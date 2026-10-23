@@ -48,9 +48,10 @@ export function CreateProjectDialogHost() {
               shown.onCreated(labelId, name);
               return;
             }
+            // The new project's page, in Settings → Projects.
             void navigate({
-              to: "/project/$environmentId/$labelId",
-              params: { environmentId: shown.environmentId, labelId },
+              to: "/settings/project-tags",
+              search: { projectEnvironmentId: shown.environmentId, projectLabelId: labelId },
             });
           }}
         />

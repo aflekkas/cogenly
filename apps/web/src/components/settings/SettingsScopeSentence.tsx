@@ -45,6 +45,8 @@ import {
 export const SETTINGS_DEVICE_ONLY_PATHS: ReadonlySet<string> = new Set([
   "/settings/appearance",
   "/settings/connections",
+  // Projects span every connected machine; the page names each project's own.
+  "/settings/project-tags",
 ]);
 
 interface SettingsScopeMenuProps {

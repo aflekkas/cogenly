@@ -7,8 +7,10 @@ import type {
 } from "@t3tools/contracts";
 
 /**
- * Match the V1 conversation windows. Item/byte budgets only apply to histories
- * without turn starts; tool activity must not split an ordinary conversation turn.
+ * Match the V1 conversation windows. Histories without turn starts page by
+ * item and byte budgets. Turn-based pages never split a turn (tool activity
+ * stays with its prompt), but stop at a turn boundary once the byte budget is
+ * spent, so a few huge turns cannot make a page unbounded.
  */
 export const THREAD_HISTORY_PAGE_POLICY = {
   maxUserTurns: 10,
@@ -22,7 +24,13 @@ export const OLDER_THREAD_USER_TURN_LIMIT = 20;
 export function isConversationHistoryItem(item: Pick<OrchestrationV2TurnItem, "type">): boolean {
   return !["command_execution", "reasoning", "file_change", "dynamic_tool"].includes(item.type);
 }
-export const THREAD_HISTORY_MAX_RAW_TURNS = 150;
+/**
+ * Every turn start counts here: typed prompts, agent and automation sends, and
+ * wake notifications. Only typed prompts count toward `maxUserTurns`, so this
+ * cap is what keeps a thread full of agent-sent messages opening small. The
+ * window query in ProjectionStore applies the same cap.
+ */
+export const THREAD_HISTORY_MAX_RAW_TURNS = 30;
 
 /** Extra rows let the projection query retain an inclusive cursor and prove another page exists. */
 export const THREAD_HISTORY_SNAPSHOT_ROW_LIMIT = THREAD_HISTORY_PAGE_POLICY.maxItems + 2;
@@ -32,6 +40,8 @@ export const THREAD_HISTORY_CURSOR_MAX_LENGTH = 4_096;
 
 export type ThreadHistoryPagePolicy = {
   readonly maxUserTurns?: number | undefined;
+  /** Defaults to THREAD_HISTORY_MAX_RAW_TURNS. */
+  readonly maxRawTurns?: number | undefined;
   readonly maxItems: number;
   readonly maxEncodedBytes: number;
 };
@@ -198,8 +208,9 @@ export function isThreadHistoryUserTurn(item: HistoryRow["item"]): boolean {
 
 /**
  * Walk a chronological timeline backward from the exclusive end, collecting rows
- * through complete user turns. Histories without turn starts use row budgets
- * and always admit at least one row so oversized items cannot deadlock paging.
+ * through complete turns. Histories without turn starts use row budgets and
+ * always admit at least one row so oversized items cannot deadlock paging.
+ * Turn-based pages always admit at least one whole turn.
  */
 function selectOlderTimelinePage<Row extends HistoryRow>(input: {
   readonly items: ReadonlyArray<Row>;
@@ -208,7 +219,7 @@ function selectOlderTimelinePage<Row extends HistoryRow>(input: {
   readonly policy?: ThreadHistoryPagePolicy | undefined;
   readonly rowEncodedBytes?: ((row: Row) => number) | undefined;
 }): SelectTimelinePageResult<Row> {
-  const policy = input.policy ?? THREAD_HISTORY_PAGE_POLICY;
+  const policy: ThreadHistoryPagePolicy = input.policy ?? THREAD_HISTORY_PAGE_POLICY;
   const rowCost = input.rowEncodedBytes ?? projectedRowEncodedBytes;
   const end = Math.min(Math.max(input.exclusiveEndIndex, 0), input.items.length);
   if (end <= 0) {
@@ -224,14 +235,20 @@ function selectOlderTimelinePage<Row extends HistoryRow>(input: {
   const turnLimit = candidates.some((row) => isThreadHistoryUserTurn(row.item))
     ? policy.maxUserTurns
     : undefined;
+  const rawTurnLimit = policy.maxRawTurns ?? THREAD_HISTORY_MAX_RAW_TURNS;
   for (let index = end - 1; index >= 0; index -= 1) {
     const row = input.items[index]!;
-    const rowBytes = turnLimit === undefined ? rowCost(row) : 0;
+    const rowBytes = rowCost(row);
     if (
       selected.length > 0 &&
       (turnLimit === undefined
         ? selected.length >= policy.maxItems || encodedBytes + rowBytes > policy.maxEncodedBytes
-        : userTurns >= turnLimit || rawTurns >= THREAD_HISTORY_MAX_RAW_TURNS)
+        : // Checked only after a turn start was taken: whole turns or nothing.
+          userTurns >= turnLimit ||
+          rawTurns >= rawTurnLimit ||
+          (rawTurns > 0 &&
+            turnStarts[index + 1] === true &&
+            encodedBytes >= policy.maxEncodedBytes))
     ) {
       break;
     }
@@ -332,7 +349,9 @@ export function selectHistoryPageFromCursor<Row extends HistoryRow>(input: {
             turns + (isThreadHistoryUserTurn(input.items[targetIndex]!.item) ? 0 : 1),
           ),
         ),
+        maxRawTurns: (policy.maxRawTurns ?? THREAD_HISTORY_MAX_RAW_TURNS) * 2,
         maxItems: policy.maxItems * 2,
+        maxEncodedBytes: policy.maxEncodedBytes * 2,
       };
     }
   }

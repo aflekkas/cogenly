@@ -47,6 +47,7 @@ describe("cloneRepositoryIntoLabel", () => {
         projects: {
           create: () => Effect.succeed({} as never),
           update: () => Effect.succeed({} as never),
+          delete: () => Effect.succeed({} as never),
         },
         identities: {
           resolve: (cwd, options) =>

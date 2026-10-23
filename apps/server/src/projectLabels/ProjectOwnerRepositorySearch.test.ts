@@ -207,6 +207,41 @@ describe("searchLabelOwnerRepositories", () => {
     }),
   );
 
+  it.effect("counts a fork's own remote as local, not only its upstream", () =>
+    Effect.gen(function* () {
+      const rest: ProjectOwnerRepositorySearchDeps["github"]["rest"] = () =>
+        Effect.succeed(restResponse(JSON.stringify([gitHubRow({ name: "acme" })])));
+      const deps = depsWith({
+        label: labelWithOwners("spawn-partners"),
+        rest,
+        projects: [projectRow("fork", "/repos/fork")],
+      });
+      const result = yield* searchLabelOwnerRepositories(
+        { id: labelId, query: "" },
+        {
+          ...deps,
+          identities: {
+            resolve: () =>
+              Effect.succeed({
+                canonicalKey: "github.com/upstream/acme",
+                locator: {
+                  source: "git-remote" as const,
+                  remoteName: "upstream",
+                  remoteUrl: "https://github.com/upstream/acme.git",
+                },
+                owner: "upstream",
+                name: "acme",
+                origin: { canonicalKey: "github.com/spawn-partners/acme" },
+              }),
+          },
+        },
+      );
+      expect(result.repositories).toMatchObject([
+        { nameWithOwner: "spawn-partners/acme", alreadyLocal: true },
+      ]);
+    }),
+  );
+
   it.effect("caps results at the requested limit", () =>
     Effect.gen(function* () {
       const rest: ProjectOwnerRepositorySearchDeps["github"]["rest"] = () =>

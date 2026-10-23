@@ -63,6 +63,8 @@ interface FloatingPreviewInsets {
   readonly top: number;
   /** Includes the docked composer, so bottom corners sit above it. */
   readonly bottom: number;
+  /** Keeps right corners clear of the timeline minimap strip. */
+  readonly right?: number;
 }
 
 export interface FloatingPreviewPoint {
@@ -83,7 +85,10 @@ export function floatingPreviewCornerPosition(
   insets: FloatingPreviewInsets,
 ): FloatingPreviewPoint {
   const left = FLOATING_PREVIEW_MARGIN;
-  const right = Math.max(left, pane.width - card.width - FLOATING_PREVIEW_MARGIN);
+  const right = Math.max(
+    left,
+    pane.width - (insets.right ?? 0) - card.width - FLOATING_PREVIEW_MARGIN,
+  );
   const top = insets.top + FLOATING_PREVIEW_MARGIN;
   // A short pane keeps the card under the top inset rather than behind the composer.
   const bottom = Math.max(top, pane.height - insets.bottom - card.height - FLOATING_PREVIEW_MARGIN);
@@ -104,6 +109,54 @@ export function nearestFloatingPreviewCorner(
   const vertical = centerY < pane.height / 2 ? "top" : "bottom";
   const horizontal = centerX < pane.width / 2 ? "left" : "right";
   return `${vertical}-${horizontal}`;
+}
+
+/** A drop within this distance of a docked corner snaps to it; farther, the card stays put. */
+export const FLOATING_PREVIEW_SNAP_DISTANCE = 56;
+
+export interface FloatingPreviewArea {
+  readonly left: number;
+  readonly top: number;
+  readonly right: number;
+  readonly bottom: number;
+}
+
+/** Keeps a card fully inside an area, such as the window below its titlebar. */
+export function clampFloatingPreviewToArea(
+  position: FloatingPreviewPoint,
+  area: FloatingPreviewArea,
+  card: FloatingPreviewSize,
+): FloatingPreviewPoint {
+  return {
+    x: Math.min(Math.max(area.left, position.x), Math.max(area.left, area.right - card.width)),
+    y: Math.min(Math.max(area.top, position.y), Math.max(area.top, area.bottom - card.height)),
+  };
+}
+
+/**
+ * Where a dropped card rests: the nearest docked corner when the drop lands
+ * close to it, otherwise exactly where it was dropped.
+ */
+export function resolveFloatingPreviewDrop(
+  dropped: FloatingPreviewPoint,
+  corners: Readonly<Record<FloatingPreviewCorner, FloatingPreviewPoint>>,
+):
+  | { readonly kind: "corner"; readonly corner: FloatingPreviewCorner }
+  | { readonly kind: "free"; readonly position: FloatingPreviewPoint } {
+  let nearest: FloatingPreviewCorner | null = null;
+  let nearestDistance = Number.POSITIVE_INFINITY;
+  for (const [corner, point] of Object.entries(corners) as Array<
+    [FloatingPreviewCorner, FloatingPreviewPoint]
+  >) {
+    const distance = Math.hypot(point.x - dropped.x, point.y - dropped.y);
+    if (distance < nearestDistance) {
+      nearest = corner;
+      nearestDistance = distance;
+    }
+  }
+  return nearest !== null && nearestDistance <= FLOATING_PREVIEW_SNAP_DISTANCE
+    ? { kind: "corner", corner: nearest }
+    : { kind: "free", position: dropped };
 }
 
 /** Keeps a dragged card inside the pane. */

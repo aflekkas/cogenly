@@ -37,6 +37,14 @@ import {
   type TimelineMinimapItem,
 } from "./timelineMinimapItems";
 import {
+  buildTimelineMinimapMarks,
+  resolveTimelineMinimapMarkBudget,
+  resolveTimelineMinimapMarkOrdinal,
+  resolveTimelineMinimapViewportWindow,
+  resolveTimelineMinimapWindowStyle,
+  type TimelineMinimapViewportWindow,
+} from "./timelineMinimap.logic";
+import {
   COMPOSER_CONTEXT_KINDS,
   ORCHESTRATION_V2_WORKSPACE_PREPARATION_FAILURE_CODE,
   type AssistantCitation,
@@ -187,14 +195,12 @@ import {
   ZapIcon,
   RotateCcwIcon,
 } from "lucide-react";
-import { ChevronDown, ChevronRight } from "lucide";
 import type {
   ComposerContextId,
   ComposerContextRecord,
   KnownComposerContextRecord,
 } from "@t3tools/contracts";
 import { Button, InlineButton } from "../ui/button";
-import { MorphIcon } from "~/components/MorphIcon";
 import { useAssetUrlRefresh, useAssetUrls, useAssetUrlState } from "../../assets/assetUrls";
 import { MediaVideoPlayer } from "../media/MediaVideoPlayer";
 import {
@@ -236,12 +242,13 @@ import { useAssistantCitationTarget, type CitationHistoryPage } from "./useAssis
 import {
   computeStableMessagesTimelineRows,
   deriveMessagesTimelineRowsWithState,
+  attemptFoldRowId,
+  turnFoldRowId,
   type MessagesTimelineRowsProjection,
   liveWorkEntryLabel,
   resolveAssistantMessageCopyState,
   resolveTimelineIsAtEnd,
   resolveTimelineMinimapHasPersistentGutter,
-  resolveTimelineMinimapCurrentIndex,
   resolveTimelineMinimapHeightStyle,
   resolveTimelineMinimapHitStripWidth,
   resolveTimelineMinimapIndexFromPointer,
@@ -396,6 +403,10 @@ interface TimelineRowSharedState {
   onWorkGroupClosed: (groupId: string) => void;
   /** Groups opened by a toggle whose details row has not mounted yet. */
   openingWorkGroupIds: Set<string>;
+  /** A collapsed turn or attempt fold's revealed rows finished animating out. */
+  onFoldClosed: (foldId: string) => void;
+  /** Folds opened by a toggle moments ago; rows they reveal grow in on mount. */
+  openingFoldIds: ReadonlySet<string>;
   onCancelWorktreeSetup: (() => void) | null;
   retryableWorkspacePreparationRunIds: ReadonlySet<RunId>;
   onRetryWorkspacePreparation: ((runId: RunId) => void) | null;
@@ -483,6 +494,10 @@ const FIRST_LAYOUT_HOLD_MAX_MS = 150;
 /** The longest an opened thread stays hidden, positioned or not. */
 const FIRST_LAYOUT_HOLD_LIMIT_MS = 600;
 const FIRST_LAYOUT_HOLD_STYLE = { opacity: 0 } as const;
+/** Rows a fold reveals that mount within this long of the open grow in. */
+const FOLD_OPEN_WINDOW_MS = 400;
+/** A closing fold drops its rows after this even if none reported the exit. */
+const FOLD_CLOSE_FALLBACK_MS = 600;
 // The opened thread's one fade in, once its first layout has settled. Opacity
 // only, so it stays under reduced motion.
 const FIRST_LAYOUT_REVEAL_STYLE = {
@@ -714,6 +729,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
     () => new Set(),
   );
   const [openingWorkGroupIds] = useState(() => new Set<string>());
+  const [closingFoldIds, setClosingFoldIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [openingFoldIds] = useState(() => new Set<string>());
   // Every open, the first one after a reload included, goes through the
   // restore below: it scrolls to the target (the end unless the user left the
   // thread scrolled up this session) and checks it landed before revealing.
@@ -751,6 +768,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
     setExpandedAttemptIds(paintedExpandedAttemptIds);
     setClosingWorkGroupIds(new Set());
     openingWorkGroupIds.clear();
+    setClosingFoldIds(new Set());
+    openingFoldIds.clear();
   }
   const citationThreadRef = useMemo(() => parseScopedThreadKey(routeThreadKey), [routeThreadKey]);
   const openPullRequest = useOpenPrLink(citationThreadRef ?? undefined);
@@ -768,7 +787,6 @@ const ConversationTimeline = memo(function ConversationTimeline({
       },
     [listIdentityKey, rememberedPosition],
   );
-  const [minimapStripMap] = useState(() => new Map<string, HTMLSpanElement>());
   const [disclosureToggleSettling, setDisclosureToggleSettling] = useState(false);
   const disclosureAnchorKeyRef = useRef<string | null>(null);
   const disclosureSettleFrameRef = useRef<number | null>(null);
@@ -845,9 +863,59 @@ const ConversationTimeline = memo(function ConversationTimeline({
     return disclosureAnchorKey === null || row.id === disclosureAnchorKey;
   }, []);
 
+  // A fold reveals several rows. Opening grows each one in; collapsing keeps
+  // them (marked closing) until they have animated out. Rows that mount soon
+  // after an open play the enter; later virtualized mounts stay still.
+  const foldClosingTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  useEffect(() => {
+    const timers = foldClosingTimersRef.current;
+    return () => {
+      for (const timer of timers.values()) clearTimeout(timer);
+      timers.clear();
+    };
+  }, []);
+  const onFoldClosed = useCallback((foldId: string) => {
+    const timer = foldClosingTimersRef.current.get(foldId);
+    if (timer !== undefined) clearTimeout(timer);
+    foldClosingTimersRef.current.delete(foldId);
+    setClosingFoldIds((existing) => {
+      if (!existing.has(foldId)) return existing;
+      const next = new Set(existing);
+      next.delete(foldId);
+      return next;
+    });
+  }, []);
+  const beginFoldToggle = useCallback(
+    (foldId: string, collapsing: boolean) => {
+      suspendEndScrollMaintenanceForDisclosure(foldId, collapsing);
+      if (collapsing) {
+        openingFoldIds.delete(foldId);
+        // Rows scrolled out of the list never report their exit.
+        const timers = foldClosingTimersRef.current;
+        const existingTimer = timers.get(foldId);
+        if (existingTimer !== undefined) clearTimeout(existingTimer);
+        timers.set(
+          foldId,
+          setTimeout(() => onFoldClosed(foldId), FOLD_CLOSE_FALLBACK_MS),
+        );
+      } else if (!closingFoldIds.has(foldId)) {
+        openingFoldIds.add(foldId);
+        setTimeout(() => openingFoldIds.delete(foldId), FOLD_OPEN_WINDOW_MS);
+      }
+      setClosingFoldIds((existing) => {
+        if (existing.has(foldId) === collapsing) return existing;
+        const next = new Set(existing);
+        if (collapsing) next.add(foldId);
+        else next.delete(foldId);
+        return next;
+      });
+    },
+    [closingFoldIds, onFoldClosed, openingFoldIds, suspendEndScrollMaintenanceForDisclosure],
+  );
+
   const onToggleTurnFold = useCallback(
     (runId: RunId) => {
-      suspendEndScrollMaintenanceForDisclosure(`turn-fold:${runId}`);
+      beginFoldToggle(turnFoldRowId(runId), expandedRunIds.has(runId));
       setExpandedRunIds((existing) => {
         const next = new Set(existing);
         if (next.has(runId)) {
@@ -858,7 +926,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
         return next;
       });
     },
-    [suspendEndScrollMaintenanceForDisclosure],
+    [beginFoldToggle, expandedRunIds],
   );
   const onToggleWorkGroup = useCallback(
     (groupId: string, anchorKey: string) => {
@@ -905,7 +973,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   }, []);
   const onToggleAttemptFold = useCallback(
     (attemptId: RunAttemptId) => {
-      suspendEndScrollMaintenanceForDisclosure(`attempt-fold:${attemptId}`);
+      beginFoldToggle(attemptFoldRowId(attemptId), expandedAttemptIds.has(attemptId));
       setExpandedAttemptIds((existing) => {
         const next = new Set(existing);
         if (next.has(attemptId)) {
@@ -916,7 +984,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
         return next;
       });
     },
-    [suspendEndScrollMaintenanceForDisclosure],
+    [beginFoldToggle, expandedAttemptIds],
   );
 
   // An in-session interrupt leaves its turn expanded so the user keeps their
@@ -1012,6 +1080,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
         expandedAttemptIds: visibleExpandedAttemptIds,
         expandedWorkGroupIds,
         closingWorkGroupIds,
+        closingFoldIds,
         isWorking,
         runlessWorkActive,
         activeTurnStartedAt,
@@ -1036,6 +1105,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     visibleExpandedAttemptIds,
     expandedWorkGroupIds,
     closingWorkGroupIds,
+    closingFoldIds,
     isWorking,
     runlessWorkActive,
     activeTurnStartedAt,
@@ -1297,7 +1367,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     };
   }, [citationAlwaysRender, restoringAlwaysRender, fullscreenAppRowId]);
   const [minimapHitStripWidth, setMinimapHitStripWidth] = useState(0);
-  const [minimapCurrentIndex, setMinimapCurrentIndex] = useState<number | null>(null);
+  const [minimapWindow, setMinimapWindow] = useState<TimelineMinimapViewportWindow | null>(null);
   const maintainVisibleContentPosition = useMemo(
     () => ({
       data: true,
@@ -1468,30 +1538,16 @@ const ConversationTimeline = memo(function ConversationTimeline({
       height: resolveTimelineRowHeight(state, item.rowIndex),
     }));
 
-    for (const [index, item] of minimapItems.entries()) {
-      const strip = minimapStripMap.get(item.id);
-      const bounds = itemBounds[index];
-      const rowTop = bounds?.top ?? null;
-      const rowHeight = bounds?.height ?? null;
-      const inView =
-        rowTop !== null &&
-        rowTop < scrollBottom &&
-        rowTop + Math.max(1, rowHeight ?? 1) > scrollTop;
-
-      // Skip no-op attribute writes: this runs for every strip on every scroll
-      // tick, and rewriting an unchanged attribute still dirties style state.
-      const next = inView ? "true" : "false";
-      if (strip && strip.dataset.inView !== next) {
-        strip.dataset.inView = next;
-      }
-    }
-    const nextCurrentIndex = resolveTimelineMinimapCurrentIndex({
+    // Changes only when a message crosses the viewport edge, not every scroll tick.
+    const nextWindow = resolveTimelineMinimapViewportWindow({
       scrollTop,
       scrollBottom,
       itemBounds,
     });
-    setMinimapCurrentIndex((current) =>
-      current === nextCurrentIndex ? current : nextCurrentIndex,
+    setMinimapWindow((current) =>
+      current?.start === nextWindow?.start && current?.end === nextWindow?.end
+        ? current
+        : nextWindow,
     );
   }, [
     citationPositioning,
@@ -1506,7 +1562,6 @@ const ConversationTimeline = memo(function ConversationTimeline({
     restoringThreadPosition,
     listRef,
     minimapItems,
-    minimapStripMap,
     onIsAtEndChange,
     reportContentOverflow,
   ]);
@@ -1591,6 +1646,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
       onToggleWorkEntry: suspendEndScrollMaintenanceForDisclosure,
       onWorkGroupClosed,
       openingWorkGroupIds,
+      onFoldClosed,
+      openingFoldIds,
       onCancelWorktreeSetup: onCancelWorktreeSetup ?? null,
       retryableWorkspacePreparationRunIds,
       onRetryWorkspacePreparation: onRetryWorkspacePreparation ?? null,
@@ -1632,6 +1689,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
       suspendEndScrollMaintenanceForDisclosure,
       onWorkGroupClosed,
       openingWorkGroupIds,
+      onFoldClosed,
+      openingFoldIds,
       onCancelWorktreeSetup,
       retryableWorkspacePreparationRunIds,
       onRetryWorkspacePreparation,
@@ -1906,8 +1965,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
                   items={minimapItems}
                   hasPersistentGutter={minimapHasPersistentGutter}
                   hitStripWidth={minimapHitStripWidth}
-                  currentIndex={minimapCurrentIndex}
-                  stripMap={minimapStripMap}
+                  viewportWindow={minimapWindow}
                   onWheel={forwardMinimapWheel}
                   onSelect={(item) => {
                     onManualNavigation();
@@ -2006,21 +2064,34 @@ function onMouseButtonsReleased(onRelease: () => void): () => void {
 function TimelineMinimap({
   hasPersistentGutter,
   hitStripWidth,
-  currentIndex,
+  viewportWindow,
   items,
-  stripMap,
   onWheel,
   onSelect,
 }: {
   hasPersistentGutter: boolean;
   hitStripWidth: number;
-  currentIndex: number | null;
+  viewportWindow: TimelineMinimapViewportWindow | null;
   items: ReadonlyArray<TimelineMinimapItem>;
-  stripMap: Map<string, HTMLSpanElement>;
   onWheel: (event: WheelEvent) => void;
   onSelect: (item: TimelineMinimapItem) => void;
 }) {
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
+  // The rail's drawn height caps how many marks it holds (see buildTimelineMinimapMarks).
+  const [railHeight, setRailHeight] = useState(0);
+  const railRef = useCallback((node: HTMLDivElement | null) => {
+    if (!node) return;
+    const measure = () => {
+      const height = Math.round(node.getBoundingClientRect().height);
+      setRailHeight((current) => (current === height ? current : height));
+    };
+    measure();
+    return observeResize(node, measure);
+  }, []);
+  const marks = useMemo(
+    () => buildTimelineMinimapMarks(items, resolveTimelineMinimapMarkBudget(railHeight)),
+    [items, railHeight],
+  );
   const wheelTargetRef = useCallback(
     (node: HTMLDivElement | null) => {
       if (!node) return;
@@ -2067,33 +2138,55 @@ function TimelineMinimap({
     shownIndex !== null && shownIndex !== undefined && shownIndex < items.length
       ? shownIndex
       : null;
+  const activeMarkOrdinal =
+    resolvedActiveIndex === null
+      ? null
+      : resolveTimelineMinimapMarkOrdinal(marks, resolvedActiveIndex);
+  const previewMarkOrdinal =
+    previewIndex === null ? null : resolveTimelineMinimapMarkOrdinal(marks, previewIndex);
+  const previewMark = previewMarkOrdinal === null ? null : (marks[previewMarkOrdinal] ?? null);
   const activeTopPercent =
-    previewIndex === null ? 0 : resolveTimelineMinimapTopPercent(previewIndex, items.length);
+    previewMark?.topPercent ??
+    (previewIndex === null ? 0 : resolveTimelineMinimapTopPercent(previewIndex, items.length));
   const activeTooltipTranslate =
-    previewIndex === null
+    previewMarkOrdinal === null
       ? "-50%"
-      : previewIndex === 0
+      : previewMarkOrdinal === 0
         ? "0%"
-        : previewIndex === items.length - 1
+        : previewMarkOrdinal === marks.length - 1
           ? "-100%"
           : "-50%";
   const resolvedCurrentIndex =
-    currentIndex !== null && currentIndex >= 0 && currentIndex < items.length ? currentIndex : null;
+    viewportWindow !== null && viewportWindow.start < items.length ? viewportWindow.start : null;
   const previousItem =
     resolvedCurrentIndex === null ? null : (items[resolvedCurrentIndex - 1] ?? null);
   const nextItem = resolvedCurrentIndex === null ? null : (items[resolvedCurrentIndex + 1] ?? null);
+  // Memoized: useLastPresent below compares by reference.
+  const windowStyle = useMemo(
+    () =>
+      viewportWindow !== null && viewportWindow.end < items.length
+        ? resolveTimelineMinimapWindowStyle(viewportWindow, items.length)
+        : null,
+    [viewportWindow, items.length],
+  );
+  // Keeps its last place while fading out instead of vanishing mid-move.
+  const shownWindowStyle = useLastPresent(windowStyle);
 
+  // Hover and clicks land on drawn marks: a bucket answers with its typed message.
   const resolveActiveIndexFromPointer = useCallback(
     (event: MouseEvent<HTMLElement>) => {
       const rect = event.currentTarget.getBoundingClientRect();
-      return resolveTimelineMinimapIndexFromPointer({
+      const itemIndex = resolveTimelineMinimapIndexFromPointer({
         itemCount: items.length,
         railTop: rect.top,
         railHeight: rect.height,
         pointerY: event.clientY,
       });
+      if (itemIndex === null) return null;
+      const ordinal = resolveTimelineMinimapMarkOrdinal(marks, itemIndex);
+      return ordinal === null ? itemIndex : (marks[ordinal]?.itemIndex ?? itemIndex);
     },
-    [items.length],
+    [items.length, marks],
   );
 
   const updateActiveIndexFromPointer = useCallback(
@@ -2104,14 +2197,16 @@ function TimelineMinimap({
     [resolveActiveIndexFromPointer],
   );
 
+  // Arrow keys step mark to mark, matching what hover reaches.
   const moveActiveIndex = useCallback(
     (delta: number) => {
       setActiveIndex((current) => {
-        const base = current ?? 0;
-        return Math.max(0, Math.min(items.length - 1, base + delta));
+        const ordinal = resolveTimelineMinimapMarkOrdinal(marks, current ?? 0) ?? 0;
+        const next = marks[Math.max(0, Math.min(marks.length - 1, ordinal + delta))];
+        return next?.itemIndex ?? current;
       });
     },
-    [items.length],
+    [marks],
   );
 
   if (items.length < TIMELINE_MINIMAP_MIN_ITEMS) {
@@ -2148,6 +2243,7 @@ function TimelineMinimap({
           onMouseMove={(event) => {
             if (event.buttons !== 0 && !pressedOnStripRef.current) setPassThrough(true);
           }}
+          ref={railRef}
           style={{
             height: resolveTimelineMinimapHeightStyle(items.length),
             width: resolveTimelineMinimapInteractiveWidth(hitStripWidth, activeItem !== null),
@@ -2186,10 +2282,10 @@ function TimelineMinimap({
                 moveActiveIndex(-1);
               } else if (event.key === "Home") {
                 event.preventDefault();
-                setActiveIndex(0);
+                setActiveIndex(marks[0]?.itemIndex ?? 0);
               } else if (event.key === "End") {
                 event.preventDefault();
-                setActiveIndex(items.length - 1);
+                setActiveIndex(marks.at(-1)?.itemIndex ?? items.length - 1);
               } else if (event.key === "Enter" || event.key === " ") {
                 event.preventDefault();
                 if (activeItem) {
@@ -2211,22 +2307,35 @@ function TimelineMinimap({
             type="button"
           >
             <div className="absolute top-0 right-3 h-full w-px bg-border/15" />
-            {items.map((item, index) => {
-              const top = `${resolveTimelineMinimapTopPercent(index, items.length)}%`;
+            {/* "You are here": one soft thumb spanning the messages on screen.
+                It moves only when a message crosses the viewport edge. */}
+            {shownWindowStyle ? (
+              <span
+                aria-hidden="true"
+                className={cn(
+                  "pointer-events-none absolute -right-0.5 w-3 rounded-full bg-foreground/10 transition-[top,height,opacity] duration-150 ease-out motion-reduce:transition-opacity",
+                  windowStyle ? "opacity-100" : "opacity-0",
+                )}
+                data-minimap-window
+                style={shownWindowStyle}
+              />
+            ) : null}
+            {marks.map((mark, ordinal) => {
               const activeDistance =
-                resolvedActiveIndex === null ? null : Math.abs(index - resolvedActiveIndex);
+                activeMarkOrdinal === null ? null : Math.abs(ordinal - activeMarkOrdinal);
               return (
-                // Compositor-friendly on purpose: in-view state and the hover
-                // fisheye animate constantly (every scroll tick and streaming
-                // update flips a band of strips), so the strip animates only
+                // Compositor-friendly on purpose: the hover fisheye flips a band
+                // of marks on every pointer move, so a mark animates only
                 // transform and opacity. Width tiers are a scale-x on a fixed
-                // w-6 box, and the in-view highlight is an opacity-faded bright
-                // overlay — never background-color or width, which would force
-                // main-thread style/layout/paint at 60fps for each transition.
+                // w-6 box; never background-color or width, which would force
+                // main-thread style/layout/paint for each transition.
                 <span
                   aria-hidden="true"
                   className={cn(
-                    "group/strip pointer-events-none absolute right-0 h-0.5 w-6 origin-right -translate-y-1/2 rounded-full bg-muted-foreground/35 transition-transform duration-200 ease-out motion-reduce:transition-none",
+                    "pointer-events-none absolute right-0 h-0.5 w-6 origin-right -translate-y-1/2 rounded-full transition-transform duration-200 ease-out motion-reduce:transition-none",
+                    // Agent and automation sends stay faint, so the rail reads as
+                    // where the user spoke.
+                    mark.typed ? "bg-muted-foreground/40" : "bg-muted-foreground/15",
                     activeDistance === 0
                       ? "scale-x-100"
                       : activeDistance === 1
@@ -2235,26 +2344,17 @@ function TimelineMinimap({
                           ? "scale-x-[0.417]"
                           : "scale-x-[0.333]",
                   )}
-                  data-in-view="false"
                   data-minimap-strip
-                  key={item.id}
-                  ref={(node) => {
-                    if (node) {
-                      stripMap.set(item.id, node);
-                    } else {
-                      stripMap.delete(item.id);
-                    }
-                  }}
-                  style={{ top }}
+                  key={mark.key}
+                  style={{ top: `${mark.topPercent}%` }}
                 >
                   {/* The hovered line brightens by fading an overlay, never by repainting its fill. */}
                   <span
                     className={cn(
-                      "absolute inset-0 rounded-full bg-muted-foreground/60 transition-opacity duration-200 ease-out",
+                      "absolute inset-0 rounded-full bg-muted-foreground/70 transition-opacity duration-200 ease-out",
                       activeDistance === 0 ? "opacity-100" : "opacity-0",
                     )}
                   />
-                  <span className="absolute inset-0 rounded-full bg-foreground/90 opacity-0 transition-opacity duration-200 ease-out group-data-[in-view=true]/strip:opacity-100" />
                 </span>
               );
             })}
@@ -2375,7 +2475,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
     (row.expanded === true || row.closing === true);
   const activityEnter = useActivityEnter(row);
 
-  return (
+  const content = (
     <div
       className={cn(
         activityEnter && ARRIVAL_FADE_CLASS,
@@ -2463,7 +2563,35 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       <WorkHandoffMarkersAfterRow row={row} />
     </div>
   );
+  return row.foldReveal ? (
+    <FoldRevealRow foldId={row.foldReveal.foldId} closing={row.foldReveal.closing}>
+      {content}
+    </FoldRevealRow>
+  ) : (
+    content
+  );
 });
+
+/** A row an open fold reveals: grows in when the fold opens, animates out when it closes. */
+function FoldRevealRow({
+  foldId,
+  closing,
+  children,
+}: {
+  foldId: string;
+  closing: boolean;
+  children: ReactNode;
+}) {
+  const { openingFoldIds, onFoldClosed } = use(TimelineRowCtx);
+  // Read on mount, so a virtualized remount of an open fold stays still.
+  const [appear] = useState(() => openingFoldIds.has(foldId));
+  const onExitComplete = useCallback(() => onFoldClosed(foldId), [foldId, onFoldClosed]);
+  return (
+    <WorkLogCollapse open={!closing} appear={appear} onExitComplete={onExitComplete}>
+      {children}
+    </WorkLogCollapse>
+  );
+}
 
 /** An expanded group's details row: grows in when opened, animates out when closed. */
 function WorkGroupDetailsReveal({
@@ -3201,7 +3329,7 @@ function TurnFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "turn-
         className="flex cursor-pointer select-none items-center gap-1 rounded-md px-1 text-sm leading-relaxed text-muted-foreground tabular-nums transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
       >
         <span>{row.label}</span>
-        <MorphIcon className="size-3.5" icon={row.expanded ? ChevronDown : ChevronRight} />
+        <DisclosureChevron open={row.expanded} />
       </button>
       <TimelineRowTimestamp
         createdAt={row.createdAt}
@@ -3224,10 +3352,7 @@ function AttemptFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "at
       onClick={() => ctx.onToggleAttemptFold(row.attemptId)}
       className="flex w-full cursor-pointer select-none items-center gap-2 rounded-md border border-border/60 bg-muted/20 px-2.5 py-2 text-left transition-colors hover:bg-muted/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
     >
-      <MorphIcon
-        className="size-3.5 shrink-0 text-muted-foreground"
-        icon={row.expanded ? ChevronDown : ChevronRight}
-      />
+      <DisclosureChevron open={row.expanded} />
       <span className="text-xs font-medium text-foreground/80">{row.label}</span>
       <span className="text-2xs text-muted-foreground">Cut off by a steer</span>
     </button>

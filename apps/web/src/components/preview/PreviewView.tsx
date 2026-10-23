@@ -45,6 +45,7 @@ import { useEnvironmentSupportsServerBrowser } from "~/state/entities";
 import {
   useEnvironment,
   useEnvironmentHttpBaseUrl,
+  useEnvironmentMachines,
   usePrimaryEnvironmentId,
 } from "~/state/environments";
 import { previewEnvironment } from "~/state/preview";
@@ -61,6 +62,8 @@ import { showPreviewPopup } from "./showPreviewPopup";
 import { PreviewChromeRow } from "./PreviewChromeRow";
 import { PreviewEmptyState } from "./PreviewEmptyState";
 import { PreviewMoreMenu, type PreviewMoreMenuActions } from "./PreviewMoreMenu";
+import { PreviewMachineChip } from "./PreviewMachineChip";
+import { resolvePreviewMachine } from "./previewMachine";
 import {
   commitBrowserViewportChange,
   subscribeBrowserViewportChange,
@@ -119,6 +122,16 @@ function previewProfileName(
 }
 
 const localApi = typeof window === "undefined" ? null : ensureLocalApi();
+
+/** The "Screenshot saved" toast still on screen, so back-to-back captures share it. */
+let openScreenshotToast: {
+  readonly id: ReturnType<typeof toastManager.add>;
+  count: number;
+} | null = null;
+
+function screenshotToastTitle(count: number): string {
+  return count > 1 ? `${count} screenshots saved` : "Screenshot saved";
+}
 
 /** Resolves stream access only while a server tab shows a file it downloaded. */
 function ServerTabFileNotShown(props: {
@@ -181,8 +194,11 @@ export function PreviewView({
     : null;
   const open = useAtomCommand(previewEnvironment.open);
   const closePreview = useAtomCommand(previewEnvironment.close, "preview close");
-  const environmentLabel = useEnvironment(threadRef.environmentId)?.label ?? "the environment";
+  const threadEnvironment = useEnvironment(threadRef.environmentId);
+  const environmentLabel = threadEnvironment?.label ?? "the environment";
   const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const primaryEnvironment = useEnvironment(primaryEnvironmentId);
+  const environmentMachines = useEnvironmentMachines();
   const serverBrowser = useEnvironmentSupportsServerBrowser(threadRef.environmentId);
   const resize = useAtomCommand(previewEnvironment.resize, "preview viewport resize");
   const adjust = useAtomCommand(previewEnvironment.adjust, "preview appearance or zoom");
@@ -213,6 +229,26 @@ export function PreviewView({
   const isServerTab = snapshot?.runtime === "server" && !nativeServerTab;
   /** The server owns this tab's appearance, zoom, and size, whoever renders it. */
   const serverOwnsRendering = snapshot?.runtime === "server";
+  const previewMachine = resolvePreviewMachine({
+    // Tabs from before server tabs carry no runtime; they are desktop tabs.
+    runtime: snapshot ? (snapshot.runtime ?? "desktop") : undefined,
+    threadEnvironment: threadEnvironment
+      ? {
+          label: threadEnvironment.label,
+          machine: environmentMachines.get(threadRef.environmentId) ?? "server",
+        }
+      : null,
+    threadIsPrimary: threadRef.environmentId === primaryEnvironmentId,
+    primaryEnvironment:
+      primaryEnvironment && primaryEnvironmentId
+        ? {
+            label: primaryEnvironment.label,
+            machine: environmentMachines.get(primaryEnvironmentId) ?? "laptop",
+          }
+        : null,
+    rendersDesktopTabs: previewBridge !== null,
+    environmentCount: environmentMachines.size,
+  });
   const serverSurfaceRef = useRef<ServerBrowserHandle | null>(null);
   const [serverAspectRatioLocked, setServerAspectRatioLocked] = useState(false);
   const serverBodyRef = useRef<HTMLDivElement | null>(null);
@@ -231,12 +267,13 @@ export function PreviewView({
     tabId: string;
     control: PreviewStreamControl;
   } | null>(null);
-  const serverControlledTabId =
-    serverControl?.control.controller === "you" ? serverControl.tabId : null;
-  const serverInputDisabled = isServerTab && serverControlledTabId !== runtimeTabId;
   const [serverFrameTabId, setServerFrameTabId] = useState<string | null>(null);
   const serverTabControl =
     isServerTab && serverControl?.tabId === runtimeTabId ? serverControl.control : null;
+  // Back, forward, reload, and the address bar work for anyone who may operate
+  // the page, even while the agent drives: the server takes control for them
+  // first, as Take control would.
+  const serverInputDisabled = isServerTab && serverTabControl?.canOperate !== true;
   // Picking reads the page without driving it, so it needs operate rights, not control.
   const serverPickBlocker = !isServerTab
     ? null
@@ -735,58 +772,37 @@ export function PreviewView({
             children: revealInFileExplorerLabel(navigator.platform),
             onClick: () => void bridge.revealArtifact(artifact.path),
           };
+          // Captures taken while the last one's toast is still up update it
+          // with a count; its actions act on the newest screenshot.
+          const count = (openScreenshotToast?.count ?? 0) + 1;
           let pathCopied = false;
-          let imageCopied = false;
           let toastId: ReturnType<typeof toastManager.add>;
 
-          const updateScreenshotToast = (
+          const screenshotToast = (
             type: "success" | "error" = "success",
-            title = "Screenshot saved",
+            title = screenshotToastTitle(count),
             description?: string,
-          ) => {
-            toastManager.update(
-              toastId,
-              stackedThreadToast({
-                type,
-                title,
-                description,
-                actionProps: {
-                  children: imageCopied ? "Copied" : "Copy image",
-                  disabled: imageCopied,
-                  onClick: copyImage,
+          ) =>
+            stackedThreadToast({
+              type,
+              title,
+              description,
+              actionProps: revealAction,
+              data: {
+                secondaryActionProps: {
+                  children: pathCopied ? "Copied" : "Copy path",
+                  disabled: pathCopied,
+                  onClick: copyPath,
                 },
-                data: {
-                  additionalActions: [
-                    {
-                      id: "copy-path",
-                      props: {
-                        children: pathCopied ? "Copied" : "Copy path",
-                        disabled: pathCopied,
-                        onClick: copyPath,
-                      },
-                    },
-                  ],
-                  secondaryActionProps: {
-                    ...revealAction,
-                  },
-                  secondaryActionVariant: "outline",
-                },
-              }),
-            );
-          };
+                secondaryActionVariant: "outline",
+              },
+            });
 
           const pathFeedback = createCopyFeedback({
             resetMs: COPY_FEEDBACK_MS,
             onStatus: (status) => {
               pathCopied = status === "copied";
-              updateScreenshotToast();
-            },
-          });
-          const imageFeedback = createCopyFeedback({
-            resetMs: COPY_FEEDBACK_MS,
-            onStatus: (status) => {
-              imageCopied = status === "copied";
-              updateScreenshotToast();
+              toastManager.update(toastId, screenshotToast());
             },
           });
           const copyPath = () => {
@@ -794,48 +810,25 @@ export function PreviewView({
               .run(() => writeTextToClipboard(artifact.path, "screenshot path"))
               .then((outcome) => {
                 if (outcome.kind !== "failed") return;
-                updateScreenshotToast(
-                  "error",
-                  "Unable to copy screenshot path",
-                  outcome.error.message,
+                toastManager.update(
+                  toastId,
+                  screenshotToast("error", "Unable to copy screenshot path", outcome.error.message),
                 );
               });
           };
 
-          const copyImage = () => {
-            void imageFeedback
-              .run(() => bridge.copyArtifactToClipboard(artifact.path).then(() => true))
-              .then((outcome) => {
-                if (outcome.kind !== "failed") return;
-                updateScreenshotToast("error", "Unable to copy screenshot", outcome.error.message);
-              });
-          };
-
-          toastId = toastManager.add(
-            stackedThreadToast({
-              type: "success",
-              title: "Screenshot saved",
-              actionProps: {
-                children: "Copy image",
-                onClick: copyImage,
+          if (openScreenshotToast) {
+            toastId = openScreenshotToast.id;
+            toastManager.update(toastId, screenshotToast());
+          } else {
+            toastId = toastManager.add({
+              ...screenshotToast(),
+              onRemove: () => {
+                if (openScreenshotToast?.id === toastId) openScreenshotToast = null;
               },
-              data: {
-                additionalActions: [
-                  {
-                    id: "copy-path",
-                    props: {
-                      children: "Copy path",
-                      onClick: copyPath,
-                    },
-                  },
-                ],
-                secondaryActionProps: {
-                  ...revealAction,
-                },
-                secondaryActionVariant: "outline",
-              },
-            }),
-          );
+            });
+          }
+          openScreenshotToast = { id: toastId, count };
         },
         (error) => {
           toastManager.add({
@@ -1067,34 +1060,39 @@ export function PreviewView({
         }
         pickNotice={pickNotice}
         control={
-          isServerTab && serverControl && serverControl.tabId === runtimeTabId
+          serverTabControl
             ? {
-                controller: serverControl.control.controller,
-                canOperate: serverControl.control.canOperate,
+                controller: serverTabControl.controller,
+                canOperate: serverTabControl.canOperate,
+                agentInvolved: serverTabControl.agentInvolved,
                 onTakeControl: () => serverSurfaceRef.current?.takeControl(),
+                onHandBack: () => serverSurfaceRef.current?.handBack(),
               }
             : null
         }
         agentUsingTab={nativeServerTab && snapshot?.agentDriving === true}
         leadingActions={
-          // Only when it differs from the default: labelling every tab
-          // "Default" would be noise on the common case, while a tab in
-          // another profile is exactly what needs calling out.
-          activeProfileId !== browserDefaults.profileId ? (
-            // Capped: profile names run to 48 characters, and an unbounded
-            // badge in this row takes its width from the URL input, the only
-            // flexible element in the compact chrome. The cap sits on the
-            // badge and the truncation on an inner span, because `Badge` is an
-            // `inline-flex` with `whitespace-nowrap` — `text-overflow` never
-            // reaches a bare text node inside it, so the name would be cut off
-            // at both ends with no ellipsis.
-            <Tooltip>
-              <TooltipTrigger render={<Badge variant="outline" className="max-w-28 shrink-0" />}>
-                <span className="truncate">{activeProfileName}</span>
-              </TooltipTrigger>
-              <TooltipPopup side="top">{activeProfileName}</TooltipPopup>
-            </Tooltip>
-          ) : null
+          <>
+            {previewMachine ? <PreviewMachineChip machine={previewMachine} /> : null}
+            {/* Only when it differs from the default: labelling every tab
+                "Default" would be noise on the common case, while a tab in
+                another profile is exactly what needs calling out. */}
+            {activeProfileId !== browserDefaults.profileId ? (
+              // Capped: profile names run to 48 characters, and an unbounded
+              // badge in this row takes its width from the URL input, the only
+              // flexible element in the compact chrome. The cap sits on the
+              // badge and the truncation on an inner span, because `Badge` is an
+              // `inline-flex` with `whitespace-nowrap` — `text-overflow` never
+              // reaches a bare text node inside it, so the name would be cut off
+              // at both ends with no ellipsis.
+              <Tooltip>
+                <TooltipTrigger render={<Badge variant="outline" className="max-w-28 shrink-0" />}>
+                  <span className="truncate">{activeProfileName}</span>
+                </TooltipTrigger>
+                <TooltipPopup side="top">{activeProfileName}</TooltipPopup>
+              </Tooltip>
+            ) : null}
+          </>
         }
         trailingActions={
           moreMenuActions ? (
@@ -1158,7 +1156,6 @@ export function PreviewView({
                 tabId={snapshot.tabId}
                 visible={visible}
                 onFirstFrame={() => setServerFrameTabId(runtimeTabId)}
-                controlPosition="none"
                 onControl={(control) =>
                   setServerControl(control ? { tabId: runtimeTabId, control } : null)
                 }

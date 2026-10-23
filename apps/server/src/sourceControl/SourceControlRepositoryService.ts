@@ -143,17 +143,43 @@ function redactUrlCredentials(text: string): string {
   return text.replace(URL_WITH_USERINFO, "$1");
 }
 
-function selectRemoteUrl(
+/**
+ * The URL git is given. `auto` takes the provider's preferred transport
+ * (`preferred`), else SSH.
+ */
+export function selectRemoteUrl(
   urls: SourceControlRepositoryCloneUrls,
   protocol: SourceControlCloneProtocol | undefined,
+  preferred: "https" | "ssh" | null = null,
 ): string {
   switch (protocol ?? "auto") {
     case "https":
       return urls.url;
     case "ssh":
-    case "auto":
       return urls.sshUrl;
+    case "auto":
+      return preferred === "https" ? urls.url : urls.sshUrl;
   }
+}
+
+/**
+ * What a failed clone tells the user: git's last lines, led by what to do
+ * when they name a refused SSH key or HTTPS login.
+ */
+export function cloneFailureDetail(stderrTail: ReadonlyArray<string>): string {
+  if (stderrTail.length === 0) return "The repository could not be cloned.";
+  const raw = stderrTail.join(" ");
+  if (/permission denied \(publickey/i.test(raw)) {
+    return `The host refused this machine's SSH key. Add an SSH key to your account, or sign in over HTTPS (for GitHub, \`gh auth login\`), then retry. Git said: ${raw}`;
+  }
+  if (/authentication failed|could not read username|terminal prompts disabled/i.test(raw)) {
+    return `The host asked for a login this machine does not have. Sign in (for GitHub, \`gh auth login\`), then retry. Git said: ${raw}`;
+  }
+  return raw;
+}
+
+function urlHost(url: string): string | null {
+  return URL.parse(url)?.host ?? null;
 }
 
 /** @public Service construction is part of the canonical Effect module API. */
@@ -195,6 +221,22 @@ export const make = Effect.gen(function* () {
       repository: input.repository.trim(),
     });
     return toRepositoryInfo(providerKind, urls);
+  });
+
+  // Asks the provider only when `auto` leaves the transport open.
+  const resolveRemoteUrl = Effect.fn("SourceControlRepositoryService.resolveRemoteUrl")(function* (
+    providerKind: SourceControlProviderKind,
+    urls: SourceControlRepositoryCloneUrls,
+    protocol: SourceControlCloneProtocol | undefined,
+    cwd: string,
+  ) {
+    const host = urlHost(urls.url);
+    if ((protocol ?? "auto") !== "auto" || host === null) return selectRemoteUrl(urls, protocol);
+    const provider = yield* providers.get(providerKind);
+    const preferred = provider.preferredCloneProtocol
+      ? yield* provider.preferredCloneProtocol({ cwd, host })
+      : null;
+    return selectRemoteUrl(urls, protocol, preferred);
   });
 
   const normalizeDestinationPath = Effect.fn("SourceControlRepositoryService.normalizeDestination")(
@@ -301,7 +343,12 @@ export const make = Effect.gen(function* () {
         repository: input.repository,
         cwd: preparedDestination.parentPath,
       });
-      remoteUrl = selectRemoteUrl(repository, input.protocol);
+      remoteUrl = yield* resolveRemoteUrl(
+        input.provider,
+        repository,
+        input.protocol,
+        preparedDestination.parentPath,
+      );
       provider = input.provider;
     }
 
@@ -369,10 +416,7 @@ export const make = Effect.gen(function* () {
             new SourceControlRepositoryError({
               operation: "cloneRepository",
               provider: input.provider ?? SourceControlProviderKind.make("unknown"),
-              detail:
-                stderrTail.length > 0
-                  ? stderrTail.join(" ")
-                  : "The repository could not be cloned.",
+              detail: cloneFailureDetail(stderrTail),
               cause,
             }),
         ),
@@ -446,7 +490,7 @@ export const make = Effect.gen(function* () {
         repository: input.repository.trim(),
         visibility: input.visibility,
       });
-      const remoteUrl = selectRemoteUrl(urls, input.protocol);
+      const remoteUrl = yield* resolveRemoteUrl(providerKind, urls, input.protocol, input.cwd);
       const remoteName = yield* git.ensureRemote({
         cwd: input.cwd,
         preferredName: input.remoteName?.trim() || "origin",

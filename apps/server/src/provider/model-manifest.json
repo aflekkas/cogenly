@@ -73,6 +73,21 @@
           "status": "unknown"
         }
       ]
+    },
+    {
+      "driver": "grok",
+      "t3CodeRange": ">=0.1.15",
+      "recommendedRange": ">=1.0.67",
+      "ranges": [
+        {
+          "range": ">=1.0.67",
+          "status": "supported"
+        },
+        {
+          "range": "<1.0.67",
+          "status": "unknown"
+        }
+      ]
     }
   ],
   "currentModels": {

@@ -50,6 +50,47 @@ export function listWorkPickerChoices(input: {
   ];
 }
 
+/** One project in the Start Work picker's first level: its repositories on this machine. */
+export interface WorkProjectGroup<Project> {
+  /** The project's key, or `null` for the repositories in no project. */
+  readonly key: string | null;
+  readonly project: Project | null;
+  readonly choices: ReadonlyArray<WorkPickerChoice>;
+}
+
+/**
+ * The repository rows of `choices` under their projects: the project holding
+ * the chat's own repository first (so Enter lands there), then the rest in
+ * the given project order, and repositories in no project last.
+ */
+export function groupWorkChoicesByProject<Project extends { readonly key: string }>(input: {
+  readonly choices: ReadonlyArray<WorkPickerChoice>;
+  readonly projects: ReadonlyArray<Project>;
+  readonly projectOf: (repository: ProjectId) => Project | null;
+  readonly sourceProjectId: ProjectId | null;
+}): WorkProjectGroup<Project>[] {
+  const byKey = new Map<string | null, WorkPickerChoice[]>();
+  for (const choice of input.choices) {
+    if (choice.value === NO_REPOSITORY || choice.value === ADD_REPOSITORY) continue;
+    const key = input.projectOf(choice.value)?.key ?? null;
+    byKey.set(key, [...(byKey.get(key) ?? []), choice]);
+  }
+  // Every project is listed, even one with nothing on this machine yet: its
+  // GitHub repositories are a pick away.
+  const groups: WorkProjectGroup<Project>[] = input.projects.map((project) => ({
+    key: project.key,
+    project,
+    choices: byKey.get(project.key) ?? [],
+  }));
+  const unfiled = byKey.get(null);
+  if (unfiled) groups.push({ key: null, project: null, choices: unfiled });
+  const sourceIndex = groups.findIndex((group) =>
+    group.choices.some((choice) => choice.value === input.sourceProjectId),
+  );
+  if (sourceIndex > 0) groups.unshift(...groups.splice(sourceIndex, 1));
+  return groups;
+}
+
 /**
  * Repositories a chat can hand Work to: the source thread's environment runs
  * the session, so only its projects qualify, and only real repositories:

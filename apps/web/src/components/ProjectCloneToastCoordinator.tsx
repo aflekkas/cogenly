@@ -48,7 +48,7 @@ interface TrackedToast {
 }
 
 function renderKey(clone: ProjectCloneSnapshot): string {
-  return `${clone.phase}:${clone.stage}:${clone.percent ?? ""}:${clone.detail ?? ""}:${clone.error ?? ""}`;
+  return `${clone.phase}:${clone.stage}:${clone.percent ?? ""}:${clone.detail ?? ""}:${clone.error ?? ""}:${clone.projectRemoved === true}`;
 }
 
 function EnvironmentCloneToasts({ environmentId }: { environmentId: EnvironmentId }) {
@@ -177,33 +177,46 @@ function EnvironmentCloneToasts({ environmentId }: { environmentId: EnvironmentI
       }
 
       // Failed or cancelled: the project stays, pointing at an empty folder.
-      // Retry from here; the draft's composer banner offers the same.
+      // Retry from here; the draft's composer banner offers the same. A clone
+      // picked from GitHub took its repository with it instead, so there is
+      // nothing to retry in place: the toast reports it, and the picker clones
+      // afresh. It closes when the server lets the clone go.
       const cancelled = clone.phase === "cancelled";
-      const options = stackedThreadToast({
-        type: cancelled ? "info" : "error",
-        title: cancelled ? `Cancelled cloning ${name}` : `Failed to clone ${name}`,
-        description: cancelled ? clone.destinationPath : (clone.error ?? "The clone failed."),
-        timeout: 0,
-        actionProps: {
-          children: "Retry",
-          onClick: () => {
-            void runCloneAction("Failed to retry clone", () =>
-              retryClone({ environmentId, input: { projectId: clone.projectId } }),
-            );
-          },
-        },
-        data: {
-          ...(cancelled ? { hideCopyButton: true } : {}),
-          secondaryActionProps: {
-            children: "Remove repository",
-            onClick: () => {
-              // The server drops the clone with the project, which closes
-              // this toast; a failed removal leaves it (and Retry) in place.
-              void removeClonedProject({ environmentId, projectId: clone.projectId });
+      const options = clone.projectRemoved
+        ? stackedThreadToast({
+            type: cancelled ? "info" : "error",
+            title: cancelled ? `Cancelled cloning ${name}` : `Couldn't clone ${name}`,
+            description: cancelled
+              ? "Nothing was added to the project."
+              : `${clone.error ?? "The clone failed."} Nothing was added to the project.`,
+            timeout: 0,
+            ...(cancelled ? { data: { hideCopyButton: true } } : {}),
+          })
+        : stackedThreadToast({
+            type: cancelled ? "info" : "error",
+            title: cancelled ? `Cancelled cloning ${name}` : `Failed to clone ${name}`,
+            description: cancelled ? clone.destinationPath : (clone.error ?? "The clone failed."),
+            timeout: 0,
+            actionProps: {
+              children: "Retry",
+              onClick: () => {
+                void runCloneAction("Failed to retry clone", () =>
+                  retryClone({ environmentId, input: { projectId: clone.projectId } }),
+                );
+              },
             },
-          },
-        },
-      });
+            data: {
+              ...(cancelled ? { hideCopyButton: true } : {}),
+              secondaryActionProps: {
+                children: "Remove repository",
+                onClick: () => {
+                  // The server drops the clone with the project, which closes
+                  // this toast; a failed removal leaves it (and Retry) in place.
+                  void removeClonedProject({ environmentId, projectId: clone.projectId });
+                },
+              },
+            },
+          });
       if (tracked) {
         toastManager.update(tracked.toastId, options);
         toasts.current.set(clone.projectId, { ...tracked, renderedKey: key, phase: clone.phase });

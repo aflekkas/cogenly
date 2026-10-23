@@ -47,6 +47,12 @@ export const ProjectCloneSnapshot = Schema.Struct({
   startedAt: IsoDateTime,
   endedAt: Schema.NullOr(IsoDateTime),
   sequence: NonNegativeInt,
+  /**
+   * Set when a failed or cancelled clone took its project with it (a GitHub
+   * repository picked into a project): there is nothing to retry in place or
+   * remove, and a retry starts a fresh clone.
+   */
+  projectRemoved: Schema.optional(Schema.Boolean),
 });
 export type ProjectCloneSnapshot = typeof ProjectCloneSnapshot.Type;
 

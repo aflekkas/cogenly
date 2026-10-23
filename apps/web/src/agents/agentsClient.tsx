@@ -240,7 +240,6 @@ import {
 } from "~/providerInstances";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { ProviderModelPicker } from "~/components/chat/ProviderModelPicker";
-import { ComposerControlSeparator } from "~/components/chat/ComposerControl";
 import { TraitsPicker } from "~/components/chat/TraitsPicker";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { useOrchestrationCommand } from "~/state/use-orchestration-command";
@@ -1149,7 +1148,6 @@ export function LiveModelControls({
       />
       {entry && !unavailable && (
         <>
-          <ComposerControlSeparator />
           <TraitsPicker
             provider={entry.driverKind}
             instanceId={entry.instanceId}

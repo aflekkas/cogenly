@@ -3,10 +3,12 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { cn } from "../lib/utils";
 import { PANEL_MOTION_EASING } from "../lib/panelFlip";
 import { PANEL_ANIMATION_DURATION } from "../panelAnimations";
+import { HERO_INLINE_ICON_STYLE, ProjectFolderIcon } from "./ProjectFolderMark";
 
 interface Layer {
   readonly key: number;
   readonly name: string | null;
+  readonly color: string | undefined;
 }
 
 /**
@@ -20,12 +22,19 @@ interface Layer {
  * Inside a stacked heading (`data-stacked`, see useHeroHeadlineMotion) the
  * tail is a smaller line of its own, without the separator.
  */
-export function HeroProjectSuffixText(props: { readonly name: string | null }) {
-  const [shown, setShown] = useState<Layer>({ key: 0, name: props.name });
+export function HeroProjectSuffixText(props: {
+  readonly name: string | null;
+  /** The project's label color, for its folder icon. */
+  readonly color: string | undefined;
+}) {
+  const [shown, setShown] = useState<Layer>({ key: 0, name: props.name, color: props.color });
   const [leaving, setLeaving] = useState<Layer | null>(null);
   if (props.name !== shown.name) {
     setLeaving(shown.name === null ? null : shown);
-    setShown({ key: shown.key + 1, name: props.name });
+    setShown({ key: shown.key + 1, name: props.name, color: props.color });
+  } else if (props.color !== shown.color) {
+    // A recolor keeps the name in place; only the icon follows.
+    setShown({ ...shown, color: props.color });
   }
   const boxRef = useRef<HTMLSpanElement>(null);
   const layerRef = useRef<HTMLSpanElement>(null);
@@ -55,7 +64,7 @@ export function HeroProjectSuffixText(props: { readonly name: string | null }) {
           className="pointer-events-none absolute start-0 top-0 opacity-0 transition-opacity duration-(--motion-duration-base) ease-standard starting:opacity-100"
           onTransitionEnd={() => setLeaving(null)}
         >
-          <SuffixContent name={leaving.name} />
+          <SuffixContent name={leaving.name} color={leaving.color} />
         </span>
       ) : null}
       <span
@@ -68,21 +77,35 @@ export function HeroProjectSuffixText(props: { readonly name: string | null }) {
             "transition-opacity duration-(--motion-duration-base) ease-standard starting:opacity-0",
         )}
       >
-        <SuffixContent name={shown.name} />
+        <SuffixContent name={shown.name} color={shown.color} />
       </span>
     </span>
   );
 }
 
-function SuffixContent(props: { readonly name: string | null }) {
+// Reads like the Work hero's project picker (InlineButton tone="picker"): the
+// project's folder and name in the heading's color, underlined quietly.
+function SuffixContent(props: {
+  readonly name: string | null;
+  readonly color: string | undefined;
+}) {
   if (props.name === null) return null;
   return (
     <>
-      <span aria-hidden className="whitespace-pre group-data-stacked/hero-headline:hidden">
+      <span
+        aria-hidden
+        className="whitespace-pre text-muted-foreground/60 group-data-stacked/hero-headline:hidden"
+      >
         {" · "}
       </span>
-      <span className="underline decoration-muted-foreground/30 decoration-from-font underline-offset-4 transition-colors duration-(--motion-duration-fast) group-hover/hero-suffix:decoration-muted-foreground group-data-popup-open/hero-suffix:decoration-muted-foreground">
-        in {props.name}
+      {"in "}
+      <span className="underline decoration-foreground/30 decoration-from-font underline-offset-4 transition-colors duration-(--motion-duration-fast) group-hover/hero-suffix:decoration-foreground group-data-popup-open/hero-suffix:decoration-foreground">
+        <ProjectFolderIcon
+          color={props.color}
+          className="inline-block"
+          style={HERO_INLINE_ICON_STYLE}
+        />
+        {props.name}
       </span>
     </>
   );

@@ -335,34 +335,6 @@ export function resolveTimelineMinimapIndexFromPointer(input: {
   return Math.max(0, Math.min(input.itemCount - 1, Math.round(progress * (input.itemCount - 1))));
 }
 
-export function resolveTimelineMinimapCurrentIndex(input: {
-  readonly scrollTop: number;
-  readonly scrollBottom: number;
-  readonly itemBounds: ReadonlyArray<{
-    readonly top: number | null;
-    readonly height: number | null;
-  }>;
-}): number | null {
-  let precedingIndex: number | null = null;
-
-  for (const [index, item] of input.itemBounds.entries()) {
-    if (item.top === null) {
-      continue;
-    }
-    const inView =
-      item.top < input.scrollBottom && item.top + Math.max(1, item.height ?? 1) > input.scrollTop;
-    if (inView) {
-      // The first visible marker is the turn at the reader's current position.
-      return index;
-    }
-    if (item.top <= input.scrollTop) {
-      precedingIndex = index;
-    }
-  }
-
-  return precedingIndex;
-}
-
 /**
  * Side gutter between the viewport edge and the centered content column.
  * `contentWidth` is the rendered column width, which follows the Chat width
@@ -468,6 +440,11 @@ const LIVE_ACTIVITY_ROW_ID = "live-activity-row";
 
 export type MessagesTimelineRow = MessagesTimelineRowContent & {
   readonly continuesWorkLog?: boolean;
+  /**
+   * Set on rows an open fold reveals: the fold row's id, and whether the fold
+   * was just collapsed and the row is animating out before it leaves.
+   */
+  readonly foldReveal?: { readonly foldId: string; readonly closing: boolean };
 };
 
 type MessagesTimelineRowContent =
@@ -712,6 +689,16 @@ function deriveTerminalAssistantMessageIds(timelineEntries: ReadonlyArray<Timeli
   }
 
   return new Set(lastAssistantMessageIdByResponseKey.values());
+}
+
+/** Row id of a turn's "Worked for ..." fold. */
+export function turnFoldRowId(runId: RunId): string {
+  return `turn-fold:${runId}`;
+}
+
+/** Row id of a superseded attempt's fold. */
+export function attemptFoldRowId(attemptId: RunAttemptId): string {
+  return `attempt-fold:${attemptId}`;
 }
 
 interface TurnFold {
@@ -1430,6 +1417,11 @@ export function deriveMessagesTimelineRows(input: {
    * details row stays until its close animation ends.
    */
   closingWorkGroupIds?: ReadonlySet<string>;
+  /**
+   * Turn and attempt folds the user just collapsed, by fold row id. Their rows
+   * read collapsed while the revealed rows stay until they animate out.
+   */
+  closingFoldIds?: ReadonlySet<string>;
   isWorking: boolean;
   /**
    * The live work has no app run (a provider-native subagent thread), so
@@ -1492,19 +1484,28 @@ export function deriveMessagesTimelineRows(input: {
     liveSubagentEntryIds,
     completeSupersededReplyEntryIds: completeSupersededReplyIds,
   });
+  // Entries an open (or closing) fold reveals, by the fold that owns them. The
+  // outer turn fold wins over an attempt fold nested inside it.
+  const revealedFoldByEntryId = new Map<string, NonNullable<MessagesTimelineRow["foldReveal"]>>();
   const collapsedEntryIds = new Set<string>();
   for (const fold of foldsByAnchorEntryId.values()) {
-    if (!input.expandedRunIds?.has(fold.runId)) {
-      for (const entryId of fold.hiddenEntryIds) {
-        collapsedEntryIds.add(entryId);
-      }
+    const foldId = turnFoldRowId(fold.runId);
+    const expanded = input.expandedRunIds?.has(fold.runId) ?? false;
+    const closing = !expanded && (input.closingFoldIds?.has(foldId) ?? false);
+    for (const entryId of fold.hiddenEntryIds) {
+      if (expanded || closing) revealedFoldByEntryId.set(entryId, { foldId, closing });
+      else collapsedEntryIds.add(entryId);
     }
   }
   const collapsedSupersededEntryIds = new Set<string>();
   for (const fold of supersededFoldsByAnchorEntryId.values()) {
-    if (!input.expandedAttemptIds?.has(fold.attemptId)) {
-      for (const entryId of fold.hiddenEntryIds) {
-        collapsedSupersededEntryIds.add(entryId);
+    const foldId = attemptFoldRowId(fold.attemptId);
+    const expanded = input.expandedAttemptIds?.has(fold.attemptId) ?? false;
+    const closing = !expanded && (input.closingFoldIds?.has(foldId) ?? false);
+    for (const entryId of fold.hiddenEntryIds) {
+      if (!expanded && !closing) collapsedSupersededEntryIds.add(entryId);
+      else if (!revealedFoldByEntryId.has(entryId)) {
+        revealedFoldByEntryId.set(entryId, { foldId, closing });
       }
     }
   }
@@ -1630,7 +1631,22 @@ export function deriveMessagesTimelineRows(input: {
     );
   };
 
+  // Rows pushed for a revealed entry, marked once the entry's turn is done
+  // (its branches `continue` from many places).
+  let pendingReveal: {
+    start: number;
+    reveal: NonNullable<MessagesTimelineRow["foldReveal"]>;
+  } | null = null;
+  const flushPendingReveal = () => {
+    if (pendingReveal === null) return;
+    for (let rowIndex = pendingReveal.start; rowIndex < nextRows.length; rowIndex += 1) {
+      nextRows[rowIndex] = { ...nextRows[rowIndex]!, foldReveal: pendingReveal.reveal };
+    }
+    pendingReveal = null;
+  };
+
   for (let index = 0; index < timelineEntries.length; index += 1) {
+    flushPendingReveal();
     const timelineEntry = timelineEntries[index];
     if (!timelineEntry) {
       continue;
@@ -1657,7 +1673,7 @@ export function deriveMessagesTimelineRows(input: {
     if (turnFold) {
       nextRows.push({
         kind: "turn-fold",
-        id: `turn-fold:${turnFold.runId}`,
+        id: turnFoldRowId(turnFold.runId),
         createdAt: turnFold.createdAt,
         runId: turnFold.runId,
         label: turnFold.label,
@@ -1669,11 +1685,16 @@ export function deriveMessagesTimelineRows(input: {
       continue;
     }
 
+    const reveal = revealedFoldByEntryId.get(timelineEntry.id);
+    if (reveal?.foldId.startsWith("turn-fold:")) {
+      pendingReveal = { start: nextRows.length, reveal };
+    }
+
     const supersededFold = supersededFoldsByAnchorEntryId.get(timelineEntry.id);
     if (supersededFold) {
       nextRows.push({
         kind: "attempt-fold",
-        id: `attempt-fold:${supersededFold.attemptId}`,
+        id: attemptFoldRowId(supersededFold.attemptId),
         createdAt: supersededFold.createdAt,
         runId: supersededFold.runId,
         attemptId: supersededFold.attemptId,
@@ -1684,6 +1705,10 @@ export function deriveMessagesTimelineRows(input: {
 
     if (collapsedSupersededEntryIds.has(timelineEntry.id)) {
       continue;
+    }
+
+    if (reveal && pendingReveal === null) {
+      pendingReveal = { start: nextRows.length, reveal };
     }
 
     if (activeWorkEntryIds.has(timelineEntry.id)) {
@@ -1937,6 +1962,7 @@ export function deriveMessagesTimelineRows(input: {
           : undefined,
     });
   }
+  flushPendingReveal();
 
   // Until the agent's turn is live, the setup card sits under the send with
   // the working header above it (the header reads "Setting up worktree…" and
@@ -2349,6 +2375,12 @@ export function computeStableMessagesTimelineRows(
 /** Shallow field comparison per row variant — avoids deep equality cost. */
 function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean {
   if (a.kind !== b.kind || a.id !== b.id) return false;
+  if (
+    a.foldReveal?.foldId !== b.foldReveal?.foldId ||
+    a.foldReveal?.closing !== b.foldReveal?.closing
+  ) {
+    return false;
+  }
 
   switch (a.kind) {
     case "working":

@@ -2094,7 +2094,7 @@ function OpenCommandPaletteDialog(props: {
     shortcutCommand: "sidebar.mode.projects",
     icon: <FolderIcon className={ITEM_ICON_CLASS} />,
     run: async () => {
-      await navigate({ to: "/project" });
+      await navigate({ to: "/settings/project-tags" });
     },
   });
   if (activeThread && (activeCapabilities?.projectFolder ?? true)) {

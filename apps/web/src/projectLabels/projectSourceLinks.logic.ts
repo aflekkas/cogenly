@@ -68,6 +68,35 @@ export function sortProjectSourceLinks(
   });
 }
 
+/**
+ * The project's GitHub org: its first linked owner, shown on the project page
+ * as the project's setting. Null when it links none.
+ */
+export function projectGitHubOrg(links: ReadonlyArray<ProjectSourceLink>): string | null {
+  for (const link of links) if (link.kind === "github-owner") return link.owner;
+  return null;
+}
+
+/**
+ * The links Sources lists beside the org: further owners, and repositories
+ * no linked owner already covers (GitHub names compare case-insensitively).
+ */
+export function projectExtraSourceLinks(
+  links: ReadonlyArray<ProjectSourceLink>,
+): ProjectSourceLink[] {
+  const org = projectGitHubOrg(links)?.toLowerCase() ?? null;
+  const owners = new Set(
+    links.flatMap((link) => (link.kind === "github-owner" ? [link.owner.toLowerCase()] : [])),
+  );
+  return sortProjectSourceLinks(
+    links.filter((link) =>
+      link.kind === "github-owner"
+        ? link.owner.toLowerCase() !== org
+        : !owners.has(link.owner.toLowerCase()),
+    ),
+  );
+}
+
 /** The owners a project's GitHub search covers, in link order. */
 export function linkedGitHubOwners(project: EnvironmentProjectLabel): string[] {
   return project.label.sourceLinks.flatMap((link) =>

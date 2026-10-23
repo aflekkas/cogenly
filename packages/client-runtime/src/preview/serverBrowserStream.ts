@@ -20,6 +20,11 @@ export type PreviewStreamMouseButton = "none" | "left" | "middle" | "right";
 export interface PreviewStreamControl {
   readonly canOperate: boolean;
   readonly controller: "agent" | "you" | "another-viewer" | "unclaimed";
+  /**
+   * An agent opened or has used the tab, so the viewer in control can hand it
+   * back with `handBack`. Older servers omit it, which reads as false.
+   */
+  readonly agentInvolved: boolean;
   readonly generation: number;
   /** Absent from older servers; a missing flag means unsupported. */
   readonly capabilities?: PreviewStreamCapabilities;
@@ -30,19 +35,12 @@ export interface PreviewStreamControl {
   };
 }
 
-/** Status line shown above a viewer; `null` control means the socket is not connected. */
-export const previewStreamControlLabel = (control: PreviewStreamControl | null): string =>
-  !control
-    ? "Connecting..."
-    : !control.canOperate
-      ? "Read-only"
-      : control.controller === "you"
-        ? "You have control"
-        : control.controller === "agent"
-          ? "Agent has control"
-          : control.controller === "another-viewer"
-            ? "Another viewer has control"
-            : "Watching";
+/** Toolbar commands any operator may send; the server takes control for them first. */
+const PAGE_COMMANDS: ReadonlySet<PreviewStreamInput["type"]> = new Set([
+  "navigate",
+  "history",
+  "reload",
+]);
 
 const isPreviewStreamDialog = (value: unknown): value is PreviewStreamControl["dialog"] =>
   value === null ||
@@ -84,6 +82,8 @@ const normalizeCapabilities = (value: unknown): PreviewStreamCapabilities | unde
 /** Client-to-server messages. Coordinates are page CSS px. */
 export type PreviewStreamInput =
   | { readonly type: "takeControl" }
+  /** The viewer in control gives the page back to the agent; needs `agentInvolved`. */
+  | { readonly type: "handBack" }
   | { readonly type: "dialog"; readonly accept: boolean; readonly promptText?: string }
   | { readonly type: "viewport"; readonly setting: PreviewViewportSetting }
   | {
@@ -206,6 +206,8 @@ export interface PreviewStreamPointer {
   readonly x: number;
   readonly y: number;
   readonly sequence: number;
+  /** The element the agent acts on, in viewport CSS pixels; null when it acts on a point. */
+  readonly box: PreviewStreamPickHover["box"];
 }
 
 /** Answer to `pickHitTest`: hovered element box and label, both null on a miss. */
@@ -370,6 +372,7 @@ export function createPreviewStreamClient(
         editable,
         canOperate,
         controller,
+        agentInvolved,
         generation,
         capabilities,
         dialog,
@@ -411,7 +414,8 @@ export function createPreviewStreamClient(
         typeof y === "number" &&
         typeof sequence === "number"
       ) {
-        events.onPointer?.({ phase, x, y, sequence });
+        // Older servers send no box; the cursor still moves without an outline.
+        events.onPointer?.({ phase, x, y, sequence, box: isPickHoverBox(box) ? box : null });
       } else if (type === "popup" && typeof tabId === "string") {
         events.onPopup?.(tabId);
       } else if (type === "clipboard" && typeof text === "string") {
@@ -457,6 +461,7 @@ export function createPreviewStreamClient(
         const nextControl: PreviewStreamControl = {
           canOperate,
           controller,
+          agentInvolved: agentInvolved === true,
           generation,
           ...(parsedCapabilities === undefined ? {} : { capabilities: parsedCapabilities }),
           dialog,
@@ -500,12 +505,14 @@ export function createPreviewStreamClient(
       if (socket?.readyState !== WebSocket.OPEN) return false;
       if (!control?.canOperate) return false;
       // Picking asks questions about the page without driving it, so it never
-      // needs control; everything else still waits for it.
+      // needs control, and toolbar page commands take it on the server. Page
+      // input still waits for it.
       const needsControl =
         input.type !== "takeControl" &&
         input.type !== "pickHitTest" &&
         input.type !== "pickCommit" &&
-        input.type !== "pickCommitRegion";
+        input.type !== "pickCommitRegion" &&
+        !PAGE_COMMANDS.has(input.type);
       if (needsControl && control.controller !== "you") return false;
       socket.send(JSON.stringify(input));
       return true;

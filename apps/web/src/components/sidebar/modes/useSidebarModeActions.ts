@@ -47,7 +47,7 @@ export function useSidebarModeActions(input: {
       return;
     }
     // No machine to create on yet: the projects page offers the dialog once one connects.
-    void router.navigate({ to: "/project", search: { create: true } });
+    void router.navigate({ to: "/settings/project-tags", search: { create: true } });
   }, [currentEnvironmentId, isMobile, router, setOpenMobile]);
 
   const openAgentTask = useCallback(

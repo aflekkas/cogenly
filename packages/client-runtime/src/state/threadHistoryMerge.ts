@@ -148,6 +148,48 @@ export function applyHistoryPageMeta(
   };
 }
 
+/**
+ * Timeline rows a thread may hold before an idle client at the live end trims
+ * back to the server's recent window. Live growth and load-earlier pages
+ * otherwise accumulate for as long as the thread stays open.
+ */
+export const THREAD_HISTORY_TRIM_ROW_THRESHOLD = 400;
+/** Rows a thread must grow by before a trim that changed nothing is retried. */
+const THREAD_HISTORY_TRIM_RETRY_GROWTH = 100;
+
+export function shouldRequestThreadHistoryTrim(input: {
+  readonly rowCount: number;
+  /** Row count at the previous trim request for this thread, if any. */
+  readonly lastRequestRowCount: number | null;
+  readonly atEnd: boolean;
+  readonly busy: boolean;
+}): boolean {
+  if (!input.atEnd || input.busy || input.rowCount <= THREAD_HISTORY_TRIM_ROW_THRESHOLD) {
+    return false;
+  }
+  return (
+    input.lastRequestRowCount === null ||
+    input.rowCount >= input.lastRequestRowCount + THREAD_HISTORY_TRIM_RETRY_GROWTH
+  );
+}
+
+/**
+ * Whether a fresh recent-window snapshot may replace the in-memory timeline.
+ * An older snapshot would drop events already applied, and one that sheds few
+ * rows is not worth re-rendering the whole timeline for.
+ */
+export function shouldInstallTrimmedThreadWindow(input: {
+  readonly appliedSequence: number;
+  readonly snapshotSequence: number;
+  readonly currentRowCount: number;
+  readonly nextRowCount: number;
+}): boolean {
+  return (
+    input.snapshotSequence >= input.appliedSequence &&
+    input.nextRowCount <= input.currentRowCount * 0.75
+  );
+}
+
 /** Whether a client timeline should render its load-earlier control. */
 export function shouldShowLoadEarlierControl(history: ThreadHistoryMeta): boolean {
   return history.hasMoreHistory || history.error !== null;

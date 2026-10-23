@@ -16,6 +16,8 @@ export function ProjectEnvironmentBadge(props: {
   readonly group: Pick<SidebarProjectSnapshot, "memberProjects">;
   readonly primaryEnvironmentId: EnvironmentId | null;
   readonly machineByEnvironmentId: ReadonlyMap<EnvironmentId, EnvironmentMachineKind>;
+  /** Names the machines beside the icon, where an icon alone would leave the row unclear. */
+  readonly showLabel?: boolean;
 }) {
   // Member order follows registration order and can differ between sessions,
   // so sort by label to keep the icon and tooltip stable.
@@ -38,15 +40,16 @@ export function ProjectEnvironmentBadge(props: {
           <span
             role="img"
             aria-label={description}
-            className="ml-auto inline-flex shrink-0 items-center text-muted-foreground"
+            className="ml-auto inline-flex min-w-0 max-w-24 shrink-0 items-center gap-1 text-muted-foreground"
           />
         }
       >
         <EnvironmentMachineIcon
           aria-hidden
           kind={props.machineByEnvironmentId.get(first.environmentId) ?? "server"}
-          className="size-3.5"
+          className="size-3.5 shrink-0"
         />
+        {props.showLabel ? <span className="truncate text-2xs">{labels}</span> : null}
       </TooltipTrigger>
       <TooltipPopup side="top">{description}</TooltipPopup>
     </Tooltip>

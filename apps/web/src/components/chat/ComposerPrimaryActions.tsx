@@ -5,6 +5,7 @@ import { MorphIcon } from "~/components/MorphIcon";
 import { formatContextWindowTokens } from "~/lib/contextWindow";
 import { cn } from "~/lib/utils";
 import { useShortcutModifierState } from "../../shortcutModifierState";
+import { StopGlyph } from "../StopGlyph";
 import { Button } from "../ui/button";
 import { PixelToneGhost, type PixelTone } from "../ui/pixelButton";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
@@ -349,9 +350,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
         <span
           className={cn("flex items-center justify-center", showStop ? "opacity-100" : "opacity-0")}
         >
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
-            <rect x="2" y="2" width="8" height="8" rx="1.5" />
-          </svg>
+          <StopGlyph width={12} height={12} />
         </span>
         <span
           className={cn("flex items-center justify-center", showStop ? "opacity-0" : "opacity-100")}

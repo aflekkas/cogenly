@@ -118,12 +118,38 @@ const targetLocator = (
   return page.locator(selector);
 };
 
+/** An element's box in viewport CSS pixels. */
+export interface PointerTargetBox {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+/**
+ * Where the agent acts: a viewport point, plus the element it acts on so
+ * viewers can outline it. `box` is null for point actions.
+ */
+export interface PointerTarget {
+  readonly x: number;
+  readonly y: number;
+  readonly box: PointerTargetBox | null;
+}
+
 /** Shows the agent's pointer to viewers before an action lands at that point. */
-export type PointerReporter = (
-  point: { readonly x: number; readonly y: number },
-  phase: "move" | "click",
-) => Promise<void>;
+export type PointerReporter = (point: PointerTarget, phase: "move" | "click") => Promise<void>;
 const noPointer: PointerReporter = async () => {};
+
+const boxTarget = (box: PointerTargetBox): PointerTarget => ({
+  x: box.x + box.width / 2,
+  y: box.y + box.height / 2,
+  box: { x: box.x, y: box.y, width: box.width, height: box.height },
+});
+
+const viewportCenter = (page: Page): PointerTarget => {
+  const viewport = page.viewportSize();
+  return { x: (viewport?.width ?? 0) / 2, y: (viewport?.height ?? 0) / 2, box: null };
+};
 
 /** The viewport point an action will hit: the target's center after scrolling it into view. */
 const targetPoint = async (
@@ -131,13 +157,11 @@ const targetPoint = async (
   locator: Locator | null,
   input: { readonly x?: number | undefined; readonly y?: number | undefined },
   timeout: number,
-) => {
-  if (locator === null) return { x: input.x ?? 0, y: input.y ?? 0 };
+): Promise<PointerTarget> => {
+  if (locator === null) return { x: input.x ?? 0, y: input.y ?? 0, box: null };
   await locator.scrollIntoViewIfNeeded({ timeout });
   const box = await locator.boundingBox({ timeout });
-  if (box) return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
-  const viewport = page.viewportSize();
-  return { x: (viewport?.width ?? 0) / 2, y: (viewport?.height ?? 0) / 2 };
+  return box ? boxTarget(box) : viewportCenter(page);
 };
 
 const SNAPSHOT_SCRIPT = `(() => {
@@ -395,26 +419,56 @@ export const drag = async (
     (error: unknown) => ({ error }),
   );
   const end = await target.boundingBox({ timeout }).catch(() => null);
-  if (end) await pointer({ x: end.x + end.width / 2, y: end.y + end.height / 2 }, "move");
+  if (end) await pointer(boxTarget(end), "move");
   const failure = await dragFailure;
   if (failure) throw failure.error;
 };
 
 /** Sets files on one file input; false when no locator or selector names one. */
-export const setInputFiles = async (page: Page, input: PreviewAutomationUploadInput) => {
+export const setInputFiles = async (
+  page: Page,
+  input: PreviewAutomationUploadInput,
+  pointer: PointerReporter = noPointer,
+) => {
   const locator = targetLocator(page, input);
   if (locator === null) return false;
+  await pointer(await restingPoint(page, locator), "move");
   await locator.setInputFiles([...input.paths], { timeout: input.timeoutMs ?? DEFAULT_TIMEOUT_MS });
   return true;
 };
 
-export const press = async (page: Page, input: PreviewAutomationPressInput) => {
+/**
+ * Where an action without its own click point acts: an element's center as it
+ * sits now, without scrolling it, else the viewport's center.
+ */
+const restingPoint = async (page: Page, locator: Locator | null): Promise<PointerTarget> => {
+  const box =
+    locator === null ? null : await locator.boundingBox({ timeout: 1_000 }).catch(() => null);
+  return box ? boxTarget(box) : viewportCenter(page);
+};
+
+export const press = async (
+  page: Page,
+  input: PreviewAutomationPressInput,
+  pointer: PointerReporter = noPointer,
+) => {
+  // Keys land in the focused element, so the cursor points there when one has focus.
+  const focused = page.locator("*:focus").last();
+  if ((await focused.count().catch(() => 0)) > 0) {
+    await pointer(await restingPoint(page, focused), "move");
+  }
   await page.keyboard.press([...(input.modifiers ?? []), input.key].join("+"));
 };
 
-export const scroll = async (page: Page, input: PreviewAutomationScrollInput) => {
+export const scroll = async (
+  page: Page,
+  input: PreviewAutomationScrollInput,
+  pointer: PointerReporter = noPointer,
+) => {
   const delta = [input.deltaX ?? 0, input.deltaY ?? 0] as const;
   const locator = targetLocator(page, input);
+  // The cursor rests on what scrolls: the target, else the middle of the page.
+  await pointer(await restingPoint(page, locator), "move");
   if (locator === null) {
     // Page-side code is passed as source: the server compiles without DOM types.
     await page.evaluate(`scrollBy(${delta[0]}, ${delta[1]})`);

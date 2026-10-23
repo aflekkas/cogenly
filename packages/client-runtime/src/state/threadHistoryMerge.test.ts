@@ -8,7 +8,10 @@ import {
   clearActiveHistoryLoading,
   isActiveHistoryRequestCursor,
   mergeOlderHistoryIntoProjection,
+  shouldInstallTrimmedThreadWindow,
+  shouldRequestThreadHistoryTrim,
   shouldShowLoadEarlierControl,
+  THREAD_HISTORY_TRIM_ROW_THRESHOLD,
 } from "./threadHistoryMerge.ts";
 import { applyOrchestrationV2ProjectionEvent } from "./orchestrationV2Projection.ts";
 
@@ -483,5 +486,39 @@ describe("threadHistoryMerge", () => {
       { partialTimeline: true },
     );
     expect(hidden?.visibleTurnItems.map((entry) => String(entry.sourceItemId))).toEqual(["item-5"]);
+  });
+});
+
+describe("thread history trimming", () => {
+  const large = THREAD_HISTORY_TRIM_ROW_THRESHOLD + 1;
+
+  it("asks to trim a large timeline only while the reader rests at the live end", () => {
+    const base = { rowCount: large, lastRequestRowCount: null, atEnd: true, busy: false };
+    expect(shouldRequestThreadHistoryTrim(base)).toBe(true);
+    expect(shouldRequestThreadHistoryTrim({ ...base, atEnd: false })).toBe(false);
+    expect(shouldRequestThreadHistoryTrim({ ...base, busy: true })).toBe(false);
+    expect(
+      shouldRequestThreadHistoryTrim({ ...base, rowCount: THREAD_HISTORY_TRIM_ROW_THRESHOLD }),
+    ).toBe(false);
+  });
+
+  it("does not retry a trim until the timeline has grown meaningfully", () => {
+    const base = { atEnd: true, busy: false, lastRequestRowCount: large };
+    expect(shouldRequestThreadHistoryTrim({ ...base, rowCount: large + 10 })).toBe(false);
+    expect(shouldRequestThreadHistoryTrim({ ...base, rowCount: large + 100 })).toBe(true);
+  });
+
+  it("installs a recent window only when it is current and sheds rows", () => {
+    const base = {
+      appliedSequence: 10,
+      snapshotSequence: 12,
+      currentRowCount: 800,
+      nextRowCount: 120,
+    };
+    expect(shouldInstallTrimmedThreadWindow(base)).toBe(true);
+    // An older snapshot would drop events this client already applied.
+    expect(shouldInstallTrimmedThreadWindow({ ...base, snapshotSequence: 9 })).toBe(false);
+    // Barely smaller: not worth re-rendering the timeline.
+    expect(shouldInstallTrimmedThreadWindow({ ...base, nextRowCount: 700 })).toBe(false);
   });
 });

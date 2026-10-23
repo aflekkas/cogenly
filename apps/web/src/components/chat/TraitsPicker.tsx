@@ -10,6 +10,7 @@ import {
 import {
   applyClaudePromptEffortPrefix,
   buildProviderOptionSelectionsFromDescriptors,
+  findReasoningEffortDescriptor,
   getProviderOptionCurrentLabel,
   getProviderOptionCurrentValue,
   getProviderOptionDescriptors,
@@ -17,10 +18,11 @@ import {
   normalizeModelSlug,
 } from "@t3tools/shared/model";
 import { memo, useCallback } from "react";
-import { BrainIcon } from "lucide-react";
+import { BrainIcon, CheckIcon } from "lucide-react";
 import {
   Menu,
   MenuGroup,
+  MenuItem,
   MenuPopup,
   MenuRadioGroup,
   MenuRadioItem,
@@ -282,7 +284,20 @@ export interface TraitsMenuContentProps {
   planModeEnabled: boolean;
   triggerClassName?: string;
   isComposerOwned?: boolean;
+  /**
+   * Offers "Set as default for <model>" under the effort choices. Injected by the
+   * composer rather than read from settings here: this module sits in the composer
+   * draft store's import graph, which loads before the environment session atoms.
+   */
+  onSetEffortDefault?: SetModelEffortDefault;
 }
+
+/** Saves a model's default reasoning effort (`setModelEffortDefault` in server settings). */
+export type SetModelEffortDefault = (input: {
+  readonly provider: ProviderInstanceId;
+  readonly model: string;
+  readonly option: { readonly id: string; readonly value: string };
+}) => void;
 
 export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
   provider,
@@ -295,10 +310,14 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
   reportedModelSelection,
   allowPromptInjectedEffort = true,
   planModeEnabled,
+  onSetEffortDefault,
   ...persistence
 }: TraitsMenuContentProps & TraitsPersistence) {
   const modelSelection =
     instanceId && model ? { instanceId, model, options: modelOptions ?? [] } : null;
+  const effortDescriptor = findReasoningEffortDescriptor(
+    onSetEffortDefault ? getProviderModelCapabilities(models, model, provider) : null,
+  );
   const setProviderModelOptions = useComposerDraftStore((store) => store.setProviderModelOptions);
   const updateModelOptions = useCallback(
     (nextOptions: ProviderOptions | undefined) => {
@@ -447,6 +466,26 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
                   </MenuRadioItem>
                 ))}
               </MenuRadioGroup>
+              {effortDescriptor?.id === descriptor.id &&
+              onSetEffortDefault &&
+              instanceId &&
+              model &&
+              selectedValue &&
+              descriptor.options.some((option) => option.id === selectedValue) ? (
+                <EffortDefaultMenuItem
+                  model={models.find((candidate) => candidate.slug === model)?.name ?? model}
+                  isDefault={
+                    descriptor.options.find((option) => option.isDefault)?.id === selectedValue
+                  }
+                  onSetDefault={() =>
+                    onSetEffortDefault({
+                      provider: instanceId,
+                      model,
+                      option: { id: descriptor.id, value: selectedValue },
+                    })
+                  }
+                />
+              ) : null}
             </MenuGroup>
           </div>
         );
@@ -484,6 +523,24 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
     </>
   );
 });
+
+/** Saves the picked effort as the model's default, or shows that it already is. */
+function EffortDefaultMenuItem(props: {
+  model: string;
+  isDefault: boolean;
+  onSetDefault: () => void;
+}) {
+  return (
+    <MenuItem disabled={props.isDefault} onClick={props.onSetDefault}>
+      <span className="flex w-full min-w-0 items-center justify-between gap-3 text-muted-foreground text-xs">
+        <span className="min-w-0 truncate">
+          {props.isDefault ? `Default for ${props.model}` : `Set as default for ${props.model}`}
+        </span>
+        {props.isDefault ? <CheckIcon aria-hidden className="size-3.5 shrink-0" /> : null}
+      </span>
+    </MenuItem>
+  );
+}
 
 /** Pair speed with reasoning while keeping other traits separated. */
 export function buildTraitsTriggerDisplay(input: {

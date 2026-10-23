@@ -1,8 +1,7 @@
-import { InfoIcon } from "lucide-react";
+import { InfoIcon, LayersIcon } from "lucide-react";
 import {
   useCallback,
   useEffect,
-  useId,
   useLayoutEffect,
   useRef,
   useState,
@@ -14,6 +13,7 @@ import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { ComposerBanner, type ComposerBannerVariant } from "./ComposerBanner";
+import { foldNotices } from "./composerStackBudget.logic";
 import { observeResize } from "~/lib/observeResize";
 import { PANEL_MOTION_EASING } from "~/lib/panelFlip";
 
@@ -60,21 +60,79 @@ function bannerPriority(item: ComposerBannerStackEntry) {
   return 2;
 }
 
+const NOTICE_OVERFLOW_ID = "composer-notice-overflow";
+
+function hasStackContent(item: ComposerBannerStackEntry) {
+  if (!("content" in item)) return true;
+  const { content } = item;
+  return content !== null && content !== undefined && content !== false && content !== "";
+}
+
+/** Plain notices may fold behind "+N more"; activity, urgent and error notices stay in view. */
+function isFoldableNotice(item: ComposerBannerStackEntry) {
+  return (
+    !("content" in item) &&
+    item.priority !== "activity" &&
+    item.priority !== "urgent" &&
+    item.variant !== "error"
+  );
+}
+
+/** The bar standing in for folded notices; the whole row opens and folds them. */
+function NoticeOverflowRow({
+  count,
+  expanded,
+  summary,
+  onToggle,
+}: {
+  readonly count: number;
+  readonly expanded: boolean;
+  readonly summary: string;
+  readonly onToggle: () => void;
+}) {
+  return (
+    <ComposerBanner.Row
+      render={<button type="button" />}
+      aria-expanded={expanded}
+      aria-label={expanded ? "Fold notices" : `Show ${count} more notice${count === 1 ? "" : "s"}`}
+      data-chat-composer-collapsed-controls="true"
+      onPointerDown={(event) => event.preventDefault()}
+      onClick={onToggle}
+    >
+      <ComposerBanner.Icon>
+        <LayersIcon />
+      </ComposerBanner.Icon>
+      <ComposerBanner.Content className="whitespace-nowrap">
+        <span className="shrink-0 font-medium leading-7 sm:leading-6">
+          {expanded ? "Fold notices" : `+${count} more`}
+        </span>
+        {summary ? (
+          <span
+            aria-hidden={expanded}
+            className={cn(
+              "w-0 min-w-0 grow truncate text-muted-foreground transition-opacity duration-(--motion-duration-fast) ease-out motion-reduce:transition-none",
+              expanded && "opacity-0",
+            )}
+          >
+            {summary}
+          </span>
+        ) : null}
+      </ComposerBanner.Content>
+      <ComposerBanner.Actions>
+        <ComposerBanner.ToggleIcon expanded={expanded} />
+      </ComposerBanner.Actions>
+    </ComposerBanner.Row>
+  );
+}
+
 interface ComposerBannerStackProps {
   readonly className?: string;
   readonly items: ReadonlyArray<ComposerBannerStackEntry>;
-  /** Attachments that sit between the stacked notices and the front item, such as the queue.
-      The stacked notices peek above the whole column, never from between two attachments. */
+  /** Attachments that sit between the stacked notice bars and the front item, such as the queue. */
   readonly attachedAbove?: ReactNode;
 }
 
 export function ComposerBannerStack({ className, items, attachedAbove }: ComposerBannerStackProps) {
-  const [stackExpanded, setStackExpanded] = useState(false);
-  const noticesRef = useRef<HTMLDivElement>(null);
-  const peekRef = useRef<HTMLButtonElement>(null);
-  const expandedItemsRef = useRef<HTMLDivElement>(null);
-  const pendingFocusRef = useRef<"peek" | "notice" | null>(null);
-  const expandedItemsId = useId();
   const [requestedExitingItemId, setExitingItemId] = useState<string | null>(null);
   const dismissTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const exitingItemId =
@@ -90,26 +148,47 @@ export function ComposerBannerStack({ className, items, attachedAbove }: Compose
     };
   }, []);
 
-  useEffect(() => {
-    if (items.length < 2) setStackExpanded(false);
-  }, [items.length]);
-
-  useLayoutEffect(() => {
-    if (stackExpanded && pendingFocusRef.current === "notice") {
-      pendingFocusRef.current = null;
-      const firstControl = expandedItemsRef.current?.querySelector<HTMLElement>(
-        'button:not(:disabled), a[href], input:not(:disabled), [tabindex="0"]',
-      );
-      (firstControl ?? expandedItemsRef.current)?.focus({ preventScroll: true });
-    } else if (!stackExpanded && pendingFocusRef.current === "peek") {
-      pendingFocusRef.current = null;
-      peekRef.current?.focus({ preventScroll: true });
-    }
-  }, [stackExpanded]);
-
-  // Activity stays attached. Urgency and severity only order the notices behind it.
-  const orderedItems = items.toSorted((a, b) => bannerPriority(a) - bannerPriority(b));
+  // Activity sits nearest the composer, then urgency and severity; every other
+  // notice is its own attached bar above the queue, the most important lowest.
+  // An entry with nothing to draw never gets a card.
+  const orderedItems = items
+    .filter(hasStackContent)
+    .toSorted((a, b) => bannerPriority(a) - bannerPriority(b));
   const frontItem = orderedItems[0];
+  // From three plain notices on, all but the most important fold into one
+  // "+N more" bar that opens them again (and folds them back).
+  const [noticesExpanded, setNoticesExpanded] = useState(false);
+  const noticeFold = foldNotices(
+    orderedItems.map((item) => ({ id: item.id, foldable: isFoldableNotice(item) })),
+    noticesExpanded,
+  );
+  if (noticeFold.overflow === 0 && noticesExpanded) setNoticesExpanded(false);
+  const hiddenSummary = orderedItems
+    .flatMap((item) =>
+      noticeFold.hidden.has(item.id) && "title" in item && typeof item.title === "string"
+        ? [item.title]
+        : [],
+    )
+    .join(", ");
+  const overflowBar: ComposerBannerStackContent | null =
+    noticeFold.overflow > 0
+      ? {
+          id: NOTICE_OVERFLOW_ID,
+          variant: "default",
+          content: (
+            <NoticeOverflowRow
+              count={noticeFold.overflow}
+              expanded={noticesExpanded}
+              summary={hiddenSummary}
+              onToggle={() => setNoticesExpanded((expanded) => !expanded)}
+            />
+          ),
+        }
+      : null;
+  const stackedItems = orderedItems.slice(1).filter((item) => !noticeFold.hidden.has(item.id));
+  const heldBars = useHeldBars(
+    overflowBar ? [overflowBar, ...stackedItems.toReversed()] : stackedItems.toReversed(),
+  );
 
   // The front notice that just went away, kept while it fades: under the next
   // one (a cross-fade) or in the collapsing frame when none follows.
@@ -128,21 +207,25 @@ export function ComposerBannerStack({ className, items, attachedAbove }: Compose
   }, []);
   // A dismissed notice has already slid out; it must not reappear while the frame closes.
   const leavingFrontDismissed = leavingFront !== null && requestedExitingItemId === leavingFront.id;
+  const stackedBars = heldBars.bars.map(({ item, leaving }) => (
+    <StackedNoticeBar
+      key={item.id}
+      item={item}
+      leaving={leaving}
+      animateMountRef={mountedRef}
+      onLeft={heldBars.clearLeft}
+    />
+  ));
 
   if (!frontItem && !leavingFront) {
     return (
       <>
-        {null}
+        {stackedBars}
         {attachedAbove}
         {null}
       </>
     );
   }
-  const stackedItems = orderedItems.slice(1);
-  const hasStack = stackedItems.length > 0;
-  const showCollapsedStackCap = hasStack && exitingItemId !== frontItem?.id;
-  const firstStackedItem = stackedItems[0];
-
   const requestDismiss = (item: ComposerBannerStackEntry) => {
     if (!("onDismiss" in item) || !item.onDismiss || exitingItemId) {
       return;
@@ -159,96 +242,7 @@ export function ComposerBannerStack({ className, items, attachedAbove }: Compose
 
   return (
     <>
-      {hasStack ? (
-        <div
-          ref={noticesRef}
-          data-chat-composer-collapsed-controls="true"
-          className={cn("relative z-20 min-h-3", stackExpanded && "z-50")}
-          onPointerEnter={(event) => {
-            if (event.pointerType === "touch") return;
-            if (document.activeElement === peekRef.current) {
-              pendingFocusRef.current = "notice";
-            }
-            setStackExpanded(true);
-          }}
-          onPointerLeave={(event) => {
-            if (!event.currentTarget.contains(document.activeElement)) setStackExpanded(false);
-          }}
-          onBlurCapture={(event) => {
-            if (
-              !event.currentTarget.contains(event.relatedTarget) &&
-              !event.currentTarget.matches(":hover")
-            ) {
-              setStackExpanded(false);
-            }
-          }}
-          onKeyDown={(event) => {
-            if (event.key !== "Escape" || !stackExpanded) return;
-            event.preventDefault();
-            event.stopPropagation();
-            pendingFocusRef.current = "peek";
-            setStackExpanded(false);
-          }}
-        >
-          {showCollapsedStackCap && firstStackedItem ? (
-            <ComposerBanner.Peek
-              ref={peekRef}
-              variant={firstStackedItem.variant}
-              aria-label="Show other notices"
-              aria-expanded={stackExpanded}
-              aria-controls={expandedItemsId}
-              aria-hidden={stackExpanded || undefined}
-              tabIndex={stackExpanded ? -1 : 0}
-              onClick={(event) => {
-                event.currentTarget.focus({ preventScroll: true });
-                pendingFocusRef.current = "notice";
-                setStackExpanded(true);
-              }}
-              className={cn(stackExpanded && "pointer-events-none invisible opacity-0")}
-            />
-          ) : null}
-          <div
-            id={expandedItemsId}
-            ref={expandedItemsRef}
-            role="group"
-            aria-label="Other notices"
-            tabIndex={-1}
-            data-composer-banner-stack-expanded-items="true"
-            className={cn(
-              "grid transition-[grid-template-rows] duration-150 ease-out focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
-              stackExpanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
-            )}
-          >
-            <div className="min-h-0 overflow-hidden">
-              <div
-                className={cn(
-                  "space-y-2 pb-2 transition-opacity duration-150 ease-out",
-                  stackExpanded
-                    ? "pointer-events-auto visible opacity-100"
-                    : "pointer-events-none invisible opacity-0",
-                )}
-              >
-                {stackedItems.map((item) => (
-                  <div
-                    key={item.id}
-                    className={cn(
-                      "transition-opacity duration-220 ease-in",
-                      exitingItemId === item.id ? "pointer-events-none opacity-0" : "opacity-100",
-                    )}
-                  >
-                    <ComposerBannerStackAlert
-                      item={item}
-                      attached={false}
-                      exiting={exitingItemId === item.id}
-                      onDismissRequest={() => requestDismiss(item)}
-                    />
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      {stackedBars}
       {attachedAbove}
       <ComposerBanner.Attachment
         className={className}
@@ -301,13 +295,6 @@ export function ComposerBannerStack({ className, items, attachedAbove }: Compose
           "relative z-10 transition-opacity duration-220 ease-in",
           exitingItemId === frontItem.id ? "pointer-events-none opacity-0" : "opacity-100",
         )}
-        onPointerDownCapture={() => {
-          setStackExpanded(false);
-          const activeElement = document.activeElement;
-          if (activeElement instanceof HTMLElement && noticesRef.current?.contains(activeElement)) {
-            activeElement.blur();
-          }
-        }}
       >
         <ComposerBannerStackAlert
           item={frontItem}
@@ -318,6 +305,86 @@ export function ComposerBannerStack({ className, items, attachedAbove }: Compose
       </div>
     );
   }
+}
+
+interface LeavingBar {
+  readonly item: ComposerBannerStackEntry;
+  readonly index: number;
+}
+
+/**
+ * The stacked notices to draw: the current ones plus any that just went away,
+ * kept at their last position until their bar has closed.
+ */
+function useHeldBars(items: ReadonlyArray<ComposerBannerStackEntry>) {
+  const [leaving, setLeaving] = useState<ReadonlyArray<LeavingBar>>([]);
+  const lastItemsRef = useRef(items);
+  const ids = new Set(items.map((item) => item.id));
+  useLayoutEffect(() => {
+    const lastItems = lastItemsRef.current;
+    lastItemsRef.current = items;
+    const currentIds = new Set(items.map((item) => item.id));
+    const gone = lastItems.flatMap((item, index) =>
+      currentIds.has(item.id) ? [] : [{ item, index }],
+    );
+    setLeaving((current) => {
+      const kept = current.filter((entry) => !currentIds.has(entry.item.id));
+      const added = gone.filter((entry) => !kept.some((held) => held.item.id === entry.item.id));
+      return added.length === 0 && kept.length === current.length ? current : [...kept, ...added];
+    });
+  });
+  const clearLeft = useCallback(
+    (id: string) => setLeaving((current) => current.filter((entry) => entry.item.id !== id)),
+    [],
+  );
+  const bars = items.map((item) => ({ item, leaving: false }));
+  for (const entry of leaving) {
+    if (ids.has(entry.item.id)) continue;
+    bars.splice(Math.min(entry.index, bars.length), 0, { item: entry.item, leaving: true });
+  }
+  return { bars, clearLeft };
+}
+
+/** A notice behind the front one, attached as its own bar above the queue. */
+function StackedNoticeBar({
+  item,
+  leaving,
+  animateMountRef,
+  onLeft,
+}: {
+  readonly item: ComposerBannerStackEntry;
+  readonly leaving: boolean;
+  readonly animateMountRef: { readonly current: boolean };
+  readonly onLeft: (id: string) => void;
+}) {
+  const onClosed = useCallback(() => onLeft(item.id), [item.id, onLeft]);
+  return (
+    <ComposerBanner.Attachment data-chat-composer-collapsed-controls="true">
+      <NoticePresenceFrame
+        open={!leaving}
+        swapKey={null}
+        animateMountRef={animateMountRef}
+        onClosed={onClosed}
+      >
+        <div
+          data-notice-current=""
+          className="relative z-10"
+          aria-hidden={leaving || undefined}
+          inert={leaving}
+        >
+          <ComposerBannerStackAlert
+            item={item}
+            attached
+            exiting={leaving}
+            // The bar closes on its own once the notice leaves the list.
+            onDismissRequest={() => {
+              if ("onDismiss" in item) item.onDismiss?.();
+            }}
+          />
+        </div>
+      </NoticePresenceFrame>
+    </ComposerBanner.Attachment>
+  );
 }
 
 /**
@@ -606,7 +673,7 @@ function NoticeDescription({ children }: { children: ReactNode }) {
             side="top"
             className="max-w-[min(30rem,calc(100vw-2rem))] whitespace-normal wrap-anywhere [--inline-button-text-align:start] [--inline-button-white-space:normal] [&_[data-slot=inline-button]]:max-w-full"
           >
-            <ComposerBanner.Scroll className="max-h-[min(var(--available-height),24rem,40dvh)]">
+            <ComposerBanner.Scroll className="[--composer-banner-scroll-max:min(var(--available-height),24rem,40dvh)]">
               {children}
             </ComposerBanner.Scroll>
           </PopoverPopup>

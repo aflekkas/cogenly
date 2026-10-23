@@ -367,10 +367,12 @@ export function formatThreadAgentsHeading(summary: Pick<ThreadAgentsSummary, "ru
  */
 export function threadAgentDotTone(
   row: Pick<ThreadAgentRow, "status" | "statusLabel">,
-): "info" | "destructive" | "success" | "muted" {
+): "destructive" | "success" | "muted" | null {
   switch (row.status) {
+    // A running row already shows its elapsed time and Stop; a dot would only
+    // collide with the account badge on the glyph.
     case "running":
-      return "info";
+      return null;
     case "failed":
       return "destructive";
     case "cancelled":

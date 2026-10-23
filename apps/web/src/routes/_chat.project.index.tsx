@@ -1,16 +1,11 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
-import {
-  ProjectsOverview,
-  validateProjectsOverviewSearch,
-} from "../components/projects/ProjectsOverview";
+import { validateProjectsOverviewSearch } from "../components/projects/ProjectsOverview";
 
-function ProjectsOverviewRoute() {
-  const search = Route.useSearch();
-  return <ProjectsOverview {...search} />;
-}
-
+// Projects live in Settings → Projects; old links land there.
 export const Route = createFileRoute("/_chat/project/")({
   validateSearch: validateProjectsOverviewSearch,
-  component: ProjectsOverviewRoute,
+  beforeLoad: ({ search }) => {
+    throw redirect({ to: "/settings/project-tags", search, replace: true });
+  },
 });

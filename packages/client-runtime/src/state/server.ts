@@ -22,6 +22,7 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 import { AsyncResult, Atom } from "effect/reactivity";
+import { applyModelEffortDefaults } from "@t3tools/shared/model";
 
 import {
   createAtomCommandScheduler,
@@ -613,9 +614,27 @@ export function resolveServerConfigValue(
     (initialConfig === null ||
       projection.config.environment.serverVersion === initialConfig.environment.serverVersion)
   ) {
-    return projection.config;
+    return withModelEffortDefaults(projection.config);
   }
-  return initialConfig ?? projection?.config ?? null;
+  const config = initialConfig ?? projection?.config ?? null;
+  return config === null ? null : withModelEffortDefaults(config);
+}
+
+/**
+ * Providers whose models start at the user's configured reasoning effort
+ * (Settings → Providers), so every picker and new draft reads one default.
+ */
+function withModelEffortDefaults(config: ServerConfig): ServerConfig {
+  const defaults = config.settings.modelEffortDefaults;
+  if (!defaults || Object.keys(defaults).length === 0) return config;
+  let changed = false;
+  const providers = config.providers.map((provider) => {
+    const models = applyModelEffortDefaults(provider.models, defaults[provider.instanceId]);
+    if (models === provider.models) return provider;
+    changed = true;
+    return { ...provider, models };
+  });
+  return changed ? { ...config, providers } : config;
 }
 
 export function createServerEnvironmentAtoms<R, E>(

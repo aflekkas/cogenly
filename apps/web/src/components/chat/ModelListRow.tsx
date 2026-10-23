@@ -120,7 +120,7 @@ export const ModelListRow = memo(function ModelListRow(props: {
           // Shows on hover or highlight and stays while starred; opacity only.
           <span
             className={cn(
-              "-mr-1 flex transition-opacity duration-(--motion-duration-fast) ease-standard motion-reduce:transition-none",
+              "group/favorite -mr-1 flex transition-opacity duration-(--motion-duration-fast) ease-standard motion-reduce:transition-none",
               props.isFavorite
                 ? "opacity-100"
                 : "opacity-0 group-hover:opacity-100 group-data-highlighted:opacity-100 focus-within:opacity-100",
@@ -151,9 +151,10 @@ export const ModelListRow = memo(function ModelListRow(props: {
                     <StarIcon
                       className={cn(
                         "size-3.5 transition-[color,fill,scale] duration-(--motion-duration-fast) ease-standard motion-reduce:transition-none sm:size-3",
+                        // Starred models read amber; an empty star warms on hover.
                         props.isFavorite
-                          ? "scale-110 fill-current text-foreground/70"
-                          : "scale-100",
+                          ? "scale-110 fill-current text-warning"
+                          : "scale-100 group-hover/favorite:text-warning",
                       )}
                       aria-hidden
                     />

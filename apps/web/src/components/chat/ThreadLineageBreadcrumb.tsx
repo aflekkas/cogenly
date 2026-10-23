@@ -120,7 +120,10 @@ function ThreadHeaderTitleContent(props: {
         >
           {ancestor === leading ? <ChevronLeftIcon aria-hidden /> : null}
           {isParent ? (
-            <span className="shrink-0 opacity-70 max-sm:hidden">{kindLabel} ·</span>
+            // Gives way first when the trail runs short, before the title truncates.
+            <span className="min-w-0 shrink-[8] truncate opacity-70 max-sm:hidden">
+              {kindLabel} ·
+            </span>
           ) : null}
           <span className="min-w-0 truncate">{title}</span>
         </TooltipTrigger>
@@ -158,9 +161,7 @@ function ThreadHeaderTitleContent(props: {
       <h2 className="sr-only">{props.title}</h2>
       {segments.root ? (
         <>
-          <span className="flex min-w-0 max-w-[30%] shrink-[4]">
-            {segment(segments.root, false)}
-          </span>
+          <span className="flex min-w-16 shrink-[4]">{segment(segments.root, false)}</span>
           {separator}
         </>
       ) : null}
@@ -193,8 +194,11 @@ function ThreadHeaderTitleContent(props: {
           {separator}
         </>
       ) : null}
-      {/* The parent yields first, so the open thread keeps the most room. */}
-      <span className="flex min-w-0 max-w-[45%] shrink-[3]">{segment(segments.parent, true)}</span>
+      {/* Every segment shows in full while the trail fits. Short of room they
+          truncate together, weighted by width (the parent faster), and never
+          below their minimums. No percentage caps: the trail is sized by its
+          content, so a percentage would resolve against itself. */}
+      <span className="flex min-w-24 shrink-[2]">{segment(segments.parent, true)}</span>
       {separator}
       <span
         aria-current="page"

@@ -130,6 +130,8 @@ const EDITABLE_AT_POINT_SCRIPT = `(x, y) => {
 const UNATTACHED_FILL_VIEWPORT = { width: 1280, height: 800 } as const;
 const NAVIGATION_TIMEOUT_MS = 15_000;
 const VIEWER_NAVIGATION_OPTIONS = { waitUntil: "commit", timeout: NAVIGATION_TIMEOUT_MS } as const;
+/** Toolbar commands a viewer may send without holding control; they take it first. */
+const VIEWER_PAGE_COMMANDS: ReadonlySet<string> = new Set(["navigate", "history", "reload"]);
 const ACTION_TIMELINE_LIMIT = 50;
 
 export class ServerBrowserTabNotFoundError extends Schema.TaggedError<ServerBrowserTabNotFoundError>()(
@@ -169,6 +171,8 @@ export type ServerBrowserViewerOutput =
       readonly _tag: "control";
       readonly canOperate: boolean;
       readonly controller: "agent" | "you" | "another-viewer" | "unclaimed";
+      /** An agent opened or has used the tab, so the viewer in control can hand it back. */
+      readonly agentInvolved: boolean;
       readonly generation: number;
       readonly capabilities: { readonly pick: boolean };
       readonly dialog: {
@@ -202,6 +206,8 @@ export type ServerBrowserViewerOutput =
       readonly x: number;
       readonly y: number;
       readonly sequence: number;
+      /** The element acted on, so the viewer can outline it; null for point actions. */
+      readonly box: ServerBrowserPage.PointerTargetBox | null;
     }
   | {
       readonly _tag: "fileChooser";
@@ -602,6 +608,7 @@ const make = Effect.gen(function* () {
               : tab.control.agentDrives
                 ? "agent"
                 : "unclaimed",
+        agentInvolved: tab.control.agentInvolved,
         generation: tab.control.generation,
         capabilities: ServerBrowserPick.PICK_CAPABILITIES,
         dialog: dialogStatus(tab),
@@ -1214,7 +1221,7 @@ const make = Effect.gen(function* () {
         "PreviewAutomationExecutionError",
         `Upload paths must be absolute: ${relative}`,
       );
-    if (await ServerBrowserPage.setInputFiles(tab.page, input)) return undefined;
+    if (await ServerBrowserPage.setInputFiles(tab.page, input, pointerFor(tab))) return undefined;
     const open = tab.fileChooser;
     if (!open)
       throw new ServerBrowserPage.ServerBrowserOperationError(
@@ -1810,19 +1817,19 @@ const make = Effect.gen(function* () {
    */
   const pointerFor =
     (tab: ServerTab): ServerBrowserPage.PointerReporter =>
-    async ({ x, y }, phase) => {
+    async ({ x, y, box }, phase) => {
       const encoder = tab.recording?.encoder;
       // A desktop-rendered tab is always on screen in the desktop app.
       if (tab.viewers.size === 0 && !encoder && !tab.desktop) return;
       const show = (next: "move" | "click") => {
         const sequence = ++pointerSequence;
         for (const viewer of tab.viewers)
-          viewer.push({ _tag: "pointer", phase: next, x, y, sequence });
+          viewer.push({ _tag: "pointer", phase: next, x, y, sequence, box });
         if (tab.desktop)
           runFork(
             desktopChannel.pointer(
               { threadId: tab.threadId, tabId: tab.tabId },
-              { phase: next, x, y },
+              { phase: next, x, y, ...(box ? { box } : {}) },
             ),
           );
         void encoder
@@ -2210,11 +2217,15 @@ const make = Effect.gen(function* () {
         );
       case "press":
         return recordAction(tab, "press", () =>
-          ServerBrowserPage.press(tab.page, input as PreviewAutomationPressInput),
+          ServerBrowserPage.press(tab.page, input as PreviewAutomationPressInput, pointerFor(tab)),
         );
       case "scroll":
         return recordAction(tab, "scroll", () =>
-          ServerBrowserPage.scroll(tab.page, input as PreviewAutomationScrollInput),
+          ServerBrowserPage.scroll(
+            tab.page,
+            input as PreviewAutomationScrollInput,
+            pointerFor(tab),
+          ),
         );
       case "evaluate":
         return ServerBrowserPage.evaluate(
@@ -2709,6 +2720,13 @@ const make = Effect.gen(function* () {
                 broadcastControl(tab);
                 await taking;
                 pushFileChooser(tab);
+              } else if (message.type === "handBack") {
+                // Control moves before the drain, so every viewer sees the agent driving at once.
+                const handing = tab.control.handBack(viewer.id, () =>
+                  releaseViewerInput(viewer, session),
+                );
+                broadcastControl(tab);
+                await handing;
               } else if (
                 message.type === "dialog" &&
                 tab.control.controller === viewer.id &&
@@ -2720,6 +2738,19 @@ const make = Effect.gen(function* () {
                     ? { promptText: message.promptText }
                     : {}),
                 });
+              } else if (
+                typeof message.type === "string" &&
+                VIEWER_PAGE_COMMANDS.has(message.type) &&
+                tab.control.controller !== viewer.id
+              ) {
+                // The toolbar's back, forward, reload, and address bar act like
+                // the desktop's own tabs: pressing one takes the page from the agent.
+                const running = tab.control.takeAndRun(viewer.id, () =>
+                  dispatchViewerInput(tab, session, viewer, message),
+                );
+                broadcastControl(tab);
+                await running;
+                pushFileChooser(tab);
               } else {
                 await tab.control.human(viewer.id, () =>
                   dispatchViewerInput(tab, session, viewer, message),

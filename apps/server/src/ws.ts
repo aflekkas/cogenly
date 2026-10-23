@@ -131,6 +131,7 @@ import * as ServerConfig from "./config.ts";
 import * as Keybindings from "./keybindings.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
 import * as ThreadManagementService from "./orchestration-v2/ThreadManagementService.ts";
+import * as UsageLimitHandoff from "./orchestration-v2/UsageLimitHandoff.ts";
 import * as CommandOutputHub from "./orchestration-v2/CommandOutputHub.ts";
 import * as McpAppRequests from "./mcpApps/McpAppRequests.ts";
 import * as ProviderSessionManager from "./orchestration-v2/ProviderSessionManager.ts";
@@ -1049,6 +1050,7 @@ const makeWsRpcHandlers = (
     const projectService = yield* ProjectService.ProjectService;
     const managedFolders = yield* ManagedProjectFolders.ManagedProjectFolders;
     const threadSearch = yield* ThreadSearch.ThreadSearch;
+    const usageLimitHandoff = yield* UsageLimitHandoff.UsageLimitHandoffService;
 
     const providerSessionsV2 = yield* ProviderSessionManager.ProviderSessionManagerV2;
     const mcpAppRequests = yield* McpAppRequests.McpAppRequests;
@@ -1413,6 +1415,10 @@ const makeWsRpcHandlers = (
           ),
         ),
       [ORCHESTRATION_V2_WS_METHODS.stopWorkflow]: (input) => threadManagement.stopWorkflow(input),
+      [ORCHESTRATION_V2_WS_METHODS.recommendUsageLimitHandoff]: (input) =>
+        usageLimitHandoff.recommend(input.threadId),
+      [ORCHESTRATION_V2_WS_METHODS.acceptUsageLimitHandoff]: (input) =>
+        usageLimitHandoff.accept({ ...input, createdBy: "user", creationSource: "web" }),
       [ORCHESTRATION_V2_WS_METHODS.getWorkflowScript]: (input) =>
         readWorkflowScript({ scriptPath: input.scriptPath }),
       [ORCHESTRATION_V2_WS_METHODS.getTurnItem]: (input) =>
@@ -2741,6 +2747,7 @@ export const WS_RPC_SERVER_OPTIONS = {
 // Keep the transport's public dependency type concrete. Expanding the full RPC
 // handler conditional here makes downstream server layers infer `any`.
 type WsRequestServices =
+  | UsageLimitHandoff.UsageLimitHandoffService
   | Agents.AgentService
   | AgentSessionImporter.AgentSessionImporter
   | T3Import.T3ImportService

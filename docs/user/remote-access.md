@@ -235,10 +235,15 @@ is the same browser [HTML renders](html-renders.md) use, so a host downloads it
 only once. Some Linux hosts need [setup](#browser-host-setup) before it can
 start.
 
-Agent tabs have separate storage and share a Chromium process. Take control before
-typing into an agent's tab; taking control stops the agent's current action. The
-agent takes control back the next time it acts, so there is nothing to hand back.
-Read-only connections can watch without changing the page.
+Agent tabs have separate storage and share a Chromium process. While an agent
+drives a tab, the page says so; choose **Take control** to use it, which stops
+the agent's current action. Back, forward, reload, and the address bar take
+control too. When you're done, click **Agent** in the toolbar to hand the tab
+back. The agent also takes control back the next time it acts. Read-only
+connections can watch without changing the page.
+
+When you use more than one environment, the toolbar names the machine whose
+browser runs the tab.
 
 While you have control, the tab works with your device: text the page copies or
 cuts goes to your clipboard, a file picker on the page opens your device's

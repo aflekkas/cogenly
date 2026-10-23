@@ -411,6 +411,17 @@ function translateLegacyProjectOverridePatch(
   } as ServerSettingsPatch;
 }
 
+/** One model's default effort set or cleared; empty instances drop out of the map. */
+function setModelEffortDefaultEntry(
+  current: ServerSettings["modelEffortDefaults"],
+  change: NonNullable<ServerSettingsPatch["setModelEffortDefault"]>,
+): ServerSettings["modelEffortDefaults"] {
+  const { [change.model]: _previous, ...rest } = current[change.provider] ?? {};
+  const models = change.option === null ? rest : { ...rest, [change.model]: change.option };
+  const { [change.provider]: _instance, ...others } = current;
+  return Object.keys(models).length === 0 ? others : { ...others, [change.provider]: models };
+}
+
 export function applyServerSettingsPatch(
   current: ServerSettings,
   rawPatch: ServerSettingsPatch,
@@ -422,6 +433,7 @@ export function applyServerSettingsPatch(
     setModelFavorites,
     setModelsHidden,
     setProviderModelOrder,
+    setModelEffortDefault,
     providerModelPreferences,
     automaticGitFetchInterval,
     providerHealthRefreshInterval,
@@ -527,6 +539,14 @@ export function applyServerSettingsPatch(
     ...next,
     favorites,
     providerModelPreferences: nextModelPreferences,
+    ...(setModelEffortDefault === undefined
+      ? {}
+      : {
+          modelEffortDefaults: setModelEffortDefaultEntry(
+            current.modelEffortDefaults,
+            setModelEffortDefault,
+          ),
+        }),
     ...(worktreeCleanupPatch === undefined
       ? {}
       : {

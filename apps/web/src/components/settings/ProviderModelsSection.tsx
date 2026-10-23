@@ -5,9 +5,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ProviderDriverKind,
   type ProviderInstanceId,
+  type ProviderOptionSelection,
   type ServerProviderModel,
 } from "@t3tools/contracts";
-import { type CustomModelDefinition, normalizeCustomModelSlug } from "@t3tools/shared/model";
+import {
+  type CustomModelDefinition,
+  findReasoningEffortDescriptor,
+  normalizeCustomModelSlug,
+} from "@t3tools/shared/model";
 
 import { cn } from "../../lib/utils";
 import { sortModelsForProviderInstance } from "../../modelOrdering";
@@ -15,6 +20,7 @@ import { MAX_CUSTOM_MODEL_LENGTH } from "../../modelSelection";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { SearchInput } from "../ui/search-input";
+import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { CustomModelEditor } from "./CustomModelEditor";
@@ -140,6 +146,70 @@ interface ProviderModelsSectionProps {
     affectedModels?: ReadonlyArray<string>,
   ) => void;
   readonly onModelOrderChange: (next: ReadonlyArray<string>) => void;
+  /** Per-model default reasoning effort chosen by the user, keyed by slug. */
+  readonly effortDefaults?: Readonly<Record<string, ProviderOptionSelection>>;
+  /** Sets (or with `null`, resets to the model's own default) one model's starting effort. */
+  readonly onEffortDefaultChange?: (slug: string, option: ProviderOptionSelection | null) => void;
+}
+
+const MODEL_DEFAULT_EFFORT = "__model-default";
+
+/**
+ * The effort a model starts at in new chats and Work, chosen per model. Only
+ * models whose catalog offers a reasoning effort get one.
+ */
+function ModelEffortDefaultSelect(props: {
+  readonly model: ServerProviderModel;
+  readonly configured: ProviderOptionSelection | undefined;
+  readonly disabled: boolean;
+  readonly onChange: (option: ProviderOptionSelection | null) => void;
+}) {
+  const descriptor = findReasoningEffortDescriptor(props.model.capabilities);
+  if (!descriptor) return null;
+  const configured =
+    props.configured?.id === descriptor.id &&
+    typeof props.configured.value === "string" &&
+    descriptor.options.some((option) => option.id === props.configured?.value)
+      ? props.configured.value
+      : null;
+  const value = configured ?? MODEL_DEFAULT_EFFORT;
+  const label =
+    configured === null
+      ? "Default effort"
+      : (descriptor.options.find((option) => option.id === configured)?.label ?? configured);
+  return (
+    <Select
+      disabled={props.disabled}
+      value={value}
+      onValueChange={(next) => {
+        if (next === value) return;
+        props.onChange(
+          next === MODEL_DEFAULT_EFFORT || next === null
+            ? null
+            : { id: descriptor.id, value: String(next) },
+        );
+      }}
+    >
+      <SelectTrigger
+        size="xs"
+        variant="ghost"
+        className="w-auto"
+        aria-label={`Default reasoning effort for ${props.model.name}`}
+      >
+        <SelectValue>{label}</SelectValue>
+      </SelectTrigger>
+      <SelectPopup align="end" alignItemWithTrigger={false}>
+        <SelectItem hideIndicator value={MODEL_DEFAULT_EFFORT}>
+          Model default
+        </SelectItem>
+        {descriptor.options.map((option) => (
+          <SelectItem hideIndicator key={option.id} value={option.id}>
+            {option.label}
+          </SelectItem>
+        ))}
+      </SelectPopup>
+    </Select>
+  );
 }
 
 /**
@@ -165,6 +235,8 @@ export function ProviderModelsSection({
   onChange,
   onHiddenModelsChange,
   onModelOrderChange,
+  effortDefaults,
+  onEffortDefaultChange,
 }: ProviderModelsSectionProps) {
   const [input, setInput] = useState("");
   const [isAdding, setIsAdding] = useState(false);
@@ -442,9 +514,17 @@ export function ProviderModelsSection({
           Always a grid item so the columns line up across rows; the text
           itself drops out on phone widths where it would starve the name.
         */}
-        <span className="text-2xs text-muted-foreground/70">
+        <span className="flex items-center gap-1.5 text-2xs text-muted-foreground/70">
           {capLabels.length > 0 ? (
             <span className="hidden sm:inline">{capLabels.join(" · ")}</span>
+          ) : null}
+          {onEffortDefaultChange ? (
+            <ModelEffortDefaultSelect
+              model={model}
+              configured={effortDefaults?.[model.slug]}
+              disabled={!canWritePreferences}
+              onChange={(option) => onEffortDefaultChange(model.slug, option)}
+            />
           ) : null}
         </span>
         {rowActions(model, { isHidden, canMoveUp, canMoveDown })}
@@ -510,7 +590,7 @@ export function ProviderModelsSection({
       </div>
       <div
         ref={listRef}
-        className="mt-2 -mx-2 max-h-64 overflow-y-auto lg:max-h-none lg:min-h-0 lg:flex-1"
+        className="scroll-fade-y mt-2 -mx-2 max-h-64 overflow-y-auto lg:max-h-none lg:min-h-0 lg:flex-1"
       >
         {visibleModels.length === 0 ? (
           <p className="px-2 py-2 text-xs text-muted-foreground">

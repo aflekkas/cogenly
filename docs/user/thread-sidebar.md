@@ -327,19 +327,24 @@ the project there or in the composer's project control, and the task moves to th
 project's most recently used repository, or to the project's folder when it has none.
 The repository menu lists only the project's own repositories (with **No project**,
 only repositories in no project); **No repository (project folder)** runs the task in
-the project's own folder instead.
+the project's own folder instead. Under **On GitHub** it also lists the project's GitHub
+repositories that aren't in the project yet: pick one to clone it in. A clone that fails or
+is cancelled adds nothing, and you can retry it from the same row. **Manage repositories…**
+opens the project's page, where you can remove a repository from the project.
 
-Manage projects on the **Projects** page: the folder button at the bottom of the
-navigation rail, **Open projects** in the command palette, or `mod+alt+4`. It shows every
-project as a card; open one for its page with its instructions, repositories, GitHub
-sources, files, recent chats and Work, and agents. Use **Add repository** to bring one in
+Manage projects in **Settings → Projects** (or **Open projects** in the command palette,
+or `mod+alt+4`). It shows every project as a card; open one for its page with its
+repositories, recent chats and Work, agents, files and GitHub org. The GitHub org (the
+button beside the project's name) is where agents and the repository picker look for its
+repositories; **Sources** lists any other repositories it reaches. Use **Add repository** to bring one in
 (a repository already in another project asks before it moves), the remove button on a
 repository row to take it out, and the **⋯** menu to rename, recolor, describe or delete
 the project. Deleting a project keeps its chats, Work and repositories; they are just no
 longer in a folder. Start one with **New project** on the page or in the command palette.
 
 You can also ask an agent in any chat or Work to set a project up or change it: add a
-repository, link GitHub, set instructions, rename or recolor it, or archive it.
+repository, link GitHub, set the instructions its agents follow, rename or recolor it, or
+archive it.
 
 From a terminal on the computer running Cogenly, `cogenly project label` does the
 same while Cogenly runs: `list`, `create <name> [--color <color>]`,
@@ -352,8 +357,8 @@ When a project is done, right-click its card (or use the project's **⋯** menu)
 choose **Archive**. An archived project leaves every project picker and move menu, but
 its chats, Work and agents stay as they are, and threads already in it still show its
 name. Neither you nor an agent can add threads or repositories to it until you
-unarchive it, though you can still move threads out. **Archived** at the top of the
-Projects page lists them; choose **Unarchive** to bring one back.
+unarchive it, though you can still move threads out. **Archived** at the top of
+Settings → Projects lists them; choose **Unarchive** to bring one back.
 
 To file a thread, right-click it and choose **Move to folder**, or run **Move to folder…** from the command palette. Choose
 **Remove from folder** to take it out; Work then falls back to its repository's

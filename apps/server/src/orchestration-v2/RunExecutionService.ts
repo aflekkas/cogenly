@@ -1,5 +1,6 @@
 import { makeAssistantStreamingFilter } from "./assistantStreaming.ts";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+import { fillModelSelectionEffortDefault } from "@t3tools/shared/model";
 import {
   isOrchestrationV2WorkActive,
   CommandId,
@@ -1444,6 +1445,19 @@ export const layer: Layer.Layer<
             key: `mcp_app_${entry.itemId.replace(/[^\w.-]/g, "_")}`,
             text: entry.text,
           }));
+          // Work started without an effort (agents, MCP launches) runs at the
+          // user's default for this model rather than the provider's.
+          const modelSelection = yield* serverSettings.getSettings.pipe(
+            Effect.map((settings) =>
+              fillModelSelectionEffortDefault(
+                input.modelSelection,
+                settings.modelEffortDefaults[input.modelSelection.instanceId]?.[
+                  input.modelSelection.model
+                ],
+              ),
+            ),
+            Effect.catch(() => Effect.succeed(input.modelSelection)),
+          );
           const turnInput = {
             appThread: input.appThread,
             threadId: input.run.threadId,
@@ -1462,7 +1476,7 @@ export const layer: Layer.Layer<
             rootNodeId: input.rootNode.id,
             providerThread: input.providerThread,
             message: input.message,
-            modelSelection: input.modelSelection,
+            modelSelection,
             runtimePolicy: input.runtimePolicy,
             ...(appContext.length === 0 ? {} : { appContext }),
           };

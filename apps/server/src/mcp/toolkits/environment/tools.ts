@@ -24,6 +24,7 @@ const PreferenceFields = {
   enableAgentTerminals: ServerSettings.fields.enableAgentTerminals,
   enableProviderUpdateChecks: ServerSettings.fields.enableProviderUpdateChecks,
   projectsRoot: ServerSettings.fields.projectsRoot,
+  modelEffortDefaults: ServerSettings.fields.modelEffortDefaults,
   backgroundActivity: Schema.Struct({ profile: BackgroundActivityProfileSelection }),
   sourceControlWritingStyle: Schema.Struct({
     mode: Schema.String,
@@ -60,9 +61,10 @@ const EnvironmentReadTool = Tool.make("environment_read", {
 const EnvironmentPreferencesTool = Tool.make("environment_preferences_update", {
   ...shared,
   description:
-    "Update selected environment-wide preferences through normal settings persistence and notifications. Requires a live full-access/default calling thread. Omitted fields are preserved; empty customInstructions clears them.",
+    "Update selected environment-wide preferences through normal settings persistence and notifications. Requires a live full-access/default calling thread. Omitted fields are preserved; empty customInstructions clears them. setModelEffortDefault sets the reasoning effort a model starts at ({ provider: instance id, model: slug, option: { id: the model's effort option id from orchestrator_capabilities, e.g. reasoningEffort or effort, value } }); option null restores the model's own default.",
   parameters: Schema.Struct({
     defaultThreadEnvMode: ServerSettingsPatch.fields.defaultThreadEnvMode,
+    setModelEffortDefault: ServerSettingsPatch.fields.setModelEffortDefault,
     newWorktreesStartFromOrigin: ServerSettingsPatch.fields.newWorktreesStartFromOrigin,
     enableAgentTerminals: ServerSettingsPatch.fields.enableAgentTerminals,
     enableProviderUpdateChecks: ServerSettingsPatch.fields.enableProviderUpdateChecks,

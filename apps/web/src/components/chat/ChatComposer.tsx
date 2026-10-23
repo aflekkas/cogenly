@@ -126,7 +126,7 @@ import { useComposerMultilinePrompt } from "./useComposerMultilinePrompt";
 import {
   ComposerTasksBadge,
   ComposerTasksContent,
-  ComposerTasksDrawer,
+  ComposerTasksPanel,
   type ComposerTaskStep,
   type ComposerTasksProgress,
 } from "./ComposerTasksBadge";
@@ -145,6 +145,7 @@ import {
   type ComposerBannerStackContent,
   type ComposerBannerStackItem,
 } from "./ComposerBannerStack";
+import { ComposerStackColumn } from "./ComposerStackColumn";
 import { formatAttachmentSize } from "@t3tools/client-runtime/state/attachments";
 import {
   acceptComposerAttachmentFiles,
@@ -372,6 +373,8 @@ import { useDelayedStatus } from "../../hooks/useDelayedStatus";
 import { useElementState } from "../../hooks/useElementState";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { useStableCallback } from "../../hooks/useStableCallback";
+import { useUpdateEnvironmentModelPreferences } from "../../hooks/useSettings";
+import type { SetModelEffortDefault } from "./TraitsPicker";
 import { ComposerDictationControl, type ComposerDictationHandle } from "./ComposerDictationControl";
 import { LAYOUT_MOTION_DURATION, readPanelAnimationsActive } from "../../panelAnimations";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -1470,7 +1473,7 @@ export interface ChatComposerProps {
   isRevertingCheckpoint?: boolean;
   sendDisabledReason: string | null;
   isPreparingWorktree: boolean;
-  bannerItems: readonly ComposerBannerStackItem[];
+  bannerItems: readonly (ComposerBannerStackItem | ComposerBannerStackContent)[];
   /** Tokens a stale session would re-read; null when the thread is not offered compaction. */
   resumeCompactionTokens: number | null;
   /** The Compact chip is off, so the next send keeps full history. */
@@ -2892,6 +2895,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     scheduleComposerFocus();
   };
   const setPromptFromTraitsStable = useStableCallback(setPromptFromTraits);
+  const updateModelPreferences = useUpdateEnvironmentModelPreferences(environmentId);
+  const setEffortDefaultStable: SetModelEffortDefault = useStableCallback(
+    (setModelEffortDefault: Parameters<SetModelEffortDefault>[0]) => {
+      void updateModelPreferences({ setModelEffortDefault });
+    },
+  );
 
   const providerTraitsMenuContent = renderProviderTraitsMenuContent({
     provider: selectedProvider,
@@ -2905,6 +2914,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     prompt,
     onPromptChange: setPromptFromTraitsStable,
     planModeEnabled: settings.planModeEnabled,
+    onSetEffortDefault: setEffortDefaultStable,
   });
   const providerTraitsPickerInput = {
     provider: selectedProvider,
@@ -2919,6 +2929,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     onPromptChange: setPromptFromTraitsStable,
     planModeEnabled: settings.planModeEnabled,
     isComposerOwned: true,
+    onSetEffortDefault: setEffortDefaultStable,
   } satisfies Parameters<typeof renderProviderTraitsPicker>[0];
   const providerTraitsPicker = renderProviderTraitsPicker(providerTraitsPickerInput);
   const [inlineRestingControlsHost, setInlineRestingControlsHost] =
@@ -4432,9 +4443,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const toggleTasksDrawerStable = useStableCallback(toggleTasksDrawer);
   const hasBannerItems = props.bannerItems.length > 0;
   const hasBlockingComposerTopDrawer = pendingUserInputs.length > 0;
+  // The badge draws nothing without steps, which would leave an empty strip.
   const showInlineTasksBadge =
     activeTasksProgress !== null &&
     activeTaskSteps !== null &&
+    activeTasksProgress.totalSteps > 0 &&
     !isTasksDrawerOpen &&
     !hasBlockingComposerTopDrawer &&
     (hasBannerItems || showComposerTopDrawer || isComposerCollapsedMobile);
@@ -4554,12 +4567,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       ? [
           {
             id: "traits",
-            content: (
-              <>
-                <ComposerControlSeparator size={composerControlsCollapsed ? "xs" : "sm"} />
-                {restingProviderTraitsPicker}
-              </>
-            ),
+            // Model and effort are one group (how the agent runs), so no divider between them.
+            content: restingProviderTraitsPicker,
           },
         ]
       : []),
@@ -4583,14 +4592,18 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       ? [
           {
             id: "project",
+            // The divider separates where the agent runs from how it runs.
             content: (
-              <ComposerProjectPicker
-                environmentId={routeThreadRef.environmentId}
-                threadId={activeThreadId}
-                draftId={routeKind === "draft" ? draftId : null}
-                size={composerControlsCollapsed ? "xs" : "sm"}
-                disabled={isSendBusy}
-              />
+              <>
+                <ComposerControlSeparator size={composerControlsCollapsed ? "xs" : "sm"} />
+                <ComposerProjectPicker
+                  environmentId={routeThreadRef.environmentId}
+                  threadId={activeThreadId}
+                  draftId={routeKind === "draft" ? draftId : null}
+                  size={composerControlsCollapsed ? "xs" : "sm"}
+                  disabled={isSendBusy}
+                />
+              </>
             ),
           },
         ]
@@ -4780,7 +4793,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     isTasksDrawerOpen &&
     !hasBlockingComposerTopDrawer &&
     activeTasksProgress !== null &&
-    activeTaskSteps !== null;
+    activeTaskSteps !== null &&
+    activeTasksProgress.totalSteps > 0;
   const activityStackContent = hasBannerItems ? (
     shownSyncPhase ? (
       <ComposerActivityRow phase={shownSyncPhase} />
@@ -5754,7 +5768,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           )
         : null}
       <ComposerBanner.Dock>
-        <ComposerBanner.Column>
+        <ComposerStackColumn>
           <ComposerBannerStack
             key={activeThreadId}
             className="relative z-0"
@@ -5772,6 +5786,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           <AttachmentPresence
             show={showComposerTopDrawer && (!isTasksDrawerOpen || hasBlockingComposerTopDrawer)}
             swapKey={pendingUserInputs.length > 0 ? "pending-user-input" : "plan-follow-up"}
+            // A question waiting on the user never shrinks or folds to fit the stack.
+            data-composer-stack-blocking={hasBlockingComposerTopDrawer || undefined}
           >
             <ComposerBanner.Root
               data-chat-composer-top-drawer="true"
@@ -5879,27 +5895,18 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               ) : null}
             </ComposerBanner.Root>
           </AttachmentPresence>
-          {/* The tab and the open task list share one surface that eases between them. */}
-          <AttachmentPresence
-            show={showTasksDrawer || showTasksTab}
-            swapKey={showTasksDrawer ? "tasks-drawer" : "tasks-tab"}
-          >
-            {showTasksDrawer ? (
-              <ComposerTasksDrawer
-                onCollapse={toggleTasksDrawerStable}
-                progress={activeTasksProgress}
-                steps={activeTaskSteps}
-              />
-            ) : showTasksTab ? (
-              <ComposerTasksBadge
-                expanded={false}
+          {/* The tab and the open task list share one surface; the list grows under it. */}
+          <AttachmentPresence show={showTasksDrawer || showTasksTab} swapKey="tasks">
+            {(showTasksDrawer || showTasksTab) && activeTasksProgress && activeTaskSteps ? (
+              <ComposerTasksPanel
+                expanded={showTasksDrawer}
                 onToggle={toggleTasksDrawerStable}
                 progress={activeTasksProgress}
                 steps={activeTaskSteps}
               />
             ) : null}
           </AttachmentPresence>
-        </ComposerBanner.Column>
+        </ComposerStackColumn>
       </ComposerBanner.Dock>
       <div className="relative">
         <ComposerSurface.Main

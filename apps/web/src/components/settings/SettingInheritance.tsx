@@ -403,7 +403,10 @@ export function SettingInheritance({
                   const projects = (
                     <ul
                       role="list"
-                      className={cn("mt-0.5 text-sm", foldOverrides && "max-h-48 overflow-y-auto")}
+                      className={cn(
+                        "mt-0.5 text-sm",
+                        foldOverrides && "scroll-fade-y max-h-48 overflow-y-auto",
+                      )}
                     >
                       {overriding.map((project) => (
                         <li

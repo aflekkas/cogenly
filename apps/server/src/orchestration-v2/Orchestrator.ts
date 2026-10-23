@@ -4817,6 +4817,20 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         ) {
           dispatchMode = { type: "start_immediately" };
         }
+        // A native /compact or /logout turn takes no steering on any provider.
+        // The message waits in the queue instead of failing and starts when
+        // that turn ends.
+        const targetMessage =
+          target === undefined
+            ? undefined
+            : projection.messages.find((message) => message.id === target.userMessageId);
+        if (
+          dispatchMode.type === "steer_active" &&
+          targetMessage !== undefined &&
+          isNativeMaintenanceCommand(targetMessage)
+        ) {
+          dispatchMode = { type: "queue_after_active" };
+        }
       }
       // A restart continuation resumes the interrupted turn, so it starts
       // immediately rather than queueing like other wakes.

@@ -739,9 +739,12 @@ export function htmlRenderThemeMessage(theme: HtmlRenderTheme) {
 }
 
 // The frame scrolls a page taller than itself, but a scrollbar inside the
-// reply reads as a box within the thread, so it stays hidden.
+// reply reads as a box within the thread, so it stays hidden. A small gutter
+// keeps rings, shadows and selected outlines on the page's outermost elements
+// inside the frame, which would otherwise clip them at its edges; the server
+// measures with the same gutter, so heights still fit.
 const BASE_CSS =
-  "html{background:var(--background);color:var(--foreground);font-family:var(--font-sans);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%;scrollbar-width:none}" +
+  "html{background:var(--background);color:var(--foreground);font-family:var(--font-sans);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%;scrollbar-width:none;padding:4px}" +
   "html::-webkit-scrollbar{display:none}body{margin:0}code,kbd,pre,samp{font-family:var(--font-mono)}" +
   // Focus outlines paint inside the element, so the frame edge never clips them.
   ":where(:focus-visible){outline:2px solid var(--ring)}:focus-visible{outline-width:2px!important;outline-offset:-2px!important}" +

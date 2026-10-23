@@ -36,6 +36,7 @@ import { isImageAttachment, type ChatMessage } from "../../types";
 import { cn } from "~/lib/utils";
 import { ComposerBanner } from "./ComposerBanner";
 import { NoticePresenceFrame } from "./ComposerBannerStack";
+import { composerStackBodyProps, useComposerStackFold } from "./ComposerStackColumn";
 import { mergeQueuedRowSlots, type QueuedRowSlot } from "./queuedRowPresence";
 import { PANEL_MOTION_EASING } from "~/lib/panelFlip";
 import { Button } from "../ui/button";
@@ -61,6 +62,9 @@ const ANIMATE_ROW_MOUNT = { current: true } as const;
 const SKIP_ROW_MOUNT = { current: false } as const;
 const QUEUED_ROW_REORDER_ANIMATION_ID = "queued-row-reorder";
 const NO_QUEUED_RUNS: ReadonlyArray<never> = [];
+// The user's own pending messages fold last when the composer stack runs out of room.
+const QUEUE_STACK_ID = "queue";
+const QUEUE_STACK_RANK = 3;
 
 /** Each row's top, relative to the list, so scrolling the list does not count as moving. */
 function measureQueuedRowTops(list: HTMLElement) {
@@ -106,6 +110,9 @@ export function QueuedRunsControl({
   const promote = useAtomCommand(threadEnvironment.promoteQueuedRun);
   const cancel = useAtomCommand(threadEnvironment.cancelQueuedRun);
   const [expanded, setExpanded] = useState(true);
+  // The stack may fold the list to its header when it runs out of room.
+  const stackFold = useComposerStackFold(QUEUE_STACK_ID);
+  const listShown = expanded && !stackFold.folded;
   const queueListId = useId();
   const [busyRunId, setBusyRunId] = useState<RunId | null>(null);
   // Live drag-reorder state: the dragged run and the queue index the row
@@ -348,6 +355,7 @@ export function QueuedRunsControl({
       if (!latest || props.editingRunId !== null || busyRunId !== null) return false;
       if (!repeat) {
         setExpanded(true);
+        if (stackFold.folded) stackFold.reveal();
         props.onEditQueuedRun({
           runId: latest.run.id,
           messageId: latest.run.userMessageId,
@@ -391,11 +399,13 @@ export function QueuedRunsControl({
         >
           <ComposerBanner.Row
             render={<button type="button" />}
-            aria-label={expanded ? "Collapse queued messages" : "Expand queued messages"}
-            aria-expanded={expanded}
+            aria-label={listShown ? "Collapse queued messages" : "Expand queued messages"}
+            aria-expanded={listShown}
             aria-controls={queueListId}
             onPointerDown={(event) => event.preventDefault()}
-            onClick={() => setExpanded((value) => !value)}
+            onClick={() =>
+              expanded && stackFold.folded ? stackFold.reveal() : setExpanded((value) => !value)
+            }
           >
             <ComposerBanner.Icon>
               <ListOrderedIcon />
@@ -405,19 +415,20 @@ export function QueuedRunsControl({
             </ComposerBanner.Content>
             <ComposerBanner.Actions>
               <ComposerBanner.Count>{shownCount}</ComposerBanner.Count>
-              <ComposerBanner.ToggleIcon expanded={expanded} />
+              <ComposerBanner.ToggleIcon expanded={listShown} />
             </ComposerBanner.Actions>
           </ComposerBanner.Row>
           {/* Opens and closes on height plus fade; the tray grows upward from the composer. */}
           <div
-            inert={!expanded}
+            {...composerStackBodyProps(QUEUE_STACK_ID, QUEUE_STACK_RANK, expanded)}
+            inert={!listShown}
             className={cn(
               "grid transition-[grid-template-rows,opacity] duration-200 ease-standard motion-reduce:transition-opacity",
-              expanded ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0",
+              listShown ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0",
             )}
           >
             <div className="min-h-0 overflow-hidden">
-              <ComposerBanner.Scroll className="max-h-32">
+              <ComposerBanner.Scroll className="[--composer-banner-scroll-max:--spacing(32)]">
                 <ComposerBanner.Children render={<ol ref={listRef} />} id={queueListId}>
                   {presence.rows.map((slot) => {
                     const item = (slot.leaving ? undefined : itemsByKey.get(slot.key)) ?? slot.item;
@@ -623,7 +634,9 @@ export function QueuedRunsControl({
                                   <TooltipPopup>
                                     {activeRun === null
                                       ? "There is no active run to steer"
-                                      : `Send as a steer instead${item.serverIndex === 0 && props.steerShortcutLabel ? ` (${props.steerShortcutLabel})` : ""}`}
+                                      : !workflow?.canPromoteToSteer
+                                        ? "Starts when the active turn finishes"
+                                        : `Send as a steer instead${item.serverIndex === 0 && props.steerShortcutLabel ? ` (${props.steerShortcutLabel})` : ""}`}
                                   </TooltipPopup>
                                 </Tooltip>
                                 <Tooltip>

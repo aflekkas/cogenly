@@ -17,6 +17,7 @@ export function preferences(settings: ServerSettings) {
     enableAgentTerminals,
     enableProviderUpdateChecks,
     projectsRoot,
+    modelEffortDefaults,
     backgroundActivity,
     sourceControlWritingStyle,
   } = settings;
@@ -27,6 +28,7 @@ export function preferences(settings: ServerSettings) {
     enableAgentTerminals,
     enableProviderUpdateChecks,
     projectsRoot,
+    modelEffortDefaults,
     backgroundActivity: { profile: backgroundActivity.profile },
     sourceControlWritingStyle: {
       ...sourceControlWritingStyle,

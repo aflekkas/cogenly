@@ -23,9 +23,9 @@ interface SessionControlHooks {
 
 /**
  * Reserves control immediately, but drains running work before the new owner
- * can act. Control goes to whoever acts: a viewer takes it explicitly, which
- * interrupts an agent action in flight, and an agent's next action takes it
- * back. Nobody hands control over.
+ * can act. A viewer takes control explicitly, which interrupts an agent action
+ * in flight, and may hand it back to the agent. An agent's next action takes
+ * control back either way.
  */
 export class SessionControl {
   readonly agentId: string | null;
@@ -35,11 +35,14 @@ export class SessionControl {
   private pending: Promise<void> = Promise.resolve();
   private owner: string | null = null;
   private agentDriving = false;
+  /** Sticky: an agent opened the tab or has acted on it, so there is an agent to hand it to. */
+  private agentActed: boolean;
   private epoch = 0;
   private closed = false;
 
   constructor(agentId: string | null, hooks: SessionControlHooks = {}) {
     this.agentId = agentId;
+    this.agentActed = agentId !== null;
     this.onGenerationChange = hooks.onGenerationChange ?? (() => {});
     this.onDisplaced = hooks.onDisplaced ?? (async () => {});
   }
@@ -52,6 +55,11 @@ export class SessionControl {
   /** Whether an agent drives: it opened the tab, or acted since a person last took it. */
   get agentDrives() {
     return this.owner === null && (this.agentId !== null || this.agentDriving);
+  }
+
+  /** Whether an agent opened or has acted on this tab, so a viewer can hand control back to it. */
+  get agentInvolved() {
+    return this.agentActed;
   }
 
   get generation() {
@@ -129,6 +137,7 @@ export class SessionControl {
     if (!this.agentMayAct(agentId))
       throw new BrowserControlInterrupted("This tab belongs to another agent.", "agentMismatch");
     this.agentDriving = true;
+    this.agentActed = true;
     if (this.owner !== null) this.changeOwner(null, true);
   }
 
@@ -165,6 +174,28 @@ export class SessionControl {
       this.changeOwner(viewerId, true);
     }
     return this.human(viewerId, async () => {});
+  }
+
+  /**
+   * A viewer's page command, such as back or a typed URL: takes control first
+   * when someone else has it, as an explicit take would, then runs.
+   */
+  async takeAndRun<A>(viewerId: string, run: () => Promise<A>) {
+    await this.take(viewerId);
+    return this.human(viewerId, run);
+  }
+
+  /**
+   * The viewer in control gives the tab back to the agent that was driving it.
+   * Its held input lets go before anyone else acts. Returns false, changing
+   * nothing, when the viewer is not in control or no agent has used the tab.
+   */
+  async handBack(viewerId: string, afterDrain: () => Promise<void> = async () => {}) {
+    if (this.closed || this.owner !== viewerId || !this.agentActed) return false;
+    this.agentDriving = true;
+    this.changeOwner(null);
+    await this.enqueue(afterDrain);
+    return true;
   }
 
   /** A departing viewer gives up control; its held input lets go before anyone else acts. */

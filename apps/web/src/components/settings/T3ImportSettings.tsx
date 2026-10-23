@@ -708,7 +708,7 @@ function ReportSections({ report }: { report: T3ImportReport }) {
           >
             <div className="pb-2">
               <WorkLogDisclosure label="Show which">
-                <ul className="flex max-h-48 flex-col gap-0.5 overflow-y-auto font-mono text-2xs text-muted-foreground select-text">
+                <ul className="scroll-fade-y flex max-h-48 flex-col gap-0.5 overflow-y-auto font-mono text-2xs text-muted-foreground select-text">
                   {skipped.rows.map((row) => (
                     <li key={row.key} className="truncate">
                       {row.label}

@@ -257,7 +257,7 @@ describe("resolveThreadAgentsWindow", () => {
 
 describe("threadAgentDotTone", () => {
   it("colours in-flight, failed, done and resting agents apart", () => {
-    expect(threadAgentDotTone({ status: "running", statusLabel: "Queued" })).toBe("info");
+    expect(threadAgentDotTone({ status: "running", statusLabel: "Queued" })).toBeNull();
     expect(threadAgentDotTone({ status: "failed", statusLabel: "Failed" })).toBe("destructive");
     expect(threadAgentDotTone({ status: "done", statusLabel: "Done" })).toBe("success");
     expect(threadAgentDotTone({ status: "done", statusLabel: "Idle" })).toBe("muted");

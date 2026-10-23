@@ -40,7 +40,8 @@ import * as SourceControlRepositoryService from "../sourceControl/SourceControlR
  * and the composer can hold a draft for it. Snapshots are memory only. A done
  * clone is dropped after a short grace window; a failed one stays until it is
  * retried or the server restarts, since the empty project is the durable
- * record the user can act on.
+ * record the user can act on. Flows that pass `removeProject` instead drop
+ * the project with a failed clone (see ProjectCloneHooks).
  */
 export class ProjectCloneTracker extends Context.Service<
   ProjectCloneTracker,
@@ -89,10 +90,19 @@ export interface ProjectCloneHooks {
     readonly projectId: ProjectId;
     readonly workspaceRoot: string;
   }) => Effect.Effect<void>;
+  /**
+   * Set by flows whose project exists only to hold the clone (a GitHub
+   * repository picked into a project). A failed or cancelled clone then takes
+   * its project and partial checkout with it, so nothing half-made stays
+   * behind; the snapshot says so (`projectRemoved`) and a retry starts over.
+   */
+  readonly removeProject?: (input: { readonly projectId: ProjectId }) => Effect.Effect<void>;
 }
 
 /** Finished snapshots stay visible this long so a late subscriber sees the outcome. */
 const DONE_RETENTION = "30 seconds";
+/** A failure whose project went with it has nothing left to act on; its error stays this long. */
+const REMOVED_RETENTION = "2 minutes";
 
 function clampText(text: string, maxLength: number): string {
   return text.length <= maxLength ? text : `${text.slice(0, maxLength - 1)}…`;
@@ -104,6 +114,8 @@ interface TrackedClone {
   readonly snapshot: ProjectCloneSnapshot;
   readonly fiber: Fiber.Fiber<unknown, unknown> | null;
   readonly hooks: ProjectCloneHooks;
+  /** Ended without landing, and its project is being (or was) removed with it. */
+  readonly abandoned?: boolean;
   readonly input: {
     /** What git is given; may carry credentials and never leaves the server. */
     readonly cloneUrl: string;
@@ -160,11 +172,14 @@ export const make = Effect.gen(function* () {
       return next;
     }).pipe(Effect.andThen(publish));
 
-  const scheduleRemoval = (projectId: ProjectId) =>
+  const scheduleRemoval = (
+    projectId: ProjectId,
+    retention: typeof DONE_RETENTION | typeof REMOVED_RETENTION = DONE_RETENTION,
+  ) =>
     Effect.gen(function* () {
       yield* clearRetention(projectId);
       const fiber = yield* remove(projectId).pipe(
-        Effect.delay(DONE_RETENTION),
+        Effect.delay(retention),
         Effect.ensuring(
           Effect.sync(() => {
             if (retentionFibers.get(projectId) === fiber) retentionFibers.delete(projectId);
@@ -204,6 +219,8 @@ export const make = Effect.gen(function* () {
       yield* modify(projectId, (tracked) => ({
         ...tracked,
         fiber: null,
+        // From here a retry is refused: `abandon` is taking the project away.
+        abandoned: phase !== "done" && tracked.hooks.removeProject !== undefined,
         snapshot: {
           ...tracked.snapshot,
           phase,
@@ -213,6 +230,25 @@ export const make = Effect.gen(function* () {
         },
       }));
       if (phase === "done") yield* scheduleRemoval(projectId);
+    });
+
+  /**
+   * A clone that did not land, for a flow that set `removeProject`: the
+   * partial checkout and the project go, then the snapshot says so
+   * (`projectRemoved`, which also frees the destination for a fresh clone)
+   * and stays a while so the surface that started it can still read the error.
+   */
+  const abandon = (projectId: ProjectId, tracked: TrackedClone) =>
+    Effect.gen(function* () {
+      const removeProject = tracked.hooks.removeProject;
+      if (removeProject === undefined) return;
+      yield* repositories.discardClone(tracked.input.destinationPath).pipe(Effect.ignore);
+      yield* removeProject({ projectId }).pipe(Effect.ignoreCause({ log: true }));
+      yield* modify(projectId, (entry) => ({
+        ...entry,
+        snapshot: { ...entry.snapshot, projectRemoved: true },
+      }));
+      yield* scheduleRemoval(projectId, REMOVED_RETENTION);
     });
 
   /**
@@ -233,8 +269,12 @@ export const make = Effect.gen(function* () {
           Exit.isSuccess(exit)
             ? finish(projectId, "done", null)
             : Cause.hasInterruptsOnly(exit.cause)
-              ? finish(projectId, "cancelled", null)
-              : finish(projectId, "failed", describeCloneFailure(exit.cause)),
+              ? finish(projectId, "cancelled", null).pipe(
+                  Effect.andThen(abandon(projectId, tracked)),
+                )
+              : finish(projectId, "failed", describeCloneFailure(exit.cause)).pipe(
+                  Effect.andThen(abandon(projectId, tracked)),
+                ),
         ),
         Effect.flatMap(() =>
           tracked.hooks
@@ -280,10 +320,12 @@ export const make = Effect.gen(function* () {
       const claimed = yield* Ref.modify(clones, (current) => {
         // A second start for the same project, or for a destination another
         // clone already owns, must not race two gits into one directory.
+        // A clone whose project went with it no longer holds its destination.
         const conflict = Array.from(current.values()).some(
           (tracked) =>
             tracked.snapshot.projectId === input.projectId ||
-            tracked.input.destinationPath === prepared.destinationPath,
+            (tracked.input.destinationPath === prepared.destinationPath &&
+              tracked.snapshot.projectRemoved !== true),
         );
         if (conflict) return [false, current] as const;
         const next = new Map(current);
@@ -363,6 +405,7 @@ export const make = Effect.gen(function* () {
       const tracked = current.get(projectId);
       if (
         !tracked ||
+        tracked.abandoned === true ||
         (tracked.snapshot.phase !== "failed" && tracked.snapshot.phase !== "cancelled")
       ) {
         return false;
@@ -397,7 +440,9 @@ export const make = Effect.gen(function* () {
       // Git may have finished while the interrupt was landing; the project
       // is going away either way, but a complete checkout is the user's.
       const after = yield* get(projectId);
-      if (after?.phase !== "done") {
+      // An abandoned clone already cleared its destination, which a fresh
+      // clone of the same repository may be using by now.
+      if (after?.phase !== "done" && tracked.abandoned !== true) {
         yield* repositories.discardClone(tracked.input.destinationPath).pipe(Effect.ignore);
       }
       yield* clearRetention(projectId);

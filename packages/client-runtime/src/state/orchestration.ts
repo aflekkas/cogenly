@@ -96,6 +96,17 @@ export function createOrchestrationEnvironmentAtoms<R, E>(
       label: "environment-data:orchestration:stop-workflow",
       tag: ORCHESTRATION_V2_WS_METHODS.stopWorkflow,
     }),
+    // Keyed by the stopped run; mounted only while a thread is stopped on a usage limit.
+    usageLimitHandoff: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:orchestration:usage-limit-handoff",
+      tag: ORCHESTRATION_V2_WS_METHODS.recommendUsageLimitHandoff,
+      staleTimeMs: 0,
+      idleTtlMs: 0,
+    }),
+    acceptUsageLimitHandoff: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:orchestration:accept-usage-limit-handoff",
+      tag: ORCHESTRATION_V2_WS_METHODS.acceptUsageLimitHandoff,
+    }),
     // Keyed by the item revision, so a live row refetches as its output grows.
     turnItem: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:orchestration:turn-item",

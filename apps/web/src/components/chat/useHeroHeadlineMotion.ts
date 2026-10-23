@@ -49,7 +49,12 @@ interface Offset {
   readonly y: number;
 }
 
-/** A Work sentence piece as last laid out: its untransformed viewport box and what it showed. */
+/**
+ * A Work sentence piece as last laid out: its untransformed box, measured from
+ * the heading's left and bottom edges so the heading moving as a whole (the
+ * hero re-centring, a panel glide) never reads as a piece moving, and what it
+ * showed.
+ */
 interface PieceSnapshot {
   readonly left: number;
   readonly top: number;
@@ -203,6 +208,7 @@ export function useHeroHeadlineMotion(
 
     const snapshotPieces = (elements: readonly HTMLElement[]): Pieces => {
       const scale = drawnScale(heading);
+      const frame = heading.getBoundingClientRect();
       const next = new Map<string, PieceSnapshot>();
       for (const element of elements) {
         const name = element.dataset.heroPiece;
@@ -224,8 +230,9 @@ export function useHeroHeadlineMotion(
           });
         }
         next.set(name, {
-          left: box.left - shift.x,
-          top: box.top - shift.y,
+          // From the bottom: the heading sits on the composer and grows upward.
+          left: box.left - shift.x - frame.left,
+          top: box.top - shift.y - frame.bottom,
           width: box.width,
           key: pieceKey(element),
           copy,
@@ -318,6 +325,7 @@ export function useHeroHeadlineMotion(
      */
     const animatePieces = (before: Pieces, elements: readonly HTMLElement[]) => {
       const scale = drawnScale(heading);
+      const frame = heading.getBoundingClientRect();
       const glide = !reduced();
       for (const element of elements) {
         const name = element.dataset.heroPiece;
@@ -327,8 +335,8 @@ export function useHeroHeadlineMotion(
         // piece starts from where it is drawn, not where it was laid out.
         const shift = pieceShift(element, scale);
         const box = element.getBoundingClientRect();
-        const fromLeft = was.left + shift.x;
-        const fromTop = was.top + shift.y;
+        const fromLeft = frame.left + was.left + shift.x;
+        const fromTop = frame.bottom + was.top + shift.y;
         const dx = (fromLeft - (box.left - shift.x)) / scale;
         const dy = (fromTop - (box.top - shift.y)) / scale;
         const travels = glide && (Math.abs(dx) >= 0.5 || Math.abs(dy) >= 0.5);
@@ -399,10 +407,11 @@ export function useHeroHeadlineMotion(
         return;
       }
       // One line holds the greeting and its tail at the heading's own size.
-      const line = `${greeting.textContent ?? ""}${
-        suffix.querySelector(SUFFIX_TEXT_SELECTOR)?.textContent ?? ""
-      }`;
+      const suffixText = suffix.querySelector(SUFFIX_TEXT_SELECTOR);
+      const line = `${greeting.textContent ?? ""}${suffixText?.textContent ?? ""}`;
       if (measure.textContent !== line) measure.textContent = line;
+      // The tail's folder icon is not text: its width and gap (HERO_INLINE_ICON_STYLE).
+      measure.style.paddingInlineEnd = suffixText?.querySelector("svg") ? "1.06em" : "";
       const hasTail = (suffix.querySelector(SUFFIX_TEXT_SELECTOR)?.textContent ?? "") !== "";
       const stacked = hasTail && measure.offsetWidth > heading.clientWidth;
       const wasStacked = heading.hasAttribute(STACKED_ATTRIBUTE);

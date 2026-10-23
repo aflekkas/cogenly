@@ -30,7 +30,7 @@ export interface ProjectLabelCloneDeps {
     "readActive" | "linkRepository"
   >;
   readonly clones: Pick<ProjectCloneTracker.ProjectCloneTracker["Service"], "start">;
-  readonly projects: Pick<ProjectService.ProjectService["Service"], "create" | "update">;
+  readonly projects: Pick<ProjectService.ProjectService["Service"], "create" | "update" | "delete">;
   readonly identities: Pick<
     RepositoryIdentityResolver.RepositoryIdentityResolver["Service"],
     "resolve"
@@ -147,6 +147,16 @@ export const cloneRepositoryIntoLabel = Effect.fn("ProjectLabelCloneRepository.c
           Effect.andThen(deps.refreshGitStatus(project.workspaceRoot)),
           Effect.ignoreCause({ log: true }),
         ),
+      // The repository exists only for this clone: a failed or cancelled one
+      // must not leave an empty repository filed in the project. Not forced,
+      // so a thread that somehow landed in it keeps it.
+      removeProject: ({ projectId: removedId }) =>
+        deps.projects
+          .delete({
+            commandId: CommandId.make(`project-clone-abandon:${removedId}`),
+            projectId: removedId,
+          })
+          .pipe(Effect.asVoid, Effect.ignoreCause({ log: true })),
     },
   );
   yield* deps.labels

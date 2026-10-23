@@ -60,6 +60,7 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import { runRanAfter } from "@t3tools/shared/orchestrationV2ThreadError";
+import { applyModelEffortDefaults } from "@t3tools/shared/model";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
@@ -92,6 +93,7 @@ import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { limitRecoveryStatus } from "../orchestration-v2/UsageLimitRecoveryWorker.ts";
+import { providerUsageHeadroom } from "../orchestration-v2/UsageLimitHandoff.ts";
 import {
   clientRuntimeModeCeiling,
   type McpInvocationScope,
@@ -2015,10 +2017,15 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const { parent, limits } = yield* loadCaller(scope);
         const providers = yield* loadProviders;
+        const nowMs = DateTime.toEpochMillis(yield* DateTime.now);
         const orchestrationCapableInstanceIds = yield* loadOrchestrationCapableInstanceIds();
         // Models the user hid from pickers stay out of the catalog agents choose from.
-        const modelPreferences = yield* serverSettings.getSettings.pipe(
-          Effect.map((settings) => settings.providerModelPreferences ?? {}),
+        const { modelPreferences, effortDefaults } = yield* serverSettings.getSettings.pipe(
+          Effect.map((settings) => ({
+            modelPreferences: settings.providerModelPreferences ?? {},
+            // Options show the user's default effort per model as the default choice.
+            effortDefaults: settings.modelEffortDefaults,
+          })),
           Effect.mapError(() => failure("orchestration_error", "Unable to read server settings.")),
         );
         return {
@@ -2037,7 +2044,7 @@ const make = Effect.gen(function* () {
               driverKind: provider.driver,
               displayName: provider?.displayName ?? null,
               models:
-                provider?.models
+                applyModelEffortDefaults(provider.models, effortDefaults[provider.instanceId])
                   .filter(
                     (model) =>
                       model.isCustom ||
@@ -2057,6 +2064,10 @@ const make = Effect.gen(function* () {
               canRunChildTask: constraints.length === 0,
               canRunCrossProviderChildTask: constraints.length === 0,
               constraints: [...constraints],
+              // Drivers without subscription usage omit it rather than report "unknown".
+              ...(provider.usageLimits === undefined
+                ? {}
+                : { usage: providerUsageHeadroom(provider.usageLimits, nowMs) }),
             };
           }),
           features: {

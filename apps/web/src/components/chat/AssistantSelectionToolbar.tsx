@@ -11,13 +11,21 @@ import {
   captureAssistantTextSelection,
   type AssistantCitationSourceAnchor,
 } from "~/lib/assistantTextSelection";
-import {
-  observeSelectionActions,
-  resolveSelectionActionPosition,
-  type SelectionActionPoint,
-} from "~/lib/selectionActions";
+import { observeSelectionActions, resolveSelectionPillPosition } from "~/lib/selectionActions";
 import { Button } from "../ui/button";
 
+type CapturedSelection = {
+  citation: AssistantCitation;
+  sourceAnchor: AssistantCitationSourceAnchor;
+  geometry: Omit<Parameters<typeof resolveSelectionPillPosition>[0], "size" | "viewport">;
+};
+
+/**
+ * The "Cite" pill for text selected in an assistant message. It stays mounted
+ * so it can fade in and out; while open, a changed selection moves it rather
+ * than re-popping it. Placement ignores the pointer (see
+ * resolveSelectionPillPosition), so it never lands on the selected text.
+ */
 export function AssistantSelectionToolbar({
   viewport,
   threadRef,
@@ -27,28 +35,41 @@ export function AssistantSelectionToolbar({
   threadRef: ScopedThreadRef;
   onCite: (citation: AssistantCitation, sourceAnchor: AssistantCitationSourceAnchor) => boolean;
 }) {
-  const [selection, setSelection] = useState<{
-    citation: AssistantCitation;
-    position: SelectionActionPoint;
-    sourceAnchor: AssistantCitationSourceAnchor;
-  } | null>(null);
-  const toolbarRef = useRef<HTMLButtonElement>(null);
+  // The last selection outlives `open` so the pill keeps its label and place
+  // while it fades out.
+  const [selection, setSelection] = useState<CapturedSelection | null>(null);
+  const [open, setOpen] = useState(false);
+  const openRef = useRef(false);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const shownRef = useRef(false);
   const actionsRef = useRef<ReturnType<typeof observeSelectionActions> | null>(null);
 
   useLayoutEffect(() => {
-    const toolbar = toolbarRef.current;
-    if (!toolbar || !selection) return;
-    const rect = toolbar.getBoundingClientRect();
-    toolbar.style.left = `${Math.max(8, Math.min(selection.position.x, window.innerWidth - rect.width - 8))}px`;
-    toolbar.style.top = `${Math.max(8, Math.min(selection.position.y, window.innerHeight - rect.height - 8))}px`;
-  }, [selection]);
+    openRef.current = open;
+    const wrapper = wrapperRef.current;
+    if (!wrapper) return;
+    if (!open || !selection) {
+      shownRef.current = false;
+      return;
+    }
+    const position = resolveSelectionPillPosition({
+      ...selection.geometry,
+      size: { width: wrapper.offsetWidth, height: wrapper.offsetHeight },
+      viewport: { width: window.innerWidth, height: window.innerHeight },
+    });
+    if (!position) return;
+    // Glide only between two open positions; an opening pill appears in place.
+    wrapper.dataset.moving = shownRef.current ? "true" : "false";
+    wrapper.style.translate = `${position.x}px ${position.y}px`;
+    shownRef.current = true;
+  }, [open, selection]);
 
   useEffect(() => {
     if (!viewport) return;
-    const clear = () => setSelection(null);
-    const update = (pointer: SelectionActionPoint | null) => {
-      const nativeSelection = window.getSelection();
-      const captured = captureAssistantTextSelection(viewport, nativeSelection);
+    const clear = () => setOpen(false);
+    const update = () => {
+      const captured = captureAssistantTextSelection(viewport, window.getSelection());
       const messageId = captured?.source.dataset.assistantCitationSource;
       if (!captured || !messageId) {
         clear();
@@ -60,16 +81,7 @@ export function AssistantSelectionToolbar({
         clear();
         return;
       }
-      const rects = captured.range.getClientRects();
-      const pointerOnText =
-        pointer !== null &&
-        Array.from(rects).some(
-          (line) =>
-            pointer.x >= line.left - 8 &&
-            pointer.x <= line.right + 8 &&
-            pointer.y >= line.top - 8 &&
-            pointer.y <= line.bottom + 8,
-        );
+      const sourceRect = captured.source.getBoundingClientRect();
       setSelection({
         sourceAnchor: { source: captured.source, range: captured.range, viewport },
         citation: {
@@ -78,23 +90,23 @@ export function AssistantSelectionToolbar({
           messageId: MessageId.make(messageId),
           ...captured.selector,
         },
-        position: resolveSelectionActionPosition({
-          bounds: viewportRect,
-          selectionRect: rects.item(rects.length - 1) ?? rect,
-          pointer: pointerOnText ? pointer : null,
-          viewport: { width: window.innerWidth, height: window.innerHeight },
-        }),
+        geometry: {
+          lines: Array.from(captured.range.getClientRects()),
+          column: { left: sourceRect.left, right: sourceRect.right },
+          bounds: { top: viewportRect.top, bottom: viewportRect.bottom },
+        },
       });
+      setOpen(true);
     };
     const actions = observeSelectionActions({
       element: viewport,
-      getActionElement: () => toolbarRef.current,
+      getActionElement: () => (openRef.current ? buttonRef.current : null),
       onSelection: update,
       onDismiss: clear,
     });
     actionsRef.current = actions;
     const focusActions = (event: KeyboardEvent) => {
-      const toolbar = toolbarRef.current;
+      const button = buttonRef.current;
       if (
         event.key !== "Tab" ||
         event.shiftKey ||
@@ -103,15 +115,16 @@ export function AssistantSelectionToolbar({
         event.metaKey ||
         event.isComposing ||
         event.defaultPrevented ||
-        !toolbar ||
-        toolbar.contains(event.target as Node)
+        !openRef.current ||
+        !button ||
+        button.contains(event.target as Node)
       ) {
         return;
       }
-      if (toolbar.disabled) return;
+      if (button.disabled) return;
       event.preventDefault();
       event.stopPropagation();
-      toolbar.focus({ preventScroll: true });
+      button.focus({ preventScroll: true });
     };
     document.addEventListener("keydown", focusActions, true);
     document.addEventListener("selectionchange", actions.selectionChanged);
@@ -123,41 +136,50 @@ export function AssistantSelectionToolbar({
     };
   }, [threadRef, viewport]);
 
-  if (!selection) return null;
-  const tooLong = selection.citation.text.length > ASSISTANT_CITATION_MAX_TEXT_LENGTH;
+  if (!viewport) return null;
+  const tooLong =
+    selection !== null && selection.citation.text.length > ASSISTANT_CITATION_MAX_TEXT_LENGTH;
   const dismiss = () => {
     actionsRef.current?.cancel();
-    setSelection(null);
+    setOpen(false);
   };
   const cite = () => {
-    if (tooLong || !onCite(selection.citation, selection.sourceAnchor)) return false;
+    if (!selection || tooLong || !onCite(selection.citation, selection.sourceAnchor)) return false;
     window.getSelection()?.removeAllRanges();
     dismiss();
     return true;
   };
   return createPortal(
-    <Button
-      ref={toolbarRef}
-      type="button"
-      size="xs"
-      variant="glass"
-      disabled={tooLong}
-      aria-label={tooLong ? "Selection is too long to cite" : "Cite selection in composer"}
-      className="fixed z-50 max-w-[calc(100vw-1rem)]"
-      style={{ left: selection.position.x, top: selection.position.y }}
-      onPointerDown={(event) => event.preventDefault()}
-      onClick={cite}
-      onKeyDown={(event) => {
-        event.stopPropagation();
-        if (event.key === "Escape" && !event.nativeEvent.isComposing) {
-          event.preventDefault();
-          dismiss();
-        }
-      }}
+    <div
+      ref={wrapperRef}
+      data-open={open}
+      aria-hidden={!open}
+      inert={!open}
+      className="pointer-events-none fixed top-0 left-0 z-50 max-w-[calc(100vw-1rem)] origin-top transition-[opacity,scale] duration-150 ease-out data-[moving=true]:transition-[opacity,scale,translate] data-[open=false]:scale-96 data-[open=false]:opacity-0 data-[open=true]:pointer-events-auto motion-reduce:transition-opacity motion-reduce:data-[open=false]:scale-100"
     >
-      <QuoteIcon aria-hidden="true" className="size-3.5" />
-      {tooLong ? "Shorten selection" : "Cite"}
-    </Button>,
+      {selection ? (
+        <Button
+          ref={buttonRef}
+          type="button"
+          size="xs"
+          variant="glass"
+          disabled={tooLong}
+          aria-label={tooLong ? "Selection is too long to cite" : "Cite selection in composer"}
+          onPointerDown={(event) => event.preventDefault()}
+          onClick={cite}
+          onKeyDown={(event) => {
+            event.stopPropagation();
+            if (event.key === "Escape" && !event.nativeEvent.isComposing) {
+              event.preventDefault();
+              dismiss();
+            }
+          }}
+        >
+          <QuoteIcon aria-hidden="true" className="size-3.5" />
+          {tooLong ? "Shorten selection" : "Cite"}
+        </Button>
+      ) : null}
+    </div>,
     document.body,
   );
 }

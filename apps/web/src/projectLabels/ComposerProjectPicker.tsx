@@ -6,6 +6,7 @@ import { useMemo, useState } from "react";
 
 import {
   ComposerControl,
+  ComposerControlChevron,
   ComposerControlIcon,
   type ComposerControlSize,
 } from "../components/chat/ComposerControl";
@@ -308,13 +309,13 @@ export function ComposerProjectPicker(props: {
             <button
               type="button"
               className={cn(
-                "group/hero-suffix pointer-events-auto inline-block cursor-pointer rounded-sm align-baseline text-muted-foreground/60 group-data-stacked/hero-headline:text-base outline-none transition-colors duration-(--motion-duration-fast) hover:text-muted-foreground focus-visible:outline-2 focus-visible:outline-ring data-popup-open:text-muted-foreground",
+                "group/hero-suffix pointer-events-auto inline-block cursor-pointer rounded-sm align-baseline text-foreground group-data-stacked/hero-headline:text-base outline-none focus-visible:outline-2 focus-visible:outline-ring",
                 current === null && "pointer-events-none",
               )}
             />
           }
         >
-          <HeroProjectSuffixText name={current?.label.name ?? null} />
+          <HeroProjectSuffixText name={current?.label.name ?? null} color={current?.label.color} />
         </ComboboxTrigger>
       ) : (
         <Tooltip>
@@ -342,6 +343,7 @@ export function ComposerProjectPicker(props: {
             >
               {current ? current.label.name : "No project"}
             </span>
+            <ComposerControlChevron size={props.size} />
           </TooltipTrigger>
           <TooltipPopup side="top">
             {forks ? "Fork into a project" : current ? "Change project" : "Add to a project"}

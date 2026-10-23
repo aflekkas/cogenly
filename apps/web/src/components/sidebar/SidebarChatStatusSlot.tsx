@@ -5,16 +5,19 @@ import { Spinner } from "../ui/spinner";
 
 const CHAT_STATUS_SPINNER_EXIT_MS = 220;
 const chatStatusLayerClassName =
-  "absolute inset-0 flex items-center justify-center transition-[opacity,scale] duration-(--motion-duration-base) ease-standard motion-reduce:transition-opacity";
+  "absolute inset-y-0 right-0 flex w-3 items-center justify-center transition-[opacity,scale] duration-(--motion-duration-base) ease-standard motion-reduce:transition-opacity";
 
 /**
- * The fixed-size slot at the end of a Chats row. The spinner and the dot sit
- * in the same box and crossfade, so a turn starting or finishing never moves
- * the title. The spinner stays mounted just long enough to fade out.
+ * The slot at the end of a Chats row. The last-activity time ("20m"), the
+ * spinner and the dot share it and crossfade: a live status replaces the time,
+ * which stays in the layout (just transparent) so a turn starting or finishing
+ * never moves the title. The spinner stays mounted just long enough to fade out.
  */
 export function SidebarChatStatusSlot(props: {
   isRunning: boolean;
   dot: "info" | "warning" | null;
+  /** Compact last-activity time; the parent refreshes it on its minute tick. */
+  timeLabel?: string | undefined;
 }) {
   const [spinnerLingers, setSpinnerLingers] = useState(props.isRunning);
   useEffect(() => {
@@ -26,8 +29,19 @@ export function SidebarChatStatusSlot(props: {
     return () => clearTimeout(timer);
   }, [props.isRunning]);
   const showDot = !props.isRunning && props.dot !== null;
+  const showTime = !props.isRunning && !showDot;
   return (
-    <span aria-hidden className="relative size-3 shrink-0">
+    <span aria-hidden className="relative flex h-4 min-w-3 shrink-0 items-center justify-end">
+      {props.timeLabel ? (
+        <span
+          className={cn(
+            "text-xs whitespace-nowrap text-muted-foreground/70 tabular-nums transition-opacity duration-(--motion-duration-base) ease-standard motion-reduce:transition-none",
+            showTime ? "opacity-100" : "opacity-0",
+          )}
+        >
+          {props.timeLabel}
+        </span>
+      ) : null}
       {spinnerLingers || props.isRunning ? (
         <span
           className={cn(

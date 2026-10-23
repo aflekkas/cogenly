@@ -50,7 +50,15 @@ import { isElectron } from "../../env";
 import { buildHostedChannelSelectionUrl, type HostedAppChannel } from "../../hostedPairing";
 import { useTheme } from "../../hooks/useTheme";
 import { BrowserAppearanceSettingRow } from "./IntegrationsSettings";
-import { DEFAULT_APPEARANCE_MODE } from "../../theme";
+import { DEFAULT_APPEARANCE_MODE, type AppearanceMode } from "../../theme";
+import {
+  ACCENT_COLORS,
+  DEFAULT_APPEARANCE_PREFERENCES,
+  type AccentColor,
+  type FontSizePreference,
+  useAppearancePreferences,
+} from "../../appearancePreferences";
+import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import {
   useScopedSettings,
   useScopedSettingsMixed,
@@ -406,6 +414,7 @@ function AboutVersionSection() {
 
 export function useSettingsRestore(onRestored?: () => void) {
   const { theme, setTheme } = useTheme();
+  const { preferences: appearance, update: updateAppearance } = useAppearancePreferences();
   const settings = useScopedSettings();
   const updateSettings = useUpdateScopedSettings();
 
@@ -418,6 +427,9 @@ export function useSettingsRestore(onRestored?: () => void) {
   const changedSettingLabels = useMemo(
     () => [
       ...(theme !== DEFAULT_APPEARANCE_MODE ? ["Theme"] : []),
+      ...(appearance.accent !== DEFAULT_APPEARANCE_PREFERENCES.accent ? ["Accent color"] : []),
+      ...(appearance.fontSize !== DEFAULT_APPEARANCE_PREFERENCES.fontSize ? ["Font size"] : []),
+      ...(appearance.motion !== DEFAULT_APPEARANCE_PREFERENCES.motion ? ["Reduce motion"] : []),
       ...(settings.diffColorScheme !== DEFAULT_UNIFIED_SETTINGS.diffColorScheme
         ? ["Diff colors"]
         : []),
@@ -561,6 +573,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.inAppNotificationsEnabled,
       settings.wordWrap,
       theme,
+      appearance,
     ],
   );
 
@@ -576,6 +589,11 @@ export function useSettingsRestore(onRestored?: () => void) {
     if (!confirmed) return;
 
     if (theme !== DEFAULT_APPEARANCE_MODE && !setTheme(DEFAULT_APPEARANCE_MODE)) return;
+    if (
+      appearance !== DEFAULT_APPEARANCE_PREFERENCES &&
+      !updateAppearance(DEFAULT_APPEARANCE_PREFERENCES)
+    )
+      return;
     updateSettings({
       diffColorScheme: DEFAULT_UNIFIED_SETTINGS.diffColorScheme,
       chatWidth: DEFAULT_UNIFIED_SETTINGS.chatWidth,
@@ -629,7 +647,15 @@ export function useSettingsRestore(onRestored?: () => void) {
       enableAgentBrowserAccess: DEFAULT_UNIFIED_SETTINGS.enableAgentBrowserAccess,
     });
     onRestored?.();
-  }, [changedSettingLabels, onRestored, setTheme, theme, updateSettings]);
+  }, [
+    appearance,
+    changedSettingLabels,
+    onRestored,
+    setTheme,
+    theme,
+    updateAppearance,
+    updateSettings,
+  ]);
 
   return {
     changedSettingLabels,
@@ -915,24 +941,185 @@ function BackgroundActivityAdvancedDialog({
   );
 }
 
+const APPEARANCE_MODE_LABELS: Record<AppearanceMode, string> = {
+  light: "Light",
+  dark: "Dark",
+  system: "System",
+};
+
+const FONT_SIZE_LABELS: Record<FontSizePreference, string> = {
+  small: "Small",
+  default: "Default",
+  large: "Large",
+};
+
+const ACCENT_COLOR_LABELS: Record<AccentColor, string> = {
+  orange: "Orange",
+  blue: "Blue",
+  violet: "Violet",
+  green: "Green",
+  pink: "Pink",
+  teal: "Teal",
+  amber: "Amber",
+  red: "Red",
+};
+
+/** Each preset's swatch, the dark-theme base from index.css (the brand orange for orange). */
+const ACCENT_SWATCHES: Record<AccentColor, string> = {
+  orange: "#ff7b3a",
+  blue: "#4c8dff",
+  violet: "#9d6bff",
+  green: "#2fb565",
+  pink: "#f0559a",
+  teal: "#1fb3a5",
+  amber: "#e8930c",
+  red: "#f04a4a",
+};
+
+/** A single-choice segmented control for a settings row. */
+function SettingsSegmented<T extends string>(props: {
+  readonly label: string;
+  readonly value: T;
+  readonly options: readonly T[];
+  readonly labels: Record<T, string>;
+  readonly onChange: (value: T) => void;
+}) {
+  return (
+    <ToggleGroup
+      aria-label={props.label}
+      variant="segmented"
+      value={[props.value]}
+      onValueChange={(next) => {
+        const picked = props.options.find((option) => option === next[0]);
+        if (picked !== undefined) props.onChange(picked);
+      }}
+    >
+      {props.options.map((option) => (
+        <Toggle key={option} value={option}>
+          {props.labels[option]}
+        </Toggle>
+      ))}
+    </ToggleGroup>
+  );
+}
+
 export function AppearanceSettingsPanel() {
   const { appearanceMode, setAppearanceMode } = useTheme();
+  const { preferences, update } = useAppearancePreferences();
   return (
     <SettingsPageContainer>
       <SettingsSection id="appearance" title="Appearance">
-        <SettingsRow title="Color scheme">
-          <div className="flex gap-2">
-            {(["light", "dark", "system"] as const).map((mode) => (
-              <Button
-                key={mode}
-                variant={appearanceMode === mode ? "default" : "outline"}
-                onClick={() => setAppearanceMode(mode)}
-              >
-                {mode === "light" ? "Light" : mode === "dark" ? "Dark" : "System"}
-              </Button>
-            ))}
-          </div>
-        </SettingsRow>
+        <SettingsRow
+          {...searchableSetting("color-scheme")}
+          description="Light, dark, or follow your system."
+          resetAction={
+            appearanceMode !== DEFAULT_APPEARANCE_MODE ? (
+              <SettingResetButton
+                label="color scheme"
+                onClick={() => setAppearanceMode(DEFAULT_APPEARANCE_MODE)}
+              />
+            ) : null
+          }
+          control={
+            <SettingsSegmented
+              label="Color scheme"
+              value={appearanceMode}
+              options={["light", "dark", "system"]}
+              labels={APPEARANCE_MODE_LABELS}
+              onChange={setAppearanceMode}
+            />
+          }
+        />
+        <SettingsRow
+          {...searchableSetting("accent-color")}
+          description="The color of send buttons, highlights and other accents."
+          resetAction={
+            preferences.accent !== DEFAULT_APPEARANCE_PREFERENCES.accent ? (
+              <SettingResetButton
+                label="accent color"
+                onClick={() => update({ accent: DEFAULT_APPEARANCE_PREFERENCES.accent })}
+              />
+            ) : null
+          }
+          control={
+            <div role="radiogroup" aria-label="Accent color" className="flex flex-wrap gap-1.5">
+              {ACCENT_COLORS.map((accent) => {
+                const selected = preferences.accent === accent;
+                return (
+                  <Tooltip key={accent}>
+                    <TooltipTrigger
+                      render={
+                        <button
+                          type="button"
+                          role="radio"
+                          aria-checked={selected}
+                          aria-label={ACCENT_COLOR_LABELS[accent]}
+                          onClick={() => update({ accent })}
+                          className="flex size-6 cursor-pointer items-center justify-center rounded-full -outline-offset-2 transition-shadow duration-(--motion-duration-fast) ease-standard focus-visible:outline-2 focus-visible:outline-ring motion-reduce:transition-none"
+                          style={{
+                            backgroundColor: ACCENT_SWATCHES[accent],
+                            boxShadow: selected
+                              ? `0 0 0 2px var(--background), 0 0 0 4px ${ACCENT_SWATCHES[accent]}`
+                              : undefined,
+                          }}
+                        >
+                          {selected ? (
+                            <CheckIcon
+                              aria-hidden
+                              className="size-3.5 text-white"
+                              strokeWidth={3}
+                            />
+                          ) : null}
+                        </button>
+                      }
+                    />
+                    <TooltipPopup side="top">{ACCENT_COLOR_LABELS[accent]}</TooltipPopup>
+                  </Tooltip>
+                );
+              })}
+            </div>
+          }
+        />
+        <SettingsRow
+          {...searchableSetting("font-size")}
+          description="Scales text and spacing across the app on this device."
+          resetAction={
+            preferences.fontSize !== DEFAULT_APPEARANCE_PREFERENCES.fontSize ? (
+              <SettingResetButton
+                label="font size"
+                onClick={() => update({ fontSize: DEFAULT_APPEARANCE_PREFERENCES.fontSize })}
+              />
+            ) : null
+          }
+          control={
+            <SettingsSegmented
+              label="Font size"
+              value={preferences.fontSize}
+              options={["small", "default", "large"]}
+              labels={FONT_SIZE_LABELS}
+              onChange={(fontSize) => update({ fontSize })}
+            />
+          }
+        />
+        <SettingsRow
+          {...searchableSetting("reduce-motion")}
+          description="Turn animations down to simple fades. Off follows your system setting."
+          resetAction={
+            preferences.motion !== DEFAULT_APPEARANCE_PREFERENCES.motion ? (
+              <SettingResetButton
+                label="reduce motion"
+                onClick={() => update({ motion: DEFAULT_APPEARANCE_PREFERENCES.motion })}
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={preferences.motion === "reduce"}
+              onCheckedChange={(checked) => update({ motion: checked ? "reduce" : "system" })}
+              aria-label="Reduce motion"
+            />
+          }
+        />
         {/* Browser tabs follow this theme by default; the row is the same one
             Integrations shows among the browser defaults. */}
         <BrowserAppearanceSettingRow disabled={false} />

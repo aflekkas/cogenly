@@ -13,7 +13,6 @@ import type {
 import { useNavigate } from "@tanstack/react-router";
 import {
   BotIcon,
-  BrainIcon,
   ClockIcon,
   FileIcon,
   FolderGit2Icon,
@@ -43,11 +42,18 @@ import type { useEnvironmentRepositories } from "../../projectLabels/ProjectLabe
 import { ProjectRepositoryPicker } from "../../projectLabels/ProjectRepositoryPicker";
 import { ProjectSourceLinkField } from "../../projectLabels/ProjectSourceLinks";
 import {
+  projectExtraSourceLinks,
+  projectGitHubOrg,
   projectSourceLinkKey,
   projectSourceLinkLabel,
   sortProjectSourceLinks,
 } from "../../projectLabels/projectSourceLinks.logic";
+import { gitHubRepositoryOf } from "../../projectLabels/repositoryPicker.logic";
 import { reportProjectFolderFailure } from "../../projectLabels/useMoveThreadToFolder";
+import {
+  useCanRemoveRepositoryFromProject,
+  useRemoveRepositoryFromProject,
+} from "../../projectLabels/useRemoveRepositoryFromProject";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { buildThreadRouteParams } from "../../threadRoutes";
@@ -61,7 +67,6 @@ import { resolveSidebarThreadStatus } from "../Sidebar.logic";
 import { chatActivityAt } from "../sidebar/modes/sidebarModes.logic";
 import { Button } from "../ui/button";
 import { Menu, MenuGroup, MenuGroupLabel, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
-import { Textarea } from "../ui/textarea";
 import { toastManager } from "../ui/toast";
 import {
   ProjectCard,
@@ -70,15 +75,8 @@ import {
   ProjectCardRow,
   useArrivedKeys,
 } from "./ProjectCard";
-import {
-  instructionsSaveState,
-  mixProjectRecent,
-  normalizeInstructions,
-  projectRecentPip,
-  type ProjectRecentPip,
-} from "./projectHome.logic";
+import { mixProjectRecent, projectRecentPip, type ProjectRecentPip } from "./projectHome.logic";
 import { sortRecentFirst } from "./projectPanel.logic";
-import type { ProjectInstructions } from "./useProjectInstructions";
 
 const NO_PERMISSION = "You don't have permission to change projects here.";
 
@@ -108,87 +106,6 @@ async function confirmRemoval(message: string): Promise<boolean> {
   );
 }
 
-/**
- * Standing instructions for every chat and Work in the project, edited in
- * place. Saves on blur or ⌘/Ctrl+Enter; the line under it says where the
- * draft stands.
- */
-export function InstructionsCard(props: {
-  readonly instructions: ProjectInstructions;
-  readonly canEdit: boolean;
-}) {
-  const { instructions } = props;
-  const [draft, setDraft] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [failed, setFailed] = useState(false);
-  const value = draft ?? instructions.value;
-  const state = instructionsSaveState({
-    draft: value,
-    saved: instructions.value,
-    saving,
-    failed,
-  });
-  const save = async () => {
-    if (draft === null || state === "saved" || saving || !props.canEdit) return;
-    setSaving(true);
-    const ok = await instructions.save(normalizeInstructions(draft));
-    setSaving(false);
-    setFailed(!ok);
-  };
-  // Once the server's copy matches the draft, follow it again, so another
-  // device's edit shows. Waiting for the match keeps the old text from flashing.
-  if (draft !== null && !saving && draft === instructions.value) setDraft(null);
-  const disabledReason = props.canEdit ? null : NO_PERMISSION;
-  const status =
-    disabledReason ??
-    (state === "saving"
-      ? "Saving…"
-      : state === "failed"
-        ? "Couldn't save. Try again."
-        : state === "unsaved"
-          ? "Unsaved · saves when you leave the field."
-          : instructions.value.trim().length > 0
-            ? "Applies to new turns in this project. Running Claude sessions pick it up after a restart."
-            : "Tell the chat “remember that…”, or write them here.");
-  return (
-    <ProjectCard icon={<BrainIcon />} title="Instructions">
-      <div className="flex flex-col gap-1.5 px-1 pt-0.5 pb-1">
-        <Textarea
-          size="sm"
-          aria-label="Project instructions"
-          placeholder="How agents should work in this project…"
-          value={value}
-          disabled={disabledReason !== null}
-          onChange={(event) => {
-            setDraft(event.currentTarget.value);
-            setFailed(false);
-          }}
-          onBlur={() => void save()}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-              event.preventDefault();
-              void save();
-            } else if (event.key === "Escape" && draft !== null) {
-              event.preventDefault();
-              setDraft(null);
-              setFailed(false);
-            }
-          }}
-        />
-        <p
-          role="status"
-          className="min-h-4 px-0.5 text-2xs text-muted-foreground"
-          data-state={state}
-        >
-          <span key={status} className="swap-motion">
-            {status}
-          </span>
-        </p>
-      </div>
-    </ProjectCard>
-  );
-}
-
 export function RepositoriesCard(props: {
   readonly environmentId: EnvironmentId;
   readonly label: ProjectLabelWithRepositories;
@@ -202,13 +119,8 @@ export function RepositoriesCard(props: {
   const canLink = useAtomValue(
     serverEnvironment.linkProjectLabelRepository.permissionAtom(environmentId),
   );
-  const canUnlink = useAtomValue(
-    serverEnvironment.unlinkProjectLabelRepository.permissionAtom(environmentId),
-  );
-  const unlink = useAtomCommand(serverEnvironment.unlinkProjectLabelRepository, {
-    label: "remove repository from project",
-    reportFailure: false,
-  });
+  const canUnlink = useCanRemoveRepositoryFromProject(environmentId);
+  const removeFromProject = useRemoveRepositoryFromProject();
   const { removing, run } = useRemoving();
   const arrived = useArrivedKeys(
     props.linkedRepositories.map((repository) => repository.id),
@@ -216,14 +128,7 @@ export function RepositoriesCard(props: {
   );
   const remove = (repositoryId: ProjectId, title: string) =>
     run(repositoryId, async () => {
-      const confirmed = await confirmRemoval(
-        `Remove ${title} from ${label.name}?\nThe repository stays on disk, and its Work leaves the project with it.`,
-      );
-      if (!confirmed) return;
-      const result = await unlink({ environmentId, input: { labelId: label.id, repositoryId } });
-      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-        reportProjectFolderFailure(`Could not remove ${title}`, result);
-      }
+      await removeFromProject({ project: props.folder, repositoryId, title });
     });
   return (
     <ProjectCard
@@ -248,6 +153,8 @@ export function RepositoriesCard(props: {
           key={repository.id}
           icon={<ProjectFavicon project={repository} />}
           title={repository.title}
+          // The GitHub repository it was cloned from, as the pickers mark it.
+          meta={gitHubRepositoryOf(repository.repositoryIdentity) ?? undefined}
           arrived={arrived.has(repository.id)}
           removing={removing.has(repository.id)}
           onOpen={() => props.onOpenRepository(repository.id)}
@@ -278,7 +185,12 @@ export function SourcesCard(props: {
   });
   const [linking, setLinking] = useState(false);
   const { removing, run } = useRemoving();
-  const links = sortProjectSourceLinks(label.sourceLinks);
+  // The org is the project's setting (in the page header); Sources lists the rest.
+  const org = projectGitHubOrg(label.sourceLinks);
+  const links =
+    org === null
+      ? sortProjectSourceLinks(label.sourceLinks)
+      : projectExtraSourceLinks(label.sourceLinks);
   const arrived = useArrivedKeys(links.map(projectSourceLinkKey), true);
   // Unlinking only forgets the link; nothing on GitHub or disk changes, so no confirm.
   const remove = (link: ProjectSourceLink) =>
@@ -306,7 +218,9 @@ export function SourcesCard(props: {
     >
       {links.length === 0 && !linking ? (
         <p className="px-1.5 pt-0.5 pb-1.5 text-xs/relaxed text-muted-foreground">
-          Link a GitHub org or repository so agents and the repository picker can reach it.
+          {org === null
+            ? "Link a GitHub org or repository so agents and the repository picker can reach it."
+            : `Repositories outside ${org} that agents and the repository picker should reach.`}
         </p>
       ) : null}
       {links.map((link) => {

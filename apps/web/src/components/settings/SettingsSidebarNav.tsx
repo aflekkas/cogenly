@@ -16,6 +16,7 @@ import {
   BrainIcon,
   DatabaseIcon,
   CalendarClockIcon,
+  FolderIcon,
   GitBranchIcon,
   HardDriveIcon,
   ImportIcon,
@@ -29,6 +30,7 @@ import {
 import { useLocation, useNavigate } from "@tanstack/react-router";
 
 import { cn } from "~/lib/utils";
+import { useLegacySidebarEnabled } from "../../hooks/useSettings";
 import { crossfadeModeSwitch } from "../sidebar/modes/modeSwitchMotion";
 import { SidebarContent, SidebarFooter, SidebarGroup, useSidebar } from "../ui/sidebar";
 import { SidebarUtilityMenu } from "../sidebar/SidebarChrome";
@@ -63,6 +65,7 @@ const SETTINGS_SECTION_ICONS: Readonly<
   "/settings/diagnostics": Settings2Icon,
   "/settings/appearance": PaletteIcon,
   "/settings/projects": PanelsTopLeftIcon,
+  "/settings/project-tags": FolderIcon,
   "/settings/memory": BrainIcon,
   "/settings/vault": KeyRoundIcon,
   "/settings/keybindings": KeyboardIcon,
@@ -108,6 +111,8 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
       pathname.startsWith(`${item.to}/`),
   );
   const { isMobile, setOpenMobile, open, setOpen } = useSidebar();
+  const legacySidebarEnabled = useLegacySidebarEnabled();
+  const navRailVisible = !isMobile && !legacySidebarEnabled;
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
   const [activeResultIndex, setActiveResultIndex] = useState(0);
@@ -381,18 +386,27 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
           </SidebarGroup>
         )}
       </SidebarContent>
-      <SidebarFooter>
+      {/* Beside the navigation rail (which carries Settings, Usage and Updates)
+          the footer holds only what renders, so the search dock sits exactly
+          where it does in the other tabs. */}
+      <SidebarFooter className="empty:hidden">
         <Suspense fallback={null}>
           <T3ConnectSidebarSignIn />
         </Suspense>
-        <div className="flex items-center gap-1">
-          <div className="min-w-0 flex-1">
-            <SidebarUtilityMenu />
-          </div>
+        {navRailVisible ? (
           <Suspense fallback={null}>
             <T3ConnectSidebarAvatar />
           </Suspense>
-        </div>
+        ) : (
+          <div className="flex items-center gap-1">
+            <div className="min-w-0 flex-1">
+              <SidebarUtilityMenu />
+            </div>
+            <Suspense fallback={null}>
+              <T3ConnectSidebarAvatar />
+            </Suspense>
+          </div>
+        )}
       </SidebarFooter>
     </>
   );

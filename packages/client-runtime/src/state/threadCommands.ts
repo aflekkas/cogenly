@@ -397,6 +397,33 @@ export function createThreadEnvironmentAtoms<R, E>(
         key: ({ environmentId, input }) => JSON.stringify([environmentId, input.threadId]),
       },
     }),
+    // Client-only: sheds older timeline rows; loadEarlierHistory brings them back.
+    trimHistory: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:thread:trim-history",
+      execute: (input: { readonly threadId: ThreadId }) =>
+        Effect.gen(function* () {
+          const supervisor = yield* EnvironmentSupervisor.EnvironmentSupervisor;
+          const controller = yield* Effect.serviceOption(
+            ThreadHistoryController.ThreadHistoryController,
+          );
+          if (Option.isNone(controller)) {
+            return {
+              _tag: "noop",
+            } satisfies ThreadHistoryController.ThreadHistoryLoadEarlierResult;
+          }
+          return yield* controller.value.trimToRecent(
+            supervisor.target.environmentId,
+            input.threadId,
+          );
+        }),
+      scheduler,
+      // A page load racing a trim is resolved in thread state: the trim skips
+      // while a page loads, and a page whose cursor was replaced is dropped.
+      concurrency: {
+        mode: "serial",
+        key: ({ environmentId, input }) => JSON.stringify([environmentId, input.threadId]),
+      },
+    }),
     uploadFeedback: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:commands:thread:upload-feedback",
       tag: WS_METHODS.providerUploadFeedback,

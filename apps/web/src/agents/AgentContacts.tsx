@@ -18,6 +18,7 @@ import {
 import { avatarFaceProps } from "~/components/agents/face/agentAvatar.logic";
 import { AgentFace } from "~/components/agents/face";
 import { ProviderInstanceIcon } from "~/components/chat/ProviderInstanceIcon";
+import { EnvironmentMachineIcon } from "~/components/EnvironmentMachineIcon";
 import {
   SidebarDragLifecycle,
   SidebarSortSensor,
@@ -77,6 +78,7 @@ import { useProjectLabelDirectory } from "~/projectLabels/useProjectLabels";
 import { deriveProviderInstanceEntries } from "~/providerInstances";
 import { agentsRpc } from "~/rpc/agents";
 import { useServerConfigs } from "~/state/entities";
+import { useEnvironmentIdentities, useEnvironmentMachines } from "~/state/environments";
 import { formatRelativeTime } from "~/timestampFormat";
 import { takeAgentArrival } from "./agentArrivals";
 import { groupAgentsByProject, orderAgentsForList } from "./agentGroups.logic";
@@ -452,6 +454,10 @@ function AgentRow({
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [pending, setPending] = useState(false);
   const since = formatRelativeTime(agent.updatedAt);
+  const environmentLabel =
+    useEnvironmentIdentities().find((entry) => entry.environmentId === agent.environmentId)
+      ?.label ?? null;
+  const environmentMachine = useEnvironmentMachines().get(agent.environmentId) ?? "server";
   const configs = useServerConfigs();
   const providerEntry = useMemo(
     () =>
@@ -667,8 +673,8 @@ function AgentRow({
         onKeyDown={onKeyDown}
         onContextMenu={onContextMenu}
       >
-        {/* The face beside a 20px name line and two 16px lines of the latest
-            reply, centred in a Work card's height so both lists share a pitch. */}
+        {/* The face beside a Work card's three lines: name and status, the
+            latest reply, then machine and model. */}
         <SidebarCardBody>
           <div className="flex min-w-0 gap-2.5">
             <AgentAvatarPicker
@@ -729,28 +735,6 @@ function AgentRow({
                     <span aria-hidden>{agent.name}</span>
                   </PanOnHoverText>
                 )}
-                {providerEntry ? (
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <span
-                          role="img"
-                          aria-label={`Model: ${modelLabel}`}
-                          className="inline-flex shrink-0 items-center"
-                        />
-                      }
-                    >
-                      <ProviderInstanceIcon
-                        driverKind={providerEntry.driverKind}
-                        displayName={providerEntry.displayName}
-                        accentColor={providerEntry.accentColor}
-                        showBadge={providerEntry.accentColor !== undefined}
-                        iconClassName="size-3.5 opacity-60"
-                      />
-                    </TooltipTrigger>
-                    <TooltipPopup side="top">{modelLabel}</TooltipPopup>
-                  </Tooltip>
-                ) : null}
                 {/* The status owns this slot's width; the hover actions cross-fade
                 in over it, so the name never reflows. */}
                 <span className="group/sidebar-status-slot relative ml-auto flex h-5 min-w-8 shrink-0 items-stretch justify-end text-xs">
@@ -802,11 +786,50 @@ function AgentRow({
                   </span>
                 </span>
               </SidebarCardLine>
-              {/* The latest reply (or the agent's job), two muted lines that
-              brighten a step while the card is selected. */}
-              <span className="mt-1 line-clamp-2 h-8 min-w-0 text-xs leading-4 text-muted-foreground transition-colors duration-(--motion-duration-fast) ease-standard group-[.state-selected]/sidebar-row:text-secondary-label motion-reduce:transition-none">
-                {summary || status}
-              </span>
+              {/* The latest reply (or the agent's job) on one muted line that
+              brightens a step while the card is selected. */}
+              <SidebarCardLine
+                line="title"
+                className="text-xs text-muted-foreground transition-colors duration-(--motion-duration-fast) ease-standard group-[.state-selected]/sidebar-row:text-secondary-label motion-reduce:transition-none"
+              >
+                <span className="min-w-0 truncate">{summary || status}</span>
+              </SidebarCardLine>
+              {/* As on a Work card: the machine it runs on, then the provider
+              glyph, which names the model. */}
+              <SidebarCardLine line="meta" tone="faint" className="justify-end">
+                {environmentLabel ? (
+                  <span className="inline-flex min-w-0 max-w-24 items-center gap-1">
+                    <EnvironmentMachineIcon
+                      aria-hidden
+                      kind={environmentMachine}
+                      className="size-3 shrink-0"
+                    />
+                    <span className="truncate">{environmentLabel}</span>
+                  </span>
+                ) : null}
+                {providerEntry ? (
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <span
+                          role="img"
+                          aria-label={`Model: ${modelLabel}`}
+                          className="inline-flex shrink-0 items-center"
+                        />
+                      }
+                    >
+                      <ProviderInstanceIcon
+                        driverKind={providerEntry.driverKind}
+                        displayName={providerEntry.displayName}
+                        accentColor={providerEntry.accentColor}
+                        showBadge={providerEntry.accentColor !== undefined}
+                        iconClassName="size-3.5"
+                      />
+                    </TooltipTrigger>
+                    <TooltipPopup side="top">{modelLabel}</TooltipPopup>
+                  </Tooltip>
+                ) : null}
+              </SidebarCardLine>
             </div>
           </div>
         </SidebarCardBody>

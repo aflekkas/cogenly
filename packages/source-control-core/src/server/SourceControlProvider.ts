@@ -151,6 +151,14 @@ export class SourceControlProvider extends Context.Service<
       readonly context?: SourceControlProviderContext;
       readonly repository: string;
     }) => Effect.Effect<SourceControlRepositoryCloneUrls, SourceControlProviderError>;
+    /**
+     * The transport an `auto` clone or publish uses on `host`, as the user's own tooling for
+     * this provider is set up (GitHub: `gh`'s git protocol). Without it, `auto` means SSH.
+     */
+    readonly preferredCloneProtocol?: (input: {
+      readonly cwd: string;
+      readonly host: string;
+    }) => Effect.Effect<"https" | "ssh">;
     readonly createRepository: (input: {
       readonly cwd: string;
       readonly repository: string;

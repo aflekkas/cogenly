@@ -1,3 +1,4 @@
+import { resolveUserMessagePresentation } from "@t3tools/client-runtime/user-message";
 import { markdownPreviewText } from "@t3tools/client-runtime/work-log/reasoning-text";
 import type { MessagesTimelineRow } from "./MessagesTimeline.logic";
 
@@ -6,6 +7,8 @@ export interface TimelineMinimapItem {
   readonly rowIndex: number;
   readonly userText: string | null;
   readonly assistantText: string | null;
+  /** Typed by the user, not sent by an agent, automation or Cogenly. */
+  readonly typed: boolean;
 }
 
 /** Keep full source text untouched until a minimap preview is opened. */
@@ -24,6 +27,7 @@ export function deriveTimelineMinimapItems(
       rowIndex: index,
       userText: row.message.text,
       assistantText: resolveFinalAssistantTextForTurn(rows, index),
+      typed: resolveUserMessagePresentation(row.message).attribution === null,
     });
   }
   return items;

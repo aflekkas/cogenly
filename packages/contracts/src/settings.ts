@@ -30,6 +30,7 @@ import {
   CustomModelSetting,
   DEFAULT_TEXT_GENERATION_MODEL,
   DEFAULT_TEXT_GENERATION_REASONING_EFFORT,
+  ProviderOptionSelection,
   ProviderOptionSelections,
 } from "./model.ts";
 import { ModelSelection } from "./modelSelection.ts";
@@ -202,6 +203,18 @@ export const ProviderModelPreferences = Schema.Record(
     modelOrder: Schema.Array(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
   }),
 );
+/**
+ * The reasoning effort a model starts at, per provider instance and model slug,
+ * overriding the catalog default. Stores the option id with the value (each
+ * provider names its effort option differently) so the server can apply it to
+ * work started without one, such as agents and MCP launches.
+ */
+export const ModelEffortDefaults = Schema.Record(
+  ProviderInstanceId,
+  Schema.Record(TrimmedNonEmptyString, ProviderOptionSelection),
+);
+export type ModelEffortDefaults = typeof ModelEffortDefaults.Type;
+
 export type ModelPreferences = {
   readonly favorites: typeof ModelFavorites.Type;
   readonly providerModelPreferences: typeof ProviderModelPreferences.Type;
@@ -905,6 +918,7 @@ export const ServerSettings = Schema.Struct({
   providerModelPreferences: Schema.NullOr(ProviderModelPreferences).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
+  modelEffortDefaults: ModelEffortDefaults.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   worktreeCleanup: WorktreeCleanup.pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   automaticBackups: AutomaticBackupsSettings.pipe(
     Schema.withDecodingDefault(Effect.succeed(Schema.decodeSync(AutomaticBackupsSettings)({}))),
@@ -1298,6 +1312,14 @@ export const ServerSettingsPatch = Schema.Struct({
   ),
   setProviderModelOrder: Schema.optionalKey(
     Schema.Struct({ provider: ProviderInstanceId, modelOrder: Schema.Array(TrimmedString) }),
+  ),
+  /** Sets or (with `option: null`) clears one model's default reasoning effort. */
+  setModelEffortDefault: Schema.optionalKey(
+    Schema.Struct({
+      provider: ProviderInstanceId,
+      model: TrimmedNonEmptyString,
+      option: Schema.NullOr(ProviderOptionSelection),
+    }),
   ),
   favorites: Schema.optionalKey(ModelFavorites),
   providerModelPreferences: Schema.optionalKey(ProviderModelPreferences),

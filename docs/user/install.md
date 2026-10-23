@@ -104,6 +104,7 @@ computer.
 | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Codex    | [Connect with ChatGPT](./providers-codex.md#connect-with-chatgpt), or install [Codex CLI](https://developers.openai.com/codex/cli) and run `codex login`. |
 | Claude   | Install [Claude Code](https://claude.com/product/claude-code), then run `claude auth login`.                                                              |
+| Grok     | [Add a Grok instance](./providers-grok.md), install the Grok Build CLI, then run `grok login`.                                                            |
 
 Provider CLIs must be on the server's `PATH`. If Cogenly cannot find one, set its
 **Binary path** in provider settings, especially when using a version manager.
@@ -129,7 +130,7 @@ base URL. Mark secret values as sensitive; after saving, Cogenly does not displa
 their original values.
 
 For provider-specific setup and accounts, see [Codex](./providers-codex.md),
-[Claude](./providers-claude.md).
+[Claude](./providers-claude.md), [Grok](./providers-grok.md).
 
 ## Next steps
 

@@ -123,7 +123,7 @@ function CopyErrorButton({ text }: { text: string }) {
 
 /** Scrollable cap for long expandable lists (~10rem); keeps the toast from growing without bound. */
 const toastExpandablePanelClassName =
-  "mt-2 max-h-40 min-h-0 overflow-y-auto overscroll-contain pr-0.5 select-text";
+  "scroll-fade-y mt-2 max-h-40 min-h-0 overflow-y-auto overscroll-contain pr-0.5 select-text";
 
 function ToastExpandableSection({
   children,
@@ -279,6 +279,11 @@ function ToastCard({
     secondaryActionProps ?? {};
   const secondaryActionVariant = data?.secondaryActionVariant ?? "outline";
   const hasPrimaryAction = hasVisibleToastAction(toast.actionProps);
+  // A lone action (Undo, Retry, Open…) is an outline button like the composer's
+  // Stop; it fills only when it leads other actions, unless the toast picks.
+  const primaryActionVariant =
+    data?.actionVariant ??
+    (additionalActions.length > 0 || secondaryActionProps !== undefined ? "default" : "outline");
   const hasLabelledActions =
     hasPrimaryAction || additionalActions.length > 0 || secondaryActionProps !== undefined;
   const hasActions = copyErrorText !== null || hasLabelledActions;
@@ -297,11 +302,15 @@ function ToastCard({
         // End padding is 4px short of the start so the × icon (5px inside its
         // 24px box) lands on the same inset as the leading icon.
         "pointer-events-auto flex min-h-0 overflow-y-visible pl-3.5 pr-2.5 text-sm [overflow-x:clip]",
-        stackedActionLayout ? "flex-col gap-2 py-2.5" : "items-start justify-between gap-2 py-3",
+        // Inline actions wrap onto their own end-aligned row once they'd squeeze
+        // the text below its 10rem floor, so a title never breaks per letter.
+        stackedActionLayout
+          ? "flex-col gap-2 py-2.5"
+          : "flex-wrap items-start justify-between gap-x-2 gap-y-2 py-3",
         className,
       )}
     >
-      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+      <div className="flex min-w-0 flex-1 basis-40 flex-col gap-0.5">
         <div className="flex min-w-0 gap-2">
           {leadingIcon || Icon ? (
             <div
@@ -340,7 +349,7 @@ function ToastCard({
             "flex items-center gap-1.5",
             // Inline, the 24px buttons centre on the 20px title line, level with
             // the icon, however many lines the description runs to.
-            stackedActionLayout ? "w-full flex-wrap justify-end" : "-my-0.5 shrink-0",
+            stackedActionLayout ? "w-full flex-wrap justify-end" : "-my-0.5 ml-auto shrink-0",
           )}
         >
           {copyErrorText !== null ? <CopyErrorButton text={copyErrorText} /> : null}
@@ -366,7 +375,7 @@ function ToastCard({
           {hasPrimaryAction ? (
             <Toast.Action
               className={cn(
-                buttonVariants({ size: "xs", variant: data?.actionVariant ?? "default" }),
+                buttonVariants({ size: "xs", variant: primaryActionVariant }),
                 "shrink-0",
               )}
               data-slot="toast-action"

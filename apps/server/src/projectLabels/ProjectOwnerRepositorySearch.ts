@@ -151,6 +151,13 @@ export const searchLabelOwnerRepositories = Effect.fn("ProjectOwnerRepositorySea
           if (identity?.owner && identity.name) {
             local.add(localRepositoryKey(identity.owner, identity.name));
           }
+          // A fork tracking its upstream is identified by the upstream; its
+          // own remote is the GitHub repository it was cloned from.
+          const origin = identity?.origin?.canonicalKey;
+          if (origin?.startsWith("github.com/")) {
+            const [owner, name] = origin.slice("github.com/".length).split("/");
+            if (owner && name) local.add(localRepositoryKey(owner, name));
+          }
         }),
       { concurrency: 8, discard: true },
     );
