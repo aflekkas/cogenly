@@ -9,6 +9,7 @@ import {
   RunId,
   RuntimeMode,
   ThreadId,
+  WorkHandoffError,
   type OrchestrationV2ThreadProjection,
 } from "@t3tools/contracts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
@@ -258,6 +259,35 @@ describe("ThreadLaunchService project filing", () => {
     }).pipe(Effect.provide(layer));
   });
 
+  it.effect(
+    "tells the caller why a checkout refused the launch, also through a Work handoff",
+    () => {
+      const { layer } = harness({ filedRepository: true, checkoutFails: true });
+      return Effect.gen(function* () {
+        const launches = yield* ThreadLaunch.ThreadLaunchService;
+        const error = yield* Effect.flip(launches.launch(launchInput({ surface: "work" })));
+        const reason =
+          "smile-express has no checkout and no known remote; clone it with project_label_clone_repository or link an existing checkout.";
+        expect(ThreadLaunch.launchRefusalMessage(error)).toBe(reason);
+        expect(
+          ThreadLaunch.launchRefusalMessage(
+            new WorkHandoffError({ sourceThreadId: threadId, stage: "launch", cause: error }),
+          ),
+        ).toBe(reason);
+      }).pipe(Effect.provide(layer));
+    },
+  );
+
+  it("keeps launch failures that are not refusals private", () => {
+    const storage = new ThreadLaunch.ThreadLaunchError({
+      operation: "create-thread",
+      commandId: CommandId.make("command:storage"),
+      projectId,
+      cause: new Error("SQLITE_BUSY: database is locked"),
+    });
+    expect(ThreadLaunch.launchRefusalMessage(storage)).toBeUndefined();
+  });
+
   it.effect("refuses an archived project before creating the thread, saying why", () => {
     const { steps, layer } = harness({ labelArchived: true });
     return Effect.gen(function* () {
@@ -265,6 +295,9 @@ describe("ThreadLaunchService project filing", () => {
       const error = yield* Effect.flip(launches.launch(launchInput({ projectFolderId: folderId })));
       expect(error._tag).toBe("ThreadLaunchError");
       expect(userFacingDispatchErrorMessage(error)).toBe(
+        "Spawn Partners is archived. Unarchive it to add to it.",
+      );
+      expect(ThreadLaunch.launchRefusalMessage(error)).toBe(
         "Spawn Partners is archived. Unarchive it to add to it.",
       );
       expect(steps).toEqual([{ kind: "read-label", id: folderId }]);

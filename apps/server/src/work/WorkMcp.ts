@@ -17,7 +17,7 @@ import * as Schema from "effect/Schema";
 import { Tool, Toolkit } from "effect/ai";
 import * as Access from "../mcp/McpToolAccess.ts";
 import * as Invocation from "../mcp/McpInvocationContext.ts";
-import { readCaller, unavailable } from "../mcp/threadAccess.ts";
+import { launchFailure, readCaller, unavailable } from "../mcp/threadAccess.ts";
 import * as Threads from "../orchestration-v2/ThreadManagementService.ts";
 import * as Work from "./WorkHandoffService.ts";
 
@@ -107,7 +107,7 @@ export const handlers = Access.toLayer(toolkit, {
             },
             { origin: "chat", createdByAgent: true, ...modes },
           )
-          .pipe(Effect.mapError(unavailable));
+          .pipe(Effect.mapError(launchFailure));
       }),
   ),
   work_start: Access.startsThreads(
@@ -133,7 +133,7 @@ export const handlers = Access.toLayer(toolkit, {
               ...(sourceAgentRunId === undefined ? {} : { sourceAgentRunId }),
             },
           )
-          .pipe(Effect.mapError(unavailable));
+          .pipe(Effect.mapError(launchFailure));
       }),
   ),
 });

@@ -14,11 +14,13 @@ import {
   type ProviderDriverKind,
   type ProviderInteractionMode,
   ProjectId,
+  ProjectLabelError,
   type ProjectLabelId,
   type RunId,
   type RuntimeMode,
   type ScheduledTaskId,
   ThreadId,
+  WorkHandoffError,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
@@ -166,6 +168,25 @@ export class ThreadLaunchError extends Schema.TaggedError<ThreadLaunchError>()(
   }
 }
 
+const isWorkHandoffError = Schema.is(WorkHandoffError);
+const isThreadLaunchError = Schema.is(ThreadLaunchError);
+const isProjectLabelError = Schema.is(ProjectLabelError);
+const isRepositoryCheckoutError = Schema.is(RepositoryCheckout.RepositoryCheckoutError);
+
+/**
+ * Why a launch was refused, when the caller can act on it: a project pick it
+ * could not use, or a repository checkout it could not make. Accepts a Work
+ * handoff that failed at launch. Other causes (storage, dispatch) stay
+ * internal, so this is undefined for them.
+ */
+export const launchRefusalMessage = (error: unknown): string | undefined => {
+  const launch = isWorkHandoffError(error) && error.stage === "launch" ? error.cause : error;
+  if (!isThreadLaunchError(launch)) return undefined;
+  return isProjectLabelError(launch.cause) || isRepositoryCheckoutError(launch.cause)
+    ? launch.cause.message
+    : undefined;
+};
+
 /** A new worktree was asked to start from a ref that gives it no commit. */
 export class ThreadLaunchBaseRefError extends Schema.TaggedError<ThreadLaunchBaseRefError>()(
   "ThreadLaunchBaseRefError",
@@ -209,8 +230,6 @@ export class ThreadLaunchService extends Context.Service<
     readonly prepareRun: (input: ThreadLaunchPreparationInput) => Effect.Effect<void>;
   }
 >()("cogenly-server/orchestration-v2/ThreadLaunchService") {}
-
-const isThreadLaunchError = Schema.is(ThreadLaunchError);
 
 function failureDetail(error: unknown): string {
   if (isThreadLaunchError(error)) {

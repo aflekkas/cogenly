@@ -27,7 +27,7 @@ import * as WorkHandoff from "./work/WorkHandoffService.ts";
 import * as AgentWorkspace from "./agents/AgentWorkspaceService.ts";
 import * as Agents from "./agents/AgentService.ts";
 import * as AgentStore from "./agents/AgentStore.ts";
-import { OrchestrationDispatchCommandError, ProjectLabelError } from "@t3tools/contracts";
+import { OrchestrationDispatchCommandError } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Orchestrator from "./orchestration-v2/Orchestrator.ts";
 
@@ -1575,10 +1575,10 @@ const makeWsRpcHandlers = (
                     new OrchestrationV2ThreadLaunchError({
                       commandId: input.commandId,
                       projectId: input.projectId,
-                      // A refused project pick (missing or archived) says why.
-                      message: Schema.is(ProjectLabelError)(cause.cause)
-                        ? cause.cause.message
-                        : "Failed to launch thread",
+                      // A refused project pick or repository checkout says why.
+                      message:
+                        ThreadLaunchService.launchRefusalMessage(cause) ??
+                        "Failed to launch thread",
                       cause,
                     }),
                   ServerRuntimeStartupError: (cause) =>

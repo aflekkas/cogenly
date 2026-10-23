@@ -12,6 +12,7 @@ import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 
 import type { OrchestratorV2Error } from "../orchestration-v2/Orchestrator.ts";
+import * as ThreadLaunch from "../orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as OrchestrationMcp from "./OrchestratorMcpService.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
@@ -21,6 +22,14 @@ export const unavailable = () =>
     code: "orchestration_error",
     message: "The operation could not be completed.",
   });
+
+/** A launch refusal the caller can act on keeps its reason; anything else stays private. */
+export const launchFailure = (error: unknown) => {
+  const refusal = ThreadLaunch.launchRefusalMessage(error);
+  return refusal === undefined
+    ? unavailable()
+    : new OrchestratorMcpFailure({ code: "invalid_request", message: refusal });
+};
 
 /** Decider string rejections are public; wrapped storage and hydration causes are not. */
 export const dispatchFailure = (
