@@ -353,6 +353,7 @@ const make = Effect.gen(function* () {
                   reason: classifyProviderFailure(failureItem.failure),
                   resetAt: failureItem.failure.resetAt,
                   nowMs: DateTime.toEpochMillis(yield* DateTime.now),
+                  existingUntil: agent.fallbackUntil ?? null,
                 })
               : null;
           const updated = yield* sql.withTransaction(
