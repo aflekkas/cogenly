@@ -56,6 +56,8 @@ const integrationFields = {
 export const Integration = Schema.Struct({
   id: IntegrationId,
   ...integrationFields,
+  /** Credential destination authorized by the owner; absent on legacy definitions. */
+  credentialOrigin: Schema.optional(Schema.String),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   /** Tombstone; null while live. Deletes set this instead of removing the row. */
@@ -172,6 +174,7 @@ export type IntegrationCallResult = typeof IntegrationCallResult.Type;
 export const IntegrationUpdateByNameInput = Schema.Struct({
   name: IntegrationName,
   displayName: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(200))),
+  transport: Schema.optional(IntegrationTransport),
   url: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(2000))),
   headers: Schema.optional(IntegrationHeaders),
   enabled: Schema.optional(Schema.Boolean),

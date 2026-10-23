@@ -18,7 +18,7 @@ import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
-import { HttpClient, HttpClientRequest } from "effect/http";
+import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
@@ -44,6 +44,17 @@ const CREDENTIAL_REF = /\{\{credential:([^}]*)\}\}/g;
 /** Credential references referenced by a header template, in order. */
 export const credentialRefsIn = (template: string): ReadonlyArray<string> =>
   [...template.matchAll(CREDENTIAL_REF)].map((match) => (match[1] ?? "").trim());
+
+/** Treat every header as sensitive: even a static Host header can change routing. */
+export const integrationDestinationChanged = (
+  current: Integration,
+  input: IntegrationUpdateInput,
+): boolean =>
+  (input.url !== undefined && input.url !== current.url) ||
+  (input.transport !== undefined && input.transport !== current.transport) ||
+  (input.headers !== undefined &&
+    (Object.keys(input.headers).length !== Object.keys(current.headers).length ||
+      Object.entries(input.headers).some(([name, value]) => current.headers[name] !== value)));
 
 /**
  * Resolves `{{credential:item.field}}` references in every header value.
@@ -136,6 +147,7 @@ export class Integrations extends Context.Service<
     ) => Effect.Effect<{ integration: Integration }, IntegrationError>;
     readonly update: (
       input: IntegrationUpdateInput,
+      options?: { readonly preserveCredentialDestination: boolean },
     ) => Effect.Effect<{ integration: Integration }, IntegrationError>;
     /** Tombstones the integration; its name becomes reusable. */
     readonly remove: (id: IntegrationId) => Effect.Effect<{ deleted: boolean }, IntegrationError>;
@@ -286,6 +298,8 @@ const make = (options: IntegrationsOptions = {}) =>
           request = HttpClientRequest.setHeader(request, "mcp-session-id", sessionId);
         }
         const response = yield* client.execute(request).pipe(
+          // Fetch otherwise forwards custom secret headers across redirects.
+          Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }),
           Effect.timeout(Duration.millis(timeoutMs)),
           Effect.mapError((cause) =>
             isError(cause)
@@ -340,6 +354,16 @@ const make = (options: IntegrationsOptions = {}) =>
     /** One upstream round trip: resolve credentials, handshake, then call. */
     const rpc = (integration: Integration, method: string, params: unknown) =>
       Effect.gen(function* () {
+        if (
+          integration.credentialOrigin !== undefined &&
+          integration.credentialOrigin !== new URL(integration.url).origin &&
+          Object.values(integration.headers).some((value) => credentialRefsIn(value).length > 0)
+        ) {
+          return yield* new IntegrationError({
+            operation: method,
+            reason: "credential_unresolved",
+          });
+        }
         const headers = yield* resolveHeaderTemplates(integration.headers, credentials.resolve);
         const initialized = yield* post(
           integration,
@@ -465,6 +489,7 @@ const make = (options: IntegrationsOptions = {}) =>
             transport: input.transport,
             url: input.url,
             headers: input.headers,
+            credentialOrigin: new URL(input.url).origin,
             enabled: input.enabled ?? true,
             scope: input.scope,
             hint: input.hint,
@@ -475,9 +500,15 @@ const make = (options: IntegrationsOptions = {}) =>
           yield* persist(integration);
           return { integration };
         }).pipe(Effect.mapError(failure("create", "storage"))),
-      update: (input) =>
+      update: (input, options) =>
         Effect.gen(function* () {
           const current = yield* getById(input.id);
+          if (
+            options?.preserveCredentialDestination &&
+            integrationDestinationChanged(current, input)
+          ) {
+            return yield* new IntegrationError({ operation: "update", reason: "invalid_request" });
+          }
           if (input.url !== undefined) yield* validateUrl(input.url);
           const integration: Integration = {
             ...current,
@@ -489,11 +520,14 @@ const make = (options: IntegrationsOptions = {}) =>
             ...(input.scope === undefined ? {} : { scope: input.scope }),
             ...(input.hint === undefined ? {} : { hint: input.hint }),
             updatedAt: yield* now,
+            credentialOrigin: options?.preserveCredentialDestination
+              ? (current.credentialOrigin ?? new URL(current.url).origin)
+              : new URL(input.url ?? current.url).origin,
           };
           yield* persist(integration);
           yield* invalidate(integration.id);
           return { integration };
-        }).pipe(Effect.mapError(failure("update", "storage"))),
+        }).pipe(sql.withTransaction, Effect.mapError(failure("update", "storage"))),
       remove: (id) =>
         Effect.gen(function* () {
           const current = yield* getById(id).pipe(

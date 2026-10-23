@@ -14,6 +14,7 @@ import {
 import { Tool, Toolkit } from "effect/ai";
 
 import * as Integrations from "../../../integrations/Integrations.ts";
+import * as AgentStore from "../../../agents/AgentStore.ts";
 import * as Threads from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as Invocation from "../../McpInvocationContext.ts";
 
@@ -22,6 +23,7 @@ const shared = {
   failureMode: "return" as const,
   dependencies: [
     Integrations.Integrations,
+    AgentStore.AgentStore,
     Invocation.McpInvocationContext,
     Threads.ThreadManagementService,
   ],
@@ -68,7 +70,7 @@ export const IntegrationsToolkit = Toolkit.make(
     parameters: IntegrationUpdateByNameInput,
     success: IntegrationMutationResult,
     description:
-      "Change a connected integration by name: display name, url, headers, enabled, project scope, or hint. Omitted fields are preserved.",
+      "Change a connected integration by name: display name, transport, url, headers, enabled, project scope, or hint. Omitted fields are preserved. Persistent agents need owner approval for URL, transport, or header changes.",
   }).annotate(Tool.Destructive, false),
   Tool.make("integration_remove", {
     ...shared,

@@ -552,6 +552,14 @@ const make = Effect.gen(function* () {
                   .pipe(Effect.mapError((cause) => fail(cause.message)));
                 break;
               }
+              case "integration_update": {
+                if (integrations._tag === "None")
+                  return yield* fail("Integrations are unavailable on this server.");
+                yield* integrations.value
+                  .update(action.payload)
+                  .pipe(Effect.mapError((cause) => fail(cause.message)));
+                break;
+              }
             }
             yield* sql.withTransaction(
               Effect.gen(function* () {

@@ -4,6 +4,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import * as Integrations from "../../../integrations/Integrations.ts";
+import * as AgentStore from "../../../agents/AgentStore.ts";
 import * as ProjectFiles from "../../../projectLabels/ProjectFiles.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
 import * as Invocation from "../../McpInvocationContext.ts";
@@ -105,16 +106,26 @@ export const layer = McpToolAccess.toLayer(IntegrationsToolkit, {
     Effect.gen(function* () {
       const service = yield* Integrations.Integrations;
       const current = yield* byName(input.name);
+      const scope = yield* Invocation.McpInvocationContext;
+      const agents = yield* AgentStore.AgentStore;
+      const agent =
+        scope.thread === undefined
+          ? null
+          : yield* agents.forThread(scope.thread.threadId).pipe(Effect.mapError(failure));
       return yield* service
-        .update({
-          id: current.id,
-          ...(input.displayName === undefined ? {} : { displayName: input.displayName }),
-          ...(input.url === undefined ? {} : { url: input.url }),
-          ...(input.headers === undefined ? {} : { headers: input.headers }),
-          ...(input.enabled === undefined ? {} : { enabled: input.enabled }),
-          ...(input.scope === undefined ? {} : { scope: input.scope }),
-          ...(input.hint === undefined ? {} : { hint: input.hint }),
-        })
+        .update(
+          {
+            id: current.id,
+            ...(input.displayName === undefined ? {} : { displayName: input.displayName }),
+            ...(input.url === undefined ? {} : { url: input.url }),
+            ...(input.transport === undefined ? {} : { transport: input.transport }),
+            ...(input.headers === undefined ? {} : { headers: input.headers }),
+            ...(input.enabled === undefined ? {} : { enabled: input.enabled }),
+            ...(input.scope === undefined ? {} : { scope: input.scope }),
+            ...(input.hint === undefined ? {} : { hint: input.hint }),
+          },
+          { preserveCredentialDestination: agent !== null },
+        )
         .pipe(Effect.mapError(failure));
     }),
   ),

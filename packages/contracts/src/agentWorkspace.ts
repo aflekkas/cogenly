@@ -12,7 +12,7 @@ import {
 import { ModelSelection } from "./modelSelection.ts";
 import { ScheduledTaskUpsertInput } from "./scheduledTask.ts";
 import { OrchestrationV2ThreadLaunchWorkspaceStrategy } from "./orchestrationV2.ts";
-import { IntegrationCreateInput } from "./integration.ts";
+import { IntegrationCreateInput, IntegrationUpdateInput } from "./integration.ts";
 
 export const AgentStartWorkInput = Schema.Struct({
   agentId: AgentId,
@@ -48,6 +48,17 @@ export const AgentApprovalAction = Schema.Union([
     actionKind: Schema.Literal("integration_add"),
     payload: IntegrationCreateInput,
   }),
+  Schema.Struct({
+    actionKind: Schema.Literal("integration_update"),
+    payload: Schema.Struct({
+      ...IntegrationUpdateInput.fields,
+      // Freeze the entire credential destination the owner reviews. Omitted
+      // fields must not inherit a different destination at approval time.
+      url: IntegrationCreateInput.fields.url,
+      transport: IntegrationCreateInput.fields.transport,
+      headers: IntegrationCreateInput.fields.headers,
+    }),
+  }),
 ]);
 export type AgentApprovalAction = typeof AgentApprovalAction.Type;
 export const AgentApprovalStatus = Schema.Literals(["pending", "approved", "rejected", "expired"]);
@@ -61,6 +72,7 @@ export const AgentApproval = Schema.Struct({
     "change_permissions",
     "vault_use",
     "integration_add",
+    "integration_update",
   ]),
   payload: Schema.Record(Schema.String, Schema.Unknown),
   status: AgentApprovalStatus,

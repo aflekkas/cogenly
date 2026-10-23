@@ -16,6 +16,12 @@ import * as Sqlite from "../persistence/Sqlite.ts";
 import { runMigrations } from "../persistence/Migrations.ts";
 import * as Credentials from "./IntegrationCredentials.ts";
 import * as Integrations from "./Integrations.ts";
+import * as Workspace from "../agents/AgentWorkspaceService.ts";
+import * as AgentStore from "../agents/AgentStore.ts";
+import * as Agents from "../agents/AgentService.ts";
+import * as Work from "../work/WorkHandoffService.ts";
+import * as Schedules from "../scheduledTasks/ScheduledTaskService.ts";
+import { agentFixture } from "../agents/agent.testkit.ts";
 
 const database = Sqlite.layerMemory.pipe(Layer.provide(NodeServices.layer));
 
@@ -32,91 +38,98 @@ interface FakeUpstream {
 }
 
 /** A real in-process HTTP MCP server speaking streamable-HTTP JSON-RPC. */
-const fakeUpstream = Effect.acquireRelease(
-  Effect.sync(() => {
-    const seen: FakeUpstream["seen"] = [];
-    const server: NodeHttp.Server = NodeHttp.createServer((request, response) => {
-      const chunks: Array<Buffer> = [];
-      request.on("data", (chunk: Buffer) => chunks.push(chunk));
-      request.on("end", () => {
-        const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as {
-          id: number;
-          method: string;
-          params?: { name?: string; arguments?: unknown };
-        };
-        seen.push({
-          method: body.method,
-          authorization: request.headers.authorization,
+const fakeUpstreamWith = (redirectTo?: string) =>
+  Effect.acquireRelease(
+    Effect.sync(() => {
+      const seen: FakeUpstream["seen"] = [];
+      const server: NodeHttp.Server = NodeHttp.createServer((request, response) => {
+        const chunks: Array<Buffer> = [];
+        request.on("data", (chunk: Buffer) => chunks.push(chunk));
+        request.on("end", () => {
+          if (redirectTo) {
+            response.writeHead(307, { location: redirectTo });
+            response.end();
+            return;
+          }
+          const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as {
+            id: number;
+            method: string;
+            params?: { name?: string; arguments?: unknown };
+          };
+          seen.push({
+            method: body.method,
+            authorization: request.headers.authorization,
+          });
+          const reply = (payload: unknown, headers: Record<string, string> = {}) => {
+            response.writeHead(200, { "content-type": "application/json", ...headers });
+            response.end(JSON.stringify(payload));
+          };
+          if (body.method === "initialize") {
+            reply(
+              { jsonrpc: "2.0", id: body.id, result: { protocolVersion: "2025-03-26" } },
+              { "mcp-session-id": "session-1" },
+            );
+          } else if (body.method === "tools/list") {
+            reply({
+              jsonrpc: "2.0",
+              id: body.id,
+              result: {
+                tools: [
+                  {
+                    name: "echo",
+                    description: "Echoes its input",
+                    inputSchema: { type: "object", properties: { text: { type: "string" } } },
+                  },
+                ],
+              },
+            });
+          } else if (body.method === "tools/call" && body.params?.name === "hang") {
+            // Never answers: the gateway timeout must map this.
+          } else if (body.method === "tools/call" && body.params?.name === "fail") {
+            reply({
+              jsonrpc: "2.0",
+              id: body.id,
+              error: { code: -32000, message: "upstream exploded" },
+            });
+          } else if (body.method === "tools/call") {
+            reply({
+              jsonrpc: "2.0",
+              id: body.id,
+              result: {
+                content: [{ type: "text", text: JSON.stringify(body.params?.arguments ?? {}) }],
+                isError: false,
+              },
+            });
+          } else {
+            reply({ jsonrpc: "2.0", id: body.id, error: { code: -32601, message: "unknown" } });
+          }
         });
-        const reply = (payload: unknown, headers: Record<string, string> = {}) => {
-          response.writeHead(200, { "content-type": "application/json", ...headers });
-          response.end(JSON.stringify(payload));
-        };
-        if (body.method === "initialize") {
-          reply(
-            { jsonrpc: "2.0", id: body.id, result: { protocolVersion: "2025-03-26" } },
-            { "mcp-session-id": "session-1" },
-          );
-        } else if (body.method === "tools/list") {
-          reply({
-            jsonrpc: "2.0",
-            id: body.id,
-            result: {
-              tools: [
-                {
-                  name: "echo",
-                  description: "Echoes its input",
-                  inputSchema: { type: "object", properties: { text: { type: "string" } } },
-                },
-              ],
-            },
-          });
-        } else if (body.method === "tools/call" && body.params?.name === "hang") {
-          // Never answers: the gateway timeout must map this.
-        } else if (body.method === "tools/call" && body.params?.name === "fail") {
-          reply({
-            jsonrpc: "2.0",
-            id: body.id,
-            error: { code: -32000, message: "upstream exploded" },
-          });
-        } else if (body.method === "tools/call") {
-          reply({
-            jsonrpc: "2.0",
-            id: body.id,
-            result: {
-              content: [{ type: "text", text: JSON.stringify(body.params?.arguments ?? {}) }],
-              isError: false,
-            },
-          });
-        } else {
-          reply({ jsonrpc: "2.0", id: body.id, error: { code: -32601, message: "unknown" } });
-        }
       });
-    });
-    return { server, seen };
-  }).pipe(
-    Effect.flatMap(({ server, seen }) =>
-      Effect.callback<FakeUpstream>((resume) => {
-        server.listen(0, "127.0.0.1", () => {
-          const address = server.address();
-          const port = typeof address === "object" && address !== null ? address.port : 0;
-          resume(
-            Effect.succeed({
-              url: `http://127.0.0.1:${port}/mcp`,
-              seen,
-              close: () =>
-                Effect.sync(() => {
-                  server.closeAllConnections();
-                  server.close();
-                }),
-            }),
-          );
-        });
-      }),
+      return { server, seen };
+    }).pipe(
+      Effect.flatMap(({ server, seen }) =>
+        Effect.callback<FakeUpstream>((resume) => {
+          server.listen(0, "127.0.0.1", () => {
+            const address = server.address();
+            const port = typeof address === "object" && address !== null ? address.port : 0;
+            resume(
+              Effect.succeed({
+                url: `http://127.0.0.1:${port}/mcp`,
+                seen,
+                close: () =>
+                  Effect.sync(() => {
+                    server.closeAllConnections();
+                    server.close();
+                  }),
+              }),
+            );
+          });
+        }),
+      ),
     ),
-  ),
-  (upstream) => upstream.close(),
-);
+    (upstream) => upstream.close(),
+  );
+const fakeUpstream = fakeUpstreamWith();
 
 const layerWith = (options: Integrations.IntegrationsOptions = {}) =>
   Integrations.layerWith(options).pipe(
@@ -167,6 +180,123 @@ describe("resolveHeaderTemplates", () => {
 });
 
 describe("Integrations gateway", () => {
+  it.effect(
+    "binds credentials to the approved origin and refuses unapproved destination edits",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* runMigrations();
+          const original = yield* fakeUpstream;
+          const other = yield* fakeUpstream;
+          const service = yield* Integrations.Integrations;
+          const { integration } = yield* service.create(createInput(original.url));
+          const preserve = { preserveCredentialDestination: true };
+          for (const change of [
+            { url: other.url },
+            { headers: { "x-api-key": "{{credential:gmail.apiKey}}" } },
+            { headers: { authorization: "{{credential:other.apiKey}}" } },
+          ]) {
+            expect(
+              (yield* service
+                .update({ id: integration.id, ...change }, preserve)
+                .pipe(Effect.result))._tag,
+            ).toBe("Failure");
+          }
+          yield* service.update({ id: integration.id, hint: "Safe edit" }, preserve);
+          yield* service.callTool(integration.name, "echo", {}, null);
+          expect(other.seen).toHaveLength(0);
+          expect(original.seen[0]?.authorization).toBe("Bearer SECRET-VALUE-123");
+
+          // A stored definition with a mismatched binding fails before resolving or sending.
+          const sql = yield* SqlClient.SqlClient;
+          yield* sql`UPDATE integrations SET payload_json = ${JSON.stringify({ ...integration, url: other.url })} WHERE id = ${integration.id}`;
+          expect(
+            (yield* service.callTool(integration.name, "echo", {}, null).pipe(Effect.result))._tag,
+          ).toBe("Failure");
+          expect(other.seen).toHaveLength(0);
+          // Settings/owner approval authorizes a new origin, keeping existing headers.
+          const approved = yield* service.update({ id: integration.id, url: other.url });
+          expect(approved.integration.credentialOrigin).toBe(new URL(other.url).origin);
+          yield* service.callTool(integration.name, "echo", {}, null);
+          expect(other.seen[0]?.authorization).toBe("Bearer SECRET-VALUE-123");
+        }).pipe(Effect.provide(layerWith())),
+      ),
+  );
+
+  it.effect("never forwards custom secret headers to a redirect destination", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* runMigrations();
+        const destination = yield* fakeUpstream;
+        const redirect = yield* fakeUpstreamWith(destination.url);
+        const service = yield* Integrations.Integrations;
+        const { integration } = yield* service.create({
+          ...createInput(redirect.url),
+          headers: { "x-api-key": "{{credential:gmail.apiKey}}" },
+        });
+        expect(
+          (yield* service.callTool(integration.name, "echo", {}, null).pipe(Effect.result))._tag,
+        ).toBe("Failure");
+        expect(destination.seen).toHaveLength(0);
+      }).pipe(Effect.provide(layerWith())),
+    ),
+  );
+
+  it.effect("owner approval applies only the reviewed credential destination", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* runMigrations();
+        const upstream = yield* fakeUpstream;
+        const service = yield* Integrations.Integrations;
+        const workspace = yield* Workspace.AgentWorkspaceService;
+        const agent = agentFixture("integration-approval");
+        const sql = yield* SqlClient.SqlClient;
+        yield* sql`INSERT INTO agents(agent_id, conversation_thread_id, payload_json, enabled, daily_run_cap) VALUES (${agent.id}, ${agent.conversationThreadId}, ${JSON.stringify(agent)}, 1, 2)`;
+        const { integration } = yield* service.create(createInput("https://original.test/mcp"));
+        const { approval } = yield* workspace.requestApproval(agent.id, {
+          actionKind: "integration_update",
+          payload: {
+            id: integration.id,
+            url: upstream.url,
+            headers: integration.headers,
+            transport: integration.transport,
+          },
+        });
+        // A subsequent edit must not attach unreviewed credentials to the approved origin.
+        yield* service.update({
+          id: integration.id,
+          headers: { authorization: "{{credential:unreviewed.apiKey}}" },
+        });
+        yield* workspace.approve(approval.id);
+        yield* service.callTool(integration.name, "echo", {}, null);
+        expect(upstream.seen[0]?.authorization).toBe("Bearer SECRET-VALUE-123");
+        expect((yield* workspace.listApprovals({})).approvals[0]?.status).toBe("approved");
+      }).pipe(
+        Effect.provide(
+          Workspace.layer.pipe(
+            Layer.provideMerge(layerWith()),
+            Layer.provide(
+              Layer.mergeAll(
+                Layer.mock(AgentStore.AgentStore)({
+                  get: () =>
+                    Effect.succeed({
+                      ...agentFixture("integration-approval"),
+                      unreadCount: 0,
+                      latestMessage: null,
+                    }),
+                }),
+                Layer.mock(Agents.AgentService)({}),
+                Layer.mock(Work.WorkHandoffService)({}),
+                Layer.mock(Schedules.ScheduledTaskService)({}),
+              ),
+            ),
+            Layer.provide(NodeServices.layer),
+          ),
+        ),
+      ),
+    ),
+  );
+
   it.effect("lists and calls tools, resolving credentials server-side only", () =>
     Effect.scoped(
       Effect.gen(function* () {

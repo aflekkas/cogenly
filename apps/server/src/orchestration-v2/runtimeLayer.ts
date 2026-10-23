@@ -340,6 +340,9 @@ const layerSecretRequestsProvided = SecretRequests.layer.pipe(
   Layer.provide(layerThreadManagementProvided),
 );
 const layerVaultProvided = Vault.layer.pipe(Layer.provide(ServerEnvironment.layerIdentity));
+const layerIntegrationsProvided = Integrations.layer.pipe(
+  Layer.provide(IntegrationCredentials.layer.pipe(Layer.provide(layerVaultProvided))),
+);
 const layerAgentsProvided = Agents.layer.pipe(
   Layer.provide(
     Layer.mergeAll(
@@ -384,12 +387,18 @@ const layerAgentWorkspaceProvided = AgentWorkspace.layer.pipe(
       layerAgentsProvided,
       layerWorkHandoffProvided,
       layerScheduledTaskProvided,
+      layerIntegrationsProvided,
     ),
   ),
 );
 const layerAgentMcpPolicyProvided = AgentMcpPolicy.layer.pipe(
   Layer.provide(
-    Layer.mergeAll(AgentStore.layer, layerAgentWorkspaceProvided, layerThreadManagementProvided),
+    Layer.mergeAll(
+      AgentStore.layer,
+      layerAgentWorkspaceProvided,
+      layerThreadManagementProvided,
+      layerIntegrationsProvided,
+    ),
   ),
 );
 const layerProviderContinuationWorkerProvided = ProviderContinuationService.layer.pipe(
@@ -461,9 +470,7 @@ export const layer = Layer.mergeAll(
 
 const layerProductionBase = Layer.mergeAll(
   Facts.layer,
-  Integrations.layer.pipe(
-    Layer.provide(IntegrationCredentials.layer.pipe(Layer.provide(layerVaultProvided))),
-  ),
+  layerIntegrationsProvided,
   Retrieval.layer,
   layer.pipe(Layer.provide(layerProjectService)),
   layerProjectService,
