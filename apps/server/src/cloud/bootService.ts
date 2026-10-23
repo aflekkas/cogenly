@@ -152,7 +152,12 @@ export function renderBootServiceUnit(
     "StartLimitBurst=5",
     "",
     "[Service]",
-    "Type=simple",
+    "Type=notify",
+    // The server sends through systemd-notify, beneath the service launcher.
+    "NotifyAccess=all",
+    "WatchdogSec=60",
+    "TimeoutStartSec=180",
+    "TimeoutStopSec=30",
     "WorkingDirectory=%h",
     `Environment=COGENLY_HOME=${quoteSystemdValue(plan.baseDir)}`,
     ...(options?.environmentPath === undefined

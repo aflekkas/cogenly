@@ -287,6 +287,101 @@ const makeHarness = Effect.sync(() => {
 });
 
 describe("agent execution", () => {
+  it.effect.each(["starting", "running"] as const)(
+    "startup fails an interrupted %s reservation and posts its reason once",
+    (status) =>
+      Effect.gen(function* () {
+        const h = yield* makeHarness;
+        yield* Effect.gen(function* () {
+          const store = yield* Store.AgentStore;
+          const agents = yield* Agents.AgentService;
+          yield* store.save(h.fixture);
+          yield* store.createRun({
+            id: "interrupted-reservation",
+            agentId: h.fixture.id,
+            triggerId: ScheduledTaskId.make("task:interrupted"),
+            workThreadId: ThreadId.make("thread:never-launched"),
+            status,
+            createdAt: DateTime.formatIso(yield* DateTime.now),
+            completedAt: null,
+            summary: null,
+            posted: false,
+          });
+          yield* agents.reconcile();
+          expect((yield* store.runs(h.fixture.id))[0]?.status).toBe(status);
+          expect(h.posts).toHaveLength(0);
+          // No grace period: recovery runs before any scheduler can launch fresh work.
+          yield* agents.reconcile({ afterRestart: true });
+          yield* agents.reconcile({ afterRestart: true });
+          const record = (yield* store.runs(h.fixture.id))[0]!;
+          expect(record).toMatchObject({ status: "failed", posted: true });
+          expect(record.completedAt).not.toBeNull();
+          expect(record.summary).toContain("Cogenly restarted during this run");
+          expect((yield* store.get(h.fixture.id)).consecutiveFailures).toBe(1);
+          expect(h.posts).toHaveLength(1);
+          expect(h.posts[0]?.effects).toEqual([]);
+          expect(h.calls).toEqual([]);
+          expect(h.launches).toEqual([]);
+        }).pipe(Effect.provide(h.layer));
+      }),
+  );
+
+  it.effect("posts the restart failure instead of an interrupted job's partial answer", () =>
+    Effect.gen(function* () {
+      const h = yield* makeHarness;
+      yield* Effect.gen(function* () {
+        const store = yield* Store.AgentStore;
+        const agents = yield* Agents.AgentService;
+        const schedules = yield* Schedules.ScheduledTaskService;
+        yield* store.save(h.fixture);
+        const { task } = yield* schedules.upsert(h.triggerInput);
+        yield* agents.trigger(task, "interrupted", task.prompt);
+        const threadId = h.launches[0]!.threadId!;
+        const projection = h.projections.get(threadId)!;
+        const run = projection.runs[0]!;
+        const at = yield* DateTime.now;
+        h.projections.set(threadId, {
+          ...projection,
+          runs: [{ ...run, status: "failed", completedAt: at }],
+          turnItems: [
+            {
+              id: TurnItemId.make("item:restart"),
+              type: "error",
+              threadId,
+              runId: run.id,
+              nodeId: null,
+              providerThreadId: null,
+              providerTurnId: null,
+              nativeItemRef: null,
+              parentItemId: null,
+              ordinal: 1,
+              status: "failed",
+              title: "Run interrupted",
+              failure: {
+                class: "transport_error",
+                code: "server_restarted",
+                message: "Cogenly restarted during this run.",
+                retryable: true,
+              },
+              startedAt: at,
+              completedAt: at,
+              updatedAt: at,
+            },
+          ],
+        });
+        yield* agents.reconcile({ afterRestart: true });
+        yield* agents.reconcile();
+        const record = (yield* store.runs(h.fixture.id))[0]!;
+        expect(record).toMatchObject({ status: "failed", posted: true });
+        expect(record.summary).toContain("Cogenly restarted during this run");
+        const posted = h.posts[0]?.events[0];
+        expect(posted?.type === "message.updated" && posted.payload.text).toBe(record.summary);
+        expect(h.posts).toHaveLength(1);
+        expect((yield* store.get(h.fixture.id)).consecutiveFailures).toBe(1);
+      }).pipe(Effect.provide(h.layer));
+    }),
+  );
+
   it.effect(
     "runs a trigger in a separate work thread and posts once without starting another turn",
     () =>

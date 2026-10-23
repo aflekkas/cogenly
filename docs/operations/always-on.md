@@ -151,7 +151,12 @@ with `git pull && vp i && vp run build:desktop && cogenly service restart`.
 
 `GET /health` is an unauthenticated liveness probe
 returning `ok`, `version`, `uptimeSeconds`, and `schedulerHeartbeatAgeSeconds`;
-point uptime monitors at it over loopback or the tailnet. The scheduler ticks
-every 5 seconds, so a heartbeat age far beyond that means the event loop
-stopped turning. `cogenly doctor` reclaims database space, pausing the service
-itself while it runs.
+point uptime monitors at it over loopback or the tailnet. The Linux service uses
+systemd's 60-second watchdog: the server sends notifications through
+`systemd-notify` only while the scheduler's 5-second heartbeat is at most 20 seconds
+old. A hung event loop or dead scheduler therefore causes a restart. Reinstall
+the service once after upgrading an older unit to enable the watchdog.
+
+Startup resumes eligible conversation turns and marks interrupted agent Work jobs
+failed with a restart reason in the work details and agent conversation.
+`cogenly doctor` reclaims database space, pausing the service itself while it runs.

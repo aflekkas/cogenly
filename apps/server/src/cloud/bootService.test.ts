@@ -19,6 +19,11 @@ describe("boot service unit renderer", () => {
   it("renders a restarting user service", () => {
     const unit = renderBootServiceUnit(plan);
     expect(unit).toContain("Description=Cogenly server\n");
+    expect(unit).toContain("Type=notify\n");
+    expect(unit).toContain("NotifyAccess=all\n");
+    expect(unit).toContain("WatchdogSec=60\n");
+    expect(unit).toContain("TimeoutStartSec=180\n");
+    expect(unit).toContain("TimeoutStopSec=30\n");
     expect(unit).toContain("Restart=always\n");
     expect(unit).toContain("RestartSec=5\n");
     expect(unit).toContain(

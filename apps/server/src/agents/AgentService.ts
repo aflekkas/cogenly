@@ -100,7 +100,9 @@ export class AgentService extends Context.Service<
       context?: AgentEventContext,
     ) => Effect.Effect<boolean, AgentError>;
     /** Also called on startup; terminal runs with undelivered postbacks survive restarts. */
-    readonly reconcile: () => Effect.Effect<void, AgentError>;
+    readonly reconcile: (options?: {
+      readonly afterRestart?: boolean;
+    }) => Effect.Effect<void, AgentError>;
   }
 >()("cogenly-server/agents/AgentService") {}
 
@@ -227,7 +229,7 @@ const make = Effect.gen(function* () {
       yield* store.markPosted(run.id);
       yield* changed;
     });
-  const reconcile = () =>
+  const reconcile: AgentService["Service"]["reconcile"] = (options) =>
     Effect.gen(function* () {
       const runs = yield* store.runs();
       for (const record of runs) {
@@ -242,33 +244,25 @@ const make = Effect.gen(function* () {
             .pipe(
               Effect.catchTags({ ProjectionStoreThreadNotFoundError: () => Effect.succeed(null) }),
             );
-          if (projection === null) {
-            if (
-              DateTime.toEpochMillis(yield* DateTime.now) - Date.parse(record.createdAt) >
-              300000
-            ) {
-              yield* store.outcome(agent.id, false);
-              yield* store.finishRun(
-                record.id,
-                "failed",
-                "This job was interrupted before it could start.",
-              );
-            }
-            return;
-          }
-          const run = projection.runs.at(-1);
+          const run = projection?.runs.at(-1);
           if (
             run === undefined &&
-            DateTime.toEpochMillis(yield* DateTime.now) - Date.parse(record.createdAt) > 300000
+            (options?.afterRestart ||
+              DateTime.toEpochMillis(yield* DateTime.now) - Date.parse(record.createdAt) > 300000)
           ) {
-            yield* store.outcome(agent.id, false);
-            yield* store.finishRun(
-              record.id,
-              "failed",
-              "This job was interrupted before its first turn started.",
+            const summary = options?.afterRestart
+              ? "Cogenly restarted during this run, before its first turn started."
+              : "This job was interrupted before its first turn started.";
+            yield* sql.withTransaction(
+              Effect.gen(function* () {
+                yield* store.outcome(agent.id, false);
+                yield* store.finishRun(record.id, "failed", summary);
+              }),
             );
+            yield* post(agent, { ...record, status: "failed", summary });
             return;
           }
+          if (projection === null) return;
           if (run?.status === "waiting") {
             yield* post(agent, {
               ...record,
@@ -312,11 +306,17 @@ const make = Effect.gen(function* () {
                   reason: advance.reason,
                   until: advance.until,
                 });
-              const summary =
-                response.slice(0, 1200) ||
-                (succeeded
-                  ? "Work finished."
-                  : "This run failed. Open the work details to inspect it.");
+              const summary = projection.turnItems.some(
+                (item) =>
+                  item.runId === run.id &&
+                  item.type === "error" &&
+                  item.failure.code === "server_restarted",
+              )
+                ? "Cogenly restarted during this run. Open the work details to inspect partial work."
+                : response.slice(0, 1200) ||
+                  (succeeded
+                    ? "Work finished."
+                    : "This run failed. Open the work details to inspect it.");
               yield* store.finishRun(
                 record.id,
                 succeeded ? "completed" : "failed",
