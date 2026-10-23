@@ -7,6 +7,8 @@ import {
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/sql/SqlClient";
+import * as Stream from "effect/Stream";
+import * as Machines from "../machines/Machines.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import { startMachine, pair, startProxy, awaitLinkState } from "../machines/testkit.ts";
 import * as SharedState from "./SharedState.ts";
@@ -30,20 +32,49 @@ const start = Effect.fn("startSyncMachine")(function* (
   const machine = yield* startMachine(name, role);
   const stateContext = yield* machine.run(Layer.build(SharedState.layer));
   const state = yield* SharedState.SharedState.pipe(Effect.provideContext(stateContext));
+  const jobs = new Map<string, Effect.Effect<void>>();
   const syncContext = yield* machine.run(
     Layer.build(
       SharedSync.layer.pipe(
-        Layer.provide(Layer.succeed(SharedState.SharedState, state)),
+        Layer.provide(Layer.succeed(SharedState.SharedState, { ...state, changes: Stream.never })),
+        Layer.provide(
+          Layer.succeed(Machines.Machines, { ...machine.machines, subscribe: Stream.never }),
+        ),
         // Explicit passes in tests, with durable milestones instead of scheduler sleeps.
-        Layer.provide(Layer.succeed(Scheduler.Scheduler, { register: () => Effect.void })),
+        Layer.provide(
+          Layer.succeed(Scheduler.Scheduler, {
+            register: (name, job) =>
+              Effect.gen(function* () {
+                const context = yield* Effect.context<Effect.Services<typeof job>>();
+                jobs.set(name, job.pipe(Effect.provideContext(context), Effect.orDie));
+              }),
+          }),
+        ),
       ),
     ),
   );
   const sync = yield* SharedSync.SharedSync.pipe(Effect.provideContext(syncContext));
-  return { ...machine, state, sync };
+  return { ...machine, state, sync, catchUp: jobs.get("shared-documents")! };
 });
 
 describe("shared documents over the authenticated machine link", () => {
+  it.live(
+    "a peer with a broken sync channel cannot block the later healthy peer",
+    () =>
+      Effect.gen(function* () {
+        const hub = yield* start("isolated-hub", "cloud-server");
+        const broken = yield* startMachine("isolated-broken", "computer");
+        const healthy = yield* start("isolated-healthy", "computer");
+        yield* pair(hub, broken);
+        yield* pair(hub, healthy);
+        yield* hub.state.write("project", "label:isolation", project);
+        yield* hub.catchUp;
+        expect((yield* healthy.state.get("project", "label:isolation"))?.fields.name).toBe(
+          "Project",
+        );
+      }).pipe(Effect.scoped),
+    20000,
+  );
   it.live(
     "two machines converge concurrent fields and a lost acknowledgement is replay-safe",
     () =>

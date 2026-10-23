@@ -110,7 +110,15 @@ const make = Effect.gen(function* () {
     yield* state.setHub(view.link._tag === "spoke" ? view.link.hubEnvironmentId : null);
     for (const machine of view.machines)
       if (machine.online && (machine.relation === "hub" || machine.relation === "spoke"))
-        yield* sync(machine.environmentId);
+        yield* sync(machine.environmentId).pipe(
+          Effect.catchTags({
+            SharedStateError: (error) =>
+              Effect.logWarning("Shared document peer catch-up deferred", {
+                peer: machine.environmentId,
+                reason: error.reason,
+              }),
+          }),
+        );
   });
   const safeCatchUp = catchUp.pipe(
     Effect.catchTags({
