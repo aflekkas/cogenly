@@ -350,7 +350,10 @@ const layerThreadLifecycleProvided = ThreadLifecycleService.layer.pipe(
 const layerSecretRequestsProvided = SecretRequests.layer.pipe(
   Layer.provide(layerThreadManagementProvided),
 );
-const layerVaultProvided = Vault.layer.pipe(Layer.provide(ServerEnvironment.layerIdentity));
+const layerVaultProvided = Vault.layer.pipe(
+  Layer.provide(ServerEnvironment.layerIdentity),
+  Layer.provide(layerProjectFilesProvided),
+);
 const layerIntegrationsProvided = Integrations.layer.pipe(
   Layer.provide(IntegrationCredentials.layer.pipe(Layer.provide(layerVaultProvided))),
 );
@@ -436,6 +439,7 @@ const layerAgentMcpPolicyProvided = AgentMcpPolicy.layer.pipe(
   Layer.provide(
     Layer.mergeAll(
       AgentStore.layer,
+      layerProjectFilesProvided,
       layerAgentWorkspaceProvided,
       layerThreadManagementProvided,
       layerIntegrationsProvided,

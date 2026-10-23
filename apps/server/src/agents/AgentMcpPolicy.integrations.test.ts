@@ -3,6 +3,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   EnvironmentId,
   IntegrationId,
+  ProjectLabelId,
   ProviderInstanceId,
   type AgentApprovalAction,
   type Integration,
@@ -11,6 +12,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/sql/SqlClient";
 
+import * as ProjectFiles from "../projectLabels/ProjectFiles.ts";
 import * as Sqlite from "../persistence/Sqlite.ts";
 import { runMigrations } from "../persistence/Migrations.ts";
 import type { McpInvocationScope } from "../mcp/McpInvocationContext.ts";
@@ -28,7 +30,7 @@ const shell = liveThreadShell(agent.conversationThreadId);
 
 let approvalRequests = 0;
 const proposals: AgentApprovalAction[] = [];
-const current: Integration = {
+let current: Integration = {
   id: IntegrationId.make("integration:test"),
   name: "gmail",
   displayName: "Gmail",
@@ -188,3 +190,30 @@ describe("integration_add approval gating", () => {
       }).pipe(Effect.provide(layer)),
   );
 });
+
+it.effect("scope widening requests owner approval for a visible integration", () =>
+  Effect.gen(function* () {
+    yield* runMigrations();
+    const sql = yield* SqlClient.SqlClient;
+    yield* sql`INSERT INTO agents(agent_id, conversation_thread_id, payload_json, enabled, daily_run_cap) VALUES (${agent.id}, ${agent.conversationThreadId}, ${JSON.stringify(agent)}, 1, 2)`;
+    const policy = yield* AgentMcpPolicy.AgentMcpPolicy;
+    const original = current;
+    current = { ...current, scope: { type: "projects", labelIds: [ProjectLabelId.make("a")] } };
+    const result = yield* policy
+      .beforeTool(
+        scopeFor(true),
+        "integration_update",
+        { name: current.name, scope: { type: "all" } },
+        false,
+      )
+      .pipe(Effect.result);
+    current = original;
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") expect(result.failure.code).toBe("agent_approval_required");
+  }).pipe(
+    Effect.provide(layer),
+    Effect.provideService(ProjectFiles.ProjectFiles, {
+      folderForThread: () => Effect.succeed({ labelId: ProjectLabelId.make("a") } as never),
+    } as ProjectFiles.ProjectFiles["Service"]),
+  ),
+);

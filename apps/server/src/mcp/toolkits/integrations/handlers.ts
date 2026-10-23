@@ -18,25 +18,28 @@ const failure = (cause: unknown): OrchestratorMcpFailure =>
           cause.reason === "not_found" ||
           cause.reason === "disabled" ||
           cause.reason === "credential_unresolved" ||
+          cause.reason === "approval_required" ||
           cause.reason === "credential_not_allowed"
             ? "invalid_request"
             : "orchestration_error",
         message:
-          cause.reason === "credential_unresolved"
-            ? "An integration credential could not be resolved. Ask the owner to check the vault item named in its headers."
-            : cause.reason === "credential_not_allowed"
-              ? "A vault item in this integration's headers isn't allowed for its server. Ask the owner to add the server to the item's allowed domains, or to save the integration in Settings → Integrations to approve it."
-              : cause.reason === "upstream_timeout"
-                ? "The integration did not answer in time. Try again, or ask the owner to check it in Settings."
-                : cause.reason === "upstream_unreachable"
-                  ? "The integration could not be reached. Ask the owner to check it in Settings."
-                  : cause.reason === "not_found"
-                    ? "No connected integration with that name is available in this project."
-                    : cause.reason === "disabled"
-                      ? "That integration is disabled."
-                      : cause.reason === "conflict"
-                        ? "An integration with that name already exists."
-                        : "The integration request could not be completed.",
+          cause.reason === "approval_required"
+            ? "Widening integration access needs owner approval. Ask the owner to approve the scope in Settings → Integrations."
+            : cause.reason === "credential_unresolved"
+              ? "An integration credential could not be resolved. Ask the owner to check the vault item named in its headers."
+              : cause.reason === "credential_not_allowed"
+                ? "A vault item in this integration's headers isn't allowed for its server. Ask the owner to add the server to the item's allowed domains, or to save the integration in Settings → Integrations to approve it."
+                : cause.reason === "upstream_timeout"
+                  ? "The integration did not answer in time. Try again, or ask the owner to check it in Settings."
+                  : cause.reason === "upstream_unreachable"
+                    ? "The integration could not be reached. Ask the owner to check it in Settings."
+                    : cause.reason === "not_found"
+                      ? "No connected integration with that name is available in this project."
+                      : cause.reason === "disabled"
+                        ? "That integration is disabled."
+                        : cause.reason === "conflict"
+                          ? "An integration with that name already exists."
+                          : "The integration request could not be completed.",
       })
     : new OrchestratorMcpFailure({
         code: "orchestration_error",
@@ -63,7 +66,12 @@ const byName = (name: string) =>
   Effect.gen(function* () {
     const service = yield* Integrations.Integrations;
     const { integrations } = yield* service.list().pipe(Effect.mapError(failure));
-    const found = integrations.find((summary) => summary.integration.name === name);
+    const label = yield* callerLabel;
+    const found = integrations.find(
+      (summary) =>
+        summary.integration.name === name &&
+        Integrations.integrationVisibleTo({ ...summary.integration, enabled: true }, label),
+    );
     if (found === undefined) {
       return yield* new OrchestratorMcpFailure({
         code: "invalid_request",
@@ -111,6 +119,7 @@ export const layer = McpToolAccess.toLayer(IntegrationsToolkit, {
     Effect.gen(function* () {
       const service = yield* Integrations.Integrations;
       const current = yield* byName(input.name);
+      const label = yield* callerLabel;
       const scope = yield* Invocation.McpInvocationContext;
       const agents = yield* AgentStore.AgentStore;
       const agent =
@@ -129,7 +138,11 @@ export const layer = McpToolAccess.toLayer(IntegrationsToolkit, {
             ...(input.scope === undefined ? {} : { scope: input.scope }),
             ...(input.hint === undefined ? {} : { hint: input.hint }),
           },
-          { preserveCredentialDestination: agent !== null },
+          {
+            preserveCredentialDestination: agent !== null,
+            callerLabelId: label,
+            preserveScope: true,
+          },
         )
         .pipe(Effect.mapError(failure));
     }),
@@ -139,7 +152,10 @@ export const layer = McpToolAccess.toLayer(IntegrationsToolkit, {
       const service = yield* Integrations.Integrations;
       const current = yield* byName(input.name).pipe(Effect.catch(() => Effect.succeed(undefined)));
       if (current === undefined) return { deleted: false };
-      return yield* service.remove(current.id).pipe(Effect.mapError(failure));
+      const label = yield* callerLabel;
+      return yield* service
+        .remove(current.id, { callerLabelId: label })
+        .pipe(Effect.mapError(failure));
     }),
   ),
 });

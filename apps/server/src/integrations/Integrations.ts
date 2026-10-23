@@ -93,6 +93,18 @@ export const integrationDestinationChanged = (
         ([name, value]) => value !== HEADER_MASK && current.headers[name] !== value,
       )));
 
+/** Adding any project, or switching to all projects, needs owner approval. */
+export const integrationScopeWidened = (
+  current: Integration,
+  input: IntegrationUpdateInput,
+): boolean =>
+  input.scope !== undefined &&
+  current.scope.type !== "all" &&
+  (input.scope.type === "all" ||
+    input.scope.labelIds.some(
+      (id) => current.scope.type === "projects" && !current.scope.labelIds.includes(id),
+    ));
+
 /**
  * Resolves `{{credential:item.field}}` references in every header value.
  * Fails closed: an unknown template, a malformed reference, or a missing
@@ -178,6 +190,8 @@ interface CachedTools {
  */
 export interface IntegrationWriteOptions {
   readonly approveCredentials?: boolean;
+  readonly callerLabelId?: ProjectLabelId | null;
+  readonly preserveScope?: boolean;
 }
 
 export interface IntegrationsOptions {
@@ -204,7 +218,10 @@ export class Integrations extends Context.Service<
       options?: IntegrationWriteOptions & { readonly preserveCredentialDestination?: boolean },
     ) => Effect.Effect<{ integration: Integration }, IntegrationError>;
     /** Tombstones the integration; its name becomes reusable. */
-    readonly remove: (id: IntegrationId) => Effect.Effect<{ deleted: boolean }, IntegrationError>;
+    readonly remove: (
+      id: IntegrationId,
+      options?: IntegrationWriteOptions,
+    ) => Effect.Effect<{ deleted: boolean }, IntegrationError>;
     readonly testConnection: (
       id: IntegrationId,
     ) => Effect.Effect<IntegrationTestResult, IntegrationError>;
@@ -593,6 +610,13 @@ const make = (options: IntegrationsOptions = {}) =>
       update: (masked, options) =>
         Effect.gen(function* () {
           const current = yield* getById(masked.id);
+          if (!integrationVisibleTo({ ...current, enabled: true }, options?.callerLabelId))
+            return yield* new IntegrationError({ operation: "update", reason: "not_found" });
+          if (options?.preserveScope && integrationScopeWidened(current, masked))
+            return yield* new IntegrationError({
+              operation: "update",
+              reason: "approval_required",
+            });
           // A masked value is one the caller left as it was.
           const input: IntegrationUpdateInput =
             masked.headers === undefined
@@ -645,7 +669,7 @@ const make = (options: IntegrationsOptions = {}) =>
           yield* invalidate(integration.id);
           return { integration: redactIntegration(integration) };
         }).pipe(sql.withTransaction, Effect.mapError(failure("update", "storage"))),
-      remove: (id) =>
+      remove: (id, options) =>
         Effect.gen(function* () {
           const current = yield* getById(id).pipe(
             Effect.catchTags({
@@ -654,6 +678,8 @@ const make = (options: IntegrationsOptions = {}) =>
             }),
           );
           if (current === undefined) return { deleted: false };
+          if (!integrationVisibleTo({ ...current, enabled: true }, options?.callerLabelId))
+            return yield* new IntegrationError({ operation: "delete", reason: "not_found" });
           const at = yield* now;
           yield* persist({ ...current, deletedAt: at, updatedAt: at });
           yield* invalidate(id);

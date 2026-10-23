@@ -131,6 +131,7 @@ const REASON_TEXT: Readonly<Record<IntegrationError["reason"], string>> = {
   upstream_timeout: "The server took too long to answer.",
   upstream_error: "The server answered with an error.",
   invalid_request: "The server rejected the request.",
+  approval_required: "Widening project access needs owner approval.",
 };
 
 export function integrationReasonText(reason: IntegrationError["reason"]): string {

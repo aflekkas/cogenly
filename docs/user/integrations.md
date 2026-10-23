@@ -66,3 +66,5 @@ Agents can also set integrations up for you (`integration_add`,
 Upstream OAuth sign-in ("Sign in with Google" for an integration) is deferred;
 v1 uses static header credentials from your vault. Local `stdio` MCP servers
 are also deferred — v1 speaks remote HTTP MCP.
+
+Agents can change or remove only integrations available in their project. Widening an integration’s project scope requires your approval.

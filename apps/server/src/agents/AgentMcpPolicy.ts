@@ -20,6 +20,8 @@ import { McpInvocationContext, type McpInvocationScope } from "../mcp/McpInvocat
 import * as Threads from "../orchestration-v2/ThreadManagementService.ts";
 import { readCaller, assertLiveCaller } from "../mcp/threadAccess.ts";
 import { resolveRuntimeMode } from "../mcp/OrchestratorMcpService.ts";
+import * as ProjectFiles from "../projectLabels/ProjectFiles.ts";
+import * as Option from "effect/Option";
 import * as Integrations from "../integrations/Integrations.ts";
 
 const decodeWorkStart = Schema.decodeUnknownEffect(WorkStartInput);
@@ -234,7 +236,18 @@ const make = Effect.gen(function* () {
           const current = listed.integrations.find(
             ({ integration }) => integration.name === update.name,
           )?.integration;
-          if (current === undefined)
+          const files = yield* Effect.serviceOption(ProjectFiles.ProjectFiles);
+          const folder =
+            scope.thread && Option.isSome(files)
+              ? yield* files.value.folderForThread(scope.thread.threadId)
+              : null;
+          if (
+            current === undefined ||
+            !Integrations.integrationVisibleTo(
+              { ...current, enabled: true },
+              folder?.labelId ?? null,
+            )
+          )
             return yield* denied(
               "No connected integration with that name exists.",
               "invalid_request",
@@ -246,7 +259,10 @@ const make = Effect.gen(function* () {
             transport: update.transport ?? current.transport,
             headers: update.headers ?? current.headers,
           };
-          if (Integrations.integrationDestinationChanged(current, payload)) {
+          if (
+            Integrations.integrationDestinationChanged(current, payload) ||
+            Integrations.integrationScopeWidened(current, payload)
+          ) {
             const action = yield* decodeAction({ actionKind: "integration_update", payload });
             const { approval } = yield* workspace.requestApproval(agent.id, action, actor);
             return yield* denied(

@@ -137,6 +137,7 @@ export class IntegrationError extends Schema.TaggedError<IntegrationError>()("In
     "upstream_timeout",
     "upstream_error",
     "invalid_request",
+    "approval_required",
   ]),
   cause: Schema.optional(Schema.Defect()),
 }) {

@@ -70,7 +70,7 @@ export const IntegrationsToolkit = Toolkit.make(
     parameters: IntegrationUpdateByNameInput,
     success: IntegrationMutationResult,
     description:
-      "Change a connected integration by name: display name, transport, url, headers, enabled, project scope, or hint. Omitted fields are preserved. Persistent agents need owner approval for URL, transport, or header changes.",
+      "Change a connected integration by name: display name, transport, url, headers, enabled, project scope, or hint. Omitted fields are preserved. Widening project scope needs owner approval. Persistent agents also need approval for URL, transport, or header changes.",
   }).annotate(Tool.Destructive, false),
   Tool.make("integration_remove", {
     ...shared,

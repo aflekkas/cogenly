@@ -485,6 +485,42 @@ describe("Integrations gateway", () => {
     }).pipe(Effect.provide(layerWith())),
   );
 
+  it.effect(
+    "scoped mutations cannot reach hidden integrations or widen access without approval",
+    () =>
+      Effect.gen(function* () {
+        yield* runMigrations();
+        const service = yield* Integrations.Integrations;
+        const a = ProjectLabelId.make("a"),
+          b = ProjectLabelId.make("b");
+        const { integration } = yield* service.create({
+          ...createInput("https://example.com/mcp"),
+          scope: { type: "projects", labelIds: [a] },
+        });
+        for (const operation of [
+          service.update({ id: integration.id, hint: "hidden write" }, { callerLabelId: b }),
+          service.remove(integration.id, { callerLabelId: b }),
+        ]) {
+          expect((yield* operation.pipe(Effect.flip)).reason).toBe("not_found");
+        }
+        for (const scope of [
+          { type: "all" as const },
+          { type: "projects" as const, labelIds: [a, b] },
+        ]) {
+          expect(
+            (yield* service
+              .update({ id: integration.id, scope }, { callerLabelId: a, preserveScope: true })
+              .pipe(Effect.flip)).reason,
+          ).toBe("approval_required");
+        }
+        yield* service.update(
+          { id: integration.id, scope: { type: "all" } },
+          { approveCredentials: true },
+        );
+        expect((yield* service.listForProject(b)).integrations).toHaveLength(1);
+      }).pipe(Effect.provide(layerWith())),
+  );
+
   it.effect("filters by project scope and tombstones on remove", () =>
     Effect.gen(function* () {
       yield* runMigrations();
