@@ -54,6 +54,7 @@ import * as ThreadSearch from "../../orchestration-v2/ThreadSearch.ts";
 import * as PreviewManager from "../../preview/Manager.ts";
 import * as SourceControlRepositoryService from "../../sourceControl/SourceControlRepositoryService.ts";
 import * as GitVcsDriver from "../../vcs/GitVcsDriver.ts";
+import * as Integrations from "../../integrations/Integrations.ts";
 import * as McpHttpServer from "../McpHttpServer.ts";
 import * as McpSessionRegistry from "../McpSessionRegistry.ts";
 import * as PreviewAutomationBroker from "../PreviewAutomationBroker.ts";
@@ -157,6 +158,11 @@ const layerStubServices = Layer.mergeAll(
   }),
   Layer.mock(Orchestrator.OrchestratorV2)({ getThreadShell: () => Effect.succeed(shell) }),
   Layer.mock(FactService.FactService)({}),
+  Layer.mock(Integrations.Integrations)({
+    list: () => Effect.succeed({ integrations: [] }),
+    listForProject: () => Effect.succeed({ integrations: [] }),
+    contextIntegrations: () => Effect.succeed([]),
+  }),
   Layer.mock(ProjectionStore.ProjectionStoreV2)({}),
   Layer.mock(DeviceService.DeviceService)({
     list: Effect.succeed({
@@ -277,6 +283,20 @@ const smokeCases = [
     tool: "image_search",
     args: { query: "red fox" },
     expected: { results: [] },
+  },
+  {
+    toolkit: "integrations",
+    names: [
+      "integrations_list",
+      "integration_tools",
+      "integration_call",
+      "integration_add",
+      "integration_update",
+      "integration_remove",
+    ],
+    tool: "integrations_list",
+    args: {},
+    expected: { integrations: [] },
   },
   {
     toolkit: "work",

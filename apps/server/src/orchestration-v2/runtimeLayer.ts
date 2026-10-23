@@ -1,6 +1,8 @@
 import * as VisualStates from "../htmlRender/VisualState.ts";
 import * as GlobalSearch from "../search/GlobalSearch.ts";
 import * as Facts from "../context/FactService.ts";
+import * as Integrations from "../integrations/Integrations.ts";
+import * as IntegrationCredentials from "../integrations/IntegrationCredentials.ts";
 import * as Retrieval from "../context/ContextRetrievalService.ts";
 import * as Exports from "../export/ExportService.ts";
 import * as AgentEvents from "../agents/AgentEventBus.ts";
@@ -454,6 +456,7 @@ export const layer = Layer.mergeAll(
 
 const layerProductionBase = Layer.mergeAll(
   Facts.layer,
+  Integrations.layer.pipe(Layer.provide(IntegrationCredentials.layer)),
   Retrieval.layer,
   layer.pipe(Layer.provide(layerProjectService)),
   layerProjectService,

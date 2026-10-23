@@ -2,6 +2,7 @@ import {
   ModelSelection,
   OrchestrationV2AppThread,
   ProjectId,
+  type ProjectLabelId,
   ProviderInstanceId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
@@ -12,7 +13,11 @@ import * as Schema from "effect/Schema";
 
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
-import { buildProjectManifest } from "@t3tools/provider-core/server/runtimeInstructions";
+import {
+  buildIntegrationsContextLine,
+  buildProjectManifest,
+} from "@t3tools/provider-core/server/runtimeInstructions";
+import * as Integrations from "../integrations/Integrations.ts";
 import * as ProjectFiles from "../projectLabels/ProjectFiles.ts";
 import * as ProjectStore from "./ProjectStore.ts";
 
@@ -92,19 +97,43 @@ export const layerFromProjectStore: Layer.Layer<
     // Optional so layers without the project-files service (unit tests over a
     // memory database) still resolve; production always provides it.
     const files = yield* Effect.serviceOption(ProjectFiles.ProjectFiles);
+    // Optional like ProjectFiles: unit layers without the gateway still
+    // resolve, and production always provides it.
+    const integrationsService = yield* Effect.serviceOption(Integrations.Integrations);
+    // The integrations line is best-effort turn context too: any failure
+    // resolves to no line rather than failing the turn.
+    const integrationsFor = (labelId: ProjectLabelId | null) =>
+      Option.isNone(integrationsService)
+        ? Effect.succeed([])
+        : integrationsService.value.contextIntegrations(labelId).pipe(
+            Effect.map((found) =>
+              found.map((integration) => ({
+                name: integration.name,
+                displayName: integration.displayName,
+                hint: integration.hint,
+              })),
+            ),
+            Effect.catch(() => Effect.succeed([])),
+          );
     // The project context is best-effort turn context from the derived index:
     // any failure resolves to no folder rather than failing the turn.
     const projectFor = (
       thread: OrchestrationV2AppThread,
-    ): Effect.Effect<{ readonly dir: string; readonly manifest: string } | undefined, never> =>
+    ): Effect.Effect<
+      | { readonly dir: string; readonly manifest: string; readonly labelId: ProjectLabelId }
+      | undefined,
+      never
+    > =>
       Option.isNone(files)
         ? Effect.succeed(undefined)
         : Effect.gen(function* () {
             const folder = yield* files.value.folderForThread(thread.id);
             if (folder === null) return undefined;
             const { entries, total } = yield* files.value.manifestEntries(folder.labelId);
+            const integrations = yield* integrationsFor(folder.labelId);
             return {
               dir: folder.dir,
+              labelId: folder.labelId,
               manifest: buildProjectManifest({
                 name: folder.name,
                 directory: folder.dir,
@@ -112,6 +141,7 @@ export const layerFromProjectStore: Layer.Layer<
                 total,
                 instructions: folder.instructions,
                 projectChat: folder.projectChatThreadId === thread.id,
+                integrations,
               }),
             };
           }).pipe(
@@ -157,12 +187,20 @@ export const layerFromProjectStore: Layer.Layer<
                   }),
                 ),
               )));
+        // Unfiled threads still get the integrations line on its own, so
+        // every provider turn names what is connected.
+        const standaloneLine =
+          project === undefined ? buildIntegrationsContextLine(yield* integrationsFor(null)) : "";
         return ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
           runtimeMode: "full-access",
           interactionMode: input.thread.interactionMode,
           cwd,
           ...conversationModeFor(input.thread),
-          ...(project === undefined ? {} : { projectManifest: project.manifest }),
+          ...(project !== undefined
+            ? { projectManifest: project.manifest }
+            : standaloneLine.length > 0
+              ? { projectManifest: standaloneLine }
+              : {}),
         });
       }),
     });

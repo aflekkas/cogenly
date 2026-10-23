@@ -12,6 +12,7 @@ import {
 import { ModelSelection } from "./modelSelection.ts";
 import { ScheduledTaskUpsertInput } from "./scheduledTask.ts";
 import { OrchestrationV2ThreadLaunchWorkspaceStrategy } from "./orchestrationV2.ts";
+import { IntegrationCreateInput } from "./integration.ts";
 
 export const AgentStartWorkInput = Schema.Struct({
   agentId: AgentId,
@@ -33,6 +34,10 @@ export const AgentApprovalAction = Schema.Union([
     actionKind: Schema.Literal("change_permissions"),
     payload: Schema.Struct({ permissions: AgentPermissions }),
   }),
+  Schema.Struct({
+    actionKind: Schema.Literal("integration_add"),
+    payload: IntegrationCreateInput,
+  }),
 ]);
 export type AgentApprovalAction = typeof AgentApprovalAction.Type;
 export const AgentApprovalStatus = Schema.Literals(["pending", "approved", "rejected", "expired"]);
@@ -40,7 +45,12 @@ export const AgentApproval = Schema.Struct({
   id: TrimmedNonEmptyString,
   agentId: AgentId,
   action: AgentApprovalAction,
-  actionKind: Schema.Literals(["start_work", "schedule_trigger", "change_permissions"]),
+  actionKind: Schema.Literals([
+    "start_work",
+    "schedule_trigger",
+    "change_permissions",
+    "integration_add",
+  ]),
   payload: Schema.Record(Schema.String, Schema.Unknown),
   status: AgentApprovalStatus,
   requestedAt: IsoDateTime,
