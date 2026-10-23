@@ -1,6 +1,6 @@
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
+import { HttpRouter, HttpServerRequest, HttpServerResponse, HttpMiddleware } from "effect/http";
 import * as Local from "./LocalIntegrations.ts";
 import {
   GOOGLE_CALLBACK_PATH,
@@ -46,7 +46,7 @@ export const layer = Layer.merge(
             ),
         }),
       );
-    }),
+    }).pipe(HttpMiddleware.withLoggerDisabled, Effect.withTracerEnabled(false)),
   ),
   // Callback never accepts an upstream URL, port, account id or arbitrary proxy path.
   // OAuth's high-entropy state, recorded from the managed process's consent link, chooses the destination.
@@ -65,6 +65,6 @@ export const layer = Layer.merge(
           : "Google sign-in did not complete, or the link expired. Return to Cogenly and request a fresh sign-in link.",
         { status: connected ? 200 : 400, headers },
       );
-    }),
+    }).pipe(HttpMiddleware.withLoggerDisabled, Effect.withTracerEnabled(false)),
   ),
 );

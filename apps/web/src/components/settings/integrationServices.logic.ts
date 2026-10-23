@@ -121,7 +121,7 @@ export const VAULT_FIELD_LABEL: Readonly<Record<VaultField, string>> = {
 
 const REASON_TEXT: Readonly<Record<IntegrationError["reason"], string>> = {
   google_client_missing:
-    "Store the google-oauth-client login in the vault (client ID as username, secret as password; allow accounts.google.com).",
+    "Store your Google OAuth client JSON in vault item google-oauth-client and allow accounts.google.com.",
   local_runtime_missing: "Install uv (brew install uv on macOS), then restart Cogenly.",
   storage: "Cogenly could not read or save this integration.",
   not_found: "This integration no longer exists.",
@@ -207,7 +207,11 @@ export function integrationStatus(
             : managed.state === "missing_runtime"
               ? "Missing runtime"
               : "Failed",
-      reason: managed.message ?? (managed.stderrTail || null),
+      reason:
+        managed.message ??
+        (managed.state === "failed" || managed.state === "missing_runtime"
+          ? managed.stderrTail || null
+          : null),
       toolCount: summary.toolCount,
     };
   }

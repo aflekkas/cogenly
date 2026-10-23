@@ -4,13 +4,37 @@ import {
   type IntegrationCreateInput,
 } from "@t3tools/contracts";
 import { type LocalMcpSpec } from "./LocalMcpRunner.ts";
+import * as Schema from "effect/Schema";
+import * as Option from "effect/Option";
+import { managedPackageCommand } from "./ManagedPackage.ts";
 
 // Verified against the PyPI 2.1.2 sdist: main.py, auth/oauth_config.py and auth/credential_store.py.
 export const GOOGLE_WORKSPACE_VERSION = "2.1.2";
 export const GOOGLE_CALLBACK_PATH = "/oauth/integrations/google/callback";
 export const GOOGLE_SIGN_IN_PATH = "/oauth/integrations/google/start";
 export const GOOGLE_CLIENT_HELP =
-  "Store a login vault item named google-oauth-client: username = Google OAuth client ID, password = client secret, allowed domain = accounts.google.com. Use request_secret with saveToVault; never paste credentials into chat. See docs/user/integrations.md#connect-google.";
+  'Store your downloaded Google Web application OAuth client JSON as the value of vault item google-oauth-client, allowing accounts.google.com. Use request_secret with saveToVault: {name: "google-oauth-client", type: "api_key", domains: ["accounts.google.com"]}; never paste credentials into chat. Alternatively, save a login with client ID as username and secret as password. See docs/user/integrations.md#connect-google.';
+
+const GoogleClient = Schema.Struct({
+  client_id: Schema.String.check(Schema.isMinLength(1)),
+  client_secret: Schema.String.check(Schema.isMinLength(1)),
+});
+const decodeClient = Schema.decodeUnknownOption(
+  Schema.fromJsonString(Schema.Union([GoogleClient, Schema.Struct({ web: GoogleClient })])),
+);
+
+/** Google's downloaded Web application JSON fits in a single private request_secret card. */
+export const googleClientFromJson = (text: string) =>
+  Option.map(decodeClient(text), (decoded) => {
+    const client = "web" in decoded ? decoded.web : decoded;
+    return { clientId: client.client_id, clientSecret: client.client_secret };
+  });
+
+const command = managedPackageCommand({
+  ecosystem: "python",
+  name: "workspace-mcp",
+  version: GOOGLE_WORKSPACE_VERSION,
+});
 
 export const googleWorkspaceInput = (
   input: GoogleWorkspaceAddInput,
@@ -53,9 +77,9 @@ export const googleWorkspaceSpec = (input: {
   readonly environment: Readonly<Record<string, string>>;
 }): LocalMcpSpec => ({
   id: input.id,
-  runtime: "uvx",
+  runtime: command.runtime,
   args: [
-    `workspace-mcp@${GOOGLE_WORKSPACE_VERSION}`,
+    ...command.args,
     "--transport",
     "streamable-http",
     "--single-user",

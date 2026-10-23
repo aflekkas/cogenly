@@ -402,6 +402,9 @@ export const layerOtlpTracesProxyRoute = HttpRouter.add(
 
 const UNTRACED_REQUEST_PATHS: ReadonlySet<string> = new Set([
   OTLP_TRACES_PROXY_PATH,
+  // Managed Google sign-in carries capability tickets and one-use OAuth codes.
+  "/oauth/integrations/google/start",
+  "/oauth/integrations/google/callback",
   // Supervisors poll this; its spans would drown the trace file.
   HEALTH_PATH,
 ]);

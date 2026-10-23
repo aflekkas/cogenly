@@ -1,13 +1,14 @@
 import { describe, expect, it } from "@effect/vitest";
 import { NodeCrypto } from "@effect/platform-node";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { IntegrationName } from "@t3tools/contracts";
+import { EnvironmentId, IntegrationName } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import { FetchHttpClient } from "effect/http";
+import * as Stream from "effect/Stream";
+import { FetchHttpClient, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 import * as ServerConfig from "../../config.ts";
 import * as Sqlite from "../../persistence/Sqlite.ts";
 import { runMigrations } from "../../persistence/Migrations.ts";
@@ -15,19 +16,40 @@ import * as Credentials from "../IntegrationCredentials.ts";
 import * as Integrations from "../Integrations.ts";
 import * as Local from "./LocalIntegrations.ts";
 import * as Runner from "./LocalMcpRunner.ts";
+import * as LocalHttp from "./LocalIntegrationHttp.ts";
 import { GOOGLE_CALLBACK_PATH, GOOGLE_WORKSPACE_VERSION } from "./GoogleWorkspace.ts";
+import * as AgentStore from "../../agents/AgentStore.ts";
+import * as Threads from "../../orchestration-v2/ThreadManagementService.ts";
+import * as Invocation from "../../mcp/McpInvocationContext.ts";
+import * as Access from "../../mcp/McpToolAccess.ts";
+import * as Handlers from "../../mcp/toolkits/integrations/handlers.ts";
+import { IntegrationsToolkit } from "../../mcp/toolkits/integrations/tools.ts";
 
 const fixture = new URL("./fixtures/fake-mcp.mjs", import.meta.url).pathname;
-const credentials = (missing = false) =>
+const credentials = (missing = false, format: "json" | "login" = "json") =>
   Layer.succeed(Credentials.IntegrationCredentials, {
     resolve: (ref) =>
       Effect.succeed(
         missing
           ? Option.none<string>()
-          : Option.some(ref.endsWith("username") ? "fake-client-id" : "fake-client-secret"),
+          : format === "json"
+            ? ref.endsWith("value")
+              ? Option.some(
+                  JSON.stringify({
+                    web: { client_id: "fake-client-id", client_secret: "fake-client-secret" },
+                  }),
+                )
+              : Option.none<string>()
+            : ref.endsWith("value")
+              ? Option.none<string>()
+              : Option.some(ref.endsWith("username") ? "fake-client-id" : "fake-client-secret"),
       ),
   });
-const testLayer = (specs: Array<Runner.LocalMcpSpec>, missing = false) => {
+const testLayer = (
+  specs: Array<Runner.LocalMcpSpec>,
+  missing = false,
+  format: "json" | "login" = "json",
+) => {
   // Replace the external package at the process boundary; exercise the real supervisor and gateway.
   const runner = Layer.effect(
     Runner.LocalMcpRunner,
@@ -56,7 +78,7 @@ const testLayer = (specs: Array<Runner.LocalMcpSpec>, missing = false) => {
     NodeServices.layer,
     NodeCrypto.layer,
     FetchHttpClient.layer,
-    credentials(missing),
+    credentials(missing, format),
     Sqlite.layerMemory.pipe(Layer.provide(NodeServices.layer)),
     ServerConfig.layerTest(process.cwd(), { prefix: "local-integrations-" }).pipe(
       Layer.provide(NodeServices.layer),
@@ -72,9 +94,9 @@ const echoResult = Schema.decodeUnknownSync(
 );
 
 describe("managed Google integrations", () => {
-  it.live(
-    "isolates two accounts and routes tools, sign-in, disable and remove through the gateway",
-    () => {
+  it.live.each(["json", "login"] as const)(
+    "isolates two accounts with %s credentials and routes tools, sign-in, disable and remove through the gateway",
+    (format) => {
       const specs: Array<Runner.LocalMcpSpec> = [];
       return Effect.gen(function* () {
         yield* runMigrations();
@@ -118,6 +140,9 @@ describe("managed Google integrations", () => {
           `https://cogenly.example.com${GOOGLE_CALLBACK_PATH}`,
         );
         expect((yield* fs.stat(specs[0]!.directory)).mode & 0o777).toBe(0o700);
+        expect(yield* fs.realPath(`${specs[0]!.directory}/logs/mcp_server_debug.log`)).toBe(
+          "/dev/null",
+        );
         expect((yield* fs.stat(specs[0]!.env.WORKSPACE_MCP_CREDENTIALS_DIR!)).mode & 0o777).toBe(
           0o700,
         );
@@ -134,19 +159,32 @@ describe("managed Google integrations", () => {
         const listed = yield* gateway.list();
         expect(listed.integrations.every((item) => item.managed?.state === "running")).toBe(true);
         const ticket = new URL(personal.signInUrl!).searchParams.get("ticket")!;
-        const auth = yield* local.authorize(ticket);
+        const route = yield* HttpRouter.toHttpEffect(LocalHttp.layer);
+        const get = (url: string) =>
+          route.pipe(
+            Effect.provideService(
+              HttpServerRequest.HttpServerRequest,
+              HttpServerRequest.fromWeb(new Request(url)),
+            ),
+            Effect.map(HttpServerResponse.toWeb),
+          );
+        const [auth, concurrentAuth] = yield* Effect.all(
+          [local.authorize(ticket), local.authorize(ticket)],
+          { concurrency: "unbounded" },
+        );
+        expect(concurrentAuth.url).toBe(auth.url);
         expect(auth.connected).toBe(false);
         expect(new URL(auth.url!).hostname).toBe("accounts.google.com");
         // Reopening the link reuses the outstanding consent flow rather than minting another refresh token.
         expect((yield* local.authorize(ticket)).url).toBe(auth.url);
+        const signInResponse = yield* get(personal.signInUrl!);
+        expect(signInResponse.headers.get("location")).toBe(auth.url);
+        expect(signInResponse.headers.get("cache-control")).toBe("no-store");
         expect(yield* local.callback("state=unknown&code=fake")).toBe(false);
         const state = new URL(auth.url!).searchParams.get("state")!;
-        expect(
-          yield* local.callback(new URLSearchParams({ state, code: "fake-code" }).toString()),
-        ).toBe(true);
-        expect(
-          yield* local.callback(new URLSearchParams({ state, code: "fake-code" }).toString()),
-        ).toBe(false);
+        const callbackUrl = `https://cogenly.example.com${GOOGLE_CALLBACK_PATH}?${new URLSearchParams({ state, code: "fake-code" })}`;
+        expect((yield* get(callbackUrl)).status).toBe(200);
+        expect((yield* get(callbackUrl)).status).toBe(400);
         expect((yield* local.authorize(ticket)).connected).toBe(true);
         expect(yield* local.signInLink(personal.integration)).toBeUndefined();
         expect(yield* local.signInLink(work.integration)).toBeDefined();
@@ -164,9 +202,54 @@ describe("managed Google integrations", () => {
         yield* gateway.remove(work.integration.id);
         expect(yield* local.status(work.integration.id)).toBeUndefined();
         expect((yield* gateway.list()).integrations).toHaveLength(0);
-      }).pipe(Effect.scoped, Effect.provide(testLayer(specs)));
+      }).pipe(Effect.scoped, Effect.provide(testLayer(specs, false, format)));
     },
     15_000,
+  );
+
+  it.live.each([false, true])(
+    "integration_add exposes a sign-in link or private vault instructions (missing client: %s)",
+    (missing) =>
+      Effect.gen(function* () {
+        yield* runMigrations();
+        const dependencies = Layer.mergeAll(
+          Layer.succeed(Invocation.McpInvocationContext, {
+            environmentId: EnvironmentId.make("env:test"),
+            requestNamespace: "client:owner",
+            thread: undefined,
+            client: { sessionId: "owner", label: "Owner", access: "full-access" },
+            capabilities: new Set(["orchestration"] as const),
+            issuedAt: 0,
+          }),
+          Layer.mock(Threads.ThreadManagementService)({}),
+          Layer.mock(AgentStore.AgentStore)({}),
+        );
+        const toolkit = yield* IntegrationsToolkit.pipe(
+          Effect.provide(
+            Access.HandlersLayer.layer(Handlers.layer).pipe(Layer.provide(dependencies)),
+          ),
+        );
+        const replies = yield* toolkit
+          .handle("integration_add", {
+            preset: "google-workspace",
+            accountLabel: "personal",
+            callbackOrigin: "https://cogenly.example.com",
+          })
+          .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(dependencies));
+        if (missing) {
+          expect(replies.at(-1)?.result).toMatchObject({
+            code: "invalid_request",
+            message: expect.stringContaining("request_secret with saveToVault"),
+          });
+        } else {
+          expect(replies.at(-1)?.result).toMatchObject({
+            integration: { transport: "local", displayName: "Google · personal" },
+            signInUrl: expect.stringContaining(
+              "https://cogenly.example.com/oauth/integrations/google/start?ticket=",
+            ),
+          });
+        }
+      }).pipe(Effect.scoped, Effect.provide(testLayer([], missing))),
   );
 
   it.live("does not create an account until the shared OAuth client is stored", () =>

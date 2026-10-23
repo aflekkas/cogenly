@@ -25,6 +25,7 @@ import {
   GOOGLE_WORKSPACE_VERSION,
   googleWorkspaceInput,
   googleWorkspaceSpec,
+  googleClientFromJson,
 } from "./GoogleWorkspace.ts";
 
 export class LocalIntegrations extends Context.Service<
@@ -146,6 +147,13 @@ const make = Effect.gen(function* () {
         scopeProjectId: labelId,
         approvedItems: [],
       };
+      const json = yield* credentials
+        .resolve("google-oauth-client.value", destination)
+        .pipe(Effect.mapError(credentialError));
+      if (json._tag === "Some") {
+        const decoded = googleClientFromJson(json.value);
+        if (decoded._tag === "Some") return decoded.value;
+      }
       const id = yield* credentials
         .resolve("google-oauth-client.username", destination)
         .pipe(Effect.mapError(credentialError));
@@ -198,6 +206,13 @@ const make = Effect.gen(function* () {
             .pipe(Effect.mapError(storageError));
           yield* fs.chmod(dir, 0o700).pipe(Effect.mapError(storageError));
         }
+        // The pinned package always installs a second, unsanitized file handler.
+        // Discard that copy; retain only the runner's bounded, redacted output.
+        const logFile = path.join(directory, "logs", "mcp_server_debug.log");
+        yield* fs.remove(logFile, { force: true }).pipe(Effect.mapError(storageError));
+        yield* fs
+          .symlink(path.sep === "\\" ? "\\\\.\\NUL" : "/dev/null", logFile)
+          .pipe(Effect.mapError(storageError));
         const spec = googleWorkspaceSpec({
           id: integration.id,
           directory,

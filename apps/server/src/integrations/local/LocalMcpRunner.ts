@@ -16,6 +16,7 @@ import * as ChildProcess from "effect/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 // Node's ephemeral listener selects a loopback port without a platform-specific shell command.
 import * as NodeNet from "node:net";
+import { createOutputRedactor } from "./OutputRedactor.ts";
 
 export class LocalMcpError extends Schema.TaggedError<LocalMcpError>()("LocalMcpError", {
   reason: Schema.Literals([
@@ -112,16 +113,6 @@ const RpcResponse = Schema.Struct({
   error: Schema.optional(Schema.Unknown),
 });
 const decodeResponse = Schema.decodeUnknownOption(Schema.fromJsonString(RpcResponse));
-
-/** Redact complete lines, so a secret split across OS chunks never enters retained output. */
-const redact = (text: string, secrets: ReadonlyArray<string>) => {
-  for (const secret of secrets.filter(Boolean).toSorted((a, b) => b.length - a.length)) {
-    for (const value of [secret, encodeURIComponent(secret), JSON.stringify(secret).slice(1, -1)]) {
-      text = text.replaceAll(value, "[redacted]");
-    }
-  }
-  return text;
-};
 
 const make = (
   options: { readonly restartDelayMs?: number; readonly requestTimeoutMs?: number } = {},
@@ -239,24 +230,22 @@ const make = (
                   }),
                 )
                 .pipe(Effect.mapError((cause) => error(spec, "start_failed", cause)));
-              const output = (stream: typeof child.stderr) =>
-                stream.pipe(
+              const output = (stream: typeof child.stderr) => {
+                const redactor = createOutputRedactor(spec.secrets);
+                const retain = (text: string) =>
+                  Effect.sync(() => {
+                    account.status = {
+                      ...account.status,
+                      stderrTail: (account.status.stderrTail + text).slice(-4000),
+                    };
+                  });
+                return stream.pipe(
                   Stream.decodeText(),
-                  Stream.splitLines,
-                  Stream.runForEach((line) =>
-                    Effect.sync(() => {
-                      account.status = {
-                        ...account.status,
-                        stderrTail: (
-                          account.status.stderrTail +
-                          redact(line, spec.secrets) +
-                          "\n"
-                        ).slice(-4000),
-                      };
-                    }),
-                  ),
+                  Stream.runForEach((chunk) => retain(redactor.push(chunk))),
                   Effect.ignore,
+                  Effect.ensuring(Effect.suspend(() => retain(redactor.flush()))),
                 );
+              };
               yield* Effect.forkScoped(output(child.stderr));
               let connection: Connection;
               if (spec.transport === "stdio") {
@@ -301,19 +290,18 @@ const make = (
                         encodeJson({ jsonrpc: "2.0", id, method, params }) + "\n",
                       ),
                     );
-                    return yield* Deferred.await(deferred);
-                  }).pipe(
-                    Effect.timeout(options.requestTimeoutMs ?? 30_000),
-                    Effect.mapError((cause) =>
-                      isLocalMcpError(cause) ? cause : error(spec, "timeout"),
-                    ),
-                    Effect.ensuring(
-                      Effect.sync(() => {
-                        for (const [id, deferred] of pending)
-                          if (Deferred.isDoneUnsafe(deferred)) pending.delete(id);
-                      }),
-                    ),
-                  );
+                    return yield* Deferred.await(deferred).pipe(
+                      Effect.timeout(options.requestTimeoutMs ?? 30_000),
+                      Effect.mapError((cause) =>
+                        isLocalMcpError(cause) ? cause : error(spec, "timeout"),
+                      ),
+                      Effect.ensuring(
+                        Effect.sync(() => {
+                          pending.delete(id);
+                        }),
+                      ),
+                    );
+                  });
                 yield* rpc("initialize", {
                   protocolVersion: "2025-03-26",
                   capabilities: {},
@@ -420,6 +408,18 @@ const make = (
             Effect.mapError((cause) =>
               isLocalMcpError(cause) ? cause : error(spec, "start_failed", cause),
             ),
+            Effect.tapError((cause) =>
+              Effect.gen(function* () {
+                const account = accounts.get(spec.id);
+                if (!account) return;
+                yield* changed(
+                  account,
+                  cause.reason === "missing_runtime" ? "missing_runtime" : "failed",
+                  cause.message,
+                );
+                yield* Deferred.fail(account.ready, cause);
+              }),
+            ),
           ),
         ),
       rpc: (id, method, params) =>
@@ -447,8 +447,15 @@ const make = (
               Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }),
               Effect.mapError((cause) => error(account.spec, "protocol", cause)),
             );
+          yield* response.text.pipe(Effect.ignore);
           return response.status === 200;
-        }),
+        }).pipe(
+          Effect.timeout(options.requestTimeoutMs ?? 30_000),
+          Effect.mapError((cause) =>
+            isLocalMcpError(cause) ? cause : new LocalMcpError({ reason: "timeout", runtime: "" }),
+          ),
+          Effect.withTracerEnabled(false),
+        ),
     });
   });
 
