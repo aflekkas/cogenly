@@ -19,11 +19,11 @@ Resolution fails closed: a missing or malformed reference fails the call and
 no request is sent. Resolved values never cross back — not in tool results,
 not in list output (which returns templates, never values), not in errors
 (upstream messages are bounded and credential-free by construction). The
-resolver sits behind the small `IntegrationCredentials` interface; it is
-temporarily backed by `ServerSecretStore` (`integration:<item>:<field>`) and
-swaps to the Vault service by replacing that one layer when Phase 6 lands.
+resolver sits behind the small `IntegrationCredentials` interface, backed by
+the [vault](./vault.md): a reference is a vault item name and field, and a
+missing item or field counts as no credential.
 
-Integration definitions live in the `integrations` table (migration 081) as
+Integration definitions live in the `integrations` table (migration 083) as
 payload JSON with a tombstone, shaped to become shared documents under sync:
 edits resolve per field later without a schema change. Upstream tool lists
 are cached per integration version with a short TTL and invalidated on edit;
