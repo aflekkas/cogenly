@@ -235,6 +235,13 @@ const listCommand = Command.make("list", { ...projectLocationFlags, json: jsonFl
   ),
 );
 
+/**
+ * The hub command `prepare` prints. Fingerprints are base64url and can start
+ * with `-`, which a separate argument would parse as a flag, so join with `=`.
+ */
+export const pairCommandHint = (keyThumbprint: string) =>
+  `cogenly machines pair --spoke-key=${keyThumbprint}`;
+
 const prepareCommand = Command.make("prepare", { ...projectLocationFlags }).pipe(
   Command.withDescription("On the joining machine: prepare the key the hub will bind its code to."),
   Command.withHandler((flags) =>
@@ -248,7 +255,7 @@ const prepareCommand = Command.make("prepare", { ...projectLocationFlags }).pipe
             `Prepared ${identity.name} (${identity.environmentId}).`,
             `Spoke key fingerprint: ${identity.keyThumbprint}`,
             "On the hub, run:",
-            `  cogenly machines pair --spoke-key ${identity.keyThumbprint}`,
+            `  ${pairCommandHint(identity.keyThumbprint)}`,
           ].join("\n"),
         );
       }),
