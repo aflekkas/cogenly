@@ -140,3 +140,111 @@ it.effect("vault_fill types the value server-side and never returns it", () =>
     }),
   ),
 );
+
+it.effect("vault_fill fills card fields by field and never returns them", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const typed: Array<unknown> = [];
+      let pageUrl = "https://shop.test/checkout";
+      const dependencies = Layer.mergeAll(
+        Layer.succeed(Invocation.McpInvocationContext, {
+          environmentId: EnvironmentId.make("environment"),
+          capabilities: new Set(["preview" as const, "orchestration" as const]),
+          requestNamespace: "test",
+          issuedAt: 0,
+          thread: {
+            threadId,
+            providerSessionId: "session",
+            providerInstanceId: ProviderInstanceId.make("codex"),
+          },
+          client: undefined,
+        }),
+        liveThreadsLayer,
+        Layer.mock(AgentStore.AgentStore)({ forThread: () => Effect.succeed(null) }),
+        Layer.mock(PreviewAutomationBroker.PreviewAutomationBroker)({
+          invoke: (request) =>
+            request.operation === "status"
+              ? Effect.succeed({
+                  available: true,
+                  visible: true,
+                  tabId: null,
+                  url: pageUrl,
+                  title: "Checkout",
+                  loading: false,
+                } as never)
+              : Effect.sync(() => {
+                  typed.push(request.input);
+                  return {} as never;
+                }),
+        }),
+        Vault.layer.pipe(
+          Layer.provideMerge(Sqlite.layerMemory),
+          Layer.provideMerge(NodeServices.layer),
+          Layer.provideMerge(NodeCrypto.layer),
+          Layer.provide(memoryStore()),
+          Layer.provide(
+            Layer.succeed(ServerEnvironment.ServerEnvironmentIdentity, {
+              getEnvironmentId: Effect.succeed(EnvironmentId.make("env:test")),
+            }),
+          ),
+        ),
+      );
+      const context = yield* Layer.build(dependencies);
+      const toolkit = yield* VaultToolkit.pipe(
+        Effect.provide(Access.HandlersLayer.layer(Handlers.layer)),
+        Effect.provideContext(context),
+      );
+      const call = (name: string, args: object) =>
+        toolkit
+          .handle(name as never, args as never)
+          .pipe(Stream.unwrap, Stream.runCollect, Effect.provideContext(context))
+          .pipe(Effect.map((results) => results.at(-1)?.result));
+
+      const saved = yield* call("vault_save", {
+        name: "Visa",
+        type: "card",
+        allowedDomains: ["shop.test"],
+        secretFields: {
+          cardNumber: "4242 4242 4242 4242",
+          cardExpiryMonth: "08",
+          cardExpiryYear: "2027",
+          cardCvc: "987",
+          cardholderName: "Ada Cardholder",
+        },
+      });
+      expect(JSON.stringify(saved)).not.toContain("4242 4242");
+      expect(JSON.stringify(saved)).not.toContain("Ada Cardholder");
+      expect(saved).toMatchObject({ item: { cardLast4: "4242" } });
+
+      for (const [field, text] of [
+        ["cardNumber", "4242 4242 4242 4242"],
+        ["cardExpiry", "08/27"],
+        ["cardCvc", "987"],
+        ["cardholderName", "Ada Cardholder"],
+      ] as const) {
+        const filled = yield* call("vault_fill", {
+          name: "Visa",
+          field,
+          locator: `input[name=${field}]`,
+        });
+        expect(filled).toMatchObject({ status: "filled", field, domain: "shop.test" });
+        expect(JSON.stringify(filled)).not.toContain(text);
+      }
+      expect(typed).toEqual([
+        { text: "4242 4242 4242 4242", locator: "input[name=cardNumber]", clear: true },
+        { text: "08/27", locator: "input[name=cardExpiry]", clear: true },
+        { text: "987", locator: "input[name=cardCvc]", clear: true },
+        { text: "Ada Cardholder", locator: "input[name=cardholderName]", clear: true },
+      ]);
+
+      pageUrl = "https://evil.test/checkout";
+      const denied = yield* call("vault_fill", {
+        name: "Visa",
+        field: "cardNumber",
+        locator: "input[name=cardNumber]",
+      });
+      expect(denied).toMatchObject({ status: "denied" });
+      expect(typed).toHaveLength(4);
+    }),
+  ),
+);

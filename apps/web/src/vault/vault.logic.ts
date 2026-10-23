@@ -35,9 +35,9 @@ export interface VaultFormField {
 }
 
 /**
- * Fields by type. The server stores four secret slots, so a card maps onto
- * them: number in `value`, CVC in `password`, name in `username`, and the
- * expiry, which is printed on the card and not a secret, in `label`.
+ * Fields by type. A card has its own encrypted fields — number, expiry
+ * month/year, CVC and cardholder name — so nothing secret rides in the
+ * plaintext `label`; the label is only display text, as on a login.
  */
 export const VAULT_FIELDS_BY_TYPE: Readonly<Record<VaultItemType, ReadonlyArray<VaultFormField>>> =
   {
@@ -49,16 +49,18 @@ export const VAULT_FIELDS_BY_TYPE: Readonly<Record<VaultItemType, ReadonlyArray<
     ],
     api_key: [{ key: "value", title: "Key", required: true }],
     card: [
-      { key: "value", title: "Card number", required: true },
-      { key: "label", title: "Expiry", placeholder: "MM/YY" },
-      { key: "password", title: "CVC" },
-      { key: "username", title: "Name on card" },
+      { key: "label", title: "Label", placeholder: "Personal Visa" },
+      { key: "cardNumber", title: "Card number", required: true },
+      { key: "cardExpiryMonth", title: "Expiry month", placeholder: "MM" },
+      { key: "cardExpiryYear", title: "Expiry year", placeholder: "YYYY" },
+      { key: "cardCvc", title: "CVC" },
+      { key: "cardholderName", title: "Name on card" },
     ],
     note: [{ key: "value", title: "Text", required: true, multiline: true }],
   };
 
-/** Allowed domains belong to logins: they are where a fill may type the value. */
-export const vaultTypeHasDomains = (type: VaultItemType) => type === "login";
+/** Allowed domains are where a fill may type the value: logins and cards. */
+export const vaultTypeHasDomains = (type: VaultItemType) => type === "login" || type === "card";
 
 export type VaultPolicyMode = VaultPolicy["mode"];
 
@@ -79,6 +81,11 @@ const EMPTY_SECRETS: Record<VaultSecretKey, string> = {
   password: "",
   totpSecret: "",
   value: "",
+  cardNumber: "",
+  cardExpiryMonth: "",
+  cardExpiryYear: "",
+  cardCvc: "",
+  cardholderName: "",
 };
 
 /** A blank draft for a new item, or the editable metadata of a saved one; secrets stay blank. */
@@ -121,6 +128,15 @@ export function vaultDraftProblem(draft: VaultDraft, mode: "create" | "edit"): s
       (field) => field.required && field.key !== "label" && draft.secrets[field.key] === "",
     );
     if (missing) return `Enter the ${missing.title.toLowerCase()}.`;
+  }
+  if (draft.type === "card") {
+    const month = draft.secrets.cardExpiryMonth.trim();
+    const year = draft.secrets.cardExpiryYear.trim();
+    if (month !== "" || year !== "") {
+      const monthOk = /^\d{1,2}$/.test(month) && Number(month) >= 1 && Number(month) <= 12;
+      const yearOk = /^\d{2}$/.test(year) || /^\d{4}$/.test(year);
+      if (!monthOk || !yearOk) return "Enter the full expiry (month and year).";
+    }
   }
   return null;
 }

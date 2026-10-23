@@ -29,8 +29,13 @@ first; the data model is ready to replicate later. User guide:
 `vault_items` keeps plaintext: name, type, scope (environment-wide or a
 project label id), an optional display `label`, field _names_, allowed
 domains, policy, timestamps, and a deleted tombstone. The secret body —
-username, password, TOTP secret, value — exists only inside the ciphertext.
-Usernames are secret too; only `label` is safe to display.
+username, password, TOTP secret, value, and a card's number, expiry
+month/year, CVC and cardholder name — exists only inside the ciphertext.
+Usernames are secret too; only `label` is safe to display. A card also keeps
+its last 4 digits in plaintext metadata: that fragment is display text for
+telling cards apart (it cannot be filled or used on its own), and it is the
+only secret-derived value outside the ciphertext. Legacy card-shaped items
+written onto the old slots are left as they are; nothing migrates them.
 
 ## Use, policy, approvals
 
@@ -59,4 +64,8 @@ against them before serialization. That covers terminal output
 input values a `vault_fill` just typed — the trap is that the page returns
 the secret to the agent, so redaction at the tool-result boundary is the
 defence, not blocking evaluate. Values are never logged; lengths and names
-are the most telemetry may carry.
+are the most telemetry may carry. Card values are also scrubbed in the
+shapes a page echoes them: the number digits-only or grouped in fours, and
+the expiry as `MM/YYYY`; the CVC and `MM/YY` expiry are below the length
+floor, so they are scrubbed as whole tokens only (never inside a longer
+number).

@@ -9,7 +9,7 @@ import {
   wrapDataKey,
 } from "./VaultCrypto.ts";
 import { evaluateVaultPolicy, hostMatchesDomain } from "./VaultPolicy.ts";
-import { redactText, redactValue } from "./VaultRedactor.ts";
+import { redactShortSecrets, redactShortValue, redactText, redactValue } from "./VaultRedactor.ts";
 import { totp } from "./VaultTotp.ts";
 
 describe("vault crypto", () => {
@@ -153,6 +153,19 @@ describe("redactor", () => {
     expect(redactValue({ a: ["x hunter2 y"], n: 42 }, secrets)).toEqual({
       a: ["x [redacted vault secret] y"],
       n: 42,
+    });
+  });
+
+  it("redacts short card secrets only as whole tokens", () => {
+    const short = ["987", "08/27"];
+    expect(redactShortSecrets("cvc 987, expiry 08/27.", short)).toBe(
+      "cvc [redacted vault secret], expiry [redacted vault secret].",
+    );
+    expect(redactShortSecrets("order 9876 and code 1987 stay", short)).toBe(
+      "order 9876 and code 1987 stay",
+    );
+    expect(redactShortValue({ echoed: ["987"] }, short)).toEqual({
+      echoed: ["[redacted vault secret]"],
     });
   });
 });

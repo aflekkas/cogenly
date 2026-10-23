@@ -16,8 +16,21 @@ export type VaultItemId = typeof VaultItemId.Type;
 export const VaultItemType = Schema.Literals(["login", "api_key", "card", "note"]);
 export type VaultItemType = typeof VaultItemType.Type;
 
-/** A field an agent may ask the server to fill; `totp` is generated, never stored as a code. */
-export const VaultField = Schema.Literals(["username", "password", "totp", "value"]);
+/**
+ * A field an agent may ask the server to fill; `totp` is generated, never
+ * stored as a code. `cardExpiry` is derived from the stored month/year and
+ * filled as `MM/YY`.
+ */
+export const VaultField = Schema.Literals([
+  "username",
+  "password",
+  "totp",
+  "value",
+  "cardNumber",
+  "cardExpiry",
+  "cardCvc",
+  "cardholderName",
+]);
 export type VaultField = typeof VaultField.Type;
 
 /** Secret fields of an item body. All of them are secret, username included. */
@@ -26,6 +39,12 @@ export const VaultSecretFields = Schema.Struct({
   password: Schema.optional(Schema.String.check(Schema.isMaxLength(8192))),
   totpSecret: Schema.optional(Schema.String.check(Schema.isMaxLength(1024))),
   value: Schema.optional(Schema.String.check(Schema.isMaxLength(65536))),
+  /** Card fields (`type: "card"`); every one lives only in the encrypted body. */
+  cardNumber: Schema.optional(Schema.String.check(Schema.isMaxLength(32))),
+  cardExpiryMonth: Schema.optional(Schema.String.check(Schema.isMaxLength(2))),
+  cardExpiryYear: Schema.optional(Schema.String.check(Schema.isMaxLength(4))),
+  cardCvc: Schema.optional(Schema.String.check(Schema.isMaxLength(8))),
+  cardholderName: Schema.optional(Schema.String.check(Schema.isMaxLength(200))),
 });
 export type VaultSecretFields = typeof VaultSecretFields.Type;
 
@@ -63,7 +82,14 @@ export const VaultItemMetadata = Schema.Struct({
   id: VaultItemId,
   ...vaultItemFields,
   /** Names of secret fields present, e.g. ["username", "password", "totp"]. */
-  fields: Schema.Array(Schema.Literals(["username", "password", "totp", "value"])),
+  fields: Schema.Array(VaultField),
+  /**
+   * Last 4 digits of a card number, for telling cards apart in lists. This is
+   * the one secret-derived fragment kept in plaintext: like `label` it is
+   * display text, it cannot be filled or used on its own, and the full number
+   * stays encrypted. Absent on non-card and legacy card-shaped items.
+   */
+  cardLast4: Schema.optional(Schema.String.check(Schema.isMaxLength(4))),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });

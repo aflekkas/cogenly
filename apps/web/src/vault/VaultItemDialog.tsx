@@ -51,6 +51,11 @@ const METADATA_FIELD = {
   password: "password",
   totpSecret: "totp",
   value: "value",
+  cardNumber: "cardNumber",
+  cardExpiryMonth: "cardExpiry",
+  cardExpiryYear: "cardExpiry",
+  cardCvc: "cardCvc",
+  cardholderName: "cardholderName",
 } as const;
 
 /**
@@ -200,7 +205,7 @@ export function VaultItemDialog(props: {
                     onChange={(event) => update({ allowedDomains: event.currentTarget.value })}
                   />
                   <p className="text-xs text-muted-foreground">
-                    Comma separated. Agents can only fill this login on these sites and their
+                    Comma separated. Agents can only fill this item on these sites and their
                     subdomains.
                   </p>
                 </div>

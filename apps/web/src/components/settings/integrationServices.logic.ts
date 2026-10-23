@@ -113,6 +113,10 @@ export const VAULT_FIELD_LABEL: Readonly<Record<VaultField, string>> = {
   password: "Password",
   totp: "One-time code",
   value: "Value",
+  cardNumber: "Card number",
+  cardExpiry: "Card expiry",
+  cardCvc: "Card CVC",
+  cardholderName: "Name on card",
 };
 
 const REASON_TEXT: Readonly<Record<IntegrationError["reason"], string>> = {

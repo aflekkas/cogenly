@@ -74,7 +74,7 @@ const VaultSaveTool = Tool.make("vault_save", {
 
 const VaultFillTool = Tool.make("vault_fill", {
   description:
-    "Type one field of a vault item (username, password, totp or value) into the active preview tab at locator, without the value ever reaching you. The tab's host must match the item's allowedDomains (exact host or subdomain). If the owner must approve this use, the result says approval_required and waits on them; ask again after approval.",
+    "Type one field of a vault item (username, password, totp or value; for a card: cardNumber, cardExpiry as MM/YY, cardCvc or cardholderName) into the active preview tab at locator, without the value ever reaching you. The tab's host must match the item's allowedDomains (exact host or subdomain). If the owner must approve this use, the result says approval_required and waits on them; ask again after approval.",
   parameters: Schema.Struct({
     itemId: Schema.optional(Schema.String),
     name: Schema.optional(Schema.String),

@@ -40,7 +40,7 @@ import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as VaultCrypto from "./VaultCrypto.ts";
 import { evaluateVaultPolicy, hostMatchesAnyDomain, type VaultUseCaller } from "./VaultPolicy.ts";
-import { redactText, redactValue } from "./VaultRedactor.ts";
+import { redactShortSecrets, redactShortValue, redactText, redactValue } from "./VaultRedactor.ts";
 import { totp } from "./VaultTotp.ts";
 
 export interface VaultUseInput {
@@ -99,20 +99,53 @@ interface VaultRow {
   readonly deleted_at: string | null;
 }
 
-const FIELD_KEYS = ["username", "password", "totp", "value"] as const;
+const FIELD_KEYS = [
+  "username",
+  "password",
+  "totp",
+  "value",
+  "cardNumber",
+  "cardExpiry",
+  "cardCvc",
+  "cardholderName",
+] as const;
 type StoredFields = {
   username?: string;
   password?: string;
   totpSecret?: string;
   value?: string;
+  cardNumber?: string;
+  cardExpiryMonth?: string;
+  cardExpiryYear?: string;
+  cardCvc?: string;
+  cardholderName?: string;
 };
 
-const storedKeyForField = (field: (typeof FIELD_KEYS)[number]): keyof StoredFields =>
-  field === "totp" ? "totpSecret" : field;
+/** Fillable field -> stored key; `totp` and the derived `cardExpiry` are special. */
+const storedKeyForField = (field: (typeof FIELD_KEYS)[number]): keyof StoredFields | null =>
+  field === "totp" ? "totpSecret" : field === "cardExpiry" ? null : field;
+
+const cardDigits = (stored: StoredFields): string => (stored.cardNumber ?? "").replace(/\D/g, "");
+
+/** The only secret-derived fragment kept in plaintext metadata; see contracts. */
+const cardLast4Of = (stored: StoredFields): string | undefined => {
+  const digits = cardDigits(stored);
+  return digits.length >= 4 ? digits.slice(-4) : undefined;
+};
+
+/** `MM/YY` from the stored month/year, or undefined when either half is missing. */
+const cardExpiryOf = (stored: StoredFields): string | undefined => {
+  const month = (stored.cardExpiryMonth ?? "").trim();
+  const year = (stored.cardExpiryYear ?? "").trim();
+  if (!month || !year) return undefined;
+  return `${month.padStart(2, "0")}/${year.slice(-2)}`;
+};
 
 const fieldsOf = (stored: StoredFields): VaultItemMetadata["fields"] =>
   FIELD_KEYS.filter((field) => {
-    const value = stored[storedKeyForField(field)];
+    if (field === "cardExpiry") return cardExpiryOf(stored) !== undefined;
+    const key = storedKeyForField(field);
+    const value = key === null ? undefined : stored[key];
     return typeof value === "string" && value.length > 0;
   });
 
@@ -122,12 +155,18 @@ const StoredFieldsJson = Schema.fromJsonString(
     password: Schema.optional(Schema.String),
     totpSecret: Schema.optional(Schema.String),
     value: Schema.optional(Schema.String),
+    cardNumber: Schema.optional(Schema.String),
+    cardExpiryMonth: Schema.optional(Schema.String),
+    cardExpiryYear: Schema.optional(Schema.String),
+    cardCvc: Schema.optional(Schema.String),
+    cardholderName: Schema.optional(Schema.String),
   }),
 );
 const MetadataJson = Schema.fromJsonString(
   Schema.Struct({
     label: Schema.optional(Schema.String),
     fields: Schema.optional(Schema.Array(Schema.String)),
+    cardLast4: Schema.optional(Schema.String),
   }),
 );
 const PolicyJson = Schema.fromJsonString(VaultPolicy);
@@ -160,6 +199,7 @@ const encodeApprovalActionJson = Schema.encodeSync(ApprovalActionJson);
 interface MetadataShape {
   readonly label?: string | undefined;
   readonly fields?: ReadonlyArray<string> | undefined;
+  readonly cardLast4?: string | undefined;
 }
 const decodeMetadataOption = Schema.decodeUnknownOption(MetadataJson);
 const decodePolicyOption = Schema.decodeUnknownOption(PolicyJson);
@@ -235,10 +275,11 @@ const make = Effect.gen(function* () {
   const identity = yield* ServerEnvironment.ServerEnvironmentIdentity;
   const crypto = yield* Crypto.Crypto;
   const now = DateTime.now.pipe(Effect.map(DateTime.formatIso));
-  const scrubCache = yield* Ref.make<{ loaded: boolean; secrets: Set<string> }>({
-    loaded: false,
-    secrets: new Set<string>(),
-  });
+  const scrubCache = yield* Ref.make<{
+    loaded: boolean;
+    secrets: Set<string>;
+    shortSecrets: Set<string>;
+  }>({ loaded: false, secrets: new Set<string>(), shortSecrets: new Set<string>() });
 
   const environmentId = yield* identity.getEnvironmentId;
 
@@ -282,6 +323,7 @@ const make = Effect.gen(function* () {
 
   const metadataOf = (row: VaultRow, stored?: StoredFields): VaultItemMetadata => {
     const metadata = parseMetadata(row.metadata_json);
+    const cardLast4 = stored ? cardLast4Of(stored) : metadata.cardLast4;
     return {
       id: VaultItemId.make(row.id),
       name: row.name,
@@ -293,6 +335,7 @@ const make = Effect.gen(function* () {
       allowedDomains: parseDomains(row.allowed_domains_json),
       policy: parsePolicy(row.policy_json),
       fields: stored ? fieldsOf(stored) : ((metadata.fields ?? []) as VaultItemMetadata["fields"]),
+      ...(cardLast4 ? { cardLast4 } : {}),
       createdAt: row.created_at as VaultItemMetadata["createdAt"],
       updatedAt: row.updated_at as VaultItemMetadata["updatedAt"],
     } as VaultItemMetadata;
@@ -388,23 +431,45 @@ const make = Effect.gen(function* () {
       yield* sql`INSERT INTO vault_usage(id, item_id, thread_id, agent_id, action, domain, at, outcome) VALUES (${`usage:${id}`}, ${input.itemId}, ${input.threadId ?? null}, ${input.agentId ?? null}, ${input.action}, ${input.domain ?? null}, ${at}, ${input.outcome})`;
     }).pipe(Effect.mapError(wrap), Effect.ignore);
 
-  const invalidateScrubCache = Ref.set(scrubCache, { loaded: false, secrets: new Set<string>() });
+  const invalidateScrubCache = Ref.set(scrubCache, {
+    loaded: false,
+    secrets: new Set<string>(),
+    shortSecrets: new Set<string>(),
+  });
 
   const ensureScrubSecrets = Effect.gen(function* () {
     const cache = yield* Ref.get(scrubCache);
-    if (cache.loaded) return cache.secrets;
+    if (cache.loaded) return cache;
     const rows = yield* sql<VaultRow>`SELECT * FROM vault_items WHERE deleted_at IS NULL`.pipe(
       Effect.mapError(wrap),
     );
     const secrets = new Set<string>();
+    const shortSecrets = new Set<string>();
     for (const row of rows) {
       const stored = yield* decryptStored(row).pipe(Effect.option);
-      if (Option.isSome(stored))
-        for (const value of Object.values(stored.value))
-          if (typeof value === "string") secrets.add(value);
+      if (Option.isNone(stored)) continue;
+      for (const value of Object.values(stored.value))
+        if (typeof value === "string" && value.length > 0) secrets.add(value);
+      // Card values echo back in shapes other than the stored one: a page may
+      // return the number digits-only or grouped, and the expiry as MM/YYYY.
+      // The CVC and MM/YY are too short for the general pass, so they go to
+      // the whole-token short pass instead.
+      const digits = cardDigits(stored.value);
+      if (digits.length > 0) {
+        secrets.add(digits);
+        secrets.add(digits.replace(/(\d{4})(?=\d)/g, "$1 "));
+      }
+      const expiry = cardExpiryOf(stored.value);
+      if (expiry !== undefined) {
+        shortSecrets.add(expiry);
+        const year = (stored.value.cardExpiryYear ?? "").trim();
+        if (year.length === 4) secrets.add(`${expiry.slice(0, 3)}${year}`);
+      }
+      if (stored.value.cardCvc) shortSecrets.add(stored.value.cardCvc);
     }
-    yield* Ref.set(scrubCache, { loaded: true, secrets });
-    return secrets;
+    const loaded = { loaded: true, secrets, shortSecrets };
+    yield* Ref.set(scrubCache, loaded);
+    return loaded;
   });
 
   const cleanStored = (fields: VaultSecretFields): StoredFields => {
@@ -413,6 +478,11 @@ const make = Effect.gen(function* () {
     if (fields.password) stored.password = fields.password;
     if (fields.totpSecret) stored.totpSecret = fields.totpSecret;
     if (fields.value) stored.value = fields.value;
+    if (fields.cardNumber) stored.cardNumber = fields.cardNumber;
+    if (fields.cardExpiryMonth) stored.cardExpiryMonth = fields.cardExpiryMonth;
+    if (fields.cardExpiryYear) stored.cardExpiryYear = fields.cardExpiryYear;
+    if (fields.cardCvc) stored.cardCvc = fields.cardCvc;
+    if (fields.cardholderName) stored.cardholderName = fields.cardholderName;
     return stored;
   };
 
@@ -423,7 +493,7 @@ const make = Effect.gen(function* () {
       const encrypted = yield* encryptStored(id, stored);
       const at = yield* now;
       const policy = input.policy ?? defaultVaultPolicy;
-      yield* sql`INSERT INTO vault_items(id, name, type, scope_project_id, metadata_json, policy_json, allowed_domains_json, ciphertext, wrapped_keys_json, created_at, updated_at) VALUES (${id}, ${input.name}, ${input.type}, ${input.scopeProjectId ?? null}, ${encodeMetadataJson({ ...(input.label ? { label: input.label } : {}), fields: fieldsOf(stored) })}, ${encodePolicyJson(policy)}, ${encodeDomainsJson(input.allowedDomains ?? [])}, ${encrypted.ciphertext}, ${encrypted.wrappedKeys}, ${at}, ${at})`.pipe(
+      yield* sql`INSERT INTO vault_items(id, name, type, scope_project_id, metadata_json, policy_json, allowed_domains_json, ciphertext, wrapped_keys_json, created_at, updated_at) VALUES (${id}, ${input.name}, ${input.type}, ${input.scopeProjectId ?? null}, ${encodeMetadataJson({ ...(input.label ? { label: input.label } : {}), fields: fieldsOf(stored), ...(cardLast4Of(stored) ? { cardLast4: cardLast4Of(stored) } : {}) })}, ${encodePolicyJson(policy)}, ${encodeDomainsJson(input.allowedDomains ?? [])}, ${encrypted.ciphertext}, ${encrypted.wrappedKeys}, ${at}, ${at})`.pipe(
         Effect.mapError((cause) =>
           String(cause).includes("UNIQUE")
             ? new VaultError({ reason: "name_conflict", cause })
@@ -465,7 +535,7 @@ const make = Effect.gen(function* () {
       const policy = input.policy ?? parsePolicy(row.policy_json);
       const label =
         input.label === null ? undefined : (input.label ?? parseMetadata(row.metadata_json).label);
-      yield* sql`UPDATE vault_items SET name = ${input.name ?? row.name}, type = ${input.type ?? row.type}, scope_project_id = ${input.scopeProjectId === undefined ? row.scope_project_id : input.scopeProjectId}, metadata_json = ${encodeMetadataJson({ ...(label ? { label } : {}), fields: fieldsOf(stored) })}, policy_json = ${encodePolicyJson(policy)}, allowed_domains_json = ${encodeDomainsJson(input.allowedDomains ?? parseDomains(row.allowed_domains_json))}, ciphertext = ${ciphertext}, wrapped_keys_json = ${wrappedKeys}, updated_at = ${at} WHERE id = ${row.id}`.pipe(
+      yield* sql`UPDATE vault_items SET name = ${input.name ?? row.name}, type = ${input.type ?? row.type}, scope_project_id = ${input.scopeProjectId === undefined ? row.scope_project_id : input.scopeProjectId}, metadata_json = ${encodeMetadataJson({ ...(label ? { label } : {}), fields: fieldsOf(stored), ...(cardLast4Of(stored) ? { cardLast4: cardLast4Of(stored) } : {}) })}, policy_json = ${encodePolicyJson(policy)}, allowed_domains_json = ${encodeDomainsJson(input.allowedDomains ?? parseDomains(row.allowed_domains_json))}, ciphertext = ${ciphertext}, wrapped_keys_json = ${wrappedKeys}, updated_at = ${at} WHERE id = ${row.id}`.pipe(
         Effect.mapError((cause) =>
           String(cause).includes("UNIQUE")
             ? new VaultError({ reason: "name_conflict", cause })
@@ -478,7 +548,9 @@ const make = Effect.gen(function* () {
 
   const fieldValue = (stored: StoredFields, field: VaultField): string | undefined => {
     if (field === "totp") return stored.totpSecret ? totp(stored.totpSecret) : undefined;
-    const value = stored[storedKeyForField(field)];
+    if (field === "cardExpiry") return cardExpiryOf(stored);
+    const key = storedKeyForField(field);
+    const value = key === null ? undefined : stored[key];
     return typeof value === "string" && value.length > 0 ? value : undefined;
   };
 
@@ -634,12 +706,16 @@ const make = Effect.gen(function* () {
       }),
     scrubText: (text) =>
       ensureScrubSecrets.pipe(
-        Effect.map((secrets) => redactText(text, secrets)),
+        Effect.map(({ secrets, shortSecrets }) =>
+          redactShortSecrets(redactText(text, secrets), shortSecrets),
+        ),
         Effect.orElseSucceed(() => text),
       ),
     scrubValue: (value) =>
       ensureScrubSecrets.pipe(
-        Effect.map((secrets) => redactValue(value, secrets)),
+        Effect.map(({ secrets, shortSecrets }) =>
+          redactShortValue(redactValue(value, secrets), shortSecrets),
+        ),
         Effect.orElseSucceed(() => value),
       ),
   });

@@ -1,10 +1,17 @@
-import { AgentId, EnvironmentId, ThreadId } from "@t3tools/contracts";
+import {
+  AgentId,
+  EnvironmentId,
+  ThreadId,
+  VaultItemMetadata,
+  VaultSecretFields,
+} from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { NodeCrypto } from "@effect/platform-node";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
@@ -44,6 +51,43 @@ const layer = Vault.layer.pipe(
 );
 
 const threadId = ThreadId.make("thread:1");
+
+describe("vault contract decoding", () => {
+  it("decodes secret bodies and metadata written before card fields existed", () => {
+    const decodeFields = Schema.decodeUnknownSync(VaultSecretFields);
+    expect(decodeFields({ username: "u", password: "p", value: "4242" })).toEqual({
+      username: "u",
+      password: "p",
+      value: "4242",
+    });
+    expect(
+      decodeFields({
+        cardNumber: "4242",
+        cardExpiryMonth: "08",
+        cardExpiryYear: "2027",
+        cardCvc: "987",
+        cardholderName: "Ada",
+      }),
+    ).toMatchObject({ cardNumber: "4242", cardExpiryYear: "2027" });
+
+    const decodeMetadata = Schema.decodeUnknownSync(VaultItemMetadata);
+    const base = {
+      id: "vault:1",
+      name: "Visa",
+      type: "card",
+      scopeProjectId: null,
+      allowedDomains: [],
+      policy: { mode: "ask", allowedAgentIds: [], allowedDomains: [] },
+      fields: ["value"],
+      createdAt: "2026-10-01T00:00:00.000Z",
+      updatedAt: "2026-10-01T00:00:00.000Z",
+    };
+    expect(decodeMetadata(base).cardLast4).toBeUndefined();
+    expect(decodeMetadata({ ...base, fields: ["cardNumber"], cardLast4: "4242" }).cardLast4).toBe(
+      "4242",
+    );
+  });
+});
 
 describe("Vault service", () => {
   it.effect("creates, lists metadata without secrets, uses, audits and deletes", () =>
@@ -156,6 +200,106 @@ describe("Vault service", () => {
         caller: { kind: "agent", agentId: AgentId.make("agent:2") },
       });
       expect(other.status).toBe("approval_required");
+    }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("stores a card in encrypted card fields and fills each by field", () =>
+    Effect.gen(function* () {
+      const vault = yield* Vault.Vault;
+      const { item } = yield* vault.create({
+        name: "Visa",
+        type: "card",
+        label: "Personal",
+        allowedDomains: ["shop.test"],
+        secretFields: {
+          cardNumber: "4242 4242 4242 4242",
+          cardExpiryMonth: "08",
+          cardExpiryYear: "2027",
+          cardCvc: "987",
+          cardholderName: "Ada Cardholder",
+        },
+      });
+      expect(item.fields).toEqual(["cardNumber", "cardExpiry", "cardCvc", "cardholderName"]);
+      expect(item.cardLast4).toBe("4242");
+      expect(item.label).toBe("Personal");
+
+      const listed = yield* vault.list({});
+      const listedJson = JSON.stringify(listed);
+      expect(listedJson).toContain("4242");
+      expect(listedJson).not.toContain("4242 4242");
+      expect(listedJson).not.toContain("4242424242424242");
+      expect(listedJson).not.toContain("Ada Cardholder");
+      expect(listedJson).not.toContain("08/2027");
+      expect(Object.values(listed.items[0]!)).not.toContain("987");
+
+      const fill = (field: "cardNumber" | "cardExpiry" | "cardCvc" | "cardholderName") =>
+        vault.use({ itemId: item.id, field, caller: { kind: "human" }, threadId, action: "fill" });
+      expect(yield* fill("cardNumber")).toMatchObject({
+        status: "allowed",
+        value: "4242 4242 4242 4242",
+      });
+      expect(yield* fill("cardExpiry")).toMatchObject({ status: "allowed", value: "08/27" });
+      expect(yield* fill("cardCvc")).toMatchObject({ status: "allowed", value: "987" });
+      expect(yield* fill("cardholderName")).toMatchObject({
+        status: "allowed",
+        value: "Ada Cardholder",
+      });
+
+      const wrongDomain = yield* vault.use({
+        itemId: item.id,
+        field: "cardNumber",
+        caller: { kind: "human" },
+        domain: "evil.test",
+        enforceAllowedDomains: true,
+        action: "fill",
+      });
+      expect(wrongDomain.status).toBe("denied");
+
+      // Every echo shape of a card secret is scrubbed, short ones included.
+      expect(
+        yield* vault.scrubText(
+          "num 4242424242424242 grouped 4242 4242 4242 4242 cvc 987 exp 08/27 long 08/2027 name Ada Cardholder",
+        ),
+      ).toBe(
+        "num [redacted vault secret] grouped [redacted vault secret] cvc [redacted vault secret] exp [redacted vault secret] long [redacted vault secret] name [redacted vault secret]",
+      );
+      expect(yield* vault.scrubText("order 9876 is not the cvc")).toBe("order 9876 is not the cvc");
+
+      const updated = yield* vault.update({
+        id: item.id,
+        secretFields: { cardNumber: "5555 5555 5555 4444" },
+      });
+      expect(updated.item.cardLast4).toBe("4444");
+      expect(updated.item.fields).toEqual([
+        "cardNumber",
+        "cardExpiry",
+        "cardCvc",
+        "cardholderName",
+      ]);
+    }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("leaves legacy card-shaped items on the old fields, undecayed", () =>
+    Effect.gen(function* () {
+      const vault = yield* Vault.Vault;
+      // Written by the old UI: number in value, CVC in password, name in
+      // username, expiry in the plaintext label. No silent migration.
+      const { item } = yield* vault.create({
+        name: "Old Visa",
+        type: "card",
+        label: "08/27",
+        secretFields: { username: "Ada Old", password: "123", value: "4242" },
+      });
+      expect(item.fields).toEqual(["username", "password", "value"]);
+      expect(item.cardLast4).toBeUndefined();
+      expect(item.label).toBe("08/27");
+      expect(
+        yield* vault.use({ itemId: item.id, field: "value", caller: { kind: "human" } }),
+      ).toMatchObject({ status: "allowed", value: "4242" });
+      const missing = yield* vault
+        .use({ itemId: item.id, field: "cardNumber", caller: { kind: "human" } })
+        .pipe(Effect.flip);
+      expect(missing.reason).toBe("field_missing");
     }).pipe(Effect.provide(layer)),
   );
 
