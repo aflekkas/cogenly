@@ -169,7 +169,9 @@ const make = Effect.gen(function* () {
       for (const row of pending) {
         const document = yield* get("schedule", row.id);
         if (document)
-          yield* projectDocument(document).pipe(Effect.provideService(SqlClient.SqlClient, sql));
+          yield* projectDocument(document, preserveLocalBindings).pipe(
+            Effect.provideService(SqlClient.SqlClient, sql),
+          );
       }
     }
     return true;

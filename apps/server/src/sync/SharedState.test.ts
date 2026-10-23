@@ -177,7 +177,10 @@ describe("SharedState", () => {
       yield* sql`INSERT INTO agents(agent_id,conversation_thread_id,payload_json,enabled,daily_run_cap,owner_machine) VALUES (${f.id},${f.conversationThreadId},${JSON.stringify({ ...f, projectId: "clone-two" })},1,${f.dailyRunCap},${local})`;
       yield* sql`INSERT INTO scheduled_tasks(task_id,title,prompt,enabled,schedule_json,project_id,workspace_strategy_json,model_selection_json,runtime_mode,interaction_mode,created_by,creation_source,created_at,updated_at,last_run_status,run_count,owner_machine) VALUES ('task:clone','Check','Check work',1,'{"type":"interval","everyMs":60000}','clone-two','{"type":"root"}',${JSON.stringify(f.modelSelection)},'full-access','default','user','web',${f.createdAt},${f.createdAt},'never',0,${local})`;
       yield* state.capture("agent", f.id);
+      yield* sql`UPDATE scheduled_tasks SET agent_id=${f.id} WHERE task_id='task:clone'`;
       yield* state.capture("schedule", "task:clone");
+      yield* sql`UPDATE agents SET payload_json=json_set(payload_json,'$.name','Renamed') WHERE agent_id=${f.id}`;
+      yield* state.capture("agent", f.id);
       expect(
         yield* sql`SELECT json_extract(payload_json,'$.projectId') AS project_id FROM agents`,
       ).toEqual([{ project_id: "clone-two" }]);
