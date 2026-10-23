@@ -111,7 +111,7 @@ agent tells you how it went.
 On web and desktop, a new thread keeps the current project and carries your model
 and mode selections, unless the destination project has its own model default.
 Its branch and workspace mode come from your configured defaults. In **Work**,
-**New task** starts in a new worktree unless the project, its `t3.json`, or
+**New task** starts in a new worktree unless the project, its `cogenly.json`, or
 Settings choose a workspace mode. To continue in an existing worktree, use
 **New thread in this worktree** from the branch toolbar.
 
@@ -156,7 +156,7 @@ folder)** in the heading's repository menu) runs in the project's own folder, so
 the files the agent makes sit with the project's other files.
 
 Each thread without a project works in its own folder under `~/.cogenly/scratch` (the
-`scratch` folder of your T3 data directory), named after its date, the first words
+`scratch` folder of your Cogenly data directory), named after its date, the first words
 of its first message, and a short id, like
 `2026-09-25-convert-these-pngs-to-webp-a1b2c3d4`. Deleting a thread keeps its
 folder, so the files the agent wrote stay until you delete them. Branch and worktree controls stay hidden because
@@ -284,7 +284,7 @@ restore provider-native shells, set the server preference `enableAgentTerminals`
 
 To reclaim disk space from settled work, turn on **Run in the thread's worktree when the
 thread settles** for one of the project's actions, or set `"runOnSettle": true` on a
-`t3.json` script, for example `cargo clean`. It runs each time a thread in its own
+`cogenly.json` script, for example `cargo clean`. It runs each time a thread in its own
 worktree settles, even if a terminal there still runs a
 command such as a dev server. Threads in the project's main checkout skip it. Its terminal
 closes when the command succeeds and stays open when it fails.

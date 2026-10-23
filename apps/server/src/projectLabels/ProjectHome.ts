@@ -82,7 +82,7 @@ export class ProjectHome extends Context.Service<
       readonly path: string;
     }) => Effect.Effect<ProjectChangeReceipt, ProjectLabelError>;
   }
->()("t3/projectLabels/ProjectHome") {}
+>()("cogenly-server/projectLabels/ProjectHome") {}
 
 /** First project chat id; stable, so a retried create replays instead of duplicating. */
 export const projectChatThreadIdFor = (id: ProjectLabelId) => ThreadId.make(`project-chat:${id}`);

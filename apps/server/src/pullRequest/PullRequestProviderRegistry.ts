@@ -13,7 +13,7 @@ export class PullRequestProviderRegistry extends Context.Service<
     readonly get: (kind: SourceControlProviderKind) => PullRequestProviderApi | null;
     readonly kinds: ReadonlyArray<SourceControlProviderKind>;
   }
->()("t3/pullRequest/PullRequestProviderRegistry") {}
+>()("cogenly-server/pullRequest/PullRequestProviderRegistry") {}
 
 /** Exported for tests, which stand a registry up from providers they supply themselves. */
 export function fromProviders(

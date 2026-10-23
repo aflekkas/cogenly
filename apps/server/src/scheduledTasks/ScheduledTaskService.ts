@@ -75,7 +75,7 @@ const WEBHOOK_RATE_LIMIT_PER_MINUTE = 60;
 
 /**
  * Where a webhook task's public URL points: `${relayHookBaseUrl}/${taskId}/${token}`.
- * Null when the environment has no managed tunnel on T3 Connect; clients then show the path.
+ * Null when the environment has no managed tunnel on Cogenly Connect; clients then show the path.
  */
 interface WebhookOrigin {
   readonly relayHookBaseUrl: string | null;
@@ -101,7 +101,7 @@ export function relayHookBaseUrl(input: {
 }
 
 export class ScheduledTaskWebhookOrigin extends Context.Reference<Effect.Effect<WebhookOrigin>>(
-  "t3/scheduledTasks/ScheduledTaskWebhookOrigin",
+  "cogenly-server/scheduledTasks/ScheduledTaskWebhookOrigin",
   {
     defaultValue: () => Effect.succeed({ relayHookBaseUrl: null }),
   },
@@ -112,7 +112,7 @@ export class ScheduledTaskWebhookOrigin extends Context.Reference<Effect.Effect<
  * configured zone; the default keeps tests and bare layers on the host zone.
  */
 export class ScheduledTaskTimeZone extends Context.Reference<string>(
-  "t3/scheduledTasks/ScheduledTaskTimeZone",
+  "cogenly-server/scheduledTasks/ScheduledTaskTimeZone",
   {
     defaultValue: () => Intl.DateTimeFormat().resolvedOptions().timeZone,
   },
@@ -133,7 +133,7 @@ export interface WebhookTriggerRequest extends WebhookRequest {
   readonly hookId: string;
   readonly token: string;
   readonly body: Uint8Array;
-  /** Set by T3 Connect; the same id is never dispatched twice. */
+  /** Set by Cogenly Connect; the same id is never dispatched twice. */
   readonly relayDeliveryId?: string;
   /** When the relay received a held request; defaults to now. */
   readonly receivedAt?: string;
@@ -276,7 +276,7 @@ export class ScheduledTaskService extends Context.Service<
       request: WebhookTriggerRequest,
     ) => Effect.Effect<WebhookTriggerResult, ScheduledTaskError>;
   }
->()("t3/scheduledTasks/ScheduledTaskService") {}
+>()("cogenly-server/scheduledTasks/ScheduledTaskService") {}
 
 function taskError(message: string, input?: { taskId?: ScheduledTaskId; cause?: unknown }) {
   return new ScheduledTaskError({

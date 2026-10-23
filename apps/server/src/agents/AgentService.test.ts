@@ -715,7 +715,7 @@ describe("agent scope, approvals and shared commitments", () => {
           const denied = yield* policy
             .beforeTool(
               scopeFor(agent.conversationThreadId),
-              "t3_thread_launch",
+              "thread_launch",
               { title: "Fix CI", message: "Repair tests" },
               false,
             )
@@ -1133,7 +1133,7 @@ it.effect(
         expect(stale.approval?.status).toBe("pending");
         expect(
           (yield* Effect.result(
-            policy.beforeTool(scopeFor(actor.threadId), "t3_pending_request_respond", {}, false),
+            policy.beforeTool(scopeFor(actor.threadId), "pending_request_respond", {}, false),
           ))._tag,
         ).toBe("Failure");
         expect(h.launches).toHaveLength(0);
@@ -1188,8 +1188,8 @@ it.effect(
           "terminal_run",
           "create_threads",
           "delegate_task",
-          "t3_thread_configure",
-          "t3_pending_request_respond",
+          "thread_configure",
+          "pending_request_respond",
         ]) {
           const result = yield* policy
             .beforeTool(scopeFor(agent.conversationThreadId), name, {}, false)
@@ -1220,7 +1220,7 @@ it.effect(
           (yield* Effect.result(
             policy.beforeTool(
               scopeFor(agent.conversationThreadId),
-              "t3_project_read",
+              "project_read",
               { projectId: "another-project", labelId: "spawn" },
               true,
             ),
@@ -1252,13 +1252,13 @@ it.effect("agents add projects with the execute grant, without the high-impact g
       const agent = yield* store.save({ ...h.fixture, permissions: defaultAgentPermissions });
       const call = (name: string) =>
         policy.beforeTool(scopeFor(agent.conversationThreadId), name, { title: "New app" }, false);
-      for (const name of ["t3_project_create", "t3_project_clone"])
+      for (const name of ["project_create", "project_clone"])
         expect(yield* call(name), name).toEqual({ handled: false });
-      expect((yield* call("t3_project_delete").pipe(Effect.flip)).code).toBe(
+      expect((yield* call("project_delete").pipe(Effect.flip)).code).toBe(
         "agent_permission_denied",
       );
       yield* store.save({ ...agent, permissions: { ...agent.permissions, execute: false } });
-      expect((yield* call("t3_project_create").pipe(Effect.flip)).code).toBe(
+      expect((yield* call("project_create").pipe(Effect.flip)).code).toBe(
         "agent_permission_denied",
       );
     }).pipe(Effect.provide(h.layer));
@@ -1300,7 +1300,7 @@ it.effect.each(["execute", "no_agent_execute", "no_read"] as const)(
           expect(
             yield* policy.beforeTool(
               scopeFor(agent.conversationThreadId),
-              "t3_project_read",
+              "project_read",
               { projectId: repositoryId },
               true,
             ),
@@ -1311,7 +1311,7 @@ it.effect.each(["execute", "no_agent_execute", "no_read"] as const)(
             (yield* policy
               .beforeTool(
                 scopeFor(result.threadId!),
-                "t3_project_read",
+                "project_read",
                 { projectId: repositoryId },
                 true,
               )

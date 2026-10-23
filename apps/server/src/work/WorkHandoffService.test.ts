@@ -867,7 +867,7 @@ it.effect("hands a brief over with the transcript as context, and titles itself"
       ]);
       expect(handoff?.history?.messages[1]?.text).toContain("Plan: validate dates first");
       expect(handoff?.history?.coverage).toContain("Source chat model: gpt-5 (provider codex)");
-      expect(handoff?.history?.coverage).toContain(`t3_thread_read({threadId:"${sourceId}"`);
+      expect(handoff?.history?.coverage).toContain(`thread_read({threadId:"${sourceId}"`);
       // A git repository with no workspace choice gets its own worktree.
       expect(projection.runs[0]?.workspacePreparation?.type).toBe("worktree");
       // Titled like a new thread: the chat's title holds until the generated one lands.

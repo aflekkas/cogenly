@@ -66,6 +66,7 @@ import * as ServerConfig from "../config.ts";
 import * as Keybindings from "../keybindings.ts";
 import * as EventSink from "../orchestration-v2/EventSink.ts";
 import { backupDatabase } from "../persistence/DatabaseBackup.ts";
+import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { T3_IMPORT_COMMAND_PREFIX } from "./T3ImportCommandIds.ts";
@@ -115,7 +116,7 @@ export class T3ImportService extends Context.Service<
     ) => Effect.Effect<{ readonly started: boolean }, T3ImportError>;
     readonly cancel: Effect.Effect<{ readonly cancelled: boolean }>;
   }
->()("t3/t3Import/T3ImportService") {}
+>()("cogenly-server/t3Import/T3ImportService") {}
 
 const SOURCE_POLL_INTERVAL = "3 seconds";
 
@@ -156,7 +157,12 @@ interface ProjectTarget {
   readonly action: "merge" | "create";
   readonly projectId: ProjectId;
   readonly title: string;
+  /** T3 Code's no-project folder, or a chat folder under it: filed under Cogenly's "No project". */
+  readonly scratch: boolean;
 }
+
+/** Stands in for "No project" in a scan made before Cogenly has created it; the import creates it. */
+const NO_PROJECT_PENDING_ID = ProjectId.make("t3-import:no-project");
 
 interface ImportPlan {
   readonly report: T3ImportReport;
@@ -237,6 +243,17 @@ const make = (options: T3ImportServiceOptions = {}) =>
     const sourceAttachmentsDir = NodePath.join(sourceDir, "attachments");
     const snapshotRoot = options.snapshotRoot ?? defaultT3SnapshotRoot();
     const scratchRoot = normalizeProjectPathForComparison(NodePath.join(home, ".t3", "scratch"));
+    /** T3 Code's no-project folder, or a per-chat folder it made under it. */
+    const isT3Scratch = (workspaceRoot: string) => {
+      const key = normalizeProjectPathForComparison(workspaceRoot);
+      return (
+        key === scratchRoot ||
+        key.startsWith(`${scratchRoot}/`) ||
+        key.startsWith(`${scratchRoot}\\`)
+      );
+    };
+    // Present in the running server; the offline CLI has no Scratch to file into.
+    const managedFolders = yield* Effect.serviceOption(ManagedProjectFolders.ManagedProjectFolders);
 
     const job = yield* SubscriptionRef.make<T3ImportJob>({ _tag: "Idle" });
     const latest = yield* Ref.make<{
@@ -349,8 +366,7 @@ const make = (options: T3ImportServiceOptions = {}) =>
           return source.listProjects().map((project): T3ImportSourceProject => {
             const count = counts.get(project.projectId) ?? { threads: 0, roots: 0 };
             const existing = findByRoot(rows, project.workspaceRoot);
-            const isScratch =
-              normalizeProjectPathForComparison(project.workspaceRoot) === scratchRoot;
+            const isScratch = isT3Scratch(project.workspaceRoot);
             return {
               sourceProjectId: project.projectId,
               title: project.title,
@@ -405,25 +421,52 @@ const make = (options: T3ImportServiceOptions = {}) =>
           readonly project_id: string;
         }>`SELECT project_id FROM projection_projects`).map((row) => row.project_id),
       );
-      const targets: Array<ProjectTarget> = sourceProjects.map((project) => {
+      // T3 Code's scratch chats file under "No project": its id once it exists,
+      // a stand-in the import resolves otherwise, or None without a Scratch.
+      const noProjectId = Option.isNone(managedFolders)
+        ? Option.none<ProjectId>()
+        : Option.map(yield* managedFolders.value.scratchRoot, (root) => {
+            const existing = findByRoot(rows, root);
+            return existing === undefined
+              ? NO_PROJECT_PENDING_ID
+              : ProjectId.make(existing.project_id);
+          });
+      const skippedScratch = sourceProjects.some(
+        (project) => isT3Scratch(project.workspaceRoot) && Option.isNone(noProjectId),
+      );
+      const targets = sourceProjects.flatMap((project): Array<ProjectTarget> => {
+        if (isT3Scratch(project.workspaceRoot)) {
+          return Option.match(noProjectId, {
+            onNone: () => [],
+            onSome: (projectId) => [
+              { source: project, action: "merge", projectId, title: "No project", scratch: true },
+            ],
+          });
+        }
         const recorded = ledgerProjects.get(project.projectId);
         const recordedRow = rows.find((row) => row.project_id === recorded);
         const existing = recordedRow ?? findByRoot(rows, project.workspaceRoot);
         if (existing !== undefined) {
-          return {
-            source: project,
-            action: "merge",
-            projectId: ProjectId.make(existing.project_id),
-            title: existing.title,
-          };
+          return [
+            {
+              source: project,
+              action: "merge",
+              projectId: ProjectId.make(existing.project_id),
+              title: existing.title,
+              scratch: false,
+            },
+          ];
         }
         const id = takenIds.has(project.projectId) ? `t3-${project.projectId}` : project.projectId;
-        return {
-          source: project,
-          action: "create",
-          projectId: ProjectId.make(id),
-          title: project.title,
-        };
+        return [
+          {
+            source: project,
+            action: "create",
+            projectId: ProjectId.make(id),
+            title: project.title,
+            scratch: false,
+          },
+        ];
       });
       const projectIdMap = new Map(
         targets.map((target) => [target.source.projectId, target.projectId]),
@@ -550,6 +593,11 @@ const make = (options: T3ImportServiceOptions = {}) =>
 
       const warnings: Array<string> = [];
       if (detected.running) warnings.push(T3_IMPORT_RUNNING_NOTE);
+      if (skippedScratch) {
+        warnings.push(
+          'Chats from T3 Code without a project were left out: this environment has no "No project" to file them under.',
+        );
+      }
       for (const target of targets) {
         if (target.action === "create" && !NodeFS.existsSync(target.source.workspaceRoot)) {
           warnings.push(
@@ -560,14 +608,14 @@ const make = (options: T3ImportServiceOptions = {}) =>
       for (const binding of providers.bindings) {
         if (binding.status === "conflict") {
           warnings.push(
-            `Provider "${binding.instanceId}" is configured differently in Cogenly (or missing in T3). Its ${binding.threads} threads import, but resuming them may start fresh sessions.`,
+            `Provider "${binding.instanceId}" is configured differently in Cogenly (or missing in T3 Code). Its ${binding.threads} threads import, but resuming them may start fresh sessions.`,
           );
         }
       }
       const diverged = threads.filter((plan) => plan.mode === "diverged").length;
       if (diverged > 0) {
         warnings.push(
-          `${diverged} threads were continued in Cogenly after an earlier import; their newer T3 activity is not applied.`,
+          `${diverged} threads were continued in Cogenly after an earlier import; their newer T3 Code activity is not applied.`,
         );
       }
       const remapped = threads.filter((plan) => plan.threadId !== plan.source.threadId).length;
@@ -677,7 +725,23 @@ const make = (options: T3ImportServiceOptions = {}) =>
 
           yield* setProgress({ phase: "projects", processedEvents: 0, totalEvents });
           const now = DateTime.formatIso(yield* DateTime.now);
-          for (const target of plan.targets) {
+          // A scan made before "No project" existed planned a stand-in id for it.
+          const noProjectId =
+            Option.isSome(managedFolders) && plan.targets.some((target) => target.scratch)
+              ? (yield* managedFolders.value.ensureScratchProject.pipe(Effect.orDie)).projectId
+              : null;
+          const targets = plan.targets.map((target) =>
+            target.scratch && noProjectId !== null ? { ...target, projectId: noProjectId } : target,
+          );
+          const scratchSources = new Set(
+            targets.filter((target) => target.scratch).map((target) => target.source.projectId),
+          );
+          const threadPlans = plan.threads.map((thread) =>
+            noProjectId !== null && scratchSources.has(thread.source.projectId)
+              ? { ...thread, projectId: noProjectId }
+              : thread,
+          );
+          for (const target of targets) {
             if (target.action === "create") {
               yield* projects
                 .bootstrap({
@@ -699,12 +763,12 @@ const make = (options: T3ImportServiceOptions = {}) =>
 
           yield* setProgress({ phase: "events", processedEvents: 0, totalEvents });
           const projectIdMap = new Map(
-            plan.targets.map((target) => [target.source.projectId, target.projectId]),
+            targets.map((target) => [target.source.projectId, target.projectId]),
           );
           const summary = yield* replayEvents({
             source,
-            plans: plan.threads,
-            context: mappingContext({ plans: plan.threads, projectIds: projectIdMap }),
+            plans: threadPlans,
+            context: mappingContext({ plans: threadPlans, projectIds: projectIdMap }),
             write: {
               eventSink,
               commandIdPrefix: `${T3_IMPORT_COMMAND_PREFIX}${now}`,

@@ -128,7 +128,7 @@ export function planPreferences(input: {
       changes.push({
         setting: key,
         action: "keep",
-        detail: `Already set in Cogenly (T3: ${label})`,
+        detail: `Already set in Cogenly (T3 Code: ${label})`,
       });
       continue;
     }

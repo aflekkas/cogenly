@@ -551,7 +551,7 @@ export const ProjectInstructionsSetInput = Schema.Struct({
 export type ProjectInstructionsSetInput = typeof ProjectInstructionsSetInput.Type;
 export const ProjectRepositoryChangeInput = Schema.Struct({
   ...projectFolderTarget,
-  /** An existing repository (see project_overview or t3_project_list). */
+  /** An existing repository (see project_overview or project_list). */
   repositoryId: ProjectId,
 });
 export type ProjectRepositoryChangeInput = typeof ProjectRepositoryChangeInput.Type;

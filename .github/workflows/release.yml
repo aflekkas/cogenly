@@ -300,7 +300,7 @@ jobs:
       - name: Build server, web client, and resource monitor
         run: |
           set -euo pipefail
-          vp run --filter t3 build
+          vp run --filter cogenly-server build
           vp run build:resource-monitor
           mkdir -p "$RUNNER_TEMP/resource-monitor"
           cp native/resource-monitor/target/release/t3-resource-monitor "$RUNNER_TEMP/resource-monitor/"

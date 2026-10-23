@@ -54,7 +54,7 @@ export class TerminalMcpService extends Context.Service<
       McpInvocationContext.McpInvocationContext
     >;
   }
->()("t3/mcp/TerminalMcpService") {}
+>()("cogenly-server/mcp/TerminalMcpService") {}
 
 const make = Effect.gen(function* () {
   const manager = yield* TerminalManager.TerminalManager;

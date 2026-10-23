@@ -161,7 +161,7 @@ export class ExportService extends Context.Service<
     readonly validate: (input: { path: string }) => Effect.Effect<ExportValidation, ExportError>;
     readonly list: () => Effect.Effect<{ exports: ReadonlyArray<ExportResult> }, ExportError>;
   }
->()("t3/export/ExportService") {}
+>()("cogenly-server/export/ExportService") {}
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;

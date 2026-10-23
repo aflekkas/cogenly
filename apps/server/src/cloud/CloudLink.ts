@@ -1,5 +1,5 @@
 /**
- * The T3 Connect link lifecycle of this environment: linking it to the relay,
+ * The Cogenly Connect link lifecycle of this environment: linking it to the relay,
  * applying and reading the link, unlinking, answering the relay's signed health
  * and mint requests, and keeping the managed tunnel registered, recovered and
  * released. HTTP handlers, server startup and shutdown all go through it.
@@ -193,7 +193,7 @@ export class CloudLinkAccountMismatchError extends Schema.TaggedError<CloudLinkA
   }
 }
 
-/** Linking from the CLI needs the authorization `t3 connect link` stores. */
+/** Linking from the CLI needs the authorization `cogenly connect link` stores. */
 export class CloudLinkAuthorizationMissingError extends Schema.TaggedError<CloudLinkAuthorizationMissingError>()(
   "CloudLinkAuthorizationMissingError",
   {},
@@ -433,7 +433,7 @@ type CloudLinkBackgroundError =
   | PlatformError.PlatformError;
 
 // "revoked" means the relay rejected this environment's credential, as after
-// the environment is deregistered from T3 Connect.
+// the environment is deregistered from Cogenly Connect.
 type ManagedTunnelRegistration =
   | { readonly status: "not_linked" | "superseded" | "revoked" }
   | { readonly status: "recovery_required"; readonly config: RelayManagedEndpointRuntimeConfig }
@@ -477,7 +477,7 @@ export class CloudLink extends Context.Service<
     /** Stops the tunnel and forgets the link, including the CLI's wish to keep it. */
     readonly unlink: () => Effect.Effect<EnvironmentCloudRelayConfigResult, CloudLinkInternalError>;
     /**
-     * Saves this environment's T3 Connect preferences, all or nothing, and
+     * Saves this environment's Cogenly Connect preferences, all or nothing, and
      * returns the link state. The activity setting is saved first. Holding
      * webhooks while offline is decided by the relay, so the relay is told
      * before the local copy is saved. If either step fails, the activity
@@ -566,7 +566,7 @@ export class CloudLink extends Context.Service<
       | HttpClientError.HttpClientError
     >;
   }
->()("t3/cloud/CloudLink") {}
+>()("cogenly-server/cloud/CloudLink") {}
 
 const make = Effect.gen(function* () {
   const secrets = yield* ServerSecretStore.ServerSecretStore;

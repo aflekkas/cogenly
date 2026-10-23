@@ -18,7 +18,7 @@ export class Scheduler extends Context.Service<
       runDueWork: Effect.Effect<void, E, R>,
     ) => Effect.Effect<void, never, R | Scope.Scope>;
   }
->()("t3/scheduling/Scheduler") {}
+>()("cogenly-server/scheduling/Scheduler") {}
 
 /**
  * One scheduler runs per process, so its heartbeat is process state: epoch

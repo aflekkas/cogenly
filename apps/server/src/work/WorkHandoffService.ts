@@ -107,7 +107,7 @@ export class WorkHandoffService extends Context.Service<
       options?: { readonly throughMessageId?: MessageId | undefined },
     ) => Effect.Effect<WorkHandoffDraft, WorkHandoffError>;
   }
->()("t3/work/WorkHandoffService") {}
+>()("cogenly-server/work/WorkHandoffService") {}
 
 const make = Effect.gen(function* () {
   const threads = yield* Threads.ThreadManagementService;

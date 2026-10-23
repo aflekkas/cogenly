@@ -455,7 +455,7 @@ export const runT3ImportStep = Effect.fn("cli.setup.t3Import")(function* (
         message: "Which T3 Code projects?",
         choices: source.projects.map((project) => ({
           title: `${project.title} (${plural(project.threadCount, "thread")})`,
-          description: `${project.workspaceRoot}${project.existingProjectTitle ? ` · merges into ${project.existingProjectTitle}` : ""}${project.isScratch ? " · scratch" : ""}`,
+          description: `${project.workspaceRoot}${project.existingProjectTitle ? ` · merges into ${project.existingProjectTitle}` : ""}${project.isScratch ? " · files under No project" : ""}`,
           value: project.sourceProjectId,
           selected:
             projectIds.length > 0
@@ -678,12 +678,12 @@ const setupFlags = {
     Flag.withDefault(false),
   ),
   importT3: Flag.Boolean("import-t3").pipe(
-    Flag.withDescription("Import from T3 Code (T3 may stay open)."),
+    Flag.withDescription("Import from T3 Code (T3 Code may stay open)."),
     Flag.withDefault(false),
   ),
   projects: Flag.String("projects").pipe(
     Flag.withDescription(
-      "T3 projects to import, comma-separated ids, titles or folders. Default: every non-scratch project with threads.",
+      "T3 Code projects to import, comma-separated ids, titles or folders. Default: every non-scratch project with threads.",
     ),
     Flag.optional,
   ),

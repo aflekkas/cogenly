@@ -148,7 +148,7 @@ describe("workPrefersNewWorktree", () => {
     expect(workPrefersNewWorktree({ ...base, isScratch: true })).toBe(false);
     expect(workPrefersNewWorktree({ ...base, environmentDefault: "local" })).toBe(false);
     expect(workPrefersNewWorktree({ ...base, resolvedSource: "project" })).toBe(false);
-    expect(workPrefersNewWorktree({ ...base, resolvedSource: "t3.json" })).toBe(false);
+    expect(workPrefersNewWorktree({ ...base, resolvedSource: "cogenly.json" })).toBe(false);
   });
 });
 

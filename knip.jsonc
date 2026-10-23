@@ -11,7 +11,7 @@
     },
     "scripts": {
       // Knip loads its preprocessor through a CLI option;
-      // worktree setup (from t3.json) runs directly.
+      // worktree setup (from cogenly.json) runs directly.
       "entry": ["knip-schemas.ts", "setup-worktree.ts"],
     },
     "apps/server": {

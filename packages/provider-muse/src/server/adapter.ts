@@ -1,6 +1,6 @@
 import { parseMuseUsageLimits } from "./usageLimits.ts";
 import type { ServerProviderUsageLimits } from "@t3tools/contracts";
-import { T3_CODE_ORCHESTRATION_INSTRUCTIONS as COGENLY_ORCHESTRATION_INSTRUCTIONS } from "@t3tools/provider-core/server/orchestrationInstructions";
+import { COGENLY_ORCHESTRATION_INSTRUCTIONS as COGENLY_ORCHESTRATION_INSTRUCTIONS } from "@t3tools/provider-core/server/orchestrationInstructions";
 import { MspError, type SendUserTurnOptions } from "@muse-code/sdk";
 import {
   MUSE_DEFAULT_MODEL,
@@ -2097,7 +2097,7 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
                           Effect.map((mcp) =>
                             mcp
                               ? "\n" +
-                                COGENLY_ORCHESTRATION_INSTRUCTIONS.replaceAll("T3", "Cogenly") +
+                                COGENLY_ORCHESTRATION_INSTRUCTIONS +
                                 (mcp.terminalToolsAvailable === false ||
                                 turnInput.runtimePolicy.conversationMode === true
                                   ? ""

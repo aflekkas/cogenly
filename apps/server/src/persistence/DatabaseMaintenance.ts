@@ -56,7 +56,7 @@ export class DatabaseCompactError extends Schema.TaggedError<DatabaseCompactErro
   }
 }
 
-/** Offline inspection and repair of a T3 state database, for `t3 doctor`. */
+/** Offline inspection and repair of a T3 state database, for `cogenly doctor`. */
 export class DatabaseMaintenance extends Context.Service<
   DatabaseMaintenance,
   {
@@ -82,7 +82,7 @@ export class DatabaseMaintenance extends Context.Service<
       | DatabaseCompactError
     >;
   }
->()("t3/persistence/DatabaseMaintenance") {}
+>()("cogenly-server/persistence/DatabaseMaintenance") {}
 
 const isDomainError = Schema.is(
   Schema.Union([DatabaseMissingError, DatabaseInUseError, DatabaseProjectionsInvalidError]),

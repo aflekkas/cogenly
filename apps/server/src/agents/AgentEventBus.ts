@@ -24,7 +24,7 @@ export class AgentEventBus extends Context.Service<
       threadId: ThreadId,
     ) => Effect.Effect<Pick<AgentEventContext, "chainDepth" | "chainAgentIds">, AgentError>;
   }
->()("t3/agents/AgentEventBus") {}
+>()("cogenly-server/agents/AgentEventBus") {}
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;

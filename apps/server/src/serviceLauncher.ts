@@ -559,7 +559,7 @@ export class Launcher {
   async #recover(): Promise<void> {
     // A fresh launcher means servers are running again: any stop marker from
     // a previous explicit stop is stale and must not make a future update
-    // handoff release its tunnel. A restart deferred by `t3 update` is done
+    // handoff release its tunnel. A restart deferred by `cogenly update` is done
     // no matter who restarted the service, but only once this launcher is
     // the version the marker waits for: a launcher that came up between the
     // CLI writing the marker and writing the new state still runs the old
@@ -815,7 +815,7 @@ export class Launcher {
   }
 
   /**
-   * Another server owns the T3 home. Exiting would make systemd or launchd
+   * Another server owns the Cogenly home. Exiting would make systemd or launchd
    * start another refused server, so stay idle until stopped or restarted.
    * A pending update fails without restoring its backup: the other owner may
    * have written to the database since.
@@ -836,7 +836,7 @@ export class Launcher {
     // Signal listeners alone do not keep Node alive.
     this.#timer = setInterval(() => {}, 2_147_483_647);
     process.stderr.write(
-      "[service-launcher] Another Cogenly server owns this T3 home. Stop it, then restart this service.\n",
+      "[service-launcher] Another Cogenly server owns this Cogenly home. Stop it, then restart this service.\n",
     );
   }
 

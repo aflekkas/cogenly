@@ -161,12 +161,15 @@ const CHAT_MARKDOWN_SANITIZE_SCHEMA = {
     href: [
       ...(defaultSchema.protocols?.href ?? []),
       "file",
+      "cogenly-citation",
+      "cogenly-context",
+      // Messages written before the rename.
       "t3-citation",
       "t3-context",
       THREAD_LINK_PROTOCOL,
       LEGACY_THREAD_LINK_PROTOCOL,
     ],
-    src: [...(defaultSchema.protocols?.src ?? []), "file", "t3-context"],
+    src: [...(defaultSchema.protocols?.src ?? []), "file", "cogenly-context", "t3-context"],
   },
 } satisfies Parameters<typeof rehypeSanitize>[0];
 

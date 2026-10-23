@@ -38,7 +38,7 @@ export const T3_IMPORT_STATUS_HEARTBEAT_MS = 5_000;
 export const T3_IMPORT_RUNNING_NOTE =
   "T3 Code is open; anything that changes after the check won't come over until you run it again.";
 
-/** Which T3 projects to import, by their T3 project id. Empty means the default selection. */
+/** Which T3 Code projects to import, by their T3 project id. Empty means the default selection. */
 export const T3ImportScope = Schema.Struct({
   sourceProjectIds: Schema.Array(Schema.String),
 });

@@ -29,10 +29,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 
 import * as Events from "../persistence/OrchestrationEventStore.ts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
-import {
-  normalizeRepositoryRemote,
-  repositoryDirectoryName,
-} from "../project/RepositoryRemote.ts";
+import { normalizeRepositoryRemote, repositoryDirectoryName } from "../project/RepositoryRemote.ts";
 import * as ProjectLabelFolders from "./ProjectLabelFolders.ts";
 
 type Labels = { readonly labels: ReadonlyArray<ProjectLabelWithRepositories> };
@@ -105,7 +102,7 @@ export class ProjectLabelService extends Context.Service<
       confirmedByUser?: boolean,
     ) => Effect.Effect<Tags, ProjectLabelError>;
   }
->()("t3/projectLabels/ProjectLabelService") {}
+>()("cogenly-server/projectLabels/ProjectLabelService") {}
 
 const isProjectLabelError = Schema.is(ProjectLabelError);
 const decodeRepositories = Schema.decodeUnknownEffect(

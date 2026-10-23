@@ -145,8 +145,8 @@ import {
 import type { ManagedServerProvider } from "@t3tools/provider-core/server/snapshot";
 import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
 import {
-  T3_CODE_BROWSER_TOOL_INSTRUCTIONS,
-  T3_CODE_ORCHESTRATION_INSTRUCTIONS,
+  COGENLY_BROWSER_TOOL_INSTRUCTIONS,
+  COGENLY_ORCHESTRATION_INSTRUCTIONS,
 } from "@t3tools/provider-core/server/orchestrationInstructions";
 import {
   CONVERSATION_MODE_INSTRUCTIONS,
@@ -499,7 +499,7 @@ export interface ClaudeAgentSdkQueryRunnerShape {
 export class ClaudeAgentSdkQueryRunner extends Context.Service<
   ClaudeAgentSdkQueryRunner,
   ClaudeAgentSdkQueryRunnerShape
->()("t3/orchestration-v2/Adapters/ClaudeAdapterV2/ClaudeAgentSdkQueryRunner") {}
+>()("cogenly-server/orchestration-v2/Adapters/ClaudeAdapterV2/ClaudeAgentSdkQueryRunner") {}
 
 export interface ClaudeAgentSdkSessionForkInput {
   readonly sessionId: string;
@@ -1216,9 +1216,9 @@ export function makeClaudeQueryOptions(input: {
         buildRuntimeInstructions({ harness: "Claude Code" }) +
         (input.conversationMode === true ? `\n${CONVERSATION_MODE_INSTRUCTIONS}` : "") +
         (input.projectManifest === undefined ? "" : `\n${input.projectManifest}`) +
-        (input.mcpServers === undefined ? "" : T3_CODE_ORCHESTRATION_INSTRUCTIONS) +
+        (input.mcpServers === undefined ? "" : COGENLY_ORCHESTRATION_INSTRUCTIONS) +
         (input.mcpServers !== undefined && input.browserToolsAvailable === true
-          ? T3_CODE_BROWSER_TOOL_INSTRUCTIONS
+          ? COGENLY_BROWSER_TOOL_INSTRUCTIONS
           : "") +
         // Conversation turns have no shell at all, so they never route
         // commands through the terminal tools.
@@ -1244,21 +1244,21 @@ export const CLAUDE_T3_MCP_TOOL_WILDCARD = "mcp__cogenly__*";
 export const CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS: ReadonlyArray<string> = [
   "mcp__cogenly__orchestrator_capabilities",
   "mcp__cogenly__list_scheduled_tasks",
-  "mcp__cogenly__t3_thread_list",
-  "mcp__cogenly__t3_thread_wait",
-  "mcp__cogenly__t3_pending_request_list",
-  "mcp__cogenly__t3_pending_request_read",
-  "mcp__cogenly__t3_thread_configuration",
-  "mcp__cogenly__t3_thread_transfers",
-  "mcp__cogenly__t3_worktree_status",
-  "mcp__cogenly__t3_worktree_list",
-  "mcp__cogenly__t3_project_list",
-  "mcp__cogenly__t3_project_read",
-  "mcp__cogenly__t3_thread_search",
-  "mcp__cogenly__t3_preview_list",
-  "mcp__cogenly__t3_environment_read",
-  "mcp__cogenly__t3_queue_list",
-  "mcp__cogenly__t3_queue_read",
+  "mcp__cogenly__thread_list",
+  "mcp__cogenly__thread_wait",
+  "mcp__cogenly__pending_request_list",
+  "mcp__cogenly__pending_request_read",
+  "mcp__cogenly__thread_configuration",
+  "mcp__cogenly__thread_transfers",
+  "mcp__cogenly__worktree_status",
+  "mcp__cogenly__worktree_list",
+  "mcp__cogenly__project_list",
+  "mcp__cogenly__project_read",
+  "mcp__cogenly__thread_search",
+  "mcp__cogenly__preview_list",
+  "mcp__cogenly__environment_read",
+  "mcp__cogenly__queue_list",
+  "mcp__cogenly__queue_read",
   "mcp__cogenly__terminal_read",
   "mcp__cogenly__terminal_list",
   "mcp__cogenly__html_preview",
@@ -1282,29 +1282,29 @@ export const CLAUDE_CONVERSATION_T3_MCP_ALLOWED_TOOLS: ReadonlyArray<string> = [
   "mcp__cogenly__work_task",
   "mcp__cogenly__memory_read",
   "mcp__cogenly__fact_search",
-  "mcp__cogenly__t3_project_label_list",
-  "mcp__cogenly__t3_project_label_read",
-  "mcp__cogenly__t3_project_label_create",
-  "mcp__cogenly__t3_project_label_update",
-  "mcp__cogenly__t3_project_label_delete",
-  "mcp__cogenly__t3_project_label_archive",
-  "mcp__cogenly__t3_project_label_unarchive",
-  "mcp__cogenly__t3_project_label_link_source",
-  "mcp__cogenly__t3_project_label_unlink_source",
-  "mcp__cogenly__t3_project_label_link_repository",
-  "mcp__cogenly__t3_project_label_unlink_repository",
-  "mcp__cogenly__t3_thread_move_project_folder",
-  "mcp__cogenly__t3_project_label_file_thread",
-  "mcp__cogenly__t3_thread_snooze",
-  "mcp__cogenly__t3_thread_unsnooze",
-  "mcp__cogenly__t3_thread_settle",
-  "mcp__cogenly__t3_thread_unsettle",
+  "mcp__cogenly__project_label_list",
+  "mcp__cogenly__project_label_read",
+  "mcp__cogenly__project_label_create",
+  "mcp__cogenly__project_label_update",
+  "mcp__cogenly__project_label_delete",
+  "mcp__cogenly__project_label_archive",
+  "mcp__cogenly__project_label_unarchive",
+  "mcp__cogenly__project_label_link_source",
+  "mcp__cogenly__project_label_unlink_source",
+  "mcp__cogenly__project_label_link_repository",
+  "mcp__cogenly__project_label_unlink_repository",
+  "mcp__cogenly__thread_move_project_folder",
+  "mcp__cogenly__project_label_file_thread",
+  "mcp__cogenly__thread_snooze",
+  "mcp__cogenly__thread_unsnooze",
+  "mcp__cogenly__thread_settle",
+  "mcp__cogenly__thread_unsettle",
   "mcp__cogenly__list_agents",
   "mcp__cogenly__start_agent_builder",
 ];
 
 // Claude Code aborts an HTTP MCP call after 60 s ("The operation timed out.")
-// unless the server config sets `timeout`. T3's wait tools (t3_thread_wait,
+// unless the server config sets `timeout`. T3's wait tools (thread_wait,
 // delegate_task mode=wait) legitimately block for up to an hour
 // (MAX_WAIT_TIMEOUT_MS in OrchestratorMcpService), so the budget sits just
 // above that and the server's own wait timeout is what ends a long call.

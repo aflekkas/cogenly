@@ -58,7 +58,7 @@ export const addEnvironmentFailure = (error: DesktopAppControl.DesktopAppControl
   });
 
 export const layer = McpToolAccess.toLayer(EnvironmentToolkit, {
-  t3_environment_read: McpToolAccess.reads(() =>
+  environment_read: McpToolAccess.reads(() =>
     Effect.gen(function* () {
       const { descriptor, settings } = yield* access;
       const current = yield* settings.getSettings.pipe(Effect.mapError(unavailable));
@@ -73,14 +73,14 @@ export const layer = McpToolAccess.toLayer(EnvironmentToolkit, {
   ),
   // Adds a machine the user's own SSH config already reaches, to the user's own desktop app,
   // which shows it happening. Full-access callers only, like other environment changes.
-  t3_environment_add: McpToolAccess.writesEnvironment((input) =>
+  environment_add: McpToolAccess.writesEnvironment((input) =>
     DesktopAppControl.DesktopAppControl.pipe(
       Effect.flatMap((control) => control.addEnvironment(input)),
       Effect.map(({ environmentId, label }) => ({ environmentId, label })),
       Effect.mapError(addEnvironmentFailure),
     ),
   ),
-  t3_environment_preferences_update: McpToolAccess.writesEnvironment((patch, check) =>
+  environment_preferences_update: McpToolAccess.writesEnvironment((patch, check) =>
     Effect.gen(function* () {
       const scope = yield* McpInvocationContext.McpInvocationContext;
       const executor = yield* ThreadCommandExecutor.ThreadCommandExecutor;

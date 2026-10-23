@@ -364,7 +364,7 @@ export function buildHandoffCoverage(input: {
   ];
   if (artifacts.length > 0) sections.push(`Key artifacts:\n${artifacts.join("\n")}`);
   sections.push(
-    `Recover omitted history with t3_thread_read({threadId:"${input.sourceThreadId}",view:"activity",limit:20,maxCharsPerItem:4000}); paginate with afterPosition=nextPosition. For long items use itemId and textOffset=nextTextOffset until null.`,
+    `Recover omitted history with thread_read({threadId:"${input.sourceThreadId}",view:"activity",limit:20,maxCharsPerItem:4000}); paginate with afterPosition=nextPosition. For long items use itemId and textOffset=nextTextOffset until null.`,
   );
   return sections.join("\n\n");
 }

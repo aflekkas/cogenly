@@ -31,7 +31,7 @@ custom server name as GitHub once it has a credential for that host.
 
 To start from nothing, choose **New project** in the command palette (`Cmd/Ctrl+K`), or
 **New project** under **Add Project** on any client, and type a name. Cogenly makes a Git
-repository in `~/.cogenly/projects` (the `projects` folder of your T3 data directory) with a README,
+repository in `~/.cogenly/projects` (the `projects` folder of your Cogenly data directory) with a README,
 an icon, and a first commit, then opens a new thread in it. Until the project has a thread, new
 threads work in its folder, even when your default is a new worktree. The folder is named after the project,
 like `pinball-stats` for "Pinball Stats". Turn on **Create private repository on GitHub** to also

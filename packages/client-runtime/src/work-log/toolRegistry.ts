@@ -21,6 +21,7 @@ import {
   resolveT3McpToolId,
   type T3McpToolDefinition,
   type T3McpToolSummaryAction,
+  withoutLegacyToolPrefix,
 } from "@t3tools/shared/t3McpToolPresentation";
 import {
   claudeSkillInvocation,
@@ -767,7 +768,7 @@ const COGENLY_TOOLS: Readonly<Record<string, WorkLogToolDescriptor>> = {
     raw: "collapsed",
     group: { style: "times", noun: ["chats", "chats"] },
   },
-  t3_thread_search: {
+  thread_search: {
     icon: "search",
     verb: ["Searching", "Searched", "search"],
     object: (call) => withQuery("chats", call),
@@ -777,7 +778,7 @@ const COGENLY_TOOLS: Readonly<Record<string, WorkLogToolDescriptor>> = {
     groupKey: "search",
     group: { style: "times", noun: ["chats", "chats"] },
   },
-  t3_thread_read: {
+  thread_read: {
     icon: "message-circle",
     verb: ["Reading", "Read", "read"],
     object: (_call, target) => (target?.title ? "chat" : "a chat"),
@@ -789,7 +790,7 @@ const COGENLY_TOOLS: Readonly<Record<string, WorkLogToolDescriptor>> = {
       count: (calls) => new Set(calls.map((call) => threadTarget(call)?.id ?? call)).size,
     },
   },
-  t3_thread_list: {
+  thread_list: {
     icon: "message-circle",
     verb: ["Listing", "Listed", "list"],
     object: () => "chats",
@@ -894,7 +895,7 @@ function threadLifecycleTool(spec: {
 }
 
 const THREAD_LIFECYCLE_TOOLS: Readonly<Record<string, WorkLogToolDescriptor>> = {
-  t3_thread_snooze: threadLifecycleTool({
+  thread_snooze: threadLifecycleTool({
     icon: "clock",
     action: "snooze",
     running: "Snoozing",
@@ -905,14 +906,14 @@ const THREAD_LIFECYCLE_TOOLS: Readonly<Record<string, WorkLogToolDescriptor>> = 
     other: "Snoozed",
     otherResult: (call) => `until ${snoozeWake(call)}`,
   }),
-  t3_thread_unsnooze: threadLifecycleTool({
+  thread_unsnooze: threadLifecycleTool({
     icon: "bell",
     action: "wake",
     running: "Waking",
     own: () => "Woke this thread",
     other: "Woke",
   }),
-  t3_thread_settle: threadLifecycleTool({
+  thread_settle: threadLifecycleTool({
     icon: "shrink",
     action: "settle",
     running: "Settling",
@@ -922,7 +923,7 @@ const THREAD_LIFECYCLE_TOOLS: Readonly<Record<string, WorkLogToolDescriptor>> = 
         : "Settled this thread",
     other: "Settled",
   }),
-  t3_thread_unsettle: threadLifecycleTool({
+  thread_unsettle: threadLifecycleTool({
     icon: "rotate-ccw",
     action: "unsettle",
     running: "Unsettling",
@@ -1044,7 +1045,8 @@ function nativeToolKey(name: string): string | null {
 export function normalizeWorkLogToolKey(toolName: string | null | undefined): string | null {
   const name = toolName?.replace(/\s+(?:complete|completed)\s*$/i, "").trim();
   if (!name) return null;
-  const tool = COGENLY_PREFIX.exec(name)?.groups?.tool;
+  const prefixedTool = COGENLY_PREFIX.exec(name)?.groups?.tool;
+  const tool = prefixedTool === undefined ? undefined : withoutLegacyToolPrefix(prefixedTool);
   if (tool && (Object.hasOwn(COGENLY_TOOLS, tool) || Object.hasOwn(PROJECT_TOOLS, tool))) {
     return tool;
   }

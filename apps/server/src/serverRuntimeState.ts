@@ -28,7 +28,7 @@ export const PersistedServerRuntimeState = Schema.Struct({
    */
   serviceManaged: Schema.optional(Schema.Boolean),
   /**
-   * The server build that wrote this record. `t3 triage` reports it because
+   * The server build that wrote this record. `cogenly triage` reports it because
    * the CLI that runs triage can be a different build. Missing on records
    * written by older servers.
    */

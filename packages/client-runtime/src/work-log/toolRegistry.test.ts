@@ -25,8 +25,11 @@ describe("normalizeWorkLogToolKey", () => {
     ]) {
       expect(normalizeWorkLogToolKey(name)).toBe("search");
     }
-    expect(normalizeWorkLogToolKey("mcp__cogenly__t3_thread_read")).toBe("t3_thread_read");
-    expect(normalizeWorkLogToolKey("t3_thread_read")).toBe("t3_thread_read");
+    expect(normalizeWorkLogToolKey("mcp__cogenly__thread_read")).toBe("thread_read");
+    expect(normalizeWorkLogToolKey("thread_read")).toBe("thread_read");
+    // Transcripts recorded before the rename carry `t3_`-prefixed names.
+    expect(normalizeWorkLogToolKey("mcp__cogenly__t3_thread_read")).toBe("thread_read");
+    expect(normalizeWorkLogToolKey("t3_thread_snooze")).toBe("thread_snooze");
   });
 
   it("folds native tool names from Claude, Codex and Muse to one key each", () => {
@@ -107,7 +110,7 @@ describe("resolveWorkLogTool", () => {
 
   it("links a read chat by id and title instead of showing the raw id", () => {
     const tool = resolveWorkLogTool({
-      toolName: "mcp__cogenly__t3_thread_read",
+      toolName: "mcp__cogenly__thread_read",
       input: { threadId: "5609dcde", view: "messages" },
       output: { thread: { threadId: "5609dcde", title: "Weekly checks" } },
       status: "completed",
@@ -124,7 +127,7 @@ describe("resolveWorkLogTool", () => {
 
   it("names an untitled read chat generically until the client supplies its live title", () => {
     const call = {
-      toolName: "cogenly.t3_thread_read",
+      toolName: "cogenly.thread_read",
       input: { threadId: "t-1" },
       status: "completed" as const,
     };
@@ -415,7 +418,7 @@ describe("thread lifecycle receipts", () => {
 
   it("reads a snooze of this thread as its wake time", () => {
     const label = resolveWorkLogTool({
-      toolName: "mcp__cogenly__t3_thread_snooze",
+      toolName: "mcp__cogenly__thread_snooze",
       input: { until: "tomorrow" },
       output: { snoozedUntil, timeZone: "UTC", receipt: "Snoozed until Fri 9:00 AM", sequence: 4 },
       status: "completed",
@@ -423,7 +426,7 @@ describe("thread lifecycle receipts", () => {
     expect(label).toMatch(/^Snoozed until \w{3}[, ]/);
     expect(
       resolveWorkLogTool({
-        toolName: "cogenly.t3_thread_snooze",
+        toolName: "cogenly.thread_snooze",
         input: { until: "tomorrow" },
         output: { snoozedUntil, timeZone: "UTC", receipt: "", snoozesWhenTurnEnds: true },
         status: "completed",
@@ -433,7 +436,7 @@ describe("thread lifecycle receipts", () => {
 
   it("names another thread and keeps the wake time as the result", () => {
     const row = resolveWorkLogTool({
-      toolName: "mcp__cogenly__t3_thread_snooze",
+      toolName: "mcp__cogenly__thread_snooze",
       input: { threadId: "thread-2", until: "friday" },
       output: { snoozedUntil, timeZone: "UTC", receipt: "", sequence: 4 },
       status: "completed",
@@ -451,15 +454,15 @@ describe("thread lifecycle receipts", () => {
         output,
         status: "completed",
       })?.label;
-    expect(own("t3_thread_settle", { sequence: 1, receipt: "" })).toBe("Settled this thread");
-    expect(own("t3_thread_settle", { settlesWhenTurnEnds: true, receipt: "" })).toBe(
+    expect(own("thread_settle", { sequence: 1, receipt: "" })).toBe("Settled this thread");
+    expect(own("thread_settle", { settlesWhenTurnEnds: true, receipt: "" })).toBe(
       "Settles when this turn ends",
     );
-    expect(own("t3_thread_unsnooze", { sequence: 1, receipt: "" })).toBe("Woke this thread");
-    expect(own("t3_thread_unsettle", { sequence: 1, receipt: "" })).toBe(
+    expect(own("thread_unsnooze", { sequence: 1, receipt: "" })).toBe("Woke this thread");
+    expect(own("thread_unsettle", { sequence: 1, receipt: "" })).toBe(
       "Moved this thread back to active",
     );
-    const call = { toolName: "mcp__cogenly__t3_thread_snooze", input: { until: "whenever" } };
+    const call = { toolName: "mcp__cogenly__thread_snooze", input: { until: "whenever" } };
     expect(resolveWorkLogTool({ ...call, status: "inProgress" })?.label).toBe(
       "Snoozing this thread",
     );
@@ -470,12 +473,12 @@ describe("thread lifecycle receipts", () => {
 
   it("groups a few changes as their rows", () => {
     const settle = {
-      toolName: "mcp__cogenly__t3_thread_settle",
+      toolName: "mcp__cogenly__thread_settle",
       input: {},
       output: { sequence: 1, receipt: "" },
       status: "completed" as const,
     };
-    const wake = { ...settle, toolName: "mcp__cogenly__t3_thread_unsnooze" };
+    const wake = { ...settle, toolName: "mcp__cogenly__thread_unsnooze" };
     expect(workLogToolGroupLabel([wake, settle])).toBe("Woke this thread · Settled this thread");
   });
 });

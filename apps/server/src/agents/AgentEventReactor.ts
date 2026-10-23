@@ -30,7 +30,7 @@ export class AgentEventReactor extends Context.Service<
     readonly tick: Effect.Effect<void, AgentError>;
     readonly observe: (event: OrchestrationV2StoredEvent) => Effect.Effect<void, AgentError>;
   }
->()("t3/agents/AgentEventReactor") {}
+>()("cogenly-server/agents/AgentEventReactor") {}
 const decodeCommitment = Schema.decodeUnknownEffect(Schema.fromJsonString(Commitment));
 const failure = (cause: unknown) =>
   new AgentError({ message: "Could not observe agent events.", cause });

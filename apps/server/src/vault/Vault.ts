@@ -225,7 +225,7 @@ export class Vault extends Context.Service<
     readonly scrubText: (text: string) => Effect.Effect<string>;
     readonly scrubValue: <A>(value: A) => Effect.Effect<A>;
   }
->()("t3/vault/Vault") {}
+>()("cogenly-server/vault/Vault") {}
 
 const KEY_PAIR_STORE_NAME = "vault-x25519-key-pair";
 

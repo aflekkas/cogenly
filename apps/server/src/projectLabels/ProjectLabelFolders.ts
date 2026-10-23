@@ -82,7 +82,7 @@ export class ProjectLabelFolders extends Context.Service<
       ProjectLabelFolderError
     >;
   }
->()("t3/projectLabels/ProjectLabelFolders") {}
+>()("cogenly-server/projectLabels/ProjectLabelFolders") {}
 
 const MAX_DIR_NAME_ATTEMPTS = 100;
 

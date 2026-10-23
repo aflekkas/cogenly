@@ -27,7 +27,7 @@ import {
 export const ScheduledTaskWebhookEndpoint = Schema.Struct({
   /** Environment-relative path including the secret token; works on any origin that reaches the environment. */
   path: TrimmedNonEmptyString,
-  /** Public T3 Connect URL, or null when the environment is not linked to T3 Connect. */
+  /** Public Cogenly Connect URL, or null when the environment is not linked to Cogenly Connect. */
   url: Schema.NullOr(TrimmedNonEmptyString),
   hasSecret: Schema.Boolean,
 });

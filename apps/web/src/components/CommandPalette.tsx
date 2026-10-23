@@ -2581,7 +2581,7 @@ function OpenCommandPaletteDialog(props: {
         "grouping",
         "checkout",
         "remove",
-        "t3.json",
+        "cogenly.json",
       ],
       title: "Repository settings",
       description: contextualProjectGroup.displayName,

@@ -39,7 +39,7 @@ const shared = {
   ],
 };
 export const ProjectLabelsToolkit = Toolkit.make(
-  Tool.make("t3_project_label_list", {
+  Tool.make("project_label_list", {
     ...shared,
     parameters: Tool.EmptyParams,
     success: ProjectLabelListResult,
@@ -48,7 +48,7 @@ export const ProjectLabelsToolkit = Toolkit.make(
   })
     .annotate(Tool.Readonly, true)
     .annotate(Tool.Destructive, false),
-  Tool.make("t3_project_label_read", {
+  Tool.make("project_label_read", {
     ...shared,
     parameters: ProjectLabelKey,
     success: ProjectLabelMutationResult,
@@ -57,7 +57,7 @@ export const ProjectLabelsToolkit = Toolkit.make(
   })
     .annotate(Tool.Readonly, true)
     .annotate(Tool.Destructive, false),
-  Tool.make("t3_project_label_file_thread", {
+  Tool.make("project_label_file_thread", {
     ...shared,
     dependencies: [...shared.dependencies, Crypto.Crypto],
     parameters: ForkThreadToProjectInput,
@@ -65,51 +65,51 @@ export const ProjectLabelsToolkit = Toolkit.make(
     description:
       "File a thread into a project. The same thread is re-filed (never forked): it keeps its history, and its next turn runs in the project folder with a fresh provider session seeded from that history. Refused while a turn is running in the thread.",
   }).annotate(Tool.Destructive, false),
-  Tool.make("t3_thread_move_project_folder", {
+  Tool.make("thread_move_project_folder", {
     ...shared,
     parameters: MoveThreadProjectFolderInput,
     success: ThreadProjectFolderResult,
     description:
       "Move a thread into one project folder, or out of it with folderId null (which restores the repository default for work). The same thread is re-filed: a filed chat's next turn runs in the project folder, an unfiled one in its scratch folder, with a fresh provider session seeded from its history. Refused while a turn is running in the thread. Folders provide context only and never grant access.",
   }).annotate(Tool.Destructive, false),
-  Tool.make("t3_thread_set_project_labels", {
+  Tool.make("thread_set_project_labels", {
     ...shared,
     parameters: SetThreadProjectLabelsInput,
     success: ThreadProjectLabelsResult,
     description:
       "Move a thread into one project folder using a singleton labelIds array. Empty clears explicit filing and restores the repository default for work. The same thread is re-filed (never forked); refused while a turn is running in it. Folders never widen access.",
   }).annotate(Tool.Destructive, true),
-  Tool.make("t3_project_label_create", {
+  Tool.make("project_label_create", {
     ...shared,
     parameters: ProjectLabelCreateInput,
     success: ProjectLabelMutationResult,
     description:
       "Create a project folder with a name, and optionally a color (gray, red, amber, green, teal, blue, violet or pink; not hex), description and instructions. Folders organize threads and repositories; they provide context only and never grant access.",
   }).annotate(Tool.Destructive, false),
-  Tool.make("t3_project_label_update", {
+  Tool.make("project_label_update", {
     ...shared,
     parameters: ProjectLabelUpdateInput,
     success: ProjectLabelMutationResult,
     description:
       "Change what the Projects page shows for a project: rename it, set its color (gray, red, amber, green, teal, blue, violet or pink; not hex), description, or instructions (standing guidance for every agent in the project). Omitted fields are preserved; null clears color or description; an empty string clears instructions.",
   }).annotate(Tool.Destructive, false),
-  Tool.make("t3_project_label_delete", {
+  Tool.make("project_label_delete", {
     ...shared,
     parameters: ProjectLabelKey,
     success: ProjectLabelDeleteResult,
     description:
-      "Delete a project folder. Its threads and repositories are kept; only the folder and its filing are removed. Prefer t3_project_label_archive to put a finished project away.",
+      "Delete a project folder. Its threads and repositories are kept; only the folder and its filing are removed. Prefer project_label_archive to put a finished project away.",
   }).annotate(Tool.Destructive, true),
-  Tool.make("t3_project_label_archive", {
+  Tool.make("project_label_archive", {
     ...shared,
     parameters: ProjectLabelKey,
     success: ProjectLabelMutationResult,
     description:
-      "Archive a project folder: it leaves the project pickers and moves to the Archived list, but keeps its threads, project chat, repositories and filing. Undo with t3_project_label_unarchive.",
+      "Archive a project folder: it leaves the project pickers and moves to the Archived list, but keeps its threads, project chat, repositories and filing. Undo with project_label_unarchive.",
   })
     .annotate(Tool.Idempotent, true)
     .annotate(Tool.Destructive, false),
-  Tool.make("t3_project_label_unarchive", {
+  Tool.make("project_label_unarchive", {
     ...shared,
     parameters: ProjectLabelKey,
     success: ProjectLabelMutationResult,
@@ -117,33 +117,33 @@ export const ProjectLabelsToolkit = Toolkit.make(
   })
     .annotate(Tool.Idempotent, true)
     .annotate(Tool.Destructive, false),
-  Tool.make("t3_project_label_link_source", {
+  Tool.make("project_label_link_source", {
     ...shared,
     parameters: ProjectLabelSourceLinkInput,
     success: ProjectLabelMutationResult,
     description:
       "Link a GitHub owner or repository to a project folder, so owner search and the repository picker know it. Pass {kind:'github-owner',owner} or {kind:'github-repo',owner,repo}.",
   }).annotate(Tool.Destructive, false),
-  Tool.make("t3_project_label_unlink_source", {
+  Tool.make("project_label_unlink_source", {
     ...shared,
     parameters: ProjectLabelSourceLinkInput,
     success: ProjectLabelMutationResult,
     description: "Remove a GitHub owner or repository link from a project folder.",
   }).annotate(Tool.Destructive, false),
-  Tool.make("t3_project_label_link_repository", {
+  Tool.make("project_label_link_repository", {
     ...shared,
     parameters: ProjectLabelRepository,
     success: ProjectLabelMutationResult,
     description:
       "File an existing repository into a project folder. Its GitHub link is filed with it when the checkout has a remote.",
   }).annotate(Tool.Destructive, false),
-  Tool.make("t3_project_label_unlink_repository", {
+  Tool.make("project_label_unlink_repository", {
     ...shared,
     parameters: ProjectLabelRepository,
     success: ProjectLabelMutationResult,
     description: "Remove a repository from a project folder. The repository itself is kept.",
   }).annotate(Tool.Destructive, false),
-  Tool.make("t3_project_label_clone_repository", {
+  Tool.make("project_label_clone_repository", {
     ...shared,
     parameters: ProjectLabelCloneRepositoryInput,
     success: ProjectCloneStartResult,

@@ -39,7 +39,7 @@ with per-call context, such as a thread id, adds it with `Effect.annotateCurrent
 
 One module per service, in this order: imports, errors and schemas, the `Context.Service` tag with
 its interface inline, `make`, then `layer`. [`WorkspacePaths.ts`](../../apps/server/src/workspace/WorkspacePaths.ts)
-and [`T3ProjectFileLoader.ts`](../../apps/server/src/project/T3ProjectFileLoader.ts) are good
+and [`ProjectConfigFileLoader.ts`](../../apps/server/src/project/ProjectConfigFileLoader.ts) are good
 references.
 
 ```ts
@@ -55,7 +55,7 @@ export class FooWriteError extends Schema.TaggedError<FooWriteError>()("FooWrite
 export class Foo extends Context.Service<
   Foo,
   { readonly write: (input: { readonly path: string }) => Effect.Effect<void, FooWriteError> }
->()("t3/area/Foo") {}
+>()("cogenly-server/area/Foo") {}
 
 const make = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;

@@ -34,7 +34,7 @@ export const t3ImportCommand = Command.make("t3-import", {
   ),
   projects: Flag.String("projects").pipe(
     Flag.withDescription(
-      "Comma-separated T3 project ids, titles or folders. Defaults to every non-scratch project with threads.",
+      "Comma-separated T3 Code project ids, titles or folders. Defaults to every non-scratch project with threads.",
     ),
     Flag.optional,
   ),

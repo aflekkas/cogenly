@@ -13,7 +13,7 @@
 #   COGENLY_RELEASE_BASE_URL  mirror for releases/download (required for now)
 #
 # The archive is unpacked into $COGENLY_HOME\runtime\versions\<version>, the
-# same layout `t3 service install` uses, so the service reuses this download.
+# same layout `cogenly service install` uses, so the service reuses this download.
 $ErrorActionPreference = "Stop"
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
