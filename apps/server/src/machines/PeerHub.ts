@@ -272,6 +272,10 @@ const make = Effect.gen(function* () {
     if (Option.isSome(joinedHub)) {
       return yield* new PeerJoinRefusedError({ reason: "hub-is-spoke" });
     }
+    const self = yield* identity.self;
+    if (input.spoke.environmentId === self.environmentId) {
+      return yield* new PeerJoinRefusedError({ reason: "grant-rejected" });
+    }
     const issued = yield* auth
       .redeemPeerGrant({
         credential: input.grant,
@@ -307,7 +311,6 @@ const make = Effect.gen(function* () {
         paired_at = excluded.paired_at,
         last_seen_at = excluded.last_seen_at`.pipe(Effect.mapError(storage("join")));
     yield* publishChange;
-    const self = yield* identity.self;
     const signature = yield* withSecrets(
       signPeerHello({
         hubEnvironmentId: self.environmentId,

@@ -212,6 +212,9 @@ const make = Effect.gen(function* () {
     }
     const key = yield* withSecrets(getOrCreatePeerDpopKey).pipe(Effect.mapError(storage("join")));
     const self = yield* identity.self;
+    if (code.hubEnvironmentId === self.environmentId) {
+      return yield* new MachineError({ operation: "join", reason: "invalid-input" });
+    }
     let refused = false;
     for (const route of routes) {
       const url = new URL(PEER_JOIN_PATH, route).toString();

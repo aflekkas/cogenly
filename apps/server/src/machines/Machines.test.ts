@@ -328,6 +328,25 @@ describe("machines", () => {
 
         // An unbound grant (the CLI fallback) pairs whoever redeems it first, once.
         const open = yield* hub.machines.createPeerGrant({});
+        const selfPair = yield* hub.machines
+          .joinHub({ hubUrls: [hub.url], code: open })
+          .pipe(Effect.flip);
+        assert.strictEqual(selfPair.reason, "invalid-input");
+        const peerHub = yield* hub.run(PeerHub.PeerHub);
+        const hubSelf = yield* hub
+          .run(MachineIdentity.MachineIdentity)
+          .pipe(Effect.flatMap((identity) => identity.self));
+        const firstKey = yield* first.run(getOrCreatePeerDpopKey);
+        const spoofed = yield* peerHub
+          .redeem({
+            grant: open.grant,
+            nonce: "self-pair",
+            proofKeyThumbprint: firstKey.thumbprint,
+            spoke: hubSelf,
+            client: { deviceType: "bot" },
+          })
+          .pipe(Effect.flip);
+        assert.strictEqual(spoofed._tag, "PeerJoinRefusedError");
         for (const route of [
           "not-a-url",
           "file:///etc/passwd",
