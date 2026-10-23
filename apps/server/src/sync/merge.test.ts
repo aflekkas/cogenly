@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@effect/vitest";
 import { EnvironmentId, type SharedDocumentChange } from "@t3tools/contracts";
 import { compareClock, mergeDocument, tickClock } from "./merge.ts";
 const clock = (node: string, wall = 10, logical = 0) => ({ node, wall, logical });
