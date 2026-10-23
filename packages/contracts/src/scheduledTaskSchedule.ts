@@ -152,5 +152,11 @@ export const ScheduledTaskUpsertSchedule = Schema.Union([
 });
 export type ScheduledTaskUpsertSchedule = typeof ScheduledTaskUpsertSchedule.Type;
 
-export const ScheduledTaskRunStatus = Schema.Literals(["never", "running", "succeeded", "failed"]);
+export const ScheduledTaskRunStatus = Schema.Literals([
+  "never",
+  "running",
+  "succeeded",
+  "failed",
+  "skipped_already_queued",
+]);
 export type ScheduledTaskRunStatus = typeof ScheduledTaskRunStatus.Type;
