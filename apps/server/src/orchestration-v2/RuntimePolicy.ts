@@ -133,6 +133,7 @@ export const layerFromProjectStore: Layer.Layer<
             Effect.map((found) => ({
               integrations: found.map((integration) => ({
                 name: integration.name,
+                status: integration.status,
                 displayName: integration.displayName,
                 hint: integration.hint,
                 accountLabel: integration.accountLabel,

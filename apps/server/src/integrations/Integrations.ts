@@ -328,10 +328,13 @@ export class Integrations extends Context.Service<
       args: unknown,
       labelId: ProjectLabelId | null | undefined,
     ) => Effect.Effect<IntegrationCallResult, IntegrationError>;
-    /** Enabled integrations visible from a project, for the context line. */
+    /** Scoped account health, including disabled definitions so catalog entries stay reserved. */
     readonly contextIntegrations: (
       labelId: ProjectLabelId | null,
-    ) => Effect.Effect<ReadonlyArray<Integration>, IntegrationError>;
+    ) => Effect.Effect<
+      ReadonlyArray<Integration & { readonly status: IntegrationSummary["status"] | "disabled" }>,
+      IntegrationError
+    >;
     /** The owner's list, then again after every change. */
     readonly subscribe: () => Stream.Stream<IntegrationListResult, IntegrationError>;
     /**
@@ -1438,7 +1441,16 @@ const make = (options: IntegrationsOptions = {}) =>
       contextIntegrations: (labelId) =>
         rows().pipe(
           Effect.map((all) =>
-            all.filter((integration) => integrationVisibleTo(integration, labelId)),
+            all.filter((integration) =>
+              integrationVisibleTo({ ...integration, enabled: true }, labelId),
+            ),
+          ),
+          Effect.flatMap(summaries),
+          Effect.map(({ integrations }) =>
+            integrations.map((summary) => ({
+              ...summary.integration,
+              status: summary.integration.enabled ? summary.status : ("disabled" as const),
+            })),
           ),
         ),
       subscribe: () =>

@@ -1,3 +1,5 @@
+import type { IntegrationConnectionStatus } from "@t3tools/contracts";
+
 const PULL_REQUEST_LINKING_INSTRUCTIONS = `<pull_request_linking>
 When the cogenly MCP server exposes link_pull_request, you must use it to register every pull request you create or work on for this thread. Call link_pull_request with the full PR URL immediately after creating a PR or starting work on an existing PR. For a stack, call it for every layer, not just the current branch or the top PR. This applies when creating or updating PRs through gh, gh stack, another CLI, or the host API: those operations do not register the PRs with this thread. Linking an already-linked PR is safe. Before finishing PR work, call list_thread_pull_requests and link any PR from your work that is missing. Do not link unrelated PRs mentioned only as background. If a linking call fails, report that failure instead of claiming the PR is linked. When asked to monitor, watch, or babysit a PR and watch_pull_request is available, call it and end your turn: Cogenly wakes you when checks finish, someone else comments, or the branch conflicts, so do not poll or run your own watcher. When you hand the work back to the user, call unwatch_pull_request first so the thread returns to their inbox.
 </pull_request_linking>`;
@@ -39,8 +41,9 @@ function toSingleLine(value: string): string {
 /** Resource paths listed in the project manifest before `+N more`. */
 export const PROJECT_MANIFEST_MAX_RESOURCES = 30;
 
-/** One connected integration as the context line names it. */
+/** One configured integration and its current health, as the context line names it. */
 export interface IntegrationContextEntry {
+  readonly status: IntegrationConnectionStatus | "disabled";
   readonly name: string;
   readonly displayName: string;
   readonly hint?: string | undefined;
@@ -64,7 +67,7 @@ export function buildIntegrationsContextLine(
       ? ""
       : `${integrations.length === 0 ? "Integrations available" : "Also available"} to connect with integration_add catalogId: ${available.map(toSingleLine).join(", ")}.`;
   if (integrations.length === 0) return availableText;
-  const names = integrations.map((integration) => {
+  const nameOf = (integration: IntegrationContextEntry) => {
     const hint = integration.hint?.trim() ?? "";
     const account = integration.accountLabel?.trim() ?? "";
     const label =
@@ -78,9 +81,18 @@ export function buildIntegrationsContextLine(
     return label.length > 0
       ? `${toSingleLine(integration.name)} (${toSingleLine(label)})`
       : toSingleLine(integration.name);
-  });
-  const connected = `Connected integrations: ${names.join(", ")}. Use integration_tools / integration_call.`;
-  return availableText === "" ? connected : `${connected} ${availableText}`;
+  };
+  const working = integrations.filter((entry) => entry.status === "connected");
+  const remaining = integrations.filter((entry) => entry.status !== "connected");
+  const connected =
+    working.length === 0
+      ? ""
+      : `Connected integrations: ${working.map(nameOf).join(", ")}. Use integration_tools / integration_call.`;
+  const other =
+    remaining.length === 0
+      ? ""
+      : `Other integrations: ${remaining.map((entry) => `${nameOf(entry)}: ${entry.status === "needs_sign_in" ? "needs sign-in" : entry.status === "unknown" ? "not checked" : entry.status}`).join(", ")}.`;
+  return [connected, other, availableText].filter(Boolean).join(" ");
 }
 
 /**

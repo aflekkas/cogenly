@@ -19,6 +19,7 @@ import * as Sqlite from "../persistence/Sqlite.ts";
 import * as Vault from "../vault/Vault.ts";
 import { runMigrations } from "../persistence/Migrations.ts";
 import * as Credentials from "./IntegrationCredentials.ts";
+import { availableToConnect } from "./IntegrationCatalog.ts";
 import * as Integrations from "./Integrations.ts";
 import * as Tokens from "./IntegrationTokens.ts";
 import { IntegrationEndpointPolicy } from "./RemoteEndpoint.ts";
@@ -645,6 +646,44 @@ describe("Integrations gateway", () => {
         );
         expect((yield* service.listForProject(b)).integrations).toHaveLength(1);
       }).pipe(Effect.provide(layerWith())),
+  );
+
+  it.effect("context reports account health and reserves disabled catalog services", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* runMigrations();
+        const upstream = yield* fakeUpstreamWith();
+        const service = yield* Integrations.Integrations;
+        const working = yield* service.create({
+          ...createInput(upstream.url, "working"),
+          headers: {},
+        });
+        const broken = yield* service.create({
+          ...createInput(upstream.url, "broken"),
+          headers: {},
+        });
+        yield* service.create({
+          ...createInput(upstream.url, "sign-in"),
+          headers: {},
+          auth: { type: "oauth" },
+        });
+        yield* service.create({
+          ...createInput("https://mcp.notion.com/mcp", "notion"),
+          headers: {},
+          enabled: false,
+        });
+        yield* service.testConnection(working.integration.id);
+        yield* service.callTool(broken.integration.name, "fail", {}, undefined).pipe(Effect.result);
+        const context = yield* service.contextIntegrations(null);
+        expect(context.map((entry) => [entry.name, entry.status])).toEqual([
+          ["broken", "error"],
+          ["notion", "disabled"],
+          ["sign-in", "needs_sign_in"],
+          ["working", "connected"],
+        ]);
+        expect(availableToConnect(context)).not.toContain("notion");
+      }),
+    ).pipe(Effect.provide(layerWith())),
   );
 
   it.effect("filters by project scope and tombstones on remove", () =>
