@@ -1447,6 +1447,7 @@ export type OrchestrationV2FileChangeDetail = typeof OrchestrationV2FileChangeDe
 
 export const OrchestrationV2ProviderFailureClass = Schema.Literals([
   "usage_limit",
+  "context_overflow",
   "provider_error",
   "transport_error",
   "permission_error",

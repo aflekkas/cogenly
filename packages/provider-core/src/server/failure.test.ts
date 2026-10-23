@@ -101,6 +101,15 @@ it("preserves actionable handoff errors wrapped by turn startup", () => {
   );
 });
 
+it.each([
+  "contextWindowExceeded",
+  "context_length_exceeded",
+  "prompt_too_long",
+  "rapid_refill_breaker",
+])("classifies provider context overflow %s separately from usage limits", (code) => {
+  assert.equal(makeProviderFailure({ code, class: "provider_error" }).class, "context_overflow");
+});
+
 it("does not expose defect text nested inside a known error category", () => {
   const failure = makeProviderFailure({
     cause: {

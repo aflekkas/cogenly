@@ -26,6 +26,37 @@ export class ContextHandoffBudgetError extends Schema.TaggedError<ContextHandoff
   }
 }
 
+/** Known context-capacity failures, including adapter wrappers around handoff refusal. */
+export function isContextOverflow(cause: unknown): boolean {
+  const seen = new Set<unknown>();
+  for (let depth = 0; depth < 16 && cause != null && !seen.has(cause); depth++) {
+    seen.add(cause);
+    try {
+      if (Cause.isCause(cause)) {
+        cause = Cause.squash(cause);
+        continue;
+      }
+      if (typeof cause !== "object") return false;
+      const record = cause as Record<string, unknown>;
+      if (
+        record._tag === "ContextHandoffBudgetError" ||
+        record.class === "context_overflow" ||
+        [
+          "contextWindowExceeded",
+          "context_length_exceeded",
+          "prompt_too_long",
+          "rapid_refill_breaker",
+        ].some((code) => code === record.code)
+      )
+        return true;
+      cause = record.cause;
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
 export const MAX_PROVIDER_FAILURE_MESSAGE_LENGTH = 4_096;
 export const MAX_PROVIDER_FAILURE_CODE_LENGTH = 128;
 
@@ -159,7 +190,10 @@ export function makeProviderFailure(input: {
     rawCode === null ? null : boundedText(rawCode, MAX_PROVIDER_FAILURE_CODE_LENGTH) || null;
 
   return {
-    class: input.class ?? "unknown",
+    class:
+      isContextOverflow(input.cause) || isContextOverflow({ code: input.code })
+        ? "context_overflow"
+        : (input.class ?? "unknown"),
     message: message || DEFAULT_PROVIDER_FAILURE_MESSAGE,
     code,
     retryable: input.retryable ?? null,

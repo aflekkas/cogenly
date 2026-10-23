@@ -1,3 +1,4 @@
+import { withAutomaticCompaction } from "./AutomaticCompaction.ts";
 import * as AgentStore from "../agents/AgentStore.ts";
 import { agentSessionSeedItems, shouldRotateAgentSession } from "../agents/context.ts";
 import { modelSelectionsEqual } from "@t3tools/shared/model";
@@ -197,6 +198,7 @@ export const layer: Layer.Layer<
         input: Parameters<ProviderAdapter.ProviderAdapterV2SessionRuntime["startTurn"]>[0],
         compact?: boolean,
       ) => ReturnType<ProviderAdapter.ProviderAdapterV2SessionRuntime["startTurn"]>,
+      deliveredMessage: () => ProviderAdapter.ProviderAdapterV2TurnInput["message"] | undefined,
     ) => {
       let deliver: typeof startWithHandoffs | undefined = startWithHandoffs;
       const start = (
@@ -204,16 +206,15 @@ export const layer: Layer.Layer<
         compact = false,
       ) =>
         Effect.suspend(() => {
+          if (compact && session.compactThread !== undefined) return session.compactThread(input);
           if (deliver !== undefined) return deliver(input, compact);
-          return compact && session.compactThread !== undefined
-            ? session.compactThread(input)
-            : session.startTurn(input);
+          return session.startTurn({ ...input, message: deliveredMessage() ?? input.message });
         }).pipe(
           // Only startup needs the handoff history. The event worker keeps this
           // session alive afterward, including when background work remains.
-          Effect.ensuring(
+          Effect.tap(() =>
             Effect.sync(() => {
-              deliver = undefined;
+              if (!compact) deliver = undefined;
             }),
           ),
         );
@@ -1190,6 +1191,9 @@ export const layer: Layer.Layer<
                 !coveredItemIds.has(item.id) &&
                 historicalMessage(item) !== null,
             );
+      // Retain just the accepted prompt for a context retry after startup
+      // releases the handoff history closure (including inline-only history).
+      let deliveredMessage: ProviderAdapter.ProviderAdapterV2TurnInput["message"] | undefined;
       const startWithHandoffs = (
         turnInput: Parameters<typeof session.startTurn>[0],
         compact = false,
@@ -1235,9 +1239,10 @@ export const layer: Layer.Layer<
                 // The note is sent with the user text, so it spends the same allowance.
                 userText: restartNote === "" ? userText : `${restartNote}\n\n${userText}`,
                 attachments: message.attachments,
-                providerThread: replacedNativeThread ? target : budgetProviderThread,
+                providerThread: target !== runningProviderThread ? target : budgetProviderThread,
                 nativeContextEstimate:
                   !replacedNativeThread &&
+                  target.contextUsage?.usedTokens === undefined &&
                   budgetProviderThread.contextUsage?.usedTokens === undefined
                     ? yield* nativeContextEstimate
                     : 0,
@@ -1280,12 +1285,13 @@ export const layer: Layer.Layer<
             .join("\n\n");
           // A note continuation has no turn to resume; its text is the prompt.
           const { restartContinuationOfRunId: _resumedRunId, ...promptedInput } = turnInput;
+          const providerMessage = {
+            ...turnInput.message,
+            text: context === "" ? userText : `${context}\n\nUser message:\n${userText}`,
+          };
           yield* start({
             ...(noteContinuation ? promptedInput : turnInput),
-            message: {
-              ...turnInput.message,
-              text: context === "" ? userText : `${context}\n\nUser message:\n${userText}`,
-            },
+            message: providerMessage,
           }).pipe(
             // A pending marker would make the next turn abandon this native
             // session, though the refused prompt never reached it.
@@ -1301,6 +1307,7 @@ export const layer: Layer.Layer<
                 : Effect.void,
             ),
           );
+          deliveredMessage = providerMessage;
           // The provider already accepted the turn. A stale pending marker
           // can force a fresh thread later, but must not stop live ingestion.
           yield* delivery.delivered.pipe(
@@ -1330,7 +1337,7 @@ export const layer: Layer.Layer<
         restartNote === "" &&
         !noteContinuation
           ? session
-          : makeDeliverySession(session, startWithHandoffs);
+          : makeDeliverySession(session, startWithHandoffs, () => deliveredMessage);
       // Claude can refuse to resume a native session this check could not
       // rule out. Retry that turn once in a fresh native session seeded with
       // the thread's history, as a failed resume above would have.
@@ -1434,7 +1441,9 @@ export const layer: Layer.Layer<
         commandId: CommandId.make(`command:effect:provider-turn.start:${run.id}`),
         appThread: projection.thread,
         providerSessionId,
-        session: recoveringSession,
+        session: yield* withAutomaticCompaction(recoveringSession, () =>
+          runControls.shouldStartProviderTurn().pipe(Effect.orElseSucceed(() => false)),
+        ).pipe(Effect.provideService(IdAllocator.IdAllocatorV2, idAllocator)),
         run: runningRun,
         rootNode: runningRootNode,
         checkpointScope,

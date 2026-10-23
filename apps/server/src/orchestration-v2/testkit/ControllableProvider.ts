@@ -20,7 +20,10 @@ export const makeControllableProvider = (capabilities: OrchestrationV2ProviderCa
   const instanceId = ProviderInstanceId.make("codex");
   const turns: ProviderAdapter.ProviderAdapterV2TurnInput[] = [];
   const steers: ProviderAdapter.ProviderAdapterV2SteerInput[] = [];
-  let queue: Queue.Queue<ProviderAdapter.ProviderAdapterV2Event>;
+  let queue: Queue.Queue<
+    ProviderAdapter.ProviderAdapterV2Event,
+    ProviderAdapter.ProviderAdapterV2Error
+  >;
   let ordinal = 0;
   const publish = (event: ProviderAdapter.ProviderAdapterV2Event) => Queue.offer(queue, event);
   const begin = (input: ProviderAdapter.ProviderAdapterV2TurnInput) =>
@@ -101,7 +104,10 @@ export const makeControllableProvider = (capabilities: OrchestrationV2ProviderCa
           planSelectionTransition: () => Effect.succeed({ type: "apply_on_next_turn" }),
           openSession: (request) =>
             Effect.gen(function* () {
-              queue = yield* Queue.unbounded<ProviderAdapter.ProviderAdapterV2Event>();
+              queue = yield* Queue.unbounded<
+                ProviderAdapter.ProviderAdapterV2Event,
+                ProviderAdapter.ProviderAdapterV2Error
+              >();
               const now = yield* DateTime.now;
               return {
                 instanceId,
@@ -168,6 +174,7 @@ export const makeControllableProvider = (capabilities: OrchestrationV2ProviderCa
     begin,
     finish,
     publish,
+    failEvents: (error: ProviderAdapter.ProviderAdapterV2Error) => Queue.fail(queue, error),
     setStart: (value: typeof start) => {
       start = value;
     },
