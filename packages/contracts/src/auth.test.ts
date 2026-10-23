@@ -55,14 +55,11 @@ describe("authorization grants", () => {
     AuthEnvironmentScope.literals.filter(
       (scope) => !(AuthPeerScopes as ReadonlyArray<string>).includes(scope),
     ),
-  )(
-    "keeps %s permission errors decodable by old clients",
-    (scope) => {
-      const response = authScopeRequiredResponse(scope);
-      expect(decodeOldScopes([response.requiredScope])).toEqual([response.requiredScope]);
-      expect(response.requiredPermission).toBe(scope);
-    },
-  );
+  )("keeps %s permission errors decodable by old clients", (scope) => {
+    const response = authScopeRequiredResponse(scope);
+    expect(decodeOldScopes([response.requiredScope])).toEqual([response.requiredScope]);
+    expect(response.requiredPermission).toBe(scope);
+  });
 
   it("keeps old clients able to decode grants with new permissions", () => {
     const response = authScopeResponse(AuthStandardClientScopes);

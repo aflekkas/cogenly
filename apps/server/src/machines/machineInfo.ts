@@ -7,7 +7,11 @@ import type {
 import type * as DateTime from "effect/DateTime";
 
 const kindFor = (role: MachineSelfReport["role"], relation: MachineRelation): MachineKind =>
-  role === "cloud-server" ? "cloud-server" : relation === "this" ? "this-computer" : "other-computer";
+  role === "cloud-server"
+    ? "cloud-server"
+    : relation === "this"
+      ? "this-computer"
+      : "other-computer";
 
 /** A machine as the server answering sees it. */
 export function toMachineInfo(

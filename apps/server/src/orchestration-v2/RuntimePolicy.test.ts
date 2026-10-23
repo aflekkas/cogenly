@@ -148,10 +148,18 @@ it.layer(layerTest)("RuntimePolicyV2", (it) => {
         }),
       );
       assert.isFalse(
-        changed({ previousCwd: undefined, nextCwd: "/projects/Spawn Partners", hasPriorStartedRun: true }),
+        changed({
+          previousCwd: undefined,
+          nextCwd: "/projects/Spawn Partners",
+          hasPriorStartedRun: true,
+        }),
       );
       assert.isFalse(
-        changed({ previousCwd: "/scratch/2026-01-01-chat", nextCwd: null, hasPriorStartedRun: true }),
+        changed({
+          previousCwd: "/scratch/2026-01-01-chat",
+          nextCwd: null,
+          hasPriorStartedRun: true,
+        }),
       );
     }),
   );
