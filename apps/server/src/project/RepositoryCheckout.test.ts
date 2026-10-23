@@ -205,15 +205,14 @@ describe("RepositoryCheckout.ensureCheckout", () => {
     });
   });
 
-  it.effect("refuses a non-empty folder that is not a checkout, leaving files untouched", () => {
+  it.effect("leaves a folder that already has files to launch as before, untouched", () => {
     const bare = makeBareRemote();
     const workspaceRoot = NodePath.join(tempRoot(), "smile-express");
     NodeFS.mkdirSync(workspaceRoot);
     NodeFS.writeFileSync(NodePath.join(workspaceRoot, "keep.txt"), "mine\n");
     const box: Box = { workspaceRoot, remote: bare, cloneCalls: 0 };
     return Effect.gen(function* () {
-      const error = yield* Effect.flip(run(box));
-      expect(error.reason).toBe("not_a_checkout");
+      yield* run(box);
       expect(NodeFS.readFileSync(NodePath.join(workspaceRoot, "keep.txt"), "utf8")).toBe("mine\n");
       expect(NodeFS.existsSync(NodePath.join(workspaceRoot, ".git"))).toBe(false);
       expect(box.cloneCalls).toBe(0);

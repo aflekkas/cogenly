@@ -13,6 +13,7 @@ import * as GitWorkflow from "../git/GitWorkflowService.ts";
 import * as ProjectLabelService from "../projectLabels/ProjectLabelService.ts";
 import * as ProjectCloneTracker from "./ProjectCloneTracker.ts";
 import * as ProjectService from "./ProjectService.ts";
+import * as RepositoryIdentityResolver from "./RepositoryIdentityResolver.ts";
 import { repositoryDirectoryName } from "./RepositoryRemote.ts";
 
 export class RepositoryCheckoutError extends Schema.TaggedError<RepositoryCheckoutError>()(
@@ -20,13 +21,7 @@ export class RepositoryCheckoutError extends Schema.TaggedError<RepositoryChecko
   {
     repositoryId: ProjectId,
     repositoryName: Schema.String,
-    reason: Schema.Literals([
-      "not_found",
-      "no_remote",
-      "not_a_checkout",
-      "clone_failed",
-      "storage",
-    ]),
+    reason: Schema.Literals(["not_found", "no_remote", "clone_failed", "storage"]),
     detail: Schema.optional(Schema.String),
     cause: Schema.optional(Schema.Defect()),
   },
@@ -37,8 +32,6 @@ export class RepositoryCheckoutError extends Schema.TaggedError<RepositoryChecko
         return `Repository ${this.repositoryId} was not found.`;
       case "no_remote":
         return `${this.repositoryName} has no checkout and no known remote; clone it with project_label_clone_repository or link an existing checkout.`;
-      case "not_a_checkout":
-        return `${this.repositoryName} is not a git checkout and its folder is not empty, so it was left untouched. Link an existing checkout for it, or move those files away and try again.`;
       case "clone_failed":
         return `${this.repositoryName} could not be cloned${this.detail ? `: ${this.detail}` : ""}.`;
       case "storage":
@@ -51,8 +44,9 @@ export class RepositoryCheckoutError extends Schema.TaggedError<RepositoryChecko
  * Guarantees a repository launch lands in a real checkout: an existing
  * checkout passes, a missing or empty folder with a known remote is cloned
  * in place through the tracked clone flow (progress on the project-clone
- * subscription, the machine's usual GitHub auth), and anything else fails
- * with what to do instead. User files are never deleted or overwritten.
+ * subscription, the machine's usual GitHub auth), a folder that already has
+ * files is left to launch as before, and a missing checkout with no known
+ * remote fails with what to do instead. User files are never touched.
  */
 export class RepositoryCheckout extends Context.Service<
   RepositoryCheckout,
@@ -101,6 +95,9 @@ const make = Effect.gen(function* () {
   const labels = yield* ProjectLabelService.ProjectLabelService;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
+  const identities = yield* Effect.serviceOption(
+    RepositoryIdentityResolver.RepositoryIdentityResolver,
+  );
 
   // The folder's own `.git` (a directory, or a file for a linked worktree),
   // not `git rev-parse`: an empty folder inside some other repository is
@@ -167,21 +164,19 @@ const make = Effect.gen(function* () {
     if (exists) {
       const entries = yield* fileSystem.readDirectory(workspaceRoot).pipe(
         Effect.mapError(
-          () =>
+          (cause) =>
             new RepositoryCheckoutError({
               repositoryId,
               repositoryName,
-              reason: "not_a_checkout",
+              reason: "storage",
+              cause,
             }),
         ),
       );
-      if (entries.length > 0) {
-        return yield* new RepositoryCheckoutError({
-          repositoryId,
-          repositoryName,
-          reason: "not_a_checkout",
-        });
-      }
+      // A folder with files launches as it always did: a monorepo subfolder,
+      // or a plain folder filed as a repository. Only a missing or empty
+      // checkout is cloned, so nothing here can touch the user's files.
+      if (entries.length > 0) return;
     }
 
     const { labels: allLabels } = yield* labels
@@ -218,13 +213,23 @@ const make = Effect.gen(function* () {
           {
             // The project record already exists; only the checkout is missing.
             createProject: () => Effect.void,
+            // Like a fresh project clone: re-resolve the folder's repository
+            // (it may have been cached as an enclosing repo while empty),
+            // then refresh the project record.
             onCloned: () =>
-              projects
-                .update({
-                  commandId: CommandId.make(`repository-checkout-cloned:${repositoryId}`),
-                  projectId: repositoryId,
-                })
-                .pipe(Effect.asVoid, Effect.ignoreCause({ log: true })),
+              (Option.isSome(identities)
+                ? identities.value.resolve(workspaceRoot, { refresh: true })
+                : Effect.void
+              ).pipe(
+                Effect.andThen(
+                  projects.update({
+                    commandId: CommandId.make(`repository-checkout-cloned:${repositoryId}`),
+                    projectId: repositoryId,
+                  }),
+                ),
+                Effect.asVoid,
+                Effect.ignoreCause({ log: true }),
+              ),
           },
         )
         .pipe(
