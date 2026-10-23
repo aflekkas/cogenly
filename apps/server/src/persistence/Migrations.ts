@@ -97,6 +97,7 @@ import Migration0085 from "./Migrations/085_AgentProviderFallback.ts";
 import Migration0088 from "./Migrations/088_AccountProcessAccess.ts";
 import Migration0087 from "./Migrations/087_Accounts.ts";
 import Migration0089 from "./Migrations/089_SharedDocuments.ts";
+import Migration0091 from "./Migrations/091_RestoreNonImportT3ScratchProjects.ts";
 import Migration0086 from "./Migrations/086_MachinePeers.ts";
 import Migration0073 from "./Migrations/073_AgentsFullAccess.ts";
 import Migration0070 from "./Migrations/070_AgentEventTriggers.ts";
@@ -208,6 +209,7 @@ export const migrationEntries = [
   [88, "AccountProcessAccess", Migration0088],
   [89, "SharedDocuments", Migration0089],
   [90, "SharedBootstrap", Migration0090],
+  [91, "RestoreNonImportT3ScratchProjects", Migration0091],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

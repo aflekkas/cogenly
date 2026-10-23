@@ -356,6 +356,7 @@ const make = Effect.gen(function* () {
                   reason: classifyProviderFailure(failureItem.failure),
                   resetAt: failureItem.failure.resetAt,
                   nowMs: DateTime.toEpochMillis(yield* DateTime.now),
+                  existingUntil: agent.fallbackUntil ?? null,
                 })
               : null;
           const updated = yield* sql.withTransaction(
@@ -513,17 +514,20 @@ const make = Effect.gen(function* () {
             aOptions.every(([key, value]) => bOptions.get(key) === value)
           );
         };
+        // An edit that omits the chain keeps the stored one; only a chain
+        // that actually differs (or a new primary) restarts fallback.
+        const nextChain = input.fallbackChain ?? existing?.fallbackChain ?? [];
         const chainChanged =
           existing !== null &&
           (!sameSelection(input.modelSelection, existing.modelSelection) ||
-            (input.fallbackChain ?? []).length !== (existing.fallbackChain ?? []).length ||
-            (input.fallbackChain ?? []).some(
+            nextChain.length !== (existing.fallbackChain ?? []).length ||
+            nextChain.some(
               (entry, index) => !sameSelection(entry, (existing.fallbackChain ?? [])[index]!),
             ));
         const agent = yield* store.save({
           ...profile,
           ownerMachine,
-          fallbackChain: input.fallbackChain ?? existing?.fallbackChain ?? [],
+          fallbackChain: nextChain,
           projectFolderId: null,
           responsibility: input.responsibility ?? existing?.responsibility ?? "",
           permissions: input.permissions ?? existing?.permissions ?? defaultAgentPermissions,

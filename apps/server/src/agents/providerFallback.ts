@@ -104,10 +104,30 @@ export const advanceFallback = (input: {
   readonly reason: AgentFallbackReason | null;
   readonly resetAt: string | null | undefined;
   readonly nowMs: number;
+  /** Return-to-primary time already stored; only a primary failure moves it. */
+  readonly existingUntil?: string | null;
 }): FallbackAdvance | null => {
   if (input.reason === null || input.chainLength < 2) return null;
   const resetMs = input.resetAt == null ? Number.NaN : Date.parse(input.resetAt);
   const hasReset = Number.isFinite(resetMs);
+  // Only the primary entry's failure sets when the primary is retried. A
+  // fallback entry failing must not push that time out with its own reset
+  // or a fresh cooldown, or an exhausted chain could stay on a fallback
+  // for as long as it keeps failing.
+  if (input.failedIndex > 0) {
+    const existingMs = input.existingUntil == null ? Number.NaN : Date.parse(input.existingUntil);
+    const untilMs = Number.isFinite(existingMs)
+      ? existingMs
+      : hasReset
+        ? resetMs
+        : input.nowMs + FALLBACK_COOLDOWN_MS;
+    return {
+      index: Math.min(input.failedIndex + 1, input.chainLength - 1),
+      reason: input.reason,
+      until: DateTime.formatIso(DateTime.makeUnsafe(untilMs)),
+      resetAt: null,
+    };
+  }
   const untilMs = hasReset ? resetMs : input.nowMs + FALLBACK_COOLDOWN_MS;
   return {
     index: Math.min(input.failedIndex + 1, input.chainLength - 1),

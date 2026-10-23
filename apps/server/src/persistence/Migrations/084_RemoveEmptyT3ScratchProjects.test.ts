@@ -33,7 +33,8 @@ describe("084_RemoveEmptyT3ScratchProjects", () => {
       yield* sql`INSERT INTO orchestration_v2_projection_threads (thread_id, project_id, title, default_provider, runtime_mode, interaction_mode, created_at, updated_at, payload_json)
         VALUES ('thread', 'scratch-with-thread', 'Chat', 'codex', 'full-access', 'default', ${at}, ${at}, '{}')`;
 
-      yield* runMigrations();
+      // Stop at 084: 091 later restores non-import projects deleted here.
+      yield* runMigrations({ toMigrationInclusive: 84 });
 
       const live = yield* sql<{ readonly project_id: string }>`
         SELECT project_id FROM projection_projects WHERE deleted_at IS NULL ORDER BY project_id
