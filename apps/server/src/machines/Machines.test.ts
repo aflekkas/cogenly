@@ -9,6 +9,8 @@ import {
   AuthPeerDelegateScope,
   AuthPeerScopes,
   AuthSyncReplicateScope,
+  PEER_PROTOCOL_VERSION,
+  PeerAuthenticatedFrame,
   isAuthPeerScope,
   makePeerChannel,
 } from "@t3tools/contracts";
@@ -21,6 +23,7 @@ import * as Deferred from "effect/Deferred";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
+import * as Socket from "effect/socket/Socket";
 import * as TestClock from "effect/testing/TestClock";
 import { FetchHttpClient, HttpClient, HttpClientRequest, HttpServerRequest } from "effect/http";
 
@@ -33,9 +36,25 @@ import * as MachineIdentity from "./MachineIdentity.ts";
 import * as PeerChannels from "./PeerChannels.ts";
 
 import * as PeerHub from "./PeerHub.ts";
+import { PeerFrameCodec } from "./peerFrames.ts";
 import { acceptsPeerIngress } from "./peerIngress.ts";
 import { normalizePeerRoute, normalizePeerRoutes } from "./peerRoutes.ts";
-import { createPeerDpopProof, getOrCreatePeerDpopKey } from "./peerCrypto.ts";
+import {
+  createPeerDpopProof,
+  getOrCreatePeerDpopKey,
+  signPeerProof,
+  peerDigest,
+  peerJoinProofTranscript,
+  peerJoinTranscript,
+  peerHelloProofTranscript,
+  peerHelloTranscript,
+  canonicalPeerJson,
+  createPeerEphemeral,
+  derivePeerSessionKey,
+  hubPublicKey,
+  signPeerTranscript,
+  verifyPeerTranscript,
+} from "./peerCrypto.ts";
 
 const Echo = makePeerChannel({
   name: "test.echo",
@@ -70,7 +89,481 @@ const startHttpObserver = (handler: NodeHttp.RequestListener) =>
       }),
   );
 
+type RelayDirection = "spoke-to-hub" | "hub-to-spoke";
+type AuthenticatedFrame = typeof PeerAuthenticatedFrame.Type;
+
+/** An active relay at the socket boundary, forwarding real sockets to the real hub. */
+const makeActiveRelay = () => {
+  type Forward = (direction: RelayDirection, wire: string) => void;
+  let intercept: (direction: RelayDirection, wire: string, forward: Forward) => void = (
+    direction,
+    wire,
+    forward,
+  ) => forward(direction, wire);
+  let dropCurrent = () => {};
+  let sendCurrent: Forward = () => {
+    throw new Error("relay not connected");
+  };
+  const constructor: Socket.WebSocketConstructor["Service"] = (url) => {
+    const socket = new globalThis.WebSocket(url);
+    dropCurrent = () => socket.close();
+    const listeners = new Set<(event: Socket.WebSocketEvent) => void>();
+    const forward: Forward = (direction, wire) => {
+      if (direction === "spoke-to-hub") socket.send(wire);
+      else for (const listener of listeners) listener({ data: wire });
+    };
+    sendCurrent = forward;
+    socket.addEventListener("message", (event) => {
+      assert.isString(event.data);
+      intercept("hub-to-spoke", event.data, forward);
+    });
+    return {
+      get readyState() {
+        return socket.readyState;
+      },
+      addEventListener(type, listener, options) {
+        if (type === "message") listeners.add(listener);
+        else socket.addEventListener(type, listener, options);
+      },
+      removeEventListener(type, listener) {
+        if (type === "message") listeners.delete(listener);
+        else socket.removeEventListener(type, listener);
+      },
+      close: (code, reason) => socket.close(code, reason),
+      send: (data) =>
+        intercept(
+          "spoke-to-hub",
+          typeof data === "string" ? data : new TextDecoder().decode(data),
+          forward,
+        ),
+    };
+  };
+  return {
+    constructor,
+    intercept: (handler: typeof intercept) => {
+      intercept = handler;
+    },
+    inject: (direction: RelayDirection, wire: string) => sendCurrent(direction, wire),
+    drop: () => dropCurrent(),
+  };
+};
+
+const authFrame = (wire: string) =>
+  Schema.decodeUnknownOption(PeerAuthenticatedFrame)(JSON.parse(wire));
+
+/** Mutate every leaf, including nested report fields, and every array as a whole. */
+function* transcriptMutations(value: Schema.Json): Generator<Schema.Json> {
+  if (Array.isArray(value)) {
+    yield [...value, "tampered"];
+    for (const [index, item] of value.entries())
+      for (const changed of transcriptMutations(item)) {
+        yield value.map((original, i) => (i === index ? changed : original));
+      }
+  } else if (value !== null && typeof value === "object") {
+    for (const [key, item] of Object.entries(value))
+      for (const changed of transcriptMutations(item)) {
+        yield { ...value, [key]: changed };
+      }
+  } else
+    yield typeof value === "string"
+      ? value + "tampered"
+      : typeof value === "number"
+        ? value + 1
+        : value === null
+          ? false
+          : !value;
+}
+
 describe("machines", () => {
+  it.live("authenticates every join and hello transcript field with distinct domains", () =>
+    Effect.gen(function* () {
+      const hub = yield* startMachine("hub", "cloud-server");
+      const spoke = yield* startMachine("spoke", "computer");
+      const self = yield* spoke
+        .run(MachineIdentity.MachineIdentity)
+        .pipe(Effect.flatMap((identity) => identity.self));
+      const hubReport = yield* hub
+        .run(MachineIdentity.MachineIdentity)
+        .pipe(Effect.flatMap((identity) => identity.self));
+      const publicKey = yield* hub.run(hubPublicKey);
+      const key = yield* spoke.run(getOrCreatePeerDpopKey);
+      const fields = {
+        hubPublicKey: publicKey,
+        hubEnvironmentId: hub.environmentId,
+        spokeKeyThumbprint: key.thumbprint,
+        spoke: self,
+        nonce: "fresh-nonce",
+        accessTokenHash: peerDigest("token"),
+        scopes: [...AuthPeerScopes],
+        expiresAt: "2027-01-01T00:00:00.000Z",
+        hub: hubReport,
+      };
+      const joinFields = { ...fields, grantHash: peerDigest("grant") };
+      const helloFields = {
+        ...fields,
+        challenge: {
+          version: PEER_PROTOCOL_VERSION,
+          connectionId: "fresh-connection",
+          hubEphemeralKey: createPeerEphemeral().publicKey,
+        },
+        spokeEphemeralKey: createPeerEphemeral().publicKey,
+      };
+      const join = peerJoinTranscript(joinFields);
+      const hello = peerHelloTranscript(helloFields);
+      for (const [transcript, other, expectedFields, domain] of [
+        [join, hello, joinFields, "cogenly-peer-join"],
+        [hello, join, helloFields, "cogenly-peer-hello"],
+      ] as const) {
+        const signature = yield* hub.run(signPeerTranscript(transcript));
+        assert.isTrue(verifyPeerTranscript(publicKey, transcript, signature));
+        assert.deepStrictEqual(JSON.parse(transcript), {
+          domain,
+          version: PEER_PROTOCOL_VERSION,
+          fields: expectedFields,
+        });
+        const json = yield* Schema.decodeUnknownEffect(Schema.Json)(JSON.parse(transcript));
+        for (const changed of transcriptMutations(json)) {
+          assert.isFalse(verifyPeerTranscript(publicKey, canonicalPeerJson(changed), signature));
+        }
+        assert.isFalse(verifyPeerTranscript(publicKey, other, signature));
+        assert.strictEqual(
+          transcript,
+          canonicalPeerJson({ version: PEER_PROTOCOL_VERSION, fields: expectedFields, domain }),
+        );
+      }
+    }).pipe(Effect.scoped),
+  );
+
+  it("binds every frame header and payload to its session before RPC decoding", () => {
+    const spoke = createPeerEphemeral();
+    const hub = createPeerEphemeral();
+    const key = derivePeerSessionKey(spoke.privateKey, hub.publicKey, "signed-hello");
+    assert.deepStrictEqual(
+      key,
+      derivePeerSessionKey(hub.privateKey, spoke.publicKey, "signed-hello"),
+    );
+    assert.isFalse(
+      key.equals(derivePeerSessionKey(hub.privateKey, spoke.publicKey, "different-hello")),
+    );
+    const sender = new PeerFrameCodec("spoke");
+    sender.establish("connection", key);
+    const request = {
+      _tag: "Request",
+      id: "1",
+      tag: "peer.call",
+      payload: { channel: "test.echo", payload: { text: "original" } },
+      headers: [],
+    };
+    const encoded = sender.serialization.makeUnsafe().encode(request);
+    if (typeof encoded !== "string") throw new Error("Expected a serialized frame");
+    const frame = Schema.decodeUnknownSync(PeerAuthenticatedFrame)(JSON.parse(encoded));
+    for (const changed of [
+      { connectionId: "another-connection" },
+      { direction: "hub-to-spoke" },
+      { sequence: 2 },
+      { sequence: 0 },
+      { sequence: Number.MAX_SAFE_INTEGER + 1 },
+      { method: "peer.leave" },
+      { payload: frame.payload.replace("test.echo", "another.channel") },
+      { payload: frame.payload.replace("original", "forged") },
+      { mac: "forged" },
+    ]) {
+      const receiver = new PeerFrameCodec("hub");
+      receiver.establish("connection", key);
+      assert.throws(
+        () => receiver.serialization.makeUnsafe().decode(JSON.stringify({ ...frame, ...changed })),
+        "Peer frame authentication failed",
+      );
+      assert.isTrue(Deferred.isDoneUnsafe(receiver.failed));
+    }
+    const receiver = new PeerFrameCodec("hub");
+    receiver.establish("connection", key);
+    const parser = receiver.serialization.makeUnsafe();
+    assert.deepStrictEqual(parser.decode(encoded), [request]);
+    assert.throws(() => parser.decode(encoded), "Peer frame authentication failed");
+    const reconnected = new PeerFrameCodec("hub");
+    reconnected.establish(
+      "new-connection",
+      derivePeerSessionKey(hub.privateKey, spoke.publicKey, "new-signed-hello"),
+    );
+    assert.throws(
+      () => reconnected.serialization.makeUnsafe().decode(encoded),
+      "Peer frame authentication failed",
+    );
+  });
+
+  it.live(
+    "rejects a captured call after reconnecting with the same pairing",
+    () =>
+      Effect.gen(function* () {
+        const relay = makeActiveRelay();
+        const hub = yield* startMachine("hub", "cloud-server");
+        const spoke = yield* startMachine("spoke", "computer", relay.constructor);
+        yield* pair(hub, spoke);
+        const channels = yield* hub.run(PeerChannels.PeerChannels);
+        const dispatched: string[] = [];
+        yield* channels.register(Echo, ({ text }) =>
+          Effect.sync(() => {
+            dispatched.push(text);
+            return { text, by: "hub" };
+          }),
+        );
+        let captured = "";
+        relay.intercept((direction, wire, forward) => {
+          const frame = authFrame(wire);
+          if (
+            direction === "spoke-to-hub" &&
+            Option.isSome(frame) &&
+            frame.value.method === "peer.call"
+          )
+            captured = wire;
+          forward(direction, wire);
+        });
+        yield* spoke.machines.call(hub.environmentId, Echo, { text: "first-session" });
+        const token = (yield* spoke.run(readHubLink).pipe(Effect.map(Option.getOrThrow)))
+          .accessToken;
+        const dropped = yield* awaitLinkState(spoke, (state) => state.status !== "online").pipe(
+          Effect.forkScoped,
+        );
+        yield* Effect.sync(() => relay.drop());
+        yield* Fiber.join(dropped);
+        yield* awaitLinkState(spoke, (state) => state.status === "online");
+        assert.strictEqual(
+          (yield* spoke.run(readHubLink).pipe(Effect.map(Option.getOrThrow))).accessToken,
+          token,
+        );
+        relay.intercept((direction, wire, forward) => {
+          const frame = authFrame(wire);
+          if (
+            direction === "spoke-to-hub" &&
+            Option.isSome(frame) &&
+            frame.value.method === "peer.call"
+          ) {
+            const previous = Option.getOrThrow(authFrame(captured));
+            assert.notStrictEqual(frame.value.connectionId, previous.connectionId);
+            forward(direction, captured);
+          } else forward(direction, wire);
+        });
+        const rejected = yield* spoke.machines
+          .call(hub.environmentId, Echo, { text: "second-session" })
+          .pipe(Effect.flip);
+        assert.strictEqual(rejected.reason, "disconnected");
+        assert.deepStrictEqual(dispatched, ["first-session"]);
+      }).pipe(Effect.scoped),
+    30_000,
+  );
+
+  for (const kind of ["call-up", "call-down", "reply-up", "reply-down"] as const) {
+    for (const attack of ["tamper", "replay", "reorder", "reflect"] as const) {
+      it.live(
+        `rejects relay ${attack} of ${kind} before dispatch or accepting a reply`,
+        () =>
+          Effect.gen(function* () {
+            const relay = makeActiveRelay();
+            const hub = yield* startMachine("hub", "cloud-server");
+            const spoke = yield* startMachine("spoke", "computer", relay.constructor);
+            yield* pair(hub, spoke);
+            const dispatched: string[] = [];
+            for (const [machine, by] of [
+              [hub, "hub"],
+              [spoke, "spoke"],
+            ] as const) {
+              const channels = yield* machine.run(PeerChannels.PeerChannels);
+              yield* channels.register(Echo, ({ text }) =>
+                Effect.sync(() => {
+                  dispatched.push(text);
+                  return { text, by };
+                }),
+              );
+            }
+            const hubChannels = yield* hub.run(PeerChannels.PeerChannels);
+            const spokeChannels = yield* spoke.run(PeerChannels.PeerChannels);
+            yield* hubChannels.register(Delegate, () => Effect.succeed({ ok: true }));
+            yield* spokeChannels.register(Delegate, () => Effect.succeed({ ok: true }));
+            yield* hub.machines.call(spoke.environmentId, Delegate, {});
+            const call = (text: string) =>
+              kind === "call-up" || kind === "reply-down"
+                ? spoke.machines.call(hub.environmentId, Echo, { text })
+                : hub.machines.call(spoke.environmentId, Echo, { text });
+            const matches = (direction: RelayDirection, frame: AuthenticatedFrame) =>
+              kind === "call-up"
+                ? direction === "spoke-to-hub" && frame.method === "peer.call"
+                : kind === "call-down"
+                  ? direction === "hub-to-spoke" &&
+                    frame.method === "Chunk" &&
+                    frame.payload.includes('"_tag":"Request"')
+                  : kind === "reply-up"
+                    ? direction === "spoke-to-hub" && frame.method === "peer.reply"
+                    : direction === "hub-to-spoke" &&
+                      frame.method === "Exit" &&
+                      frame.payload.includes('"by":"hub"');
+            let captured: string | undefined;
+            const held = yield* Deferred.make<void>();
+            const attacked = yield* Deferred.make<void>();
+            relay.intercept((direction, wire, forward) => {
+              const frame = authFrame(wire);
+              if (
+                Option.isNone(frame) ||
+                (!matches(direction, frame.value) &&
+                  !(
+                    kind === "call-down" &&
+                    attack === "reorder" &&
+                    captured !== undefined &&
+                    direction === "hub-to-spoke"
+                  ))
+              ) {
+                forward(direction, wire);
+                return;
+              }
+              if (attack === "replay" && captured === undefined) {
+                captured = wire;
+                forward(direction, wire);
+                return;
+              }
+              if (attack === "reorder" && captured === undefined) {
+                captured = wire;
+                Deferred.doneUnsafe(held, Effect.void);
+                return;
+              }
+              relay.intercept((nextDirection, nextWire, nextForward) =>
+                nextForward(nextDirection, nextWire),
+              );
+              if (attack === "tamper")
+                forward(
+                  direction,
+                  JSON.stringify({
+                    ...frame.value,
+                    payload: frame.value.payload.replaceAll("attack", "forged"),
+                  }),
+                );
+              else if (attack === "replay") forward(direction, captured!);
+              else if (attack === "reorder") {
+                forward(direction, wire);
+                forward(direction, captured!);
+              } else forward(direction === "spoke-to-hub" ? "hub-to-spoke" : "spoke-to-hub", wire);
+              Deferred.doneUnsafe(attacked, Effect.void);
+            });
+            if (attack === "replay") assert.strictEqual((yield* call("warmup")).text, "warmup");
+            const first = yield* call("attack-1").pipe(Effect.result, Effect.forkScoped);
+            let second: typeof first | undefined;
+            if (attack === "reorder") {
+              yield* Deferred.await(held);
+              second = yield* (
+                kind === "call-down"
+                  ? spoke.machines
+                      .call(hub.environmentId, Delegate, {})
+                      .pipe(Effect.as({ text: "barrier", by: "hub" }))
+                  : call("attack-2")
+              ).pipe(Effect.result, Effect.forkScoped);
+            }
+            yield* Deferred.await(attacked);
+            const result = yield* Fiber.join(first);
+            assert.strictEqual(result._tag, "Failure");
+            if (result._tag === "Failure")
+              assert.strictEqual(result.failure.reason, "disconnected");
+            if (second !== undefined)
+              assert.strictEqual((yield* Fiber.join(second))._tag, "Failure");
+            const expected = kind.startsWith("call")
+              ? attack === "replay"
+                ? ["warmup"]
+                : []
+              : attack === "replay"
+                ? ["warmup", "attack-1"]
+                : attack === "reorder"
+                  ? ["attack-1", "attack-2"]
+                  : ["attack-1"];
+            assert.deepStrictEqual(dispatched, expected);
+            assert.isTrue(Option.isSome(yield* spoke.run(readHubLink)));
+          }).pipe(Effect.scoped),
+        30_000,
+      );
+    }
+  }
+
+  for (const attack of ["tamper", "reorder", "reflect", "replay"] as const) {
+    it.live(
+      `rejects relay ${attack} of Unpaired without forgetting the pairing`,
+      () =>
+        Effect.gen(function* () {
+          const relay = makeActiveRelay();
+          const hub = yield* startMachine("hub", "cloud-server");
+          const spoke = yield* startMachine("spoke", "computer", relay.constructor);
+          yield* pair(hub, spoke);
+          const channels = yield* spoke.run(PeerChannels.PeerChannels);
+          yield* channels.register(Echo, ({ text }) => Effect.succeed({ text, by: "spoke" }));
+          // A completed hub call proves the inbox is subscribed before unpairing.
+          yield* hub.machines.call(spoke.environmentId, Echo, { text: "ready" });
+          const held = yield* Deferred.make<void>();
+          const attacked = yield* Deferred.make<void>();
+          let captured = "";
+          let earlier = "";
+          relay.intercept((direction, wire, forward) => {
+            const frame = authFrame(wire);
+            if (
+              attack === "reorder" &&
+              direction === "hub-to-spoke" &&
+              Option.isSome(frame) &&
+              frame.value.method === "Exit" &&
+              frame.value.payload.includes('"by":"hub"')
+            ) {
+              earlier = wire;
+              Deferred.doneUnsafe(held, Effect.void);
+              return;
+            }
+            if (
+              direction !== "hub-to-spoke" ||
+              Option.isNone(frame) ||
+              !frame.value.payload.includes('"_tag":"Unpaired"')
+            ) {
+              forward(direction, wire);
+              return;
+            }
+            captured = wire;
+            if (attack === "tamper")
+              forward(
+                direction,
+                JSON.stringify({ ...frame.value, payload: frame.value.payload + " " }),
+              );
+            else if (attack === "reorder") {
+              forward(direction, wire);
+              forward(direction, earlier);
+            } else if (attack === "reflect") forward("spoke-to-hub", wire);
+            // Replay captures a real notice and withholds it until a new pairing/session.
+            Deferred.doneUnsafe(attacked, Effect.void);
+          });
+          if (attack === "reorder") {
+            const hubChannels = yield* hub.run(PeerChannels.PeerChannels);
+            yield* hubChannels.register(Echo, ({ text }) => Effect.succeed({ text, by: "hub" }));
+            yield* spoke.machines
+              .call(hub.environmentId, Echo, { text: "held" })
+              .pipe(Effect.ignore, Effect.forkScoped);
+            yield* Deferred.await(held);
+          }
+          yield* hub.machines.unpair({ environmentId: spoke.environmentId });
+          yield* Deferred.await(attacked);
+          yield* awaitLinkState(spoke, (state) => state.status === "revoked");
+          assert.isTrue(Option.isSome(yield* spoke.run(readHubLink)));
+          if (attack === "replay") {
+            yield* spoke.machines.unpair({ environmentId: hub.environmentId });
+            relay.intercept((direction, wire, forward) => forward(direction, wire));
+            yield* pair(hub, spoke);
+            const newLink = yield* spoke.run(readHubLink).pipe(Effect.map(Option.getOrThrow));
+            const dropped = yield* awaitLinkState(spoke, (state) => state.status !== "online").pipe(
+              Effect.forkScoped,
+            );
+            yield* Effect.sync(() => relay.inject("hub-to-spoke", captured));
+            yield* Fiber.join(dropped);
+            assert.strictEqual(
+              (yield* spoke.run(readHubLink).pipe(Effect.map(Option.getOrThrow))).accessToken,
+              newLink.accessToken,
+            );
+            yield* awaitLinkState(spoke, (state) => state.status === "online");
+          }
+        }).pipe(Effect.scoped),
+      30_000,
+    );
+  }
+
   it("accepts only loopback sockets, with explicit Serve forwarding and no public proxy markers", () => {
     const config = { tailscaleServeEnabled: true };
     const serve = {
@@ -369,6 +862,8 @@ describe("machines", () => {
         const firstKey = yield* first.run(getOrCreatePeerDpopKey);
         const spoofed = yield* peerHub
           .redeem({
+            proofKey: firstKey.publicJwk,
+            proof: "invalid",
             grant: open.grant,
             nonce: "self-pair",
             proofKeyThumbprint: firstKey.thumbprint,
@@ -541,7 +1036,53 @@ describe("machines", () => {
           .pipe(Effect.flatMap((identity) => identity.self));
         const key = yield* spoke.run(getOrCreatePeerDpopKey);
         const code = yield* hub.machines.createPeerGrant({ spokeKeyThumbprint: key.thumbprint });
+        // A body proof is checked before a grant is consumed or a report is stored.
+        const validProof = signPeerProof(
+          key,
+          peerJoinProofTranscript({
+            hubPublicKey: code.hubPublicKey,
+            hubEnvironmentId: hub.environmentId,
+            spokeKeyThumbprint: key.thumbprint,
+            spoke: self,
+            nonce: "join-proof",
+            grantHash: peerDigest(code.grant),
+          }),
+        );
+        for (const changed of [
+          { spoke: { ...self, name: "forged" } },
+          { nonce: "forged" },
+          { proof: "forged" },
+          { grant: "forged" },
+          { proofKey: { ...key.publicJwk, x: "forged" } },
+        ]) {
+          const refused = yield* peerHub
+            .redeem({
+              grant: code.grant,
+              nonce: "join-proof",
+              proofKeyThumbprint: key.thumbprint,
+              spoke: self,
+              proofKey: key.publicJwk,
+              proof: validProof,
+              client: { deviceType: "bot" },
+              ...changed,
+            })
+            .pipe(Effect.flip);
+          assert.strictEqual(refused._tag, "PeerJoinRefusedError");
+          assert.strictEqual((yield* hub.machines.list).machines.length, 1);
+        }
         const joined = yield* peerHub.redeem({
+          proofKey: key.publicJwk,
+          proof: signPeerProof(
+            key,
+            peerJoinProofTranscript({
+              hubPublicKey: code.hubPublicKey,
+              hubEnvironmentId: hub.environmentId,
+              spokeKeyThumbprint: key.thumbprint,
+              spoke: self,
+              nonce: "hello-nonce",
+              grantHash: peerDigest(code.grant),
+            }),
+          ),
           grant: code.grant,
           nonce: "hello-nonce",
           proofKeyThumbprint: key.thumbprint,
@@ -565,13 +1106,94 @@ describe("machines", () => {
             }),
           ),
         );
+        const incompatible = yield* peerHub.connect(session);
+        const mismatch = yield* incompatible.challenge({ version: 1 }).pipe(Effect.flip);
+        assert.strictEqual(mismatch.reason, "version-mismatch");
+        assert.include(mismatch.message, "upgrade both machines");
+        for (const field of [
+          "proof",
+          "nonce",
+          "spoke",
+          "spokeEphemeralKey",
+          "proofKey",
+          "accessToken",
+        ] as const) {
+          yield* Effect.gen(function* () {
+            const rejected = yield* peerHub.connect(session);
+            const challenge = yield* rejected.challenge({ version: PEER_PROTOCOL_VERSION });
+            const ephemeral = createPeerEphemeral();
+            const input = {
+              version: PEER_PROTOCOL_VERSION,
+              nonce: "proof-nonce",
+              spoke: self,
+              accessToken: joined.accessToken,
+              proofKey: key.publicJwk,
+              spokeEphemeralKey: ephemeral.publicKey,
+              proof: signPeerProof(
+                key,
+                peerHelloProofTranscript({
+                  hubPublicKey: code.hubPublicKey,
+                  hubEnvironmentId: hub.environmentId,
+                  spokeKeyThumbprint: key.thumbprint,
+                  spoke: self,
+                  nonce: "proof-nonce",
+                  accessTokenHash: peerDigest(joined.accessToken),
+                  challenge,
+                  spokeEphemeralKey: ephemeral.publicKey,
+                }),
+              ),
+            };
+            const tampered =
+              field === "spoke"
+                ? { ...input, spoke: { ...self, name: "forged" } }
+                : field === "proofKey"
+                  ? { ...input, proofKey: { ...input.proofKey, x: "forged" } }
+                  : { ...input, [field]: "forged" };
+            const error = yield* rejected.hello(tampered).pipe(Effect.flip);
+            assert.strictEqual(error.reason, "invalid-proof");
+            const listed = yield* hub.machines.list;
+            assert.strictEqual(listed.machines[1]?.online, false);
+            assert.strictEqual(listed.machines[1]?.name, self.name);
+          }).pipe(Effect.scoped);
+        }
         const connection = yield* peerHub.connect(session);
+        const challenge = yield* connection.challenge({ version: PEER_PROTOCOL_VERSION });
+        const ephemeral = createPeerEphemeral();
+        const helloInput = {
+          version: PEER_PROTOCOL_VERSION,
+          nonce: "hello",
+          spoke: self,
+          accessToken: joined.accessToken,
+          proofKey: key.publicJwk,
+          spokeEphemeralKey: ephemeral.publicKey,
+          proof: signPeerProof(
+            key,
+            peerHelloProofTranscript({
+              hubPublicKey: code.hubPublicKey,
+              hubEnvironmentId: hub.environmentId,
+              spokeKeyThumbprint: key.thumbprint,
+              spoke: self,
+              nonce: "hello",
+              accessTokenHash: peerDigest(joined.accessToken),
+              challenge,
+              spokeEphemeralKey: ephemeral.publicKey,
+            }),
+          ),
+        };
         const other = { ...self, environmentId: hub.environmentId };
         assert.strictEqual(
-          (yield* connection.hello({ nonce: "hello", spoke: other }).pipe(Effect.flip)).reason,
+          (yield* connection.hello({ ...helloInput, spoke: other }).pipe(Effect.flip)).reason,
           "machine-mismatch",
         );
-        yield* connection.hello({ nonce: "hello", spoke: self });
+        yield* connection.hello(helloInput);
+        yield* Effect.gen(function* () {
+          const replay = yield* peerHub.connect(session);
+          yield* replay.challenge({ version: PEER_PROTOCOL_VERSION });
+          assert.strictEqual(
+            (yield* replay.hello(helloInput).pipe(Effect.flip)).reason,
+            "invalid-proof",
+          );
+        }).pipe(Effect.scoped);
         assert.strictEqual(
           (yield* connection.ping({ spoke: other }).pipe(Effect.flip)).reason,
           "machine-mismatch",

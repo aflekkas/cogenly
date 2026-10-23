@@ -22,6 +22,7 @@ import {
   type AuthEnvironmentScope,
 } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
@@ -99,6 +100,8 @@ export const layer = Layer.unwrap(
         if (body._tag === "None") return refuse(400, "invalid_request");
         const result = yield* hub
           .redeem({
+            proofKey: body.value.proofKey,
+            proof: body.value.proof,
             grant: body.value.grant,
             nonce: body.value.nonce,
             proofKeyThumbprint: proofKeyThumbprint.value,
@@ -161,38 +164,46 @@ export const layer = Layer.unwrap(
         const session = yield* auth.authenticatePeerWebSocket(request).pipe(Effect.option);
         if (session._tag === "None") return refuse(401, "not_paired");
         const connection = yield* hub.connect(session.value);
-        const { protocol, httpEffect } = yield* RpcServer.makeProtocolWithHttpEffectWebsocket;
-        yield* RpcServer.make(PeerRpcGroup, PEER_RPC_SERVER_OPTIONS).pipe(
-          Effect.provideService(RpcServer.Protocol, protocol),
-          Effect.provide(
-            Layer.merge(
-              PeerRpcGroup.toLayer({
-                [PEER_METHODS.hello]: connection.hello,
-                [PEER_METHODS.ping]: connection.ping,
-                [PEER_METHODS.machines]: () => connection.machines,
-                [PEER_METHODS.inbox]: () => connection.inbox,
-                [PEER_METHODS.reply]: connection.reply,
-                [PEER_METHODS.call]: connection.call,
-                [PEER_METHODS.leave]: () => connection.leave,
-              }),
-              peerScopeAuthorizationLayer(session.value.scopes),
+        return yield* Effect.gen(function* () {
+          const { protocol, httpEffect } = yield* RpcServer.makeProtocolWithHttpEffectWebsocket;
+          yield* RpcServer.make(PeerRpcGroup, PEER_RPC_SERVER_OPTIONS).pipe(
+            Effect.provideService(RpcServer.Protocol, protocol),
+            Effect.provide(
+              Layer.merge(
+                PeerRpcGroup.toLayer({
+                  [PEER_METHODS.challenge]: connection.challenge,
+                  [PEER_METHODS.hello]: connection.hello,
+                  [PEER_METHODS.ping]: connection.ping,
+                  [PEER_METHODS.machines]: () => connection.machines,
+                  [PEER_METHODS.inbox]: () => connection.inbox,
+                  [PEER_METHODS.reply]: connection.reply,
+                  [PEER_METHODS.call]: connection.call,
+                  [PEER_METHODS.leave]: () => connection.leave,
+                }),
+                peerScopeAuthorizationLayer(session.value.scopes),
+              ),
             ),
-          ),
-          Effect.forkScoped,
+            Effect.forkScoped,
+          );
+          // Unpairing, a newer socket from the same spoke, or revoking the
+          // session anywhere (Settings → Connections) closes this one, after
+          // the spoke has been told so it forgets its credential.
+          return yield* Effect.raceFirst(
+            Effect.raceFirst(
+              httpEffect,
+              Deferred.await(connection.frames.failed).pipe(Effect.as(HttpServerResponse.empty())),
+            ),
+            Effect.raceFirst(
+              connection.closed,
+              sessions
+                .awaitInvalidation(session.value.sessionId)
+                .pipe(Effect.ignore, Effect.andThen(connection.revoked)),
+            ).pipe(Effect.as(HttpServerResponse.empty())),
+          );
+        }).pipe(
+          Effect.provideService(RpcSerialization.RpcSerialization, connection.frames.serialization),
         );
-        // Unpairing, a newer socket from the same spoke, or revoking the
-        // session anywhere (Settings → Connections) closes this one, after
-        // the spoke has been told so it forgets its credential.
-        return yield* Effect.raceFirst(
-          httpEffect,
-          Effect.raceFirst(
-            connection.closed,
-            sessions
-              .awaitInvalidation(session.value.sessionId)
-              .pipe(Effect.ignore, Effect.andThen(connection.revoked)),
-          ).pipe(Effect.as(HttpServerResponse.empty())),
-        );
-      }).pipe(Effect.provide(RpcSerialization.layerJson), Effect.withSpan("peer.socket")),
+      }).pipe(Effect.withSpan("peer.socket")),
     );
 
     return Layer.mergeAll(identity, join, ticket, socket);

@@ -204,9 +204,20 @@ export const PeerIdentityResult = Schema.Struct({
   signature: TrimmedNonEmptyString,
 });
 
+export const PeerProofKey = Schema.Struct({
+  kty: Schema.Literal("EC"),
+  crv: Schema.Literal("P-256"),
+  x: TrimmedNonEmptyString,
+  y: TrimmedNonEmptyString,
+});
+
+export const PEER_PROTOCOL_VERSION = 2;
+
 export const PeerJoinRequest = Schema.Struct({
+  proofKey: PeerProofKey,
+  proof: TrimmedNonEmptyString,
   grant: TrimmedNonEmptyString,
-  /** Random, single-use; the hub signs it like a `peer.hello` nonce. */
+  /** Random, single-use; covered by the join transcript. */
   nonce: TrimmedNonEmptyString,
   spoke: MachineSelfReport,
 });
@@ -217,7 +228,7 @@ export const PeerJoinResult = Schema.Struct({
   expiresAt: Schema.DateTimeUtc,
   hubEnvironmentId: EnvironmentId,
   scopes: Schema.Array(AuthPeerScope),
-  /** Base64url Ed25519 signature over `peerHelloSigningInput` for the join nonce. */
+  /** Ed25519 signature over the canonical, domain-separated join transcript. */
   signature: TrimmedNonEmptyString,
   hub: MachineSelfReport,
 });
@@ -280,10 +291,19 @@ export class PeerCallError extends Schema.TaggedError<PeerCallError>()("PeerCall
 export class PeerProtocolError extends Schema.TaggedError<PeerProtocolError>()(
   "PeerProtocolError",
   {
-    reason: Schema.Literals(["hello-required", "machine-mismatch", "not-paired"]),
+    reason: Schema.Literals([
+      "hello-required",
+      "machine-mismatch",
+      "not-paired",
+      "version-mismatch",
+      "invalid-proof",
+    ]),
   },
 ) {
   override get message(): string {
+    if (this.reason === "version-mismatch")
+      return "Incompatible peer protocol version; upgrade both machines.";
+    if (this.reason === "invalid-proof") return "Peer connection proof is invalid.";
     return this.reason === "hello-required"
       ? "Say peer.hello before anything else."
       : this.reason === "machine-mismatch"
@@ -292,28 +312,43 @@ export class PeerProtocolError extends Schema.TaggedError<PeerProtocolError>()(
   }
 }
 
+/** A fresh challenge belongs to exactly one socket. It grants no authority. */
+export const PeerChallengeResult = Schema.Struct({
+  version: Schema.Number,
+  connectionId: TrimmedNonEmptyString,
+  hubEphemeralKey: TrimmedNonEmptyString,
+});
+export type PeerChallengeResult = typeof PeerChallengeResult.Type;
+
 export const PeerHelloInput = Schema.Struct({
-  /** Random, single-use; the hub signs it so the spoke knows who answered. */
+  version: Schema.Number,
   nonce: TrimmedNonEmptyString,
   spoke: MachineSelfReport,
+  accessToken: TrimmedNonEmptyString,
+  proofKey: PeerProofKey,
+  spokeEphemeralKey: TrimmedNonEmptyString,
+  proof: TrimmedNonEmptyString,
 });
 export type PeerHelloInput = typeof PeerHelloInput.Type;
 
 export const PeerHelloResult = Schema.Struct({
   hubEnvironmentId: EnvironmentId,
-  /** Base64url Ed25519 signature over `peerHelloSigningInput`. */
   signature: TrimmedNonEmptyString,
   hub: MachineSelfReport,
+  scopes: Schema.Array(AuthPeerScope),
+  expiresAt: Schema.DateTimeUtc,
 });
 export type PeerHelloResult = typeof PeerHelloResult.Type;
 
-/** The exact bytes a hub signs for `peer.hello`. */
-export const peerHelloSigningInput = (input: {
-  readonly hubEnvironmentId: string;
-  readonly spokeEnvironmentId: string;
-  readonly nonce: string;
-}) =>
-  `cogenly-peer-hello:v1\n${input.hubEnvironmentId}\n${input.spokeEnvironmentId}\n${input.nonce}`;
+/** The serialized RPC envelope is hashed once and authenticated before RPC decoding. */
+export const PeerAuthenticatedFrame = Schema.Struct({
+  connectionId: TrimmedNonEmptyString,
+  direction: Schema.Literals(["spoke-to-hub", "hub-to-spoke"]),
+  sequence: Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0)),
+  method: TrimmedNonEmptyString,
+  payload: Schema.String,
+  mac: TrimmedNonEmptyString,
+});
 
 /** Messages the hub pushes down the spoke's open socket. */
 export const PeerPush = Schema.Union([
@@ -343,6 +378,7 @@ export const PeerCallInput = Schema.Struct({
 export type PeerCallInput = typeof PeerCallInput.Type;
 
 export const PEER_METHODS = {
+  challenge: "peer.challenge",
   hello: "peer.hello",
   ping: "peer.ping",
   machines: "peer.machines",
@@ -361,6 +397,11 @@ export class PeerScopeAuthorization extends RpcMiddleware.Service<PeerScopeAutho
 const peerErrors = Schema.Union([PeerProtocolError, EnvironmentAuthorizationError]);
 
 export const PeerRpcGroup = RpcGroup.make(
+  Rpc.make(PEER_METHODS.challenge, {
+    payload: Schema.Struct({ version: Schema.Number }),
+    success: PeerChallengeResult,
+    error: peerErrors,
+  }),
   Rpc.make(PEER_METHODS.hello, {
     payload: PeerHelloInput,
     success: PeerHelloResult,

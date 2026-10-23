@@ -62,7 +62,11 @@ const layerIdentity = (name: string, role: MachineRole) =>
  * Redials are immediate so reconnects need no clock; a refused or untrusted
  * hub is retried only after an hour, so the status it settles on holds.
  */
-const machineLayer = (name: string, role: MachineRole) => {
+const machineLayer = (
+  name: string,
+  role: MachineRole,
+  socketConstructor?: Socket.WebSocketConstructor["Service"],
+) => {
   const infra = Layer.mergeAll(
     SqlitePersistence.layerMemory,
     ServerSecretStore.layer,
@@ -83,7 +87,11 @@ const machineLayer = (name: string, role: MachineRole) => {
       Layer.mock(DirectEndpoints.DirectEndpoints)({ resolve: () => Effect.succeed([]) }),
     ),
     Layer.provide(FetchHttpClient.layer),
-    Layer.provide(Socket.layerWebSocketConstructorGlobal),
+    Layer.provide(
+      socketConstructor === undefined
+        ? Socket.layerWebSocketConstructorGlobal
+        : Layer.succeed(Socket.WebSocketConstructor, socketConstructor),
+    ),
     Layer.provide(
       Layer.succeed(HubLink.HubLinkRetry, {
         base: Duration.zero,
@@ -103,8 +111,12 @@ const machineLayer = (name: string, role: MachineRole) => {
 
 type MachineContext = Layer.Success<ReturnType<typeof machineLayer>>;
 
-export const startMachine = Effect.fn("startMachine")(function* (name: string, role: MachineRole) {
-  const context = yield* Layer.build(machineLayer(name, role));
+export const startMachine = Effect.fn("startMachine")(function* (
+  name: string,
+  role: MachineRole,
+  socketConstructor?: Socket.WebSocketConstructor["Service"],
+) {
+  const context = yield* Layer.build(machineLayer(name, role, socketConstructor));
   const run = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     Effect.provideContext(effect, context as Context.Context<MachineContext>);
   const server = yield* run(HttpServer.HttpServer);
