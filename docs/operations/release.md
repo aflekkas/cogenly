@@ -132,6 +132,19 @@ the next package versions on `main` (use `node scripts/update-release-package-ve
 The workflow stamps server, desktop, web, and contracts versions in its checkout;
 it never commits a version change to main.
 
+Before 1.0, choose the number by what a user has to know or do:
+
+- **Patch (`0.x.Y`)**: fixes, polish, security hardening, and features that
+  work without the user doing anything new. Routine database migrations are
+  fine in a patch.
+- **Minor (`0.X.0`)**: a release that changes how Cogenly is set up or used
+  across the board. Examples: a new capability users opt into with setup steps
+  (pairing machines, a new provider), data that starts syncing between
+  machines, a removed or renamed command, tool, or setting, or anything that
+  needs a migration step from the user. Its release notes say what to do.
+- Never reuse or skip back: each prod release advances the latest one, and the
+  workflow refuses anything else.
+
 Notes are generated against the latest prod release, ignoring old staging
 prereleases. The first prod release uses the source commit's first-parent
 history, since there is no previous tag. Every release body records the source
