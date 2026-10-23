@@ -412,7 +412,7 @@ const belongsToBootService = Effect.fn("cli.update.belongs_to_boot_service")(fun
   return false;
 });
 
-const runUpdate = Effect.fn("cli.update.run")(function* (input: {
+export const runUpdate = Effect.fn("cli.update.run")(function* (input: {
   readonly baseDir: string;
   readonly logsDir: string;
   readonly serverRuntimeStatePath: string;
@@ -491,11 +491,25 @@ const runUpdate = Effect.fn("cli.update.run")(function* (input: {
       : currentVersion;
 
   if (executableCurrent && serviceCurrent) {
+    // Already current is not a reason to skip the launchers: a machine
+    // whose only command is still `t3` gets its `cogenly` here.
+    const launchedAs = (yield* HostProcess.IsExecutable) ? yield* resolveLauncherPath : undefined;
+    const targetPaths = pinnedRuntimePaths(path, input.baseDir, targetVersion, platform);
+    const launcherInput = {
+      launchedAs,
+      versionsDir: path.dirname(targetPaths.versionDir),
+      targetEntryPath: targetPaths.entryPath,
+    };
+    yield* repointLauncher(launcherInput);
+    const retired = yield* retireLegacyLauncher(launcherInput);
     yield* Console.log(
       serviceVersion !== undefined
         ? `cogenly and its background service are already on ${targetVersion} (${targetChannel}).`
         : `cogenly is already on ${targetVersion} (${targetChannel}).`,
     );
+    for (const launcher of retired) {
+      yield* Console.log(`  The t3 command is now cogenly (${launcher}).`);
+    }
     return;
   }
   if (!input.allowDowngrade && compareExactServiceVersions(targetVersion, newestInstalled) < 0) {

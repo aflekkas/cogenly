@@ -3,9 +3,14 @@ import { describe, expect, it } from "@effect/vitest";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 
-import { retireLegacyLauncher } from "./update.ts";
+import { FetchHttpClient } from "effect/http";
+
+import * as BootService from "../cloud/bootService.ts";
+import * as ProcessRunner from "../processRunner.ts";
+import { retireLegacyLauncher, runUpdate } from "./update.ts";
 
 /** A home with two downloaded versions and an empty bin directory on PATH. */
 const setup = Effect.gen(function* () {
@@ -29,6 +34,52 @@ const retire = (input: { launchedAs: string; versionsDir: string; targetEntryPat
     Effect.provideService(HostProcess.Platform, "linux"),
     Effect.provideService(HostProcess.Environment, { PATH: "" }),
   );
+
+describe("runUpdate when already current", () => {
+  it.effect("still replaces a legacy t3 launcher with cogenly", () =>
+    Effect.gen(function* () {
+      const { fs, path, oldEntry, bin } = yield* setup;
+      const legacy = path.join(bin, "t3");
+      yield* fs.symlink(oldEntry, legacy);
+      yield* runUpdate({
+        baseDir: path.join(bin, "..", "home"),
+        logsDir: path.join(bin, "..", "home", "logs"),
+        serverRuntimeStatePath: path.join(bin, "..", "home", "runtime-state.json"),
+        channel: undefined,
+        requestedVersion: "0.1.0",
+        allowDowngrade: false,
+        assumeYes: true,
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            Layer.mock(BootService.BootService)({
+              status: Effect.succeed({
+                supported: false,
+                installed: false,
+                current: false,
+                unitPath: "",
+                logPath: "",
+              }),
+            }),
+            Layer.succeed(HostProcess.Platform, "linux" as const),
+            Layer.succeed(HostProcess.Architecture, "arm64" as const),
+            Layer.succeed(HostProcess.IsExecutable, true),
+            Layer.succeed(HostProcess.InvokedAs, legacy),
+            Layer.succeed(HostProcess.WorkingDirectory, bin),
+            Layer.succeed(HostProcess.Environment, {
+              PATH: bin,
+              COGENLY_RELEASE_BASE_URL: "https://example.invalid/releases",
+            }),
+            ProcessRunner.layer,
+            FetchHttpClient.layer,
+          ),
+        ),
+      );
+      expect(yield* fs.exists(legacy)).toBe(false);
+      expect(yield* fs.readLink(path.join(bin, "cogenly"))).toBe(oldEntry);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+});
 
 describe("retireLegacyLauncher", () => {
   it.effect("replaces our t3 launcher with a cogenly one pointing at the new version", () =>
