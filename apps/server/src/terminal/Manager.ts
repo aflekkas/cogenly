@@ -316,7 +316,12 @@ export interface AgentTerminalResult {
   readonly output: string;
   readonly nextOffset: number;
   readonly truncated: boolean;
+  readonly notice?: string;
 }
+
+/** Shown when a foreground wait times out and the command is killed. */
+export const AGENT_TERMINAL_TIMEOUT_NOTICE =
+  "Command timed out and was killed. It may have been waiting for input (for example a login prompt). Re-run it with background=true, then poll with terminal_read and answer prompts with terminal_write so the wait does not block the turn.";
 
 interface AgentTerminalOpenInput extends TerminalOpenInput {
   readonly redactOutput?: CredentialDelivery["redactOutput"];
@@ -1758,7 +1763,11 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     threadId: string,
     terminalId: string,
   ) {
-    const fiber = yield* runKillEscalation(process, threadId, terminalId).pipe(
+    // Uninterruptible: once SIGTERM is sent, the SIGKILL after the grace
+    // period must land even if the caller that started the kill is cancelled.
+    const fiber = yield* Effect.uninterruptible(
+      runKillEscalation(process, threadId, terminalId),
+    ).pipe(
       Effect.ensuring(
         modifyManagerState((state) => {
           if (!state.killFibers.has(process)) {
@@ -1773,6 +1782,21 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     );
 
     yield* registerKillFiber(process, fiber);
+  });
+
+  /** Bounded wait for a started kill escalation; the escalation itself keeps running past the bound. */
+  const awaitKillEscalation = Effect.fn("terminal.awaitKillEscalation")(function* (
+    process: PtyAdapter.PtyProcess,
+  ) {
+    const fiber: Option.Option<Fiber.Fiber<void, never>> = yield* modifyManagerState<
+      Option.Option<Fiber.Fiber<void, never>>
+    >((state) => [Option.fromNullishOr(state.killFibers.get(process)), state] as const);
+    if (Option.isSome(fiber)) {
+      yield* Fiber.await(fiber.value).pipe(
+        Effect.timeoutOption(processKillGraceMs + 5_000),
+        Effect.asVoid,
+      );
+    }
   });
 
   const persistWorker = yield* makeKeyedCoalescingWorker<
@@ -3312,6 +3336,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       status: session.status,
       exitCode: session.exitCode,
       timedOut: session.agent.timedOut,
+      ...(session.agent.timedOut ? { notice: AGENT_TERMINAL_TIMEOUT_NOTICE } : {}),
       ...session.agent.output.read(input.sinceOffset),
     };
   });
@@ -3324,9 +3349,11 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         if (!session.agent) return yield* new TerminalSessionLookupError(input);
         const process = session.process;
         yield* stopProcess(session);
+        // stopProcess already started the SIGTERM → SIGKILL escalation in the
+        // worker scope; await it (bounded) instead of interrupting and
+        // re-running it inline, which delayed the SIGKILL by a second grace.
         if (process) {
-          yield* clearKillFiber(process);
-          yield* runKillEscalation(process, input.threadId, input.terminalId);
+          yield* awaitKillEscalation(process);
         }
         yield* publishEvent({
           type: "exited",
@@ -3378,7 +3405,14 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         if (Option.isNone(completed)) {
           const session = yield* requireSession(input.threadId, input.terminalId);
           if (session.agent) session.agent.timedOut = true;
-          yield* killAgent(input);
+          // The deadline must end the call, not just the wait: cap the kill
+          // at the kill grace plus a small allowance. The escalation keeps
+          // running in the worker scope past the cap, so the process group
+          // still receives its SIGKILL even when this returns first.
+          yield* killAgent(input).pipe(
+            Effect.timeoutOption(processKillGraceMs + 5_000),
+            Effect.asVoid,
+          );
         }
       }
       return yield* readAgent(input);

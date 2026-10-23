@@ -29,6 +29,7 @@ const result = Schema.Struct({
   output: Schema.String,
   nextOffset: NonNegativeInt,
   truncated: Schema.Boolean,
+  notice: Schema.optional(Schema.String),
 });
 const run = Tool.make("terminal_run", {
   ...shared,

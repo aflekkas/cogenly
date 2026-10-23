@@ -192,6 +192,78 @@ it.live("settle cleanup kills both sleeps in an owned PTY process group", () =>
   ),
 );
 
+it.effect("foreground timeout returns even when an exited listener never completes", () =>
+  provide(
+    Effect.gen(function* () {
+      const { cwd, manager } = yield* make;
+      const started = yield* Deferred.make<void>();
+      const never = yield* Deferred.make<void>();
+      yield* manager.subscribe((event) =>
+        event.type === "started"
+          ? Deferred.succeed(started, undefined).pipe(Effect.asVoid)
+          : event.type === "exited"
+            ? Deferred.await(never).pipe(Effect.asVoid)
+            : Effect.void,
+      );
+      const result = yield* manager
+        .runAgent({ threadId: "A", command: "sleep 1000", cwd, timeoutMs: 50 })
+        .pipe(Effect.forkChild);
+      yield* Deferred.await(started);
+      yield* TestClock.adjust(50);
+      // Covers the kill grace cap as well; the call must still return.
+      yield* TestClock.adjust(10_000);
+      const ended = result.pollUnsafe();
+      expect(ended?._tag).toBe("Success");
+      if (ended?._tag === "Success") {
+        expect(ended.value.timedOut).toBe(true);
+        expect(ended.value.status).toBe("exited");
+        expect(ended.value.notice).toContain("background=true");
+      }
+    }),
+  ),
+);
+
+it.live("foreground timeout kills a SIGTERM-ignoring command and its child", () =>
+  provide(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const cwd = yield* fs.makeTempDirectoryScoped({ prefix: "cogenly-terminal-term-" });
+      const adapter = yield* PtyAdapter.PtyAdapter;
+      const manager = yield* Manager.makeWithOptions({
+        logsDir: cwd,
+        ptyAdapter: adapter,
+        processKillGraceMs: 50,
+        processTable: Effect.succeed([]),
+      });
+      const children = yield* Deferred.make<ReadonlyArray<number>>();
+      let text = "";
+      yield* manager.subscribe((event) =>
+        Effect.gen(function* () {
+          if (event.type !== "output") return;
+          text += event.data;
+          const match = /CHILD:(\d+)/u.exec(text);
+          if (match) yield* Deferred.succeed(children, [Number(match[1])]);
+        }),
+      );
+      const startedAt = Date.now();
+      const result = yield* manager.runAgent({
+        threadId: "A",
+        command: "trap '' TERM; sleep 1000 & echo CHILD:$!; wait",
+        cwd,
+        timeoutMs: 300,
+      });
+      const elapsed = Date.now() - startedAt;
+      expect(result.timedOut).toBe(true);
+      expect(result.status).toBe("exited");
+      expect(result.notice).toContain("background=true");
+      expect(elapsed).toBeLessThan(5_000);
+      const pids = yield* Deferred.await(children);
+      yield* Effect.sleep(200);
+      for (const pid of pids) expect(() => process.kill(pid, 0)).toThrow();
+    }).pipe(Effect.provide(NodePtyAdapter.layer)),
+  ),
+);
+
 it.effect("foreground returns exit status and bounded head/tail output", () =>
   provide(
     Effect.gen(function* () {
