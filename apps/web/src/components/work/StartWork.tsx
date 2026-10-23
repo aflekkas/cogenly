@@ -41,14 +41,16 @@ import {
   linkedGitHubOwners,
   type OwnerSearchState,
 } from "~/projectLabels/projectSourceLinks.logic";
-import { remoteRowsOutsideProject } from "~/projectLabels/repositoryPicker.logic";
+import { remoteSectionRows } from "~/projectLabels/repositoryPicker.logic";
 import {
   LocalRepositoryRowEnd,
   ManageRepositoriesRowContent,
   RemoteRepositoryRow,
   RemoteRepositorySection,
   RepositorySourceLabel,
+  ShowMoreRemoteRow,
 } from "~/projectLabels/RepositorySourceRows";
+import { useEnvironments, usePrimaryEnvironmentId } from "~/state/environments";
 import {
   useCanRemoveRepositoryFromProject,
   useRemoveRepositoryFromProject,
@@ -276,11 +278,18 @@ type StartWorkItem =
       readonly value: string;
       readonly label: string;
       readonly remote: RemoteCloneTarget;
+    }
+  | {
+      /** The GitHub section's "Show more" row. */
+      readonly kind: "more";
+      readonly value: string;
+      readonly label: string;
+      readonly hidden: number;
     };
 
 interface StartWorkGroup {
   readonly value: string;
-  /** "On this machine" over a project's own repositories; the rest have no header. */
+  /** The chat's machine over a project's own repositories; the rest have no header. */
   readonly label: string | null;
   readonly items: ReadonlyArray<StartWorkItem>;
   /** The project's GitHub results, searched while the project is open. */
@@ -329,6 +338,18 @@ export function StartWorkPicker(props: {
   const machineKind = resolveEnvironmentMachineKind(
     useServerConfigs().get(threadRef.environmentId) ?? null,
   );
+  // Work runs on the chat's machine; its repositories are named as being there.
+  const { environments } = useEnvironments();
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const machineLabel = environments.find(
+    (environment) => environment.environmentId === threadRef.environmentId,
+  )?.label;
+  const machineSectionLabel = machineLabel
+    ? `On ${machineLabel}`
+    : threadRef.environmentId === primaryEnvironmentId
+      ? "On this machine"
+      : "On another machine";
+  const [showAllRemote, setShowAllRemote] = useState(false);
 
   // Work runs on the chat's machine, so only that machine's projects list.
   const environmentIds = useMemo(() => [threadRef.environmentId], [threadRef.environmentId]);
@@ -409,17 +430,19 @@ export function StartWorkPicker(props: {
     };
     const local = openGroup.choices.filter((choice) => matches(choice.label)).map(choiceItem);
     // A repository shows once: a clone the project holds wins over its GitHub row.
-    const remoteRows =
+    const remoteSection =
       remoteSearch?.status === "done"
-        ? remoteRowsOutsideProject(
-            remoteSearch.repositories,
-            openGroup.choices.map((choice) => choice.repository?.repositoryIdentity),
-          )
-        : [];
+        ? remoteSectionRows({
+            repositories: remoteSearch.repositories,
+            local: openGroup.choices.map((choice) => choice.repository?.repositoryIdentity),
+            searching: trimmed.length > 0,
+            expanded: showAllRemote,
+          })
+        : { rows: [], hidden: 0 };
     const showRemote =
       openProject !== null &&
       remoteSearch !== undefined &&
-      (remoteSearch.status !== "done" || remoteRows.length > 0);
+      (remoteSearch.status !== "done" || remoteSection.rows.length > 0);
     // "Add repository…", then the project's page in Settings, which lists,
     // removes and adds its repositories.
     const openActions: StartWorkItem[] = [
@@ -441,7 +464,7 @@ export function StartWorkPicker(props: {
         ? [
             {
               value: `local:${groupKey}`,
-              label: showRemote ? "On this machine" : null,
+              label: showRemote ? machineSectionLabel : null,
               items: local,
             },
           ]
@@ -452,12 +475,24 @@ export function StartWorkPicker(props: {
               value: `remote:${groupKey}`,
               label: "On GitHub",
               remote: { project: openProject, state: remoteSearch },
-              items: remoteRows.map((repository): StartWorkItem => ({
-                kind: "remote",
-                value: `remote:${groupKey}|${repository.nameWithOwner}`,
-                label: repository.name,
-                remote: { project: openProject, repository },
-              })),
+              items: [
+                ...remoteSection.rows.map(({ repository, label }): StartWorkItem => ({
+                  kind: "remote",
+                  value: `remote:${groupKey}|${repository.nameWithOwner}`,
+                  label,
+                  remote: { project: openProject, repository },
+                })),
+                ...(remoteSection.hidden > 0
+                  ? [
+                      {
+                        kind: "more" as const,
+                        value: `remote:${groupKey}|more`,
+                        label: `Show ${remoteSection.hidden} more`,
+                        hidden: remoteSection.hidden,
+                      },
+                    ]
+                  : []),
+              ],
             },
           ]
         : []),
@@ -465,7 +500,17 @@ export function StartWorkPicker(props: {
         ? [{ value: ACTIONS_GROUP, label: null, items: openActions }]
         : []),
     ];
-  }, [choices, filter, openGroup, openProject, projectGroups, query, remoteSearch]);
+  }, [
+    choices,
+    filter,
+    machineSectionLabel,
+    openGroup,
+    openProject,
+    projectGroups,
+    query,
+    remoteSearch,
+    showAllRemote,
+  ]);
 
   const remoteClone = useRemoteRepositoryClone(
     (target) =>
@@ -501,8 +546,14 @@ export function StartWorkPicker(props: {
   const showProject = (key: string | null) => {
     setOpenProjectKey(key);
     setQuery("");
+    setShowAllRemote(false);
   };
   const pick = (item: StartWorkItem) => {
+    if (item.kind === "more") {
+      keepOpenRef.current = true;
+      setShowAllRemote(true);
+      return;
+    }
     if (item.kind === "project") {
       keepOpenRef.current = true;
       showProject(item.group.key ?? NO_PROJECT_KEY);
@@ -555,12 +606,16 @@ export function StartWorkPicker(props: {
   };
 
   const renderItem = (item: StartWorkItem) => {
+    if (item.kind === "more") {
+      return <ShowMoreRemoteRow key={item.value} item={item} hidden={item.hidden} />;
+    }
     if (item.kind === "remote") {
       return (
         <RemoteRepositoryRow
           key={item.value}
           item={item}
           repository={item.remote.repository}
+          label={item.label}
           clone={remoteClone}
           view={remoteClone.isFor(item.remote) ? remoteClone.view : null}
         />
@@ -644,7 +699,10 @@ export function StartWorkPicker(props: {
         }
         setOpen(next);
         setQuery("");
-        if (!next) setOpenProjectKey(null);
+        if (!next) {
+          setOpenProjectKey(null);
+          setShowAllRemote(false);
+        }
       }}
       value={null}
       onValueChange={(item: StartWorkItem | null) => {

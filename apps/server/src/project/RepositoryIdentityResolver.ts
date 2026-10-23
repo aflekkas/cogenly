@@ -85,11 +85,20 @@ function buildRepositoryOrigin(
   return { canonicalKey: originKey, ...(displayName ? { displayName } : {}) };
 }
 
+/** Every remote's normalized key, when there is more than one; otherwise undefined. */
+export function remoteKeysOf(remotes: ReadonlyMap<string, string>): string[] | undefined {
+  const keys = [...new Set([...remotes.values()].map((url) => normalizeGitRemoteUrl(url)))].filter(
+    (key) => key.length > 0,
+  );
+  return keys.length > 1 ? keys.toSorted() : undefined;
+}
+
 function buildRepositoryIdentity(input: {
   readonly remoteName: string;
   readonly remoteUrl: string;
   readonly originUrl: string | undefined;
   readonly rootPath: string;
+  readonly remoteKeys?: ReadonlyArray<string> | undefined;
 }): RepositoryIdentity {
   const canonicalKey = normalizeGitRemoteUrl(input.remoteUrl);
   const sourceControlProvider = detectSourceControlProviderFromGitRemoteUrl(input.remoteUrl);
@@ -112,6 +121,7 @@ function buildRepositoryIdentity(input: {
     ...(owner ? { owner } : {}),
     ...(repositoryName ? { name: repositoryName } : {}),
     ...(origin ? { origin } : {}),
+    ...(input.remoteKeys && input.remoteKeys.length > 0 ? { remoteKeys: input.remoteKeys } : {}),
   };
 }
 
@@ -157,7 +167,12 @@ const resolveRepositoryIdentityFromCacheKey = Effect.fn(
   const remotes = parseRemoteFetchUrls(remoteResult.value.stdout);
   const remote = pickPrimaryRemote(remotes);
   return remote
-    ? buildRepositoryIdentity({ ...remote, originUrl: remotes.get("origin"), rootPath: cacheKey })
+    ? buildRepositoryIdentity({
+        ...remote,
+        originUrl: remotes.get("origin"),
+        rootPath: cacheKey,
+        remoteKeys: remoteKeysOf(remotes),
+      })
     : null;
 });
 

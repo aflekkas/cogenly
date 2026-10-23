@@ -1,5 +1,5 @@
 import type { ProjectLabelOwnerRepository, RepositoryIdentity } from "@t3tools/contracts";
-import { FolderIcon, LockIcon, Settings2Icon, XIcon } from "lucide-react";
+import { ChevronDownIcon, FolderIcon, LockIcon, Settings2Icon, XIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { GitHubIcon } from "~/components/Icons";
@@ -20,9 +20,9 @@ import type { RemoteCloneView, useRemoteRepositoryClone } from "./useRemoteRepos
 
 /*
  * The rows every repository picker shares: a project's repositories split by
- * where they live ("On this machine", "On GitHub"), and a GitHub repository's
- * row with its clone in progress under it. Used by the composer's repository
- * picker and the Start Work picker.
+ * where they live (one section per machine, then "On GitHub"), and a GitHub
+ * repository's row with its clone in progress under it. Used by the
+ * composer's repository picker and the Start Work picker.
  */
 
 /** Where a run of picker rows lives: on a machine, or on GitHub. */
@@ -86,6 +86,8 @@ export function RemoteRepositorySection<Item>(props: {
 export function RemoteRepositoryRow<Item>(props: {
   readonly item: Item;
   readonly repository: ProjectLabelOwnerRepository;
+  /** The row's name: the bare name, or `owner/name` where that alone would mislead. */
+  readonly label: string;
   readonly clone: ReturnType<typeof useRemoteRepositoryClone>;
   /** This row's clone, when the followed clone is this repository's. */
   readonly view: RemoteCloneView | null;
@@ -103,7 +105,7 @@ export function RemoteRepositoryRow<Item>(props: {
           )}
         </ComboboxItemIcon>
         <TruncatedWithTooltip
-          text={repository.name}
+          text={props.label}
           tooltip={`Clone ${repository.nameWithOwner} into this project`}
           className="min-w-0 shrink text-sm"
         />
@@ -126,6 +128,21 @@ export function RemoteRepositoryRow<Item>(props: {
         />
       ) : null}
     </>
+  );
+}
+
+/**
+ * The GitHub section's last row while it shows a preview: picking it lists
+ * the rest in place. Searching lists everything anyway.
+ */
+export function ShowMoreRemoteRow<Item>(props: { readonly item: Item; readonly hidden: number }) {
+  return (
+    <ComboboxItem hideIndicator value={props.item} tone="action">
+      <ComboboxItemIcon>
+        <ChevronDownIcon aria-hidden className="size-3.5" />
+      </ComboboxItemIcon>
+      <span className="min-w-0 flex-1 truncate text-sm">{`Show ${props.hidden} more`}</span>
+    </ComboboxItem>
   );
 }
 

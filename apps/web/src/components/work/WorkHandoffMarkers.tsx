@@ -3,6 +3,7 @@ import { isScratchProject } from "@t3tools/client-runtime/state/projects";
 import type {
   EnvironmentId,
   MessageId,
+  OrchestrationV2Notification,
   ThreadId,
   WorkHandoffLink,
   WorkTask,
@@ -12,9 +13,11 @@ import { createContext, use, useMemo, type ReactNode } from "react";
 
 import { useProjects, useServerConfigs, useThreadShell } from "~/state/entities";
 import type { MessagesTimelineRow } from "../chat/MessagesTimeline.logic";
+import { resolveThreadOrigin } from "../chat/threadLineage.logic";
+import { WorkLogRow } from "../chat/WorkLog";
 import { ProjectFavicon } from "../ProjectFavicon";
+import { InlineButton } from "../ui/button";
 import { Spinner } from "../ui/spinner";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
   deriveWorkHandoffStatus,
   type WorkHandoffAnchors,
@@ -124,7 +127,7 @@ function WorkHandoffMarkerList(props: {
   readonly state: WorkHandoffMarkersState;
 }) {
   return (
-    <div className="pt-3">
+    <div className="pt-1">
       {props.links.map((link) => (
         <WorkHandoffMarker
           key={link.threadId}
@@ -171,10 +174,33 @@ function WorkHandoffStatusIcon({ status }: { readonly status: WorkHandoffStatus 
   }
 }
 
+/** Whether a thread is a Work session handed off from a chat or an agent conversation. */
+export function isWorkHandoffThread(source: Parameters<typeof resolveThreadOrigin>[0]): boolean {
+  const origin = resolveThreadOrigin(source);
+  return origin?.kind === "chat" || origin?.kind === "agent-conversation";
+}
+
+const NOTIFICATION_OUTCOME_VERB: Record<OrchestrationV2Notification["outcome"], string> = {
+  completed: "finished",
+  failed: "failed",
+  cancelled: "stopped",
+  updated: "updated",
+  unknown: "finished",
+};
+
+/** The chat's note that a Work session it handed off reported back, e.g. `Work "X" finished`. */
+export function workNotificationLabel(
+  title: string,
+  outcome: OrchestrationV2Notification["outcome"],
+): string {
+  return `Work "${title}" ${NOTIFICATION_OUTCOME_VERB[outcome]}`;
+}
+
 /**
- * A timeline divider that says this chat continued as a Work session here:
- * the session's live title, its repository and status. The whole marker
- * opens it; the Work thread links back with "From chat".
+ * The timeline row that says this chat continued as a Work session here: the
+ * session's live title, its repository and status, drawn like every other
+ * timeline event. "Open Work" opens it; the Work thread links back with
+ * "From chat".
  */
 function WorkHandoffMarker(props: {
   readonly environmentId: EnvironmentId;
@@ -203,39 +229,46 @@ function WorkHandoffMarker(props: {
   const repositoryLabel = repository?.title ?? "No repository";
 
   return (
-    <div className="flex min-w-0 items-center gap-3 py-1 text-xs">
-      <span aria-hidden className="h-px flex-1 bg-border" />
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <button
-              type="button"
-              onClick={() => props.onOpenThread(link.threadId)}
-              aria-label={`Continued in Work: ${title}, ${repositoryLabel}${status ? `, ${STATUS_LABEL[status]}` : ""}. Open Work`}
-              className="flex min-w-0 max-w-[min(36rem,85%)] cursor-pointer items-center gap-2 rounded-lg border border-border bg-background px-3 py-1.5 transition-colors state-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-            />
-          }
-        >
-          <HammerIcon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
-          <span className="shrink-0 text-muted-foreground">Continued in Work</span>
-          <span aria-hidden className="h-3.5 w-px shrink-0 bg-border" />
-          <WorkHandoffStatusIcon status={status} />
-          <span className="min-w-0 truncate font-medium text-foreground">{title}</span>
-          <span aria-hidden className="shrink-0 text-muted-foreground">
+    <WorkLogRow
+      data-work-handoff=""
+      icon={<HammerIcon aria-hidden className="size-4 text-icon-muted" />}
+      label={
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="shrink-0">Continued in Work</span>
+          <span aria-hidden className="shrink-0">
             ·
           </span>
-          <span className="flex min-w-0 shrink items-center gap-1 text-muted-foreground">
+          {status ? (
+            // Keyed by status: a Work finishing fades its new icon in place.
+            <span
+              key={status}
+              role="img"
+              aria-label={STATUS_LABEL[status]}
+              className="flex shrink-0 items-center swap-motion"
+            >
+              <WorkHandoffStatusIcon status={status} />
+            </span>
+          ) : null}
+          <span className="min-w-0 truncate font-medium text-foreground/80">{title}</span>
+          <span aria-hidden className="shrink-0">
+            ·
+          </span>
+          <span className="flex min-w-0 shrink-[2] items-center gap-1 text-muted-foreground">
             {repository ? (
               <ProjectFavicon project={repository} className="size-3.5 shrink-0" />
             ) : null}
             <span className="min-w-0 truncate">{repositoryLabel}</span>
           </span>
-        </TooltipTrigger>
-        <TooltipPopup side="top">
-          {status ? `${STATUS_LABEL[status]} · Open Work` : "Open Work"}
-        </TooltipPopup>
-      </Tooltip>
-      <span aria-hidden className="h-px flex-1 bg-border" />
-    </div>
+        </span>
+      }
+      trailing={
+        <InlineButton
+          aria-label={`Open Work: ${title}`}
+          onClick={() => props.onOpenThread(link.threadId)}
+        >
+          Open Work
+        </InlineButton>
+      }
+    />
   );
 }

@@ -4,6 +4,7 @@ import {
   ProjectLabelOwnerRepository,
   type ProjectLabelOwnerRepositorySearchInput,
   ProjectLabelOwnerSearchError,
+  type RepositoryIdentity,
 } from "@t3tools/contracts";
 import * as GitHubRest from "@t3tools/source-control-github/server/GitHubRest";
 import * as GitHubRequestPolicy from "@t3tools/source-control-github/server/GitHubRequestPolicy";
@@ -72,6 +73,55 @@ export function matchesOwnerRepositoryQuery(name: string, query: string): boolea
 
 const localRepositoryKey = (owner: string, name: string) =>
   `${owner.trim().toLowerCase()}/${name.trim().toLowerCase()}`;
+
+const GITHUB_KEY_PREFIX = "github.com/";
+
+function gitHubKeyOf(canonicalKey: string | undefined): string | null {
+  if (!canonicalKey?.startsWith(GITHUB_KEY_PREFIX)) return null;
+  const [owner, name, ...rest] = canonicalKey.slice(GITHUB_KEY_PREFIX.length).split("/");
+  return owner && name && rest.length === 0 ? localRepositoryKey(owner, name) : null;
+}
+
+/**
+ * Every GitHub `owner/name` a checkout answers to, lowercase: its canonical
+ * remote, a fork's own remote, and any other remote on GitHub. A checkout
+ * whose origin is another host (a GitHub Enterprise mirror, say) still
+ * answers to the GitHub repository a second remote points at.
+ */
+export function localGitHubRepositoryKeys(
+  identity: RepositoryIdentity | null | undefined,
+): ReadonlyArray<string> {
+  if (!identity) return [];
+  const keys = [
+    gitHubKeyOf(identity.canonicalKey),
+    gitHubKeyOf(identity.origin?.canonicalKey),
+    ...(identity.remoteKeys ?? []).map(gitHubKeyOf),
+  ];
+  return [...new Set(keys.filter((key) => key !== null))];
+}
+
+/** At most this many renamed-owner lookups per search, so a search stays one round trip or two. */
+const RENAME_LOOKUP_LIMIT = 4;
+const RENAME_LOOKUP_TIMEOUT = "4 seconds";
+
+const GitHubRepositoryFullName = Schema.fromJsonString(Schema.Struct({ full_name: Schema.String }));
+const decodeRepositoryFullName = Schema.decodeUnknownOption(GitHubRepositoryFullName);
+
+/**
+ * Local keys that may name one of `candidates` under an owner's old name:
+ * same repository name, different owner. GitHub redirects a renamed owner's
+ * repositories, so a checkout's remote can keep the old owner for good.
+ */
+export function renameLookupCandidates(
+  local: ReadonlySet<string>,
+  candidates: ReadonlyArray<string>,
+): string[] {
+  const wanted = new Set(candidates);
+  const names = new Set(candidates.map((key) => key.slice(key.indexOf("/") + 1)));
+  return [...local]
+    .filter((key) => !wanted.has(key) && names.has(key.slice(key.indexOf("/") + 1)))
+    .slice(0, RENAME_LOOKUP_LIMIT);
+}
 
 function toSearchError(error: GitHubRequestPolicy.GitHubApiError): ProjectLabelOwnerSearchError {
   switch (error._tag) {
@@ -148,16 +198,7 @@ export const searchLabelOwnerRepositories = Effect.fn("ProjectOwnerRepositorySea
       rows,
       (row) =>
         Effect.map(deps.identities.resolve(row.workspaceRoot), (identity) => {
-          if (identity?.owner && identity.name) {
-            local.add(localRepositoryKey(identity.owner, identity.name));
-          }
-          // A fork tracking its upstream is identified by the upstream; its
-          // own remote is the GitHub repository it was cloned from.
-          const origin = identity?.origin?.canonicalKey;
-          if (origin?.startsWith("github.com/")) {
-            const [owner, name] = origin.slice("github.com/".length).split("/");
-            if (owner && name) local.add(localRepositoryKey(owner, name));
-          }
+          for (const key of localGitHubRepositoryKeys(identity)) local.add(key);
         }),
       { concurrency: 8, discard: true },
     );
@@ -219,15 +260,50 @@ export const searchLabelOwnerRepositories = Effect.fn("ProjectOwnerRepositorySea
         ? [yield* fetchSignedInAccount]
         : yield* Effect.forEach(owners, fetchOwner, { concurrency: 4 });
     const seen = new Set<string>();
-    const repositories: Array<ProjectLabelOwnerRepository> = [];
+    const matched: Array<GitHubOwnerRepositoryRow> = [];
     for (const row of pages.flat()) {
       const key = localRepositoryKey(row.owner.login, row.name);
       if (seen.has(key)) continue;
       seen.add(key);
       if (!matchesOwnerRepositoryQuery(row.name, input.query)) continue;
+      matched.push(row);
+      if (matched.length >= limit) break;
+    }
+
+    // A checkout whose remote still names an owner's old login answers to the
+    // renamed repository: ask GitHub where the old address leads. Best effort;
+    // a failed lookup leaves the row as it was.
+    const unmatched = matched
+      .map((row) => localRepositoryKey(row.owner.login, row.name))
+      .filter((key) => !local.has(key));
+    yield* Effect.forEach(
+      renameLookupCandidates(local, unmatched),
+      (key) =>
+        deps.github
+          .rest({
+            host: "github.com",
+            operation: "ProjectOwnerRepositorySearch.resolveRenamedRepository",
+            path: `repos/${key.split("/").map(encodeURIComponent).join("/")}`,
+            timeout: RENAME_LOOKUP_TIMEOUT,
+          })
+          .pipe(
+            Effect.map((response) => {
+              const resolved = Option.getOrUndefined(decodeRepositoryFullName(response.body));
+              if (resolved) {
+                const [owner = "", name = ""] = resolved.full_name.split("/");
+                if (owner && name) local.add(localRepositoryKey(owner, name));
+              }
+            }),
+            Effect.ignore,
+          ),
+      { concurrency: RENAME_LOOKUP_LIMIT, discard: true },
+    );
+
+    const repositories: Array<ProjectLabelOwnerRepository> = [];
+    for (const row of matched) {
+      const key = localRepositoryKey(row.owner.login, row.name);
       const mapped = mapGitHubOwnerRepositoryRow(row, local.has(key));
       if (mapped) repositories.push(mapped);
-      if (repositories.length >= limit) break;
     }
     return { repositories };
   },

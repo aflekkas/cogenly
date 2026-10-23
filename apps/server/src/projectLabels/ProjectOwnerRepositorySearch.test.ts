@@ -242,6 +242,101 @@ describe("searchLabelOwnerRepositories", () => {
     }),
   );
 
+  const enterpriseCheckout = (gitHubRemote: string) => ({
+    resolve: () =>
+      Effect.succeed({
+        canonicalKey: "smiledoctors.ghe.com/marketing/smileexpressapp",
+        locator: {
+          source: "git-remote" as const,
+          remoteName: "origin",
+          remoteUrl: "https://smiledoctors.ghe.com/marketing/SmileExpressApp.git",
+        },
+        owner: "marketing",
+        name: "smileexpressapp",
+        remoteKeys: [gitHubRemote, "smiledoctors.ghe.com/marketing/smileexpressapp"],
+      }),
+  });
+
+  it.effect("counts any GitHub remote as local, when origin is another host", () =>
+    Effect.gen(function* () {
+      const rest: ProjectOwnerRepositorySearchDeps["github"]["rest"] = () =>
+        Effect.succeed(restResponse(JSON.stringify([gitHubRow({ name: "smile-express" })])));
+      const deps = depsWith({
+        label: labelWithOwners("spawn-partners"),
+        rest,
+        projects: [projectRow("smile", "/repos/smile")],
+      });
+      const result = yield* searchLabelOwnerRepositories(
+        { id: labelId, query: "" },
+        { ...deps, identities: enterpriseCheckout("github.com/spawn-partners/smile-express") },
+      );
+      expect(result.repositories).toMatchObject([
+        { nameWithOwner: "spawn-partners/smile-express", alreadyLocal: true },
+      ]);
+    }),
+  );
+
+  it.effect("follows a renamed owner to the repository a stale remote names", () =>
+    Effect.gen(function* () {
+      const seen: Array<string> = [];
+      const rest: ProjectOwnerRepositorySearchDeps["github"]["rest"] = (input) =>
+        Effect.sync(() => void seen.push(input.path)).pipe(
+          Effect.as(
+            input.path.startsWith("repos/")
+              ? restResponse(JSON.stringify({ full_name: "Spawn-Partners/smile-express" }))
+              : restResponse(
+                  JSON.stringify([
+                    gitHubRow({ name: "smile-express" }),
+                    gitHubRow({ name: "finance" }),
+                  ]),
+                ),
+          ),
+        );
+      const deps = depsWith({
+        label: labelWithOwners("spawn-partners"),
+        rest,
+        projects: [projectRow("smile", "/repos/smile")],
+      });
+      const result = yield* searchLabelOwnerRepositories(
+        { id: labelId, query: "" },
+        { ...deps, identities: enterpriseCheckout("github.com/spawn-llc/smile-express") },
+      );
+      // Only the same-named repository is looked up, not every result.
+      expect(seen.filter((path) => path.startsWith("repos/"))).toEqual([
+        "repos/spawn-llc/smile-express",
+      ]);
+      expect(result.repositories).toMatchObject([
+        { nameWithOwner: "spawn-partners/smile-express", alreadyLocal: true },
+        { nameWithOwner: "spawn-partners/finance", alreadyLocal: false },
+      ]);
+    }),
+  );
+
+  it.effect("keeps a same-named repository under another owner when GitHub says it differs", () =>
+    Effect.gen(function* () {
+      const rest: ProjectOwnerRepositorySearchDeps["github"]["rest"] = (input) =>
+        Effect.succeed(
+          input.path.startsWith("repos/")
+            ? restResponse(JSON.stringify({ full_name: "bartr-app/platform" }))
+            : restResponse(
+                JSON.stringify([gitHubRow({ name: "platform", owner: { login: "mediamaxxing" } })]),
+              ),
+        );
+      const result = yield* searchLabelOwnerRepositories(
+        { id: labelId, query: "" },
+        depsWith({
+          label: labelWithOwners(),
+          rest,
+          projects: [projectRow("bartr", "/repos/bartr")],
+          identities: { "/repos/bartr": { owner: "bartr-app", name: "platform" } },
+        }),
+      );
+      expect(result.repositories).toMatchObject([
+        { nameWithOwner: "mediamaxxing/platform", alreadyLocal: false },
+      ]);
+    }),
+  );
+
   it.effect("caps results at the requested limit", () =>
     Effect.gen(function* () {
       const rest: ProjectOwnerRepositorySearchDeps["github"]["rest"] = () =>
