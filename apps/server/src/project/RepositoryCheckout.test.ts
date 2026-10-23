@@ -6,7 +6,9 @@ import {
   SourceControlProviderKind,
   SourceControlRepositoryError,
 } from "@t3tools/contracts";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
@@ -56,17 +58,22 @@ interface Box {
   workspaceRoot: string;
   remote: string | null;
   cloneCalls: number;
+  onPrepareClone?: () => Effect.Effect<void>;
+  onListLabels?: () => Effect.Effect<void>;
+  onClone?: () => void;
 }
 
 function harness(box: Box) {
   const repositories = Layer.mock(SourceControlRepositoryService.SourceControlRepositoryService)({
     prepareClone: (input) =>
-      Effect.succeed({
-        destinationPath: input.destinationPath ?? "",
-        remoteUrl: input.remoteUrl ?? "",
-        cloneUrl: input.remoteUrl ?? "",
-        repository: null,
-      }),
+      (box.onPrepareClone ? box.onPrepareClone() : Effect.void).pipe(
+        Effect.as({
+          destinationPath: input.destinationPath ?? "",
+          remoteUrl: input.remoteUrl ?? "",
+          cloneUrl: input.remoteUrl ?? "",
+          repository: null,
+        }),
+      ),
     cloneRepository: (input) =>
       Effect.try({
         try: () => {
@@ -76,6 +83,7 @@ function harness(box: Box) {
             ["clone", "--progress", "--", input.remoteUrl ?? "", input.destinationPath ?? ""],
             { stdio: "pipe" },
           );
+          box.onClone?.();
           return {
             cwd: input.destinationPath ?? "",
             remoteUrl: input.remoteUrl ?? "",
@@ -109,15 +117,23 @@ function harness(box: Box) {
         clones,
         Layer.mock(ProjectLabelService.ProjectLabelService)({
           list: () =>
-            Effect.succeed({
-              labels: [
-                {
-                  repositories: [
-                    { repositoryId: projectId, remote: box.remote, directoryName: "smile-express" },
+            (box.onListLabels ? box.onListLabels() : Effect.void).pipe(
+              Effect.andThen(
+                Effect.succeed({
+                  labels: [
+                    {
+                      repositories: [
+                        {
+                          repositoryId: projectId,
+                          remote: box.remote,
+                          directoryName: "smile-express",
+                        },
+                      ],
+                    },
                   ],
-                },
-              ],
-            } as never),
+                } as never),
+              ),
+            ),
         }),
         NodeServices.layer,
       ),
@@ -188,6 +204,48 @@ describe("RepositoryCheckout.ensureCheckout", () => {
         "hello\n",
       );
     });
+  });
+
+  it.effect("two concurrent ensures into one empty repo clone once and both succeed", () => {
+    const bare = makeBareRemote();
+    const workspaceRoot = NodePath.join(tempRoot(), "smile-express");
+    NodeFS.mkdirSync(workspaceRoot);
+    const box: Box = { workspaceRoot, remote: bare, cloneCalls: 0 };
+    return Effect.gen(function* () {
+      const entered = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      let listCalls = 0;
+      box.onListLabels = () =>
+        Effect.suspend(() => {
+          listCalls += 1;
+          // Hold the first ensure after its checkout check but before it can
+          // start a clone, so the second ensure claims the clone first: the
+          // check-then-start race, deterministically.
+          return listCalls === 1
+            ? Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release)))
+            : Effect.void;
+        });
+      // Both ensures share one clone tracker, like two launches in one
+      // server: the harness layer is provided once around the whole test,
+      // since providing it per ensure would rebuild the tracker each time.
+      const ensure = Effect.gen(function* () {
+        const checkout = yield* RepositoryCheckout.RepositoryCheckout;
+        return yield* checkout.ensureCheckout(projectId);
+      }).pipe(Effect.scoped);
+      const first = yield* Effect.forkScoped(ensure);
+      yield* Deferred.await(entered);
+      const second = yield* Effect.forkScoped(ensure);
+      // The second ensure claimed the clone and finished; only now release
+      // the first ensure so its start meets the already-claimed clone.
+      yield* Fiber.join(second);
+      yield* Deferred.succeed(release, undefined);
+      yield* Fiber.join(first);
+      yield* Fiber.join(second);
+      expect(box.cloneCalls).toBe(1);
+      expect(NodeFS.readFileSync(NodePath.join(workspaceRoot, "README.md"), "utf8")).toBe(
+        "hello\n",
+      );
+    }).pipe(Effect.provide(harness(box)));
   });
 
   it.effect("fails with what to do when there is no checkout and no remote", () => {

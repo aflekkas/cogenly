@@ -201,53 +201,69 @@ const make = Effect.gen(function* () {
 
     const existing = yield* clones.get(repositoryId);
     if (existing === null || existing.phase === "done") {
-      yield* clones
-        .start(
-          {
-            projectId: repositoryId,
-            title: project.title,
-            createdAt: DateTime.formatIso(yield* DateTime.now),
-            destinationPath: workspaceRoot,
-            ...cloneInputForRemote(remote),
-          },
-          {
-            // The project record already exists; only the checkout is missing.
-            createProject: () => Effect.void,
-            // Like a fresh project clone: re-resolve the folder's repository
-            // (it may have been cached as an enclosing repo while empty),
-            // then refresh the project record.
-            onCloned: () =>
-              (Option.isSome(identities)
-                ? identities.value.resolve(workspaceRoot, { refresh: true })
-                : Effect.void
-              ).pipe(
-                Effect.andThen(
-                  projects.update({
-                    commandId: CommandId.make(`repository-checkout-cloned:${repositoryId}`),
-                    projectId: repositoryId,
-                  }),
+      // The check above and this start are not atomic: a concurrent launch
+      // for the same repository can claim the clone in between. Its start
+      // conflict is not a failure — wait for that clone below instead.
+      const started = yield* Effect.result(
+        clones
+          .start(
+            {
+              projectId: repositoryId,
+              title: project.title,
+              createdAt: DateTime.formatIso(yield* DateTime.now),
+              destinationPath: workspaceRoot,
+              ...cloneInputForRemote(remote),
+            },
+            {
+              // The project record already exists; only the checkout is missing.
+              createProject: () => Effect.void,
+              // Like a fresh project clone: re-resolve the folder's repository
+              // (it may have been cached as an enclosing repo while empty),
+              // then refresh the project record.
+              onCloned: () =>
+                (Option.isSome(identities)
+                  ? identities.value.resolve(workspaceRoot, { refresh: true })
+                  : Effect.void
+                ).pipe(
+                  Effect.andThen(
+                    projects.update({
+                      commandId: CommandId.make(`repository-checkout-cloned:${repositoryId}`),
+                      projectId: repositoryId,
+                    }),
+                  ),
+                  Effect.asVoid,
+                  Effect.ignoreCause({ log: true }),
                 ),
-                Effect.asVoid,
-                Effect.ignoreCause({ log: true }),
-              ),
-          },
-          // Server-initiated re-clone of a stored remote: local remotes that
-          // came from a previous clone or the repository's own config are allowed.
-          { cloneCaller: "owner" },
-        )
-        .pipe(
-          Effect.mapError(
-            (cause) =>
-              new RepositoryCheckoutError({
-                repositoryId,
-                repositoryName,
-                reason: "clone_failed",
-                detail:
-                  cause._tag === "SourceControlRepositoryError" ? cause.detail : cause.message,
-                cause,
-              }),
+            },
+            // Server-initiated re-clone of a stored remote: local remotes that
+            // came from a previous clone or the repository's own config are allowed.
+            { cloneCaller: "owner" },
+          )
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new RepositoryCheckoutError({
+                  repositoryId,
+                  repositoryName,
+                  reason: "clone_failed",
+                  detail:
+                    cause._tag === "SourceControlRepositoryError" ? cause.detail : cause.message,
+                  cause,
+                }),
+            ),
           ),
-        );
+      );
+      if (started._tag === "Failure") {
+        const concurrent = yield* clones.get(repositoryId);
+        // Only a conflict with this repository's own clone means "wait for
+        // it"; a destination owned by another project stays an error.
+        if (
+          concurrent === null ||
+          concurrent.phase === "failed" ||
+          concurrent.phase === "cancelled"
+        )
+          return yield* started.failure;
+      }
     } else if (existing.phase === "failed" || existing.phase === "cancelled") {
       const retried = yield* clones.retry(repositoryId).pipe(
         Effect.mapError(
