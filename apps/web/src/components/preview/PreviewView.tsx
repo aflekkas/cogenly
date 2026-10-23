@@ -88,6 +88,8 @@ import { cn } from "~/lib/utils";
 import { useBrowserSurfaceStore } from "~/browser/browserSurfaceStore";
 import { showBrowserTabInPanel } from "./floatingBrowserPreviewStore";
 import { usePreviewSession } from "./usePreviewSession";
+import { useSitePermissions } from "./useSitePermissions";
+import { PreviewPermissionPrompt } from "./PreviewPermissionPrompt";
 import { ZoomIndicator } from "./ZoomIndicator";
 import { AgentBrowserCursor } from "./AgentBrowserCursor";
 import {
@@ -313,6 +315,14 @@ export function PreviewView({
   const serverStreamPending =
     isServerTab && !showEmptyState && !isUnreachable && serverFrameTabId !== runtimeTabId;
   const controller = desktopOverlay?.controller ?? "none";
+  // Camera, microphone, location and the like are decided for the page the
+  // desktop renders; a streamed server tab runs in the environment's browser.
+  const sitePermissions = useSitePermissions(
+    !isServerTab && desktopOverlay?.hasWebContents === true ? runtimeTabId : null,
+  );
+  const sitePermissionActions = sitePermissions.available
+    ? { read: sitePermissions.read, change: sitePermissions.change }
+    : undefined;
   const serverPickMarkers = useMemo(
     () => (isServerTab ? pickMarkers(previewAnnotations, url) : []),
     [isServerTab, previewAnnotations, url],
@@ -630,6 +640,7 @@ export function PreviewView({
           ? {
               openDevTools: desktopCall(previewBridge.openDevTools),
               toggleNativePictureInPicture: () => handleNativePictureInPicture(),
+              ...(sitePermissionActions ? { sitePermissions: sitePermissionActions } : {}),
             }
           : {}),
       }
@@ -653,6 +664,7 @@ export function PreviewView({
               .catch(() => undefined),
           openDevTools: desktopCall(previewBridge.openDevTools),
           toggleNativePictureInPicture: () => handleNativePictureInPicture(),
+          ...(sitePermissionActions ? { sitePermissions: sitePermissionActions } : {}),
         }
       : null;
 
@@ -1208,6 +1220,10 @@ export function PreviewView({
         {snapshot && desktopOverlay ? (
           <ZoomIndicator zoomFactor={desktopOverlay.zoomFactor} />
         ) : null}
+        <PreviewPermissionPrompt
+          prompt={sitePermissions.prompt}
+          onAnswer={sitePermissions.answer}
+        />
         {runtimeTabId &&
         desktopOverlay &&
         !showEmptyState &&

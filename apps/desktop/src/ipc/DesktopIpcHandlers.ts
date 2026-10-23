@@ -139,4 +139,7 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
   yield* DictationIpc.registerStreamAudio;
   yield* ipc.handle(PreviewIpc.listBrowserImportSources);
   yield* ipc.handle(PreviewIpc.importBrowserCookies);
+  yield* ipc.handle(PreviewIpc.getSitePermissions);
+  yield* ipc.handle(PreviewIpc.setSitePermission);
+  yield* ipc.handle(PreviewIpc.answerSitePermissionPrompt);
 });

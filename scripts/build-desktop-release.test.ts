@@ -3,7 +3,12 @@ import { it } from "@effect/vitest";
 import { describe, expect } from "vite-plus/test";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
-import { createBuildConfig, MAC_AUDIO_INPUT_ENTITLEMENT } from "./build-desktop-artifact.ts";
+import {
+  createBuildConfig,
+  MAC_AUDIO_INPUT_ENTITLEMENT,
+  MAC_CAMERA_ENTITLEMENT,
+  renderMacPasskeyEntitlements,
+} from "./build-desktop-artifact.ts";
 
 const configFor = (version: string, signed = false, mock = false) =>
   createBuildConfig("mac", "dmg", version, signed, mock, 3000, undefined).pipe(
@@ -37,23 +42,44 @@ describe("desktop release packaging", () => {
       const config = yield* configFor("1.2.3", true);
       expect(config.mac).toMatchObject({ notarize: true, hardenedRuntime: true });
       expect(config.mac).not.toHaveProperty("provisioningProfile");
-      // Dictation needs microphone capture under the hardened runtime.
+      // Dictation and browser-panel pages need the microphone and camera under the hardened runtime.
       const entitlements = (config.mac as { entitlements: string }).entitlements;
       const fs = yield* FileSystem.FileSystem;
-      expect(yield* fs.readFileString(entitlements)).toContain(MAC_AUDIO_INPUT_ENTITLEMENT);
+      const plist = yield* fs.readFileString(entitlements);
+      expect(plist).toContain(MAC_AUDIO_INPUT_ENTITLEMENT);
+      expect(plist).toContain(MAC_CAMERA_ENTITLEMENT);
     }).pipe(Effect.provide(NodeServices.layer)),
   );
-  it.effect("ships the dictation helper and a microphone usage description on macOS", () =>
-    Effect.gen(function* () {
-      const config = yield* configFor("1.2.3");
-      expect(config.extraResources).toContainEqual({
-        from: "apps/desktop/prod-resources/speech-helper",
-        to: "speech-helper",
-      });
-      expect(config.mac).toMatchObject({
-        extendInfo: { NSMicrophoneUsageDescription: expect.any(String) },
-      });
-    }),
+  it("grants the camera and microphone to passkey-signed builds too", () => {
+    const plist = renderMacPasskeyEntitlements(
+      {
+        appId: "app.id",
+        teamId: "TEAM",
+        rpDomains: ["example.com"],
+        provisioningProfilePath: "profile.provisionprofile",
+      },
+      { touchIdKeychainAccessGroup: undefined, browserPasskeys: false },
+    );
+    expect(plist).toContain(MAC_AUDIO_INPUT_ENTITLEMENT);
+    expect(plist).toContain(MAC_CAMERA_ENTITLEMENT);
+  });
+  it.effect(
+    "ships the dictation helper and microphone and camera usage descriptions on macOS",
+    () =>
+      Effect.gen(function* () {
+        const config = yield* configFor("1.2.3");
+        expect(config.extraResources).toContainEqual({
+          from: "apps/desktop/prod-resources/speech-helper",
+          to: "speech-helper",
+        });
+        // Without NSCameraUsageDescription macOS never lets the app reach the camera.
+        expect(config.mac).toMatchObject({
+          extendInfo: {
+            NSMicrophoneUsageDescription: expect.any(String),
+            NSCameraUsageDescription: expect.any(String),
+          },
+        });
+      }),
   );
   it.effect("keeps local update testing on localhost and retired previews without a feed", () =>
     Effect.gen(function* () {

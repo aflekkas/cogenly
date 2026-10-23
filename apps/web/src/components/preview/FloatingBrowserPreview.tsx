@@ -17,6 +17,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 
+import { useChatCanvas } from "~/components/chat/ChatCanvasContext";
 import { useBrowserPointerStore } from "~/browser/browserPointerStore";
 import {
   acquireBrowserSurfaceActivity,
@@ -40,10 +41,11 @@ import {
   FLOATING_PREVIEW_CAPTURE_INTERVAL_MS,
   FLOATING_PREVIEW_CARD_HEIGHT,
   FLOATING_PREVIEW_CARD_WIDTH,
+  DEFAULT_FLOATING_PREVIEW_CORNER,
   FLOATING_PREVIEW_DRAG_SLOP_PX,
-  FLOATING_PREVIEW_MIN_PANE_WIDTH,
   FLOATING_PREVIEW_STREAM_FRAME_INTERVAL_MS,
   floatingPreviewCornerPosition,
+  floatingPreviewPaneFits,
   floatingPreviewTitle,
   type FloatingPreviewPoint,
   type FloatingPreviewSize,
@@ -70,8 +72,6 @@ const CARD_SIZE: FloatingPreviewSize = {
   width: FLOATING_PREVIEW_CARD_WIDTH,
   height: FLOATING_PREVIEW_CARD_HEIGHT,
 };
-/** The chat header overlays the pane's top edge. */
-const PANE_TOP_INSET = 48;
 /** A dragged card stays below the window's titlebar row and off its edges. */
 const WORKSPACE_TITLEBAR_HEIGHT = 52;
 const WINDOW_EDGE_INSET = 8;
@@ -146,7 +146,9 @@ function FloatingBrowserPreviewCard({
 
   const shownCounts = useFloatingBrowserPreviewStore((state) => state.shownCounts);
   const dismissedKey = useFloatingBrowserPreviewStore((state) => state.dismissedKey);
-  const corner = useFloatingBrowserPreviewStore((state) => state.corner);
+  const corner =
+    useFloatingBrowserPreviewStore((state) => state.corner) ?? DEFAULT_FLOATING_PREVIEW_CORNER;
+  const detailsCard = useChatCanvas()?.detailsCard ?? null;
   const freePosition = useFloatingBrowserPreviewStore((state) => state.freePosition);
 
   // The pane stays in the chat's layout only to be measured; the card itself
@@ -214,7 +216,7 @@ function FloatingBrowserPreviewCard({
     navStatus: snapshot?.navStatus ?? null,
     thumbnailAvailable: thumbnailSource !== null,
     poppedOut: desktopOverlay?.pictureInPicture === true,
-    paneFits: (pane?.width ?? 0) >= FLOATING_PREVIEW_MIN_PANE_WIDTH,
+    paneFits: pane !== null && floatingPreviewPaneFits(pane, CARD_SIZE, bottomInset),
   });
   // Mounts transparent and fades in on the next frame, so arriving on a thread
   // with a card to show reads the same as closing the panel in place.
@@ -239,9 +241,10 @@ function FloatingBrowserPreviewCard({
   const cornerPosition = (target: FloatingPreviewCorner): FloatingPreviewPoint | null => {
     if (!pane) return null;
     const inPane = floatingPreviewCornerPosition(target, pane, CARD_SIZE, {
-      top: PANE_TOP_INSET,
+      top: 0,
       bottom: bottomInset,
       right: minimapInset,
+      detailsCard,
     });
     return { x: paneOrigin.x + inPane.x, y: paneOrigin.y + inPane.y };
   };
