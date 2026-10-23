@@ -100,6 +100,7 @@ import {
 import { formatThreadLink } from "@t3tools/shared/threadLinks";
 import * as Metrics from "../observability/Metrics.ts";
 import * as SecretRequests from "../secrets/SecretRequests.ts";
+import * as Vault from "../vault/Vault.ts";
 
 const DEFAULT_WAIT_TIMEOUT_MS = 10 * 60 * 1_000;
 const MAX_WAIT_TIMEOUT_MS = 60 * 60 * 1_000;
@@ -924,6 +925,7 @@ const make = Effect.gen(function* () {
         )
       : Effect.succeed(project.defaultModelSelection);
   const secretRequests = yield* SecretRequests.SecretRequests;
+  const vault = yield* Vault.Vault;
 
   const requireCapability = (scope: McpInvocationScope) =>
     scope.capabilities.has("orchestration")
@@ -1895,6 +1897,36 @@ const make = Effect.gen(function* () {
             "The user saved the secret, but it could not be read. Ask again with a new clientRequestId.",
           );
         }
+        if (input.saveToVault) {
+          // The private answer lands as a vault item instead of a one-use
+          // ref: consume the ref server-side and store the value encrypted.
+          const value = yield* secretRequests
+            .consume({ ref: secretRef.value, projectId: parent.thread.projectId })
+            .pipe(
+              Effect.mapError((error) =>
+                failure(
+                  "orchestration_error",
+                  `Could not store the secret in the vault: ${error.message}`,
+                ),
+              ),
+            );
+          const { item } = yield* vault
+            .saveSecretValue({
+              name: input.saveToVault.name,
+              type: input.saveToVault.type,
+              domains: input.saveToVault.domains ?? [],
+              value,
+            })
+            .pipe(
+              Effect.mapError((error) =>
+                failure(
+                  "orchestration_error",
+                  `Could not store the secret in the vault: ${error.message}`,
+                ),
+              ),
+            );
+          return { status, vaultItemId: item.id, vaultItemName: item.name };
+        }
         return { status, secretRef: secretRef.value };
       }).pipe(Effect.withSpan("OrchestratorMcpService.requestSecret")),
 
@@ -2716,5 +2748,6 @@ export const layer: Layer.Layer<
   | ScheduledTaskService.ScheduledTaskService
   | ProjectService.ProjectService
   | SecretRequests.SecretRequests
+  | Vault.Vault
   | ServerSettings.ServerSettingsService
 > = Layer.effect(OrchestratorMcpService, make);

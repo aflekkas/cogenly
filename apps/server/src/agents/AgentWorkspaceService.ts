@@ -46,6 +46,25 @@ const decodeHistory = Schema.decodeUnknownEffect(Schema.fromJsonString(Commitmen
 const decodeJsonRecord = Schema.decodeUnknownEffect(
   Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)),
 );
+const decodeVaultPolicy = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(
+    // Local shape mirrors contracts VaultPolicy; kept inline to avoid a cycle.
+    Schema.Struct({
+      mode: Schema.Literals(["ask", "allow"]),
+      allowedAgentIds: Schema.Array(Schema.String),
+      allowedDomains: Schema.Array(Schema.String),
+    }),
+  ),
+);
+const encodeVaultPolicy = Schema.encodeEffect(
+  Schema.fromJsonString(
+    Schema.Struct({
+      mode: Schema.Literals(["ask", "allow"]),
+      allowedAgentIds: Schema.Array(Schema.String),
+      allowedDomains: Schema.Array(Schema.String),
+    }),
+  ),
+);
 const decodeActivityRun = Schema.decodeUnknownEffect(AgentActivityRun);
 const decodeRunAction = Schema.decodeUnknownEffect(AgentRunAction);
 
@@ -498,6 +517,29 @@ const make = Effect.gen(function* () {
               case "change_permissions":
                 yield* agents.upsert({ ...agent, ...action.payload });
                 break;
+              case "vault_use": {
+                // Approving a vault use grants this agent that item (on the
+                // approved domain, when one was involved) so a retry succeeds.
+                const rows = yield* sql<{
+                  policy_json: string;
+                }>`SELECT policy_json FROM vault_items WHERE id = ${action.payload.vaultItemId} AND deleted_at IS NULL`;
+                if (rows[0]) {
+                  const decoded = yield* decodeVaultPolicy(rows[0].policy_json);
+                  const policy = {
+                    mode: "allow" as const,
+                    allowedAgentIds: decoded.allowedAgentIds.includes(agent.id)
+                      ? [...decoded.allowedAgentIds]
+                      : [...decoded.allowedAgentIds, agent.id],
+                    allowedDomains:
+                      action.payload.domain &&
+                      !decoded.allowedDomains.includes(action.payload.domain)
+                        ? [...decoded.allowedDomains, action.payload.domain]
+                        : [...decoded.allowedDomains],
+                  };
+                  yield* sql`UPDATE vault_items SET policy_json = ${yield* encodeVaultPolicy(policy)}, updated_at = ${yield* now} WHERE id = ${action.payload.vaultItemId}`;
+                }
+                break;
+              }
             }
             yield* sql.withTransaction(
               Effect.gen(function* () {

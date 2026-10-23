@@ -43,6 +43,7 @@ import * as ProjectSetupScriptRunner from "../../project/ProjectSetupScriptRunne
 import * as ProviderRegistry from "../../provider/ProviderRegistry.ts";
 import * as ScheduledTaskService from "../../scheduledTasks/ScheduledTaskService.ts";
 import * as SecretRequests from "../../secrets/SecretRequests.ts";
+import * as Vault from "../../vault/Vault.ts";
 import * as ServerSettings from "../../serverSettings.ts";
 import * as VcsStatusBroadcaster from "../../vcs/VcsStatusBroadcaster.ts";
 import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
@@ -181,6 +182,11 @@ const layerStubServices = Layer.mergeAll(
   Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({ list: () => Effect.succeed([]) }),
   Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
   Layer.mock(SecretRequests.SecretRequests)({}),
+  Layer.mock(Vault.Vault)({
+    list: () => Effect.succeed({ items: [] }),
+    scrubText: (text) => Effect.succeed(text),
+    scrubValue: (value) => Effect.succeed(value),
+  }),
   Layer.mock(ProjectService.ProjectService)({
     getById: () => Effect.succeed(Option.some(project)),
     snapshot: Effect.succeed({ projects: [project], updatedAt: project.updatedAt }),
@@ -651,6 +657,13 @@ const smokeCases = [
       parentThreadId: "thread-scratch",
       providers: [],
     },
+  },
+  {
+    toolkit: "vault",
+    names: ["vault_list", "vault_save", "vault_fill", "vault_delete"],
+    tool: "vault_list",
+    args: {},
+    expected: { items: [] },
   },
 ];
 
