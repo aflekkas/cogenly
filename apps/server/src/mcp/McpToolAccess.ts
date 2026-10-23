@@ -314,20 +314,33 @@ export const startsThreads = <P, A, E, R>(
 const fullAccessRequired =
   "Changing projects or environment settings needs a live full-access/default calling thread or a full-access client.";
 
+type EnvironmentHandler<P, A, E, R> = (
+  params: P,
+  check: Effect.Effect<Caller, OrchestratorMcpFailure, CheckServices>,
+) => Effect.Effect<A, E, R>;
+
+const environmentCheck = orchestratingCaller.pipe(
+  Effect.tap((caller) => assertFullAccess(caller, fullAccessRequired)),
+);
+
 /**
  * Changes projects or environment settings, which needs a full-access/default
  * caller. `check` re-checks the caller wherever the handler waits before
  * writing, such as for a lock, since the caller's modes can change meanwhile.
+ * Conversations may call these, so each one must be safe for a chat to run on
+ * a user's request, such as connecting an integration.
  */
-export const writesEnvironment = <P, A, E, R>(
-  handle: (
-    params: P,
-    check: Effect.Effect<Caller, OrchestratorMcpFailure, CheckServices>,
-  ) => Effect.Effect<A, E, R>,
-) => {
-  const check = orchestratingCaller.pipe(
-    Effect.tap((caller) => assertFullAccess(caller, fullAccessRequired)),
+export const writesEnvironment = <P, A, E, R>(handle: EnvironmentHandler<P, A, E, R>) =>
+  declare((params: P) =>
+    environmentCheck.pipe(Effect.flatMap(() => handle(params, environmentCheck))),
   );
+
+/**
+ * Like `writesEnvironment`, but refuses chat and builder callers: creating,
+ * changing or deleting projects and environments is work, not conversation.
+ */
+export const writesEnvironmentAsWork = <P, A, E, R>(handle: EnvironmentHandler<P, A, E, R>) => {
+  const check = environmentCheck.pipe(Effect.tap((caller) => assertWorkCaller(caller.caller)));
   return declare((params: P) => check.pipe(Effect.flatMap(() => handle(params, check))));
 };
 

@@ -78,15 +78,15 @@ export const layer = McpToolAccess.toLayer(EnvironmentToolkit, {
     }),
   ),
   // Adds a machine the user's own SSH config already reaches, to the user's own desktop app,
-  // which shows it happening. Full-access callers only, like other environment changes.
-  environment_add: McpToolAccess.writesEnvironment((input) =>
+  // which shows it happening. Full-access work callers only, like project changes.
+  environment_add: McpToolAccess.writesEnvironmentAsWork((input) =>
     DesktopAppControl.DesktopAppControl.pipe(
       Effect.flatMap((control) => control.addEnvironment(input)),
       Effect.map(({ environmentId, label }) => ({ environmentId, label })),
       Effect.mapError(addEnvironmentFailure),
     ),
   ),
-  environment_preferences_update: McpToolAccess.writesEnvironment((patch, check) =>
+  environment_preferences_update: McpToolAccess.writesEnvironmentAsWork((patch, check) =>
     Effect.gen(function* () {
       const scope = yield* McpInvocationContext.McpInvocationContext;
       const executor = yield* ThreadCommandExecutor.ThreadCommandExecutor;
