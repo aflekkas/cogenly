@@ -17,6 +17,7 @@ import {
   buildIntegrationsContextLine,
   buildProjectManifest,
 } from "@t3tools/provider-core/server/runtimeInstructions";
+import { availableToConnect } from "../integrations/IntegrationCatalog.ts";
 import * as Integrations from "../integrations/Integrations.ts";
 import * as ProjectFiles from "../projectLabels/ProjectFiles.ts";
 import * as ProjectStore from "./ProjectStore.ts";
@@ -124,19 +125,21 @@ export const layerFromProjectStore: Layer.Layer<
     const integrationsService = yield* Effect.serviceOption(Integrations.Integrations);
     // The integrations line is best-effort turn context too: any failure
     // resolves to no line rather than failing the turn.
+    const noIntegrations = { integrations: [], available: [] };
     const integrationsFor = (labelId: ProjectLabelId | null) =>
       Option.isNone(integrationsService)
-        ? Effect.succeed([])
+        ? Effect.succeed(noIntegrations)
         : integrationsService.value.contextIntegrations(labelId).pipe(
-            Effect.map((found) =>
-              found.map((integration) => ({
+            Effect.map((found) => ({
+              integrations: found.map((integration) => ({
                 name: integration.name,
                 displayName: integration.displayName,
                 hint: integration.hint,
                 accountLabel: integration.accountLabel,
               })),
-            ),
-            Effect.catch(() => Effect.succeed([])),
+              available: availableToConnect(found),
+            })),
+            Effect.catch(() => Effect.succeed(noIntegrations)),
           );
     // The project context is best-effort turn context from the derived index:
     // any failure resolves to no folder rather than failing the turn.
@@ -153,7 +156,7 @@ export const layerFromProjectStore: Layer.Layer<
             const folder = yield* files.value.folderForThread(thread.id);
             if (folder === null) return undefined;
             const { entries, total } = yield* files.value.manifestEntries(folder.labelId);
-            const integrations = yield* integrationsFor(folder.labelId);
+            const { integrations, available } = yield* integrationsFor(folder.labelId);
             return {
               dir: folder.dir,
               labelId: folder.labelId,
@@ -165,6 +168,7 @@ export const layerFromProjectStore: Layer.Layer<
                 instructions: folder.instructions,
                 projectChat: folder.projectChatThreadId === thread.id,
                 integrations,
+                availableIntegrations: available,
               }),
             };
           }).pipe(
@@ -212,8 +216,11 @@ export const layerFromProjectStore: Layer.Layer<
               )));
         // Unfiled threads still get the integrations line on its own, so
         // every provider turn names what is connected.
-        const standaloneLine =
-          project === undefined ? buildIntegrationsContextLine(yield* integrationsFor(null)) : "";
+        const standalone = project === undefined ? yield* integrationsFor(null) : noIntegrations;
+        const standaloneLine = buildIntegrationsContextLine(
+          standalone.integrations,
+          standalone.available,
+        );
         return ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
           runtimeMode: "full-access",
           interactionMode: input.thread.interactionMode,

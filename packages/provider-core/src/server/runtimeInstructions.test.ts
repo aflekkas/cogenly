@@ -151,6 +151,22 @@ describe("integrations context line", () => {
     );
   });
 
+  it("names what is still available to connect on the same line", () => {
+    expect(
+      buildIntegrationsContextLine([], ["google-workspace (Gmail, Calendar, Drive)", "slack"]),
+    ).toBe(
+      "Integrations available to connect with integration_add catalogId: google-workspace (Gmail, Calendar, Drive), slack.",
+    );
+    const line = buildIntegrationsContextLine(
+      [{ name: "linear", displayName: "Linear" }],
+      ["notion"],
+    );
+    expect(line).toBe(
+      "Connected integrations: linear (Linear). Use integration_tools / integration_call. Also available to connect with integration_add catalogId: notion.",
+    );
+    expect(line).not.toContain("\n");
+  });
+
   it("adds exactly one line to the project manifest", () => {
     const base = { name: "P", directory: "/projects/P", resources: [], total: 0 };
     const withIntegrations = buildProjectManifest({

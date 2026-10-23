@@ -6,7 +6,7 @@ import {
   type IntegrationCatalogConnectInput,
 } from "@t3tools/contracts";
 
-import { resolveCatalogConnect } from "./IntegrationCatalog.ts";
+import { availableToConnect, resolveCatalogConnect } from "./IntegrationCatalog.ts";
 
 const resolve = (
   request: IntegrationCatalogConnectInput,
@@ -129,6 +129,25 @@ describe("resolveCatalogConnect", () => {
       _tag: "needs",
       message: expect.stringContaining("Figma isn't available yet"),
     });
+  });
+});
+
+describe("availableToConnect", () => {
+  it("names connectable entries without an integration, never unavailable ones", () => {
+    const available = availableToConnect([
+      { transport: "http", url: "https://mcp.linear.app/mcp" },
+      { transport: "http", url: "https://example.com/mcp" },
+    ]);
+    expect(available).toEqual([
+      "google-workspace (Gmail, Calendar, Drive)",
+      "notion",
+      "github",
+      "atlassian",
+      "intercom",
+      "wispr-flow",
+      "slack",
+      "fathom",
+    ]);
   });
 });
 

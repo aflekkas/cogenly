@@ -1,6 +1,9 @@
 import {
+  INTEGRATION_CATALOG,
   IntegrationName,
   integrationCatalogEntry,
+  integrationCatalogEntryFor,
+  type Integration,
   type IntegrationAddInput,
   type IntegrationAddToolInput,
   type IntegrationCatalogAuthKind,
@@ -75,6 +78,21 @@ const inputsHelp = (
   }
   const host = entry.tokenHost ?? new URL(entry.regions[0].url).hostname;
   return `${entry.name} needs an OAuth app the user creates with ${entry.name}. Ask for its client ID and pass it as clientId; for its client secret: ${storeHint(`${entry.id}-client-secret`, host, "clientSecret")} ${docs}`;
+};
+
+/**
+ * Catalog ids an agent could still connect, as the per-turn integrations line
+ * names them: every connectable entry without an integration yet.
+ */
+export const availableToConnect = (
+  connected: ReadonlyArray<Pick<Integration, "transport" | "url" | "local">>,
+): Array<string> => {
+  const used = new Set(connected.map((integration) => integrationCatalogEntryFor(integration)?.id));
+  return INTEGRATION_CATALOG.filter(
+    (entry) => entry.kind !== "unavailable" && !used.has(entry.id),
+  ).map((entry) =>
+    entry.kind === "local-preset" ? `${entry.id} (Gmail, Calendar, Drive)` : entry.id,
+  );
 };
 
 /**

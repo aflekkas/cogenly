@@ -49,15 +49,21 @@ export interface IntegrationContextEntry {
 }
 
 /**
- * The one line every provider turn gets about connected integrations, e.g.
+ * The one line every provider turn gets about integrations, e.g.
  * "Connected integrations: gmail (Gmail, aflekkas@…), linear-spawn (Linear ·
- * Spawn Partners). Use integration_tools / integration_call." Empty when none
- * are connected.
+ * Spawn Partners). Use integration_tools / integration_call. Also available
+ * to connect with integration_add catalogId: notion, slack." `available` are
+ * catalog ids not connected yet. Empty when there is neither.
  */
 export function buildIntegrationsContextLine(
   integrations: ReadonlyArray<IntegrationContextEntry>,
+  available: ReadonlyArray<string> = [],
 ): string {
-  if (integrations.length === 0) return "";
+  const availableText =
+    available.length === 0
+      ? ""
+      : `${integrations.length === 0 ? "Integrations available" : "Also available"} to connect with integration_add catalogId: ${available.map(toSingleLine).join(", ")}.`;
+  if (integrations.length === 0) return availableText;
   const names = integrations.map((integration) => {
     const hint = integration.hint?.trim() ?? "";
     const account = integration.accountLabel?.trim() ?? "";
@@ -73,7 +79,8 @@ export function buildIntegrationsContextLine(
       ? `${toSingleLine(integration.name)} (${toSingleLine(label)})`
       : toSingleLine(integration.name);
   });
-  return `Connected integrations: ${names.join(", ")}. Use integration_tools / integration_call.`;
+  const connected = `Connected integrations: ${names.join(", ")}. Use integration_tools / integration_call.`;
+  return availableText === "" ? connected : `${connected} ${availableText}`;
 }
 
 /**
@@ -92,6 +99,8 @@ export function buildProjectManifest(input: {
   readonly projectChat?: boolean | undefined;
   /** Connected integrations visible from this project; adds one tiny line. */
   readonly integrations?: ReadonlyArray<IntegrationContextEntry> | undefined;
+  /** Catalog ids not connected yet, named on the same line. */
+  readonly availableIntegrations?: ReadonlyArray<string> | undefined;
 }): string {
   const shown = input.resources.slice(0, PROJECT_MANIFEST_MAX_RESOURCES);
   const files =
@@ -101,7 +110,10 @@ export function buildProjectManifest(input: {
   const more = input.total - shown.length;
   const manifest = `<project_manifest>The thread's project folder is "${toSingleLine(input.name)}" at ${toSingleLine(input.directory)}. Project files:\n${files}${more > 0 ? `\n+${more} more` : ""}\nUse project_recall to search these files and project_file_read to read one. To add a repository to a project, use project_label_clone_repository (it clones into the project folder and registers it); do not git clone by hand.</project_manifest>`;
   const instructions = input.instructions?.trim() ?? "";
-  const integrationsLine = buildIntegrationsContextLine(input.integrations ?? []);
+  const integrationsLine = buildIntegrationsContextLine(
+    input.integrations ?? [],
+    input.availableIntegrations,
+  );
   return [
     manifest,
     ...(integrationsLine.length === 0 ? [] : [integrationsLine]),
