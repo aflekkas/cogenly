@@ -44,8 +44,10 @@ leave a secret field blank to keep it, or type a new value to replace it.
 The first time an agent wants to use an item, you get an approval
 request naming the item and field. Approving lets that agent use that item
 again (on the approved site, when one was involved). For chats and Work,
-approval applies to the requesting thread. CLI process exposure
-always needs its own approval.
+the request is a card above that thread's composer, the thread shows
+**Needs approval**, and allowing it applies to that thread only; deny it and
+the agent is told you declined. A persistent agent's requests wait in its open
+items. CLI process exposure always needs its own approval.
 
 ## Usage log
 
