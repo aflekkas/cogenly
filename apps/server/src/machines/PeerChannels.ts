@@ -30,7 +30,10 @@ export type PeerChannelHandler<C extends PeerChannel> = (
 
 interface Registered {
   readonly scope: AuthPeerScope;
-  readonly handle: (payload: Schema.Json, caller: PeerCaller) => Effect.Effect<Schema.Json, PeerCallError>;
+  readonly handle: (
+    payload: Schema.Json,
+    caller: PeerCaller,
+  ) => Effect.Effect<Schema.Json, PeerCallError>;
 }
 
 type JsonCodec = Schema.Codec<unknown, unknown, never, never>;
@@ -55,17 +58,6 @@ export const decodePeerResult = <C extends PeerChannel>(
     Effect.mapError(() => new PeerCallError({ channel: channel.name, reason: "invalid-payload" })),
   );
 
-/** The channel's own error inside a failed call, when it carries one. */
-export const decodePeerChannelError = <C extends PeerChannel>(
-  channel: C,
-  error: PeerCallError,
-): Effect.Effect<C["error"]["Type"] | PeerCallError> =>
-  error.reason !== "handler-failed" || error.error === undefined
-    ? Effect.succeed(error)
-    : Schema.decodeUnknownEffect(json(channel.error))(error.error).pipe(
-        Effect.orElseSucceed(() => error),
-      );
-
 export class PeerChannels extends Context.Service<
   PeerChannels,
   {
@@ -87,7 +79,11 @@ const make = Effect.sync(() => {
 
   const register: PeerChannels["Service"]["register"] = (channel, handler) => {
     const fail = (reason: PeerCallError["reason"], error?: Schema.Json) =>
-      new PeerCallError({ channel: channel.name, reason, ...(error === undefined ? {} : { error }) });
+      new PeerCallError({
+        channel: channel.name,
+        reason,
+        ...(error === undefined ? {} : { error }),
+      });
     const handle: Registered["handle"] = (payload, caller) =>
       Schema.decodeUnknownEffect(json(channel.payload))(payload).pipe(
         Effect.mapError(() => fail("invalid-payload")),

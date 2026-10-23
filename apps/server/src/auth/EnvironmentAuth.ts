@@ -106,7 +106,7 @@ export const mcpClientScopes = (
  * WebSocket and MCP path rejects the subject, so a stolen peer credential can
  * reach nothing but the peer protocol. See docs/internals/machines.md.
  */
-export const PEER_SUBJECT = "peer";
+const PEER_SUBJECT = "peer";
 // Proof-bound, so the token alone is useless; unpairing revokes it.
 const PEER_SESSION_TTL = Duration.days(365);
 const PEER_GRANT_TTL = Duration.minutes(10);
