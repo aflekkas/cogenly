@@ -11,6 +11,7 @@ describe("account RPC permissions", () => {
       WS_METHODS.accountsUpdate,
       WS_METHODS.accountsDisconnect,
       WS_METHODS.accountsUse,
+      WS_METHODS.accountsConnect,
       WS_METHODS.accountsRemoveAccess,
     ])
       expect(CLIENT_GUARDED_RPC_SCOPES[method]).toBe("orchestration:operate");

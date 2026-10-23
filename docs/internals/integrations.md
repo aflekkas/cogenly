@@ -21,7 +21,11 @@ not in list output (which returns templates, never values), not in errors
 (upstream messages are bounded and credential-free by construction). The
 resolver sits behind the small `IntegrationCredentials` interface, backed by
 the [vault](./vault.md): a reference is a vault item name and field, and a
-missing item or field counts as no credential.
+missing item or field counts as no credential. Accounts may associate metadata
+with those vault items; legacy integration references keep their names. CLI
+process exposure is a separate permission and resolves through AccountAccess
+with authenticated thread/project/agent/provider context. The integration
+resolver's unrestricted server caller must not be reused for process delivery.
 
 Integration definitions live in the `integrations` table (migration 083) as
 payload JSON with a tombstone, shaped to become shared documents under sync:

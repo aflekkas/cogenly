@@ -49,48 +49,62 @@ const make = Effect.gen(function* () {
     method: "environment" | "verification",
     selectedId?: CredentialId,
   ) {
-    const authorized = yield* access.forLaunch(input, terminalId);
+    const authorized = yield* access.forLaunch(input, terminalId, method, selectedId);
     const env: Record<string, string> = {};
     for (const item of authorized.credentials.filter(
       (item) => selectedId === undefined || item.credential.id === selectedId,
     )) {
-      const adapter = cliAdapter(item.account.serviceId);
-      if (!adapter || env[adapter.tokenVariable] !== undefined)
-        return yield* new AccountError({ reason: "invalid_input" });
-      const result = yield* vault.use({
-        itemId: item.credential.vaultItemId,
-        scopeProjectId: authorized.caller.scopeProjectId,
-        caller: { kind: "server" },
-        field: "value",
-        expectedRevision: item.revision,
-        threadId: input.threadId,
-        action: "process_resolve",
-      });
-      if (result.status !== "allowed" || result.value.length < 6)
-        return yield* new AccountError({ reason: "unavailable" });
-      yield* vault.registerProcessSecrets([result.value]);
-      env[adapter.tokenVariable] = result.value;
-      // Cloudflare's optional account selector stays encrypted with the token.
-      if (item.account.serviceId === "cloudflare" && result.item.fields.includes("username")) {
-        const account = yield* vault.use({
+      yield* Effect.gen(function* () {
+        const adapter = cliAdapter(item.account.serviceId);
+        if (!adapter || env[adapter.tokenVariable] !== undefined)
+          return yield* new AccountError({ reason: "invalid_input" });
+        const result = yield* vault.use({
           itemId: item.credential.vaultItemId,
+          scopeProjectId: authorized.caller.scopeProjectId,
           caller: { kind: "server" },
-          field: "username",
+          field: "value",
           expectedRevision: item.revision,
           threadId: input.threadId,
           action: "process_resolve",
         });
-        if (account.status !== "allowed") return yield* new AccountError({ reason: "unavailable" });
-        yield* vault.registerProcessSecrets([account.value]);
-        env.CLOUDFLARE_ACCOUNT_ID = account.value;
-      }
-      yield* access.audit({
-        caller: authorized.caller,
-        credential: item,
-        terminalId,
-        outcome: "prepared",
-        method,
-      });
+        if (result.status !== "allowed" || result.value.length < 6)
+          return yield* new AccountError({ reason: "unavailable" });
+        yield* vault.registerProcessSecrets([result.value]);
+        env[adapter.tokenVariable] = result.value;
+        // Cloudflare's optional account selector stays encrypted with the token.
+        if (item.account.serviceId === "cloudflare" && result.item.fields.includes("username")) {
+          const account = yield* vault.use({
+            itemId: item.credential.vaultItemId,
+            caller: { kind: "server" },
+            field: "username",
+            expectedRevision: item.revision,
+            threadId: input.threadId,
+            action: "process_resolve",
+          });
+          if (account.status !== "allowed")
+            return yield* new AccountError({ reason: "unavailable" });
+          yield* vault.registerProcessSecrets([account.value]);
+          env.CLOUDFLARE_ACCOUNT_ID = account.value;
+        }
+        yield* access.audit({
+          caller: authorized.caller,
+          credential: item,
+          terminalId,
+          outcome: "prepared",
+          method,
+        });
+      }).pipe(
+        Effect.mapError(wrap),
+        Effect.tapError((error) =>
+          access.audit({
+            caller: authorized.caller,
+            credential: item,
+            terminalId,
+            method,
+            outcome: error.reason,
+          }),
+        ),
+      );
     }
     return { ...authorized, env };
   }, Effect.mapError(wrap));
@@ -119,7 +133,12 @@ const make = Effect.gen(function* () {
     verify: Effect.fnUntraced(function* (input, accountId, credentialId) {
       return yield* Effect.scoped(
         Effect.gen(function* () {
-          const authorized = yield* access.forLaunch(input);
+          const authorized = yield* access.forLaunch(
+            input,
+            `verify:${credentialId}`,
+            "verification",
+            credentialId,
+          );
           const selected = authorized.credentials.find(
             (c) => c.account.id === accountId && c.credential.id === credentialId,
           );

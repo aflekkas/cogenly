@@ -47,7 +47,9 @@ export const AccountMachineStatus = Schema.Struct({
     "unknown",
   ]),
   checkedAt: IsoDateTime,
-  reason: Schema.optional(Schema.Literals(["authentication_only", "verification_failed"])),
+  reason: Schema.optional(
+    Schema.Literals(["authentication_only", "verification_failed", "credential_changed"]),
+  ),
 });
 export type AccountMachineStatus = typeof AccountMachineStatus.Type;
 
@@ -80,13 +82,21 @@ export const AccountUpdateInput = Schema.Struct({
   ...AccountScope,
   id: AccountId,
   displayLabel: Schema.optional(Account.fields.displayLabel),
+  serviceId: Schema.optional(Account.fields.serviceId),
   credentials: Schema.optional(Schema.Array(Credential)),
 });
 export type AccountUpdateInput = typeof AccountUpdateInput.Type;
 export const AccountResult = Schema.Struct({ account: Account });
+export const AccountServiceSetup = Schema.Struct({
+  serviceId: Schema.Literals(["cloudflare", "github"]),
+  method: Schema.Literal("api_token"),
+  setupUrl: Schema.String,
+  instructions: Schema.String,
+});
 export const AccountsListResult = Schema.Struct({
   accounts: Schema.Array(Account),
   statuses: Schema.Array(AccountMachineStatus),
+  services: Schema.Array(AccountServiceSetup),
 });
 export const AccountDisconnectResult = Schema.Struct({ disconnected: Schema.Boolean });
 export class AccountError extends Schema.TaggedError<AccountError>()("AccountError", {
@@ -99,6 +109,7 @@ export class AccountError extends Schema.TaggedError<AccountError>()("AccountErr
     "expired",
     "conflict",
     "unavailable",
+    "project_required",
   ]),
   cause: Schema.optional(Schema.Defect()),
 }) {
@@ -113,6 +124,7 @@ export class AccountError extends Schema.TaggedError<AccountError>()("AccountErr
       expired: "This credential has expired. Replace it before running a command.",
       conflict: "This credential is already associated with an account or CLI binding.",
       unavailable: "This credential cannot be used on this machine.",
+      project_required: "Choose a project before connecting this account.",
     }[this.reason];
   }
 }
@@ -143,3 +155,49 @@ export const AccountThreadUseInput = Schema.Struct({
   ...AccountUseInput.fields,
   threadId: ThreadId,
 });
+
+export type AccountServiceSetup = typeof AccountServiceSetup.Type;
+export const AccountConnection = Schema.Struct({
+  connectionId: TrimmedNonEmptyString,
+  serviceId: Schema.Literals(["cloudflare", "github"]),
+  displayLabel: Account.fields.displayLabel,
+  scopeProjectId: Schema.NullOr(ProjectLabelId),
+  kind: Schema.Literal("token"),
+  intendedUse: Schema.Literal("cli"),
+  requestedGrant: Schema.Literal("ask"),
+  accountId: Schema.NullOr(AccountId),
+  credentialId: Schema.NullOr(CredentialId),
+});
+export type AccountConnection = typeof AccountConnection.Type;
+export const AccountConnectInput = Schema.Struct({
+  connectionId: Schema.optional(TrimmedNonEmptyString),
+  serviceId: Schema.optional(AccountConnection.fields.serviceId),
+  displayLabel: Schema.optional(Account.fields.displayLabel),
+}).check(
+  Schema.makeFilter((input) =>
+    input.connectionId !== undefined
+      ? input.serviceId === undefined && input.displayLabel === undefined
+      : input.serviceId !== undefined && input.displayLabel !== undefined,
+  ),
+);
+export type AccountConnectInput = typeof AccountConnectInput.Type;
+export const AccountConnectResult = Schema.Struct({
+  connection: AccountConnection,
+  setup: AccountServiceSetup,
+  access: Schema.optional(AccountUseResult),
+  verification: Schema.optional(AccountMachineStatus),
+});
+export const AccountThreadConnectInput = Schema.Struct({
+  threadId: ThreadId,
+  connection: AccountConnectInput,
+});
+
+export const AccountDisconnectTarget = Schema.Struct({
+  accountId: Schema.optional(AccountId),
+  connectionId: Schema.optional(TrimmedNonEmptyString),
+}).check(
+  Schema.makeFilter(
+    (input) => (input.accountId !== undefined) !== (input.connectionId !== undefined),
+  ),
+);
+export type AccountDisconnectTarget = typeof AccountDisconnectTarget.Type;

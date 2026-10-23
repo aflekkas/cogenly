@@ -26,17 +26,6 @@ export const AgentStartWorkInput = Schema.Struct({
 });
 export type AgentStartWorkInput = typeof AgentStartWorkInput.Type;
 export const AgentApprovalAction = Schema.Union([
-  Schema.Struct({
-    actionKind: Schema.Literal("account_process"),
-    payload: Schema.Struct({
-      accountId: TrimmedNonEmptyString,
-      credentialId: TrimmedNonEmptyString,
-      credentialRevision: Schema.Int,
-      threadId: ThreadId,
-      projectKey: TrimmedNonEmptyString,
-      message: Schema.Literal("The agent and the commands it runs can read this token."),
-    }),
-  }),
   Schema.Struct({ actionKind: Schema.Literal("start_work"), payload: AgentStartWorkInput }),
   Schema.Struct({
     actionKind: Schema.Literal("vault_use"),
@@ -46,6 +35,17 @@ export const AgentApprovalAction = Schema.Union([
       field: VaultField,
       domain: Schema.NullOr(Schema.String),
       threadId: Schema.NullOr(ThreadId),
+      /** Distinct permission from browser fill; never grants the legacy vault policy. */
+      processExposure: Schema.optional(
+        Schema.Struct({
+          accountId: TrimmedNonEmptyString,
+          credentialId: TrimmedNonEmptyString,
+          credentialRevision: Schema.Int,
+          threadId: ThreadId,
+          projectKey: TrimmedNonEmptyString,
+          message: Schema.Literal("The agent and the commands it runs can read this token."),
+        }),
+      ),
     }),
   }),
   Schema.Struct({
@@ -72,7 +72,6 @@ export const AgentApproval = Schema.Struct({
     "schedule_trigger",
     "change_permissions",
     "vault_use",
-    "account_process",
     "integration_add",
   ]),
   payload: Schema.Record(Schema.String, Schema.Unknown),

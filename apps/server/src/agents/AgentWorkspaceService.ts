@@ -288,7 +288,7 @@ const make = Effect.gen(function* () {
     }).pipe(Effect.mapError(wrap));
   const requestApproval = (agentId: AgentId, action: AgentApprovalAction, actor?: AgentActor) =>
     Effect.gen(function* () {
-      if (action.actionKind === "account_process")
+      if (action.actionKind === "vault_use" && action.payload.processExposure !== undefined)
         return yield* fail("Process exposure approvals must be requested through Accounts.");
       const agent = actor ? (yield* current(actor)).agent : yield* store.get(agentId);
       if (agent.id !== agentId)
@@ -505,7 +505,10 @@ const make = Effect.gen(function* () {
             if (approval.status === "approved") return { approval };
             if (approval.status !== "pending")
               return yield* fail("This approval is no longer pending.");
-            if (approval.action.actionKind === "account_process") {
+            if (
+              approval.action.actionKind === "vault_use" &&
+              approval.action.payload.processExposure !== undefined
+            ) {
               if (accountAccess._tag === "None") return yield* fail("Accounts are unavailable.");
               yield* sql.withTransaction(
                 Effect.gen(function* () {

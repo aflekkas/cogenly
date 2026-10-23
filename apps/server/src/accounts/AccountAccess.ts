@@ -1,3 +1,5 @@
+import { cliAdapter } from "./CliAdapters.ts";
+import * as Option from "effect/Option";
 import {
   AccountError,
   AccountId,
@@ -62,6 +64,8 @@ export class AccountAccess extends Context.Service<
     readonly forLaunch: (
       caller: AccountCallerInput,
       terminalId?: string,
+      method?: "environment" | "verification",
+      credentialId?: CredentialId,
     ) => Effect.Effect<
       { caller: AccountCaller; credentials: ReadonlyArray<AuthorizedCredential> },
       AccountError
@@ -130,6 +134,7 @@ const make = Effect.gen(function* () {
       id: accountId,
       scopeProjectId: context.scopeProjectId,
     });
+    if (!cliAdapter(account.serviceId)) return yield* new AccountError({ reason: "invalid_input" });
     const credential = account.credentials.find((c) => c.id === credentialId);
     if (
       !credential?.vaultItemId ||
@@ -139,8 +144,12 @@ const make = Effect.gen(function* () {
       return yield* new AccountError({ reason: "not_found" });
     if (credential.policy.processExposure === "deny")
       return yield* new AccountError({ reason: "denied" });
-    if (credential.expiresAt && credential.expiresAt <= (yield* now))
-      return yield* new AccountError({ reason: "expired" });
+    if (credential.expiresAt) {
+      const expires = DateTime.make(credential.expiresAt);
+      if (Option.isNone(expires)) return yield* new AccountError({ reason: "invalid_input" });
+      if (DateTime.isLessThanOrEqualTo(expires.value, yield* DateTime.now))
+        return yield* new AccountError({ reason: "expired" });
+    }
     const rows = yield* sql<{
       credential_revision: number;
     }>`SELECT credential_revision FROM vault_items WHERE id = ${credential.vaultItemId} AND deleted_at IS NULL AND (scope_project_id IS NULL OR scope_project_id = ${context.scopeProjectId})`;
@@ -201,15 +210,22 @@ const make = Effect.gen(function* () {
   });
   const request = Effect.fnUntraced(function* (context: AccountCaller, item: AuthorizedCredential) {
     const id = `approval:account:${yield* crypto.randomUUIDv4()}`;
-    const action: typeof AgentApprovalAction.Type = {
-      actionKind: "account_process",
+    const action: AgentApprovalAction = {
+      actionKind: "vault_use",
       payload: {
-        accountId: item.account.id,
-        credentialId: item.credential.id,
-        credentialRevision: item.revision,
+        vaultItemId: item.credential.vaultItemId,
+        vaultItemName: `CLI token · ${item.account.displayLabel}. The agent and the commands it runs can read this token.`,
+        field: "value",
+        domain: null,
         threadId: context.threadId,
-        projectKey: context.projectKey,
-        message: "The agent and the commands it runs can read this token.",
+        processExposure: {
+          accountId: item.account.id,
+          credentialId: item.credential.id,
+          credentialRevision: item.revision,
+          threadId: context.threadId,
+          projectKey: context.projectKey,
+          message: "The agent and the commands it runs can read this token.",
+        },
       },
     };
     const actionJson = yield* Schema.encodeEffect(Schema.fromJsonString(AgentApprovalAction))(
@@ -241,7 +257,7 @@ const make = Effect.gen(function* () {
       if (!input.attached) {
         yield* sql`DELETE FROM account_thread_bindings WHERE thread_id = ${context.threadId} AND credential_id = ${input.credentialId} AND account_id = ${input.accountId}`;
         yield* sql`DELETE FROM account_process_grants WHERE credential_id = ${input.credentialId} AND subject_type = 'thread' AND subject_id = ${context.threadId}`;
-        yield* sql`UPDATE agent_approvals SET status = 'rejected', decided_at = ${yield* now} WHERE status = 'pending' AND json_extract(action_json, '$.actionKind') = 'account_process' AND json_extract(action_json, '$.payload.threadId') = ${context.threadId} AND json_extract(action_json, '$.payload.credentialId') = ${input.credentialId}`;
+        yield* sql`UPDATE agent_approvals SET status = 'rejected', decided_at = ${yield* now} WHERE status = 'pending' AND json_extract(action_json, '$.payload.processExposure') IS NOT NULL AND json_extract(action_json, '$.payload.threadId') = ${context.threadId} AND json_extract(action_json, '$.payload.processExposure.credentialId') = ${input.credentialId}`;
         return { status: "detached" as const };
       }
       const item = yield* load(context, input.accountId, input.credentialId);
@@ -267,13 +283,18 @@ const make = Effect.gen(function* () {
         message: new AccountError({ reason: "approval_required" }).message,
       };
     }, Effect.mapError(wrap)),
-    forLaunch: Effect.fnUntraced(function* (auth, terminalId = "authorization") {
+    forLaunch: Effect.fnUntraced(function* (
+      auth,
+      terminalId = "authorization",
+      method = "environment",
+      credentialId,
+    ) {
       const context = yield* caller(auth);
       const bindings = yield* sql<{
         account_id: string;
         credential_id: string;
         project_key: string;
-      }>`SELECT account_id, credential_id, project_key FROM account_thread_bindings WHERE thread_id = ${context.threadId} ORDER BY credential_id`;
+      }>`SELECT account_id, credential_id, project_key FROM account_thread_bindings WHERE thread_id = ${context.threadId} AND (${credentialId ?? null} IS NULL OR credential_id = ${credentialId ?? null}) ORDER BY credential_id`;
       const credentials: Array<AuthorizedCredential> = [];
       for (const binding of bindings) {
         const resolved = yield* Effect.gen(function* () {
@@ -287,6 +308,12 @@ const make = Effect.gen(function* () {
           if (!(yield* withinParent(context, item)))
             return yield* new AccountError({ reason: "denied" });
           if (!(yield* hasGrant(context, item))) {
+            const decisions = yield* sql<{
+              status: string;
+              decided_by: string | null;
+            }>`SELECT status, decided_by FROM agent_approvals WHERE json_extract(action_json, '$.payload.processExposure.threadId') = ${context.threadId} AND json_extract(action_json, '$.payload.processExposure.credentialId') = ${item.credential.id} AND json_extract(action_json, '$.payload.processExposure.credentialRevision') = ${item.revision} AND json_extract(action_json, '$.payload.processExposure.projectKey') = ${context.projectKey} ORDER BY rowid DESC LIMIT 1`;
+            if (decisions[0]?.status === "rejected" && decisions[0].decided_by === "user")
+              return yield* new AccountError({ reason: "denied" });
             yield* request(context, item);
             return yield* new AccountError({ reason: "approval_required" });
           }
@@ -294,7 +321,7 @@ const make = Effect.gen(function* () {
         }).pipe(Effect.mapError(wrap), Effect.result);
         if (resolved._tag === "Failure") {
           yield* sql`INSERT INTO vault_usage(id, item_id, thread_id, agent_id, action, at, outcome, credential_id, credential_revision, environment_id, project_id, delivery_method, terminal_id, provider_instance_id)
-            SELECT ${`usage:${yield* crypto.randomUUIDv4()}`}, c.vault_item_id, ${context.threadId}, ${context.agentId}, 'credential_delivery', ${yield* now}, ${resolved.failure.reason}, c.id, CAST(v.credential_revision AS TEXT), ${yield* identity.getEnvironmentId}, ${context.projectKey}, 'environment', ${terminalId}, ${context.providerInstanceId} FROM account_credentials c JOIN vault_items v ON v.id = c.vault_item_id WHERE c.id = ${binding.credential_id}`;
+            SELECT ${`usage:${yield* crypto.randomUUIDv4()}`}, c.vault_item_id, ${context.threadId}, ${context.agentId}, 'credential_delivery', ${yield* now}, ${resolved.failure.reason}, c.id, CAST(v.credential_revision AS TEXT), ${yield* identity.getEnvironmentId}, ${context.projectKey}, ${method}, ${terminalId}, ${context.providerInstanceId} FROM account_credentials c JOIN vault_items v ON v.id = c.vault_item_id WHERE c.id = ${binding.credential_id}`;
           return yield* resolved.failure;
         }
         credentials.push(resolved.success);
@@ -312,14 +339,15 @@ const make = Effect.gen(function* () {
         const action = yield* Schema.decodeUnknownEffect(
           Schema.fromJsonString(AgentApprovalAction),
         )(rows[0].action_json);
-        if (action.actionKind !== "account_process")
+        if (action.actionKind !== "vault_use" || !action.payload.processExposure)
           return yield* new AccountError({ reason: "invalid_input" });
         if (
           rows[0].requested_at <
           DateTime.formatIso(DateTime.subtract(yield* DateTime.now, { days: 7 }))
         )
           return yield* new AccountError({ reason: "denied" });
-        const shell = yield* threads.getThreadShell(action.payload.threadId);
+        const exposure = action.payload.processExposure;
+        const shell = yield* threads.getThreadShell(exposure.threadId);
         if (!shell?.providerInstanceId) return yield* new AccountError({ reason: "denied" });
         const context = yield* caller({
           threadId: shell.id,
@@ -327,16 +355,16 @@ const make = Effect.gen(function* () {
         });
         const item = yield* load(
           context,
-          AccountId.make(action.payload.accountId),
-          CredentialId.make(action.payload.credentialId),
+          AccountId.make(exposure.accountId),
+          CredentialId.make(exposure.credentialId),
         );
         const bindings =
           yield* sql`SELECT 1 FROM account_thread_bindings WHERE thread_id = ${context.threadId} AND credential_id = ${item.credential.id} AND project_key = ${context.projectKey}`;
         if (
           !bindings[0] ||
-          context.projectKey !== action.payload.projectKey ||
+          context.projectKey !== exposure.projectKey ||
           context.agentId !== rows[0].agent_id ||
-          item.revision !== action.payload.credentialRevision ||
+          item.revision !== exposure.credentialRevision ||
           !(yield* withinParent(context, item))
         )
           return yield* new AccountError({ reason: "denied" });
@@ -359,7 +387,7 @@ const make = Effect.gen(function* () {
         Effect.gen(function* () {
           yield* sql`DELETE FROM account_process_grants WHERE credential_id = ${input.credentialId}`;
           yield* sql`DELETE FROM account_thread_bindings WHERE credential_id = ${input.credentialId}`;
-          yield* sql`UPDATE agent_approvals SET status = 'rejected', decided_at = ${yield* now} WHERE status = 'pending' AND json_extract(action_json, '$.actionKind') = 'account_process' AND json_extract(action_json, '$.payload.credentialId') = ${input.credentialId}`;
+          yield* sql`UPDATE agent_approvals SET status = 'rejected', decided_at = ${yield* now} WHERE status = 'pending' AND json_extract(action_json, '$.payload.processExposure') IS NOT NULL AND json_extract(action_json, '$.payload.processExposure.credentialId') = ${input.credentialId}`;
         }),
       );
       return {

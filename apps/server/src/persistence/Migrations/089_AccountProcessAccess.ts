@@ -26,4 +26,5 @@ export default Effect.gen(function* () {
     yield* sql.unsafe(`ALTER TABLE vault_usage ADD COLUMN ${column} TEXT`);
   }
   yield* sql`CREATE TABLE account_connections(id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, provider_instance_id TEXT NOT NULL, project_id TEXT NOT NULL, scope_project_id TEXT, service_id TEXT NOT NULL, display_label TEXT NOT NULL, account_id TEXT, credential_id TEXT, created_at TEXT NOT NULL, cancelled_at TEXT)`;
+  yield* sql`CREATE TABLE account_secret_request_targets(request_id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, target_kind TEXT NOT NULL CHECK(target_kind IN ('account','other')), connection_id TEXT)`;
 });

@@ -263,7 +263,7 @@ const make = Effect.gen(function* () {
           ? "merge"
           : /deploy/.test(name)
             ? "deploy"
-            : /delete|remove|forget/.test(name)
+            : /delete|remove|forget|account_disconnect/.test(name)
               ? "delete"
               : /create.*(?:pr|pull_request)/.test(name)
                 ? "create_pr"

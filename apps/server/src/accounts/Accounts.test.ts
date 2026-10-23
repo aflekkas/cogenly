@@ -1,3 +1,4 @@
+import * as Vault from "../vault/Vault.ts";
 import { AccountId, ProjectLabelId, VaultItemId } from "@t3tools/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { NodeCrypto } from "@effect/platform-node";
@@ -10,6 +11,7 @@ import { migrateVaultAccounts } from "../persistence/Migrations/088_Accounts.ts"
 import * as Accounts from "./Accounts.ts";
 
 const layer = Accounts.layer.pipe(
+  Layer.provide(Layer.mock(Vault.Vault)({})),
   Layer.provideMerge(Sqlite.layerMemory),
   Layer.provideMerge(NodeServices.layer),
   Layer.provideMerge(NodeCrypto.layer),
@@ -47,6 +49,7 @@ describe("Accounts", () => {
         id: AccountId.make("account:legacy"),
         scopeProjectId: project,
         displayLabel: "Chosen public label",
+        serviceId: "cloudflare",
       });
       yield* migrateVaultAccounts;
       expect(

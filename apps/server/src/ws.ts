@@ -1,3 +1,4 @@
+import * as AccountConnections from "./accounts/AccountConnections.ts";
 import * as AccountAccess from "./accounts/AccountAccess.ts";
 import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import type * as HttpClient from "effect/http/HttpClient";
@@ -1087,6 +1088,7 @@ const makeWsRpcHandlers = (
     const secretRequests = yield* SecretRequests.SecretRequests;
     const vault = yield* Vault.Vault;
     const accounts = yield* Accounts.Accounts;
+    const accountConnections = yield* AccountConnections.AccountConnections;
     const accountAccess = yield* AccountAccess.AccountAccess;
     const pullRequests = yield* PullRequestService.PullRequestService;
     const reviewGuides = yield* PullRequestReviewGuideService.PullRequestReviewGuideService;
@@ -1739,6 +1741,8 @@ const makeWsRpcHandlers = (
         Effect.annotateCurrentSpan({ "scheduled_task.id": input.id }).pipe(
           Effect.andThen(scheduledTasks.rotateWebhookToken(input)),
         ),
+      [WS_METHODS.accountsConnect]: (input) =>
+        accountConnections.connectForThread(input.threadId, input.connection),
       [WS_METHODS.accountsUse]: (input) =>
         accountAccess.setThreadBindingForThread(input.threadId, input),
       [WS_METHODS.accountsRemoveAccess]: (input) => accountAccess.removeAccess(input),
@@ -2794,6 +2798,7 @@ type WsRequestServices =
   | ScheduledTasks.ScheduledTaskService
   | SecretRequests.SecretRequests
   | AccountAccess.AccountAccess
+  | AccountConnections.AccountConnections
   | Accounts.Accounts
   | Vault.Vault
   | ServerConfig.ServerConfig

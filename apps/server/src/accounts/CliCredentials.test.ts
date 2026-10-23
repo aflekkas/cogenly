@@ -1,3 +1,8 @@
+import * as AccountsMcp from "../mcp/AccountsMcpService.ts";
+import * as Invocation from "../mcp/McpInvocationContext.ts";
+import { SecretRef } from "@t3tools/contracts";
+import * as SecretRequests from "../secrets/SecretRequests.ts";
+import * as Connections from "./AccountConnections.ts";
 import * as PtyAdapter from "@t3tools/shared/PtyAdapter";
 import * as PlatformError from "effect/PlatformError";
 import * as Workspace from "../agents/AgentWorkspaceService.ts";
@@ -88,6 +93,11 @@ const fixture = Effect.gen(function* () {
     NodeCrypto.layer,
     Layer.mock(ServerSecretStore.ServerSecretStore)({
       get: (name) => Effect.succeed(Option.fromNullishOr(secretValues.get(name))),
+      remove: (name) =>
+        Effect.sync(() => {
+          secretValues.delete(name);
+        }),
+      getOrCreateRandom: () => Effect.succeed(new Uint8Array(32).fill(7)),
       create: (name, value) =>
         Effect.sync(() => {
           secretValues.set(name, value);
@@ -135,10 +145,10 @@ const fixture = Effect.gen(function* () {
       },
     }),
   ).pipe(Layer.provide(NodeServices.layer));
-  const accountsLayer = Accounts.layer.pipe(Layer.provideMerge(dependencies));
+  const vaultLayer = Vault.layer.pipe(Layer.provideMerge(dependencies));
+  const accountsLayer = Accounts.layer.pipe(Layer.provideMerge(vaultLayer));
   const accessLayer = Access.layer.pipe(Layer.provideMerge(accountsLayer));
-  const vaultLayer = Vault.layer.pipe(Layer.provideMerge(accessLayer));
-  const layer = Cli.layer.pipe(Layer.provideMerge(vaultLayer));
+  const layer = Cli.layer.pipe(Layer.provideMerge(accessLayer));
   return {
     layer,
     shells,
@@ -158,7 +168,7 @@ const create = (serviceId = "cloudflare", value = token) =>
     const vault = yield* Vault.Vault;
     const accounts = yield* Accounts.Accounts;
     const { item } = yield* vault.create({
-      name: `${serviceId}:${value}`,
+      name: `${serviceId}:synthetic`,
       type: "api_key",
       scopeProjectId: project,
       secretFields: {
@@ -490,6 +500,59 @@ describe("portable CLI process credentials", () => {
       }).pipe(Effect.provide(NodeServices.layer)),
   );
 
+  it.effect("does not turn broadly stored tokens into cross-project process grants", () =>
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      for (const id of ["agent:one", "agent:two", "agent:scheduled"]) f.agentThreads.add(id);
+      f.scopes.set("agent:two", ProjectLabelId.make("project:two"));
+      yield* Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        yield* sql`INSERT INTO agents(agent_id, conversation_thread_id, payload_json, enabled) VALUES (${agent.id}, 'agent', '{}', 1)`;
+        const vault = yield* Vault.Vault;
+        const accounts = yield* Accounts.Accounts;
+        const access = yield* Access.AccountAccess;
+        const { item } = yield* vault.create({
+          name: "shared-token",
+          type: "api_key",
+          scopeProjectId: null,
+          secretFields: { value: token },
+        });
+        const { account } = yield* accounts.create({
+          serviceId: "github",
+          displayLabel: "Shared",
+          scopeProjectId: null,
+          credentials: [
+            {
+              kind: "token",
+              vaultItemId: item.id,
+              portability: "shared",
+              deliveryBindings: ["cli"],
+              policy: { processExposure: "ask" },
+            },
+          ],
+        });
+        const binding = {
+          accountId: account.id,
+          credentialId: account.credentials[0]!.id,
+          attached: true,
+        };
+        const request = yield* access.setThreadBinding(auth("agent:one"), binding);
+        yield* access.approve(request.approvalId!, "agent_project");
+        expect((yield* access.setThreadBinding(auth("agent:scheduled"), binding)).status).toBe(
+          "attached",
+        );
+        expect((yield* access.setThreadBinding(auth("agent:two"), binding)).status).toBe(
+          "approval_required",
+        );
+        expect(
+          yield* (yield* Cli.CliCredentials)
+            .launch(auth("agent:two"), "other-project")
+            .pipe(Effect.flip),
+        ).toMatchObject({ reason: "approval_required" });
+      }).pipe(Effect.provide(f.layer));
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("routes owner-thread consent and rejection through existing agent approvals", () =>
     Effect.gen(function* () {
       const f = yield* fixture;
@@ -504,7 +567,7 @@ describe("portable CLI process credentials", () => {
         });
         expect((yield* workspace.listApprovals({ status: "pending" })).approvals[0]).toMatchObject({
           agentId: null,
-          actionKind: "account_process",
+          actionKind: "vault_use",
         });
         expect((yield* workspace.approve(request.approvalId!)).approval.status).toBe("approved");
         expect(
@@ -523,7 +586,7 @@ describe("portable CLI process credentials", () => {
         yield* workspace.reject(next.approvalId!);
         expect(
           yield* (yield* Cli.CliCredentials).launch(auth(), "rejected").pipe(Effect.flip),
-        ).toMatchObject({ reason: "approval_required" });
+        ).toMatchObject({ reason: "denied" });
       }).pipe(
         Effect.provide(
           Workspace.layer.pipe(
@@ -539,6 +602,223 @@ describe("portable CLI process credentials", () => {
         ),
       );
     }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect(
+    "uses identical account authorization from authenticated MCP and owner RPC service paths",
+    () =>
+      Effect.gen(function* () {
+        const f = yield* fixture;
+        yield* Effect.gen(function* () {
+          const created = yield* create("github");
+          const mcp = yield* AccountsMcp.AccountsMcpService;
+          const access = yield* Access.AccountAccess;
+          const input = {
+            accountId: created.account.id,
+            credentialId: created.credential.id,
+            attached: true,
+          };
+          const rpc = yield* access.setThreadBindingForThread(auth().threadId, input);
+          const scope: Invocation.McpInvocationScope = {
+            environmentId: EnvironmentId.make("machine:test"),
+            issuedAt: 0,
+            requestNamespace: "account-test",
+            capabilities: new Set(["orchestration"]),
+            client: undefined,
+            thread: { ...auth(), providerSessionId: "session:test" },
+          };
+          expect(
+            yield* mcp
+              .use(input)
+              .pipe(Effect.provideService(Invocation.McpInvocationContext, scope)),
+          ).toEqual(rpc);
+          const listed = yield* mcp
+            .list("github")
+            .pipe(Effect.provideService(Invocation.McpInvocationContext, scope));
+          expect(listed.accounts.map((a) => a.id)).toEqual([created.account.id]);
+          expect(JSON.stringify(listed)).not.toContain(token);
+          f.scopes.set("outsider", ProjectLabelId.make("project:outsider"));
+          const outside = {
+            ...scope,
+            thread: { ...scope.thread!, threadId: ThreadId.make("outsider") },
+          };
+          expect(
+            (yield* mcp
+              .list()
+              .pipe(Effect.provideService(Invocation.McpInvocationContext, outside))).accounts,
+          ).toEqual([]);
+          expect(
+            yield* mcp
+              .disconnect({ accountId: created.account.id })
+              .pipe(Effect.provideService(Invocation.McpInvocationContext, outside), Effect.flip),
+          ).toMatchObject({ code: "invalid_request" });
+        }).pipe(
+          Effect.provide(
+            AccountsMcp.layer.pipe(
+              Layer.provideMerge(
+                Connections.layer.pipe(
+                  Layer.provideMerge(SecretRequests.layer.pipe(Layer.provideMerge(f.layer))),
+                ),
+              ),
+            ),
+          ),
+        );
+      }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect(
+    "owns pending connections, captures private tokens idempotently, and verifies only after consent",
+    () =>
+      Effect.gen(function* () {
+        const f = yield* fixture;
+        yield* Effect.gen(function* () {
+          const connections = yield* Connections.AccountConnections;
+          const accounts = yield* Accounts.Accounts;
+          const access = yield* Access.AccountAccess;
+          const store = yield* ServerSecretStore.ServerSecretStore;
+          f.scopes.set("unfiled", null);
+          expect(
+            yield* connections
+              .connect(auth("unfiled"), { serviceId: "github", displayLabel: "Default" })
+              .pipe(Effect.flip),
+          ).toMatchObject({ reason: "project_required" });
+          const first = yield* connections.connect(auth(), {
+            serviceId: "cloudflare",
+            displayLabel: "Public work label",
+          });
+          const retry = yield* connections.connect(auth(), {
+            serviceId: "cloudflare",
+            displayLabel: "Public work label",
+          });
+          expect(retry.connection.connectionId).toBe(first.connection.connectionId);
+          yield* connections.bindSecretRequest(
+            auth(),
+            "private-card:one",
+            first.connection.connectionId,
+          );
+          yield* connections.bindSecretRequest(
+            auth(),
+            "private-card:one",
+            first.connection.connectionId,
+          );
+          expect(
+            yield* connections.bindSecretRequest(auth(), "private-card:one").pipe(Effect.flip),
+          ).toMatchObject({ reason: "conflict" });
+          yield* connections.bindSecretRequest(auth(), "private-card:generic");
+          expect(
+            yield* connections
+              .bindSecretRequest(auth(), "private-card:generic", first.connection.connectionId)
+              .pipe(Effect.flip),
+          ).toMatchObject({ reason: "conflict" });
+          const description = yield* connections.describe(auth(), first.connection.connectionId);
+          expect(description.reason).toContain("Project: project:one");
+          expect(description.reason).toContain(
+            "The agent and the commands it runs can read this token",
+          );
+          expect(
+            yield* connections
+              .describe(auth("unrelated-thread"), first.connection.connectionId)
+              .pipe(Effect.flip),
+          ).toMatchObject({ reason: "not_found" });
+          const ref = SecretRef.make("secret-ref:" + "a".repeat(32));
+          yield* store.create(
+            "secret-request-" + "a".repeat(32),
+            new TextEncoder().encode(
+              JSON.stringify({ projectId: "project:mcp-test", value: token, savedAt: 0 }),
+            ),
+          );
+          const saved = yield* connections.capture(auth(), first.connection.connectionId, ref);
+          expect(saved.accountId).not.toBeNull();
+          expect(yield* connections.capture(auth(), first.connection.connectionId, ref)).toEqual(
+            saved,
+          );
+          expect(Option.isNone(yield* store.get("secret-request-" + "a".repeat(32)))).toBe(true);
+          expect(JSON.stringify(saved)).not.toContain(token);
+          expect((yield* accounts.list({ scopeProjectId: project })).accounts).toHaveLength(1);
+          const ready = yield* connections.connect(auth(), {
+            connectionId: first.connection.connectionId,
+          });
+          expect(ready.access?.status).toBe("approval_required");
+          expect(f.processInputs).toHaveLength(0);
+          yield* access.approve(ready.access!.approvalId!, "thread");
+          expect(
+            (yield* connections.connect(auth(), { connectionId: first.connection.connectionId }))
+              .verification?.state,
+          ).toBe("verified");
+          const second = yield* connections.connect(auth(), {
+            serviceId: "github",
+            displayLabel: "Other",
+          });
+          expect(
+            yield* connections
+              .bindSecretRequest(auth(), "private-card:one", second.connection.connectionId)
+              .pipe(Effect.flip),
+          ).toMatchObject({ reason: "conflict" });
+          yield* accounts.cancelConnection(
+            yield* access.caller(auth()),
+            second.connection.connectionId,
+          );
+          expect(
+            yield* connections.describe(auth(), second.connection.connectionId).pipe(Effect.flip),
+          ).toMatchObject({ reason: "not_found" });
+        }).pipe(
+          Effect.provide(
+            Connections.layer.pipe(
+              Layer.provideMerge(SecretRequests.layer.pipe(Layer.provideMerge(f.layer))),
+            ),
+          ),
+        );
+      }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect(
+    "rolls back vault/account association together and keeps a failed private capture retryable",
+    () =>
+      Effect.gen(function* () {
+        const f = yield* fixture;
+        yield* Effect.gen(function* () {
+          const connections = yield* Connections.AccountConnections;
+          const store = yield* ServerSecretStore.ServerSecretStore;
+          const sql = yield* SqlClient.SqlClient;
+          const connection = (yield* connections.connect(auth(), {
+            serviceId: "github",
+            displayLabel: "Work",
+          })).connection;
+          const ref = SecretRef.make("secret-ref:" + "b".repeat(32));
+          const name = "secret-request-" + "b".repeat(32);
+          yield* store.create(
+            name,
+            new TextEncoder().encode(
+              JSON.stringify({ projectId: "project:mcp-test", value: token, savedAt: 0 }),
+            ),
+          );
+          yield* sql`CREATE TRIGGER fail_account_store BEFORE INSERT ON accounts BEGIN SELECT RAISE(FAIL, 'synthetic storage failure'); END`;
+          expect(
+            yield* connections.capture(auth(), connection.connectionId, ref).pipe(Effect.flip),
+          ).toMatchObject({ reason: "storage" });
+          expect(yield* sql`SELECT id FROM vault_items`).toEqual([]);
+          expect(yield* sql`SELECT id FROM accounts`).toEqual([]);
+          expect(Option.isSome(yield* store.get(name))).toBe(true);
+          yield* sql`DROP TRIGGER fail_account_store`;
+          const saved = yield* connections.capture(auth(), connection.connectionId, ref);
+          expect(saved.accountId).not.toBeNull();
+          expect(yield* sql`SELECT id FROM vault_items`).toHaveLength(1);
+          expect(yield* sql`SELECT id FROM accounts`).toHaveLength(1);
+          expect(Option.isNone(yield* store.get(name))).toBe(true);
+          expect(JSON.stringify(yield* sql`SELECT payload_json FROM accounts`)).not.toContain(
+            token,
+          );
+          expect(JSON.stringify(yield* sql`SELECT * FROM account_connections`)).not.toContain(
+            token,
+          );
+        }).pipe(
+          Effect.provide(
+            Connections.layer.pipe(
+              Layer.provideMerge(SecretRequests.layer.pipe(Layer.provideMerge(f.layer))),
+            ),
+          ),
+        );
+      }).pipe(Effect.provide(NodeServices.layer)),
   );
 
   it.effect(
@@ -565,6 +845,13 @@ describe("portable CLI process credentials", () => {
           expect((yield* cli.verify(auth(), created.account.id, created.credential.id)).state).toBe(
             "cli_missing",
           );
+          yield* (yield* Vault.Vault).update({
+            id: created.item.id,
+            secretFields: { value: "synthetic-replacement-for-status" },
+          });
+          expect(
+            (yield* (yield* Accounts.Accounts).list({ scopeProjectId: project })).statuses[0],
+          ).toMatchObject({ state: "unknown", reason: "credential_changed" });
           for (const input of f.processInputs) {
             expect(input.command).toBe("gh");
             expect(input.args).toEqual(["auth", "status"]);

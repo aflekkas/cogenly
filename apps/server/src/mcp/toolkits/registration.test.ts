@@ -1,3 +1,6 @@
+import * as Accounts from "../../accounts/Accounts.ts";
+import * as AccountAccess from "../../accounts/AccountAccess.ts";
+import * as AccountConnections from "../../accounts/AccountConnections.ts";
 import * as CliCredentials from "../../accounts/CliCredentials.ts";
 import * as GlobalSearch from "../../search/GlobalSearch.ts";
 import * as FactService from "../../context/FactService.ts";
@@ -21,6 +24,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   EnvironmentId,
   ProjectLabelId,
+  ProjectId,
   ProviderInstanceId,
   ThreadId,
   OrchestratorMcpFailure,
@@ -103,6 +107,22 @@ const project = {
   deletedAt: null,
 };
 const layerStubServices = Layer.mergeAll(
+  Layer.mock(Accounts.Accounts)({
+    list: () => Effect.succeed({ accounts: [], statuses: [], services: [] }),
+  }),
+  Layer.mock(AccountAccess.AccountAccess)({
+    caller: () =>
+      Effect.succeed({
+        threadId: ThreadId.make("thread-scratch"),
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        projectId: ProjectId.make("project-scratch"),
+        scopeProjectId: null,
+        projectKey: "project-scratch",
+        agentId: null,
+        parentThreadId: null,
+      }),
+  }),
+  Layer.mock(AccountConnections.AccountConnections)({}),
   Layer.mock(CliCredentials.CliCredentials)({
     launch: () => Effect.succeed({ env: {}, complete: () => Effect.void }),
   }),
@@ -692,6 +712,13 @@ const smokeCases = [
       parentThreadId: "thread-scratch",
       providers: [],
     },
+  },
+  {
+    toolkit: "accounts",
+    names: ["accounts_list", "account_connect", "account_use", "account_disconnect"],
+    tool: "accounts_list",
+    args: {},
+    expected: { accounts: [], statuses: [], services: [] },
   },
   {
     toolkit: "vault",
