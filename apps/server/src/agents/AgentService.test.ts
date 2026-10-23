@@ -846,6 +846,49 @@ it.effect("creates a conversation without a provider turn and edits the agent in
   }),
 );
 
+it.effect("editing an agent without its fallback chain keeps the fallback position", () =>
+  Effect.gen(function* () {
+    const h = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const store = yield* Store.AgentStore;
+      const agents = yield* Agents.AgentService;
+      const { name, avatar, instructions, modelSelection, runtimeMode, projectId, dailyRunCap } =
+        h.fixture;
+      const fallback = { instanceId: ProviderInstanceId.make("claude-backup"), model: "opus" };
+      const created = yield* agents.upsert({
+        name,
+        avatar,
+        instructions,
+        modelSelection,
+        runtimeMode,
+        projectId,
+        dailyRunCap,
+        fallbackChain: [fallback],
+      });
+      yield* store.setFallback(created.agent.id, {
+        index: 1,
+        reason: "usage_limit",
+        until: "2099-01-01T00:00:00.000Z",
+      });
+      // A profile edit that does not carry the chain must not restart it.
+      const edited = yield* agents.upsert({
+        avatar,
+        instructions,
+        modelSelection,
+        runtimeMode,
+        projectId,
+        dailyRunCap,
+        id: created.agent.id,
+        name: "Pine",
+      });
+      expect(edited.agent.fallbackChain).toEqual([fallback]);
+      expect(edited.agent.fallbackIndex).toBe(1);
+      expect(edited.agent.fallbackReason).toBe("usage_limit");
+      expect(edited.agent.fallbackUntil).toBe("2099-01-01T00:00:00.000Z");
+    }).pipe(Effect.provide(h.layer));
+  }),
+);
+
 it.effect("files an agent's conversation in a project and moves it between projects in place", () =>
   Effect.gen(function* () {
     const h = yield* makeHarness;
