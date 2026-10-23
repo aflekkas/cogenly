@@ -27,6 +27,7 @@ import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -74,8 +75,13 @@ export interface PeerHubConnection {
     input: PeerCallInput,
   ) => Effect.Effect<Schema.Json, PeerCallError | PeerProtocolError>;
   readonly leave: Effect.Effect<{}, PeerProtocolError>;
-  /** Completes when the hub drops this socket: unpaired, or replaced by a newer one. */
+  /**
+   * Completes when the hub drops this socket (unpaired, or replaced by a newer
+   * one) and the inbox has delivered what was queued, such as `Unpaired`.
+   */
   readonly closed: Effect.Effect<void>;
+  /** The session was revoked elsewhere: unpair, tell the spoke, then close. */
+  readonly revoked: Effect.Effect<void>;
 }
 
 export class PeerHub extends Context.Service<
@@ -164,15 +170,13 @@ const make = Effect.gen(function* () {
     }>`SELECT environment_id, session_id, report_json, paired_at, last_seen_at FROM machine_peers ORDER BY paired_at`;
     return yield* Effect.forEach(rows, (row) =>
       decodeReport(row.report_json).pipe(
-        Effect.map(
-          (report): SpokeRow => ({
-            environmentId: EnvironmentId.make(row.environment_id),
-            sessionId: row.session_id as AuthSessionId,
-            report,
-            pairedAt: parseTime(row.paired_at) ?? DateTime.makeUnsafe(0),
-            lastSeenAt: parseTime(row.last_seen_at),
-          }),
-        ),
+        Effect.map((report): SpokeRow => ({
+          environmentId: EnvironmentId.make(row.environment_id),
+          sessionId: row.session_id as AuthSessionId,
+          report,
+          pairedAt: parseTime(row.paired_at) ?? DateTime.makeUnsafe(0),
+          lastSeenAt: parseTime(row.last_seen_at),
+        })),
       ),
     );
   });
@@ -237,6 +241,9 @@ const make = Effect.gen(function* () {
 
   // Stops serving a socket: its pending calls fail, its inbox ends and the
   // route closes it. Only the newest socket of a spoke counts as online.
+  // How long a dropped socket may take to deliver its last pushes.
+  const DRAIN_TIMEOUT = Duration.seconds(5);
+
   const drop = (connection: LiveConnection) =>
     Effect.gen(function* () {
       for (const pending of connection.pending.values()) {
@@ -255,7 +262,10 @@ const make = Effect.gen(function* () {
   // servers. The nonce signature lets the spoke check it reached the hub that
   // client named, by the key it pins from then on.
   // This hub's own name or kind changed: spokes list it too.
-  yield* identity.changes.pipe(Stream.runForEach(() => publishChange), Effect.forkScoped);
+  yield* identity.changes.pipe(
+    Stream.runForEach(() => publishChange),
+    Effect.forkScoped,
+  );
 
   const redeem: PeerHub["Service"]["redeem"] = Effect.fn("PeerHub.redeem")(function* (input) {
     const joinedHub = yield* withSecrets(readHubLink).pipe(Effect.mapError(storage("join")));
@@ -339,17 +349,17 @@ const make = Effect.gen(function* () {
       yield* publishChange;
     });
 
-  const unpair: PeerHub["Service"]["unpair"] = Effect.fn("PeerHub.unpair")(function* (
-    environmentId,
-  ) {
-    const row = yield* readRows.pipe(
-      Effect.map((rows) => rows.find((entry) => entry.environmentId === environmentId)),
-      Effect.mapError(storage("unpair")),
-    );
-    if (row === undefined) return false;
-    yield* unpairRow(row);
-    return true;
-  });
+  const unpair: PeerHub["Service"]["unpair"] = Effect.fn("PeerHub.unpair")(
+    function* (environmentId) {
+      const row = yield* readRows.pipe(
+        Effect.map((rows) => rows.find((entry) => entry.environmentId === environmentId)),
+        Effect.mapError(storage("unpair")),
+      );
+      if (row === undefined) return false;
+      yield* unpairRow(row);
+      return true;
+    },
+  );
 
   const callSpoke: PeerHub["Service"]["callSpoke"] = (environmentId, channel, payload) =>
     Effect.gen(function* () {
@@ -382,6 +392,8 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const scopes = session.scopes.filter(isAuthPeerScope);
       const closed = yield* Deferred.make<void>();
+      const inboxDone = yield* Deferred.make<void>();
+      let inboxOpen = false;
       let current: LiveConnection | undefined;
       // Every method but hello needs a hello on this socket, and only while
       // the socket is still the spoke's current one.
@@ -456,8 +468,38 @@ const make = Effect.gen(function* () {
       );
 
       const inbox: PeerHubConnection["inbox"] = Stream.unwrap(
-        requireHello.pipe(Effect.map((connection) => Stream.fromQueue(connection.outbox))),
+        requireHello.pipe(
+          Effect.map((connection) => {
+            inboxOpen = true;
+            return Stream.fromQueue(connection.outbox).pipe(
+              Stream.ensuring(Deferred.succeed(inboxDone, undefined)),
+            );
+          }),
+        ),
       );
+
+      const drained = Deferred.await(closed).pipe(
+        Effect.andThen(
+          Effect.suspend(() =>
+            inboxOpen
+              ? Deferred.await(inboxDone).pipe(Effect.timeoutOption(DRAIN_TIMEOUT))
+              : Effect.void,
+          ),
+        ),
+        Effect.asVoid,
+      );
+
+      const revoked: PeerHubConnection["revoked"] = Effect.suspend(() =>
+        current !== undefined && live.get(current.environmentId)?.id === current.id
+          ? rowForSession(session.sessionId).pipe(
+              Effect.flatMap((row) =>
+                row === undefined
+                  ? drop(current!)
+                  : unpairRow(row).pipe(Effect.ignore({ log: true })),
+              ),
+            )
+          : Deferred.succeed(closed, undefined),
+      ).pipe(Effect.andThen(drained));
 
       const reply: PeerHubConnection["reply"] = (input) =>
         requireHello.pipe(
@@ -499,7 +541,8 @@ const make = Effect.gen(function* () {
         reply,
         call,
         leave,
-        closed: Deferred.await(closed),
+        closed: drained,
+        revoked,
       } satisfies PeerHubConnection;
     });
 

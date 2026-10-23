@@ -51,9 +51,13 @@ export class Machines extends Context.Service<
       input: MachineCreatePeerGrantInput,
     ) => Effect.Effect<MachineJoinCode, MachineError>;
     /** Spoke, step 3: redeem the grant and start dialing the hub. */
-    readonly joinHub: (input: MachineJoinHubInput) => Effect.Effect<MachineListResult, MachineError>;
+    readonly joinHub: (
+      input: MachineJoinHubInput,
+    ) => Effect.Effect<MachineListResult, MachineError>;
     /** Unpair a spoke (on the hub) or the hub (on a spoke). */
-    readonly unpair: (input: MachineUnpairInput) => Effect.Effect<MachineUnpairResult, MachineError>;
+    readonly unpair: (
+      input: MachineUnpairInput,
+    ) => Effect.Effect<MachineUnpairResult, MachineError>;
     /**
      * Send a channel request to a paired machine: the hub from a spoke, a
      * spoke from the hub. Refused, never queued, while it is offline.
@@ -129,9 +133,11 @@ const make = Effect.gen(function* () {
     return { machines: [thisMachine, ...spokes], link };
   }).pipe(Effect.withSpan("Machines.list"));
 
-  const subscribe: Machines["Service"]["subscribe"] = Stream.concat(
-    Stream.make(undefined),
-    Stream.mergeAll([identity.changes, hub.changes, hubLink.changes], { concurrency: "unbounded" }),
+  // The initial list runs alongside the change subscriptions, not before
+  // them, so a change landing in between is not missed.
+  const subscribe: Machines["Service"]["subscribe"] = Stream.mergeAll(
+    [Stream.make(undefined), identity.changes, hub.changes, hubLink.changes],
+    { concurrency: "unbounded" },
   ).pipe(Stream.mapEffect(() => list));
 
   const update: Machines["Service"]["update"] = (input) =>

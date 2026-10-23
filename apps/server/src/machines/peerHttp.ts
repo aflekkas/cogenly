@@ -150,12 +150,15 @@ export const layer = Layer.unwrap(
           Effect.forkScoped,
         );
         // Unpairing, a newer socket from the same spoke, or revoking the
-        // session anywhere (Settings → Connections) closes this one.
+        // session anywhere (Settings → Connections) closes this one, after
+        // the spoke has been told so it forgets its credential.
         return yield* Effect.raceFirst(
           httpEffect,
           Effect.raceFirst(
             connection.closed,
-            sessions.awaitInvalidation(session.value.sessionId).pipe(Effect.ignore),
+            sessions
+              .awaitInvalidation(session.value.sessionId)
+              .pipe(Effect.ignore, Effect.andThen(connection.revoked)),
           ).pipe(Effect.as(HttpServerResponse.empty())),
         );
       }).pipe(Effect.provide(RpcSerialization.layerJson), Effect.withSpan("peer.socket")),

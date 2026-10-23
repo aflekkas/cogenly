@@ -34,7 +34,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
 import * as Queue from "effect/Queue";
-import * as Ref from "effect/Ref";
+import * as SubscriptionRef from "effect/SubscriptionRef";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
@@ -75,6 +75,8 @@ export class HubLink extends Context.Service<
     /** Unpair from this side: tell the hub when it is reachable, then forget it. */
     readonly leave: Effect.Effect<boolean, MachineError>;
     readonly view: Effect.Effect<Option.Option<HubLinkView>, MachineError>;
+    /** The link's status, route and hub machine list: the current value, then every change. */
+    readonly states: Stream.Stream<Omit<HubLinkView, "link">>;
     /** Ask the hub to run a channel request. Refused while it is offline. */
     readonly callHub: <C extends PeerChannel>(
       channel: C,
@@ -96,11 +98,23 @@ type HubClient = RpcClient.FromGroup<typeof PeerRpcGroup, RpcClientError.RpcClie
 
 const HEARTBEAT_INTERVAL = Duration.seconds(30);
 const REQUEST_TIMEOUT = Duration.seconds(15);
-const BACKOFF_BASE = Duration.seconds(1);
-const BACKOFF_MAX = Duration.minutes(1);
-// A revoked or untrusted link keeps retrying, slowly: a different server
-// answering on a route must not unpair this machine for good.
-const BACKOFF_REFUSED = Duration.minutes(5);
+
+/**
+ * Redial delays. Failures back off exponentially from `base` to `max`. A
+ * revoked or untrusted link keeps retrying, slowly: a different server
+ * answering on a route must not unpair this machine for good.
+ */
+export const HubLinkRetry = Context.Reference<{
+  readonly base: Duration.Duration;
+  readonly max: Duration.Duration;
+  readonly refused: Duration.Duration;
+}>("cogenly-server/machines/HubLink/HubLinkRetry", {
+  defaultValue: () => ({
+    base: Duration.seconds(1),
+    max: Duration.minutes(1),
+    refused: Duration.minutes(5),
+  }),
+});
 
 const STATUS_MESSAGES: Record<HubAttemptError["reason"], string> = {
   unreachable: "The hub could not be reached on any of its addresses.",
@@ -136,7 +150,8 @@ const make = Effect.gen(function* () {
   // Wakes the dial loop: the link was created, replaced or removed.
   const kick = yield* Queue.sliding<void>(1);
 
-  const state = yield* Ref.make<LinkState>({
+  const retry = yield* HubLinkRetry;
+  const state = yield* SubscriptionRef.make<LinkState>({
     status: "connecting",
     route: null,
     lastError: null,
@@ -150,7 +165,9 @@ const make = Effect.gen(function* () {
     Effect.provideService(effect, Crypto.Crypto, crypto);
   const notify = PubSub.publish(changed, undefined).pipe(Effect.asVoid);
   const setState = (patch: Partial<LinkState>) =>
-    Ref.update(state, (current) => ({ ...current, ...patch })).pipe(Effect.andThen(notify));
+    SubscriptionRef.update(state, (current) => ({ ...current, ...patch })).pipe(
+      Effect.andThen(notify),
+    );
 
   const storage = (operation: MachineError["operation"]) => (cause: unknown) =>
     new MachineError({ operation, reason: "storage", cause });
@@ -246,9 +263,7 @@ const make = Effect.gen(function* () {
 
   // Forget the hub: credential, pinned key and proof key. A later pairing
   // starts from a fresh proof key.
-  const forget = withSecrets(
-    removeHubLink.pipe(Effect.andThen(removePeerDpopKey)),
-  ).pipe(
+  const forget = withSecrets(removeHubLink.pipe(Effect.andThen(removePeerDpopKey))).pipe(
     Effect.andThen(setState({ status: "connecting", route: null, lastError: null, machines: [] })),
     Effect.andThen(Queue.offer(kick, undefined)),
   );
@@ -268,7 +283,7 @@ const make = Effect.gen(function* () {
   const view: HubLink["Service"]["view"] = Effect.gen(function* () {
     const link = yield* withSecrets(readHubLink).pipe(Effect.mapError(storage("list")));
     if (Option.isNone(link)) return Option.none<HubLinkView>();
-    const current = yield* Ref.get(state);
+    const current = yield* SubscriptionRef.get(state);
     return Option.some({ link: link.value, ...current } satisfies HubLinkView);
   });
 
@@ -279,7 +294,10 @@ const make = Effect.gen(function* () {
         return yield* new PeerCallError({ channel: channel.name, reason: "offline" });
       }
       const encoded = yield* encodePeerPayload(channel, payload);
-      const value = yield* client[PEER_METHODS.call]({ channel: channel.name, payload: encoded }).pipe(
+      const value = yield* client[PEER_METHODS.call]({
+        channel: channel.name,
+        payload: encoded,
+      }).pipe(
         Effect.catchTags({
           PeerCallError: (error) => Effect.fail(error),
           PeerProtocolError: () =>
@@ -300,9 +318,12 @@ const make = Effect.gen(function* () {
       case "Machines":
         return setState({ machines: push.machines });
       case "Unpaired":
+        // The hub closes the socket right after this; forgetting must finish
+        // even when that close interrupts the inbox.
         return Effect.logInfo("The hub unpaired this machine.").pipe(
           Effect.andThen(forget),
           Effect.ignore({ log: true }),
+          Effect.uninterruptible,
         );
       case "Request":
         return channels
@@ -343,7 +364,10 @@ const make = Effect.gen(function* () {
         const response = yield* post(
           ticketUrl,
           HttpClientRequest.post(ticketUrl).pipe(
-            HttpClientRequest.setHeaders({ authorization: `DPoP ${link.accessToken}`, dpop: proof }),
+            HttpClientRequest.setHeaders({
+              authorization: `DPoP ${link.accessToken}`,
+              dpop: proof,
+            }),
           ),
         );
         if (response.status === 401 || response.status === 403) {
@@ -438,7 +462,10 @@ const make = Effect.gen(function* () {
         yield* setState({ status: "connecting", route });
         const outcome = yield* connectRoute(link, route).pipe(Effect.flip);
         if (outcome.reason === "dropped") return outcome.reason;
-        if (outcome.reason === "refused" || (outcome.reason === "untrusted" && worst !== "refused")) {
+        if (
+          outcome.reason === "refused" ||
+          (outcome.reason === "untrusted" && worst !== "refused")
+        ) {
           worst = outcome.reason;
         }
       }
@@ -467,6 +494,11 @@ const make = Effect.gen(function* () {
         failures = 0;
         continue;
       }
+      // Unpaired while connected: nothing left to report or redial.
+      const still = yield* withSecrets(readHubLink).pipe(
+        Effect.orElseSucceed(() => Option.none<HubLinkRecord>()),
+      );
+      if (Option.isNone(still)) continue;
       failures = outcome === "dropped" ? 0 : failures + 1;
       yield* setState({
         status: statusFor(outcome),
@@ -475,8 +507,9 @@ const make = Effect.gen(function* () {
       });
       const delay =
         outcome === "refused" || outcome === "untrusted"
-          ? BACKOFF_REFUSED
-          : Duration.min(Duration.times(BACKOFF_BASE, 2 ** Math.min(failures, 6)), BACKOFF_MAX);
+          ? retry.refused
+          : Duration.min(Duration.times(retry.base, 2 ** Math.min(failures, 6)), retry.max);
+      if (Duration.isZero(delay)) continue;
       yield* Effect.raceFirst(Effect.sleep(delay), Queue.take(kick));
     }
   });
@@ -488,6 +521,7 @@ const make = Effect.gen(function* () {
     join,
     leave,
     view,
+    states: SubscriptionRef.changes(state),
     callHub,
     changes: Stream.fromPubSub(changed),
   });
