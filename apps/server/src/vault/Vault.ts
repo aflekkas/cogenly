@@ -55,6 +55,8 @@ export interface VaultUseInput {
   readonly domain?: string | null | undefined;
   /** Audit action name, e.g. "fill", "resolve". Defaults to "use". */
   readonly action?: string | undefined;
+  /** Reject replacement between account authorization and field resolution. */
+  readonly expectedRevision?: number | undefined;
   /** Browser fill refuses domains outside the item's allowedDomains. */
   readonly enforceAllowedDomains?: boolean | undefined;
 }
@@ -85,6 +87,9 @@ const wrap = (cause: unknown): VaultError =>
   isVaultError(cause) ? cause : new VaultError({ reason: "storage", cause });
 
 interface VaultRow {
+  readonly credential_revision: number;
+  readonly account_id?: string;
+  readonly credential_id?: string;
   readonly id: string;
   readonly name: string;
   readonly type: string;
@@ -262,6 +267,8 @@ export class Vault extends Context.Service<
       readonly value: string;
       readonly scopeProjectId?: string | null | undefined;
     }) => Effect.Effect<{ item: VaultItemMetadata }, VaultError>;
+    /** Retained through server lifetime: descendants and retained output may outlive a PTY. */
+    readonly registerProcessSecrets: (values: ReadonlyArray<string>) => Effect.Effect<void>;
     readonly scrubText: (text: string) => Effect.Effect<string>;
     readonly scrubValue: <A>(value: A) => Effect.Effect<A>;
   }
@@ -281,6 +288,7 @@ const make = Effect.gen(function* () {
     shortSecrets: Set<string>;
   }>({ loaded: false, secrets: new Set<string>(), shortSecrets: new Set<string>() });
 
+  const processSecrets = yield* Ref.make(new Set<string>());
   const environmentId = yield* identity.getEnvironmentId;
 
   // VaultMachineKeyStore (file-backed today; Keychain replaces this on macOS).
@@ -326,6 +334,8 @@ const make = Effect.gen(function* () {
     const cardLast4 = stored ? cardLast4Of(stored) : metadata.cardLast4;
     return {
       id: VaultItemId.make(row.id),
+      ...(row.account_id ? { accountId: row.account_id } : {}),
+      ...(row.credential_id ? { credentialId: row.credential_id } : {}),
       name: row.name,
       type: row.type as VaultItemMetadata["type"],
       scopeProjectId: row.scope_project_id
@@ -344,7 +354,7 @@ const make = Effect.gen(function* () {
   const loadRow = (itemId: string) =>
     Effect.gen(function* () {
       const rows =
-        yield* sql<VaultRow>`SELECT * FROM vault_items WHERE id = ${itemId} AND deleted_at IS NULL`;
+        yield* sql<VaultRow>`SELECT vault_items.*, (SELECT c.account_id FROM account_credentials c JOIN accounts a ON a.id = c.account_id AND a.deleted_at IS NULL WHERE c.vault_item_id = vault_items.id) AS account_id, (SELECT c.id FROM account_credentials c JOIN accounts a ON a.id = c.account_id AND a.deleted_at IS NULL WHERE c.vault_item_id = vault_items.id) AS credential_id FROM vault_items WHERE id = ${itemId} AND deleted_at IS NULL`;
       if (!rows[0]) return yield* new VaultError({ reason: "not_found" });
       return rows[0];
     });
@@ -358,7 +368,7 @@ const make = Effect.gen(function* () {
       if (input.itemId) return yield* loadRow(input.itemId);
       if (!input.name) return yield* new VaultError({ reason: "invalid_input" });
       const rows =
-        yield* sql<VaultRow>`SELECT * FROM vault_items WHERE name = ${input.name} AND deleted_at IS NULL ORDER BY updated_at DESC`;
+        yield* sql<VaultRow>`SELECT vault_items.*, (SELECT c.account_id FROM account_credentials c JOIN accounts a ON a.id = c.account_id AND a.deleted_at IS NULL WHERE c.vault_item_id = vault_items.id) AS account_id, (SELECT c.id FROM account_credentials c JOIN accounts a ON a.id = c.account_id AND a.deleted_at IS NULL WHERE c.vault_item_id = vault_items.id) AS credential_id FROM vault_items WHERE name = ${input.name} AND deleted_at IS NULL ORDER BY updated_at DESC`;
       if (rows.length === 0) return yield* new VaultError({ reason: "not_found" });
       if (rows.length === 1) return rows[0]!;
       const scoped = rows.filter(
@@ -440,9 +450,10 @@ const make = Effect.gen(function* () {
   const ensureScrubSecrets = Effect.gen(function* () {
     const cache = yield* Ref.get(scrubCache);
     if (cache.loaded) return cache;
-    const rows = yield* sql<VaultRow>`SELECT * FROM vault_items WHERE deleted_at IS NULL`.pipe(
-      Effect.mapError(wrap),
-    );
+    const rows =
+      yield* sql<VaultRow>`SELECT vault_items.*, (SELECT c.account_id FROM account_credentials c JOIN accounts a ON a.id = c.account_id AND a.deleted_at IS NULL WHERE c.vault_item_id = vault_items.id) AS account_id, (SELECT c.id FROM account_credentials c JOIN accounts a ON a.id = c.account_id AND a.deleted_at IS NULL WHERE c.vault_item_id = vault_items.id) AS credential_id FROM vault_items WHERE deleted_at IS NULL`.pipe(
+        Effect.mapError(wrap),
+      );
     const secrets = new Set<string>();
     const shortSecrets = new Set<string>();
     for (const row of rows) {
@@ -508,7 +519,7 @@ const make = Effect.gen(function* () {
   const list: Vault["Service"]["list"] = (input) =>
     Effect.gen(function* () {
       const rows =
-        yield* sql<VaultRow>`SELECT * FROM vault_items WHERE deleted_at IS NULL AND (${input.scopeProjectId ?? null} IS NULL OR scope_project_id IS NULL OR scope_project_id = ${input.scopeProjectId ?? null}) ORDER BY name`.pipe(
+        yield* sql<VaultRow>`SELECT vault_items.*, (SELECT c.account_id FROM account_credentials c JOIN accounts a ON a.id = c.account_id AND a.deleted_at IS NULL WHERE c.vault_item_id = vault_items.id) AS account_id, (SELECT c.id FROM account_credentials c JOIN accounts a ON a.id = c.account_id AND a.deleted_at IS NULL WHERE c.vault_item_id = vault_items.id) AS credential_id FROM vault_items WHERE deleted_at IS NULL AND (${input.scopeProjectId ?? null} IS NULL OR scope_project_id IS NULL OR scope_project_id = ${input.scopeProjectId ?? null}) ORDER BY name`.pipe(
           Effect.mapError(wrap),
         );
       return { items: rows.map((row) => metadataOf(row)) };
@@ -535,7 +546,7 @@ const make = Effect.gen(function* () {
       const policy = input.policy ?? parsePolicy(row.policy_json);
       const label =
         input.label === null ? undefined : (input.label ?? parseMetadata(row.metadata_json).label);
-      yield* sql`UPDATE vault_items SET name = ${input.name ?? row.name}, type = ${input.type ?? row.type}, scope_project_id = ${input.scopeProjectId === undefined ? row.scope_project_id : input.scopeProjectId}, metadata_json = ${encodeMetadataJson({ ...(label ? { label } : {}), fields: fieldsOf(stored), ...(cardLast4Of(stored) ? { cardLast4: cardLast4Of(stored) } : {}) })}, policy_json = ${encodePolicyJson(policy)}, allowed_domains_json = ${encodeDomainsJson(input.allowedDomains ?? parseDomains(row.allowed_domains_json))}, ciphertext = ${ciphertext}, wrapped_keys_json = ${wrappedKeys}, updated_at = ${at} WHERE id = ${row.id}`.pipe(
+      yield* sql`UPDATE vault_items SET name = ${input.name ?? row.name}, type = ${input.type ?? row.type}, scope_project_id = ${input.scopeProjectId === undefined ? row.scope_project_id : input.scopeProjectId}, metadata_json = ${encodeMetadataJson({ ...(label ? { label } : {}), fields: fieldsOf(stored), ...(cardLast4Of(stored) ? { cardLast4: cardLast4Of(stored) } : {}) })}, policy_json = ${encodePolicyJson(policy)}, allowed_domains_json = ${encodeDomainsJson(input.allowedDomains ?? parseDomains(row.allowed_domains_json))}, ciphertext = ${ciphertext}, wrapped_keys_json = ${wrappedKeys}, credential_revision = ${row.credential_revision + (input.secretFields ? 1 : 0)}, updated_at = ${at} WHERE id = ${row.id}`.pipe(
         Effect.mapError((cause) =>
           String(cause).includes("UNIQUE")
             ? new VaultError({ reason: "name_conflict", cause })
@@ -561,6 +572,11 @@ const make = Effect.gen(function* () {
         name: input.name,
         scopeProjectId: input.scopeProjectId,
       });
+      if (
+        input.expectedRevision !== undefined &&
+        row.credential_revision !== input.expectedRevision
+      )
+        return yield* new VaultError({ reason: "invalid_input" });
       const item = metadataOf(row);
       const agentId = input.caller.kind === "agent" ? input.caller.agentId : null;
       const action = input.action ?? "use";
@@ -659,6 +675,13 @@ const make = Effect.gen(function* () {
         const rows = yield* sql<{
           id: string;
           item_id: string;
+          credential_id: string | null;
+          credential_revision: string | null;
+          environment_id: string | null;
+          project_id: string | null;
+          delivery_method: string | null;
+          terminal_id: string | null;
+          provider_instance_id: string | null;
           thread_id: string | null;
           agent_id: string | null;
           action: string;
@@ -672,6 +695,13 @@ const make = Effect.gen(function* () {
           usage: rows.map((row) => ({
             id: row.id as never,
             itemId: VaultItemId.make(row.item_id),
+            credentialId: row.credential_id as never,
+            credentialRevision: row.credential_revision,
+            environmentId: row.environment_id,
+            projectId: row.project_id,
+            deliveryMethod: row.delivery_method,
+            terminalId: row.terminal_id,
+            providerInstanceId: row.provider_instance_id,
             threadId: row.thread_id ? ThreadId.make(row.thread_id) : null,
             agentId: row.agent_id ? AgentId.make(row.agent_id) : null,
             action: row.action as never,
@@ -704,12 +734,26 @@ const make = Effect.gen(function* () {
         allowedDomains: [...(input.domains ?? [])] as never,
         secretFields: input.type === "login" ? { password: input.value } : { value: input.value },
       }),
+    registerProcessSecrets: (values) =>
+      Ref.update(processSecrets, (current) => {
+        const next = new Set(current);
+        for (const value of values) {
+          next.add(value);
+          next.add(Buffer.from(value).toString("base64"));
+          next.add(encodeURIComponent(value));
+          next.add(JSON.stringify(value).slice(1, -1));
+        }
+        return next;
+      }),
     scrubText: (text) =>
       ensureScrubSecrets.pipe(
         Effect.map(({ secrets, shortSecrets }) =>
           redactShortSecrets(redactText(text, secrets), shortSecrets),
         ),
         Effect.orElseSucceed(() => text),
+        Effect.flatMap((scrubbed) =>
+          Ref.get(processSecrets).pipe(Effect.map((secrets) => redactText(scrubbed, secrets))),
+        ),
       ),
     scrubValue: (value) =>
       ensureScrubSecrets.pipe(
@@ -717,6 +761,9 @@ const make = Effect.gen(function* () {
           redactShortValue(redactValue(value, secrets), shortSecrets),
         ),
         Effect.orElseSucceed(() => value),
+        Effect.flatMap((scrubbed) =>
+          Ref.get(processSecrets).pipe(Effect.map((secrets) => redactValue(scrubbed, secrets))),
+        ),
       ),
   });
 });

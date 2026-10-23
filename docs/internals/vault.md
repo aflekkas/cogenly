@@ -1,7 +1,9 @@
 # Vault
 
-Encrypted secrets that agents use without ever seeing. Built single-machine
-first; the data model is ready to replicate later. User guide:
+Encrypted credential storage. Browser fill keeps values out of model context;
+Accounts can separately authorize portable token exposure to agent terminals.
+Built single-machine first; credential replication still needs the re-wrap
+work described below. User guide:
 [docs/user/vault.md](../user/vault.md).
 
 ## Key hierarchy
@@ -40,10 +42,12 @@ written onto the old slots are left as they are; nothing migrates them.
 ## Use, policy, approvals
 
 Decryption happens only in the `Vault` service (`apps/server/src/vault/Vault.ts`),
-for one field, and every outcome is appended to `vault_usage` (item, thread,
-agent, action, domain, outcome).
+for one field, and every outcome is appended to `vault_usage`. Process delivery
+adds the credential revision, machine, project, provider instance, terminal id
+and delivery method. This records delivery, not every downstream API action.
 
-Humans (owner-initiated turns) and server-internal callers are allowed.
+For browser fill, humans (owner-initiated turns) and server-internal callers
+are allowed.
 Agents default to `ask`: the first use inserts a pending row in the existing
 `agent_approvals` table with action kind `vault_use` and the tool returns a
 clear "waiting on you" result — no hang. Approving (existing agents RPCs)
@@ -54,10 +58,31 @@ was involved, so a retry succeeds. Rejecting leaves the policy untouched.
 (e.g. the integrations gateway): it returns a decrypted field by name and is
 never exposed through MCP or RPC.
 
+Accounts reference vault items without copying their encrypted identities. The
+legacy backfill reads metadata only and preserves item ids and encrypted
+bodies. Account lookups filter by project, including direct id lookups; an
+unfiled caller sees only all-project accounts.
+
+CLI process exposure uses separate revision-bound grants, including for owner
+threads. It reuses `vault_use` approvals with a `processExposure` payload; this
+branch must never update the browser policy. Approval grants this thread by
+default, or explicitly this agent in this project. Scheduled runs may reuse
+that agent grant, while a child remains bounded by every ancestor's live
+bindings and grants. Changing a token requires new approval. Removing access
+blocks future delivery; existing processes retain their copies until stopped,
+and upstream revocation is needed to invalidate captured copies.
+
+Private account connections bind the service, project and intended CLI use
+server-side. Vault storage and association commit together before the private
+receipt is removed, so storage failures remain retryable. CLI verification
+uses a replacement environment and private empty configuration directories;
+provider-native credential files are neither imported nor cloned.
+
 ## Scrubbing and the preview_evaluate trap
 
-Any string that equals a stored secret value (length ≥ 6) must not reach a
-model. All vault field values are cached in memory only (loaded lazily,
+Exact stored secret values (length ≥ 6) are scrubbed from tool results.
+This is an output guard, not a boundary against an agent already authorized
+to read a process token. All vault field values are cached in memory only (loaded lazily,
 invalidated on writes) and `McpToolAccess` redacts every MCP tool result
 against them before serialization. That covers terminal output
 (`terminal_run`/`terminal_read`) and other tool output as a second layer.
@@ -74,3 +99,12 @@ are also scrubbed in the shapes a page echoes them: the number digits-only or
 grouped in fours, and the expiry as `MM/YYYY`; the CVC and `MM/YY` expiry are
 below the length floor, so they are scrubbed as whole tokens only (never
 inside a longer number).
+
+Delivered process values and their base64, URL-encoded and JSON-escaped forms
+stay registered for the server lifetime, including old revisions after
+replacement/deletion. This deliberately outlives a PTY: descendants and retained
+output may outlive it. Account terminals also redact across PTY chunk boundaries
+before output enters events or persisted history. Tokens are resolved after
+provider environment configuration and overlay only the selected terminal's
+environment; they never enter settings or launch arguments. Provider-native
+shell delivery is separate work because provider sessions can share threads.

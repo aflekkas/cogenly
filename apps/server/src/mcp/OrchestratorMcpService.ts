@@ -1,3 +1,4 @@
+import * as AccountConnections from "../accounts/AccountConnections.ts";
 import {
   CommandId,
   type RunId,
@@ -926,6 +927,7 @@ const make = Effect.gen(function* () {
       : Effect.succeed(project.defaultModelSelection);
   const secretRequests = yield* SecretRequests.SecretRequests;
   const vault = yield* Vault.Vault;
+  const accountConnections = yield* AccountConnections.AccountConnections;
 
   const requireCapability = (scope: McpInvocationScope) =>
     scope.capabilities.has("orchestration")
@@ -1782,6 +1784,16 @@ const make = Effect.gen(function* () {
             "Asking for a secret requires an active run owned by this MCP provider session.",
           );
         }
+        if (input.saveToAccount && input.saveToVault)
+          return yield* failure(
+            "invalid_request",
+            "Choose saveToAccount or saveToVault, not both.",
+          );
+        const accountTarget = input.saveToAccount
+          ? yield* accountConnections
+              .describe(threadScope.thread, input.saveToAccount.connectionId)
+              .pipe(Effect.mapError((cause) => failure("invalid_request", cause.message)))
+          : undefined;
         const runId = run.id;
         const nodeId = run.rootNodeId;
         // The answer is consumed when it is stored, so a taken name must fail
@@ -1806,6 +1818,48 @@ const make = Effect.gen(function* () {
         const turnItemId = TurnItemId.make(
           `turn-item:secret-request:${stablePart(threadId)}:${stablePart(key)}`,
         );
+        yield* accountConnections
+          .bindSecretRequest(threadScope.thread, turnItemId, input.saveToAccount?.connectionId)
+          .pipe(Effect.mapError((cause) => failure("invalid_request", cause.message)));
+        if (accountTarget?.connection.accountId && accountTarget.connection.credentialId)
+          return {
+            status: "saved" as const,
+            accountId: accountTarget.connection.accountId,
+            credentialId: accountTarget.connection.credentialId,
+            connectionId: accountTarget.connection.connectionId,
+          };
+        if (input.saveToAccount) {
+          // Recover a failed storage transfer even if the original run ended.
+          // The immutable card target was checked above; only a saved answer may move.
+          const previous = yield* threadManagement
+            .getThreadRecords(threadId, ["turnItems"], {
+              turnItemTypes: ["secret_request"],
+              messageRoles: [],
+            })
+            .pipe(
+              Effect.mapError(() =>
+                failure("orchestration_error", "Unable to read the private account request."),
+              ),
+            );
+          const card = previous.turnItems.find((item) => item.id === turnItemId);
+          if (card?.type === "secret_request" && card.secretStatus === "saved") {
+            const saved = yield* secretRequests.savedRef({ threadId, turnItemId });
+            if (Option.isNone(saved))
+              return yield* failure(
+                "orchestration_error",
+                "The private answer is no longer available. Ask again with a new clientRequestId.",
+              );
+            const connection = yield* accountConnections
+              .capture(threadScope.thread, input.saveToAccount.connectionId, saved.value)
+              .pipe(Effect.mapError((cause) => failure("orchestration_error", cause.message)));
+            return {
+              status: "saved" as const,
+              accountId: connection.accountId!,
+              credentialId: connection.credentialId!,
+              connectionId: connection.connectionId,
+            };
+          }
+        }
         const record = (secretStatus: "pending" | "cancelled") =>
           threadManagement
             .dispatch({
@@ -1819,8 +1873,8 @@ const make = Effect.gen(function* () {
               runId,
               nodeId,
               turnItemId,
-              label: input.label,
-              reason: input.reason,
+              label: accountTarget?.label ?? input.label,
+              reason: accountTarget ? `${accountTarget.reason} ${input.reason}` : input.reason,
               ...(input.placeholder === undefined ? {} : { placeholder: input.placeholder }),
               secretStatus,
             })
@@ -1912,6 +1966,17 @@ const make = Effect.gen(function* () {
             "orchestration_error",
             "The user saved the secret, but it could not be read. Ask again with a new clientRequestId.",
           );
+        }
+        if (input.saveToAccount) {
+          const connection = yield* accountConnections
+            .capture(threadScope.thread, input.saveToAccount.connectionId, secretRef.value)
+            .pipe(Effect.mapError((cause) => failure("orchestration_error", cause.message)));
+          return {
+            status,
+            accountId: connection.accountId!,
+            credentialId: connection.credentialId!,
+            connectionId: connection.connectionId,
+          };
         }
         if (input.saveToVault) {
           // The private answer lands as a vault item instead of a one-use
@@ -2764,6 +2829,7 @@ export const layer: Layer.Layer<
   | ScheduledTaskService.ScheduledTaskService
   | ProjectService.ProjectService
   | SecretRequests.SecretRequests
+  | AccountConnections.AccountConnections
   | Vault.Vault
   | ServerSettings.ServerSettingsService
 > = Layer.effect(OrchestratorMcpService, make);

@@ -35,6 +35,17 @@ export const AgentApprovalAction = Schema.Union([
       field: VaultField,
       domain: Schema.NullOr(Schema.String),
       threadId: Schema.NullOr(ThreadId),
+      /** Distinct permission from browser fill; never grants the legacy vault policy. */
+      processExposure: Schema.optional(
+        Schema.Struct({
+          accountId: TrimmedNonEmptyString,
+          credentialId: TrimmedNonEmptyString,
+          credentialRevision: Schema.Int,
+          threadId: ThreadId,
+          projectKey: TrimmedNonEmptyString,
+          message: Schema.Literal("The agent and the commands it runs can read this token."),
+        }),
+      ),
     }),
   }),
   Schema.Struct({
@@ -65,7 +76,7 @@ export type AgentApprovalAction = typeof AgentApprovalAction.Type;
 export const AgentApprovalStatus = Schema.Literals(["pending", "approved", "rejected", "expired"]);
 export const AgentApproval = Schema.Struct({
   id: TrimmedNonEmptyString,
-  agentId: AgentId,
+  agentId: Schema.NullOr(AgentId),
   action: AgentApprovalAction,
   actionKind: Schema.Literals([
     "start_work",
@@ -93,7 +104,10 @@ export const AgentApprovalListInput = Schema.Struct({
   status: Schema.optional(AgentApprovalStatus),
 });
 export const AgentApprovalListResult = Schema.Struct({ approvals: Schema.Array(AgentApproval) });
-export const AgentApprovalKey = Schema.Struct({ id: TrimmedNonEmptyString });
+export const AgentApprovalKey = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  accountScope: Schema.optional(Schema.Literals(["thread", "agent_project"])),
+});
 export const AgentApprovalResult = Schema.Struct({ approval: AgentApproval });
 export const AgentStartWorkResult = Schema.Struct({
   threadId: Schema.NullOr(ThreadId),

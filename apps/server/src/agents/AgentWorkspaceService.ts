@@ -1,3 +1,4 @@
+import * as AccountAccess from "../accounts/AccountAccess.ts";
 import * as Access from "./AgentAccessScope.ts";
 import {
   AgentError,
@@ -114,7 +115,10 @@ export class AgentWorkspaceService extends Context.Service<
     readonly listApprovals: (
       input: typeof AgentApprovalListInput.Type,
     ) => Effect.Effect<{ approvals: ReadonlyArray<AgentApproval> }, AgentError>;
-    readonly approve: (id: string) => Effect.Effect<{ approval: AgentApproval }, AgentError>;
+    readonly approve: (
+      id: string,
+      accountScope?: "thread" | "agent_project",
+    ) => Effect.Effect<{ approval: AgentApproval }, AgentError>;
     readonly reject: (id: string) => Effect.Effect<{ approval: AgentApproval }, AgentError>;
     readonly startWork: (
       input: AgentStartWorkInput,
@@ -137,6 +141,7 @@ const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const store = yield* Store.AgentStore;
   const agents = yield* Agents.AgentService;
+  const accountAccess = yield* Effect.serviceOption(AccountAccess.AccountAccess);
   const work = yield* Work.WorkHandoffService;
   const schedules = yield* Schedules.ScheduledTaskService;
   const canSee = (scope: Access.ResolvedAgentAccess, item: Commitment) =>
@@ -283,6 +288,8 @@ const make = Effect.gen(function* () {
     }).pipe(Effect.mapError(wrap));
   const requestApproval = (agentId: AgentId, action: AgentApprovalAction, actor?: AgentActor) =>
     Effect.gen(function* () {
+      if (action.actionKind === "vault_use" && action.payload.processExposure !== undefined)
+        return yield* fail("Process exposure approvals must be requested through Accounts.");
       const agent = actor ? (yield* current(actor)).agent : yield* store.get(agentId);
       if (agent.id !== agentId)
         return yield* fail("An agent cannot request an action for another agent.");
@@ -490,7 +497,7 @@ const make = Effect.gen(function* () {
         Effect.map((approvals) => ({ approvals })),
         Effect.mapError(wrap),
       ),
-    approve: (id) =>
+    approve: (id, accountScope = "thread") =>
       lock
         .withPermits(1)(
           Effect.gen(function* () {
@@ -498,6 +505,22 @@ const make = Effect.gen(function* () {
             if (approval.status === "approved") return { approval };
             if (approval.status !== "pending")
               return yield* fail("This approval is no longer pending.");
+            if (
+              approval.action.actionKind === "vault_use" &&
+              approval.action.payload.processExposure !== undefined
+            ) {
+              if (accountAccess._tag === "None") return yield* fail("Accounts are unavailable.");
+              yield* sql.withTransaction(
+                Effect.gen(function* () {
+                  yield* accountAccess.value
+                    .approve(id, accountScope)
+                    .pipe(Effect.mapError((cause) => fail(cause.message)));
+                  yield* sql`UPDATE agent_approvals SET status = 'approved', decided_at = ${yield* now}, decided_by = 'user' WHERE id = ${id} AND status = 'pending'`;
+                }),
+              );
+              return { approval: yield* getApproval(id) };
+            }
+            if (approval.agentId === null) return yield* fail("An agent approval needs an agent.");
             const agent = yield* store.get(approval.agentId);
             let resultThreadId: ThreadId | null = null;
             const action = approval.action;

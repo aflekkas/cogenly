@@ -81,6 +81,9 @@ const vaultItemFields = {
 export const VaultItemMetadata = Schema.Struct({
   id: VaultItemId,
   ...vaultItemFields,
+  /** Optional association; encrypted identities are never copied into it. */
+  accountId: Schema.optional(TrimmedNonEmptyString),
+  credentialId: Schema.optional(TrimmedNonEmptyString),
   /** Names of secret fields present, e.g. ["username", "password", "totp"]. */
   fields: Schema.Array(VaultField),
   /**
@@ -140,6 +143,13 @@ export const VaultUsageEntry = Schema.Struct({
   threadId: Schema.NullOr(ThreadId),
   agentId: Schema.NullOr(AgentId),
   action: TrimmedNonEmptyString,
+  credentialId: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  credentialRevision: Schema.optional(Schema.NullOr(Schema.String)),
+  environmentId: Schema.optional(Schema.NullOr(Schema.String)),
+  projectId: Schema.optional(Schema.NullOr(Schema.String)),
+  deliveryMethod: Schema.optional(Schema.NullOr(Schema.String)),
+  terminalId: Schema.optional(Schema.NullOr(Schema.String)),
+  providerInstanceId: Schema.optional(Schema.NullOr(Schema.String)),
   domain: Schema.NullOr(Schema.String),
   at: IsoDateTime,
   outcome: TrimmedNonEmptyString,

@@ -1,4 +1,5 @@
 import {
+  AccountId,
   AuthAccessWriteScope,
   AuthPeerScopes,
   AuthStandardClientScopes,
@@ -587,4 +588,45 @@ it.effect("project folders do not let read-only clients move threads or change m
       AuthOrchestrationReadScope,
     );
   }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "allows account metadata reads but blocks account disconnection before the handler without operate permission",
+  () =>
+    Effect.gen(function* () {
+      const tested = [WS_METHODS.accountsList, WS_METHODS.accountsDisconnect] as const;
+      const group = WsRpcGroup.omit(
+        ...[...WsRpcGroup.requests.keys()].filter(
+          (tag): tag is Exclude<keyof typeof RPC_REQUIRED_SCOPES, (typeof tested)[number]> =>
+            !(tested as ReadonlyArray<string>).includes(tag),
+        ),
+      );
+      let mutations = 0;
+      const client = yield* RpcTest.makeClient(group).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            group.toLayerHandler(WS_METHODS.accountsList, () =>
+              Effect.succeed({ accounts: [], statuses: [], services: [] }),
+            ),
+            group.toLayerHandler(WS_METHODS.accountsDisconnect, () =>
+              Effect.sync(() => {
+                mutations += 1;
+                return { disconnected: true };
+              }),
+            ),
+            RpcAuthorization.layer([AuthOrchestrationReadScope]),
+          ),
+        ),
+      );
+      expect((yield* client[WS_METHODS.accountsList]({ scopeProjectId: null })).accounts).toEqual(
+        [],
+      );
+      expect(
+        yield* client[WS_METHODS.accountsDisconnect]({
+          id: AccountId.make("account:test"),
+          scopeProjectId: null,
+        }).pipe(Effect.flip),
+      ).toMatchObject({ requiredPermission: AuthOrchestrationOperateScope });
+      expect(mutations).toBe(0);
+    }).pipe(Effect.scoped),
 );

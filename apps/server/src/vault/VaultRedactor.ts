@@ -69,3 +69,35 @@ export const redactShortValue = <A>(value: A, secrets: Iterable<string>): A => {
   };
   return walk(value) as A;
 };
+
+/** A PTY may split a token across data callbacks. Hold only a possible secret
+ * prefix so raw values never enter terminal events, history or disk logs. */
+export const processOutputRedactor = (values: Iterable<string>) => {
+  const secrets = orderedSecrets(values);
+  let pending = "";
+  return (chunk: string, final = false): string => {
+    const input = pending + chunk;
+    pending = "";
+    let output = "";
+    let index = 0;
+    while (index < input.length) {
+      const rest = input.slice(index);
+      if (
+        !final &&
+        secrets.some((secret) => rest.length < secret.length && secret.startsWith(rest))
+      ) {
+        pending = rest;
+        break;
+      }
+      const match = secrets.find((secret) => input.startsWith(secret, index));
+      if (match) {
+        output += VAULT_REDACTION;
+        index += match.length;
+      } else {
+        output += input[index];
+        index += 1;
+      }
+    }
+    return output;
+  };
+};

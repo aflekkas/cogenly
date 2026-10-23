@@ -1,3 +1,5 @@
+import * as AccountConnections from "./accounts/AccountConnections.ts";
+import * as AccountAccess from "./accounts/AccountAccess.ts";
 import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import type * as HttpClient from "effect/http/HttpClient";
 import type * as CodexInstallation from "./provider/CodexInstallation.ts";
@@ -137,6 +139,7 @@ import * as ThreadMessageIntake from "./orchestration-v2/ThreadMessageIntake.ts"
 import * as ScheduledTasks from "./scheduledTasks/ScheduledTaskService.ts";
 import * as SecretRequests from "./secrets/SecretRequests.ts";
 import * as Vault from "./vault/Vault.ts";
+import * as Accounts from "./accounts/Accounts.ts";
 import {
   archivedShellStreamItemFromThreadShell,
   buildActiveShellSnapshot,
@@ -1086,6 +1089,9 @@ const makeWsRpcHandlers = (
     const scheduledTasks = yield* ScheduledTasks.ScheduledTaskService;
     const secretRequests = yield* SecretRequests.SecretRequests;
     const vault = yield* Vault.Vault;
+    const accounts = yield* Accounts.Accounts;
+    const accountConnections = yield* AccountConnections.AccountConnections;
+    const accountAccess = yield* AccountAccess.AccountAccess;
     const pullRequests = yield* PullRequestService.PullRequestService;
     const reviewGuides = yield* PullRequestReviewGuideService.PullRequestReviewGuideService;
     const pullRequestSync = yield* PullRequestSyncReactor.PullRequestSyncReactor;
@@ -1665,7 +1671,7 @@ const makeWsRpcHandlers = (
       [WS_METHODS.agentsApprovalsList]: (input) => agentWorkspace.listApprovals(input),
       [WS_METHODS.agentsRequestApproval]: (input) =>
         agentWorkspace.requestApproval(input.agentId, input.action),
-      [WS_METHODS.agentsApprove]: (input) => agentWorkspace.approve(input.id),
+      [WS_METHODS.agentsApprove]: (input) => agentWorkspace.approve(input.id, input.accountScope),
       [WS_METHODS.agentsReject]: (input) => agentWorkspace.reject(input.id),
       [WS_METHODS.agentsStartWork]: (input) => agentWorkspace.startWork(input),
       [WS_METHODS.agentsActivity]: (input) => agentWorkspace.activity(input.agentId),
@@ -1738,6 +1744,16 @@ const makeWsRpcHandlers = (
         Effect.annotateCurrentSpan({ "scheduled_task.id": input.id }).pipe(
           Effect.andThen(scheduledTasks.rotateWebhookToken(input)),
         ),
+      [WS_METHODS.accountsConnect]: (input) =>
+        accountConnections.connectForThread(input.threadId, input.connection),
+      [WS_METHODS.accountsUse]: (input) =>
+        accountAccess.setThreadBindingForThread(input.threadId, input),
+      [WS_METHODS.accountsRemoveAccess]: (input) => accountAccess.removeAccess(input),
+      [WS_METHODS.accountsList]: (input) => accounts.list(input),
+      [WS_METHODS.accountsGet]: (input) => accounts.get(input),
+      [WS_METHODS.accountsCreate]: (input) => accounts.create(input),
+      [WS_METHODS.accountsUpdate]: (input) => accounts.update(input),
+      [WS_METHODS.accountsDisconnect]: (input) => accounts.disconnect(input),
       [WS_METHODS.vaultList]: (input) => vault.list(input),
       [WS_METHODS.vaultCreate]: (input) => vault.create(input),
       [WS_METHODS.vaultUpdate]: (input) => vault.update(input),
@@ -2785,6 +2801,9 @@ type WsRequestServices =
   | ReviewService.ReviewService
   | ScheduledTasks.ScheduledTaskService
   | SecretRequests.SecretRequests
+  | AccountAccess.AccountAccess
+  | AccountConnections.AccountConnections
+  | Accounts.Accounts
   | Vault.Vault
   | ServerConfig.ServerConfig
   | ServerEnvironment.ServerEnvironment

@@ -647,6 +647,10 @@ export const OrchestratorMcpRequestSecretInput = Schema.Struct({
     description:
       "Reuse when retrying a call that lost its result, so the user sees one card and its answer is returned again. Use a new id to ask again after timed_out or cancelled.",
   }),
+  saveToAccount: Schema.optional(Schema.Struct({ connectionId: TrimmedNonEmptyString })).annotate({
+    description:
+      "Store the private answer as the API token for a server-owned pending account connection from account_connect. Service, project, kind and intended use are fixed by that connection. Cannot be combined with saveToVault.",
+  }),
   saveToVault: Schema.optional(
     Schema.Struct({
       name: TrimmedNonEmptyString,
@@ -662,11 +666,17 @@ export type OrchestratorMcpRequestSecretInput = typeof OrchestratorMcpRequestSec
 
 export const OrchestratorMcpRequestSecretResult = Schema.Union([
   Schema.Struct({
-    status: Schema.Literal("saved").annotate({ description: "secretRef holds the value." }),
+    status: Schema.Literal("saved").annotate({
+      description:
+        "The private answer was stored; account/vault targets return identifiers instead of a secretRef.",
+    }),
     secretRef: Schema.optional(SecretRef).annotate({
       description:
-        "Pass it to a tool that accepts a secretRef; it works once, and you never see the value. Absent when saveToVault stored the value instead.",
+        "Pass it to a tool that accepts a secretRef; it works once, and you never see the value. Absent when saveToVault or saveToAccount stored the value instead.",
     }),
+    accountId: Schema.optional(TrimmedNonEmptyString),
+    credentialId: Schema.optional(TrimmedNonEmptyString),
+    connectionId: Schema.optional(TrimmedNonEmptyString),
     vaultItemId: Schema.optional(TrimmedNonEmptyString).annotate({
       description: "Vault item created from the answer when saveToVault was requested.",
     }),

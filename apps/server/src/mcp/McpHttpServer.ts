@@ -1,3 +1,6 @@
+import { AccountsToolkit } from "./toolkits/accounts/tools.ts";
+import * as AccountsHandlers from "./toolkits/accounts/handlers.ts";
+import * as AccountsMcp from "./AccountsMcpService.ts";
 import * as SearchMcp from "../search/Mcp.ts";
 import { ProjectLabelsToolkit } from "./toolkits/projectLabels/tools.ts";
 import * as ProjectLabelsHandlers from "./toolkits/projectLabels/handlers.ts";
@@ -1007,6 +1010,9 @@ export const layer = Layer.mergeAll(
   ),
   layerThreadToolkit,
   toolkitRegistration(VaultToolkit, VaultHandlers.layer),
+  toolkitRegistration(AccountsToolkit, AccountsHandlers.layer).pipe(
+    Layer.provide(AccountsMcp.layer),
+  ),
   layerAttachmentToolkit,
   layerProjectRegistration,
   layerProjectLabelsRegistration,
