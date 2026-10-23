@@ -25,6 +25,7 @@ import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
+import * as Stream from "effect/Stream";
 
 import * as Credentials from "./IntegrationCredentials.ts";
 
@@ -38,6 +39,8 @@ const failure =
 
 export const DEFAULT_TOOL_CACHE_TTL_MS = 60_000;
 export const DEFAULT_UPSTREAM_TIMEOUT_MS = 10_000;
+/** Larger replies are refused rather than buffered. */
+export const DEFAULT_MAX_UPSTREAM_BODY_BYTES = 4 * 1024 * 1024;
 const MAX_UPSTREAM_MESSAGE_CHARS = 500;
 
 const CREDENTIAL_REF = /\{\{credential:([^}]*)\}\}/g;
@@ -208,6 +211,7 @@ export interface IntegrationWriteOptions {
 export interface IntegrationsOptions {
   readonly toolCacheTtlMs?: number;
   readonly upstreamTimeoutMs?: number;
+  readonly maxUpstreamBodyBytes?: number;
 }
 
 export class Integrations extends Context.Service<
@@ -305,6 +309,7 @@ const make = (options: IntegrationsOptions = {}) =>
     const credentials = yield* Credentials.IntegrationCredentials;
     const ttlMs = options.toolCacheTtlMs ?? DEFAULT_TOOL_CACHE_TTL_MS;
     const timeoutMs = options.upstreamTimeoutMs ?? DEFAULT_UPSTREAM_TIMEOUT_MS;
+    const maxBodyBytes = options.maxUpstreamBodyBytes ?? DEFAULT_MAX_UPSTREAM_BODY_BYTES;
     const cache = yield* Ref.make(new Map<string, CachedTools>());
     const requestIds = yield* Ref.make(0);
     const now = DateTime.now.pipe(Effect.map(DateTime.formatIso));
@@ -399,9 +404,36 @@ const make = (options: IntegrationsOptions = {}) =>
         if (sessionId !== undefined) {
           request = HttpClientRequest.setHeader(request, "mcp-session-id", sessionId);
         }
-        const response = yield* client.execute(request).pipe(
-          // Fetch otherwise forwards custom secret headers across redirects.
-          Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }),
+        // The timeout covers the whole exchange, so a server that sends
+        // headers and then trickles or stalls its body is still cut off.
+        const exchange = Effect.gen(function* () {
+          const response = yield* client.execute(request).pipe(
+            // Fetch otherwise forwards custom secret headers across redirects.
+            Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }),
+          );
+          const declared = Number(response.headers["content-length"]);
+          if (Number.isFinite(declared) && declared > maxBodyBytes)
+            return yield* new IntegrationError({ operation: method, reason: "upstream_error" });
+          const chunks: Array<Uint8Array> = [];
+          let size = 0;
+          yield* response.stream.pipe(
+            Stream.mapError(
+              (cause) =>
+                new IntegrationError({ operation: method, reason: "upstream_error", cause }),
+            ),
+            Stream.runForEach((chunk) => {
+              size += chunk.byteLength;
+              if (size > maxBodyBytes)
+                return Effect.fail(
+                  new IntegrationError({ operation: method, reason: "upstream_error" }),
+                );
+              chunks.push(chunk);
+              return Effect.void;
+            }),
+          );
+          return { response, text: new TextDecoder().decode(Buffer.concat(chunks)) };
+        });
+        const { response, text } = yield* exchange.pipe(
           Effect.timeout(Duration.millis(timeoutMs)),
           Effect.mapError((cause) =>
             isError(cause)
@@ -416,11 +448,6 @@ const make = (options: IntegrationsOptions = {}) =>
                     reason: "upstream_unreachable",
                     cause,
                   }),
-          ),
-        );
-        const text = yield* response.text.pipe(
-          Effect.mapError(
-            (cause) => new IntegrationError({ operation: method, reason: "upstream_error", cause }),
           ),
         );
         if (response.status < 200 || response.status >= 300) {

@@ -41,6 +41,8 @@ interface FakeUpstream {
   readonly close: () => Effect.Effect<void>;
 }
 
+let trickleStarted: (() => void) | undefined;
+
 /** A real in-process HTTP MCP server speaking streamable-HTTP JSON-RPC. */
 const fakeUpstreamWith = (redirectTo?: string) =>
   Effect.acquireRelease(
@@ -87,6 +89,17 @@ const fakeUpstreamWith = (redirectTo?: string) =>
                 ],
               },
             });
+          } else if (body.method === "tools/call" && body.params?.name === "huge") {
+            reply({ jsonrpc: "2.0", id: body.id, result: { text: "x".repeat(4096) } });
+          } else if (body.method === "tools/call" && body.params?.name === "huge-chunked") {
+            // No content-length: only counting the streamed bytes catches it.
+            response.writeHead(200, { "content-type": "application/json" });
+            for (let chunk = 0; chunk < 4; chunk += 1) response.write(" ".repeat(1024));
+            response.end(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: {} }));
+          } else if (body.method === "tools/call" && body.params?.name === "trickle") {
+            // Headers and a first byte, then nothing: the body read must time out.
+            response.writeHead(200, { "content-type": "application/json" });
+            response.write("{", () => trickleStarted?.());
           } else if (body.method === "tools/call" && body.params?.name === "hang") {
             // Never answers: the gateway timeout must map this.
           } else if (body.method === "tools/call" && body.params?.name === "fail") {
@@ -399,6 +412,35 @@ describe("Integrations gateway", () => {
           expect(JSON.stringify(timedOut.failure)).toContain("upstream_timeout");
         }
       }).pipe(Effect.provide(layerWith({ upstreamTimeoutMs: 50 }))),
+    ),
+  );
+
+  it.effect("refuses oversized replies and times out a body that stalls", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* runMigrations();
+        const upstream = yield* fakeUpstream;
+        const service = yield* Integrations.Integrations;
+        yield* service.create(createInput(upstream.url, "biggw"));
+        for (const tool of ["huge", "huge-chunked"]) {
+          const failed = yield* service
+            .callTool(IntegrationName.make("biggw"), tool, {}, null)
+            .pipe(Effect.result);
+          expect(failed._tag).toBe("Failure");
+          if (failed._tag === "Failure")
+            expect(JSON.stringify(failed.failure)).toContain("upstream_error");
+        }
+        const started = new Promise<void>((resolve) => (trickleStarted = resolve));
+        const fiber = yield* service
+          .callTool(IntegrationName.make("biggw"), "trickle", {}, null)
+          .pipe(Effect.result, Effect.forkChild);
+        yield* Effect.promise(() => started);
+        yield* TestClock.adjust(Duration.millis(100));
+        const timedOut = yield* Fiber.join(fiber);
+        expect(timedOut._tag).toBe("Failure");
+        if (timedOut._tag === "Failure")
+          expect(JSON.stringify(timedOut.failure)).toContain("upstream_timeout");
+      }).pipe(Effect.provide(layerWith({ upstreamTimeoutMs: 50, maxUpstreamBodyBytes: 2048 }))),
     ),
   );
 
