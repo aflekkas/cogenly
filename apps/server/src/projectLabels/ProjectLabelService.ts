@@ -582,7 +582,7 @@ const make = Effect.gen(function* () {
           const rows = yield* sql<{ readonly worktree_path: string }>`
             SELECT json_extract(payload_json, '$.worktreePath') AS worktree_path
             FROM orchestration_v2_projection_threads
-            WHERE deleted_at IS NULL AND archived_at IS NULL
+            WHERE deleted_at IS NULL
               AND json_extract(payload_json, '$.worktreePath') IS NOT NULL
           `.pipe(Effect.mapError(failure("update")));
           const inside = `${folder.dir}/`;
