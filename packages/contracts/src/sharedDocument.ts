@@ -5,7 +5,13 @@ import { makePeerChannel } from "./machine.ts";
 
 export const SHARED_BATCH_LIMIT = 32;
 export const SHARED_BATCH_BYTES = 256 * 1024;
-export const SHARED_DOCUMENT_BYTES = 96 * 1024;
+/** Canonical remote identity, also used to validate the normalizer's output. */
+export const SharedRepositoryRemote = Schema.String.check(
+  Schema.isPattern(
+    /^[a-z0-9][a-z0-9.-]*\/(?:[a-zA-Z0-9_.~-]|%[a-fA-F0-9]{2})+(?:\/(?:[a-zA-Z0-9_.~-]|%[a-fA-F0-9]{2})+)*$/,
+  ),
+  Schema.makeFilter((value) => value.split("/").every((part) => part !== "." && part !== "..")),
+);
 const Counter = Schema.Int.check(
   Schema.isBetween({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
 );

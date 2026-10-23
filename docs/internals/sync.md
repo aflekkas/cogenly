@@ -11,7 +11,8 @@ stable environment ID. Receiving advances the persisted local clock before the
 next local edit. Collections are fields, so concurrent replacements of a repo
 list or fallback chain choose one whole value. Tombstones are permanent for an
 ID, including against edits with newer clocks. Recreating means a new ID.
-Concurrent moves of one remote between projects choose the greatest repository
+Local captures preserve the domain's checkout bindings; only peer merges reconcile
+competing project documents. Concurrent moves of one remote choose the greatest repository
 field clock across the competing documents. The local checkout binding survives
 that move and a deleted clone becomes a remote-only link.
 
@@ -26,7 +27,7 @@ and cursors together across recovery. There is no log compaction or cursor
 reset protocol yet.
 
 Only the three declared document kinds cross these channels. The receiver
-rejects unknown fields, malformed values, oversized documents/batches, cursor
+rejects unknown fields, malformed values, oversized multi-document batches, cursor
 gaps, implausibly future clocks, forged authorship and ownership changes.
 V1 ownership is fixed after creation: transferring execution needs a separate
 handoff protocol. Existing jobs are backfilled to the local machine before
@@ -34,6 +35,11 @@ scheduling starts; new jobs default to the paired hub. An agent's triggers must
 have the same owner. Reservations, due-work dispatch, event dispatch, webhooks
 and reconciliation enforce ownership. Being offline does not grant another
 machine permission to take over.
+
+Sync uses the domain's text and collection limits. A document exceeding the normal
+batch byte budget travels alone, so a valid configuration cannot wedge a cursor.
+Legacy rows that cannot be captured are logged and skipped during bootstrap;
+capture failure during repository backfill never fails a project read.
 
 Shared repository identity is its remote. Local checkout IDs, absolute paths,
 thread bindings, credentials, run counters and fallback position/reset time do

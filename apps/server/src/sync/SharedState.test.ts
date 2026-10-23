@@ -47,6 +47,40 @@ const batch = (changes: SharedDocumentChange[], after = 0) => ({
   changes,
 });
 describe("SharedState", () => {
+  it.effect("bootstraps good rows even when a legacy row cannot be captured", () =>
+    Effect.gen(function* () {
+      const state = yield* SharedState.SharedState;
+      const sql = yield* SqlClient.SqlClient;
+      for (const [id, name] of [
+        ["label:bad", ""],
+        ["label:good", "Good"],
+      ])
+        yield* sql`INSERT INTO project_labels(label_id,name,created_at,updated_at) VALUES (${id},${name},${project.createdAt},${project.createdAt})`;
+      yield* state.bootstrap;
+      expect((yield* state.get("project", "label:good"))?.fields.name).toBe("Good");
+      expect(yield* state.get("project", "label:bad")).toBeUndefined();
+    }).pipe(Effect.provide(layer)),
+  );
+  it.effect("replays a domain-valid document larger than the normal batch budget", () =>
+    Effect.gen(function* () {
+      const state = yield* SharedState.SharedState;
+      const large = "p".repeat(300_000);
+      yield* state.write("schedule", "task:large", { prompt: large });
+      yield* state.write("project", "label:after", project);
+      const first = yield* state.readBatch(0, peer, true);
+      expect(first.cursor).toBe(1);
+      expect(first.changes[0]?.fields.prompt).toBe(large);
+      const incoming = {
+        ...first.changes[0]!,
+        updatedBy: peer,
+        clocks: { prompt: { wall: 1, logical: 0, node: peer } },
+        id: "task:peer-large",
+      };
+      yield* state.receive(batch([incoming]), peer, false);
+      expect((yield* state.get("schedule", incoming.id))?.fields.prompt).toBe(large);
+      expect((yield* state.readBatch(first.cursor, peer, true)).changes[0]?.id).toBe("label:after");
+    }).pipe(Effect.provide(layer)),
+  );
   it.effect("local agent and schedule captures keep the selected clone", () =>
     Effect.gen(function* () {
       const state = yield* SharedState.SharedState;

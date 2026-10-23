@@ -37,6 +37,18 @@ const seed = Effect.gen(function* () {
 });
 
 describe("local shared document captures", () => {
+  it.effect("a failed lazy capture never makes project reads fail", () =>
+    Effect.gen(function* () {
+      yield* seed;
+      const labels = yield* Labels.ProjectLabelService;
+      const id = (yield* labels.create({ name: "Legacy" })).label.id;
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`INSERT INTO label_repositories(label_id,repository_id) VALUES (${id},'clone-one')`;
+      yield* sql`CREATE TRIGGER reject_capture BEFORE INSERT ON shared_changes BEGIN SELECT RAISE(ABORT,'capture unavailable'); END`;
+      expect((yield* labels.list()).labels[0]?.repositoryIds).toEqual(["clone-one"]);
+      expect((yield* labels.read(id)).label.repositories?.[0]?.remote).toBe("github.com/org/repo");
+    }).pipe(Effect.provide(layer)),
+  );
   it.effect("keeps two local clones of the same remote linked", () =>
     Effect.gen(function* () {
       yield* seed;

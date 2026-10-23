@@ -248,7 +248,9 @@ const make = Effect.gen(function* () {
       const change = yield* decodeChange(row.change_json);
       if (change.updatedBy !== target && (!localOnly || change.updatedBy === environmentId)) {
         const size = new TextEncoder().encode(row.change_json).length;
-        if (bytes + size > SHARED_BATCH_BYTES - 1024) break;
+        // Domain text has no aggregate byte limit. Send a large document alone so
+        // it cannot wedge the cursor, while keeping ordinary coalesced batches small.
+        if (changes.length > 0 && bytes + size > SHARED_BATCH_BYTES - 1024) break;
         changes.push(change);
         bytes += size;
       }
@@ -264,7 +266,8 @@ const make = Effect.gen(function* () {
             onExcessProperty: "error",
           });
           if (
-            new TextEncoder().encode(encodeJson(batch)).length > SHARED_BATCH_BYTES ||
+            (batch.changes.length > 1 &&
+              new TextEncoder().encode(encodeJson(batch)).length > SHARED_BATCH_BYTES) ||
             batch.cursor < batch.after ||
             batch.cursor - batch.after > SHARED_BATCH_LIMIT ||
             batch.changes.length > batch.cursor - batch.after ||
@@ -331,7 +334,17 @@ const make = Effect.gen(function* () {
           ["agent", yield* sql<{ id: string }>`SELECT agent_id AS id FROM agents`],
           ["schedule", yield* sql<{ id: string }>`SELECT task_id AS id FROM scheduled_tasks`],
         ] as const)
-          for (const row of rows) if (!(yield* get(kind, row.id))) yield* capture(kind, row.id);
+          for (const row of rows)
+            yield* Effect.gen(function* () {
+              if (!(yield* get(kind, row.id))) yield* capture(kind, row.id);
+            }).pipe(
+              Effect.catch((error) =>
+                Effect.logWarning("Skipping invalid shared configuration during bootstrap", {
+                  kind,
+                  reason: storage(error).reason,
+                }),
+              ),
+            );
       }),
     )
     .pipe(Effect.mapError(storage));
