@@ -225,7 +225,13 @@ describe("CodexAdapterV2 assistant message streaming", () => {
       assert.equal(completedText, "item final");
       assert.deepEqual(yield* Ref.get(updates), [
         { turnId: "turn-1", itemId: "message-1", text: "item final", completed: true },
-        { turnId: "turn-1", itemId: "message-2", text: "turn final", completed: true },
+        {
+          turnId: "turn-1",
+          itemId: "message-2",
+          text: "turn final",
+          completed: true,
+          cutOff: true,
+        },
       ]);
       yield* Effect.yieldNow;
       yield* TestClock.adjust("50 millis");
@@ -233,6 +239,65 @@ describe("CodexAdapterV2 assistant message streaming", () => {
       assert.equal((yield* Ref.get(updates)).length, 2);
     }),
   );
+
+  it.effect("closes a fragment Codex never completed as interrupted, not as the answer", () =>
+    Effect.gen(function* () {
+      const closings = yield* Ref.make<
+        ReadonlyArray<{ itemId: string; text: string; status: string; recordMessage: boolean }>
+      >([]);
+      const coalescer = yield* makeProviderTextDeltaCoalescer({
+        flushIntervalMs: 50,
+        emit: (update) =>
+          Ref.update(closings, (current) => [
+            ...current,
+            {
+              itemId: update.itemId,
+              text: update.text,
+              ...CodexAdapterV2.codexAgentMessageClosing(update, false),
+            },
+          ]),
+      });
+
+      // A steer restarts sampling mid-sentence: Codex drops this item and
+      // never sends item/completed for it.
+      yield* coalescer.append({ turnId: "turn-1", itemId: "fragment", delta: "I'll combine" });
+      yield* coalescer.append({ turnId: "turn-1", itemId: "fragment", delta: " the booking" });
+      yield* coalescer.append({ turnId: "turn-1", itemId: "answer", delta: "Deleted both" });
+      yield* coalescer.complete({
+        turnId: "turn-1",
+        itemId: "answer",
+        finalText: "Deleted both Slack updates.",
+      });
+      // turn/completed
+      yield* coalescer.flushTurn("turn-1");
+
+      assert.deepEqual(yield* Ref.get(closings), [
+        {
+          itemId: "answer",
+          text: "Deleted both Slack updates.",
+          status: "completed",
+          recordMessage: true,
+        },
+        {
+          itemId: "fragment",
+          text: "I'll combine the booking",
+          status: "interrupted",
+          recordMessage: false,
+        },
+      ]);
+    }),
+  );
+
+  it("keeps a fragment in the transcript when the turn itself was cut short", () => {
+    assert.deepEqual(
+      CodexAdapterV2.codexAgentMessageClosing({ completed: true, cutOff: true }, true),
+      { status: "interrupted", recordMessage: true },
+    );
+    assert.deepEqual(CodexAdapterV2.codexAgentMessageClosing({ completed: false }, true), {
+      status: "running",
+      recordMessage: false,
+    });
+  });
 
   it.effect("retains buffered text until completion updates are emitted", () =>
     Effect.gen(function* () {
@@ -268,7 +333,13 @@ describe("CodexAdapterV2 assistant message streaming", () => {
 
       assert.equal(completedText, "item final");
       assert.deepEqual(yield* Ref.get(updates), [
-        { turnId: "turn-1", itemId: "message-1", text: "turn final", completed: true },
+        {
+          turnId: "turn-1",
+          itemId: "message-1",
+          text: "turn final",
+          completed: true,
+          cutOff: true,
+        },
         { turnId: "turn-1", itemId: "message-2", text: "item final", completed: true },
       ]);
     }),
