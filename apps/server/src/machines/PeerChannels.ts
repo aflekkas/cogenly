@@ -49,7 +49,7 @@ export const encodePeerPayload = <C extends PeerChannel>(
 /** Decode a channel reply. */
 export const decodePeerResult = <C extends PeerChannel>(
   channel: C,
-  value: Schema.Json,
+  value: unknown,
 ): Effect.Effect<C["success"]["Type"], PeerCallError> =>
   Schema.decodeUnknownEffect(json(channel.success))(value).pipe(
     Effect.mapError(() => new PeerCallError({ channel: channel.name, reason: "invalid-payload" })),
