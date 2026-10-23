@@ -89,7 +89,7 @@ const tailscaleServePortFlag = Flag.Int("tailscale-serve-port").pipe(
   Flag.optional,
 );
 
-// Trace file location, shared by the server and `t3 trace summary`.
+// Trace file location, shared by the server and `cogenly trace summary`.
 export const traceFileConfig = Config.String("COGENLY_TRACE_FILE").pipe(
   Config.option,
   Config.map(Option.getOrUndefined),
@@ -160,6 +160,9 @@ const EnvServerConfig = Config.all({
   logWebSocketEvents: Config.Boolean("COGENLY_LOG_WS_EVENTS").pipe(
     Config.option,
     Config.map(Option.getOrUndefined),
+  ),
+  peerIngress: Config.Literals(["loopback", "disabled"], "COGENLY_PEER_INGRESS").pipe(
+    Config.withDefault("loopback"),
   ),
   tailscaleServeEnabled: Config.Boolean("COGENLY_TAILSCALE_SERVE").pipe(
     Config.option,
@@ -493,6 +496,7 @@ export const resolveServerConfig = (
       resourceMonitorPath,
       autoBootstrapProjectFromCwd,
       logWebSocketEvents,
+      peerIngress: env.peerIngress,
       tailscaleServeEnabled,
       tailscaleServePort,
       serverTimeZone,

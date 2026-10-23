@@ -2,7 +2,7 @@
 
 Each connection joins a client to one environment over HTTP and WebSocket. The
 environment owns providers, execution, files, and durable state. Direct access,
-Tailscale, SSH, and T3 Connect change how the client reaches that server; they do
+Tailscale, SSH, and Cogenly Connect change how the client reaches that server; they do
 not introduce another execution model. See
 [remote access](../user/remote-access.md) for setup.
 
@@ -10,9 +10,14 @@ not introduce another execution model. See
 
 An environment keeps its ID across server restarts and endpoint changes. Saved
 connections are local to a client profile; the server's identity and state are
-not. A repository identity can correlate clones across environments, but never
-routes work between them. A project and its threads belong to one environment.
-The canonical key follows the `upstream` remote when one exists, so pull request
+not. Separately, [machine peer links](./machines.md) let an admin pair servers
+under one hub. A spoke stores its own peer credential and dials the hub; that
+server-owned link does not use the client's saved connection catalog. It
+currently carries presence and typed channels, with no project or thread
+replication or remote execution. Projects and threads still execute and persist
+in their original environment.
+
+A repository identity correlates clones across environments. The canonical key follows the `upstream` remote when one exists, so pull request
 features target the repository a fork tracks. A fork also reports its own
 `origin`, and clients group and label by that, so a fork never collapses into a
 checkout of its upstream.
@@ -34,7 +39,7 @@ the first that works. Each direct route is first checked with the public
 descriptor, so a saved LAN address that a different machine answers on another
 network receives no credential. That check is not proof of a working route:
 when every route stays silent, each is still tried. A route that fails to
-connect, including a blocked one such as a signed-out T3 Connect, moves on to
+connect, including a blocked one such as a signed-out Cogenly Connect, moves on to
 the next; only an incompatible server stops the walk, because it is the same
 server on every route. While connected over a later route the
 [supervisor](../../packages/client-runtime/src/connection/supervisor.ts)
@@ -45,7 +50,7 @@ held back for a cooldown so a flaky network cannot bounce the connection.
 
 A connected server reports the LAN and tailnet addresses it is bound to, and the
 client saves them as learned routes. A learned route reuses the credential of
-the route it was learned over: the T3 Connect access token, which is not bound
+the route it was learned over: the Cogenly Connect access token, which is not bound
 to an origin because each DPoP proof names the URL it signs, or the paired
 bearer token. Learned routes the server stops reporting are dropped, which is
 how a changed LAN address replaces the old one; routes the user saved are never
@@ -73,7 +78,7 @@ parameter would disclose it to the wrong origin.
 Tailscale supplies an endpoint for ordinary pairing, so it needs no separate
 environment type. Authentication remains the environment's responsibility for
 every route. See [environment authentication](./environment-auth.md) and the
-[T3 Connect trust boundary](./t3-connect.md).
+[Cogenly Connect trust boundary](./t3-connect.md).
 
 SSH can launch a server as well as forward a port. Desktop main owns that
 lifecycle because it can spawn SSH and handle authentication prompts. The
@@ -97,6 +102,6 @@ no local state is deleted. On the next start the main process skips port selecti
 and the primary and WSL backends, and opens the window right away. The renderer sees this through
 `desktopBridge.getLocalEnvironmentEnabled()`: `readPrimaryEnvironmentTarget` returns null, so primary
 auth and platform-managed discovery are skipped and only saved environments (pairing, relay, SSH)
-connect. This is possible because the desktop renderer is not served by the backend: the `t3code://`
+connect. This is possible because the desktop renderer is not served by the backend: the `cogenly://`
 scheme serves the bundled client from disk (Vite in development) and API traffic always goes to the
 environment's own URL.

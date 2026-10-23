@@ -1,6 +1,6 @@
 import { parseMuseUsageLimits } from "./usageLimits.ts";
 import type { ServerProviderUsageLimits } from "@t3tools/contracts";
-import { T3_CODE_ORCHESTRATION_INSTRUCTIONS as COGENLY_ORCHESTRATION_INSTRUCTIONS } from "@t3tools/provider-core/server/orchestrationInstructions";
+import { COGENLY_ORCHESTRATION_INSTRUCTIONS as COGENLY_ORCHESTRATION_INSTRUCTIONS } from "@t3tools/provider-core/server/orchestrationInstructions";
 import { MspError, type SendUserTurnOptions } from "@muse-code/sdk";
 import {
   MUSE_DEFAULT_MODEL,
@@ -1709,7 +1709,7 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
               // Cogenly MCP server, so sessionMcp stays requested.
               readOnly: input.runtimePolicy.conversationMode === true,
               sessionMcp: true,
-              disableShell: mcpSession !== undefined && mcpSession.terminalToolsAvailable !== false,
+              disableShell: McpProviderSession.terminalToolsAvailable(mcpSession),
             },
             options.createHost,
           ).pipe(
@@ -2097,8 +2097,8 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
                           Effect.map((mcp) =>
                             mcp
                               ? "\n" +
-                                COGENLY_ORCHESTRATION_INSTRUCTIONS.replaceAll("T3", "Cogenly") +
-                                (mcp.terminalToolsAvailable === false ||
+                                COGENLY_ORCHESTRATION_INSTRUCTIONS +
+                                (!McpProviderSession.terminalToolsAvailable(mcp) ||
                                 turnInput.runtimePolicy.conversationMode === true
                                   ? ""
                                   : "\nUse the cogenly MCP terminal_run tool for every shell command. Native shell is disabled. Use background=true for servers, terminal_read for output, terminal_write for stdin, and terminal_kill to stop. Terminals and their children stop when this thread settles.")

@@ -1553,7 +1553,7 @@ function SavedBackendListRow({
     serverUpdateState.status === "running" && serverUpdateState.stage === "resuming";
   const status = savedBackendStatus(environment);
   const serverVersion = environment.serverConfig?.environment.serverVersion ?? null;
-  // A saved T3 Connect machine this device has never reached (unsupported,
+  // A saved Cogenly Connect machine this device has never reached (unsupported,
   // or not yet connected) still has a descriptor from relay discovery, so
   // it can wear its detected glyph instead of the generic server. Discovery
   // empties its map on every refresh, so hold the last descriptor seen or
@@ -2814,7 +2814,7 @@ export function ConnectionsSettings() {
 
   // Removing forgets the pairing, credentials, and cached threads on this
   // device. Switching off is the reversible path, so removal always confirms.
-  // T3 Connect environments get their own dialog: removing one here leaves its
+  // Cogenly Connect environments get their own dialog: removing one here leaves its
   // account registration, so it points to where that can be deregistered.
   const [pendingT3ConnectRemoval, setPendingT3ConnectRemoval] =
     useState<EnvironmentPresentation | null>(null);
@@ -2962,7 +2962,7 @@ export function ConnectionsSettings() {
       </div>
     </div>
   );
-  // T3 Connect is offered as a route when this account can reach the machine
+  // Cogenly Connect is offered as a route when this account can reach the machine
   // through it and it is not one of the machine's routes yet.
   const relayRouteOffer =
     routeTarget !== null &&

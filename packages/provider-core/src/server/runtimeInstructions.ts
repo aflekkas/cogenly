@@ -7,12 +7,14 @@ When the cogenly MCP server exposes link_pull_request, you must use it to regist
  * needs this to organize projects, file threads, and set agents up when the
  * user asks in plain words.
  */
-export const HOW_COGENLY_WORKS_INSTRUCTIONS = `<how_cogenly_works>Cogenly has three surfaces. Chats are conversations: they answer directly and, when asked, can save or read project files, but they never edit repositories. Work sessions change code inside one repository. Agents are persistent assistants: each owns an ongoing conversation and can run on scheduled triggers. Projects organize everything. A project is a folder at \`<projectsRoot>/<Project>/\` holding git repositories alongside project files at the top level. A chat filed in a project runs with that folder as its working directory and can use the project file tools; Work runs inside its repository. Filing never moves history: moving a chat into a project forks it, carrying the conversation into the new project chat while the original stays where it was. When the user asks you to set things up, use the cogenly MCP tools: list and create projects, link repositories and GitHub owners, file threads into projects, list agents, or start an agent builder for a new agent. Confirm first before bulk or destructive changes. When the user asks to snooze, wake, settle or unsettle a thread ("snooze this until tomorrow"), call t3_thread_snooze, t3_thread_unsnooze, t3_thread_settle or t3_thread_unsettle; snooze takes their words or a preset as until.</how_cogenly_works>`;
+export const HOW_COGENLY_WORKS_INSTRUCTIONS = `<how_cogenly_works>Cogenly has three surfaces. Chats are conversations: they answer directly and, when asked, can save or read project files, but they never edit repositories. Work sessions change code inside one repository. Agents are persistent assistants: each owns an ongoing conversation and can run on scheduled triggers. Projects organize everything. A project is a folder at \`<projectsRoot>/<Project>/\` holding git repositories alongside project files at the top level. A chat filed in a project runs with that folder as its working directory and can use the project file tools; Work runs inside its repository. Filing never moves history: moving a chat into a project forks it, carrying the conversation into the new project chat while the original stays where it was. When the user asks you to set things up, use the cogenly MCP tools: list and create projects, link repositories and GitHub owners, file threads into projects, list agents, or start an agent builder for a new agent. Confirm first before bulk or destructive changes. When the user asks to snooze, wake, settle or unsettle a thread ("snooze this until tomorrow"), call thread_snooze, thread_unsnooze, thread_settle or thread_unsettle; snooze takes their words or a preset as until.</how_cogenly_works>`;
 
 /**
  * Shared runtime context; omit model and effort when the harness manages them dynamically.
  * `modelName` is the display name users see in the model picker; `model` is the slug.
  */
+const VAULT_INSTRUCTIONS = `<vault>Cogenly has a vault for logins, API keys, cards and notes. Save credentials you create (e.g. a signup password) with vault_save, and log in with vault_fill, which types the value into the page without showing it to you. List items with vault_list (metadata only). Never ask for secrets in chat: use request_secret, with saveToVault when the value should be kept as a vault item. If vault_fill says approval_required, the owner has been asked; tell them it is waiting on them and ask again after they approve.</vault>`;
+
 export function buildRuntimeInstructions(runtime: {
   readonly harness: string;
   readonly model?: string | undefined;
@@ -27,7 +29,7 @@ export function buildRuntimeInstructions(runtime: {
     modelName && modelName !== model ? `${modelName} (model slug: ${model})` : model;
   const modelInfo = model && model !== "auto" && model !== "default" ? `, as ${modelLabel}` : "";
   const effortInfo = effort ? ` with ${effort} reasoning effort` : "";
-  return `<runtime_info>In case you're asked: you are running in Cogenly through the ${harness} harness${modelInfo}${effortInfo}. No need to mention this otherwise. You can embed images and videos in your response using Markdown with absolute file paths.</runtime_info>\n\n${PULL_REQUEST_LINKING_INSTRUCTIONS}\n\n${HOW_COGENLY_WORKS_INSTRUCTIONS}`;
+  return `<runtime_info>In case you're asked: you are running in Cogenly through the ${harness} harness${modelInfo}${effortInfo}. No need to mention this otherwise. You can embed images and videos in your response using Markdown with absolute file paths.</runtime_info>\n\n${PULL_REQUEST_LINKING_INSTRUCTIONS}\n\n${HOW_COGENLY_WORKS_INSTRUCTIONS}\n\n${VAULT_INSTRUCTIONS}`;
 }
 
 function toSingleLine(value: string): string {
@@ -36,6 +38,37 @@ function toSingleLine(value: string): string {
 
 /** Resource paths listed in the project manifest before `+N more`. */
 export const PROJECT_MANIFEST_MAX_RESOURCES = 30;
+
+/** One connected integration as the context line names it. */
+export interface IntegrationContextEntry {
+  readonly name: string;
+  readonly displayName: string;
+  readonly hint?: string | undefined;
+}
+
+/**
+ * The one line every provider turn gets about connected integrations, e.g.
+ * "Connected integrations: gmail (Gmail, aflekkas@…), linear. Use
+ * integration_tools / integration_call." Empty when none are connected.
+ */
+export function buildIntegrationsContextLine(
+  integrations: ReadonlyArray<IntegrationContextEntry>,
+): string {
+  if (integrations.length === 0) return "";
+  const names = integrations.map((integration) => {
+    const hint = integration.hint?.trim() ?? "";
+    const label =
+      hint.length > 0
+        ? hint
+        : integration.displayName !== integration.name
+          ? integration.displayName
+          : "";
+    return label.length > 0
+      ? `${toSingleLine(integration.name)} (${toSingleLine(label)})`
+      : toSingleLine(integration.name);
+  });
+  return `Connected integrations: ${names.join(", ")}. Use integration_tools / integration_call.`;
+}
 
 /**
  * Compact manifest of the thread's project folder, appended to the turn
@@ -51,6 +84,8 @@ export function buildProjectManifest(input: {
   readonly instructions?: string | undefined;
   /** True for the project's own chat, which also gets PROJECT_CHAT_INSTRUCTIONS. */
   readonly projectChat?: boolean | undefined;
+  /** Connected integrations visible from this project; adds one tiny line. */
+  readonly integrations?: ReadonlyArray<IntegrationContextEntry> | undefined;
 }): string {
   const shown = input.resources.slice(0, PROJECT_MANIFEST_MAX_RESOURCES);
   const files =
@@ -60,8 +95,10 @@ export function buildProjectManifest(input: {
   const more = input.total - shown.length;
   const manifest = `<project_manifest>The thread's project folder is "${toSingleLine(input.name)}" at ${toSingleLine(input.directory)}. Project files:\n${files}${more > 0 ? `\n+${more} more` : ""}\nUse project_recall to search these files and project_file_read to read one.</project_manifest>`;
   const instructions = input.instructions?.trim() ?? "";
+  const integrationsLine = buildIntegrationsContextLine(input.integrations ?? []);
   return [
     manifest,
+    ...(integrationsLine.length === 0 ? [] : [integrationsLine]),
     ...(instructions.length === 0
       ? []
       : [
@@ -77,7 +114,7 @@ export function buildProjectManifest(input: {
  */
 export const PROJECT_CHAT_INSTRUCTIONS = `<project_chat>This is the project's own chat, the place the user configures and runs this project from. Act on requests about the project yourself with the cogenly project tools; they target this project by default:
 - project_overview shows its repositories (with ids), GitHub sources and instructions. Check it before changing anything.
-- Repositories: project_repository_add / project_repository_remove for repositories already on this machine (find ids with t3_project_list); t3_project_label_clone_repository clones a GitHub repository into the project.
+- Repositories: project_repository_add / project_repository_remove for repositories already on this machine (find ids with project_list); project_label_clone_repository clones a GitHub repository into the project.
 - Sources: project_source_link / project_source_unlink for GitHub owners or repositories.
 - Instructions: project_instructions_get, then project_instructions_set with the whole new text. Keep them short and in the user's words.
 - Files: project_files_list, project_file_read, project_recall, project_file_write (saves a note) and project_file_remove.
@@ -95,7 +132,7 @@ export const CONVERSATION_MODE_INSTRUCTIONS = `<conversation_mode>You are in a c
 
 When a request needs commands, files, code, or other tools (changing a repository, installing or uninstalling apps, editing settings on this machine), do not tell the user to do it by hand. Hand it to a task with the work_task tool. A task is a new top-level Work thread the user can see and follow, with its own project or environment; it reports its result back to this chat, and you then tell the user the outcome, so never poll it. A subagent is different: internal helper work inside one thread, which conversations do not have. Here you only start tasks.
 - mode "start" when the user explicitly asked for this action and it is unambiguous and low-risk, or when they clearly instructed destructive work themselves (for example "uninstall those two apps"). Otherwise mode "propose": the user gets a card to approve, edit or dismiss. Err toward propose for anything destructive (deleting files, uninstalling, resetting) that the user did not clearly ask for.
-- Pick the target: one of the user's projects (see t3_project_list) when the work belongs to it, or no targetProjectId for work on this machine itself, which runs in No project.
+- Pick the target: one of the user's projects (see project_list) when the work belongs to it, or no targetProjectId for work on this machine itself, which runs in No project.
 - Write the brief as complete instructions for the task agent: goal, steps or constraints, and what done looks like.
 - In your reply, say in a sentence what the task will do and where, and whether it started or waits for approval.
 If work_task is unavailable, explain what you would do and suggest Start Work (the hammer on a message).

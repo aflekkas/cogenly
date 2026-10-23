@@ -877,7 +877,7 @@ export const PreviewAutomationResponse = Schema.Struct({
 });
 export type PreviewAutomationResponse = typeof PreviewAutomationResponse.Type;
 
-// Thread fields are absent when the caller signed in from outside a T3 thread.
+// Thread fields are absent when the caller signed in from outside a Cogenly thread.
 const McpCapabilityErrorFields = {
   environmentId: EnvironmentId,
   threadId: Schema.optional(ThreadId),
@@ -1031,11 +1031,25 @@ export class PreviewAutomationControlInterruptedError extends Schema.TaggedError
     if (this.reason === "dialogPending")
       return "A browser dialog is pending. Read preview_status and resolve it with preview_dialog.";
     if (this.reason === "tabLimit")
-      return "Too many server browser tabs are open. Close one with t3_preview_close, or reuse a tabId from preview_status tabs.";
+      return "Too many server browser tabs are open. Close one with preview_close, or reuse a tabId from preview_status tabs.";
     if (this.reason === "closed") return "This browser tab is closed. Call preview_open.";
     if (this.reason === "interrupted")
       return "Browser control changed. Take a fresh snapshot before trying again.";
     return `Preview automation ${this.operation} was interrupted on client ${this.clientId}.`;
+  }
+}
+
+export class PreviewAutomationVaultSafetyError extends Schema.TaggedError<PreviewAutomationVaultSafetyError>()(
+  "PreviewAutomationVaultSafetyError",
+  {
+    ...PreviewAutomationRequestErrorFields,
+    reason: Schema.Literals(["tab_required", "evaluation_disabled"]),
+  },
+) {
+  override get message(): string {
+    return this.reason === "tab_required"
+      ? "A vault fill requires an explicit target tab."
+      : "Evaluation is disabled on this tab after a vault fill. Use snapshots and focused browser actions, or open a fresh tab.";
   }
 }
 
@@ -1206,6 +1220,7 @@ export const PreviewAutomationError = Schema.Union([
   PreviewAutomationTimeoutError,
   PreviewAutomationControlInterruptedError,
   PreviewAutomationExecutionError,
+  PreviewAutomationVaultSafetyError,
   PreviewAutomationInvalidSelectorError,
   PreviewAutomationTargetNotEditableError,
   PreviewAutomationResultTooLargeError,

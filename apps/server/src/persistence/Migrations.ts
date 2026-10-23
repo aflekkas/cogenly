@@ -88,6 +88,15 @@ import Migration0077 from "./Migrations/077_ProjectResourceFiles.ts";
 import Migration0078 from "./Migrations/078_T3ImportLedger.ts";
 import Migration0079 from "./Migrations/079_ProjectHome.ts";
 import Migration0080 from "./Migrations/080_ProjectLabelArchive.ts";
+import Migration0081 from "./Migrations/081_ProjectLabelRepositoryRemotes.ts";
+import Migration0082 from "./Migrations/082_Vault.ts";
+import Migration0083 from "./Migrations/083_Integrations.ts";
+import Migration0084 from "./Migrations/084_RemoveEmptyT3ScratchProjects.ts";
+import Migration0085 from "./Migrations/085_AgentProviderFallback.ts";
+import Migration0088 from "./Migrations/088_AccountProcessAccess.ts";
+import Migration0087 from "./Migrations/087_Accounts.ts";
+import Migration0089 from "./Migrations/089_SharedDocuments.ts";
+import Migration0086 from "./Migrations/086_MachinePeers.ts";
 import Migration0073 from "./Migrations/073_AgentsFullAccess.ts";
 import Migration0070 from "./Migrations/070_AgentEventTriggers.ts";
 import Migration0067 from "./Migrations/067_AgentScope.ts";
@@ -188,6 +197,15 @@ export const migrationEntries = [
   [78, "T3ImportLedger", Migration0078],
   [79, "ProjectHome", Migration0079],
   [80, "ProjectLabelArchive", Migration0080],
+  [81, "ProjectLabelRepositoryRemotes", Migration0081],
+  [82, "Vault", Migration0082],
+  [83, "Integrations", Migration0083],
+  [84, "RemoveEmptyT3ScratchProjects", Migration0084],
+  [85, "AgentProviderFallback", Migration0085],
+  [86, "MachinePeers", Migration0086],
+  [87, "Accounts", Migration0087],
+  [88, "AccountProcessAccess", Migration0088],
+  [89, "SharedDocuments", Migration0089],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

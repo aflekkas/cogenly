@@ -194,7 +194,7 @@ export type PullRequestError = PullRequestUnavailableError | PullRequestOperatio
 const routingCredential = Context.Reference<{
   readonly credentialFingerprint: string;
   readonly viewer: string;
-} | null>("t3/PullRequestService/routingCredential", { defaultValue: () => null });
+} | null>("cogenly-server/PullRequestService/routingCredential", { defaultValue: () => null });
 // Internal only: the client cannot choose its cache's credential namespace.
 const credentialNamespace = Symbol("pullRequestCredentialNamespace");
 type CredentialRef = PullRequestRef & { readonly [credentialNamespace]?: string };
@@ -315,7 +315,7 @@ export class PullRequestService extends Context.Service<
       options?: { readonly notifyReaders?: boolean },
     ) => Effect.Effect<void>;
   }
->()("t3/pullRequest/PullRequestService") {}
+>()("cogenly-server/pullRequest/PullRequestService") {}
 
 /** What a verdict is called when refusing it, so the sentence reads as an action. */
 const VERDICT_LABELS: Record<PullRequestReviewVerdict, string> = {

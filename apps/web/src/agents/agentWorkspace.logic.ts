@@ -296,6 +296,31 @@ export function describeApproval(
         title: "Change its permissions",
         details: policyDiff(context.agent, action.payload),
       };
+    case "vault_use":
+      return {
+        title: `Use “${action.payload.vaultItemName}” (${action.payload.field})`,
+        details: [
+          action.payload.domain === null
+            ? "Approving lets this agent use the item from now on."
+            : `On ${action.payload.domain}. Approving lets this agent use the item from now on.`,
+        ],
+      };
+    case "integration_add":
+      return {
+        title: `Connect ${action.payload.displayName} (${action.payload.name})`,
+        details: [action.payload.url],
+      };
+    case "integration_update":
+      return {
+        title: `Change integration ${action.payload.id}`,
+        details: [
+          action.payload.url,
+          `${action.payload.transport} · Headers: ${Object.keys(action.payload.headers).join(", ") || "none"}`,
+          ...Object.values(action.payload.headers).flatMap((value) =>
+            [...value.matchAll(/\{\{credential:([^}]*)\}\}/g)].map((match) => `Vault: ${match[1]}`),
+          ),
+        ],
+      };
   }
 }
 

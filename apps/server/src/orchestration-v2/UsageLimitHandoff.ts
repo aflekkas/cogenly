@@ -236,7 +236,7 @@ export class UsageLimitHandoffService extends Context.Service<
       },
     ) => Effect.Effect<UsageLimitHandoffAcceptResult, UsageLimitHandoffError>;
   }
->()("t3/orchestration-v2/UsageLimitHandoff/UsageLimitHandoffService") {}
+>()("cogenly-server/orchestration-v2/UsageLimitHandoff/UsageLimitHandoffService") {}
 
 const make = Effect.gen(function* () {
   const threads = yield* ThreadManagement.ThreadManagementService;

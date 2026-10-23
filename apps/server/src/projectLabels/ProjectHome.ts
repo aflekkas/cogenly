@@ -82,7 +82,7 @@ export class ProjectHome extends Context.Service<
       readonly path: string;
     }) => Effect.Effect<ProjectChangeReceipt, ProjectLabelError>;
   }
->()("t3/projectLabels/ProjectHome") {}
+>()("cogenly-server/projectLabels/ProjectHome") {}
 
 /** First project chat id; stable, so a retried create replays instead of duplicating. */
 export const projectChatThreadIdFor = (id: ProjectLabelId) => ThreadId.make(`project-chat:${id}`);
@@ -210,7 +210,20 @@ const make = Effect.gen(function* () {
     function* (id) {
       const { label } = yield* labels.read(id);
       const repositories = yield* Effect.forEach(label.repositoryIds, (repositoryId) =>
-        repositoryTitle(repositoryId).pipe(Effect.map((title) => ({ id: repositoryId, title }))),
+        repositoryTitle(repositoryId).pipe(
+          Effect.map((title) => {
+            const link = label.repositories?.find(
+              (candidate) => candidate.repositoryId === repositoryId,
+            );
+            return {
+              id: repositoryId,
+              title,
+              ...(link === undefined
+                ? {}
+                : { remote: link.remote, directoryName: link.directoryName }),
+            };
+          }),
+        ),
       );
       return {
         projectFolderId: label.id,

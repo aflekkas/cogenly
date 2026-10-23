@@ -87,7 +87,7 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
   const isProjectScope = scope.kind === "project" || scope.kind === "checkout";
   const unavailable = connectedEnvironments.length === 0;
   // File-backed keys show their effective value; the target already carries
-  // the checkout's t3.json, and a null file here only fills the built-in.
+  // the checkout's cogenly.json, and a null file here only fills the built-in.
   // The reset arrow beside the title clears the tier (SettingsRow handles a
   // project override, the environment value is cleared here), so the picker
   // has no "inherit" item.
@@ -214,7 +214,7 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
       description={
         isProjectScope
           ? "Where new threads in this repository start."
-          : "Where new threads start. Repositories and their t3.json can override it."
+          : "Where new threads start. Repositories and their cogenly.json can override it."
       }
       resetAction={
         !isProjectScope && settings.defaultThreadEnvMode !== null ? (
@@ -286,7 +286,7 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
             description={
               isProjectScope
                 ? "How new worktrees in this repository populate git submodules."
-                : "How new worktrees populate git submodules. Repositories and their t3.json can override it."
+                : "How new worktrees populate git submodules. Repositories and their cogenly.json can override it."
             }
             resetAction={
               !isProjectScope && settings.worktreeSubmodules !== null ? (

@@ -4,12 +4,14 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import { McpSchema, McpServer } from "effect/ai";
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
 import * as DesktopAppControl from "../../../environment/DesktopAppControl.ts";
 import * as ServerEnvironment from "../../../environment/ServerEnvironment.ts";
 import * as ThreadCommandExecutor from "../../../orchestration-v2/ThreadCommandExecutor.ts";
 import * as ThreadManagement from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as Settings from "../../../serverSettings.ts";
+import * as MachineSecurity from "../../../security/MachineSecurity.ts";
 import * as McpHttpServer from "../../McpHttpServer.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import { liveThreadShell } from "../../McpToolAccess.testkit.ts";
@@ -75,6 +77,10 @@ const makeServer = (
         Layer.mock(Settings.ServerSettingsService)({}),
         Layer.mock(ThreadCommandExecutor.ThreadCommandExecutor)({}),
         Layer.succeed(DesktopAppControl.DesktopAppControl, { addEnvironment }),
+        Layer.succeed(MachineSecurity.MachineSecurity, {
+          status: Effect.die("machine_security_status is not exercised here"),
+        }),
+        Layer.mock(ChildProcessSpawner.ChildProcessSpawner)({}),
       ),
     ),
   );
@@ -90,7 +96,7 @@ const decodeOutcome = Schema.decodeUnknownEffect(
 
 const call = (scope: McpInvocationContext.McpInvocationScope, args: Record<string, unknown>) =>
   McpServer.McpServer.pipe(
-    Effect.flatMap((server) => server.callTool({ name: "t3_environment_add", arguments: args })),
+    Effect.flatMap((server) => server.callTool({ name: "environment_add", arguments: args })),
     Effect.flatMap(({ content }) =>
       decodeOutcome(content.map((part) => (part.type === "text" ? part.text : "")).join("")),
     ),
@@ -112,7 +118,7 @@ it.effect.each([
   ["a plan-mode thread", threadCaller(planThreadId), { code: "capability_denied" }],
   ["a thread whose turn ended", threadCaller(endedThreadId), { code: "parent_not_active" }],
   ["a read-only client", readOnlyClient, { code: "capability_denied" }],
-] as const)("t3_environment_add from %s", ([, scope, expected]) =>
+] as const)("environment_add from %s", ([, scope, expected]) =>
   Effect.gen(function* () {
     const calls: Array<unknown> = [];
     const outcome = yield* call(scope, { ssh: "t3vps", name: "Contabo VPS" }).pipe(
@@ -128,7 +134,7 @@ it.effect.each([
   }),
 );
 
-it.effect("t3_environment_add says when no desktop app runs beside this environment", () =>
+it.effect("environment_add says when no desktop app runs beside this environment", () =>
   call(threadCaller(fullAccessThreadId), { ssh: "t3vps" }).pipe(
     Effect.map((outcome) =>
       expect(outcome).toMatchObject({

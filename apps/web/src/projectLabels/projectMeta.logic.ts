@@ -4,6 +4,7 @@
  * and the repository picker's project groups.
  */
 import type { EnvironmentId, ProjectId, ProjectLabelId } from "@t3tools/contracts";
+import { normalizeProjectPathForComparison } from "@t3tools/shared/path";
 
 import {
   projectLabelKey,
@@ -146,6 +147,51 @@ function belongsTo(
   return project === null
     ? !projects.some((candidate) => holdsRepository(candidate, refs))
     : holdsRepository(project, refs);
+}
+
+// Data dirs that keep a `scratch` folder for threads without a project:
+// Cogenly's own and T3 Code's, whose projects the T3 import brings over.
+const SCRATCH_DATA_DIRS = new Set([".cogenly", ".t3"]);
+
+const pathSegments = (path: string) => path.split(/[\\/]/).filter(Boolean);
+
+function isSameOrInside(path: string, folder: string) {
+  return (
+    path === folder ||
+    path.startsWith(folder.endsWith("/") || folder.endsWith("\\") ? folder : `${folder}/`) ||
+    path.startsWith(`${folder}\\`)
+  );
+}
+
+/**
+ * Whether a project can be listed as a repository in a repository picker. Not
+ * the machine's Scratch ("No project") home, nor anything inside a Scratch
+ * folder (its per-thread folders, a T3 Code import's old Scratch), nor the
+ * home folder the data dir sits in. "No repository" is the way into Scratch.
+ */
+export function isPickableRepository(
+  project: { readonly workspaceRoot: string; readonly isScratch?: boolean | undefined },
+  scratchWorkspaceRoot: string | null | undefined,
+): boolean {
+  if (project.isScratch === true) return false;
+  const root = normalizeProjectPathForComparison(project.workspaceRoot);
+  const segments = pathSegments(root);
+  for (let index = 0; index < segments.length - 1; index++) {
+    if (SCRATCH_DATA_DIRS.has(segments[index]!) && segments[index + 1] === "scratch") return false;
+  }
+  if (scratchWorkspaceRoot == null) return true;
+  const scratch = normalizeProjectPathForComparison(scratchWorkspaceRoot);
+  if (isSameOrInside(root, scratch)) return false;
+  // Scratch is `<data dir>/scratch`; a hidden data dir sits in the home
+  // folder, and a project rooted there (or above it) is not a repository.
+  const scratchSegments = pathSegments(scratch);
+  const dataDir = scratchSegments.at(-2);
+  if (dataDir?.startsWith(".") && segments.length <= scratchSegments.length - 2) {
+    return !scratchSegments
+      .slice(0, segments.length)
+      .every((segment, index) => segment === segments[index]);
+  }
+  return true;
 }
 
 /**

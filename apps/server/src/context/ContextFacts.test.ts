@@ -1,3 +1,4 @@
+import { layerIdentity as layerSharedIdentity } from "../sync/testkit.ts";
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { Fact, ProjectLabelId, RunId, ThreadId, type FactCreateInput } from "@t3tools/contracts";
@@ -14,10 +15,11 @@ import { runMigrations } from "../persistence/Migrations.ts";
 import { agentFixture } from "../agents/agent.testkit.ts";
 
 const database = Sqlite.layerMemory.pipe(Layer.provide(NodeServices.layer));
-const layer = Layer.mergeAll(Facts.layer, Retrieval.layer, Store.layer).pipe(
-  Layer.provideMerge(database),
-  Layer.provide(NodeServices.layer),
-);
+const layer = Layer.mergeAll(
+  Facts.layer,
+  Retrieval.layer,
+  Store.layer.pipe(Layer.provide(layerSharedIdentity)),
+).pipe(Layer.provideMerge(database), Layer.provide(NodeServices.layer));
 const a = ProjectLabelId.make("a"),
   b = ProjectLabelId.make("b");
 const threadId = ThreadId.make("chat");
@@ -70,14 +72,14 @@ describe("shared facts and scoped context", () => {
       ]);
       expect(yield* sql`SELECT * FROM fact_history`).toHaveLength(4);
       expect(yield* sql`SELECT * FROM agent_memory`).toEqual([]);
-      const aliases = yield* (yield* Store.AgentStore).memory(scoped.id);
+      const aliases = yield* Store.AgentStore.pipe(
+        Effect.flatMap((store) => store.memory(scoped.id)),
+        Effect.provide(Store.layer.pipe(Layer.provide(layerSharedIdentity))),
+      );
       expect(aliases.map((n) => n.id).sort()).toEqual(["owner", "thread:evidence"]);
     }).pipe(
       Effect.provide(
-        Store.layer.pipe(
-          Layer.provideMerge(NodeSqlite.layer({ filename: ":memory:" })),
-          Layer.provide(NodeServices.layer),
-        ),
+        NodeSqlite.layer({ filename: ":memory:" }).pipe(Layer.provideMerge(NodeServices.layer)),
       ),
     ),
   );

@@ -8,6 +8,8 @@ the same computer and never changes it.
 
 - **Projects.** Each T3 Code project you pick. A project whose folder is already
   in Cogenly is merged into it, not duplicated.
+- **Chats without a project.** T3 Code's Scratch chats are not picked by default.
+  Pick them and they come over under **No project**, not as a repository.
 - **Full history.** Every message, tool call, and run in each thread, not a
   trimmed transcript.
 - **Subagent threads and forks.** Subagent threads stay linked to the thread
@@ -26,8 +28,6 @@ the same computer and never changes it.
 
 - **Sign-ins and secrets.** Tokens, API keys, and logins are never copied.
   Providers may ask you to sign in again.
-- **T3 Code's Scratch project.** It holds many one-off folders, so it is shown
-  as **Later** and is not imported yet.
 - **Deleted projects and threads.** Only what is live in T3 Code is imported.
 
 ## Before you start

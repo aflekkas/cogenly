@@ -27,8 +27,10 @@ import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 
+import * as SharedState from "../sync/SharedState.ts";
 import * as Events from "../persistence/OrchestrationEventStore.ts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
+import { normalizeRepositoryRemote, repositoryDirectoryName } from "../project/RepositoryRemote.ts";
 import * as ProjectLabelFolders from "./ProjectLabelFolders.ts";
 
 type Labels = { readonly labels: ReadonlyArray<ProjectLabelWithRepositories> };
@@ -101,11 +103,22 @@ export class ProjectLabelService extends Context.Service<
       confirmedByUser?: boolean,
     ) => Effect.Effect<Tags, ProjectLabelError>;
   }
->()("t3/projectLabels/ProjectLabelService") {}
+>()("cogenly-server/projectLabels/ProjectLabelService") {}
 
 const isProjectLabelError = Schema.is(ProjectLabelError);
 const decodeRepositories = Schema.decodeUnknownEffect(
   Schema.fromJsonString(Schema.Array(ProjectId)),
+);
+const decodeRepositoryLinks = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(
+    Schema.Array(
+      Schema.Struct({
+        repositoryId: ProjectId,
+        remote: Schema.NullOr(Schema.String),
+        directoryName: Schema.NullOr(Schema.String),
+      }),
+    ),
+  ),
 );
 const decodeSourceLinkRows = Schema.decodeUnknownEffect(
   Schema.fromJsonString(
@@ -119,6 +132,7 @@ const encodeAudit = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  const shared = yield* SharedState.SharedState;
   const crypto = yield* Crypto.Crypto;
   const events = yield* Events.OrchestrationEventStore;
   const changes = yield* PubSub.sliding<void>(1);
@@ -131,6 +145,7 @@ const make = Effect.gen(function* () {
   const readLabels = (id?: ProjectLabelId) =>
     sql`SELECT label_id AS id, name, color, description, instructions, project_chat_thread_id AS projectChatThreadId, archived_at AS archivedAt, created_at AS createdAt, updated_at AS updatedAt,
     (SELECT json_group_array(repository_id) FROM (SELECT repository_id FROM label_repositories r WHERE r.label_id = l.label_id ORDER BY repository_id)) AS repositories
+    , (SELECT json_group_array(json(link)) FROM (SELECT json_object('repositoryId', repository_id, 'remote', remote, 'directoryName', directory_name) AS link FROM label_repositories r WHERE r.label_id = l.label_id ORDER BY repository_id)) AS repositoryLinks
     , (SELECT json_group_array(json(source)) FROM (SELECT json_object('kind', kind, 'owner', owner, 'repo', repo) AS source FROM label_source_links s WHERE s.label_id = l.label_id ORDER BY kind, owner, repo)) AS sources
     , (SELECT count(*) FROM effective_thread_project_folders f
       JOIN orchestration_v2_projection_threads t ON t.thread_id = f.thread_id
@@ -146,6 +161,9 @@ const make = Effect.gen(function* () {
         Effect.forEach(rows, (row) =>
           Effect.gen(function* () {
             const repositoryIds = yield* decodeRepositories(row.repositories);
+            const repositoryLinks = yield* backfillRepositoryLinks(
+              yield* decodeRepositoryLinks(row.repositoryLinks),
+            );
             const sourceLinkRows = yield* decodeSourceLinkRows(row.sources);
             const sourceLinks = sourceLinkRows.flatMap((source) =>
               source.kind === "github-owner"
@@ -165,6 +183,11 @@ const make = Effect.gen(function* () {
               archivedAt: row.archivedAt ?? undefined,
               instructions: row.instructions ?? "",
               repositoryIds,
+              repositories: repositoryLinks.map((link) => ({
+                repositoryId: link.repositoryId,
+                remote: link.remote || null,
+                directoryName: link.directoryName || null,
+              })),
               sourceLinks,
             });
           }),
@@ -235,6 +258,27 @@ const make = Effect.gen(function* () {
         .withTransaction(
           Effect.gen(function* () {
             const result = yield* effect;
+            if (
+              typeof result === "object" &&
+              result !== null &&
+              "label" in result &&
+              typeof result.label === "object" &&
+              result.label !== null &&
+              "id" in result.label &&
+              typeof result.label.id === "string" &&
+              [
+                "create",
+                "update",
+                "archive",
+                "unarchive",
+                "linkRepository",
+                "unlinkRepository",
+                "linkSource",
+                "unlinkSource",
+              ].includes(operation)
+            ) {
+              yield* shared.capture("project", result.label.id);
+            }
             const payload = yield* encodeAudit({ input, result });
             yield* sql`INSERT INTO project_label_audit(operation, occurred_at, payload_json) VALUES (${operation}, ${yield* now}, ${payload})`;
             return result;
@@ -267,9 +311,10 @@ const make = Effect.gen(function* () {
           );
         return Stream.concat(
           Stream.fromEffect(read()),
-          Stream.merge(Stream.fromSubscription(subscription), deletions).pipe(
-            Stream.mapEffect(read),
-          ),
+          Stream.merge(
+            Stream.merge(Stream.fromSubscription(subscription), shared.changes),
+            deletions,
+          ).pipe(Stream.mapEffect(read)),
         );
       }),
     );
@@ -299,6 +344,46 @@ const make = Effect.gen(function* () {
             }),
           ),
         );
+  // Links written before portable identity (or by a link whose checkout had
+  // no readable remote yet) backfill lazily on read: the remote and directory
+  // name come from the checkout's git remote when it can be read. A repo with
+  // no remote stays null (local-only). The resolver caches, so repeat reads
+  // of a local-only repo do not spawn git every time.
+  const backfillRepositoryLinks = (
+    links: ReadonlyArray<{
+      readonly repositoryId: ProjectId;
+      readonly remote: string | null;
+      readonly directoryName: string | null;
+    }>,
+  ) =>
+    Option.isNone(identities)
+      ? Effect.succeed(links)
+      : Effect.forEach(links, (link) =>
+          Effect.gen(function* () {
+            if (link.remote !== null && link.directoryName !== null) return link;
+            const rows = yield* sql<{
+              workspace_root: string;
+            }>`SELECT workspace_root FROM projection_projects WHERE project_id = ${link.repositoryId} AND deleted_at IS NULL`;
+            const workspaceRoot = rows[0]?.workspace_root;
+            if (typeof workspaceRoot !== "string" || workspaceRoot.length === 0) return link;
+            const identity = yield* identities.value.resolve(workspaceRoot);
+            const remote =
+              identity === null ? null : normalizeRepositoryRemote(identity.locator.remoteUrl);
+            const directoryName = repositoryDirectoryName(workspaceRoot) ?? link.directoryName;
+            if (remote !== link.remote || directoryName !== link.directoryName) {
+              yield* sql.withTransaction(
+                Effect.gen(function* () {
+                  yield* sql`UPDATE label_repositories SET remote=${remote},directory_name=${directoryName} WHERE repository_id=${link.repositoryId}`;
+                  const labels = yield* sql<{
+                    label_id: string;
+                  }>`SELECT label_id FROM label_repositories WHERE repository_id=${link.repositoryId}`;
+                  for (const row of labels) yield* shared.capture("project", row.label_id);
+                }),
+              );
+            }
+            return { repositoryId: link.repositoryId, remote, directoryName };
+          }),
+        );
   // A linked repository files its own GitHub link with the project, so owner
   // search and the picker know it without a manual step. Best-effort: no
   // remote, a non-GitHub remote, or an unparseable one simply adds nothing.
@@ -324,17 +409,35 @@ const make = Effect.gen(function* () {
       link ? "linkRepository" : "unlinkRepository",
       input,
       Effect.gen(function* () {
+        const previous = yield* sql<{
+          label_id: string;
+        }>`SELECT label_id FROM label_repositories WHERE repository_id=${input.repositoryId}`;
         const { label } = yield* get(input.labelId);
         if (link && !label.repositoryIds.includes(input.repositoryId))
           yield* readActive(input.labelId);
         if (link) {
-          const rows =
-            yield* sql`SELECT project_id FROM projection_projects WHERE project_id = ${input.repositoryId} AND deleted_at IS NULL`;
+          const rows = yield* sql<{
+            workspace_root: string;
+          }>`SELECT workspace_root FROM projection_projects WHERE project_id = ${input.repositoryId} AND deleted_at IS NULL`;
           if (!rows.length) return yield* missing("repository");
-          yield* sql`INSERT INTO label_repositories(label_id, repository_id) VALUES (${input.labelId}, ${input.repositoryId}) ON CONFLICT(repository_id) DO UPDATE SET label_id = excluded.label_id`;
+          // Portable identity, filled now so the link names the repository by
+          // remote (null when local-only) and its project-relative directory.
+          // A resolve that cannot read a remote yet never erases a stored one.
+          const workspaceRoot = rows[0]?.workspace_root;
+          const identity =
+            Option.isNone(identities) || typeof workspaceRoot !== "string"
+              ? null
+              : yield* identities.value.resolve(workspaceRoot);
+          const remote =
+            identity === null ? null : normalizeRepositoryRemote(identity.locator.remoteUrl);
+          const directoryName =
+            typeof workspaceRoot === "string" ? repositoryDirectoryName(workspaceRoot) : null;
+          yield* sql`INSERT INTO label_repositories(label_id, repository_id, remote, directory_name) VALUES (${input.labelId}, ${input.repositoryId}, ${remote}, ${directoryName}) ON CONFLICT(repository_id) DO UPDATE SET label_id = excluded.label_id, remote = COALESCE(excluded.remote, label_repositories.remote), directory_name = COALESCE(excluded.directory_name, label_repositories.directory_name)`;
           yield* autoAddRepositorySourceLink(input.labelId, input.repositoryId);
         } else
           yield* sql`DELETE FROM label_repositories WHERE label_id = ${input.labelId} AND repository_id = ${input.repositoryId}`;
+        if (previous[0] && previous[0].label_id !== input.labelId)
+          yield* shared.capture("project", previous[0].label_id);
         yield* sql`UPDATE project_labels SET updated_at = ${yield* now} WHERE label_id = ${input.labelId}`;
         return yield* get(input.labelId);
       }),
@@ -374,29 +477,26 @@ const make = Effect.gen(function* () {
             reason: "project_chat",
             projectName: owner.name,
           });
-        if (input.folderId !== null) {
-          // Only filing into an archived project is refused: unfiling, moving
-          // out, and re-filing where the thread already is stay allowed.
-          const current = (yield* tags(input.threadId)).labels[0]?.labelId;
+        // Only filing into an archived project is refused: unfiling, moving
+        // out, and re-filing where the thread already is stay allowed.
+        const current = (yield* tags(input.threadId)).labels[0]?.labelId ?? null;
+        if (input.folderId !== null)
           yield* (current === input.folderId ? get : readActive)(input.folderId);
-          // A chat with turns moves by forking, not by re-parenting: its
-          // scratch working directory no longer matches the project dir, so
-          // the history moves to a new chat through a context transfer
-          // instead (forkThreadToProject). Turnless chats still assign
-          // directly, unfiling stays allowed, and Work threads keep following
-          // their repo. A persistent agent's conversation is its one ongoing
-          // thread, so it re-files in place: the agents row identifies it
-          // even when a migrated shell lacks the agent annotation.
-          const turned = yield* sql`SELECT 1 AS one FROM orchestration_v2_projection_threads t
-              WHERE t.thread_id = ${input.threadId} AND t.deleted_at IS NULL
-              AND COALESCE(json_extract(t.payload_json, '$.surface'), 'chat') = 'chat'
-              AND COALESCE(json_extract(t.payload_json, '$.agent.role'), '') NOT IN ('work', 'conversation')
-              AND NOT EXISTS (SELECT 1 FROM agents a WHERE a.conversation_thread_id = t.thread_id)
-              AND EXISTS (SELECT 1 FROM orchestration_v2_projection_runs r WHERE r.thread_id = t.thread_id) LIMIT 1`;
-          if (turned.length > 0)
+        // Re-home instead of fork: the same thread is re-filed, and its next
+        // turn follows the filing. RuntimePolicy resolves a filed chat's cwd
+        // to the project folder (an unfiled chat keeps its scratch folder),
+        // and ProviderTurnStartService starts a fresh provider session with a
+        // portable context handoff when a thread's cwd changes, for every
+        // adapter. What must not happen is moving a turn in flight, so a
+        // thread with an active run refuses until that run settles.
+        if (input.folderId !== current) {
+          const active = yield* sql`SELECT 1 AS one FROM orchestration_v2_projection_runs r
+              WHERE r.thread_id = ${input.threadId}
+              AND r.status IN ('preparing', 'queued', 'starting', 'running', 'waiting') LIMIT 1`;
+          if (active.length > 0)
             return yield* new ProjectLabelError({
               operation: "moveThread",
-              reason: "fork_required",
+              reason: "thread_active",
             });
         }
         yield* sql`DELETE FROM thread_project_labels WHERE thread_id = ${input.threadId}`;
@@ -418,7 +518,11 @@ const make = Effect.gen(function* () {
       ].includes(stored.event.type));
   return ProjectLabelService.of({
     moveThread,
-    subscribeChanges: PubSub.subscribe(changes).pipe(Effect.map(Stream.fromSubscription)),
+    subscribeChanges: PubSub.subscribe(changes).pipe(
+      Effect.map((subscription) =>
+        Stream.merge(Stream.fromSubscription(subscription), shared.changes),
+      ),
+    ),
     list,
     read: get,
     readActive,
@@ -463,17 +567,8 @@ const make = Effect.gen(function* () {
         "delete",
         { id },
         Effect.gen(function* () {
-          yield* sql`UPDATE commitments SET payload_json = json_set(payload_json, '$.labelIds', json(
-            (SELECT json_group_array(l.value) FROM json_each(commitments.payload_json, '$.labelIds') l WHERE l.value <> ${id})
-          )) WHERE id IN (SELECT commitment_id FROM commitment_labels WHERE label_id = ${id})`;
-          yield* sql`DELETE FROM commitment_labels WHERE label_id = ${id}`;
-          const at = yield* now;
-          yield* sql`UPDATE facts SET updated_at=${at},payload_json = json_set(payload_json, '$.updatedAt',${at},'$.labelIds', json(
-            (SELECT json_group_array(l.value) FROM json_each(facts.payload_json, '$.labelIds') l WHERE l.value <> ${id})
-          )) WHERE id IN (SELECT fact_id FROM fact_labels WHERE label_id = ${id})`;
-          yield* sql`INSERT INTO fact_history(fact_id,payload_json) SELECT f.id,json_object('id',${yield* crypto.randomUUIDv4()} || ':' || f.id,'factId',f.id,'who','user','at',${at},'fact',json(f.payload_json)) FROM facts f WHERE f.id IN (SELECT fact_id FROM fact_labels WHERE label_id=${id})`;
-          const rows =
-            yield* sql`DELETE FROM project_labels WHERE label_id = ${id} RETURNING label_id`;
+          const rows = yield* sql`SELECT label_id FROM project_labels WHERE label_id=${id}`;
+          yield* shared.write("project", id, {}, true);
           return { deleted: rows.length > 0 };
         }),
       ),
@@ -537,4 +632,4 @@ const make = Effect.gen(function* () {
     },
   });
 });
-export const layer = Layer.effect(ProjectLabelService, make);
+export const layer = Layer.effect(ProjectLabelService, make).pipe(Layer.provide(SharedState.layer));

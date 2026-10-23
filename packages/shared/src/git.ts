@@ -11,6 +11,11 @@ import * as Arr from "effect/Array";
 import * as Result from "effect/Result";
 import { detectSourceControlProviderFromRemoteUrl } from "./sourceControl.ts";
 
+/**
+ * The legacy temporary-branch prefix. New worktrees use
+ * {@link WORKTREE_BRANCH_NAMESPACE}; this stays so pre-`c/` temporary
+ * branches are still recognized (and renamed away) wherever they appear.
+ */
 export const WORKTREE_BRANCH_PREFIX = "t3";
 // Canonical form is `t3/<8 hex>`. `t3-<8 hex>` is the fallback when a plain `t3`
 // branch blocks the namespace. The matcher also accepts every legacy shape, so
@@ -122,16 +127,52 @@ export function deriveLocalBranchNameFromRemoteRef(branchName: string): string {
   return branchName.slice(firstSeparatorIndex + 1);
 }
 
-export function buildTemporaryWorktreeBranchName(
-  randomHex: (byteLength: number) => string,
-): string {
-  // Normalize to exactly 8 lowercase hex chars so a UUID-shaped callback
-  // still produces the canonical temporary branch form.
-  const token = randomHex(4)
+/** The namespace new Cogenly worktree branches live under: `c/<slug>`. */
+export const WORKTREE_BRANCH_NAMESPACE = "c";
+
+/**
+ * The branch a new worktree starts on, decided before the worktree exists:
+ * a deterministic slug from the first words of the request, like the scratch
+ * folder names. `taken` dedupes against existing branch names and worktree
+ * folder slugs with a `-2`, `-3`, ... suffix. The folder slug is the branch
+ * without the `c/` prefix.
+ */
+export function buildWorktreeBranchName(
+  text: string,
+  taken: {
+    readonly branches?: ReadonlyArray<string>;
+    readonly folders?: ReadonlyArray<string>;
+  } = {},
+): { readonly branch: string; readonly slug: string } {
+  const words = text
     .toLowerCase()
-    .replace(/[^0-9a-f]/g, "")
-    .slice(0, 8);
-  return `${WORKTREE_BRANCH_PREFIX}/${token}`;
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean)
+    .slice(0, 5)
+    .join("-")
+    .slice(0, 48)
+    .replace(/-+$/, "");
+  const base = words.length > 0 ? sanitizeBranchFragment(words) : "update";
+  const branches = new Set((taken.branches ?? []).map((name) => name.toLowerCase()));
+  const folders = new Set((taken.folders ?? []).map((name) => name.toLowerCase()));
+  let slug = base;
+  for (
+    let suffix = 2;
+    branches.has(`${WORKTREE_BRANCH_NAMESPACE}/${slug}`) || folders.has(slug);
+    suffix++
+  ) {
+    slug = `${base}-${suffix}`;
+  }
+  return { branch: `${WORKTREE_BRANCH_NAMESPACE}/${slug}`, slug };
+}
+
+/** The worktree folder name for a branch: its `c/` slug, else the flattened name. */
+export function worktreeFolderSlug(branch: string): string {
+  const trimmed = branch.trim();
+  const slug = trimmed.startsWith(`${WORKTREE_BRANCH_NAMESPACE}/`)
+    ? trimmed.slice(WORKTREE_BRANCH_NAMESPACE.length + 1)
+    : trimmed;
+  return slug.replace(/\//g, "-");
 }
 
 /**

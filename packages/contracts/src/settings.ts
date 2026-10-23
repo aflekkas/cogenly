@@ -19,7 +19,12 @@ import {
   TrimmedString,
 } from "./baseSchemas.ts";
 import { UsageLimitSourceId } from "./usageLimitSourceId.ts";
-import { EnvironmentMachineKind, ThreadEnvMode, WorktreeSubmodules } from "./environment.ts";
+import {
+  EnvironmentMachineKind,
+  MachineRole,
+  ThreadEnvMode,
+  WorktreeSubmodules,
+} from "./environment.ts";
 import { KeybindingShortcut } from "./keybindings.ts";
 import {
   CustomModelSetting,
@@ -826,7 +831,7 @@ const NULLABLE_PROJECT_SETTINGS_OVERRIDES: ReadonlySet<ProjectScopedServerSettin
   "pullRequestMergeMethod",
 ]);
 
-/** Reclaimable bytes from which the offline `t3 doctor` repair is worth suggesting. */
+/** Reclaimable bytes from which the offline `cogenly doctor` repair is worth suggesting. */
 export const DATABASE_COMPACTION_RECOMMENDED_BYTES = 1024 ** 3;
 
 /** Live SQLite file accounting for the environment's state database. */
@@ -834,7 +839,7 @@ export const DatabaseStorageStatus = Schema.Struct({
   databaseBytes: Schema.Number,
   /** Free pages inside the file that an offline VACUUM (or incremental auto_vacuum) returns to disk. */
   reclaimableBytes: Schema.Number,
-  /** False on databases created before incremental auto_vacuum; `t3 doctor` converts them. */
+  /** False on databases created before incremental auto_vacuum; `cogenly doctor` converts them. */
   incrementalVacuumEnabled: Schema.Boolean,
   /** Command to run on the host to reclaim the space offline. */
   compactCommand: Schema.String,
@@ -871,6 +876,16 @@ export const StorageCleanupReport = Schema.Struct({
 });
 export type StorageCleanupReport = typeof StorageCleanupReport.Type;
 
+/** Built-in nightly backups of the Cogenly home, owned by the server. */
+export const AutomaticBackupsSettings = Schema.Struct({
+  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  /** How many nightly backup directories to keep under `<home>/backups/`. */
+  retentionCount: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 30 })).pipe(
+    Schema.withDecodingDefault(Effect.succeed(7)),
+  ),
+});
+export type AutomaticBackupsSettings = typeof AutomaticBackupsSettings.Type;
+
 export const StorageCleanupSettings = Schema.Struct({
   worktreeKeepWhen: WorktreeKeepWhen.pipe(
     Schema.withDecodingDefault(Effect.succeed("uncommitted-changes")),
@@ -905,12 +920,15 @@ export const ServerSettings = Schema.Struct({
   ),
   modelEffortDefaults: ModelEffortDefaults.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   worktreeCleanup: WorktreeCleanup.pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  automaticBackups: AutomaticBackupsSettings.pipe(
+    Schema.withDecodingDefault(Effect.succeed(Schema.decodeSync(AutomaticBackupsSettings)({}))),
+  ),
   storageCleanup: StorageCleanupSettings.pipe(
     Schema.withDecodingDefault(Effect.succeed(Schema.decodeSync(StorageCleanupSettings)({}))),
   ),
   /**
    * Absolute directory new worktrees are created under, e.g. `D:\worktrees`
-   * or `~/worktrees`. Empty uses `<T3 home>/worktrees`.
+   * or `~/worktrees`. Empty uses `<Cogenly home>/worktrees`.
    */
   worktreesDirectory: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   /**
@@ -1024,11 +1042,19 @@ export const ServerSettings = Schema.Struct({
   environmentIcon: ForwardCompatibleNullable(EnvironmentMachineKind).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
+  /** The name paired machines show for this one. Null uses the detected default. */
+  machineName: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  /** Whether this is a personal computer or a cloud server. Null uses detection. */
+  machineRole: ForwardCompatibleNullable(MachineRole).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
   /**
-   * Null means inherit: the repository's t3.json, then "local". The old
+   * Null means inherit: the repository's cogenly.json, then "local". The old
    * default "local" was never persisted (defaults are stripped on write), so
    * it now decodes as inherit, which resolves the same way because the old
-   * chain also let t3.json outrank the environment. Null stays off the wire
+   * chain also let cogenly.json outrank the environment. Null stays off the wire
    * so older clients, which require a literal here, keep decoding.
    */
   defaultThreadEnvMode: OmittedWhenNull(ThreadEnvMode),
@@ -1036,7 +1062,7 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(true)),
   ),
   /**
-   * Null defers to the repository's t3.json, then to recursive. A value
+   * Null defers to the repository's cogenly.json, then to recursive. A value
    * picked on a newer server decodes as null here rather than failing the
    * whole settings snapshot for an older client.
    */
@@ -1068,7 +1094,7 @@ export const ServerSettings = Schema.Struct({
   branchNamingMode: BranchNamingMode.pipe(
     Schema.withDecodingDefault(Effect.succeed("static" as const)),
   ),
-  branchNamePrefix: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed("t3"))),
+  branchNamePrefix: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed("c"))),
   branchNameInstructions: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   removeAgentCreditsOnMerge: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   sourceControlWritingStyle: SourceControlWritingStyleSettings.pipe(
@@ -1322,6 +1348,14 @@ export const ServerSettingsPatch = Schema.Struct({
       ]),
     ),
   ),
+  automaticBackups: Schema.optionalKey(
+    Schema.Struct({
+      enabled: Schema.optionalKey(Schema.Boolean),
+      retentionCount: Schema.optionalKey(
+        Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 30 })),
+      ),
+    }),
+  ),
   storageCleanup: Schema.optionalKey(
     Schema.Struct({
       worktreeKeepWhen: Schema.optionalKey(WorktreeKeepWhen),
@@ -1387,6 +1421,8 @@ export const ServerSettingsPatch = Schema.Struct({
   providerHealthRefreshInterval: Schema.optionalKey(Schema.DurationFromMillis),
   backgroundActivityProfile: Schema.optionalKey(BackgroundActivityProfile),
   environmentIcon: Schema.optionalKey(Schema.NullOr(EnvironmentMachineKind)),
+  machineName: Schema.optionalKey(Schema.NullOr(TrimmedNonEmptyString)),
+  machineRole: Schema.optionalKey(Schema.NullOr(MachineRole)),
   defaultThreadEnvMode: Schema.optionalKey(Schema.NullOr(ThreadEnvMode)),
   newWorktreesStartFromOrigin: Schema.optionalKey(Schema.Boolean),
   worktreeSubmodules: Schema.optionalKey(Schema.NullOr(WorktreeSubmodules)),

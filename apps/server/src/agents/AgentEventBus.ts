@@ -1,3 +1,4 @@
+import * as SharedState from "../sync/SharedState.ts";
 import * as Access from "./AgentAccessScope.ts";
 import * as DateTime from "effect/DateTime";
 import { canReceiveAgentEvent, matchesAgentEvent } from "./agentEventPolicy.ts";
@@ -24,10 +25,11 @@ export class AgentEventBus extends Context.Service<
       threadId: ThreadId,
     ) => Effect.Effect<Pick<AgentEventContext, "chainDepth" | "chainAgentIds">, AgentError>;
   }
->()("t3/agents/AgentEventBus") {}
+>()("cogenly-server/agents/AgentEventBus") {}
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  const shared = yield* SharedState.SharedState;
   const access = yield* Access.AgentAccessScope;
   const agents = yield* Agents.AgentService;
   const schedules = yield* Schedules.ScheduledTaskService;
@@ -68,7 +70,12 @@ const make = Effect.gen(function* () {
       const { tasks } = yield* schedules.list();
       let deferred = false;
       for (const task of tasks) {
-        if (!matchesAgentEvent(task, event) || task.agentId == null) continue;
+        if (
+          (task.ownerMachine !== undefined && task.ownerMachine !== shared.environmentId) ||
+          !matchesAgentEvent(task, event) ||
+          task.agentId == null
+        )
+          continue;
         const accepted = yield* schedules.triggerEvent(task.id, event);
         if (!accepted && canReceiveAgentEvent(yield* access.resolve(task.agentId), task, event)) {
           const prior =
@@ -82,4 +89,7 @@ const make = Effect.gen(function* () {
   }).pipe(lock.withPermits(1), Effect.mapError(failure));
   return AgentEventBus.of({ emit, drain, lineage });
 });
-export const layer = Layer.effect(AgentEventBus, make).pipe(Layer.provide(Access.layer));
+export const layer = Layer.effect(AgentEventBus, make).pipe(
+  Layer.provide(Access.layer),
+  Layer.provide(SharedState.layer),
+);

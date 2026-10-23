@@ -27,6 +27,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import * as SshAuth from "./auth.ts";
 import {
   baseSshArgs,
+  buildLocalForwardArgs,
   buildSshHostSpecEffect,
   collectProcessOutput,
   getLastNonEmptyOutputLine,
@@ -754,7 +755,7 @@ elif [ -n "$REMOTE_PID" ] && [ -n "$REMOTE_PORT" ] && server_running "$REMOTE_PI
     REMOTE_PORT=""
     REMOTE_MANAGED=""
   elif ! wait_ready "@@T3_READY_TIMEOUT_MS@@"; then
-    printf 'Remote T3 server is still running but did not become ready. Retry the connection; the server was left running.\\n' >&2
+    printf 'Remote Cogenly server is still running but did not become ready. Retry the connection; the server was left running.\\n' >&2
     exit 1
   fi
 else
@@ -821,7 +822,7 @@ if [ -z "$REMOTE_PORT" ]; then
   printf '%s\\n' "$REMOTE_PORT" >"$PORT_FILE"
   printf 'managed\\n' >"$MANAGED_FILE"
   if ! wait_ready "@@T3_READY_TIMEOUT_MS@@"; then
-    printf 'Remote T3 server did not become ready on 127.0.0.1:%s.\\n' "$REMOTE_PORT" >&2
+    printf 'Remote Cogenly server did not become ready on 127.0.0.1:%s.\\n' "$REMOTE_PORT" >&2
     if [ -s "$LOG_FILE" ]; then
       tail -n 80 "$LOG_FILE" >&2 2>/dev/null || true
     else
@@ -864,7 +865,7 @@ if [ "$REMOTE_MANAGED" != "external" ] && [ -n "$REMOTE_PID" ] && kill -0 "$REMO
     sleep 0.1
   done
   if kill -0 "$REMOTE_PID" 2>/dev/null; then
-    printf 'Remote T3 server with PID %s did not stop within 2 seconds. Its ownership files were kept.\\n' "$REMOTE_PID" >&2
+    printf 'Remote Cogenly server with PID %s did not stop within 2 seconds. Its ownership files were kept.\\n' "$REMOTE_PID" >&2
     exit 1
   fi
 fi
@@ -885,7 +886,7 @@ export class SshInvalidArchiveVersionError extends Schema.TaggedError<SshInvalid
   { archiveVersion: Schema.String },
 ) {
   override get message(): string {
-    return `'${this.archiveVersion}' is not an exact t3 version and cannot name a runtime directory.`;
+    return `'${this.archiveVersion}' is not an exact cogenly version and cannot name a runtime directory.`;
   }
 }
 
@@ -900,7 +901,7 @@ export class SshMissingRunnerError extends Schema.TaggedError<SshMissingRunnerEr
   {},
 ) {
   override get message(): string {
-    return "A remote t3 runner needs an archive version or a node script path.";
+    return "A remote cogenly runner needs an archive version or a node script path.";
   }
 }
 
@@ -1274,8 +1275,7 @@ const startSshTunnel = Effect.fn("ssh/tunnel.startSshTunnel")(function* (input: 
     "ServerAliveCountMax=3",
     "-n",
     "-N",
-    "-L",
-    `${input.localPort}:127.0.0.1:${input.remotePort}`,
+    ...buildLocalForwardArgs({ localPort: input.localPort, remotePort: input.remotePort }),
     hostSpec,
   ];
   const sshCommand = yield* resolveSshCommand;

@@ -17,6 +17,7 @@ import {
   type DispatchModeRefusal,
 } from "../orchestration-v2/DispatchModeLimit.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
+import * as Vault from "../vault/Vault.ts";
 import { resolveInteractionMode, resolveRuntimeMode } from "./OrchestratorMcpService.ts";
 import {
   assertFullAccess,
@@ -35,7 +36,7 @@ import {
  * Both constructors demand this. Their private constructors only stop the type
  * checker; this also stops `Reflect.construct` and friends at runtime.
  */
-const builtHere: unique symbol = Symbol("t3/mcp/McpToolAccess/builtHere");
+const builtHere: unique symbol = Symbol("cogenly-server/mcp/McpToolAccess/builtHere");
 
 const refuseOutsideConstruction = (token: symbol) => {
   if (token !== builtHere) {
@@ -98,6 +99,17 @@ export class Declaration<out Handler> {
     declare = (handle) => {
       const declaration = new Declaration(builtHere, (params: Parameters<typeof handle>[0]) =>
         handle(params).pipe(
+          // Second layer: scrub exact vault values from every tool result
+          // before serialization. Transformed values need source-level
+          // protection, such as the broker's evaluation seal after vault_fill.
+          // No Vault service in scope means nothing to scrub.
+          Effect.flatMap((result) =>
+            Effect.serviceOption(Vault.Vault).pipe(
+              Effect.flatMap((vault) =>
+                Option.isSome(vault) ? vault.value.scrubValue(result) : Effect.succeed(result),
+              ),
+            ),
+          ),
           Effect.tap((result) =>
             Effect.serviceOption(McpInvocationContext.McpInvocationContext).pipe(
               Effect.flatMap((scope) =>

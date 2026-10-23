@@ -1,7 +1,7 @@
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
 
-// Ledger for Import from T3 Code. One row per imported T3 thread records the
+// Ledger for Import from T3 Code. One row per imported Cogenly thread records the
 // last T3 event sequence written, so a re-run appends only newer events and
 // never duplicates. Projects record which Cogenly project each T3 project
 // landed in.

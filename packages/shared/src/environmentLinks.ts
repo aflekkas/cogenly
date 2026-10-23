@@ -3,7 +3,7 @@ import { sanitizeLinkedPrompt, type PromptLinkResult } from "./promptLinks.ts";
 /**
  * Adding a remote environment without clicking through Settings. Three entry points share
  * this request: the `cogenly://environments/add?ssh=<alias>&name=<name>` deep link, the
- * `cogenly environment add` CLI command, and the `t3_environment_add` MCP tool. Each one
+ * `cogenly environment add` CLI command, and the `environment_add` MCP tool. Each one
  * runs the desktop's SSH flow for an alias the user's SSH config already knows.
  *
  * A deep link can come from any web page, so the desktop confirms it first. The CLI and the

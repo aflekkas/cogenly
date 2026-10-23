@@ -17,7 +17,7 @@ import {
   type RuntimeRequestId,
   type ServerProviderModel,
 } from "@t3tools/contracts";
-import { T3_CODE_ORCHESTRATION_INSTRUCTIONS as COGENLY_ORCHESTRATION_INSTRUCTIONS } from "@t3tools/provider-core/server/orchestrationInstructions";
+import { COGENLY_ORCHESTRATION_INSTRUCTIONS } from "@t3tools/provider-core/server/orchestrationInstructions";
 import { AgentScope } from "@t3tools/shared/AgentScope";
 import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
 import * as Cause from "effect/Cause";

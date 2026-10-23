@@ -1,3 +1,5 @@
+import * as AccountConnections from "./accounts/AccountConnections.ts";
+import * as AccountAccess from "./accounts/AccountAccess.ts";
 import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import type * as HttpClient from "effect/http/HttpClient";
 import type * as CodexInstallation from "./provider/CodexInstallation.ts";
@@ -6,6 +8,9 @@ import type * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import type * as VcsProcess from "./vcs/VcsProcess.ts";
 import * as GlobalSearch from "./search/GlobalSearch.ts";
 import * as Facts from "./context/FactService.ts";
+import * as Integrations from "./integrations/Integrations.ts";
+import * as Machines from "./machines/Machines.ts";
+import * as MachineSecurity from "./security/MachineSecurity.ts";
 import * as VisualStates from "./htmlRender/VisualState.ts";
 import * as Retrieval from "./context/ContextRetrievalService.ts";
 import * as Exports from "./export/ExportService.ts";
@@ -134,6 +139,8 @@ import * as ThreadLaunchService from "./orchestration-v2/ThreadLaunchService.ts"
 import * as ThreadMessageIntake from "./orchestration-v2/ThreadMessageIntake.ts";
 import * as ScheduledTasks from "./scheduledTasks/ScheduledTaskService.ts";
 import * as SecretRequests from "./secrets/SecretRequests.ts";
+import * as Vault from "./vault/Vault.ts";
+import * as Accounts from "./accounts/Accounts.ts";
 import {
   archivedShellStreamItemFromThreadShell,
   buildActiveShellSnapshot,
@@ -1076,10 +1083,17 @@ const makeWsRpcHandlers = (
     const agentWorkspace = yield* AgentWorkspace.AgentWorkspaceService;
     const agentStore = yield* AgentStore.AgentStore;
     const facts = yield* Facts.FactService;
+    const integrations = yield* Integrations.Integrations;
+    const machines = yield* Machines.Machines;
+    const machineSecurity = yield* MachineSecurity.MachineSecurity;
     const visualStates = yield* VisualStates.VisualStateService;
     const retrieval = yield* Retrieval.ContextRetrievalService;
     const scheduledTasks = yield* ScheduledTasks.ScheduledTaskService;
     const secretRequests = yield* SecretRequests.SecretRequests;
+    const vault = yield* Vault.Vault;
+    const accounts = yield* Accounts.Accounts;
+    const accountConnections = yield* AccountConnections.AccountConnections;
+    const accountAccess = yield* AccountAccess.AccountAccess;
     const pullRequests = yield* PullRequestService.PullRequestService;
     const reviewGuides = yield* PullRequestReviewGuideService.PullRequestReviewGuideService;
     const pullRequestSync = yield* PullRequestSyncReactor.PullRequestSyncReactor;
@@ -1663,10 +1677,23 @@ const makeWsRpcHandlers = (
       [WS_METHODS.agentsApprovalsList]: (input) => agentWorkspace.listApprovals(input),
       [WS_METHODS.agentsRequestApproval]: (input) =>
         agentWorkspace.requestApproval(input.agentId, input.action),
-      [WS_METHODS.agentsApprove]: (input) => agentWorkspace.approve(input.id),
+      [WS_METHODS.agentsApprove]: (input) => agentWorkspace.approve(input.id, input.accountScope),
       [WS_METHODS.agentsReject]: (input) => agentWorkspace.reject(input.id),
       [WS_METHODS.agentsStartWork]: (input) => agentWorkspace.startWork(input),
       [WS_METHODS.agentsActivity]: (input) => agentWorkspace.activity(input.agentId),
+      [WS_METHODS.integrationsList]: () => integrations.list(),
+      [WS_METHODS.integrationsCreate]: (input) => integrations.create(input),
+      [WS_METHODS.integrationsUpdate]: (input) => integrations.update(input),
+      [WS_METHODS.integrationsDelete]: (input) => integrations.remove(input.id),
+      [WS_METHODS.integrationsTestConnection]: (input) => integrations.testConnection(input.id),
+      [WS_METHODS.machineSecurityStatus]: () => machineSecurity.status,
+      [WS_METHODS.machinesList]: () => machines.list,
+      [WS_METHODS.machinesSubscribe]: () => machines.subscribe,
+      [WS_METHODS.machinesUpdate]: (input) => machines.update(input),
+      [WS_METHODS.machinesPrepareJoin]: () => machines.prepareJoin,
+      [WS_METHODS.machinesCreatePeerGrant]: (input) => machines.createPeerGrant(input),
+      [WS_METHODS.machinesJoinHub]: (input) => machines.joinHub(input),
+      [WS_METHODS.machinesUnpair]: (input) => machines.unpair(input),
       [WS_METHODS.factsList]: (input) => facts.list(input),
       [WS_METHODS.factsCreate]: (input) => facts.create(input),
       [WS_METHODS.visualStateGet]: (input) =>
@@ -1723,6 +1750,21 @@ const makeWsRpcHandlers = (
         Effect.annotateCurrentSpan({ "scheduled_task.id": input.id }).pipe(
           Effect.andThen(scheduledTasks.rotateWebhookToken(input)),
         ),
+      [WS_METHODS.accountsConnect]: (input) =>
+        accountConnections.connectForThread(input.threadId, input.connection),
+      [WS_METHODS.accountsUse]: (input) =>
+        accountAccess.setThreadBindingForThread(input.threadId, input),
+      [WS_METHODS.accountsRemoveAccess]: (input) => accountAccess.removeAccess(input),
+      [WS_METHODS.accountsList]: (input) => accounts.list(input),
+      [WS_METHODS.accountsGet]: (input) => accounts.get(input),
+      [WS_METHODS.accountsCreate]: (input) => accounts.create(input),
+      [WS_METHODS.accountsUpdate]: (input) => accounts.update(input),
+      [WS_METHODS.accountsDisconnect]: (input) => accounts.disconnect(input),
+      [WS_METHODS.vaultList]: (input) => vault.list(input),
+      [WS_METHODS.vaultCreate]: (input) => vault.create(input),
+      [WS_METHODS.vaultUpdate]: (input) => vault.update(input),
+      [WS_METHODS.vaultDelete]: (input) => vault.delete(input),
+      [WS_METHODS.vaultUsage]: (input) => vault.listUsage(input),
       [WS_METHODS.secretsAnswerRequest]: (input) =>
         Effect.annotateCurrentSpan({ "orchestration_v2.thread_id": input.threadId }).pipe(
           Effect.andThen(secretRequests.answer(input)),
@@ -2678,11 +2720,13 @@ const makeWsRpcHandlers = (
 type WsRpcs = RpcGroup.Rpcs<typeof ServerWsRpcGroup>;
 type WsRpcHandlersEffect = ReturnType<typeof makeWsRpcHandlers>;
 type WsRpcHandlers = Effect.Success<WsRpcHandlersEffect>;
-type WsRpcHandlerKeysA = Extract<keyof WsRpcHandlers, `p${string}` | `s${string}`>;
-/** Resolve in halves to stay within the RPC conditional type's instantiation budget. */
+type WsRpcHandlerKeysA = Extract<keyof WsRpcHandlers, `p${string}`>;
+type WsRpcHandlerKeysB = Extract<keyof WsRpcHandlers, `s${string}`>;
+/** Resolve in smaller groups to stay within the RPC conditional type's instantiation budget. */
 type WsRpcHandlerServices =
   | RpcGroup.HandlersServices<WsRpcs, Pick<WsRpcHandlers, WsRpcHandlerKeysA>>
-  | RpcGroup.HandlersServices<WsRpcs, Omit<WsRpcHandlers, WsRpcHandlerKeysA>>;
+  | RpcGroup.HandlersServices<WsRpcs, Pick<WsRpcHandlers, WsRpcHandlerKeysB>>
+  | RpcGroup.HandlersServices<WsRpcs, Omit<WsRpcHandlers, WsRpcHandlerKeysA | WsRpcHandlerKeysB>>;
 
 const layerWsRpc = (
   ...args: Parameters<typeof makeWsRpcHandlers>
@@ -2724,6 +2768,9 @@ type WsRequestServices =
   | Exports.ExportService
   | ExternalLauncher.ExternalLauncher
   | Facts.FactService
+  | Integrations.Integrations
+  | Machines.Machines
+  | MachineSecurity.MachineSecurity
   | FileSystem.FileSystem
   | GitHubRest.GitHubRest
   | GitWorkflowService.GitWorkflowService
@@ -2763,6 +2810,10 @@ type WsRequestServices =
   | ReviewService.ReviewService
   | ScheduledTasks.ScheduledTaskService
   | SecretRequests.SecretRequests
+  | AccountAccess.AccountAccess
+  | AccountConnections.AccountConnections
+  | Accounts.Accounts
+  | Vault.Vault
   | ServerConfig.ServerConfig
   | ServerEnvironment.ServerEnvironment
   | ServerLifecycleEvents.ServerLifecycleEvents

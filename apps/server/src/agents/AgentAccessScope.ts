@@ -30,7 +30,7 @@ export type ResolvedAgentAccess = {
 export class AgentAccessScope extends Context.Service<
   AgentAccessScope,
   { readonly resolve: (agentId: AgentId) => Effect.Effect<ResolvedAgentAccess, AgentError> }
->()("t3/agents/AgentAccessScope") {}
+>()("cogenly-server/agents/AgentAccessScope") {}
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;

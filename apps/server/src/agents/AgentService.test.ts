@@ -1,3 +1,5 @@
+import * as SharedState from "../sync/SharedState.ts";
+import { layerIdentity as layerSharedIdentity } from "../sync/testkit.ts";
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
@@ -38,6 +40,7 @@ import {
   RunId,
   ScheduledTaskId,
   ThreadId,
+  TurnItemId,
   type OrchestrationV2Run,
   type OrchestrationV2ThreadProjection,
   type ScheduledTaskUpsertInput,
@@ -219,16 +222,16 @@ const makeHarness = Effect.sync(() => {
     ServerConfig.layerTest(process.cwd(), { prefix: "t3-agent-service-" }),
   );
   const database = Sqlite.layerMemory;
-  const store = Store.layer.pipe(Layer.provide(database));
-  const labels = Labels.layer.pipe(
-    Layer.provide(Layer.merge(database, LabelEvents.layer.pipe(Layer.provide(database)))),
-  );
-  const agents = Agents.layer.pipe(
-    Layer.provide(Layer.mergeAll(boundaries, store, labels, database)),
-  );
-  const schedules = Schedules.layer.pipe(
-    Layer.provide(Layer.mergeAll(boundaries, agents, store, database)),
-  );
+  const store = Store.layer.pipe(Layer.provide(layerSharedIdentity)).pipe(Layer.provide(database));
+  const labels = Labels.layer
+    .pipe(Layer.provide(layerSharedIdentity))
+    .pipe(Layer.provide(Layer.merge(database, LabelEvents.layer.pipe(Layer.provide(database)))));
+  const agents = Agents.layer
+    .pipe(Layer.provide(layerSharedIdentity))
+    .pipe(Layer.provide(Layer.mergeAll(boundaries, store, labels, database)));
+  const schedules = Schedules.layer
+    .pipe(Layer.provide(layerSharedIdentity))
+    .pipe(Layer.provide(Layer.mergeAll(boundaries, agents, store, database)));
   const work = Work.layer.pipe(Layer.provide(Layer.mergeAll(store, boundaries)));
   const workspace = Workspace.layer.pipe(
     Layer.provide(Layer.mergeAll(store, agents, schedules, work, boundaries, database)),
@@ -239,9 +242,9 @@ const makeHarness = Effect.sync(() => {
   const eventStore = EventStore.layerFromOrchestrationEventStore.pipe(
     Layer.provide(LabelEvents.layer.pipe(Layer.provide(database))),
   );
-  const bus = AgentEvents.layer.pipe(
-    Layer.provide(Layer.mergeAll(agents, schedules, store, database)),
-  );
+  const bus = AgentEvents.layer
+    .pipe(Layer.provide(layerSharedIdentity))
+    .pipe(Layer.provide(Layer.mergeAll(agents, schedules, store, database)));
   const reactor = EventReactor.layer.pipe(
     Layer.provide(Layer.mergeAll(bus, eventStore, boundaries, database)),
   );
@@ -286,6 +289,206 @@ const makeHarness = Effect.sync(() => {
 });
 
 describe("agent execution", () => {
+  it.effect.each(["starting", "running", "completed", "failed"] as const)(
+    "restart recovery leaves another machine's %s run untouched",
+    (status) =>
+      Effect.gen(function* () {
+        const h = yield* makeHarness;
+        yield* Effect.gen(function* () {
+          const store = yield* Store.AgentStore;
+          const agents = yield* Agents.AgentService;
+          yield* store.save({ ...h.fixture, ownerMachine: EnvironmentId.make("other-machine") });
+          yield* store.createRun({
+            id: "off-owner-run",
+            agentId: h.fixture.id,
+            triggerId: ScheduledTaskId.make("task:off-owner"),
+            workThreadId: ThreadId.make("thread:off-owner"),
+            status,
+            createdAt: DateTime.formatIso(yield* DateTime.now),
+            completedAt: null,
+            summary: null,
+            posted: false,
+          });
+          const before = yield* store.runs(h.fixture.id);
+          yield* agents.reconcile({ afterRestart: true });
+          yield* agents.reconcile();
+          expect(yield* store.runs(h.fixture.id)).toEqual(before);
+          expect((yield* store.get(h.fixture.id)).consecutiveFailures).toBe(0);
+          expect(h.posts).toEqual([]);
+          expect(h.commands).toEqual([]);
+          expect(h.calls).toEqual([]);
+          expect(h.launches).toEqual([]);
+        }).pipe(Effect.provide(h.layer));
+      }),
+  );
+
+  it.effect.each(["starting", "running"] as const)(
+    "startup fails an interrupted %s reservation and posts its reason once",
+    (status) =>
+      Effect.gen(function* () {
+        const h = yield* makeHarness;
+        yield* Effect.gen(function* () {
+          const store = yield* Store.AgentStore;
+          const agents = yield* Agents.AgentService;
+          yield* store.save(h.fixture);
+          yield* store.createRun({
+            id: "interrupted-reservation",
+            agentId: h.fixture.id,
+            triggerId: ScheduledTaskId.make("task:interrupted"),
+            workThreadId: ThreadId.make("thread:never-launched"),
+            status,
+            createdAt: DateTime.formatIso(yield* DateTime.now),
+            completedAt: null,
+            summary: null,
+            posted: false,
+          });
+          yield* agents.reconcile();
+          expect((yield* store.runs(h.fixture.id))[0]?.status).toBe(status);
+          expect(h.posts).toHaveLength(0);
+          // No grace period: recovery runs before any scheduler can launch fresh work.
+          yield* agents.reconcile({ afterRestart: true });
+          yield* agents.reconcile({ afterRestart: true });
+          const record = (yield* store.runs(h.fixture.id))[0]!;
+          expect(record).toMatchObject({ status: "failed", posted: true });
+          expect(record.completedAt).not.toBeNull();
+          expect(record.summary).toContain("Cogenly restarted during this run");
+          expect((yield* store.get(h.fixture.id)).consecutiveFailures).toBe(1);
+          expect(h.posts).toHaveLength(1);
+          expect(h.posts[0]?.effects).toEqual([]);
+          expect(h.calls).toEqual([]);
+          expect(h.launches).toEqual([]);
+        }).pipe(Effect.provide(h.layer));
+      }),
+  );
+
+  it.effect("posts the restart failure instead of an interrupted job's partial answer", () =>
+    Effect.gen(function* () {
+      const h = yield* makeHarness;
+      yield* Effect.gen(function* () {
+        const store = yield* Store.AgentStore;
+        const agents = yield* Agents.AgentService;
+        const schedules = yield* Schedules.ScheduledTaskService;
+        yield* store.save(h.fixture);
+        const { task } = yield* schedules.upsert(h.triggerInput);
+        yield* agents.trigger(task, "interrupted", task.prompt);
+        const threadId = h.launches[0]!.threadId!;
+        const projection = h.projections.get(threadId)!;
+        const run = projection.runs[0]!;
+        const at = yield* DateTime.now;
+        h.projections.set(threadId, {
+          ...projection,
+          runs: [{ ...run, status: "failed", completedAt: at }],
+          turnItems: [
+            {
+              id: TurnItemId.make("item:restart"),
+              type: "error",
+              threadId,
+              runId: run.id,
+              nodeId: null,
+              providerThreadId: null,
+              providerTurnId: null,
+              nativeItemRef: null,
+              parentItemId: null,
+              ordinal: 1,
+              status: "failed",
+              title: "Run interrupted",
+              failure: {
+                class: "transport_error",
+                code: "server_restarted",
+                message: "Cogenly restarted during this run.",
+                retryable: true,
+              },
+              startedAt: at,
+              completedAt: at,
+              updatedAt: at,
+            },
+          ],
+        });
+        yield* agents.reconcile({ afterRestart: true });
+        yield* agents.reconcile();
+        const record = (yield* store.runs(h.fixture.id))[0]!;
+        expect(record).toMatchObject({ status: "failed", posted: true });
+        expect(record.summary).toContain("Cogenly restarted during this run");
+        const posted = h.posts[0]?.events[0];
+        expect(posted?.type === "message.updated" && posted.payload.text).toBe(record.summary);
+        expect(h.posts).toHaveLength(1);
+        expect((yield* store.get(h.fixture.id)).consecutiveFailures).toBe(1);
+      }).pipe(Effect.provide(h.layer));
+    }),
+  );
+
+  it.effect("an incoming agent tombstone stops owner work through the normal deletion path", () =>
+    Effect.gen(function* () {
+      const h = yield* makeHarness;
+      yield* Effect.gen(function* () {
+        const store = yield* Store.AgentStore;
+        const agents = yield* Agents.AgentService;
+        const schedules = yield* Schedules.ScheduledTaskService;
+        const sql = yield* SqlClient.SqlClient;
+        yield* store.save(h.fixture);
+        const { task } = yield* schedules.upsert(h.triggerInput);
+        expect(yield* agents.trigger(task, "delete-running", task.prompt)).toBe(true);
+        const context = yield* Layer.build(
+          SharedState.layer.pipe(Layer.provide(layerSharedIdentity)),
+        );
+        const shared = yield* SharedState.SharedState.pipe(Effect.provideContext(context));
+        const peer = EnvironmentId.make("editing-machine");
+        yield* shared.receive(
+          {
+            after: 0,
+            cursor: 1,
+            changes: [
+              {
+                kind: "agent",
+                id: h.fixture.id,
+                fields: {},
+                clocks: {},
+                tombstone: { wall: 1, logical: 0, node: peer },
+                updatedBy: peer,
+              },
+            ],
+          },
+          peer,
+          false,
+        );
+        expect(
+          (yield* sql<{
+            enabled: number;
+          }>`SELECT enabled FROM scheduled_tasks WHERE task_id=${task.id}`)[0]?.enabled,
+        ).toBe(0);
+        yield* agents.reconcile();
+        expect(yield* store.list()).toHaveLength(0);
+        expect((yield* schedules.list()).tasks).toHaveLength(0);
+        expect(h.commands.filter((command) => command.type === "thread.stop")).toHaveLength(2);
+        expect((yield* shared.get("schedule", task.id))?.tombstone).not.toBeNull();
+      }).pipe(Effect.provide(h.layer));
+    }),
+  );
+
+  it.effect("only the owner fires agents, due schedules and event triggers", () =>
+    Effect.gen(function* () {
+      const h = yield* makeHarness;
+      yield* Effect.gen(function* () {
+        const store = yield* Store.AgentStore;
+        const agents = yield* Agents.AgentService;
+        const schedules = yield* Schedules.ScheduledTaskService;
+        const sql = yield* SqlClient.SqlClient;
+        const ownerMachine = EnvironmentId.make("other-machine");
+        yield* store.save({ ...h.fixture, ownerMachine });
+        const { task } = yield* schedules.upsert({ ...h.triggerInput, ownerMachine });
+        yield* sql`UPDATE scheduled_tasks SET next_run_at='1969-01-01T00:00:00.000Z' WHERE task_id=${task.id}`;
+        expect(yield* store.reserve(h.fixture.id)).toBe(false);
+        expect(yield* agents.trigger(task, "off-owner", task.prompt)).toBe(false);
+        yield* h.jobs.get("scheduled-tasks")!;
+        yield* agents.reconcile();
+        expect(h.launches).toHaveLength(0);
+        expect(yield* store.runs(h.fixture.id)).toHaveLength(0);
+        expect((yield* schedules.list()).tasks[0]?.runCount).toBe(0);
+        expect((yield* Effect.result(schedules.runNow({ id: task.id })))._tag).toBe("Failure");
+      }).pipe(Effect.provide(h.layer));
+    }),
+  );
+
   it.effect(
     "runs a trigger in a separate work thread and posts once without starting another turn",
     () =>
@@ -524,6 +727,73 @@ it.effect("keeps running jobs after repeated provider failures once each backoff
   }),
 );
 
+it.effect("a usage-limited run makes the next run use the next fallback entry", () =>
+  Effect.gen(function* () {
+    const h = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const store = yield* Store.AgentStore;
+      const agents = yield* Agents.AgentService;
+      const schedules = yield* Schedules.ScheduledTaskService;
+      const sql = yield* SqlClient.SqlClient;
+      const fallback = { instanceId: ProviderInstanceId.make("claude-backup"), model: "opus" };
+      yield* store.save({ ...h.fixture, dailyRunCap: 100, fallbackChain: [fallback] });
+      const { task } = yield* schedules.upsert(h.triggerInput);
+      expect(yield* agents.trigger(task, "fallback:first", task.prompt)).toBe(true);
+      expect(h.launches.at(-1)?.modelSelection).toEqual(h.fixture.modelSelection);
+      const first = h.launches.at(-1)!;
+      const projection = h.projections.get(first.threadId!)!;
+      const run = projection.runs[0]!;
+      h.projections.set(first.threadId!, {
+        ...projection,
+        runs: [{ ...run, status: "failed" }],
+        messages: [],
+        turnItems: [
+          {
+            id: TurnItemId.make(`failure:${first.threadId}`),
+            threadId: first.threadId!,
+            runId: run.id,
+            nodeId: null,
+            providerThreadId: null,
+            providerTurnId: null,
+            nativeItemRef: null,
+            parentItemId: null,
+            ordinal: 0,
+            status: "failed",
+            title: "Usage limit reached",
+            startedAt: null,
+            completedAt: null,
+            updatedAt: DateTime.makeUnsafe(h.fixture.createdAt),
+            type: "error",
+            failure: {
+              class: "usage_limit",
+              message: "You've hit your weekly limit",
+              code: "api_error_429",
+              retryable: true,
+              resetAt: "2099-01-01T00:00:00.000Z",
+            },
+          },
+        ],
+      });
+      yield* agents.reconcile();
+      const after = yield* store.get(h.fixture.id);
+      expect(after.fallbackIndex).toBe(1);
+      expect(after.fallbackReason).toBe("usage_limit");
+      expect(after.fallbackUntil).toBe("2099-01-01T00:00:00.000Z");
+      const runs = yield* store.runs(h.fixture.id);
+      expect(runs[0]?.modelSelection).toEqual(h.fixture.modelSelection);
+      expect(runs[0]?.fallbackReason).toBe("usage_limit");
+      expect(runs[0]?.fallbackResetAt).toBe("2099-01-01T00:00:00.000Z");
+      yield* sql`UPDATE agents SET backoff_until = NULL WHERE agent_id = ${h.fixture.id}`;
+      expect(yield* agents.trigger(task, "fallback:second", task.prompt)).toBe(true);
+      expect(h.launches.at(-1)?.modelSelection).toEqual(fallback);
+      const secondRuns = yield* store.runs(h.fixture.id);
+      const secondRun = secondRuns.find((run) => run.id === "agent-work:fallback:second");
+      expect(secondRun?.modelSelection).toEqual(fallback);
+      expect(secondRun?.fallbackReason).toBe("usage_limit");
+    }).pipe(Effect.provide(h.layer));
+  }),
+);
+
 it.effect("deleting an agent stops active work and removes triggers and memory", () =>
   Effect.gen(function* () {
     const h = yield* makeHarness;
@@ -715,7 +985,7 @@ describe("agent scope, approvals and shared commitments", () => {
           const denied = yield* policy
             .beforeTool(
               scopeFor(agent.conversationThreadId),
-              "t3_thread_launch",
+              "thread_launch",
               { title: "Fix CI", message: "Repair tests" },
               false,
             )
@@ -1133,7 +1403,7 @@ it.effect(
         expect(stale.approval?.status).toBe("pending");
         expect(
           (yield* Effect.result(
-            policy.beforeTool(scopeFor(actor.threadId), "t3_pending_request_respond", {}, false),
+            policy.beforeTool(scopeFor(actor.threadId), "pending_request_respond", {}, false),
           ))._tag,
         ).toBe("Failure");
         expect(h.launches).toHaveLength(0);
@@ -1188,8 +1458,8 @@ it.effect(
           "terminal_run",
           "create_threads",
           "delegate_task",
-          "t3_thread_configure",
-          "t3_pending_request_respond",
+          "thread_configure",
+          "pending_request_respond",
         ]) {
           const result = yield* policy
             .beforeTool(scopeFor(agent.conversationThreadId), name, {}, false)
@@ -1220,7 +1490,7 @@ it.effect(
           (yield* Effect.result(
             policy.beforeTool(
               scopeFor(agent.conversationThreadId),
-              "t3_project_read",
+              "project_read",
               { projectId: "another-project", labelId: "spawn" },
               true,
             ),
@@ -1252,13 +1522,13 @@ it.effect("agents add projects with the execute grant, without the high-impact g
       const agent = yield* store.save({ ...h.fixture, permissions: defaultAgentPermissions });
       const call = (name: string) =>
         policy.beforeTool(scopeFor(agent.conversationThreadId), name, { title: "New app" }, false);
-      for (const name of ["t3_project_create", "t3_project_clone"])
+      for (const name of ["project_create", "project_clone"])
         expect(yield* call(name), name).toEqual({ handled: false });
-      expect((yield* call("t3_project_delete").pipe(Effect.flip)).code).toBe(
+      expect((yield* call("project_delete").pipe(Effect.flip)).code).toBe(
         "agent_permission_denied",
       );
       yield* store.save({ ...agent, permissions: { ...agent.permissions, execute: false } });
-      expect((yield* call("t3_project_create").pipe(Effect.flip)).code).toBe(
+      expect((yield* call("project_create").pipe(Effect.flip)).code).toBe(
         "agent_permission_denied",
       );
     }).pipe(Effect.provide(h.layer));
@@ -1300,7 +1570,7 @@ it.effect.each(["execute", "no_agent_execute", "no_read"] as const)(
           expect(
             yield* policy.beforeTool(
               scopeFor(agent.conversationThreadId),
-              "t3_project_read",
+              "project_read",
               { projectId: repositoryId },
               true,
             ),
@@ -1311,7 +1581,7 @@ it.effect.each(["execute", "no_agent_execute", "no_read"] as const)(
             (yield* policy
               .beforeTool(
                 scopeFor(result.threadId!),
-                "t3_project_read",
+                "project_read",
                 { projectId: repositoryId },
                 true,
               )
@@ -1487,7 +1757,13 @@ describe("event-driven agent triggers", () => {
             yield* reactor.tick;
             yield* reactor.observe(source);
             yield* (yield* AgentEvents.AgentEventBus).drain;
-          }).pipe(Effect.provide(EventReactor.layer.pipe(Layer.provideMerge(AgentEvents.layer))));
+          }).pipe(
+            Effect.provide(
+              EventReactor.layer.pipe(
+                Layer.provideMerge(AgentEvents.layer.pipe(Layer.provide(layerSharedIdentity))),
+              ),
+            ),
+          );
           expect(h.launches).toHaveLength(1);
         }).pipe(Effect.provide(h.layer));
       }),

@@ -71,7 +71,7 @@ export class ProjectCloneTracker extends Context.Service<
     /** Emits every tracked clone first, then the full list after each change. */
     readonly stream: Stream.Stream<ReadonlyArray<ProjectCloneSnapshot>>;
   }
->()("t3/project/ProjectCloneTracker") {}
+>()("cogenly-server/project/ProjectCloneTracker") {}
 
 /**
  * Orchestration side effects the caller owns. The tracker never depends on the

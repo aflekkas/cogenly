@@ -120,6 +120,19 @@ const RPC_AGGREGATES = {
   [WS_METHODS.agentsReject]: "agents",
   [WS_METHODS.agentsStartWork]: "agents",
   [WS_METHODS.agentsActivity]: "agents",
+  [WS_METHODS.integrationsList]: "integrations",
+  [WS_METHODS.integrationsCreate]: "integrations",
+  [WS_METHODS.integrationsUpdate]: "integrations",
+  [WS_METHODS.integrationsDelete]: "integrations",
+  [WS_METHODS.integrationsTestConnection]: "integrations",
+  [WS_METHODS.machineSecurityStatus]: "machines",
+  [WS_METHODS.machinesList]: "machines",
+  [WS_METHODS.machinesSubscribe]: "machines",
+  [WS_METHODS.machinesUpdate]: "machines",
+  [WS_METHODS.machinesPrepareJoin]: "machines",
+  [WS_METHODS.machinesCreatePeerGrant]: "machines",
+  [WS_METHODS.machinesJoinHub]: "machines",
+  [WS_METHODS.machinesUnpair]: "machines",
   [WS_METHODS.factsList]: "facts",
   [WS_METHODS.factsCreate]: "facts",
   [WS_METHODS.factsUpdate]: "facts",
@@ -151,6 +164,19 @@ const RPC_AGGREGATES = {
   [WS_METHODS.scheduledTasksDelete]: "scheduledTasks",
   [WS_METHODS.scheduledTasksRunNow]: "scheduledTasks",
   [WS_METHODS.scheduledTasksRotateWebhookToken]: "scheduledTasks",
+  [WS_METHODS.accountsConnect]: "accounts",
+  [WS_METHODS.accountsUse]: "accounts",
+  [WS_METHODS.accountsRemoveAccess]: "accounts",
+  [WS_METHODS.accountsList]: "accounts",
+  [WS_METHODS.accountsGet]: "accounts",
+  [WS_METHODS.accountsCreate]: "accounts",
+  [WS_METHODS.accountsUpdate]: "accounts",
+  [WS_METHODS.accountsDisconnect]: "accounts",
+  [WS_METHODS.vaultList]: "vault",
+  [WS_METHODS.vaultCreate]: "vault",
+  [WS_METHODS.vaultUpdate]: "vault",
+  [WS_METHODS.vaultDelete]: "vault",
+  [WS_METHODS.vaultUsage]: "vault",
   [WS_METHODS.scheduledTasksListWebhookDeliveries]: "scheduledTasks",
   [WS_METHODS.scheduledTasksGetWebhookDelivery]: "scheduledTasks",
   [WS_METHODS.secretsAnswerRequest]: "secrets",
@@ -293,7 +319,7 @@ const RPC_METHODS_WITH_TRACING_DISABLED: ReadonlySet<string> = new Set([
  * after `RpcScopeAuthorization`, so it wraps authorization and also records rejected calls.
  */
 export class RpcInstrumentation extends RpcMiddleware.Service<RpcInstrumentation>()(
-  "t3/server/RpcInstrumentation",
+  "cogenly-server/server/RpcInstrumentation",
 ) {}
 
 /**

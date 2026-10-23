@@ -74,7 +74,7 @@ export class DesktopBrowserChannel extends Context.Service<
       },
     ) => Effect.Effect<void>;
   }
->()("t3/preview/DesktopBrowserChannel") {}
+>()("cogenly-server/preview/DesktopBrowserChannel") {}
 
 const make = Effect.gen(function* () {
   const config = yield* ServerConfig.ServerConfig;

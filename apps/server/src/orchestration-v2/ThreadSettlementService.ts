@@ -88,7 +88,7 @@ export class ThreadSettlementServiceV2 extends Context.Service<
   {
     readonly start: () => Effect.Effect<void, never, Scope.Scope>;
   }
->()("t3/orchestration-v2/ThreadSettlementService/ThreadSettlementServiceV2") {}
+>()("cogenly-server/orchestration-v2/ThreadSettlementService/ThreadSettlementServiceV2") {}
 
 export const make = Effect.gen(function* () {
   const orchestrator = yield* Orchestrator.OrchestratorV2;

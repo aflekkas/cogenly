@@ -57,7 +57,7 @@ export class VisualStateService extends Context.Service<
       VisualStateError
     >;
   }
->()("t3/htmlRender/VisualState/VisualStateService") {}
+>()("cogenly-server/htmlRender/VisualState/VisualStateService") {}
 
 const storageFailure = (operation: "get" | "set" | "submit", renderId: string, cause: unknown) =>
   new VisualStateError({ operation, reason: "storage", renderId, cause });

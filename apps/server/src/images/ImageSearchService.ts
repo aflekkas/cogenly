@@ -29,7 +29,7 @@ export class ImageSearchService extends Context.Service<
       input: ImageSearchInput,
     ) => Effect.Effect<ImageSearchResult, ImageSearchError>;
   }
->()("t3/images/ImageSearchService") {}
+>()("cogenly-server/images/ImageSearchService") {}
 
 const COMMONS_API_ENDPOINT = "https://commons.wikimedia.org/w/api.php";
 const COMMONS_USER_AGENT = "CogenlyImageSearch/1.0";

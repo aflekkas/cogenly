@@ -84,7 +84,7 @@ it.effect("explains a disabled provider when sending attachments", () =>
       ),
     );
     const result = yield* toolkit
-      .handle("t3_thread_send_attachments", { attachments: [attachment] })
+      .handle("thread_send_attachments", { attachments: [attachment] })
       .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(dependencies));
     expect(result.at(-1)?.result).toMatchObject({
       code: "invalid_request",

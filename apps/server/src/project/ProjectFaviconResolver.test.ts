@@ -7,11 +7,11 @@ import * as Path from "effect/Path";
 
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 import * as ProjectFaviconResolver from "./ProjectFaviconResolver.ts";
-import * as T3ProjectFileLoader from "./T3ProjectFileLoader.ts";
+import * as ProjectConfigFileLoader from "./ProjectConfigFileLoader.ts";
 
 const layerTest = ProjectFaviconResolver.layer.pipe(
   Layer.provideMerge(WorkspacePaths.layer),
-  Layer.provideMerge(T3ProjectFileLoader.layer),
+  Layer.provideMerge(ProjectConfigFileLoader.layer),
   Layer.provideMerge(NodeServices.layer),
 );
 

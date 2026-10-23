@@ -33,9 +33,9 @@ import * as UsageLimitHandoff from "../../../orchestration-v2/UsageLimitHandoff.
 import * as ServerConfig from "../../../config.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 
-const ThreadOrganizeTool = Tool.make("t3_thread_organize", {
+const ThreadOrganizeTool = Tool.make("thread_organize", {
   description:
-    "Pin, archive, or mark a thread unread. Omit threadId for this thread. For a thread stopped on a usage limit (see usageLimit in t3_thread_list or t3_thread_read), dont_resume cancels its automatic continuation at the reset and resume_at_reset schedules it again. Snooze and settle have their own tools. Existing thread lifecycle rules apply.",
+    "Pin, archive, or mark a thread unread. Omit threadId for this thread. For a thread stopped on a usage limit (see usageLimit in thread_list or thread_read), dont_resume cancels its automatic continuation at the reset and resume_at_reset schedules it again. Snooze and settle have their own tools. Existing thread lifecycle rules apply.",
   parameters: Schema.Struct({
     threadId: Schema.optional(ThreadId),
     action: Schema.Literals([
@@ -71,7 +71,7 @@ const lifecycleTool = {
     Crypto.Crypto,
   ],
 };
-const ThreadSnoozeTool = Tool.make("t3_thread_snooze", {
+const ThreadSnoozeTool = Tool.make("thread_snooze", {
   ...lifecycleTool,
   description: `Snooze a thread: hide it from the user's inbox until a time, as when they say "snooze this until tomorrow". Omit threadId for this thread. until is a preset (${SNOOZE_PRESET_KEYS.join(", ")}), limit_reset (until the usage limit the thread stopped on resets), an ISO time, or a short phrase such as "friday 2pm" or "in 2 days". Presets and phrases resolve in the user's time zone exactly as the snooze menu does. A snoozed thread wakes early when it asks for something, fails, or completes; snoozing this thread therefore lands when your turn completes (snoozesWhenTurnEnds=true). Quote the receipt instead of restating the time.`,
   parameters: Schema.Struct({
@@ -89,7 +89,7 @@ const ThreadSnoozeTool = Tool.make("t3_thread_snooze", {
 })
   .annotate(Tool.Title, "Snooze a thread")
   .annotate(Tool.Destructive, false);
-const ThreadUnsnoozeTool = Tool.make("t3_thread_unsnooze", {
+const ThreadUnsnoozeTool = Tool.make("thread_unsnooze", {
   ...lifecycleTool,
   description:
     "Wake a snoozed thread now so it returns to the user's inbox. Omit threadId for this thread.",
@@ -98,7 +98,7 @@ const ThreadUnsnoozeTool = Tool.make("t3_thread_unsnooze", {
 })
   .annotate(Tool.Title, "Wake a thread")
   .annotate(Tool.Destructive, false);
-const ThreadSettleTool = Tool.make("t3_thread_settle", {
+const ThreadSettleTool = Tool.make("thread_settle", {
   ...lifecycleTool,
   description:
     "Settle a thread: move it out of the active list once its work is done. Omit threadId for this thread. Settling this thread takes effect when your turn completes, returning settlesWhenTurnEnds=true; a turn that fails or is interrupted, or a queued message, leaves it active.",
@@ -111,7 +111,7 @@ const ThreadSettleTool = Tool.make("t3_thread_settle", {
 })
   .annotate(Tool.Title, "Settle a thread")
   .annotate(Tool.Destructive, false);
-const ThreadUnsettleTool = Tool.make("t3_thread_unsettle", {
+const ThreadUnsettleTool = Tool.make("thread_unsettle", {
   ...lifecycleTool,
   description: "Return a settled thread to the user's active list. Omit threadId for this thread.",
   parameters: Schema.Struct({ threadId: Schema.optional(ThreadId) }),
@@ -136,10 +136,10 @@ const queueEntry = Schema.Struct({
   text: Schema.String,
   truncated: Schema.Boolean,
 });
-const QueueListTool = Tool.make("t3_queue_list", {
+const QueueListTool = Tool.make("queue_list", {
   ...commandTool,
   description:
-    "List queued messages in delivery order. Results are a live offset page; use t3_thread_read for full thread history.",
+    "List queued messages in delivery order. Results are a live offset page; use thread_read for full thread history.",
   parameters: Schema.Struct({
     threadId: Schema.optional(ThreadId),
     cursor: Schema.optional(NonNegativeInt),
@@ -152,7 +152,7 @@ const QueueListTool = Tool.make("t3_queue_list", {
 })
   .annotate(Tool.Readonly, true)
   .annotate(Tool.Destructive, false);
-const QueueReadTool = Tool.make("t3_queue_read", {
+const QueueReadTool = Tool.make("queue_read", {
   ...commandTool,
   description: "Read up to 16,000 characters of a queued message. Omit threadId for this thread.",
   parameters: Schema.Struct(queueTarget),
@@ -160,7 +160,7 @@ const QueueReadTool = Tool.make("t3_queue_read", {
 })
   .annotate(Tool.Readonly, true)
   .annotate(Tool.Destructive, false);
-const QueueEditTool = Tool.make("t3_queue_edit", {
+const QueueEditTool = Tool.make("queue_edit", {
   ...commandTool,
   description:
     "Replace a queued message's text, preserving its attachments. The service rejects runs that are no longer queued.",
@@ -169,17 +169,17 @@ const QueueEditTool = Tool.make("t3_queue_edit", {
     text: Schema.String.check(Schema.isMaxLength(100000)),
   }),
 }).annotate(Tool.Destructive, true);
-const QueueCancelTool = Tool.make("t3_queue_cancel", {
+const QueueCancelTool = Tool.make("queue_cancel", {
   ...commandTool,
   description: "Cancel a queued run using the existing queue command.",
   parameters: Schema.Struct(queueTarget),
 }).annotate(Tool.Destructive, true);
-const QueueReorderTool = Tool.make("t3_queue_reorder", {
+const QueueReorderTool = Tool.make("queue_reorder", {
   ...commandTool,
   description: "Move a queued run before another queued run, or to the end with beforeRunId=null.",
   parameters: Schema.Struct({ ...queueTarget, beforeRunId: Schema.NullOr(RunId) }),
 }).annotate(Tool.Destructive, true);
-const QueuePromoteTool = Tool.make("t3_queue_promote_to_steer", {
+const QueuePromoteTool = Tool.make("queue_promote_to_steer", {
   ...commandTool,
   description:
     "Deliver a queued message as steering to the specified active run. Existing provider and run-state rules apply.",
@@ -207,7 +207,7 @@ const pendingRequest = Schema.Struct({
   requestId: RuntimeRequestId,
   questions: Schema.Array(question),
 });
-const PendingRequestListTool = Tool.make("t3_pending_request_list", {
+const PendingRequestListTool = Tool.make("pending_request_list", {
   ...commandTool,
   description:
     "List pending user questions in a thread. Omit threadId for this thread. Approval requests are not included.",
@@ -216,16 +216,16 @@ const PendingRequestListTool = Tool.make("t3_pending_request_list", {
 })
   .annotate(Tool.Readonly, true)
   .annotate(Tool.Destructive, false);
-const PendingRequestReadTool = Tool.make("t3_pending_request_read", {
+const PendingRequestReadTool = Tool.make("pending_request_read", {
   ...commandTool,
   description:
-    "Read a pending user question. Answer with t3_pending_request_respond; existing live or message response handling is used.",
+    "Read a pending user question. Answer with pending_request_respond; existing live or message response handling is used.",
   parameters: Schema.Struct(requestTarget),
   success: pendingRequest,
 })
   .annotate(Tool.Readonly, true)
   .annotate(Tool.Destructive, false);
-const PendingRequestRespondTool = Tool.make("t3_pending_request_respond", {
+const PendingRequestRespondTool = Tool.make("pending_request_respond", {
   ...commandTool,
   description:
     "Answer a pending user-input request using the existing runtime response command. This cannot approve a permission request.",
@@ -234,7 +234,7 @@ const PendingRequestRespondTool = Tool.make("t3_pending_request_respond", {
   .annotate(Tool.Destructive, true)
   .annotate(Tool.OpenWorld, true);
 
-const ThreadConfigurationTool = Tool.make("t3_thread_configuration", {
+const ThreadConfigurationTool = Tool.make("thread_configuration", {
   ...commandTool,
   description:
     "Read a thread's provider/model selection and modes. Omit threadId for this thread. orchestrator_capabilities lists available providers and models.",
@@ -248,7 +248,7 @@ const ThreadConfigurationTool = Tool.make("t3_thread_configuration", {
 })
   .annotate(Tool.Readonly, true)
   .annotate(Tool.Destructive, false);
-const ThreadConfigureTool = Tool.make("t3_thread_configure", {
+const ThreadConfigureTool = Tool.make("thread_configure", {
   ...commandTool,
   description:
     "Set a thread's provider, model and options with the existing selection command. Omit threadId for this thread. This does not change permission modes. Use orchestrator_capabilities to choose a selection.",
@@ -262,19 +262,19 @@ const limitHandoffTool = {
   ...commandTool,
   dependencies: [...commandTool.dependencies, UsageLimitHandoff.UsageLimitHandoffService],
 };
-const ThreadLimitHandoffOptionsTool = Tool.make("t3_thread_limit_handoff_options", {
+const ThreadLimitHandoffOptionsTool = Tool.make("thread_limit_handoff_options", {
   ...limitHandoffTool,
   description:
-    "For a thread stopped on a usage limit (usageLimit in t3_thread_list or t3_thread_read), list the provider instances that could continue it, best first: known headroom before unknown, the same provider before another, the same model before a fallback. Each candidate carries its usage. recommendation is null when the thread is not stopped on a usage limit; an empty candidates list means nothing else can run it now. Omit threadId for this thread.",
+    "For a thread stopped on a usage limit (usageLimit in thread_list or thread_read), list the provider instances that could continue it, best first: known headroom before unknown, the same provider before another, the same model before a fallback. Each candidate carries its usage. recommendation is null when the thread is not stopped on a usage limit; an empty candidates list means nothing else can run it now. Omit threadId for this thread.",
   parameters: Schema.Struct({ threadId: Schema.optional(ThreadId) }),
   success: Schema.Struct({ recommendation: Schema.NullOr(UsageLimitHandoffRecommendation) }),
 })
   .annotate(Tool.Readonly, true)
   .annotate(Tool.Destructive, false);
-const ThreadLimitHandoffTool = Tool.make("t3_thread_limit_handoff", {
+const ThreadLimitHandoffTool = Tool.make("thread_limit_handoff", {
   ...limitHandoffTool,
   description:
-    "Continue a thread stopped on a usage limit on another provider instance: switches the thread, hands its context over, and re-runs the stopped request, cancelling any resume scheduled for the reset. Omit providerInstanceId to take the top candidate from t3_thread_limit_handoff_options; model defaults to the candidate's. Switch only when the user asked you to manage usage or approved the switch.",
+    "Continue a thread stopped on a usage limit on another provider instance: switches the thread, hands its context over, and re-runs the stopped request, cancelling any resume scheduled for the reset. Omit providerInstanceId to take the top candidate from thread_limit_handoff_options; model defaults to the candidate's. Switch only when the user asked you to manage usage or approved the switch.",
   parameters: Schema.Struct({
     threadId: Schema.optional(ThreadId),
     providerInstanceId: Schema.optional(ProviderInstanceId),
@@ -288,7 +288,7 @@ const ThreadLimitHandoffTool = Tool.make("t3_thread_limit_handoff", {
 }).annotate(Tool.Destructive, true);
 
 const transferResult = Schema.Struct({ sequence: NonNegativeInt, targetThreadId: ThreadId });
-const ThreadForkTool = Tool.make("t3_thread_fork", {
+const ThreadForkTool = Tool.make("thread_fork", {
   ...commandTool,
   description:
     "Fork a thread from a stable run or checkpoint using the existing fork command. Omit threadId to fork this thread. The fork inherits the source configuration. Acceptance does not mean a provider turn has completed.",
@@ -299,7 +299,7 @@ const ThreadForkTool = Tool.make("t3_thread_fork", {
   }),
   success: transferResult,
 }).annotate(Tool.Destructive, true);
-const ThreadMergeBackTool = Tool.make("t3_thread_merge_back", {
+const ThreadMergeBackTool = Tool.make("thread_merge_back", {
   ...commandTool,
   description:
     "Merge context from a thread back to a related thread in the same project. Omit sourceThreadId to merge from this thread. Existing lineage and transfer rules apply.",
@@ -310,7 +310,7 @@ const ThreadMergeBackTool = Tool.make("t3_thread_merge_back", {
   }),
   success: transferResult,
 }).annotate(Tool.Destructive, true);
-const ThreadTransfersTool = Tool.make("t3_thread_transfers", {
+const ThreadTransfersTool = Tool.make("thread_transfers", {
   ...commandTool,
   description: "Read context transfer status for a thread. Omit threadId for this thread.",
   parameters: Schema.Struct({ threadId: Schema.optional(ThreadId) }),
@@ -328,7 +328,7 @@ const ThreadTransfersTool = Tool.make("t3_thread_transfers", {
   .annotate(Tool.Readonly, true)
   .annotate(Tool.Destructive, false);
 
-const ThreadSearchTool = Tool.make("t3_thread_search", {
+const ThreadSearchTool = Tool.make("thread_search", {
   ...commandTool,
   description:
     "Search active thread titles and content with the app's existing bounded search. Each match carries a Markdown `link` to the thread; when you mention it to the user, write that link as is. Matches are limited to one project (projectId, else the calling thread's project) out of the global top matches, so this may return fewer than limit. A caller outside a Cogenly thread that omits projectId searches every project. No pagination or exhaustive-result guarantee.",

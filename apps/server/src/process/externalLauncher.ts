@@ -374,7 +374,7 @@ export class ExternalLauncher extends Context.Service<
     readonly launchBrowser: (target: string) => Effect.Effect<void, ExternalLauncherError>;
     readonly revealInFileManager: (target: string) => Effect.Effect<void, ExternalLauncherError>;
   }
->()("t3/process/externalLauncher") {}
+>()("cogenly-server/process/externalLauncher") {}
 
 // ==============================
 // Implementations

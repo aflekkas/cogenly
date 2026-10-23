@@ -45,6 +45,8 @@ import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
 import * as AgentAwarenessRelay from "./relay/AgentAwarenessRelay.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerSettings from "./serverSettings.ts";
+import * as Agents from "./agents/AgentService.ts";
+import * as SystemdWatchdog from "./scheduling/SystemdWatchdog.ts";
 import { forkParked, forkParkedFiber } from "./serverActivation.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
@@ -79,7 +81,7 @@ export class ServerRuntimeStartup extends Context.Service<
       effect: Effect.Effect<A, E>,
     ) => Effect.Effect<A, E | ServerRuntimeStartupError>;
   }
->()("t3/serverRuntimeStartup") {}
+>()("cogenly-server/serverRuntimeStartup") {}
 
 interface QueuedCommand {
   readonly run: Effect.Effect<void, never>;
@@ -538,7 +540,13 @@ const make = (options?: StartupOptions) =>
             ),
           ),
         ),
-        recover: runStartupPhase("orchestration-v2.recovery", providerRuntimeRecovery.recover),
+        recover: runStartupPhase("orchestration-v2.recovery", providerRuntimeRecovery.recover).pipe(
+          Effect.tap(() =>
+            Effect.flatMap(Agents.AgentService, (agents) =>
+              agents.reconcile({ afterRestart: true }),
+            ),
+          ),
+        ),
         recoverDelegatedTasks: runStartupPhase(
           "orchestration-v2.delegated-tasks.recover",
           orchestrator.recoverDelegatedTasks,
@@ -676,6 +684,7 @@ const make = (options?: StartupOptions) =>
         }),
       );
       yield* Effect.logDebug("startup phase: complete");
+      yield* Effect.flatMap(SystemdWatchdog.SystemdWatchdog, (watchdog) => watchdog.start);
       yield* flushCompileCache;
     }).pipe(
       Effect.withSpan("server.startup", {
@@ -717,6 +726,6 @@ const make = (options?: StartupOptions) =>
   });
 
 export const layerWithOptions = (options?: StartupOptions) =>
-  Layer.effect(ServerRuntimeStartup, make(options));
+  Layer.effect(ServerRuntimeStartup, make(options)).pipe(Layer.provide(SystemdWatchdog.layer));
 
 const layer = layerWithOptions();

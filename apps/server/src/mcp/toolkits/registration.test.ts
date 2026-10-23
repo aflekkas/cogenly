@@ -1,3 +1,7 @@
+import * as Accounts from "../../accounts/Accounts.ts";
+import * as AccountAccess from "../../accounts/AccountAccess.ts";
+import * as AccountConnections from "../../accounts/AccountConnections.ts";
+import * as CliCredentials from "../../accounts/CliCredentials.ts";
 import * as GlobalSearch from "../../search/GlobalSearch.ts";
 import * as FactService from "../../context/FactService.ts";
 import * as ProjectLabels from "../../projectLabels/ProjectLabelService.ts";
@@ -20,6 +24,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   EnvironmentId,
   ProjectLabelId,
+  ProjectId,
   ProviderInstanceId,
   ThreadId,
   OrchestratorMcpFailure,
@@ -43,6 +48,7 @@ import * as ProjectSetupScriptRunner from "../../project/ProjectSetupScriptRunne
 import * as ProviderRegistry from "../../provider/ProviderRegistry.ts";
 import * as ScheduledTaskService from "../../scheduledTasks/ScheduledTaskService.ts";
 import * as SecretRequests from "../../secrets/SecretRequests.ts";
+import * as Vault from "../../vault/Vault.ts";
 import * as ServerSettings from "../../serverSettings.ts";
 import * as VcsStatusBroadcaster from "../../vcs/VcsStatusBroadcaster.ts";
 import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
@@ -55,6 +61,8 @@ import * as UsageLimitHandoff from "../../orchestration-v2/UsageLimitHandoff.ts"
 import * as PreviewManager from "../../preview/Manager.ts";
 import * as SourceControlRepositoryService from "../../sourceControl/SourceControlRepositoryService.ts";
 import * as GitVcsDriver from "../../vcs/GitVcsDriver.ts";
+import * as Integrations from "../../integrations/Integrations.ts";
+import * as Machines from "../../machines/Machines.ts";
 import * as McpHttpServer from "../McpHttpServer.ts";
 import * as McpSessionRegistry from "../McpSessionRegistry.ts";
 import * as PreviewAutomationBroker from "../PreviewAutomationBroker.ts";
@@ -100,6 +108,25 @@ const project = {
   deletedAt: null,
 };
 const layerStubServices = Layer.mergeAll(
+  Layer.mock(Accounts.Accounts)({
+    list: () => Effect.succeed({ accounts: [], statuses: [], services: [] }),
+  }),
+  Layer.mock(AccountAccess.AccountAccess)({
+    caller: () =>
+      Effect.succeed({
+        threadId: ThreadId.make("thread-scratch"),
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        projectId: ProjectId.make("project-scratch"),
+        scopeProjectId: null,
+        projectKey: "project-scratch",
+        agentId: null,
+        parentThreadId: null,
+      }),
+  }),
+  Layer.mock(AccountConnections.AccountConnections)({}),
+  Layer.mock(CliCredentials.CliCredentials)({
+    launch: () => Effect.succeed({ env: {}, complete: () => Effect.void }),
+  }),
   Layer.mock(GlobalSearch.GlobalSearch)({ query: () => Effect.succeed({ results: [] }) }),
   Layer.mock(ProjectLabels.ProjectLabelService)({ list: () => Effect.succeed({ labels: [] }) }),
   Layer.mock(ProjectFiles.ProjectFiles)({
@@ -141,7 +168,7 @@ const layerStubServices = Layer.mergeAll(
   }),
   Layer.mock(AgentMcpPolicy.AgentMcpPolicy)({
     beforeTool: (_scope, name) =>
-      ["t3_thread_launch", "work_start"].includes(name)
+      ["thread_launch", "work_start"].includes(name)
         ? Effect.fail(
             new OrchestratorMcpFailure({
               code: "agent_approval_required",
@@ -158,6 +185,14 @@ const layerStubServices = Layer.mergeAll(
   }),
   Layer.mock(Orchestrator.OrchestratorV2)({ getThreadShell: () => Effect.succeed(shell) }),
   Layer.mock(FactService.FactService)({}),
+  Layer.mock(Integrations.Integrations)({
+    list: () => Effect.succeed({ integrations: [] }),
+    listForProject: () => Effect.succeed({ integrations: [] }),
+    contextIntegrations: () => Effect.succeed([]),
+  }),
+  Layer.mock(Machines.Machines)({
+    list: Effect.succeed({ machines: [], link: { _tag: "standalone" } }),
+  }),
   Layer.mock(ProjectionStore.ProjectionStoreV2)({}),
   Layer.mock(DeviceService.DeviceService)({
     list: Effect.succeed({
@@ -182,6 +217,11 @@ const layerStubServices = Layer.mergeAll(
   Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({ list: () => Effect.succeed([]) }),
   Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
   Layer.mock(SecretRequests.SecretRequests)({}),
+  Layer.mock(Vault.Vault)({
+    list: () => Effect.succeed({ items: [] }),
+    scrubText: (text) => Effect.succeed(text),
+    scrubValue: (value) => Effect.succeed(value),
+  }),
   Layer.mock(ProjectService.ProjectService)({
     getById: () => Effect.succeed(Option.some(project)),
     snapshot: Effect.succeed({ projects: [project], updatedAt: project.updatedAt }),
@@ -281,6 +321,27 @@ const smokeCases = [
     expected: { results: [] },
   },
   {
+    toolkit: "integrations",
+    names: [
+      "integrations_list",
+      "integration_tools",
+      "integration_call",
+      "integration_add",
+      "integration_update",
+      "integration_remove",
+    ],
+    tool: "integrations_list",
+    args: {},
+    expected: { integrations: [] },
+  },
+  {
+    toolkit: "machines",
+    names: ["machines_list"],
+    tool: "machines_list",
+    args: {},
+    expected: { machines: [], link: { _tag: "standalone" } },
+  },
+  {
     toolkit: "work",
     names: ["work_start", "work_propose_handoff", "work_task"],
     tool: "work_propose_handoff",
@@ -349,8 +410,8 @@ const smokeCases = [
   },
   {
     toolkit: "attachment",
-    names: ["t3_attachment_discard", "t3_attachment_prepare_upload", "t3_thread_send_attachments"],
-    tool: "t3_attachment_prepare_upload",
+    names: ["attachment_discard", "attachment_prepare_upload", "thread_send_attachments"],
+    tool: "attachment_prepare_upload",
     args: {
       upload: {
         type: "file",
@@ -372,8 +433,8 @@ const smokeCases = [
   },
   {
     toolkit: "worktree",
-    names: ["t3_worktree_handoff", "t3_worktree_list", "t3_worktree_status"],
-    tool: "t3_worktree_status",
+    names: ["worktree_handoff", "worktree_list", "worktree_status"],
+    tool: "worktree_status",
     args: {},
     expected: {
       attached: false,
@@ -461,38 +522,38 @@ const smokeCases = [
   {
     toolkit: "projectLabels",
     names: [
-      "t3_project_label_list",
-      "t3_project_label_read",
-      "t3_project_label_create",
-      "t3_project_label_update",
-      "t3_project_label_delete",
-      "t3_project_label_archive",
-      "t3_project_label_unarchive",
-      "t3_project_label_link_source",
-      "t3_project_label_unlink_source",
-      "t3_project_label_link_repository",
-      "t3_project_label_unlink_repository",
-      "t3_project_label_clone_repository",
-      "t3_project_label_file_thread",
-      "t3_thread_move_project_folder",
-      "t3_thread_set_project_labels",
+      "project_label_list",
+      "project_label_read",
+      "project_label_create",
+      "project_label_update",
+      "project_label_delete",
+      "project_label_archive",
+      "project_label_unarchive",
+      "project_label_link_source",
+      "project_label_unlink_source",
+      "project_label_link_repository",
+      "project_label_unlink_repository",
+      "project_label_clone_repository",
+      "project_label_file_thread",
+      "thread_move_project_folder",
+      "thread_set_project_labels",
     ],
-    tool: "t3_project_label_list",
+    tool: "project_label_list",
     args: {},
     expected: { labels: [] },
   },
   {
     toolkit: "project",
     names: [
-      "t3_project_clone",
-      "t3_project_create",
-      "t3_project_delete",
-      "t3_project_list",
-      "t3_project_read",
-      "t3_project_update",
-      "t3_thread_launch",
+      "project_clone",
+      "project_create",
+      "project_delete",
+      "project_list",
+      "project_read",
+      "project_update",
+      "thread_launch",
     ],
-    tool: "t3_project_list",
+    tool: "project_list",
     args: {},
     expected: {
       projects: [
@@ -505,8 +566,8 @@ const smokeCases = [
   },
   {
     toolkit: "previewControls",
-    names: ["t3_preview_close", "t3_preview_list"],
-    tool: "t3_preview_list",
+    names: ["preview_close", "preview_list"],
+    tool: "preview_list",
     args: {},
     expected: {
       sessions: [],
@@ -515,8 +576,13 @@ const smokeCases = [
   },
   {
     toolkit: "environment",
-    names: ["t3_environment_add", "t3_environment_preferences_update", "t3_environment_read"],
-    tool: "t3_environment_read",
+    names: [
+      "environment_add",
+      "environment_preferences_update",
+      "environment_read",
+      "machine_security_status",
+    ],
+    tool: "environment_read",
     args: {},
     expected: {
       label: "MCP smoke",
@@ -583,30 +649,30 @@ const smokeCases = [
     toolkit: "thread",
     names: [
       "run_scheduled_task_now",
-      "t3_pending_request_list",
-      "t3_pending_request_read",
-      "t3_pending_request_respond",
-      "t3_queue_cancel",
-      "t3_queue_edit",
-      "t3_queue_list",
-      "t3_queue_promote_to_steer",
-      "t3_queue_read",
-      "t3_queue_reorder",
-      "t3_thread_configuration",
-      "t3_thread_configure",
-      "t3_thread_fork",
-      "t3_thread_limit_handoff",
-      "t3_thread_limit_handoff_options",
-      "t3_thread_merge_back",
-      "t3_thread_organize",
-      "t3_thread_search",
-      "t3_thread_settle",
-      "t3_thread_snooze",
-      "t3_thread_transfers",
-      "t3_thread_unsettle",
-      "t3_thread_unsnooze",
+      "pending_request_list",
+      "pending_request_read",
+      "pending_request_respond",
+      "queue_cancel",
+      "queue_edit",
+      "queue_list",
+      "queue_promote_to_steer",
+      "queue_read",
+      "queue_reorder",
+      "thread_configuration",
+      "thread_configure",
+      "thread_fork",
+      "thread_limit_handoff",
+      "thread_limit_handoff_options",
+      "thread_merge_back",
+      "thread_organize",
+      "thread_search",
+      "thread_settle",
+      "thread_snooze",
+      "thread_transfers",
+      "thread_unsettle",
+      "thread_unsnooze",
     ],
-    tool: "t3_thread_configuration",
+    tool: "thread_configuration",
     args: {},
     expected: {
       threadId: "thread-scratch",
@@ -617,7 +683,7 @@ const smokeCases = [
     // Search results carry a ready-made Markdown link the agent can paste.
     toolkit: "thread",
     names: [],
-    tool: "t3_thread_search",
+    tool: "thread_search",
     args: { query: "weekly checks" },
     expected: {
       matches: [
@@ -638,13 +704,13 @@ const smokeCases = [
       "orchestrator_capabilities",
       "request_secret",
       "schedule_task",
-      "t3_thread_interrupt",
-      "t3_thread_list",
-      "t3_thread_read",
-      "t3_thread_send",
-      "t3_thread_update",
-      "t3_thread_wait",
-      "t3_workflow_stop",
+      "thread_interrupt",
+      "thread_list",
+      "thread_read",
+      "thread_send",
+      "thread_update",
+      "thread_wait",
+      "workflow_stop",
       "task_cancel",
       "task_status",
       "update_scheduled_task",
@@ -655,6 +721,20 @@ const smokeCases = [
       parentThreadId: "thread-scratch",
       providers: [],
     },
+  },
+  {
+    toolkit: "accounts",
+    names: ["accounts_list", "account_connect", "account_use", "account_disconnect"],
+    tool: "accounts_list",
+    args: {},
+    expected: { accounts: [], statuses: [], services: [] },
+  },
+  {
+    toolkit: "vault",
+    names: ["vault_list", "vault_save", "vault_fill", "vault_delete"],
+    tool: "vault_list",
+    args: {},
+    expected: { items: [] },
   },
 ];
 
@@ -757,8 +837,8 @@ it.effect.each(smokeCases)(
         const payload = yield* decodeToolsListPayload(bodyText.match(/\{.*\}/s)![0]);
         const tools = payload.result.tools;
         const toolNames = tools.map((tool) => tool.name);
-        expect(toolNames).toContain("t3_worktree_handoff");
-        expect(toolNames).toContain("t3_worktree_status");
+        expect(toolNames).toContain("worktree_handoff");
+        expect(toolNames).toContain("worktree_status");
         // The worktree registration merges alongside the other toolkits rather
         // than replacing them.
         expect(toolNames).toContain("preview_status");
@@ -791,7 +871,7 @@ it.effect.each(smokeCases)(
         expect(result.result.structuredContent).toMatchObject(testCase.expected);
         if (testCase.toolkit === "agentWorkspace") {
           // An authenticated call cannot reach the launch handler after policy refuses it.
-          for (const name of ["t3_thread_launch", "work_start"]) {
+          for (const name of ["thread_launch", "work_start"]) {
             const refused = yield* httpClient.post("/mcp", {
               headers: {
                 accept: "application/json, text/event-stream",
@@ -814,18 +894,16 @@ it.effect.each(smokeCases)(
           }
         }
         // Descriptions, including imported guidance, must use the product name.
-        expect(
-          bodyText.match(/T3 Code|T3-owned|T3 thread|T3 injects|T3's|t3\.chat|Cogenly Connect/g),
-        ).toBeNull();
+        expect(bodyText.match(/\bT3\b|\bt3_/g)).toBeNull();
 
         // The handoff tool mutates thread state, reaches the network (origin
         // fetch), and runs project setup scripts, so its MCP hints must not
         // promise a read-only, closed-world, non-destructive tool.
-        const handoff = tools.find((tool) => tool.name === "t3_worktree_handoff");
+        const handoff = tools.find((tool) => tool.name === "worktree_handoff");
         expect(handoff?.annotations?.readOnlyHint).toBe(false);
         expect(handoff?.annotations?.destructiveHint).toBe(true);
         expect(handoff?.annotations?.openWorldHint).toBe(true);
-        const status = tools.find((tool) => tool.name === "t3_worktree_status");
+        const status = tools.find((tool) => tool.name === "worktree_status");
         expect(status?.annotations?.readOnlyHint).toBe(true);
         expect(status?.annotations?.destructiveHint).toBe(false);
 

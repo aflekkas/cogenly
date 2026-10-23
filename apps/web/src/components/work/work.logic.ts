@@ -9,7 +9,7 @@ import type {
 } from "@t3tools/contracts";
 import type { ProjectSettingSource } from "@t3tools/shared/projectSettings";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/models";
-import { isScratchProject } from "@t3tools/client-runtime/state/projects";
+import { isPickableRepository } from "~/projectLabels/projectMeta.logic";
 import type { WorkStatus } from "@t3tools/client-runtime/state/work-status";
 
 /** The picker's "No repository" choice: Work runs in the environment's scratch project. */
@@ -93,8 +93,8 @@ export function groupWorkChoicesByProject<Project extends { readonly key: string
 
 /**
  * Repositories a chat can hand Work to: the source thread's environment runs
- * the session, so only its projects qualify, and never the scratch ("No
- * project") workspace, which is where chats live.
+ * the session, so only its projects qualify, and only real repositories:
+ * never the scratch ("No project") workspace, where chats live, or its folders.
  */
 export function listWorkRepositories(
   projects: ReadonlyArray<EnvironmentProject>,
@@ -105,15 +105,14 @@ export function listWorkRepositories(
     .filter(
       (project) =>
         project.environmentId === environmentId &&
-        project.isScratch !== true &&
-        !isScratchProject(project, scratchWorkspaceRoot),
+        isPickableRepository(project, scratchWorkspaceRoot),
     )
     .toSorted((left, right) => left.title.localeCompare(right.title));
 }
 
 /**
  * Work starts in its own worktree when nothing says otherwise. A project
- * override, a t3.json, or a machine-wide default still decides; only the
+ * override, a cogenly.json, or a machine-wide default still decides; only the
  * built-in "local" fallback gives way, and only for repositories (never the
  * scratch workspace).
  */

@@ -899,10 +899,10 @@ it("validates remote device hosts and rejects ambiguous host ids", () => {
 });
 
 describe("branch naming settings", () => {
-  it("defaults existing settings to the t3 static prefix", () => {
+  it("defaults existing settings to the c static prefix", () => {
     expect(decodeServerSettings({})).toMatchObject({
       branchNamingMode: "static",
-      branchNamePrefix: "t3",
+      branchNamePrefix: "c",
       branchNameInstructions: "",
     });
   });
@@ -1068,4 +1068,27 @@ it("ignores retired appearance fields in settings saved by older installs", () =
   expect(
     decodeServerSettings({ defaultTheme: "ocean", defaultThemeSetAt: "old" }),
   ).not.toHaveProperty("defaultTheme");
+});
+
+describe("ServerSettings machine identity", () => {
+  it("defaults old settings to detected identity and accepts explicit resets", () => {
+    expect(decodeServerSettings({})).toMatchObject({ machineName: null, machineRole: null });
+    expect(decodeServerSettingsPatch({ machineName: null, machineRole: null })).toEqual({
+      machineName: null,
+      machineRole: null,
+    });
+  });
+
+  it("round-trips an edited name and role, trimming the name", () => {
+    const input = { machineName: "  Studio  ", machineRole: "cloud-server" };
+    const expected = { machineName: "Studio", machineRole: "cloud-server" };
+    expect(encodeServerSettings(decodeServerSettings(input))).toMatchObject(expected);
+    expect(decodeServerSettingsPatch(input)).toEqual(expected);
+  });
+
+  it("ignores future roles in snapshots while rejecting unsupported edits", () => {
+    expect(decodeServerSettings({ machineRole: "future-role" }).machineRole).toBeNull();
+    expect(() => decodeServerSettingsPatch({ machineRole: "future-role" })).toThrow();
+    expect(() => decodeServerSettingsPatch({ machineName: "   " })).toThrow();
+  });
 });

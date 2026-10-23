@@ -17,7 +17,12 @@ import * as BootService from "../cloud/bootService.ts";
 import { pinnedRuntimeVersionsDir } from "../cloud/pinnedRuntime.ts";
 import { projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
 import * as CliService from "./service.ts";
-import { findWindowsShim, launcherOwnsVersionsDir, resolveLauncherPath } from "./update.ts";
+import {
+  findLegacyLaunchers,
+  findWindowsShim,
+  launcherOwnsVersionsDir,
+  resolveLauncherPath,
+} from "./update.ts";
 
 export class CliUninstallError extends Schema.TaggedError<CliUninstallError>()(
   "CliUninstallError",
@@ -29,14 +34,14 @@ export class CliUninstallError extends Schema.TaggedError<CliUninstallError>()(
 }
 
 /**
- * What `t3 uninstall` would remove for one T3 home. Computed before anything
+ * What `cogenly uninstall` would remove for one Cogenly home. Computed before anything
  * is touched so the user sees the whole plan in one place.
  */
 export interface UninstallPlan {
   /** The background service serves this home and will be stopped and removed. */
   readonly service: boolean;
-  /** The `t3` launcher (symlink or `.cmd` shim) that points into this home's runtime tree. */
-  readonly launcher: string | undefined;
+  /** The `cogenly` launcher (symlink or `.cmd` shim), and any legacy `t3` one, that point into this home's runtime tree. */
+  readonly launchers: ReadonlyArray<string>;
   /** `<home>/runtime`, holding every downloaded version, when it exists. */
   readonly runtimeDir: string | undefined;
   /** `<home>/userdata`, which is never removed; shown so the user knows where it is. */
@@ -86,7 +91,12 @@ const planUninstall = Effect.fn("cli.uninstall.plan")(function* (input: {
   const launchedAs = (yield* HostProcess.IsExecutable) ? yield* resolveLauncherPath : undefined;
   const plan: UninstallPlan = {
     service: status.supported && status.installed && servesThisHome,
-    launcher: yield* findOwnedLauncher({ launchedAs, versionsDir }),
+    launchers: [
+      ...Option.toArray(
+        Option.fromUndefinedOr(yield* findOwnedLauncher({ launchedAs, versionsDir })),
+      ),
+      ...(yield* findLegacyLaunchers({ launchedAs, versionsDir })),
+    ].filter((launcher, index, all) => all.indexOf(launcher) === index),
     runtimeDir: (yield* fs.exists(runtimeDir).pipe(Effect.orElseSucceed(() => false)))
       ? runtimeDir
       : undefined,
@@ -129,7 +139,7 @@ const runUninstall = Effect.fn("cli.uninstall.run")(function* (input: {
   const service = yield* BootService.BootService;
   const plan = yield* planUninstall({ baseDir: input.baseDir });
 
-  if (!plan.service && plan.launcher === undefined && plan.runtimeDir === undefined) {
+  if (!plan.service && plan.launchers.length === 0 && plan.runtimeDir === undefined) {
     yield* Console.log(`Nothing to remove: Cogenly is not installed for ${input.baseDir}.`);
     if (!(yield* HostProcess.IsExecutable)) {
       yield* Console.log(
@@ -141,7 +151,7 @@ const runUninstall = Effect.fn("cli.uninstall.run")(function* (input: {
 
   yield* Console.log("This will remove:");
   if (plan.service) yield* Console.log("  the background service (stopping it first)");
-  if (plan.launcher !== undefined) yield* Console.log(`  the launcher at ${plan.launcher}`);
+  for (const launcher of plan.launchers) yield* Console.log(`  the launcher at ${launcher}`);
   if (plan.runtimeDir !== undefined) {
     yield* Console.log(`  every downloaded version under ${plan.runtimeDir}`);
   }
@@ -169,16 +179,15 @@ const runUninstall = Effect.fn("cli.uninstall.run")(function* (input: {
     yield* service.uninstall;
     yield* Console.log("Removed the background service.");
   }
-  if (plan.launcher !== undefined) {
+  for (const launcher of plan.launchers) {
     yield* fs
-      .remove(plan.launcher, { force: true })
+      .remove(launcher, { force: true })
       .pipe(
         Effect.mapError(
-          () =>
-            new CliUninstallError({ reason: `Could not remove the launcher at ${plan.launcher}.` }),
+          () => new CliUninstallError({ reason: `Could not remove the launcher at ${launcher}.` }),
         ),
       );
-    yield* Console.log(`Removed ${plan.launcher}.`);
+    yield* Console.log(`Removed ${launcher}.`);
   }
   if (plan.runtimeDir !== undefined) {
     // This process runs from inside runtimeDir. POSIX unlinks a running

@@ -1,3 +1,5 @@
+import type { CredentialDelivery } from "../accounts/CliCredentials.ts";
+import type { AccountError } from "@t3tools/contracts";
 /**
  * TerminalManager - Terminal session orchestration service interface.
  *
@@ -160,8 +162,11 @@ export class TerminalManager extends Context.Service<
         readonly command: string;
         readonly background?: boolean;
         readonly timeoutMs?: number;
+        readonly prepareCredentials?: (
+          terminalId: string,
+        ) => Effect.Effect<CredentialDelivery, AccountError>;
       },
-    ) => Effect.Effect<AgentTerminalResult, TerminalError>;
+    ) => Effect.Effect<AgentTerminalResult, TerminalError | AccountError>;
     readonly waitAgent: (input: {
       readonly threadId: string;
       readonly terminalId: string;
@@ -260,7 +265,7 @@ export class TerminalManager extends Context.Service<
       listener: (event: TerminalMetadataStreamEvent) => Effect.Effect<void>,
     ) => Effect.Effect<() => void>;
   }
->()("t3/terminal/Manager/TerminalManager") {}
+>()("cogenly-server/terminal/Manager/TerminalManager") {}
 
 interface TerminalSubprocessInspectResult {
   readonly hasRunningSubprocess: boolean;
@@ -314,12 +319,14 @@ export interface AgentTerminalResult {
 }
 
 interface AgentTerminalOpenInput extends TerminalOpenInput {
+  readonly redactOutput?: CredentialDelivery["redactOutput"];
   readonly agentCommand?: string;
 }
 
 interface TerminalSessionState {
   agent?: {
     readonly command: string;
+    readonly redactOutput?: CredentialDelivery["redactOutput"];
     readonly output: AgentOutput;
     readonly startedAt: string;
     timedOut: boolean;
@@ -2387,13 +2394,17 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
               session.pid = processPid;
               session.status = "running";
               // onExit may replay an exit immediately; accept it before subscribing.
-              session.unsubscribeData = spawnResult.process.onData((data) => {
+              session.unsubscribeData = spawnResult.process.onData((raw) => {
+                const data = session.agent?.redactOutput ? session.agent.redactOutput(raw) : raw;
+                if (!data) return;
                 if (!enqueueProcessEvent(session, processPid, { type: "output", data })) {
                   return;
                 }
                 if (eventsActivated) runFork(drainProcessEvents(session, processPid));
               });
               session.unsubscribeExit = spawnResult.process.onExit((event) => {
+                const tail = session.agent?.redactOutput?.("", true);
+                if (tail) enqueueProcessEvent(session, processPid, { type: "output", data: tail });
                 if (!enqueueProcessEvent(session, processPid, { type: "exit", event })) {
                   return;
                 }
@@ -2696,6 +2707,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
           : {
               agent: {
                 command: input.agentCommand,
+                ...(input.redactOutput ? { redactOutput: input.redactOutput } : {}),
                 output: new AgentOutput(),
                 startedAt: yield* nowIso,
                 timedOut: false,
@@ -3381,9 +3393,32 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     const identity = { threadId: input.threadId, terminalId };
     yield* withThreadLock(
       input.threadId,
-      resolveLaunchInputEnvironment({ ...input, terminalId }).pipe(
-        Effect.flatMap((resolved) => openLocked({ ...resolved, agentCommand: input.command })),
-      ),
+      Effect.gen(function* () {
+        const resolved = yield* resolveLaunchInputEnvironment({ ...input, terminalId });
+        // Explicit account bindings take precedence over provider configuration.
+        // Resolve after allocating the terminal id; values never enter the wire input.
+        const delivery = input.prepareCredentials
+          ? yield* input.prepareCredentials(terminalId)
+          : undefined;
+        const opened = yield* openLocked({
+          ...resolved,
+          env: { ...resolved.env, ...delivery?.env },
+          ...(delivery?.redactOutput ? { redactOutput: delivery.redactOutput } : {}),
+          agentCommand: input.command,
+        }).pipe(
+          Effect.onError(() =>
+            delivery ? delivery.complete("launch_failed").pipe(Effect.ignore) : Effect.void,
+          ),
+        );
+        if (delivery)
+          yield* delivery
+            .complete(opened.status === "running" ? "delivered" : "launch_failed")
+            .pipe(
+              Effect.onError(() =>
+                closeSession(input.threadId, terminalId, false).pipe(Effect.ignore),
+              ),
+            );
+      }),
     );
     return yield* input.background
       ? readAgent(identity)

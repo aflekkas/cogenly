@@ -1,4 +1,8 @@
-import { T3_PROJECT_FILE_NAME, type T3ProjectFile } from "@t3tools/contracts";
+import {
+  LEGACY_PROJECT_CONFIG_FILE_NAME,
+  PROJECT_CONFIG_FILE_NAME,
+  type T3ProjectFile,
+} from "@t3tools/contracts";
 import { parseT3ProjectFile } from "@t3tools/shared/t3ProjectFile";
 import { useAtomValue } from "@effect/atom-react";
 import * as Option from "effect/Option";
@@ -13,7 +17,7 @@ import { resolveSettingsScope, type SettingsScopeSearch } from "./settingsScope"
 import { selectSingleEnvironmentScope } from "./settingsScopeAxis";
 
 /**
- * Each member's decoded t3.json, so file-backed settings show the file as a
+ * Each member's decoded cogenly.json (or legacy t3.json), so file-backed settings show the file as a
  * layer in the inheritance chain. A member is only present once its read has
  * settled; the query atom caches per (environment, cwd).
  */
@@ -25,23 +29,21 @@ function useMemberProjectFiles(scope: ReturnType<typeof resolveSettingsScope>) {
         Atom.make((get) => {
           const files = new Map<string, T3ProjectFile | null>();
           for (const member of members) {
-            const result = get(
-              getProjectFileQueryAtom(
-                member.environmentId,
-                member.workspaceRoot,
-                T3_PROJECT_FILE_NAME,
-              ),
-            );
-            if (result.waiting) continue;
-            // A pending in-app save overlays the query, like useProjectFileQuery.
-            const data =
-              get(
-                optimisticFileAtom(
-                  member.environmentId,
-                  member.workspaceRoot,
-                  T3_PROJECT_FILE_NAME,
-                ),
-              )?.data ?? Option.getOrNull(AsyncResult.value(result));
+            // Undefined while the read is pending, null when the file is missing.
+            const read = (fileName: string) => {
+              const result = get(
+                getProjectFileQueryAtom(member.environmentId, member.workspaceRoot, fileName),
+              );
+              if (result.waiting) return undefined;
+              // A pending in-app save overlays the query, like useProjectFileQuery.
+              return (
+                get(optimisticFileAtom(member.environmentId, member.workspaceRoot, fileName))
+                  ?.data ?? Option.getOrNull(AsyncResult.value(result))
+              );
+            };
+            const primary = read(PROJECT_CONFIG_FILE_NAME);
+            const data = primary === null ? read(LEGACY_PROJECT_CONFIG_FILE_NAME) : primary;
+            if (data === undefined) continue;
             files.set(
               member.physicalProjectKey,
               data === null || data.truncated ? null : parseT3ProjectFile(data.contents),

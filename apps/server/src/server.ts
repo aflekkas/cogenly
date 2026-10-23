@@ -5,6 +5,8 @@ import * as Random from "effect/Random";
 import * as Semaphore from "effect/Semaphore";
 import * as DatabaseStorage from "./persistence/DatabaseStorage.ts";
 import * as StorageCleanup from "./storageCleanup.ts";
+import * as ServerBackup from "./housekeeping/ServerBackup.ts";
+import * as ServerHousekeeping from "./housekeeping/ServerHousekeeping.ts";
 import * as PullRequestSyncReactor from "./orchestration-v2/PullRequestSyncReactor.ts";
 import * as PullRequestWatchReactor from "./orchestration-v2/PullRequestWatchReactor.ts";
 import * as DelegatedTaskQuestionReactor from "./orchestration-v2/DelegatedTaskQuestionReactor.ts";
@@ -32,7 +34,15 @@ import * as ServerConfig from "./config.ts";
 import { withUntracedRequests } from "./http.ts";
 import * as ServerHttp from "./http.ts";
 import { guardHttpResponseWriteErrors } from "./httpResponseErrorGuard.ts";
+import * as Socket from "effect/socket/Socket";
 import * as Health from "./health.ts";
+import * as HubLink from "./machines/HubLink.ts";
+import * as MachineIdentity from "./machines/MachineIdentity.ts";
+import * as Machines from "./machines/Machines.ts";
+import * as MachineSecurity from "./security/MachineSecurity.ts";
+import * as PeerChannels from "./machines/PeerChannels.ts";
+import * as PeerHttp from "./machines/peerHttp.ts";
+import * as PeerHub from "./machines/PeerHub.ts";
 import { fixPath } from "./os-jank.ts";
 import * as Ws from "./ws.ts";
 import * as AgentScopeLive from "./process/agentScope.ts";
@@ -89,7 +99,7 @@ import * as ProviderRegistry from "./provider/ProviderRegistry.ts";
 import * as ProviderUsageLimitsIngestion from "./provider/ProviderUsageLimitsIngestion.ts";
 import * as UsageLimitSources from "./usage/UsageLimitSources.ts";
 import * as ProjectFaviconResolver from "./project/ProjectFaviconResolver.ts";
-import * as T3ProjectFileLoader from "./project/T3ProjectFileLoader.ts";
+import * as ProjectConfigFileLoader from "./project/ProjectConfigFileLoader.ts";
 import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolver.ts";
 import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
 import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
@@ -158,8 +168,12 @@ import * as ResourceAttribution from "./resourceTelemetry/ResourceAttribution.ts
 import * as ResourceMonitorBinary from "./resourceTelemetry/ResourceMonitorBinary.ts";
 import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as UsageService from "./usage/UsageService.ts";
+import * as Scheduler from "./scheduling/Scheduler.ts";
+import * as SharedState from "./sync/SharedState.ts";
+import * as SharedSync from "./sync/SharedSync.ts";
 import * as RuntimeLayer from "./orchestration-v2/runtimeLayer.ts";
 import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
+import * as ProjectLabelFolders from "./projectLabels/ProjectLabelFolders.ts";
 import * as ThreadSearch from "./orchestration-v2/ThreadSearch.ts";
 import * as ResourceCleanupService from "./orchestration-v2/ResourceCleanupService.ts";
 import * as ThreadSettlementService from "./orchestration-v2/ThreadSettlementService.ts";
@@ -273,6 +287,9 @@ const layerRelayClient = Layer.unwrap(
 const layerHttpServer = Layer.unwrap(
   Effect.gen(function* () {
     const config = yield* ServerConfig.ServerConfig;
+    const wideBind = MachineSecurity.wideBindWarning(config.host ?? "127.0.0.1");
+    if (wideBind !== null)
+      yield* Effect.logWarning(wideBind, { host: config.host, port: config.port });
     return NodeHttpServer.layer(() => guardHttpResponseWriteErrors(NodeHttp.createServer()), {
       host: config.host ?? "127.0.0.1",
       port: config.port,
@@ -337,6 +354,8 @@ const layerPullRequestService = PullRequestService.layer.pipe(
 const layerGitManager = GitManager.layer.pipe(
   // Per-project git settings resolve the acting thread's project.
   Layer.provide(Layer.merge(ProjectionStoreV2.layer, ProjectStore.layer)),
+  // New worktrees resolve their repository's project folder by its id file.
+  Layer.provide(ProjectLabelFolders.layer),
   Layer.provideMerge(RuntimeLayer.layerProjectSetupScriptRunner),
   Layer.provideMerge(WorktreeSetupTracker.layer),
   Layer.provideMerge(GitVcsDriver.layer),
@@ -411,6 +430,16 @@ const layerDevice = DeviceService.layer.pipe(
   Layer.provide(NetService.layer),
 );
 
+// Machines paired with this one. Spokes dial their hub over a WebSocket, so
+// the link needs a socket constructor of its own.
+const layerMachines = Machines.layer.pipe(
+  Layer.provideMerge(HubLink.layer.pipe(Layer.provide(Socket.layerWebSocketConstructorGlobal))),
+  Layer.provideMerge(PeerHub.layer),
+  Layer.provideMerge(PeerChannels.layer),
+  Layer.provideMerge(MachineIdentity.layer),
+  Layer.provide(ProcessRunner.layer),
+);
+
 const layerWorkspaceEntries = WorkspaceEntries.layer.pipe(Layer.provide(WorkspacePaths.layer));
 
 const layerWorkspaceFileSystem = WorkspaceFileSystem.layer.pipe(
@@ -426,7 +455,7 @@ const layerWorkspace = Layer.mergeAll(
 
 const layerProjectFaviconResolver = ProjectFaviconResolver.layer.pipe(
   Layer.provide(WorkspacePaths.layer),
-  Layer.provide(T3ProjectFileLoader.layer),
+  Layer.provide(ProjectConfigFileLoader.layer),
 );
 
 const layerServerEnvironment = ServerEnvironment.layer.pipe(Layer.provide(ServerSecretStore.layer));
@@ -539,10 +568,21 @@ const layerProviderInstallationRefresh = Layer.effectDiscard(
 
 const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   AgentAwarenessRelay.layer,
-  // Asks T3 Connect to deliver webhooks it held while this environment was offline.
+  MachineSecurity.layer,
+  SharedSync.layer.pipe(
+    Layer.provideMerge(layerMachines),
+    Layer.provide(SharedState.layer),
+    Layer.provide(ServerEnvironment.layerIdentity),
+    Layer.provide(Scheduler.layer),
+  ),
+  // Asks Cogenly Connect to deliver webhooks it held while this environment was offline.
   HeldHooksWaker.layer,
   layerThreadSettlementWorker,
   StorageCleanup.layer.pipe(Layer.provide(ProjectionStoreV2.layer)),
+  // Server-owned periodic jobs: nightly home backups and housekeeping.
+  // Neither starts provider turns; both are plain service methods.
+  ServerBackup.layer,
+  ServerHousekeeping.layer,
   DatabaseStorage.layer.pipe(
     Layer.provide(ProjectionMaintenance.layer),
     Layer.provide(
@@ -701,6 +741,7 @@ const layerMakeRoutes = Layer.mergeAll(
     ServerHttp.layerImageProxyRoute,
     Health.layerHealthRoute,
     DeviceHubProxy.layer,
+    PeerHttp.layer,
     ServerBrowserStream.routeLayer,
     ServerHttp.layerStaticAndDevRoute,
     Ws.layer,
@@ -737,7 +778,7 @@ const layerMakeRoutes = Layer.mergeAll(
 const layerMakeServer = Layer.unwrap(
   Effect.gen(function* () {
     const config = yield* ServerConfig.ServerConfig;
-    // Before anything opens the database: one server per T3 home.
+    // Before anything opens the database: one server per Cogenly home.
     const ownership = yield* ServerOwnership.acquireServerOwnership(config.serverRuntimeStatePath);
     const activation = yield* Deferred.make<void>();
     const awaitActivation = Deferred.await(activation);

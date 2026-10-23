@@ -55,7 +55,7 @@ function isManagedTunnelActive(
 }
 
 /**
- * Drives the primary environment's T3 Connect link. T3 Connect (managed
+ * Drives the primary environment's Cogenly Connect link. Cogenly Connect (managed
  * tunnel) and agent-activity publishing are independent capabilities backed by
  * a single relay link, so consumers express the full desired state and
  * `reconcileCloudState` applies it: unlink when neither is wanted, otherwise
@@ -112,7 +112,7 @@ export function useCloudLinkController() {
   const linkRevoked = linkData?.linkRevoked ?? false;
   const managedTunnelActive = linkData ? isManagedTunnelActive(linkData, relayProviderKind) : false;
   // Local state says managed but the relay holds a publish-only link. Turning
-  // T3 Connect on relinks as managed, which repairs it.
+  // Cogenly Connect on relinks as managed, which repairs it.
   const managedTunnelOutOfSync =
     linkData !== null && !managedTunnelActive && isManagedTunnelActive(linkData, undefined);
   const publishAgentActivity = primaryCloudLinkState.data?.publishAgentActivity ?? false;
@@ -162,7 +162,7 @@ export function useCloudLinkController() {
     // actually holds now.
     if (!wantsLink) {
       // Unlink works without a relay token — a failed token read must not
-      // leave the user unable to turn T3 Connect off.
+      // leave the user unable to turn Cogenly Connect off.
       const unlinkResult = await unlinkPrimaryEnvironment({
         target,
         clerkToken: tokenResult._tag === "Success" ? (tokenResult.value ?? null) : null,

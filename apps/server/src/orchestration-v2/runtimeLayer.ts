@@ -1,6 +1,12 @@
+import * as AccountConnections from "../accounts/AccountConnections.ts";
+import * as AccountAccess from "../accounts/AccountAccess.ts";
+import * as CliCredentials from "../accounts/CliCredentials.ts";
+import * as ProcessRunner from "../processRunner.ts";
 import * as VisualStates from "../htmlRender/VisualState.ts";
 import * as GlobalSearch from "../search/GlobalSearch.ts";
 import * as Facts from "../context/FactService.ts";
+import * as Integrations from "../integrations/Integrations.ts";
+import * as IntegrationCredentials from "../integrations/IntegrationCredentials.ts";
 import * as Retrieval from "../context/ContextRetrievalService.ts";
 import * as Exports from "../export/ExportService.ts";
 import * as AgentEvents from "../agents/AgentEventBus.ts";
@@ -71,6 +77,9 @@ import * as ThreadForkService from "./ThreadForkService.ts";
 import * as TurnItemPositionStore from "./TurnItemPositionStore.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
 import * as SecretRequests from "../secrets/SecretRequests.ts";
+import * as Vault from "../vault/Vault.ts";
+import * as Accounts from "../accounts/Accounts.ts";
+import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 
 /** The shared application event log and its command receipts. */
 export const layerEventInfrastructure = Layer.mergeAll(
@@ -276,10 +285,6 @@ const layerAgentSessionImporterProvided = AgentSessionImporter.layer.pipe(
   ),
 );
 
-const layerT3ImportProvided = T3Import.layer.pipe(
-  Layer.provide(Layer.mergeAll(layerProjectService, layerEventSinkProvided)),
-);
-
 const layerThreadManagementProvided = ThreadManagementService.layerWithLegacyImporter.pipe(
   Layer.provide(
     Layer.mergeAll(
@@ -303,6 +308,12 @@ const layerProjectLabelsProvided = ProjectLabels.layer.pipe(
 const layerManagedProjectFoldersProvided = ManagedProjectFolders.layer.pipe(
   Layer.provide(layerProjectService),
   Layer.provide(Layer.mergeAll(layerProjectLabelsProvided, ProjectLabelFolders.layer)),
+);
+// Scratch chats from T3 Code file under "No project", which ManagedProjectFolders owns.
+const layerT3ImportProvided = T3Import.layer.pipe(
+  Layer.provide(
+    Layer.mergeAll(layerProjectService, layerEventSinkProvided, layerManagedProjectFoldersProvided),
+  ),
 );
 const layerThreadLaunchProvided = ThreadLaunchService.layer.pipe(
   Layer.provide(
@@ -333,6 +344,10 @@ const layerThreadLifecycleProvided = ThreadLifecycleService.layer.pipe(
 );
 const layerSecretRequestsProvided = SecretRequests.layer.pipe(
   Layer.provide(layerThreadManagementProvided),
+);
+const layerVaultProvided = Vault.layer.pipe(Layer.provide(ServerEnvironment.layerIdentity));
+const layerIntegrationsProvided = Integrations.layer.pipe(
+  Layer.provide(IntegrationCredentials.layer.pipe(Layer.provide(layerVaultProvided))),
 );
 const layerAgentsProvided = Agents.layer.pipe(
   Layer.provide(
@@ -371,19 +386,55 @@ const layerAgentEventReactorProvided = AgentEventReactor.layer.pipe(
     ),
   ),
 );
+const layerAccountsProvided = Accounts.layer.pipe(Layer.provide(layerVaultProvided));
+const layerAccountAccessProvided = AccountAccess.layer.pipe(
+  Layer.provide(
+    Layer.mergeAll(
+      layerAccountsProvided,
+      AgentStore.layer,
+      layerThreadManagementProvided,
+      layerProjectFilesProvided,
+    ).pipe(Layer.provideMerge(ServerEnvironment.layerIdentity)),
+  ),
+);
+const layerCliCredentialsProvided = CliCredentials.layer.pipe(
+  Layer.provide(
+    Layer.mergeAll(layerAccountAccessProvided, layerVaultProvided, ProcessRunner.layer).pipe(
+      Layer.provideMerge(ServerEnvironment.layerIdentity),
+    ),
+  ),
+);
+const layerAccountConnectionsProvided = AccountConnections.layer.pipe(
+  Layer.provide(
+    Layer.mergeAll(
+      layerAccountsProvided,
+      layerAccountAccessProvided,
+      layerCliCredentialsProvided,
+      layerSecretRequestsProvided,
+      layerThreadManagementProvided,
+    ),
+  ),
+);
 const layerAgentWorkspaceProvided = AgentWorkspace.layer.pipe(
   Layer.provide(
     Layer.mergeAll(
       AgentStore.layer,
       layerAgentsProvided,
       layerWorkHandoffProvided,
+      layerAccountAccessProvided,
       layerScheduledTaskProvided,
+      layerIntegrationsProvided,
     ),
   ),
 );
 const layerAgentMcpPolicyProvided = AgentMcpPolicy.layer.pipe(
   Layer.provide(
-    Layer.mergeAll(AgentStore.layer, layerAgentWorkspaceProvided, layerThreadManagementProvided),
+    Layer.mergeAll(
+      AgentStore.layer,
+      layerAgentWorkspaceProvided,
+      layerThreadManagementProvided,
+      layerIntegrationsProvided,
+    ),
   ),
 );
 const layerProviderContinuationWorkerProvided = ProviderContinuationService.layer.pipe(
@@ -455,6 +506,7 @@ export const layer = Layer.mergeAll(
 
 const layerProductionBase = Layer.mergeAll(
   Facts.layer,
+  layerIntegrationsProvided,
   Retrieval.layer,
   layer.pipe(Layer.provide(layerProjectService)),
   layerProjectService,
@@ -486,6 +538,11 @@ const layerProductionBase = Layer.mergeAll(
   AgentStore.layer,
   layerScheduledTaskProvided,
   layerSecretRequestsProvided,
+  layerVaultProvided,
+  layerAccountsProvided,
+  layerAccountAccessProvided,
+  layerCliCredentialsProvided,
+  layerAccountConnectionsProvided,
   UsageLimitRecoveryWorker.layer.pipe(
     Layer.provide(Layer.mergeAll(ProjectionStore.layer, layerThreadManagementProvided)),
   ),
@@ -502,4 +559,6 @@ const layerProductionBase = Layer.mergeAll(
 // requirement, which leaks into every CLI command through runServer.
 const layerVisualStatesProvided = VisualStates.layer.pipe(Layer.provide(layerProductionBase));
 
-export const layerProduction = Layer.mergeAll(layerProductionBase, layerVisualStatesProvided);
+export const layerProduction = Layer.mergeAll(layerProductionBase, layerVisualStatesProvided).pipe(
+  Layer.provide(ServerEnvironment.layerIdentity),
+);

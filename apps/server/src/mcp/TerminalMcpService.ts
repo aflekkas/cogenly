@@ -1,3 +1,6 @@
+import * as CliCredentials from "../accounts/CliCredentials.ts";
+import { AccountError } from "@t3tools/contracts";
+import * as Schema from "effect/Schema";
 import { OrchestratorMcpFailure } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -54,10 +57,11 @@ export class TerminalMcpService extends Context.Service<
       McpInvocationContext.McpInvocationContext
     >;
   }
->()("t3/mcp/TerminalMcpService") {}
+>()("cogenly-server/mcp/TerminalMcpService") {}
 
 const make = Effect.gen(function* () {
   const manager = yield* TerminalManager.TerminalManager;
+  const credentials = yield* CliCredentials.CliCredentials;
   const settings = yield* ServerSettings.ServerSettingsService;
   const projects = yield* ProjectService.ProjectService;
   const executor = yield* ThreadCommandExecutor.ThreadCommandExecutor;
@@ -124,8 +128,17 @@ const make = Effect.gen(function* () {
                 worktreePath: thread.worktreePath,
                 providerInstanceId: scope.thread.providerInstanceId,
                 background: true,
+                prepareCredentials: (terminalId) =>
+                  credentials.launch(
+                    { threadId, providerInstanceId: scope.thread.providerInstanceId },
+                    terminalId,
+                  ),
               })
-              .pipe(Effect.mapError(unavailable));
+              .pipe(
+                Effect.mapError((cause) =>
+                  Schema.is(AccountError)(cause) ? denied(cause.message) : unavailable(),
+                ),
+              );
           }),
         );
         return yield* input.background

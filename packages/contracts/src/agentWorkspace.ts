@@ -12,6 +12,8 @@ import {
 import { ModelSelection } from "./modelSelection.ts";
 import { ScheduledTaskUpsertInput } from "./scheduledTask.ts";
 import { OrchestrationV2ThreadLaunchWorkspaceStrategy } from "./orchestrationV2.ts";
+import { IntegrationCreateInput, IntegrationUpdateInput } from "./integration.ts";
+import { VaultField } from "./vault.ts";
 
 export const AgentStartWorkInput = Schema.Struct({
   agentId: AgentId,
@@ -26,6 +28,27 @@ export type AgentStartWorkInput = typeof AgentStartWorkInput.Type;
 export const AgentApprovalAction = Schema.Union([
   Schema.Struct({ actionKind: Schema.Literal("start_work"), payload: AgentStartWorkInput }),
   Schema.Struct({
+    actionKind: Schema.Literal("vault_use"),
+    payload: Schema.Struct({
+      vaultItemId: TrimmedNonEmptyString,
+      vaultItemName: TrimmedNonEmptyString,
+      field: VaultField,
+      domain: Schema.NullOr(Schema.String),
+      threadId: Schema.NullOr(ThreadId),
+      /** Distinct permission from browser fill; never grants the legacy vault policy. */
+      processExposure: Schema.optional(
+        Schema.Struct({
+          accountId: TrimmedNonEmptyString,
+          credentialId: TrimmedNonEmptyString,
+          credentialRevision: Schema.Int,
+          threadId: ThreadId,
+          projectKey: TrimmedNonEmptyString,
+          message: Schema.Literal("The agent and the commands it runs can read this token."),
+        }),
+      ),
+    }),
+  }),
+  Schema.Struct({
     actionKind: Schema.Literal("schedule_trigger"),
     payload: ScheduledTaskUpsertInput,
   }),
@@ -33,14 +56,36 @@ export const AgentApprovalAction = Schema.Union([
     actionKind: Schema.Literal("change_permissions"),
     payload: Schema.Struct({ permissions: AgentPermissions }),
   }),
+  Schema.Struct({
+    actionKind: Schema.Literal("integration_add"),
+    payload: IntegrationCreateInput,
+  }),
+  Schema.Struct({
+    actionKind: Schema.Literal("integration_update"),
+    payload: Schema.Struct({
+      ...IntegrationUpdateInput.fields,
+      // Freeze the entire credential destination the owner reviews. Omitted
+      // fields must not inherit a different destination at approval time.
+      url: IntegrationCreateInput.fields.url,
+      transport: IntegrationCreateInput.fields.transport,
+      headers: IntegrationCreateInput.fields.headers,
+    }),
+  }),
 ]);
 export type AgentApprovalAction = typeof AgentApprovalAction.Type;
 export const AgentApprovalStatus = Schema.Literals(["pending", "approved", "rejected", "expired"]);
 export const AgentApproval = Schema.Struct({
   id: TrimmedNonEmptyString,
-  agentId: AgentId,
+  agentId: Schema.NullOr(AgentId),
   action: AgentApprovalAction,
-  actionKind: Schema.Literals(["start_work", "schedule_trigger", "change_permissions"]),
+  actionKind: Schema.Literals([
+    "start_work",
+    "schedule_trigger",
+    "change_permissions",
+    "vault_use",
+    "integration_add",
+    "integration_update",
+  ]),
   payload: Schema.Record(Schema.String, Schema.Unknown),
   status: AgentApprovalStatus,
   requestedAt: IsoDateTime,
@@ -59,7 +104,10 @@ export const AgentApprovalListInput = Schema.Struct({
   status: Schema.optional(AgentApprovalStatus),
 });
 export const AgentApprovalListResult = Schema.Struct({ approvals: Schema.Array(AgentApproval) });
-export const AgentApprovalKey = Schema.Struct({ id: TrimmedNonEmptyString });
+export const AgentApprovalKey = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  accountScope: Schema.optional(Schema.Literals(["thread", "agent_project"])),
+});
 export const AgentApprovalResult = Schema.Struct({ approval: AgentApproval });
 export const AgentStartWorkResult = Schema.Struct({
   threadId: Schema.NullOr(ThreadId),

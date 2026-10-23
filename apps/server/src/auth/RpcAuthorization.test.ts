@@ -1,4 +1,8 @@
 import {
+  AccountId,
+  AuthAccessWriteScope,
+  AuthPeerScopes,
+  AuthStandardClientScopes,
   clientRpcRequiredScopes,
   AuthEnvironmentMaintainScope,
   AuthDiagnosticsReadScope,
@@ -98,6 +102,38 @@ describe("RPC authorization scopes", () => {
       WS_METHODS.commitmentsHistory,
     ])
       expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationReadScope);
+  });
+
+  it("separates vault metadata reads from vault writes, on the client too", () => {
+    for (const method of [WS_METHODS.vaultList, WS_METHODS.vaultUsage]) {
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationReadScope);
+      expect(clientRpcRequiredScopes(method, {})).toEqual([AuthOrchestrationReadScope]);
+    }
+    for (const method of [WS_METHODS.vaultCreate, WS_METHODS.vaultUpdate, WS_METHODS.vaultDelete]) {
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationOperateScope);
+      expect(clientRpcRequiredScopes(method, {})).toEqual([AuthOrchestrationOperateScope]);
+    }
+  });
+
+  it("keeps machine pairing behind access management, which standard clients lack", () => {
+    for (const method of [
+      WS_METHODS.machinesPrepareJoin,
+      WS_METHODS.machinesCreatePeerGrant,
+      WS_METHODS.machinesJoinHub,
+      WS_METHODS.machinesUnpair,
+    ]) {
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthAccessWriteScope);
+      expect(clientRpcRequiredScopes(method, {})).toEqual([AuthAccessWriteScope]);
+    }
+    expect(AuthStandardClientScopes).not.toContain(AuthAccessWriteScope);
+    expect(requiredScopeForRpcMethod(WS_METHODS.machinesUpdate)).toBe(AuthSettingsWriteScope);
+    expect(requiredScopeForRpcMethod(WS_METHODS.machinesList)).toBe(AuthOrchestrationReadScope);
+  });
+
+  it("never lets a peer scope authorize a client RPC", () => {
+    for (const scope of Object.values(RPC_REQUIRED_SCOPES)) {
+      expect(AuthPeerScopes).not.toContain(scope);
+    }
   });
 
   it("requires operate access to stop a workflow", () => {
@@ -561,4 +597,45 @@ it.effect("project folders do not let read-only clients move threads or change m
       AuthOrchestrationReadScope,
     );
   }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "allows account metadata reads but blocks account disconnection before the handler without operate permission",
+  () =>
+    Effect.gen(function* () {
+      const tested = [WS_METHODS.accountsList, WS_METHODS.accountsDisconnect] as const;
+      const group = WsRpcGroup.omit(
+        ...[...WsRpcGroup.requests.keys()].filter(
+          (tag): tag is Exclude<keyof typeof RPC_REQUIRED_SCOPES, (typeof tested)[number]> =>
+            !(tested as ReadonlyArray<string>).includes(tag),
+        ),
+      );
+      let mutations = 0;
+      const client = yield* RpcTest.makeClient(group).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            group.toLayerHandler(WS_METHODS.accountsList, () =>
+              Effect.succeed({ accounts: [], statuses: [], services: [] }),
+            ),
+            group.toLayerHandler(WS_METHODS.accountsDisconnect, () =>
+              Effect.sync(() => {
+                mutations += 1;
+                return { disconnected: true };
+              }),
+            ),
+            RpcAuthorization.layer([AuthOrchestrationReadScope]),
+          ),
+        ),
+      );
+      expect((yield* client[WS_METHODS.accountsList]({ scopeProjectId: null })).accounts).toEqual(
+        [],
+      );
+      expect(
+        yield* client[WS_METHODS.accountsDisconnect]({
+          id: AccountId.make("account:test"),
+          scopeProjectId: null,
+        }).pipe(Effect.flip),
+      ).toMatchObject({ requiredPermission: AuthOrchestrationOperateScope });
+      expect(mutations).toBe(0);
+    }).pipe(Effect.scoped),
 );

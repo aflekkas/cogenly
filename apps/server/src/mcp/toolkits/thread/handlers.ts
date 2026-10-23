@@ -110,7 +110,7 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
       };
     }),
   ),
-  t3_thread_search: McpToolAccess.reads((input) =>
+  thread_search: McpToolAccess.reads((input) =>
     Effect.gen(function* () {
       const { caller } = yield* readCaller();
       const { projectId: requested, ...query } = input;
@@ -129,7 +129,7 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
       };
     }),
   ),
-  t3_thread_fork: writesThread((input) =>
+  thread_fork: writesThread((input) =>
     Effect.gen(function* () {
       const { threads, projection } = yield* readThread(input.threadId);
       const commandId = yield* newCommandId();
@@ -149,7 +149,7 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
       return { sequence: result.sequence, targetThreadId };
     }),
   ),
-  t3_thread_merge_back: McpToolAccess.writesThreads(
+  thread_merge_back: McpToolAccess.writesThreads(
     (input) => [input.targetThreadId, input.sourceThreadId],
     (input) =>
       Effect.gen(function* () {
@@ -169,7 +169,7 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
         return { sequence: result.sequence, targetThreadId: input.targetThreadId };
       }),
   ),
-  t3_thread_transfers: McpToolAccess.reads((input) =>
+  thread_transfers: McpToolAccess.reads((input) =>
     Effect.gen(function* () {
       const { projection } = yield* readThread(input.threadId, ["contextTransfers"]);
       return {
@@ -184,7 +184,7 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
       };
     }),
   ),
-  t3_thread_configuration: McpToolAccess.reads((input) =>
+  thread_configuration: McpToolAccess.reads((input) =>
     Effect.gen(function* () {
       const {
         projection: { thread },
@@ -197,7 +197,7 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
       };
     }),
   ),
-  t3_thread_configure: writesThread((input) =>
+  thread_configure: writesThread((input) =>
     Effect.gen(function* () {
       const {
         threads,
@@ -215,7 +215,7 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
       return { sequence: result.sequence };
     }),
   ),
-  t3_thread_limit_handoff_options: McpToolAccess.reads((input) =>
+  thread_limit_handoff_options: McpToolAccess.reads((input) =>
     Effect.gen(function* () {
       const { shell } = yield* readThread(input.threadId);
       const handoff = yield* UsageLimitHandoff.UsageLimitHandoffService;
@@ -225,7 +225,7 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
       return { recommendation };
     }),
   ),
-  t3_thread_limit_handoff: writesThread((input) =>
+  thread_limit_handoff: writesThread((input) =>
     Effect.gen(function* () {
       const { shell } = yield* readThread(input.threadId);
       if (shell.latestRunId === null) {
@@ -252,7 +252,7 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
       };
     }),
   ),
-  t3_pending_request_list: McpToolAccess.reads((input) =>
+  pending_request_list: McpToolAccess.reads((input) =>
     Effect.gen(function* () {
       const { projection } = yield* readThread(input.threadId, ["runtimeRequests"]);
       return {
@@ -262,13 +262,13 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
       };
     }),
   ),
-  t3_pending_request_read: McpToolAccess.reads((input) =>
+  pending_request_read: McpToolAccess.reads((input) =>
     Effect.gen(function* () {
       const { item } = yield* readQuestion(input);
       return { requestId: input.requestId, questions: item.questions };
     }),
   ),
-  t3_pending_request_respond: writesThread((input) =>
+  pending_request_respond: writesThread((input) =>
     Effect.gen(function* () {
       const { threads, projection } = yield* readQuestion(input);
       const result = yield* threads
@@ -283,7 +283,7 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
       return { sequence: result.sequence };
     }),
   ),
-  t3_queue_list: McpToolAccess.reads((input) =>
+  queue_list: McpToolAccess.reads((input) =>
     Effect.gen(function* () {
       const { projection } = yield* readThread(input.threadId, ["runs", "messages"]);
       const runs = queuedRunsInDeliveryOrder(projection);
@@ -298,7 +298,7 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
       };
     }),
   ),
-  t3_queue_read: McpToolAccess.reads((input) =>
+  queue_read: McpToolAccess.reads((input) =>
     Effect.gen(function* () {
       const { projection } = yield* readThread(input.threadId, ["runs", "messages"]);
       const entry = queueEntry(projection, input.queuedRunId, 16000);
@@ -311,7 +311,7 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
       );
     }),
   ),
-  t3_queue_edit: writesThread((input) =>
+  queue_edit: writesThread((input) =>
     dispatch(input.threadId, (common) => ({
       ...common,
       type: "queued-run.edit",
@@ -319,14 +319,14 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
       text: input.text,
     })),
   ),
-  t3_queue_cancel: writesThread((input) =>
+  queue_cancel: writesThread((input) =>
     dispatch(input.threadId, (common) => ({
       ...common,
       type: "queued-run.cancel",
       runId: input.queuedRunId,
     })),
   ),
-  t3_queue_reorder: writesThread((input) =>
+  queue_reorder: writesThread((input) =>
     dispatch(input.threadId, (common) => ({
       ...common,
       type: "queued-run.reorder",
@@ -334,7 +334,7 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
       beforeRunId: input.beforeRunId,
     })),
   ),
-  t3_queue_promote_to_steer: writesThread((input) =>
+  queue_promote_to_steer: writesThread((input) =>
     dispatch(input.threadId, (common) => ({
       ...common,
       type: "queued-message.promote-to-steer",
@@ -342,7 +342,7 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
       targetRunId: input.targetRunId,
     })),
   ),
-  t3_thread_organize: writesThread((input) =>
+  thread_organize: writesThread((input) =>
     Effect.gen(function* () {
       const { threads, projection, shell } = yield* readThread(input.threadId);
       const common = { commandId: yield* newCommandId(), threadId: projection.thread.id };
@@ -370,7 +370,7 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
       return { sequence: result.sequence };
     }),
   ),
-  t3_thread_snooze: writesThread((input) =>
+  thread_snooze: writesThread((input) =>
     Effect.gen(function* () {
       const { threads, shell, caller } = yield* readThread(input.threadId);
       const config = yield* ServerConfig.ServerConfig;
@@ -414,7 +414,7 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
       };
     }),
   ),
-  t3_thread_unsnooze: writesThread((input) =>
+  thread_unsnooze: writesThread((input) =>
     Effect.gen(function* () {
       const { threads, shell } = yield* readThread(input.threadId);
       const result = yield* threads
@@ -423,7 +423,7 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
       return { ...result, receipt: "Woke the thread" };
     }),
   ),
-  t3_thread_settle: writesThread((input) =>
+  thread_settle: writesThread((input) =>
     Effect.gen(function* () {
       const { threads, shell, caller } = yield* readThread(input.threadId);
       const result = yield* threads
@@ -440,7 +440,7 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
       };
     }),
   ),
-  t3_thread_unsettle: writesThread((input) =>
+  thread_unsettle: writesThread((input) =>
     Effect.gen(function* () {
       const { threads, shell } = yield* readThread(input.threadId);
       const result = yield* threads

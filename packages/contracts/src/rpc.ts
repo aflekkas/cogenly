@@ -4,7 +4,12 @@ import * as Visual from "./visual.ts";
 import * as Exports from "./export.ts";
 import * as T3Import from "./t3Import.ts";
 import * as ProjectLabels from "./projectLabel.ts";
+import * as Integrations from "./integration.ts";
+import * as Machines from "./machine.ts";
+import * as MachineSecurity from "./machineSecurity.ts";
 import * as Work from "./work.ts";
+import * as Vault from "./vault.ts";
+import * as Accounts from "./accounts.ts";
 import * as AgentWorkspace from "./agentWorkspace.ts";
 import * as AgentBuilder from "./agentBuilder.ts";
 import * as Agents from "./agent.ts";
@@ -580,8 +585,38 @@ export const WS_METHODS = {
   scheduledTasksRunNow: "scheduledTasks.runNow",
   scheduledTasksRotateWebhookToken: "scheduledTasks.rotateWebhookToken",
   secretsAnswerRequest: "secrets.answerRequest",
+  accountsConnect: "accounts.connect",
+  accountsUse: "accounts.use",
+  accountsRemoveAccess: "accounts.removeAccess",
+  accountsList: "accounts.list",
+  accountsGet: "accounts.get",
+  accountsCreate: "accounts.create",
+  accountsUpdate: "accounts.update",
+  accountsDisconnect: "accounts.disconnect",
+  vaultList: "vault.list",
+  vaultCreate: "vault.create",
+  vaultUpdate: "vault.update",
+  vaultDelete: "vault.delete",
+  vaultUsage: "vault.usage",
   scheduledTasksListWebhookDeliveries: "scheduledTasks.listWebhookDeliveries",
   scheduledTasksGetWebhookDelivery: "scheduledTasks.getWebhookDelivery",
+
+  // Cogenly-managed integrations (upstream MCP servers behind the gateway)
+  integrationsList: "integrations.list",
+  integrationsCreate: "integrations.create",
+  integrationsUpdate: "integrations.update",
+  integrationsDelete: "integrations.delete",
+  integrationsTestConnection: "integrations.testConnection",
+
+  // Machines: this server, its hub, and its paired spokes
+  machinesList: "machines.list",
+  machinesSubscribe: "machines.subscribe",
+  machinesUpdate: "machines.update",
+  machinesPrepareJoin: "machines.prepareJoin",
+  machinesCreatePeerGrant: "machines.createPeerGrant",
+  machinesJoinHub: "machines.joinHub",
+  machinesUnpair: "machines.unpair",
+  machineSecurityStatus: "machines.securityStatus",
 
   // Cloud environment methods
   cloudGetRelayClientStatus: "cloud.getRelayClientStatus",
@@ -2067,6 +2102,75 @@ const WsAgentsActivityRpc = Rpc.make(WS_METHODS.agentsActivity, {
   success: AgentWorkspace.AgentActivityResult,
   error: Schema.Union([Agents.AgentError, EnvironmentAuthorizationError]),
 });
+const WsIntegrationsListRpc = Rpc.make(WS_METHODS.integrationsList, {
+  payload: Schema.Struct({}),
+  success: Integrations.IntegrationListResult,
+  error: Schema.Union([Integrations.IntegrationError, EnvironmentAuthorizationError]),
+});
+const WsIntegrationsCreateRpc = Rpc.make(WS_METHODS.integrationsCreate, {
+  payload: Integrations.IntegrationCreateInput,
+  success: Integrations.IntegrationMutationResult,
+  error: Schema.Union([Integrations.IntegrationError, EnvironmentAuthorizationError]),
+});
+const WsIntegrationsUpdateRpc = Rpc.make(WS_METHODS.integrationsUpdate, {
+  payload: Integrations.IntegrationUpdateInput,
+  success: Integrations.IntegrationMutationResult,
+  error: Schema.Union([Integrations.IntegrationError, EnvironmentAuthorizationError]),
+});
+const WsIntegrationsDeleteRpc = Rpc.make(WS_METHODS.integrationsDelete, {
+  payload: Integrations.IntegrationKey,
+  success: Integrations.IntegrationDeleteResult,
+  error: Schema.Union([Integrations.IntegrationError, EnvironmentAuthorizationError]),
+});
+const WsIntegrationsTestConnectionRpc = Rpc.make(WS_METHODS.integrationsTestConnection, {
+  payload: Integrations.IntegrationKey,
+  success: Integrations.IntegrationTestResult,
+  error: Schema.Union([Integrations.IntegrationError, EnvironmentAuthorizationError]),
+});
+
+const machineErrors = Schema.Union([Machines.MachineError, EnvironmentAuthorizationError]);
+const WsMachineSecurityStatusRpc = Rpc.make(WS_METHODS.machineSecurityStatus, {
+  payload: Schema.Struct({}),
+  success: MachineSecurity.MachineSecurityStatus,
+  error: machineErrors,
+});
+const WsMachinesListRpc = Rpc.make(WS_METHODS.machinesList, {
+  payload: Schema.Struct({}),
+  success: Machines.MachineListResult,
+  error: machineErrors,
+});
+const WsMachinesSubscribeRpc = Rpc.make(WS_METHODS.machinesSubscribe, {
+  payload: Schema.Struct({}),
+  success: Machines.MachineListResult,
+  error: machineErrors,
+  stream: true,
+});
+const WsMachinesUpdateRpc = Rpc.make(WS_METHODS.machinesUpdate, {
+  payload: Machines.MachineUpdateInput,
+  success: Machines.MachineListResult,
+  error: machineErrors,
+});
+const WsMachinesPrepareJoinRpc = Rpc.make(WS_METHODS.machinesPrepareJoin, {
+  payload: Schema.Struct({}),
+  success: Machines.MachinePeerIdentity,
+  error: machineErrors,
+});
+const WsMachinesCreatePeerGrantRpc = Rpc.make(WS_METHODS.machinesCreatePeerGrant, {
+  payload: Machines.MachineCreatePeerGrantInput,
+  success: Machines.MachineJoinCode,
+  error: machineErrors,
+});
+const WsMachinesJoinHubRpc = Rpc.make(WS_METHODS.machinesJoinHub, {
+  payload: Machines.MachineJoinHubInput,
+  success: Machines.MachineListResult,
+  error: machineErrors,
+});
+const WsMachinesUnpairRpc = Rpc.make(WS_METHODS.machinesUnpair, {
+  payload: Machines.MachineUnpairInput,
+  success: Machines.MachineUnpairResult,
+  error: machineErrors,
+});
+
 const WsFactsListRpc = Rpc.make(WS_METHODS.factsList, {
   payload: Facts.FactListInput,
   success: Facts.FactListResult,
@@ -2257,6 +2361,72 @@ const WsSecretsAnswerRequestRpc = Rpc.make(WS_METHODS.secretsAnswerRequest, {
   error: Schema.Union([SecretRequestError, EnvironmentAuthorizationError]),
 });
 
+const WsAccountsConnectRpc = Rpc.make(WS_METHODS.accountsConnect, {
+  payload: Accounts.AccountThreadConnectInput,
+  success: Accounts.AccountConnectResult,
+  error: Schema.Union([Accounts.AccountError, EnvironmentAuthorizationError]),
+});
+const WsAccountsUseRpc = Rpc.make(WS_METHODS.accountsUse, {
+  payload: Accounts.AccountThreadUseInput,
+  success: Accounts.AccountUseResult,
+  error: Schema.Union([Accounts.AccountError, EnvironmentAuthorizationError]),
+});
+const WsAccountsRemoveAccessRpc = Rpc.make(WS_METHODS.accountsRemoveAccess, {
+  payload: Accounts.AccountRemoveAccessInput,
+  success: Accounts.AccountRemoveAccessResult,
+  error: Schema.Union([Accounts.AccountError, EnvironmentAuthorizationError]),
+});
+const WsAccountsListRpc = Rpc.make(WS_METHODS.accountsList, {
+  payload: Accounts.AccountsListInput,
+  success: Accounts.AccountsListResult,
+  error: Schema.Union([Accounts.AccountError, EnvironmentAuthorizationError]),
+});
+const WsAccountsGetRpc = Rpc.make(WS_METHODS.accountsGet, {
+  payload: Accounts.AccountKeyInput,
+  success: Accounts.AccountResult,
+  error: Schema.Union([Accounts.AccountError, EnvironmentAuthorizationError]),
+});
+const WsAccountsCreateRpc = Rpc.make(WS_METHODS.accountsCreate, {
+  payload: Accounts.AccountCreateInput,
+  success: Accounts.AccountResult,
+  error: Schema.Union([Accounts.AccountError, EnvironmentAuthorizationError]),
+});
+const WsAccountsUpdateRpc = Rpc.make(WS_METHODS.accountsUpdate, {
+  payload: Accounts.AccountUpdateInput,
+  success: Accounts.AccountResult,
+  error: Schema.Union([Accounts.AccountError, EnvironmentAuthorizationError]),
+});
+const WsAccountsDisconnectRpc = Rpc.make(WS_METHODS.accountsDisconnect, {
+  payload: Accounts.AccountKeyInput,
+  success: Accounts.AccountDisconnectResult,
+  error: Schema.Union([Accounts.AccountError, EnvironmentAuthorizationError]),
+});
+const WsVaultListRpc = Rpc.make(WS_METHODS.vaultList, {
+  payload: Vault.VaultListInput,
+  success: Vault.VaultListResult,
+  error: Schema.Union([Vault.VaultError, EnvironmentAuthorizationError]),
+});
+const WsVaultCreateRpc = Rpc.make(WS_METHODS.vaultCreate, {
+  payload: Vault.VaultCreateInput,
+  success: Vault.VaultItemResult,
+  error: Schema.Union([Vault.VaultError, EnvironmentAuthorizationError]),
+});
+const WsVaultUpdateRpc = Rpc.make(WS_METHODS.vaultUpdate, {
+  payload: Vault.VaultUpdateInput,
+  success: Vault.VaultItemResult,
+  error: Schema.Union([Vault.VaultError, EnvironmentAuthorizationError]),
+});
+const WsVaultDeleteRpc = Rpc.make(WS_METHODS.vaultDelete, {
+  payload: Vault.VaultDeleteInput,
+  success: Vault.VaultDeleteResult,
+  error: Schema.Union([Vault.VaultError, EnvironmentAuthorizationError]),
+});
+const WsVaultUsageRpc = Rpc.make(WS_METHODS.vaultUsage, {
+  payload: Vault.VaultUsageListInput,
+  success: Vault.VaultUsageListResult,
+  error: Schema.Union([Vault.VaultError, EnvironmentAuthorizationError]),
+});
+
 const WsScheduledTasksListWebhookDeliveriesRpc = Rpc.make(
   WS_METHODS.scheduledTasksListWebhookDeliveries,
   {
@@ -2384,6 +2554,19 @@ export const WsRpcGroup = RpcGroup.make(
   WsAgentsRejectRpc,
   WsAgentsStartWorkRpc,
   WsAgentsActivityRpc,
+  WsIntegrationsListRpc,
+  WsIntegrationsCreateRpc,
+  WsIntegrationsUpdateRpc,
+  WsIntegrationsDeleteRpc,
+  WsIntegrationsTestConnectionRpc,
+  WsMachineSecurityStatusRpc,
+  WsMachinesListRpc,
+  WsMachinesSubscribeRpc,
+  WsMachinesUpdateRpc,
+  WsMachinesPrepareJoinRpc,
+  WsMachinesCreatePeerGrantRpc,
+  WsMachinesJoinHubRpc,
+  WsMachinesUnpairRpc,
   WsFactsListRpc,
   WsFactsCreateRpc,
   WsFactsUpdateRpc,
@@ -2419,6 +2602,19 @@ export const WsRpcGroup = RpcGroup.make(
   WsScheduledTasksRunNowRpc,
   WsScheduledTasksRotateWebhookTokenRpc,
   WsSecretsAnswerRequestRpc,
+  WsAccountsConnectRpc,
+  WsAccountsUseRpc,
+  WsAccountsRemoveAccessRpc,
+  WsAccountsListRpc,
+  WsAccountsGetRpc,
+  WsAccountsCreateRpc,
+  WsAccountsUpdateRpc,
+  WsAccountsDisconnectRpc,
+  WsVaultListRpc,
+  WsVaultCreateRpc,
+  WsVaultUpdateRpc,
+  WsVaultDeleteRpc,
+  WsVaultUsageRpc,
   WsScheduledTasksListWebhookDeliveriesRpc,
   WsScheduledTasksGetWebhookDeliveryRpc,
   WsServerReportClientActivityRpc,

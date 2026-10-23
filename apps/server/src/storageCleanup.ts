@@ -43,7 +43,12 @@ import { threadHasQueuedTurnStart } from "./orchestration-v2/ThreadSettlementSer
 import { forkParked } from "./serverActivation.ts";
 import * as Settings from "./serverSettings.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
-import { isFilesystemRoot, managedWorktreesDirectories } from "./worktreesDirectory.ts";
+import { resolveProjectsRootDirectory } from "./project/ProjectsRoot.ts";
+import {
+  isFilesystemRoot,
+  managedWorktreesDirectories,
+  projectWorktreesDirectories,
+} from "./worktreesDirectory.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
 import { withWorkspaceLease } from "./workspace/workspaceLease.ts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -196,7 +201,7 @@ export class StorageCleanup extends Context.Service<
     readonly reports: Stream.Stream<StorageCleanupReport | null>;
     readonly drain: Effect.Effect<void>;
   }
->()("t3/storageCleanup") {}
+>()("cogenly-server/storageCleanup") {}
 
 const make = Effect.gen(function* () {
   const config = yield* ServerConfig.ServerConfig;
@@ -570,11 +575,23 @@ const make = Effect.gen(function* () {
   ) {
     if (!anyWorktreePolicy(serverSettings, worktreeCleanupEnabled)) return;
     const roots: Array<string> = [];
+    // Project-local worktrees live under `<projectsRoot>/<entry>/worktrees`.
+    const home = yield* HostProcess.HomeDirectory;
+    const projectsRoot = resolveProjectsRootDirectory(
+      serverSettings.projectsRoot,
+      home,
+      config.baseDir,
+      path,
+    );
+    const projectEntries = yield* fs
+      .readDirectory(projectsRoot)
+      .pipe(Effect.orElseSucceed(() => [] as ReadonlyArray<string>));
     for (const directory of managedWorktreesDirectories(
       serverSettings,
       config.worktreesDir,
       path,
-      yield* HostProcess.HomeDirectory,
+      home,
+      projectWorktreesDirectories(projectsRoot, projectEntries, path),
     )) {
       // An unmounted drive only skips its own worktrees.
       const root = yield* fs.exists(directory).pipe(

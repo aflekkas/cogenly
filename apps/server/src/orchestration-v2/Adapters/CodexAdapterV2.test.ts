@@ -467,6 +467,45 @@ describe("CodexAdapterV2 runtime policy", () => {
     }),
   );
 
+  it.effect(
+    "routes shell commands to the terminal tools only when they are explicitly granted",
+    () =>
+      Effect.gen(function* () {
+        const build = (terminalToolsAvailable?: boolean) =>
+          CodexAdapterV2.buildCodexTurnStartParams({
+            nativeThreadId: "native-terminal-instructions",
+            codexInput: [{ type: "text", text: "run the tests" }],
+            runtimePolicy: {
+              runtimeMode: "full-access",
+              interactionMode: "default",
+              cwd: null,
+            },
+            modelSelection: {
+              instanceId: ProviderInstanceId.make("codex"),
+              model: "gpt-5.4",
+            },
+            hasT3Mcp: true,
+            ...(terminalToolsAvailable === undefined ? {} : { terminalToolsAvailable }),
+          });
+
+        const granted = yield* build(true);
+        assert.include(
+          granted.additionalContext?.cogenly_tools?.value ?? "",
+          "Native shell tools are disabled",
+        );
+        // An explicit denial and a credential that never stated terminal
+        // availability both keep the native shell, so the turn must not be
+        // told to route commands through terminal tools instead.
+        for (const params of [yield* build(false), yield* build()]) {
+          assert.notInclude(params.additionalContext?.cogenly_tools?.value ?? "", "terminal_run");
+          assert.notInclude(
+            params.additionalContext?.cogenly_tools?.value ?? "",
+            "Native shell tools are disabled",
+          );
+        }
+      }),
+  );
+
   it.effect("omits default-mode collaboration settings without the T3 MCP server", () =>
     Effect.gen(function* () {
       const params = yield* CodexAdapterV2.buildCodexTurnStartParams({
@@ -1198,7 +1237,9 @@ describe("Codex terminal routing", () => {
     browserToolsAvailable: false,
   };
   it("disables all native shell execution while the terminal MCP server is attached", () => {
-    const params = CodexAdapterV2.codexThreadRuntimeParams({ mcpSession: session });
+    const params = CodexAdapterV2.codexThreadRuntimeParams({
+      mcpSession: { ...session, terminalToolsAvailable: true },
+    });
     assert.equal(params.config["features.shell_tool"], false);
     assert.deepInclude(params.config.mcp_servers, {
       cogenly: {
@@ -1220,6 +1261,15 @@ describe("Codex terminal routing", () => {
       CodexAdapterV2.codexThreadRuntimeParams({
         mcpSession: { ...session, terminalToolsAvailable: false },
       }).config["features.shell_tool"],
+    );
+  });
+  it("keeps the native shell when the credential never stated terminal availability", () => {
+    // `session` carries no `terminalToolsAvailable`: nothing guarantees the
+    // Cogenly terminal tools serve this session, so the shell stays on.
+    assert.isUndefined(
+      CodexAdapterV2.codexThreadRuntimeParams({ mcpSession: session }).config[
+        "features.shell_tool"
+      ],
     );
   });
 });

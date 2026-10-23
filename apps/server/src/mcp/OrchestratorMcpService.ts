@@ -1,3 +1,4 @@
+import * as AccountConnections from "../accounts/AccountConnections.ts";
 import {
   CommandId,
   type RunId,
@@ -102,6 +103,7 @@ import {
 import { formatThreadLink } from "@t3tools/shared/threadLinks";
 import * as Metrics from "../observability/Metrics.ts";
 import * as SecretRequests from "../secrets/SecretRequests.ts";
+import * as Vault from "../vault/Vault.ts";
 
 const DEFAULT_WAIT_TIMEOUT_MS = 10 * 60 * 1_000;
 const MAX_WAIT_TIMEOUT_MS = 60 * 60 * 1_000;
@@ -200,7 +202,7 @@ export interface OrchestratorMcpServiceShape {
 export class OrchestratorMcpService extends Context.Service<
   OrchestratorMcpService,
   OrchestratorMcpServiceShape
->()("t3/mcp/OrchestratorMcpService") {}
+>()("cogenly-server/mcp/OrchestratorMcpService") {}
 
 const isThreadManagementError = Schema.is(ThreadManagementService.ThreadManagementError);
 
@@ -926,6 +928,8 @@ const make = Effect.gen(function* () {
         )
       : Effect.succeed(project.defaultModelSelection);
   const secretRequests = yield* SecretRequests.SecretRequests;
+  const vault = yield* Vault.Vault;
+  const accountConnections = yield* AccountConnections.AccountConnections;
 
   const requireCapability = (scope: McpInvocationScope) =>
     scope.capabilities.has("orchestration")
@@ -1782,14 +1786,82 @@ const make = Effect.gen(function* () {
             "Asking for a secret requires an active run owned by this MCP provider session.",
           );
         }
+        if (input.saveToAccount && input.saveToVault)
+          return yield* failure(
+            "invalid_request",
+            "Choose saveToAccount or saveToVault, not both.",
+          );
+        const accountTarget = input.saveToAccount
+          ? yield* accountConnections
+              .describe(threadScope.thread, input.saveToAccount.connectionId)
+              .pipe(Effect.mapError((cause) => failure("invalid_request", cause.message)))
+          : undefined;
         const runId = run.id;
         const nodeId = run.rootNodeId;
+        // The answer is consumed when it is stored, so a taken name must fail
+        // before the user types anything rather than after.
+        if (input.saveToVault) {
+          const name = input.saveToVault.name;
+          const { items } = yield* vault
+            .list({})
+            .pipe(
+              Effect.mapError(() => failure("orchestration_error", "Unable to read the vault.")),
+            );
+          if (items.some((item) => item.name === name)) {
+            return yield* failure(
+              "invalid_request",
+              `A vault item named "${name}" already exists. Pick another name, or use the existing item.`,
+            );
+          }
+        }
         const key = yield* requestKey(input.clientRequestId);
         // Turn item ids are global; scope the key to this thread. A retry with
         // the same clientRequestId finds this card, answered or not.
         const turnItemId = TurnItemId.make(
           `turn-item:secret-request:${stablePart(threadId)}:${stablePart(key)}`,
         );
+        yield* accountConnections
+          .bindSecretRequest(threadScope.thread, turnItemId, input.saveToAccount?.connectionId)
+          .pipe(Effect.mapError((cause) => failure("invalid_request", cause.message)));
+        if (accountTarget?.connection.accountId && accountTarget.connection.credentialId)
+          return {
+            status: "saved" as const,
+            accountId: accountTarget.connection.accountId,
+            credentialId: accountTarget.connection.credentialId,
+            connectionId: accountTarget.connection.connectionId,
+          };
+        if (input.saveToAccount) {
+          // Recover a failed storage transfer even if the original run ended.
+          // The immutable card target was checked above; only a saved answer may move.
+          const previous = yield* threadManagement
+            .getThreadRecords(threadId, ["turnItems"], {
+              turnItemTypes: ["secret_request"],
+              messageRoles: [],
+            })
+            .pipe(
+              Effect.mapError(() =>
+                failure("orchestration_error", "Unable to read the private account request."),
+              ),
+            );
+          const card = previous.turnItems.find((item) => item.id === turnItemId);
+          if (card?.type === "secret_request" && card.secretStatus === "saved") {
+            const saved = yield* secretRequests.savedRef({ threadId, turnItemId });
+            if (Option.isNone(saved))
+              return yield* failure(
+                "orchestration_error",
+                "The private answer is no longer available. Ask again with a new clientRequestId.",
+              );
+            const connection = yield* accountConnections
+              .capture(threadScope.thread, input.saveToAccount.connectionId, saved.value)
+              .pipe(Effect.mapError((cause) => failure("orchestration_error", cause.message)));
+            return {
+              status: "saved" as const,
+              accountId: connection.accountId!,
+              credentialId: connection.credentialId!,
+              connectionId: connection.connectionId,
+            };
+          }
+        }
         const record = (secretStatus: "pending" | "cancelled") =>
           threadManagement
             .dispatch({
@@ -1803,8 +1875,8 @@ const make = Effect.gen(function* () {
               runId,
               nodeId,
               turnItemId,
-              label: input.label,
-              reason: input.reason,
+              label: accountTarget?.label ?? input.label,
+              reason: accountTarget ? `${accountTarget.reason} ${input.reason}` : input.reason,
               ...(input.placeholder === undefined ? {} : { placeholder: input.placeholder }),
               secretStatus,
             })
@@ -1896,6 +1968,47 @@ const make = Effect.gen(function* () {
             "orchestration_error",
             "The user saved the secret, but it could not be read. Ask again with a new clientRequestId.",
           );
+        }
+        if (input.saveToAccount) {
+          const connection = yield* accountConnections
+            .capture(threadScope.thread, input.saveToAccount.connectionId, secretRef.value)
+            .pipe(Effect.mapError((cause) => failure("orchestration_error", cause.message)));
+          return {
+            status,
+            accountId: connection.accountId!,
+            credentialId: connection.credentialId!,
+            connectionId: connection.connectionId,
+          };
+        }
+        if (input.saveToVault) {
+          // The private answer lands as a vault item instead of a one-use
+          // ref: consume the ref server-side and store the value encrypted.
+          const value = yield* secretRequests
+            .consume({ ref: secretRef.value, projectId: parent.thread.projectId })
+            .pipe(
+              Effect.mapError((error) =>
+                failure(
+                  "orchestration_error",
+                  `Could not store the secret in the vault: ${error.message}`,
+                ),
+              ),
+            );
+          const { item } = yield* vault
+            .saveSecretValue({
+              name: input.saveToVault.name,
+              type: input.saveToVault.type,
+              domains: input.saveToVault.domains ?? [],
+              value,
+            })
+            .pipe(
+              Effect.mapError((error) =>
+                failure(
+                  "orchestration_error",
+                  `Could not store the secret in the vault: ${error.message}`,
+                ),
+              ),
+            );
+          return { status, vaultItemId: item.id, vaultItemName: item.name };
         }
         return { status, secretRef: secretRef.value };
       }).pipe(Effect.withSpan("OrchestratorMcpService.requestSecret")),
@@ -2727,5 +2840,7 @@ export const layer: Layer.Layer<
   | ScheduledTaskService.ScheduledTaskService
   | ProjectService.ProjectService
   | SecretRequests.SecretRequests
+  | AccountConnections.AccountConnections
+  | Vault.Vault
   | ServerSettings.ServerSettingsService
 > = Layer.effect(OrchestratorMcpService, make);

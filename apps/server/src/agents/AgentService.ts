@@ -29,6 +29,7 @@ import {
 } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Schema from "effect/Schema";
+import * as SharedState from "../sync/SharedState.ts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -48,6 +49,13 @@ import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as EventSink from "../orchestration-v2/EventSink.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import { conversationCarryOver } from "./context.ts";
+import {
+  advanceFallback,
+  chainIndexOf,
+  classifyProviderFailure,
+  decideFallback,
+  fallbackChainOf,
+} from "./providerFallback.ts";
 
 const encodeEventContext = Schema.encodeEffect(Schema.fromJsonString(AgentEventContext));
 const encodeEventSchedule = Schema.encodeEffect(Schema.fromJsonString(ScheduledTaskSchedule));
@@ -93,12 +101,15 @@ export class AgentService extends Context.Service<
       context?: AgentEventContext,
     ) => Effect.Effect<boolean, AgentError>;
     /** Also called on startup; terminal runs with undelivered postbacks survive restarts. */
-    readonly reconcile: () => Effect.Effect<void, AgentError>;
+    readonly reconcile: (options?: {
+      readonly afterRestart?: boolean;
+    }) => Effect.Effect<void, AgentError>;
   }
->()("t3/agents/AgentService") {}
+>()("cogenly-server/agents/AgentService") {}
 
 const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
+  const shared = yield* SharedState.SharedState;
   const store = yield* Store.AgentStore;
   const launch = yield* ThreadLaunch.ThreadLaunchService;
   const threads = yield* Threads.ThreadManagementService;
@@ -115,8 +126,8 @@ const make = Effect.gen(function* () {
   const changed = PubSub.publish(changes, undefined).pipe(Effect.asVoid);
   const list = () => store.list().pipe(Effect.map((agents) => ({ agents })));
   // The conversation's folder membership is the agent's project, so it also
-  // decides the conversation's cwd and project manifest. The re-parenting
-  // gate exempts agent conversations; they move instead of forking.
+  // decides the conversation's cwd and project manifest. Like every thread
+  // it re-files in place (never forks), and not while a run is active.
   const fileConversation = (threadId: ThreadId, folderId: ProjectLabelId | null) =>
     labels.moveThread({ threadId, folderId }).pipe(
       Effect.mapError(
@@ -145,6 +156,26 @@ const make = Effect.gen(function* () {
     );
   const workspace = (agent: Agent) =>
     projections.getThread(agent.conversationThreadId).pipe(Effect.map((t) => t.projectId));
+  // Shared agent configuration can arrive before its owner has opened the conversation.
+  // Only that owner creates the fixed thread id; other machines keep configuration only.
+  const ensureConversation = Effect.fn("AgentService.ensureConversation")(function* (agent: Agent) {
+    if (agent.ownerMachine !== undefined && agent.ownerMachine !== shared.environmentId) return;
+    if ((yield* projections.getThreadShell(agent.conversationThreadId)) !== null) return;
+    const projectId = agent.projectId ?? (yield* folders.ensureScratchProject).projectId;
+    yield* launch.launch({
+      agent: { id: agent.id, role: "conversation" },
+      commandId: CommandId.make(`agent-create:${agent.id}`),
+      threadId: agent.conversationThreadId,
+      projectId,
+      title: agent.name,
+      modelSelection: agent.modelSelection,
+      runtimeMode: agent.runtimeMode,
+      interactionMode: "default",
+      workspaceStrategy: { type: "root" },
+      createdBy: "user",
+      creationSource: "server",
+    });
+  });
   // This is a passive assistant message: no message.dispatch and no provider effect.
   // A stable command receipt makes replay after a crash exactly-once in the conversation.
   const post = (agent: Agent, run: AgentWorkRun) =>
@@ -220,48 +251,76 @@ const make = Effect.gen(function* () {
       yield* store.markPosted(run.id);
       yield* changed;
     });
-  const reconcile = () =>
+  const removeAgent = (id: AgentId) =>
     Effect.gen(function* () {
+      const agent = (yield* store.list()).find((candidate) => candidate.id === id);
+      if (agent === undefined) return { deleted: false };
+      // Retire before stopping work so a due trigger cannot launch while deletion waits.
+      yield* store.retire(id);
+      const runs = yield* store.runs(id);
+      const threadIds = [
+        agent.conversationThreadId,
+        ...runs
+          .filter((run) => run.status === "starting" || run.status === "running")
+          .map((run) => run.workThreadId),
+      ];
+      for (const threadId of agent.ownerMachine === undefined ||
+      agent.ownerMachine === shared.environmentId
+        ? threadIds
+        : []) {
+        const thread = yield* projections.getThreadShell(threadId);
+        if (thread === null) continue;
+        yield* threads.dispatch({
+          type: "thread.stop",
+          commandId: CommandId.make(`agent-delete:${id}:${threadId}`),
+          threadId,
+          reason: "Agent deleted.",
+        });
+      }
+      const deleted = yield* store.delete(id);
+      yield* changed;
+      return { deleted };
+    }).pipe(Effect.mapError(failure));
+  const reconcile: AgentService["Service"]["reconcile"] = (options) =>
+    Effect.gen(function* () {
+      const deletions = yield* sql<{
+        id: string;
+      }>`SELECT d.id FROM shared_documents d JOIN agents a ON a.agent_id=d.id WHERE d.kind='agent' AND d.tombstone_json IS NOT NULL`;
+      for (const document of deletions) yield* removeAgent(AgentId.make(document.id));
       const runs = yield* store.runs();
       for (const record of runs) {
         yield* Effect.gen(function* () {
           const agent = yield* store.get(record.agentId);
+          if (agent.ownerMachine !== undefined && agent.ownerMachine !== shared.environmentId)
+            return;
           if (record.status === "completed" || record.status === "failed") {
             yield* post(agent, record);
             return;
           }
           const projection = yield* projections
-            .getThreadRecords(record.workThreadId, ["runs", "messages"])
+            .getThreadRecords(record.workThreadId, ["runs", "messages", "turnItems"])
             .pipe(
               Effect.catchTags({ ProjectionStoreThreadNotFoundError: () => Effect.succeed(null) }),
             );
-          if (projection === null) {
-            if (
-              DateTime.toEpochMillis(yield* DateTime.now) - Date.parse(record.createdAt) >
-              300000
-            ) {
-              yield* store.outcome(agent.id, false);
-              yield* store.finishRun(
-                record.id,
-                "failed",
-                "This job was interrupted before it could start.",
-              );
-            }
-            return;
-          }
-          const run = projection.runs.at(-1);
+          const run = projection?.runs.at(-1);
           if (
             run === undefined &&
-            DateTime.toEpochMillis(yield* DateTime.now) - Date.parse(record.createdAt) > 300000
+            (options?.afterRestart ||
+              DateTime.toEpochMillis(yield* DateTime.now) - Date.parse(record.createdAt) > 300000)
           ) {
-            yield* store.outcome(agent.id, false);
-            yield* store.finishRun(
-              record.id,
-              "failed",
-              "This job was interrupted before its first turn started.",
+            const summary = options?.afterRestart
+              ? "Cogenly restarted during this run, before its first turn started."
+              : "This job was interrupted before its first turn started.";
+            yield* sql.withTransaction(
+              Effect.gen(function* () {
+                yield* store.outcome(agent.id, false);
+                yield* store.finishRun(record.id, "failed", summary);
+              }),
             );
+            yield* post(agent, { ...record, status: "failed", summary });
             return;
           }
+          if (projection === null) return;
           if (run?.status === "waiting") {
             yield* post(agent, {
               ...record,
@@ -280,19 +339,58 @@ const make = Effect.gen(function* () {
             .map((m) => m.text)
             .join("\n")
             .trim();
+          // A usage-limit / signed-out failure advances the fallback chain
+          // instead of just backing off on the same provider; other
+          // failures keep the normal backoff in `outcome`.
+          const failureItem = succeeded
+            ? undefined
+            : projection.turnItems.find((item) => item.type === "error" && item.runId === run.id);
+          const advance =
+            failureItem?.type === "error"
+              ? advanceFallback({
+                  chainLength: fallbackChainOf(agent).length,
+                  failedIndex: chainIndexOf(fallbackChainOf(agent), record.modelSelection),
+                  reason: classifyProviderFailure(failureItem.failure),
+                  resetAt: failureItem.failure.resetAt,
+                  nowMs: DateTime.toEpochMillis(yield* DateTime.now),
+                })
+              : null;
           const updated = yield* sql.withTransaction(
             Effect.gen(function* () {
               yield* store.outcome(agent.id, succeeded);
-              const summary =
-                response.slice(0, 1200) ||
-                (succeeded
-                  ? "Work finished."
-                  : "This run failed. Open the work details to inspect it.");
-              yield* store.finishRun(record.id, succeeded ? "completed" : "failed", summary);
+              if (advance !== null)
+                yield* store.setFallback(agent.id, {
+                  index: advance.index,
+                  reason: advance.reason,
+                  until: advance.until,
+                });
+              const summary = projection.turnItems.some(
+                (item) =>
+                  item.runId === run.id &&
+                  item.type === "error" &&
+                  item.failure.code === "server_restarted",
+              )
+                ? "Cogenly restarted during this run. Open the work details to inspect partial work."
+                : response.slice(0, 1200) ||
+                  (succeeded
+                    ? "Work finished."
+                    : "This run failed. Open the work details to inspect it.");
+              yield* store.finishRun(
+                record.id,
+                succeeded ? "completed" : "failed",
+                summary,
+                advance === null ? undefined : { reason: advance.reason, resetAt: advance.resetAt },
+              );
               return {
                 ...record,
                 status: succeeded ? ("completed" as const) : ("failed" as const),
                 summary,
+                ...(advance === null
+                  ? {}
+                  : {
+                      fallbackReason: advance.reason,
+                      fallbackResetAt: advance.resetAt,
+                    }),
               };
             }),
           );
@@ -346,9 +444,12 @@ const make = Effect.gen(function* () {
             );
           return Stream.concat(
             Stream.fromEffect(list()),
-            Stream.mergeAll([Stream.fromSubscription(subscription), folderChanges, messages], {
-              concurrency: "unbounded",
-            }).pipe(Stream.mapEffect(list)),
+            Stream.mergeAll(
+              [Stream.fromSubscription(subscription), shared.changes, folderChanges, messages],
+              {
+                concurrency: "unbounded",
+              },
+            ).pipe(Stream.mapEffect(list)),
           );
         }),
       ),
@@ -356,10 +457,13 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const at = DateTime.formatIso(yield* DateTime.now);
         const existing = input.id === undefined ? null : yield* store.get(input.id);
+        const ownerMachine =
+          input.ownerMachine ?? existing?.ownerMachine ?? (yield* shared.defaultOwner);
+        const ownsAgent = ownerMachine === shared.environmentId;
         const id = existing?.id ?? AgentId.make(`agent:${yield* crypto.randomUUIDv4()}`);
         const conversationThreadId =
           existing?.conversationThreadId ?? ThreadId.make(`agent-conversation:${id}`);
-        if (existing === null) {
+        if (existing === null && ownsAgent) {
           if (input.projectId === null)
             return yield* new AgentError({ message: "Choose a project to create an agent." });
           // Before the launch, so a refused project leaves no orphan conversation.
@@ -380,6 +484,7 @@ const make = Effect.gen(function* () {
           });
         }
         if (
+          ownsAgent &&
           input.projectFolderId !== undefined &&
           (existing === null
             ? input.projectFolderId !== null
@@ -387,8 +492,28 @@ const make = Effect.gen(function* () {
         )
           yield* fileConversation(conversationThreadId, input.projectFolderId);
         const { kickoff: _kickoff, projectFolderId: _projectFolderId, ...profile } = input;
+        // Editing the primary or the chain restarts fallback from the primary.
+        const sameSelection = (a: Agent["modelSelection"], b: Agent["modelSelection"]) => {
+          const aOptions = Object.entries(a.options ?? {});
+          const bOptions = new Map(Object.entries(b.options ?? {}));
+          return (
+            a.instanceId === b.instanceId &&
+            a.model === b.model &&
+            aOptions.length === bOptions.size &&
+            aOptions.every(([key, value]) => bOptions.get(key) === value)
+          );
+        };
+        const chainChanged =
+          existing !== null &&
+          (!sameSelection(input.modelSelection, existing.modelSelection) ||
+            (input.fallbackChain ?? []).length !== (existing.fallbackChain ?? []).length ||
+            (input.fallbackChain ?? []).some(
+              (entry, index) => !sameSelection(entry, (existing.fallbackChain ?? [])[index]!),
+            ));
         const agent = yield* store.save({
           ...profile,
+          ownerMachine,
+          fallbackChain: input.fallbackChain ?? existing?.fallbackChain ?? [],
           projectFolderId: null,
           responsibility: input.responsibility ?? existing?.responsibility ?? "",
           permissions: input.permissions ?? existing?.permissions ?? defaultAgentPermissions,
@@ -399,8 +524,12 @@ const make = Effect.gen(function* () {
           updatedAt: at,
           consecutiveFailures: existing?.consecutiveFailures ?? 0,
           backoffUntil: existing?.backoffUntil ?? null,
+          fallbackIndex: chainChanged ? 0 : (existing?.fallbackIndex ?? 0),
+          fallbackReason: chainChanged ? null : (existing?.fallbackReason ?? null),
+          fallbackUntil: chainChanged ? null : (existing?.fallbackUntil ?? null),
         });
-        if (existing !== null) {
+        if (existing !== null && ownsAgent) {
+          yield* ensureConversation(agent);
           yield* threads.dispatch({
             type: "thread.runtime-mode.set",
             commandId: CommandId.make(`agent-mode:${id}:${at}`),
@@ -414,7 +543,7 @@ const make = Effect.gen(function* () {
             title: agent.name,
           });
         }
-        if (existing === null && input.kickoff === true) {
+        if (existing === null && ownsAgent && input.kickoff === true) {
           // The agent opens with its own turn; clients hide a turn the owner
           // did not write. The agent exists either way, so a lost greeting
           // is a warning, not a failed create.
@@ -532,36 +661,13 @@ const make = Effect.gen(function* () {
         });
         return { proposal: input.proposal };
       }).pipe(Effect.mapError(failure)),
-    delete: (id) =>
-      Effect.gen(function* () {
-        const agent = (yield* store.list()).find((candidate) => candidate.id === id);
-        if (agent === undefined) return { deleted: false };
-        // Retire before stopping work so a due trigger cannot launch while deletion waits.
-        yield* store.retire(id);
-        const runs = yield* store.runs(id);
-        const threadIds = [
-          agent.conversationThreadId,
-          ...runs
-            .filter((run) => run.status === "starting" || run.status === "running")
-            .map((run) => run.workThreadId),
-        ];
-        for (const threadId of threadIds) {
-          const thread = yield* projections.getThreadShell(threadId);
-          if (thread === null) continue;
-          yield* threads.dispatch({
-            type: "thread.stop",
-            commandId: CommandId.make(`agent-delete:${id}:${threadId}`),
-            threadId,
-            reason: "Agent deleted.",
-          });
-        }
-        const deleted = yield* store.delete(id);
-        yield* changed;
-        return { deleted };
-      }).pipe(Effect.mapError(failure)),
+    delete: removeAgent,
     send: (input) =>
       Effect.gen(function* () {
         const agent = yield* store.get(input.id);
+        if (agent.ownerMachine !== undefined && agent.ownerMachine !== shared.environmentId)
+          return yield* new AgentError({ message: "This agent runs on another machine." });
+        yield* ensureConversation(agent);
         // Backoff and daily caps govern background reservations only.
         // An owner text always reaches the provider. Intake claims its pending
         // uploads into the conversation, as it does for a chat send.
@@ -600,8 +706,16 @@ const make = Effect.gen(function* () {
             message: "Event triggers require a source event and cannot be run manually.",
           });
         let agent = yield* store.get(task.agentId);
+        if (
+          (agent.ownerMachine !== undefined && agent.ownerMachine !== shared.environmentId) ||
+          (task.ownerMachine !== undefined && task.ownerMachine !== shared.environmentId)
+        )
+          return false;
+        yield* ensureConversation(agent);
         const id = `agent-work:${fireKey}`;
         const workThreadId = ThreadId.make(id);
+        let usedSelection = agent.modelSelection;
+        let usedFallbackReason: Agent["fallbackReason"] = null;
         const accepted = yield* sql.withTransaction(
           Effect.gen(function* () {
             if (context !== undefined) {
@@ -617,6 +731,11 @@ const make = Effect.gen(function* () {
               if (prior.length) return false;
             }
             if (!(yield* store.reserve(agent.id))) return false;
+            const decision = decideFallback(agent, DateTime.toEpochMillis(yield* DateTime.now));
+            if (decision.restored)
+              yield* store.setFallback(agent.id, { index: 0, reason: null, until: null });
+            usedSelection = decision.selection;
+            usedFallbackReason = decision.reason;
             if (context !== undefined) {
               const inherited = {
                 ...context,
@@ -639,6 +758,8 @@ const make = Effect.gen(function* () {
               completedAt: null,
               summary: null,
               posted: false,
+              modelSelection: usedSelection,
+              ...(usedFallbackReason === null ? {} : { fallbackReason: usedFallbackReason }),
             });
             return true;
           }),
@@ -659,7 +780,7 @@ const make = Effect.gen(function* () {
             threadId: workThreadId,
             projectId: agent.projectId ?? task.projectId,
             title: `${agent.name}: ${task.title}`,
-            modelSelection: agent.modelSelection,
+            modelSelection: usedSelection,
             runtimeMode: agent.runtimeMode,
             interactionMode: task.interactionMode,
             workspaceStrategy: task.workspaceStrategy,
@@ -688,4 +809,6 @@ const make = Effect.gen(function* () {
     reconcile,
   });
 });
-export const layer = Layer.effect(AgentService, make).pipe(Layer.provide(Access.layer));
+export const layer = Layer.effect(AgentService, make)
+  .pipe(Layer.provide(SharedState.layer))
+  .pipe(Layer.provide(Access.layer));

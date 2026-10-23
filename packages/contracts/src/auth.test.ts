@@ -2,6 +2,8 @@ import { describe, expect, it } from "vite-plus/test";
 import * as Schema from "effect/Schema";
 
 import {
+  AuthAdministrativeScopes,
+  AuthPeerScopes,
   AuthEnvironmentScopes,
   AuthEnvironmentScope,
   authScopeRequiredResponse,
@@ -39,14 +41,25 @@ describe("authorization grants", () => {
 
   const decodeOldScopes = Schema.decodeUnknownSync(oldScopes);
 
-  it.each(AuthEnvironmentScope.literals)(
-    "keeps %s permission errors decodable by old clients",
-    (scope) => {
-      const response = authScopeRequiredResponse(scope);
-      expect(decodeOldScopes([response.requiredScope])).toEqual([response.requiredScope]);
-      expect(response.requiredPermission).toBe(scope);
-    },
-  );
+  it("never offers peer scopes to clients", () => {
+    for (const scope of AuthPeerScopes) {
+      expect(() => Schema.decodeUnknownSync(AuthGrantScopes)([scope])).toThrow();
+      expect(AuthAdministrativeScopes).not.toContain(scope);
+      expect(authScopeResponse([scope]).scopes).toEqual([]);
+    }
+  });
+
+  // Peer scopes are only checked on `/peer`, between servers of this release,
+  // so no old client ever receives a permission error naming them.
+  it.each(
+    AuthEnvironmentScope.literals.filter(
+      (scope) => !(AuthPeerScopes as ReadonlyArray<string>).includes(scope),
+    ),
+  )("keeps %s permission errors decodable by old clients", (scope) => {
+    const response = authScopeRequiredResponse(scope);
+    expect(decodeOldScopes([response.requiredScope])).toEqual([response.requiredScope]);
+    expect(response.requiredPermission).toBe(scope);
+  });
 
   it("keeps old clients able to decode grants with new permissions", () => {
     const response = authScopeResponse(AuthStandardClientScopes);

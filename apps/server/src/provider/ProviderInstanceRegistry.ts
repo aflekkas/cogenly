@@ -127,7 +127,7 @@ export class ProviderInstanceRegistry extends Context.Service<
      */
     readonly subscribeChanges: Effect.Effect<PubSub.Subscription<void>, never, Scope.Scope>;
   }
->()("t3/provider/ProviderInstanceRegistry") {}
+>()("cogenly-server/provider/ProviderInstanceRegistry") {}
 
 /**
  * Live registry entry: the materialized `ProviderInstance` + the fresh

@@ -44,12 +44,22 @@ messages. Facts that must survive should be remembered explicitly.
 Autonomous job reservations are transactional, limited to one active job per agent,
 and capped per UTC day. Agents cannot be paused: failure backoff starts at one minute and
 doubles up to one hour, but never disables an agent, since nothing could turn it back on.
+An agent may also carry an ordered `fallbackChain` of provider instance + model pairs
+after its primary `modelSelection`. When a background run's normalized provider failure
+classifies as `usage_limit` or as a sign-in problem (`providerFallback.ts` reuses the
+adapters' `OrchestrationV2ProviderFailure` classification; Muse only exposes sign-in
+failures in message text), the reconciler advances the stored chain index instead of only
+backing off: the next run uses the next entry, recorded on its `agent_work_runs` row with
+the reason and any reported reset time. The primary entry returns at the reported reset,
+or one hour after the failure when no reset is known. Other failures keep the backoff
+above, and an agent with no chain behaves exactly as before.
 Migration 072 re-enabled agents paused before this. The `agents.enabled` column now only
 fences reservations while deletion stops active work. Owner conversation turns bypass
 backoff and caps. Fixed-time triggers attached to an agent catch up once, then
 advance from the current time; there is no backlog replay. All scheduling runs while
-the server is up, including headless `apps/server` deployments. A VPS still needs a
-process supervisor, persistent database/secrets/workspaces, provider credentials and
+the server is up, including headless `apps/server` deployments. `cogenly service install`
+supplies the Linux process supervisor and scheduler watchdog. A VPS also needs
+persistent database/secrets/workspaces, provider credentials and
 CLI dependencies, an explicit timezone for fixed-time schedules, backups, and secured
 remote access. There is no multi-server scheduler lease: run one writer per home.
 
@@ -60,8 +70,8 @@ in all of them, and execute lets them start Work in any repository without askin
 Without execute, Work becomes an owner approval for that one reviewed target. New agents
 default to read, draft and execute; the high-impact grants stay off. Migration 073 dropped
 the stored `scope` and `autonomy`. Trigger and permission changes still require an owner
-approval. Agents add projects through the ordinary `t3_project_create` and
-`t3_project_clone` tools, which need the execute grant.
+approval. Agents add projects through the ordinary `project_create` and
+`project_clone` tools, which need the execute grant.
 Persistent agents start tracked Work through `start_agent_work` or `work_start`; untracked child launches,
 forks and self-approval/configuration are explicitly refused so they cannot shed policy.
 The authenticated MCP boundary applies policy before all toolkits; generic shell,

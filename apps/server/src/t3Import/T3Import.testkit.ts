@@ -133,10 +133,12 @@ export function run(threadId: string, status: "running" | "completed"): Orchestr
  * `wal` mimics a running T3: WAL mode with checkpoints off, so appended rows stay
  * in the `-wal` file while the fixture is open.
  */
-export function makeT3Fixture(options: { readonly wal?: boolean } = {}) {
+export function makeT3Fixture(
+  options: { readonly wal?: boolean; readonly workspaceRoot?: string } = {},
+) {
   const dir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-import-fixture-"));
-  const workspaceRoot = NodePath.join(dir, "project");
-  NodeFS.mkdirSync(workspaceRoot);
+  const workspaceRoot = options.workspaceRoot ?? NodePath.join(dir, "project");
+  NodeFS.mkdirSync(workspaceRoot, { recursive: true });
   const dbPath = NodePath.join(dir, "statev2.sqlite");
   const db = new NodeSqlite.DatabaseSync(dbPath);
   if (options.wal === true) db.exec("PRAGMA journal_mode = WAL; PRAGMA wal_autocheckpoint = 0;");

@@ -90,7 +90,7 @@ export interface ProviderTurnStartServiceV2Shape {
 export class ProviderTurnStartServiceV2 extends Context.Service<
   ProviderTurnStartServiceV2,
   ProviderTurnStartServiceV2Shape
->()("t3/orchestration-v2/ProviderTurnStartService/ProviderTurnStartServiceV2") {}
+>()("cogenly-server/orchestration-v2/ProviderTurnStartService/ProviderTurnStartServiceV2") {}
 
 export const layer: Layer.Layer<
   ProviderTurnStartServiceV2,
@@ -537,6 +537,40 @@ export const layer: Layer.Layer<
       const existingSessionProjection = projection.providerSessions.find(
         (candidate) => candidate.id === providerSessionId,
       );
+      // A thread whose working directory changed since its provider session
+      // opened (a chat re-homed into a project, or back to its scratch
+      // folder) cannot resume that session: provider sessions are keyed by
+      // cwd. Close the old session so the open below starts one in the new
+      // cwd, and skip the resume further down so the fresh session is seeded
+      // with a portable context handoff instead. This is the same
+      // resume-fallback path a provider switch uses, for every adapter.
+      // The previous run's own cwd, not the session's: a shared session (Codex
+      // serves every thread of an instance from one app-server) has one cwd
+      // for many threads.
+      const previousStartedRun = projection.runs.findLast(
+        (source) =>
+          source.ordinal < run.ordinal &&
+          source.startedAt !== null &&
+          source.providerThreadId === run.providerThreadId,
+      );
+      const previousRootNode = projection.nodes.find(
+        (candidate) => candidate.id === previousStartedRun?.rootNodeId,
+      );
+      const cwdChanged = RuntimePolicy.providerSessionCwdChanged({
+        previousCwd: projection.checkpointScopes.find(
+          (candidate) => candidate.id === previousRootNode?.checkpointScopeId,
+        )?.cwd,
+        nextCwd: resolvedRuntimePolicy.cwd,
+        hasPriorStartedRun: previousStartedRun !== undefined,
+      });
+      // Closing a shared session would stop every other thread on it; there
+      // skipping the resume below is enough, since its threads carry their own cwd.
+      if (
+        cwdChanged &&
+        existingSessionProjection?.capabilities.sessions
+          .supportsMultipleProviderThreadsPerSession !== true
+      )
+        yield* providerSessions.close(providerSessionId).pipe(Effect.ignoreCause({ log: true }));
       const sessionResult = yield* Effect.result(
         providerSessions.open({
           threadId: projection.thread.id,
@@ -806,7 +840,7 @@ export const layer: Layer.Layer<
             handoff.delivery?.status === "pending",
         );
         const resumed = yield* Effect.result(
-          uncertainDelivery || rotateAgentSession
+          uncertainDelivery || rotateAgentSession || cwdChanged
             ? Effect.fail(
                 new ProviderAdapter.ProviderAdapterTurnStartError({
                   driver: session.driver,
@@ -831,7 +865,11 @@ export const layer: Layer.Layer<
           driver: session.driver,
           providerThreadId: providerThread.id,
           runId,
-          reason: uncertainDelivery ? "uncertain_history_delivery" : "resume_failed",
+          reason: uncertainDelivery
+            ? "uncertain_history_delivery"
+            : cwdChanged
+              ? "cwd_changed"
+              : "resume_failed",
           errorTag: resumed.failure._tag,
         });
         const replacement = yield* loadFromProvider(

@@ -221,7 +221,7 @@ export const OrchestratorMcpDelegateTaskResult = Schema.Struct({
   resultContextTransferId: Schema.NullOr(ContextTransferId),
   hasPendingQuestion: Schema.Boolean.annotate({
     description:
-      "Blocking question ends mode=wait. Pass threadId=childThreadId to t3_pending_request_list, t3_pending_request_read (with requestId) and t3_pending_request_respond, or ask the user; the task's completion still wakes this thread.",
+      "Blocking question ends mode=wait. Pass threadId=childThreadId to pending_request_list, pending_request_read (with requestId) and pending_request_respond, or ask the user; the task's completion still wakes this thread.",
   }),
   waitTimedOut: Schema.Boolean.annotate({
     description:
@@ -301,7 +301,7 @@ export type OrchestratorMcpThreadStatus = typeof OrchestratorMcpThreadStatus.Typ
 const OrchestratorMcpProjectTarget = Schema.optional(
   ProjectId.annotate({
     description:
-      "Project to act on. Omit for the calling thread's project; required when the caller is not a T3 thread.",
+      "Project to act on. Omit for the calling thread's project; required when the caller is not a Cogenly thread.",
   }),
 );
 
@@ -322,7 +322,7 @@ export type OrchestratorMcpThreadListInput = typeof OrchestratorMcpThreadListInp
 /** A thread stopped on a usage limit: when the limit resets and whether it continues then. */
 export const OrchestratorMcpThreadUsageLimit = Schema.Struct({
   resetAt: IsoDateTime,
-  /** Continues on its own at resetAt; change with t3_thread_organize resume_at_reset / dont_resume. */
+  /** Continues on its own at resetAt; change with thread_organize resume_at_reset / dont_resume. */
   autoResume: Schema.Boolean,
 });
 export type OrchestratorMcpThreadUsageLimit = typeof OrchestratorMcpThreadUsageLimit.Type;
@@ -358,7 +358,7 @@ export type OrchestratorMcpThreadListItem = typeof OrchestratorMcpThreadListItem
 
 export const OrchestratorMcpThreadListResult = Schema.Struct({
   projectId: ProjectId,
-  /** The calling thread, or null when the caller is not a T3 thread. */
+  /** The calling thread, or null when the caller is not a Cogenly thread. */
   currentThreadId: Schema.NullOr(ThreadId),
   threads: Schema.Array(OrchestratorMcpThreadListItem),
   nextCursor: Schema.NullOr(NonNegativeInt),
@@ -532,9 +532,9 @@ export const OrchestratorMcpProviderCapability = Schema.Struct({
 export type OrchestratorMcpProviderCapability = typeof OrchestratorMcpProviderCapability.Type;
 
 export const OrchestratorMcpCapabilitiesResult = Schema.Struct({
-  /** The calling thread, or null when the caller is not a T3 thread. */
+  /** The calling thread, or null when the caller is not a Cogenly thread. */
   parentThreadId: Schema.NullOr(ThreadId),
-  /** The calling thread's selection, or null when the caller is not a T3 thread. */
+  /** The calling thread's selection, or null when the caller is not a Cogenly thread. */
   inheritedProviderInstanceId: Schema.NullOr(ProviderInstanceId),
   inheritedModel: Schema.NullOr(Schema.String),
   runtimeMode: RuntimeMode,
@@ -590,7 +590,7 @@ export const OrchestratorMcpScheduledTask = Schema.Struct({
   schedule: ScheduledTaskSchedule,
   nextRunAt: Schema.NullOr(IsoDateTime),
   lastRunStatus: ScheduledTaskRunStatus,
-  /** For webhook tasks: the public T3 Connect URL. Absent when this environment has no managed tunnel. */
+  /** For webhook tasks: the public Cogenly Connect URL. Absent when this environment has no managed tunnel. */
   webhookUrl: Schema.optional(Schema.String).annotate({
     description:
       "Public URL to give the sender. Absent when this environment has no Cogenly Connect managed tunnel; the user must enable Cogenly Connect remote access first.",
@@ -608,7 +608,7 @@ export const OrchestratorMcpListScheduledTasksInput = Schema.Struct({
   projectId: Schema.optional(
     ProjectId.annotate({
       description:
-        "Only list this project's tasks. Omit for the calling thread's project, or for every project when the caller is not a T3 thread.",
+        "Only list this project's tasks. Omit for the calling thread's project, or for every project when the caller is not a Cogenly thread.",
     }),
   ),
 });
@@ -650,16 +650,40 @@ export const OrchestratorMcpRequestSecretInput = Schema.Struct({
     description:
       "Reuse when retrying a call that lost its result, so the user sees one card and its answer is returned again. Use a new id to ask again after timed_out or cancelled.",
   }),
+  saveToAccount: Schema.optional(Schema.Struct({ connectionId: TrimmedNonEmptyString })).annotate({
+    description:
+      "Store the private answer as the API token for a server-owned pending account connection from account_connect. Service, project, kind and intended use are fixed by that connection. Cannot be combined with saveToVault.",
+  }),
+  saveToVault: Schema.optional(
+    Schema.Struct({
+      name: TrimmedNonEmptyString,
+      type: Schema.Literals(["login", "api_key", "card", "note"]),
+      domains: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+    }),
+  ).annotate({
+    description:
+      "Keep the user's answer as a vault item with this name instead of a one-use secretRef, so it can be reused (e.g. vault_fill) without asking again.",
+  }),
 });
 export type OrchestratorMcpRequestSecretInput = typeof OrchestratorMcpRequestSecretInput.Type;
 
 export const OrchestratorMcpRequestSecretResult = Schema.Union([
   Schema.Struct({
-    status: Schema.Literal("saved").annotate({ description: "secretRef holds the value." }),
-    secretRef: SecretRef.annotate({
+    status: Schema.Literal("saved").annotate({
       description:
-        "Pass it to a tool that accepts a secretRef; it works once, and you never see the value.",
+        "The private answer was stored; account/vault targets return identifiers instead of a secretRef.",
     }),
+    secretRef: Schema.optional(SecretRef).annotate({
+      description:
+        "Pass it to a tool that accepts a secretRef; it works once, and you never see the value. Absent when saveToVault or saveToAccount stored the value instead.",
+    }),
+    accountId: Schema.optional(TrimmedNonEmptyString),
+    credentialId: Schema.optional(TrimmedNonEmptyString),
+    connectionId: Schema.optional(TrimmedNonEmptyString),
+    vaultItemId: Schema.optional(TrimmedNonEmptyString).annotate({
+      description: "Vault item created from the answer when saveToVault was requested.",
+    }),
+    vaultItemName: Schema.optional(TrimmedNonEmptyString),
   }),
   Schema.Struct({
     status: Schema.Literals(["declined", "cancelled", "timed_out"]).annotate({

@@ -2,6 +2,7 @@ import {
   ModelSelection,
   OrchestrationV2AppThread,
   ProjectId,
+  type ProjectLabelId,
   ProviderInstanceId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
@@ -12,7 +13,11 @@ import * as Schema from "effect/Schema";
 
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
-import { buildProjectManifest } from "@t3tools/provider-core/server/runtimeInstructions";
+import {
+  buildIntegrationsContextLine,
+  buildProjectManifest,
+} from "@t3tools/provider-core/server/runtimeInstructions";
+import * as Integrations from "../integrations/Integrations.ts";
 import * as ProjectFiles from "../projectLabels/ProjectFiles.ts";
 import * as ProjectStore from "./ProjectStore.ts";
 
@@ -54,7 +59,7 @@ export interface RuntimePolicyV2Shape {
 }
 
 export class RuntimePolicyV2 extends Context.Service<RuntimePolicyV2, RuntimePolicyV2Shape>()(
-  "t3/orchestration-v2/RuntimePolicy/RuntimePolicyV2",
+  "cogenly-server/orchestration-v2/RuntimePolicy/RuntimePolicyV2",
 ) {}
 
 /**
@@ -70,6 +75,28 @@ const conversationModeFor = (
   thread: OrchestrationV2AppThread,
 ): Pick<ProviderAdapter.ProviderAdapterV2RuntimePolicy, "conversationMode"> =>
   thread.surface === "chat" || thread.surface === "builder" ? { conversationMode: true } : {};
+
+/**
+ * Whether a provider session opened in `previousCwd` must give way to a
+ * fresh session in `nextCwd`: provider sessions are keyed by cwd, so a
+ * thread re-homed into a project (or back to its scratch folder) cannot
+ * resume the session it ran in before. Only a thread with started history
+ * needs the fresh session seeded; a first turn simply opens where it is.
+ */
+export function providerSessionCwdChanged(input: {
+  readonly previousCwd: string | null | undefined;
+  readonly nextCwd: string | null | undefined;
+  readonly hasPriorStartedRun: boolean;
+}): boolean {
+  return (
+    input.hasPriorStartedRun &&
+    typeof input.previousCwd === "string" &&
+    input.previousCwd.length > 0 &&
+    typeof input.nextCwd === "string" &&
+    input.nextCwd.length > 0 &&
+    input.previousCwd !== input.nextCwd
+  );
+}
 
 export const layer: Layer.Layer<RuntimePolicyV2> = Layer.succeed(RuntimePolicyV2, {
   resolve: (input) =>
@@ -92,19 +119,43 @@ export const layerFromProjectStore: Layer.Layer<
     // Optional so layers without the project-files service (unit tests over a
     // memory database) still resolve; production always provides it.
     const files = yield* Effect.serviceOption(ProjectFiles.ProjectFiles);
+    // Optional like ProjectFiles: unit layers without the gateway still
+    // resolve, and production always provides it.
+    const integrationsService = yield* Effect.serviceOption(Integrations.Integrations);
+    // The integrations line is best-effort turn context too: any failure
+    // resolves to no line rather than failing the turn.
+    const integrationsFor = (labelId: ProjectLabelId | null) =>
+      Option.isNone(integrationsService)
+        ? Effect.succeed([])
+        : integrationsService.value.contextIntegrations(labelId).pipe(
+            Effect.map((found) =>
+              found.map((integration) => ({
+                name: integration.name,
+                displayName: integration.displayName,
+                hint: integration.hint,
+              })),
+            ),
+            Effect.catch(() => Effect.succeed([])),
+          );
     // The project context is best-effort turn context from the derived index:
     // any failure resolves to no folder rather than failing the turn.
     const projectFor = (
       thread: OrchestrationV2AppThread,
-    ): Effect.Effect<{ readonly dir: string; readonly manifest: string } | undefined, never> =>
+    ): Effect.Effect<
+      | { readonly dir: string; readonly manifest: string; readonly labelId: ProjectLabelId }
+      | undefined,
+      never
+    > =>
       Option.isNone(files)
         ? Effect.succeed(undefined)
         : Effect.gen(function* () {
             const folder = yield* files.value.folderForThread(thread.id);
             if (folder === null) return undefined;
             const { entries, total } = yield* files.value.manifestEntries(folder.labelId);
+            const integrations = yield* integrationsFor(folder.labelId);
             return {
               dir: folder.dir,
+              labelId: folder.labelId,
               manifest: buildProjectManifest({
                 name: folder.name,
                 directory: folder.dir,
@@ -112,6 +163,7 @@ export const layerFromProjectStore: Layer.Layer<
                 total,
                 instructions: folder.instructions,
                 projectChat: folder.projectChatThreadId === thread.id,
+                integrations,
               }),
             };
           }).pipe(
@@ -157,12 +209,20 @@ export const layerFromProjectStore: Layer.Layer<
                   }),
                 ),
               )));
+        // Unfiled threads still get the integrations line on its own, so
+        // every provider turn names what is connected.
+        const standaloneLine =
+          project === undefined ? buildIntegrationsContextLine(yield* integrationsFor(null)) : "";
         return ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
           runtimeMode: "full-access",
           interactionMode: input.thread.interactionMode,
           cwd,
           ...conversationModeFor(input.thread),
-          ...(project === undefined ? {} : { projectManifest: project.manifest }),
+          ...(project !== undefined
+            ? { projectManifest: project.manifest }
+            : standaloneLine.length > 0
+              ? { projectManifest: standaloneLine }
+              : {}),
         });
       }),
     });

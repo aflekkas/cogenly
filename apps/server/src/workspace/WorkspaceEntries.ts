@@ -104,7 +104,7 @@ export class WorkspaceEntries extends Context.Service<
     ) => Effect.Effect<ProjectSearchContentsResult, WorkspaceEntriesError>;
     readonly refresh: (cwd: string) => Effect.Effect<void>;
   }
->()("t3/workspace/WorkspaceEntries") {}
+>()("cogenly-server/workspace/WorkspaceEntries") {}
 
 /** Paths sent to one `git check-ignore` call when labelling a folder's children. */
 const IGNORE_CHECK_CHUNK_SIZE = 1000;

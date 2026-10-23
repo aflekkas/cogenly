@@ -1,3 +1,6 @@
+import { AccountsToolkit } from "./toolkits/accounts/tools.ts";
+import * as AccountsHandlers from "./toolkits/accounts/handlers.ts";
+import * as AccountsMcp from "./AccountsMcpService.ts";
 import * as SearchMcp from "../search/Mcp.ts";
 import { ProjectLabelsToolkit } from "./toolkits/projectLabels/tools.ts";
 import * as ProjectLabelsHandlers from "./toolkits/projectLabels/handlers.ts";
@@ -38,12 +41,15 @@ import { PreviewControlsToolkit } from "./toolkits/previewControls/tools.ts";
 import * as PreviewControlsHandlers from "./toolkits/previewControls/handlers.ts";
 import { EnvironmentToolkit } from "./toolkits/environment/tools.ts";
 import * as DesktopAppControl from "../environment/DesktopAppControl.ts";
+import * as MachineSecurity from "../security/MachineSecurity.ts";
 import * as EnvironmentHandlers from "./toolkits/environment/handlers.ts";
 import { ProjectToolkit } from "./toolkits/project/tools.ts";
 import * as ProjectHandlers from "./toolkits/project/handlers.ts";
 import { AttachmentToolkit } from "./toolkits/attachment/tools.ts";
 import * as AttachmentHandlers from "./toolkits/attachment/handlers.ts";
 import { TerminalToolkit } from "./toolkits/terminal/tools.ts";
+import { VaultToolkit } from "./toolkits/vault/tools.ts";
+import * as VaultHandlers from "./toolkits/vault/handlers.ts";
 import * as TerminalHandlers from "./toolkits/terminal/handlers.ts";
 import * as TerminalMcpService from "./TerminalMcpService.ts";
 import { ThreadToolkit } from "./toolkits/thread/tools.ts";
@@ -84,6 +90,10 @@ import { ProjectHomeToolkit } from "./toolkits/projectHome/tools.ts";
 import * as ProjectHomeHandlers from "./toolkits/projectHome/handlers.ts";
 import { ProjectFilesToolkit } from "./toolkits/projectFiles/tools.ts";
 import * as ImageSearchService from "../images/ImageSearchService.ts";
+import { IntegrationsToolkit } from "./toolkits/integrations/tools.ts";
+import { MachinesToolkit } from "./toolkits/machines/tools.ts";
+import * as MachinesHandlers from "./toolkits/machines/handlers.ts";
+import * as IntegrationsHandlers from "./toolkits/integrations/handlers.ts";
 
 /** Where an MCP client discovers how to sign in (RFC 9728), at this request's own origin. */
 const mcpResourceMetadataUrl = (request: HttpServerRequest.HttpServerRequest) =>
@@ -140,7 +150,7 @@ export class McpClientAuthenticator extends Context.Service<
       request: HttpServerRequest.HttpServerRequest,
     ) => Effect.Effect<McpInvocationContext.McpInvocationScope | undefined>;
   }
->()("t3/mcp/McpHttpServer/McpClientAuthenticator") {}
+>()("cogenly-server/mcp/McpHttpServer/McpClientAuthenticator") {}
 
 type AuthenticatedHttpEffect = Effect.Effect<
   HttpServerResponse.HttpServerResponse,
@@ -937,7 +947,11 @@ const layerPreviewControlsRegistration = toolkitRegistration(
 export const layerEnvironmentToolkit = toolkitRegistration(
   EnvironmentToolkit,
   EnvironmentHandlers.layer,
-).pipe(Layer.provide(ThreadCommandExecutor.layer), Layer.provide(DesktopAppControl.layer));
+).pipe(
+  Layer.provide(ThreadCommandExecutor.layer),
+  Layer.provide(DesktopAppControl.layer),
+  Layer.provide(MachineSecurity.layer),
+);
 
 const layerProjectLabelsRegistration = toolkitRegistration(
   ProjectLabelsToolkit,
@@ -995,9 +1009,16 @@ export const layer = Layer.mergeAll(
     Layer.provide(ThreadCommandExecutor.layer),
   ),
   layerThreadToolkit,
+  toolkitRegistration(VaultToolkit, VaultHandlers.layer),
+  toolkitRegistration(AccountsToolkit, AccountsHandlers.layer).pipe(
+    Layer.provide(AccountsMcp.layer),
+  ),
   layerAttachmentToolkit,
   layerProjectRegistration,
   layerProjectLabelsRegistration,
+  // Integrations bubbles to the server root like ProjectFiles.
+  toolkitRegistration(IntegrationsToolkit, IntegrationsHandlers.layer),
+  toolkitRegistration(MachinesToolkit, MachinesHandlers.layer),
   // ProjectFiles bubbles to the server root like ThreadManagement.
   toolkitRegistration(ProjectFilesToolkit, ProjectFilesHandlers.layer),
   // ProjectHome bubbles to the server root like ProjectFiles.

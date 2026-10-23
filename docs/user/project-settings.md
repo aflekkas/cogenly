@@ -37,14 +37,19 @@ machine's setting. Every other provider setting stays per machine.
 
 ## Worktree branch names
 
+New worktree branches are named when the worktree is created: a short slug
+from your first message under a `c/` prefix, such as `c/fix-login-redirect`.
+The worktree folder is named by that slug and never moves.
+
 In **Settings → Source Control → Worktree branch naming**, choose a static prefix,
 a model-selected semantic prefix such as `feat/` or `fix/`, or custom instructions
-for the complete name. The static prefix defaults to `t3/`; a trailing slash is
+for the complete name. The static prefix defaults to `c/`; a trailing slash is
 optional, and an empty prefix adds nothing. Invalid characters in a static prefix
 are replaced with hyphens. Custom instructions are appended to
 the naming prompt and can specify issue IDs, namespaces, and casing.
 
-These settings apply to automatically named new worktree branches. Select a repository
+These settings apply when a client names a worktree branch with a temporary
+name and Cogenly renames it. Select a repository
 to override its environment defaults. Worktree directories keep their original names.
 If generation fails, or a custom name is invalid or already taken, the temporary
 branch name remains.
@@ -54,7 +59,7 @@ branch name remains.
 In **Settings → Scheduled tasks**, choose **On webhook**
 as a task's schedule to run it whenever another service calls its URL, such as
 GitHub on a new pull request or a CI job that failed. A public URL needs a
-[T3 Connect](remote-access.md) managed tunnel; after you save the task, copy
+[Cogenly Connect](remote-access.md) managed tunnel; after you save the task, copy
 its URL from the editor. Without one, the editor shows only the URL's path.
 **Rotate** replaces the URL and the old one stops working.
 
@@ -75,9 +80,9 @@ requests and the prompt each one produced.
 
 If the environment is offline, the sender gets an error and nothing runs;
 redeliver from the sender, such as GitHub's **Recent Deliveries**, once it is
-back. To have T3 Connect keep requests instead, turn on **Hold webhooks while
-offline** in **Settings → Connections**. T3 Connect then stores requests to a
-T3 Connect URL for up to 24 hours and delivers them when the environment
+back. To have Cogenly Connect keep requests instead, turn on **Hold webhooks while
+offline** in **Settings → Connections**. Cogenly Connect then stores requests to a
+Cogenly Connect URL for up to 24 hours and delivers them when the environment
 returns. Leave it off if you don't want request bodies stored outside your
 machine. To skip requests that waited too long, set **Skip requests older
 than** on the task.
@@ -92,23 +97,24 @@ repository crumb.
 The Repository category, shown while a repository is selected, holds the repository's name, icon, actions,
 checkouts and removal. Actions belong to a repository: editing them creates the repository's own list
 on each selected environment, and reset returns to the environment's shared list. A repository's
-`t3.json` actions can be imported there.
+`cogenly.json` actions can be imported there.
 
-Settings a repository can also declare in `t3.json`, such as the workspace for new threads,
-resolve in one order: a repository override, then the environment setting, then `t3.json`, then the
-built-in default. Leave a setting on **Inherit** to let the next tier decide.
+Settings a repository can also declare in `cogenly.json`, such as the workspace for new threads,
+resolve in one order: a repository override, then the environment setting, then `cogenly.json`, then the
+built-in default. Leave a setting on **Inherit** to let the next tier decide. A repository that
+still has a `t3.json` and no `cogenly.json` is read the same way; rename the file when convenient.
 Browser access changes apply when an agent session next starts.
 
 New worktrees initialize git submodules recursively. If that step is slow because the repository
 declares many nested submodules, set **Submodules** in **Settings → General** (with the repository
 selected to override it there) to **Top level only** to stop at the ones the repository declares
 itself, or **Skip** to leave them for a setup script. It resolves in the same order as the
-workspace default: a `"worktreeSubmodules"` value in the `t3.json` of the branch being checked out
+workspace default: a `"worktreeSubmodules"` value in the `cogenly.json` of the branch being checked out
 applies when the repository and environment are both on **Inherit**.
 
 ## Worktree location
 
-New worktrees go in the `worktrees` folder of the T3 home directory. To put them somewhere else,
+New worktrees go in the `worktrees` folder of the Cogenly home directory. To put them somewhere else,
 such as another drive, set **Settings → Storage → Worktree location** to an absolute path like
 `D:\worktrees` or `~/worktrees`. The setting is per machine. Existing worktrees stay where they
 are, and cleanup covers both the default folder and the custom one.
@@ -126,7 +132,7 @@ captures and log retention remain machine-wide.
 
 Worktrees can be removed after a chosen number of inactive days, after a thread settles, after
 merging, or when they have no commits beyond the default branch. Set settled retention to 0 days
-to remove a worktree at the next cleanup after settlement. Only T3-managed worktrees are eligible.
+to remove a worktree at the next cleanup after settlement. Only Cogenly-managed worktrees are eligible.
 Active sessions and shared worktrees prevent removal. **Keep worktrees with local changes** defaults
 to **Uncommitted changes**, which protects tracked edits and untracked files but deletes ignored
 files such as `.env` and build output. **Any local files** also protects ignored files other than

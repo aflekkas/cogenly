@@ -32,12 +32,12 @@ import { toastManager } from "../ui/toast";
 import { WizardSteps, WizardPopup, WizardHeader, WizardPanel, WizardFooter } from "../ui/wizard";
 
 /**
- * Post-sign-in onboarding wizard for T3 Connect. Opens on every in-session
+ * Post-sign-in onboarding wizard for Cogenly Connect. Opens on every in-session
  * sign-in — sign-out removes the connected relay environments, so each new
  * session starts with no devices to reach. It first prompts to publish this
  * environment (managed tunnel + agent activity, both defaulting on) when the
  * current session is authorized to manage the relay link, then lists the
- * account's T3 Connect environments so every device can be connected right
+ * account's Cogenly Connect environments so every device can be connected right
  * away. A cold load with a restored session does not count as a sign-in.
  */
 export function ConnectOnboardingDialog() {

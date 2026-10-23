@@ -194,16 +194,16 @@ describe("projectFolderChangeKind", () => {
     expect(projectFolderChangeKind(chat({ surface: "chat" }), folder)).toBe("move");
   });
 
-  it("forks a chat with turns, including one mid-turn", () => {
-    expect(projectFolderChangeKind(chat({ surface: "chat", latestRun: run }), folder)).toBe("fork");
+  it("re-homes a chat with turns in place instead of forking it", () => {
+    expect(projectFolderChangeKind(chat({ surface: "chat", latestRun: run }), folder)).toBe("move");
     expect(
       projectFolderChangeKind(
         chat({ surface: "chat", latestRun: { ...run, status: "running" } }),
         folder,
       ),
-    ).toBe("fork");
+    ).toBe("move");
     // Older shells omit the surface; the server treats them as chats too.
-    expect(projectFolderChangeKind(chat({ latestRun: run }), folder)).toBe("fork");
+    expect(projectFolderChangeKind(chat({ latestRun: run }), folder)).toBe("move");
   });
 
   it("always moves when taking a chat out of a project", () => {

@@ -321,7 +321,7 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
 
   it("pre-approves all t3-code tools when attaching an MCP session without an allowlist", () => {
     const threadId = ThreadId.make("thread-claude-mcp-no-allowlist");
-    const mcpSession = mcpSessionFor(threadId);
+    const mcpSession = { ...mcpSessionFor(threadId), terminalToolsAvailable: true };
     const overrides = ClaudeAdapterV2.claudeMcpQueryOverrides({
       mcpSession,
       readOnlySandbox: false,
@@ -336,7 +336,7 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
 
   it("extends an explicit allowlist with the t3-code wildcard", () => {
     const threadId = ThreadId.make("thread-claude-mcp-with-allowlist");
-    const mcpSession = mcpSessionFor(threadId);
+    const mcpSession = { ...mcpSessionFor(threadId), terminalToolsAvailable: true };
     const overrides = ClaudeAdapterV2.claudeMcpQueryOverrides({
       mcpSession,
       readOnlySandbox: false,
@@ -352,7 +352,7 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
 
   it("pre-approves only read-only t3-code tools in a read-only sandbox", () => {
     const threadId = ThreadId.make("thread-claude-mcp-read-only");
-    const mcpSession = mcpSessionFor(threadId);
+    const mcpSession = { ...mcpSessionFor(threadId), terminalToolsAvailable: true };
     const overrides = ClaudeAdapterV2.claudeMcpQueryOverrides({
       mcpSession,
       readOnlySandbox: true,
@@ -398,23 +398,23 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
       "mcp__cogenly__work_task",
       "mcp__cogenly__memory_read",
       "mcp__cogenly__fact_search",
-      "mcp__cogenly__t3_project_label_list",
-      "mcp__cogenly__t3_project_label_read",
-      "mcp__cogenly__t3_project_label_create",
-      "mcp__cogenly__t3_project_label_update",
-      "mcp__cogenly__t3_project_label_delete",
-      "mcp__cogenly__t3_project_label_archive",
-      "mcp__cogenly__t3_project_label_unarchive",
-      "mcp__cogenly__t3_project_label_link_source",
-      "mcp__cogenly__t3_project_label_unlink_source",
-      "mcp__cogenly__t3_project_label_link_repository",
-      "mcp__cogenly__t3_project_label_unlink_repository",
-      "mcp__cogenly__t3_thread_move_project_folder",
-      "mcp__cogenly__t3_project_label_file_thread",
-      "mcp__cogenly__t3_thread_snooze",
-      "mcp__cogenly__t3_thread_unsnooze",
-      "mcp__cogenly__t3_thread_settle",
-      "mcp__cogenly__t3_thread_unsettle",
+      "mcp__cogenly__project_label_list",
+      "mcp__cogenly__project_label_read",
+      "mcp__cogenly__project_label_create",
+      "mcp__cogenly__project_label_update",
+      "mcp__cogenly__project_label_delete",
+      "mcp__cogenly__project_label_archive",
+      "mcp__cogenly__project_label_unarchive",
+      "mcp__cogenly__project_label_link_source",
+      "mcp__cogenly__project_label_unlink_source",
+      "mcp__cogenly__project_label_link_repository",
+      "mcp__cogenly__project_label_unlink_repository",
+      "mcp__cogenly__thread_move_project_folder",
+      "mcp__cogenly__project_label_file_thread",
+      "mcp__cogenly__thread_snooze",
+      "mcp__cogenly__thread_unsnooze",
+      "mcp__cogenly__thread_settle",
+      "mcp__cogenly__thread_unsettle",
       "mcp__cogenly__list_agents",
       "mcp__cogenly__start_agent_builder",
     ]);
@@ -423,10 +423,10 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
       "mcp__cogenly__terminal_run",
       "mcp__cogenly__terminal_write",
       "mcp__cogenly__work_start",
-      "mcp__cogenly__t3_thread_launch",
-      "mcp__cogenly__t3_worktree_handoff",
-      "mcp__cogenly__t3_project_clone",
-      "mcp__cogenly__t3_project_label_clone_repository",
+      "mcp__cogenly__thread_launch",
+      "mcp__cogenly__worktree_handoff",
+      "mcp__cogenly__project_clone",
+      "mcp__cogenly__project_label_clone_repository",
     ]) {
       assert.isFalse(overrides.allowedTools?.includes(mutating), mutating);
     }
@@ -492,6 +492,24 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
       }),
     );
     assert.notEqual(rotatedKey, initialKey);
+  });
+
+  it("disallows the native shell only when terminal tools are explicitly granted", () => {
+    const base = mcpSessionFor(ThreadId.make("terminal-grant"));
+    const disallowedToolsFor = (mcpSession: McpProviderSession.McpProviderSessionConfig) =>
+      ClaudeAdapterV2.claudeMcpQueryOverrides({ mcpSession, readOnlySandbox: false })
+        .disallowedTools;
+    assert.deepEqual(disallowedToolsFor({ ...base, terminalToolsAvailable: true }), [
+      "Bash",
+      "BashOutput",
+      "KillShell",
+      "TaskOutput",
+      "TaskStop",
+    ]);
+    assert.isUndefined(disallowedToolsFor({ ...base, terminalToolsAvailable: false }));
+    // A credential that never stated terminal availability must keep Bash:
+    // nothing guarantees the Cogenly terminal tools serve this session.
+    assert.isUndefined(disallowedToolsFor(base));
   });
 
   it("restores native shell tools when agent terminals are disabled", () => {

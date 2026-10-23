@@ -76,7 +76,7 @@ The proposal:
 - triggers: one entry per trigger with a short title, what to do when woken, and a schedule; leave them out if it only needs to answer me. A schedule is one of: {"type": "interval", "everyMs": 3600000}; {"type": "fixed_time", "timeOfDay": "09:00"} with optional "weekdays" ([0-6], Sunday first); {"type": "event", "event": "<kind>"} where kind is one of ${EVENTS.join(" ")}; {"type": "webhook"}. Intervals run at most once per minute.
 - needs: tools or integrations it will rely on, or an empty list
 - permissions: extra grants from ${GRANTS.join(", ")}, only if the job truly needs them (it already reads, drafts and starts Work); omit the rest
-- projectFolderId: only when I name a project for it; look the id up with t3_project_label_list. Leave it out to keep the project this conversation started in`;
+- projectFolderId: only when I name a project for it; look the id up with project_label_list. Leave it out to keep the project this conversation started in`;
 
 /** The hidden first turn a new agent opens with when created with kickoff. */
 export const agentKickoffText = "Introduce yourself briefly and start on your responsibility.";

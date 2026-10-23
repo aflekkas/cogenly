@@ -66,6 +66,7 @@ export * from "./resourceTelemetry.ts";
 export * from "./rpc.ts";
 export * from "./worktreeSetup.ts";
 export * from "./secretRequest.ts";
+export * from "./vault.ts";
 export * from "./clientRpcPermissions.ts";
 
 export * from "./agent.ts";
@@ -81,3 +82,9 @@ export * from "./visual.ts";
 export * from "./export.ts";
 export * from "./t3Import.ts";
 export * from "./agentEvent.ts";
+export * from "./integration.ts";
+export * from "./machine.ts";
+export * from "./machineSecurity.ts";
+export * from "./accounts.ts";
+
+export * from "./sharedDocument.ts";

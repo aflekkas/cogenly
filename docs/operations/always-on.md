@@ -56,8 +56,10 @@ is the state database, plus `settings.json`, `secrets/`, `logs/`, and
 
 ### Reach it
 
-The server binds loopback by default. Prefer Tailscale; use a reverse proxy
-for public access.
+The server binds loopback by default. Use Tailscale first: it keeps Cogenly
+private to your tailnet with no open ports. A public reverse proxy is an
+explicit public-mode option, not the default path — only choose it when you
+want Cogenly reachable from the internet.
 
 Tailscale Serve (HTTPS on your tailnet, no open ports):
 
@@ -65,7 +67,8 @@ Tailscale Serve (HTTPS on your tailnet, no open ports):
 cogenly serve --tailscale-serve   # or once: cogenly pair --tailscale
 ```
 
-Reverse proxy (Caddy example; the server stays on loopback):
+Public mode — reverse proxy (Caddy example; the server stays on loopback,
+but the proxy makes it internet-facing):
 
 ```caddy
 cogenly.example.com {
@@ -120,26 +123,28 @@ fall-back times fire once.
 
 ### Backups
 
-Snapshots are consistent while the server runs:
+The server backs itself up nightly — no cron needed. Each run writes
+`<home>/backups/<timestamp>/` with a consistent snapshot of the state
+database (taken through SQLite's online backup API, safe while the server
+runs), plus `settings.json` and `secrets/`. Backup directories are `0700`
+and files `0600` because they contain secrets. The newest 7 backups are
+kept; change that or turn backups off with `automaticBackups` in
+`settings.json` (`{ "enabled": true, "retentionCount": 7 }`). The server
+also prunes old logs, removes orphaned worktrees whose thread is deleted
+or archived (never one with uncommitted or unpushed work), and runs
+`PRAGMA optimize` on a timer.
+
+A one-off snapshot is still available by hand:
 
 ```sh
 cogenly backup --keep 7   # -> <home>/backups/cogenly-backup-<timestamp>.sqlite
 ```
 
-Nightly via cron:
-
-```cron
-0 2 * * * /opt/cogenly/apps/server/dist/bin.mjs backup --base-dir /home/owner/.cogenly --keep 7
-```
-
-The snapshot covers the state database only. For full disaster recovery also
-copy `settings.json` and `secrets/` (or the whole home).
-
 Restore: stop the server (`cogenly service uninstall` keeps data but removes
 startup; prefer `systemctl --user stop cogenly` / `launchctl bootout`, or just
 stop the manual server), copy the snapshot over `userdata/statev2.sqlite`,
 delete the `statev2.sqlite-wal` and `statev2.sqlite-shm` sidecars if present,
-and start again.
+restore `settings.json` and `secrets/` alongside it, and start again.
 
 ### Upgrades and health
 
@@ -149,7 +154,12 @@ with `git pull && vp i && vp run build:desktop && cogenly service restart`.
 
 `GET /health` is an unauthenticated liveness probe
 returning `ok`, `version`, `uptimeSeconds`, and `schedulerHeartbeatAgeSeconds`;
-point uptime monitors at it over loopback or the tailnet. The scheduler ticks
-every 5 seconds, so a heartbeat age far beyond that means the event loop
-stopped turning. `cogenly doctor` reclaims database space, pausing the service
-itself while it runs.
+point uptime monitors at it over loopback or the tailnet. The Linux service uses
+systemd's 60-second watchdog: the server sends notifications through
+`systemd-notify` only while the scheduler's 5-second heartbeat is at most 20 seconds
+old. A hung event loop or dead scheduler therefore causes a restart. Reinstall
+the service once after upgrading an older unit to enable the watchdog.
+
+Startup resumes eligible conversation turns and marks interrupted agent Work jobs
+failed with a restart reason in the work details and agent conversation.
+`cogenly doctor` reclaims database space, pausing the service itself while it runs.

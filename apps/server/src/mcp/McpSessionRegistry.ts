@@ -48,7 +48,7 @@ export interface McpSessionRegistryShape {
 export class McpSessionRegistry extends Context.Service<
   McpSessionRegistry,
   McpSessionRegistryShape
->()("t3/mcp/McpSessionRegistry") {}
+>()("cogenly-server/mcp/McpSessionRegistry") {}
 
 /** Registry credentials always belong to a provider session, so their scope has a thread. */
 interface CredentialRecord {

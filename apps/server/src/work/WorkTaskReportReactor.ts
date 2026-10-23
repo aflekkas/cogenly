@@ -113,7 +113,7 @@ export class WorkTaskReportReactor extends Context.Service<
     readonly start: () => Effect.Effect<void, never, Scope.Scope>;
     readonly handle: (event: OrchestrationV2DomainEvent) => Effect.Effect<void>;
   }
->()("t3/work/WorkTaskReportReactor") {}
+>()("cogenly-server/work/WorkTaskReportReactor") {}
 
 const make = Effect.gen(function* () {
   const engine = yield* Orchestrator.OrchestratorV2;

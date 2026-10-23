@@ -227,9 +227,9 @@ describe("collapseWorkEntryRuns", () => {
     const runs = collapseWorkEntryRuns([
       toolEntry("s1", "cogenly.search", { query: "a" }),
       toolEntry("s2", "mcp__cogenly__search", { query: "b" }),
-      toolEntry("s3", "cogenly.t3_thread_search", { query: "c" }),
+      toolEntry("s3", "cogenly.thread_search", { query: "c" }),
       thought,
-      toolEntry("r1", "cogenly.t3_thread_read", { threadId: "t-1" }),
+      toolEntry("r1", "cogenly.thread_read", { threadId: "t-1" }),
       toolEntry("x1", "Bash", { command: "ls" }),
     ]);
     expect(runs.map((run) => (run.kind === "run" ? run.label : run.id))).toEqual([

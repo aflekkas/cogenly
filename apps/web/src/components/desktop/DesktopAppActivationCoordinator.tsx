@@ -37,7 +37,7 @@ export function DesktopAppActivationCoordinator() {
     primaryEnvironment.serverConfig !== null &&
     shell.data?.snapshot._tag === "Some";
 
-  // `cogenly environment add`, `t3_environment_add`, and confirmed deep links: one toast
+  // `cogenly environment add`, `environment_add`, and confirmed deep links: one toast
   // that goes from "Connecting…" to "Connected" (or the failure) without blocking anything.
   const addEnvironment = useEffectEvent(
     (request: Extract<DesktopAppActivationRequest, { type: "add-environment" }>) => {

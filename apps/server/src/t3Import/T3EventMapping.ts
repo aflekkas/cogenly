@@ -35,7 +35,7 @@ export interface T3EventMappingContext {
    * project the thread later moved out of.
    */
   readonly threadProjectIds: ReadonlyMap<string, ProjectId>;
-  /** T3 thread ids that collide with an unrelated Cogenly thread, to their replacement ids. */
+  /** Cogenly thread ids that collide with an unrelated Cogenly thread, to their replacement ids. */
   readonly threadIdRemap: ReadonlyMap<string, string>;
 }
 

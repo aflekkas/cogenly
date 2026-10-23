@@ -41,6 +41,7 @@ import {
 } from "~/projectLabels/projectLabels.logic";
 import {
   heroProjectSuffix,
+  isPickableRepository,
   projectDefaultRepository,
   repositoriesInProject,
   workDraftFolderId,
@@ -241,30 +242,31 @@ export function DraftHeroHeadline({
   // Whether a project is its machine's no-project home. Read from the
   // machine's config even while it reconnects: scratchWorkspaceRootFor is
   // null then, and the home would read as a project named "No project".
-  const isNoProjectHome = useCallback(
-    (project: { readonly environmentId: EnvironmentId; readonly workspaceRoot: string }) =>
-      isScratchProject(
-        project,
-        scratchWorkspaceRootFor(project.environmentId) ??
-          environments.find((environment) => environment.environmentId === project.environmentId)
-            ?.serverConfig?.scratchWorkspaceRoot,
-      ),
+  const scratchRootOf = useCallback(
+    (environmentId: EnvironmentId) =>
+      scratchWorkspaceRootFor(environmentId) ??
+      environments.find((environment) => environment.environmentId === environmentId)?.serverConfig
+        ?.scratchWorkspaceRoot,
     [environments, scratchWorkspaceRootFor],
   );
-  // The project that hosts threads without a project is not a repository: the
-  // picker's "No repository" row is the way into it. Any member being a home
-  // (on any machine) keeps it out, so it never shows as a "No project" row.
+  const isNoProjectHome = useCallback(
+    (project: { readonly environmentId: EnvironmentId; readonly workspaceRoot: string }) =>
+      isScratchProject(project, scratchRootOf(project.environmentId)),
+    [scratchRootOf],
+  );
+  // Only repositories are listed: the picker's "No repository" row is the way
+  // into the no-project home. Any member that is not one (a home, a Scratch
+  // thread folder, the home folder) keeps its group out.
   const menuEntries = useMemo(
     () =>
       projectPickerEntries.filter(
         ({ group, targetProject }) =>
           group.isScratch !== true &&
-          !isNoProjectHome(targetProject) &&
-          !group.memberProjects.some(
-            (member) => member.isScratch === true || isNoProjectHome(member),
+          [targetProject, ...group.memberProjects].every((project) =>
+            isPickableRepository(project, scratchRootOf(project.environmentId)),
           ),
       ),
-    [isNoProjectHome, projectPickerEntries],
+    [projectPickerEntries, scratchRootOf],
   );
   const activeProject =
     activeProjectRef === null

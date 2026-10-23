@@ -85,9 +85,25 @@ export const ProjectSourceLink = Schema.Union([
 ]);
 export type ProjectSourceLink = typeof ProjectSourceLink.Type;
 
+/**
+ * One repository filed in a project, identified portably by its remote.
+ * `remote` is the normalized remote (`host/owner/repo`: lowercase host,
+ * ssh/https unified, no `.git` suffix); null marks a local-only repository
+ * with no remote. `directoryName` is the repository's directory name under
+ * the project folder (where another machine clones it); null until known.
+ */
+export const ProjectLabelRepositoryLink = Schema.Struct({
+  repositoryId: ProjectId,
+  remote: Schema.NullOr(TrimmedNonEmptyString),
+  directoryName: Schema.NullOr(TrimmedNonEmptyString),
+});
+export type ProjectLabelRepositoryLink = typeof ProjectLabelRepositoryLink.Type;
+
 export const ProjectLabelWithRepositories = Schema.Struct({
   ...ProjectLabel.fields,
   repositoryIds: Schema.Array(ProjectId),
+  // Older servers (and caches written by them) predate portable repo identity.
+  repositories: Schema.optionalKey(Schema.Array(ProjectLabelRepositoryLink)),
   // Older servers (and caches written by them) predate source links.
   sourceLinks: Schema.Array(ProjectSourceLink).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
   /**
@@ -235,9 +251,10 @@ export const MoveThreadProjectFolderInput = Schema.Struct({
 });
 export type MoveThreadProjectFolderInput = typeof MoveThreadProjectFolderInput.Type;
 /**
- * Moving a chat with turns into a project is a fork: the source keeps its
- * history and the new chat, filed in the target project, carries it via a
- * context transfer. Turnless chats keep using moveThread.
+ * Explicitly fork a chat into a project: the source keeps its history and the
+ * new chat, filed in the target project, carries it via a context transfer.
+ * Plain filing (moveThread) re-homes the same chat instead; this is only for
+ * callers that ask for a copy.
  */
 export const ForkThreadToProjectInput = Schema.Struct({
   threadId: ThreadId,
@@ -247,9 +264,10 @@ export type ForkThreadToProjectInput = typeof ForkThreadToProjectInput.Type;
 export const ForkThreadToProjectResult = Schema.Struct({ threadId: ThreadId });
 export type ForkThreadToProjectResult = typeof ForkThreadToProjectResult.Type;
 /**
- * Filing a thread into a project from MCP: a chat with turns forks (threadId
- * is the new chat, sourceThreadId stays where it was); turnless chats and Work
- * threads file in place (threadId === sourceThreadId).
+ * Filing a thread into a project from MCP: the same thread is re-filed
+ * (threadId === sourceThreadId, forked is always false). Its next turn runs
+ * in the project folder with a fresh provider session seeded from its
+ * history. Kept in this shape for callers written against the fork era.
  */
 export const FileThreadIntoProjectResult = Schema.Struct({
   threadId: ThreadId,
@@ -279,6 +297,7 @@ export class ProjectLabelError extends Schema.TaggedError<ProjectLabelError>()(
       "invalid_membership",
       "invalid_path",
       "fork_required",
+      "thread_active",
       "archived",
       "project_chat",
     ]),
@@ -299,6 +318,8 @@ export class ProjectLabelError extends Schema.TaggedError<ProjectLabelError>()(
         return "That path is not a file in this project folder.";
       case "fork_required":
         return "This chat already has turns; fork it into the project instead of moving it.";
+      case "thread_active":
+        return "A turn is running in this thread; wait for it to finish before moving it.";
       case "project_chat":
         return `This is ${this.projectName ?? "a project"}'s own conversation; it stays in its project.`;
       case "storage":
@@ -503,7 +524,16 @@ export const ProjectOverviewResult = Schema.Struct({
   name: Schema.String,
   description: Schema.optional(Schema.String),
   instructions: Schema.String,
-  repositories: Schema.Array(Schema.Struct({ id: ProjectId, title: Schema.String })),
+  repositories: Schema.Array(
+    Schema.Struct({
+      id: ProjectId,
+      title: Schema.String,
+      /** Normalized remote (`host/owner/repo`); null/absent for local-only repositories. */
+      remote: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+      /** Directory name under the project folder; absent until known. */
+      directoryName: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+    }),
+  ),
   sourceLinks: Schema.Array(ProjectSourceLink),
   projectChatThreadId: Schema.NullOr(ThreadId),
 });
@@ -521,7 +551,7 @@ export const ProjectInstructionsSetInput = Schema.Struct({
 export type ProjectInstructionsSetInput = typeof ProjectInstructionsSetInput.Type;
 export const ProjectRepositoryChangeInput = Schema.Struct({
   ...projectFolderTarget,
-  /** An existing repository (see project_overview or t3_project_list). */
+  /** An existing repository (see project_overview or project_list). */
   repositoryId: ProjectId,
 });
 export type ProjectRepositoryChangeInput = typeof ProjectRepositoryChangeInput.Type;

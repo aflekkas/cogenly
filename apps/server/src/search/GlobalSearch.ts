@@ -19,7 +19,7 @@ export class GlobalSearch extends Context.Service<
       scope?: McpInvocationScope,
     ) => Effect.Effect<SearchQueryResult, SearchError>;
   }
->()("t3/search/GlobalSearch") {}
+>()("cogenly-server/search/GlobalSearch") {}
 
 const encodeStrings = Schema.encodeSync(Schema.fromJsonString(Schema.Array(Schema.String)));
 const decodeStrings = Schema.decodeUnknownEffect(

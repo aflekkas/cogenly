@@ -278,7 +278,7 @@ describe("conversation-mode MCP boundary", () => {
     ["terminal_run", { command: "echo chat-probe" }],
     ["terminal_write", { terminalId: "terminal-probe", input: "x" }],
     ["terminal_kill", { terminalId: "terminal-probe" }],
-    ["t3_worktree_handoff", { branch: "probe/chat" }],
+    ["worktree_handoff", { branch: "probe/chat" }],
     ["delegate_task", { task: "probe task" }],
     ["create_threads", { threads: [{}] }],
     [
@@ -290,7 +290,7 @@ describe("conversation-mode MCP boundary", () => {
         scopeSummary: "Probe scope",
       },
     ],
-    ["t3_thread_launch", { title: "Probe launch" }],
+    ["thread_launch", { title: "Probe launch" }],
   ] as const)("%s refuses a chat-surface caller", ([tool, args]) =>
     callText(tool, chatThreadId, args).pipe(
       Effect.flatMap(refusalOf),

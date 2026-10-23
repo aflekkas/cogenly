@@ -1,9 +1,13 @@
+import * as SharedState from "../sync/SharedState.ts";
 import { decodeAgentRow } from "./agentRecord.ts";
 import {
   Agent,
   AgentPermissions,
   AgentError,
   AgentId,
+  type AgentFallbackReason,
+  ModelSelection as ModelSelectionSchema,
+  type ModelSelection,
   FactId,
   type RunId,
   type ContextPrincipal,
@@ -28,6 +32,7 @@ import { conversationCarryOver } from "./context.ts";
 
 interface Row {
   payload_json: string;
+  owner_machine?: string | null;
   consecutive_failures: number;
   backoff_until: string | null;
   daily_run_cap: number;
@@ -40,6 +45,12 @@ const decodeNote = Schema.decodeUnknownEffect(AgentMemoryNote);
 const decodeEventContext = Schema.decodeUnknownEffect(Schema.fromJsonString(AgentEventContext));
 const encodeEventContext = Schema.encodeSync(Schema.fromJsonString(AgentEventContext));
 const decodeRun = Schema.decodeUnknownEffect(AgentWorkRun);
+const decodeSelectionJson = (json: string | null) =>
+  json == null
+    ? Effect.succeed(undefined)
+    : Schema.decodeUnknownEffect(Schema.fromJsonString(ModelSelectionSchema))(json).pipe(
+        Effect.catch(() => Effect.succeed(undefined)),
+      );
 const encodePermissions = Schema.encodeEffect(Schema.fromJsonString(AgentPermissions));
 const decodeLatestMessage = Schema.decodeUnknownEffect(
   Schema.fromJsonString(AgentListItem.fields.latestMessage),
@@ -77,20 +88,34 @@ export class AgentStore extends Context.Service<
     /** Reserve background work only; owner messages never consume this allowance. */
     readonly reserve: (id: AgentId) => Effect.Effect<boolean, AgentError>;
     readonly outcome: (id: AgentId, succeeded: boolean) => Effect.Effect<Agent, AgentError>;
+    /** Persist where the fallback chain currently points; index 0 clears it. */
+    readonly setFallback: (
+      id: AgentId,
+      state: {
+        readonly index: number;
+        readonly reason: AgentFallbackReason | null;
+        readonly until: string | null;
+      },
+    ) => Effect.Effect<void, AgentError>;
     readonly createRun: (run: AgentWorkRun) => Effect.Effect<void, AgentError>;
     readonly runs: (id?: AgentId) => Effect.Effect<ReadonlyArray<AgentWorkRun>, AgentError>;
     readonly finishRun: (
       id: string,
       status: "completed" | "failed",
       summary: string,
+      fallback?: {
+        readonly reason: AgentFallbackReason;
+        readonly resetAt: string | null;
+      },
     ) => Effect.Effect<void, AgentError>;
     readonly markRunning: (id: string) => Effect.Effect<void, AgentError>;
     readonly markPosted: (id: string) => Effect.Effect<void, AgentError>;
   }
->()("t3/agents/AgentStore") {}
+>()("cogenly-server/agents/AgentStore") {}
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  const shared = yield* SharedState.SharedState;
   const facts = yield* Facts.FactService;
   const retrieval = yield* Retrieval.ContextRetrievalService;
   const now = DateTime.now.pipe(Effect.map(DateTime.formatIso));
@@ -169,6 +194,9 @@ const make = Effect.gen(function* () {
       Effect.flatMap((rows) =>
         Effect.forEach(rows, (r) =>
           Effect.gen(function* () {
+            const usedSelection = yield* decodeSelectionJson(
+              typeof r.model_selection_json === "string" ? r.model_selection_json : null,
+            );
             return yield* decodeRun({
               id: r.run_id,
               agentId: r.agent_id,
@@ -185,6 +213,11 @@ const make = Effect.gen(function* () {
               completedAt: r.completed_at,
               summary: r.summary,
               posted: r.posted === 1,
+              ...(usedSelection === undefined ? {} : { modelSelection: usedSelection }),
+              ...(typeof r.fallback_reason !== "string"
+                ? {}
+                : { fallbackReason: r.fallback_reason as AgentFallbackReason }),
+              ...(!("fallback_reset_at" in r) ? {} : { fallbackResetAt: r.fallback_reset_at }),
             });
           }),
         ),
@@ -216,10 +249,16 @@ const make = Effect.gen(function* () {
         return yield* get(agent.id);
       }).pipe(Effect.mapError(storeError)),
     save: (agent) =>
-      sql`INSERT INTO agents(agent_id, conversation_thread_id, payload_json, enabled, daily_run_cap) VALUES (${agent.id}, ${agent.conversationThreadId}, json_remove(${encodeAgent(agent)}, '$.projectFolderId'), 1, ${agent.dailyRunCap}) ON CONFLICT(agent_id) DO UPDATE SET payload_json = excluded.payload_json, daily_run_cap = excluded.daily_run_cap`.pipe(
-        Effect.andThen(get(agent.id)),
-        Effect.mapError(storeError),
-      ),
+      sql
+        .withTransaction(
+          Effect.gen(function* () {
+            const owner = agent.ownerMachine ?? (yield* shared.defaultOwner);
+            yield* sql`INSERT INTO agents(agent_id, conversation_thread_id, payload_json, enabled, daily_run_cap, owner_machine) VALUES (${agent.id}, ${agent.conversationThreadId}, json_remove(${encodeAgent({ ...agent, ownerMachine: owner })}, '$.projectFolderId'), 1, ${agent.dailyRunCap}, ${owner}) ON CONFLICT(agent_id) DO UPDATE SET payload_json = excluded.payload_json, daily_run_cap = excluded.daily_run_cap, owner_machine = excluded.owner_machine`;
+            yield* shared.capture("agent", agent.id);
+            return yield* get(agent.id);
+          }),
+        )
+        .pipe(Effect.mapError(storeError)),
 
     retire: (id) =>
       sql`UPDATE agents SET enabled = 0 WHERE agent_id = ${id}`.pipe(
@@ -231,6 +270,11 @@ const make = Effect.gen(function* () {
         .withTransaction(
           Effect.gen(function* () {
             yield* sql`DELETE FROM scheduled_task_webhook_deliveries WHERE task_id IN (SELECT task_id FROM scheduled_tasks WHERE agent_id = ${id})`;
+            const schedules = yield* sql<{
+              task_id: string;
+            }>`SELECT task_id FROM scheduled_tasks WHERE agent_id = ${id}`;
+            for (const task of schedules) yield* shared.capture("schedule", task.task_id, true);
+            yield* shared.capture("agent", id, true);
             yield* sql`DELETE FROM scheduled_tasks WHERE agent_id = ${id}`;
             yield* sql`DELETE FROM agent_conversation_context WHERE agent_id = ${id}`;
             yield* sql`DELETE FROM agent_memory WHERE agent_id = ${id}`;
@@ -270,7 +314,7 @@ const make = Effect.gen(function* () {
           budgetChars: agent === null ? 4000 : 16000,
         });
         if (agent === null) return context.text;
-        return `You are ${agent.name}, the owner's persistent agent.\nResponsibility:\n${agent.responsibility}\nYou act on your own across all of the owner's projects and repositories, within your permissions: ${yield* encodePermissions(agent.permissions)}. Use t3_project_list to see them and t3_project_create or t3_project_clone to add one.\nStanding instructions:\n${agent.instructions}\n\n${context.text}\nUse fact_search to retrieve accessible facts, fact_propose for uncertain facts, and fact_supersede to replace proposals. memory_read, memory_remember and memory_forget remain aliases for your own facts. Only the user can confirm a proposal. Use list_open_items for shared commitments, propose_commitment for extracted obligations, and update_commitment_status with evidence. Use request_agent_approval for new triggers or permission changes; you can never approve your own requests. Use start_agent_work to start or propose repository Work. Send concise messages to the owner.`;
+        return `You are ${agent.name}, the owner's persistent agent.\nResponsibility:\n${agent.responsibility}\nYou act on your own across all of the owner's projects and repositories, within your permissions: ${yield* encodePermissions(agent.permissions)}. Use project_list to see them and project_create or project_clone to add one.\nStanding instructions:\n${agent.instructions}\n\n${context.text}\nUse fact_search to retrieve accessible facts, fact_propose for uncertain facts, and fact_supersede to replace proposals. memory_read, memory_remember and memory_forget remain aliases for your own facts. Only the user can confirm a proposal. Use list_open_items for shared commitments, propose_commitment for extracted obligations, and update_commitment_status with evidence. Use request_agent_approval for new triggers or permission changes; you can never approve your own requests. Use start_agent_work to start or propose repository Work. Send concise messages to the owner.`;
       }).pipe(Effect.mapError(storeError)),
     carryOver: (agentId, ordinal, messages) =>
       Effect.gen(function* () {
@@ -287,7 +331,7 @@ const make = Effect.gen(function* () {
         const at = yield* now;
         const day = at.slice(0, 10);
         const rows =
-          yield* sql`UPDATE agents SET run_day = ${day}, daily_runs = CASE WHEN run_day = ${day} THEN daily_runs + 1 ELSE 1 END WHERE agent_id = ${id} AND enabled = 1 AND (backoff_until IS NULL OR backoff_until <= ${at}) AND (run_day IS NULL OR run_day <> ${day} OR daily_runs < daily_run_cap) AND NOT EXISTS (SELECT 1 FROM agent_work_runs WHERE agent_id = ${id} AND status IN ('starting', 'running')) RETURNING agent_id`;
+          yield* sql`UPDATE agents SET run_day = ${day}, daily_runs = CASE WHEN run_day = ${day} THEN daily_runs + 1 ELSE 1 END WHERE agent_id = ${id} AND enabled = 1 AND (owner_machine IS NULL OR owner_machine = ${shared.environmentId}) AND (backoff_until IS NULL OR backoff_until <= ${at}) AND (run_day IS NULL OR run_day <> ${day} OR daily_runs < daily_run_cap) AND NOT EXISTS (SELECT 1 FROM agent_work_runs WHERE agent_id = ${id} AND status IN ('starting', 'running')) RETURNING agent_id`;
         return rows.length > 0;
       }).pipe(Effect.mapError(storeError)),
     outcome: (id, succeeded) =>
@@ -303,16 +347,22 @@ const make = Effect.gen(function* () {
         yield* sql`UPDATE agents SET payload_json = json_set(payload_json, '$.updatedAt', ${DateTime.formatIso(at)}), consecutive_failures = ${failures}, backoff_until = ${until} WHERE agent_id = ${id}`;
         return yield* get(id);
       }).pipe(Effect.mapError(storeError)),
+    setFallback: (id, state) =>
+      Effect.gen(function* () {
+        const at = DateTime.formatIso(yield* DateTime.now);
+        yield* sql`UPDATE agents SET payload_json = json_set(payload_json, '$.updatedAt', ${at}, '$.fallbackIndex', ${state.index}, '$.fallbackReason', ${state.reason === null ? null : state.reason}, '$.fallbackUntil', ${state.until}) WHERE agent_id = ${id}`;
+      }).pipe(Effect.mapError(storeError)),
     createRun: (run) =>
-      sql`INSERT INTO agent_work_runs(run_id, agent_id, trigger_id, work_thread_id, status, created_at, trigger_kind, trigger_context_json) VALUES (${run.id}, ${run.agentId}, ${run.triggerId}, ${run.workThreadId}, ${run.status}, ${run.createdAt}, ${run.triggerKind ?? "trigger"}, ${run.triggerContext === undefined ? null : encodeEventContext(run.triggerContext)})`.pipe(
+      sql`INSERT INTO agent_work_runs(run_id, agent_id, trigger_id, work_thread_id, status, created_at, trigger_kind, trigger_context_json, model_selection_json, fallback_reason) VALUES (${run.id}, ${run.agentId}, ${run.triggerId}, ${run.workThreadId}, ${run.status}, ${run.createdAt}, ${run.triggerKind ?? "trigger"}, ${run.triggerContext === undefined ? null : encodeEventContext(run.triggerContext)}, ${run.modelSelection === undefined ? null : JSON.stringify(run.modelSelection)}, ${run.fallbackReason ?? null})`.pipe(
         Effect.asVoid,
         Effect.mapError(storeError),
       ),
-    finishRun: (id, status, summary) =>
+    finishRun: (id, status, summary, fallback) =>
       now.pipe(
-        Effect.flatMap(
-          (at) =>
-            sql`UPDATE agent_work_runs SET status = ${status}, completed_at = ${at}, summary = ${summary} WHERE run_id = ${id}`,
+        Effect.flatMap((at) =>
+          fallback === undefined
+            ? sql`UPDATE agent_work_runs SET status = ${status}, completed_at = ${at}, summary = ${summary} WHERE run_id = ${id}`
+            : sql`UPDATE agent_work_runs SET status = ${status}, completed_at = ${at}, summary = ${summary}, fallback_reason = ${fallback.reason}, fallback_reset_at = ${fallback.resetAt} WHERE run_id = ${id}`,
         ),
         Effect.asVoid,
         Effect.mapError(storeError),
@@ -330,5 +380,5 @@ const make = Effect.gen(function* () {
   });
 });
 export const layer = Layer.effect(AgentStore, make).pipe(
-  Layer.provide(Layer.merge(Facts.layer, Retrieval.layer)),
+  Layer.provide(Layer.mergeAll(Facts.layer, Retrieval.layer, SharedState.layer)),
 );

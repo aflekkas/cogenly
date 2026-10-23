@@ -53,11 +53,12 @@ const SETTLE_WAIT_MS = 60 * 60_000;
 
 /**
  * Files one thread in a folder, or takes it out with `folder: null` (Work then
- * falls back to its repository's folder). A turnless chat or Work moves and
- * gets a toast that can undo it. A chat with turns cannot be re-parented: it
- * is forked into the project, waiting first for a running turn to settle so
- * the fork carries it, then the new chat opens with a way back to the
- * original. Resolves true once the thread (or its fork) is in the folder.
+ * falls back to its repository's folder). Every thread moves in place and
+ * gets a toast that can undo it: the server re-homes the same thread, whose
+ * next turn runs in the new folder with a fresh provider session seeded from
+ * its history, and refuses the move while a turn is running. The fork path
+ * below stays for explicit "fork to project" callers; plain moves no longer
+ * use it. Resolves true once the thread is in the folder.
  */
 export function useMoveThreadToFolder() {
   const navigate = useNavigate();

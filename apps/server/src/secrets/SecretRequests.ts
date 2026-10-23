@@ -79,12 +79,17 @@ export class SecretRequests extends Context.Service<
      * Reads and deletes a ref's value. Fails for unknown or used refs, and
      * for refs entered in another project.
      */
+    /** Transfer into durable storage before deleting the receipt. Failed storage leaves it retryable. */
+    readonly adopt: <A, E, R>(
+      input: { readonly ref: SecretRef; readonly projectId: ProjectId },
+      save: (value: string) => Effect.Effect<A, E, R>,
+    ) => Effect.Effect<A, E | SecretRequestError, R>;
     readonly consume: (input: {
       readonly ref: SecretRef;
       readonly projectId: ProjectId;
     }) => Effect.Effect<string, SecretRequestError>;
   }
->()("t3/secrets/SecretRequests") {}
+>()("cogenly-server/secrets/SecretRequests") {}
 
 const make = Effect.gen(function* () {
   const store = yield* ServerSecretStore.ServerSecretStore;
@@ -216,7 +221,7 @@ const make = Effect.gen(function* () {
       Effect.withSpan("SecretRequests.consume"),
     );
 
-  const consumeRef = (input: { readonly ref: SecretRef; readonly projectId: ProjectId }) =>
+  const readRef = (input: { readonly ref: SecretRef; readonly projectId: ProjectId }) =>
     Effect.gen(function* () {
       if (!REF_PATTERN.test(input.ref))
         return yield* new SecretRequestError({ reason: "invalid_ref" });
@@ -234,13 +239,25 @@ const make = Effect.gen(function* () {
         yield* removeLogged(storeName(input.ref));
         return yield* new SecretRequestError({ reason: "ref_expired" });
       }
-      // One use: the value moves into whatever consumed it. If it cannot be
-      // deleted, it is not handed out, so a ref is never used twice.
-      if (!(yield* removeLogged(storeName(input.ref)))) {
-        return yield* new SecretRequestError({ reason: "consume_failed" });
-      }
       return decoded.value.value;
     });
+  const consumeRef = (input: { readonly ref: SecretRef; readonly projectId: ProjectId }) =>
+    Effect.gen(function* () {
+      const value = yield* readRef(input);
+      if (!(yield* removeLogged(storeName(input.ref))))
+        return yield* new SecretRequestError({ reason: "consume_failed" });
+      return value;
+    });
+  const adopt: SecretRequests["Service"]["adopt"] = (input, save) =>
+    Effect.gen(function* () {
+      const value = yield* readRef(input);
+      const result = yield* save(value);
+      // The destination is durable and idempotent before removal. A failed
+      // removal is retryable; no secret is returned to the tool either way.
+      if (!(yield* removeLogged(storeName(input.ref))))
+        return yield* new SecretRequestError({ reason: "consume_failed" });
+      return result;
+    }).pipe(consumeLock.withPermits(1));
 
   /**
    * Drops values nobody used before they expired, so an agent that never
@@ -275,7 +292,7 @@ const make = Effect.gen(function* () {
     Effect.forkScoped,
   );
 
-  return SecretRequests.of({ answer, savedRef, consume });
+  return SecretRequests.of({ answer, savedRef, consume, adopt });
 });
 
 export const layer = Layer.effect(SecretRequests, make);

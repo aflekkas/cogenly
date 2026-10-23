@@ -4,6 +4,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   ProjectLabelCloneRepositoryInput,
   ProjectLabelCreateInput,
+  ProjectLabelError,
   ProjectLabelOwnerRepositorySearchInput,
   ProjectLabelSourceLinkInput,
   ProjectLabelUpdateInput,
@@ -87,6 +88,44 @@ describe("project source links", () => {
         link: { kind: "github-owner", owner: "spawn-partners" },
       }).link,
     ).toEqual({ kind: "github-owner", owner: "spawn-partners" });
+  });
+});
+
+describe("project repository links", () => {
+  it("carries each repository's normalized remote and directory name", () => {
+    const decoded = decodeLabel({
+      id: "label:1",
+      name: "Spawn Partners",
+      repositoryIds: ["repo-1", "repo-2"],
+      repositories: [
+        { repositoryId: "repo-1", remote: "github.com/spawn/platform", directoryName: "platform" },
+        { repositoryId: "repo-2", remote: null, directoryName: "local-notes" },
+      ],
+      threadCount: 0,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+    expect(decoded.repositories).toEqual([
+      { repositoryId: "repo-1", remote: "github.com/spawn/platform", directoryName: "platform" },
+      { repositoryId: "repo-2", remote: null, directoryName: "local-notes" },
+    ]);
+  });
+
+  it("still decodes a label from a server that predates repository links", () => {
+    const decoded = decodeLabel({
+      id: "label:1",
+      name: "Spawn Partners",
+      repositoryIds: [],
+      threadCount: 0,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+    expect(decoded.repositories).toBeUndefined();
+  });
+
+  it("names the active-run refusal for a move attempted mid-turn", () => {
+    const error = new ProjectLabelError({ operation: "moveThread", reason: "thread_active" });
+    expect(error.message).toContain("turn is running");
   });
 });
 

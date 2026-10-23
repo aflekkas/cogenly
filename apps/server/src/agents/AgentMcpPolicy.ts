@@ -5,6 +5,8 @@ import {
   AgentApprovalAction,
   OrchestratorMcpFailure,
   OrchestratorMcpScheduleTaskInput,
+  IntegrationCreateInput,
+  IntegrationUpdateByNameInput,
   type AgentPermissions,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
@@ -18,10 +20,13 @@ import { McpInvocationContext, type McpInvocationScope } from "../mcp/McpInvocat
 import * as Threads from "../orchestration-v2/ThreadManagementService.ts";
 import { readCaller, assertLiveCaller } from "../mcp/threadAccess.ts";
 import { resolveRuntimeMode } from "../mcp/OrchestratorMcpService.ts";
+import * as Integrations from "../integrations/Integrations.ts";
 
 const decodeWorkStart = Schema.decodeUnknownEffect(WorkStartInput);
 const decodeStartWork = Schema.decodeUnknownEffect(AgentStartWorkInput);
 const decodeSchedule = Schema.decodeUnknownEffect(OrchestratorMcpScheduleTaskInput);
+const decodeIntegrationAdd = Schema.decodeUnknownEffect(IntegrationCreateInput);
+const decodeIntegrationUpdate = Schema.decodeUnknownEffect(IntegrationUpdateByNameInput);
 const decodeAction = Schema.decodeUnknownEffect(AgentApprovalAction);
 const isMcpFailure = Schema.is(OrchestratorMcpFailure);
 const isRecord = Schema.is(Schema.Record(Schema.String, Schema.Unknown));
@@ -48,13 +53,14 @@ export class AgentMcpPolicy extends Context.Service<
       result?: unknown,
     ) => Effect.Effect<void, OrchestratorMcpFailure>;
   }
->()("t3/agents/AgentMcpPolicy") {}
+>()("cogenly-server/agents/AgentMcpPolicy") {}
 const make = Effect.gen(function* () {
   const store = yield* Store.AgentStore;
   const workspace = yield* Workspace.AgentWorkspaceService;
   const sql = yield* SqlClient.SqlClient;
   const access = yield* Access.AgentAccessScope;
   const threads = yield* Threads.ThreadManagementService;
+  const integrations = yield* Effect.serviceOption(Integrations.Integrations);
   const actorFor = (scope: McpInvocationScope) =>
     scope.thread === undefined
       ? Effect.succeed(null)
@@ -87,7 +93,7 @@ const make = Effect.gen(function* () {
         if (
           params.projectId !== undefined &&
           !permittedProject(params.projectId) &&
-          !["request_agent_approval", "t3_thread_launch", "start_agent_work"].includes(name)
+          !["request_agent_approval", "thread_launch", "start_agent_work"].includes(name)
         )
           return yield* denied("This repository does not exist in this environment.");
         if (typeof params.threadId === "string" && params.threadId !== actor.threadId) {
@@ -98,7 +104,7 @@ const make = Effect.gen(function* () {
             return yield* denied("This thread is not in a live repository.");
         }
         if (readonly) return { handled: false };
-        if (["create_threads", "delegate_task", "t3_thread_fork"].includes(name))
+        if (["create_threads", "delegate_task", "thread_fork"].includes(name))
           return yield* denied(
             "Persistent agents must start governed Work with start_agent_work; untracked child threads require the owner.",
           );
@@ -125,9 +131,9 @@ const make = Effect.gen(function* () {
         yield* resolveRuntimeMode(caller.limits.runtimeMode, agent.runtimeMode);
         if (
           [
-            "t3_pending_request_respond",
-            "t3_thread_configure",
-            "t3_environment_preferences_update",
+            "pending_request_respond",
+            "thread_configure",
+            "environment_preferences_update",
           ].includes(name)
         )
           return yield* denied(
@@ -144,7 +150,7 @@ const make = Effect.gen(function* () {
           ].includes(name)
         )
           return { handled: false };
-        if (name === "t3_thread_launch" || name === "work_start") {
+        if (name === "thread_launch" || name === "work_start") {
           if (
             params.modelSelection !== undefined ||
             params.runtimeMode !== undefined ||
@@ -204,6 +210,51 @@ const make = Effect.gen(function* () {
           };
         }
         if (name === "start_agent_work") return { handled: false };
+        // Connecting an integration hands every agent a new credentialed
+        // upstream, so a persistent agent proposes it and the owner approves
+        // (approving creates it). The owner's own turns are not agents here:
+        // actor is null for them and they fall through to the tool.
+        if (name === "integration_add") {
+          const payload = yield* decodeIntegrationAdd(input);
+          const action = yield* decodeAction({
+            actionKind: "integration_add",
+            payload,
+          });
+          const { approval } = yield* workspace.requestApproval(agent.id, action, actor);
+          return yield* denied(
+            `Integration proposal awaiting owner approval: ${approval.id}`,
+            "agent_approval_required",
+          );
+        }
+        if (name === "integration_update") {
+          const update = yield* decodeIntegrationUpdate(input);
+          if (integrations._tag === "None")
+            return yield* denied("Integrations are unavailable.", "agent_policy_unavailable");
+          const listed = yield* integrations.value.list();
+          const current = listed.integrations.find(
+            ({ integration }) => integration.name === update.name,
+          )?.integration;
+          if (current === undefined)
+            return yield* denied(
+              "No connected integration with that name exists.",
+              "invalid_request",
+            );
+          const payload = {
+            ...update,
+            id: current.id,
+            url: update.url ?? current.url,
+            transport: update.transport ?? current.transport,
+            headers: update.headers ?? current.headers,
+          };
+          if (Integrations.integrationDestinationChanged(current, payload)) {
+            const action = yield* decodeAction({ actionKind: "integration_update", payload });
+            const { approval } = yield* workspace.requestApproval(agent.id, action, actor);
+            return yield* denied(
+              `Integration change awaiting owner approval: ${approval.id}`,
+              "agent_approval_required",
+            );
+          }
+        }
         if (name === "schedule_task") {
           const schedule = yield* decodeSchedule(input);
           const action = yield* decodeAction({
@@ -245,12 +296,12 @@ const make = Effect.gen(function* () {
           ? "merge"
           : /deploy/.test(name)
             ? "deploy"
-            : /delete|remove|forget/.test(name)
+            : /delete|remove|forget|account_disconnect/.test(name)
               ? "delete"
               : /create.*(?:pr|pull_request)/.test(name)
                 ? "create_pr"
                 : /send|comment|review|reply|reaction/.test(name) &&
-                    !["t3_thread_send", "t3_thread_send_attachments"].includes(name)
+                    !["thread_send", "thread_send_attachments"].includes(name)
                   ? "send"
                   : /fact_(propose|supersede)|memory_(remember|write)|html_|attachment_/.test(name)
                     ? "draft"
@@ -260,7 +311,7 @@ const make = Effect.gen(function* () {
         // They cannot safely be reduced to an execute grant by parsing model text.
         // Adding a project (create or clone) is ordinary execute work for an agent.
         if (
-          /^(terminal_|preview_|device_|t3_project_(?:update|delete))/.test(name) &&
+          /^(terminal_|preview_(?!close$|list$)|device_|project_(?:update|delete)$)/.test(name) &&
           !["send", "create_pr", "merge", "deploy", "delete"].every(
             (key) => agent.permissions[key as keyof AgentPermissions],
           )
@@ -287,7 +338,7 @@ const make = Effect.gen(function* () {
             "propose_commitment",
             "update_commitment_status",
             "start_agent_work",
-            "t3_thread_launch",
+            "thread_launch",
             "work_start",
           ].includes(name)
         )

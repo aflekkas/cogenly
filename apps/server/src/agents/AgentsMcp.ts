@@ -43,7 +43,7 @@ const List = Tool.make("list_agents", {
 const BuilderStart = Tool.make("start_agent_builder", {
   ...shared,
   description:
-    "Start an agent-builder conversation from a request. Pass projectFolderId (from t3_project_label_list) to start it in a project; the proposed agent lands there. The builder drafts its proposal in the new thread and the owner confirms it on the proposal card; this never creates an agent directly.",
+    "Start an agent-builder conversation from a request. Pass projectFolderId (from project_label_list) to start it in a project; the proposed agent lands there. The builder drafts its proposal in the new thread and the owner confirms it on the proposal card; this never creates an agent directly.",
   parameters: AgentBuilderStartInput,
   success: AgentBuilderStartResult,
 })
@@ -52,7 +52,7 @@ const BuilderStart = Tool.make("start_agent_builder", {
 const SetProject = Tool.make("update_agent_project", {
   ...shared,
   description:
-    "Move a persistent agent into a project folder (projectFolderId from t3_project_label_list), or null for no project. Its one conversation moves with it in place, without forking, and then runs in the project directory with the project's files.",
+    "Move a persistent agent into a project folder (projectFolderId from project_label_list), or null for no project. Its one conversation moves with it in place, without forking, and then runs in the project directory with the project's files.",
   parameters: AgentSetProjectInput,
   success: AgentMutationResult,
 }).annotate(Tool.Destructive, false);

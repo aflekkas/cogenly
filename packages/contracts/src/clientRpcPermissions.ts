@@ -1,6 +1,7 @@
 import * as Schema from "effect/Schema";
 import { GitPreparePullRequestThreadInput } from "./git.ts";
 import {
+  AuthAccessWriteScope,
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
   AuthSettingsWriteScope,
@@ -76,6 +77,23 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.agentsApprove]: AuthOrchestrationOperateScope,
   [WS_METHODS.agentsReject]: AuthOrchestrationOperateScope,
   [WS_METHODS.agentsStartWork]: AuthOrchestrationOperateScope,
+  [WS_METHODS.integrationsList]: AuthOrchestrationReadScope,
+  // Creating or changing an integration hands agents a new credentialed
+  // upstream, and testing one spends a resolved credential on the network.
+  [WS_METHODS.integrationsCreate]: AuthOrchestrationOperateScope,
+  [WS_METHODS.integrationsUpdate]: AuthOrchestrationOperateScope,
+  [WS_METHODS.integrationsDelete]: AuthOrchestrationOperateScope,
+  [WS_METHODS.integrationsTestConnection]: AuthOrchestrationOperateScope,
+  [WS_METHODS.machineSecurityStatus]: AuthOrchestrationReadScope,
+  [WS_METHODS.machinesList]: AuthOrchestrationReadScope,
+  [WS_METHODS.machinesSubscribe]: AuthOrchestrationReadScope,
+  [WS_METHODS.machinesUpdate]: AuthSettingsWriteScope,
+  // Pairing hands another server a standing credential to this one, or makes
+  // this server hold one for another: access management, like pairing links.
+  [WS_METHODS.machinesPrepareJoin]: AuthAccessWriteScope,
+  [WS_METHODS.machinesCreatePeerGrant]: AuthAccessWriteScope,
+  [WS_METHODS.machinesJoinHub]: AuthAccessWriteScope,
+  [WS_METHODS.machinesUnpair]: AuthAccessWriteScope,
   [WS_METHODS.factsCreate]: AuthOrchestrationOperateScope,
   [WS_METHODS.factsUpdate]: AuthOrchestrationOperateScope,
   [WS_METHODS.factsSupersede]: AuthOrchestrationOperateScope,
@@ -98,6 +116,20 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.scheduledTasksDelete]: AuthOrchestrationOperateScope,
   [WS_METHODS.scheduledTasksRunNow]: AuthOrchestrationOperateScope,
   [WS_METHODS.scheduledTasksRotateWebhookToken]: AuthOrchestrationOperateScope,
+  // Vault metadata is owner-visible; writes change stored secrets.
+  [WS_METHODS.accountsConnect]: AuthOrchestrationOperateScope,
+  [WS_METHODS.accountsUse]: AuthOrchestrationOperateScope,
+  [WS_METHODS.accountsRemoveAccess]: AuthOrchestrationOperateScope,
+  [WS_METHODS.accountsList]: AuthOrchestrationReadScope,
+  [WS_METHODS.accountsGet]: AuthOrchestrationReadScope,
+  [WS_METHODS.accountsCreate]: AuthOrchestrationOperateScope,
+  [WS_METHODS.accountsUpdate]: AuthOrchestrationOperateScope,
+  [WS_METHODS.accountsDisconnect]: AuthOrchestrationOperateScope,
+  [WS_METHODS.vaultList]: AuthOrchestrationReadScope,
+  [WS_METHODS.vaultUsage]: AuthOrchestrationReadScope,
+  [WS_METHODS.vaultCreate]: AuthOrchestrationOperateScope,
+  [WS_METHODS.vaultUpdate]: AuthOrchestrationOperateScope,
+  [WS_METHODS.vaultDelete]: AuthOrchestrationOperateScope,
   [ORCHESTRATION_V2_WS_METHODS.stopWorkflow]: AuthOrchestrationOperateScope,
   // Continuing on another provider starts a turn, like sending a message.
   [ORCHESTRATION_V2_WS_METHODS.acceptUsageLimitHandoff]: AuthOrchestrationOperateScope,

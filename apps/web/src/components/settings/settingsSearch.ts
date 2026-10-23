@@ -16,6 +16,7 @@ export type SettingsPath =
   | "/settings/general"
   | "/settings/project-tags"
   | "/settings/memory"
+  | "/settings/vault"
   | "/settings/diagnostics"
   | "/settings/appearance"
   | "/settings/keybindings"
@@ -67,7 +68,7 @@ export interface SettingsSearchItem {
   readonly localBackendManagementOnly?: boolean;
   readonly localEnvironmentOnly?: boolean;
   readonly wslAvailableOnly?: boolean;
-  // Its row only renders while this environment's T3 Connect managed tunnel is on.
+  // Its row only renders while this environment's Cogenly Connect managed tunnel is on.
   readonly managedTunnelOnly?: boolean;
   /**
    * Sorts after every other match. Keybinding commands mirror rows on other
@@ -97,6 +98,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/general": "General",
   "/settings/project-tags": "Projects",
   "/settings/memory": "Memory",
+  "/settings/vault": "Vault",
   "/settings/appearance": "Appearance",
   "/settings/keybindings": "Keybindings",
   "/settings/providers": "Providers",
@@ -220,6 +222,14 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Memory",
     to: "/settings/memory",
     searchTerms: ["facts remember forget correct context proposed confirm agents knowledge"],
+  },
+  {
+    id: "vault",
+    title: "Vault",
+    to: "/settings/vault",
+    searchTerms: [
+      "secrets passwords logins credentials api keys cards notes one-time codes totp approvals usage log",
+    ],
   },
   {
     id: "data-export",
@@ -401,7 +411,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Submodules",
     to: "/settings/general",
     scope: "project-defaults",
-    searchTerms: ["git submodule init recursive top-level none worktree t3.json"],
+    searchTerms: ["git submodule init recursive top-level none worktree cogenly.json"],
   },
   {
     id: "start-from-origin",
@@ -537,6 +547,14 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/providers",
     searchTerms: ["refresh availability versions auth state models background probes seconds off"],
     providerSettingsOnly: true,
+  },
+  {
+    id: "integration-services",
+    title: "Services",
+    to: "/settings/integrations",
+    searchTerms: [
+      "integrations mcp servers connect remote gmail linear github tools vault credentials headers add",
+    ],
   },
   {
     id: "agent-browser-access",
@@ -714,7 +732,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "project-actions",
     title: "Actions",
     to: "/settings/projects",
-    searchTerms: ["commands scripts setup run dev server checkout worktree t3.json import"],
+    searchTerms: ["commands scripts setup run dev server checkout worktree cogenly.json import"],
   },
   {
     id: "environment-icon",
@@ -763,7 +781,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "t3-connect",
     localEnvironmentOnly: true,
-    title: "T3 Connect",
+    title: "Cogenly Connect",
     to: "/settings/connections",
     targetId: "connections-environment",
     searchTerms: ["managed tunnel cloud other devices remote"],
@@ -776,7 +794,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Hold webhooks while offline",
     to: "/settings/connections",
     targetId: "connections-environment",
-    searchTerms: ["webhook automations offline queue mailbox t3 connect"],
+    searchTerms: ["webhook automations offline queue mailbox cogenly connect"],
     cloudOnly: true,
     managedTunnelOnly: true,
   },
@@ -801,7 +819,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "remote-environments",
     title: "Environments",
     to: "/settings/connections",
-    searchTerms: ["add pair backend host code ssh config agent tunnel saved t3 connect"],
+    searchTerms: ["add pair backend host code ssh config agent tunnel saved cogenly connect"],
   },
   {
     id: "load-balancing",
@@ -841,6 +859,7 @@ const SETTINGS_CATEGORY_SCOPES: Readonly<Record<SettingsPath, SettingsSearchScop
   "/settings/general": null,
   "/settings/project-tags": null,
   "/settings/memory": null,
+  "/settings/vault": null,
   "/settings/data": null,
   "/settings/import": null,
   "/settings/appearance": null,
