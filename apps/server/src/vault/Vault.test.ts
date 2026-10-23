@@ -498,6 +498,22 @@ describe("Vault service", () => {
     }).pipe(Effect.provide(layer)),
   );
 
+  it.effect("keeps scrubbing values a rotation or delete took out of the vault", () =>
+    Effect.gen(function* () {
+      const vault = yield* Vault.Vault;
+      const { item } = yield* vault.create({
+        name: "Rotated",
+        type: "api_key",
+        secretFields: { value: "old-token-value" },
+      });
+      yield* vault.update({ id: item.id, secretFields: { value: "new-token-value" } });
+      yield* vault.delete({ id: item.id });
+      expect(yield* vault.scrubText("old-token-value new-token-value")).toBe(
+        "[redacted vault secret] [redacted vault secret]",
+      );
+    }).pipe(Effect.provide(layer)),
+  );
+
   it.effect("scrubs the TOTP codes valid around now", () =>
     Effect.gen(function* () {
       const vault = yield* Vault.Vault;

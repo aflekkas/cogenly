@@ -667,6 +667,8 @@ const make = Effect.gen(function* () {
       let ciphertext = row.ciphertext;
       let wrappedKeys = row.wrapped_keys_json;
       if (input.secretFields) {
+        // Copies of the old values may still sit in pages and buffers.
+        yield* retainSecrets(scrubFormsOf(current));
         stored = { ...current };
         for (const [key, value] of Object.entries(input.secretFields)) {
           if (value === "") delete stored[key as keyof StoredFields];
@@ -837,8 +839,19 @@ const make = Effect.gen(function* () {
     update,
     delete: (input, callerScope) =>
       Effect.gen(function* () {
-        if (callerScope)
-          yield* findRow({ itemId: input.id, callerScope }).pipe(Effect.mapError(wrap));
+        const row = yield* findRow({ itemId: input.id, callerScope }).pipe(
+          Effect.map(Option.some),
+          Effect.catchIf(
+            (error) => !callerScope && isVaultError(error) && error.reason === "not_found",
+            () => Effect.succeed(Option.none<VaultRow>()),
+          ),
+          Effect.mapError(wrap),
+        );
+        // A deleted item's values can still sit in pages and buffers.
+        if (Option.isSome(row)) {
+          const stored = yield* decryptStored(row.value).pipe(Effect.option);
+          if (Option.isSome(stored)) yield* retainSecrets(scrubFormsOf(stored.value));
+        }
         const rows =
           yield* sql`UPDATE vault_items SET deleted_at = ${yield* now}, ciphertext = '', wrapped_keys_json = '[]', updated_at = ${yield* now} WHERE id = ${input.id} AND deleted_at IS NULL RETURNING id`.pipe(
             Effect.mapError(wrap),

@@ -95,7 +95,8 @@ Exact stored secret values (length ≥ 6) are scrubbed from tool results;
 values of 3–5 characters are scrubbed as whole tokens only. Every value `use`
 hands out, including the generated TOTP code, is also retained for the server
 lifetime (bounded, oldest first), so it stays scrubbed after its code window
-or a rotation.
+or a rotation; replacing or deleting an item retains its old values the same
+way.
 This is an output guard, not a boundary against an agent already authorized
 to read a process token. All vault field values are cached in memory only (loaded lazily,
 invalidated on writes) and `McpToolAccess` redacts every MCP tool result
