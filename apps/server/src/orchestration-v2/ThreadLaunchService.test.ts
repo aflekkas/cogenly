@@ -74,7 +74,7 @@ function harness(
         Layer.mock(WorktreeSetupTracker.WorktreeSetupTracker)({
           stageStatus: () => Effect.void,
           markUncancellable: () => Effect.void,
-          finish: () => Effect.void,
+          finish: () => Effect.succeed(null),
         }),
         Layer.mock(ProjectCloneTracker.ProjectCloneTracker)({
           get: () =>

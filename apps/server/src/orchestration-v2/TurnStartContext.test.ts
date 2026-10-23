@@ -155,6 +155,6 @@ describe("SQL getTurnStartContext", () => {
           hasPriorStartedRun: previousStartedRun !== undefined,
         }),
       ).toBe(true);
-    }).pipe(Effect.provide(Projections.layer), Effect.provide(layer)),
+    }).pipe(Effect.provide(Layer.provideMerge(Projections.layer, layer))),
   );
 });
