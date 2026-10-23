@@ -22,7 +22,9 @@ const mapStrings = <A>(value: A, rewrite: (text: string) => string): A => {
     if (typeof current === "string") return rewrite(current);
     if (Array.isArray(current)) return current.map(walk);
     if (typeof current === "object" && current !== null)
-      return Object.fromEntries(Object.entries(current).map(([key, entry]) => [key, walk(entry)]));
+      return Object.fromEntries(
+        Object.entries(current).map(([key, entry]) => [rewrite(key), walk(entry)]),
+      );
     return current;
   };
   return walk(value) as A;
@@ -44,8 +46,8 @@ export const VAULT_WITHHELD = "[withheld: the vault could not be checked for sec
 
 /**
  * A tool result with every string replaced by `VAULT_WITHHELD`, for when the
- * secrets to scrub cannot be loaded. The shape stays, so the result still
- * encodes; nothing it said reaches the agent.
+ * secrets to scrub cannot be loaded. Keys are withheld too: arbitrary
+ * property names can themselves carry secret values.
  */
 export const withholdValue = <A>(value: A): A => mapStrings(value, () => VAULT_WITHHELD);
 

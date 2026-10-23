@@ -450,8 +450,7 @@ describe("Vault service", () => {
       yield* sql`ALTER TABLE vault_items RENAME TO vault_items_gone`;
       expect(yield* vault.scrubText("leaked token-value-123")).toBe(VAULT_WITHHELD);
       expect(yield* vault.scrubValue({ output: "leaked token-value-123", exitCode: 0 })).toEqual({
-        output: VAULT_WITHHELD,
-        exitCode: 0,
+        [VAULT_WITHHELD]: 0,
       });
     }).pipe(Effect.provide(layer)),
   );
