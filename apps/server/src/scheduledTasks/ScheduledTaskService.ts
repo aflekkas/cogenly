@@ -13,6 +13,7 @@ import {
   ScheduledTask,
   ScheduledTaskError,
   ScheduledTaskId,
+  SharedDocumentId,
   ThreadId,
   ScheduledTaskWebhookDeliveryId,
   type ScheduledTaskDeleteInput,
@@ -84,6 +85,7 @@ interface WebhookOrigin {
 }
 
 const ENDPOINT_KEY = /^[0-9a-f]{16}$/;
+const isSharedDocumentId = Schema.is(SharedDocumentId);
 
 /**
  * The relay's hook URL prefix for this environment. The relay finds the
@@ -1085,11 +1087,26 @@ export const layer = Layer.effect(
                   ),
                 )
             : null;
+        const legacyId = ScheduledTaskId.make(
+          input.commandId ? `scheduled-task:${input.commandId}` : `scheduled-task:${uuid}`,
+        );
         const id =
           input.id ??
-          ScheduledTaskId.make(
-            input.commandId ? `scheduled-task:${input.commandId}` : `scheduled-task:${uuid}`,
-          );
+          (yield* Effect.gen(function* () {
+            if (isSharedDocumentId(legacyId) || (yield* findTask(legacyId))) return legacyId;
+            const digest = yield* crypto
+              .digest("SHA-256", new TextEncoder().encode(input.commandId!))
+              .pipe(
+                Effect.mapError((cause) =>
+                  taskError("Could not generate schedule task id.", { cause }),
+                ),
+              );
+            const hash = Array.from(new Uint8Array(digest))
+              .slice(0, 16)
+              .map((byte) => byte.toString(16).padStart(2, "0"))
+              .join("");
+            return ScheduledTaskId.make(`scheduled-task:command:${hash}`);
+          }));
         // Look up by the *resolved* id so idempotent creates (commandId replays)
         // keep their run history, and so real load failures propagate instead
         // of silently resetting an existing row.

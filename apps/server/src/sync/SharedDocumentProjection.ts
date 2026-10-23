@@ -231,7 +231,7 @@ export const projectDocument = Effect.fn("SharedState.projectDocument")(function
       yield* sql`UPDATE facts SET updated_at=${at},payload_json=json_set(payload_json,'$.updatedAt',${at},'$.labelIds',json((SELECT json_group_array(l.value) FROM json_each(facts.payload_json,'$.labelIds') l WHERE l.value<>${id}))) WHERE id IN (SELECT fact_id FROM fact_labels WHERE label_id=${id})`;
       yield* sql`INSERT INTO fact_history(fact_id,payload_json) SELECT f.id,json_object('id',${`sync-delete:${id}:${at}:`} || f.id,'factId',f.id,'who','user','at',${at},'fact',json(f.payload_json)) FROM facts f WHERE f.id IN (SELECT fact_id FROM fact_labels WHERE label_id=${id})`;
       yield* sql`DELETE FROM project_labels WHERE label_id=${id}`;
-      yield* reconcileRepositories();
+      if (!preserveLocalBindings) yield* reconcileRepositories();
     }
     if (kind === "agent") {
       // Keep the row and run ledger until AgentService uses its normal stop/delete path.
@@ -254,7 +254,12 @@ export const projectDocument = Effect.fn("SharedState.projectDocument")(function
     yield* sql`DELETE FROM label_source_links WHERE label_id=${id}`;
     for (const source of f.sourceLinks)
       yield* sql`INSERT INTO label_source_links(label_id,kind,owner,repo,created_at) VALUES (${id},${source.kind},${source.owner},${source.kind === "github-owner" ? "" : source.repo},${at})`;
-    if (changedFields === undefined || changedFields.includes("repositories"))
+    // Domain mutations already updated the local links. Other documents may still be
+    // awaiting capture in the same transaction (for example the destination of a move).
+    if (
+      !preserveLocalBindings &&
+      (changedFields === undefined || changedFields.includes("repositories"))
+    )
       yield* reconcileRepositories();
     yield* sql`INSERT OR IGNORE INTO shared_possible_duplicates(kind,first_id,second_id) SELECT 'project',min(label_id,${id}),max(label_id,${id}) FROM project_labels WHERE lower(trim(name))=lower(trim(${f.name})) AND label_id<>${id}`;
     return;
@@ -283,7 +288,10 @@ export const projectDocument = Effect.fn("SharedState.projectDocument")(function
       ...previous,
       ...profile,
       id,
-      projectId: locals[0]?.project_id ?? previous.projectId ?? null,
+      projectId:
+        preserveLocalBindings && previous.projectId !== undefined
+          ? previous.projectId
+          : (locals[0]?.project_id ?? previous.projectId ?? null),
       conversationThreadId: previous.conversationThreadId ?? `agent-conversation:${id}`,
       projectFolderId: null,
       updatedAt: at,
@@ -328,7 +336,10 @@ export const projectDocument = Effect.fn("SharedState.projectDocument")(function
             ? yield* json(previous[0].workspace_strategy_json)
             : { type: "root" }
         : f.workspaceStrategy;
-  const projectId = locals[0]?.project_id ?? previous[0]?.project_id ?? `remote:${remote ?? id}`;
+  const projectId =
+    preserveLocalBindings && previous[0]
+      ? previous[0].project_id
+      : (locals[0]?.project_id ?? previous[0]?.project_id ?? `remote:${remote ?? id}`);
   const schedule = encodeJson(f.schedule);
   const occurrence = f.enabled
     ? nextScheduledRunAt(f.schedule, yield* DateTime.now, {

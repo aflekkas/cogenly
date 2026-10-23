@@ -5,6 +5,9 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
+import * as Queue from "effect/Queue";
+import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as Sqlite from "../persistence/Sqlite.ts";
 import { agentFixture } from "../agents/agent.testkit.ts";
@@ -47,6 +50,145 @@ const batch = (changes: SharedDocumentChange[], after = 0) => ({
   changes,
 });
 describe("SharedState", () => {
+  it.effect("no-op writes, captures and replayed batches do not notify client streams", () =>
+    Effect.gen(function* () {
+      const state = yield* SharedState.SharedState;
+      const live = yield* state.changes.pipe(Stream.toQueue({ capacity: 16 }));
+      yield* state.write("project", "label:noop", project);
+      yield* Queue.take(live);
+      yield* state.write("project", "label:noop", project);
+      yield* state.capture("project", "label:noop");
+      yield* TestClock.adjust(0);
+      expect(yield* Queue.size(live)).toBe(0);
+      const incoming = batch([change(project)]);
+      yield* state.receive(incoming, peer, false);
+      yield* Queue.take(live);
+      yield* state.receive(incoming, peer, false);
+      yield* state.receive(batch([change({ name: "stale" }, 1)], 1), peer, false);
+      yield* TestClock.adjust(0);
+      expect(yield* Queue.size(live)).toBe(0);
+    }).pipe(Effect.scoped, Effect.provide(layer)),
+  );
+  it.effect("bootstrap is persisted across restarts and scoped to the pairing", () =>
+    Effect.gen(function* () {
+      const state = yield* SharedState.SharedState;
+      const sql = yield* SqlClient.SqlClient;
+      yield* state.bootstrap();
+      yield* sql`INSERT INTO project_labels(label_id,name,created_at,updated_at) VALUES ('label:late','Late',${project.createdAt},${project.createdAt})`;
+      const context = yield* Layer.build(
+        Layer.fresh(SharedState.layer).pipe(
+          Layer.provide(
+            Layer.succeed(ServerEnvironment.ServerEnvironmentIdentity, {
+              getEnvironmentId: Effect.succeed(local),
+            }),
+          ),
+        ),
+      );
+      const restarted = yield* SharedState.SharedState.pipe(Effect.provideContext(context));
+      yield* restarted.bootstrap();
+      expect(yield* restarted.get("project", "label:late")).toBeUndefined();
+      yield* restarted.setHub(peer);
+      yield* restarted.bootstrap();
+      expect((yield* restarted.get("project", "label:late"))?.fields.name).toBe("Late");
+    }).pipe(Effect.scoped, Effect.provide(layer)),
+  );
+  it.effect("pairing never changes the default execution owner from the creating machine", () =>
+    Effect.gen(function* () {
+      const state = yield* SharedState.SharedState;
+      yield* state.setHub(peer);
+      expect(yield* state.defaultOwner).toBe(local);
+    }).pipe(Effect.provide(layer)),
+  );
+  it.effect("skips undecodable persisted rows and advances past them", () =>
+    Effect.gen(function* () {
+      const state = yield* SharedState.SharedState;
+      const sql = yield* SqlClient.SqlClient;
+      const invalid = { ...change(project), id: "bad%id" };
+      yield* sql`INSERT INTO shared_documents(kind,id,fields_json,clocks_json,updated_by_env) VALUES ('project',${invalid.id},${JSON.stringify(project)},${JSON.stringify(invalid.clocks)},${peer})`;
+      yield* sql`INSERT INTO shared_changes(change_json) VALUES (${JSON.stringify(invalid)})`;
+      yield* sql`INSERT INTO shared_changes(change_json) VALUES ('not-json')`;
+      yield* state.write("project", "label:good", project);
+      expect(yield* state.get("project", invalid.id)).toBeUndefined();
+      const outgoing = yield* state.readBatch(0, peer, true);
+      expect(outgoing.cursor).toBe(3);
+      expect(outgoing.changes.map((doc) => doc.id)).toEqual(["label:good"]);
+    }).pipe(Effect.provide(layer)),
+  );
+  it.effect("keeps legacy encoded schedule ids readable, editable, deletable and syncable", () =>
+    Effect.gen(function* () {
+      const state = yield* SharedState.SharedState;
+      const sql = yield* SqlClient.SqlClient;
+      const id = "scheduled-task:command:mcp:session:schedule-task:nightly%20digest%3Aone";
+      const legacy = { ...change({ title: "Legacy" }), kind: "schedule" as const, id };
+      yield* sql`INSERT INTO shared_documents(kind,id,fields_json,clocks_json,updated_by_env) VALUES ('schedule',${id},${JSON.stringify(legacy.fields)},${JSON.stringify(legacy.clocks)},${peer})`;
+      yield* sql`INSERT INTO shared_changes(change_json) VALUES (${JSON.stringify(legacy)})`;
+      expect((yield* state.get("schedule", id))?.fields.title).toBe("Legacy");
+      expect((yield* state.readBatch(0, local, false)).changes[0]?.id).toBe(id);
+      yield* state.write("schedule", id, { title: "Edited" });
+      yield* state.write("schedule", id, {}, true);
+      expect((yield* state.get("schedule", id))?.tombstone).not.toBeNull();
+    }).pipe(Effect.provide(layer)),
+  );
+  it.effect("bootstraps good rows even when a legacy row cannot be captured", () =>
+    Effect.gen(function* () {
+      const state = yield* SharedState.SharedState;
+      const sql = yield* SqlClient.SqlClient;
+      for (const [id, name] of [
+        ["label:bad", ""],
+        ["label:good", "Good"],
+      ])
+        yield* sql`INSERT INTO project_labels(label_id,name,created_at,updated_at) VALUES (${id},${name},${project.createdAt},${project.createdAt})`;
+      yield* state.bootstrap();
+      expect((yield* state.get("project", "label:good"))?.fields.name).toBe("Good");
+      expect(yield* state.get("project", "label:bad")).toBeUndefined();
+    }).pipe(Effect.provide(layer)),
+  );
+  it.effect("replays a domain-valid document larger than the normal batch budget", () =>
+    Effect.gen(function* () {
+      const state = yield* SharedState.SharedState;
+      const large = "p".repeat(300_000);
+      yield* state.write("schedule", "task:large", { prompt: large });
+      yield* state.write("project", "label:after", project);
+      const first = yield* state.readBatch(0, peer, true);
+      expect(first.cursor).toBe(1);
+      expect(first.changes[0]?.fields.prompt).toBe(large);
+      const incoming = {
+        ...first.changes[0]!,
+        updatedBy: peer,
+        clocks: { prompt: { wall: 1, logical: 0, node: peer } },
+        id: "task:peer-large",
+      };
+      yield* state.receive(batch([incoming]), peer, false);
+      expect((yield* state.get("schedule", incoming.id))?.fields.prompt).toBe(large);
+      expect((yield* state.readBatch(first.cursor, peer, true)).changes[0]?.id).toBe("label:after");
+    }).pipe(Effect.provide(layer)),
+  );
+  it.effect("local agent and schedule captures keep the selected clone", () =>
+    Effect.gen(function* () {
+      const state = yield* SharedState.SharedState;
+      const sql = yield* SqlClient.SqlClient;
+      const f = agentFixture();
+      for (const id of ["clone-one", "clone-two"])
+        yield* sql`INSERT INTO projection_projects(project_id,title,workspace_root,scripts_json,created_at,updated_at) VALUES (${id},${id},${`/repos/${id}`},'[]',${f.createdAt},${f.createdAt})`;
+      yield* state.write("project", "label:clones", project);
+      for (const id of ["clone-one", "clone-two"])
+        yield* sql`INSERT INTO label_repositories(label_id,repository_id,remote,directory_name) VALUES ('label:clones',${id},'github.com/org/repo',${id})`;
+      yield* sql`INSERT INTO shared_repository_checkouts(remote,repository_id) VALUES ('github.com/org/repo','clone-one')`;
+      yield* sql`INSERT INTO agents(agent_id,conversation_thread_id,payload_json,enabled,daily_run_cap,owner_machine) VALUES (${f.id},${f.conversationThreadId},${JSON.stringify({ ...f, projectId: "clone-two" })},1,${f.dailyRunCap},${local})`;
+      yield* sql`INSERT INTO scheduled_tasks(task_id,title,prompt,enabled,schedule_json,project_id,workspace_strategy_json,model_selection_json,runtime_mode,interaction_mode,created_by,creation_source,created_at,updated_at,last_run_status,run_count,owner_machine) VALUES ('task:clone','Check','Check work',1,'{"type":"interval","everyMs":60000}','clone-two','{"type":"root"}',${JSON.stringify(f.modelSelection)},'full-access','default','user','web',${f.createdAt},${f.createdAt},'never',0,${local})`;
+      yield* state.capture("agent", f.id);
+      yield* sql`UPDATE scheduled_tasks SET agent_id=${f.id} WHERE task_id='task:clone'`;
+      yield* state.capture("schedule", "task:clone");
+      yield* sql`UPDATE agents SET payload_json=json_set(payload_json,'$.name','Renamed') WHERE agent_id=${f.id}`;
+      yield* state.capture("agent", f.id);
+      expect(
+        yield* sql`SELECT json_extract(payload_json,'$.projectId') AS project_id FROM agents`,
+      ).toEqual([{ project_id: "clone-two" }]);
+      expect(yield* sql`SELECT project_id FROM scheduled_tasks`).toEqual([
+        { project_id: "clone-two" },
+      ]);
+    }).pipe(Effect.provide(layer)),
+  );
   it.effect(
     "commits projection and outbound log together, stores duplicates and replays idempotently",
     () =>
@@ -337,7 +479,7 @@ describe("SharedState", () => {
           ),
         );
         const state = yield* SharedState.SharedState.pipe(Effect.provideContext(restarted));
-        yield* state.bootstrap;
+        yield* state.bootstrap();
         const doc = yield* state.get("agent", fixture.id);
         expect(doc?.fields.ownerMachine).toBe(local);
         expect(doc?.fields.fallbackChain).toEqual([]);

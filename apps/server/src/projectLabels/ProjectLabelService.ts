@@ -384,7 +384,15 @@ const make = Effect.gen(function* () {
                   const labels = yield* sql<{
                     label_id: string;
                   }>`SELECT label_id FROM label_repositories WHERE repository_id=${link.repositoryId}`;
-                  for (const row of labels) yield* shared.capture("project", row.label_id);
+                  for (const row of labels)
+                    yield* shared.capture("project", row.label_id).pipe(
+                      Effect.catchTags({
+                        SharedStateError: (error) =>
+                          Effect.logWarning("Project repository backfill capture failed", {
+                            reason: error.reason,
+                          }),
+                      }),
+                    );
                 }),
               );
             }
