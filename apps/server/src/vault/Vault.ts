@@ -691,7 +691,6 @@ const make = Effect.gen(function* () {
         // policy; an agentless thread's approved row is its grant.
         const agentKey = caller.kind === "agent" ? caller.agentId : null;
         const threadId = caller.kind === "thread" ? caller.threadId : (input.threadId ?? null);
-        const approvalId = `approval:vault:${row.id}:${agentKey ?? `thread:${threadId}`}:${input.field}:${input.domain ?? ""}`;
         const actionJson = encodeApprovalActionJson({
           actionKind: "vault_use",
           payload: {
@@ -702,9 +701,21 @@ const make = Effect.gen(function* () {
             threadId: threadId === null ? null : ThreadId.make(threadId),
           },
         });
-        yield* sql`INSERT OR IGNORE INTO agent_approvals(id, agent_id, action_json, status, requested_at, source_run_id) VALUES (${approvalId}, ${agentKey}, ${actionJson}, 'pending', ${yield* now}, ${null})`.pipe(
-          Effect.mapError(wrap),
-        );
+        // Only a pending request is reused; once decided or expired, asking
+        // again starts a new cycle, so a revoked grant can be re-requested.
+        const approvalId = yield* sql
+          .withTransaction(
+            Effect.gen(function* () {
+              const pending = yield* sql<{
+                id: string;
+              }>`SELECT id FROM agent_approvals WHERE status = 'pending' AND agent_id IS ${agentKey} AND json_extract(action_json, '$.actionKind') = 'vault_use' AND json_extract(action_json, '$.payload.processExposure') IS NULL AND json_extract(action_json, '$.payload.vaultItemId') = ${row.id} AND json_extract(action_json, '$.payload.field') = ${input.field} AND json_extract(action_json, '$.payload.domain') IS ${input.domain ?? null} AND (${agentKey} IS NOT NULL OR json_extract(action_json, '$.payload.threadId') = ${threadId}) LIMIT 1`;
+              if (pending[0]) return pending[0].id;
+              const id = `approval:vault:${yield* crypto.randomUUIDv4()}`;
+              yield* sql`INSERT INTO agent_approvals(id, agent_id, action_json, status, requested_at, source_run_id) VALUES (${id}, ${agentKey}, ${actionJson}, 'pending', ${yield* now}, ${null})`;
+              return id;
+            }),
+          )
+          .pipe(Effect.mapError(wrap));
         yield* record("approval_required");
         return {
           status: "approval_required",

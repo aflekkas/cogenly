@@ -190,6 +190,23 @@ describe("Vault service", () => {
         expect(asked.approvalId).toContain("approval:vault:");
       const approvals = yield* sql`SELECT status FROM agent_approvals`;
       expect(approvals).toHaveLength(1);
+      const askAgain = vault.use({
+        itemId: item.id,
+        field: "value",
+        caller: { kind: "agent", agentId },
+        threadId,
+      });
+      const approvalIdOf = (result: Vault.VaultUseResult) =>
+        result.status === "approval_required" ? result.approvalId : null;
+      // A pending request is reused; a decided one does not block a new request.
+      expect(approvalIdOf(yield* askAgain)).toBe(approvalIdOf(asked));
+      yield* sql`UPDATE agent_approvals SET status = 'rejected'`;
+      const renewed = approvalIdOf(yield* askAgain);
+      expect(renewed).not.toBe(approvalIdOf(asked));
+      expect(
+        yield* sql`SELECT status FROM agent_approvals WHERE id = ${renewed} AND status = 'pending'`,
+      ).toHaveLength(1);
+      yield* sql`DELETE FROM agent_approvals WHERE status = 'rejected'`;
 
       yield* vault.update({
         id: item.id,
