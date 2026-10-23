@@ -48,6 +48,7 @@ import {
 } from "../desktopUpdate.logic";
 import { useServerUpdate } from "../ServerUpdateAction";
 import { Button } from "../ui/button";
+import { DisclosurePanel } from "../ui/disclosure";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { RefreshIcon } from "../ui/refresh-icon";
 import { Separator } from "../ui/separator";
@@ -129,7 +130,7 @@ function VersionPair({
   );
 }
 
-/** A 2px progress line laid over the bottom of its row, so it takes no room. */
+/** A 2px progress line. The caller positions it: laid over a row's bottom edge, or in flow. */
 function ProgressLine({
   percent,
   label,
@@ -147,7 +148,7 @@ function ProgressLine({
       aria-valuemax={100}
       {...(percent === null ? {} : { "aria-valuenow": Math.floor(percent) })}
       className={cn(
-        "reveal-motion pointer-events-none absolute h-0.5 overflow-hidden rounded-full bg-muted",
+        "reveal-motion pointer-events-none h-0.5 overflow-hidden rounded-full bg-muted",
         className,
       )}
     >
@@ -293,7 +294,7 @@ function ListRow({
           <ProgressLine
             percent={row.percent ?? null}
             label={`Updating ${row.name}`}
-            className="right-1.5 bottom-0 left-8.5"
+            className="absolute right-1.5 bottom-0 left-8.5"
           />
         ) : null}
       </div>
@@ -873,50 +874,59 @@ export function NavRailUpdates({
               />
             ) : (
               <div key="updates" className="swap-motion flex flex-col">
-                <div className="relative flex items-center gap-2.5 pt-0.5 pb-2">
-                  <img
-                    src="/cogenly-mark.svg"
-                    alt=""
-                    aria-hidden
-                    draggable={false}
-                    className="size-8 shrink-0 rounded-tile select-none"
-                  />
-                  <div className="flex min-w-0 flex-1 flex-col gap-px">
-                    <div className="flex min-w-0 items-baseline gap-1.5">
-                      <span className="shrink-0 text-sm font-medium">{appRow.name}</span>
-                      <VersionPair
-                        current={appRow.currentVersion}
-                        next={appRow.status === "current" ? null : appRow.latestVersion}
-                        prefix
-                        className="min-w-0 truncate"
+                <div className="flex flex-col pt-0.5 pb-2">
+                  <div className="flex items-center gap-2.5">
+                    <img
+                      src="/cogenly-mark.svg"
+                      alt=""
+                      aria-hidden
+                      draggable={false}
+                      className="size-8 shrink-0 rounded-tile select-none"
+                    />
+                    <div className="flex min-w-0 flex-1 flex-col gap-px">
+                      <div className="flex min-w-0 items-baseline gap-1.5">
+                        <span className="shrink-0 text-sm font-medium">{appRow.name}</span>
+                        <VersionPair
+                          current={appRow.currentVersion}
+                          next={appRow.status === "current" ? null : appRow.latestVersion}
+                          prefix
+                          className="min-w-0 truncate"
+                        />
+                      </div>
+                      <HeroStatus tone={heroStatus.tone} label={heroStatus.label} />
+                    </div>
+                    <div
+                      key={heroAction ? `action:${heroAction.label}` : "refresh"}
+                      className="swap-motion flex shrink-0 items-center gap-1"
+                    >
+                      {heroAction ? (
+                        <Button
+                          size="xs"
+                          variant={heroAction.filled ? "default" : "outline"}
+                          disabled={heroAction.onClick === null}
+                          onClick={heroAction.onClick ?? undefined}
+                        >
+                          {heroAction.label}
+                        </Button>
+                      ) : (
+                        <RefreshButton
+                          checking={isChecking}
+                          onCheck={() => void checkForUpdates()}
+                        />
+                      )}
+                    </div>
+                  </div>
+                  {/* In flow under the text column, so the hero keeps the same
+                    bottom padding as every section while the bar grows in. */}
+                  <DisclosurePanel open={appUpdating}>
+                    <div className="pt-2 pl-10.5">
+                      <ProgressLine
+                        percent={restarting ? null : (appRow.percent ?? null)}
+                        label={`Updating ${appRow.name}`}
+                        className="relative"
                       />
                     </div>
-                    <HeroStatus tone={heroStatus.tone} label={heroStatus.label} />
-                  </div>
-                  <div
-                    key={heroAction ? `action:${heroAction.label}` : "refresh"}
-                    className="swap-motion flex shrink-0 items-center gap-1"
-                  >
-                    {heroAction ? (
-                      <Button
-                        size="xs"
-                        variant={heroAction.filled ? "default" : "outline"}
-                        disabled={heroAction.onClick === null}
-                        onClick={heroAction.onClick ?? undefined}
-                      >
-                        {heroAction.label}
-                      </Button>
-                    ) : (
-                      <RefreshButton checking={isChecking} onCheck={() => void checkForUpdates()} />
-                    )}
-                  </div>
-                  {appUpdating ? (
-                    <ProgressLine
-                      percent={restarting ? null : (appRow.percent ?? null)}
-                      label={`Updating ${appRow.name}`}
-                      className="right-0 bottom-0.5 left-10.5"
-                    />
-                  ) : null}
+                  </DisclosurePanel>
                 </div>
                 {hasNotes ? (
                   <>

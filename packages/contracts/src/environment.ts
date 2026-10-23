@@ -265,6 +265,12 @@ export const RepositoryIdentity = Schema.Struct({
   owner: Schema.optionalKey(TrimmedNonEmptyString),
   name: Schema.optionalKey(TrimmedNonEmptyString),
   origin: Schema.optionalKey(RepositoryOrigin),
+  /**
+   * Every fetch remote's normalized key, set when the checkout has more than one remote. A
+   * checkout whose origin is another host can still answer to a GitHub repository through a
+   * second remote; repository pickers match on any of them.
+   */
+  remoteKeys: Schema.optionalKey(Schema.Array(TrimmedNonEmptyString)),
 });
 export type RepositoryIdentity = typeof RepositoryIdentity.Type;
 

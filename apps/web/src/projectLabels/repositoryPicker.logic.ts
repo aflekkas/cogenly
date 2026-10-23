@@ -16,23 +16,139 @@ function gitHubPathOf(canonicalKey: string | undefined): string | null {
 
 /**
  * Every GitHub `owner/name` a checkout answers to, lowercase: the canonical
- * remote and, for a fork that tracks its upstream, its own remote too.
+ * remote, a fork's own remote, and any other remote on GitHub (a checkout
+ * whose origin is another host can still push to GitHub through a second one).
  */
 export function gitHubRepositoryKeys(
   identity: RepositoryIdentity | null | undefined,
 ): ReadonlyArray<string> {
   if (!identity) return [];
-  const keys = [gitHubPathOf(identity.canonicalKey), gitHubPathOf(identity.origin?.canonicalKey)];
+  const keys = [
+    gitHubPathOf(identity.canonicalKey),
+    gitHubPathOf(identity.origin?.canonicalKey),
+    ...(identity.remoteKeys ?? []).map(gitHubPathOf),
+  ];
   return [...new Set(keys.filter((key) => key !== null))];
 }
 
 /**
  * The GitHub repository a checkout's row names, as `owner/name`: its own
- * remote (a fork's), else the canonical one. Null off GitHub.
+ * remote (a fork's), else the canonical one, else any other remote on
+ * GitHub. Null when none is on GitHub.
  */
 export function gitHubRepositoryOf(identity: RepositoryIdentity | null | undefined): string | null {
   if (!identity) return null;
-  return gitHubPathOf(identity.origin?.canonicalKey) ?? gitHubPathOf(identity.canonicalKey);
+  return (
+    gitHubPathOf(identity.origin?.canonicalKey) ??
+    gitHubPathOf(identity.canonicalKey) ??
+    gitHubRepositoryKeys(identity)[0] ??
+    null
+  );
+}
+
+/** The repository name of an `owner/name` key. */
+function nameOfKey(key: string): string {
+  return key.slice(key.indexOf("/") + 1);
+}
+
+/**
+ * The label a GitHub result shows: its bare name, or `owner/name` when the
+ * bare name could be mistaken for another repository — a local checkout
+ * answering to a same-named repository under another owner, or another
+ * result with the same name.
+ */
+function remoteRowLabel(
+  repository: ProjectLabelOwnerRepository,
+  context: {
+    readonly localKeys: ReadonlyArray<string>;
+    readonly remoteNames: ReadonlyMap<string, number>;
+  },
+): string {
+  const name = repository.name.toLowerCase();
+  const collides =
+    (context.remoteNames.get(name) ?? 0) > 1 ||
+    context.localKeys.some((key) => nameOfKey(key) === name);
+  return collides ? repository.nameWithOwner : repository.name;
+}
+
+/** How many GitHub results share each lowercase name, for `remoteRowLabel`. */
+function remoteNameCounts(
+  repositories: ReadonlyArray<ProjectLabelOwnerRepository>,
+): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const repository of repositories) {
+    const name = repository.name.toLowerCase();
+    counts.set(name, (counts.get(name) ?? 0) + 1);
+  }
+  return counts;
+}
+
+/** Results the GitHub section shows before "Show more"; a search shows them all. */
+export const REMOTE_ROWS_PREVIEW_LIMIT = 6;
+
+/** A GitHub result as a picker lists it, with the label `remoteRowLabel` gives it. */
+export interface RemoteSectionRow {
+  readonly repository: ProjectLabelOwnerRepository;
+  readonly label: string;
+}
+
+/**
+ * The GitHub section's rows: results the project does not hold yet, each
+ * labelled so it cannot be mistaken for a local checkout or another result,
+ * cut to a short preview unless the user is searching or asked for more.
+ * `hidden` counts what the preview leaves out, for a "Show more" row.
+ */
+export function remoteSectionRows(input: {
+  readonly repositories: ReadonlyArray<ProjectLabelOwnerRepository>;
+  readonly local: ReadonlyArray<RepositoryIdentity | null | undefined>;
+  readonly searching: boolean;
+  readonly expanded: boolean;
+}): { readonly rows: RemoteSectionRow[]; readonly hidden: number } {
+  const outside = remoteRowsOutsideProject(input.repositories, input.local);
+  const context = {
+    localKeys: input.local.flatMap(gitHubRepositoryKeys),
+    remoteNames: remoteNameCounts(outside),
+  };
+  const shown =
+    input.searching || input.expanded ? outside : outside.slice(0, REMOTE_ROWS_PREVIEW_LIMIT);
+  return {
+    rows: shown.map((repository) => ({ repository, label: remoteRowLabel(repository, context) })),
+    hidden: outside.length - shown.length,
+  };
+}
+
+/** A machine's run of a project's repositories, for one section per machine. */
+export interface MachineSection<Item, Id extends string = string> {
+  readonly environmentId: Id;
+  readonly items: ReadonlyArray<Item>;
+}
+
+/**
+ * Splits a project's repositories by the machine that holds them, the
+ * primary machine first, then the others in first-seen order. Each
+ * repository goes under its own checkout's machine, never another's.
+ */
+export function groupRepositoriesByMachine<Item, Id extends string>(
+  items: ReadonlyArray<Item>,
+  environmentOf: (item: Item) => Id,
+  primaryEnvironmentId: Id | null,
+): MachineSection<Item, Id>[] {
+  const byEnvironment = new Map<Id, Item[]>();
+  for (const item of items) {
+    const environmentId = environmentOf(item);
+    const run = byEnvironment.get(environmentId);
+    if (run) run.push(item);
+    else byEnvironment.set(environmentId, [item]);
+  }
+  const sections = [...byEnvironment.entries()].map(([environmentId, run]) => ({
+    environmentId,
+    items: run,
+  }));
+  return sections.toSorted(
+    (left, right) =>
+      Number(right.environmentId === primaryEnvironmentId) -
+      Number(left.environmentId === primaryEnvironmentId),
+  );
 }
 
 /**

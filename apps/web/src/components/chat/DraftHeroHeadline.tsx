@@ -26,12 +26,10 @@ import {
 import {
   buildSidebarProjectPickerEntries,
   buildSidebarProjectSnapshots,
-  projectGroupsSpanEnvironments,
 } from "~/sidebarProjectGrouping";
 import { useProjects, useThreadShells } from "~/state/entities";
 import { useEnvironments, usePrimaryEnvironmentId } from "~/state/environments";
 import { EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
-import { ProjectEnvironmentBadge } from "../ProjectEnvironmentBadge";
 import {
   setPendingProjectFolder,
   usePendingProjectFolderStore,
@@ -55,7 +53,10 @@ import {
   linkedGitHubOwners,
   type OwnerSearchState,
 } from "~/projectLabels/projectSourceLinks.logic";
-import { remoteRowsOutsideProject } from "~/projectLabels/repositoryPicker.logic";
+import {
+  groupRepositoriesByMachine,
+  remoteSectionRows,
+} from "~/projectLabels/repositoryPicker.logic";
 import {
   LocalRepositoryRowEnd,
   ManageRepositoriesRowContent,
@@ -63,6 +64,7 @@ import {
   RemoteRepositoryRow,
   RemoteRepositorySection,
   RepositorySourceLabel,
+  ShowMoreRemoteRow,
 } from "~/projectLabels/RepositorySourceRows";
 import {
   useCanRemoveRepositoryFromProject,
@@ -124,12 +126,16 @@ interface PickerItem {
     readonly project: EnvironmentProjectLabel;
     readonly repository: ProjectLabelOwnerRepository;
   };
+  /** The GitHub section's "Show more" row, with how many results it hides. */
+  readonly more?: number;
 }
 
 interface PickerGroup {
   readonly value: string;
-  /** The header; only the "On GitHub" section has one. */
+  /** The header: the machine a run of repositories is on, or "On GitHub". */
   readonly label: string | null;
+  /** The machine a section of the project's own repositories is on. */
+  readonly environmentId?: EnvironmentId;
   readonly items: readonly PickerItem[];
   /** Set on the project's "On GitHub" section, which follows its own repositories. */
   readonly remote?: {
@@ -197,13 +203,6 @@ export function DraftHeroHeadline({
       projects,
       threads,
     ],
-  );
-  // Same-named projects on two machines are only told apart by where they
-  // live, so rows on another machine carry its icon once the catalog spans
-  // more than one environment; a single-machine catalog stays as it was.
-  const showProjectEnvironments = useMemo(
-    () => projectGroupsSpanEnvironments(projectGroups),
-    [projectGroups],
   );
   const environmentMachineById = useMemo(
     () =>
@@ -369,21 +368,25 @@ export function DraftHeroHeadline({
     [projectEntryByKey, scopedRepositoryItems],
   );
   const projectFolderRowLabel = heroLine.projectFolderRowLabel;
-  // The project's repositories are clones on its machine: this one, or a
-  // connected environment named by its label.
-  const workEnvironmentId = workProject?.environmentId ?? null;
-  const localSectionLabel =
-    workEnvironmentId === null || workEnvironmentId === primaryEnvironmentId
-      ? "On this machine"
-      : `On ${environmentLabelById.get(workEnvironmentId) ?? "its machine"}`;
-  const localSectionMachine =
-    workEnvironmentId === null ? null : (environmentMachineById.get(workEnvironmentId) ?? null);
+  // The GitHub section shows a short preview until "Show more"; a search lists all.
+  const [showAllRemote, setShowAllRemote] = useState(false);
+  // Each repository sits under the machine its checkout is on, named by that
+  // machine's label, so a VPS clone never reads as "on this machine".
+  const machineSectionLabel = useCallback(
+    (environmentId: EnvironmentId) => {
+      const label = environmentLabelById.get(environmentId);
+      if (label) return `On ${label}`;
+      return environmentId === primaryEnvironmentId ? "On this machine" : "On another machine";
+    },
+    [environmentLabelById, primaryEnvironmentId],
+  );
   const buildPickerGroups = useCallback(
     (
       items: readonly PickerItem[],
       withActions: boolean,
       withProjectFolder: boolean,
       remote: OwnerSearchState | undefined = undefined,
+      searching = false,
     ) => {
       const groups: PickerGroup[] = [];
       if (withProjectFolder) {
@@ -404,19 +407,37 @@ export function DraftHeroHeadline({
       // show, each source has its header so the machine's clones and GitHub's
       // repositories read apart. A repository shows once: a clone the project
       // holds (all of them, not just the search's matches) wins.
-      const remoteRows =
+      const remoteSection =
         remote?.status === "done"
-          ? remoteRowsOutsideProject(remote.repositories, projectRepositoryIdentities)
-          : [];
+          ? remoteSectionRows({
+              repositories: remote.repositories,
+              local: projectRepositoryIdentities,
+              searching,
+              expanded: showAllRemote,
+            })
+          : { rows: [], hidden: 0 };
       const showRemote =
         workProject !== null &&
         remote !== undefined &&
-        (remote.status !== "done" || remoteRows.length > 0);
-      if (items.length > 0) {
+        (remote.status !== "done" || remoteSection.rows.length > 0);
+      const machineSections = groupRepositoriesByMachine(
+        items.flatMap((item) => {
+          const environmentId = projectEntryByKey.get(item.projectKey)?.targetProject.environmentId;
+          return environmentId ? [{ item, environmentId }] : [];
+        }),
+        (entry) => entry.environmentId,
+        primaryEnvironmentId,
+      );
+      // Headers only once there is more than one source to tell apart.
+      const labelSections = showRemote || machineSections.length > 1;
+      for (const section of machineSections) {
+        const { environmentId } = section;
+        const groupKey = `${REPOSITORIES_GROUP_KEY}:${environmentId}`;
         groups.push({
-          value: REPOSITORIES_GROUP_KEY,
-          label: showRemote ? localSectionLabel : null,
-          items: items.map((item) => ({ ...item, groupKey: REPOSITORIES_GROUP_KEY })),
+          value: groupKey,
+          label: labelSections ? machineSectionLabel(environmentId) : null,
+          environmentId,
+          items: section.items.map(({ item }) => ({ ...item, groupKey })),
         });
       }
       if (showRemote && workProject !== null && remote !== undefined) {
@@ -425,13 +446,26 @@ export function DraftHeroHeadline({
           value: groupKey,
           label: "On GitHub",
           remote: { project: workProject, state: remote },
-          items: remoteRows.map((repository) => ({
-            value: `${groupKey}|${repository.nameWithOwner}`,
-            label: repository.name,
-            projectKey: "",
-            groupKey,
-            remote: { project: workProject, repository },
-          })),
+          items: [
+            ...remoteSection.rows.map(({ repository, label }) => ({
+              value: `${groupKey}|${repository.nameWithOwner}`,
+              label,
+              projectKey: "",
+              groupKey,
+              remote: { project: workProject, repository },
+            })),
+            ...(remoteSection.hidden > 0
+              ? [
+                  {
+                    value: `${groupKey}|more`,
+                    label: `Show ${remoteSection.hidden} more`,
+                    projectKey: "",
+                    groupKey,
+                    more: remoteSection.hidden,
+                  },
+                ]
+              : []),
+          ],
         });
       }
       if (withActions) {
@@ -461,7 +495,15 @@ export function DraftHeroHeadline({
       }
       return groups;
     },
-    [localSectionLabel, projectFolderRowLabel, projectRepositoryIdentities, workProject],
+    [
+      machineSectionLabel,
+      primaryEnvironmentId,
+      projectEntryByKey,
+      projectFolderRowLabel,
+      projectRepositoryIdentities,
+      showAllRemote,
+      workProject,
+    ],
   );
   const [pickerOpen, setPickerOpen] = useState(false);
   const keepPickerOpenRef = useRef(false);
@@ -487,6 +529,7 @@ export function DraftHeroHeadline({
       showProjectFolderRow &&
         pickerFilter.contains(projectFolderRowLabel, query, (candidate) => candidate),
       remoteSearch,
+      true,
     );
   }, [
     buildPickerGroups,
@@ -517,8 +560,9 @@ export function DraftHeroHeadline({
     heroLine.projectFolderRow === "selected"
       ? projectFolderItem
       : (pickerGroups
-          .find((group) => group.value === REPOSITORIES_GROUP_KEY)
-          ?.items.find((item) => item.projectKey === activeProjectKey) ?? null);
+          .filter((group) => group.environmentId !== undefined)
+          .flatMap((group) => group.items)
+          .find((item) => item.projectKey === activeProjectKey) ?? null);
 
   // The picker can change the draft's target while the no-project home is
   // still being opened; a stale continuation must not retarget it again.
@@ -720,14 +764,6 @@ export function DraftHeroHeadline({
         {item.value === NO_REPOSITORY_VALUE && heroLine.projectFolderRow === "selected" ? (
           <CheckIcon className="ml-auto" />
         ) : null}
-        {entry && showProjectEnvironments ? (
-          <ProjectEnvironmentBadge
-            group={entry.group}
-            primaryEnvironmentId={primaryEnvironmentId}
-            machineByEnvironmentId={environmentMachineById}
-            showLabel
-          />
-        ) : null}
         {entry ? (
           <LocalRepositoryRowEnd
             identity={entry.targetProject.repositoryIdentity}
@@ -742,6 +778,9 @@ export function DraftHeroHeadline({
   };
 
   const renderRemoteItem = (item: PickerItem) => {
+    if (item.more !== undefined) {
+      return <ShowMoreRemoteRow key={item.value} item={item} hidden={item.more} />;
+    }
     const remote = item.remote;
     if (!remote) return null;
     return (
@@ -749,6 +788,7 @@ export function DraftHeroHeadline({
         key={item.value}
         item={item}
         repository={remote.repository}
+        label={item.label}
         clone={remoteClone}
         view={remoteClone.isFor(remote) ? remoteClone.view : null}
       />
@@ -771,10 +811,17 @@ export function DraftHeroHeadline({
         }
         setPickerOpen(open);
         setPickerQuery("");
+        if (!open) setShowAllRemote(false);
       }}
       value={selectedPickerItem}
       onValueChange={(item: PickerItem | null) => {
         if (!item) return;
+        // "Show more" lists the rest of the GitHub results in place.
+        if (item.more !== undefined) {
+          keepPickerOpenRef.current = true;
+          setShowAllRemote(true);
+          return;
+        }
         // A GitHub result clones into its project with the picker still up,
         // its row showing the progress; the repository is picked once it lands.
         if (item.remote) {
@@ -908,7 +955,11 @@ export function DraftHeroHeadline({
                       icon={
                         <EnvironmentMachineIcon
                           aria-hidden
-                          kind={localSectionMachine ?? resolveEnvironmentMachineKind(null)}
+                          kind={
+                            (group.environmentId
+                              ? environmentMachineById.get(group.environmentId)
+                              : undefined) ?? resolveEnvironmentMachineKind(null)
+                          }
                           className="size-3"
                         />
                       }
