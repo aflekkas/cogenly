@@ -467,20 +467,30 @@ const make = Effect.gen(function* () {
       const encoded = yield* encodePeerPayload(channel, payload);
       const id = yield* crypto.randomUUIDv4().pipe(Effect.orDie);
       const reply = yield* Deferred.make<Schema.Json, PeerCallError>();
-      connection.pending.set(id, reply);
-      yield* Queue.offer(connection.outbox, {
-        _tag: "Request",
-        id,
-        channel: channel.name,
-        payload: encoded,
-      });
-      const value = yield* Deferred.await(reply).pipe(
+      const disconnected = new PeerCallError({ channel: channel.name, reason: "disconnected" });
+      const value = yield* Effect.acquireUseRelease(
+        Effect.sync(() => connection.pending.set(id, reply)),
+        () =>
+          Effect.gen(function* () {
+            const offered = yield* Queue.offer(connection.outbox, {
+              _tag: "Request",
+              id,
+              channel: channel.name,
+              payload: encoded,
+            });
+            if (!offered) return yield* disconnected;
+            return yield* Effect.raceFirst(
+              Deferred.await(reply),
+              Deferred.await(connection.closed).pipe(Effect.andThen(Effect.fail(disconnected))),
+            );
+          }),
+        () => Effect.sync(() => connection.pending.delete(id)),
+      ).pipe(
         Effect.mapError((error) =>
           error.channel === ""
             ? new PeerCallError({ channel: channel.name, reason: error.reason })
             : error,
         ),
-        Effect.ensuring(Effect.sync(() => connection.pending.delete(id))),
       );
       return yield* decodePeerResult(channel, value);
     }).pipe(Effect.withSpan("PeerHub.callSpoke", { attributes: { channel: channel.name } }));

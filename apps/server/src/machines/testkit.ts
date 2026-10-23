@@ -9,6 +9,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { type MachineRole, type MachineSelfReport } from "@t3tools/contracts";
 import type * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as Crypto from "effect/Crypto";
 
 import * as Duration from "effect/Duration";
 
@@ -35,6 +36,7 @@ import * as PeerHttp from "./peerHttp.ts";
 import * as PeerHub from "./PeerHub.ts";
 
 interface MachineOverrides {
+  readonly crypto?: (crypto: Crypto.Crypto["Service"]) => Crypto.Crypto["Service"];
   readonly auth?: (
     auth: EnvironmentAuth.EnvironmentAuth["Service"],
   ) => EnvironmentAuth.EnvironmentAuth["Service"];
@@ -102,6 +104,15 @@ const machineLayer = (
       Layer.mock(DirectEndpoints.DirectEndpoints)({ resolve: () => Effect.succeed([]) }),
     ),
     Layer.provide(FetchHttpClient.layer),
+    Layer.provide(
+      Layer.effect(
+        Crypto.Crypto,
+        Effect.gen(function* () {
+          const crypto = yield* Crypto.Crypto;
+          return overrides.crypto?.(crypto) ?? crypto;
+        }),
+      ),
+    ),
     Layer.provide(
       socketConstructor === undefined
         ? Socket.layerWebSocketConstructorGlobal
