@@ -18,6 +18,7 @@ import {
   type PreviewAutomationSnapshot,
   type PreviewAutomationStatus,
   type PreviewTabId,
+  type SitePermissionsState,
 } from "@t3tools/contracts";
 
 import {
@@ -206,6 +207,9 @@ const handlers = {
   ),
   preview_set_appearance: McpToolAccess.actsAsCaller((input) =>
     invokeTargeted<PreviewAutomationSetColorSchemeResult>("setColorScheme", input),
+  ),
+  preview_permission: McpToolAccess.actsAsCaller((input) =>
+    invokeTargeted<SitePermissionsState>("permission", input),
   ),
   preview_snapshot: McpToolAccess.readsAsCaller((input) => {
     // Output selection and saving are MCP-only; the browser still produces a complete snapshot.

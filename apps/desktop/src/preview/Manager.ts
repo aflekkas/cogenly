@@ -3422,6 +3422,8 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     reapplyZoom,
     refresh,
     registerWebview,
+    requireWebContents,
+    tabIdForWebContents,
     resetZoom: (tabId: string) => applyZoom(tabId, () => DEFAULT_ZOOM_FACTOR),
     setZoomFactor: (tabId: string, zoomFactor: number) =>
       applyZoom(tabId, () => normalizeZoomFactor(zoomFactor)),
@@ -3606,6 +3608,12 @@ export class PreviewManager extends Context.Service<
       webContentsId: number,
     ) => Effect.Effect<void, PreviewManagerError>;
     readonly prepareWebview: (webContents: Electron.WebContents) => Effect.Effect<void>;
+    /** The guest page a tab shows; fails while its webview is not attached. */
+    readonly requireWebContents: (
+      tabId: string,
+    ) => Effect.Effect<Electron.WebContents, PreviewManagerError>;
+    /** The tab a guest page belongs to, or null when no tab shows it. */
+    readonly tabIdForWebContents: (webContentsId: number) => Effect.Effect<string | null>;
     readonly navigate: (tabId: string, url: string) => Effect.Effect<void, PreviewManagerError>;
     readonly goBack: (tabId: string) => Effect.Effect<void, PreviewManagerError>;
     readonly goForward: (tabId: string) => Effect.Effect<void, PreviewManagerError>;
@@ -3763,6 +3771,8 @@ export const make = Effect.gen(function* PreviewManagerMake() {
     closeTab: operations.closeTab,
     registerWebview: operations.registerWebview,
     prepareWebview: operations.prepareWebview,
+    requireWebContents: operations.requireWebContents,
+    tabIdForWebContents: operations.tabIdForWebContents,
     navigate: operations.navigate,
     goBack: operations.goBack,
     goForward: operations.goForward,

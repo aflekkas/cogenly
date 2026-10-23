@@ -103,6 +103,11 @@ export class ServerBrowserContexts {
         "--disable-gpu",
         "--force-device-scale-factor=2",
         "--disable-blink-features=AutomationControlled",
+        // A VPS has no camera or microphone. Pages an agent allows through
+        // preview_permission get a synthetic test source instead of an error.
+        // Unlike --use-fake-ui-for-media-stream this does not skip permission:
+        // an ungranted page is still denied.
+        "--use-fake-device-for-media-stream",
       ],
       ignoreDefaultArgs: ["--enable-automation"],
       headless: true,

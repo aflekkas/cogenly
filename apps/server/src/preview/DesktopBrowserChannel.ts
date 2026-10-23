@@ -14,8 +14,12 @@ import {
   DesktopBrowserEvent,
   type DesktopBrowserCommand as DesktopBrowserCommandType,
   type DesktopBrowserPointerBox,
+  type SitePermission,
+  type SitePermissionChangeResult,
+  type SitePermissionSetting,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
+import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -41,6 +45,13 @@ export interface DesktopTabKey {
   readonly tabId: string;
 }
 
+export interface DesktopPermissionChange {
+  readonly permission: SitePermission;
+  readonly setting: SitePermissionSetting;
+  /** Defaults to the origin the tab shows. */
+  readonly origin?: string;
+}
+
 const keyOf = ({ threadId, tabId }: DesktopTabKey) => `${threadId}\u0000${tabId}`;
 
 export class DesktopBrowserChannel extends Context.Service<
@@ -63,6 +74,16 @@ export class DesktopBrowserChannel extends Context.Service<
      * releases the tab on the desktop and stops the endpoint.
      */
     readonly endpoint: (key: DesktopTabKey) => Effect.Effect<string, never, Scope.Scope>;
+    /**
+     * Reads (`change` null) or changes the site permissions of a tab the
+     * desktop renders, as an agent. None when the desktop does not answer in
+     * time, such as an app that predates site permissions.
+     */
+    readonly permission: (
+      key: DesktopTabKey,
+      change: DesktopPermissionChange | null,
+      timeout: Duration.Input,
+    ) => Effect.Effect<Option.Option<SitePermissionChangeResult>>;
     /** Draws the agent's cursor over a tab the desktop renders. */
     readonly pointer: (
       key: DesktopTabKey,
@@ -94,9 +115,14 @@ const make = Effect.gen(function* () {
       attached: Stream.empty,
       isAttached: () => Effect.succeed(false),
       endpoint: () => Effect.die("No desktop app is attached to this server."),
+      permission: () => Effect.succeed(Option.none()),
       pointer: () => Effect.void,
     });
   }
+
+  /** `permission` commands waiting on the desktop's answer, by request id. */
+  const permissionWaiters = new Map<string, Deferred.Deferred<SitePermissionChangeResult>>();
+  let permissionRequests = 0;
 
   const command = (message: DesktopBrowserCommandType) =>
     writeLock.withPermits(1)(
@@ -130,6 +156,10 @@ const make = Effect.gen(function* () {
         case "cdp": {
           const queue = inbound.get(id);
           return queue ? Queue.offer(queue, event.message).pipe(Effect.asVoid) : Effect.void;
+        }
+        case "permission": {
+          const waiter = permissionWaiters.get(event.requestId);
+          return waiter ? Deferred.succeed(waiter, event.result).pipe(Effect.asVoid) : Effect.void;
         }
         case "attached":
           attachedTabs.add(id);
@@ -233,6 +263,29 @@ const make = Effect.gen(function* () {
     ),
     isAttached: (key) => Effect.sync(() => attachedTabs.has(keyOf(key))),
     endpoint,
+    permission: (key, change, timeout) =>
+      Effect.gen(function* () {
+        const requestId = `permission-${(permissionRequests += 1)}`;
+        const waiter = yield* Deferred.make<SitePermissionChangeResult>();
+        permissionWaiters.set(requestId, waiter);
+        yield* command({
+          type: "permission",
+          ...key,
+          requestId,
+          change:
+            change === null
+              ? null
+              : {
+                  permission: change.permission,
+                  setting: change.setting,
+                  ...(change.origin === undefined ? {} : { origin: change.origin }),
+                },
+        });
+        return yield* Deferred.await(waiter).pipe(
+          Effect.timeoutOption(timeout),
+          Effect.ensuring(Effect.sync(() => permissionWaiters.delete(requestId))),
+        );
+      }),
     pointer: (key, pointer) => command({ type: "pointer", ...key, ...pointer }),
   });
 });

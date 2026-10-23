@@ -261,6 +261,11 @@ const T3_MCP_TOOLS: Readonly<Record<string, T3McpToolDefinition>> = {
     "browser",
     "browser",
   ),
+  preview_permission: tool(
+    ["Set", "Setting", "Set", "a site permission in the preview browser"],
+    "browser",
+    "browser",
+  ),
   preview_recording_start: tool(
     ["Start", "Starting", "Started", "recording the preview browser"],
     "browser",

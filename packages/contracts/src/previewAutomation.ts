@@ -11,6 +11,7 @@ import {
 } from "./preview.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 import { BrowserProfileId } from "./browserProfile.ts";
+import { SitePermission, SitePermissionSetting, SitePermissionsState } from "./sitePermissions.ts";
 
 const BoundedUrl = Schema.String.check(Schema.isTrimmed())
   .check(Schema.isNonEmpty())
@@ -56,6 +57,7 @@ export const PREVIEW_AUTOMATION_SERVER_OPERATIONS = [
   "hover",
   "select",
   "drag",
+  "permission",
 ] as const;
 export const PreviewAutomationOperation = Schema.Literals(PREVIEW_AUTOMATION_SERVER_OPERATIONS);
 export type PreviewAutomationOperation = typeof PreviewAutomationOperation.Type;
@@ -146,6 +148,11 @@ export const PreviewAutomationStatus = Schema.Struct({
   viewportSetting: Schema.optional(PreviewViewportSetting),
   /** Measured guest-page viewport in CSS pixels when a webview is ready. */
   viewport: Schema.optional(PreviewRenderedViewportSize),
+  /**
+   * The site's permissions and any request still waiting on the user, for the
+   * origin the tab shows. Desktop-rendered tabs only.
+   */
+  sitePermissions: Schema.optional(SitePermissionsState),
   /** Server hosts: a file picker the page opened, answered with preview_upload. */
   fileChooser: Schema.optional(
     Schema.NullOr(Schema.Struct({ multiple: Schema.Boolean, accept: Schema.String })),
@@ -198,6 +205,26 @@ export const PreviewAutomationDialogInput = Schema.Struct({
   }),
 });
 export type PreviewAutomationDialogInput = typeof PreviewAutomationDialogInput.Type;
+
+export const PreviewAutomationPermissionInput = Schema.Struct({
+  ...PreviewAutomationTabTargetFields,
+  permission: SitePermission.annotate({
+    description:
+      "The permission a page needs: camera, microphone, geolocation, notifications, clipboard-read, or midi. Camera and microphone are decided separately.",
+  }),
+  decision: SitePermissionSetting.annotate({
+    description:
+      "allow lets the site use it, block denies it, ask clears the decision so the site prompts the user again.",
+  }),
+  origin: Schema.optional(BoundedUrl).annotate({
+    description:
+      "Site to decide for, such as https://app.example.com. Omit to use the origin the tab shows now.",
+  }),
+}).annotate({
+  description:
+    "Allows, blocks, or resets one site permission (camera, microphone, location...) for a site in the collaborative browser, so a page that needs it can work without the user clicking Allow. A site the user explicitly blocked cannot be changed.",
+});
+export type PreviewAutomationPermissionInput = typeof PreviewAutomationPermissionInput.Type;
 
 export const PreviewAutomationOpenInput = Schema.Struct({
   ...PreviewAutomationTabTargetFields,

@@ -599,6 +599,7 @@ const smokeCases = [
       "preview_hover",
       "preview_navigate",
       "preview_open",
+      "preview_permission",
       "preview_press",
       "preview_recording_start",
       "preview_recording_stop",

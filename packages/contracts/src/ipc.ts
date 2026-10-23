@@ -12,6 +12,14 @@ import { AdvertisedEndpoint } from "./remoteAccess.ts";
 import { ExecutionEnvironmentDescriptor } from "./environment.ts";
 import type { ClientSettings, QuitConfirmationMode } from "./settings.ts";
 import type { PreviewForwardedShortcut } from "./keybindings.ts";
+import {
+  SitePermission,
+  SitePermissionPromptAnswer,
+  SitePermissionSetting,
+  type SitePermissionChangeResult,
+  type SitePermissionPrompt,
+  type SitePermissionsState,
+} from "./sitePermissions.ts";
 
 import type {
   DesktopAppActivationRequest,
@@ -528,6 +536,12 @@ export interface DesktopPreviewOpenLinkEvent {
   background: boolean;
 }
 
+/** A tab's oldest unanswered permission request changed; `prompt` is null once none is waiting. */
+export interface DesktopPreviewSitePermissionPromptEvent {
+  tabId: string;
+  prompt: SitePermissionPrompt | null;
+}
+
 /** Recording decorations are forwarded separately from the captured page pixels. */
 export const DesktopPreviewRecordingInputSchema = Schema.Union([
   Schema.Struct({
@@ -967,6 +981,18 @@ export const DesktopPreviewSetAudioMutedInputSchema = Schema.Struct({
   audioMuted: Schema.Boolean,
 });
 
+export const DesktopPreviewSetSitePermissionInputSchema = Schema.Struct({
+  tabId: DesktopPreviewTabIdSchema,
+  permission: SitePermission,
+  setting: SitePermissionSetting,
+});
+
+export const DesktopPreviewAnswerSitePermissionPromptInputSchema = Schema.Struct({
+  tabId: DesktopPreviewTabIdSchema,
+  promptId: Schema.String,
+  answer: SitePermissionPromptAnswer,
+});
+
 export const DesktopPreviewAnnotationThemeInputSchema = Schema.Struct({
   theme: DesktopPreviewAnnotationThemeSchema,
 });
@@ -1215,6 +1241,21 @@ export interface DesktopPreviewBridge {
   setAudioMuted: (tabId: string, audioMuted: boolean) => Promise<void>;
   /** Open the guest webview's DevTools (detached). */
   openDevTools: (tabId: string) => Promise<void>;
+  sitePermissions: {
+    /** The tab's permissions for the origin it shows, and any request waiting on the person. */
+    get: (tabId: string) => Promise<SitePermissionsState>;
+    /** Remembers the person's choice for the tab's origin in the tab's browser profile. */
+    set: (
+      tabId: string,
+      permission: SitePermission,
+      setting: SitePermissionSetting,
+    ) => Promise<SitePermissionChangeResult>;
+    /** Answers the waiting request; `dismiss` denies it this once without remembering. */
+    answer: (tabId: string, promptId: string, answer: SitePermissionPromptAnswer) => Promise<void>;
+    onPromptChange: (
+      listener: (event: DesktopPreviewSitePermissionPromptEvent) => void,
+    ) => () => void;
+  };
   /** Drop cookies + storage data for the preview partition (all tabs). */
   clearCookies: (environmentId: EnvironmentId, profileId?: string) => Promise<void>;
   /** Drop the HTTP cache for the preview partition (all tabs). */
