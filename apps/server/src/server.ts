@@ -32,7 +32,14 @@ import * as ServerConfig from "./config.ts";
 import { withUntracedRequests } from "./http.ts";
 import * as ServerHttp from "./http.ts";
 import { guardHttpResponseWriteErrors } from "./httpResponseErrorGuard.ts";
+import * as Socket from "effect/socket/Socket";
 import * as Health from "./health.ts";
+import * as HubLink from "./machines/HubLink.ts";
+import * as MachineIdentity from "./machines/MachineIdentity.ts";
+import * as Machines from "./machines/Machines.ts";
+import * as PeerChannels from "./machines/PeerChannels.ts";
+import * as PeerHttp from "./machines/peerHttp.ts";
+import * as PeerHub from "./machines/PeerHub.ts";
 import { fixPath } from "./os-jank.ts";
 import * as Ws from "./ws.ts";
 import * as AgentScopeLive from "./process/agentScope.ts";
@@ -414,6 +421,16 @@ const layerDevice = DeviceService.layer.pipe(
   Layer.provide(NetService.layer),
 );
 
+// Machines paired with this one. Spokes dial their hub over a WebSocket, so
+// the link needs a socket constructor of its own.
+const layerMachines = Machines.layer.pipe(
+  Layer.provideMerge(HubLink.layer.pipe(Layer.provide(Socket.layerWebSocketConstructorGlobal))),
+  Layer.provideMerge(PeerHub.layer),
+  Layer.provideMerge(PeerChannels.layer),
+  Layer.provideMerge(MachineIdentity.layer),
+  Layer.provide(ProcessRunner.layer),
+);
+
 const layerWorkspaceEntries = WorkspaceEntries.layer.pipe(Layer.provide(WorkspacePaths.layer));
 
 const layerWorkspaceFileSystem = WorkspaceFileSystem.layer.pipe(
@@ -542,6 +559,7 @@ const layerProviderInstallationRefresh = Layer.effectDiscard(
 
 const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   AgentAwarenessRelay.layer,
+  layerMachines,
   // Asks Cogenly Connect to deliver webhooks it held while this environment was offline.
   HeldHooksWaker.layer,
   layerThreadSettlementWorker,
@@ -704,6 +722,7 @@ const layerMakeRoutes = Layer.mergeAll(
     ServerHttp.layerImageProxyRoute,
     Health.layerHealthRoute,
     DeviceHubProxy.layer,
+    PeerHttp.layer,
     ServerBrowserStream.routeLayer,
     ServerHttp.layerStaticAndDevRoute,
     Ws.layer,
