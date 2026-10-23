@@ -348,7 +348,10 @@ const make = (options: IntegrationsOptions = {}) =>
         const entries = yield* Ref.get(cache);
         return {
           integrations: integrations.map((integration) => {
-            const cached = entries.get(`${integration.id}:${integration.updatedAt}`);
+            const prefix = `${integration.id}:${integration.updatedAt}`;
+            const cached =
+              entries.get(prefix) ??
+              [...entries.values()].find((entry) => entry.key.startsWith(`${prefix}:`));
             return {
               integration: redactIntegration(integration),
               status: cached === undefined ? "unknown" : "connected",
@@ -451,7 +454,12 @@ const make = (options: IntegrationsOptions = {}) =>
       );
 
     /** One upstream round trip: resolve credentials, handshake, then call. */
-    const rpc = (integration: Integration, method: string, params: unknown) =>
+    const rpc = (
+      integration: Integration,
+      method: string,
+      params: unknown,
+      labelId?: ProjectLabelId | null,
+    ) =>
       Effect.gen(function* () {
         const endpoint = new URL(integration.url);
         if (
@@ -466,6 +474,7 @@ const make = (options: IntegrationsOptions = {}) =>
         }
         const destination: Credentials.CredentialDestination = {
           host: endpoint.hostname,
+          scopeProjectId: labelId,
           approvedItems:
             integration.credentialOrigin === endpoint.origin
               ? (integration.approvedCredentialItems ?? [])
@@ -490,8 +499,8 @@ const make = (options: IntegrationsOptions = {}) =>
         );
       });
 
-    const fetchTools = (integration: Integration) =>
-      rpc(integration, "tools/list", {}).pipe(
+    const fetchTools = (integration: Integration, labelId?: ProjectLabelId | null) =>
+      rpc(integration, "tools/list", {}, labelId).pipe(
         Effect.flatMap((result) => {
           const tools =
             typeof result === "object" && result !== null && "tools" in result
@@ -526,14 +535,14 @@ const make = (options: IntegrationsOptions = {}) =>
     ) =>
       Effect.gen(function* () {
         const integration = yield* getByName(name, labelId);
-        const key = `${integration.id}:${integration.updatedAt}`;
+        const key = `${integration.id}:${integration.updatedAt}${labelId === undefined ? "" : labelId === null ? ":unfiled" : `:project:${labelId}`}`;
         if (!force) {
           const entries = yield* Ref.get(cache);
           const cached = entries.get(key);
           const at = yield* Clock.currentTimeMillis;
           if (cached !== undefined && at - cached.atMs < ttlMs) return cached.result;
         }
-        const result = yield* fetchTools(integration);
+        const result = yield* fetchTools(integration, labelId);
         const at = yield* Clock.currentTimeMillis;
         yield* Ref.update(cache, (entries) => new Map(entries).set(key, { key, atMs: at, result }));
         return result;
@@ -729,10 +738,15 @@ const make = (options: IntegrationsOptions = {}) =>
       callTool: (name, tool, args, labelId) =>
         Effect.gen(function* () {
           const integration = yield* getByName(name, labelId);
-          const result = yield* rpc(integration, "tools/call", {
-            name: tool,
-            arguments: args ?? {},
-          });
+          const result = yield* rpc(
+            integration,
+            "tools/call",
+            {
+              name: tool,
+              arguments: args ?? {},
+            },
+            labelId,
+          );
           const record =
             typeof result === "object" && result !== null
               ? (result as Record<string, unknown>)

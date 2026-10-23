@@ -41,6 +41,7 @@ export class IntegrationCredentialNotAllowedError extends Schema.TaggedError<Int
 export interface CredentialDestination {
   /** The integration endpoint's host. */
   readonly host: string;
+  readonly scopeProjectId?: string | null | undefined;
   /** Vault item names the owner approved for this endpoint. */
   readonly approvedItems: ReadonlyArray<string>;
 }
@@ -107,6 +108,7 @@ const makeVault = Effect.gen(function* () {
       return vault
         .resolveSecretByName({
           name: parsed.item,
+          scopeProjectId: destination.scopeProjectId,
           field: parsed.field,
           destinationHost: destination.host,
           approved: destination.approvedItems.includes(parsed.item),

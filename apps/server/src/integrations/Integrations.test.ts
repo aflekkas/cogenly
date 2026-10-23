@@ -650,6 +650,43 @@ describe("Integration credential destinations", () => {
   const reasonOf = (exit: { readonly _tag: string; readonly failure?: unknown }) =>
     exit._tag === "Failure" ? (exit.failure as { readonly reason?: string }).reason : "success";
 
+  it.effect(
+    "keeps project-scoped vault credentials inside that project, including cached tools",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* runMigrations();
+          const upstream = yield* fakeUpstream;
+          const vault = yield* Vault.Vault,
+            service = yield* Integrations.Integrations;
+          const a = ProjectLabelId.make("project:a"),
+            b = ProjectLabelId.make("project:b");
+          yield* vault.create({
+            name: "github",
+            type: "api_key",
+            scopeProjectId: a,
+            allowedDomains: ["127.0.0.1"],
+            secretFields: { value: "scoped-credential" },
+          });
+          yield* service.create({ ...createInput(upstream.url), headers: tokenHeaders });
+          expect((yield* service.listTools(IntegrationName.make("gmail"), a)).tools).toHaveLength(
+            1,
+          );
+          const calls = upstream.seen.length;
+          for (const scope of [b, null]) {
+            for (const operation of [
+              service.listTools(IntegrationName.make("gmail"), scope).pipe(Effect.asVoid),
+              service
+                .callTool(IntegrationName.make("gmail"), "echo", {}, scope)
+                .pipe(Effect.asVoid),
+            ])
+              expect((yield* operation.pipe(Effect.flip)).reason).toBe("credential_unresolved");
+          }
+          expect(upstream.seen).toHaveLength(calls);
+        }),
+      ).pipe(Effect.provide(vaultLayer())),
+  );
+
   it.effect("refuses a vault item whose domains do not include the integration's host", () =>
     Effect.scoped(
       Effect.gen(function* () {
