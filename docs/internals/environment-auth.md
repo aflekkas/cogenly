@@ -49,6 +49,15 @@ above its ceiling. Inside MCP the credential sets the limits and tool
 parameters only pick targets; see
 [threadAccess](../../apps/server/src/mcp/threadAccess.ts).
 
+### Paired machines are a separate audience
+
+Another Cogenly server paired as a machine holds a DPoP-bound session with
+subject `peer` and the peer scopes `sync:replicate` and `peer:delegate`. Only
+the `/peer` endpoints accept it; every other HTTP and WebSocket path and `/mcp`
+reject the subject, the way they reject `mcp-client`. Peer scopes are never
+part of a client grant, and a peer grant is refused by every client pairing
+path. See [machines](./machines.md).
+
 Issuer and resource URLs come from the request's Host and
 `X-Forwarded-Proto`, so one server answers over loopback, Tailscale Serve and a
 Cogenly Connect tunnel. A proxy that rewrites Host or drops the protocol header

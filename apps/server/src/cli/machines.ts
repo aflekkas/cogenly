@@ -14,7 +14,9 @@
 import {
   AuthAccessWriteScope,
   AuthOrchestrationReadScope,
+  AuthSettingsWriteScope,
   type MachineInfo,
+  MachineRole,
   MachineJoinCode,
   type MachineListResult,
   WS_METHODS,
@@ -37,8 +39,12 @@ import { readPersistedServerRuntimeState } from "../serverRuntimeState.ts";
 import { projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
 import { liveWebSocketUrl, liveWebSocketUrlSource, makeLiveRpcClient } from "./liveServer.ts";
 
-/** Read machines, and pair or unpair them: pairing is access management. */
-const MACHINES_CLI_SCOPES = [AuthOrchestrationReadScope, AuthAccessWriteScope] as const;
+/** Read machines, rename this one, and pair or unpair them: pairing is access management. */
+const MACHINES_CLI_SCOPES = [
+  AuthOrchestrationReadScope,
+  AuthSettingsWriteScope,
+  AuthAccessWriteScope,
+] as const;
 
 class MachinesCliError extends Schema.TaggedError<MachinesCliError>()("MachinesCliError", {
   reason: Schema.String,
@@ -298,7 +304,39 @@ const unpairCommand = Command.make("unpair", {
   ),
 );
 
+const renameCommand = Command.make("rename", {
+  ...projectLocationFlags,
+  name: Argument.String("name").pipe(
+    Argument.withDescription(
+      "The name other machines show for this one. Use `--reset` to go back.",
+    ),
+    Argument.optional,
+  ),
+  kind: Flag.Literals("kind", MachineRole.literals).pipe(
+    Flag.withDescription("Override the detected kind: computer or cloud-server."),
+    Flag.optional,
+  ),
+  reset: Flag.Boolean("reset").pipe(
+    Flag.withDescription("Use the detected name and kind again."),
+    Flag.withDefault(false),
+  ),
+}).pipe(
+  Command.withDescription("Rename this machine or correct its kind."),
+  Command.withHandler((flags) =>
+    runLive(flags, (client) =>
+      client[WS_METHODS.machinesUpdate](
+        flags.reset
+          ? { name: null, role: null }
+          : {
+              ...(Option.isSome(flags.name) ? { name: flags.name.value } : {}),
+              ...(Option.isSome(flags.kind) ? { role: flags.kind.value } : {}),
+            },
+      ).pipe(Effect.mapError(describe), Effect.map(describeMachines), Effect.flatMap(Console.log)),
+    ),
+  ),
+);
+
 export const machinesCommand = Command.make("machines").pipe(
   Command.withDescription("Pair this Cogenly with your other machines."),
-  Command.withSubcommands([listCommand, pairCommand, joinCommand, unpairCommand]),
+  Command.withSubcommands([listCommand, pairCommand, joinCommand, unpairCommand, renameCommand]),
 );
