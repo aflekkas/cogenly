@@ -289,6 +289,39 @@ const makeHarness = Effect.sync(() => {
 });
 
 describe("agent execution", () => {
+  it.effect.each(["starting", "running", "completed", "failed"] as const)(
+    "restart recovery leaves another machine's %s run untouched",
+    (status) =>
+      Effect.gen(function* () {
+        const h = yield* makeHarness;
+        yield* Effect.gen(function* () {
+          const store = yield* Store.AgentStore;
+          const agents = yield* Agents.AgentService;
+          yield* store.save({ ...h.fixture, ownerMachine: EnvironmentId.make("other-machine") });
+          yield* store.createRun({
+            id: "off-owner-run",
+            agentId: h.fixture.id,
+            triggerId: ScheduledTaskId.make("task:off-owner"),
+            workThreadId: ThreadId.make("thread:off-owner"),
+            status,
+            createdAt: DateTime.formatIso(yield* DateTime.now),
+            completedAt: null,
+            summary: null,
+            posted: false,
+          });
+          const before = yield* store.runs(h.fixture.id);
+          yield* agents.reconcile({ afterRestart: true });
+          yield* agents.reconcile();
+          expect(yield* store.runs(h.fixture.id)).toEqual(before);
+          expect((yield* store.get(h.fixture.id)).consecutiveFailures).toBe(0);
+          expect(h.posts).toEqual([]);
+          expect(h.commands).toEqual([]);
+          expect(h.calls).toEqual([]);
+          expect(h.launches).toEqual([]);
+        }).pipe(Effect.provide(h.layer));
+      }),
+  );
+
   it.effect.each(["starting", "running"] as const)(
     "startup fails an interrupted %s reservation and posts its reason once",
     (status) =>
