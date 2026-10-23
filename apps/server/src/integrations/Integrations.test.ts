@@ -39,7 +39,11 @@ const credentialsLayer = Layer.succeed(Credentials.IntegrationCredentials, {
 
 interface FakeUpstream {
   readonly url: string;
-  readonly seen: Array<{ method: string; authorization: string | undefined }>;
+  readonly seen: Array<{
+    method: string;
+    authorization: string | undefined;
+    sessionId: string | undefined;
+  }>;
   readonly close: () => Effect.Effect<void>;
 }
 
@@ -65,6 +69,7 @@ const fakeUpstreamWith = (redirectTo?: string) =>
           seen.push({
             method: body.method,
             authorization: request.headers.authorization,
+            sessionId: [request.headers["mcp-session-id"]].flat()[0],
           });
           const reply = (payload: unknown, headers: Record<string, string> = {}) => {
             response.writeHead(200, { "content-type": "application/json", ...headers });
@@ -389,6 +394,23 @@ describe("Integrations gateway", () => {
         expect(listed.integrations[0]?.status).toBe("connected");
         expect(listed.integrations[0]?.toolCount).toBe(1);
         expect(JSON.stringify(listed)).not.toContain("SECRET-VALUE-123");
+      }).pipe(Effect.provide(layerWith())),
+    ),
+  );
+
+  it.effect("completes the MCP lifecycle on the session before each request", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* runMigrations();
+        const upstream = yield* fakeUpstream;
+        const service = yield* Integrations.Integrations;
+        const { integration } = yield* service.create(createInput(upstream.url));
+        yield* service.callTool(integration.name, "echo", { text: "hi" }, null);
+        expect(upstream.seen.map(({ method, sessionId }) => [method, sessionId])).toEqual([
+          ["initialize", undefined],
+          ["notifications/initialized", "session-1"],
+          ["tools/call", "session-1"],
+        ]);
       }).pipe(Effect.provide(layerWith())),
     ),
   );
