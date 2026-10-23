@@ -5,6 +5,7 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import type {
   EnvironmentId,
+  ModelSelection,
   RunId,
   ThreadId,
   UsageLimitHandoffCandidate,
@@ -52,7 +53,8 @@ export function useUsageLimitHandoff(input: {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId | null;
   readonly runId: RunId | null;
-  readonly onAccepted: () => void;
+  /** Receives the selection the continuation started on. */
+  readonly onAccepted: (modelSelection: ModelSelection) => void;
 }): UsageLimitHandoffOffer | null {
   const { environmentId, threadId, runId } = input;
   const active = threadId !== null && runId !== null;
@@ -120,7 +122,7 @@ export function useUsageLimitHandoff(input: {
         inFlight.current = false;
         setPendingKey(null);
         if (result._tag === "Success") {
-          input.onAccepted();
+          input.onAccepted(result.value.modelSelection);
           return;
         }
         if (isAtomCommandInterrupted(result)) return;

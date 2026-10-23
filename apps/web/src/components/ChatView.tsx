@@ -1346,12 +1346,22 @@ export default function ChatView(props: ChatViewProps) {
   const composerActiveProvider = useComposerDraftStore(
     (store) => store.getComposerDraft(composerDraftTarget)?.activeProvider ?? null,
   );
-  const composerSelectedModelSelection = useComposerDraftStore((store) => {
-    const draft = store.getComposerDraft(composerDraftTarget);
-    return draft?.activeProvider
-      ? (draft.modelSelectionByProvider[draft.activeProvider] ?? null)
-      : null;
-  });
+  // What the composer would send, reported by it. The pending-handoff preview
+  // reads this rather than the raw draft, which the composer may override
+  // (an unavailable instance, a normalized model).
+  const [composerSendModelSelection, setComposerSendModelSelection] = useState<Pick<
+    ModelSelection,
+    "instanceId" | "model"
+  > | null>(null);
+  const onComposerSendModelSelectionChange = useCallback((selection: ModelSelection | null) => {
+    setComposerSendModelSelection((current) =>
+      current?.instanceId === selection?.instanceId && current?.model === selection?.model
+        ? current
+        : selection === null
+          ? null
+          : { instanceId: selection.instanceId, model: selection.model },
+    );
+  }, []);
   const composerHasAttachments = useComposerDraftStore((store) => {
     const draft = store.getComposerDraft(composerDraftTarget);
     return (draft?.images.length ?? 0) > 0 || (draft?.files.length ?? 0) > 0;
@@ -5791,18 +5801,8 @@ export default function ChatView(props: ChatViewProps) {
       (item.text.trim().toLowerCase() !== "/compact" || item.attachments.length > 0),
   );
   const pendingHandoff = useMemo(
-    () =>
-      resolvePendingHandoff(
-        serverProjection,
-        composerSelectedModelSelection ?? activeThread?.modelSelection,
-        providerStatuses,
-      ),
-    [
-      serverProjection,
-      composerSelectedModelSelection,
-      activeThread?.modelSelection,
-      providerStatuses,
-    ],
+    () => resolvePendingHandoff(serverProjection, composerSendModelSelection, providerStatuses),
+    [serverProjection, composerSendModelSelection, providerStatuses],
   );
   const compactThreadUnavailable =
     !canOperateThread ||
@@ -5901,7 +5901,16 @@ export default function ChatView(props: ChatViewProps) {
     environmentId,
     threadId: activeThreadShell?.id ?? null,
     runId: stoppedOnUsageLimit ? (activeThreadShell?.latestRun?.runId ?? null) : null,
-    onAccepted: () => {
+    onAccepted: (modelSelection) => {
+      // The continuation moved the thread; the composer follows, or its own
+      // pick would send the next turn back to the limited instance.
+      if (activeThreadShell) {
+        setComposerDraftModelSelection(
+          scopeThreadRef(environmentId, activeThreadShell.id),
+          modelSelection,
+          { explicit: true, replaceOptions: true },
+        );
+      }
       clearUsageLimitsFor(routeThreadKey);
       scrollToEnd();
     },
@@ -9717,6 +9726,7 @@ export default function ChatView(props: ChatViewProps) {
                                 activeProjectDefaultModelSelection
                               }
                               activeThreadModelSelection={activeThread?.modelSelection}
+                              onSendModelSelectionChange={onComposerSendModelSelectionChange}
                               activeProjectId={activeProject?.id ?? null}
                               activeContextWindow={activeContextWindow}
                               activeTasksProgress={activeComposerTasksProgress}
