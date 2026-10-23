@@ -68,9 +68,21 @@ export class DesktopIpcUnregistrationError extends Schema.TaggedError<DesktopIpc
   }
 }
 
+export class DesktopIpcFrameError extends Schema.TaggedError<DesktopIpcFrameError>()(
+  "DesktopIpcFrameError",
+  {
+    channel: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `Desktop IPC for ${this.channel} is only available to the main frame.`;
+  }
+}
+
 export const DesktopIpcError = Schema.Union([
   DesktopIpcRegistrationError,
   DesktopIpcUnregistrationError,
+  DesktopIpcFrameError,
 ]);
 export type DesktopIpcError = typeof DesktopIpcError.Type;
 
@@ -115,9 +127,7 @@ export const make = (ipcMain: DesktopIpcMain): DesktopIpc["Service"] =>
                 Effect.gen(function* () {
                   yield* Effect.annotateCurrentSpan({ channel });
                   if (!isMainFrameIpcEvent(event)) {
-                    return yield* Effect.fail(
-                      new Error("Desktop IPC is only available to the main frame."),
-                    );
+                    return yield* new DesktopIpcFrameError({ channel });
                   }
                   return yield* handler(raw, event);
                 }).pipe(Effect.annotateLogs({ channel }), Effect.withSpan("desktop.ipc.invoke")),

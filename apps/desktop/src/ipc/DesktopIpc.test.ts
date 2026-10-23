@@ -55,7 +55,7 @@ describe("DesktopIpc frame guard", () => {
         const rejected = yield* Effect.result(
           Effect.tryPromise({
             try: () => Promise.resolve(listener!(subFrameEvent, null)),
-            catch: (cause) => cause,
+            catch: (cause) => (cause instanceof Error ? cause.message : "rejected"),
           }),
         );
         expect(rejected._tag).toBe("Failure");
