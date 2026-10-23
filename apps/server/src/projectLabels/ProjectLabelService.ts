@@ -77,7 +77,14 @@ export class ProjectLabelService extends Context.Service<
       id: ProjectLabelId,
     ) => Effect.Effect<{ label: ProjectLabelWithRepositories }, ProjectLabelError>;
     readonly linkRepository: (
-      input: ProjectLabelRepository,
+      input: ProjectLabelRepository & {
+        /**
+         * The repository's remote as known by the caller (a clone that has
+         * not landed yet cannot be read from disk). Stored normalized at
+         * link time so a failed clone still leaves a recoverable remote.
+         */
+        readonly remote?: string | null | undefined;
+      },
     ) => Effect.Effect<{ label: ProjectLabelWithRepositories }, ProjectLabelError>;
     readonly unlinkRepository: (
       input: ProjectLabelRepository,
@@ -404,7 +411,10 @@ const make = Effect.gen(function* () {
       yield* sql`INSERT INTO label_source_links(label_id, kind, owner, repo, created_at) VALUES (${labelId}, ${link.kind}, ${link.owner}, ${link.repo}, ${yield* now}) ON CONFLICT(label_id, kind, owner, repo) DO NOTHING`;
     },
   );
-  const repository = (input: ProjectLabelRepository, link: boolean) =>
+  const repository = (
+    input: ProjectLabelRepository & { readonly remote?: string | null | undefined },
+    link: boolean,
+  ) =>
     mutate(
       link ? "linkRepository" : "unlinkRepository",
       input,
@@ -429,7 +439,8 @@ const make = Effect.gen(function* () {
               ? null
               : yield* identities.value.resolve(workspaceRoot);
           const remote =
-            identity === null ? null : normalizeRepositoryRemote(identity.locator.remoteUrl);
+            normalizeRepositoryRemote(input.remote) ??
+            (identity === null ? null : normalizeRepositoryRemote(identity.locator.remoteUrl));
           const directoryName =
             typeof workspaceRoot === "string" ? repositoryDirectoryName(workspaceRoot) : null;
           yield* sql`INSERT INTO label_repositories(label_id, repository_id, remote, directory_name) VALUES (${input.labelId}, ${input.repositoryId}, ${remote}, ${directoryName}) ON CONFLICT(repository_id) DO UPDATE SET label_id = excluded.label_id, remote = COALESCE(excluded.remote, label_repositories.remote), directory_name = COALESCE(excluded.directory_name, label_repositories.directory_name)`;

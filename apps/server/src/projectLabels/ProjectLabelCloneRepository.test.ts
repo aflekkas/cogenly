@@ -14,6 +14,7 @@ describe("cloneRepositoryIntoLabel", () => {
     Effect.gen(function* () {
       const labelId = ProjectLabelId.make("label:spawn");
       const linked: Array<ProjectId> = [];
+      const linkedRemotes: Array<string | null | undefined> = [];
       const resolved: Array<{ cwd: string; refresh?: boolean }> = [];
       const deps: ProjectLabelCloneDeps = {
         labels: {
@@ -24,6 +25,7 @@ describe("cloneRepositoryIntoLabel", () => {
           linkRepository: (input) =>
             Effect.sync(() => {
               linked.push(input.repositoryId);
+              linkedRemotes.push(input.remote);
               return { label: {} as ProjectLabelWithRepositories };
             }),
         },
@@ -78,6 +80,9 @@ describe("cloneRepositoryIntoLabel", () => {
       // Linked immediately (so the picker shows it while cloning) and again
       // once the clone lands.
       expect(linked).toEqual([started.projectId, started.projectId]);
+      // The link made while the clone runs already carries the normalized
+      // remote, so a failed clone leaves a recoverable record behind.
+      expect(linkedRemotes).toEqual([undefined, "github.com/spawn/platform"]);
       expect(resolved).toEqual([{ cwd: "/projects/Spawn Partners/Platform", refresh: true }]);
     }).pipe(Effect.provide(NodeServices.layer)),
   );

@@ -99,6 +99,17 @@ describe("buildProjectManifest", () => {
     expect(manifest).toContain("project_file_read");
   });
 
+  it("tells agents to add repositories with the project clone tool, not git clone", () => {
+    const manifest = buildProjectManifest({
+      name: "Spawn Partners",
+      directory: "/projects/Spawn Partners",
+      resources: [],
+      total: 0,
+    });
+    expect(manifest).toContain("project_label_clone_repository");
+    expect(manifest).toContain("do not git clone by hand");
+  });
+
   it("says when the project has no files yet", () => {
     const manifest = buildProjectManifest({
       name: "Empty",
