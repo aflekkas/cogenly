@@ -5,12 +5,28 @@ import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 
 export interface DesktopIpcInvokeEvent {
-  readonly sender: { readonly id: number };
+  readonly sender: { readonly id: number; readonly mainFrame?: unknown };
+  readonly senderFrame?: unknown;
 }
 
 export interface DesktopIpcSyncEvent {
   returnValue: unknown;
+  readonly sender?: { readonly mainFrame?: unknown };
+  readonly senderFrame?: unknown;
 }
+
+/**
+ * Only the window's main frame may use the desktop bridge. A subframe event
+ * (or one whose frame cannot be proven to be the main frame) is rejected
+ * before any handler runs.
+ */
+export const isMainFrameIpcEvent = (event: {
+  readonly sender?: { readonly mainFrame?: unknown };
+  readonly senderFrame?: unknown;
+}): boolean =>
+  event.senderFrame !== undefined &&
+  event.sender?.mainFrame !== undefined &&
+  event.senderFrame === event.sender.mainFrame;
 
 export type DesktopIpcHandleListener = (
   event: DesktopIpcInvokeEvent,
@@ -98,6 +114,11 @@ export const make = (ipcMain: DesktopIpcMain): DesktopIpc["Service"] =>
               runPromise(
                 Effect.gen(function* () {
                   yield* Effect.annotateCurrentSpan({ channel });
+                  if (!isMainFrameIpcEvent(event)) {
+                    return yield* Effect.fail(
+                      new Error("Desktop IPC is only available to the main frame."),
+                    );
+                  }
                   return yield* handler(raw, event);
                 }).pipe(Effect.annotateLogs({ channel }), Effect.withSpan("desktop.ipc.invoke")),
               ),
@@ -128,6 +149,10 @@ export const make = (ipcMain: DesktopIpcMain): DesktopIpc["Service"] =>
           try: () => {
             ipcMain.removeAllListeners(channel);
             ipcMain.on(channel, (event) => {
+              if (!isMainFrameIpcEvent(event)) {
+                event.returnValue = undefined;
+                return;
+              }
               event.returnValue = runSync(
                 Effect.gen(function* () {
                   yield* Effect.annotateCurrentSpan({ channel });
