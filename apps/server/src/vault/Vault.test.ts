@@ -448,6 +448,31 @@ describe("Vault service", () => {
     }).pipe(Effect.provide(layer)),
   );
 
+  it.effect("a scrub reload that races a write never publishes the older snapshot", () =>
+    Effect.gen(function* () {
+      const vault = yield* Vault.Vault;
+      for (const n of [1, 2, 3, 4, 5])
+        yield* vault.create({
+          name: `Item ${n}`,
+          type: "api_key",
+          secretFields: { value: `item-value-${n}` },
+        });
+      // The reload awaits decryption once per item while the new item is written.
+      yield* Effect.all(
+        [
+          vault.scrubText("warm the cache"),
+          vault.create({
+            name: "Second",
+            type: "api_key",
+            secretFields: { value: "second-value-2" },
+          }),
+        ],
+        { concurrency: "unbounded" },
+      );
+      expect(yield* vault.scrubText("second-value-2")).toBe("[redacted vault secret]");
+    }).pipe(Effect.provide(layer)),
+  );
+
   it.effect("scrubs the TOTP codes valid around now", () =>
     Effect.gen(function* () {
       const vault = yield* Vault.Vault;

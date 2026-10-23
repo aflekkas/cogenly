@@ -311,17 +311,16 @@ const make = Effect.gen(function* () {
   const identity = yield* ServerEnvironment.ServerEnvironmentIdentity;
   const crypto = yield* Crypto.Crypto;
   const now = DateTime.now.pipe(Effect.map(DateTime.formatIso));
+  // `version` moves on every write, so a reload that raced one is discarded
+  // instead of publishing a snapshot older than the write.
   const scrubCache = yield* Ref.make<{
-    loaded: boolean;
-    secrets: Set<string>;
-    shortSecrets: Set<string>;
-    totpSecrets: ReadonlyArray<string>;
-  }>({
-    loaded: false,
-    secrets: new Set<string>(),
-    shortSecrets: new Set<string>(),
-    totpSecrets: [],
-  });
+    version: number;
+    loaded: {
+      secrets: Set<string>;
+      shortSecrets: Set<string>;
+      totpSecrets: ReadonlyArray<string>;
+    } | null;
+  }>({ version: 0, loaded: null });
 
   const processSecrets = yield* Ref.make(new Set<string>());
   const environmentId = yield* identity.getEnvironmentId;
@@ -490,16 +489,12 @@ const make = Effect.gen(function* () {
       yield* sql`INSERT INTO vault_usage(id, item_id, thread_id, agent_id, action, domain, at, outcome) VALUES (${`usage:${id}`}, ${input.itemId}, ${input.threadId ?? null}, ${input.agentId ?? null}, ${input.action}, ${input.domain ?? null}, ${at}, ${input.outcome})`;
     }).pipe(Effect.mapError(wrap), Effect.ignore);
 
-  const invalidateScrubCache = Ref.set(scrubCache, {
-    loaded: false,
-    secrets: new Set<string>(),
-    shortSecrets: new Set<string>(),
-    totpSecrets: [],
-  });
+  const invalidateScrubCache = Ref.update(scrubCache, (cache) => ({
+    version: cache.version + 1,
+    loaded: null,
+  }));
 
-  const ensureScrubSecrets = Effect.gen(function* () {
-    const cache = yield* Ref.get(scrubCache);
-    if (cache.loaded) return cache;
+  const loadScrubSecrets = Effect.gen(function* () {
     const rows =
       yield* sql<VaultRow>`SELECT vault_items.*, (SELECT c.account_id FROM account_credentials c JOIN accounts a ON a.id = c.account_id AND a.deleted_at IS NULL WHERE c.vault_item_id = vault_items.id) AS account_id, (SELECT c.id FROM account_credentials c JOIN accounts a ON a.id = c.account_id AND a.deleted_at IS NULL WHERE c.vault_item_id = vault_items.id) AS credential_id FROM vault_items WHERE deleted_at IS NULL`.pipe(
         Effect.mapError(wrap),
@@ -530,9 +525,22 @@ const make = Effect.gen(function* () {
       if (stored.value.cardCvc) shortSecrets.add(stored.value.cardCvc);
       if (stored.value.totpSecret) totpSecrets.push(stored.value.totpSecret);
     }
-    const loaded = { loaded: true, secrets, shortSecrets, totpSecrets };
-    yield* Ref.set(scrubCache, loaded);
-    return loaded;
+    return { secrets, shortSecrets, totpSecrets };
+  });
+
+  const ensureScrubSecrets = Effect.gen(function* () {
+    while (true) {
+      const { version, loaded } = yield* Ref.get(scrubCache);
+      if (loaded) return loaded;
+      const fresh = yield* loadScrubSecrets;
+      const published = yield* Ref.modify(scrubCache, (cache) =>
+        cache.version === version
+          ? ([true, { version, loaded: fresh }] as const)
+          : ([false, cache] as const),
+      );
+      // A write landed mid-load: the rows may predate it, so load again.
+      if (published) return fresh;
+    }
   });
 
   /**
