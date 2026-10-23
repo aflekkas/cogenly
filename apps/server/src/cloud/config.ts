@@ -18,7 +18,7 @@ export const RELAY_ENVIRONMENT_CREDENTIAL_SECRET = "cloud-relay-environment-cred
 export const PUBLISH_AGENT_ACTIVITY_SECRET = "cloud-publish-agent-activity";
 export const HOLD_WEBHOOKS_WHILE_OFFLINE_SECRET = "cloud-hold-webhooks-while-offline";
 // Set when the relay rejects this environment's credential (401), as after the
-// environment is deregistered from T3 Connect. The link stays stored; the mark
+// environment is deregistered from Cogenly Connect. The link stays stored; the mark
 // tells `cogenly connect status` and clients to offer a relink. Linking, unlinking,
 // or a later successful tunnel registration clears it.
 export const CLOUD_LINK_REVOKED = "cloud-link-revoked";
@@ -90,7 +90,7 @@ const readSecretString = (name: string) =>
     Effect.orElseSucceed(() => null),
   );
 
-/** The relay URL and environment credential, or null when not linked to T3 Connect. */
+/** The relay URL and environment credential, or null when not linked to Cogenly Connect. */
 export const readRelayConnection = Effect.all([
   readSecretString(RELAY_URL_SECRET),
   readSecretString(RELAY_ENVIRONMENT_CREDENTIAL_SECRET),
@@ -100,7 +100,7 @@ export const readRelayConnection = Effect.all([
   ),
 );
 
-/** Whether this environment opted in to T3 Connect holding webhooks while it is offline. */
+/** Whether this environment opted in to Cogenly Connect holding webhooks while it is offline. */
 export const readHoldWebhooksWhileOffline = readSecretString(
   HOLD_WEBHOOKS_WHILE_OFFLINE_SECRET,
 ).pipe(Effect.map((value) => value === "true"));

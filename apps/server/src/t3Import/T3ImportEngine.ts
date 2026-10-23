@@ -1,5 +1,5 @@
 /**
- * The data path of Import from T3 Code: classify T3 threads against the
+ * The data path of Import from T3 Code: classify Cogenly threads against the
  * import ledger, dry-run their events, and replay them through the event sink.
  *
  * Writes go through `EventSinkV2.write`, the same path a live command takes,
@@ -60,7 +60,7 @@ export interface T3ThreadPlan {
   readonly messages: number;
 }
 
-/** Replacement id for a T3 thread whose id an unrelated Cogenly thread already uses. */
+/** Replacement id for a Cogenly thread whose id an unrelated Cogenly thread already uses. */
 export const collisionThreadId = (sourceThreadId: string) => `t3-${sourceThreadId}`;
 
 /** Threads whose T3 stats are read between yields to the event loop. */

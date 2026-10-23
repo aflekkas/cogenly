@@ -815,7 +815,7 @@ export class Launcher {
   }
 
   /**
-   * Another server owns the T3 home. Exiting would make systemd or launchd
+   * Another server owns the Cogenly home. Exiting would make systemd or launchd
    * start another refused server, so stay idle until stopped or restarted.
    * A pending update fails without restoring its backup: the other owner may
    * have written to the database since.
@@ -836,7 +836,7 @@ export class Launcher {
     // Signal listeners alone do not keep Node alive.
     this.#timer = setInterval(() => {}, 2_147_483_647);
     process.stderr.write(
-      "[service-launcher] Another Cogenly server owns this T3 home. Stop it, then restart this service.\n",
+      "[service-launcher] Another Cogenly server owns this Cogenly home. Stop it, then restart this service.\n",
     );
   }
 

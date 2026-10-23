@@ -420,11 +420,11 @@ export const EnvironmentCloudLinkStateResult = Schema.Struct({
   // Optional so newer clients tolerate older environment servers.
   managedTunnelActive: Schema.optional(Schema.Boolean),
   publishAgentActivity: Schema.Boolean,
-  // Opt-in: T3 Connect holds webhook requests while this environment is
+  // Opt-in: Cogenly Connect holds webhook requests while this environment is
   // offline. Optional so newer clients tolerate older environment servers.
   holdWebhooksWhileOffline: Schema.optional(Schema.Boolean),
   // The relay rejected this link's credential, usually because the environment
-  // was deregistered from T3 Connect. The link stays stored until it is linked
+  // was deregistered from Cogenly Connect. The link stays stored until it is linked
   // again. Optional so newer clients tolerate older environment servers.
   linkRevoked: Schema.optional(Schema.Boolean),
 });

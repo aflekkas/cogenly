@@ -11,7 +11,7 @@ export interface WebhookAddress {
   readonly address: string;
   /** Whether `address` is a full URL a sender can call. */
   readonly copyable: boolean;
-  /** One line on who can reach `address`; null for a T3 Connect URL. */
+  /** One line on who can reach `address`; null for a Cogenly Connect URL. */
   readonly note: string | null;
 }
 

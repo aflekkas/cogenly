@@ -1958,7 +1958,7 @@ function T3AwareImportStage(props: ImportStageProps & { readonly t3EnvironmentId
   const done = view.kind === "done";
   const finishAfterT3Import = () => {
     if (view.kind !== "done") return;
-    // Imported T3 threads are repository work, listed under Work.
+    // Imported Cogenly threads are repository work, listed under Work.
     setSidebarMode("tasks");
     void onDone(undefined, undefined, view.result.importedThreads);
   };

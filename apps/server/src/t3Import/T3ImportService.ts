@@ -560,14 +560,14 @@ const make = (options: T3ImportServiceOptions = {}) =>
       for (const binding of providers.bindings) {
         if (binding.status === "conflict") {
           warnings.push(
-            `Provider "${binding.instanceId}" is configured differently in Cogenly (or missing in T3). Its ${binding.threads} threads import, but resuming them may start fresh sessions.`,
+            `Provider "${binding.instanceId}" is configured differently in Cogenly (or missing in T3 Code). Its ${binding.threads} threads import, but resuming them may start fresh sessions.`,
           );
         }
       }
       const diverged = threads.filter((plan) => plan.mode === "diverged").length;
       if (diverged > 0) {
         warnings.push(
-          `${diverged} threads were continued in Cogenly after an earlier import; their newer T3 activity is not applied.`,
+          `${diverged} threads were continued in Cogenly after an earlier import; their newer T3 Code activity is not applied.`,
         );
       }
       const remapped = threads.filter((plan) => plan.threadId !== plan.source.threadId).length;

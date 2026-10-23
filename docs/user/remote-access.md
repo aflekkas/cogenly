@@ -5,15 +5,15 @@ machine. That machine must stay running and reachable while you work.
 
 For a VPS, start with [Run Cogenly on a VPS](./install.md#run-cogenly-on-a-vps).
 
-## T3 Connect
+## Cogenly Connect
 
-Cogenly releases do not include T3 Connect yet. Use
+Cogenly releases do not include Cogenly Connect yet. Use
 [desktop-managed SSH](#desktop-managed-ssh), [pairing](#pair-over-a-lan-or-private-network),
 or [Tailscale HTTPS](#tailscale-https) instead.
 
-T3 Connect makes an environment available to your other devices without setting
+Cogenly Connect makes an environment available to your other devices without setting
 up router forwarding. In the desktop app on the host, open **Settings →
-Connections**, sign in, and enable **T3 Connect** for that environment.
+Connections**, sign in, and enable **Cogenly Connect** for that environment.
 
 For a command-line host, run:
 
@@ -26,12 +26,12 @@ Follow the sign-in instructions. Setup offers a
 server with `cogenly serve`. Saving your sign-in alone does not make the machine
 reachable.
 
-On your other device, sign in to the same T3 Connect account and choose the
+On your other device, sign in to the same Cogenly Connect account and choose the
 environment. Over SSH, the CLI prints a browser link and a short code. Open the
 link on any device, confirm the code matches, and approve. The CLI continues on
 its own, so you do not need to forward an OAuth callback port.
 
-T3 Connect renews access credentials when needed without disconnecting a healthy
+Cogenly Connect renews access credentials when needed without disconnecting a healthy
 connection. Pull request diffs and provider settings keep working after the
 previous credential expires. A failed renewal affects that request; it does not
 disconnect an otherwise healthy conversation.
@@ -71,17 +71,17 @@ another link to share.
 ### Reach one machine several ways
 
 A machine can have more than one route: LAN, Tailscale, another VPN, a public
-URL, SSH, or T3 Connect. Tailscale shares its `100.64.0.0/10` address range with
+URL, SSH, or Cogenly Connect. Tailscale shares its `100.64.0.0/10` address range with
 other VPNs such as Cloudflare WARP, so an address in that range shows as VPN
 unless the machine confirms it is on Tailscale. To add a route, choose **Add
-route** in the machine's route list, or next to it in the T3 Connect list.
+route** in the machine's route list, or next to it in the Cogenly Connect list.
 Pairing the same machine again over another address also adds a route instead
 of a second machine. A new route is placed by speed, in that order, and you can
 reorder routes at any time.
 
-While connected through T3 Connect or a paired address, Cogenly also learns the
+While connected through Cogenly Connect or a paired address, Cogenly also learns the
 machine's current LAN and Tailscale addresses and adds them as routes, so
-pairing once through T3 Connect is enough to use the LAN at home. When the
+pairing once through Cogenly Connect is enough to use the LAN at home. When the
 machine's LAN address changes, for example after it joins another Wi-Fi network,
 the learned route follows it. The machine must allow network access for its LAN
 address to be learned. You can reorder a learned route, but not remove it; it
@@ -96,13 +96,13 @@ return to the app, and every minute, and moves back as soon as one works.
 
 On web and desktop, select the route count under the machine's name in
 **Settings → Connections** to see its routes. Drag a route to change the order,
-or remove it. Signing out of T3 Connect removes only that route; a machine
+or remove it. Signing out of Cogenly Connect removes only that route; a machine
 you can still reach another way stays saved.
 
 Open **Permissions** next to **Routes** in web or desktop, to see what your current connection can do on that
 environment. For a remote environment, this is in its route details. Permissions
 shown there apply only to the route marked **In use**; other routes are not
-checked. Direct pairing and T3 Connect have separate sessions and may grant
+checked. Direct pairing and Cogenly Connect have separate sessions and may grant
 different permissions.
 
 ### Balance new threads across machines
@@ -230,7 +230,7 @@ directly. Every other device, and the desktop app for other environments,
 streams them from the host. Agents keep using them while no device is
 connected, and `localhost` addresses reach servers on the host.
 
-The first tab downloads a headless Chrome, about 120 MB, into the T3 home. It
+The first tab downloads a headless Chrome, about 120 MB, into the Cogenly home. It
 is the same browser [HTML renders](html-renders.md) use, so a host downloads it
 only once. Some Linux hosts need [setup](#browser-host-setup) before it can
 start.
@@ -324,25 +324,25 @@ a client's permissions.
 local changes. Add `filesystem:write` to allow editing files or saving plans to
 the workspace. These scopes control direct file access from the client.
 
-To remove an environment from T3 Connect, open your account menu's **T3 Connect**
+To remove an environment from Cogenly Connect, open your account menu's **Cogenly Connect**
 page and choose **Deregister**. This
 revokes its cloud access and frees its host space even when the environment is
-offline or has been wiped. When T3 Connect rejects a host's link, the host
-shows that it was removed from T3 Connect. To link it again, turn on
-**T3 Connect** in **Settings → Connections** on a desktop host, or run
+offline or has been wiped. When Cogenly Connect rejects a host's link, the host
+shows that it was removed from Cogenly Connect. To link it again, turn on
+**Cogenly Connect** in **Settings → Connections** on a desktop host, or run
 `cogenly connect link` on a command-line host and then restart Cogenly there. A
 command-line host that released its tunnel when it last stopped may link itself
 again on its next start; run `cogenly connect unlink` on that host to keep it off.
 Removing an environment from a device's connection settings only forgets it on
 that device; it stays registered to your account.
 
-When idle tunnel cleanup is enabled, T3 Connect removes a linked environment's
+When idle tunnel cleanup is enabled, Cogenly Connect removes a linked environment's
 tunnel after it stays offline for several minutes. The environment stays linked
-and keeps the same address. When the host starts again or wakes, T3 Connect
+and keeps the same address. When the host starts again or wakes, Cogenly Connect
 creates a replacement tunnel on its own. You do not need to pair again. Cleanup
 usually runs five to ten minutes after the tunnel goes down.
 
-T3 Connect also removes the tunnel of an environment running an older version of
+Cogenly Connect also removes the tunnel of an environment running an older version of
 Cogenly once it has been offline for seven days. That environment shows a message
 asking you to update. Start Cogenly on that computer and update it to the latest
 version; it reconnects at the same address without pairing again.
@@ -354,7 +354,7 @@ your login; `cogenly connect logout` also clears that login. Background-service
 Treat pairing URLs and authorization codes as passwords. Do not include them in
 screenshots, logs, or bug reports.
 
-## T3 Connect troubleshooting
+## Cogenly Connect troubleshooting
 
 Run `cogenly connect status` on the host to inspect saved authorization and link
 configuration. It is not a live reachability check. If the environment appears
@@ -383,7 +383,7 @@ If a computer should only drive work running elsewhere, turn off its local envir
 desktop app, open **Settings → Connections** and switch off **Local
 environment**. Cogenly restarts without a local server: no local agents or terminals run, WSL
 backends stay off, and other devices can no longer connect to this computer. Your projects,
-history, and saved connections are kept, and you keep working through pairing, T3 Connect, or SSH.
+history, and saved connections are kept, and you keep working through pairing, Cogenly Connect, or SSH.
 
 Switch **Local environment** back on in the same place to restart with your previous local
 settings.

@@ -797,7 +797,7 @@ function DoneSection({
         control={
           // Onboarding moves on with its own footer instead.
           presentation === "settings" ? (
-            // Imported T3 threads are repository work, listed under Work.
+            // Imported Cogenly threads are repository work, listed under Work.
             <Button size="sm" onClick={() => selectMode("tasks", { leaveUtilityPage: true })}>
               Open imported projects
             </Button>

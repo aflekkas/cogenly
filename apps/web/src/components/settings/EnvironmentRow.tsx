@@ -20,7 +20,7 @@ export function formatDesktopSshTarget(target: DesktopSshEnvironmentTarget): str
 
 /**
  * How this client reaches a machine, printed first in every environment row so
- * T3 Connect, SSH, WSL, and plain remote links are told apart without a legend.
+ * Cogenly Connect, SSH, WSL, and plain remote links are told apart without a legend.
  * A machine with several routes names the one in use, or how many it has.
  */
 export function environmentTransportLabel(

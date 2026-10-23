@@ -29,7 +29,7 @@ describe("resolveT3McpToolPresentation", () => {
   });
   it("pretty prints Claude and Cursor T3 MCP tool names", () => {
     expect(resolveT3McpToolPresentation("mcp__cogenly__thread_read")).toEqual({
-      displayName: "Read a T3 thread",
+      displayName: "Read a Cogenly thread",
       logo: "t3-code",
     });
   });
@@ -44,14 +44,14 @@ describe("resolveT3McpToolPresentation", () => {
 
   it("pretty prints Codex T3 MCP tool names", () => {
     expect(resolveT3McpToolPresentation("t3-code.create_threads")).toEqual({
-      displayName: "Create T3 threads",
+      displayName: "Create Cogenly threads",
       logo: "t3-code",
     });
   });
 
   it("pretty prints thread metadata updates", () => {
     expect(resolveT3McpToolPresentation("mcp__cogenly__thread_update")).toEqual({
-      displayName: "Update T3 thread metadata",
+      displayName: "Update Cogenly thread metadata",
       logo: "t3-code",
     });
   });

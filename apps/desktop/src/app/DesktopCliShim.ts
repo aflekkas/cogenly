@@ -8,7 +8,7 @@ import { makeComponentLogger } from "./DesktopObservability.ts";
 
 // A desktop install puts no `t3` on PATH, so commands the server asks a person
 // to run (`sudo cogenly browser setup`) had nothing to call. The app keeps a small
-// launcher for its bundled CLI in the T3 home, which is never on PATH and so
+// launcher for its bundled CLI in the Cogenly home, which is never on PATH and so
 // never shadows another `t3`, and the server names it by absolute path in those
 // commands through COGENLY_CLI_PATH. An AppImage mounts somewhere new each run,
 // so its launcher mounts the AppImage itself instead of pointing into it.
@@ -37,7 +37,7 @@ export type CliShimTarget =
 /**
  * The launcher script. Electron runs the server as plain Node with
  * `ELECTRON_RUN_AS_NODE`, which reads the entry from inside the asar archive.
- * The launcher's own path and the app's T3 home are written in, so the command
+ * The launcher's own path and the app's Cogenly home are written in, so the command
  * the server shows is absolute and `sudo`, which clears the environment, still
  * runs against this install's home.
  */

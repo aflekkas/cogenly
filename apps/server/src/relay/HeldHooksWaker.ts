@@ -9,7 +9,7 @@ import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import { makeRelayEnvironmentClient } from "./relayEnvironmentClient.ts";
 
 /**
- * Tells T3 Connect this environment is reachable again, so the relay delivers
+ * Tells Cogenly Connect this environment is reachable again, so the relay delivers
  * the webhook requests it held while we were offline now rather than at its
  * next backoff step. Nothing happens unless the environment opted in.
  */

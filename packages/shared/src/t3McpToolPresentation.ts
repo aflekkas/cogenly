@@ -167,15 +167,15 @@ const T3_MCP_TOOLS: Readonly<Record<string, T3McpToolDefinition>> = {
     "schedule-delete",
   ),
   request_secret: tool(["Ask for", "Asking for", "Asked for", "a secret"], "secret-request"),
-  create_threads: tool(["Create", "Creating", "Created", "T3 threads"], "thread-create"),
-  thread_start: tool(["Start", "Starting", "Started", "a T3 thread"], "thread-create"),
-  thread_list: tool(["List", "Listing", "Listed", "T3 threads"], "thread-list"),
-  thread_read: tool(["Read", "Reading", "Read", "a T3 thread"], "thread-read"),
-  thread_send: tool(["Send", "Sending", "Sent", "to a T3 thread"], "thread-send"),
-  thread_wait: tool(["Wait", "Waiting", "Waited", "for a T3 thread"], "thread-wait"),
+  create_threads: tool(["Create", "Creating", "Created", "Cogenly threads"], "thread-create"),
+  thread_start: tool(["Start", "Starting", "Started", "a Cogenly thread"], "thread-create"),
+  thread_list: tool(["List", "Listing", "Listed", "Cogenly threads"], "thread-list"),
+  thread_read: tool(["Read", "Reading", "Read", "a Cogenly thread"], "thread-read"),
+  thread_send: tool(["Send", "Sending", "Sent", "to a Cogenly thread"], "thread-send"),
+  thread_wait: tool(["Wait", "Waiting", "Waited", "for a Cogenly thread"], "thread-wait"),
   workflow_stop: tool(["Stop", "Stopping", "Requested a stop for", "a workflow"], "workflow-stop"),
   thread_interrupt: tool(
-    ["Interrupt", "Interrupting", "Requested an interrupt of", "a T3 thread"],
+    ["Interrupt", "Interrupting", "Requested an interrupt of", "a Cogenly thread"],
     "thread-interrupt",
   ),
   worktree_handoff: tool(
@@ -322,7 +322,10 @@ const T3_MCP_TOOLS: Readonly<Record<string, T3McpToolDefinition>> = {
   thread_unsnooze: tool(["Wake", "Waking", "Woke", "a thread"], "thread-organize"),
   thread_settle: tool(["Settle", "Settling", "Settled", "a thread"], "thread-organize"),
   thread_unsettle: tool(["Unsettle", "Unsettling", "Unsettled", "a thread"], "thread-organize"),
-  thread_update: tool(["Update", "Updating", "Updated", "T3 thread metadata"], "thread-update"),
+  thread_update: tool(
+    ["Update", "Updating", "Updated", "Cogenly thread metadata"],
+    "thread-update",
+  ),
   worktree_list: tool(["List", "Listing", "Listed", "workspace branches"], "worktree-list"),
   preview_list: tool(["List", "Listing", "Listed", "preview tabs"], "browser", "browser"),
   preview_close: tool(["Close", "Closing", "Closed", "a preview tab"], "browser", "browser"),
@@ -433,7 +436,7 @@ function normalizeT3McpToolLabel(value: string): string {
 }
 
 /**
- * ACP agents disagree on how the injected T3 server prefixes its tools:
+ * ACP agents disagree on how the injected Cogenly server prefixes its tools:
  * `mcp__t3-code__x` (Claude/Cursor), `t3-code.x` (Codex), plus single
  * underscore, colon, slash, dash, and space separators seen from registry
  * agents. The prefix match is deliberately loose because the display-name

@@ -843,9 +843,7 @@ it.effect.each(smokeCases)(
           }
         }
         // Descriptions, including imported guidance, must use the product name.
-        expect(
-          bodyText.match(/T3 Code|T3-owned|T3 thread|T3 injects|T3's|t3\.chat|Cogenly Connect/g),
-        ).toBeNull();
+        expect(bodyText.match(/\bT3\b|\bt3_/g)).toBeNull();
 
         // The handoff tool mutates thread state, reaches the network (origin
         // fetch), and runs project setup scripts, so its MCP hints must not

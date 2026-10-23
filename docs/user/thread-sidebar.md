@@ -156,7 +156,7 @@ folder)** in the heading's repository menu) runs in the project's own folder, so
 the files the agent makes sit with the project's other files.
 
 Each thread without a project works in its own folder under `~/.cogenly/scratch` (the
-`scratch` folder of your T3 data directory), named after its date, the first words
+`scratch` folder of your Cogenly data directory), named after its date, the first words
 of its first message, and a short id, like
 `2026-09-25-convert-these-pngs-to-webp-a1b2c3d4`. Deleting a thread keeps its
 folder, so the files the agent wrote stay until you delete them. Branch and worktree controls stay hidden because

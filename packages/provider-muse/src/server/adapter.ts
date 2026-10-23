@@ -2097,7 +2097,7 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
                           Effect.map((mcp) =>
                             mcp
                               ? "\n" +
-                                COGENLY_ORCHESTRATION_INSTRUCTIONS.replaceAll("T3", "Cogenly") +
+                                COGENLY_ORCHESTRATION_INSTRUCTIONS +
                                 (mcp.terminalToolsAvailable === false ||
                                 turnInput.runtimePolicy.conversationMode === true
                                   ? ""
