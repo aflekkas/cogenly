@@ -255,14 +255,34 @@ interface JsonRpcResponse {
   readonly error?: { readonly message?: unknown };
 }
 
-const parseRpcBody = (text: string): JsonRpcResponse | undefined => {
+/**
+ * The data of each server-sent event, whatever order its fields come in
+ * (`event:` and `id:` often precede `data:`). Multi-line data joins with `\n`.
+ */
+const sseEventData = (text: string): Array<string> => {
+  const events: Array<string> = [];
+  let data: Array<string> | null = null;
+  for (const line of text.split(/\r\n|\r|\n/)) {
+    if (line === "") {
+      if (data !== null) events.push(data.join("\n"));
+      data = null;
+      continue;
+    }
+    const colon = line.indexOf(":");
+    if (colon === 0) continue;
+    if ((colon === -1 ? line : line.slice(0, colon)) !== "data") continue;
+    const value = colon === -1 ? "" : line.slice(colon + 1);
+    (data ??= []).push(value.startsWith(" ") ? value.slice(1) : value);
+  }
+  if (data !== null) events.push(data.join("\n"));
+  return events;
+};
+
+/** A plain JSON body, or the last JSON object among an SSE body's events. */
+export const parseRpcBody = (text: string): JsonRpcResponse | undefined => {
   const trimmed = text.trim();
-  const candidates = trimmed.startsWith("data:")
-    ? trimmed
-        .split("\n")
-        .filter((line) => line.startsWith("data:"))
-        .map((line) => line.slice("data:".length).trim())
-    : [trimmed];
+  const candidates =
+    trimmed.startsWith("{") || trimmed.startsWith("[") ? [trimmed] : sseEventData(trimmed);
   for (const candidate of candidates.toReversed()) {
     try {
       const parsed: unknown = JSON.parse(candidate);

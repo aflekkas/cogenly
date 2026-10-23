@@ -153,6 +153,20 @@ const createInput = (url: string, name = "gmail") => ({
   hint: "Gmail for aflekkas@example.com",
 });
 
+describe("parseRpcBody", () => {
+  it("reads JSON-RPC from SSE events whatever order their fields come in", () => {
+    const result = { jsonrpc: "2.0", id: 1, result: { tools: [] } };
+    for (const body of [
+      `data: ${JSON.stringify(result)}\n\n`,
+      `event: message\nid: 7\ndata: ${JSON.stringify(result)}\n\n`,
+      `: keep-alive\r\nevent: message\r\ndata: ${JSON.stringify(result)}\r\n\r\n`,
+      `event: message\ndata: {"jsonrpc":"2.0","id":1,\ndata: "result":{"tools":[]}}\n\n`,
+    ]) {
+      expect(Integrations.parseRpcBody(body)).toEqual(result);
+    }
+  });
+});
+
 describe("resolveHeaderTemplates", () => {
   it.effect("resolves credential references and fails closed when missing", () =>
     Effect.gen(function* () {
