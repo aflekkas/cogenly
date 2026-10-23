@@ -52,6 +52,8 @@ export interface LocalMcpSpec {
   readonly secrets: ReadonlyArray<string>;
   readonly transport: "http" | "stdio";
   readonly port: number;
+  /** Environment fields rebuilt whenever a bind failure retires the port. */
+  readonly portEnvironment?: ReadonlyArray<string>;
   readonly path?: string;
 }
 
@@ -68,7 +70,7 @@ interface Connection {
 }
 
 interface Account {
-  readonly spec: LocalMcpSpec;
+  spec: LocalMcpSpec;
   readonly scope: Scope.Closeable;
   ready: Deferred.Deferred<Connection, LocalMcpError>;
   status: LocalMcpStatus;
@@ -293,9 +295,11 @@ const make = (
 
     const supervise = (account: Account) =>
       Effect.gen(function* () {
-        const spec = account.spec;
         let attempt = 0;
-        while (accounts.get(spec.id) === account) {
+        while (accounts.get(account.spec.id) === account) {
+          const spec = account.spec;
+          let bindFailure = false;
+          let attemptOutput = "";
           yield* changed(account, "starting");
           const result = yield* Effect.scoped(
             Effect.gen(function* () {
@@ -329,6 +333,11 @@ const make = (
                 const redactor = createOutputRedactor(spec.secrets);
                 const retain = (text: string) =>
                   Effect.gen(function* () {
+                    attemptOutput = (attemptOutput + text).slice(-4000);
+                    bindFailure ||=
+                      /EADDRINUSE|address already in use|error while attempting to bind|could not bind/i.test(
+                        attemptOutput,
+                      );
                     const stderrTail = (account.status.stderrTail + text).slice(-4000);
                     const rejected = !account.status.grantRejected && isGrantRejection(stderrTail);
                     account.status = {
@@ -436,7 +445,8 @@ const make = (
                     initialized = response.value;
                     break;
                   }
-                  if (!(yield* child.isRunning)) return yield* error(spec, "start_failed");
+                  if (bindFailure || !(yield* child.isRunning))
+                    return yield* error(spec, "start_failed");
                   yield* Effect.sleep("100 millis");
                 }
                 if (!initialized) return yield* error(spec, "timeout");
@@ -474,6 +484,19 @@ const make = (
               yield* child.exitCode;
             }),
           ).pipe(Effect.result);
+          if (bindFailure) {
+            const port = yield* freeLoopbackPort;
+            account.spec = {
+              ...spec,
+              port,
+              env: {
+                ...spec.env,
+                ...Object.fromEntries(
+                  (spec.portEnvironment ?? []).map((key) => [key, String(port)]),
+                ),
+              },
+            };
+          }
           yield* changed(account, "failed");
           yield* Deferred.fail(account.ready, error(spec, "start_failed", result));
           account.ready = yield* Deferred.make<Connection, LocalMcpError>();

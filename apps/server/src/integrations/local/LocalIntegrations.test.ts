@@ -77,6 +77,7 @@ const testLayer = (
             ...spec,
             runtime: process.execPath,
             args: [fixture],
+            portEnvironment: [...(spec.portEnvironment ?? []), "FIXTURE_PORT"],
             env: {
               ...spec.env,
               FIXTURE_TRANSPORT: "http",

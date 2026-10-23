@@ -97,6 +97,7 @@ export const googleWorkspaceSpec = (input: {
   directory: input.directory,
   transport: "http",
   port: input.port,
+  portEnvironment: ["WORKSPACE_MCP_PORT"],
   env: {
     ...input.environment,
     GOOGLE_OAUTH_CLIENT_ID: input.clientId,

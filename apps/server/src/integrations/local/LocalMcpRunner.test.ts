@@ -25,6 +25,11 @@ const decodeEcho = Schema.decodeUnknownSync(
 const decodePid = Schema.decodeUnknownSync(
   Schema.fromJsonString(Schema.Struct({ pid: Schema.Number })),
 );
+const decodeOwner = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(
+    Schema.Struct({ pid: Schema.Number, identity: Schema.String, port: Schema.Number }),
+  ),
+);
 const specFor = (transport: "http" | "stdio") =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
@@ -38,6 +43,7 @@ const specFor = (transport: "http" | "stdio") =>
       directory,
       transport,
       port,
+      portEnvironment: ["FIXTURE_PORT"],
       env: {
         PATH: process.env.PATH ?? "",
         FIXTURE_TRANSPORT: transport,
@@ -196,6 +202,46 @@ describe("LocalMcpRunner", () => {
     }).pipe(Effect.scoped, Effect.provide(layer)),
   );
 
+  it.live("reallocates the port and its environment after a bind failure", () =>
+    Effect.gen(function* () {
+      const runner = yield* Runner.LocalMcpRunner;
+      const spec = yield* specFor("http");
+      const blocker = NodeNet.createServer();
+      yield* Effect.acquireRelease(
+        Effect.callback<void>((resume) => {
+          blocker.listen(spec.port, "127.0.0.1", () => resume(Effect.void));
+        }),
+        () => Effect.sync(() => blocker.close()),
+      );
+      const changes = yield* Queue.unbounded<Runner.LocalMcpStatus>();
+      yield* runner.changes.pipe(
+        Stream.runForEach((event) => Queue.offer(changes, event.status)),
+        Effect.forkScoped,
+      );
+      yield* runner.start(spec);
+      yield* Stream.fromQueue(changes).pipe(
+        Stream.filter((status) => status.state === "failed"),
+        Stream.take(1),
+        Stream.runDrain,
+      );
+      // A bind failure has retired the old port before publishing "failed".
+      const fs = yield* FileSystem.FileSystem;
+      const failedOwner = yield* fs.readFileString(`${spec.directory}/process.json`);
+      const next = yield* Stream.fromQueue(changes).pipe(
+        Stream.filter((status) => status.state === "running" || status.state === "failed"),
+        Stream.take(1),
+        Stream.runCollect,
+      );
+      expect(next[0]?.state).toBe("running");
+      const owner = yield* fs.readFileString(`${spec.directory}/process.json`);
+      expect(owner).not.toBe(failedOwner);
+      const result = yield* runner.rpc(spec.id, "tools/call", { name: "echo" });
+      expect(decodeEcho(result).content[0]?.text).toContain('"pid":');
+      expect(yield* runner.callback(spec.id, "state=test&code=test")).toBe(true);
+      expect(blocker.listening).toBe(true);
+    }).pipe(Effect.scoped, Effect.provide(layer)),
+  );
+
   it.live.each([true, false])(
     "reconciles a persisted owner only when its identity matches (%s)",
     (matches) =>
@@ -229,11 +275,9 @@ describe("LocalMcpRunner", () => {
         yield* runner.start(spec);
         yield* runner.rpc(spec.id, "tools/list", {});
         expect(yield* old.isRunning).toBe(!matches);
-        const owner = yield* Schema.decodeUnknownEffect(
-          Schema.fromJsonString(
-            Schema.Struct({ pid: Schema.Number, identity: Schema.String, port: Schema.Number }),
-          ),
-        )(yield* fs.readFileString(`${spec.directory}/process.json`));
+        const owner = yield* decodeOwner(
+          yield* fs.readFileString(`${spec.directory}/process.json`),
+        );
         expect(owner.pid).not.toBe(old.pid);
         expect(owner.port).toBe(spec.port);
         expect(owner.identity).not.toBe("");
