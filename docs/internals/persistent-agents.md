@@ -48,8 +48,9 @@ Migration 072 re-enabled agents paused before this. The `agents.enabled` column 
 fences reservations while deletion stops active work. Owner conversation turns bypass
 backoff and caps. Fixed-time triggers attached to an agent catch up once, then
 advance from the current time; there is no backlog replay. All scheduling runs while
-the server is up, including headless `apps/server` deployments. A VPS still needs a
-process supervisor, persistent database/secrets/workspaces, provider credentials and
+the server is up, including headless `apps/server` deployments. `cogenly service install`
+supplies the Linux process supervisor and scheduler watchdog. A VPS also needs
+persistent database/secrets/workspaces, provider credentials and
 CLI dependencies, an explicit timezone for fixed-time schedules, backups, and secured
 remote access. There is no multi-server scheduler lease: run one writer per home.
 
