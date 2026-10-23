@@ -54,6 +54,7 @@ const decodeVaultPolicy = Schema.decodeUnknownEffect(
     Schema.Struct({
       mode: Schema.Literals(["ask", "allow"]),
       allowedAgentIds: Schema.Array(Schema.String),
+      allowedThreadIds: Schema.optional(Schema.Array(Schema.String)),
       allowedDomains: Schema.Array(Schema.String),
     }),
   ),
@@ -63,6 +64,7 @@ const encodeVaultPolicy = Schema.encodeEffect(
     Schema.Struct({
       mode: Schema.Literals(["ask", "allow"]),
       allowedAgentIds: Schema.Array(Schema.String),
+      allowedThreadIds: Schema.optional(Schema.Array(Schema.String)),
       allowedDomains: Schema.Array(Schema.String),
     }),
   ),
@@ -520,6 +522,46 @@ const make = Effect.gen(function* () {
               );
               return { approval: yield* getApproval(id) };
             }
+            if (approval.action.actionKind === "vault_use") {
+              const { payload } = approval.action;
+              if (approval.agentId === null && payload.threadId === null)
+                return yield* fail("A vault approval needs a calling thread or agent.");
+              yield* sql.withTransaction(
+                Effect.gen(function* () {
+                  const rows = yield* sql<{
+                    policy_json: string;
+                  }>`SELECT policy_json FROM vault_items WHERE id = ${payload.vaultItemId} AND deleted_at IS NULL`;
+                  if (!rows[0]) return yield* fail("Vault item not found.");
+                  const decoded = yield* decodeVaultPolicy(rows[0].policy_json);
+                  const policy = {
+                    mode: "allow" as const,
+                    allowedAgentIds: [
+                      ...new Set([
+                        ...decoded.allowedAgentIds,
+                        ...(approval.agentId ? [approval.agentId] : []),
+                      ]),
+                    ],
+                    allowedThreadIds: [
+                      ...new Set([
+                        ...(decoded.allowedThreadIds ?? []),
+                        ...(approval.agentId === null && payload.threadId
+                          ? [payload.threadId]
+                          : []),
+                      ]),
+                    ],
+                    allowedDomains: [
+                      ...new Set([
+                        ...decoded.allowedDomains,
+                        ...(payload.domain ? [payload.domain] : []),
+                      ]),
+                    ],
+                  };
+                  yield* sql`UPDATE vault_items SET policy_json = ${yield* encodeVaultPolicy(policy)}, updated_at = ${yield* now} WHERE id = ${payload.vaultItemId}`;
+                  yield* sql`UPDATE agent_approvals SET status = 'approved', decided_at = ${yield* now}, decided_by = 'user' WHERE id = ${id} AND status = 'pending'`;
+                }),
+              );
+              return { approval: yield* getApproval(id) };
+            }
             if (approval.agentId === null) return yield* fail("An agent approval needs an agent.");
             const agent = yield* store.get(approval.agentId);
             let resultThreadId: ThreadId | null = null;
@@ -544,29 +586,6 @@ const make = Effect.gen(function* () {
               case "change_permissions":
                 yield* agents.upsert({ ...agent, ...action.payload });
                 break;
-              case "vault_use": {
-                // Approving a vault use grants this agent that item (on the
-                // approved domain, when one was involved) so a retry succeeds.
-                const rows = yield* sql<{
-                  policy_json: string;
-                }>`SELECT policy_json FROM vault_items WHERE id = ${action.payload.vaultItemId} AND deleted_at IS NULL`;
-                if (rows[0]) {
-                  const decoded = yield* decodeVaultPolicy(rows[0].policy_json);
-                  const policy = {
-                    mode: "allow" as const,
-                    allowedAgentIds: decoded.allowedAgentIds.includes(agent.id)
-                      ? [...decoded.allowedAgentIds]
-                      : [...decoded.allowedAgentIds, agent.id],
-                    allowedDomains:
-                      action.payload.domain &&
-                      !decoded.allowedDomains.includes(action.payload.domain)
-                        ? [...decoded.allowedDomains, action.payload.domain]
-                        : [...decoded.allowedDomains],
-                  };
-                  yield* sql`UPDATE vault_items SET policy_json = ${yield* encodeVaultPolicy(policy)}, updated_at = ${yield* now} WHERE id = ${action.payload.vaultItemId}`;
-                }
-                break;
-              }
               case "integration_add": {
                 if (integrations._tag === "None")
                   return yield* fail("Integrations are unavailable on this server.");

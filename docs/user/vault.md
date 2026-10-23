@@ -40,10 +40,10 @@ leave a secret field blank to keep it, or type a new value to replace it.
 
 ## Approvals
 
-The first time an always-on agent wants to use an item, you get an approval
+The first time an agent wants to use an item, you get an approval
 request naming the item and field. Approving lets that agent use that item
-again (on the approved site, when one was involved). Ordinary chats you
-start yourself do not need approval for browser fill. CLI process exposure
+again (on the approved site, when one was involved). For chats and Work,
+approval applies to the requesting thread. CLI process exposure
 always needs its own approval.
 
 ## Usage log

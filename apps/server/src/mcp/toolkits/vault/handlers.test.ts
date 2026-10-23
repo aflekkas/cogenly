@@ -161,6 +161,15 @@ it.effect("vault_fill types the value server-side and never returns it", () =>
       });
       expect(evaluated).toBe(1);
 
+      const asked = yield* call("vault_fill", { name: "GitHub", field: "password" });
+      expect(asked).toMatchObject({ status: "approval_required" });
+      expect(typed).toHaveLength(0);
+      const savedItem = (yield* Context.get(context, Vault.Vault).list({})).items[0]!;
+      yield* Context.get(context, Vault.Vault).update({
+        id: savedItem.id,
+        policy: { mode: "allow", allowedAgentIds: [], allowedDomains: ["github.com"] },
+      });
+
       const filled = yield* call("vault_fill", {
         name: "GitHub",
         field: "password",
@@ -321,6 +330,7 @@ it.effect("vault_fill fills card fields by field and never returns them", () =>
       const saved = yield* call("vault_save", {
         name: "Visa",
         type: "card",
+        policy: { mode: "allow", allowedAgentIds: [], allowedDomains: ["shop.test"] },
         allowedDomains: ["shop.test"],
         secretFields: {
           cardNumber: "4242 4242 4242 4242",

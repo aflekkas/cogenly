@@ -22,6 +22,12 @@ import * as Vault from "./Vault.ts";
 import { VAULT_WITHHELD } from "./VaultRedactor.ts";
 import { totp } from "./VaultTotp.ts";
 
+import * as Workspace from "../agents/AgentWorkspaceService.ts";
+import * as AgentStore from "../agents/AgentStore.ts";
+import * as Agents from "../agents/AgentService.ts";
+import * as Work from "../work/WorkHandoffService.ts";
+import * as Schedules from "../scheduledTasks/ScheduledTaskService.ts";
+
 const memoryStore = () => {
   const values = new Map<string, Uint8Array>();
   return Layer.succeed(ServerSecretStore.ServerSecretStore, {
@@ -165,6 +171,57 @@ describe("Vault service", () => {
         .pipe(Effect.flip);
       expect(afterDelete.reason).toBe("not_found");
     }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("thread fills ask the owner and approval grants only that thread", () =>
+    Effect.gen(function* () {
+      const vault = yield* Vault.Vault;
+      const workspace = yield* Workspace.AgentWorkspaceService;
+      const { item } = yield* vault.create({
+        name: "Thread login",
+        type: "login",
+        allowedDomains: ["example.com"],
+        secretFields: { password: "thread-password" },
+      });
+      const request = {
+        itemId: item.id,
+        field: "password" as const,
+        caller: { kind: "thread" as const, threadId },
+        threadId,
+        domain: "example.com",
+        enforceAllowedDomains: true,
+      };
+      const asked = yield* vault.use(request);
+      expect(asked.status).toBe("approval_required");
+      if (asked.status !== "approval_required" || !asked.approvalId)
+        throw new Error("Missing approval");
+      yield* workspace.approve(asked.approvalId);
+      expect(yield* vault.use(request)).toMatchObject({
+        status: "allowed",
+        value: "thread-password",
+      });
+      expect(
+        (yield* vault.use({
+          ...request,
+          caller: { kind: "thread", threadId: ThreadId.make("other") },
+        })).status,
+      ).toBe("approval_required");
+      expect((yield* vault.use({ ...request, domain: "evil.test" })).status).toBe("denied");
+    }).pipe(
+      Effect.provide(
+        Workspace.layer.pipe(
+          Layer.provideMerge(layer),
+          Layer.provide(
+            Layer.mergeAll(
+              Layer.mock(AgentStore.AgentStore)({}),
+              Layer.mock(Agents.AgentService)({}),
+              Layer.mock(Work.WorkHandoffService)({}),
+              Layer.mock(Schedules.ScheduledTaskService)({}),
+            ),
+          ),
+        ),
+      ),
+    ),
   );
 
   it.effect("asks agents by default, then allows after the policy grants them", () =>

@@ -662,8 +662,10 @@ const make = Effect.gen(function* () {
         // AgentWorkspaceService.approve's vault_use case, which grants the
         // item policy so a retry succeeds).
         let approvalId: string | null = null;
-        if (input.caller.kind === "agent") {
-          approvalId = `approval:vault:${row.id}:${input.caller.agentId}:${input.field}:${input.domain ?? ""}`;
+        if (input.caller.kind === "agent" || input.caller.kind === "thread") {
+          const callerKey =
+            input.caller.kind === "agent" ? input.caller.agentId : input.caller.threadId;
+          approvalId = `approval:vault:${row.id}:${callerKey}:${input.field}:${input.domain ?? ""}`;
           const actionJson = encodeApprovalActionJson({
             actionKind: "vault_use",
             payload: {
@@ -674,7 +676,7 @@ const make = Effect.gen(function* () {
               threadId: input.threadId ?? null,
             },
           });
-          yield* sql`INSERT OR IGNORE INTO agent_approvals(id, agent_id, action_json, status, requested_at, source_run_id) VALUES (${approvalId}, ${input.caller.agentId}, ${actionJson}, 'pending', ${yield* now}, ${null})`.pipe(
+          yield* sql`INSERT OR IGNORE INTO agent_approvals(id, agent_id, action_json, status, requested_at, source_run_id) VALUES (${approvalId}, ${agentId}, ${actionJson}, 'pending', ${yield* now}, ${null})`.pipe(
             Effect.mapError(wrap),
           );
         }

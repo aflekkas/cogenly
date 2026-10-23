@@ -113,3 +113,5 @@ before output enters events or persisted history. Tokens are resolved after
 provider environment configuration and overlay only the selected terminal's
 environment; they never enter settings or launch arguments. Provider-native
 shell delivery is separate work because provider sessions can share threads.
+
+MCP vault fills always identify a thread or its persistent agent; neither is a human caller. The existing `vault_use` approval grants only that identity and the approved domain.
