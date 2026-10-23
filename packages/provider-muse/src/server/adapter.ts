@@ -277,6 +277,19 @@ const INFORMATIONAL_NOTIFICATIONS = new Set([
 const TOOLS_WITH_NATIVE_ROWS = new Set(["write_todos", "request_user_input", "workflow"]);
 const responseAnswerSchema = Schema.Union([Schema.String, Schema.Array(Schema.String)]);
 
+/**
+ * Native shell is disabled only when the Cogenly terminal tools are
+ * definitely available to this session: an MCP session is present and its
+ * credential explicitly grants terminal tools. A credential that never
+ * stated terminal availability (`terminalToolsAvailable` undefined) — the
+ * shape a delegated child can start with when its MCP credential was
+ * minted without the flag — keeps the native shell, so the agent always
+ * has some way to run commands instead of none.
+ */
+export const museTerminalToolsAvailable = (
+  mcpSession: McpProviderSession.McpProviderSessionConfig | undefined,
+): boolean => mcpSession?.terminalToolsAvailable === true;
+
 /** One scoped Muse host owns one native session; the orchestrator owns app runs and queuing. */
 export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
   options: MuseAdapterV2Options,
@@ -1709,7 +1722,7 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
               // Cogenly MCP server, so sessionMcp stays requested.
               readOnly: input.runtimePolicy.conversationMode === true,
               sessionMcp: true,
-              disableShell: mcpSession !== undefined && mcpSession.terminalToolsAvailable !== false,
+              disableShell: museTerminalToolsAvailable(mcpSession),
             },
             options.createHost,
           ).pipe(
@@ -2098,7 +2111,7 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
                             mcp
                               ? "\n" +
                                 COGENLY_ORCHESTRATION_INSTRUCTIONS +
-                                (mcp.terminalToolsAvailable === false ||
+                                (!museTerminalToolsAvailable(mcp) ||
                                 turnInput.runtimePolicy.conversationMode === true
                                   ? ""
                                   : "\nUse the cogenly MCP terminal_run tool for every shell command. Native shell is disabled. Use background=true for servers, terminal_read for output, terminal_write for stdin, and terminal_kill to stop. Terminals and their children stop when this thread settles.")

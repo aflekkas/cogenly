@@ -365,6 +365,7 @@ describe("MuseAdapterV2", () => {
         threadId: THREAD_ID,
         providerSessionId: "test-session",
         providerInstanceId: INSTANCE_ID,
+        terminalToolsAvailable: true,
         endpoint: "http://127.0.0.1:43210/mcp",
         authorizationHeader: "Bearer thread-scoped-test-token",
         browserToolsAvailable: true,
@@ -391,6 +392,62 @@ describe("MuseAdapterV2", () => {
         });
       }
     }).pipe(Effect.scoped, Effect.provide(testLayer)),
+  );
+
+  it.effect(
+    "keeps the native shell unless terminal tools are explicitly granted to the session",
+    () =>
+      Effect.gen(function* () {
+        const sessions = yield* McpProviderSessions.McpProviderSessions;
+        const base = {
+          environmentId: EnvironmentId.make("test-environment"),
+          threadId: THREAD_ID,
+          providerSessionId: "test-session",
+          providerInstanceId: INSTANCE_ID,
+          endpoint: "http://127.0.0.1:43210/mcp",
+          authorizationHeader: "Bearer test-token",
+          browserToolsAvailable: true,
+        };
+        // A delegated child whose MCP credential never stated terminal
+        // availability (flag absent) must keep its native shell; only an
+        // explicit grant disables it, and an explicit denial keeps it too.
+        const cases: ReadonlyArray<{
+          readonly terminalToolsAvailable?: boolean;
+          readonly expectedDisableShell: boolean;
+        }> = [
+          { terminalToolsAvailable: true, expectedDisableShell: true },
+          { terminalToolsAvailable: false, expectedDisableShell: false },
+          { expectedDisableShell: false },
+        ];
+        for (const testCase of cases) {
+          yield* sessions.set(
+            testCase.terminalToolsAvailable === undefined
+              ? base
+              : { ...base, terminalToolsAvailable: testCase.terminalToolsAvailable },
+          );
+          const fake = yield* makeFakeMuse();
+          fake.host.initializeResult.grantedCapabilities.push("sessionMcp");
+          let disableShell: boolean | undefined;
+          yield* makeHarness(fake, INSTANCE_ID, undefined, undefined, undefined, runtimePolicy, {
+            createHost: async (options) => {
+              disableShell = options.disableShell;
+              return fake.host;
+            },
+          });
+          assert.strictEqual(disableShell, testCase.expectedDisableShell);
+        }
+        // No MCP session at all: no terminal toolkit, so the shell stays on.
+        yield* sessions.clear(THREAD_ID);
+        const fake = yield* makeFakeMuse();
+        let disableShell: boolean | undefined;
+        yield* makeHarness(fake, INSTANCE_ID, undefined, undefined, undefined, runtimePolicy, {
+          createHost: async (options) => {
+            disableShell = options.disableShell;
+            return fake.host;
+          },
+        });
+        assert.strictEqual(disableShell, false);
+      }).pipe(Effect.scoped, Effect.provide(testLayer)),
   );
 
   it.effect("publishes account usage notifications without requiring a sessionId", () =>
