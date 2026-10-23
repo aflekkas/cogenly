@@ -58,6 +58,7 @@ import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import {
   Menu,
+  MenuGroup,
   MenuGroupLabel,
   MenuItem,
   MenuPopup,
@@ -674,7 +675,7 @@ function IntegrationEditorDialog(props: {
             {stored !== null && props.integration === null ? "Done" : "Cancel"}
           </DialogClose>
           <Button type="submit" form="integration-editor" disabled={pending !== null}>
-            {pending === "save" ? "Saving…" : props.integration ? "Save" : "Add integration"}
+            {pending === "save" ? "Saving…" : stored !== null ? "Save" : "Add integration"}
           </Button>
         </DialogFooter>
       </DialogPopup>
@@ -705,28 +706,30 @@ function VaultReferenceMenu(props: {
         <KeyRoundIcon />
       </MenuTrigger>
       <MenuPopup align="end">
-        <MenuGroupLabel>Use a vault item</MenuGroupLabel>
-        {props.loading ? (
-          <MenuItem disabled>Loading vault…</MenuItem>
-        ) : items.length === 0 ? (
-          <MenuItem disabled>No vault items yet</MenuItem>
-        ) : (
-          items.map((item) => (
-            <MenuSub key={item.id}>
-              <MenuSubTrigger>{item.name}</MenuSubTrigger>
-              <MenuSubPopup>
-                {item.fields.map((field) => (
-                  <MenuItem
-                    key={field}
-                    onClick={() => props.onPick(credentialReference(item.name, field))}
-                  >
-                    {VAULT_FIELD_LABEL[field]}
-                  </MenuItem>
-                ))}
-              </MenuSubPopup>
-            </MenuSub>
-          ))
-        )}
+        <MenuGroup>
+          <MenuGroupLabel>Use a vault item</MenuGroupLabel>
+          {props.loading ? (
+            <MenuItem disabled>Loading vault…</MenuItem>
+          ) : items.length === 0 ? (
+            <MenuItem disabled>No vault items yet</MenuItem>
+          ) : (
+            items.map((item) => (
+              <MenuSub key={item.id}>
+                <MenuSubTrigger>{item.name}</MenuSubTrigger>
+                <MenuSubPopup>
+                  {item.fields.map((field) => (
+                    <MenuItem
+                      key={field}
+                      onClick={() => props.onPick(credentialReference(item.name, field))}
+                    >
+                      {VAULT_FIELD_LABEL[field]}
+                    </MenuItem>
+                  ))}
+                </MenuSubPopup>
+              </MenuSub>
+            ))
+          )}
+        </MenuGroup>
       </MenuPopup>
     </Menu>
   );
