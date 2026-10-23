@@ -107,13 +107,25 @@ describe("domain matching and policy", () => {
     expect(hostMatchesDomain("", "example.com")).toBe(false);
   });
 
-  it("allows humans and server callers, asks agents by default", () => {
+  it("allows server callers, asks agents and agent threads by default", () => {
     const ask = { mode: "ask" as const, allowedAgentIds: [], allowedDomains: [] };
-    expect(evaluateVaultPolicy({ policy: ask, caller: { kind: "human" } })).toBe("allow");
     expect(evaluateVaultPolicy({ policy: ask, caller: { kind: "server" } })).toBe("allow");
     expect(evaluateVaultPolicy({ policy: ask, caller: { kind: "agent", agentId: "a1" } })).toBe(
       "ask",
     );
+    expect(evaluateVaultPolicy({ policy: ask, caller: { kind: "thread", threadId: "t1" } })).toBe(
+      "ask",
+    );
+    const anyAgent = { mode: "allow" as const, allowedAgentIds: [], allowedDomains: [] };
+    expect(
+      evaluateVaultPolicy({ policy: anyAgent, caller: { kind: "thread", threadId: "t1" } }),
+    ).toBe("allow");
+    expect(
+      evaluateVaultPolicy({
+        policy: { ...anyAgent, allowedAgentIds: ["a1" as never] },
+        caller: { kind: "thread", threadId: "t1" },
+      }),
+    ).toBe("ask");
     const allow = {
       mode: "allow" as const,
       allowedAgentIds: ["a1" as never],

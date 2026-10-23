@@ -615,6 +615,24 @@ const make = Effect.gen(function* () {
     return typeof value === "string" && value.length > 0 ? value : undefined;
   };
 
+  /**
+   * An agentless thread's grant is the owner's approved `vault_use` row for
+   * that thread, item, field and domain. Editing the item afterwards ends it,
+   * so changing the policy in Settings revokes thread grants too.
+   */
+  const hasThreadGrant = (input: {
+    row: VaultRow;
+    threadId: string;
+    field: VaultField;
+    domain: string | null;
+  }) =>
+    sql<{
+      id: string;
+    }>`SELECT id FROM agent_approvals WHERE agent_id IS NULL AND status = 'approved' AND decided_at >= ${input.row.updated_at} AND json_extract(action_json, '$.actionKind') = 'vault_use' AND json_extract(action_json, '$.payload.processExposure') IS NULL AND json_extract(action_json, '$.payload.threadId') = ${input.threadId} AND json_extract(action_json, '$.payload.vaultItemId') = ${input.row.id} AND json_extract(action_json, '$.payload.field') = ${input.field} AND json_extract(action_json, '$.payload.domain') IS ${input.domain} LIMIT 1`.pipe(
+      Effect.map((rows) => rows.length > 0),
+      Effect.mapError(wrap),
+    );
+
   const use: Vault["Service"]["use"] = (input) =>
     Effect.gen(function* () {
       const row = yield* findRow({
@@ -656,28 +674,37 @@ const make = Effect.gen(function* () {
         caller: input.caller,
         domain: input.domain,
       });
-      if (decision === "ask") {
-        // Reuse the existing agent approval mechanism: one pending approval
-        // per agent/item/field/domain, decided by the owner (see
-        // AgentWorkspaceService.approve's vault_use case, which grants the
-        // item policy so a retry succeeds).
-        let approvalId: string | null = null;
-        if (input.caller.kind === "agent") {
-          approvalId = `approval:vault:${row.id}:${input.caller.agentId}:${input.field}:${input.domain ?? ""}`;
-          const actionJson = encodeApprovalActionJson({
-            actionKind: "vault_use",
-            payload: {
-              vaultItemId: row.id as never,
-              vaultItemName: row.name as never,
+      const caller = input.caller;
+      const threadGranted =
+        decision === "ask" && caller.kind === "thread"
+          ? yield* hasThreadGrant({
+              row,
+              threadId: caller.threadId,
               field: input.field,
               domain: input.domain ?? null,
-              threadId: input.threadId ?? null,
-            },
-          });
-          yield* sql`INSERT OR IGNORE INTO agent_approvals(id, agent_id, action_json, status, requested_at, source_run_id) VALUES (${approvalId}, ${input.caller.agentId}, ${actionJson}, 'pending', ${yield* now}, ${null})`.pipe(
-            Effect.mapError(wrap),
-          );
-        }
+            })
+          : false;
+      if (decision === "ask" && !threadGranted && caller.kind !== "server") {
+        // Reuse the existing agent approval mechanism: one pending approval
+        // per agent (or agentless thread)/item/field/domain, decided by the
+        // owner. AgentWorkspaceService.approve grants an agent the item
+        // policy; an agentless thread's approved row is its grant.
+        const agentKey = caller.kind === "agent" ? caller.agentId : null;
+        const threadId = caller.kind === "thread" ? caller.threadId : (input.threadId ?? null);
+        const approvalId = `approval:vault:${row.id}:${agentKey ?? `thread:${threadId}`}:${input.field}:${input.domain ?? ""}`;
+        const actionJson = encodeApprovalActionJson({
+          actionKind: "vault_use",
+          payload: {
+            vaultItemId: row.id as never,
+            vaultItemName: row.name as never,
+            field: input.field,
+            domain: input.domain ?? null,
+            threadId: threadId === null ? null : ThreadId.make(threadId),
+          },
+        });
+        yield* sql`INSERT OR IGNORE INTO agent_approvals(id, agent_id, action_json, status, requested_at, source_run_id) VALUES (${approvalId}, ${agentKey}, ${actionJson}, 'pending', ${yield* now}, ${null})`.pipe(
+          Effect.mapError(wrap),
+        );
         yield* record("approval_required");
         return {
           status: "approval_required",

@@ -144,6 +144,7 @@ it.effect("vault_fill types the value server-side and never returns it", () =>
         name: "GitHub",
         type: "login",
         allowedDomains: ["github.com"],
+        policy: { mode: "allow", allowedAgentIds: [], allowedDomains: ["github.com"] },
         secretFields: { username: "octo-user", password: "octo-password-123" },
       });
       expect(JSON.stringify(saved)).not.toContain("octo-password-123");
@@ -151,6 +152,19 @@ it.effect("vault_fill types the value server-side and never returns it", () =>
 
       const listed = yield* call("vault_list", {});
       expect(JSON.stringify(listed)).not.toContain("octo-password-123");
+
+      // A thread without a persistent agent is not the owner: the default
+      // policy asks before anything is typed.
+      yield* call("vault_save", {
+        name: "Asks first",
+        type: "login",
+        allowedDomains: ["github.com"],
+        secretFields: { password: "asks-first-password" },
+      });
+      expect(
+        yield* call("vault_fill", { name: "Asks first", field: "password", locator: "input" }),
+      ).toMatchObject({ status: "approval_required", domain: "github.com" });
+      expect(typed).toEqual([]);
 
       // Ordinary evaluation works until the vault sends a value to this tab.
       yield* broker.invoke({
@@ -322,6 +336,7 @@ it.effect("vault_fill fills card fields by field and never returns them", () =>
         name: "Visa",
         type: "card",
         allowedDomains: ["shop.test"],
+        policy: { mode: "allow", allowedAgentIds: [], allowedDomains: [] },
         secretFields: {
           cardNumber: "4242 4242 4242 4242",
           cardExpiryMonth: "08",

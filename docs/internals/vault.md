@@ -46,13 +46,17 @@ for one field, and every outcome is appended to `vault_usage`. Process delivery
 adds the credential revision, machine, project, provider instance, terminal id
 and delivery method. This records delivery, not every downstream API action.
 
-For browser fill, humans (owner-initiated turns) and server-internal callers
-are allowed.
-Agents default to `ask`: the first use inserts a pending row in the existing
+For browser fill, only server-internal callers skip the policy. An MCP caller
+is never treated as the owner: a persistent agent's thread is an `agent`
+caller and every other thread a `thread` caller, since a prompt-injected Work
+or chat agent must not inherit owner trust.
+Both default to `ask`: the first use inserts a pending row in the existing
 `agent_approvals` table with action kind `vault_use` and the tool returns a
 clear "waiting on you" result — no hang. Approving (existing agents RPCs)
 grants that item's policy to that agent, and to the approved domain when one
-was involved, so a retry succeeds. Rejecting leaves the policy untouched.
+was involved, so a retry succeeds. An agentless thread's row has no agent; the
+approved row itself is that thread's grant for the item, field and domain, and
+any later edit to the item ends it. Rejecting leaves the policy untouched.
 
 `resolveSecretByName` is the server-internal API for other server features
 (e.g. the integrations gateway): it returns a decrypted field by name and is

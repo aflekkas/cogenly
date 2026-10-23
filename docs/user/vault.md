@@ -42,8 +42,9 @@ leave a secret field blank to keep it, or type a new value to replace it.
 
 The first time an always-on agent wants to use an item, you get an approval
 request naming the item and field. Approving lets that agent use that item
-again (on the approved site, when one was involved). Ordinary chats you
-start yourself do not need approval for browser fill. CLI process exposure
+again (on the approved site, when one was involved). Agents in ordinary chats
+and Work ask too, unless the item allows any agent; to let them fill without
+asking, set the item to allow agents in Settings → Vault. CLI process exposure
 always needs its own approval.
 
 ## Usage log

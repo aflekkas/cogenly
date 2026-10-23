@@ -115,7 +115,7 @@ describe("Vault service", () => {
       const allowed = yield* vault.use({
         itemId: item.id,
         field: "password",
-        caller: { kind: "human" },
+        caller: { kind: "server" },
         threadId,
         action: "fill",
       });
@@ -124,7 +124,7 @@ describe("Vault service", () => {
       const code = yield* vault.use({
         itemId: item.id,
         field: "totp",
-        caller: { kind: "human" },
+        caller: { kind: "server" },
         threadId,
         action: "fill",
       });
@@ -134,7 +134,7 @@ describe("Vault service", () => {
       const wrongDomain = yield* vault.use({
         itemId: item.id,
         field: "password",
-        caller: { kind: "human" },
+        caller: { kind: "server" },
         domain: "evil.test",
         enforceAllowedDomains: true,
         action: "fill",
@@ -161,7 +161,7 @@ describe("Vault service", () => {
       expect(deleted).toBe(true);
       expect((yield* vault.list({})).items).toEqual([]);
       const afterDelete = yield* vault
-        .use({ itemId: item.id, field: "password", caller: { kind: "human" } })
+        .use({ itemId: item.id, field: "password", caller: { kind: "server" } })
         .pipe(Effect.flip);
       expect(afterDelete.reason).toBe("not_found");
     }).pipe(Effect.provide(layer)),
@@ -211,6 +211,63 @@ describe("Vault service", () => {
     }).pipe(Effect.provide(layer)),
   );
 
+  it.effect("asks an agentless thread by default and fills once allowed or approved", () =>
+    Effect.gen(function* () {
+      const vault = yield* Vault.Vault;
+      const sql = yield* SqlClient.SqlClient;
+      const caller = { kind: "thread", threadId } as const;
+      const { item } = yield* vault.create({
+        name: "GitHub",
+        type: "login",
+        allowedDomains: ["github.com"],
+        secretFields: { password: "octo-password-123" },
+      });
+      const fill = vault.use({
+        itemId: item.id,
+        field: "password",
+        caller,
+        threadId,
+        domain: "github.com",
+        enforceAllowedDomains: true,
+        action: "fill",
+      });
+      const asked = yield* fill;
+      expect(asked.status).toBe("approval_required");
+      const pending = yield* sql<{
+        agent_id: string | null;
+        status: string;
+      }>`SELECT agent_id, status FROM agent_approvals`;
+      expect(pending).toEqual([{ agent_id: null, status: "pending" }]);
+
+      // The owner's approval is the thread's grant, for this thread only.
+      yield* sql`UPDATE agent_approvals SET status = 'approved', decided_at = '2026-01-01T00:00:00.000Z'`;
+      expect(yield* fill).toMatchObject({ status: "allowed", value: "octo-password-123" });
+      expect(
+        (yield* vault.use({
+          itemId: item.id,
+          field: "password",
+          caller: { kind: "thread", threadId: "thread:other" },
+          domain: "github.com",
+        })).status,
+      ).toBe("approval_required");
+
+      yield* vault.update({
+        id: item.id,
+        policy: { mode: "allow", allowedAgentIds: [], allowedDomains: ["github.com"] },
+      });
+      expect(yield* fill).toMatchObject({ status: "allowed", value: "octo-password-123" });
+      expect(
+        (yield* vault.use({
+          itemId: item.id,
+          field: "password",
+          caller,
+          domain: "evil.test",
+          enforceAllowedDomains: true,
+        })).status,
+      ).toBe("denied");
+    }).pipe(Effect.provide(layer)),
+  );
+
   it.effect("stores a card in encrypted card fields and fills each by field", () =>
     Effect.gen(function* () {
       const vault = yield* Vault.Vault;
@@ -241,7 +298,7 @@ describe("Vault service", () => {
       expect(Object.values(listed.items[0]!)).not.toContain("987");
 
       const fill = (field: "cardNumber" | "cardExpiry" | "cardCvc" | "cardholderName") =>
-        vault.use({ itemId: item.id, field, caller: { kind: "human" }, threadId, action: "fill" });
+        vault.use({ itemId: item.id, field, caller: { kind: "server" }, threadId, action: "fill" });
       expect(yield* fill("cardNumber")).toMatchObject({
         status: "allowed",
         value: "4242 4242 4242 4242",
@@ -256,7 +313,7 @@ describe("Vault service", () => {
       const wrongDomain = yield* vault.use({
         itemId: item.id,
         field: "cardNumber",
-        caller: { kind: "human" },
+        caller: { kind: "server" },
         domain: "evil.test",
         enforceAllowedDomains: true,
         action: "fill",
@@ -302,10 +359,10 @@ describe("Vault service", () => {
       expect(item.cardLast4).toBeUndefined();
       expect(item.label).toBe("08/27");
       expect(
-        yield* vault.use({ itemId: item.id, field: "value", caller: { kind: "human" } }),
+        yield* vault.use({ itemId: item.id, field: "value", caller: { kind: "server" } }),
       ).toMatchObject({ status: "allowed", value: "4242" });
       const missing = yield* vault
-        .use({ itemId: item.id, field: "cardNumber", caller: { kind: "human" } })
+        .use({ itemId: item.id, field: "cardNumber", caller: { kind: "server" } })
         .pipe(Effect.flip);
       expect(missing.reason).toBe("field_missing");
     }).pipe(Effect.provide(layer)),
@@ -356,7 +413,7 @@ describe("Vault service", () => {
       const updated = yield* vault.update({ id: item.id, secretFields: { value: "" } });
       expect(updated.item.fields).toEqual([]);
       const missing = yield* vault
-        .use({ itemId: item.id, field: "value", caller: { kind: "human" } })
+        .use({ itemId: item.id, field: "value", caller: { kind: "server" } })
         .pipe(Effect.flip);
       expect(missing.reason).toBe("field_missing");
     }).pipe(Effect.provide(layer)),

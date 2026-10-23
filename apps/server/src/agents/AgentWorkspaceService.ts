@@ -520,6 +520,12 @@ const make = Effect.gen(function* () {
               );
               return { approval: yield* getApproval(id) };
             }
+            if (approval.agentId === null && approval.action.actionKind === "vault_use") {
+              // An agentless thread's browser-fill request: the approved row
+              // is the thread's grant (Vault.use reads it), so no policy changes.
+              yield* sql`UPDATE agent_approvals SET status = 'approved', decided_at = ${yield* now}, decided_by = 'user' WHERE id = ${id} AND status = 'pending'`;
+              return { approval: yield* getApproval(id) };
+            }
             if (approval.agentId === null) return yield* fail("An agent approval needs an agent.");
             const agent = yield* store.get(approval.agentId);
             let resultThreadId: ThreadId | null = null;

@@ -78,7 +78,11 @@ export const layer = McpToolAccess.toLayer(VaultToolkit, {
           ...(rest.itemId ? { itemId: VaultItemId.make(rest.itemId) } : {}),
           ...(rest.name ? { name: rest.name } : {}),
           field: rest.field,
-          caller: agent ? { kind: "agent", agentId: agent.id } : { kind: "human" },
+          // An MCP caller is never the owner: an agentless thread is subject
+          // to the item policy and asks like an agent.
+          caller: agent
+            ? { kind: "agent", agentId: agent.id }
+            : { kind: "thread", threadId: scope.thread.threadId },
           threadId: scope.thread.threadId,
           domain,
           action: "fill",

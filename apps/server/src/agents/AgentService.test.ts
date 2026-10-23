@@ -1150,6 +1150,29 @@ describe("agent scope, approvals and shared commitments", () => {
       }),
   );
 
+  it.effect("approving an agentless thread's vault use records its grant", () =>
+    Effect.gen(function* () {
+      const h = yield* makeHarness;
+      yield* Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const workspace = yield* Workspace.AgentWorkspaceService;
+        const action = JSON.stringify({
+          actionKind: "vault_use",
+          payload: {
+            vaultItemId: "vault:1",
+            vaultItemName: "GitHub",
+            field: "password",
+            domain: "github.com",
+            threadId: "thread:chat",
+          },
+        });
+        yield* sql`INSERT INTO agent_approvals(id, agent_id, action_json, status, requested_at) VALUES ('approval:vault:thread', NULL, ${action}, 'pending', '2026-01-01T00:00:00.000Z')`;
+        const { approval } = yield* workspace.approve("approval:vault:thread");
+        expect(approval).toMatchObject({ status: "approved", agentId: null });
+      }).pipe(Effect.provide(h.layer));
+    }),
+  );
+
   it.effect(
     "even an autonomous agent must propose a trigger, and approval creates the owner-visible schedule",
     () =>
