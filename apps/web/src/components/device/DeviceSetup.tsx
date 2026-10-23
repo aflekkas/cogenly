@@ -1,4 +1,4 @@
-import { DeviceHostUpdates } from "./DeviceHostUpdates";
+import { DeviceHostUpdates, deviceHostUpdateShown } from "./DeviceHostUpdates";
 import type { DevicePlatform, DeviceServiceState, EnvironmentId } from "@t3tools/contracts";
 import { Check } from "lucide-react";
 import { Check as CheckGlyph, CircleAlert } from "lucide";
@@ -130,73 +130,83 @@ export function DeviceSetup(props: {
       </WizardHeader>
 
       <WizardPanel>
-        <DeviceHostUpdates state={props.state} environmentId={props.environmentId} />
-        {step === 0 ? (
-          <section className="space-y-3 text-sm">
-            <h3 className="font-medium">Enable the device hub</h3>
-            <div className="flex items-start justify-between gap-4">
-              <p className="text-muted-foreground">{deviceHubDescription}</p>
-              <Switch
-                checked={enabled}
-                disabled={!canConfigure || busy || pending !== null}
-                aria-label="Enable device hub"
-                onCheckedChange={(checked) =>
-                  void update("hub", {
-                    enabled: Boolean(checked),
-                    ...(checked ? {} : { agentAccessEnabled: false }),
-                  })
-                }
-              />
-            </div>
-            <DeviceHubSetupStatus
-              state={props.state}
-              pending={pending === "hub" || (busy && pending !== "agent")}
-            />
-          </section>
-        ) : null}
+        <div className="flex flex-col gap-5">
+          {step !== 0 ? (
+            <DeviceHostUpdates state={props.state} environmentId={props.environmentId} />
+          ) : null}
+          {step === 0 ? (
+            <section className="space-y-3 text-sm">
+              <h3 className="font-medium">Enable the device hub</h3>
+              <div className="flex items-start justify-between gap-4">
+                <p className="text-muted-foreground">{deviceHubDescription}</p>
+                <Switch
+                  checked={enabled}
+                  disabled={!canConfigure || busy || pending !== null}
+                  aria-label="Enable device hub"
+                  onCheckedChange={(checked) =>
+                    void update("hub", {
+                      enabled: Boolean(checked),
+                      ...(checked ? {} : { agentAccessEnabled: false }),
+                    })
+                  }
+                />
+              </div>
+              {/* A machine's own install card already says what is happening;
+                the generic line would repeat it. */}
+              {deviceHostUpdateShown(props.state) ? (
+                <DeviceHostUpdates state={props.state} environmentId={props.environmentId} />
+              ) : (
+                <DeviceHubSetupStatus
+                  state={props.state}
+                  pending={pending === "hub" || (busy && pending !== "agent")}
+                />
+              )}
+            </section>
+          ) : null}
 
-        {step === 1 || (step === 0 && enabled && localPlatformsUnavailable) ? (
-          <section className={cn("space-y-3 text-sm", step === 0 && "mt-4")}>
-            <h3 className="font-medium">Check simulator support</h3>
-            <DevicePlatformSetup
-              state={props.state}
-              checking={pending === "check"}
-              disabled={!enabled || busy || pending !== null}
-              onCheck={() => {
-                setPending("check");
-                void list({ environmentId: props.environmentId, input: {} }).finally(() =>
-                  setPending(null),
-                );
-              }}
-            />
-          </section>
-        ) : null}
-
-        {step === 2 ? (
-          <section className="space-y-3 text-sm">
-            <h3 className="font-medium">Allow agent control</h3>
-            <div className="flex items-start justify-between gap-4">
-              <p className="text-muted-foreground">{agentDeviceDescription}</p>
-              <Switch
-                checked={props.state.agentAccessEnabled}
-                disabled={!canConfigure || !enabled || busy || pending !== null}
-                aria-label="Allow agents to control devices"
-                onCheckedChange={(checked) =>
-                  void update("agent", { agentAccessEnabled: Boolean(checked) })
-                }
+          {step === 1 || (step === 0 && enabled && localPlatformsUnavailable) ? (
+            <section className="space-y-3 text-sm">
+              <h3 className="font-medium">Check simulator support</h3>
+              <DevicePlatformSetup
+                state={props.state}
+                checking={pending === "check"}
+                disabled={!enabled || busy || pending !== null}
+                onCheck={() => {
+                  setPending("check");
+                  void list({ environmentId: props.environmentId, input: {} }).finally(() =>
+                    setPending(null),
+                  );
+                }}
               />
-            </div>
-            <AgentDeviceSetupStatus state={props.state} pending={pending === "agent"} />
-            <p className="text-xs text-muted-foreground">
-              Leave this off to keep manual device controls without giving agents access.
+            </section>
+          ) : null}
+
+          {step === 2 ? (
+            <section className="space-y-3 text-sm">
+              <h3 className="font-medium">Allow agent control</h3>
+              <div className="flex items-start justify-between gap-4">
+                <p className="text-muted-foreground">{agentDeviceDescription}</p>
+                <Switch
+                  checked={props.state.agentAccessEnabled}
+                  disabled={!canConfigure || !enabled || busy || pending !== null}
+                  aria-label="Allow agents to control devices"
+                  onCheckedChange={(checked) =>
+                    void update("agent", { agentAccessEnabled: Boolean(checked) })
+                  }
+                />
+              </div>
+              <AgentDeviceSetupStatus state={props.state} pending={pending === "agent"} />
+              <p className="text-xs text-muted-foreground">
+                Leave this off to keep manual device controls without giving agents access.
+              </p>
+            </section>
+          ) : null}
+          {props.state.hostStatus === "failed" && props.state.hostStatusDetail ? (
+            <p role="alert" className="text-xs text-destructive">
+              {props.state.hostStatusDetail}
             </p>
-          </section>
-        ) : null}
-        {props.state.hostStatus === "failed" && props.state.hostStatusDetail ? (
-          <p role="alert" className="mt-3 text-xs text-destructive">
-            {props.state.hostStatusDetail}
-          </p>
-        ) : null}
+          ) : null}
+        </div>
       </WizardPanel>
 
       <WizardFooter>

@@ -4,6 +4,16 @@ import { Button } from "~/components/ui/button";
 import { deviceEnvironment } from "~/state/device";
 import { useAtomCommand } from "~/state/use-atom-command";
 
+const SHOWN_HOST_STATUSES = new Set(["installing", "starting", "failed"]);
+
+/** Whether any host has an install, start or failure card to show. */
+export function deviceHostUpdateShown(state: DeviceServiceState): boolean {
+  return (
+    state.hostStatus !== "disabled" &&
+    state.hosts.some((host) => SHOWN_HOST_STATUSES.has(state.hostStatuses[host.id]?.status ?? ""))
+  );
+}
+
 /** Shared by setup, Settings, and the Device panel so automatic updates stay visible. */
 export function DeviceHostUpdates({
   state,
@@ -19,7 +29,7 @@ export function DeviceHostUpdates({
     <div className="space-y-2">
       {state.hosts.map((host) => {
         const status = state.hostStatuses[host.id];
-        if (!status || !["installing", "starting", "failed"].includes(status.status)) return null;
+        if (!status || !SHOWN_HOST_STATUSES.has(status.status)) return null;
         const failed = status.status === "failed";
         return (
           <div
