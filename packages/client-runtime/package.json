@@ -139,6 +139,10 @@
       "types": "./src/state/attachments.ts",
       "default": "./src/state/attachments.ts"
     },
+    "./state/threadApprovals": {
+      "types": "./src/state/threadApprovals.ts",
+      "default": "./src/state/threadApprovals.ts"
+    },
     "./text-paste": {
       "types": "./src/textPaste.ts",
       "default": "./src/textPaste.ts"

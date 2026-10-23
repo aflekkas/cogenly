@@ -149,6 +149,29 @@ describe("command permissions", () => {
     ),
   );
 
+  it.effect("shows a thread's pending approvals with the read grant; deciding needs operate", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const registry = yield* setup;
+        const see = createCommandPermissions(runtime, WS_METHODS.threadApprovalsSubscribe);
+        const decide = createCommandPermissions(runtime, WS_METHODS.agentsApprove);
+        registry.set(
+          sessions(env),
+          AsyncResult.success({
+            ...grant(false),
+            scopes: [AuthOrchestrationReadScope],
+            permissions: [AuthOrchestrationReadScope],
+          }),
+        );
+        expect(registry.get(see.permissionAtom(env))).toBe(true);
+        expect(registry.get(decide.permissionAtom(env))).toBe(false);
+        expect((yield* decide.authorize(registry, env).pipe(Effect.flip)).requiredScope).toBe(
+          AuthOrchestrationOperateScope,
+        );
+      }),
+    ),
+  );
+
   it.effect("guards search with the destination read grant without requiring operate access", () =>
     Effect.scoped(
       Effect.gen(function* () {
