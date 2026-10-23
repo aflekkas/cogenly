@@ -126,7 +126,7 @@ describe("SharedState", () => {
       for (let i = 0; i < 40; i++)
         yield* state.write("project", `label:${i}`, {
           ...project,
-          instructions: "x".repeat(32000),
+          instructions: "x".repeat(20000),
         });
       const first = yield* state.readBatch(0, peer, false);
       expect(first.changes.length).toBeLessThanOrEqual(32);

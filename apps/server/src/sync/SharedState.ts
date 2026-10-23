@@ -113,6 +113,14 @@ const make = Effect.gen(function* () {
     project: boolean,
   ) {
     const current = yield* get(change.kind, change.id);
+    for (const [key, clock] of Object.entries(change.clocks)) {
+      if (
+        current?.clocks[key] &&
+        compareClock(clock, current.clocks[key]) === 0 &&
+        encodeJson(change.fields[key]) !== encodeJson(current.fields[key])
+      )
+        return yield* new SharedStateError({ reason: "invalid-document" });
+    }
     const owner = current?.fields.ownerMachine;
     const ownerClock = current?.clocks.ownerMachine;
     const incomingOwner = change.fields.ownerMachine;
@@ -127,6 +135,16 @@ const make = Effect.gen(function* () {
     )
       return yield* new SharedStateError({ reason: "owner-change" });
     const merged = mergeDocument(current, change);
+    if (merged.kind === "schedule" && typeof merged.fields.agentId === "string") {
+      const agent = yield* get("agent", merged.fields.agentId);
+      if (
+        agent &&
+        (agent.tombstone ||
+          (agent.fields.ownerMachine !== undefined &&
+            merged.fields.ownerMachine !== agent.fields.ownerMachine))
+      )
+        return yield* new SharedStateError({ reason: "owner-change" });
+    }
     if (current && encodeJson(current) === encodeJson(merged)) return false;
     yield* sql`INSERT INTO shared_documents(kind,id,fields_json,clocks_json,tombstone_json,updated_by_env) VALUES (${merged.kind},${merged.id},${encodeJson(merged.fields)},${encodeJson(merged.clocks)},${merged.tombstone ? encodeJson(merged.tombstone) : null},${merged.updatedBy}) ON CONFLICT(kind,id) DO UPDATE SET fields_json=excluded.fields_json,clocks_json=excluded.clocks_json,tombstone_json=excluded.tombstone_json,updated_by_env=excluded.updated_by_env`;
     // Log the original delta, not the merged document: authorship must survive hub relay.
@@ -245,6 +263,8 @@ const make = Effect.gen(function* () {
           if (
             new TextEncoder().encode(encodeJson(batch)).length > SHARED_BATCH_BYTES ||
             batch.cursor < batch.after ||
+            batch.cursor - batch.after > SHARED_BATCH_LIMIT ||
+            batch.changes.length > batch.cursor - batch.after ||
             (batch.cursor === batch.after && batch.changes.length > 0)
           )
             return yield* new SharedStateError({ reason: "invalid-cursor" });

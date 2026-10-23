@@ -154,6 +154,26 @@ const make = Effect.gen(function* () {
     );
   const workspace = (agent: Agent) =>
     projections.getThread(agent.conversationThreadId).pipe(Effect.map((t) => t.projectId));
+  // Shared agent configuration can arrive before its owner has opened the conversation.
+  // Only that owner creates the fixed thread id; other machines keep configuration only.
+  const ensureConversation = Effect.fn("AgentService.ensureConversation")(function* (agent: Agent) {
+    if (agent.ownerMachine !== undefined && agent.ownerMachine !== shared.environmentId) return;
+    if ((yield* projections.getThreadShell(agent.conversationThreadId)) !== null) return;
+    const projectId = agent.projectId ?? (yield* folders.ensureScratchProject).projectId;
+    yield* launch.launch({
+      agent: { id: agent.id, role: "conversation" },
+      commandId: CommandId.make(`agent-create:${agent.id}`),
+      threadId: agent.conversationThreadId,
+      projectId,
+      title: agent.name,
+      modelSelection: agent.modelSelection,
+      runtimeMode: agent.runtimeMode,
+      interactionMode: "default",
+      workspaceStrategy: { type: "root" },
+      createdBy: "user",
+      creationSource: "server",
+    });
+  });
   // This is a passive assistant message: no message.dispatch and no provider effect.
   // A stable command receipt makes replay after a crash exactly-once in the conversation.
   const post = (agent: Agent, run: AgentWorkRun) =>
@@ -229,8 +249,42 @@ const make = Effect.gen(function* () {
       yield* store.markPosted(run.id);
       yield* changed;
     });
+  const removeAgent = (id: AgentId) =>
+    Effect.gen(function* () {
+      const agent = (yield* store.list()).find((candidate) => candidate.id === id);
+      if (agent === undefined) return { deleted: false };
+      // Retire before stopping work so a due trigger cannot launch while deletion waits.
+      yield* store.retire(id);
+      const runs = yield* store.runs(id);
+      const threadIds = [
+        agent.conversationThreadId,
+        ...runs
+          .filter((run) => run.status === "starting" || run.status === "running")
+          .map((run) => run.workThreadId),
+      ];
+      for (const threadId of agent.ownerMachine === undefined ||
+      agent.ownerMachine === shared.environmentId
+        ? threadIds
+        : []) {
+        const thread = yield* projections.getThreadShell(threadId);
+        if (thread === null) continue;
+        yield* threads.dispatch({
+          type: "thread.stop",
+          commandId: CommandId.make(`agent-delete:${id}:${threadId}`),
+          threadId,
+          reason: "Agent deleted.",
+        });
+      }
+      const deleted = yield* store.delete(id);
+      yield* changed;
+      return { deleted };
+    }).pipe(Effect.mapError(failure));
   const reconcile = () =>
     Effect.gen(function* () {
+      const deletions = yield* sql<{
+        id: string;
+      }>`SELECT d.id FROM shared_documents d JOIN agents a ON a.agent_id=d.id WHERE d.kind='agent' AND d.tombstone_json IS NOT NULL`;
+      for (const document of deletions) yield* removeAgent(AgentId.make(document.id));
       const runs = yield* store.runs();
       for (const record of runs) {
         yield* Effect.gen(function* () {
@@ -403,10 +457,13 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const at = DateTime.formatIso(yield* DateTime.now);
         const existing = input.id === undefined ? null : yield* store.get(input.id);
+        const ownerMachine =
+          input.ownerMachine ?? existing?.ownerMachine ?? (yield* shared.defaultOwner);
+        const ownsAgent = ownerMachine === shared.environmentId;
         const id = existing?.id ?? AgentId.make(`agent:${yield* crypto.randomUUIDv4()}`);
         const conversationThreadId =
           existing?.conversationThreadId ?? ThreadId.make(`agent-conversation:${id}`);
-        if (existing === null) {
+        if (existing === null && ownsAgent) {
           if (input.projectId === null)
             return yield* new AgentError({ message: "Choose a project to create an agent." });
           // Before the launch, so a refused project leaves no orphan conversation.
@@ -427,6 +484,7 @@ const make = Effect.gen(function* () {
           });
         }
         if (
+          ownsAgent &&
           input.projectFolderId !== undefined &&
           (existing === null
             ? input.projectFolderId !== null
@@ -454,8 +512,7 @@ const make = Effect.gen(function* () {
             ));
         const agent = yield* store.save({
           ...profile,
-          ownerMachine:
-            input.ownerMachine ?? existing?.ownerMachine ?? (yield* shared.defaultOwner),
+          ownerMachine,
           fallbackChain: input.fallbackChain ?? existing?.fallbackChain ?? [],
           projectFolderId: null,
           responsibility: input.responsibility ?? existing?.responsibility ?? "",
@@ -471,7 +528,8 @@ const make = Effect.gen(function* () {
           fallbackReason: chainChanged ? null : (existing?.fallbackReason ?? null),
           fallbackUntil: chainChanged ? null : (existing?.fallbackUntil ?? null),
         });
-        if (existing !== null && agent.ownerMachine === shared.environmentId) {
+        if (existing !== null && ownsAgent) {
+          yield* ensureConversation(agent);
           yield* threads.dispatch({
             type: "thread.runtime-mode.set",
             commandId: CommandId.make(`agent-mode:${id}:${at}`),
@@ -485,7 +543,7 @@ const make = Effect.gen(function* () {
             title: agent.name,
           });
         }
-        if (existing === null && input.kickoff === true) {
+        if (existing === null && ownsAgent && input.kickoff === true) {
           // The agent opens with its own turn; clients hide a turn the owner
           // did not write. The agent exists either way, so a lost greeting
           // is a warning, not a failed create.
@@ -603,36 +661,13 @@ const make = Effect.gen(function* () {
         });
         return { proposal: input.proposal };
       }).pipe(Effect.mapError(failure)),
-    delete: (id) =>
-      Effect.gen(function* () {
-        const agent = (yield* store.list()).find((candidate) => candidate.id === id);
-        if (agent === undefined) return { deleted: false };
-        // Retire before stopping work so a due trigger cannot launch while deletion waits.
-        yield* store.retire(id);
-        const runs = yield* store.runs(id);
-        const threadIds = [
-          agent.conversationThreadId,
-          ...runs
-            .filter((run) => run.status === "starting" || run.status === "running")
-            .map((run) => run.workThreadId),
-        ];
-        for (const threadId of threadIds) {
-          const thread = yield* projections.getThreadShell(threadId);
-          if (thread === null) continue;
-          yield* threads.dispatch({
-            type: "thread.stop",
-            commandId: CommandId.make(`agent-delete:${id}:${threadId}`),
-            threadId,
-            reason: "Agent deleted.",
-          });
-        }
-        const deleted = yield* store.delete(id);
-        yield* changed;
-        return { deleted };
-      }).pipe(Effect.mapError(failure)),
+    delete: removeAgent,
     send: (input) =>
       Effect.gen(function* () {
         const agent = yield* store.get(input.id);
+        if (agent.ownerMachine !== undefined && agent.ownerMachine !== shared.environmentId)
+          return yield* new AgentError({ message: "This agent runs on another machine." });
+        yield* ensureConversation(agent);
         // Backoff and daily caps govern background reservations only.
         // An owner text always reaches the provider. Intake claims its pending
         // uploads into the conversation, as it does for a chat send.
@@ -676,6 +711,7 @@ const make = Effect.gen(function* () {
           (task.ownerMachine !== undefined && task.ownerMachine !== shared.environmentId)
         )
           return false;
+        yield* ensureConversation(agent);
         const id = `agent-work:${fireKey}`;
         const workThreadId = ThreadId.make(id);
         let usedSelection = agent.modelSelection;

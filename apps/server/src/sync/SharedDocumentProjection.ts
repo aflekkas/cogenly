@@ -8,6 +8,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
+import { nextScheduledRunAt } from "../scheduledTasks/Schedule.ts";
 import { decodeAgent, decodeProject, decodeSchedule } from "./documentSchemas.ts";
 
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
@@ -150,13 +151,18 @@ export const projectDocument = Effect.fn("SharedState.projectDocument")(function
   const { kind, id, fields } = document;
   const at = DateTime.formatIso(yield* DateTime.now);
   if (document.tombstone) {
-    if (kind === "project") yield* sql`DELETE FROM project_labels WHERE label_id=${id}`;
+    if (kind === "project") {
+      yield* sql`UPDATE commitments SET payload_json=json_set(payload_json,'$.labelIds',json((SELECT json_group_array(l.value) FROM json_each(commitments.payload_json,'$.labelIds') l WHERE l.value<>${id}))) WHERE id IN (SELECT commitment_id FROM commitment_labels WHERE label_id=${id})`;
+      yield* sql`DELETE FROM commitment_labels WHERE label_id=${id}`;
+      yield* sql`UPDATE facts SET updated_at=${at},payload_json=json_set(payload_json,'$.updatedAt',${at},'$.labelIds',json((SELECT json_group_array(l.value) FROM json_each(facts.payload_json,'$.labelIds') l WHERE l.value<>${id}))) WHERE id IN (SELECT fact_id FROM fact_labels WHERE label_id=${id})`;
+      yield* sql`INSERT INTO fact_history(fact_id,payload_json) SELECT f.id,json_object('id',${`sync-delete:${id}:${at}:`} || f.id,'factId',f.id,'who','user','at',${at},'fact',json(f.payload_json)) FROM facts f WHERE f.id IN (SELECT fact_id FROM fact_labels WHERE label_id=${id})`;
+      yield* sql`DELETE FROM project_labels WHERE label_id=${id}`;
+    }
     if (kind === "agent") {
-      // Local work/history is retained. The owner reconciler handles any run already started.
+      // Keep the row and run ledger until AgentService uses its normal stop/delete path.
       yield* sql`UPDATE agents SET enabled=0 WHERE agent_id=${id}`;
       yield* sql`DELETE FROM scheduled_task_webhook_deliveries WHERE task_id IN (SELECT task_id FROM scheduled_tasks WHERE agent_id=${id})`;
       yield* sql`DELETE FROM scheduled_tasks WHERE agent_id=${id}`;
-      yield* sql`DELETE FROM agents WHERE agent_id=${id}`;
     }
     if (kind === "schedule") {
       yield* sql`DELETE FROM scheduled_task_webhook_deliveries WHERE task_id=${id}`;
@@ -256,5 +262,11 @@ export const projectDocument = Effect.fn("SharedState.projectDocument")(function
       : f.workspaceStrategy;
   const projectId = locals[0]?.project_id ?? previous[0]?.project_id ?? `remote:${remote ?? id}`;
   const schedule = encodeJson(f.schedule);
-  yield* sql`INSERT INTO scheduled_tasks(task_id,agent_id,title,prompt,enabled,schedule_json,project_id,thread_id,workspace_strategy_json,model_selection_json,runtime_mode,interaction_mode,created_by,creation_source,created_at,updated_at,next_run_at,last_run_status,run_count,owner_machine) VALUES (${id},${f.agentId},${f.title},${f.prompt},${f.enabled ? 1 : 0},${schedule},${projectId},${previous[0]?.thread_id ?? null},${encodeJson(strategy)},${encodeJson(f.modelSelection)},${f.runtimeMode},${f.interactionMode},'user','web',${f.createdAt},${at},NULL,'never',0,${f.ownerMachine}) ON CONFLICT(task_id) DO UPDATE SET agent_id=excluded.agent_id,title=excluded.title,prompt=excluded.prompt,enabled=excluded.enabled,schedule_json=excluded.schedule_json,project_id=excluded.project_id,workspace_strategy_json=excluded.workspace_strategy_json,model_selection_json=excluded.model_selection_json,runtime_mode=excluded.runtime_mode,interaction_mode=excluded.interaction_mode,updated_at=excluded.updated_at,owner_machine=excluded.owner_machine,next_run_at=CASE WHEN scheduled_tasks.schedule_json=excluded.schedule_json AND scheduled_tasks.enabled=excluded.enabled THEN scheduled_tasks.next_run_at ELSE NULL END`;
+  const occurrence = f.enabled
+    ? nextScheduledRunAt(f.schedule, yield* DateTime.now, {
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      })
+    : null;
+  const next = occurrence === null ? null : DateTime.formatIso(occurrence);
+  yield* sql`INSERT INTO scheduled_tasks(task_id,agent_id,title,prompt,enabled,schedule_json,project_id,thread_id,workspace_strategy_json,model_selection_json,runtime_mode,interaction_mode,created_by,creation_source,created_at,updated_at,next_run_at,last_run_status,run_count,owner_machine) VALUES (${id},${f.agentId},${f.title},${f.prompt},${f.enabled ? 1 : 0},${schedule},${projectId},${previous[0]?.thread_id ?? null},${encodeJson(strategy)},${encodeJson(f.modelSelection)},${f.runtimeMode},${f.interactionMode},'user','web',${f.createdAt},${at},${next},'never',0,${f.ownerMachine}) ON CONFLICT(task_id) DO UPDATE SET agent_id=excluded.agent_id,title=excluded.title,prompt=excluded.prompt,enabled=excluded.enabled,schedule_json=excluded.schedule_json,project_id=excluded.project_id,workspace_strategy_json=excluded.workspace_strategy_json,model_selection_json=excluded.model_selection_json,runtime_mode=excluded.runtime_mode,interaction_mode=excluded.interaction_mode,updated_at=excluded.updated_at,owner_machine=excluded.owner_machine,next_run_at=CASE WHEN scheduled_tasks.schedule_json=excluded.schedule_json AND scheduled_tasks.enabled=excluded.enabled THEN scheduled_tasks.next_run_at ELSE excluded.next_run_at END`;
 }, Effect.mapError(storage));

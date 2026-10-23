@@ -1,5 +1,7 @@
 import {
   Agent,
+  IsoDateTime,
+  PROJECT_INSTRUCTIONS_MAX_LENGTH,
   ProjectLabel,
   ProjectSourceLink,
   ScheduledTask,
@@ -14,7 +16,8 @@ const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const PortableId = Schema.String.check(Schema.isPattern(/^[a-zA-Z0-9][a-zA-Z0-9:._-]{0,199}$/));
 const Remote = Schema.String.check(
   Schema.isMaxLength(1000),
-  Schema.isPattern(/^[a-z0-9.-]+\.[a-z0-9.-]+\/[a-zA-Z0-9_.-]+(?:\/[a-zA-Z0-9_.-]+)+$/),
+  Schema.isPattern(/^[a-z0-9][a-z0-9.-]*\/[a-zA-Z0-9_.-]+(?:\/[a-zA-Z0-9_.-]+)+$/),
+  Schema.makeFilter((value) => value.split("/").every((part) => part !== "." && part !== "..")),
 );
 const RelativePath = Schema.String.check(
   Schema.isMaxLength(1000),
@@ -26,10 +29,10 @@ const RelativePath = Schema.String.check(
 const Selection = Agent.fields.modelSelection;
 export const ProjectFields = Schema.Struct({
   name: ProjectLabel.fields.name,
-  color: Schema.NullOr(Schema.String.check(Schema.isMaxLength(100))),
-  description: Schema.NullOr(Schema.String.check(Schema.isMaxLength(32000))),
-  instructions: Schema.String.check(Schema.isMaxLength(32000)),
-  archivedAt: Schema.NullOr(Schema.String.check(Schema.isMaxLength(50))),
+  color: Schema.NullOr(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(100))),
+  description: Schema.NullOr(Schema.String.check(Schema.isMaxLength(4000))),
+  instructions: Schema.String.check(Schema.isMaxLength(PROJECT_INSTRUCTIONS_MAX_LENGTH)),
+  archivedAt: Schema.NullOr(IsoDateTime),
   repositories: Schema.Array(
     Schema.Struct({ remote: Remote, directoryName: Schema.NullOr(RelativePath) }),
   ).check(Schema.isMaxLength(100)),

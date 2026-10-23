@@ -167,6 +167,9 @@ import * as ResourceAttribution from "./resourceTelemetry/ResourceAttribution.ts
 import * as ResourceMonitorBinary from "./resourceTelemetry/ResourceMonitorBinary.ts";
 import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as UsageService from "./usage/UsageService.ts";
+import * as Scheduler from "./scheduling/Scheduler.ts";
+import * as SharedState from "./sync/SharedState.ts";
+import * as SharedSync from "./sync/SharedSync.ts";
 import * as RuntimeLayer from "./orchestration-v2/runtimeLayer.ts";
 import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
 import * as ProjectLabelFolders from "./projectLabels/ProjectLabelFolders.ts";
@@ -561,7 +564,12 @@ const layerProviderInstallationRefresh = Layer.effectDiscard(
 
 const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   AgentAwarenessRelay.layer,
-  layerMachines,
+  SharedSync.layer.pipe(
+    Layer.provideMerge(layerMachines),
+    Layer.provide(SharedState.layer),
+    Layer.provide(ServerEnvironment.layerIdentity),
+    Layer.provide(Scheduler.layer),
+  ),
   // Asks Cogenly Connect to deliver webhooks it held while this environment was offline.
   HeldHooksWaker.layer,
   layerThreadSettlementWorker,

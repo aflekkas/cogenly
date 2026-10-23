@@ -241,9 +241,9 @@ const makeHarness = Effect.sync(() => {
   const eventStore = EventStore.layerFromOrchestrationEventStore.pipe(
     Layer.provide(LabelEvents.layer.pipe(Layer.provide(database))),
   );
-  const bus = AgentEvents.layer.pipe(
-    Layer.provide(Layer.mergeAll(agents, schedules, store, database)),
-  );
+  const bus = AgentEvents.layer
+    .pipe(Layer.provide(layerSharedIdentity))
+    .pipe(Layer.provide(Layer.mergeAll(agents, schedules, store, database)));
   const reactor = EventReactor.layer.pipe(
     Layer.provide(Layer.mergeAll(bus, eventStore, boundaries, database)),
   );
