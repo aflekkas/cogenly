@@ -59,6 +59,14 @@ never exposed through MCP or RPC. It takes the destination host and refuses
 items whose allowed domains miss it unless the caller says the owner approved
 the item there; integrations record those approvals per credential origin.
 
+Integration OAuth tokens are vault items too, one per integration account,
+written and read only by the gateway ([IntegrationTokens.ts](../../apps/server/src/integrations/IntegrationTokens.ts)).
+Each secret gets its own field (access token `value`, refresh token
+`password`, a registered client's secret `username`) because scrubbing matches
+exact field values: a JSON blob in one field would leave the tokens inside it
+unscrubbed. Expiry and the client registration are not secret and stay with the
+integration.
+
 Accounts reference vault items without copying their encrypted identities. The
 legacy backfill reads metadata only and preserves item ids and encrypted
 bodies. Account lookups filter by project, including direct id lookups; an
