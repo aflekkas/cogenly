@@ -31,6 +31,7 @@ const StoredDpopKey = Schema.Struct({
 });
 const StoredDpopKeyJson = Schema.fromJsonString(StoredDpopKey);
 const decodeStoredDpopKey = Schema.decodeUnknownEffect(StoredDpopKeyJson);
+const decodePublicJwk = Schema.decodeUnknownEffect(DpopPublicJwk);
 const encodeStoredDpopKey = Schema.encodeEffect(StoredDpopKeyJson);
 
 export interface PeerDpopKey {
@@ -65,9 +66,7 @@ export const getOrCreatePeerDpopKey = Effect.gen(function* () {
   const secrets = yield* ServerSecretStore.ServerSecretStore;
   const generated = NodeCrypto.generateKeyPairSync("ec", { namedCurve: "P-256" });
   const privateJwk = generated.privateKey.export({ format: "jwk" });
-  const publicJwk = yield* Schema.decodeUnknownEffect(DpopPublicJwk)(
-    generated.publicKey.export({ format: "jwk" }),
-  ).pipe(
+  const publicJwk = yield* decodePublicJwk(generated.publicKey.export({ format: "jwk" })).pipe(
     Effect.mapError(
       (cause) =>
         new ServerSecretStore.SecretStoreDecodeError({ resource: "machine peer key", cause }),

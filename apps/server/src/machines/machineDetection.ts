@@ -12,7 +12,7 @@ import type {
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
-import * as NodeDns from "node:dns/promises";
+import * as NodeDnsPromises from "node:dns/promises";
 import * as NodeOS from "node:os";
 
 import * as ProcessRunner from "../processRunner.ts";
@@ -145,7 +145,7 @@ const reverseDnsProvider = Effect.gen(function* () {
         ),
     )?.address;
   if (address === undefined) return null;
-  const names = yield* Effect.tryPromise(() => NodeDns.reverse(address)).pipe(
+  const names = yield* Effect.tryPromise(() => NodeDnsPromises.reverse(address)).pipe(
     Effect.timeoutOption("2 seconds"),
     Effect.orElseSucceed(() => undefined),
   );

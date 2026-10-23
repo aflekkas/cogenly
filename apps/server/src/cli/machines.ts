@@ -57,10 +57,12 @@ class MachinesCliError extends Schema.TaggedError<MachinesCliError>()("MachinesC
 
 const JOIN_CODE_PREFIX = "cogenly-join:";
 const JoinCodeJson = Schema.fromJsonString(Schema.toCodecJson(MachineJoinCode));
+const encodeJoinCodeJson = Schema.encodeEffect(JoinCodeJson);
+const decodeJoinCodeJson = Schema.decodeEffect(JoinCodeJson);
 
 /** One copyable token: the grant plus the hub identity the joiner pins. */
 export const encodeJoinCode = (code: MachineJoinCode) =>
-  Schema.encodeEffect(JoinCodeJson)(code).pipe(
+  encodeJoinCodeJson(code).pipe(
     Effect.map((json) => `${JOIN_CODE_PREFIX}${Base64Url.encode(json)}`),
   );
 
@@ -72,7 +74,7 @@ export const decodeJoinCode = (text: string) =>
       : trimmed;
     const json = Base64Url.decodeString(body);
     if (Result.isFailure(json)) return yield* Effect.fail(json.failure);
-    return yield* Schema.decodeEffect(JoinCodeJson)(json.success);
+    return yield* decodeJoinCodeJson(json.success);
   }).pipe(
     Effect.mapError(
       (cause) =>
