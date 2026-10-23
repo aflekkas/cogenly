@@ -9,8 +9,9 @@ work launches.
 ## Pair from the terminal
 
 Keep Cogenly running on both machines. The computer joining must be able to
-reach the hub at an HTTPS address or over an encrypted network such as
-Tailscale. See [remote access](./remote-access.md) to make the hub reachable.
+reach the hub through Tailscale Serve HTTPS (start the hub with
+`--tailscale-serve`) or a private SSH forward to its loopback listener.
+Public Connect URLs and public reverse proxies cannot carry peer pairing. See [remote access](./remote-access.md) to make the hub reachable.
 
 On the hub, run:
 

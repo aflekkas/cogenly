@@ -49,6 +49,7 @@ import * as Machines from "./Machines.ts";
 import * as PeerChannels from "./PeerChannels.ts";
 import * as PeerHttp from "./peerHttp.ts";
 import * as PeerHub from "./PeerHub.ts";
+import { acceptsPeerIngress } from "./peerIngress.ts";
 import { normalizePeerRoute, normalizePeerRoutes } from "./peerRoutes.ts";
 import { createPeerDpopProof, getOrCreatePeerDpopKey } from "./peerCrypto.ts";
 
@@ -242,6 +243,76 @@ const startHttpObserver = (handler: NodeHttp.RequestListener) =>
   );
 
 describe("machines", () => {
+  it("accepts only loopback sockets, with explicit Serve forwarding and no public proxy markers", () => {
+    const config = { tailscaleServeEnabled: true };
+    const serve = {
+      "x-forwarded-for": "100.64.0.2",
+      "x-forwarded-host": "hub.ts.net",
+      "x-forwarded-proto": "https",
+    };
+    const request = (remote: string | undefined, headers: Record<string, string> = {}) =>
+      HttpServerRequest.fromWeb(new Request("http://127.0.0.1/peer", { headers })).modify({
+        remoteAddress: Option.fromUndefinedOr(remote),
+      });
+    for (const remote of ["127.0.0.1", "::1", "::ffff:127.0.0.1"]) {
+      assert.isTrue(acceptsPeerIngress(request(remote), config));
+      assert.isTrue(acceptsPeerIngress(request(remote, serve), config));
+    }
+    for (const remote of [undefined, "203.0.113.1", "100.64.0.2", "localhost"]) {
+      assert.isFalse(acceptsPeerIngress(request(remote, serve), config));
+    }
+    for (const headers of [
+      { ...serve, "cf-ray": "edge-ray", "tailscale-user-login": "spoof@example.com" },
+      { ...serve, "cf-connecting-ip": "203.0.113.1" },
+      { ...serve, "tailscale-funnel-request": "?1" },
+      { ...serve, "x-forwarded-for": "203.0.113.1" },
+      { ...serve, "x-forwarded-for": "100.64.0.2, 203.0.113.1" },
+      { ...serve, forwarded: "for=203.0.113.1" },
+      { ...serve, "x-forwarded-proto": "http" },
+      { "x-forwarded-host": "hub.ts.net" },
+    ])
+      assert.isFalse(acceptsPeerIngress(request("127.0.0.1", headers), config));
+    assert.isFalse(
+      acceptsPeerIngress(request("127.0.0.1", serve), { tailscaleServeEnabled: false }),
+    );
+    assert.isFalse(
+      acceptsPeerIngress(request("127.0.0.1"), { ...config, peerIngress: "disabled" }),
+    );
+  });
+
+  it.live(
+    "refuses all peer endpoints through Connect and public proxies before authentication",
+    () =>
+      Effect.gen(function* () {
+        const hub = yield* startMachine("hub", "cloud-server");
+        const client = yield* HttpClient.HttpClient.pipe(Effect.provide(FetchHttpClient.layer));
+        for (const path of ["peer/identity", "peer/join", "peer/ticket", "peer"]) {
+          for (const headers of [
+            {
+              "cf-ray": "edge",
+              "x-forwarded-for": "100.64.0.2",
+              "x-forwarded-proto": "https",
+              "x-forwarded-host": "hub.ts.net",
+              "tailscale-user-login": "spoof@example.com",
+            },
+            { "x-forwarded-for": "203.0.113.1", "x-forwarded-proto": "https" },
+          ]) {
+            const response = yield* client.execute(
+              HttpClientRequest.make(path === "peer" ? "GET" : "POST")(hub.url + path).pipe(
+                HttpClientRequest.setHeaders(headers),
+              ),
+            );
+            assert.strictEqual(response.status, 403);
+            assert.deepStrictEqual(yield* response.json, { code: "private_peer_ingress_required" });
+          }
+        }
+        // The boundary did not disable local pairing.
+        const spoke = yield* startMachine("spoke", "computer");
+        yield* pair(hub, spoke);
+      }).pipe(Effect.scoped),
+    30_000,
+  );
+
   it("permits TLS or loopback routes, without a plaintext fallback", () => {
     assert.strictEqual(normalizePeerRoute("wss://hub.example/path"), "https://hub.example/");
     assert.strictEqual(normalizePeerRoute("ws://[::1]:4773/"), "http://[::1]:4773/");

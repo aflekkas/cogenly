@@ -161,6 +161,9 @@ const EnvServerConfig = Config.all({
     Config.option,
     Config.map(Option.getOrUndefined),
   ),
+  peerIngress: Config.Literals(["loopback", "disabled"], "COGENLY_PEER_INGRESS").pipe(
+    Config.withDefault("loopback"),
+  ),
   tailscaleServeEnabled: Config.Boolean("COGENLY_TAILSCALE_SERVE").pipe(
     Config.option,
     Config.map(Option.getOrUndefined),
@@ -493,6 +496,7 @@ export const resolveServerConfig = (
       resourceMonitorPath,
       autoBootstrapProjectFromCwd,
       logWebSocketEvents,
+      peerIngress: env.peerIngress,
       tailscaleServeEnabled,
       tailscaleServePort,
       serverTimeZone,

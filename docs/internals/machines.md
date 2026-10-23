@@ -50,6 +50,35 @@ validated before dialing, cannot mix TLS with loopback plaintext, and are
 validated again on reconnect, including links saved by older versions. HTTP
 redirects are never followed. Pairing does not provision a tunnel.
 
+## Private ingress boundary
+
+All `/peer` endpoints, including the secret-free identity challenge, check the
+actual socket's remote address before reading credentials or upgrading. The
+`COGENLY_PEER_INGRESS` server setting defaults to `loopback`; `disabled` refuses
+all peer ingress. Public or tailnet socket sources are refused even if they
+supply localhost Host or Tailscale identity headers. Use an SSH forward or
+Tailscale Serve terminating HTTPS and forwarding to loopback.
+
+Both Serve and Connect dial loopback, so the socket alone cannot distinguish
+them. ManagedEndpointRuntime runs cloudflared with a remotely provisioned
+loopback origin. Cloudflare adds `cf-ray` and client/forwarding headers; any
+`cf-*` header is a denial marker, never an authorization signal. This rejects
+Connect even when a public caller spoofs Tailscale headers. RFC Forwarded, Via,
+and X-Real-IP are refused too. Other X-Forwarded headers are refused unless
+`--tailscale-serve` is enabled, and then must match Serve's overwritten tuple:
+HTTPS, a single numeric tailnet source, and forwarded host. Public addresses,
+chains, and `Tailscale-Funnel-Request` are refused. Identity headers grant no
+exception; tagged Tailscale nodes need none.
+
+This boundary trusts local processes and proxy configuration. A locally
+configured public proxy that deliberately strips every ingress marker is
+indistinguishable from a local client; it must block `/peer` itself or set
+`COGENLY_PEER_INGRESS=disabled`. Do not publish an SSH forward or enable Funnel.
+The source for Serve's overwritten forwarding/Funnel headers is
+[Tailscale's reverse proxy](https://github.com/tailscale/tailscale/blob/main/ipn/ipnlocal/serve.go);
+Cloudflare's edge headers are described in its
+[HTTP headers reference](https://developers.cloudflare.com/fundamentals/reference/http-headers/).
+
 ## Connection and revocation lifetimes
 
 The spoke stores its token, routes, hub pin, and proof key in
