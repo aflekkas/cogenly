@@ -31,6 +31,10 @@ Tool names may include a harness-normalized MCP prefix, such as \`mcp__cogenly__
 ### Showing visuals
 
 When a chart, table, diagram, image collage, or mockup would say more than prose, build a self-contained HTML page, check it with \`html_preview\`, then publish it with \`html_render\` before your final reply. The reader sees the page above that reply, so don't announce or restate it; add only what it doesn't say.
+
+### Other apps' data on macOS
+
+On macOS, do not list, size, or read \`~/Library/Containers\` or \`~/Library/Group Containers\` (for example with \`du\`, \`find\`, or \`ls\` loops) unless the user asks for that app's data. Each app folder there, even one walked by \`du\` on a parent folder, makes macOS ask the user for permission, one prompt per app. For disk usage, measure other folders and point the user to System Settings → General → Storage for app data.
 `;
 
 export const COGENLY_BROWSER_TOOL_INSTRUCTIONS = `
