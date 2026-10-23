@@ -166,6 +166,22 @@ export function buildWorktreeBranchName(
   return { branch: `${WORKTREE_BRANCH_NAMESPACE}/${slug}`, slug };
 }
 
+/**
+ * First free worktree folder name for a slug: the slug itself, then
+ * `slug-2`, `slug-3`, ... against the names already on disk. Branch slugs
+ * collide across repositories (same folder name, or `fix-login` next to
+ * `c/fix-login`), so the name is picked where the worktree is created,
+ * from what the directory actually holds.
+ */
+export function freeWorktreeFolderSlug(slug: string, taken: ReadonlyArray<string>): string {
+  const takenNames = new Set(taken.map((name) => name.toLowerCase()));
+  if (!takenNames.has(slug.toLowerCase())) return slug;
+  for (let suffix = 2; ; suffix++) {
+    const candidate = `${slug}-${suffix}`;
+    if (!takenNames.has(candidate.toLowerCase())) return candidate;
+  }
+}
+
 /** The worktree folder name for a branch: its `c/` slug, else the flattened name. */
 export function worktreeFolderSlug(branch: string): string {
   const trimmed = branch.trim();

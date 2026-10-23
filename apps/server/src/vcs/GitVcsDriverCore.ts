@@ -31,6 +31,7 @@ import {
 } from "@t3tools/contracts";
 import {
   dedupeRemoteBranchesWithLocalMatches,
+  freeWorktreeFolderSlug,
   normalizeGitRemoteUrl,
   worktreeFolderSlug,
 } from "@t3tools/shared/git";
@@ -3483,7 +3484,14 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
           detail: `The worktree location "${options?.worktreesDirectory}" must be an absolute folder on this machine, not a drive root. Change it in Settings → Storage.`,
         });
       }
-      worktreePath = path.join(parentDir, repoName, sanitizedBranch);
+      // Slugs collide across repositories sharing this parent (same repo
+      // folder name, or `fix-login` beside `c/fix-login`): pick the first
+      // folder name the directory does not already hold.
+      const repoDir = path.join(parentDir, repoName);
+      const existingFolders = yield* fileSystem
+        .readDirectory(repoDir)
+        .pipe(Effect.catch(() => Effect.succeed([] as ReadonlyArray<string>)));
+      worktreePath = path.join(repoDir, freeWorktreeFolderSlug(sanitizedBranch, existingFolders));
     }
     const args = input.newRefName
       ? ["worktree", "add", "-b", input.newRefName, worktreePath, input.refName]
