@@ -807,6 +807,88 @@ describe("SharedState", () => {
     }).pipe(Effect.provide(layer)),
   );
 
+  it.effect("peer repository reconciliation preserves every active local clone across moves", () =>
+    Effect.gen(function* () {
+      const state = yield* SharedState.SharedState;
+      const sql = yield* SqlClient.SqlClient;
+      const remote = "github.com/org/repo";
+      yield* state.write("project", "label:clones", project);
+      for (const id of ["clone-one", "clone-two"]) {
+        yield* sql`INSERT INTO projection_projects(project_id,title,workspace_root,scripts_json,created_at,updated_at) VALUES (${id},${id},${`/repos/${id}`},'[]',${project.createdAt},${project.createdAt})`;
+        yield* sql`INSERT INTO label_repositories(label_id,repository_id,remote,directory_name) VALUES ('label:clones',${id},${remote},${id})`;
+      }
+      yield* state.capture("project", "label:clones");
+      const repositories = [{ remote, directoryName: "portable" }];
+      yield* state.receive(
+        batch([{ ...change({ repositories }, 50), id: "label:clones" }]),
+        peer,
+        false,
+      );
+      expect(
+        yield* sql`SELECT label_id,repository_id,directory_name FROM label_repositories ORDER BY repository_id`,
+      ).toEqual([
+        { label_id: "label:clones", repository_id: "clone-one", directory_name: "clone-one" },
+        { label_id: "label:clones", repository_id: "clone-two", directory_name: "clone-two" },
+      ]);
+      yield* state.receive(
+        batch(
+          [
+            {
+              ...change({ ...project, name: "Destination", repositories }, 100),
+              id: "label:moved",
+            },
+          ],
+          1,
+        ),
+        peer,
+        false,
+      );
+      expect(
+        yield* sql`SELECT label_id,repository_id FROM label_repositories ORDER BY repository_id`,
+      ).toEqual([
+        { label_id: "label:moved", repository_id: "clone-one" },
+        { label_id: "label:moved", repository_id: "clone-two" },
+      ]);
+      yield* state.receive(
+        batch(
+          [
+            {
+              ...change({}, 105),
+              id: "label:moved",
+              tombstone: { wall: 105, logical: 0, node: peer },
+            },
+          ],
+          2,
+        ),
+        peer,
+        false,
+      );
+      expect(
+        yield* sql`SELECT label_id,repository_id FROM label_repositories ORDER BY repository_id`,
+      ).toEqual([
+        { label_id: "label:clones", repository_id: "clone-one" },
+        { label_id: "label:clones", repository_id: "clone-two" },
+      ]);
+      yield* sql`UPDATE projection_projects SET deleted_at=${project.createdAt} WHERE project_id='clone-two'`;
+      yield* state.receive(
+        batch([{ ...change({ repositories }, 110), id: "label:clones" }], 3),
+        peer,
+        false,
+      );
+      expect(yield* sql`SELECT repository_id FROM label_repositories`).toEqual([
+        { repository_id: "clone-one" },
+      ]);
+      yield* sql`UPDATE projection_projects SET deleted_at=${project.createdAt} WHERE project_id='clone-one'`;
+      yield* state.receive(
+        batch([{ ...change({ repositories }, 120), id: "label:clones" }], 4),
+        peer,
+        false,
+      );
+      expect(yield* sql`SELECT label_id,repository_id FROM label_repositories`).toEqual([
+        { label_id: "label:clones", repository_id: `remote:${remote}` },
+      ]);
+    }).pipe(Effect.provide(layer)),
+  );
   it.effect.each([false, true])(
     "converges concurrent repository moves (reversed delivery: %s)",
     (reversed) =>

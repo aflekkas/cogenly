@@ -15,8 +15,8 @@ list or fallback chain choose one whole value. Tombstones are permanent for an
 ID, including against edits with newer clocks. Recreating means a new ID.
 Local captures preserve the domain's checkout bindings; only peer merges reconcile
 competing project documents. Concurrent moves of one remote choose the greatest repository
-field clock across the competing documents. The local checkout binding survives
-that move and a deleted clone becomes a remote-only link.
+field clock across the competing documents. Every active local clone stays linked
+to that winner; a remote-only link replaces them when no active clone remains.
 
 There is one hub. Spokes send only their own authored deltas; the hub preserves
 those clocks when relaying to other spokes. A spoke trusts forwarded authorship

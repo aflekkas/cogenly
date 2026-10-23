@@ -207,8 +207,18 @@ const reconcileRepositories = Effect.fn("SharedState.reconcileRepositories")(fun
     remote: string;
     repository_id: string;
     directory_name: string | null;
-  }>`SELECT c.* FROM shared_repository_checkouts c JOIN projection_projects p ON p.project_id=c.repository_id WHERE p.deleted_at IS NULL`;
-  const localByRemote = new Map(checkouts.map((row) => [row.remote, row]));
+  }>`SELECT c.remote,c.repository_id,c.directory_name FROM shared_repository_checkouts c JOIN projection_projects p ON p.project_id=c.repository_id WHERE p.deleted_at IS NULL UNION ALL SELECT r.remote,r.repository_id,r.directory_name FROM label_repositories r JOIN projection_projects p ON p.project_id=r.repository_id WHERE r.remote IS NOT NULL AND p.deleted_at IS NULL`;
+  // The checkout map chooses a default clone for new execution bindings; it is
+  // not an exhaustive inventory. Existing links may contain several local clones.
+  const localByRemote = new Map<string, Map<string, (typeof checkouts)[number]>>();
+  for (const checkout of checkouts) {
+    let clones = localByRemote.get(checkout.remote);
+    if (!clones) {
+      clones = new Map();
+      localByRemote.set(checkout.remote, clones);
+    }
+    clones.set(checkout.repository_id, checkout);
+  }
   const links = yield* sql<{
     label_id: string;
     repository_id: string;
@@ -218,15 +228,19 @@ const reconcileRepositories = Effect.fn("SharedState.reconcileRepositories")(fun
     const winner = winners.get(link.remote);
     if (
       winner?.id !== link.label_id ||
-      link.repository_id !==
-        (localByRemote.get(link.remote)?.repository_id ?? `remote:${link.remote}`)
+      !(
+        localByRemote.get(link.remote)?.has(link.repository_id) ??
+        link.repository_id === `remote:${link.remote}`
+      )
     )
       yield* sql`DELETE FROM label_repositories WHERE repository_id=${link.repository_id} AND EXISTS (SELECT 1 FROM shared_documents WHERE kind='project' AND id=${link.label_id})`;
   }
   for (const [remote, winner] of winners) {
-    const local = localByRemote.get(remote);
-    const repositoryId = local?.repository_id ?? `remote:${remote}`;
-    yield* sql`INSERT INTO label_repositories(label_id,repository_id,remote,directory_name) VALUES (${winner.id},${repositoryId},${remote},${local?.directory_name ?? winner.directoryName}) ON CONFLICT(repository_id) DO UPDATE SET label_id=excluded.label_id,remote=excluded.remote,directory_name=excluded.directory_name`;
+    const clones = localByRemote.get(remote)?.values() ?? [
+      { repository_id: `remote:${remote}`, directory_name: winner.directoryName },
+    ];
+    for (const clone of clones)
+      yield* sql`INSERT INTO label_repositories(label_id,repository_id,remote,directory_name) VALUES (${winner.id},${clone.repository_id},${remote},${clone.directory_name ?? winner.directoryName}) ON CONFLICT(repository_id) DO UPDATE SET label_id=excluded.label_id,remote=excluded.remote,directory_name=excluded.directory_name`;
   }
 });
 
@@ -247,8 +261,9 @@ export const projectDocument = Effect.fn("SharedState.projectDocument")(function
       yield* sql`DELETE FROM commitment_labels WHERE label_id=${id}`;
       yield* sql`UPDATE facts SET updated_at=${at},payload_json=json_set(payload_json,'$.updatedAt',${at},'$.labelIds',json((SELECT json_group_array(l.value) FROM json_each(facts.payload_json,'$.labelIds') l WHERE l.value<>${id}))) WHERE id IN (SELECT fact_id FROM fact_labels WHERE label_id=${id})`;
       yield* sql`INSERT INTO fact_history(fact_id,payload_json) SELECT f.id,json_object('id',${`sync-delete:${id}:${at}:`} || f.id,'factId',f.id,'who','user','at',${at},'fact',json(f.payload_json)) FROM facts f WHERE f.id IN (SELECT fact_id FROM fact_labels WHERE label_id=${id})`;
-      yield* sql`DELETE FROM project_labels WHERE label_id=${id}`;
+      // Transfer all surviving clones before label deletion cascades their links.
       if (!preserveLocalBindings) yield* reconcileRepositories();
+      yield* sql`DELETE FROM project_labels WHERE label_id=${id}`;
     }
     if (kind === "agent") {
       // Keep the row and run ledger until AgentService uses its normal stop/delete path.
