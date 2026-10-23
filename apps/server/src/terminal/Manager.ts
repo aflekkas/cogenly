@@ -349,6 +349,8 @@ interface TerminalSessionState {
   pendingProcessEvents: Array<PendingProcessEvent>;
   pendingProcessEventIndex: number;
   processEventDrainRunning: boolean;
+  /** The forked drain, so a stop can await the ordered flush it queued. */
+  processEventDrainFiber: Fiber.Fiber<void, never> | null;
   exitCode: number | null;
   exitSignal: number | null;
   updatedAt: string;
@@ -2276,9 +2278,80 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     }
   });
 
+  /**
+   * Writes a session's final history now, bypassing the debounced persist
+   * worker: a stop must not wait out a debounce (which, under a test
+   * clock, may never elapse), and the worker's pending write holds the
+   * same history object, so it can only rewrite this same content.
+   */
+  const writeHistoryNow = Effect.fn("terminal.writeHistoryNow")(function* (
+    session: TerminalSessionState,
+  ) {
+    yield* fileSystem
+      .writeFileString(historyPath(session.threadId, session.terminalId), session.history.value())
+      .pipe(
+        Effect.catch((error) =>
+          Effect.logWarning("failed to persist terminal history", {
+            threadId: session.threadId,
+            terminalId: session.terminalId,
+            error,
+          }),
+        ),
+      );
+  });
+
+  /** Forks the ordered output drain and remembers it so a stop can await it. */
+  const forkProcessEventDrain = (session: TerminalSessionState, expectedPid: number) => {
+    const holder: { fiber?: Fiber.Fiber<void, never> } = {};
+    holder.fiber = runFork(
+      drainProcessEvents(session, expectedPid).pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            if (session.processEventDrainFiber === holder.fiber) {
+              session.processEventDrainFiber = null;
+            }
+          }),
+        ),
+      ),
+    );
+    session.processEventDrainFiber = holder.fiber;
+  };
+
   const stopProcess = Effect.fn("terminal.stopProcess")(function* (session: TerminalSessionState) {
     const process = session.process;
     if (!process) return;
+
+    const expectedPid = session.pid;
+    if (expectedPid !== null) {
+      // Flush both redactors through the ordered drain before anything is
+      // detached or cleared: each redactor holds back a tail that could
+      // still become a secret, and only its final flush releases that
+      // tail — redacted, or as the non-secret text it turned out to be.
+      // Dropping the queue here would silently lose that text.
+      let shouldFork = false;
+      const tail = session.agent?.redactOutput?.("", true);
+      if (tail) {
+        shouldFork =
+          enqueueProcessEvent(session, expectedPid, { type: "output", data: tail }) || shouldFork;
+      }
+      shouldFork =
+        enqueueProcessEvent(session, expectedPid, { type: "output", data: "", final: true }) ||
+        shouldFork;
+      if (
+        shouldFork ||
+        (session.processEventDrainRunning && session.processEventDrainFiber === null)
+      ) {
+        forkProcessEventDrain(session, expectedPid);
+      }
+      const drainFiber = session.processEventDrainFiber;
+      if (drainFiber) yield* Fiber.await(drainFiber);
+      if (session.process !== process) {
+        // The drain met a queued natural exit and already tore the
+        // process down; only the final history is left to persist.
+        yield* writeHistoryNow(session);
+        return;
+      }
+    }
 
     const updatedAt = yield* nowIso;
     yield* modifyManagerState((state) => {
@@ -2296,6 +2369,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       return [undefined, state] as const;
     });
 
+    yield* writeHistoryNow(session);
     yield* clearKillFiber(process);
     yield* unregisterTerminal({
       threadId: session.threadId,
@@ -2448,7 +2522,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
                 if (!enqueueProcessEvent(session, processPid, { type: "output", data })) {
                   return;
                 }
-                if (eventsActivated) runFork(drainProcessEvents(session, processPid));
+                if (eventsActivated) forkProcessEventDrain(session, processPid);
               });
               session.unsubscribeExit = spawnResult.process.onExit((event) => {
                 const tail = session.agent?.redactOutput?.("", true);
@@ -2463,8 +2537,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
                   }) || shouldDrain;
                 shouldDrain =
                   enqueueProcessEvent(session, processPid, { type: "exit", event }) || shouldDrain;
-                if (eventsActivated && shouldDrain)
-                  runFork(drainProcessEvents(session, processPid));
+                if (eventsActivated && shouldDrain) forkProcessEventDrain(session, processPid);
               });
               eventStamp = advanceEventSequence(session);
               return [undefined, state] as const;
@@ -2479,7 +2552,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
             });
             // Publish startup before draining any events replayed during subscription.
             eventsActivated = true;
-            if (session.processEventDrainRunning) runFork(drainProcessEvents(session, processPid));
+            if (session.processEventDrainRunning) forkProcessEventDrain(session, processPid);
           }),
         ),
       ),
@@ -2780,6 +2853,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         pendingProcessEvents: [],
         pendingProcessEventIndex: 0,
         processEventDrainRunning: false,
+        processEventDrainFiber: null,
         exitCode: null,
         exitSignal: null,
         updatedAt: yield* nowIso,
@@ -3224,6 +3298,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
           pendingProcessEvents: [],
           pendingProcessEventIndex: 0,
           processEventDrainRunning: false,
+          processEventDrainFiber: null,
           exitCode: null,
           exitSignal: null,
           updatedAt: yield* nowIso,
