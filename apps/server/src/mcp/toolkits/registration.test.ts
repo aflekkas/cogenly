@@ -1,3 +1,4 @@
+import * as CliCredentials from "../../accounts/CliCredentials.ts";
 import * as GlobalSearch from "../../search/GlobalSearch.ts";
 import * as FactService from "../../context/FactService.ts";
 import * as ProjectLabels from "../../projectLabels/ProjectLabelService.ts";
@@ -102,6 +103,9 @@ const project = {
   deletedAt: null,
 };
 const layerStubServices = Layer.mergeAll(
+  Layer.mock(CliCredentials.CliCredentials)({
+    launch: () => Effect.succeed({ env: {}, complete: () => Effect.void }),
+  }),
   Layer.mock(GlobalSearch.GlobalSearch)({ query: () => Effect.succeed({ results: [] }) }),
   Layer.mock(ProjectLabels.ProjectLabelService)({ list: () => Effect.succeed({ labels: [] }) }),
   Layer.mock(ProjectFiles.ProjectFiles)({

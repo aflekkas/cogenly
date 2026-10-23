@@ -88,6 +88,18 @@ const make = Effect.gen(function* () {
     if (new Set(account.credentials.map((c) => c.id)).size !== account.credentials.length)
       return yield* new AccountError({ reason: "invalid_input" });
     yield* sql`INSERT INTO accounts(id, scope_project_id, payload_json) VALUES (${account.id}, ${account.scopeProjectId}, ${encode(account)}) ON CONFLICT(id) DO UPDATE SET payload_json = excluded.payload_json`;
+    const previous = yield* sql<{
+      id: string;
+      vault_item_id: string | null;
+    }>`SELECT id, vault_item_id FROM account_credentials WHERE account_id = ${account.id}`;
+    for (const old of previous) {
+      const replacement = account.credentials.find((c) => c.id === old.id);
+      if (!replacement || replacement.vaultItemId !== old.vault_item_id) {
+        yield* sql`DELETE FROM account_process_grants WHERE credential_id = ${old.id}`;
+        yield* sql`DELETE FROM account_thread_bindings WHERE credential_id = ${old.id}`;
+        yield* sql`UPDATE agent_approvals SET status = 'rejected' WHERE status = 'pending' AND json_extract(action_json, '$.actionKind') = 'account_process' AND json_extract(action_json, '$.payload.credentialId') = ${old.id}`;
+      }
+    }
     yield* sql`DELETE FROM account_credentials WHERE account_id = ${account.id}`;
     for (const credential of account.credentials) {
       yield* sql`INSERT INTO account_credentials(id, account_id, vault_item_id) VALUES (${credential.id}, ${account.id}, ${credential.vaultItemId ?? null})`;
@@ -146,6 +158,10 @@ const make = Effect.gen(function* () {
           yield* get(input);
           yield* sql`UPDATE accounts SET deleted_at = ${yield* now} WHERE id = ${input.id}`;
           yield* sql`DELETE FROM account_machine_status WHERE credential_id IN (SELECT id FROM account_credentials WHERE account_id = ${input.id})`;
+          yield* sql`DELETE FROM account_process_grants WHERE credential_id IN (SELECT id FROM account_credentials WHERE account_id = ${input.id})`;
+          yield* sql`DELETE FROM account_thread_bindings WHERE account_id = ${input.id}`;
+          yield* sql`UPDATE agent_approvals SET status = 'rejected' WHERE status = 'pending' AND json_extract(action_json, '$.actionKind') = 'account_process' AND json_extract(action_json, '$.payload.accountId') = ${input.id}`;
+          yield* sql`UPDATE account_connections SET cancelled_at = ${yield* now} WHERE account_id = ${input.id}`;
           yield* sql`DELETE FROM account_credentials WHERE account_id = ${input.id}`;
           return { disconnected: true };
         }),

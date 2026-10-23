@@ -1,5 +1,5 @@
 import * as Schema from "effect/Schema";
-import { IsoDateTime, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { IsoDateTime, TrimmedNonEmptyString, ThreadId } from "./baseSchemas.ts";
 import { ProjectLabelId } from "./projectLabel.ts";
 import { VaultItemId } from "./vault.ts";
 
@@ -116,3 +116,30 @@ export class AccountError extends Schema.TaggedError<AccountError>()("AccountErr
     }[this.reason];
   }
 }
+
+export const AccountUseInput = Schema.Struct({
+  accountId: AccountId,
+  credentialId: CredentialId,
+  attached: Schema.Boolean,
+});
+export type AccountUseInput = typeof AccountUseInput.Type;
+export const AccountUseResult = Schema.Struct({
+  status: Schema.Literals(["attached", "detached", "approval_required", "denied"]),
+  approvalId: Schema.optional(Schema.String),
+  message: Schema.optional(Schema.String),
+});
+export const AccountRemoveAccessInput = Schema.Struct({
+  ...AccountScope,
+  id: AccountId,
+  credentialId: CredentialId,
+});
+export const AccountRemoveAccessResult = Schema.Struct({
+  removed: Schema.Boolean,
+  affectedThreadIds: Schema.Array(Schema.String),
+  message: Schema.String,
+});
+
+export const AccountThreadUseInput = Schema.Struct({
+  ...AccountUseInput.fields,
+  threadId: ThreadId,
+});

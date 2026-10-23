@@ -577,6 +577,8 @@ export const WS_METHODS = {
   scheduledTasksRunNow: "scheduledTasks.runNow",
   scheduledTasksRotateWebhookToken: "scheduledTasks.rotateWebhookToken",
   secretsAnswerRequest: "secrets.answerRequest",
+  accountsUse: "accounts.use",
+  accountsRemoveAccess: "accounts.removeAccess",
   accountsList: "accounts.list",
   accountsGet: "accounts.get",
   accountsCreate: "accounts.create",
@@ -2326,6 +2328,16 @@ const WsSecretsAnswerRequestRpc = Rpc.make(WS_METHODS.secretsAnswerRequest, {
   error: Schema.Union([SecretRequestError, EnvironmentAuthorizationError]),
 });
 
+const WsAccountsUseRpc = Rpc.make(WS_METHODS.accountsUse, {
+  payload: Accounts.AccountThreadUseInput,
+  success: Accounts.AccountUseResult,
+  error: Schema.Union([Accounts.AccountError, EnvironmentAuthorizationError]),
+});
+const WsAccountsRemoveAccessRpc = Rpc.make(WS_METHODS.accountsRemoveAccess, {
+  payload: Accounts.AccountRemoveAccessInput,
+  success: Accounts.AccountRemoveAccessResult,
+  error: Schema.Union([Accounts.AccountError, EnvironmentAuthorizationError]),
+});
 const WsAccountsListRpc = Rpc.make(WS_METHODS.accountsList, {
   payload: Accounts.AccountsListInput,
   success: Accounts.AccountsListResult,
@@ -2551,6 +2563,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsScheduledTasksRunNowRpc,
   WsScheduledTasksRotateWebhookTokenRpc,
   WsSecretsAnswerRequestRpc,
+  WsAccountsUseRpc,
+  WsAccountsRemoveAccessRpc,
   WsAccountsListRpc,
   WsAccountsGetRpc,
   WsAccountsCreateRpc,

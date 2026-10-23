@@ -1,3 +1,4 @@
+import * as AccountAccess from "./accounts/AccountAccess.ts";
 import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import type * as HttpClient from "effect/http/HttpClient";
 import type * as CodexInstallation from "./provider/CodexInstallation.ts";
@@ -1086,6 +1087,7 @@ const makeWsRpcHandlers = (
     const secretRequests = yield* SecretRequests.SecretRequests;
     const vault = yield* Vault.Vault;
     const accounts = yield* Accounts.Accounts;
+    const accountAccess = yield* AccountAccess.AccountAccess;
     const pullRequests = yield* PullRequestService.PullRequestService;
     const reviewGuides = yield* PullRequestReviewGuideService.PullRequestReviewGuideService;
     const pullRequestSync = yield* PullRequestSyncReactor.PullRequestSyncReactor;
@@ -1665,7 +1667,7 @@ const makeWsRpcHandlers = (
       [WS_METHODS.agentsApprovalsList]: (input) => agentWorkspace.listApprovals(input),
       [WS_METHODS.agentsRequestApproval]: (input) =>
         agentWorkspace.requestApproval(input.agentId, input.action),
-      [WS_METHODS.agentsApprove]: (input) => agentWorkspace.approve(input.id),
+      [WS_METHODS.agentsApprove]: (input) => agentWorkspace.approve(input.id, input.accountScope),
       [WS_METHODS.agentsReject]: (input) => agentWorkspace.reject(input.id),
       [WS_METHODS.agentsStartWork]: (input) => agentWorkspace.startWork(input),
       [WS_METHODS.agentsActivity]: (input) => agentWorkspace.activity(input.agentId),
@@ -1737,6 +1739,9 @@ const makeWsRpcHandlers = (
         Effect.annotateCurrentSpan({ "scheduled_task.id": input.id }).pipe(
           Effect.andThen(scheduledTasks.rotateWebhookToken(input)),
         ),
+      [WS_METHODS.accountsUse]: (input) =>
+        accountAccess.setThreadBindingForThread(input.threadId, input),
+      [WS_METHODS.accountsRemoveAccess]: (input) => accountAccess.removeAccess(input),
       [WS_METHODS.accountsList]: (input) => accounts.list(input),
       [WS_METHODS.accountsGet]: (input) => accounts.get(input),
       [WS_METHODS.accountsCreate]: (input) => accounts.create(input),
@@ -2788,6 +2793,7 @@ type WsRequestServices =
   | ReviewService.ReviewService
   | ScheduledTasks.ScheduledTaskService
   | SecretRequests.SecretRequests
+  | AccountAccess.AccountAccess
   | Accounts.Accounts
   | Vault.Vault
   | ServerConfig.ServerConfig

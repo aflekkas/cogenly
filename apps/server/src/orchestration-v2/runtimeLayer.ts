@@ -1,3 +1,6 @@
+import * as AccountAccess from "../accounts/AccountAccess.ts";
+import * as CliCredentials from "../accounts/CliCredentials.ts";
+import * as ProcessRunner from "../processRunner.ts";
 import * as VisualStates from "../htmlRender/VisualState.ts";
 import * as GlobalSearch from "../search/GlobalSearch.ts";
 import * as Facts from "../context/FactService.ts";
@@ -378,12 +381,34 @@ const layerAgentEventReactorProvided = AgentEventReactor.layer.pipe(
     ),
   ),
 );
+const layerAccountAccessProvided = AccountAccess.layer.pipe(
+  Layer.provide(
+    Layer.mergeAll(
+      Accounts.layer,
+      AgentStore.layer,
+      layerThreadManagementProvided,
+      layerProjectFilesProvided,
+      ServerEnvironment.layerIdentity,
+    ),
+  ),
+);
+const layerCliCredentialsProvided = CliCredentials.layer.pipe(
+  Layer.provide(
+    Layer.mergeAll(
+      layerAccountAccessProvided,
+      layerVaultProvided,
+      ProcessRunner.layer,
+      ServerEnvironment.layerIdentity,
+    ),
+  ),
+);
 const layerAgentWorkspaceProvided = AgentWorkspace.layer.pipe(
   Layer.provide(
     Layer.mergeAll(
       AgentStore.layer,
       layerAgentsProvided,
       layerWorkHandoffProvided,
+      layerAccountAccessProvided,
       layerScheduledTaskProvided,
     ),
   ),
@@ -498,6 +523,8 @@ const layerProductionBase = Layer.mergeAll(
   layerSecretRequestsProvided,
   layerVaultProvided,
   Accounts.layer,
+  layerAccountAccessProvided,
+  layerCliCredentialsProvided,
   UsageLimitRecoveryWorker.layer.pipe(
     Layer.provide(Layer.mergeAll(ProjectionStore.layer, layerThreadManagementProvided)),
   ),

@@ -26,6 +26,17 @@ export const AgentStartWorkInput = Schema.Struct({
 });
 export type AgentStartWorkInput = typeof AgentStartWorkInput.Type;
 export const AgentApprovalAction = Schema.Union([
+  Schema.Struct({
+    actionKind: Schema.Literal("account_process"),
+    payload: Schema.Struct({
+      accountId: TrimmedNonEmptyString,
+      credentialId: TrimmedNonEmptyString,
+      credentialRevision: Schema.Int,
+      threadId: ThreadId,
+      projectKey: TrimmedNonEmptyString,
+      message: Schema.Literal("The agent and the commands it runs can read this token."),
+    }),
+  }),
   Schema.Struct({ actionKind: Schema.Literal("start_work"), payload: AgentStartWorkInput }),
   Schema.Struct({
     actionKind: Schema.Literal("vault_use"),
@@ -54,13 +65,14 @@ export type AgentApprovalAction = typeof AgentApprovalAction.Type;
 export const AgentApprovalStatus = Schema.Literals(["pending", "approved", "rejected", "expired"]);
 export const AgentApproval = Schema.Struct({
   id: TrimmedNonEmptyString,
-  agentId: AgentId,
+  agentId: Schema.NullOr(AgentId),
   action: AgentApprovalAction,
   actionKind: Schema.Literals([
     "start_work",
     "schedule_trigger",
     "change_permissions",
     "vault_use",
+    "account_process",
     "integration_add",
   ]),
   payload: Schema.Record(Schema.String, Schema.Unknown),
@@ -81,7 +93,10 @@ export const AgentApprovalListInput = Schema.Struct({
   status: Schema.optional(AgentApprovalStatus),
 });
 export const AgentApprovalListResult = Schema.Struct({ approvals: Schema.Array(AgentApproval) });
-export const AgentApprovalKey = Schema.Struct({ id: TrimmedNonEmptyString });
+export const AgentApprovalKey = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  accountScope: Schema.optional(Schema.Literals(["thread", "agent_project"])),
+});
 export const AgentApprovalResult = Schema.Struct({ approval: AgentApproval });
 export const AgentStartWorkResult = Schema.Struct({
   threadId: Schema.NullOr(ThreadId),

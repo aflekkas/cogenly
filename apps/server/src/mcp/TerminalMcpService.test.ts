@@ -1,3 +1,4 @@
+import * as CliCredentials from "../accounts/CliCredentials.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import { EnvironmentId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
@@ -76,6 +77,9 @@ it.effect(
         deletedAt: null,
       };
       const dependencies = Layer.mergeAll(
+        Layer.mock(CliCredentials.CliCredentials)({
+          launch: () => Effect.succeed({ env: {}, complete: () => Effect.void }),
+        }),
         Layer.succeed(Manager.TerminalManager, manager),
         Layer.mock(ThreadManagement.ThreadManagementService)({
           getThreadShell: (id) =>

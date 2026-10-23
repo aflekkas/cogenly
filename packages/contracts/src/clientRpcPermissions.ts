@@ -116,6 +116,8 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.scheduledTasksRunNow]: AuthOrchestrationOperateScope,
   [WS_METHODS.scheduledTasksRotateWebhookToken]: AuthOrchestrationOperateScope,
   // Vault metadata is owner-visible; writes change stored secrets.
+  [WS_METHODS.accountsUse]: AuthOrchestrationOperateScope,
+  [WS_METHODS.accountsRemoveAccess]: AuthOrchestrationOperateScope,
   [WS_METHODS.accountsList]: AuthOrchestrationReadScope,
   [WS_METHODS.accountsGet]: AuthOrchestrationReadScope,
   [WS_METHODS.accountsCreate]: AuthOrchestrationOperateScope,
