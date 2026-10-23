@@ -6,6 +6,7 @@ import {
   type IntegrationCreateInput,
   type IntegrationListResult,
   type IntegrationName,
+  type IntegrationScope,
   type IntegrationSummary,
   type IntegrationTestResult,
   type IntegrationToolsResult,
@@ -162,6 +163,27 @@ export const integrationVisibleTo = (
   (labelId === undefined ||
     integration.scope.type === "all" ||
     (labelId !== null && integration.scope.labelIds.includes(labelId)));
+
+/** Whether a caller may manage it: its project scope, disabled ones included. */
+export const integrationInScope = (
+  integration: Integration,
+  labelId: ProjectLabelId | null | undefined,
+): boolean =>
+  integration.deletedAt === null &&
+  (labelId === undefined ||
+    integration.scope.type === "all" ||
+    (labelId !== null && integration.scope.labelIds.includes(labelId)));
+
+/** Whether `next` makes the integration usable from any project it was not usable from. */
+export const integrationScopeWidened = (
+  current: Integration,
+  next: IntegrationScope | undefined,
+): boolean => {
+  if (next === undefined || current.scope.type === "all") return false;
+  if (next.type === "all") return true;
+  const labelIds = current.scope.labelIds;
+  return next.labelIds.some((labelId) => !labelIds.includes(labelId));
+};
 
 interface CachedTools {
   readonly key: string;

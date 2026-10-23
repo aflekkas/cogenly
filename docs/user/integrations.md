@@ -44,6 +44,11 @@ to one you approved it for. Saving an integration in Settings, or approving an
 agent's request, approves the vault items in its headers for that server.
 Changing its URL drops that approval until you save it again.
 
+Agents can change or remove only integrations available in their own project.
+Making one available to more projects is your call: a persistent agent's
+request becomes an approval card, and other threads are asked to have you
+change it in Settings → Integrations.
+
 ## What agents see
 
 Every turn carries one short line when anything is connected:

@@ -42,6 +42,12 @@ const current: Integration = {
   updatedAt: agent.updatedAt,
   deletedAt: null,
 };
+const scoped: Integration = {
+  ...current,
+  id: IntegrationId.make("integration:scoped"),
+  name: "scoped",
+  scope: { type: "projects", labelIds: ["label:a" as never] },
+};
 const layer = AgentMcpPolicy.layer.pipe(
   Layer.provide(
     Layer.mergeAll(
@@ -63,7 +69,10 @@ const layer = AgentMcpPolicy.layer.pipe(
       Layer.mock(Integrations.Integrations)({
         list: () =>
           Effect.succeed({
-            integrations: [{ integration: current, status: "unknown", toolCount: null }],
+            integrations: [
+              { integration: current, status: "unknown", toolCount: null },
+              { integration: scoped, status: "unknown", toolCount: null },
+            ],
           }),
       }),
     ),
@@ -186,5 +195,38 @@ describe("integration_add approval gating", () => {
         ).toEqual({ handled: false });
         expect(proposals).toHaveLength(6);
       }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("requires approval to make an integration reach more projects", () =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`INSERT INTO agents(agent_id, conversation_thread_id, payload_json, enabled, daily_run_cap) VALUES (${agent.id}, ${agent.conversationThreadId}, ${JSON.stringify(agent)}, 1, 2)`;
+      const policy = yield* AgentMcpPolicy.AgentMcpPolicy;
+      proposals.length = 0;
+      for (const scope of [
+        { type: "all" },
+        { type: "projects", labelIds: ["label:a", "label:b"] },
+      ]) {
+        const result = yield* policy
+          .beforeTool(scopeFor(true), "integration_update", { name: scoped.name, scope }, false)
+          .pipe(Effect.flip);
+        expect(result.code).toBe("agent_approval_required");
+      }
+      expect(proposals).toHaveLength(2);
+      for (const scope of [
+        { type: "projects", labelIds: ["label:a"] },
+        { type: "projects", labelIds: [] },
+      ]) {
+        expect(
+          yield* policy.beforeTool(
+            scopeFor(true),
+            "integration_update",
+            { name: scoped.name, scope },
+            false,
+          ),
+        ).toEqual({ handled: false });
+      }
+    }).pipe(Effect.provide(layer)),
   );
 });

@@ -59,11 +59,17 @@ const callerLabel = Effect.gen(function* () {
   return (folder?.labelId ?? null) as ProjectLabelId | null;
 });
 
+/** An integration the caller may manage: one in its project scope, disabled or not. */
 const byName = (name: string) =>
   Effect.gen(function* () {
     const service = yield* Integrations.Integrations;
+    const label = yield* callerLabel;
     const { integrations } = yield* service.list().pipe(Effect.mapError(failure));
-    const found = integrations.find((summary) => summary.integration.name === name);
+    const found = integrations.find(
+      (summary) =>
+        summary.integration.name === name &&
+        Integrations.integrationInScope(summary.integration, label),
+    );
     if (found === undefined) {
       return yield* new OrchestratorMcpFailure({
         code: "invalid_request",
@@ -112,6 +118,15 @@ export const layer = McpToolAccess.toLayer(IntegrationsToolkit, {
       const service = yield* Integrations.Integrations;
       const current = yield* byName(input.name);
       const scope = yield* Invocation.McpInvocationContext;
+      // Widening reach hands the credentialed upstream to more projects, so it
+      // is the owner's call: a persistent agent's request becomes an approval
+      // (AgentMcpPolicy) before it gets here, and other threads are refused.
+      if (scope.thread !== undefined && Integrations.integrationScopeWidened(current, input.scope))
+        return yield* new OrchestratorMcpFailure({
+          code: "invalid_request",
+          message:
+            "Making an integration available to more projects needs the owner. Ask them to change it in Settings → Integrations.",
+        });
       const agents = yield* AgentStore.AgentStore;
       const agent =
         scope.thread === undefined

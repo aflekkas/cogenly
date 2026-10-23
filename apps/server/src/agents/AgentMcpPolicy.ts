@@ -246,7 +246,10 @@ const make = Effect.gen(function* () {
             transport: update.transport ?? current.transport,
             headers: update.headers ?? current.headers,
           };
-          if (Integrations.integrationDestinationChanged(current, payload)) {
+          if (
+            Integrations.integrationDestinationChanged(current, payload) ||
+            Integrations.integrationScopeWidened(current, payload.scope)
+          ) {
             const action = yield* decodeAction({ actionKind: "integration_update", payload });
             const { approval } = yield* workspace.requestApproval(agent.id, action, actor);
             return yield* denied(
