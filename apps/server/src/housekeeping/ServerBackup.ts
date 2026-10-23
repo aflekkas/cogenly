@@ -18,6 +18,7 @@ import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Random from "effect/Random";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
@@ -208,7 +209,7 @@ const make = Effect.gen(function* () {
     // The leading dot keeps the temp name out of the dated-folder pattern.
     const tempDirectory = path.join(
       backupsDirectory,
-      `.tmp-${backupDirectoryName(yield* DateTime.now)}-${Math.random().toString(36).slice(2, 10)}`,
+      `.tmp-${backupDirectoryName(yield* DateTime.now)}-${(yield* Random.nextInt).toString(36)}`,
     );
     yield* fs
       .makeDirectory(backupsDirectory, { recursive: true, mode: 0o700 })

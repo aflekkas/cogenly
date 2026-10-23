@@ -14,7 +14,7 @@ describe("089_SharedDocuments", () => {
   it.effect("upgrades an accounts database without losing accounts or process approvals", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
-      expect(migrationManifest.filter(([id]) => id >= 85)).toEqual([
+      expect(migrationManifest.filter(([id]) => id >= 85 && id <= 89)).toEqual([
         [85, "AgentProviderFallback"],
         [86, "MachinePeers"],
         [87, "Accounts"],
@@ -25,7 +25,7 @@ describe("089_SharedDocuments", () => {
       yield* sql`INSERT INTO accounts(id, payload_json) VALUES ('account:keep', '{}')`;
       yield* sql`INSERT INTO agent_approvals(id, agent_id, action_json, status, requested_at)
         VALUES ('approval:keep', NULL, '{}', 'pending', '2026-01-01T00:00:00.000Z')`;
-      expect(yield* runMigrations()).toEqual([[89, "SharedDocuments"]]);
+      expect(yield* runMigrations({ toMigrationInclusive: 89 })).toEqual([[89, "SharedDocuments"]]);
       expect(yield* sql`SELECT id FROM accounts`).toEqual([{ id: "account:keep" }]);
       expect(yield* sql`SELECT id, agent_id FROM agent_approvals`).toEqual([
         { id: "approval:keep", agent_id: null },
@@ -34,7 +34,7 @@ describe("089_SharedDocuments", () => {
       yield* sql`SELECT owner_machine FROM scheduled_tasks`;
       yield* sql`INSERT INTO shared_documents(kind, id, fields_json, clocks_json, updated_by_env)
         VALUES ('project', 'project:shared', '{}', '{}', 'local')`;
-      expect(yield* runMigrations()).toEqual([]);
+      expect(yield* runMigrations({ toMigrationInclusive: 89 })).toEqual([]);
     }).pipe(Effect.provide(layer)),
   );
 });
