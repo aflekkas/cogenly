@@ -1,6 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { isAtomCommandInterrupted } from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { CheckIcon, FolderIcon, FolderMinusIcon, PlusIcon, Settings2Icon } from "lucide-react";
@@ -19,7 +18,7 @@ import {
 import { ProjectContextToggle } from "../context/ThreadContext";
 import { useThreadShell } from "../state/entities";
 import { serverEnvironment } from "../state/server";
-import { useAtomCommand } from "../state/use-atom-command";
+import { openCreateProjectDialog } from "./CreateProjectDialogHost";
 import {
   PROJECT_LABEL_COLORS,
   priorFiling,
@@ -27,7 +26,7 @@ import {
   threadForksIntoProjects,
 } from "./projectLabels.logic";
 import { ProjectFolderIcon } from "./ProjectFolderMark";
-import { reportProjectFolderFailure, useMoveThreadToFolder } from "./useMoveThreadToFolder";
+import { useMoveThreadToFolder } from "./useMoveThreadToFolder";
 import { useProjectLabelDirectory } from "./useProjectLabels";
 
 type FolderOption =
@@ -68,10 +67,6 @@ export function ThreadFolderPicker(props: {
     serverEnvironment.createProjectLabel.permissionAtom(environmentId),
   );
   const moveThread = useMoveThreadToFolder();
-  const createLabel = useAtomCommand(serverEnvironment.createProjectLabel, {
-    label: "create project",
-    reportFailure: false,
-  });
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
@@ -110,6 +105,19 @@ export function ThreadFolderPicker(props: {
   const previous = priorFiling(state);
   const choose = async (option: FolderOption) => {
     if (busy || !canMove) return;
+    if (option.kind === "create") {
+      setOpen(false);
+      setQuery("");
+      const color = PROJECT_LABEL_COLORS[state.options.length % PROJECT_LABEL_COLORS.length]?.value;
+      openCreateProjectDialog({
+        environmentId,
+        initialName: option.name,
+        ...(color ? { initialColor: color } : {}),
+        // Filed into the new project, as picking an existing one would.
+        onCreated: (id, name) => void moveThread({ thread, folder: { id, name }, previous }),
+      });
+      return;
+    }
     setBusy(true);
     try {
       if (option.kind === "folder") {
@@ -121,25 +129,8 @@ export function ThreadFolderPicker(props: {
           folder: { id: target.label.id, name: target.label.name },
           previous,
         });
-      } else if (option.kind === "remove") {
-        await moveThread({ thread, folder: null, previous });
       } else {
-        const color =
-          PROJECT_LABEL_COLORS[state.options.length % PROJECT_LABEL_COLORS.length]?.value;
-        const created = await createLabel({
-          environmentId,
-          input: { name: option.name, ...(color ? { color } : {}) },
-        });
-        if (created._tag === "Failure") {
-          if (!isAtomCommandInterrupted(created))
-            reportProjectFolderFailure("Could not create project", created);
-          return;
-        }
-        await moveThread({
-          thread,
-          folder: { id: created.value.label.id, name: created.value.label.name },
-          previous,
-        });
+        await moveThread({ thread, folder: null, previous });
       }
       setOpen(false);
       setQuery("");
@@ -220,7 +211,7 @@ export function ThreadFolderPicker(props: {
               ) : (
                 <>
                   <PlusIcon />
-                  <span className="min-w-0 flex-1 truncate">New project “{option.name}”</span>
+                  <span className="min-w-0 flex-1 truncate">New project “{option.name}”…</span>
                 </>
               )}
             </ComboboxItem>

@@ -3,11 +3,41 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   ProjectLabelCloneRepositoryInput,
+  ProjectLabelCreateInput,
   ProjectLabelOwnerRepositorySearchInput,
   ProjectLabelSourceLinkInput,
+  ProjectLabelUpdateInput,
   ProjectLabelWithRepositories,
   ProjectSourceLink,
 } from "./projectLabel.ts";
+
+describe("project colors", () => {
+  const decodeCreate = Schema.decodeUnknownSync(ProjectLabelCreateInput);
+  const decodeUpdate = Schema.decodeUnknownSync(ProjectLabelUpdateInput);
+
+  it("takes the palette's names and refuses anything the app would show as gray", () => {
+    expect(decodeCreate({ name: "Spawn", color: "blue" })).toEqual({
+      name: "Spawn",
+      color: "blue",
+    });
+    expect(() => decodeCreate({ name: "Spawn", color: "#3b82f6" })).toThrow();
+    expect(() => decodeUpdate({ id: "label-1", color: "navy" })).toThrow();
+    expect(decodeUpdate({ id: "label-1", color: null })).toEqual({ id: "label-1", color: null });
+  });
+
+  it("still reads a label whose stored color predates the palette", () => {
+    const label = decodeLabel({
+      id: "label-1",
+      name: "Old",
+      color: "#3b82f6",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      repositoryIds: [],
+      threadCount: 0,
+    });
+    expect(label.color).toBe("#3b82f6");
+  });
+});
 
 const decodeSourceLink = Schema.decodeUnknownSync(ProjectSourceLink);
 const decodeSourceLinkInput = Schema.decodeUnknownSync(ProjectLabelSourceLinkInput);

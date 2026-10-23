@@ -1,9 +1,8 @@
 import { useAtomValue } from "@effect/atom-react";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { isAtomCommandInterrupted } from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentId, ProjectLabelId, ThreadId } from "@t3tools/contracts";
 import { CheckIcon, FolderIcon, FolderMinusIcon, PlusIcon } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 
 import {
   ComposerControl,
@@ -26,10 +25,11 @@ import { type DraftId, useComposerDraftStore } from "../composerDraftStore";
 import { cn } from "../lib/utils";
 import { useThreadShell } from "../state/entities";
 import { serverEnvironment } from "../state/server";
-import { useAtomCommand } from "../state/use-atom-command";
+import { openCreateProjectDialog } from "./CreateProjectDialogHost";
 import { setPendingProjectFolder, usePendingProjectFolderStore } from "./pendingProjectFolders";
 import {
   PROJECT_LABEL_COLORS,
+  isProjectChatThread,
   priorFiling,
   projectLabelKey,
   scopedRepositoryKey,
@@ -40,7 +40,7 @@ import {
 import { composerProjectFolderId } from "./projectMeta.logic";
 import { HeroProjectSuffixText } from "./HeroProjectSuffix";
 import { HERO_INLINE_ICON_STYLE, ProjectFolderIcon } from "./ProjectFolderMark";
-import { reportProjectFolderFailure, useMoveThreadToFolder } from "./useMoveThreadToFolder";
+import { useMoveThreadToFolder } from "./useMoveThreadToFolder";
 import { useProjectLabelDirectory } from "./useProjectLabels";
 import { pickNoProjectForWork } from "./workNoProjectPicks";
 import { WorkHeroCrumbText } from "../components/chat/WorkHeroSentence";
@@ -66,7 +66,7 @@ function optionText(option: ProjectOption): string {
     case "new":
       return "New project";
     case "create":
-      return `Create ${option.name}`;
+      return `New project ${option.name}`;
   }
 }
 
@@ -111,16 +111,9 @@ export function ComposerProjectPicker(props: {
     serverEnvironment.createProjectLabel.permissionAtom(environmentId),
   );
   const moveThread = useMoveThreadToFolder();
-  const createLabel = useAtomCommand(serverEnvironment.createProjectLabel, {
-    label: "create project",
-    reportFailure: false,
-  });
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
-  // "New project…" keeps the popup open and turns the search into a name field.
-  const [naming, setNaming] = useState(false);
-  const searchRef = useRef<HTMLInputElement>(null);
 
   const projects = useMemo(
     // Archived projects are not offered; one the thread is already in still
@@ -179,7 +172,13 @@ export function ComposerProjectPicker(props: {
   // Chats, and Work drafts: existing Work follows its repository (moved from
   // its row's menu), and an agent's conversation belongs to the agent.
   const surface = thread ? thread.source.surface : draftSurface;
-  const isChat = surface !== "work" && surface !== "builder" && thread?.source.agent === undefined;
+  // A project's own conversation is that project's for good, so it has no
+  // picker: the page it lives on already names the project.
+  const isChat =
+    surface !== "work" &&
+    surface !== "builder" &&
+    thread?.source.agent === undefined &&
+    !(thread !== null && isProjectChatThread(thread, directory.labels));
 
   const isHeadline = props.appearance === "headline";
   const headlineIcon = (
@@ -232,34 +231,24 @@ export function ComposerProjectPicker(props: {
 
   const choose = async (option: ProjectOption) => {
     if (busy) return;
-    if (option.kind === "new") {
-      setNaming(true);
-      searchRef.current?.focus();
+    if (option.kind === "new" || option.kind === "create") {
+      setOpen(false);
+      setQuery("");
+      const color = PROJECT_LABEL_COLORS[projects.length % PROJECT_LABEL_COLORS.length]?.value;
+      openCreateProjectDialog({
+        environmentId,
+        ...(option.kind === "create" ? { initialName: option.name } : {}),
+        ...(color ? { initialColor: color } : {}),
+        // The new project is picked here, as choosing an existing one would.
+        onCreated: (id, name) => void assign({ id, name }),
+      });
       return;
     }
     setBusy(true);
     try {
-      if (option.kind === "project") {
-        await assign({ id: option.id, name: option.name });
-      } else if (option.kind === "none") {
-        await assign(null);
-      } else {
-        const color = PROJECT_LABEL_COLORS[projects.length % PROJECT_LABEL_COLORS.length]?.value;
-        const created = await createLabel({
-          environmentId,
-          input: { name: option.name, ...(color ? { color } : {}) },
-        });
-        if (created._tag === "Failure") {
-          if (!isAtomCommandInterrupted(created)) {
-            reportProjectFolderFailure("Could not create project", created);
-          }
-          return;
-        }
-        await assign({ id: created.value.label.id, name: created.value.label.name });
-      }
+      await assign(option.kind === "project" ? { id: option.id, name: option.name } : null);
       setOpen(false);
       setQuery("");
-      setNaming(false);
     } finally {
       setBusy(false);
     }
@@ -279,10 +268,7 @@ export function ComposerProjectPicker(props: {
       onOpenChange={(next, details) => {
         if (!next && details.reason === "item-press") return;
         setOpen(next);
-        if (!next) {
-          setQuery("");
-          setNaming(false);
-        }
+        if (!next) setQuery("");
       }}
       itemToStringLabel={optionText}
       isItemEqualToValue={(left, right) => left.key === right.key}
@@ -369,15 +355,8 @@ export function ComposerProjectPicker(props: {
         className="w-64"
       >
         <ComboboxSearchInput
-          ref={searchRef}
-          aria-label={naming ? "New project name" : "Find a project"}
-          placeholder={
-            naming
-              ? "Name the new project"
-              : canCreate
-                ? "Find or create a project"
-                : "Find a project"
-          }
+          aria-label="Find a project"
+          placeholder={canCreate ? "Find or create a project" : "Find a project"}
           value={query}
           onChange={(event) => setQuery(event.target.value)}
         />
@@ -423,7 +402,7 @@ export function ComposerProjectPicker(props: {
                   <ComboboxItemIcon>
                     <PlusIcon />
                   </ComboboxItemIcon>
-                  <span className="min-w-0 flex-1 truncate">Create “{option.name}”</span>
+                  <span className="min-w-0 flex-1 truncate">New project “{option.name}”…</span>
                 </>
               )}
             </ComboboxItem>

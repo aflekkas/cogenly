@@ -1,5 +1,6 @@
 import { LiveAgentsProvider } from "../agents/agentsClient";
 import { AgentsCreateHost } from "../agents/AgentsCreateHost";
+import { CreateProjectDialogHost } from "../projectLabels/CreateProjectDialogHost";
 import { PermissionUpdateNotice } from "../components/PermissionUpdateNotice";
 import { type ServerLifecycleWelcomePayload } from "@t3tools/contracts";
 import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
@@ -237,6 +238,7 @@ function RootRouteView() {
         <LiveAgentsProvider>
           {appShell}
           <AgentsCreateHost />
+          <CreateProjectDialogHost />
         </LiveAgentsProvider>
         {/* Above the router: a theme draft is judged by walking the app, so the
               editor has to survive navigation away from settings. */}

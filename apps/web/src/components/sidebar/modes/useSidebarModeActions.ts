@@ -4,6 +4,7 @@ import { useRouter } from "@tanstack/react-router";
 import { useCallback } from "react";
 
 import { useScratchProject } from "../../../hooks/useScratchProject";
+import { openCreateProjectDialog } from "../../../projectLabels/CreateProjectDialogHost";
 import { useSidebar } from "../../ui/sidebar";
 import type { SidebarMode } from "./sidebarModes.logic";
 
@@ -11,13 +12,13 @@ const NEW_ITEM_LABELS: Record<SidebarMode, string> = {
   chats: "New chat",
   tasks: "New task",
   agents: "New agent",
-  projects: "New project",
 };
 
 /**
  * Creation and navigation that differ by mode: the search dock's new button
- * makes a scratch chat in Chats, an agent in Agents and a project in Projects
- * (Work keeps the sidebar's own new-thread flow).
+ * makes a scratch chat in Chats and an agent in Agents (Work keeps the
+ * sidebar's own new-thread flow). `createProject` serves the dock's
+ * new-project button in every mode.
  */
 export function useSidebarModeActions(input: {
   readonly mode: SidebarMode;
@@ -41,13 +42,12 @@ export function useSidebarModeActions(input: {
 
   const createProject = useCallback(() => {
     if (isMobile) setOpenMobile(false);
-    void router.navigate({
-      to: "/project",
-      search: {
-        create: true,
-        ...(currentEnvironmentId !== null ? { environmentId: currentEnvironmentId } : {}),
-      },
-    });
+    if (currentEnvironmentId !== null) {
+      openCreateProjectDialog({ environmentId: currentEnvironmentId });
+      return;
+    }
+    // No machine to create on yet: the projects page offers the dialog once one connects.
+    void router.navigate({ to: "/project", search: { create: true } });
   }, [currentEnvironmentId, isMobile, router, setOpenMobile]);
 
   const openAgentTask = useCallback(

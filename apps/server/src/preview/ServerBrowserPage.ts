@@ -257,9 +257,15 @@ export const click = async (
   return point;
 };
 
-export const type = async (page: Page, input: PreviewAutomationTypeInput) => {
+export const type = async (
+  page: Page,
+  input: PreviewAutomationTypeInput,
+  pointer: PointerReporter = noPointer,
+) => {
   const timeout = input.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const locator = targetLocator(page, input);
+  // Typing into the focused field has no target to point at.
+  if (locator !== null) await pointer(await targetPoint(page, locator, {}, timeout), "move");
   if (locator !== null && input.clear) {
     await locator.fill(input.text, { timeout });
     return;
@@ -338,9 +344,11 @@ export const hover = async (
 export const select = async (
   page: Page,
   input: PreviewAutomationSelectInput,
+  pointer: PointerReporter = noPointer,
 ): Promise<PreviewAutomationSelectResult> => {
   const locator = targetLocator(page, input)!;
   const timeout = input.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  await pointer(await targetPoint(page, locator, {}, timeout), "move");
   // Each entry matches an option by value first, then by its visible label.
   const options = await locator.evaluate(
     (element) =>

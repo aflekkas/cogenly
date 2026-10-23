@@ -75,10 +75,6 @@ describe("resolveModeLanding", () => {
     expect(resolveModeLanding({ mode: "agents", ...none, agentsLoaded: false }).kind).toBe("wait");
   });
 
-  it("opens the projects overview in Projects", () => {
-    expect(resolveModeLanding({ mode: "projects", ...everything }).kind).toBe("projects-overview");
-  });
-
   it("waits for threads before choosing a chat or repository", () => {
     expect(resolveModeLanding({ mode: "chats", ...everything, bootstrapped: false }).kind).toBe(
       "wait",
@@ -90,7 +86,7 @@ describe("resolveModeLanding", () => {
 });
 
 describe("modeSwitchReplacesMainPanel", () => {
-  const thread = (mode: Exclude<SidebarMode, "projects">): MainPanelContent => ({
+  const thread = (mode: SidebarMode): MainPanelContent => ({
     kind: "thread",
     mode,
   });
@@ -99,16 +95,9 @@ describe("modeSwitchReplacesMainPanel", () => {
     expect(modeSwitchReplacesMainPanel("chats", thread("tasks"))).toBe(true);
     expect(modeSwitchReplacesMainPanel("chats", thread("agents"))).toBe(true);
     expect(modeSwitchReplacesMainPanel("tasks", thread("chats"))).toBe(true);
-    expect(modeSwitchReplacesMainPanel("projects", thread("chats"))).toBe(true);
     expect(modeSwitchReplacesMainPanel("chats", thread("chats"))).toBe(false);
     expect(modeSwitchReplacesMainPanel("tasks", thread("tasks"))).toBe(false);
     expect(modeSwitchReplacesMainPanel("agents", thread("agents"))).toBe(false);
-  });
-
-  it("replaces a project view outside Projects", () => {
-    for (const mode of SIDEBAR_MODES) {
-      expect(modeSwitchReplacesMainPanel(mode, { kind: "project-view" })).toBe(mode !== "projects");
-    }
   });
 
   it("leaves the index and other pages to land or go back on their own", () => {

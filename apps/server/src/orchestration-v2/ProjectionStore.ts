@@ -1023,6 +1023,10 @@ type ShellThreadRow = {
   readonly has_actionable_proposed_plan: number;
   readonly item_count: number;
   readonly runless_item_count: number;
+  /** The newest provider-native subagent record whose conversation is this thread. */
+  readonly native_task_status: string | null;
+  readonly native_task_started_at: string | null;
+  readonly native_task_completed_at: string | null;
 };
 
 type ShellRunRow = {
@@ -1670,6 +1674,46 @@ function shellStatusFromStoredRunStatus(status: string | null): OrchestrationV2S
     default:
       return "failed";
   }
+}
+
+/**
+ * The shell activity of a provider-native subagent's conversation, which has
+ * no runs of its own: its task record on the parent. Null when the thread has
+ * no such record.
+ */
+export function nativeSubagentShellActivity(task: {
+  readonly status: string | null;
+  readonly startedAt: string | null;
+  readonly completedAt: string | null;
+}): {
+  readonly status: OrchestrationV2ShellThreadStatus;
+  readonly activityRunStatus: "starting" | "running" | "waiting" | null;
+  readonly startedAt: DateTime.Utc | null;
+  readonly completedAt: DateTime.Utc | null;
+} | null {
+  const live =
+    task.status === "pending"
+      ? "starting"
+      : task.status === "running" || task.status === "waiting"
+        ? task.status
+        : null;
+  const status: OrchestrationV2ShellThreadStatus | null =
+    live !== null
+      ? live
+      : task.status === "completed" ||
+          task.status === "failed" ||
+          task.status === "cancelled" ||
+          task.status === "interrupted"
+        ? task.status
+        : null;
+  if (status === null) return null;
+  return {
+    status,
+    activityRunStatus: live,
+    startedAt: task.startedAt === null ? null : DateTime.makeUnsafe(task.startedAt),
+    completedAt:
+      live !== null || task.completedAt === null ? null : DateTime.makeUnsafe(task.completedAt),
+  };
 }
 
 function itemCountThroughRun(input: {
@@ -5473,8 +5517,23 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 FROM orchestration_v2_projection_turn_items i
                 WHERE i.thread_id = t.thread_id
                   AND i.run_id IS NULL
-              ) AS runless_item_count
+              ) AS runless_item_count,
+              native_task.status AS native_task_status,
+              native_task.started_at AS native_task_started_at,
+              native_task.completed_at AS native_task_completed_at
             FROM orchestration_v2_projection_threads t
+            -- A provider-native subagent's conversation has no runs of its own;
+            -- its task record on the parent says whether it is working.
+            LEFT JOIN orchestration_v2_projection_subagents native_task
+              ON native_task.subagent_id = (
+                SELECT candidate.subagent_id
+                FROM orchestration_v2_projection_subagents candidate
+                WHERE candidate.child_thread_id = t.thread_id
+                  AND candidate.origin = 'provider_native'
+                ORDER BY COALESCE(candidate.started_at, candidate.updated_at) DESC,
+                  candidate.updated_at DESC, candidate.subagent_id DESC
+                LIMIT 1
+              )
             -- The newest run not waiting in a held queue, matching latestUnheldRun.
             LEFT JOIN orchestration_v2_projection_runs presented ON presented.run_id = (
               SELECT candidate.run_id
@@ -5757,6 +5816,20 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 : DateTime.makeUnsafe(row.blocking_run_completed_at);
           }
         }
+        // A run-less provider-native subagent conversation works while its task does.
+        const nativeTask =
+          latestRunId === null
+            ? nativeSubagentShellActivity({
+                status: row.native_task_status,
+                startedAt: row.native_task_started_at,
+                completedAt: row.native_task_completed_at,
+              })
+            : null;
+        if (nativeTask !== null) {
+          latestRunStatus = nativeTask.status;
+          latestRunStartedAt = nativeTask.startedAt;
+          latestRunCompletedAt = nativeTask.completedAt;
+        }
         const pendingBackgroundTasks = [
           ...derivePendingBackgroundWork({
             latestRun:
@@ -5783,16 +5856,20 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           latestRunCompletedAt,
           activeRunId: row.active_run_id === null ? null : RunId.make(row.active_run_id),
           activityRunStartedAt:
-            row.activity_run_started_at === null
-              ? null
-              : DateTime.makeUnsafe(row.activity_run_started_at),
+            nativeTask?.activityRunStatus != null
+              ? nativeTask.startedAt
+              : row.activity_run_started_at === null
+                ? null
+                : DateTime.makeUnsafe(row.activity_run_started_at),
           activityRunStatus:
-            row.activity_run_status === "preparing" ||
-            row.activity_run_status === "starting" ||
-            row.activity_run_status === "running" ||
-            row.activity_run_status === "waiting"
-              ? row.activity_run_status
-              : null,
+            nativeTask?.activityRunStatus != null
+              ? nativeTask.activityRunStatus
+              : row.activity_run_status === "preparing" ||
+                  row.activity_run_status === "starting" ||
+                  row.activity_run_status === "running" ||
+                  row.activity_run_status === "waiting"
+                ? row.activity_run_status
+                : null,
           ...threadErrorSummary(
             terminalFailureItem?.type === "error" ? terminalFailureItem.failure : null,
             row.last_error,

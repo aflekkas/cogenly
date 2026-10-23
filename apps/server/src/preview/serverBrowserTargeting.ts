@@ -146,15 +146,22 @@ export const tabBacking = (input: {
 /**
  * Whether a new tab should ask the desktop panel to show it before waiting for
  * its `<webview>`. Agent tabs do: an agent tab nobody shows never attaches, and
- * then runs headless with different logins. A person's own tabs already show.
+ * then runs headless with different logins. A person's own tabs already show,
+ * and an agent that opened a tab in the background (`open: false`) keeps it
+ * out of the panel, running headless.
  */
 export const revealBeforeAttach = (input: {
   readonly desktopAvailable: boolean;
   readonly alreadyAttached: boolean;
   readonly adopted: boolean;
   readonly agentOwned: boolean;
+  readonly background: boolean;
 }): boolean =>
-  input.desktopAvailable && !input.alreadyAttached && !input.adopted && input.agentOwned;
+  input.desktopAvailable &&
+  !input.alreadyAttached &&
+  !input.adopted &&
+  input.agentOwned &&
+  !input.background;
 
 /**
  * Whether a tab the desktop just attached should replace the server's headless

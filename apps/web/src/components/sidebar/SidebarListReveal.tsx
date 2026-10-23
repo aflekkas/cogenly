@@ -21,7 +21,7 @@ const revealedCounts = new Map<string, number>();
  * Paging for a sidebar list whose rows are all on the client: `count` rows
  * render, and `reveal` adds a page. Each `resetKey` (a mode) keeps the pages
  * it revealed, so switching modes and back shows the same rows, and the list's
- * scroll position (useSidebarScrollMemory) lands where it was. `listKey` tells
+ * scroll position (useSidebarListAnchor) lands where it was. `listKey` tells
  * lists sharing a reset key apart.
  */
 export function useSidebarListReveal(options: {

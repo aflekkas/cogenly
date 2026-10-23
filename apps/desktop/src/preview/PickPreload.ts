@@ -462,6 +462,58 @@ async function captureElement(element: Element): Promise<PickedElementPayload> {
   };
 }
 
+/** The default pen colour of the composer's image markup (imageMarkup.ts). */
+const DRAW_INK_COLOR = "#ef4444";
+
+/** Lucide's mouse-pointer-2, square-dashed, pencil and eraser, for the tool buttons. */
+const TOOL_ICON_PATHS: Readonly<Record<AnnotationTool, ReadonlyArray<string>>> = {
+  select: [
+    "M4.037 4.688a.495.495 0 0 1 .651-.651l16 6.5a.5.5 0 0 1-.063.947l-6.124 1.58a2 2 0 0 0-1.438 1.435l-1.579 6.126a.5.5 0 0 1-.947.063z",
+  ],
+  marquee: [
+    "M5 3a2 2 0 0 0-2 2",
+    "M19 3a2 2 0 0 1 2 2",
+    "M21 19a2 2 0 0 1-2 2",
+    "M5 21a2 2 0 0 1-2-2",
+    "M9 3h1",
+    "M9 21h1",
+    "M14 3h1",
+    "M14 21h1",
+    "M3 9v1",
+    "M21 9v1",
+    "M3 14v1",
+    "M21 14v1",
+  ],
+  draw: [
+    "M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z",
+    "m15 5 4 4",
+  ],
+  erase: [
+    "m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21",
+    "M22 21H7",
+    "m5 11 9 9",
+  ],
+};
+
+function toolIcon(paths: ReadonlyArray<string>): SVGSVGElement {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("width", "15");
+  svg.setAttribute("height", "15");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("stroke", "currentColor");
+  svg.setAttribute("stroke-width", "2");
+  svg.setAttribute("stroke-linecap", "round");
+  svg.setAttribute("stroke-linejoin", "round");
+  svg.setAttribute("aria-hidden", "true");
+  for (const d of paths) {
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", d);
+    svg.appendChild(path);
+  }
+  return svg;
+}
+
 function createButton(label: string, title: string): HTMLButtonElement {
   const button = document.createElement("button");
   button.type = "button";
@@ -989,15 +1041,17 @@ function startAnnotation(sendEnabled: boolean): void {
     gap.value = computed.gap === "normal" ? "0px" : computed.gap;
   };
 
-  const tools: ReadonlyArray<[AnnotationTool, string, string]> = [
-    ["select", "Select", "Select elements (V)"],
-    ["marquee", "Region", "Draw a region or marquee-select elements (R)"],
-    ["draw", "Draw", "Draw freehand (D)"],
-    ["erase", "Erase", "Remove an annotation target (E)"],
+  const tools: ReadonlyArray<[AnnotationTool, string, string, ReadonlyArray<string>]> = [
+    ["select", "Select", "Select elements (V)", TOOL_ICON_PATHS.select],
+    ["marquee", "Region", "Draw a region or marquee-select elements (R)", TOOL_ICON_PATHS.marquee],
+    ["draw", "Draw", "Scribble on the page (D)", TOOL_ICON_PATHS.draw],
+    ["erase", "Erase", "Remove an annotation target (E)", TOOL_ICON_PATHS.erase],
   ];
-  for (const [candidate, label, title] of tools) {
+  for (const [candidate, label, title, iconPaths] of tools) {
     const button = createButton(label, title);
     button.className += " h-8 px-2.5 text-sm";
+    button.style.gap = "6px";
+    button.prepend(toolIcon(iconPaths));
     button.addEventListener("click", () => {
       tool = candidate;
       refreshToolButtons();
@@ -1246,9 +1300,14 @@ function startAnnotation(sendEnabled: boolean): void {
       return;
     }
     if (tool === "draw" && activeStroke) {
+      // Every sample since the last frame, so a quick scribble keeps its shape.
+      const samples = event.getCoalescedEvents?.() ?? [];
       activeStroke.target.points = [
         ...activeStroke.target.points,
-        { x: event.clientX, y: event.clientY },
+        ...(samples.length > 0 ? samples : [event]).map((sample) => ({
+          x: sample.clientX,
+          y: sample.clientY,
+        })),
       ];
       activeStroke.target.bounds = strokeBounds(
         activeStroke.target.points,
@@ -1275,7 +1334,8 @@ function startAnnotation(sendEnabled: boolean): void {
     if (tool === "draw") {
       const stroke: PreviewAnnotationStrokeTarget = {
         id: nextId("stroke"),
-        color: annotationTheme?.primary ?? "#2563eb",
+        // The composer's image markup pen: red ink, a scribble rather than a selection.
+        color: DRAW_INK_COLOR,
         width: 4,
         points: [dragStart],
         bounds: { x: dragStart.x, y: dragStart.y, width: 1, height: 1 },

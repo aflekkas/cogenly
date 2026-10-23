@@ -126,24 +126,3 @@ export function instructionsSaveState(input: {
 export function normalizeInstructions(text: string): string {
   return text.replace(/\s+$/u, "");
 }
-
-/** A suggested opener for the project chat; picking one fills the composer. */
-export interface ProjectChatSuggestion {
-  readonly id: "repository" | "github" | "brief" | "remember" | "agent" | "work";
-  readonly label: string;
-  readonly prompt: string;
-}
-
-/** The empty project chat's openers, in the order the empty state shows them. */
-export const PROJECT_CHAT_SUGGESTIONS: ReadonlyArray<ProjectChatSuggestion> = [
-  { id: "repository", label: "Add a repository", prompt: "Add my repository " },
-  { id: "github", label: "Link my GitHub org", prompt: "Link the GitHub org " },
-  {
-    id: "brief",
-    label: "Drop in a brief or spec",
-    prompt: "File the attached brief in this project and summarize it.",
-  },
-  { id: "remember", label: "Remember that…", prompt: "Remember that " },
-  { id: "agent", label: "Assign an agent", prompt: "Assign an agent to this project that " },
-  { id: "work", label: "Start Work from an issue", prompt: "Start Work on " },
-];

@@ -112,16 +112,19 @@ describe("source links", () => {
     expect(sortProjectSourceLinks(links).map((link) => link.owner)).toEqual(["acme", "Spawn", "a"]);
   });
 
-  it("searches only projects linked to an owner, and only with a query", () => {
+  it("searches every project while the picker is open, linked to an owner or not", () => {
     const owner = folder("p1", "Spawn", [], [{ kind: "github-owner", owner: "spawn" }]);
-    const repoOnly = folder("p2", "Solo", [], [{ kind: "github-repo", owner: "a", repo: "b" }]);
-    expect(ownerSearchProjects([owner, repoOnly], "  ")).toEqual([]);
-    expect(ownerSearchProjects([owner, repoOnly], "ser")).toEqual([owner]);
+    const unlinked = folder("p2", "Solo", [], [{ kind: "github-repo", owner: "a", repo: "b" }]);
+    expect(ownerSearchProjects([owner, unlinked], false)).toEqual([]);
+    expect(ownerSearchProjects([owner, unlinked], true)).toEqual([owner, unlinked]);
   });
 
-  it("names the owner in a not-connected error", () => {
+  it("names the owner in a not-connected error, or the account when none is linked", () => {
     expect(ownerSearchErrorMessage("github_not_connected", ["spawn-partners"])).toBe(
       "Connect GitHub to search spawn-partners",
+    );
+    expect(ownerSearchErrorMessage("github_not_connected", [])).toBe(
+      "Connect GitHub to search your repositories",
     );
   });
 });

@@ -22,8 +22,9 @@ import {
   SquareIcon,
   UnplugIcon,
 } from "lucide-react";
-import { Children, useMemo, useState, type ReactNode } from "react";
+import { Children, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
+import { observeResize } from "~/lib/observeResize";
 import { cn } from "~/lib/utils";
 import {
   useProjects,
@@ -44,13 +45,16 @@ import {
   revealInFileExplorerLabelForOs,
 } from "../preview/fileExplorerLabel";
 import { Button } from "../ui/button";
-import { BadgeDot } from "../ui/badge-dot";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Spinner } from "../ui/spinner";
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { AgentElapsed } from "./AgentElapsed";
+import { useChatCanvas } from "./ChatCanvasContext";
+import type { ChatCanvasDetailsCard } from "./chatCanvasLayout";
+import { canDockThreadDetails } from "./threadDetailsDock.logic";
+import { useThreadDetailsDockStore } from "./threadDetailsDockStore";
 import { resolveProviderInstanceAccentColors } from "../../providerInstances";
 import { ThreadDetailsControl } from "./ThreadDetailsControl";
 import { DisclosurePanel, DisclosureTrigger } from "../ui/disclosure";
@@ -98,16 +102,11 @@ function toSubagentInput(subagent: OrchestrationV2Subagent): ThreadAgentSubagent
   };
 }
 
-/**
- * The thread details popover behind the header's details button: where the
- * thread runs, where it came from, and the agents it spawned or handed work
- * to directly, with the actions to open or stop them.
- */
-export function ThreadDetailsMenu(props: {
+/** What the details show for a thread, for the popover and the docked card alike. */
+function useThreadDetailsModel(props: {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
 }) {
-  const [open, setOpen] = useState(false);
   const ref = useMemo(
     () => scopeThreadRef(props.environmentId, props.threadId),
     [props.environmentId, props.threadId],
@@ -145,31 +144,66 @@ export function ThreadDetailsMenu(props: {
     });
   }, [projection?.subagents, props.environmentId, props.threadId, shells]);
   const canDetach = projection === null ? false : canDetachThreadProviderSession(projection);
-
   const label =
     summary.running > 0 ? `Thread details, ${summary.running} running` : "Thread details";
+  return { shell, summary, canDetach, label };
+}
+
+/**
+ * The header's details button: where the thread runs, where it came from, and
+ * the agents it spawned or handed work to directly, with the actions to open
+ * or stop them. While the chat has room beside it (ThreadDetailsDock), the
+ * button docks the details there and the chat slides over; otherwise it
+ * opens them as a popover.
+ */
+export function ThreadDetailsMenu(props: {
+  readonly environmentId: EnvironmentId;
+  readonly threadId: ThreadId;
+}) {
+  const [popoverOpen, setPopoverOpen] = useState(false);
+  const { shell, summary, canDetach, label } = useThreadDetailsModel(props);
+  const dockAvailable = useThreadDetailsDockStore((state) => state.available);
+  const docked = useThreadDetailsDockStore((state) => state.docked && state.available);
+  // The card takes over from a popover left open when room for it appears.
+  const open = popoverOpen && !docked;
+  const tooltip = dockAvailable ? `${docked ? "Hide" : "Show"} ${label.toLowerCase()}` : label;
+  const buttonProps = {
+    variant: "ghost-muted",
+    size: "icon-sm",
+    "aria-label": label,
+    "data-thread-details-trigger": "",
+    "data-pressed": open || docked ? "" : undefined,
+    className: "relative shrink-0 [-webkit-app-region:no-drag]",
+  } as const;
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        // With room to dock, the button toggles the card instead.
+        if (dockAvailable) return;
+        setPopoverOpen(next);
+      }}
+    >
       <Tooltip>
         <TooltipTrigger
           render={
-            <PopoverTrigger
-              render={
-                <Button
-                  variant="ghost-muted"
-                  size="icon-sm"
-                  aria-label={label}
-                  data-pressed={open ? "" : undefined}
-                  className="relative shrink-0 [-webkit-app-region:no-drag]"
-                />
-              }
-            />
+            dockAvailable ? (
+              <Button
+                {...buttonProps}
+                aria-pressed={docked}
+                onClick={() => {
+                  setPopoverOpen(false);
+                  useThreadDetailsDockStore.getState().setDocked(!docked);
+                }}
+              />
+            ) : (
+              <PopoverTrigger render={<Button {...buttonProps} />} />
+            )
           }
         >
           <ListTreeIcon className="size-4.5" />
-          <BadgeDot tone={summary.active.length > 0 && "info"} className="absolute top-1 right-1" />
         </TooltipTrigger>
-        <TooltipPopup side="bottom">{label}</TooltipPopup>
+        <TooltipPopup side="bottom">{tooltip}</TooltipPopup>
       </Tooltip>
       <PopoverPopup side="bottom" align="end" collisionPadding={8} width="md" padding="none">
         {shell ? (
@@ -178,11 +212,130 @@ export function ThreadDetailsMenu(props: {
             threadId={props.threadId}
             summary={summary}
             canDetach={canDetach}
-            onNavigate={() => setOpen(false)}
+            onNavigate={() => setPopoverOpen(false)}
           />
         ) : null}
       </PopoverPopup>
     </Popover>
+  );
+}
+
+/**
+ * Thread details docked at the chat's top-right, for a user who keeps them
+ * open (the header button) while the chat has room beside them. Rendered in
+ * the ChatCanvas: it reports where it sits, and the canvas slides the chat
+ * over to keep clear of it (chatCanvasLayout). The same content as the
+ * popover; it fades in and out, and the chat glides with it.
+ */
+export function ThreadDetailsDock(props: {
+  readonly environmentId: EnvironmentId;
+  readonly threadId: ThreadId;
+  readonly rightPanelOpen: boolean;
+  /** The find bar holds the top-right corner while it shows; the card sits under it. */
+  readonly findOpen: boolean;
+}) {
+  const canvas = useChatCanvas();
+  const available = canDockThreadDetails({
+    canvasWidth: canvas?.container.width ?? 0,
+    minChatWidth: canvas?.lane.minChatWidth ?? 0,
+    rightPanelOpen: props.rightPanelOpen,
+  });
+  const setAvailable = useThreadDetailsDockStore((state) => state.setAvailable);
+  useLayoutEffect(() => setAvailable(available), [available, setAvailable]);
+  useLayoutEffect(() => () => setAvailable(false), [setAvailable]);
+  const docked = useThreadDetailsDockStore((state) => state.docked);
+  const open = available && docked;
+  // Stays mounted while it fades out after closing. Only a card the user
+  // opens here fades in; one already open when the chat loads just shows.
+  const [present, setPresent] = useState(open);
+  const [fadeIn, setFadeIn] = useState(false);
+  if (open && !present) {
+    setPresent(true);
+    setFadeIn(true);
+  }
+  if (!present) return null;
+  return (
+    <ThreadDetailsDockCard
+      {...props}
+      open={open}
+      fadeIn={fadeIn}
+      onClosed={() => setPresent(false)}
+      reportDetailsCard={canvas?.reportDetailsCard ?? null}
+    />
+  );
+}
+
+function ThreadDetailsDockCard(props: {
+  readonly environmentId: EnvironmentId;
+  readonly threadId: ThreadId;
+  readonly findOpen: boolean;
+  readonly open: boolean;
+  readonly fadeIn: boolean;
+  readonly onClosed: () => void;
+  readonly reportDetailsCard: ((card: ChatCanvasDetailsCard | null) => void) | null;
+}) {
+  const { shell, summary, canDetach } = useThreadDetailsModel(props);
+  const cardRef = useRef<HTMLElement | null>(null);
+  const { open, reportDetailsCard } = props;
+  // Reported only while open, so the chat glides back as the card fades out.
+  useLayoutEffect(() => {
+    const card = cardRef.current;
+    const canvas = card?.closest<HTMLElement>("[data-chat-canvas]");
+    if (!reportDetailsCard || !card || !canvas || !open) {
+      reportDetailsCard?.(null);
+      return;
+    }
+    const report = () => {
+      const rect = card.getBoundingClientRect();
+      const origin = canvas.getBoundingClientRect();
+      reportDetailsCard({
+        left: Math.round(rect.left - origin.left),
+        right: Math.round(rect.right - origin.left),
+        bottom: Math.round(rect.bottom - origin.top),
+      });
+    };
+    report();
+    const stop = observeResize([card, canvas], report);
+    return () => {
+      stop();
+      reportDetailsCard(null);
+    };
+  }, [open, reportDetailsCard]);
+  return (
+    <aside
+      ref={cardRef}
+      aria-label="Thread details"
+      inert={!open}
+      data-panel-flip="end"
+      onKeyDown={(event) => {
+        if (event.key !== "Escape") return;
+        event.stopPropagation();
+        useThreadDetailsDockStore.getState().setDocked(false);
+        document.querySelector<HTMLElement>("[data-thread-details-trigger]")?.focus();
+      }}
+      onTransitionEnd={(event) => {
+        if (event.target === event.currentTarget && !open) props.onClosed();
+      }}
+      className={cn(
+        "dropdown-glass surface-raised surface-raised-floating absolute right-3 z-30 flex max-h-[min(36rem,calc(100%-12rem))] w-(--thread-details-panel-width) flex-col overflow-hidden rounded-lg text-popover-foreground",
+        "transition-[opacity,top] duration-(--motion-duration-base) ease-out motion-reduce:transition-opacity",
+        props.fadeIn && "starting:opacity-0",
+        props.findOpen ? "top-14" : "top-3",
+        open ? "opacity-100" : "pointer-events-none opacity-0",
+      )}
+    >
+      <div className="scroll-fade-y min-h-0 overflow-y-auto overscroll-contain">
+        {shell ? (
+          <ThreadDetailsMenuContent
+            environmentId={props.environmentId}
+            threadId={props.threadId}
+            summary={summary}
+            canDetach={canDetach}
+            onNavigate={() => {}}
+          />
+        ) : null}
+      </div>
+    </aside>
   );
 }
 
@@ -485,7 +638,7 @@ function ThreadAgentsGroup(props: {
     <>
       <ul
         aria-label={props.label ?? "Running agents"}
-        className="m-0 max-h-[13.5rem] list-none overflow-y-auto overscroll-contain p-0 has-data-workflow-open:max-h-[min(28rem,55dvh)]"
+        className="scroll-fade-y m-0 max-h-[13.5rem] list-none overflow-y-auto overscroll-contain p-0 has-data-workflow-open:max-h-[min(28rem,55dvh)]"
       >
         {visible.map(props.children)}
       </ul>

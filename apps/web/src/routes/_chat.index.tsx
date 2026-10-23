@@ -120,10 +120,6 @@ function ModeIndexLanding({ mode }: { readonly mode: SidebarMode }) {
           replace: true,
         });
         return;
-      case "projects-overview":
-        startingRef.current = true;
-        void navigate({ to: "/project", replace: true });
-        return;
       case "new-chat":
         startingRef.current = true;
         void startScratchThread(landing.environmentId, { replace: true, surface: "chat" });

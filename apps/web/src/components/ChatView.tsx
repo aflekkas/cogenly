@@ -205,7 +205,9 @@ import { type LegendListRef } from "@legendapp/list/react";
 import {
   CHAT_TIMELINE_ANCHOR_OFFSET,
   timelineContentOverflowsViewport,
+  isCarriedOverWheel,
   readTimelinePosition,
+  readWheelGesture,
   type TimelineScrollMode,
 } from "./chat/timelineScrollAnchoring";
 import { glideToLiveEnd } from "~/lib/sendMotion";
@@ -420,7 +422,7 @@ import {
   type PanelLayoutControlsProps,
   RightPanelMaximizeControl,
 } from "./chat/PanelLayoutControls";
-import { ThreadDetailsMenu } from "./chat/ThreadDetailsMenu";
+import { ThreadDetailsDock, ThreadDetailsMenu } from "./chat/ThreadDetailsMenu";
 import { expandedImageKey, type ExpandedImagePreview } from "./chat/ExpandedImagePreview";
 import { NoActiveThreadState } from "./NoActiveThreadState";
 import {
@@ -873,6 +875,11 @@ function isCompactCommandMessage(message: ChatMessage): boolean {
  */
 export interface ChatViewEmbedding {
   readonly renderEmptyState?: (composer: { readonly fill: (prompt: string) => void }) => ReactNode;
+  /**
+   * The host names the thread (a project's conversation is named for its
+   * project), so the first message generates no title.
+   */
+  readonly keepTitle?: boolean;
 }
 
 type ChatViewProps = { embedded?: ChatViewEmbedding } & (
@@ -4153,9 +4160,12 @@ export default function ChatView(props: ChatViewProps) {
         if (surface) useRightPanelStore.getState().activateSurface(activeThreadRef, surface.id);
         else useRightPanelStore.getState().openBrowser(activeThreadRef, session.tabId);
       } else if (!surface && !shouldUsePlanSidebarSheet) {
-        // A new tab the agent revealed without forcing it opens in the panel,
-        // like an agent-opened device; the phone sheet waits to be asked.
-        useRightPanelStore.getState().openBrowser(activeThreadRef, session.tabId);
+        // A new tab the agent revealed without forcing it joins the panel's tabs,
+        // but a panel the user closed stays closed (the floating preview shows
+        // the tab instead); the phone sheet waits to be asked.
+        useRightPanelStore
+          .getState()
+          .openBrowser(activeThreadRef, session.tabId, { reveal: rightPanelState.isOpen });
       }
     }
   }, [
@@ -4163,6 +4173,7 @@ export default function ChatView(props: ChatViewProps) {
     activePreviewState.listLoaded,
     activePreviewState.sessions,
     activeThreadRef,
+    rightPanelState.isOpen,
     rightPanelState.surfaces,
     shouldUsePlanSidebarSheet,
   ]);
@@ -4499,6 +4510,8 @@ export default function ChatView(props: ChatViewProps) {
   const [sendGlideThreadKey, setSendGlideThreadKey] = useState<string | null>(null);
   const anchorUserScrollGenerationRef = useRef(0);
   const cancelPositionRestoreRef = useRef<(() => void) | null>(null);
+  // When the open thread opened; see isCarriedOverWheel.
+  const timelineOpenedAtRef = useRef(0);
   const liveFollowUserScrollGenerationRef = useRef<number | null>(0);
   const cancelTimelineLiveFollowForUserNavigation = () => {
     cancelPositionRestoreRef.current?.();
@@ -4687,6 +4700,8 @@ export default function ChatView(props: ChatViewProps) {
           } else if (event.deltaY < 0) {
             timelineScrollIntentRef.current = "away-from-end";
           }
+          // Momentum carried over from the previous thread is not a scroll of this one.
+          if (isCarriedOverWheel(readWheelGesture(), timelineOpenedAtRef.current)) return;
           if (event.deltaY < 0 && contentScrollsUp()) {
             handleManualNavigation();
           }
@@ -4712,7 +4727,9 @@ export default function ChatView(props: ChatViewProps) {
             }
             return;
           }
-          if (viewportIsAwayFromEnd()) {
+          // A click while the opening thread is still scrolling to its place
+          // (cancelPositionRestoreRef is set) is not leaving the end.
+          if (cancelPositionRestoreRef.current === null && viewportIsAwayFromEnd()) {
             handleManualNavigation();
           }
         };
@@ -4825,6 +4842,7 @@ export default function ChatView(props: ChatViewProps) {
   const onIsAtEndChangeStable = useStableCallback(onIsAtEndChange);
 
   useEffect(() => {
+    timelineOpenedAtRef.current = performance.now();
     const followEnd = readTimelinePosition(routeThreadKey)?.atEnd !== false;
     isAtEndRef.current = followEnd;
     timelineScrollIntentRef.current = null;
@@ -4988,9 +5006,13 @@ export default function ChatView(props: ChatViewProps) {
       composerTimelineInsetRef.current = nextInset;
       setComposerTimelineInset(nextInset);
     }
-    const mainSurface = composerOverlayElement?.querySelector<HTMLElement>(
-      '[data-chat-composer-main-surface="true"]',
-    );
+    // A subagent thread's bar stands in for the composer and has no main
+    // surface; its host is the edge then, or the stale cover from the last
+    // composer would clip the timeline above the bar.
+    const mainSurface =
+      composerOverlayElement?.querySelector<HTMLElement>(
+        '[data-chat-composer-main-surface="true"]',
+      ) ?? composerOverlayElement?.querySelector<HTMLElement>('[data-slot="composer-host"]');
     // The backdrop starts at the composer's top edge and runs to the window
     // edge, so the timeline never shows below or beside the composer. The
     // timeline's bottom edge fade ends at that same edge (--chat-composer-cover)
@@ -7885,7 +7907,7 @@ export default function ChatView(props: ChatViewProps) {
             })(),
           },
           modelSelection: ctxSelectedModelSelection,
-          titleSeed: title,
+          ...(embedded?.keepTitle === true ? {} : { titleSeed: title }),
           runtimeMode,
           interactionMode: sendInteractionMode,
           dispatchMode: turnDispatchMode,
@@ -9173,6 +9195,14 @@ export default function ChatView(props: ChatViewProps) {
             onDrop={workspaceFileDropHandlers.onDrop}
           >
             <ThreadFind onClose={focusComposerStable} />
+            {isServerThread && activeThreadRef && !embedded ? (
+              <ThreadDetailsDock
+                environmentId={activeThreadRef.environmentId}
+                threadId={activeThreadRef.threadId}
+                rightPanelOpen={rightPanelOpen}
+                findOpen={isThreadFindActive}
+              />
+            ) : null}
             {isWorkspaceFileDragActive ? (
               <div
                 className="pointer-events-none absolute inset-2 z-40 flex items-center justify-center rounded-2xl border-2 border-dashed border-primary/60 bg-primary/[0.035]"

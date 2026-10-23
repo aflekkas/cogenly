@@ -18,7 +18,6 @@ import {
 import { acquireBrowserSurfaceActivity } from "~/browser/browserSurfaceStore";
 import { usePreviewAvailable, useRendersServerTabNatively } from "~/browser/previewRuntime";
 import { previewRuntimeTabId } from "~/browser/previewRuntimeTabId";
-import { Button } from "~/components/ui/button";
 import { faviconUrlForOrigin } from "~/lib/favicon";
 import { observeResize } from "~/lib/observeResize";
 import { cn } from "~/lib/utils";
@@ -36,9 +35,7 @@ import {
   FLOATING_PREVIEW_DRAG_SLOP_PX,
   FLOATING_PREVIEW_MIN_PANE_WIDTH,
   FLOATING_PREVIEW_STREAM_FRAME_INTERVAL_MS,
-  FLOATING_PREVIEW_THUMBNAIL_HEIGHT,
   floatingPreviewCornerPosition,
-  floatingPreviewSubtitle,
   floatingPreviewTitle,
   type FloatingPreviewPoint,
   type FloatingPreviewSize,
@@ -63,9 +60,9 @@ const STREAM_JPEG_QUALITY = 60;
 const MAX_STREAM_REFUSALS = 2;
 
 /**
- * A small card over the chat for the browser tab the panel showed last, once
- * the panel no longer shows it: closed, switched to another surface, or left
- * behind on another thread. It mirrors the page with a throttled thumbnail;
+ * A small card over the chat for this thread's browser tab the panel showed
+ * last, once the panel no longer shows it: closed or switched to another
+ * surface. It mirrors the page with a throttled thumbnail;
  * clicking it reopens the panel on that tab, and the x dismisses it until the
  * tab is looked at again. Mounted once per chat pane.
  */
@@ -75,7 +72,13 @@ export function FloatingBrowserPreview(props: {
   readonly composerElement: HTMLElement | null;
 }) {
   const target = useFloatingBrowserPreviewStore((state) => state.target);
-  if (!target) return null;
+  // Only the thread that owns the tab shows it; another thread's browsing never follows you.
+  const onTargetThread =
+    target !== null &&
+    props.activeThreadRef !== null &&
+    props.activeThreadRef.environmentId === target.threadRef.environmentId &&
+    props.activeThreadRef.threadId === target.threadRef.threadId;
+  if (!target || !onTargetThread) return null;
   return <FloatingBrowserPreviewGate key={target.key} target={target} {...props} />;
 }
 
@@ -258,7 +261,7 @@ function FloatingBrowserPreviewCard({
           inert={!shown}
           data-floating-browser-preview={shown ? "shown" : "hidden"}
           className={cn(
-            "absolute top-0 left-0 flex touch-none flex-col overflow-hidden rounded-xl border border-border bg-popover shadow-lg",
+            "group/floating-preview absolute top-0 left-0 touch-none overflow-hidden rounded-xl border border-border/70 bg-muted shadow-xl",
             "transition-opacity duration-(--motion-duration-base) ease-out",
             // The card glides to its corner after a drop; it follows the pointer while dragged.
             drag === null && "motion-safe:transition-[opacity,transform]",
@@ -274,57 +277,53 @@ function FloatingBrowserPreviewCard({
           onPointerUp={handlePointer}
           onPointerCancel={handlePointer}
         >
+          {/* The page fills the card; its title sits on a soft scrim along the bottom. */}
           <button
             type="button"
-            className="flex min-h-0 flex-1 cursor-pointer flex-col text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+            className="absolute inset-0 block cursor-pointer text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
             onClick={openInPanel}
             aria-label={`Open ${title} in the browser panel`}
           >
-            <span
-              className="relative block shrink-0 overflow-hidden border-b border-border bg-muted"
-              style={{ height: FLOATING_PREVIEW_THUMBNAIL_HEIGHT }}
-            >
-              {/* Placeholder until the first frame paints over it. */}
-              <span className="absolute inset-0 flex items-center justify-center text-muted-foreground">
-                <FaviconImage
-                  sources={[capturedFavicon, faviconUrlForOrigin(url, 64)]}
-                  fallback={<Globe2 aria-hidden className="size-6" />}
-                  className="size-8 rounded object-contain opacity-60"
-                />
-              </span>
-              {thumbnailSource === "stream" ? (
-                <StreamThumbnail threadRef={threadRef} tabId={tabId} active={shown} />
-              ) : thumbnailSource === "desktop" ? (
-                <DesktopThumbnail runtimeTabId={runtimeTabId} active={shown} />
-              ) : null}
+            {/* Placeholder until the first frame paints over it. */}
+            <span className="absolute inset-0 flex items-center justify-center text-muted-foreground">
+              <FaviconImage
+                sources={[capturedFavicon, faviconUrlForOrigin(url, 64)]}
+                fallback={<Globe2 aria-hidden className="size-6" />}
+                className="size-8 rounded object-contain opacity-60"
+              />
             </span>
-            <span className="flex min-w-0 flex-1 items-center gap-2 pr-9 pl-2.5">
+            {thumbnailSource === "stream" ? (
+              <StreamThumbnail threadRef={threadRef} tabId={tabId} active={shown} />
+            ) : thumbnailSource === "desktop" ? (
+              <DesktopThumbnail runtimeTabId={runtimeTabId} active={shown} />
+            ) : null}
+            <span className="absolute inset-x-0 bottom-0 flex h-9 min-w-0 items-end gap-1.5 bg-linear-to-t from-black/70 to-transparent px-2.5 pb-2 text-white">
               <FaviconImage
                 sources={[capturedFavicon, faviconUrlForOrigin(url, 32)]}
-                fallback={
-                  <Globe2 aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
-                }
+                fallback={<Globe2 aria-hidden className="size-3.5 shrink-0 opacity-80" />}
                 className="size-3.5 shrink-0 rounded-sm object-contain"
               />
-              <span className="flex min-w-0 flex-col">
-                <span className="truncate text-xs font-medium text-foreground">{title}</span>
-                <span className="flex min-w-0 items-center gap-1 text-2xs text-muted-foreground">
-                  {agentDriving ? <Bot aria-hidden className="size-3 shrink-0" /> : null}
-                  <span className="truncate">{floatingPreviewSubtitle({ url, agentDriving })}</span>
-                </span>
+              <span className="min-w-0 flex-1 truncate text-xs leading-3.5 font-medium">
+                {title}
               </span>
+              {agentDriving ? (
+                <span className="flex shrink-0 items-center gap-1 rounded-full bg-white/15 px-1.5 text-2xs leading-3.5 backdrop-blur-sm">
+                  <Bot aria-hidden className="size-2.5" />
+                  Agent
+                </span>
+              ) : null}
             </span>
           </button>
-          <div data-floating-preview-close="" className="absolute right-1.5 bottom-2">
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              aria-label="Close browser preview"
-              onClick={() => useFloatingBrowserPreviewStore.getState().dismiss(key)}
-            >
-              <X />
-            </Button>
-          </div>
+          {/* Shown on hover or keyboard focus, so the page reads clean at rest. */}
+          <button
+            type="button"
+            data-floating-preview-close=""
+            aria-label="Close browser preview"
+            onClick={() => useFloatingBrowserPreviewStore.getState().dismiss(key)}
+            className="absolute top-1.5 right-1.5 flex size-6 cursor-pointer items-center justify-center rounded-md bg-black/55 text-white opacity-0 backdrop-blur-sm transition-opacity duration-(--motion-duration-fast) ease-out outline-none group-hover/floating-preview:opacity-100 hover:bg-black/75 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+          >
+            <X aria-hidden className="size-3.5" />
+          </button>
         </section>
       ) : null}
     </div>
@@ -357,7 +356,7 @@ function StreamThumbnail(props: {
         threadId: threadRef.threadId,
         tabId,
         maxWidth: FLOATING_PREVIEW_CARD_WIDTH * ratio,
-        maxHeight: FLOATING_PREVIEW_THUMBNAIL_HEIGHT * ratio * 2,
+        maxHeight: FLOATING_PREVIEW_CARD_HEIGHT * ratio * 2,
         interactive: false,
         minFrameIntervalMs: FLOATING_PREVIEW_STREAM_FRAME_INTERVAL_MS,
         quality: STREAM_JPEG_QUALITY,

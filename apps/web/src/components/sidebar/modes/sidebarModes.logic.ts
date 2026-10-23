@@ -1,14 +1,14 @@
 /**
- * The sidebar lists one of three kinds of work at a time, or the projects
- * that tie them together:
+ * The sidebar lists one of three kinds of work at a time:
  *
  * - Chats: threads started from Chats.
  * - Work: threads started from Work, with or without a project, plus every
  *   thread an agent started to do work, wherever it runs. Shown as "Work"; the id stays `tasks`
  *   because persisted settings and keybindings store it.
  * - Agents: persistent agent conversations.
- * - Projects: the user's project tags. Lists no threads itself; a project
- *   opens a view of its Work, chats and agents.
+ *
+ * Projects are not a mode: they have their own page, opened from the rail's
+ * footer like Usage (`/project`).
  *
  * Every visible thread belongs to one mode, so a thread never shows twice and
  * opening one from anywhere (search, a notification, a link) can switch the
@@ -17,21 +17,21 @@
 import { sortPinnedThreadsByOrderKey } from "@t3tools/client-runtime/state/thread-sort";
 import type { EnvironmentId, ThreadId, ThreadSurface } from "@t3tools/contracts";
 
-export type SidebarMode = "chats" | "tasks" | "agents" | "projects";
+export type SidebarMode = "chats" | "tasks" | "agents";
 
-export const SIDEBAR_MODES: ReadonlyArray<SidebarMode> = ["chats", "tasks", "agents", "projects"];
+export const SIDEBAR_MODES: ReadonlyArray<SidebarMode> = ["chats", "tasks", "agents"];
 
 export const SIDEBAR_MODE_LABELS: Record<SidebarMode, string> = {
   chats: "Chats",
   tasks: "Work",
   agents: "Agents",
-  projects: "Projects",
 };
 
 export const DEFAULT_SIDEBAR_MODE: SidebarMode = "tasks";
 
+/** A stored mode; the retired "projects" mode reads as not a mode, so the default applies. */
 export function isSidebarMode(value: unknown): value is SidebarMode {
-  return value === "chats" || value === "tasks" || value === "agents" || value === "projects";
+  return value === "chats" || value === "tasks" || value === "agents";
 }
 
 export function sidebarModeThreadKey(
@@ -61,8 +61,8 @@ export function classifySidebarThreadMode(input: {
   return input.isScratch ? "chats" : "tasks";
 }
 
-/** The modes a thread can belong to; Projects lists none itself. */
-export type SidebarThreadMode = Exclude<SidebarMode, "projects">;
+/** The modes a thread can belong to: every mode lists threads. */
+export type SidebarThreadMode = SidebarMode;
 
 export interface SidebarModeThreadClassifier {
   /** `environmentId:threadId` of every agent conversation. */

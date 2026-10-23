@@ -6498,7 +6498,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   data-chat-composer-primary-actions-compact={
                     isComposerPrimaryActionsCompact ? "true" : "false"
                   }
-                  className="flex shrink-0 flex-nowrap items-center justify-end gap-1"
+                  // Even breathing room between dictation, attach and the primary button.
+                  className="flex shrink-0 flex-nowrap items-center justify-end gap-2"
                 >
                   {settings.dictationEnabled && !isChoiceOnlyPendingQuestion ? (
                     <ComposerDictationControl

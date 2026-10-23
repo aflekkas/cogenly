@@ -250,18 +250,17 @@ import { SIDEBAR_MODE_ICONS } from "./sidebar/modes/SidebarModeSwitcher";
 import { RepositoryBadge } from "./sidebar/modes/RepositoryBadge";
 import { SidebarRenameField } from "./sidebar/SidebarRenameField";
 import {
-  projectChatThreadKeys,
   projectLabelKey,
   priorFiling,
   scopedRepositoryKey,
   threadFolderState,
   threadForksIntoProjects,
   threadProjectFolderId,
-  withoutProjectChats,
   workThreadFolder,
   type EnvironmentProjectLabel,
   type ProjectLabelKey,
 } from "../projectLabels/projectLabels.logic";
+import { openCreateProjectDialog } from "../projectLabels/CreateProjectDialogHost";
 import { usePendingProjectFolderStore } from "../projectLabels/pendingProjectFolders";
 import { useMoveThreadToFolder } from "../projectLabels/useMoveThreadToFolder";
 import { useProjectLabelDirectory } from "../projectLabels/useProjectLabels";
@@ -276,9 +275,7 @@ import { useNavRailBadgeStore } from "./sidebar/navRailState";
 import {
   CHAT_DATE_GROUP_LABELS,
   SidebarAgentsList,
-  ProjectsShelfBar,
   SidebarModeSwitcher,
-  SidebarProjectsList,
   CHAT_LIST_PAGE_SIZE,
   applyPinnedDragOrder,
   chatListGroupOf,
@@ -306,8 +303,13 @@ import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuShortcut, MenuTrigger } f
 import { SidebarChatStatusSlot } from "./sidebar/SidebarChatStatusSlot";
 import {
   SIDEBAR_CARD_CLASS_NAME,
+  SIDEBAR_CARD_REST_CLASS_NAME,
   SIDEBAR_DRAFT_CLASS_NAME,
   SIDEBAR_DRAFT_TITLE_CLASS_NAME,
+  SidebarCardBody,
+  sidebarCardClassName,
+  SidebarCardItem,
+  SidebarCardLine,
   SidebarFoldRow,
   SidebarGroupHeader,
   SidebarList,
@@ -326,9 +328,9 @@ import {
   workGroupSectionKey,
 } from "./sidebar/workCards.logic";
 import { SidebarListRevealSentinel, useSidebarListReveal } from "./sidebar/SidebarListReveal";
-import { useSidebarScrollMemory } from "./sidebar/useSidebarScrollMemory";
+import { useSidebarListAnchor } from "./sidebar/useSidebarListAnchor";
+import { useAgentListFilter } from "../agents/agentListFilter";
 import { AgentsShelfBar } from "../agents/AgentsShelfBar";
-import { playListSwitchMotion } from "./sidebar/listSwitchMotion";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
 import {
   composerDraftHasUserContent,
@@ -795,34 +797,28 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
   }
   // A Work card like any other, marked as a draft in the status slot.
   return (
-    <li className="list-none py-0.5">
+    <SidebarCardItem>
       <div
         role="button"
         tabIndex={0}
         aria-label={accessibility.label}
         aria-current={accessibility.current}
         data-testid="sidebar-draft-row"
-        className={cn(
-          SIDEBAR_CARD_CLASS_NAME,
-          SIDEBAR_DRAFT_CLASS_NAME,
-          props.isActive
-            ? "state-selected"
-            : "state-hover bg-(--sidebar-card) text-sidebar-foreground",
-        )}
+        className={sidebarCardClassName({ selected: props.isActive, draft: true })}
         onClick={handleActivate}
         onContextMenu={handleContextMenu}
         onKeyDown={handleKeyDown}
       >
         <span className="sr-only">{preview}</span>
-        <div className="relative z-10 h-[4.5rem] px-(--sidebar-row-content-inset) py-2">
-          <div className="flex h-[18px] min-w-0 items-center gap-1.5">
+        <SidebarCardBody>
+          <SidebarCardLine line="head">
             <WorkCardLabel
               folder={props.folder ?? null}
               repositoryName={props.repositoryName ?? null}
               project={props.project}
               projectInHeading={props.projectInHeading}
             />
-            <span className="relative ml-auto flex h-[18px] min-w-8 shrink-0 items-stretch justify-end text-xs">
+            <span className="relative ml-auto flex h-5 min-w-8 shrink-0 items-stretch justify-end text-xs">
               <span
                 aria-hidden
                 className="pointer-events-none flex items-center gap-1 self-center font-medium text-warning-foreground transition-opacity duration-(--motion-duration-base) ease-standard motion-reduce:transition-none group-has-[:focus-visible]/sidebar-row:opacity-0 group-any-hover/sidebar-row:opacity-0"
@@ -832,29 +828,29 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
               </span>
               <span className="absolute inset-y-0 right-0 flex items-center">{discardButton}</span>
             </span>
-          </div>
-          <div className="mt-0.5 flex min-w-0">
+          </SidebarCardLine>
+          <SidebarCardLine line="title">
             <span
               aria-hidden
               className={cn(
-                "min-w-0 flex-1 truncate text-card font-medium",
+                "min-w-0 flex-1 truncate text-sm font-medium",
                 SIDEBAR_DRAFT_TITLE_CLASS_NAME,
               )}
             >
               {preview}
             </span>
-          </div>
-          <div className="mt-0.5 flex h-4 min-w-0 items-center gap-1.5 text-foreground/12 text-xs transition-colors duration-(--motion-duration-base) group-[.state-selected]/sidebar-row:text-foreground/23 motion-reduce:transition-none">
+          </SidebarCardLine>
+          <SidebarCardLine line="meta" tone="faint">
             {props.branch ? (
               <>
                 <GitBranchIcon aria-hidden className="size-3 shrink-0" />
                 <span className="min-w-0 flex-1 fade-truncate">{props.branch}</span>
               </>
             ) : null}
-          </div>
-        </div>
+          </SidebarCardLine>
+        </SidebarCardBody>
       </div>
-    </li>
+    </SidebarCardItem>
   );
 });
 
@@ -1729,11 +1725,12 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       "[&:not(:hover):not(:focus-within)_*]:text-secondary-label/70",
     props.isActive || isSelected || isContextMenuOpen || props.sweepAction !== null
       ? "state-selected"
-      : hasUnsentDraft
-        ? "state-hover bg-(--sidebar-card) text-sidebar-foreground"
-        : shouldRecede
-          ? "state-hover bg-(--sidebar-card) text-sidebar-muted-foreground/75"
-          : "state-hover bg-(--sidebar-card) text-sidebar-foreground",
+      : cn(
+          SIDEBAR_CARD_REST_CLASS_NAME,
+          shouldRecede && !hasUnsentDraft
+            ? "text-sidebar-muted-foreground/75"
+            : "text-sidebar-foreground",
+        ),
     // Background work fades as a whole row, status label included, so it
     // takes less attention than rows that need a human (input, approval).
     shouldRecede && status === "working" && "opacity-70 hover:opacity-100 focus-within:opacity-100",
@@ -1772,10 +1769,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
         inputClassName="min-w-0 flex-1 rounded-sm border border-input bg-card px-1 text-sm font-medium text-card-foreground outline-none focus:border-foreground"
       />
     ) : (
-      <PendingTitleSlot
-        pending={isRegeneratingTitle}
-        className={cn("min-w-0 flex-1", variant === "card" ? "text-card" : "text-sm")}
-      >
+      <PendingTitleSlot pending={isRegeneratingTitle} className="min-w-0 flex-1 text-sm">
         <PanOnHoverText
           className={cn(
             "transition-[color,opacity] duration-(--motion-duration-base) motion-reduce:transition-none",
@@ -1977,14 +1971,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   const diff = latestRunDiff(thread);
 
   return (
-    <li
+    <SidebarCardItem
       data-thread-item={threadKey}
       onPointerDown={handleRowPointerDown}
       {...(fileDropHandlers ?? {})}
-      className={cn(
-        // The 72px content box plus the py-0.5 gap between cards.
-        "list-none py-0.5 [content-visibility:auto] [contain-intrinsic-size:auto_76px]",
-      )}
     >
       <div
         ref={setRowElement}
@@ -2002,10 +1992,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
         onContextMenu={handleContextMenu}
       >
         {accessibleTitle}
-        <div className={cn("relative z-10 h-[4.5rem] px-(--sidebar-row-content-inset) py-2")}>
+        <SidebarCardBody>
           {/* T3's three lines: where it runs and its status, the title, then
               the branch and machine. */}
-          <div className="flex h-[18px] min-w-0 items-center gap-1.5">
+          <SidebarCardLine line="head">
             <WorkCardLabel
               folder={props.folder}
               repositoryName={props.repositoryName}
@@ -2033,7 +2023,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                   there the actions take their own width beside it. */}
             <span
               className={cn(
-                "group/sidebar-status-slot relative ml-auto flex h-[18px] min-w-8 shrink-0 items-stretch justify-end text-xs",
+                "group/sidebar-status-slot relative ml-auto flex h-5 min-w-8 shrink-0 items-stretch justify-end text-xs",
                 props.sweepAction !== null && "hidden",
               )}
             >
@@ -2223,19 +2213,18 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                   pressed action button stays connected and a cancelled sweep's
                   release click still fires and is consumed. */}
             {sweepBadge}
-          </div>
+          </SidebarCardLine>
           {/* The hover actions sit on the first line, so the title never fades under them. */}
-          <div className="mt-0.5 flex h-[18px] min-w-0 items-center gap-1.5 [--pan-end-inset-target:0px]">
+          <SidebarCardLine line="title" className="[--pan-end-inset-target:0px]">
             {draftIndicator}
             {title}
-          </div>
+          </SidebarCardLine>
           {isRegeneratingTitle ? (
             <span role="status" className="sr-only">
               Regenerating title
             </span>
           ) : null}
-          {/* Barely there at rest (#2b2c2e on the card), a step up when selected. */}
-          <div className="mt-0.5 flex h-4 min-w-0 items-center gap-1.5 text-foreground/12 text-xs transition-colors duration-(--motion-duration-base) group-[.state-selected]/sidebar-row:text-foreground/23 motion-reduce:transition-none">
+          <SidebarCardLine line="meta" tone="faint">
             {/* Work an agent started names the agent ahead of the branch. */}
             {props.workAgentName ? (
               <span className="flex min-w-0 max-w-1/2 shrink-0 items-center gap-1">
@@ -2302,11 +2291,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 <TooltipPopup side="top">{providerModelLabel}</TooltipPopup>
               </Tooltip>
             </span>
-          </div>
-        </div>
+          </SidebarCardLine>
+        </SidebarCardBody>
         {props.jumpLabel ? <JumpHintBadge label={props.jumpLabel} /> : null}
       </div>
-    </li>
+    </SidebarCardItem>
   );
 });
 
@@ -2552,14 +2541,6 @@ export default function Sidebar() {
     [routeDraftThread, routeTarget],
   );
   const routeThreadKey = routeThreadRef ? scopedThreadKey(routeThreadRef) : null;
-  // The project view open in the main area, highlighted in the Projects list.
-  const routeProjectKey = useParams({
-    strict: false,
-    select: (params) =>
-      "labelId" in params && params.labelId && params.environmentId
-        ? projectLabelKey(params.environmentId, params.labelId)
-        : null,
-  });
   const routeTargetRef = useRef(routeTarget);
   routeTargetRef.current = routeTarget;
   // Post-settle navigation validates against the CURRENT route, not the one
@@ -2632,10 +2613,6 @@ export default function Sidebar() {
   // Project folders hold chats and Work, across environments.
   const labelEnvironmentIds = useConnectedEnvironmentIds();
   const projectLabelDirectory = useProjectLabelDirectory(labelEnvironmentIds);
-  const projectChatKeys = useMemo(
-    () => projectChatThreadKeys(projectLabelDirectory.labels),
-    [projectLabelDirectory.labels],
-  );
   const moveThreadToFolder = useMoveThreadToFolder();
   // Chats | Work | Agents: the list below shows one mode's threads at a time.
   const sidebarModes = useSidebarModeState({
@@ -2649,22 +2626,8 @@ export default function Sidebar() {
     projectDisplayNameByKey,
   });
   const sidebarMode = sidebarModes.mode;
-  // Chats and Work list threads; Agents and Projects render their own lists.
+  // Chats and Work list threads; Agents renders its own list.
   const modeListsThreads = sidebarMode === "chats" || sidebarMode === "tasks";
-  // Opening a project view (a row's menu, search, a link) shows the Projects
-  // list beside it, as opening a thread follows it into its mode.
-  // Follows a change of folder route only, never the folder the list mounted on:
-  // beside the rail the list is not mounted on Projects pages, and it can mount
-  // while a navigation away from a folder still reports that folder, which would
-  // undo a switch to another mode made from there.
-  const setSidebarMode = sidebarModes.setMode;
-  const followProjectRoute = useStableCallback(() => setSidebarMode("projects"));
-  const followedProjectKeyRef = useRef(routeProjectKey);
-  useEffect(() => {
-    if (routeProjectKey === followedProjectKeyRef.current) return;
-    followedProjectKeyRef.current = routeProjectKey;
-    if (routeProjectKey !== null) followProjectRoute();
-  }, [followProjectRoute, routeProjectKey]);
   // Rows name their folder in the hover card. One object per folder, so
   // memoized rows keep the same prop while the directory holds.
   const folderFor = useMemo(() => {
@@ -2856,12 +2819,7 @@ export default function Sidebar() {
       const preciseNow = new Date().toISOString();
       // Subagent child threads live in the parent's Agents surface, not the
       // sidebar roster (v2 models them as real threads with lineage).
-      // Project chats live on their project's page, not in the Chats list.
-      const roster = withoutProjectChats(
-        filterSidebarV2VisibleThreads(sidebarModes.modeThreads, null),
-        projectChatKeys,
-      );
-      const visible = roster;
+      const visible = filterSidebarV2VisibleThreads(sidebarModes.modeThreads, null);
       inboxReturns.observe(workingShelfEnabled ? threads : null);
       const active: EnvironmentThreadShell[] = [];
       const working: EnvironmentThreadShell[] = [];
@@ -2922,7 +2880,6 @@ export default function Sidebar() {
       };
     }, [
       nowMinute,
-      projectChatKeys,
       serverConfigs,
       sidebarMode,
       sidebarModes.modeThreads,
@@ -2946,7 +2903,12 @@ export default function Sidebar() {
   const [pinDrag, setPinDrag] = useState<{ key: string; order: readonly string[] } | null>(null);
   // While a Work card's move saves (a drop, or alt+arrow), the Working list
   // draws this order, so the card never jumps back before the server agrees.
-  const [workDrag, setWorkDrag] = useState<{ key: string; order: readonly string[] } | null>(null);
+  // `settled` once its writes are saved, while the rows catch up.
+  const [workDrag, setWorkDrag] = useState<{
+    key: string;
+    order: readonly string[];
+    settled?: boolean;
+  } | null>(null);
   const chatWindow = useMemo(
     () =>
       sidebarMode === "chats"
@@ -3423,8 +3385,8 @@ export default function Sidebar() {
     },
     [updateThreadMetadata],
   );
-  // The rename field's regenerate button: drop the typed title and let the
-  // agent name the thread again.
+  // The rename field's regenerate button and the row menu's Regenerate Title:
+  // drop the typed title and let the agent name the thread again.
   const regenerateThreadTitle = useCallback(
     (threadRef: ScopedThreadRef) => {
       void (async () => {
@@ -3767,7 +3729,16 @@ export default function Sidebar() {
         return ref ? [reorderActiveThread(ref, orderKey)] : [];
       }),
     ).then((results) => {
-      setWorkDrag((current) => (current?.key === key ? null : current));
+      const failed = results.some(
+        (result) => result._tag === "Failure" && !isAtomCommandInterrupted(result),
+      );
+      // A failed move falls back to the saved order. A saved one holds its
+      // preview until the list's own order catches up (see workDropLanded):
+      // a command can land before its rows do, and dropping the preview then
+      // would swing the cards back and forth.
+      setWorkDrag((current) =>
+        current?.key !== key ? current : failed ? null : { ...current, settled: true },
+      );
       for (const result of results) {
         if (result._tag !== "Failure" || isAtomCommandInterrupted(result)) continue;
         const error = squashAtomCommandFailure(result);
@@ -4013,6 +3984,10 @@ export default function Sidebar() {
   const workRows = useMemo(() => {
     if (sidebarMode !== "tasks") return null;
     const shown = openShelf ?? "active";
+    // Only live work sits under project headings. Snoozed and Settled are
+    // shelves of put-away threads, one flat list each (each card names its
+    // project), drawn below like the other modes' shelves.
+    if (shown === "snoozed" || shown === "settled") return null;
     const threads: { key: string; section: SidebarSection }[] = [];
     for (const item of sidebarListItems) {
       if (item.kind !== "thread") continue;
@@ -4024,16 +3999,16 @@ export default function Sidebar() {
       threads.push({ key: item.key, section: item.section });
     }
     threads.reverse();
-    const previewed =
+    const savedOrder = threads.map((entry) => entry.key);
+    const drawnOrder =
       workDrag !== null && shown === "active"
-        ? (() => {
-            const byKey = new Map(threads.map((entry) => [entry.key, entry]));
-            return applyDrawnOrder(
-              threads.map((entry) => entry.key),
-              workDrag.order,
-            ).map((key) => byKey.get(key)!);
-          })()
-        : threads;
+        ? applyDrawnOrder(savedOrder, workDrag.order)
+        : savedOrder;
+    const byKey = new Map(threads.map((entry) => [entry.key, entry]));
+    const previewed =
+      drawnOrder === savedOrder ? threads : drawnOrder.map((key) => byKey.get(key)!);
+    // The saved order now draws what the preview does.
+    const dropLanded = drawnOrder.every((key, index) => savedOrder[index] === key);
     const drafts =
       shown === "active" ? workDrafts.toSorted((a, b) => a.createdAtMs - b.createdAtMs) : [];
     // One stable folder per project (rowFolderByKey), for the heading's mark.
@@ -4064,7 +4039,7 @@ export default function Sidebar() {
             ),
       );
     });
-    return { shown, threads: previewed, groups };
+    return { shown, threads: previewed, groups, dropLanded };
   }, [
     attentionThreadKeys,
     openShelf,
@@ -4079,6 +4054,24 @@ export default function Sidebar() {
   ]);
   const workRowsRef = useRef(workRows);
   workRowsRef.current = workRows;
+  // A saved move lets go of its preview once the rows draw the same order,
+  // so nothing moves. If they never do (another device moved them too), it
+  // lets go after a while and the list snaps to the saved order.
+  const workDropLanded = workRows?.dropLanded ?? true;
+  useEffect(() => {
+    if (workDrag?.settled !== true) return;
+    const key = workDrag.key;
+    const release = () => setWorkDrag((current) => (current?.key === key ? null : current));
+    if (workDropLanded) {
+      release();
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      listMotionSkipRef.current = true;
+      release();
+    }, 4000);
+    return () => window.clearTimeout(timer);
+  }, [workDrag, workDropLanded]);
   // Rows as they read on screen, for range selection and action sweeps: in
   // Work that is project by project. Settle-and-advance keeps the list order.
   const drawnThreadKeysRef = useRef<readonly string[]>(orderedThreadKeys);
@@ -4168,8 +4161,21 @@ export default function Sidebar() {
   );
   const sidebarListHasRows = sidebarListItems.length + visibleDraftSessionCount > 0;
   const sidebarModeListRef = useRef<HTMLDivElement | null>(null);
-  // Each mode, and search, keeps its own place in the list.
-  useSidebarScrollMemory(sidebarModeListRef, isSearchingThreads ? "search" : sidebarMode);
+  // Each list (a mode and its filter, or search) keeps its own place. Lists
+  // fill from the bottom, against the dock; Chats and search run best first
+  // from the top.
+  const agentListFilter = useAgentListFilter();
+  useSidebarListAnchor(
+    sidebarModeListRef,
+    isSearchingThreads
+      ? "search"
+      : sidebarMode === "tasks"
+        ? `tasks:${openShelf ?? "active"}`
+        : sidebarMode === "agents"
+          ? `agents:${agentListFilter}`
+          : sidebarMode,
+    isSearchingThreads || sidebarMode === "chats" ? "top" : "bottom",
+  );
   const listMotionModeRef = useRef(sidebarMode);
   const listMotionShelfRef = useRef(openShelf);
   const listMotionRevealRef = useRef({ chats: chatVisibleCount, settled: settledVisibleCount });
@@ -4190,9 +4196,8 @@ export default function Sidebar() {
     // mode; AppSidebarLayout plays the switch's one enter motion on the column.
     const modeChanged = listMotionModeRef.current !== sidebarMode;
     listMotionModeRef.current = sidebarMode;
-    // Switching the Work count bar's filter swaps the list the same way, with
-    // a short blur fade (no travel) so the new list reads as arriving rather
-    // than redrawn.
+    // Switching the Work count bar's filter swaps the list the same way:
+    // instantly, with no fade.
     const shelfChanged = listMotionShelfRef.current !== openShelf;
     listMotionShelfRef.current = openShelf;
     // A revealed page fades its rows in where they land; nothing travels.
@@ -4204,7 +4209,6 @@ export default function Sidebar() {
       sidebarListHasRows && !modeChanged && !shelfChanged && !folded && !sortDropped,
       { inPlace: revealed },
     );
-    if (shelfChanged && !modeChanged) playListSwitchMotion(sidebarModeListRef.current);
   }, [
     chatVisibleCount,
     openShelf,
@@ -4673,6 +4677,7 @@ export default function Sidebar() {
               isSnoozed,
               canSnoozeNow: canSnooze(thread, { now: new Date().toISOString() }),
               isRunning: !threadRuntimeCanArchive(thread.runtime),
+              isRegeneratingTitle: thread.titleRegeneration != null,
               confirmsDelete: confirmThreadDelete || capabilities.delete === "always-confirm",
               supports: {
                 settlement: supportsSettlement,
@@ -4680,6 +4685,9 @@ export default function Sidebar() {
                 pinning:
                   serverConfigs.get(thread.environmentId)?.environment.capabilities
                     .threadPinning === true,
+                titleRegeneration:
+                  serverConfigs.get(thread.environmentId)?.environment.capabilities
+                    .threadTitleRegeneration === true,
               },
               snoozePresets,
               limitResume: usageLimitMenuState(
@@ -4721,7 +4729,13 @@ export default function Sidebar() {
           return;
         }
         if (clicked.value === "new-folder") {
-          sidebarModeActions.createProject();
+          // The right-clicked thread moves into the project it just made.
+          const previous = priorFiling(folderState);
+          openCreateProjectDialog({
+            environmentId: thread.environmentId,
+            onCreated: (id, name) =>
+              void moveThreadToFolder({ thread, folder: { id, name }, previous }),
+          });
           return;
         }
         const clickedId = clicked.value;
@@ -4790,6 +4804,9 @@ export default function Sidebar() {
           }
           case "rename":
             startThreadRename(threadRef, thread.title);
+            return;
+          case "regenerate-title":
+            regenerateThreadTitle(threadRef);
             return;
           case "mark-unread":
             markThreadUnread(threadRef);
@@ -5074,15 +5091,6 @@ export default function Sidebar() {
             onClick: sidebarModeActions.createAgent,
           },
         ];
-      case "projects":
-        return [
-          {
-            id: "new-project",
-            label: sidebarModeActions.newItemLabel,
-            icon: FolderPlusIcon,
-            onClick: sidebarModeActions.createProject,
-          },
-        ];
     }
   })();
   const threadHeader = (
@@ -5147,7 +5155,6 @@ export default function Sidebar() {
               />
             ) : null}
             {sidebarMode === "agents" ? <AgentsShelfBar /> : null}
-            {sidebarMode === "projects" ? <ProjectsShelfBar /> : null}
             {threadHeader}
           </SidebarGroup>
         }
@@ -5233,18 +5240,6 @@ export default function Sidebar() {
               onCreateAgent={sidebarModeActions.createAgent}
             />
           ) : null}
-          {!isSearchingThreads && sidebarMode === "projects" ? (
-            <SidebarProjectsList
-              activeProjectKey={routeProjectKey}
-              environmentLabel={(entry) =>
-                labelEnvironmentIds.length > 1
-                  ? (environmentLabelById.get(entry.environmentId) ?? null)
-                  : null
-              }
-              onOpenProject={openProjectView}
-              onCreateProject={sidebarModeActions.createProject}
-            />
-          ) : null}
           {!isSearchingThreads && modeListsThreads ? (
             // Work's cards sort within their project groups (SidebarSortableFoldRow).
             <SidebarThreadListProviders
@@ -5268,7 +5263,7 @@ export default function Sidebar() {
                 // presentational list also makes its implicit listitems
                 // presentational while preserving every descendant control.
                 role="presentation"
-                // Row padding (4px each side) plus the cards' gap spaces Work cards 10px apart.
+                // Work's cards carry their own gap (SidebarCardItem); Chats' rows take the list's.
                 density={sidebarMode === "tasks" ? "cards" : "rows"}
                 onKeyDown={sidebarMode === "tasks" ? handleWorkListKeyDown : undefined}
                 grow={sidebarListItems.length > 0}
@@ -5430,7 +5425,8 @@ export default function Sidebar() {
                   // shows active work (and drafts), each other one only its shelf.
                   const shownSection = sidebarMode === "tasks" ? (openShelf ?? "active") : null;
                   const items: ReactNode[] = [];
-                  // Work's cards sit under project headings, "No project" last,
+                  // Work's live cards (All, Needs attention) sit under project
+                  // headings, "No project" last,
                   // each group in the order the user arranged (workRows) with
                   // its drafts newest at the bottom. A folded heading keeps
                   // only the open card; cards drag within their group.

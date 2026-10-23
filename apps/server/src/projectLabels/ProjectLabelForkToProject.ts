@@ -5,7 +5,7 @@ import {
   type ForkThreadToProjectInput,
   type ForkThreadToProjectResult,
   type OrchestrationV2AppThread,
-  type ProjectLabelError,
+  ProjectLabelError,
 } from "@t3tools/contracts";
 import type * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -17,7 +17,7 @@ import type * as ProjectLabelService from "./ProjectLabelService.ts";
 export interface ForkThreadToProjectDeps {
   readonly labels: Pick<
     ProjectLabelService.ProjectLabelService["Service"],
-    "readActive" | "moveThread"
+    "readActive" | "moveThread" | "list"
   >;
   readonly threads: Pick<
     ThreadManagementService.ThreadManagementService["Service"],
@@ -66,6 +66,16 @@ export const forkThreadToProject: (
     );
   const source = records.thread;
   if (source.deletedAt !== null) return yield* forkFailure("This chat was deleted.");
+  // A project's own conversation stays on its page; it never forks elsewhere.
+  const home = (yield* deps.labels.list()).labels.find(
+    (label) => label.projectChatThreadId === source.id,
+  );
+  if (home !== undefined)
+    return yield* new ProjectLabelError({
+      operation: "forkThreadToProject",
+      reason: "project_chat",
+      projectName: home.name,
+    });
   // An agent's conversation is its single ongoing thread: forking would split
   // the agent from its history, so it re-files in place instead.
   if (source.agent?.role === "conversation") {

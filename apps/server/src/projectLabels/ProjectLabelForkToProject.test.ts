@@ -81,6 +81,8 @@ function setup(input: {
   readonly runs: ReadonlyArray<OrchestrationV2Run>;
   readonly labelMissing?: boolean;
   readonly dispatchFails?: boolean;
+  /** A project whose own conversation is the source thread. */
+  readonly homeOf?: string;
 }) {
   const dispatched: Array<Parameters<Threads["dispatch"]>[0]> = [];
   const moved: Array<Parameters<Labels["moveThread"]>[0]> = [];
@@ -96,6 +98,19 @@ function setup(input: {
       })) as Threads["dispatch"],
   } satisfies Threads;
   const labels = {
+    list: (() =>
+      Effect.succeed({
+        labels:
+          input.homeOf === undefined
+            ? []
+            : [
+                {
+                  id: ProjectLabelId.make("label:home"),
+                  name: input.homeOf,
+                  projectChatThreadId: input.thread.id,
+                } as ProjectLabelWithRepositories,
+              ],
+      })) as Labels["list"],
     readActive: ((id: ProjectLabelId) =>
       input.labelMissing === true
         ? Effect.fail(new ProjectLabelError({ operation: "read", reason: "not_found" }))
@@ -153,6 +168,25 @@ describe("forkThreadToProject", () => {
       expect(yield* forkThreadToProject(input, deps)).toEqual({ threadId: input.threadId });
       expect(dispatched).toHaveLength(0);
       expect(moved).toEqual([{ threadId: input.threadId, folderId: labelId }]);
+    }),
+  );
+
+  it.effect("refuses to fork a project's own conversation into another project", () =>
+    Effect.gen(function* () {
+      const now = yield* DateTime.now;
+      const { deps, dispatched, moved } = setup({
+        thread: makeThread({ now, surface: "chat" }),
+        runs: [turnedRun],
+        homeOf: "Personal",
+      });
+      const failure = yield* forkThreadToProject(input, deps).pipe(Effect.flip);
+      expect(failure).toMatchObject({
+        _tag: "ProjectLabelError",
+        reason: "project_chat",
+        projectName: "Personal",
+      });
+      expect(dispatched).toHaveLength(0);
+      expect(moved).toHaveLength(0);
     }),
   );
 

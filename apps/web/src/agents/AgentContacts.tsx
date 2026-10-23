@@ -8,7 +8,7 @@ import * as Schema from "effect/Schema";
 import { EllipsisIcon } from "lucide-react";
 import {
   useCallback,
-  useLayoutEffect,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -26,8 +26,13 @@ import {
 } from "~/components/Sidebar.pointer";
 import { PanOnHoverText } from "~/components/sidebar/PanOnHoverText";
 import { SidebarChatStatusSlot } from "~/components/sidebar/SidebarChatStatusSlot";
-import { playListSwitchMotion } from "~/components/sidebar/listSwitchMotion";
-import { SIDEBAR_CARD_CLASS_NAME, SidebarList } from "~/components/sidebar/SidebarList";
+import {
+  SidebarCardBody,
+  sidebarCardClassName,
+  SidebarCardItem,
+  SidebarCardLine,
+  SidebarList,
+} from "~/components/sidebar/SidebarList";
 import { SidebarListEmptyState } from "~/components/sidebar/SidebarListEmptyState";
 import {
   SIDEBAR_SORT_DISTANCE,
@@ -144,28 +149,43 @@ export function AgentContacts({
     }
     return map;
   }, [directory.labels]);
-  // A drop's order holds until its writes land, so the card never jumps back.
+  // A drop's order holds until the list's own order matches it (`settled`
+  // once its writes are saved), so the cards never swing back and forth.
   const [dragPreview, setDragPreview] = useState<{
     readonly key: string;
     readonly order: readonly string[];
+    readonly settled?: boolean;
   } | null>(null);
-  const { grouped, groups } = useMemo(() => {
+  const { grouped, groups, dropLanded } = useMemo(() => {
     const result = groupAgentsByProject({
       agents: orderAgentsForList(agents),
       folders: directory.labels,
       include: filter === "attention" ? (agent) => agentAttentionCount(agent) > 0 : undefined,
     });
-    if (dragPreview === null) return result;
-    return {
-      ...result,
-      groups: result.groups.map((group) => {
-        if (!group.agents.some((agent) => agentContactKey(agent) === dragPreview.key)) return group;
-        const byKey = new Map(group.agents.map((agent) => [agentContactKey(agent), agent]));
-        const order = applyDrawnOrder([...byKey.keys()], dragPreview.order);
-        return { ...group, agents: order.map((key) => byKey.get(key)!) };
-      }),
-    };
+    if (dragPreview === null) return { ...result, dropLanded: true };
+    let landed = true;
+    const previewed = result.groups.map((group) => {
+      if (!group.agents.some((agent) => agentContactKey(agent) === dragPreview.key)) return group;
+      const byKey = new Map(group.agents.map((agent) => [agentContactKey(agent), agent]));
+      const saved = [...byKey.keys()];
+      const order = applyDrawnOrder(saved, dragPreview.order);
+      if (order.some((key, index) => saved[index] !== key)) landed = false;
+      return { ...group, agents: order.map((key) => byKey.get(key)!) };
+    });
+    return { ...result, groups: previewed, dropLanded: landed };
   }, [agents, directory.labels, filter, dragPreview]);
+  useEffect(() => {
+    if (dragPreview?.settled !== true) return;
+    const key = dragPreview.key;
+    const release = () => setDragPreview((current) => (current?.key === key ? null : current));
+    if (dropLanded) {
+      release();
+      return;
+    }
+    // Moved elsewhere too: let go after a while and show the saved order.
+    const timer = window.setTimeout(release, 4000);
+    return () => window.clearTimeout(timer);
+  }, [dragPreview, dropLanded]);
   const [collapsedGroupKeys, setCollapsedGroupKeys] = useLocalStorage(
     COLLAPSED_GROUPS_STORAGE_KEY,
     EMPTY_GROUP_KEYS,
@@ -217,14 +237,20 @@ export function AgentContacts({
           return agent ? [{ agent, orderKey }] : [];
         }),
       )
-      .catch((cause: unknown) =>
-        toastManager.add({
-          type: "error",
-          title: "Could not reorder agents",
-          description: cause instanceof Error ? cause.message : undefined,
-        }),
-      )
-      .finally(() => setDragPreview((current) => (current?.key === key ? null : current)));
+      .then(
+        () =>
+          setDragPreview((current) =>
+            current?.key === key ? { ...current, settled: true } : current,
+          ),
+        (cause: unknown) => {
+          setDragPreview((current) => (current?.key === key ? null : current));
+          toastManager.add({
+            type: "error",
+            title: "Could not reorder agents",
+            description: cause instanceof Error ? cause.message : undefined,
+          });
+        },
+      );
   };
   /** alt+ArrowUp / alt+ArrowDown on a focused agent moves it one place in its group. */
   const moveAgent = (agent: AgentContact, delta: -1 | 1): boolean => {
@@ -275,14 +301,6 @@ export function AgentContacts({
     [agents],
   );
   const { onTransitionEnd } = useAgentGroupFlip(listRef, flipFolders);
-  // Switching the count bar's filter remounts the list (keyed below); the new
-  // one blur-fades in, as Work's shelves do.
-  const shownFilterRef = useRef(filter);
-  useLayoutEffect(() => {
-    if (shownFilterRef.current === filter) return;
-    shownFilterRef.current = filter;
-    playListSwitchMotion(listRef.current);
-  }, [filter]);
   const shownCount = groups.reduce((count, group) => count + group.agents.length, 0);
   return (
     <>
@@ -322,6 +340,8 @@ export function AgentContacts({
           key={filter}
           aria-label={filter === "attention" ? "Agents needing attention" : "Agents"}
           data-agents-list
+          // Groups hold cards: no row gap between them, only the group space.
+          density="cards"
           className="reveal-motion"
           grow={shownCount > 0 || !loading}
           onTransitionEnd={onTransitionEnd}
@@ -614,16 +634,12 @@ function AgentRow({
   });
 
   return (
-    <li
+    <SidebarCardItem
       {...sortItem.listeners}
       ref={sortItem.setNodeRef}
       style={sortItem.style}
       data-agent-flip={flipKey(agent)}
-      className={cn(
-        // The 80px card plus the py-1 gap between cards, as Work's.
-        "relative list-none py-1 [content-visibility:auto] [contain-intrinsic-size:auto_88px]",
-        sortItem.className,
-      )}
+      className={cn("relative", sortItem.className)}
     >
       <div
         ref={(node) => {
@@ -636,11 +652,10 @@ function AgentRow({
         aria-current={active ? "page" : undefined}
         data-testid="sidebar-row-agent"
         data-actions-pinned={facePicker || undefined}
-        className={cn(
-          SIDEBAR_CARD_CLASS_NAME,
-          active ? "state-selected" : "state-hover bg-(--sidebar-card) text-sidebar-foreground",
-          arrived && "swap-motion",
-        )}
+        className={sidebarCardClassName({
+          selected: active,
+          className: arrived && "swap-motion",
+        })}
         onClick={() => {
           if (renaming === null) onOpen(agent);
         }}
@@ -652,147 +667,149 @@ function AgentRow({
         onKeyDown={onKeyDown}
         onContextMenu={onContextMenu}
       >
-        {/* 12px insets around the face beside a 20px name line and two
-            16px lines of the latest reply, inside Work's card surface. */}
-        <span className="relative z-10 flex h-20 min-w-0 gap-2.5 px-(--sidebar-row-content-inset) py-(--sidebar-content-inset)">
-          <AgentAvatarPicker
-            avatar={agent.avatar}
-            open={facePicker}
-            onOpenChange={setFacePicker}
-            onChange={(avatar) =>
-              void mutate(
-                () => client.save(agent.environmentId, { ...agentDraft(agent), avatar }),
-                "Could not change the face",
-              )
-            }
-          >
-            <PopoverTrigger
-              render={
-                <span className="flex size-8 shrink-0 items-center justify-center" aria-hidden />
+        {/* The face beside a 20px name line and two 16px lines of the latest
+            reply, centred in a Work card's height so both lists share a pitch. */}
+        <SidebarCardBody>
+          <div className="flex min-w-0 gap-2.5">
+            <AgentAvatarPicker
+              avatar={agent.avatar}
+              open={facePicker}
+              onOpenChange={setFacePicker}
+              onChange={(avatar) =>
+                void mutate(
+                  () => client.save(agent.environmentId, { ...agentDraft(agent), avatar }),
+                  "Could not change the face",
+                )
               }
-              tabIndex={-1}
-              onClick={(event) => event.stopPropagation()}
             >
-              <AgentFace {...avatarFaceProps(agent.avatar)} state={agent.state} size={32} />
-            </PopoverTrigger>
-          </AgentAvatarPicker>
-          <span className="flex min-w-0 flex-1 flex-col">
-            <span className="flex h-5 min-w-0 items-center gap-1.5">
-              {renaming !== null && canWrite ? (
-                <input
-                  autoFocus
-                  value={renaming}
-                  aria-label="Agent name"
-                  maxLength={200}
-                  onChange={(event) => setRenaming(event.target.value)}
-                  onFocus={(event) => event.currentTarget.select()}
-                  onKeyDown={(event) => {
-                    event.stopPropagation();
-                    if (event.key === "Enter") {
-                      event.preventDefault();
-                      commitRename();
-                    } else if (event.key === "Escape") {
-                      event.preventDefault();
-                      setRenaming(null);
-                    }
-                  }}
-                  onBlur={commitRename}
-                  onClick={(event) => event.stopPropagation()}
-                  className="min-w-0 flex-1 rounded-sm border border-input bg-card px-1 text-sm text-card-foreground outline-none focus:border-foreground"
-                />
-              ) : (
-                <PanOnHoverText
-                  className={cn(
-                    "min-w-0 flex-1 text-sm",
-                    unread > 0 || attention > 0 ? "font-medium text-foreground" : "font-normal",
-                    active
-                      ? "text-foreground"
-                      : !(unread > 0 || attention > 0) && "text-foreground/80",
-                  )}
-                >
-                  <span aria-hidden>{agent.name}</span>
-                </PanOnHoverText>
-              )}
-              {providerEntry ? (
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <span
-                        role="img"
-                        aria-label={`Model: ${modelLabel}`}
-                        className="inline-flex shrink-0 items-center"
-                      />
-                    }
-                  >
-                    <ProviderInstanceIcon
-                      driverKind={providerEntry.driverKind}
-                      displayName={providerEntry.displayName}
-                      accentColor={providerEntry.accentColor}
-                      showBadge={providerEntry.accentColor !== undefined}
-                      iconClassName="size-3.5 opacity-60"
-                    />
-                  </TooltipTrigger>
-                  <TooltipPopup side="top">{modelLabel}</TooltipPopup>
-                </Tooltip>
-              ) : null}
-              {/* The status owns this slot's width; the hover actions cross-fade
-                in over it, so the name never reflows. */}
-              <span className="group/sidebar-status-slot relative ml-auto flex h-5 min-w-8 shrink-0 items-stretch justify-end text-xs">
-                <span className="pointer-events-none flex items-center gap-1.5 self-center justify-self-end tabular-nums text-secondary-label transition-opacity duration-(--motion-duration-base) ease-standard group-has-[:focus-visible]/sidebar-status-slot:opacity-0 group-any-hover/sidebar-row:opacity-0 motion-reduce:transition-none">
-                  {attention > 0 ? (
-                    <span
-                      key="attention"
-                      className="swap-motion inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-warning px-1 text-2xs font-semibold leading-none text-background"
-                      aria-label={`${attention} waiting on you`}
-                    >
-                      {attention > 99 ? "99+" : attention}
-                    </span>
-                  ) : null}
-                  <SidebarChatStatusSlot
-                    isRunning={running}
-                    dot={attention > 0 ? "warning" : unread > 0 ? "info" : null}
+              <PopoverTrigger
+                render={
+                  <span className="flex size-8 shrink-0 items-center justify-center" aria-hidden />
+                }
+                tabIndex={-1}
+                onClick={(event) => event.stopPropagation()}
+              >
+                <AgentFace {...avatarFaceProps(agent.avatar)} state={agent.state} size={32} />
+              </PopoverTrigger>
+            </AgentAvatarPicker>
+            <div className="flex min-w-0 flex-1 flex-col">
+              <SidebarCardLine line="head">
+                {renaming !== null && canWrite ? (
+                  <input
+                    autoFocus
+                    value={renaming}
+                    aria-label="Agent name"
+                    maxLength={200}
+                    onChange={(event) => setRenaming(event.target.value)}
+                    onFocus={(event) => event.currentTarget.select()}
+                    onKeyDown={(event) => {
+                      event.stopPropagation();
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        commitRename();
+                      } else if (event.key === "Escape") {
+                        event.preventDefault();
+                        setRenaming(null);
+                      }
+                    }}
+                    onBlur={commitRename}
+                    onClick={(event) => event.stopPropagation()}
+                    className="min-w-0 flex-1 rounded-sm border border-input bg-card px-1 text-sm text-card-foreground outline-none focus:border-foreground"
                   />
-                  {!running && since ? (
-                    <span key="time" className="swap-motion">
-                      {since.value}
-                    </span>
-                  ) : null}
-                </span>
-                <span
-                  data-row-hover-actions=""
-                  className="pointer-events-none absolute inset-y-0 right-0 flex items-stretch opacity-0 transition-opacity duration-(--motion-duration-base) ease-standard has-[:focus-visible]:pointer-events-auto has-[:focus-visible]:opacity-100 group-any-hover/sidebar-row:pointer-events-auto group-any-hover/sidebar-row:opacity-100 motion-reduce:transition-none"
-                >
+                ) : (
+                  <PanOnHoverText
+                    className={cn(
+                      "min-w-0 flex-1 text-sm",
+                      unread > 0 || attention > 0 ? "font-medium text-foreground" : "font-normal",
+                      active
+                        ? "text-foreground"
+                        : !(unread > 0 || attention > 0) && "text-foreground/80",
+                    )}
+                  >
+                    <span aria-hidden>{agent.name}</span>
+                  </PanOnHoverText>
+                )}
+                {providerEntry ? (
                   <Tooltip>
                     <TooltipTrigger
                       render={
-                        <button
-                          type="button"
-                          aria-label={`More for ${agent.name}`}
-                          aria-haspopup="menu"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            const rect = event.currentTarget.getBoundingClientRect();
-                            void openMenu({ x: rect.right, y: rect.bottom });
-                          }}
-                          onPointerDown={(event) => event.stopPropagation()}
-                          className="inline-flex cursor-pointer items-center rounded-md bg-transparent px-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+                        <span
+                          role="img"
+                          aria-label={`Model: ${modelLabel}`}
+                          className="inline-flex shrink-0 items-center"
                         />
                       }
                     >
-                      <EllipsisIcon className="size-3.5" />
+                      <ProviderInstanceIcon
+                        driverKind={providerEntry.driverKind}
+                        displayName={providerEntry.displayName}
+                        accentColor={providerEntry.accentColor}
+                        showBadge={providerEntry.accentColor !== undefined}
+                        iconClassName="size-3.5 opacity-60"
+                      />
                     </TooltipTrigger>
-                    <TooltipPopup side="top">More</TooltipPopup>
+                    <TooltipPopup side="top">{modelLabel}</TooltipPopup>
                   </Tooltip>
+                ) : null}
+                {/* The status owns this slot's width; the hover actions cross-fade
+                in over it, so the name never reflows. */}
+                <span className="group/sidebar-status-slot relative ml-auto flex h-5 min-w-8 shrink-0 items-stretch justify-end text-xs">
+                  <span className="pointer-events-none flex items-center gap-1.5 self-center justify-self-end tabular-nums text-secondary-label transition-opacity duration-(--motion-duration-base) ease-standard group-has-[:focus-visible]/sidebar-status-slot:opacity-0 group-any-hover/sidebar-row:opacity-0 motion-reduce:transition-none">
+                    {attention > 0 ? (
+                      <span
+                        key="attention"
+                        className="swap-motion inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-warning px-1 text-2xs font-semibold leading-none text-background"
+                        aria-label={`${attention} waiting on you`}
+                      >
+                        {attention > 99 ? "99+" : attention}
+                      </span>
+                    ) : null}
+                    <SidebarChatStatusSlot
+                      isRunning={running}
+                      dot={attention > 0 ? "warning" : unread > 0 ? "info" : null}
+                    />
+                    {!running && since ? (
+                      <span key="time" className="swap-motion">
+                        {since.value}
+                      </span>
+                    ) : null}
+                  </span>
+                  <span
+                    data-row-hover-actions=""
+                    className="pointer-events-none absolute inset-y-0 right-0 flex items-stretch opacity-0 transition-opacity duration-(--motion-duration-base) ease-standard has-[:focus-visible]:pointer-events-auto has-[:focus-visible]:opacity-100 group-any-hover/sidebar-row:pointer-events-auto group-any-hover/sidebar-row:opacity-100 motion-reduce:transition-none"
+                  >
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <button
+                            type="button"
+                            aria-label={`More for ${agent.name}`}
+                            aria-haspopup="menu"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              const rect = event.currentTarget.getBoundingClientRect();
+                              void openMenu({ x: rect.right, y: rect.bottom });
+                            }}
+                            onPointerDown={(event) => event.stopPropagation()}
+                            className="inline-flex cursor-pointer items-center rounded-md bg-transparent px-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+                          />
+                        }
+                      >
+                        <EllipsisIcon className="size-3.5" />
+                      </TooltipTrigger>
+                      <TooltipPopup side="top">More</TooltipPopup>
+                    </Tooltip>
+                  </span>
                 </span>
-              </span>
-            </span>
-            {/* The latest reply (or the agent's job), two muted lines that
+              </SidebarCardLine>
+              {/* The latest reply (or the agent's job), two muted lines that
               brighten a step while the card is selected. */}
-            <span className="mt-1 line-clamp-2 h-8 min-w-0 text-xs leading-4 text-muted-foreground transition-colors duration-(--motion-duration-fast) ease-standard group-[.state-selected]/sidebar-row:text-secondary-label motion-reduce:transition-none">
-              {summary || status}
-            </span>
-          </span>
-        </span>
+              <span className="mt-1 line-clamp-2 h-8 min-w-0 text-xs leading-4 text-muted-foreground transition-colors duration-(--motion-duration-fast) ease-standard group-[.state-selected]/sidebar-row:text-secondary-label motion-reduce:transition-none">
+                {summary || status}
+              </span>
+            </div>
+          </div>
+        </SidebarCardBody>
       </div>
       <OverlayPresence when={confirmingDelete}>
         {() => (
@@ -823,6 +840,6 @@ function AgentRow({
           </AlertDialog>
         )}
       </OverlayPresence>
-    </li>
+    </SidebarCardItem>
   );
 }

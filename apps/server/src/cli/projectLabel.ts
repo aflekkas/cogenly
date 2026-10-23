@@ -16,6 +16,7 @@ import {
   AuthOrchestrationReadScope,
   EnvironmentHttpApi,
   ProjectId,
+  ProjectLabelColor,
   type ProjectLabelWithRepositories,
   type ProjectSnapshot,
   WS_METHODS,
@@ -54,6 +55,8 @@ export class ProjectLabelCliError extends Schema.TaggedError<ProjectLabelCliErro
     return this.reason;
   }
 }
+
+const isProjectLabelColor = Schema.is(ProjectLabelColor);
 
 type LabelRpcTag =
   | typeof WS_METHODS.projectLabelsList
@@ -206,9 +209,15 @@ export const runProjectLabelCommand = Effect.fn("cli.projectLabel.run")(function
       } satisfies Output;
     }
     case "create": {
+      const color = command.color;
+      if (color !== undefined && !isProjectLabelColor(color)) {
+        return yield* new ProjectLabelCliError({
+          reason: `Unknown color "${color}". Use one of: ${ProjectLabelColor.literals.join(", ")}.`,
+        });
+      }
       const { label } = yield* client[WS_METHODS.projectLabelsCreate]({
         name: command.name,
-        ...(command.color === undefined ? {} : { color: command.color }),
+        ...(color === undefined ? {} : { color }),
       }).pipe(Effect.mapError(describe));
       return yield* labelOutput(context, "Created project")(label);
     }
@@ -366,7 +375,7 @@ const createCommand = Command.make("create", {
   json: jsonFlag,
   name: Argument.String("name").pipe(Argument.withDescription("Project name.")),
   color: Flag.String("color").pipe(
-    Flag.withDescription("Project color, as the app's color picker names it."),
+    Flag.withDescription("Project color: gray, red, amber, green, teal, blue, violet or pink."),
     Flag.optional,
   ),
 }).pipe(

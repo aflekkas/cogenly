@@ -104,10 +104,105 @@ export function imageToCanvasPoint(image: Point, view: ImageView): Point {
   return { x: image.x * view.scale + view.x, y: image.y * view.scale + view.y };
 }
 
-export function clampToImage(point: Point, natural: Size): Point {
+/**
+ * How far past each edge of the image markup may reach, as a share of the
+ * image's long side. The space around the image is a canvas too; this keeps
+ * one stray drag from blowing the flattened PNG up to an empty expanse.
+ */
+export const MARKUP_OUTSIDE_RATIO = 0.5;
+
+/** A drawn point, kept within the image plus the reach around it. */
+export function clampToMarkupArea(point: Point, natural: Size): Point {
+  const reach = longSide(natural) * MARKUP_OUTSIDE_RATIO;
   return {
-    x: Math.min(natural.width, Math.max(0, point.x)),
-    y: Math.min(natural.height, Math.max(0, point.y)),
+    x: Math.min(natural.width + reach, Math.max(-reach, point.x)),
+    y: Math.min(natural.height + reach, Math.max(-reach, point.y)),
+  };
+}
+
+export interface MarkupBounds {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+/** A text label's width in image pixels: measured when a canvas can, estimated otherwise. */
+export type MeasureMarkupText = (text: string, fontSize: number) => number;
+const estimateTextWidth: MeasureMarkupText = (text, fontSize) => text.length * fontSize * 0.62;
+
+/** The box a shape paints, stroke and arrowhead included. */
+export function shapeBounds(
+  shape: MarkupShape,
+  measureText: MeasureMarkupText = estimateTextWidth,
+): MarkupBounds {
+  if (shape.kind === "text") {
+    const halo = textHaloWidth(shape.width) / 2;
+    return {
+      x: shape.at.x - halo,
+      y: shape.at.y - halo,
+      width: measureText(shape.text, shape.width) + halo * 2,
+      height: shape.width * 1.25 + halo * 2,
+    };
+  }
+  let points: ReadonlyArray<Point>;
+  switch (shape.kind) {
+    case "pen":
+    case "highlighter":
+      points = shape.points;
+      break;
+    case "arrow":
+      points = [shape.from, shape.to, ...arrowHead(shape.from, shape.to, shape.width)];
+      break;
+    case "rect":
+      points = [shape.from, shape.to];
+      break;
+  }
+  const half = shape.width / 2;
+  const xs = points.map((point) => point.x);
+  const ys = points.map((point) => point.y);
+  const minX = Math.min(...xs) - half;
+  const minY = Math.min(...ys) - half;
+  return {
+    x: minX,
+    y: minY,
+    width: Math.max(...xs) + half - minX,
+    height: Math.max(...ys) + half - minY,
+  };
+}
+
+/**
+ * The flattened canvas in image pixels: the image, grown to hold every shape
+ * drawn past its edges plus a small margin on the sides that grew. Each side
+ * stops at the reach `clampToMarkupArea` allows.
+ */
+export function markupCanvasBounds(
+  natural: Size,
+  shapes: ReadonlyArray<MarkupShape>,
+  measureText?: MeasureMarkupText,
+): MarkupBounds {
+  const reach = longSide(natural) * MARKUP_OUTSIDE_RATIO;
+  const margin = Math.max(8, longSide(natural) * 0.01);
+  let left = 0;
+  let top = 0;
+  let right = natural.width;
+  let bottom = natural.height;
+  for (const shape of shapes) {
+    const box = shapeBounds(shape, measureText);
+    left = Math.min(left, box.x);
+    top = Math.min(top, box.y);
+    right = Math.max(right, box.x + box.width);
+    bottom = Math.max(bottom, box.y + box.height);
+  }
+  const grow = (edge: number, image: number, sign: -1 | 1) =>
+    edge === image ? image : image + sign * Math.min(reach, Math.abs(edge - image) + margin);
+  const x = Math.floor(grow(left, 0, -1));
+  const y = Math.floor(grow(top, 0, -1));
+  return {
+    x,
+    y,
+    width: Math.ceil(grow(right, natural.width, 1)) - x,
+    height: Math.ceil(grow(bottom, natural.height, 1)) - y,
   };
 }
 

@@ -297,7 +297,7 @@ function ToastCard({
         // End padding is 4px short of the start so the × icon (5px inside its
         // 24px box) lands on the same inset as the leading icon.
         "pointer-events-auto flex min-h-0 overflow-y-visible pl-3.5 pr-2.5 text-sm [overflow-x:clip]",
-        stackedActionLayout ? "flex-col gap-2 py-2.5" : "items-center justify-between gap-2 py-3",
+        stackedActionLayout ? "flex-col gap-2 py-2.5" : "items-start justify-between gap-2 py-3",
         className,
       )}
     >
@@ -338,7 +338,9 @@ function ToastCard({
         <div
           className={cn(
             "flex items-center gap-1.5",
-            stackedActionLayout ? "w-full flex-wrap justify-end" : "shrink-0",
+            // Inline, the 24px buttons centre on the 20px title line, level with
+            // the icon, however many lines the description runs to.
+            stackedActionLayout ? "w-full flex-wrap justify-end" : "-my-0.5 shrink-0",
           )}
         >
           {copyErrorText !== null ? <CopyErrorButton text={copyErrorText} /> : null}

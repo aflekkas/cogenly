@@ -23,7 +23,6 @@ import { isSidebarUtilityPage } from "./mainAppLocation";
 import { SidebarProviderUpdatePill } from "./SidebarProviderUpdatePill";
 import { SidebarUpdateArchitectureWarning, SidebarUpdatePill } from "./SidebarUpdatePill";
 import { observeResize } from "~/lib/observeResize";
-import { PageTitleSlot } from "../WorkspacePageTitle";
 import { settingsReturnHref } from "./modes/spaceRouteMemory";
 
 export const SidebarChromeHeader = memo(function SidebarChromeHeader({
@@ -54,10 +53,10 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
       </div>
       {/* One visible line: the pill wraps onto the clipped second line once it no longer fits. */}
       <div className="relative z-10 flex h-8 min-w-0 flex-1 flex-wrap content-start items-center gap-x-2 overflow-hidden py-0.5">
-        {/* The open page's title, after the back/forward pair (WorkspacePageTitle). */}
-        <PageTitleSlot className="relative z-10 ml-[max(var(--sidebar-content-inset),calc(var(--workspace-titlebar-content-left)-var(--nav-rail-width,0px)))] hidden h-7 min-w-0 flex-1 items-center overflow-hidden text-foreground desktop-layout:flex *:max-w-full!" />
+        {/* The page title floats over this row from the fixed titlebar slot
+            (WorkspacePageTitle), so the pill keeps to the far end. */}
         {pillLabel ? (
-          <div className="ml-1 flex h-7 items-center">
+          <div className="ml-auto flex h-7 items-center">
             <Badge data-environment-identification="pill" size="sm" variant="secondary">
               {pillLabel}
             </Badge>

@@ -69,6 +69,71 @@ export interface RememberedTimelinePosition {
   };
 }
 
+/**
+ * A wheel event within this gap of the previous one continues the same
+ * gesture. Trackpad momentum streams events every frame, so its tail stays
+ * inside one gesture.
+ */
+export const WHEEL_GESTURE_GAP_MS = 120;
+
+export interface WheelGesture {
+  readonly startedAt: number;
+  readonly lastAt: number;
+}
+
+/** The gesture a wheel event at `at` belongs to, given the previous one. */
+export function nextWheelGesture(
+  gesture: WheelGesture | null,
+  at: number,
+  gapMs: number = WHEEL_GESTURE_GAP_MS,
+): WheelGesture {
+  return gesture !== null && at - gesture.lastAt <= gapMs
+    ? { startedAt: gesture.startedAt, lastAt: at }
+    : { startedAt: at, lastAt: at };
+}
+
+/**
+ * Whether a wheel event is carried over from a gesture begun before a thread
+ * opened: momentum from scrolling the previous thread, which the browser keeps
+ * delivering to the same scroller. It is not the user scrolling this thread.
+ */
+export function isCarriedOverWheel(gesture: WheelGesture | null, threadOpenedAt: number): boolean {
+  return gesture !== null && gesture.startedAt < threadOpenedAt;
+}
+
+/** Whether carried-over momentum (`isCarriedOverWheel`) is still arriving at `now`. */
+export function isCarriedOverWheelActive(
+  gesture: WheelGesture | null,
+  threadOpenedAt: number,
+  now: number,
+  gapMs: number = WHEEL_GESTURE_GAP_MS,
+): boolean {
+  return (
+    gesture !== null && isCarriedOverWheel(gesture, threadOpenedAt) && now - gesture.lastAt <= gapMs
+  );
+}
+
+let currentWheelGesture: WheelGesture | null = null;
+let wheelGestureTrackerInstalled = false;
+
+/** Starts tracking wheel gestures document-wide, before any scroller's own listeners run. */
+export function ensureWheelGestureTracker() {
+  if (wheelGestureTrackerInstalled || typeof document === "undefined") return;
+  wheelGestureTrackerInstalled = true;
+  document.addEventListener(
+    "wheel",
+    () => {
+      currentWheelGesture = nextWheelGesture(currentWheelGesture, performance.now());
+    },
+    { capture: true, passive: true },
+  );
+}
+
+/** The wheel gesture in progress (or last seen); see `isCarriedOverWheel`. */
+export function readWheelGesture(): WheelGesture | null {
+  return currentWheelGesture;
+}
+
 // Scoped thread keys keep separate environments independent. Bound the session cache.
 const rememberedTimelinePositions = new Map<string, RememberedTimelinePosition>();
 

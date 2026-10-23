@@ -19,12 +19,21 @@ import { DisclosureChevron, DisclosurePanel } from "../ui/disclosure";
  *   that truncates, a hairline, and a disclosure chevron when it collapses.
  * - `SidebarFoldRow` — a row under a collapsible heading, which folds with it.
  * - `sidebarRowClassName` / `SidebarRowSubtitle` — a row: one line (32px) or a
- *   title with a muted second line (40px). Chats and Projects are rows.
- * - `SIDEBAR_CARD_CLASS_NAME` — Work's and Agents' cards, which carry live
- *   status and actions, share the rows' focus ring, truncation and selected
- *   state. Both sort by drag (`SidebarSortable`).
+ *   title with a muted second line (40px). Chats are rows.
+ * - `SidebarCardItem` / `sidebarCardClassName` / `SidebarCardBody` and its
+ *   `SidebarCardLine`s — a card: Work's, Agents' and Projects' items, which
+ *   carry live status and actions. Two lines (64px) or three (88px) inside
+ *   12px insets; Work and Agents sort by drag (`SidebarSortable`).
  * - `SidebarListEmptyState` (its own file) — one quiet line for a list with
  *   nothing in it.
+ * - `SidebarShelfBar` / `SidebarSegmentBar` (their own file) — the count bar
+ *   above the search dock, the same in Work, Agents and Projects.
+ *
+ * Spacing comes from three values in index.css: rows sit
+ * `--sidebar-row-gap` (4px) apart, cards `--sidebar-card-gap` (8px), and a
+ * heading after other items takes `--sidebar-group-gap` (8px) more above it.
+ * A heading is 4px from its first item in every mode. Don't hand-roll gaps,
+ * margins or heights on list items; use these pieces.
  *
  * Nothing in a row may be wider than the column: every text run truncates
  * (`truncate`, `fade-truncate` or `PanOnHoverText`) inside a `min-w-0` box, and
@@ -37,7 +46,7 @@ export function SidebarList({
   className,
   ...props
 }: ComponentProps<"ul"> & {
-  /** Rows sit 4px apart; Work's cards carry their own 4px padding, so 2px. */
+  /** Rows sit --sidebar-row-gap apart; cards carry their own gap (`SidebarCardItem`). */
   density?: "rows" | "cards";
   /** Fill the column and stack from the bottom, against the search dock. */
   grow?: boolean;
@@ -47,13 +56,19 @@ export function SidebarList({
       {...props}
       className={cn(
         "relative flex min-w-0 flex-col",
-        density === "cards" ? "gap-0.5" : "gap-1",
+        density === "rows" && "gap-(--sidebar-row-gap)",
         grow && "flex-1 justify-end",
         className,
       )}
     />
   );
 }
+
+/**
+ * The space above a group's start (its heading, or the item holding it) when
+ * other items come before it: a heading sits nearer its own items.
+ */
+export const SIDEBAR_GROUP_START_CLASS_NAME = "not-first:mt-(--sidebar-group-gap)";
 
 // T3's section tones: muted at rest, info for states like Snoozed.
 const headerTones = {
@@ -126,6 +141,8 @@ export function SidebarGroupHeader({
       onContextMenu={onContextMenu}
       className={cn(
         "mx-0.5 flex h-8 min-w-0 list-none items-center text-xs font-medium",
+        // Inside its group's own item, that item takes the group's space.
+        as === "li" && SIDEBAR_GROUP_START_CLASS_NAME,
         tones.label,
         className,
       )}
@@ -176,10 +193,14 @@ export function SidebarFoldRow({
   return (
     <li
       {...props}
-      className={cn("min-w-0 list-none", density === "cards" ? "-mt-0.5" : "-mt-1", className)}
+      className={cn(
+        "min-w-0 list-none",
+        density === "rows" && "-mt-(--sidebar-row-gap)",
+        className,
+      )}
     >
       <DisclosurePanel open={open}>
-        <ul role="presentation" className={density === "cards" ? "pt-0.5" : "pt-1"}>
+        <ul role="presentation" className={cn(density === "rows" && "pt-(--sidebar-row-gap)")}>
           {children}
         </ul>
       </DisclosurePanel>
@@ -214,23 +235,137 @@ export function sidebarRowClassName(options: {
 
 /**
  * Any row or card holding an unsent draft (a new-thread draft, or a thread
- * with text left in its composer): an amber wash and edge that carries
- * through hover and selection. Its title takes `SIDEBAR_DRAFT_TITLE_CLASS_NAME`
- * in place of the resting/hover tones.
+ * with text left in its composer): a faint warm wash that carries through
+ * hover and selection. Its title takes `SIDEBAR_DRAFT_TITLE_CLASS_NAME`, the
+ * foreground with a hint of warmth, in place of the resting/hover tones.
  */
 export const SIDEBAR_DRAFT_CLASS_NAME = "sidebar-draft";
-export const SIDEBAR_DRAFT_TITLE_CLASS_NAME = "text-warning-foreground";
+export const SIDEBAR_DRAFT_TITLE_CLASS_NAME =
+  "text-[color-mix(in_srgb,var(--warning-foreground)_22%,var(--foreground))]";
 
 /** The content-visibility placeholder height that matches a row, so offscreen rows never shift the list. */
 export function sidebarRowIntrinsicSizeClassName(lines: 1 | 2): string {
   return lines === 2 ? "[contain-intrinsic-size:auto_40px]" : "[contain-intrinsic-size:auto_32px]";
 }
 
-/** A Work card's surface (callers add the selected and resting tones). */
+/** A card's surface without its tones; `sidebarCardClassName` adds them. */
 export const SIDEBAR_CARD_CLASS_NAME = cn(
   "group/sidebar-row sidebar-row-motion relative w-full min-w-0 cursor-pointer overflow-hidden rounded-rail text-left",
   ROW_FOCUS_CLASS_NAME,
 );
+
+/** The card's resting tone: the raised card surface over the column. */
+export const SIDEBAR_CARD_REST_CLASS_NAME = "state-hover bg-(--sidebar-card)";
+
+/**
+ * A card's surface: selected (the open item, a multi-selection or an open
+ * menu) or resting on the card fill. `draft` adds the draft wash. Callers
+ * with their own resting text tone pass it in `className`.
+ */
+export function sidebarCardClassName(options: {
+  readonly selected: boolean;
+  readonly draft?: boolean;
+  readonly className?: string | false | null | undefined;
+}): string {
+  return cn(
+    SIDEBAR_CARD_CLASS_NAME,
+    options.draft && SIDEBAR_DRAFT_CLASS_NAME,
+    options.selected
+      ? "state-selected"
+      : cn(SIDEBAR_CARD_REST_CLASS_NAME, "text-sidebar-foreground"),
+    options.className,
+  );
+}
+
+type SidebarCardLines = 2 | 3;
+
+// 12px insets around 20px lines 4px apart, the last a 16px meta line.
+const cardBodyHeight: Record<SidebarCardLines, string> = { 2: "h-16", 3: "h-[5.5rem]" };
+// The body plus the card's gap, so offscreen cards never shift the list.
+const cardIntrinsicSize: Record<SidebarCardLines, string> = {
+  2: "[contain-intrinsic-size:auto_72px]",
+  3: "[contain-intrinsic-size:auto_96px]",
+};
+
+/**
+ * A card's list item: it carries half the card gap above and below, so cards
+ * sit `--sidebar-card-gap` apart and 4px from a heading, and skips painting
+ * while offscreen at the height its `lines` give it.
+ */
+export function SidebarCardItem({
+  lines = 3,
+  className,
+  ...props
+}: ComponentProps<"li"> & { lines?: SidebarCardLines }) {
+  return (
+    <li
+      {...props}
+      className={cn(
+        "min-w-0 list-none py-(--sidebar-card-item-padding) [content-visibility:auto]",
+        cardIntrinsicSize[lines],
+        className,
+      )}
+    />
+  );
+}
+
+/**
+ * A card's content box inside its surface: 12px insets around `lines`
+ * `SidebarCardLine`s (a label/status line, a title, a meta line). Content that
+ * is shorter than the lines (an agent's face beside its name and reply) is
+ * centred in the same height, so every card in a list has the same pitch.
+ */
+export function SidebarCardBody({
+  lines = 3,
+  className,
+  ...props
+}: ComponentProps<"div"> & { lines?: SidebarCardLines }) {
+  return (
+    <div
+      {...props}
+      className={cn(
+        "relative z-10 flex min-w-0 flex-col justify-center px-(--sidebar-row-content-inset) py-(--sidebar-content-inset)",
+        cardBodyHeight[lines],
+        className,
+      )}
+    />
+  );
+}
+
+const cardLineClassName = {
+  /** Where it runs or what it is, with the status and hover actions at the end. */
+  head: "flex h-5 min-w-0 items-center gap-1.5",
+  /** The title. */
+  title: "mt-1 flex h-5 min-w-0 items-center gap-1.5",
+  /** Muted detail: branch, machine, counts. */
+  meta: "mt-1 flex h-4 min-w-0 items-center gap-1.5 text-xs transition-colors duration-(--motion-duration-base) motion-reduce:transition-none",
+} as const;
+
+const cardMetaTones = {
+  /** Work's: barely there at rest (#2b2c2e on the card), a step up when selected. */
+  faint: "text-foreground/12 group-[.state-selected]/sidebar-row:text-foreground/23",
+  /** Readable detail, as on a row's second line. */
+  muted: "text-muted-foreground group-[.state-selected]/sidebar-row:text-secondary-label",
+} as const;
+
+/** One of a card's lines, in the order head, title, meta. */
+export function SidebarCardLine({
+  line,
+  tone = "muted",
+  className,
+  ...props
+}: ComponentProps<"div"> & {
+  line: keyof typeof cardLineClassName;
+  /** The meta line's tone. */
+  tone?: keyof typeof cardMetaTones;
+}) {
+  return (
+    <div
+      {...props}
+      className={cn(cardLineClassName[line], line === "meta" && cardMetaTones[tone], className)}
+    />
+  );
+}
 
 /** A row's muted second line; it brightens a step while the row is selected. */
 export function SidebarRowSubtitle({ className, ...props }: ComponentProps<"span">) {

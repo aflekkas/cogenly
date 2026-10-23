@@ -134,16 +134,26 @@ describe("searchLabelOwnerRepositories", () => {
     },
   });
 
-  it.effect("returns nothing when the project links no owners", () =>
+  it.effect("lists the signed-in account's repositories when the project links no owners", () =>
     Effect.gen(function* () {
+      const seen: Array<string> = [];
+      const rest: ProjectOwnerRepositorySearchDeps["github"]["rest"] = (input) =>
+        Effect.sync(() => void seen.push(input.path)).pipe(
+          Effect.as(
+            restResponse(
+              JSON.stringify([
+                gitHubRow({ name: "acme-web", owner: { login: "aflekkas" } }),
+                gitHubRow({ name: "billing", owner: { login: "aflekkas" } }),
+              ]),
+            ),
+          ),
+        );
       const result = yield* searchLabelOwnerRepositories(
         { id: labelId, query: "acme" },
-        depsWith({
-          label: labelWithOwners(),
-          rest: () => Effect.die(new Error("must not call GitHub")),
-        }),
+        depsWith({ label: labelWithOwners(), rest }),
       );
-      expect(result.repositories).toEqual([]);
+      expect(seen).toEqual([expect.stringContaining("user/repos?")]);
+      expect(result.repositories.map((repo) => repo.nameWithOwner)).toEqual(["aflekkas/acme-web"]);
     }),
   );
 

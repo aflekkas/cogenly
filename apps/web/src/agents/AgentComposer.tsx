@@ -479,7 +479,7 @@ export function AgentComposer({
                       />
                     )}
                   </div>
-                  <div className="flex shrink-0 flex-nowrap items-center justify-end gap-1">
+                  <div className="flex shrink-0 flex-nowrap items-center justify-end gap-2">
                     {dictationEnabled && (
                       <ComposerDictationControl
                         ownerKey={composerTargetKey(target)}

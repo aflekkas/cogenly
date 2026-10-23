@@ -2,7 +2,12 @@ import type { ContextMenuItem } from "@t3tools/contracts";
 import { FolderMinusIcon } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 
-import { SidebarGroupHeader, SidebarList } from "~/components/sidebar/SidebarList";
+import {
+  SIDEBAR_GROUP_START_CLASS_NAME,
+  SidebarGroupHeader,
+  SidebarList,
+} from "~/components/sidebar/SidebarList";
+import { cn } from "~/lib/utils";
 import { readLocalApi } from "~/localApi";
 import type { EnvironmentProjectLabel } from "~/projectLabels/projectLabels.logic";
 import { ProjectFolderIcon } from "~/projectLabels/ProjectFolderMark";
@@ -49,7 +54,10 @@ export function AgentProjectGroup(props: {
     else if (clicked === "toggle") props.onToggle();
   };
   return (
-    <li className="flex min-w-0 list-none flex-col" data-agent-group={props.groupKey}>
+    <li
+      className={cn("flex min-w-0 list-none flex-col", SIDEBAR_GROUP_START_CLASS_NAME)}
+      data-agent-group={props.groupKey}
+    >
       {props.heading ? (
         <SidebarGroupHeader
           as="div"

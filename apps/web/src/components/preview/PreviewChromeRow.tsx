@@ -64,7 +64,11 @@ function PreviewControlToggle({ control }: { control: PreviewControlState }) {
           data-preview-control={control.controller}
         >
           {control.controller === "agent" ? (
-            <Bot />
+            // Named, not just a robot: it says who drives, and the tooltip what a click does.
+            <span className="flex items-center gap-1 text-brand-accent">
+              <Bot />
+              <span className="text-xs font-medium">Agent</span>
+            </span>
           ) : control.controller === "another-viewer" ? (
             <Eye />
           ) : (
@@ -78,9 +82,10 @@ function PreviewControlToggle({ control }: { control: PreviewControlState }) {
 }
 
 /**
- * Says an agent drives a tab the desktop renders natively. Those tabs have no
- * stream, so no control toggle; the person takes over by using the page. Once
- * shown it keeps its slot and fades, so the toolbar never shifts.
+ * Says an agent drives a tab the desktop renders natively: a status pill, not
+ * a button. Those tabs have no stream, so no control toggle; the person takes
+ * over by using the page. Once shown it keeps its slot and fades, so the
+ * toolbar never shifts.
  */
 function AgentUsingTabIndicator({ active }: { active: boolean }) {
   const shownOnce = useLastPresent(active || null);
@@ -95,15 +100,16 @@ function AgentUsingTabIndicator({ active }: { active: boolean }) {
             aria-hidden={active ? undefined : true}
             data-agent-using-tab={active ? "" : undefined}
             className={cn(
-              "flex size-7 shrink-0 items-center justify-center text-muted-foreground transition-opacity duration-(--motion-duration-base) ease-out",
+              "flex h-7 shrink-0 items-center gap-1 px-1.5 text-xs font-medium text-brand-accent transition-opacity duration-(--motion-duration-base) ease-out",
               active ? "opacity-100" : "pointer-events-none opacity-0",
             )}
           />
         }
       >
         <Bot className="size-4" />
+        Agent
       </TooltipTrigger>
-      <TooltipPopup>Agent is using this tab</TooltipPopup>
+      <TooltipPopup>An agent is using this tab · use the page to take over</TooltipPopup>
     </Tooltip>
   );
 }
@@ -388,7 +394,7 @@ export function PreviewChromeRow({
               disabled={pickDisabled}
               pressed={pickActive ?? false}
             >
-              <MousePointerClick className={cn(pickActive && "text-primary")} />
+              <MousePointerClick className={cn(pickActive && "text-brand-accent")} />
             </ToolbarButton>
           ) : null}
           {onCapture ? (

@@ -84,14 +84,14 @@ export const ProjectLabelsToolkit = Toolkit.make(
     parameters: ProjectLabelCreateInput,
     success: ProjectLabelMutationResult,
     description:
-      "Create a project folder with a name and an optional color. Folders organize threads and repositories; they provide context only and never grant access.",
+      "Create a project folder with a name, and optionally a color (gray, red, amber, green, teal, blue, violet or pink; not hex), description and instructions. Folders organize threads and repositories; they provide context only and never grant access.",
   }).annotate(Tool.Destructive, false),
   Tool.make("t3_project_label_update", {
     ...shared,
     parameters: ProjectLabelUpdateInput,
     success: ProjectLabelMutationResult,
     description:
-      "Rename a project folder, or change its color or description. Omitted fields are preserved; null clears color or description.",
+      "Change what the Projects page shows for a project: rename it, set its color (gray, red, amber, green, teal, blue, violet or pink; not hex), description, or instructions (standing guidance for every agent in the project). Omitted fields are preserved; null clears color or description; an empty string clears instructions.",
   }).annotate(Tool.Destructive, false),
   Tool.make("t3_project_label_delete", {
     ...shared,

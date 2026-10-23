@@ -1,6 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
 import { isAtomCommandInterrupted } from "@t3tools/client-runtime/state/runtime";
-import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import type {
   EnvironmentId,
   ProjectId,
@@ -13,7 +12,6 @@ import {
   ArchiveRestoreIcon,
   MoreHorizontalIcon,
   PaletteIcon,
-  PanelRightIcon,
   PencilIcon,
   Settings2Icon,
   SquarePenIcon,
@@ -22,7 +20,6 @@ import {
 import { useMemo, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 
 import { isElectron } from "../../env";
-import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { useScratchProject } from "../../hooks/useScratchProject";
 import { useSidebarProjectGroups } from "../../hooks/useSidebarProjectGroups";
 import { useClientSettings } from "../../hooks/useSettings";
@@ -62,10 +59,11 @@ import {
   MenuTrigger,
 } from "../ui/menu";
 import { OverlayPresence } from "../ui/overlay-presence";
-import { Sheet, SheetPopup } from "../ui/sheet";
+import { ScrollArea } from "../ui/scroll-area";
 import { SidebarInset } from "../ui/sidebar";
+import { WorkspacePageContainer } from "../WorkspacePageContainer";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
-import { ProjectChatColumn } from "./ProjectChatColumn";
+import { WorkspacePageTitle } from "../WorkspacePageTitle";
 import {
   AgentsCard,
   FilesCard,
@@ -75,7 +73,6 @@ import {
   SourcesCard,
 } from "./ProjectHomeCards";
 import { sortRecentFirst } from "./projectPanel.logic";
-import { useProjectChatThread } from "./useProjectChatThread";
 import { useProjectInstructions } from "./useProjectInstructions";
 import { useProjectResources } from "./useProjectResources";
 
@@ -125,7 +122,7 @@ function ProjectNameEditor(props: {
     );
   }
   return (
-    <h1 className="min-w-0 truncate text-card/5 font-semibold tracking-tight">
+    <h1 className="min-w-0 truncate text-sm font-medium text-foreground">
       <button
         type="button"
         disabled={!props.canEdit}
@@ -142,10 +139,7 @@ function ProjectNameEditor(props: {
   );
 }
 
-/**
- * A separate chat in the project, rename, color, details, archive and delete,
- * in the header's ⋯ menu.
- */
+/** The header's ⋯ menu: a new chat in the project, rename, color, details, archive, delete. */
 function ProjectHeaderMenu(props: {
   readonly label: ProjectLabelWithRepositories;
   readonly canEdit: boolean;
@@ -169,7 +163,7 @@ function ProjectHeaderMenu(props: {
       <MenuPopup align="end">
         <MenuItem onClick={props.onNewChat}>
           <SquarePenIcon />
-          New separate chat
+          New chat in project
         </MenuItem>
         <MenuSeparator />
         <MenuItem disabled={!props.canEdit} onClick={props.onRename}>
@@ -217,20 +211,23 @@ function ProjectHeaderMenu(props: {
   );
 }
 
+/** Recent shows every chat and Work filed in the project. */
+const NOTHING_EXCLUDED: ReadonlySet<string> = new Set();
+
 /**
- * One project in the main area, as its home: a compact header, the project's
- * one persistent conversation in the main column (the same thread on every
- * visit and device, `projectChatThreadId`), and the cards it is built from (instructions,
- * repositories, sources, files, recent threads, agents) in a column that
- * scrolls on its own. Narrow windows move the cards into a sheet the header
- * toggles. Picking another project fades the new page in.
+ * One project's page, opened from the Projects page like a Usage-style page:
+ * a header with its name and actions, then the cards it is built from
+ * (instructions, repositories, sources, files, recent threads, agents) in a
+ * grid that scrolls with the page. Conversation about the project happens in
+ * any thread: agents edit all of it with the project tools. Picking another
+ * project fades the new page in.
  */
 export function ProjectView(props: {
   readonly environmentId: EnvironmentId;
   readonly labelId: ProjectLabelId;
 }) {
   return (
-    <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none">
+    <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none isolate">
       <ProjectPage
         key={projectLabelKey(props.environmentId, props.labelId)}
         environmentId={props.environmentId}
@@ -266,8 +263,6 @@ function ProjectPage(props: {
   const { startScratchThread } = useScratchProject();
   const [renaming, setRenaming] = useState(false);
   const [editingDetails, setEditingDetails] = useState(false);
-  const [cardsOpen, setCardsOpen] = useState(false);
-  const cardsInline = useMediaQuery("lg");
   const projects = useProjects();
   const projectGroups = useSidebarProjectGroups();
   const groupingSettings = useClientSettings(selectProjectGroupingSettings);
@@ -282,12 +277,6 @@ function ProjectPage(props: {
   const chats = useMemo(() => sortRecentFirst(contents?.chats ?? [], chatActivityAt), [contents]);
   const work = useMemo(() => sortRecentFirst(contents?.work ?? [], chatActivityAt), [contents]);
   const instructions = useProjectInstructions(environmentId, label);
-  const chat = useProjectChatThread(environmentId, label);
-  const projectChatKey = chat.status === "ready" ? scopedThreadKey(chat.threadRef) : null;
-  const excludeFromRecent = useMemo(
-    () => new Set(projectChatKey === null ? [] : [projectChatKey]),
-    [projectChatKey],
-  );
 
   const openRepositorySettings = (repositoryId: ProjectId) => {
     const group = projectGroups.find((candidate) =>
@@ -306,7 +295,10 @@ function ProjectPage(props: {
       },
     });
   };
-  const update = async (input: { name?: string; color?: string }, failure: string) => {
+  const update = async (
+    input: { name?: string; color?: ReturnType<typeof projectLabelPaletteColor> },
+    failure: string,
+  ) => {
     const result = await updateLabel({ environmentId, input: { id: labelId, ...input } });
     if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
       reportProjectFolderFailure(failure, result);
@@ -340,63 +332,35 @@ function ProjectPage(props: {
     );
   }
 
-  const cards = (
-    <div className="flex flex-col gap-2 p-3 pb-4">
-      <InstructionsCard instructions={instructions} canEdit={canEdit} />
-      <RepositoriesCard
-        environmentId={environmentId}
-        label={label}
-        folder={entry}
-        repositories={repositories}
-        linkedRepositories={linkedRepositories}
-        folderByRepository={directory.folderByRepository}
-        onOpenRepository={openRepositorySettings}
-      />
-      <SourcesCard environmentId={environmentId} label={label} />
-      <FilesCard
-        environmentId={environmentId}
-        label={label}
-        resources={files.resources}
-        loaded={files.isLoaded}
-        error={files.error}
-      />
-      <RecentCard
-        environmentId={environmentId}
-        label={label}
-        chats={chats}
-        work={work}
-        exclude={excludeFromRecent}
-      />
-      <AgentsCard environmentId={environmentId} label={label} />
-    </div>
-  );
-
   return (
     <div className="swap-motion flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
       <WorkspacePageHeader electron={isElectron}>
-        <ProjectFolderIcon color={label.color} className="size-6 shrink-0" />
-        <div className="flex min-w-0 flex-1 flex-col">
-          <ProjectNameEditor
-            key={label.name}
-            name={label.name}
-            editing={renaming}
-            canEdit={canEdit}
-            onStartEdit={() => setRenaming(true)}
-            onCancel={() => setRenaming(false)}
-            onSave={async (name) => {
-              setRenaming(false);
-              await update({ name }, `Could not rename ${label.name}`);
-            }}
-          />
-          {archive.archived || label.description ? (
-            <p className="swap-motion truncate text-xs text-muted-foreground">
-              {[archive.archived ? "Archived" : null, label.description || null]
-                .filter(Boolean)
-                .join(" · ")}
-            </p>
-          ) : null}
-        </div>
-        <span className="flex shrink-0 items-center gap-1">
+        {/* The leading title sits in the titlebar after back/forward, like every page's. */}
+        <WorkspacePageTitle>
+          <div className="flex min-w-0 items-center gap-2 [-webkit-app-region:no-drag]">
+            <ProjectFolderIcon color={label.color} className="size-4 shrink-0" />
+            <ProjectNameEditor
+              key={label.name}
+              name={label.name}
+              editing={renaming}
+              canEdit={canEdit}
+              onStartEdit={() => setRenaming(true)}
+              onCancel={() => setRenaming(false)}
+              onSave={async (name) => {
+                setRenaming(false);
+                await update({ name }, `Could not rename ${label.name}`);
+              }}
+            />
+            {archive.archived || label.description ? (
+              <span className="swap-motion min-w-0 shrink-[2] truncate text-xs text-muted-foreground">
+                {[archive.archived ? "Archived" : null, label.description || null]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </span>
+            ) : null}
+          </div>
+        </WorkspacePageTitle>
+        <span className="ms-auto flex shrink-0 items-center gap-1">
           {archive.archived ? (
             <span key="unarchive" className="swap-motion flex">
               <Button
@@ -410,17 +374,6 @@ function ProjectPage(props: {
               </Button>
             </span>
           ) : null}
-          {cardsInline ? null : (
-            <Button
-              size="icon-sm"
-              variant="ghost-muted"
-              aria-label="Project details"
-              aria-expanded={cardsOpen}
-              onClick={() => setCardsOpen((open) => !open)}
-            >
-              <PanelRightIcon />
-            </Button>
-          )}
           <ProjectHeaderMenu
             label={label}
             canEdit={canEdit}
@@ -434,33 +387,57 @@ function ProjectPage(props: {
               })
             }
             onRename={() => setRenaming(true)}
-            onRecolor={(color) => void update({ color }, `Could not recolor ${label.name}`)}
+            onRecolor={(color) =>
+              void update(
+                { color: projectLabelPaletteColor(color) },
+                `Could not recolor ${label.name}`,
+              )
+            }
             onEditDetails={() => setEditingDetails(true)}
             onToggleArchived={() => void archive.setArchived(!archive.archived)}
             onDelete={() => void remove()}
           />
         </span>
       </WorkspacePageHeader>
-      <div className="flex min-h-0 min-w-0 flex-1">
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <ProjectChatColumn label={label} chat={chat} />
-        </div>
-        {cardsInline ? (
-          <aside
+      {/* The cards give keyboard access, so the viewport stays out of the tab order. */}
+      <ScrollArea className="min-h-0 flex-1" viewportTabIndex={-1}>
+        <WorkspacePageContainer width="expanded">
+          {/* Each card sizes to its content (items-start), so none is clipped. */}
+          <section
             aria-label={`${label.name} details`}
-            className="scroll-fade-y w-82 shrink-0 overflow-y-auto overscroll-contain border-s border-border"
+            className="grid items-start gap-3 md:grid-cols-2 xl:grid-cols-3"
           >
-            {cards}
-          </aside>
-        ) : null}
-      </div>
-      {cardsInline ? null : (
-        <Sheet open={cardsOpen} onOpenChange={setCardsOpen}>
-          <SheetPopup side="right" aria-label={`${label.name} details`}>
-            <div className="min-h-0 flex-1 overflow-y-auto pt-10">{cards}</div>
-          </SheetPopup>
-        </Sheet>
-      )}
+            <div className="md:col-span-2 xl:col-span-3">
+              <InstructionsCard instructions={instructions} canEdit={canEdit} />
+            </div>
+            <RepositoriesCard
+              environmentId={environmentId}
+              label={label}
+              folder={entry}
+              repositories={repositories}
+              linkedRepositories={linkedRepositories}
+              folderByRepository={directory.folderByRepository}
+              onOpenRepository={openRepositorySettings}
+            />
+            <SourcesCard environmentId={environmentId} label={label} />
+            <FilesCard
+              environmentId={environmentId}
+              label={label}
+              resources={files.resources}
+              loaded={files.isLoaded}
+              error={files.error}
+            />
+            <RecentCard
+              environmentId={environmentId}
+              label={label}
+              chats={chats}
+              work={work}
+              exclude={NOTHING_EXCLUDED}
+            />
+            <AgentsCard environmentId={environmentId} label={label} />
+          </section>
+        </WorkspacePageContainer>
+      </ScrollArea>
       <OverlayPresence when={editingDetails && label}>
         {(label) => (
           <ProjectLabelEditorDialog

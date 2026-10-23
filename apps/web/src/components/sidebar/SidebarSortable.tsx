@@ -32,6 +32,18 @@ export const SIDEBAR_SORT_DISTANCE = 6;
 /** Held to the column: up and down only, inside the scrolling list. */
 export const SIDEBAR_SORT_MODIFIERS = [restrictToVerticalAxis, restrictToFirstScrollableAncestor];
 
+/**
+ * The list scrolls only when a card is held right at its top or bottom edge
+ * (dnd-kit's default reaches a fifth of the viewport in, which in a list that
+ * fills from the bottom is most of the cards). Layout-shift compensation is
+ * off: it scrolls the whole column to chase a card whose box moved as the
+ * drag began, which reads as the list jumping.
+ */
+const SIDEBAR_SORT_AUTO_SCROLL = {
+  threshold: { x: 0, y: 0.08 },
+  layoutShiftCompensation: false,
+} as const;
+
 // --motion-duration-base on ease-standard: the cards a drag passes slide aside.
 const SIDEBAR_SORT_TRANSITION = { duration: 220, easing: "cubic-bezier(0.32, 0.72, 0, 1)" };
 const SIDEBAR_SORT_LIFT_TRANSITION =
@@ -152,6 +164,7 @@ export function SidebarSortContext(props: {
       sensors={props.sensors}
       collisionDetection={props.collisionDetection}
       modifiers={SIDEBAR_SORT_MODIFIERS}
+      autoScroll={SIDEBAR_SORT_AUTO_SCROLL}
       accessibility={accessibility}
       onDragStart={(event) => {
         // The grabbing cursor holds for the whole drag, wherever the pointer goes.

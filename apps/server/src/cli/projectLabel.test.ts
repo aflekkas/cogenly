@@ -133,6 +133,11 @@ describe("cogenly project label", () => {
       const created = yield* run(context, { _tag: "create", name: "Work", color: "blue" });
       expect(created.json).toMatchObject({ label: { id: "label-1", name: "Work", color: "blue" } });
       yield* run(context, { _tag: "create", name: "Side", color: undefined });
+      // A color the app cannot show is refused, naming the ones it can.
+      const refused = yield* run(context, { _tag: "create", name: "Hex", color: "#3b82f6" }).pipe(
+        Effect.flip,
+      );
+      expect(refused.message).toContain("gray, red, amber, green, teal, blue, violet, pink");
 
       const renamed = yield* run(context, { _tag: "rename", label: "work", name: "Client work" });
       expect(renamed.text).toContain("Client work (label-1)");

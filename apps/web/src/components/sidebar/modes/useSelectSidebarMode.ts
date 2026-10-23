@@ -14,15 +14,16 @@ import type { SidebarMode } from "./sidebarModes.logic";
 /**
  * Picking a sidebar mode by hand: the rail, the mobile switcher, the palette
  * and the mode shortcuts. When the main panel shows a thread or draft another
- * mode lists (or a project view outside Projects), it lands on the new mode
- * instead, so Chats never sits beside a repository draft. Following an opened
+ * mode lists, it lands on the new mode instead, so Chats never sits beside a
+ * repository draft. From a utility page (Settings, Usage, Projects) it goes
+ * back to the main app. Following an opened
  * thread into its mode sets the mode directly and keeps the thread. A landing
  * goes straight to its thread or draft; only a mode with nothing to open yet
  * (loading, or its empty state) passes through the index route.
  *
  * Before any landing, a mode returns to the page it last showed
- * (spaceRouteMemory), as a normal push, while that thread or project is still
- * there. Picking the mode already shown changes nothing.
+ * (spaceRouteMemory), as a normal push, while that thread is still there.
+ * Picking the mode already shown changes nothing.
  */
 export function useSelectSidebarMode() {
   const setMode = useUiStateStore((store) => store.setSidebarMode);
@@ -35,8 +36,6 @@ export function useSelectSidebarMode() {
   const readMainPanelContent = useCallback((): MainPanelContent => {
     const { pathname } = router.state.location;
     if (pathname === "/") return { kind: "index" };
-    if (pathname === "/project" || pathname.startsWith("/project/"))
-      return { kind: "project-view" };
     const kind = readRouteThreadKind();
     return kind === null
       ? { kind: "other" }

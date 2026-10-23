@@ -64,6 +64,7 @@ import { answerNoProjectPick, useWorkNoProjectPicked } from "~/projectLabels/wor
 import { chatGreeting } from "./chatGreeting";
 import { FadeSwap } from "./StateTransition";
 import { useHeroHeadlineMotion } from "./useHeroHeadlineMotion";
+import { cn } from "~/lib/utils";
 import { WorkHeroCrumbText, WorkHeroSentence } from "./WorkHeroSentence";
 import { sortLogicalProjectsForSidebar } from "../Sidebar.logic";
 import {
@@ -91,6 +92,8 @@ import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 
 // Picker values for the action rows; repositories are keyed by their logical
 // project key.
+/** The draft heading's FadeSwap slot, which a replacing draft's heading picks up from. */
+const DRAFT_HEADING_GROUP = "draft-heading";
 const ADD_PROJECT_VALUE = "add-project";
 const ACTIONS_GROUP_KEY = "actions";
 const REPOSITORIES_GROUP_KEY = "repositories";
@@ -409,17 +412,19 @@ export function DraftHeroHeadline({
     },
     [projectFolderRowLabel, workProject],
   );
-  const pickerGroups = useMemo(
-    () => buildPickerGroups(scopedRepositoryItems, true, showProjectFolderRow),
-    [buildPickerGroups, scopedRepositoryItems, showProjectFolderRow],
-  );
   const [pickerOpen, setPickerOpen] = useState(false);
   const keepPickerOpenRef = useRef(false);
   const [pickerQuery, setPickerQuery] = useState("");
   const pickerFilter = useComboboxFilter();
-  // A search also asks GitHub, under the Work project's linked owners.
+  // While open, the picker also lists the Work project's GitHub repositories:
+  // its linked owners', else the signed-in account's; recent pushes until a search.
   const searchedProjects = useMemo(() => (workProject ? [workProject] : []), [workProject]);
-  const ownerSearch = useOwnerRepositorySearch(searchedProjects, pickerOpen ? pickerQuery : "");
+  const ownerSearch = useOwnerRepositorySearch(searchedProjects, pickerQuery, pickerOpen);
+  const remoteSearch = workProject ? ownerSearch.get(workProject.key) : undefined;
+  const pickerGroups = useMemo(
+    () => buildPickerGroups(scopedRepositoryItems, true, showProjectFolderRow, remoteSearch),
+    [buildPickerGroups, remoteSearch, scopedRepositoryItems, showProjectFolderRow],
+  );
   const filteredPickerGroups = useMemo(() => {
     const query = pickerQuery.trim();
     if (query.length === 0) return pickerGroups;
@@ -430,11 +435,11 @@ export function DraftHeroHeadline({
       false,
       showProjectFolderRow &&
         pickerFilter.contains(projectFolderRowLabel, query, (candidate) => candidate),
-      workProject ? ownerSearch.get(workProject.key) : undefined,
+      remoteSearch,
     );
   }, [
     buildPickerGroups,
-    ownerSearch,
+    remoteSearch,
     pickerFilter,
     pickerGroups,
     pickerQuery,
@@ -747,7 +752,7 @@ export function DraftHeroHeadline({
             <ComboboxTrigger
               render={
                 <InlineButton
-                  tone={breadcrumb.repository.placeholder ? "muted" : "picker"}
+                  tone="picker"
                   className="pointer-events-auto min-w-0 max-w-64 shrink align-baseline"
                 />
               }
@@ -757,7 +762,12 @@ export function DraftHeroHeadline({
         >
           {/* Plain inline flow, so the name shares the heading's baseline. The badge is an
               atomic inline box and stays clear of the button's underline. */}
-          <span className="block truncate">
+          <span
+            className={cn(
+              "block truncate",
+              breadcrumb.repository.placeholder && "text-muted-foreground",
+            )}
+          >
             {!breadcrumb.repository.placeholder && activeProjectDisplayName ? (
               activeProject ? (
                 // Work's mark for a repository: its icon, else its initials badge.
@@ -828,10 +838,15 @@ export function DraftHeroHeadline({
   const greetingSuffix = heroProjectSuffix(pendingProject?.label.name ?? null);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const measureRef = useRef<HTMLSpanElement>(null);
+  // Work's project and repository change in place: its pieces glide and the
+  // changed name crossfades (useHeroHeadlineMotion), also across the new draft
+  // a picked repository opens.
+  const workHeroKey = `${workProjectKey ?? "none"}:${isScratchDraft ? "none" : activeProjectKey}`;
   useHeroHeadlineMotion(
     headingRef,
     measureRef,
     isChatDraft && draftThread ? `chat:${draftThread.threadId}` : "heading",
+    { contentKey: isChatDraft ? "chat" : workHeroKey, handoff: DRAFT_HEADING_GROUP },
   );
   // A project picked for this Work draft, in the hero or the toolbar, moves it
   // to one of the project's repositories: the current one if the project holds
@@ -926,13 +941,9 @@ export function DraftHeroHeadline({
           className="pointer-events-none invisible absolute start-0 top-0 whitespace-pre"
         />
         <FadeSwap
-          group="draft-heading"
-          swapKey={
-            // A chat's project changes in place (the tail glides), not by a swap.
-            isChatDraft
-              ? "chat"
-              : `work:${workProjectKey ?? "none"}:${isScratchDraft ? "none" : activeProjectKey}`
-          }
+          group={DRAFT_HEADING_GROUP}
+          // A chat's project and Work's breadcrumb change in place, not by a swap.
+          swapKey={isChatDraft ? "chat" : "work"}
         >
           {isChatDraft ? (
             <>
@@ -975,7 +986,12 @@ function RemoteRepositorySection(props: {
   readonly renderItem: (item: PickerItem) => ReactNode;
 }) {
   const { state } = props;
-  const ownerName = props.owners.length === 1 ? props.owners[0] : "linked owners";
+  const ownerName =
+    props.owners.length === 0
+      ? "your repositories"
+      : props.owners.length === 1
+        ? props.owners[0]
+        : "linked owners";
   return (
     <div className="reveal-motion">
       <ComboboxGroupLabel>

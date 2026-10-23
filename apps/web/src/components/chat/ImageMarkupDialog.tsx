@@ -41,7 +41,7 @@ import {
   appendStrokePoint,
   canRedoMarkup,
   canUndoMarkup,
-  clampToImage,
+  clampToMarkupArea,
   clearShapes,
   createMarkupHistory,
   fontSizeFor,
@@ -59,7 +59,7 @@ import {
   type MarkupTool,
   type Point,
 } from "./imageMarkup";
-import { flattenMarkup } from "./imageMarkupCanvas";
+import { flattenMarkup, markupBackgroundColor } from "./imageMarkupCanvas";
 import type { ImageMarkupSession } from "./imageMarkupSessions";
 import { ZoomableImage, type ZoomableImageHandle } from "./ZoomableImage";
 import type { ImageView, Size } from "./zoomableImageView";
@@ -231,7 +231,7 @@ export function ImageMarkupDialog({
   const drawing = {
     active: tool !== "hand" && !spaceHeld && !busy,
     onStart: (raw: Point, { view, natural }: { view: ImageView; natural: Size }) => {
-      const point = clampToImage(raw, natural);
+      const point = clampToMarkupArea(raw, natural);
       commitText();
       if (tool === "text") {
         setTextDraft({
@@ -255,7 +255,7 @@ export function ImageMarkupDialog({
     onMove: (raw: Point) => {
       const current = draftRef.current;
       if (!current) return;
-      const point = clampToImage(raw, current.natural);
+      const point = clampToMarkupArea(raw, current.natural);
       const { shape } = current;
       const next: MarkupShape =
         shape.kind === "pen" || shape.kind === "highlighter"
@@ -302,7 +302,7 @@ export function ImageMarkupDialog({
     setBusy(true);
     setError(null);
     try {
-      const flattened = await flattenMarkup(base.file, base.name, shapes);
+      const flattened = await flattenMarkup(base.file, base.name, shapes, markupBackgroundColor());
       // A full-resolution PNG can pass the send cap; shrink it like any attached image.
       const prepared = await prepareImageForAttachment(
         flattened,

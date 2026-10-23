@@ -1,17 +1,27 @@
 import { useAtomValue } from "@effect/atom-react";
-import type {
-  EnvironmentId,
-  ProjectLabelId,
-  ProjectLabelWithRepositories,
-} from "@t3tools/contracts";
+import type { EnvironmentId } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
-import { FolderIcon, FolderPlusIcon } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { FolderIcon, FolderPlusIcon, LaptopMinimalIcon } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
+import { useAgents } from "../../agents/agentsClient";
 import { isElectron } from "../../env";
+import { useEscapeToGoBack } from "../../hooks/useNavigateBack";
+import { openCreateProjectDialog } from "../../projectLabels/CreateProjectDialogHost";
+import { ProjectFolderIcon } from "../../projectLabels/ProjectFolderMark";
 import { ProjectLabelEditorDialog } from "../../projectLabels/ProjectLabelEditorDialog";
+import { ProjectSourceLinksDialog } from "../../projectLabels/ProjectSourceLinks";
+import {
+  projectLabelKey,
+  type EnvironmentProjectLabel,
+  type ProjectLabelKey,
+} from "../../projectLabels/projectLabels.logic";
+import { useProjectContents } from "../../projectLabels/useProjectContents";
 import { usePrimaryEnvironmentId } from "../../state/environments";
+import { environmentPresentations } from "../../state/presentation";
 import { serverEnvironment } from "../../state/server";
+import { formatRelativeTimeLabel } from "../../timestampFormat";
+import { chatActivityAt } from "../sidebar/modes/sidebarModes.logic";
 import { Button } from "../ui/button";
 import {
   Empty,
@@ -22,8 +32,14 @@ import {
   EmptyTitle,
 } from "../ui/empty";
 import { OverlayPresence } from "../ui/overlay-presence";
+import { ScrollArea } from "../ui/scroll-area";
 import { SidebarInset } from "../ui/sidebar";
+import { Toggle, ToggleGroup } from "../ui/toggle-group";
+import { WorkspaceBreadcrumb, WorkspaceBreadcrumbItem } from "../WorkspaceBreadcrumb";
+import { WorkspacePageContainer } from "../WorkspacePageContainer";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
+import { latestProjectActivity, projectPanelSummary } from "./projectPanel.logic";
+import { useProjectFolderMenu } from "./useProjectFolderMenu";
 
 export interface ProjectsOverviewSearch {
   readonly create?: true | undefined;
@@ -44,80 +60,240 @@ export function validateProjectsOverviewSearch(
   };
 }
 
-/** Opens the project editor for a new folder on one machine, then the folder. */
-function NewProjectDialog(props: {
-  environmentId: EnvironmentId;
-  onClose: () => void;
-  onCreated: (labelId: ProjectLabelId) => void;
+type ProjectsFilter = "active" | "archived";
+
+/**
+ * One project on the grid: its folder and name with the last activity, its
+ * description, then what it holds and the machine it lives on. Clicking opens
+ * the project's page; right-click (or the context-menu key) opens its menu.
+ */
+function ProjectTile(props: {
+  readonly entry: EnvironmentProjectLabel;
+  readonly summary: string;
+  readonly lastActivityAt: string | null;
+  readonly environmentLabel: string | null;
+  readonly onOpen: () => void;
+  readonly onRename: () => void;
+  readonly onLinkSources: () => void;
 }) {
+  const { label } = props.entry;
+  const menu = useProjectFolderMenu(props.entry, { ...props, onDeleted: () => {} });
+  const description = label.description?.trim() || null;
   return (
-    <ProjectLabelEditorDialog
-      environmentId={props.environmentId}
-      label={null as ProjectLabelWithRepositories | null}
-      onClose={props.onClose}
-      onCreated={props.onCreated}
-    />
+    <li className="flex min-w-0 list-none">
+      <button
+        type="button"
+        data-menu-open={menu.menuOpen ? "" : undefined}
+        aria-label={[label.name, props.summary, description].filter(Boolean).join(", ")}
+        onClick={props.onOpen}
+        onKeyDown={(event) => {
+          if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+            event.preventDefault();
+            menu.openMenuAtElement(event.currentTarget);
+          }
+        }}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          void menu.openMenu({ x: event.clientX, y: event.clientY });
+        }}
+        className="project-tile flex-1"
+      >
+        <span className="flex min-w-0 items-center gap-2">
+          <ProjectFolderIcon color={label.color} className="size-4.5 shrink-0" />
+          <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
+            {label.name}
+          </span>
+          {props.lastActivityAt ? (
+            <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+              {formatRelativeTimeLabel(props.lastActivityAt)}
+            </span>
+          ) : null}
+        </span>
+        {description ? (
+          <span className="line-clamp-2 text-xs/relaxed text-muted-foreground">{description}</span>
+        ) : null}
+        <span className="mt-auto flex min-w-0 items-center gap-3 pt-1 text-xs text-muted-foreground">
+          <span className="min-w-0 flex-1 truncate tabular-nums">{props.summary}</span>
+          {props.environmentLabel ? (
+            <span className="flex max-w-1/2 shrink-0 items-center gap-1">
+              <LaptopMinimalIcon aria-hidden className="size-3 shrink-0" />
+              <span className="truncate">{props.environmentLabel}</span>
+            </span>
+          ) : null}
+        </span>
+      </button>
+    </li>
   );
 }
 
 /**
- * Projects mode with nothing picked: the list is the sidebar, so the main
- * area only says to pick one, and offers a new project. `?create` opens the
- * editor straight away (the sidebar's new button lands here).
+ * The Projects page, opened from the rail's footer like Usage: every project
+ * across connected machines as a grid, the active ones or the archived ones.
+ * A project opens its own page. `?create` opens the new-project dialog at once.
  */
 export function ProjectsOverview(props: ProjectsOverviewSearch) {
+  useEscapeToGoBack();
   const navigate = useNavigate();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const createEnvironmentId = props.environmentId ?? primaryEnvironmentId;
   const canCreate = useAtomValue(
     serverEnvironment.createProjectLabel.permissionAtom(createEnvironmentId),
   );
-  const [creating, setCreating] = useState(false);
+  const { directory, byProject } = useProjectContents();
+  const { agents } = useAgents();
+  const presentations = useAtomValue(environmentPresentations.presentationsAtom);
+  const [filter, setFilter] = useState<ProjectsFilter>("active");
+  const [renaming, setRenaming] = useState<EnvironmentProjectLabel | null>(null);
+  const [linking, setLinking] = useState<EnvironmentProjectLabel | null>(null);
+
+  const createProject = () => {
+    if (createEnvironmentId !== null)
+      openCreateProjectDialog({ environmentId: createEnvironmentId });
+  };
   const openedCreate = useRef(false);
   useEffect(() => {
     if (!props.create || openedCreate.current || !canCreate || createEnvironmentId === null) return;
     openedCreate.current = true;
-    setCreating(true);
+    openCreateProjectDialog({ environmentId: createEnvironmentId });
   }, [canCreate, createEnvironmentId, props.create]);
 
+  const agentsByProject = useMemo(() => {
+    const counts = new Map<ProjectLabelKey, number>();
+    for (const agent of agents) {
+      if (!agent.projectFolderId) continue;
+      const key = projectLabelKey(agent.environmentId, agent.projectFolderId);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return counts;
+  }, [agents]);
+  // The machine only says something when there is more than one.
+  const environmentLabel = (environmentId: EnvironmentId) =>
+    presentations.size > 1 ? (presentations.get(environmentId)?.entry.target.label ?? null) : null;
+
+  // An empty filter falls back to the other, so the page never opens onto nothing.
+  const shownFilter: ProjectsFilter =
+    filter === "archived" && directory.archived.length === 0 ? "active" : filter;
+  const shown = shownFilter === "archived" ? directory.archived : directory.active;
+
   return (
-    <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none">
+    <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none isolate">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
-        <WorkspacePageHeader electron={isElectron} />
-        <Empty>
-          <EmptyHeader>
-            <EmptyMedia>
-              <FolderIcon />
-            </EmptyMedia>
-            <EmptyTitle>Select a project</EmptyTitle>
-            <EmptyDescription>
-              Pick one in the sidebar to start a chat in it and see what it holds.
-            </EmptyDescription>
-          </EmptyHeader>
-          <EmptyContent>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={createEnvironmentId === null || !canCreate}
-              onClick={() => setCreating(true)}
-            >
-              <FolderPlusIcon />
-              New project
-            </Button>
-          </EmptyContent>
-        </Empty>
+        <WorkspacePageHeader electron={isElectron}>
+          <div className="flex w-full min-w-0 items-center gap-3 py-2">
+            <WorkspaceBreadcrumb ariaLabel="Projects breadcrumb" className="min-w-0">
+              <WorkspaceBreadcrumbItem current>
+                <h1>Projects</h1>
+              </WorkspaceBreadcrumbItem>
+            </WorkspaceBreadcrumb>
+            <span className="ms-auto flex shrink-0 items-center gap-2">
+              {directory.archived.length > 0 ? (
+                <ToggleGroup
+                  aria-label="Which projects"
+                  variant="segmented"
+                  value={[shownFilter]}
+                  onValueChange={(next) => {
+                    const value = next[0];
+                    if (value === "active" || value === "archived") setFilter(value);
+                  }}
+                >
+                  <Toggle value="active">Active</Toggle>
+                  <Toggle value="archived">Archived · {directory.archived.length}</Toggle>
+                </ToggleGroup>
+              ) : null}
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={createEnvironmentId === null || !canCreate}
+                onClick={createProject}
+              >
+                <FolderPlusIcon />
+                New project
+              </Button>
+            </span>
+          </div>
+        </WorkspacePageHeader>
+
+        {/* The tiles give keyboard access, so the viewport stays out of the tab order. */}
+        <ScrollArea className="min-h-0 flex-1" viewportTabIndex={-1}>
+          <WorkspacePageContainer width="expanded">
+            {directory.labels.length === 0 ? (
+              <Empty>
+                <EmptyHeader>
+                  <EmptyMedia>
+                    <FolderIcon />
+                  </EmptyMedia>
+                  <EmptyTitle>No projects yet</EmptyTitle>
+                  <EmptyDescription>
+                    A project groups the repositories, chats, Work, files and agents for one effort,
+                    and gives agents its instructions.
+                  </EmptyDescription>
+                </EmptyHeader>
+                <EmptyContent>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={createEnvironmentId === null || !canCreate}
+                    onClick={createProject}
+                  >
+                    <FolderPlusIcon />
+                    New project
+                  </Button>
+                </EmptyContent>
+              </Empty>
+            ) : (
+              <ul
+                key={shownFilter}
+                aria-label={shownFilter === "archived" ? "Archived projects" : "Projects"}
+                className="swap-motion grid grid-cols-[repeat(auto-fill,minmax(16rem,1fr))] gap-3"
+              >
+                {shown.map((entry) => {
+                  const contents = byProject.get(entry.key);
+                  return (
+                    <ProjectTile
+                      key={entry.key}
+                      entry={entry}
+                      summary={
+                        projectPanelSummary({
+                          repositories: entry.label.repositoryIds.length,
+                          chats: contents?.chats.length ?? 0,
+                          work: contents?.work.length ?? 0,
+                          files: 0,
+                          agents: agentsByProject.get(entry.key) ?? 0,
+                        }) ?? "Empty"
+                      }
+                      lastActivityAt={latestProjectActivity(contents, chatActivityAt)}
+                      environmentLabel={environmentLabel(entry.environmentId)}
+                      onOpen={() =>
+                        void navigate({
+                          to: "/project/$environmentId/$labelId",
+                          params: { environmentId: entry.environmentId, labelId: entry.label.id },
+                        })
+                      }
+                      onRename={() => setRenaming(entry)}
+                      onLinkSources={() => setLinking(entry)}
+                    />
+                  );
+                })}
+              </ul>
+            )}
+          </WorkspacePageContainer>
+        </ScrollArea>
       </div>
-      <OverlayPresence when={creating && createEnvironmentId}>
-        {(environmentId) => (
-          <NewProjectDialog
-            environmentId={environmentId}
-            onClose={() => setCreating(false)}
-            onCreated={(labelId) =>
-              void navigate({
-                to: "/project/$environmentId/$labelId",
-                params: { environmentId, labelId },
-              })
-            }
+      <OverlayPresence when={renaming}>
+        {(entry) => (
+          <ProjectLabelEditorDialog
+            environmentId={entry.environmentId}
+            label={entry.label}
+            onClose={() => setRenaming(null)}
+          />
+        )}
+      </OverlayPresence>
+      <OverlayPresence when={linking}>
+        {(entry) => (
+          <ProjectSourceLinksDialog
+            environmentId={entry.environmentId}
+            label={entry.label}
+            onClose={() => setLinking(null)}
           />
         )}
       </OverlayPresence>

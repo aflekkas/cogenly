@@ -771,9 +771,17 @@ const make = Effect.gen(function* () {
   };
 
   /**
+   * Agent `preview_open` calls in flight with `open: false`, per thread and
+   * agent session. The tab they create stays out of the panel.
+   */
+  const backgroundOpens = new Map<string, number>();
+  const backgroundOpenKey = (threadId: string, agentSessionId: string) =>
+    `${threadId}\u0000${agentSessionId}`;
+
+  /**
    * Asks every client to show a tab and select it in the thread's browser
-   * panel. Throttled per tab, since an agent acting on a tab off screen asks on
-   * each action until the panel shows it.
+   * panel, for a new agent tab that needs the panel's `<webview>` to attach.
+   * Throttled per tab.
    */
   const requestPanelReveal = (threadId: string, tabId: string) => {
     const key = tabKey(threadId, tabId);
@@ -838,6 +846,10 @@ const make = Effect.gen(function* () {
         ),
         adopted: adopted !== undefined,
         agentOwned: snapshot.automationOwner !== undefined,
+        background:
+          snapshot.automationOwner !== undefined &&
+          (backgroundOpens.get(backgroundOpenKey(snapshot.threadId, snapshot.automationOwner)) ??
+            0) > 0,
       })
     ) {
       requestPanelReveal(snapshot.threadId, snapshot.tabId);
@@ -1967,20 +1979,33 @@ const make = Effect.gen(function* () {
           closeIdleAgentTabs();
           assertTabCapacity(request.agentSessionId);
         }
-        const tab =
-          existing ??
-          (await ensureTab(
-            await Effect.runPromise(
-              manager.open({
-                threadId: request.threadId,
-                ...(url ? { url } : {}),
-                ...(profileId === undefined ? {} : { profileId }),
-                runtime: "server",
-                reveal: false,
-                automationOwner: request.agentSessionId,
-              }),
-            ),
-          ));
+        const background = (open.open ?? open.show) === false;
+        const backgroundKey = backgroundOpenKey(request.threadId, request.agentSessionId);
+        if (!existing && background)
+          backgroundOpens.set(backgroundKey, (backgroundOpens.get(backgroundKey) ?? 0) + 1);
+        let tab: ServerTab;
+        try {
+          tab =
+            existing ??
+            (await ensureTab(
+              await Effect.runPromise(
+                manager.open({
+                  threadId: request.threadId,
+                  ...(url ? { url } : {}),
+                  ...(profileId === undefined ? {} : { profileId }),
+                  runtime: "server",
+                  reveal: false,
+                  automationOwner: request.agentSessionId,
+                }),
+              ),
+            ));
+        } finally {
+          if (!existing && background) {
+            const remaining = (backgroundOpens.get(backgroundKey) ?? 1) - 1;
+            if (remaining > 0) backgroundOpens.set(backgroundKey, remaining);
+            else backgroundOpens.delete(backgroundKey);
+          }
+        }
         if (existing?.dialog)
           throw new BrowserControlInterrupted(
             "A browser dialog is pending. Read preview_status and use preview_dialog first.",
@@ -2079,10 +2104,8 @@ const make = Effect.gen(function* () {
     request: PreviewAutomationRequest,
     agentSessionId: string,
   ): Promise<unknown> => {
-    // The user should see the tab an agent drives: acting on one off screen
-    // brings it into the panel. A read of a tab leaves the panel alone.
-    if (!READ_OPERATIONS.has(request.operation) && !isShown(tab) && desktopChannel.available)
-      requestPanelReveal(tab.threadId, tab.tabId);
+    // Acting on a tab never brings the panel back: a person who closed it
+    // keeps it closed, and follows along in the floating preview instead.
     // A read of another agent's tab, or of any tab while a person drives it,
     // runs in place: it neither queues behind their input nor takes control.
     // Every other call takes control, and a person taking it back interrupts it.
@@ -2167,7 +2190,11 @@ const make = Effect.gen(function* () {
         );
       case "select":
         return recordAction(tab, "select", () =>
-          ServerBrowserPage.select(tab.page, input as PreviewAutomationSelectInput),
+          ServerBrowserPage.select(
+            tab.page,
+            input as PreviewAutomationSelectInput,
+            pointerFor(tab),
+          ),
         );
       case "drag":
         return recordAction(tab, "drag", () =>
@@ -2179,7 +2206,7 @@ const make = Effect.gen(function* () {
         );
       case "type":
         return recordAction(tab, "type", () =>
-          ServerBrowserPage.type(tab.page, input as PreviewAutomationTypeInput),
+          ServerBrowserPage.type(tab.page, input as PreviewAutomationTypeInput, pointerFor(tab)),
         );
       case "press":
         return recordAction(tab, "press", () =>

@@ -114,8 +114,8 @@ export interface ProjectOwnerRepositorySearchDeps {
 }
 
 /**
- * The linked owners' GitHub repositories matching `query`, most recently
- * pushed first. Reads the first page per owner through the server's GitHub
+ * The linked owners' GitHub repositories matching `query` (or, with no owner
+ * linked, the signed-in account's), most recently pushed first. Reads the first page per owner through the server's GitHub
  * credential, so private organization repositories the user can access are
  * included. A linked owner that is a user rather than an organization reads
  * through the user endpoint instead.
@@ -131,7 +131,6 @@ export const searchLabelOwnerRepositories = Effect.fn("ProjectOwnerRepositorySea
         label.sourceLinks.flatMap((link) => (link.kind === "github-owner" ? [link.owner] : [])),
       ),
     ];
-    if (owners.length === 0) return { repositories: [] };
     const limit = input.limit ?? PROJECT_LABEL_OWNER_SEARCH_DEFAULT_LIMIT;
 
     const rows = yield* deps.projects.list().pipe(
@@ -194,7 +193,24 @@ export const searchLabelOwnerRepositories = Effect.fn("ProjectOwnerRepositorySea
         );
       }).pipe(Effect.mapError(toSearchError));
 
-    const pages = yield* Effect.forEach(owners, fetchOwner, { concurrency: 4 });
+    // A project that links no owner lists the signed-in account's own
+    // repositories (and those of its organizations) instead.
+    const fetchSignedInAccount = Effect.gen(function* () {
+      const response = yield* deps.github.rest({
+        host: "github.com",
+        operation: "ProjectOwnerRepositorySearch.listAccountRepositories",
+        path: `user/repos?per_page=${OWNER_REPOSITORIES_PER_PAGE}&affiliation=owner,collaborator,organization_member&sort=pushed&direction=desc`,
+        timeout: OWNER_REPOSITORIES_TIMEOUT,
+      });
+      return (Option.getOrUndefined(decodeRepositoryListJson(response.body)) ?? []).flatMap(
+        (value) => Option.toArray(decodeRepositoryRow(value)),
+      );
+    }).pipe(Effect.mapError(toSearchError));
+
+    const pages =
+      owners.length === 0
+        ? [yield* fetchSignedInAccount]
+        : yield* Effect.forEach(owners, fetchOwner, { concurrency: 4 });
     const seen = new Set<string>();
     const repositories: Array<ProjectLabelOwnerRepository> = [];
     for (const row of pages.flat()) {

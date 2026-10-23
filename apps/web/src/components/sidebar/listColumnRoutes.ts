@@ -1,11 +1,13 @@
+import { isProjectsPage } from "./mainAppLocation";
+
 /**
  * Full-width pages: with the nav rail there to navigate away, these routes
  * have no sidebar list column. The toggle keeps its place but is disabled, and
- * its shortcut does nothing. Projects pages keep the column: the Projects
- * list is the way to pick one. The mobile sheet
- * keeps the list, since it is the only way back there. The Agents index and the
- * agent builder with nothing to list (`agentsEmpty`) are full-width too: the empty
- * state lives in the main pane, and the column returns with the first agent.
+ * its shortcut does nothing. Usage and the Projects pages are full-width. The
+ * mobile sheet keeps the list, since it is the only way back there. The Agents
+ * index and the agent builder with nothing to list (`agentsEmpty`) are
+ * full-width too: the empty state lives in the main pane, and the column
+ * returns with the first agent.
  */
 export function routeHidesListColumn(
   pathname: string,
@@ -13,6 +15,7 @@ export function routeHidesListColumn(
 ): boolean {
   return (
     pathname === "/usage" ||
+    isProjectsPage(pathname) ||
     ((pathname === "/" || pathname === "/agents/new") && context.agentsEmpty)
   );
 }

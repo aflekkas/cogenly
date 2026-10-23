@@ -148,9 +148,6 @@ export function useLandOnMode(): (mode: SidebarMode) => boolean {
             params: buildThreadRouteParams(landing.threadRef),
           });
           return true;
-        case "projects-overview":
-          void router.navigate({ to: "/project" });
-          return true;
         case "new-chat":
           void startScratchThread(landing.environmentId, { surface: "chat" });
           return true;

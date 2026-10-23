@@ -361,6 +361,19 @@ const make = Effect.gen(function* () {
       input,
       Effect.gen(function* () {
         yield* requireThread(input.threadId);
+        // A project's own conversation lives on its page: it may be filed in
+        // that project (as ProjectHome does) but never moved out or elsewhere.
+        const home = yield* sql<{
+          readonly labelId: string;
+          readonly name: string;
+        }>`SELECT label_id AS labelId, name FROM project_labels WHERE project_chat_thread_id = ${input.threadId} LIMIT 1`;
+        const owner = home[0];
+        if (owner !== undefined && owner.labelId !== input.folderId)
+          return yield* new ProjectLabelError({
+            operation: "moveThread",
+            reason: "project_chat",
+            projectName: owner.name,
+          });
         if (input.folderId !== null) {
           // Only filing into an archived project is refused: unfiling, moving
           // out, and re-filing where the thread already is stay allowed.

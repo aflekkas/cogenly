@@ -108,6 +108,7 @@ export function repositoryFolderMove(
 export type ProjectFolderSource = "explicit" | "repository";
 
 interface FolderedThread {
+  readonly id?: string;
   readonly environmentId: EnvironmentId;
   readonly source: {
     readonly projectFolderId?: ProjectLabelId | null | undefined;
@@ -128,6 +129,22 @@ export interface ThreadFolderState {
   readonly options: ReadonlyArray<EnvironmentProjectLabel>;
 }
 
+/**
+ * Whether `thread` is some project's own conversation (from when each project
+ * had one). It is listed with the project's chats, and stays in its project.
+ */
+export function isProjectChatThread(
+  thread: { readonly id?: string; readonly environmentId: EnvironmentId },
+  labels: ReadonlyArray<Pick<EnvironmentProjectLabel, "environmentId" | "label">>,
+): boolean {
+  return labels.some(
+    (entry) =>
+      entry.environmentId === thread.environmentId &&
+      entry.label.projectChatThreadId != null &&
+      entry.label.projectChatThreadId === thread.id,
+  );
+}
+
 /** Where a thread is filed, how, and where it could go, for move menus. */
 export function threadFolderState(
   thread: FolderedThread,
@@ -142,17 +159,21 @@ export function threadFolderState(
       ? null
       : (directory.byKey.get(projectLabelKey(thread.environmentId, folderId)) ?? null);
   const source = current === null ? null : (thread.source.projectFolderSource ?? null);
+  // A project's own conversation stays in its project: nowhere to move it.
+  const projectHome = thread.id !== undefined && isProjectChatThread(thread, directory.labels);
   return {
     current,
     source,
     viaRepository: source === "repository",
-    removable: source === "explicit",
+    removable: source === "explicit" && !projectHome,
     // An archived folder is never offered, though a thread already in one
     // still names it as `current`.
-    options: directory.labels.filter(
-      (entry) =>
-        entry.environmentId === thread.environmentId && !isProjectLabelArchived(entry.label),
-    ),
+    options: projectHome
+      ? []
+      : directory.labels.filter(
+          (entry) =>
+            entry.environmentId === thread.environmentId && !isProjectLabelArchived(entry.label),
+        ),
   };
 }
 
@@ -236,27 +257,4 @@ export function projectFolderChangeKind(
   folderId: ProjectLabelId | null,
 ): "move" | "fork" {
   return folderId !== null && threadForksIntoProjects(thread) ? "fork" : "move";
-}
-
-/**
- * Each folder's own project chat, as `environmentId:threadId`. That thread
- * lives on the project's page, so the Chats list and folder contents skip it.
- */
-export function projectChatThreadKeys(
-  labels: ReadonlyArray<Pick<EnvironmentProjectLabel, "environmentId" | "label">>,
-): ReadonlySet<string> {
-  const keys = new Set<string>();
-  for (const entry of labels) {
-    const threadId = entry.label.projectChatThreadId;
-    if (threadId) keys.add(`${entry.environmentId}:${threadId}`);
-  }
-  return keys;
-}
-
-/** `threads` without the project chats in `keys` (see `projectChatThreadKeys`). */
-export function withoutProjectChats<
-  T extends { readonly environmentId: string; readonly id: string },
->(threads: ReadonlyArray<T>, keys: ReadonlySet<string>): T[] {
-  if (keys.size === 0) return [...threads];
-  return threads.filter((thread) => !keys.has(`${thread.environmentId}:${thread.id}`));
 }

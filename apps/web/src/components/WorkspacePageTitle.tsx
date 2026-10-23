@@ -5,14 +5,15 @@ import { create } from "zustand";
 
 /**
  * The page title sits in one place: the titlebar row right after the toggle
- * and back/forward pair. While the list column is docked open, that spot is
- * the column's header, so the page's leading title is portaled there
- * (`PageTitleSlot`); otherwise it stays in the page's own top bar, which
- * already clears the toggle and back/forward pair.
+ * and back/forward pair. With the nav rail, that pair is fixed in the window
+ * and the slot (`PageTitleSlot`) is fixed right after it, so the page's
+ * leading title is portaled there and never moves or remounts as the list
+ * column opens and closes. Without the rail (narrow windows, the legacy
+ * sidebar) it stays in the page's own top bar.
  */
 interface PageTitleSlotState {
   readonly slot: HTMLElement | null;
-  /** The list column is docked open beside the rail, so its header shows. */
+  /** The fixed titlebar slot is in use (the nav rail shows). */
   readonly docked: boolean;
   /**
    * Titles of pages on screen, latest last. Kept-alive pages (`<Activity
@@ -36,7 +37,7 @@ export const usePageTitleSlotStore = create<PageTitleSlotState>()((set) => ({
   release: (id) => set((state) => ({ claims: state.claims.filter((c) => c !== id) })),
 }));
 
-/** The list column header's title spot, filled by the page's `WorkspacePageTitle`. */
+/** The titlebar's title spot after the back/forward pair, filled by the page's `WorkspacePageTitle`. */
 export function PageTitleSlot(props: { readonly className?: string }) {
   const setSlot = usePageTitleSlotStore((store) => store.setSlot);
   const ref = useCallback(

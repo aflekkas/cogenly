@@ -11,7 +11,6 @@ import type { SidebarMode, SidebarThreadMode } from "./sidebarModes.logic";
  *   repository draft.
  * - Work opens a new draft in the most recently active repository.
  * - Agents opens the most recent agent's conversation, else its empty state.
- * - Projects opens the projects overview.
  */
 export type ModeLanding =
   | { readonly kind: "wait" }
@@ -20,8 +19,7 @@ export type ModeLanding =
   | { readonly kind: "chats-unavailable" }
   | { readonly kind: "repository-draft"; readonly projectRef: ScopedProjectRef }
   | { readonly kind: "no-repositories" }
-  | { readonly kind: "agents-empty" }
-  | { readonly kind: "projects-overview" };
+  | { readonly kind: "agents-empty" };
 
 export function resolveModeLanding(input: {
   readonly mode: SidebarMode;
@@ -39,8 +37,6 @@ export function resolveModeLanding(input: {
   readonly agentsLoaded: boolean;
 }): ModeLanding {
   switch (input.mode) {
-    case "projects":
-      return { kind: "projects-overview" };
     case "agents":
       if (input.recentAgentConversation !== null)
         return { kind: "open-thread", threadRef: input.recentAgentConversation };
@@ -62,22 +58,18 @@ export function resolveModeLanding(input: {
 /** What the main panel shows right now, as far as mode switching cares. */
 export type MainPanelContent =
   | { readonly kind: "thread"; readonly mode: SidebarThreadMode }
-  | { readonly kind: "project-view" }
   | { readonly kind: "index" }
   | { readonly kind: "other" };
 
 /**
  * Whether picking `mode` by hand must replace the main panel: it shows a
- * thread (or draft) another mode lists, or a project view outside Projects.
- * The index lands again on its own, and pages outside the thread routes keep
- * their own back navigation.
+ * thread (or draft) another mode lists. The index lands again on its own, and
+ * pages outside the thread routes keep their own back navigation.
  */
 export function modeSwitchReplacesMainPanel(mode: SidebarMode, content: MainPanelContent): boolean {
   switch (content.kind) {
     case "thread":
       return content.mode !== mode;
-    case "project-view":
-      return mode !== "projects";
     case "index":
     case "other":
       return false;

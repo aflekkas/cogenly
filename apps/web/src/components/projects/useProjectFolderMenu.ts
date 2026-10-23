@@ -100,10 +100,11 @@ export function useProjectFolderMenu(
     else if (id === "delete") {
       if (await deleteFolder(environmentId, label)) handlers.onDeleted();
     } else if (id.startsWith("color:")) {
-      if (id.slice("color:".length) === label.color) return;
+      const color = projectLabelPaletteColor(id.slice("color:".length));
+      if (color === label.color) return;
       const result = await updateLabel({
         environmentId,
-        input: { id: label.id, color: id.slice("color:".length) },
+        input: { id: label.id, color },
       });
       if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
         reportProjectFolderFailure(`Could not recolor ${label.name}`, result);

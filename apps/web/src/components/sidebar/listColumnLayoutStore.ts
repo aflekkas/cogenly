@@ -19,7 +19,7 @@ export const MAIN_COLUMN_MIN_WIDTH_PX = THREAD_MAIN_CONTENT_MIN_WIDTH;
 export const RIGHT_PANEL_MIN_WIDTH_PX = PREVIEW_PANEL_MIN_WIDTH;
 
 export interface AutoClosedPanel {
-  /** What was closed: a thread key, or "project" for the Projects panel. */
+  /** What was closed: the thread key of the panel's thread. */
   readonly scope: string;
   readonly reopen: () => void;
 }
@@ -52,7 +52,7 @@ interface ListColumnLayoutState {
 let pendingAutomaticCollapse: boolean | null = null;
 
 export const useListColumnLayoutStore = create<ListColumnLayoutState>((set) => ({
-  openByMode: { chats: true, tasks: true, agents: true, projects: true },
+  openByMode: { chats: true, tasks: true, agents: true },
   autoCollapsed: false,
   autoCollapseDismissed: false,
   inlineRightPanelWidth: null,

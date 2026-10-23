@@ -30,7 +30,7 @@ import { SettingsSidebarNav } from "./settings/SettingsSidebarNav";
 import { SidebarBrandWidthProbe, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { SidebarNavRail } from "./sidebar/SidebarNavRail";
 import { NavigationHistoryButtons, NavigationHistoryShortcuts } from "./NavigationHistoryControls";
-import { usePageTitleSlotStore } from "./WorkspacePageTitle";
+import { PageTitleSlot, usePageTitleSlotStore } from "./WorkspacePageTitle";
 import { resolveWorkspaceTitlebarLayout } from "../workspaceTitlebar";
 import { useIsMobile } from "../hooks/useMediaQuery";
 import { routeHidesListColumn, SIDEBAR_TOGGLE_DISABLED_LABEL } from "./sidebar/listColumnRoutes";
@@ -138,6 +138,7 @@ function SidebarControl({
     <div
       className={cn(
         "pointer-events-none fixed left-[var(--workspace-controls-left)] top-[var(--workspace-controls-top)] z-50 ml-px flex h-[var(--workspace-topbar-height)] items-center",
+        TITLEBAR_TITLE_ROW_RIGHT_CLASS,
         isMobile && mobileSheetMounted && "hidden",
       )}
       data-sidebar-control=""
@@ -166,7 +167,25 @@ function SidebarControl({
         </TooltipPopup>
       </Tooltip>
       <NavigationHistoryButtons />
+      <TitlebarPageTitle />
     </div>
+  );
+}
+
+/**
+ * The fixed titlebar row's right bound: clear of the main pane's own controls
+ * (and an open inline right panel), so the page title gets every pixel between
+ * back/forward and those controls, and truncates only when it truly runs out.
+ */
+const TITLEBAR_TITLE_ROW_RIGHT_CLASS = "right-[calc(var(--workspace-right-panel-width,0px)+10rem)]";
+
+/**
+ * The page's leading title, fixed right after the back/forward pair (see
+ * WorkspacePageTitle). It never moves or remounts when the list column toggles.
+ */
+function TitlebarPageTitle() {
+  return (
+    <PageTitleSlot className="ml-[var(--workspace-titlebar-control-gap,0.5rem)] flex h-7 min-w-0 flex-1 items-center text-foreground *:max-w-full! *:pointer-events-auto" />
   );
 }
 
@@ -181,10 +200,12 @@ function RailNavigationHistoryControl() {
     <div
       className={cn(
         "pointer-events-none fixed left-[var(--workspace-history-controls-left)] top-[var(--workspace-controls-top)] z-50 flex h-[var(--workspace-topbar-height)] items-center",
+        TITLEBAR_TITLE_ROW_RIGHT_CLASS,
         isMobile && mobileSheetMounted && "hidden",
       )}
     >
       <NavigationHistoryButtons />
+      <TitlebarPageTitle />
     </div>
   );
 }
@@ -231,43 +252,27 @@ function ListColumnAutoCollapse({
 }
 
 /**
- * The open inline right panel beside the main column: the project panel in
- * Projects mode, otherwise the routed thread's panel (browser, preview,
- * files). `closeForRoom` closes it as a last resort and remembers that, so
- * `ReopenAutoClosedPanel` can bring it back; the user's own close never does.
+ * The open inline right panel beside the main column: the routed thread's
+ * panel (browser, preview, files). `closeForRoom` closes it as a last resort
+ * and remembers that, so `ReopenAutoClosedPanel` can bring it back; the
+ * user's own close never does.
  */
 function useInlineRightPanelRoom() {
-  const navigate = useNavigate();
-  const sidebarMode = useUiStateStore((store) => store.sidebarMode);
-  const href = useLocation({ select: (location) => location.href });
   const routeThreadRef = useParams({
     strict: false,
     select: (params) => resolveThreadRouteRef(params),
   });
-  const projectPanelOpen = useParams({
-    strict: false,
-    select: (params) => "labelId" in params && Boolean(params.labelId),
-  });
   const threadKey = routeThreadRef ? scopedThreadKey(routeThreadRef) : null;
   const closeForRoom = () => {
-    const { setAutoClosedPanel } = useListColumnLayoutStore.getState();
-    if (sidebarMode === "projects" && projectPanelOpen) {
-      setAutoClosedPanel({
-        scope: "project",
-        reopen: () => void navigate({ href }),
-      });
-      void navigate({ to: "/project" });
-    } else if (routeThreadRef) {
-      setAutoClosedPanel({
-        scope: threadKey ?? "",
-        reopen: () => useRightPanelStore.getState().show(routeThreadRef),
-      });
-      useRightPanelStore.getState().close(routeThreadRef);
-    }
+    if (!routeThreadRef) return;
+    useListColumnLayoutStore.getState().setAutoClosedPanel({
+      scope: threadKey ?? "",
+      reopen: () => useRightPanelStore.getState().show(routeThreadRef),
+    });
+    useRightPanelStore.getState().close(routeThreadRef);
   };
   // What a remembered auto-close would reopen from the page shown now.
-  const scopeShown = sidebarMode === "projects" && !projectPanelOpen ? "project" : threadKey;
-  return { closeForRoom, scopeShown };
+  return { closeForRoom, scopeShown: threadKey };
 }
 
 /**
@@ -408,16 +413,17 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (panelOutOfRoom) closeForRoom();
   }, [panelOutOfRoom, closeForRoom]);
-  // The page title moves into the list column's header while it is docked.
-  const pageTitleDocked = navRailVisible && listColumnOpen && !listSidebarHidden;
+  // With the rail, the page title sits in the fixed titlebar slot after
+  // back/forward, whether or not the list column is open.
   useEffect(() => {
-    usePageTitleSlotStore.getState().setDocked(pageTitleDocked);
-  }, [pageTitleDocked]);
+    usePageTitleSlotStore.getState().setDocked(navRailVisible);
+  }, [navRailVisible]);
   const onListColumnOpenChange = (open: boolean) =>
     useListColumnLayoutStore.getState().applyOpenChange(sidebarMode, open);
   const sidebarProviderStyle = {
     "--sidebar-width": `${listColumnWidth}px`,
     "--panel-animation-duration": `${panelAnimationDurationMs}ms`,
+    "--workspace-right-panel-width": `${inlineRightPanelWidth ?? 0}px`,
     ...titlebarLayout.style,
   } as CSSProperties;
 

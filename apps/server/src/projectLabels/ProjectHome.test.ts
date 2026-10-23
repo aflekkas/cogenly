@@ -164,6 +164,27 @@ describe("ProjectHome project chat", () => {
     }).pipe(Effect.provide(layer)),
   );
 
+  it.effect("keeps the project chat in its project", () =>
+    Effect.gen(function* () {
+      const id = yield* seed;
+      const home = yield* ProjectHome.ProjectHome;
+      const service = yield* Labels.ProjectLabelService;
+      const other = (yield* service.create({ name: "Elsewhere" })).label.id;
+      const chat = yield* home.ensureChat({ id, modelSelection });
+      for (const folderId of [other, null]) {
+        const refused = yield* service
+          .moveThread({ threadId: chat.threadId, folderId })
+          .pipe(Effect.flip);
+        expect(refused).toMatchObject({ reason: "project_chat", projectName: "Spawn" });
+      }
+      // Re-filing it in its own project stays allowed.
+      expect(yield* service.moveThread({ threadId: chat.threadId, folderId: id })).toEqual({
+        threadId: chat.threadId,
+        projectFolderId: id,
+      });
+    }).pipe(Effect.provide(layer)),
+  );
+
   it.effect("creates concurrent first visits once", () =>
     Effect.gen(function* () {
       const id = yield* seed;

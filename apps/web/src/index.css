@@ -150,6 +150,16 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     var(--sidebar)
   );
   --sidebar-row-content-inset: 0.875rem;
+  /*
+   * The sidebar lists' rhythm (SidebarList.tsx): rows sit 4px apart, cards
+   * 8px, and a group heading that follows other items gets 8px more above it,
+   * so a heading sits nearer its own items than the group before.
+   */
+  --sidebar-row-gap: 0.25rem;
+  --sidebar-card-gap: 0.5rem;
+  /* Each card's item carries half the gap above and below it. */
+  --sidebar-card-item-padding: calc(var(--sidebar-card-gap) / 2);
+  --sidebar-group-gap: 0.5rem;
   --command-shell-inset: 0.5rem;
   --command-content-inset: 1rem;
   --floating-content-inset: 0.75rem;
@@ -333,6 +343,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --color-send-foreground: var(--brand-accent-fill-foreground);
   /* The brand orange as a colour utility, for the few deliberate uses. */
   --color-brand-accent: var(--brand-accent-fill);
+  --color-brand-accent-foreground: var(--brand-accent-fill-foreground);
   --color-brand-accent-tint: var(--brand-accent-tint);
   /* The brand button's gradient (components/ui/button, variant "brand"). */
   --color-brand-cta-top: var(--brand-accent-cta-top);
@@ -1032,22 +1043,17 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
   }
 }
 
-/* A sidebar row or card holding an unsent draft: a faint amber wash and edge
+/* A sidebar row or card holding an unsent draft: a barely warm wash, no edge,
    at rest, hover and selected (SIDEBAR_DRAFT_CLASS_NAME). It retints the
    state-hover / state-selected fills, so those keep their cross-fade. The
    rest rule outranks bg-(--sidebar-card) and steps aside on hover so the
    amber hover fill shows. */
 @utility sidebar-draft {
-  --state-hover-fill: color-mix(in srgb, var(--warning) 10%, var(--sidebar-row-hover));
-  --state-selected-fill: color-mix(in srgb, var(--warning) 13%, var(--sidebar-row-active));
-  --tw-inset-ring-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warning) 18%, transparent);
-  box-shadow:
-    var(--tw-inset-shadow, 0 0 #0000), var(--tw-inset-ring-shadow, 0 0 #0000),
-    var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000),
-    var(--tw-shadow, 0 0 #0000);
+  --state-hover-fill: color-mix(in srgb, var(--warning) 5%, var(--sidebar-row-hover));
+  --state-selected-fill: color-mix(in srgb, var(--warning) 6%, var(--sidebar-row-active));
 
   &:not(.state-selected):not(:hover) {
-    background-color: color-mix(in srgb, var(--warning) 7%, var(--sidebar-card, transparent));
+    background-color: color-mix(in srgb, var(--warning) 3.5%, var(--sidebar-card, transparent));
   }
 }
 
@@ -2805,6 +2811,16 @@ code {
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--app-scrollbar-thumb-hover);
+}
+
+/* The timeline minimap stands in for the scrollbar while it shows (a fine
+   pointer, enough turns, a persistent gutter): only the thumb hides, so the
+   gutter keeps its width and nothing shifts as the minimap comes and goes. */
+@media (pointer: fine) {
+  .messages-timeline-scroll[data-minimap-shown]::-webkit-scrollbar-thumb,
+  .messages-timeline-scroll[data-minimap-shown]::-webkit-scrollbar-thumb:hover {
+    background: transparent;
+  }
 }
 
 /* Chat markdown rendering */

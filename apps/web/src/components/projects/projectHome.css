@@ -109,44 +109,38 @@
   }
 }
 
-/* The empty project chat's openers (ProjectChatColumn). */
-.project-chat-chip {
-  display: inline-flex;
-  height: 32px;
-  align-items: center;
-  gap: 7px;
-  padding: 0 12px 0 10px;
-  border-radius: 999px;
+/* A project on the Projects page grid (ProjectsOverview): the cards' surface,
+   as a button that opens the project. Sized by its content, never clipped. */
+.project-tile {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  border-radius: var(--radius-xl);
   border: 1px solid var(--border);
   background-color: var(--card);
   box-shadow: var(--surface-halo, 0 1px 2px rgb(0 0 0 / 4%));
-  color: var(--foreground);
-  font-size: 0.8125rem;
+  text-align: left;
   cursor: pointer;
   outline: none;
   transition:
     background-color var(--motion-duration-fast) var(--ease-standard),
-    border-color var(--motion-duration-fast) var(--ease-standard),
-    opacity var(--motion-duration-fast) var(--ease-standard);
+    border-color var(--motion-duration-fast) var(--ease-standard);
 }
 
-.project-chat-chip > svg {
-  width: 14px;
-  height: 14px;
-  flex: none;
-  color: var(--muted-foreground);
-}
-
-.project-chat-chip:hover:not(:disabled) {
-  background-color: color-mix(in srgb, var(--card) 92%, var(--foreground));
+.project-tile:hover,
+.project-tile[data-menu-open] {
+  background-color: color-mix(in srgb, var(--card) 94%, var(--foreground));
   border-color: var(--input);
 }
 
-.project-chat-chip:focus-visible:not(:root[data-input-modality="pointer"] *) {
+.project-tile:focus-visible:not(:root[data-input-modality="pointer"] *) {
   box-shadow: 0 0 0 2px var(--ring);
 }
 
-.project-chat-chip:disabled {
-  cursor: default;
-  opacity: 0.55;
+@media (prefers-reduced-motion: reduce) {
+  .project-tile {
+    transition-property: opacity;
+  }
 }

@@ -40,20 +40,26 @@ describe("spaceRouteForMatch", () => {
     expect(
       spaceRouteForMatch({ routeId: "/_chat/draft/$draftId", params: { draftId: "d1" } }),
     ).toEqual({ kind: "draft", draftId: "d1" });
-    expect(
-      spaceRouteForMatch({
-        routeId: "/_chat/project/$environmentId/$labelId",
-        params: { environmentId: "env-1", labelId: "l1" },
-      }),
-    ).toEqual({ kind: "project", environmentId: "env-1", labelId: "l1" });
     expect(spaceRouteForMatch({ routeId: "/settings/keybindings", params: {} })).toEqual({
       kind: "settings",
     });
   });
 
-  it("leaves the index, Usage and legacy links to no space", () => {
-    for (const routeId of ["/_chat/", "/usage", "/projects/$projectKey", "/welcome"]) {
-      expect(spaceRouteForMatch({ routeId, params: { projectKey: "x" } })).toBeNull();
+  it("leaves the index, Usage, Projects and legacy links to no space", () => {
+    for (const routeId of [
+      "/_chat/",
+      "/usage",
+      "/_chat/project/",
+      "/_chat/project/$environmentId/$labelId",
+      "/projects/$projectKey",
+      "/welcome",
+    ]) {
+      expect(
+        spaceRouteForMatch({
+          routeId,
+          params: { projectKey: "x", environmentId: "env-1", labelId: "l1" },
+        }),
+      ).toBeNull();
     }
   });
 });
@@ -64,15 +70,10 @@ describe("space route memory", () => {
       { href: "/env-1/work-1", route: workThread, mode: "tasks" },
       { href: "/env-1/chat-1", route: chatThread, mode: "chats" },
       { href: "/settings/appearance", route: { kind: "settings" } },
-      {
-        href: "/project/env-1/l1",
-        route: { kind: "project", environmentId: "env-1", labelId: "l1" },
-      },
     ]);
     expect(resolveSpaceReturn(memory, "tasks", always)).toBe("/env-1/work-1");
     expect(resolveSpaceReturn(memory, "chats", always)).toBe("/env-1/chat-1");
     expect(resolveSpaceReturn(memory, "settings", always)).toBe("/settings/appearance");
-    expect(resolveSpaceReturn(memory, "projects", always)).toBe("/project/env-1/l1");
     expect(resolveSpaceReturn(memory, "agents", always)).toBeNull();
   });
 
@@ -112,9 +113,9 @@ describe("space route memory", () => {
 
   it("never sends a space to a page another space owns", () => {
     const stored = parseStoredSpaceRouteMemory({
-      projects: { href: "/settings/general", route: { kind: "settings" } },
+      chats: { href: "/settings/general", route: { kind: "settings" } },
     });
-    expect(resolveSpaceReturn(stored, "projects", always)).toBeNull();
+    expect(resolveSpaceReturn(stored, "chats", always)).toBeNull();
   });
 });
 
@@ -122,7 +123,7 @@ describe("parseStoredSpaceRouteMemory", () => {
   it("round-trips what it stores", () => {
     const memory = visit({}, [
       { href: "/env-1/chat-1", route: chatThread, mode: "chats" },
-      { href: "/project", route: { kind: "projects-overview" } },
+      { href: "/agents/new", route: { kind: "new-agent" } },
     ]);
     expect(parseStoredSpaceRouteMemory(JSON.parse(JSON.stringify(memory)))).toEqual(memory);
   });

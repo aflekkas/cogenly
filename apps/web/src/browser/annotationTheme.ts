@@ -13,8 +13,10 @@ export function readPreviewAnnotationTheme(): DesktopPreviewAnnotationTheme {
     foreground: readVariable(styles, "--contrast-foreground", "oklch(0.269 0 0)"),
     popover: readVariable(styles, "--popover", "white"),
     popoverForeground: readVariable(styles, "--contrast-popover-foreground", "oklch(0.269 0 0)"),
-    primary: readVariable(styles, "--primary", "oklch(0.488 0.217 264)"),
-    primaryForeground: readVariable(styles, "--primary-foreground", "white"),
+    // Annotations, picks and the agent cursor wear the brand orange, which
+    // reads on any page; the app's own primary is near-white in dark mode.
+    primary: readVariable(styles, "--brand-accent-fill", "#c94a14"),
+    primaryForeground: readVariable(styles, "--brand-accent-fill-foreground", "white"),
     muted: readVariable(styles, "--muted", "rgb(0 0 0 / 4%)"),
     mutedForeground: readVariable(styles, "--contrast-muted-foreground", "oklch(0.556 0 0)"),
     accent: readVariable(styles, "--accent", "rgb(0 0 0 / 4%)"),

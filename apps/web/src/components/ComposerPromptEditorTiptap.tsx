@@ -963,6 +963,9 @@ function ComposerPromptEditorTiptapInner(props: ComposerPromptEditorProps) {
   // The open citation's unsaved comment, saved before a new value replaces the document.
   const citationDraftRef = useRef<{ key: string; comment: string } | null>(null);
   const [isEmpty, setIsEmpty] = useState(value.length === 0);
+  // Live dictation draws at the caret without entering the document, so the
+  // placeholder steps aside for it while the document is still empty.
+  const [dictationPreviewShown, setDictationPreviewShown] = useState(false);
 
   const citationCommentActions = useMemo(
     () => ({
@@ -1778,10 +1781,16 @@ function ComposerPromptEditorTiptapInner(props: ComposerPromptEditorProps) {
       },
       readSnapshot,
       setDictationPreview: (text) => {
-        if (editor && !editor.isDestroyed) setDictationPreview(editor.view, text);
+        if (!editor || editor.isDestroyed) return;
+        setDictationPreview(editor.view, text);
+        setDictationPreviewShown(Boolean(text?.trim()));
       },
-      insertDictatedText: (text) =>
-        editor != null && !editor.isDestroyed && insertDictatedText(editor.view, text),
+      insertDictatedText: (text) => {
+        if (editor == null || editor.isDestroyed) return false;
+        // Settling clears the preview, whether or not any text lands.
+        setDictationPreviewShown(false);
+        return insertDictatedText(editor.view, text);
+      },
       isCaretOnVisualEdge: (edge) => {
         const snapshot = readSnapshot();
         if (snapshot.value.length === 0) return true;
@@ -1902,8 +1911,10 @@ function ComposerPromptEditorTiptapInner(props: ComposerPromptEditorProps) {
             />
             {isEmpty && contextRecords.size === 0 && placeholder ? (
               <div
+                aria-hidden={dictationPreviewShown || undefined}
                 className={cn(
-                  "pointer-events-none absolute inset-0 leading-relaxed text-placeholder/75",
+                  "pointer-events-none absolute inset-0 leading-relaxed text-placeholder/75 transition-opacity duration-(--motion-duration-fast) ease-standard motion-reduce:transition-none",
+                  dictationPreviewShown && "opacity-0",
                   placeholderClassName,
                 )}
               >

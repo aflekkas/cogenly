@@ -4,7 +4,6 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   clampFloatingPreviewPosition,
   floatingPreviewCornerPosition,
-  floatingPreviewSubtitle,
   floatingPreviewTitle,
   nearestFloatingPreviewCorner,
   previewTabHasPage,
@@ -106,15 +105,6 @@ describe("floating preview corners", () => {
 });
 
 describe("floating preview labels", () => {
-  it("names who drives the tab before where it is", () => {
-    expect(floatingPreviewSubtitle({ url: "https://example.com/a", agentDriving: true })).toBe(
-      "Agent is using this tab",
-    );
-    expect(floatingPreviewSubtitle({ url: "https://example.com/a", agentDriving: false })).toBe(
-      "example.com",
-    );
-  });
-
   it("titles the card by page title, then host", () => {
     expect(floatingPreviewTitle(page("https://example.com/a", "Docs"))).toBe("Docs");
     expect(floatingPreviewTitle(page("https://example.com/a"))).toBe("example.com");

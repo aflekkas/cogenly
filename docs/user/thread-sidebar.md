@@ -318,13 +318,17 @@ The repository menu lists only the project's own repositories (with **No project
 only repositories in no project); **No repository (project folder)** runs the task in
 the project's own folder instead.
 
-Projects have their own sidebar view: pick **Projects** in the navigation rail (or the
-mobile switcher), or press `mod+alt+4`. Open a project to see its repositories, chats
-and Work. Use **Add repository** to bring one in (a repository already in another
-project asks before it moves), the remove button on a repository row to take it out,
-and **Edit** to rename, recolor, describe or delete the project. Deleting a project
-keeps its chats, Work and repositories; they are just no longer in a folder. Start one
-with **New project** at the top of the list or in the command palette.
+Manage projects on the **Projects** page: the folder button at the bottom of the
+navigation rail, **Open projects** in the command palette, or `mod+alt+4`. It shows every
+project as a card; open one for its page with its instructions, repositories, GitHub
+sources, files, recent chats and Work, and agents. Use **Add repository** to bring one in
+(a repository already in another project asks before it moves), the remove button on a
+repository row to take it out, and the **⋯** menu to rename, recolor, describe or delete
+the project. Deleting a project keeps its chats, Work and repositories; they are just no
+longer in a folder. Start one with **New project** on the page or in the command palette.
+
+You can also ask an agent in any chat or Work to set a project up or change it: add a
+repository, link GitHub, set instructions, rename or recolor it, or archive it.
 
 From a terminal on the computer running Cogenly, `cogenly project label` does the
 same while Cogenly runs: `list`, `create <name> [--color <color>]`,
@@ -333,20 +337,12 @@ same while Cogenly runs: `list`, `create <name> [--color <color>]`,
 a repository by its folder or id; add `--json` for scripts. A folder Cogenly doesn't
 track yet needs `cogenly project add <folder>` first.
 
-Each project has one ongoing conversation on its page. Talk to it to set the project
-up (add repositories, link GitHub, drop in a brief, set instructions) or to start Work;
-it is the same thread every time you open the project, on any device, and it picks up
-where you left off. On a machine
-that cannot run threads without a project, the conversation runs in the project's first
-repository, so add one first. For a separate chat in the project, choose **New separate
-chat** from the project's **⋯** menu.
-
-When a project is done, right-click it in the list (or use the project's **⋯** menu) and
+When a project is done, right-click its card (or use the project's **⋯** menu) and
 choose **Archive**. An archived project leaves every project picker and move menu, but
-its chats, Work, agents and conversation stay as they are, and threads already in it
-still show its name. Neither you nor an agent can add threads or repositories to it
-until you unarchive it, though you can still move threads out. The count bar under the Projects list switches between active and
-**Archived** projects; choose **Unarchive** to bring one back.
+its chats, Work and agents stay as they are, and threads already in it still show its
+name. Neither you nor an agent can add threads or repositories to it until you
+unarchive it, though you can still move threads out. **Archived** at the top of the
+Projects page lists them; choose **Unarchive** to bring one back.
 
 To file a thread, right-click it and choose **Move to folder**, or run **Move to folder…** from the command palette. Choose
 **Remove from folder** to take it out; Work then falls back to its repository's

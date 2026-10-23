@@ -4,12 +4,9 @@ import type { PreviewNavStatus } from "@t3tools/contracts";
 export const FLOATING_PREVIEW_STREAM_FRAME_INTERVAL_MS = 1_000;
 /** A desktop tab's thumbnail is recaptured this often while the card shows. */
 export const FLOATING_PREVIEW_CAPTURE_INTERVAL_MS = 2_000;
-/** The card's size in CSS px; the thumbnail is 16:10 under a one-line header. */
+/** The card's size in CSS px: the page fills it edge to edge at 16:10. */
 export const FLOATING_PREVIEW_CARD_WIDTH = 248;
-export const FLOATING_PREVIEW_THUMBNAIL_HEIGHT = 155;
-const FLOATING_PREVIEW_HEADER_HEIGHT = 40;
-export const FLOATING_PREVIEW_CARD_HEIGHT =
-  FLOATING_PREVIEW_THUMBNAIL_HEIGHT + FLOATING_PREVIEW_HEADER_HEIGHT;
+export const FLOATING_PREVIEW_CARD_HEIGHT = 155;
 /** Space between the card and whatever edge or obstacle it docks against. */
 const FLOATING_PREVIEW_MARGIN = 16;
 /** A pane narrower than this keeps the chat to itself. */
@@ -119,17 +116,6 @@ export function clampFloatingPreviewPosition(
     x: Math.min(Math.max(0, position.x), Math.max(0, pane.width - card.width)),
     y: Math.min(Math.max(0, position.y), Math.max(0, pane.height - card.height)),
   };
-}
-
-/** One line under the title: who is driving the tab, else where it is. */
-export function floatingPreviewSubtitle(input: {
-  readonly url: string;
-  readonly agentDriving: boolean;
-}): string {
-  if (input.agentDriving) return "Agent is using this tab";
-  if (!URL.canParse(input.url)) return input.url;
-  const parsed = new URL(input.url);
-  return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.host : input.url;
 }
 
 /** The card's title: the page title, else its host, else the raw URL. */

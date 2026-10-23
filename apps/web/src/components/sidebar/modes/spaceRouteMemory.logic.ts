@@ -1,28 +1,20 @@
 /**
- * Each space on the rail (Chats, Work, Agents, Projects, and Settings)
- * remembers the page it last showed, so switching away and back returns to
- * it instead of landing afresh. A space's memory is the href (path and
- * search) of its last page and what that page shows, so a return can check
- * the thread or project is still there before going back to it.
+ * Each space on the rail (Chats, Work, Agents, and Settings) remembers the
+ * page it last showed, so switching away and back returns to it instead of
+ * landing afresh. A space's memory is the href (path and search) of its last
+ * page and what that page shows, so a return can check the thread is still
+ * there before going back to it.
  */
 import type { SidebarMode, SidebarThreadMode } from "./sidebarModes.logic";
 
 export type SidebarSpace = SidebarMode | "settings";
 
-export const SIDEBAR_SPACES: ReadonlyArray<SidebarSpace> = [
-  "chats",
-  "tasks",
-  "agents",
-  "projects",
-  "settings",
-];
+export const SIDEBAR_SPACES: ReadonlyArray<SidebarSpace> = ["chats", "tasks", "agents", "settings"];
 
 /** What a remembered page shows. */
 export type SpaceRoute =
   | { readonly kind: "thread"; readonly environmentId: string; readonly threadId: string }
   | { readonly kind: "draft"; readonly draftId: string }
-  | { readonly kind: "project"; readonly environmentId: string; readonly labelId: string }
-  | { readonly kind: "projects-overview" }
   | { readonly kind: "new-agent" }
   | { readonly kind: "settings" };
 
@@ -35,8 +27,8 @@ export type SpaceRouteMemory = Partial<Record<SidebarSpace, RememberedSpaceRoute
 
 /**
  * The page a route match shows, from the router's leaf match. Null for pages
- * no space owns: the index (it lands on its own), Usage, legacy links, and
- * the connect and welcome flows.
+ * no space owns: the index (it lands on its own), Usage, Projects, legacy
+ * links, and the connect and welcome flows.
  */
 export function spaceRouteForMatch(match: {
   readonly routeId: string;
@@ -51,12 +43,6 @@ export function spaceRouteForMatch(match: {
         : null;
     case "/_chat/draft/$draftId":
       return params.draftId ? { kind: "draft", draftId: params.draftId } : null;
-    case "/_chat/project/$environmentId/$labelId":
-      return params.environmentId && params.labelId
-        ? { kind: "project", environmentId: params.environmentId, labelId: params.labelId }
-        : null;
-    case "/_chat/project/":
-      return { kind: "projects-overview" };
     case "/_chat/agents/new":
       return { kind: "new-agent" };
     default:
@@ -76,9 +62,6 @@ export function spaceOfRoute(
     case "thread":
     case "draft":
       return threadMode;
-    case "project":
-    case "projects-overview":
-      return "projects";
     case "new-agent":
       return "agents";
     case "settings":
@@ -145,11 +128,6 @@ function parseSpaceRoute(value: unknown): SpaceRoute | null {
         : null;
     case "draft":
       return isNonEmptyString(record.draftId) ? { kind: "draft", draftId: record.draftId } : null;
-    case "project":
-      return isNonEmptyString(record.environmentId) && isNonEmptyString(record.labelId)
-        ? { kind: "project", environmentId: record.environmentId, labelId: record.labelId }
-        : null;
-    case "projects-overview":
     case "new-agent":
     case "settings":
       return { kind: record.kind };

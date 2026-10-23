@@ -376,6 +376,8 @@ export function ZoomableImage({
         className={cn(
           "absolute top-0 left-0 block max-w-none origin-top-left transition-opacity duration-(--motion-duration-fast) ease-out",
           ready ? "opacity-100" : "opacity-0",
+          // Markup reaches past the image, so its edge is hinted on the surrounding canvas.
+          drawing && "outline-1 outline-foreground/20",
         )}
         style={
           ready

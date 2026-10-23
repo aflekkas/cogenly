@@ -52,7 +52,8 @@ function useThreadLineageChain(shell: EnvironmentThreadShell | null) {
 
 const SEGMENT_CLASS = "min-w-0 shrink [-webkit-app-region:no-drag]";
 
-// Clear of the fixed titlebar controls at the header's right edge.
+// Inline in a page's own top bar (no nav rail): clear of the fixed titlebar
+// controls at the header's right edge. The rail's titlebar slot lifts the cap.
 const HEADER_TITLE_MAX_WIDTH_CLASS = "max-w-[min(40rem,calc(100%-10rem))]";
 
 /**
@@ -147,13 +148,19 @@ function ThreadHeaderTitleContent(props: {
       // Keyed by thread: a navigation mounts a fresh trail that fades in place.
       key={`${props.shell.environmentId}:${props.shell.id}`}
       aria-label="Thread lineage"
-      className={cn("swap-motion flex min-w-0 items-center text-xs", HEADER_TITLE_MAX_WIDTH_CLASS)}
+      className={cn(
+        // Clickable through the desktop titlebar's drag strip it sits in.
+        "swap-motion flex min-w-0 items-center text-xs [-webkit-app-region:no-drag]",
+        HEADER_TITLE_MAX_WIDTH_CLASS,
+      )}
       data-panel-flip="start"
     >
       <h2 className="sr-only">{props.title}</h2>
       {segments.root ? (
         <>
-          <span className="flex min-w-0 max-w-48 shrink-[2]">{segment(segments.root, false)}</span>
+          <span className="flex min-w-0 max-w-[30%] shrink-[4]">
+            {segment(segments.root, false)}
+          </span>
           {separator}
         </>
       ) : null}
@@ -186,9 +193,13 @@ function ThreadHeaderTitleContent(props: {
           {separator}
         </>
       ) : null}
-      {segment(segments.parent, true)}
+      {/* The parent yields first, so the open thread keeps the most room. */}
+      <span className="flex min-w-0 max-w-[45%] shrink-[3]">{segment(segments.parent, true)}</span>
       {separator}
-      <span aria-current="page" className="min-w-0 shrink-[2] truncate px-1 text-foreground">
+      <span
+        aria-current="page"
+        className="min-w-16 shrink truncate px-1 font-medium text-foreground"
+      >
         {props.shell.title}
       </span>
     </nav>

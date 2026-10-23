@@ -9,8 +9,6 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   isProjectLabelArchived,
   partitionArchivedProjectLabels,
-  projectChatThreadKeys,
-  withoutProjectChats,
   priorFiling,
   projectFolderChangeKind,
   projectLabelKey,
@@ -107,6 +105,26 @@ describe("threadFolderState", () => {
     expect(state.current).toBe(archived);
     expect(state.options.map((entry) => entry.label.name)).toEqual(["Bartr"]);
   });
+
+  it("keeps a project's own conversation where it is", () => {
+    const home = {
+      ...spawn,
+      label: { ...spawn.label, projectChatThreadId: "project-chat:spawn" as never },
+    };
+    const withHome = {
+      labels: [bartr, remote, home],
+      byKey: new Map([bartr, remote, home].map((entry) => [entry.key, entry] as const)),
+    };
+    const chat = { ...thread("spawn", "explicit"), id: "project-chat:spawn" };
+    expect(threadFolderState(chat, withHome)).toMatchObject({
+      current: home,
+      removable: false,
+      options: [],
+    });
+    // Any other thread in the project still moves as usual.
+    const sibling = { ...thread("spawn", "explicit"), id: "thread:sibling" };
+    expect(threadFolderState(sibling, withHome).options).toHaveLength(2);
+  });
 });
 
 describe("partitionArchivedProjectLabels", () => {
@@ -198,34 +216,5 @@ describe("projectFolderChangeKind", () => {
     expect(projectFolderChangeKind(chat({ surface: "builder", latestRun: run }), folder)).toBe(
       "move",
     );
-  });
-});
-
-describe("project chats", () => {
-  const withChat = (environmentId: string, id: string, chat: string | null) => ({
-    environmentId: environmentId as never,
-    label: { id, projectChatThreadId: chat } as never,
-  });
-
-  it("collects each folder's chat, scoped by environment", () => {
-    const keys = projectChatThreadKeys([
-      withChat("env-a", "spawn", "t1"),
-      withChat("env-b", "remote", "t1"),
-      withChat("env-a", "bartr", null),
-    ]);
-    expect([...keys].toSorted()).toEqual(["env-a:t1", "env-b:t1"]);
-  });
-
-  it("drops only the project chats from a thread list", () => {
-    const keys = projectChatThreadKeys([withChat("env-a", "spawn", "t1")]);
-    const threads = [
-      { environmentId: "env-a", id: "t1" },
-      { environmentId: "env-b", id: "t1" },
-      { environmentId: "env-a", id: "t2" },
-    ];
-    expect(withoutProjectChats(threads, keys)).toEqual([
-      { environmentId: "env-b", id: "t1" },
-      { environmentId: "env-a", id: "t2" },
-    ]);
   });
 });

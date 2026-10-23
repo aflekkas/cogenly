@@ -75,13 +75,16 @@ export function linkedGitHubOwners(project: EnvironmentProjectLabel): string[] {
   );
 }
 
-/** Projects whose linked owners the picker searches for this query; none for an empty query. */
+/**
+ * Projects the picker asks GitHub about while it is open. Each searches its
+ * linked owners, or the signed-in account when it links none; an empty query
+ * lists recent pushes.
+ */
 export function ownerSearchProjects(
   projects: ReadonlyArray<EnvironmentProjectLabel>,
-  query: string,
+  active: boolean,
 ): EnvironmentProjectLabel[] {
-  if (query.trim().length === 0) return [];
-  return projects.filter((project) => linkedGitHubOwners(project).length > 0);
+  return active ? [...projects] : [];
 }
 
 /** One project's GitHub search, as the picker shows it under the project. */
@@ -115,7 +118,8 @@ export function ownerSearchErrorMessage(
   reason: ProjectLabelOwnerSearchError["reason"] | null,
   owners: ReadonlyArray<string>,
 ): string {
-  const named = owners.length === 1 ? owners[0] : "linked owners";
+  const named =
+    owners.length === 0 ? "your repositories" : owners.length === 1 ? owners[0] : "linked owners";
   switch (reason) {
     case "github_not_connected":
       return `Connect GitHub to search ${named}`;

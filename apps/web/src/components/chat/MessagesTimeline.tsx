@@ -212,7 +212,11 @@ import { useThreadShell } from "../../state/entities";
 import { StartWorkPicker, useCanStartWork } from "../work/StartWork";
 import {
   CHAT_TIMELINE_ANCHOR_OFFSET,
+  ensureWheelGestureTracker,
+  isCarriedOverWheel,
+  isCarriedOverWheelActive,
   readTimelinePosition,
+  readWheelGesture,
   rememberTimelinePosition,
   timelineContentOverflowsViewport,
 } from "./timelineScrollAnchoring";
@@ -314,6 +318,7 @@ import { useLastPresent } from "../ui/overlay-presence";
 import { useV2ItemSupport } from "../../state/v2ItemSupport";
 import {
   isV2LifecycleItem,
+  PendingSubagentCompletions,
   SubagentNotificationLink,
   SubagentHoverCardGroup,
   V2LifecycleRow,
@@ -483,6 +488,11 @@ const FIRST_LAYOUT_HOLD_STYLE = { opacity: 0 } as const;
 const FIRST_LAYOUT_REVEAL_STYLE = {
   transition: "opacity var(--motion-duration-base) var(--ease-standard)",
 } as const;
+/**
+ * A just-sent message, the live activity under it and a fresh restart divider
+ * all arrive the same way: one short opacity fade, together, with no travel.
+ */
+const ARRIVAL_FADE_CLASS = "swap-motion";
 /** The most frames an opened thread prompts the list to finish its scroll. */
 const SCROLL_SETTLE_PROMPT_FRAMES = 30;
 
@@ -704,9 +714,10 @@ const ConversationTimeline = memo(function ConversationTimeline({
     () => new Set(),
   );
   const [openingWorkGroupIds] = useState(() => new Set<string>());
-  const [positionedThreadKey, setPositionedThreadKey] = useState<string | null>(() =>
-    rememberedPosition?.atEnd === false ? null : listIdentityKey,
-  );
+  // Every open, the first one after a reload included, goes through the
+  // restore below: it scrolls to the target (the end unless the user left the
+  // thread scrolled up this session) and checks it landed before revealing.
+  const [positionedThreadKey, setPositionedThreadKey] = useState<string | null>(null);
   const restoringThreadPosition = positionedThreadKey !== listIdentityKey;
   // A thread opens hidden and shows once its first layout has settled at the
   // target position, so estimate corrections and scroll restoration happen
@@ -716,6 +727,13 @@ const ConversationTimeline = memo(function ConversationTimeline({
   );
   const holdingFirstLayout = !paintOnly && revealedThreadKey !== listIdentityKey;
   const itemSizeChangesRef = useRef(0);
+  // When this thread opened, to tell momentum carried over from the previous
+  // thread (isCarriedOverWheel) from the user scrolling this one.
+  const threadOpenedAtRef = useRef(0);
+  useLayoutEffect(() => {
+    ensureWheelGestureTracker();
+    threadOpenedAtRef.current = performance.now();
+  }, [listIdentityKey]);
   const listIdentityRef = useRef(listIdentityKey);
   const previousLatestRunRef = useRef(latestRun);
   let paintedExpandedRunIds = expandedRunIds;
@@ -1066,6 +1084,18 @@ const ConversationTimeline = memo(function ConversationTimeline({
       cancelRestoration();
       onManualNavigation();
     };
+    // Momentum from scrolling the previous thread keeps arriving here; it is
+    // not the user scrolling this one.
+    const onWheel = () => {
+      if (!isCarriedOverWheel(readWheelGesture(), threadOpenedAtRef.current)) {
+        cancelForNavigation();
+      }
+    };
+    // Only a scrollbar drag scrolls; a click into the opening thread must not
+    // stop it short of its target.
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.target === viewport) cancelForNavigation();
+    };
     const onScrollKey = (event: globalThis.KeyboardEvent) => {
       if (
         ["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key) &&
@@ -1076,9 +1106,9 @@ const ConversationTimeline = memo(function ConversationTimeline({
       )
         cancelForNavigation();
     };
-    viewport?.addEventListener("wheel", cancelForNavigation, { passive: true });
+    viewport?.addEventListener("wheel", onWheel, { passive: true });
     viewport?.addEventListener("touchmove", cancelForNavigation, { passive: true });
-    viewport?.addEventListener("pointerdown", cancelForNavigation, { passive: true });
+    viewport?.addEventListener("pointerdown", onPointerDown, { passive: true });
     viewport?.ownerDocument.addEventListener("keydown", onScrollKey);
     const position = rememberedPosition;
     const index = position ? rows.findIndex((row) => row.id === position.rowId) : -1;
@@ -1181,9 +1211,9 @@ const ConversationTimeline = memo(function ConversationTimeline({
         cancelPositionRestoreRef.current = null;
       }
       if (settleFrame !== null) cancelAnimationFrame(settleFrame);
-      viewport?.removeEventListener("wheel", cancelForNavigation);
+      viewport?.removeEventListener("wheel", onWheel);
       viewport?.removeEventListener("touchmove", cancelForNavigation);
-      viewport?.removeEventListener("pointerdown", cancelForNavigation);
+      viewport?.removeEventListener("pointerdown", onPointerDown);
       viewport?.ownerDocument.removeEventListener("keydown", onScrollKey);
     };
   }, [
@@ -1200,6 +1230,18 @@ const ConversationTimeline = memo(function ConversationTimeline({
   const [timelineViewportElement, setTimelineViewportElement] = useState<HTMLDivElement | null>(
     null,
   );
+  // Momentum from scrolling the previous thread would otherwise carry this
+  // one away from where it opened (often to the top). Swallow it here.
+  useEffect(() => {
+    if (!timelineViewportElement) return;
+    const swallowCarriedOverWheel = (event: WheelEvent) => {
+      if (event.cancelable && isCarriedOverWheel(readWheelGesture(), threadOpenedAtRef.current)) {
+        event.preventDefault();
+      }
+    };
+    timelineViewportElement.addEventListener("wheel", swallowCarriedOverWheel, { passive: false });
+    return () => timelineViewportElement.removeEventListener("wheel", swallowCarriedOverWheel);
+  }, [timelineViewportElement]);
   // Re-measure the minimap gutter when the chat column changes width without a viewport resize.
   const chatWidth = useClientSettings((settings) => settings.chatWidth);
   const {
@@ -1224,6 +1266,16 @@ const ConversationTimeline = memo(function ConversationTimeline({
     setFindListReady(true);
   }, [onCitationListLoad]);
   const [minimapHasPersistentGutter, setMinimapHasPersistentGutter] = useState(false);
+  // Visible at rest (not only on hover), the minimap stands in for the scrollbar,
+  // so the scroll node's thumb hides (index.css, `data-minimap-shown`).
+  const minimapShown =
+    minimapHasPersistentGutter && minimapItems.length >= TIMELINE_MINIMAP_MIN_ITEMS;
+  useEffect(() => {
+    const node = listRef.current?.getScrollableNode();
+    if (!(node instanceof HTMLElement)) return;
+    node.toggleAttribute("data-minimap-shown", minimapShown);
+    // findListReady: the scroll node exists once the list has loaded.
+  }, [listRef, minimapShown, findListReady]);
   const [fullscreenAppRowId, setFullscreenAppRowId] = useState<string | null>(null);
   // Only the row that holds the pin can release it.
   const onAppFullscreenChange = useCallback((rowId: string, fullscreen: boolean) => {
@@ -1258,9 +1310,28 @@ const ConversationTimeline = memo(function ConversationTimeline({
     () => (
       // The composer inset lives in the footer, so the list's end is the latest
       // row plus the space the composer covers, and never further.
-      <TimelineListFooter composerInset={contentInsetEndAdjustment}>{footer}</TimelineListFooter>
+      <TimelineListFooter composerInset={contentInsetEndAdjustment}>
+        {/* Subagents that finished before this thread's agent has heard back. */}
+        {citationThreadRef !== null && !paintOnly ? (
+          <PendingSubagentCompletions
+            parentRef={citationThreadRef}
+            timestampFormat={timestampFormat}
+            providerStatuses={providerStatuses}
+            onOpenThread={onOpenThread}
+          />
+        ) : null}
+        {footer}
+      </TimelineListFooter>
     ),
-    [contentInsetEndAdjustment, footer],
+    [
+      citationThreadRef,
+      contentInsetEndAdjustment,
+      footer,
+      onOpenThread,
+      paintOnly,
+      providerStatuses,
+      timestampFormat,
+    ],
   );
 
   const measureContentOverflow = useCallback(
@@ -1369,6 +1440,17 @@ const ConversationTimeline = memo(function ConversationTimeline({
           liveFollowEnabled,
         );
       }
+    }
+    // Momentum carried over from the previous thread that the browser would not
+    // let us cancel: a thread that opened following its end stays there.
+    if (
+      isAtEnd === false &&
+      liveFollowEnabled &&
+      !citationPositioning &&
+      isCarriedOverWheelActive(readWheelGesture(), threadOpenedAtRef.current, performance.now())
+    ) {
+      void listRef.current?.scrollToEnd({ animated: false });
+      return;
     }
     if (isAtEnd !== undefined && !citationPositioning) {
       onIsAtEndChange(isAtEnd);
@@ -2296,7 +2378,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
   return (
     <div
       className={cn(
-        activityEnter && "animate-activity-enter",
+        activityEnter && ARRIVAL_FADE_CLASS,
         // Commentary (non-terminal assistant) rows carry no metadata row, so
         // they sit closer to the work that follows them.
         isWorkLogRow || isSubagentGroup
@@ -2485,7 +2567,7 @@ function RestartDividerTimelineRow({
       aria-label="Cogenly restarted"
       className={cn(
         "mx-auto w-full max-w-(--chat-content-max-width)",
-        entering && "animate-activity-enter",
+        entering && ARRIVAL_FADE_CLASS,
       )}
     >
       <TimelineSystemDivider
@@ -2747,9 +2829,9 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
     <div
       className={cn(
         "group flex flex-col items-end gap-1 pe-(--chat-content-inset)",
-        entering && "animate-message-send",
+        entering && ARRIVAL_FADE_CLASS,
       )}
-      onAnimationEnd={(event) => {
+      onTransitionEnd={(event) => {
         if (event.target === event.currentTarget) justSent.delete(row.message.id);
       }}
     >
@@ -2793,7 +2875,7 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
         </p>
       ) : null}
       {row.message.inputIntent && row.message.inputIntent !== "turn_start" ? (
-        <UserMessageIntentMarker intent={row.message.inputIntent} entering={entering} />
+        <UserMessageIntentMarker intent={row.message.inputIntent} />
       ) : null}
       <div
         className={cn(
@@ -2970,11 +3052,8 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
 
 function UserMessageIntentMarker({
   intent,
-  entering = false,
 }: {
   readonly intent: NonNullable<ChatMessage["inputIntent"]>;
-  /** Fades in just after a message that was just sent. */
-  readonly entering?: boolean;
 }) {
   const presentation =
     intent === "queued_turn"
@@ -2997,10 +3076,7 @@ function UserMessageIntentMarker({
       <TooltipTrigger
         render={
           <div
-            className={cn(
-              "me-1 flex items-center justify-end gap-1 text-xs leading-none text-muted-foreground",
-              entering && "animate-message-send-label",
-            )}
+            className="me-1 flex items-center justify-end gap-1 text-xs leading-none text-muted-foreground"
             data-user-message-intent={intent}
           />
         }
@@ -4448,9 +4524,10 @@ function LiveWorkEntryTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "
   const tool = questionHeading ? null : liveTool;
 
   const failed = workEntryDisplayIndicatesToolFailure(row.entry);
-  // The expanded group already lists the thought, so the preview steps aside.
-  const thoughtLine =
-    row.thought && !row.expanded && !row.closing ? liveThoughtLine(row.thought.detail ?? "") : "";
+  const thoughtLine = row.thought ? liveThoughtLine(row.thought.detail ?? "") : "";
+  // The expanded group already lists the thought, so the preview folds away as
+  // the group opens and folds back as it closes, the same motion both ways.
+  const thoughtShown = thoughtLine !== "" && !row.expanded;
   // While the thought itself streams, the status line just says Thinking.
   const thoughtIsStatus = thoughtLine !== "" && row.entry === row.thought;
 
@@ -4463,29 +4540,33 @@ function LiveWorkEntryTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "
       )}
       aria-label={
         failed
-          ? `${thoughtLine ? `${thoughtLine} ` : ""}${tool?.label ?? label}, tool call failed`
+          ? `${thoughtShown ? `${thoughtLine} ` : ""}${tool?.label ?? label}, tool call failed`
           : undefined
       }
       aria-expanded={row.expanded}
       onClick={() => ctx.onToggleWorkGroup(row.groupId, row.id)}
     >
       {thoughtLine ? (
-        // The latest thought's first sentence sits above the status line as an
-        // ordinary work-log row, so a finding never hides behind the next tool call.
-        <WorkLogRow
-          icon={
-            <span className="flex size-4 items-center justify-center text-icon-muted">
-              <ToolActivityIconView
-                icon={undefined}
-                fallbackName="brain"
-                className="block size-4 shrink-0 stroke-2"
-                muted
-              />
-            </span>
-          }
-          label={<span className="line-clamp-4">{thoughtLine}</span>}
-          wrapLabel
-        />
+        <div className="w-full">
+          <WorkLogCollapse open={thoughtShown}>
+            {/* The latest thought's first sentence sits above the status line as an
+                ordinary work-log row, so a finding never hides behind the next tool call. */}
+            <WorkLogRow
+              icon={
+                <span className="flex size-4 items-center justify-center text-icon-muted">
+                  <ToolActivityIconView
+                    icon={undefined}
+                    fallbackName="brain"
+                    className="block size-4 shrink-0 stroke-2"
+                    muted
+                  />
+                </span>
+              }
+              label={<span className="line-clamp-4">{thoughtLine}</span>}
+              wrapLabel
+            />
+          </WorkLogCollapse>
+        </div>
       ) : null}
       <LiveActivityRow
         label={

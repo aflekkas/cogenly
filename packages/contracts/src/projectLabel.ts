@@ -14,7 +14,25 @@ import { SourceControlCloneProtocol, SourceControlProviderKind } from "./sourceC
 /** Project folders provide context only and never grant access. Legacy names/IDs are stable. */
 export const ProjectLabelId = TrimmedNonEmptyString.pipe(Schema.brand("ProjectLabelId"));
 export type ProjectLabelId = typeof ProjectLabelId.Type;
+/** A stored color: palette names, plus whatever older clients stored (shown as gray). */
 const color = TrimmedNonEmptyString.check(Schema.isMaxLength(100));
+/**
+ * The colors a project can be given: the app's palette names. Hex values and
+ * other names are refused, so a project never silently shows as gray.
+ */
+export const ProjectLabelColor = Schema.Literals([
+  "gray",
+  "red",
+  "amber",
+  "green",
+  "teal",
+  "blue",
+  "violet",
+  "pink",
+]).annotate({
+  description: "One of gray, red, amber, green, teal, blue, violet, pink (not a hex value).",
+});
+export type ProjectLabelColor = typeof ProjectLabelColor.Type;
 const description = Schema.String.check(Schema.isMaxLength(4000));
 /** Standing guidance for every agent working in the project; empty means none. */
 export const PROJECT_INSTRUCTIONS_MAX_LENGTH = 20_000;
@@ -185,6 +203,7 @@ export const ThreadProjectLabel = Schema.Struct({
 export type ThreadProjectLabel = typeof ThreadProjectLabel.Type;
 export const ProjectLabelCreateInput = Schema.Struct({
   ...fields,
+  color: Schema.optional(ProjectLabelColor),
   instructions: Schema.optional(instructions),
 });
 export type ProjectLabelCreateInput = typeof ProjectLabelCreateInput.Type;
@@ -192,7 +211,7 @@ export type ProjectLabelCreateInput = typeof ProjectLabelCreateInput.Type;
 export const ProjectLabelUpdateInput = Schema.Struct({
   id: ProjectLabelId,
   name: Schema.optional(fields.name),
-  color: Schema.optional(Schema.NullOr(color)),
+  color: Schema.optional(Schema.NullOr(ProjectLabelColor)),
   description: Schema.optional(Schema.NullOr(description)),
   instructions: Schema.optional(instructions),
 });
@@ -261,8 +280,9 @@ export class ProjectLabelError extends Schema.TaggedError<ProjectLabelError>()(
       "invalid_path",
       "fork_required",
       "archived",
+      "project_chat",
     ]),
-    /** The project's name, so an `archived` refusal can say which one. */
+    /** The project's name, so an `archived` or `project_chat` refusal can say which one. */
     projectName: Schema.optional(Schema.String),
     cause: Schema.optional(Schema.Defect()),
   },
@@ -279,6 +299,8 @@ export class ProjectLabelError extends Schema.TaggedError<ProjectLabelError>()(
         return "That path is not a file in this project folder.";
       case "fork_required":
         return "This chat already has turns; fork it into the project instead of moving it.";
+      case "project_chat":
+        return `This is ${this.projectName ?? "a project"}'s own conversation; it stays in its project.`;
       case "storage":
         return "Could not access project folders.";
     }

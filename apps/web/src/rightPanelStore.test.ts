@@ -63,6 +63,35 @@ describe("selectActiveRightPanelSurface", () => {
   });
 });
 
+describe("openBrowser without reveal", () => {
+  const revealThreadRef = {
+    environmentId: EnvironmentId.make("env-1"),
+    threadId: ThreadId.make("thread-reveal"),
+  };
+  const read = () =>
+    selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, revealThreadRef);
+
+  it("adds and selects the tab but leaves a closed panel closed", () => {
+    const store = useRightPanelStore.getState();
+    store.openBrowser(revealThreadRef, "tab-1");
+    store.close(revealThreadRef);
+    expect(read().isOpen).toBe(false);
+
+    store.openBrowser(revealThreadRef, "agent-tab", { reveal: false });
+
+    expect(read().isOpen).toBe(false);
+    expect(read().surfaces.map((surface) => surface.id)).toContain("browser:agent-tab");
+    expect(read().activeSurfaceId).toBe("browser:agent-tab");
+  });
+
+  it("still opens the panel by default", () => {
+    const store = useRightPanelStore.getState();
+    store.close(revealThreadRef);
+    store.openBrowser(revealThreadRef, "user-tab");
+    expect(read().isOpen).toBe(true);
+  });
+});
+
 describe("activateGroup", () => {
   const groupThreadRef = {
     environmentId: EnvironmentId.make("env-1"),

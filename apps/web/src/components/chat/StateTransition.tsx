@@ -58,6 +58,10 @@ function captureLeavingCopy(group: string, source: HTMLElement) {
   }, 0);
 }
 
+// The cross-fade each group is playing, so a replacement that animates its own
+// change can stop it (settleFadeSwap).
+const running = new Map<string, readonly Animation[]>();
+
 function crossFade(group: string, incoming: HTMLElement) {
   // Development's strict-mode remount of the same element is not a state change.
   if (leaving.get(group)?.source === incoming) return;
@@ -73,7 +77,27 @@ function crossFade(group: string, incoming: HTMLElement) {
     () => entry.copy.remove(),
   );
   // Both sides fade in place; nothing rises.
-  incoming.animate([{ opacity: 0 }, { opacity: 1 }], { duration, easing });
+  const into = incoming.animate([{ opacity: 0 }, { opacity: 1 }], { duration, easing });
+  const animations = [out, into];
+  running.set(group, animations);
+  void into.finished.then(
+    () => {
+      if (running.get(group) === animations) running.delete(group);
+    },
+    () => undefined,
+  );
+}
+
+/**
+ * Stops a group's cross-fade that just started, for a replacement that
+ * animates the change itself (the Work hero's pieces glide and crossfade on
+ * their own when a new draft replaces the old).
+ */
+export function settleFadeSwap(group: string) {
+  const animations = running.get(group);
+  if (!animations) return;
+  running.delete(group);
+  for (const animation of animations) animation.cancel();
 }
 
 /** Fades the copy a removed item left behind, for a replacement that has nothing to show there. */

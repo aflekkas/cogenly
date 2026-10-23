@@ -46,13 +46,12 @@ it does not own a copy.
   no per-provider code. Codex and Muse resend it every turn; Claude bakes it
   into the system prompt when its process opens, so an instructions edit
   reaches a live Claude thread only after that process restarts.
-- Each project has one project chat (`projectLabels.ensureProjectChat`),
-  an ordinary chat-surface thread the label points at. It is left out of the
-  project's thread count and the Chats list, and it configures the project
-  through the `project_*` MCP tools, which act on the caller's own project.
-  It runs in the Scratch project (so in the project directory); where Scratch
-  is off (a data dir inside a checkout, such as a dev worktree) it runs in the
-  project's first linked repository, and with neither it cannot start.
+- Projects are managed on a page (`/project`, opened from the rail's footer),
+  and agents in any thread change them with the project MCP tools; there is
+  no per-project conversation in the client any more. The server still keeps
+  `projectLabels.ensureProjectChat` and a label's `projectChatThreadId` for
+  projects that have one: clients now list that thread with the project's
+  other chats, and the server keeps refusing to move it out of its project.
 - Archiving a project only sets `archivedAt` on the label. Its threads, chat,
   repositories and filing are untouched; clients drop archived projects from
   every picker and move menu (the label directory's `active`) but still name

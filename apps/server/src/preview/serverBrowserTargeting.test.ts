@@ -111,7 +111,13 @@ describe("tabBacking", () => {
 });
 
 describe("revealBeforeAttach", () => {
-  const base = { desktopAvailable: true, alreadyAttached: false, adopted: false, agentOwned: true };
+  const base = {
+    desktopAvailable: true,
+    alreadyAttached: false,
+    adopted: false,
+    agentOwned: true,
+    background: false,
+  };
 
   it("asks the panel to show a new agent tab before waiting for its webview", () => {
     expect(revealBeforeAttach(base)).toBe(true);
@@ -122,6 +128,10 @@ describe("revealBeforeAttach", () => {
     expect(revealBeforeAttach({ ...base, alreadyAttached: true })).toBe(false);
     expect(revealBeforeAttach({ ...base, adopted: true })).toBe(false);
     expect(revealBeforeAttach({ ...base, agentOwned: false })).toBe(false);
+  });
+
+  it("keeps a tab the agent opened in the background out of the panel", () => {
+    expect(revealBeforeAttach({ ...base, background: true })).toBe(false);
   });
 });
 

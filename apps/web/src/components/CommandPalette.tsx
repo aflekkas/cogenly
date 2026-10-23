@@ -109,6 +109,7 @@ import {
   useProjectLabelDirectory,
 } from "../projectLabels/useProjectLabels";
 import { requestAgentCreation } from "../agents/AgentsCreateHost";
+import { openCreateProjectDialog } from "../projectLabels/CreateProjectDialogHost";
 import { agentViewKey, requestAgentView } from "../agents/agentViewIntent";
 import { useStartWork, WorkPickerChoiceIcon } from "./work/StartWork";
 import { ADD_REPOSITORY, listWorkPickerChoices, listWorkRepositories } from "./work/work.logic";
@@ -2069,7 +2070,7 @@ function OpenCommandPaletteDialog(props: {
     },
   });
 
-  // Projects are folders; their home is the Projects sidebar and /project.
+  // Projects are folders; their home is the Projects page (/project).
   actionItems.push({
     kind: "action",
     value: "action:new-project-label",
@@ -2077,13 +2078,8 @@ function OpenCommandPaletteDialog(props: {
     title: "New project",
     icon: <FolderPlusIcon className={ITEM_ICON_CLASS} />,
     run: async () => {
-      await navigate({
-        to: "/project",
-        search: {
-          create: true,
-          ...(activeThread?.environmentId ? { environmentId: activeThread.environmentId } : {}),
-        },
-      });
+      const environmentId = activeThread?.environmentId ?? primaryEnvironmentId;
+      if (environmentId !== null) openCreateProjectDialog({ environmentId });
     },
   });
   actionItems.push({
@@ -2091,6 +2087,7 @@ function OpenCommandPaletteDialog(props: {
     value: "action:manage-project-labels",
     searchTerms: ["projects", "manage projects", "folders", "add repository"],
     title: "Open projects",
+    shortcutCommand: "sidebar.mode.projects",
     icon: <FolderIcon className={ITEM_ICON_CLASS} />,
     run: async () => {
       await navigate({ to: "/project" });

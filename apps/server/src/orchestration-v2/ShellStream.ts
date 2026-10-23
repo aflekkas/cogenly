@@ -72,18 +72,37 @@ export type ShellApplicationEvent =
   | {
       readonly sequence: number;
       readonly event: Pick<OrchestrationV2StoredEvent["event"], "threadId">;
+      /**
+       * Other threads whose shell the event changes: a provider-native
+       * subagent's child thread takes its status from the parent's record.
+       */
+      readonly relatedThreadIds?: ReadonlyArray<OrchestrationV2StoredEvent["event"]["threadId"]>;
     };
 
 /** Shell updates refetch an aggregate; drop transcript bodies before retaining an event. */
 export function toShellApplicationEvent(stored: ApplicationStoredEvent): ShellApplicationEvent {
-  return "aggregateKind" in stored
-    ? {
-        aggregateKind: stored.aggregateKind,
-        aggregateId: stored.aggregateId,
-        type: stored.type,
+  if ("aggregateKind" in stored) {
+    return {
+      aggregateKind: stored.aggregateKind,
+      aggregateId: stored.aggregateId,
+      type: stored.type,
+      sequence: stored.sequence,
+    };
+  }
+  const event = stored.event;
+  const childThreadId =
+    event.type === "subagent.updated" &&
+    event.payload.childThreadId !== null &&
+    event.payload.childThreadId !== event.threadId
+      ? event.payload.childThreadId
+      : null;
+  return childThreadId === null
+    ? { sequence: stored.sequence, event: { threadId: event.threadId } }
+    : {
         sequence: stored.sequence,
-      }
-    : { sequence: stored.sequence, event: { threadId: stored.event.threadId } };
+        event: { threadId: event.threadId },
+        relatedThreadIds: [childThreadId],
+      };
 }
 
 /** Keep only the newest shell-relevant event per project/thread aggregate. */
@@ -97,6 +116,16 @@ export function coalesceShellApplicationEvents<A extends ShellApplicationEvent>(
         ? `project:${stored.aggregateId}`
         : `thread:${stored.event.threadId}`;
     latestByAggregate.set(key, stored);
+    if ("aggregateKind" in stored) continue;
+    // A related thread refetches its own shell at this event's sequence.
+    for (const threadId of stored.relatedThreadIds ?? []) {
+      const existing = latestByAggregate.get(`thread:${threadId}`);
+      if (existing !== undefined && existing.sequence > stored.sequence) continue;
+      latestByAggregate.set(`thread:${threadId}`, {
+        sequence: stored.sequence,
+        event: { threadId },
+      } as A);
+    }
   }
   return Array.from(latestByAggregate.values()).sort(
     (left, right) => left.sequence - right.sequence,

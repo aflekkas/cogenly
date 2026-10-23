@@ -30,6 +30,7 @@ import { requestConfirmDialog } from "../confirmDialog";
 import { useProjects, useServerConfigs } from "../state/entities";
 import { serverEnvironment } from "../state/server";
 import { useAtomCommand } from "../state/use-atom-command";
+import { projectLabelPaletteColor } from "./projectLabels.logic";
 
 function reportFailure(title: string, result: { readonly cause: Cause.Cause<unknown> }) {
   const error = squashAtomCommandFailure(result);
@@ -94,14 +95,20 @@ export function ProjectLabelEditorDialog(props: {
   readonly environmentId: EnvironmentId;
   readonly label: ProjectLabelWithRepositories | null;
   readonly onClose: () => void;
-  /** After a create, so the caller can open the new folder. */
-  readonly onCreated?: (labelId: ProjectLabelId) => void;
+  /** A new project's starting name, such as what was typed into a picker's search. */
+  readonly initialName?: string;
+  /** A new project's starting color; blue when omitted. */
+  readonly initialColor?: string;
+  /** After a create, so the caller can open the new folder or file something into it. */
+  readonly onCreated?: (labelId: ProjectLabelId, name: string) => void;
   /** After a delete, so a view of the deleted project can leave. */
   readonly onDeleted?: () => void;
 }) {
   const { environmentId, label, onClose } = props;
-  const [name, setName] = useState(label?.name ?? "");
-  const [color, setColor] = useState<string | undefined>(label?.color ?? "blue");
+  const [name, setName] = useState(label?.name ?? props.initialName ?? "");
+  const [color, setColor] = useState<string | undefined>(
+    label?.color ?? props.initialColor ?? "blue",
+  );
   const [description, setDescription] = useState(label?.description ?? "");
   const [descriptionFocused, setDescriptionFocused] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -120,7 +127,7 @@ export function ProjectLabelEditorDialog(props: {
           environmentId,
           input: {
             name: trimmedName,
-            ...(color ? { color } : {}),
+            ...(color ? { color: projectLabelPaletteColor(color) } : {}),
             ...(description.trim() ? { description: description.trim() } : {}),
           },
         });
@@ -143,7 +150,7 @@ export function ProjectLabelEditorDialog(props: {
             input: {
               id: label.id,
               name: trimmedName,
-              color: color ?? null,
+              color: color === undefined ? null : projectLabelPaletteColor(color),
               description: nextDescription.length > 0 ? nextDescription : null,
             },
           });
@@ -155,7 +162,7 @@ export function ProjectLabelEditorDialog(props: {
         }
       }
       onClose();
-      if (label === null) props.onCreated?.(labelId);
+      if (label === null) props.onCreated?.(labelId, trimmedName);
     } finally {
       setSaving(false);
     }

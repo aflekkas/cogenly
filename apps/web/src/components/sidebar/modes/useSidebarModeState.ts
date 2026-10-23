@@ -10,6 +10,7 @@ import type {
   ScopedThreadRef,
   ThreadSurface,
 } from "@t3tools/contracts";
+import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo } from "react";
 
 import { resolveShortcutCommand } from "../../../keybindings";
@@ -36,8 +37,10 @@ const MODE_BY_COMMAND: Record<string, SidebarMode> = {
   "sidebar.mode.chats": "chats",
   "sidebar.mode.tasks": "tasks",
   "sidebar.mode.agents": "agents",
-  "sidebar.mode.projects": "projects",
 };
+
+/** Kept under its old id, as keybindings store it: opens the Projects page. */
+const OPEN_PROJECTS_COMMAND = "sidebar.mode.projects";
 
 /**
  * Which mode lists each thread: agent conversations, scratch chats, or Work.
@@ -108,6 +111,7 @@ export function useSidebarModeState(input: {
   const mode = useUiStateStore((store) => store.sidebarMode);
   const setMode = useUiStateStore((store) => store.setSidebarMode);
   const selectMode = useSelectSidebarMode();
+  const navigate = useNavigate();
 
   const { agents } = useAgents();
   const { classifier, scratchProjectKeys } = useSidebarModeClassifier({
@@ -123,7 +127,7 @@ export function useSidebarModeState(input: {
 
   const draftInMode = useCallback(
     (draft: DraftModeShape): boolean => {
-      if (mode === "agents" || mode === "projects") return false;
+      if (mode === "agents") return false;
       const projectKey = `${draft.environmentId}:${draft.projectId}`;
       const draftMode = classifySidebarThreadMode({
         isAgent: false,
@@ -182,6 +186,12 @@ export function useSidebarModeState(input: {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.repeat) return;
       const command = resolveShortcutCommand(event, keybindings);
+      if (command === OPEN_PROJECTS_COMMAND) {
+        event.preventDefault();
+        event.stopPropagation();
+        void navigate({ to: "/project" });
+        return;
+      }
       const next = command ? MODE_BY_COMMAND[command] : undefined;
       if (!next) return;
       event.preventDefault();
@@ -190,7 +200,7 @@ export function useSidebarModeState(input: {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [keybindings, selectMode]);
+  }, [keybindings, navigate, selectMode]);
 
   return {
     mode,

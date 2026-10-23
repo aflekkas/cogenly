@@ -174,6 +174,24 @@ describe("buildThreadActionMenuItems per thread kind", () => {
     ).not.toContain("pin");
   });
 
+  it("offers Regenerate Title after Rename when the server supports it, waiting while it runs", () => {
+    const withRegeneration = (kind: ThreadKind, isRegeneratingTitle = false) => {
+      const base = stateFor(kind, { isRegeneratingTitle });
+      return buildThreadActionMenuItems({
+        ...base,
+        supports: { ...base.supports, titleRegeneration: true },
+      });
+    };
+    for (const kind of ["chat", "work"] as const) {
+      const items = ids(withRegeneration(kind));
+      expect(items.indexOf("regenerate-title")).toBe(items.indexOf("rename") + 1);
+    }
+    const pending = withRegeneration("work", true).find((item) => item.id === "regenerate-title");
+    expect(pending).toMatchObject({ label: "Regenerating Title…", disabled: true });
+    expect(ids(buildThreadActionMenuItems(stateFor("work")))).not.toContain("regenerate-title");
+    expect(ids(withRegeneration("agentConversation"))).not.toContain("regenerate-title");
+  });
+
   it("drops the branch items without a branch", () => {
     const items = ids(buildThreadActionMenuItems(stateFor("work", { branch: null })));
     expect(items).not.toContain("copy-branch");

@@ -47,15 +47,17 @@ function searchErrorReason(cause: Cause.Cause<unknown>) {
 }
 
 /**
- * GitHub repositories under each project's linked owners that match the
- * picker's search, keyed by project. Asks once typing pauses, keeps a
- * project's last results on screen while the next search runs, and reports
- * loading only once the spinner delay passed (absent before then). Nothing is
- * searched for an empty query.
+ * GitHub repositories under each project's linked owners (or the signed-in
+ * account's, when it links none) that match the picker's search, keyed by
+ * project. Searches while `active` (the picker is open): an empty query lists
+ * recent pushes, a typed one asks once typing pauses. Keeps a project's last
+ * results on screen while the next search runs, and reports loading only once
+ * the spinner delay passed (absent before then).
  */
 export function useOwnerRepositorySearch(
   projects: ReadonlyArray<EnvironmentProjectLabel>,
   query: string,
+  active: boolean,
 ): ReadonlyMap<ProjectLabelKey, OwnerSearchState> {
   const trimmed = query.trim();
   const [debounced, setDebounced] = useState(trimmed);
@@ -67,18 +69,19 @@ export function useOwnerRepositorySearch(
 
   const targets = useMemo(
     (): SearchTarget[] =>
-      ownerSearchProjects(projects, trimmed).map((project) => ({
+      ownerSearchProjects(projects, active).map((project) => ({
         environmentId: project.environmentId,
         labelId: project.label.id,
         owners: linkedGitHubOwners(project),
       })),
-    [projects, trimmed],
+    [projects, active],
   );
+  // Clearing the search lists recent pushes again at once, without the debounce.
   const searchedQuery = trimmed.length === 0 ? "" : debounced;
   const targetsKey = JSON.stringify(targets);
   const atom = useMemo(() => {
     const parsed = JSON.parse(targetsKey) as SearchTarget[];
-    if (parsed.length === 0 || searchedQuery.length === 0) return EMPTY_RAW_ATOM;
+    if (parsed.length === 0) return EMPTY_RAW_ATOM;
     return Atom.make((get) => {
       const states = new Map<ProjectLabelKey, RawState>();
       for (const target of parsed) {
@@ -125,11 +128,10 @@ export function useOwnerRepositorySearch(
     if (changed) setSettled((current) => new Map([...current, ...next]));
   }, [raw]);
 
-  // A cleared search starts the next one from nothing, not from old results.
+  // A closed picker opens next time from nothing, not from old results.
   useEffect(() => {
-    if (trimmed.length === 0)
-      setSettled((current) => (current.size === 0 ? current : EMPTY_STATES));
-  }, [trimmed]);
+    if (!active) setSettled((current) => (current.size === 0 ? current : EMPTY_STATES));
+  }, [active]);
 
   const fresh = searchedQuery === trimmed;
   const waiting =

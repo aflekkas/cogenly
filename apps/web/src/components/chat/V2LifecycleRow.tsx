@@ -1,7 +1,8 @@
 import { ThreadHoverCardPopup } from "../ThreadHoverCard";
 import { AgentElapsed } from "./AgentElapsed";
 import { projectedSubagentsToRuntime } from "@t3tools/client-runtime/state/subagentRuntime";
-import { createContext, use, useState, type ReactNode } from "react";
+import { notificationChildThreadId } from "@t3tools/client-runtime/state/thread-execution";
+import { createContext, use, useMemo, useState, type ReactNode } from "react";
 import { useThreadShell, useProject } from "../../state/entities";
 import { SubagentTooltipContent } from "./SubagentTooltipContent";
 import { useAtomValue } from "@effect/atom-react";
@@ -17,6 +18,10 @@ import {
   subagentRowLines,
   subagentStatusVisual,
 } from "./subagentRow.logic";
+import {
+  pendingSubagentCompletions,
+  type PendingCompletionOutcome,
+} from "./pendingSubagentCompletions.logic";
 import {
   resolveHandoffEndpoints,
   type HandoffEndpoints,
@@ -366,6 +371,133 @@ export function SubagentNotificationLink(props: {
             },
           })}
     />
+  );
+}
+
+/**
+ * Provider-native children seen running in the background, per parent thread.
+ * The roster drops a child once it ends, so it is remembered for the session.
+ */
+const backgroundChildrenByParent = new Map<string, Set<string>>();
+
+const PENDING_OUTCOME_STATUS: Record<PendingCompletionOutcome, OrchestrationV2TurnItem["status"]> =
+  {
+    completed: "completed",
+    failed: "failed",
+    cancelled: "cancelled",
+  };
+
+/**
+ * Subagents that just finished, at the end of the parent's timeline, until the
+ * parent's own notification for them lands: a busy parent only hears about a
+ * background subagent on its next turn.
+ */
+export function PendingSubagentCompletions(props: {
+  readonly parentRef: ScopedThreadRef;
+  readonly timestampFormat: TimestampFormat;
+  readonly providerStatuses: ReadonlyArray<ServerProvider>;
+  readonly onOpenThread: (threadId: ThreadId) => void;
+}) {
+  const projection = useAtomValue(
+    environmentThreadDetails.threadAtom(props.parentRef),
+    (thread) => thread?.projection ?? null,
+  );
+  const parentKey = `${props.parentRef.environmentId}:${props.parentRef.threadId}`;
+  const rows = useMemo(() => {
+    if (projection === null) return [];
+    const seen = backgroundChildrenByParent.get(parentKey) ?? new Set<string>();
+    const rosterTaskIds = new Set<string>();
+    for (const providerThread of projection.providerThreads) {
+      for (const task of providerThread.pendingBackgroundTasks ?? []) {
+        if (task.kind !== "subagent") continue;
+        rosterTaskIds.add(task.taskId);
+        const childThreadId = "childThreadId" in task ? task.childThreadId : undefined;
+        if (typeof childThreadId === "string") seen.add(childThreadId);
+      }
+    }
+    for (const subagent of projection.subagents) {
+      const nativeId = subagent.nativeTaskRef?.nativeId ?? null;
+      if (subagent.childThreadId !== null && nativeId !== null && rosterTaskIds.has(nativeId)) {
+        seen.add(subagent.childThreadId);
+      }
+    }
+    if (seen.size > 0) backgroundChildrenByParent.set(parentKey, seen);
+    const notifiedAtMsByChild = new Map<string, number>();
+    const noteNotified = (childThreadId: string | undefined, atMs: number) => {
+      if (childThreadId === undefined) return;
+      const previous = notifiedAtMsByChild.get(childThreadId);
+      if (previous === undefined || atMs > previous) notifiedAtMsByChild.set(childThreadId, atMs);
+    };
+    for (const item of projection.turnItems) {
+      if (item.type !== "notification") continue;
+      noteNotified(
+        notificationChildThreadId(item.source),
+        DateTime.toEpochMillis(item.startedAt ?? item.updatedAt),
+      );
+    }
+    for (const message of projection.messages) {
+      if (message.notification === undefined) continue;
+      noteNotified(
+        notificationChildThreadId(message.notification.source),
+        DateTime.toEpochMillis(message.createdAt),
+      );
+    }
+    const pending = pendingSubagentCompletions({
+      threadId: props.parentRef.threadId,
+      subagents: projection.subagents.map((subagent) => ({
+        id: subagent.id,
+        threadId: subagent.threadId,
+        origin: subagent.origin,
+        childThreadId: subagent.childThreadId,
+        status: subagent.status,
+        completedAtMs:
+          subagent.completedAt === null ? null : DateTime.toEpochMillis(subagent.completedAt),
+        completionDelivery: subagent.completionDelivery,
+      })),
+      notifiedAtMsByChild,
+      backgroundChildren: seen,
+    });
+    return pending.flatMap((completion) => {
+      const agent = projection.subagents.find((subagent) => subagent.id === completion.subagentId);
+      return agent === undefined ? [] : [{ completion, agent }];
+    });
+  }, [parentKey, projection, props.parentRef.threadId]);
+  if (rows.length === 0) return null;
+  return (
+    <div className="flex flex-col" data-pending-subagent-completions="">
+      {rows.map(({ completion, agent }) => (
+        // Fades in where it lands; the notification that replaces it draws the same row.
+        <div key={completion.childThreadId} className="swap-motion">
+          <SubagentTimelineLink
+            parentRef={props.parentRef}
+            subagentId={agent.id}
+            providerInstanceId={agent.providerInstanceId}
+            origin={agent.origin}
+            status={agent.status}
+            driver={agent.driver}
+            provider={props.providerStatuses.find(
+              (provider) => provider.instanceId === agent.providerInstanceId,
+            )}
+            providers={props.providerStatuses}
+            title={formatSubagentDisplayTitle(agent.title ?? "Subagent")}
+            result={agent.result}
+            progress={agent.progress}
+            startedAt={agent.startedAt}
+            completedAt={agent.completedAt}
+            threadId={agent.childThreadId}
+            onOpenThread={props.onOpenThread}
+            event={{
+              status: PENDING_OUTCOME_STATUS[completion.outcome],
+              label: NOTIFICATION_OUTCOME_LABEL[completion.outcome],
+              timestamp: formatShortTimestamp(
+                new Date(completion.completedAtMs).toISOString(),
+                props.timestampFormat,
+              ),
+            }}
+          />
+        </div>
+      ))}
+    </div>
   );
 }
 

@@ -1,15 +1,15 @@
 /**
  * The navigation rail: a narrow icon column at the window's left edge, beside
- * the thread list. Chats, Work, Agents and Projects switch the list from the top;
- * Search, Usage, Settings and Updates sit at the bottom. It stays put while the list
- * collapses, so modes, search and settings remain one click away.
+ * the thread list. Chats, Work and Agents switch the list from the top;
+ * Search, Projects, Usage, Settings and Updates sit at the bottom. It stays put
+ * while the list collapses, so modes, search and settings remain one click away.
  *
  * Mobile keeps the segmented control inside the sheet instead (see
  * SidebarModeSwitcher), so the rail renders only on wider windows.
  */
 import { useAtomValue } from "@effect/atom-react";
 import { PanelLeft, PanelLeftClose } from "lucide";
-import { ChartNoAxesColumnIcon, SearchIcon, SettingsIcon } from "lucide-react";
+import { ChartNoAxesColumnIcon, FolderIcon, SearchIcon, SettingsIcon } from "lucide-react";
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactElement,
@@ -34,7 +34,7 @@ import { primaryServerKeybindingsAtom } from "../../state/server";
 import { useUiStateStore } from "../../uiStateStore";
 import { useSidebar, useSidebarVisibility } from "../ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { isSidebarUtilityPage } from "./mainAppLocation";
+import { isProjectsPage, isSidebarUtilityPage } from "./mainAppLocation";
 import { routeHidesListColumn, SIDEBAR_TOGGLE_DISABLED_LABEL } from "./listColumnRoutes";
 import { SIDEBAR_MODE_ICONS } from "./modes/SidebarModeSwitcher";
 import { SIDEBAR_MODE_LABELS, SIDEBAR_MODES, type SidebarMode } from "./modes/sidebarModes.logic";
@@ -85,7 +85,6 @@ export function SidebarNavRail({
 }) {
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const mode = useUiStateStore((store) => store.sidebarMode);
-  const setMode = useUiStateStore((store) => store.setSidebarMode);
   const selectSidebarMode = useSelectSidebarMode();
   const decisionsWaiting = useNavRailBadgeStore((store) => store.decisionsWaiting);
   const { open, setOpen, toggleSidebar } = useSidebar();
@@ -103,6 +102,7 @@ export function SidebarNavRail({
   const onUtilityPage = isSidebarUtilityPage(pathname);
   const onSettings = pathname === "/settings" || pathname.startsWith("/settings/");
   const onUsage = pathname === "/usage";
+  const onProjects = isProjectsPage(pathname);
   // Usage, Projects and an empty Agents list have no list column, so the
   // toggle stays in place but disabled there.
   const agentsEmpty = useAgentsEmpty();
@@ -113,24 +113,14 @@ export function SidebarNavRail({
     context: { usagePageOpen: onUsage },
   });
   const searchShortcut = shortcutLabelForCommand(keybindings, "commandPalette.toggle");
+  // Stored under the old mode command's id; it opens the Projects page now.
+  const projectsShortcut = shortcutLabelForCommand(keybindings, "sidebar.mode.projects");
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   // Hovering the toggle floats the collapsed list column out from under the
   // rail (ListColumnPeek); clicking it docks the column.
   const peekAvailable = useListColumnPeekStore((store) => store.available);
 
-  const onProjectsPage = pathname === "/project" || pathname.startsWith("/project/");
   const selectMode = (next: SidebarMode) => {
-    // Picking Projects again from a project goes back to its overview. The
-    // other modes have no index page (their landing opens a thread or a new
-    // draft), so picking them again keeps what is open.
-    if (next === "projects" && open && pathname.startsWith("/project/")) {
-      crossfadeModeSwitch(() => {
-        setMode("projects");
-        void navigate({ to: "/project" });
-        return true;
-      });
-      return;
-    }
     // A utility page hands the column back to the thread list; another mode
     // returns to the page it last showed (spaceRouteMemory).
     selectSidebarMode(next, { leaveUtilityPage: true });
@@ -212,10 +202,9 @@ export function SidebarNavRail({
         className="mt-1.5 flex flex-col items-center gap-1"
       >
         {SIDEBAR_MODES.map((segment, segmentIndex) => {
-          // A utility page owns the column, so no mode reads as current there.
-          // The Projects pages have no list, so the route, not the list's mode, says where you are.
-          const selected =
-            (onProjectsPage ? segment === "projects" : segment === mode) && !onUtilityPage;
+          // A utility page (Settings, Usage, Projects) owns the main area, so
+          // no mode reads as current there.
+          const selected = segment === mode && !onUtilityPage;
           const label = SIDEBAR_MODE_LABELS[segment];
           const Icon = SIDEBAR_MODE_ICONS[segment];
           const shortcut = shortcutLabelForCommand(keybindings, `sidebar.mode.${segment}`);
@@ -246,7 +235,7 @@ export function SidebarNavRail({
                 // focus (arrows, Tab) still gets the ring.
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => selectMode(segment)}
-                {...preloadOnIntent(segment === "projects" ? "projects" : "threads")}
+                {...preloadOnIntent("threads")}
                 className={cn(RAIL_BUTTON_CLASS, railButtonTone(selected))}
               >
                 <Icon aria-hidden />
@@ -276,6 +265,19 @@ export function SidebarNavRail({
             className={cn(RAIL_BUTTON_CLASS, railButtonTone(false))}
           >
             <SearchIcon aria-hidden />
+          </button>
+        </RailTooltip>
+        <RailTooltip label={projectsShortcut ? `Projects (${projectsShortcut})` : "Projects"}>
+          <button
+            type="button"
+            aria-label="Projects"
+            aria-current={onProjects ? "page" : undefined}
+            // Projects again from a project's page goes back to the grid.
+            onClick={() => void navigate({ to: "/project" })}
+            {...preloadOnIntent("projects")}
+            className={cn(RAIL_BUTTON_CLASS, railButtonTone(onProjects))}
+          >
+            <FolderIcon aria-hidden />
           </button>
         </RailTooltip>
         <RailTooltip label="Usage">

@@ -10,11 +10,8 @@ import { useCallback, useEffect, useMemo } from "react";
 
 import { type DraftId, useComposerDraftStore } from "../../../composerDraftStore";
 import { useThreadKind, useThreadKindResolver } from "../../../hooks/useThreadKind";
-import { projectLabelKey } from "../../../projectLabels/projectLabels.logic";
-import { useProjectLabelDirectory } from "../../../projectLabels/useProjectLabels";
 import { appAtomRegistry } from "../../../rpc/atomRegistry";
 import { readThreadShell, useThreadShell } from "../../../state/entities";
-import { useConnectedEnvironmentIds } from "../../../state/environments";
 import { primaryEnvironmentIdAtom } from "../../../state/primaryEnvironment";
 import { allEnvironmentShellsBootstrappedAtom } from "../../../state/shell";
 import { sidebarModeForThreadKind } from "../../../threadCapabilities";
@@ -121,7 +118,6 @@ export function SpaceRouteMemoryTracker() {
  */
 export function useSpaceReturn(): (space: SidebarSpace) => string | null {
   const resolveKind = useThreadKindResolver();
-  const projectDirectory = useProjectLabelDirectory(useConnectedEnvironmentIds());
   return useCallback(
     (space) =>
       resolveSpaceReturn(readMemory(), space, (route, owner): SpaceRouteAvailability => {
@@ -143,16 +139,10 @@ export function useSpaceReturn(): (space: SidebarSpace) => string | null {
             if (draft === null) return "gone";
             return sidebarModeForThreadKind(resolveKind(draft)) === owner ? "available" : "gone";
           }
-          case "project":
-            // An empty directory is still loading (or holds nothing to tell by).
-            if (projectDirectory.labels.length === 0) return "unknown";
-            return projectDirectory.byKey.has(projectLabelKey(route.environmentId, route.labelId))
-              ? "available"
-              : "gone";
           default:
             return "available";
         }
       }),
-    [projectDirectory, resolveKind],
+    [resolveKind],
   );
 }

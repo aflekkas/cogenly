@@ -26,6 +26,7 @@ export type ThreadActionMenuId =
   | "limit-resume:on"
   | "limit-resume:off"
   | "rename"
+  | "regenerate-title"
   | "mark-unread"
   | "mark-read"
   | "agent-settings"
@@ -113,12 +114,16 @@ export interface ThreadActionMenuState {
   readonly confirmsDelete?: boolean;
   /** Archive rejects a thread with an attached provider, so disable it here rather than let the action fail. */
   readonly isRunning: boolean;
+  /** The agent is already naming the thread again, so Regenerate Title waits. */
+  readonly isRegeneratingTitle?: boolean;
   /** What the thread's environment understands; a kind's action still needs its server. */
   readonly supports: {
     readonly settlement: boolean;
     readonly snooze: boolean;
     /** Server understands thread.pin / thread.unpin. */
     readonly pinning: boolean;
+    /** Server understands regenerateTitle on thread.meta.update. */
+    readonly titleRegeneration?: boolean;
   };
   readonly snoozePresets: ReadonlyArray<SnoozePreset>;
   /** A usage-limit stop whose reset is ahead: whether it resumes then. Omitted otherwise. */
@@ -215,8 +220,7 @@ type MenuItems = ReadonlyArray<ContextMenuItem<ThreadActionMenuId>>;
  *
  * Three groups: the thread's state, the thread itself, and removal.
  * Repository actions (new thread, settings, opening its folder) sit on the
- * Work list's repository heading; title regeneration sits in the rename
- * field.
+ * Work list's repository heading.
  */
 export function buildThreadActionMenuItems(state: ThreadActionMenuState): MenuItems {
   const can = state.capabilities;
@@ -282,6 +286,16 @@ export function buildThreadActionMenuItems(state: ThreadActionMenuState): MenuIt
   ];
   const thread: MenuItems = [
     ...(can.rename ? [{ id: "rename" as const, label: "Rename…", icon: "pencil" }] : []),
+    ...(can.regenerateTitle && state.supports.titleRegeneration === true
+      ? [
+          {
+            id: "regenerate-title" as const,
+            label: state.isRegeneratingTitle === true ? "Regenerating Title…" : "Regenerate Title",
+            icon: "refresh-cw",
+            disabled: state.isRegeneratingTitle === true,
+          },
+        ]
+      : []),
     ...(can.projectFolder ? folderMenuItems(state.folder) : []),
     ...(copyChildren.length > 0
       ? [{ id: "copy" as const, label: "Copy", icon: "copy", children: copyChildren }]

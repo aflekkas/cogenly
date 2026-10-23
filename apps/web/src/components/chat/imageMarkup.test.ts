@@ -9,14 +9,16 @@ import {
   canRedoMarkup,
   canUndoMarkup,
   canvasToImagePoint,
-  clampToImage,
+  clampToMarkupArea,
   clearShapes,
   createMarkupHistory,
   flattenTarget,
   imageToCanvasPoint,
   isMeaningfulShape,
+  markupCanvasBounds,
   markupFileName,
   redoMarkup,
+  shapeBounds,
   shapePath,
   smoothStrokePath,
   strokeWidthFor,
@@ -85,11 +87,10 @@ describe("coordinates", () => {
     expect(imageToCanvasPoint(image, view)).toEqual({ x: 140, y: 70 });
   });
 
-  it("keeps points inside the image", () => {
-    expect(clampToImage({ x: -5, y: 900 }, { width: 400, height: 300 })).toEqual({
-      x: 0,
-      y: 300,
-    });
+  it("lets points reach past the image, up to half its long side", () => {
+    const natural = { width: 400, height: 300 };
+    expect(clampToMarkupArea({ x: -5, y: 320 }, natural)).toEqual({ x: -5, y: 320 });
+    expect(clampToMarkupArea({ x: -900, y: 900 }, natural)).toEqual({ x: -200, y: 500 });
   });
 
   it("flattens at the original resolution", () => {
@@ -108,6 +109,69 @@ describe("coordinates", () => {
     const huge = flattenTarget({ width: 12_000, height: 12_000 });
     expect(huge.width * huge.height).toBeLessThanOrEqual(MAX_CANVAS_AREA);
     expect(huge.width).toBe(huge.height);
+  });
+});
+
+describe("markupCanvasBounds", () => {
+  const natural = { width: 400, height: 300 };
+  const rect = (from: { x: number; y: number }, to: { x: number; y: number }): MarkupShape => ({
+    id: "r",
+    kind: "rect",
+    color: "#ef4444",
+    width: 4,
+    from,
+    to,
+  });
+
+  it("is the image itself when everything is drawn inside it", () => {
+    expect(markupCanvasBounds(natural, [rect({ x: 10, y: 10 }, { x: 100, y: 100 })])).toEqual({
+      x: 0,
+      y: 0,
+      width: 400,
+      height: 300,
+    });
+  });
+
+  it("grows only the sides markup crosses, stroke and margin included", () => {
+    // Past the right edge by 50 plus half the stroke (2) plus the 8px margin.
+    const bounds = markupCanvasBounds(natural, [rect({ x: 300, y: 50 }, { x: 450, y: 100 })]);
+    expect(bounds).toEqual({ x: 0, y: 0, width: 460, height: 300 });
+  });
+
+  it("places the image at an offset when markup reaches above or left of it", () => {
+    const bounds = markupCanvasBounds(natural, [rect({ x: -30, y: -20 }, { x: 50, y: 50 })]);
+    expect(bounds.x).toBe(-40);
+    expect(bounds.y).toBe(-30);
+    expect(bounds.x + bounds.width).toBe(400);
+    expect(bounds.y + bounds.height).toBe(300);
+  });
+
+  it("stops each side at the reach around the image", () => {
+    const bounds = markupCanvasBounds(natural, [rect({ x: -5000, y: 0 }, { x: 5000, y: 10 })]);
+    expect(bounds.x).toBe(-200);
+    expect(bounds.x + bounds.width).toBe(600);
+  });
+
+  it("counts an arrowhead and measured text toward the bounds", () => {
+    const arrow: MarkupShape = {
+      id: "a",
+      kind: "arrow",
+      color: "#ef4444",
+      width: 4,
+      from: { x: 200, y: 150 },
+      to: { x: 200, y: 330 },
+    };
+    expect(markupCanvasBounds(natural, [arrow]).height).toBeGreaterThan(330);
+    const text: MarkupShape = {
+      id: "t",
+      kind: "text",
+      color: "#ef4444",
+      width: 20,
+      at: { x: 380, y: 10 },
+      text: "hello",
+    };
+    expect(shapeBounds(text, () => 100).width).toBeGreaterThanOrEqual(100);
+    expect(markupCanvasBounds(natural, [text], () => 100).width).toBeGreaterThan(480);
   });
 });
 

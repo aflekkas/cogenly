@@ -110,7 +110,15 @@ interface RightPanelStoreState {
   open: (ref: ScopedThreadRef, kind: Exclude<RightPanelKind, "file">) => void;
   openDevice: (ref: ScopedThreadRef, target: DeviceTabTarget, automatic?: boolean) => void;
   renameDevice: (ref: ScopedThreadRef, surfaceId: string, title: string) => void;
-  openBrowser: (ref: ScopedThreadRef, tabId: string | null) => void;
+  /**
+   * Adds and selects a browser tab. With `reveal: false` a closed panel stays
+   * closed: the tab is there, selected, when the user next opens the panel.
+   */
+  openBrowser: (
+    ref: ScopedThreadRef,
+    tabId: string | null,
+    options?: { readonly reveal?: boolean },
+  ) => void;
   openFile: (ref: ScopedThreadRef, relativePath: string, line?: number) => void;
   /**
    * Moves the folder browser in `surfaceId` to `relativePath` in place, so walking
@@ -494,14 +502,15 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
             ),
           })),
         ),
-      openBrowser: (ref, tabId) =>
+      openBrowser: (ref, tabId, options) =>
         set((state) =>
           userAction(state, scopedThreadKey(ref), (current) => {
             const surface = browserSurface(tabId);
             const withoutPlaceholder = tabId
               ? current.surfaces.filter((entry) => entry.id !== "browser:new")
               : current.surfaces;
-            return upsertSurface({ ...current, surfaces: withoutPlaceholder }, surface);
+            const next = upsertSurface({ ...current, surfaces: withoutPlaceholder }, surface);
+            return options?.reveal === false && !current.isOpen ? { ...next, isOpen: false } : next;
           }),
         ),
 
