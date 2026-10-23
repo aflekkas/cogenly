@@ -1462,20 +1462,23 @@ const make = (options: IntegrationsOptions = {}) =>
             },
             labelId,
           );
-          const record =
-            typeof result === "object" && result !== null
-              ? (result as Record<string, unknown>)
-              : undefined;
           // A server that echoes its bearer token must not hand it to the agent.
           const live = liveTokens.get(integration.id);
-          const content = redactValue(
+          const sanitized = redactValue(
             result ?? null,
             [live?.accessToken, live?.refreshToken, live?.clientSecret].filter(
               (secret): secret is string => secret !== undefined && secret.length >= 8,
             ),
           );
+          const record =
+            typeof sanitized === "object" && sanitized !== null
+              ? (sanitized as Record<string, unknown>)
+              : undefined;
           return {
-            content,
+            content: record !== undefined && "content" in record ? record.content : sanitized,
+            ...(record !== undefined && "structuredContent" in record
+              ? { structuredContent: record.structuredContent }
+              : {}),
             ...(typeof record?.isError === "boolean" ? { isError: record.isError } : {}),
           } satisfies IntegrationCallResult;
         }),

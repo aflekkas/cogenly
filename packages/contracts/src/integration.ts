@@ -320,6 +320,7 @@ export type IntegrationCallInput = typeof IntegrationCallInput.Type;
 /** The upstream tool result, passed through without credential material. */
 export const IntegrationCallResult = Schema.Struct({
   content: Schema.Unknown,
+  structuredContent: Schema.optional(Schema.Unknown),
   isError: Schema.optional(Schema.Boolean),
 });
 export type IntegrationCallResult = typeof IntegrationCallResult.Type;

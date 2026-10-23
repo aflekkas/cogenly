@@ -403,6 +403,7 @@ describe("Integrations gateway", () => {
         const result = yield* service.callTool(integration.name, "echo", { text: "hi" }, null);
         expect(JSON.stringify(result)).not.toContain("SECRET-VALUE-123");
         expect(JSON.stringify(result)).toContain("hi");
+        expect(result.content).toEqual([{ type: "text", text: JSON.stringify({ text: "hi" }) }]);
         expect(
           upstream.seen.some((entry) => entry.authorization === "Bearer SECRET-VALUE-123"),
         ).toBe(true);

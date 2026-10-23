@@ -115,7 +115,7 @@ const testLayer = (
 };
 const echoResult = Schema.decodeUnknownSync(
   Schema.Struct({
-    content: Schema.Struct({ content: Schema.Array(Schema.Struct({ text: Schema.String })) }),
+    content: Schema.Array(Schema.Struct({ text: Schema.String })),
   }),
 );
 
@@ -182,7 +182,7 @@ describe("managed Google integrations", () => {
           { text: "account routing" },
           undefined,
         );
-        expect(echoResult(response).content.content[0]?.text).toContain("account routing");
+        expect(echoResult(response).content[0]?.text).toContain("account routing");
         const listed = yield* gateway.list();
         expect(listed.integrations.every((item) => item.managed?.state === "running")).toBe(true);
         expect(listed.integrations.map((item) => item.status)).toEqual([
