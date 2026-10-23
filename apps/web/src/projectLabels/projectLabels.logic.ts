@@ -237,24 +237,30 @@ export interface ProjectFolderChangeThread {
   readonly latestRun: unknown;
 }
 
-/** True for a chat with turns: the server refuses to re-parent it, so it forks. */
+/**
+ * True for a chat with turns. Plain moves used to fork such chats into the
+ * project; they now re-home in place (the server starts a fresh provider
+ * session in the project folder with a context handoff), so nothing forks
+ * on a plain move. Kept for the pickers, which only need the distinction to
+ * word their actions, and explicit forks still go through the
+ * forkThreadToProject RPC. Always false today.
+ */
 export function threadForksIntoProjects(thread: ProjectFolderChangeThread): boolean {
-  return (
-    (thread.source.surface ?? "chat") === "chat" &&
-    thread.source.agent?.role !== "work" &&
-    thread.latestRun !== null
-  );
+  void thread;
+  return false;
 }
 
 /**
- * How putting a thread in `folderId` happens. A chat with turns is forked
- * into the project (the original stays where it is) because its history ran
- * in another directory; a turnless chat or Work files in place, and taking a
- * thread out of a project is always a move.
+ * How putting a thread in `folderId` happens. Every thread files in place:
+ * the server re-homes the same thread, and its next turn runs in the new
+ * folder. (An explicit fork remains available through the
+ * forkThreadToProject RPC for callers that ask for a copy.)
  */
 export function projectFolderChangeKind(
   thread: ProjectFolderChangeThread,
   folderId: ProjectLabelId | null,
 ): "move" | "fork" {
-  return folderId !== null && threadForksIntoProjects(thread) ? "fork" : "move";
+  void thread;
+  void folderId;
+  return "move";
 }

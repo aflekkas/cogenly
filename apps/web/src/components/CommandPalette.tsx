@@ -2101,7 +2101,7 @@ function OpenCommandPaletteDialog(props: {
     const folderState = threadFolderState(activeThread, activeFolderDirectory);
     const thread = activeThread;
     const previous = priorFiling(folderState);
-    // A chat with turns goes into a project as a fork, not a move.
+    // Chats re-home into a project in place; forks are explicit only.
     const forks = threadForksIntoProjects(thread);
     if (folderState.options.length > 0) {
       actionItems.push({

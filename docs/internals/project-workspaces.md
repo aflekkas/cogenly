@@ -48,15 +48,19 @@ it does not own a copy.
   the launch records it as the thread's worktree path (made if missing), so its
   cwd stays put when the Work is later re-filed, and provider sessions, which
   are keyed by cwd, keep resuming.
-- Moving a chat to a project forks it: the new chat is created in the project,
-  carries the history (context handoff), and starts in the project directory.
-  The original chat is left where it was. Chats with turns are never
-  re-parented; a brand-new chat with no turns yet may still be filed
-  directly, and unfiling stays allowed.
+- Moving a chat to a project re-homes it: the same thread is re-filed, and
+  its next turn runs with the project directory as its working directory (an
+  unfiled chat runs in its scratch folder again). Provider sessions are
+  keyed by cwd, so the next turn starts a fresh provider session in the new
+  cwd, seeded with a portable context handoff of the prior history — the
+  same resume-fallback path as a provider switch, for Claude, Codex and
+  Muse alike. Moving never happens mid-turn: a thread with an active run
+  refuses until that run settles. An explicit "fork to project" action still
+  creates a copy carrying the history and leaves the original where it was.
 - A persistent agent's project is its conversation's folder membership, not a
-  field on the agent. That conversation is the agent's single ongoing thread,
-  so it is exempt from the fork rule: moving an agent re-files the same
-  thread, which then runs in the new project dir with its manifest.
+  field on the agent. That conversation is the agent's single ongoing thread:
+  moving an agent re-files the same thread, which then runs in the new
+  project dir with its manifest.
 - Agents reach resources through the `cogenly` MCP server: list, read (paged
   text), and recall (search across the project's files). Threads in a project
   get a short manifest of its resources in their context.
@@ -90,9 +94,13 @@ now, while only one environment holds a project:
    resolve against the local `projectsRoot` at the edge.
 2. Project identity is the id in `.cogenly-project.json`, not the folder name
    or path.
-3. Repositories are described portably by their source links (GitHub
-   owner/repo, remote URL). A local-only folder with no remote is marked
-   environment-local.
+3. Repositories are identified portably by their remote, never by local
+   path. Each label↔repository link stores the normalized remote
+   (`host/owner/repo`: lowercase host, ssh/https unified, no `.git`) and the
+   repository's directory name under the project folder, filled on link and
+   on clone and backfilled from the checkout's git remote on read. A
+   repository with no remote stores null and is local-only on this machine.
+   Source links (GitHub owner/repo) remain a separate, coarser grouping.
 4. Resource identity is a content hash plus a relative path, so two copies of a
    project can be compared without trusting timestamps.
 5. File access goes through one project-files service (list, read, write,

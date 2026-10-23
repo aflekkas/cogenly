@@ -38,11 +38,13 @@ const isForkableChat = (thread: OrchestrationV2AppThread): boolean =>
   thread.lineage.relationshipToParent !== "subagent";
 
 /**
- * Move a chat with turns into a project by forking it: the source chat keeps
+ * Explicitly fork a chat with turns into a project: the source chat keeps
  * its history untouched, and the new chat — filed in the target project,
  * carrying the history through a `thread.fork` context transfer — runs with
- * the project dir as its working directory from its first turn. Turnless
- * chats keep using moveThread, and Work threads keep their repo assignment.
+ * the project dir as its working directory from its first turn. Plain filing
+ * (moveThread) re-homes the same chat instead; this stays for callers that
+ * ask for a copy. Turnless chats keep using moveThread, and Work threads
+ * keep their repo assignment.
  */
 export const forkThreadToProject: (
   input: ForkThreadToProjectInput,
@@ -116,7 +118,7 @@ export const forkThreadToProject: (
         ),
       ),
     );
-  // The fork lands turnless, so the re-parenting gate lets it file.
+  // The fork lands turnless, so filing it cannot hit the active-run refusal.
   yield* deps.labels.moveThread({ threadId: targetThreadId, folderId: input.labelId });
   return { threadId: targetThreadId };
 });

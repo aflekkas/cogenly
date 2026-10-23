@@ -9,6 +9,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import * as Stream from "effect/Stream";
 import * as Queue from "effect/Queue";
 import * as Labels from "./ProjectLabelService.ts";
+import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
 import * as Events from "../persistence/OrchestrationEventStore.ts";
 import * as Sqlite from "../persistence/Sqlite.ts";
 const database = Sqlite.layerMemory.pipe(Layer.provide(NodeServices.layer));
@@ -100,6 +101,78 @@ describe("project labels", () => {
     }).pipe(Effect.provide(layer)),
   );
 
+  it.effect("stores the directory name on link and marks a repo with no remote local-only", () =>
+    Effect.gen(function* () {
+      yield* seed;
+      const service = yield* Labels.ProjectLabelService;
+      const { label } = yield* service.create({ name: "Spawn" });
+      yield* service.linkRepository({ labelId: label.id, repositoryId: repoA });
+      // No identity resolver in this layer: the directory name still lands,
+      // and the remote stays null (local-only) instead of guessing.
+      expect((yield* service.read(label.id)).label.repositories).toEqual([
+        { repositoryId: repoA, remote: null, directoryName: "repo-a" },
+      ]);
+      const sql = yield* SqlClient.SqlClient;
+      expect(yield* sql`SELECT remote, directory_name FROM label_repositories`).toEqual([
+        { remote: null, directory_name: "repo-a" },
+      ]);
+    }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("stores the normalized remote on link and backfills links that predate it", () =>
+    Effect.gen(function* () {
+      yield* seed;
+      const service = yield* Labels.ProjectLabelService;
+      const sql = yield* SqlClient.SqlClient;
+      const { label } = yield* service.create({ name: "Spawn" });
+      yield* service.linkRepository({ labelId: label.id, repositoryId: repoB });
+      expect((yield* service.read(label.id)).label.repositories).toEqual([
+        { repositoryId: repoB, remote: "github.com/spawn/repo-b", directoryName: "repo-b" },
+      ]);
+      // A link written before portable identity backfills from the remote
+      // on read, and the backfill is stored.
+      yield* sql`UPDATE label_repositories SET remote = NULL, directory_name = NULL WHERE repository_id = ${repoB}`;
+      expect((yield* service.read(label.id)).label.repositories).toEqual([
+        { repositoryId: repoB, remote: "github.com/spawn/repo-b", directoryName: "repo-b" },
+      ]);
+      expect(yield* sql`SELECT remote, directory_name FROM label_repositories`).toEqual([
+        { remote: "github.com/spawn/repo-b", directory_name: "repo-b" },
+      ]);
+      // A repository whose checkout has no remote stays local-only.
+      yield* service.linkRepository({ labelId: label.id, repositoryId: repoA });
+      expect(
+        (yield* service.read(label.id)).label.repositories?.find(
+          (link) => link.repositoryId === repoA,
+        ),
+      ).toEqual({ repositoryId: repoA, remote: null, directoryName: "repo-a" });
+    }).pipe(
+      Effect.provide(
+        Labels.layer.pipe(
+          Layer.provideMerge(
+            Layer.succeed(RepositoryIdentityResolver.RepositoryIdentityResolver, {
+              resolve: (cwd) =>
+                Effect.succeed(
+                  cwd.endsWith("repo-b")
+                    ? {
+                        canonicalKey: "github.com/spawn/repo-b",
+                        locator: {
+                          source: "git-remote" as const,
+                          remoteName: "origin",
+                          remoteUrl: "git@github.com:Spawn/Repo-B.git",
+                        },
+                        rootPath: cwd,
+                      }
+                    : null,
+                ),
+            }),
+          ),
+          Layer.provideMerge(persistence),
+          Layer.provide(NodeServices.layer),
+        ),
+      ),
+    ),
+  );
+
   it.effect("enforces one folder and derives work membership while explicit filing wins", () =>
     Effect.gen(function* () {
       yield* seed;
@@ -161,12 +234,13 @@ describe("project labels", () => {
     }).pipe(Effect.provide(layer)),
   );
 
-  it.effect("requires chats with turns to fork into a project instead of moving", () =>
+  it.effect("re-homes chats with turns into a project, keeping the same thread", () =>
     Effect.gen(function* () {
       yield* seed;
       const service = yield* Labels.ProjectLabelService;
       const sql = yield* SqlClient.SqlClient;
       const folder = (yield* service.create({ name: "Folder" })).label.id;
+      const other = (yield* service.create({ name: "Other" })).label.id;
       const at = "2026-01-01T00:00:00.000Z";
       for (const [id, payload] of [
         ["turned-chat", { surface: "chat" }],
@@ -176,13 +250,19 @@ describe("project labels", () => {
         yield* sql`INSERT INTO orchestration_v2_projection_threads(thread_id,project_id,title,default_provider,runtime_mode,interaction_mode,created_at,updated_at,payload_json) VALUES (${id},${repoA},${id},'codex','full-access','default',${at},${at},${JSON.stringify(payload)})`;
         yield* sql`INSERT INTO orchestration_v2_projection_runs(run_id,thread_id,ordinal,provider,status,requested_at,payload_json) VALUES (${`${id}:run`},${id},1,'codex','completed',${at},'{}')`;
       }
-      // A chat with turns cannot re-parent into a project.
+      // A chat with turns re-files in place: same thread id, new folder.
       expect(
-        (yield* service
-          .moveThread({ threadId: ThreadId.make("turned-chat"), folderId: folder })
-          .pipe(Effect.flip)).reason,
-      ).toBe("fork_required");
-      expect((yield* service.getThreadLabels(ThreadId.make("turned-chat"))).labels).toEqual([]);
+        yield* service.moveThread({ threadId: ThreadId.make("turned-chat"), folderId: folder }),
+      ).toEqual({ threadId: ThreadId.make("turned-chat"), projectFolderId: folder });
+      expect(
+        (yield* service.getThreadLabels(ThreadId.make("turned-chat"))).labels.map(
+          (tag) => tag.labelId,
+        ),
+      ).toEqual([folder]);
+      // Moving between projects keeps the same thread too.
+      expect(
+        yield* service.moveThread({ threadId: ThreadId.make("turned-chat"), folderId: other }),
+      ).toEqual({ threadId: ThreadId.make("turned-chat"), projectFolderId: other });
       // Unfiling stays allowed, and Work keeps its repo-following assignment.
       yield* sql`INSERT INTO thread_project_labels(thread_id,label_id) VALUES ('turned-unfiled-chat',${folder})`;
       expect(
@@ -194,6 +274,33 @@ describe("project labels", () => {
       expect(
         yield* service.moveThread({ threadId: ThreadId.make("turned-work"), folderId: folder }),
       ).toEqual({ threadId: ThreadId.make("turned-work"), projectFolderId: folder });
+    }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("refuses to move a thread while a run is active in it", () =>
+    Effect.gen(function* () {
+      yield* seed;
+      const service = yield* Labels.ProjectLabelService;
+      const sql = yield* SqlClient.SqlClient;
+      const folder = (yield* service.create({ name: "Folder" })).label.id;
+      const at = "2026-01-01T00:00:00.000Z";
+      yield* sql`INSERT INTO orchestration_v2_projection_threads(thread_id,project_id,title,default_provider,runtime_mode,interaction_mode,created_at,updated_at,payload_json) VALUES ('active-chat',${repoA},'active-chat','codex','full-access','default',${at},${at},'{"surface":"chat"}')`;
+      for (const status of ["preparing", "queued", "starting", "running", "waiting"] as const) {
+        yield* sql`DELETE FROM orchestration_v2_projection_runs WHERE thread_id = 'active-chat'`;
+        yield* sql`INSERT INTO orchestration_v2_projection_runs(run_id,thread_id,ordinal,provider,status,requested_at,payload_json) VALUES ('active-chat:run','active-chat',1,'codex',${status},${at},'{}')`;
+        expect(
+          (yield* service
+            .moveThread({ threadId: ThreadId.make("active-chat"), folderId: folder })
+            .pipe(Effect.flip)).reason,
+        ).toBe("thread_active");
+        // The refused move leaves the filing untouched.
+        expect((yield* service.getThreadLabels(ThreadId.make("active-chat"))).labels).toEqual([]);
+      }
+      // Once the run settles, the same move goes through.
+      yield* sql`UPDATE orchestration_v2_projection_runs SET status = 'completed' WHERE thread_id = 'active-chat'`;
+      expect(
+        yield* service.moveThread({ threadId: ThreadId.make("active-chat"), folderId: folder }),
+      ).toEqual({ threadId: ThreadId.make("active-chat"), projectFolderId: folder });
     }).pipe(Effect.provide(layer)),
   );
 
@@ -231,13 +338,14 @@ describe("project labels", () => {
           projectFolderId: null,
         });
       }
-      // The gate still holds for an ordinary chat with turns.
+      // An ordinary chat with turns re-homes the same way now.
       yield* sql`DELETE FROM agents WHERE agent_id = 'agent:migrated'`;
       expect(
-        (yield* service
-          .moveThread({ threadId: ThreadId.make("migrated-conversation"), folderId: first })
-          .pipe(Effect.flip)).reason,
-      ).toBe("fork_required");
+        yield* service.moveThread({
+          threadId: ThreadId.make("migrated-conversation"),
+          folderId: first,
+        }),
+      ).toEqual({ threadId: ThreadId.make("migrated-conversation"), projectFolderId: first });
     }).pipe(Effect.provide(layer)),
   );
 

@@ -115,8 +115,8 @@ const make = Effect.gen(function* () {
   const changed = PubSub.publish(changes, undefined).pipe(Effect.asVoid);
   const list = () => store.list().pipe(Effect.map((agents) => ({ agents })));
   // The conversation's folder membership is the agent's project, so it also
-  // decides the conversation's cwd and project manifest. The re-parenting
-  // gate exempts agent conversations; they move instead of forking.
+  // decides the conversation's cwd and project manifest. Like every thread
+  // it re-files in place (never forks), and not while a run is active.
   const fileConversation = (threadId: ThreadId, folderId: ProjectLabelId | null) =>
     labels.moveThread({ threadId, folderId }).pipe(
       Effect.mapError(

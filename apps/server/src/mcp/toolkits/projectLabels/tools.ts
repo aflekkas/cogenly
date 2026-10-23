@@ -44,7 +44,7 @@ export const ProjectLabelsToolkit = Toolkit.make(
     parameters: Tool.EmptyParams,
     success: ProjectLabelListResult,
     description:
-      "List project folders, their repositories, project chat (projectChatThreadId) and effective thread counts. Archived folders carry archivedAt. Folders provide context only and never grant access.",
+      "List project folders, their repositories (each with its normalized remote in repositories[].remote, null for a local-only repository, and its directoryName under the project folder), project chat (projectChatThreadId) and effective thread counts. Archived folders carry archivedAt. Folders provide context only and never grant access.",
   })
     .annotate(Tool.Readonly, true)
     .annotate(Tool.Destructive, false),
@@ -63,21 +63,21 @@ export const ProjectLabelsToolkit = Toolkit.make(
     parameters: ForkThreadToProjectInput,
     success: FileThreadIntoProjectResult,
     description:
-      "File a thread into a project. A chat with turns is forked: the returned threadId is the new project chat carrying the history, and the original chat is left in place. Turnless chats and Work threads are filed directly. Prefer this over t3_thread_move_project_folder for chats.",
+      "File a thread into a project. The same thread is re-filed (never forked): it keeps its history, and its next turn runs in the project folder with a fresh provider session seeded from that history. Refused while a turn is running in the thread.",
   }).annotate(Tool.Destructive, false),
   Tool.make("t3_thread_move_project_folder", {
     ...shared,
     parameters: MoveThreadProjectFolderInput,
     success: ThreadProjectFolderResult,
     description:
-      "Move a thread into one project folder. folderId null clears explicit filing and restores the repository default for work. A chat with turns cannot be re-parented; use t3_project_label_file_thread to fork it into the project. Folders provide context only and never grant access.",
+      "Move a thread into one project folder, or out of it with folderId null (which restores the repository default for work). The same thread is re-filed: a filed chat's next turn runs in the project folder, an unfiled one in its scratch folder, with a fresh provider session seeded from its history. Refused while a turn is running in the thread. Folders provide context only and never grant access.",
   }).annotate(Tool.Destructive, false),
   Tool.make("t3_thread_set_project_labels", {
     ...shared,
     parameters: SetThreadProjectLabelsInput,
     success: ThreadProjectLabelsResult,
     description:
-      "Move a thread into one project folder using a singleton labelIds array. Empty clears explicit filing and restores the repository default for work. A chat with turns cannot be re-parented; use t3_project_label_file_thread to fork it into the project. Folders never widen access.",
+      "Move a thread into one project folder using a singleton labelIds array. Empty clears explicit filing and restores the repository default for work. The same thread is re-filed (never forked); refused while a turn is running in it. Folders never widen access.",
   }).annotate(Tool.Destructive, true),
   Tool.make("t3_project_label_create", {
     ...shared,

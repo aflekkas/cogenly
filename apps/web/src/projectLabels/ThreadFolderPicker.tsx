@@ -139,7 +139,7 @@ export function ThreadFolderPicker(props: {
     }
   };
 
-  // A chat with turns goes into a project as a fork, so say so.
+  // Chats re-home in place now; `forks` stays for the explicit fork action.
   const forks = threadForksIntoProjects(thread);
   const action = forks ? "Fork into project" : "Move to folder";
   const triggerLabel = current ? `In ${current.label.name}. ${action}` : action;

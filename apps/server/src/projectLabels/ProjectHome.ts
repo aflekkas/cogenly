@@ -210,7 +210,20 @@ const make = Effect.gen(function* () {
     function* (id) {
       const { label } = yield* labels.read(id);
       const repositories = yield* Effect.forEach(label.repositoryIds, (repositoryId) =>
-        repositoryTitle(repositoryId).pipe(Effect.map((title) => ({ id: repositoryId, title }))),
+        repositoryTitle(repositoryId).pipe(
+          Effect.map((title) => {
+            const link = label.repositories?.find(
+              (candidate) => candidate.repositoryId === repositoryId,
+            );
+            return {
+              id: repositoryId,
+              title,
+              ...(link === undefined
+                ? {}
+                : { remote: link.remote, directoryName: link.directoryName }),
+            };
+          }),
+        ),
       );
       return {
         projectFolderId: label.id,

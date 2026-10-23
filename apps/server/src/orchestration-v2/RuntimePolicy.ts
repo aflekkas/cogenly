@@ -71,6 +71,28 @@ const conversationModeFor = (
 ): Pick<ProviderAdapter.ProviderAdapterV2RuntimePolicy, "conversationMode"> =>
   thread.surface === "chat" || thread.surface === "builder" ? { conversationMode: true } : {};
 
+/**
+ * Whether a provider session opened in `previousCwd` must give way to a
+ * fresh session in `nextCwd`: provider sessions are keyed by cwd, so a
+ * thread re-homed into a project (or back to its scratch folder) cannot
+ * resume the session it ran in before. Only a thread with started history
+ * needs the fresh session seeded; a first turn simply opens where it is.
+ */
+export function providerSessionCwdChanged(input: {
+  readonly previousCwd: string | null | undefined;
+  readonly nextCwd: string | null | undefined;
+  readonly hasPriorStartedRun: boolean;
+}): boolean {
+  return (
+    input.hasPriorStartedRun &&
+    typeof input.previousCwd === "string" &&
+    input.previousCwd.length > 0 &&
+    typeof input.nextCwd === "string" &&
+    input.nextCwd.length > 0 &&
+    input.previousCwd !== input.nextCwd
+  );
+}
+
 export const layer: Layer.Layer<RuntimePolicyV2> = Layer.succeed(RuntimePolicyV2, {
   resolve: (input) =>
     Effect.succeed({

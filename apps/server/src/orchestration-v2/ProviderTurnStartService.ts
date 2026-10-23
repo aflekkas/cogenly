@@ -537,6 +537,24 @@ export const layer: Layer.Layer<
       const existingSessionProjection = projection.providerSessions.find(
         (candidate) => candidate.id === providerSessionId,
       );
+      // A thread whose working directory changed since its provider session
+      // opened (a chat re-homed into a project, or back to its scratch
+      // folder) cannot resume that session: provider sessions are keyed by
+      // cwd. Close the old session so the open below starts one in the new
+      // cwd, and skip the resume further down so the fresh session is seeded
+      // with a portable context handoff instead. This is the same
+      // resume-fallback path a provider switch uses, for every adapter.
+      const cwdChanged = RuntimePolicy.providerSessionCwdChanged({
+        previousCwd: existingSessionProjection?.cwd,
+        nextCwd: resolvedRuntimePolicy.cwd,
+        hasPriorStartedRun: projection.runs.some(
+          (source) => source.ordinal < run.ordinal && source.startedAt !== null,
+        ),
+      });
+      if (cwdChanged)
+        yield* providerSessions
+          .close(providerSessionId)
+          .pipe(Effect.ignoreCause({ log: true }));
       const sessionResult = yield* Effect.result(
         providerSessions.open({
           threadId: projection.thread.id,
@@ -806,7 +824,7 @@ export const layer: Layer.Layer<
             handoff.delivery?.status === "pending",
         );
         const resumed = yield* Effect.result(
-          uncertainDelivery || rotateAgentSession
+          uncertainDelivery || rotateAgentSession || cwdChanged
             ? Effect.fail(
                 new ProviderAdapter.ProviderAdapterTurnStartError({
                   driver: session.driver,
@@ -831,7 +849,11 @@ export const layer: Layer.Layer<
           driver: session.driver,
           providerThreadId: providerThread.id,
           runId,
-          reason: uncertainDelivery ? "uncertain_history_delivery" : "resume_failed",
+          reason: uncertainDelivery
+            ? "uncertain_history_delivery"
+            : cwdChanged
+              ? "cwd_changed"
+              : "resume_failed",
           errorTag: resumed.failure._tag,
         });
         const replacement = yield* loadFromProvider(
