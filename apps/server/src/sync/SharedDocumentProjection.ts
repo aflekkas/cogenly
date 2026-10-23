@@ -18,6 +18,23 @@ const json = Schema.decodeUnknownEffect(
   Schema.fromJsonString(Schema.Record(Schema.String, Schema.Json)),
 );
 const storage = (cause: unknown) => new SharedStateError({ reason: "storage", cause });
+/** Keep an active binding to this remote before choosing a default local clone. */
+const executionCheckout = Effect.fn("SharedState.executionCheckout")(function* (
+  remote: string | null,
+  previousId: string | null,
+) {
+  const sql = yield* SqlClient.SqlClient;
+  const previous = yield* sql<{
+    project_id: string;
+    workspace_root: string;
+  }>`SELECT p.project_id,p.workspace_root FROM projection_projects p WHERE p.project_id=${previousId} AND p.deleted_at IS NULL AND (${remote} IS NULL OR EXISTS (SELECT 1 FROM label_repositories r WHERE r.repository_id=p.project_id AND r.remote=${remote}) OR EXISTS (SELECT 1 FROM shared_repository_checkouts r WHERE r.repository_id=p.project_id AND r.remote=${remote}))`;
+  if (previous[0] || remote === null) return previous[0];
+  const mapped = yield* sql<{
+    project_id: string;
+    workspace_root: string;
+  }>`SELECT p.project_id,p.workspace_root FROM projection_projects p JOIN shared_repository_checkouts r ON r.repository_id=p.project_id WHERE r.remote=${remote} AND p.deleted_at IS NULL LIMIT 1`;
+  return mapped[0];
+});
 const repository = Effect.fn("SharedState.repository")(function* (
   id: string | null,
   kind: SharedDocumentKind,
@@ -265,13 +282,6 @@ export const projectDocument = Effect.fn("SharedState.projectDocument")(function
     return;
   }
   const remote = typeof fields.repositoryRemote === "string" ? fields.repositoryRemote : null;
-  const locals =
-    remote === null
-      ? []
-      : yield* sql<{
-          project_id: string;
-          workspace_root: string;
-        }>`SELECT p.project_id,p.workspace_root FROM projection_projects p JOIN shared_repository_checkouts r ON r.repository_id=p.project_id WHERE r.remote=${remote} AND p.deleted_at IS NULL LIMIT 1`;
   if (kind === "agent") {
     const decoded = yield* Effect.result(decodeAgent(fields));
     if (decoded._tag === "Failure") return;
@@ -280,6 +290,10 @@ export const projectDocument = Effect.fn("SharedState.projectDocument")(function
       payload_json: string;
     }>`SELECT payload_json FROM agents WHERE agent_id=${id}`;
     const previous = existing[0] ? yield* json(existing[0].payload_json) : {};
+    const checkout = yield* executionCheckout(
+      remote,
+      typeof previous.projectId === "string" ? previous.projectId : null,
+    );
     const { repositoryRemote: _, ...profile } = f;
     const chainChanged =
       encodeJson(previous.modelSelection ?? null) !== encodeJson(f.modelSelection) ||
@@ -291,7 +305,7 @@ export const projectDocument = Effect.fn("SharedState.projectDocument")(function
       projectId:
         preserveLocalBindings && previous.projectId !== undefined
           ? previous.projectId
-          : (locals[0]?.project_id ?? previous.projectId ?? null),
+          : (checkout?.project_id ?? previous.projectId ?? null),
       conversationThreadId: previous.conversationThreadId ?? `agent-conversation:${id}`,
       projectFolderId: null,
       updatedAt: at,
@@ -322,14 +336,20 @@ export const projectDocument = Effect.fn("SharedState.projectDocument")(function
     thread_id: string | null;
     workspace_strategy_json: string;
   }>`SELECT project_id,thread_id,workspace_strategy_json FROM scheduled_tasks WHERE task_id=${id}`;
+  const checkout = yield* executionCheckout(remote, previous[0]?.project_id ?? null);
+  const keepStrategy =
+    previous[0] &&
+    (preserveLocalBindings ||
+      (checkout?.project_id === previous[0].project_id &&
+        !changedFields?.includes("workspaceStrategy")));
   const strategy =
-    preserveLocalBindings && previous[0]
+    keepStrategy && previous[0]
       ? yield* json(previous[0].workspace_strategy_json)
       : f.workspaceStrategy.type === "existing_worktree"
-        ? locals[0]
+        ? checkout
           ? {
               type: "existing_worktree",
-              worktreePath: `${locals[0].workspace_root}/${f.workspaceStrategy.relativePath}`,
+              worktreePath: `${checkout.workspace_root}/${f.workspaceStrategy.relativePath}`,
               ...(f.workspaceStrategy.branch ? { branch: f.workspaceStrategy.branch } : {}),
             }
           : previous[0]
@@ -339,7 +359,7 @@ export const projectDocument = Effect.fn("SharedState.projectDocument")(function
   const projectId =
     preserveLocalBindings && previous[0]
       ? previous[0].project_id
-      : (locals[0]?.project_id ?? previous[0]?.project_id ?? `remote:${remote ?? id}`);
+      : (checkout?.project_id ?? previous[0]?.project_id ?? `remote:${remote ?? id}`);
   const schedule = encodeJson(f.schedule);
   const occurrence = f.enabled
     ? nextScheduledRunAt(f.schedule, yield* DateTime.now, {

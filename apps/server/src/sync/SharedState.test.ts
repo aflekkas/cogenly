@@ -189,6 +189,79 @@ describe("SharedState", () => {
       ]);
     }).pipe(Effect.provide(layer)),
   );
+  it.effect("peer metadata edits keep valid agent and schedule execution bindings", () =>
+    Effect.gen(function* () {
+      const state = yield* SharedState.SharedState;
+      const sql = yield* SqlClient.SqlClient;
+      const f = agentFixture();
+      for (const id of ["clone-one", "clone-two"])
+        yield* sql`INSERT INTO projection_projects(project_id,title,workspace_root,scripts_json,created_at,updated_at) VALUES (${id},${id},${`/repos/${id}`},'[]',${f.createdAt},${f.createdAt})`;
+      yield* state.write("project", "label:clones", project);
+      for (const id of ["clone-one", "clone-two"])
+        yield* sql`INSERT INTO label_repositories(label_id,repository_id,remote,directory_name) VALUES ('label:clones',${id},'github.com/org/repo',${id})`;
+      yield* sql`INSERT INTO shared_repository_checkouts(remote,repository_id) VALUES ('github.com/org/repo','clone-one')`;
+      yield* sql`INSERT INTO agents(agent_id,conversation_thread_id,payload_json,enabled,daily_run_cap,owner_machine) VALUES (${f.id},${f.conversationThreadId},${JSON.stringify({ ...f, projectId: "clone-two" })},1,${f.dailyRunCap},${local})`;
+      const strategy = {
+        type: "existing_worktree",
+        worktreePath: "/repos/clone-two/worktrees/job",
+      };
+      yield* sql`INSERT INTO scheduled_tasks(task_id,agent_id,title,prompt,enabled,schedule_json,project_id,workspace_strategy_json,model_selection_json,runtime_mode,interaction_mode,created_by,creation_source,created_at,updated_at,last_run_status,run_count,owner_machine) VALUES ('task:clone',${f.id},'Check','Check work',1,'{"type":"interval","everyMs":60000}','clone-two',${JSON.stringify(strategy)},${JSON.stringify(f.modelSelection)},'full-access','default','user','web',${f.createdAt},${f.createdAt},'never',0,${local})`;
+      yield* state.capture("agent", f.id);
+      yield* state.capture("schedule", "task:clone");
+      const edit = (
+        kind: "agent" | "schedule",
+        id: string,
+        fields: SharedDocumentChange["fields"],
+        logical: number,
+      ): SharedDocumentChange => ({
+        ...change(fields),
+        kind,
+        id,
+        clocks: Object.fromEntries(
+          Object.keys(fields).map((key) => [key, { wall: 0, logical, node: peer }]),
+        ),
+      });
+      yield* state.receive(batch([edit("agent", f.id, { name: "Peer rename" }, 10)]), peer, false);
+      yield* state.receive(
+        batch([edit("schedule", "task:clone", { title: "Peer title", enabled: false }, 11)], 1),
+        peer,
+        false,
+      );
+      expect(
+        yield* sql`SELECT json_extract(payload_json,'$.projectId') AS project_id, json_extract(payload_json,'$.name') AS name FROM agents`,
+      ).toEqual([{ project_id: "clone-two", name: "Peer rename" }]);
+      expect(
+        yield* sql`SELECT project_id,title,enabled,workspace_strategy_json FROM scheduled_tasks`,
+      ).toEqual([
+        {
+          project_id: "clone-two",
+          title: "Peer title",
+          enabled: 0,
+          workspace_strategy_json: JSON.stringify(strategy),
+        },
+      ]);
+      // A missing binding may materialize from the checkout map on the next projection.
+      yield* sql`UPDATE agents SET payload_json=json_set(payload_json,'$.projectId',NULL) WHERE agent_id=${f.id}`;
+      yield* sql`UPDATE scheduled_tasks SET project_id='remote:github.com/org/repo' WHERE task_id='task:clone'`;
+      yield* state.receive(
+        batch([edit("agent", f.id, { name: "Materialized" }, 12)], 2),
+        peer,
+        false,
+      );
+      expect(
+        yield* sql`SELECT json_extract(payload_json,'$.projectId') AS project_id FROM agents`,
+      ).toEqual([{ project_id: "clone-one" }]);
+      expect(yield* sql`SELECT project_id,workspace_strategy_json FROM scheduled_tasks`).toEqual([
+        {
+          project_id: "clone-one",
+          workspace_strategy_json: JSON.stringify({
+            type: "existing_worktree",
+            worktreePath: "/repos/clone-one/worktrees/job",
+          }),
+        },
+      ]);
+    }).pipe(Effect.provide(layer)),
+  );
   it.effect(
     "commits projection and outbound log together, stores duplicates and replays idempotently",
     () =>

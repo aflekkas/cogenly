@@ -57,7 +57,8 @@ preserve task references and webhook URLs; new IDs hash keys that are not portab
 
 Shared repository identity is its remote. Local checkout IDs, absolute paths,
 thread bindings, credentials, run counters and fallback position/reset time do
-not replicate. Existing-worktree references travel only relative to a
+not replicate. Peer metadata edits preserve valid local execution bindings;
+checkout resolution only fills a missing binding. Existing-worktree references travel only relative to a
 repository; a worktree outside that repository is represented as root intent.
 A remote-only repository link has no local checkout. Configuration sync never
 clones it. Provider instances referenced by model selections still need to be
