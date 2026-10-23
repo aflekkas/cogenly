@@ -103,6 +103,8 @@ export class ServerConfig extends Context.Service<
     readonly resourceMonitorPath?: string | undefined;
     readonly autoBootstrapProjectFromCwd: boolean;
     readonly logWebSocketEvents: boolean;
+    /** Peer endpoints are private even when the client listener is published. */
+    readonly peerIngress?: "loopback" | "disabled";
     readonly tailscaleServeEnabled: boolean;
     readonly tailscaleServePort: number;
     /**
@@ -242,6 +244,7 @@ const makeTest = Effect.fn("ServerConfig.makeTest")(function* (
     mode: "web",
     autoBootstrapProjectFromCwd: false,
     logWebSocketEvents: false,
+    peerIngress: "loopback",
     tailscaleServeEnabled: false,
     tailscaleServePort: 443,
     serverTimeZone: systemLocalTimeZone(),

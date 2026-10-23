@@ -14,9 +14,11 @@ or launch work remotely. Provider reports contain status, never login tokens.
 An admin-connected client calls `machines.prepareJoin` on the spoke, passes its
 key thumbprint to `machines.createPeerGrant` on the hub, and hands the resulting
 join code to `machines.joinHub` on the spoke. Only the spoke server redeems it.
-The hub grant expires after ten minutes and can be spent once. The CLI fallback
-can omit the thumbprint: that code is a secret usable by the first redeemer,
-whose proof key is then bound. Transfer it privately.
+The hub grant expires after ten minutes and can be spent once. The CLI follows
+the same prepare → grant → join exchange: grants always bind the intended spoke
+key before issuance, and old unbound grants are refused.
+Transfer the code privately. The CLI reads it through a hidden prompt or
+`--code-stdin`, never a positional argument or a suggested command line.
 
 The hub issues a one-year DPoP session with subject `peer`, holding
 `sync:replicate` and `peer:delegate`. Neither scope belongs to legacy, standard,
@@ -34,16 +36,50 @@ must enforce their own domain limits; these scopes do not make arbitrary RPC
 forwarding safe.
 
 The spoke pins the hub environment ID and Ed25519 public key from the admin's
-join code. On join and each connection the hub signs a fresh nonce with both
-environment IDs. The hub pins the spoke environment ID to its proof-bound
-session and checks subsequent self reports against it. Keep the environment ID,
+join code. Before join and each reconnect, a secret-free `/peer/identity` challenge
+checks that pin before sending any grant or peer token. Join and the socket
+hello also sign fresh nonces with both environment IDs. The hub pins the spoke
+environment ID to its proof-bound session and checks subsequent self reports against it. Keep the environment ID,
 environment key, and peer secrets together across restarts. Key replacement
 requires unpairing and pairing again.
 
-DPoP and the signed hello authenticate the endpoints; they do not encrypt the
-socket's contents. Use HTTPS or an encrypted network such as Tailscale. The peer
-routes use the server's existing listener and exposure policy; pairing does not
-open a separate public port or provision a tunnel.
+DPoP and the signed hello authenticate endpoints; TLS encrypts network traffic.
+The shared peer-route policy requires HTTPS/WSS, with HTTP/WS allowed only for
+literal loopback or localhost (a local SSH forward). A tailnet name or
+100.64/10 address does not exempt a route from TLS. Supplied join routes replace
+advertised routes rather than silently adding fallbacks. Entire route lists are
+validated before dialing, cannot mix TLS with loopback plaintext, and are
+validated again on reconnect, including links saved by older versions. HTTP
+redirects are never followed. Pairing does not provision a tunnel.
+
+## Private ingress boundary
+
+All `/peer` endpoints, including the secret-free identity challenge, check the
+actual socket's remote address before reading credentials or upgrading. The
+`COGENLY_PEER_INGRESS` server setting defaults to `loopback`; `disabled` refuses
+all peer ingress. Public or tailnet socket sources are refused even if they
+supply localhost Host or Tailscale identity headers. Use an SSH forward or
+Tailscale Serve terminating HTTPS and forwarding to loopback.
+
+Both Serve and Connect dial loopback, so the socket alone cannot distinguish
+them. ManagedEndpointRuntime runs cloudflared with a remotely provisioned
+loopback origin. Cloudflare adds `cf-ray` and client/forwarding headers; any
+`cf-*` header is a denial marker, never an authorization signal. This rejects
+Connect even when a public caller spoofs Tailscale headers. RFC Forwarded, Via,
+and X-Real-IP are refused too. Other X-Forwarded headers are refused unless
+`--tailscale-serve` is enabled, and then must match Serve's overwritten tuple:
+HTTPS, a single numeric tailnet source, and forwarded host. Public addresses,
+chains, and `Tailscale-Funnel-Request` are refused. Identity headers grant no
+exception; tagged Tailscale nodes need none.
+
+This boundary trusts local processes and proxy configuration. A locally
+configured public proxy that deliberately strips every ingress marker is
+indistinguishable from a local client; it must block `/peer` itself or set
+`COGENLY_PEER_INGRESS=disabled`. Do not publish an SSH forward or enable Funnel.
+The source for Serve's overwritten forwarding/Funnel headers is
+[Tailscale's reverse proxy](https://github.com/tailscale/tailscale/blob/main/ipn/ipnlocal/serve.go);
+Cloudflare's edge headers are described in its
+[HTTP headers reference](https://developers.cloudflare.com/fundamentals/reference/http-headers/).
 
 ## Connection and revocation lifetimes
 

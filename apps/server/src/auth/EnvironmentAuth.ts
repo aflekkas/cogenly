@@ -603,11 +603,11 @@ export class EnvironmentAuth extends Context.Service<
     ) => Effect.Effect<AuthenticatedSession, ServerAuthCredentialError | ServerAuthInternalError>;
     /**
      * A one-time grant another server redeems to pair as a machine. Bound to
-     * that server's proof key when it is known up front.
+     * that server's prepared proof key before issuance.
      */
     readonly issuePeerGrant: (input: {
       readonly label: string;
-      readonly proofKeyThumbprint?: string;
+      readonly proofKeyThumbprint: string;
     }) => Effect.Effect<IssuedPairingLink, ServerAuthInternalError>;
     /** Spends a peer grant for a proof-bound `peer` session. Other grants fail. */
     readonly redeemPeerGrant: (input: {
@@ -1415,7 +1415,7 @@ export const make = Effect.gen(function* () {
       scopes: AuthPeerScopes,
       label: input.label,
       ttl: PEER_GRANT_TTL,
-      ...(input.proofKeyThumbprint ? { proofKeyThumbprint: input.proofKeyThumbprint } : {}),
+      proofKeyThumbprint: input.proofKeyThumbprint,
     }).pipe(Effect.withSpan("EnvironmentAuth.issuePeerGrant"));
 
   const redeemPeerGrant: EnvironmentAuth["Service"]["redeemPeerGrant"] = Effect.fn(
@@ -1424,7 +1424,11 @@ export const make = Effect.gen(function* () {
     const grant = yield* bootstrapCredentials
       .consume(input.credential, { proofKeyThumbprint: input.proofKeyThumbprint })
       .pipe(Effect.mapError(toBootstrapExchangeError));
-    if (grant.subject !== PEER_SUBJECT || grant.method !== "one-time-token") {
+    if (
+      grant.subject !== PEER_SUBJECT ||
+      grant.method !== "one-time-token" ||
+      grant.proofKeyThumbprint !== input.proofKeyThumbprint
+    ) {
       return yield* new ServerAuthInvalidCredentialError({
         diagnostic: "Only a machine pairing grant pairs a machine.",
       });

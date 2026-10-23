@@ -15,6 +15,7 @@ import {
   type PeerCallInput,
   type PeerChannel,
   type PeerHelloInput,
+  type PeerIdentityRequest,
   type PeerHelloResult,
   type PeerJoinResult,
   PeerProtocolError,
@@ -87,6 +88,14 @@ export interface PeerHubConnection {
 export class PeerHub extends Context.Service<
   PeerHub,
   {
+    /** Prove the hub pin before a spoke sends any credential. */
+    readonly proveIdentity: (input: PeerIdentityRequest) => Effect.Effect<
+      {
+        readonly hubEnvironmentId: EnvironmentId;
+        readonly signature: string;
+      },
+      MachineError
+    >;
     /** Spend a peer grant presented by a spoke whose proof key was verified. */
     readonly redeem: (input: {
       readonly grant: string;
@@ -159,6 +168,19 @@ const make = Effect.gen(function* () {
 
   const withSecrets = <A, E>(effect: Effect.Effect<A, E, ServerSecretStore.ServerSecretStore>) =>
     Effect.provideService(effect, ServerSecretStore.ServerSecretStore, secrets);
+
+  const proveIdentity: PeerHub["Service"]["proveIdentity"] = (input) =>
+    Effect.gen(function* () {
+      const self = yield* identity.self;
+      const signature = yield* withSecrets(
+        signPeerHello({
+          hubEnvironmentId: self.environmentId,
+          spokeEnvironmentId: input.spokeEnvironmentId,
+          nonce: input.nonce,
+        }),
+      ).pipe(Effect.mapError(storage("join")));
+      return { hubEnvironmentId: self.environmentId, signature };
+    });
 
   const readRows = Effect.gen(function* () {
     const rows = yield* sql<{
@@ -567,6 +589,7 @@ const make = Effect.gen(function* () {
     });
 
   return PeerHub.of({
+    proveIdentity,
     redeem,
     issueTicket,
     connect,

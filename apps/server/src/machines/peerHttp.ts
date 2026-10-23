@@ -8,6 +8,9 @@
 import {
   AuthSyncReplicateScope,
   PEER_JOIN_PATH,
+  PEER_IDENTITY_PATH,
+  PeerIdentityRequest,
+  PeerIdentityResult,
   PEER_METHODS,
   PEER_SOCKET_PATH,
   PEER_TICKET_PATH,
@@ -30,6 +33,8 @@ import { rpcAuthorizationError } from "../auth/RpcAuthorization.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as SessionStore from "../auth/SessionStore.ts";
 import { deriveAuthClientMetadata } from "../auth/utils.ts";
+import * as ServerConfig from "../config.ts";
+import { acceptsPeerIngress } from "./peerIngress.ts";
 import * as PeerHub from "./PeerHub.ts";
 
 const refuse = (status: number, code: string) =>
@@ -50,17 +55,39 @@ const PEER_RPC_SERVER_OPTIONS = { disableTracing: true, disableFatalDefects: tru
 
 export const layer = Layer.unwrap(
   Effect.gen(function* () {
+    const config = yield* ServerConfig.ServerConfig;
     const hub = yield* PeerHub.PeerHub;
     const auth = yield* EnvironmentAuth.EnvironmentAuth;
     const sessions = yield* SessionStore.SessionStore;
     const secrets = yield* ServerSecretStore.ServerSecretStore;
     const crypto = yield* Crypto.Crypto;
 
+    const identity = HttpRouter.add(
+      "POST",
+      PEER_IDENTITY_PATH,
+      Effect.gen(function* () {
+        const request = yield* HttpServerRequest.HttpServerRequest;
+        if (!acceptsPeerIngress(request, config))
+          return refuse(403, "private_peer_ingress_required");
+        const body = yield* HttpServerRequest.schemaBodyJson(PeerIdentityRequest).pipe(
+          Effect.option,
+        );
+        if (body._tag === "None") return refuse(400, "invalid_request");
+        const result = yield* hub.proveIdentity(body.value).pipe(Effect.option);
+        if (result._tag === "None") return refuse(500, "internal_error");
+        return yield* HttpServerResponse.schemaJson(PeerIdentityResult)(result.value, {
+          headers: { "cache-control": "no-store" },
+        }).pipe(Effect.orDie);
+      }),
+    );
+
     const join = HttpRouter.add(
       "POST",
       PEER_JOIN_PATH,
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest;
+        if (!acceptsPeerIngress(request, config))
+          return refuse(403, "private_peer_ingress_required");
         // The proof names the key the new session is bound to.
         const proofKeyThumbprint = yield* verifyRequestDpopProof({ request }).pipe(
           Effect.provideService(ServerSecretStore.ServerSecretStore, secrets),
@@ -104,6 +131,8 @@ export const layer = Layer.unwrap(
       PEER_TICKET_PATH,
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest;
+        if (!acceptsPeerIngress(request, config))
+          return refuse(403, "private_peer_ingress_required");
         return yield* auth.authenticatePeerRequest(request).pipe(
           Effect.flatMap(hub.issueTicket),
           Effect.flatMap((issued) =>
@@ -127,6 +156,8 @@ export const layer = Layer.unwrap(
       PEER_SOCKET_PATH,
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest;
+        if (!acceptsPeerIngress(request, config))
+          return refuse(403, "private_peer_ingress_required");
         const session = yield* auth.authenticatePeerWebSocket(request).pipe(Effect.option);
         if (session._tag === "None") return refuse(401, "not_paired");
         const connection = yield* hub.connect(session.value);
@@ -164,6 +195,6 @@ export const layer = Layer.unwrap(
       }).pipe(Effect.provide(RpcSerialization.layerJson), Effect.withSpan("peer.socket")),
     );
 
-    return Layer.mergeAll(join, ticket, socket);
+    return Layer.mergeAll(identity, join, ticket, socket);
   }),
 );

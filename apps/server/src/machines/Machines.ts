@@ -34,6 +34,7 @@ import * as HubLink from "./HubLink.ts";
 import * as MachineIdentity from "./MachineIdentity.ts";
 import { relateHubMachine, toMachineInfo } from "./machineInfo.ts";
 import { hubPublicKey } from "./peerCrypto.ts";
+import { normalizePeerRoute } from "./peerRoutes.ts";
 import * as PeerHub from "./PeerHub.ts";
 
 export class Machines extends Context.Service<
@@ -175,14 +176,15 @@ const make = Effect.gen(function* () {
     "Machines.createPeerGrant",
   )(function* (input) {
     yield* requireNotSpoke("create-grant", "hub-is-spoke");
+    if (!input.spokeKeyThumbprint?.trim()) {
+      return yield* new MachineError({ operation: "create-grant", reason: "invalid-input" });
+    }
     const storage = (cause: unknown) =>
       new MachineError({ operation: "create-grant", reason: "storage", cause });
     const grant = yield* auth
       .issuePeerGrant({
         label: input.spokeName ?? "Machine",
-        ...(input.spokeKeyThumbprint === undefined
-          ? {}
-          : { proofKeyThumbprint: input.spokeKeyThumbprint }),
+        proofKeyThumbprint: input.spokeKeyThumbprint,
       })
       .pipe(Effect.mapError(storage));
     const self = yield* identity.self;
@@ -193,7 +195,13 @@ const make = Effect.gen(function* () {
     // Tailnet first: it is encrypted and follows the machine between networks.
     const routes = (yield* endpoints.resolve())
       .toSorted((left, right) => Number(right.kind === "tailnet") - Number(left.kind === "tailnet"))
-      .map((endpoint) => endpoint.httpBaseUrl);
+      .flatMap((endpoint) => {
+        try {
+          return [normalizePeerRoute(endpoint.httpBaseUrl)];
+        } catch {
+          return [];
+        }
+      });
     return {
       grant: grant.credential,
       hubEnvironmentId: self.environmentId,

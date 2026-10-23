@@ -9,29 +9,41 @@ work launches.
 ## Pair from the terminal
 
 Keep Cogenly running on both machines. The computer joining must be able to
-reach the hub at an HTTPS address or over an encrypted network such as
-Tailscale. See [remote access](./remote-access.md) to make the hub reachable.
+reach the hub through Tailscale Serve HTTPS (start the hub with
+`--tailscale-serve`) or a private SSH forward to its loopback listener.
+Public Connect URLs and public reverse proxies cannot carry peer pairing.
+See [remote access](./remote-access.md) to make the hub reachable.
 
-On the hub, run:
+On the computer joining, prepare its key:
 
 ```sh
-cogenly machines pair
+cogenly machines prepare
+```
+
+On the hub, use the spoke key fingerprint that command reports:
+
+```sh
+cogenly machines pair --spoke-key <fingerprint>
 ```
 
 Copy the complete `cogenly-join:` code it prints. The code expires after ten
-minutes and works once. Keep it private: anyone with this terminal-generated
-code can redeem it first.
+minutes, works once, and can be redeemed only with the prepared machine's key.
+Keep it private.
 
-On the other computer, use the hub address that computer can reach:
+On the joining computer, use the hub's Tailscale Serve HTTPS address:
 
 ```sh
-cogenly machines join https://your-hub.example 'cogenly-join:...'
+cogenly machines join https://your-hub.your-tailnet.ts.net
 cogenly machines list
 ```
 
-Use the complete code in place of `cogenly-join:...`. An address starting with
-`127.0.0.1` or `localhost` refers to the joining computer, so use the hub's
-network address instead. If your running server uses a custom home, supply
+Paste the complete code into the hidden prompt. For scripts, use
+`cogenly machines join <hub-url> --code-stdin` and pipe the code from a private
+source; do not put it in command arguments or shell history. A loopback HTTP
+URL is accepted only for a local SSH forward to the hub. Explicit join URLs
+replace advertised alternatives, so there is no silent route fallback.
+
+If your running server uses a custom home, supply
 `--base-dir /path/to/home` to each machines command on that machine.
 
 Run `cogenly machines list` on either side to see names, machine kinds, online

@@ -2,7 +2,7 @@
  * `cogenly machines`: pair Cogenly servers from a terminal, for headless
  * machines and when no app is signed in to both. The app brokers pairing
  * itself; this is the fallback. On the hub, `pair` prints a one-time join
- * code; on the other machine, `join <hub-url> <code>` makes that server
+ * code bound to the prepared spoke key; `join <hub-url>` privately reads it and makes the server
  * redeem it and start dialing the hub.
  *
  * Every subcommand is a thin transport over the `machines.*` RPCs on the
@@ -25,10 +25,13 @@ import * as Effect from "effect/Effect";
 import * as Base64Url from "effect/encoding/Base64Url";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Redacted from "effect/Redacted";
+import * as Stdio from "effect/Stdio";
+import * as Stream from "effect/Stream";
 import * as References from "effect/References";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
-import { Argument, Command, Flag, GlobalFlag } from "effect/cli";
+import { Argument, Command, Flag, GlobalFlag, Prompt } from "effect/cli";
 import { FetchHttpClient } from "effect/http";
 
 import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
@@ -71,14 +74,44 @@ export const decodeJoinCode = (text: string) =>
     return yield* decodeJoinCodeJson(json.success);
   }).pipe(
     Effect.mapError(
-      (cause) =>
+      () =>
         new MachinesCliError({
           reason:
             "That join code is not valid. Copy the whole code `cogenly machines pair` printed.",
-          cause,
         }),
     ),
   );
+
+/** Keep pairing secrets out of argv, history, and terminal echo. */
+export const readMachineJoinCode = (codeStdin: boolean) =>
+  Effect.gen(function* () {
+    const stdio = yield* Stdio.Stdio;
+    if (!codeStdin && !(yield* stdio.stdinIsTerminal)) {
+      return yield* new MachinesCliError({
+        reason: "Use --code-stdin to read a join code from a pipe.",
+      });
+    }
+    const text = codeStdin
+      ? yield* stdio.stdin.pipe(
+          Stream.decodeText(),
+          Stream.runFoldEffect(
+            () => "",
+            (text, chunk) =>
+              text.length + chunk.length > 16_384
+                ? Effect.fail(new MachinesCliError({ reason: "That join code is too long." }))
+                : Effect.succeed(text + chunk),
+          ),
+          Effect.mapError(
+            () => new MachinesCliError({ reason: "Could not read the join code from stdin." }),
+          ),
+        )
+      : Redacted.value(
+          yield* Prompt.run(Prompt.Hidden({ message: "Join code" })).pipe(
+            Effect.mapError(() => new MachinesCliError({ reason: "Join canceled." })),
+          ),
+        );
+    return yield* decodeJoinCode(text);
+  });
 
 const describe = (cause: unknown): MachinesCliError => {
   const tagged =
@@ -196,8 +229,32 @@ const listCommand = Command.make("list", { ...projectLocationFlags, json: jsonFl
   ),
 );
 
+const prepareCommand = Command.make("prepare", { ...projectLocationFlags }).pipe(
+  Command.withDescription("On the joining machine: prepare the key the hub will bind its code to."),
+  Command.withHandler((flags) =>
+    runLive(flags, (client) =>
+      Effect.gen(function* () {
+        const identity = yield* client[WS_METHODS.machinesPrepareJoin]({}).pipe(
+          Effect.mapError(describe),
+        );
+        yield* Console.log(
+          [
+            `Prepared ${identity.name} (${identity.environmentId}).`,
+            `Spoke key fingerprint: ${identity.keyThumbprint}`,
+            "On the hub, run:",
+            `  cogenly machines pair --spoke-key ${identity.keyThumbprint}`,
+          ].join("\n"),
+        );
+      }),
+    ),
+  ),
+);
+
 const pairCommand = Command.make("pair", {
   ...projectLocationFlags,
+  spokeKey: Flag.String("spoke-key").pipe(
+    Flag.withDescription("The intended joining machine's fingerprint from machines prepare."),
+  ),
   name: Flag.String("name").pipe(
     Flag.withDescription("What to call the machine that will join, in the pairing list."),
     Flag.optional,
@@ -209,9 +266,10 @@ const pairCommand = Command.make("pair", {
   Command.withHandler((flags) =>
     runLive(flags, (client) =>
       Effect.gen(function* () {
-        const code = yield* client[WS_METHODS.machinesCreatePeerGrant](
-          Option.isSome(flags.name) ? { spokeName: flags.name.value } : {},
-        ).pipe(Effect.mapError(describe));
+        const code = yield* client[WS_METHODS.machinesCreatePeerGrant]({
+          spokeKeyThumbprint: flags.spokeKey,
+          ...(Option.isSome(flags.name) ? { spokeName: flags.name.value } : {}),
+        }).pipe(Effect.mapError(describe));
         const encoded = yield* encodeJoinCode(code).pipe(Effect.orDie);
         const hubUrl = code.routes[0] ?? "<this server's URL>";
         yield* Console.log(
@@ -221,7 +279,8 @@ const pairCommand = Command.make("pair", {
             encoded,
             "",
             "On the other machine, with Cogenly running, run:",
-            `  cogenly machines join ${hubUrl} ${encoded}`,
+            `  cogenly machines join ${hubUrl}`,
+            "Paste the code into the hidden prompt, or provide it on stdin with --code-stdin.",
             ...(code.routes.length > 1
               ? ["", `This server also answers on: ${code.routes.slice(1).join(", ")}`]
               : []),
@@ -239,22 +298,25 @@ const joinCommand = Command.make("join", {
       "An address this machine reaches the hub on, such as its tailnet URL.",
     ),
   ),
-  code: Argument.String("code").pipe(
-    Argument.withDescription("The join code `cogenly machines pair` printed on the hub."),
+  codeStdin: Flag.Boolean("code-stdin").pipe(
+    Flag.withDescription("Read the join code from stdin instead of a hidden prompt."),
+    Flag.withDefault(false),
   ),
 }).pipe(
   Command.withDescription("Pair this machine with a hub, using a join code from the hub."),
   Command.withHandler((flags) =>
-    runLive(flags, (client) =>
-      Effect.gen(function* () {
-        const code = yield* decodeJoinCode(flags.code);
-        const result = yield* client[WS_METHODS.machinesJoinHub]({
-          hubUrls: [flags.hubUrl],
-          code,
-        }).pipe(Effect.mapError(describe));
-        yield* Console.log(`Paired with ${code.hubName}.\n${describeMachines(result)}`);
-      }),
-    ),
+    Effect.gen(function* () {
+      const code = yield* readMachineJoinCode(flags.codeStdin);
+      return yield* runLive(flags, (client) =>
+        Effect.gen(function* () {
+          const result = yield* client[WS_METHODS.machinesJoinHub]({
+            hubUrls: [flags.hubUrl],
+            code,
+          }).pipe(Effect.mapError(describe));
+          yield* Console.log(`Paired with ${code.hubName}.\n${describeMachines(result)}`);
+        }),
+      );
+    }),
   ),
 );
 
@@ -302,5 +364,5 @@ const unpairCommand = Command.make("unpair", {
 
 export const machinesCommand = Command.make("machines").pipe(
   Command.withDescription("Pair this Cogenly with your other machines."),
-  Command.withSubcommands([listCommand, pairCommand, joinCommand, unpairCommand]),
+  Command.withSubcommands([listCommand, prepareCommand, pairCommand, joinCommand, unpairCommand]),
 );

@@ -13,6 +13,9 @@ import {
   type MachinePeerIdentity,
   type MachineSelfReport,
   PEER_JOIN_PATH,
+  PEER_IDENTITY_PATH,
+  PeerIdentityRequest,
+  PeerIdentityResult,
   PEER_METHODS,
   PEER_SOCKET_PATH,
   PEER_TICKET_PATH,
@@ -37,7 +40,7 @@ import * as Queue from "effect/Queue";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
-import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
+import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 import { RpcClient, RpcClientError, RpcSerialization } from "effect/rpc";
 import * as Socket from "effect/socket/Socket";
 
@@ -52,6 +55,8 @@ import {
   removePeerDpopKey,
   verifyPeerHello,
 } from "./peerCrypto.ts";
+
+import { normalizePeerRoutes } from "./peerRoutes.ts";
 
 export type HubLinkStatus = "connecting" | "online" | "offline" | "revoked" | "untrusted";
 
@@ -135,18 +140,6 @@ const socketUrl = (route: string, ticket: string) => {
   return url.toString();
 };
 
-const uniqueRoutes = (routes: ReadonlyArray<string>) => [
-  ...new Set(
-    routes.map((route) => {
-      const url = new URL(route);
-      if ((url.protocol !== "https:" && url.protocol !== "http:") || url.username || url.password) {
-        throw new Error("Invalid peer route");
-      }
-      return url.origin + "/";
-    }),
-  ),
-];
-
 const make = Effect.gen(function* () {
   const secrets = yield* ServerSecretStore.ServerSecretStore;
   const crypto = yield* Crypto.Crypto;
@@ -192,10 +185,37 @@ const make = Effect.gen(function* () {
 
   const post = (url: string, request: HttpClientRequest.HttpClientRequest) =>
     http.execute(request).pipe(
+      Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }),
       Effect.timeout(REQUEST_TIMEOUT),
       Effect.mapError((cause) => new HubAttemptError({ reason: "unreachable", cause })),
       Effect.withSpan("HubLink.post", { attributes: { "url.path": new URL(url).pathname } }),
     );
+
+  const verifyIdentity = (route: string, pin: { hubEnvironmentId: string; hubPublicKey: string }) =>
+    Effect.gen(function* () {
+      const self = yield* identity.self;
+      const nonce = yield* randomNonce;
+      const url = new URL(PEER_IDENTITY_PATH, route).toString();
+      const request = yield* HttpClientRequest.schemaBodyJson(PeerIdentityRequest)(
+        HttpClientRequest.post(url),
+        { spokeEnvironmentId: self.environmentId, nonce },
+      ).pipe(Effect.orDie);
+      const response = yield* post(url, request);
+      const result = yield* HttpClientResponse.filterStatusOk(response).pipe(
+        Effect.flatMap(HttpClientResponse.schemaBodyJson(PeerIdentityResult)),
+        Effect.mapError((cause) => new HubAttemptError({ reason: "unreachable", cause })),
+      );
+      if (
+        result.hubEnvironmentId !== pin.hubEnvironmentId ||
+        !verifyPeerHello({
+          ...pin,
+          spokeEnvironmentId: self.environmentId,
+          nonce,
+          signature: result.signature,
+        })
+      )
+        return yield* new HubAttemptError({ reason: "untrusted" });
+    });
 
   const join: HubLink["Service"]["join"] = Effect.fn("HubLink.join")(function* (input) {
     const existing = yield* withSecrets(readHubLink).pipe(Effect.mapError(storage("join")));
@@ -204,7 +224,7 @@ const make = Effect.gen(function* () {
     }
     const { code } = input;
     const routes = yield* Effect.try({
-      try: () => uniqueRoutes([...input.hubUrls, ...code.routes]),
+      try: () => normalizePeerRoutes(input.hubUrls.length > 0 ? input.hubUrls : code.routes),
       catch: () => new MachineError({ operation: "join", reason: "invalid-input" }),
     });
     if (routes.length === 0) {
@@ -217,6 +237,13 @@ const make = Effect.gen(function* () {
     }
     let refused = false;
     for (const route of routes) {
+      const checked = yield* verifyIdentity(route, code).pipe(Effect.result);
+      if (checked._tag === "Failure") {
+        if (checked.failure.reason === "untrusted") {
+          return yield* new MachineError({ operation: "join", reason: "hub-identity-mismatch" });
+        }
+        continue;
+      }
       const url = new URL(PEER_JOIN_PATH, route).toString();
       const nonce = yield* randomNonce;
       const proof = yield* withCrypto(createPeerDpopProof({ key, method: "POST", url })).pipe(
@@ -363,6 +390,7 @@ const make = Effect.gen(function* () {
   const connectRoute = (link: HubLinkRecord, route: string) =>
     Effect.scoped(
       Effect.gen(function* () {
+        yield* verifyIdentity(route, link);
         const key = yield* withSecrets(getOrCreatePeerDpopKey).pipe(
           Effect.mapError((cause) => new HubAttemptError({ reason: "refused", cause })),
         );
@@ -476,7 +504,12 @@ const make = Effect.gen(function* () {
   const connectOnce = (link: HubLinkRecord) =>
     Effect.gen(function* () {
       let worst: HubAttemptError["reason"] = "unreachable";
-      for (const route of link.routes) {
+      const routes = yield* Effect.try({
+        try: () => normalizePeerRoutes(link.routes),
+        catch: () => new HubAttemptError({ reason: "untrusted" }),
+      }).pipe(Effect.option);
+      if (Option.isNone(routes)) return "untrusted" as const;
+      for (const route of routes.value) {
         yield* setState({ status: "connecting", route });
         const outcome = yield* connectRoute(link, route).pipe(Effect.flip);
         if (outcome.reason === "dropped") return outcome.reason;
