@@ -9,6 +9,7 @@ import type {
   MachineSecurityState,
   MachineSecurityStatus,
 } from "@t3tools/contracts";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
@@ -381,7 +382,7 @@ const runText = (
 export const make = Effect.gen(function* () {
   const config = yield* ServerConfig.ServerConfig;
   const status = Effect.gen(function* () {
-    const platform = process.platform;
+    const platform = yield* HostProcess.Platform;
     const isLinux = platform === "linux";
     const socketsRaw = isLinux
       ? yield* runText("ss", ["-H", "-ltnp"])

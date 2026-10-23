@@ -335,70 +335,69 @@ describe("SharedState", () => {
     }).pipe(Effect.provide(layer)),
   );
 
-  for (const reversed of [false, true])
-    it.effect(
-      `converges concurrent repository moves in ${reversed ? "reverse" : "forward"} delivery order`,
-      () =>
-        Effect.gen(function* () {
-          const state = yield* SharedState.SharedState;
-          const sql = yield* SqlClient.SqlClient;
-          const a = {
-            ...change(
-              {
-                ...project,
-                name: "A",
-                repositories: [{ remote: "github.com/org/repo", directoryName: "repo" }],
-              },
-              20,
-            ),
-            id: "label:a",
-          };
-          const b = {
-            ...change(
-              {
-                ...project,
-                name: "B",
-                repositories: [{ remote: "github.com/org/repo", directoryName: "repo" }],
-              },
-              10,
-            ),
-            id: "label:b",
-          };
-          yield* state.receive(
-            { after: 0, cursor: 2, changes: reversed ? [b, a] : [a, b] },
-            peer,
-            false,
-          );
-          expect(yield* sql`SELECT label_id,remote FROM label_repositories`).toEqual([
-            { label_id: "label:a", remote: "github.com/org/repo" },
-          ]);
-          // Bind this machine's clone, then delete the winning project. The other
-          // project's still-live intent wins without losing the local clone location.
-          yield* sql`INSERT INTO projection_projects(project_id,title,workspace_root,scripts_json,created_at,updated_at) VALUES ('local-repo','Repo','/private/local/checkout','[]','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z')`;
-          yield* sql`UPDATE label_repositories SET repository_id='local-repo',directory_name='checkout' WHERE label_id='label:a'`;
-          yield* state.capture("project", "label:a");
-          const deletion = {
-            ...change({}, 30),
-            id: "label:a",
-            tombstone: { wall: 30, logical: 0, node: peer },
-          };
-          yield* state.receive({ after: 2, cursor: 3, changes: [deletion] }, peer, false);
-          expect(
-            yield* sql`SELECT label_id,repository_id,directory_name FROM label_repositories`,
-          ).toEqual([
-            { label_id: "label:b", repository_id: "local-repo", directory_name: "checkout" },
-          ]);
-          expect((yield* state.get("project", "label:b"))?.fields).not.toHaveProperty(
-            "workspaceRoot",
-          );
-          yield* sql`UPDATE projection_projects SET deleted_at='2026-01-02T00:00:00.000Z' WHERE project_id='local-repo'`;
-          expect(yield* sql`SELECT label_id,repository_id,remote FROM label_repositories`).toEqual([
+  it.effect.each([false, true])(
+    "converges concurrent repository moves (reversed delivery: %s)",
+    (reversed) =>
+      Effect.gen(function* () {
+        const state = yield* SharedState.SharedState;
+        const sql = yield* SqlClient.SqlClient;
+        const a = {
+          ...change(
             {
-              label_id: "label:b",
-              repository_id: "remote:github.com/org/repo",
-              remote: "github.com/org/repo",
+              ...project,
+              name: "A",
+              repositories: [{ remote: "github.com/org/repo", directoryName: "repo" }],
             },
-          ]);
-        }).pipe(Effect.provide(layer)),
-    );
+            20,
+          ),
+          id: "label:a",
+        };
+        const b = {
+          ...change(
+            {
+              ...project,
+              name: "B",
+              repositories: [{ remote: "github.com/org/repo", directoryName: "repo" }],
+            },
+            10,
+          ),
+          id: "label:b",
+        };
+        yield* state.receive(
+          { after: 0, cursor: 2, changes: reversed ? [b, a] : [a, b] },
+          peer,
+          false,
+        );
+        expect(yield* sql`SELECT label_id,remote FROM label_repositories`).toEqual([
+          { label_id: "label:a", remote: "github.com/org/repo" },
+        ]);
+        // Bind this machine's clone, then delete the winning project. The other
+        // project's still-live intent wins without losing the local clone location.
+        yield* sql`INSERT INTO projection_projects(project_id,title,workspace_root,scripts_json,created_at,updated_at) VALUES ('local-repo','Repo','/private/local/checkout','[]','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z')`;
+        yield* sql`UPDATE label_repositories SET repository_id='local-repo',directory_name='checkout' WHERE label_id='label:a'`;
+        yield* state.capture("project", "label:a");
+        const deletion = {
+          ...change({}, 30),
+          id: "label:a",
+          tombstone: { wall: 30, logical: 0, node: peer },
+        };
+        yield* state.receive({ after: 2, cursor: 3, changes: [deletion] }, peer, false);
+        expect(
+          yield* sql`SELECT label_id,repository_id,directory_name FROM label_repositories`,
+        ).toEqual([
+          { label_id: "label:b", repository_id: "local-repo", directory_name: "checkout" },
+        ]);
+        expect((yield* state.get("project", "label:b"))?.fields).not.toHaveProperty(
+          "workspaceRoot",
+        );
+        yield* sql`UPDATE projection_projects SET deleted_at='2026-01-02T00:00:00.000Z' WHERE project_id='local-repo'`;
+        expect(yield* sql`SELECT label_id,repository_id,remote FROM label_repositories`).toEqual([
+          {
+            label_id: "label:b",
+            repository_id: "remote:github.com/org/repo",
+            remote: "github.com/org/repo",
+          },
+        ]);
+      }).pipe(Effect.provide(layer)),
+  );
 });

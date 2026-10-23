@@ -353,216 +353,210 @@ describe("machines", () => {
     30_000,
   );
 
-  for (const kind of ["call-up", "call-down", "reply-up", "reply-down"] as const) {
-    for (const attack of ["tamper", "replay", "reorder", "reflect"] as const) {
-      it.live(
-        `rejects relay ${attack} of ${kind} before dispatch or accepting a reply`,
-        () =>
-          Effect.gen(function* () {
-            const relay = makeActiveRelay();
-            const hub = yield* startMachine("hub", "cloud-server");
-            const spoke = yield* startMachine("spoke", "computer", relay.constructor);
-            yield* pair(hub, spoke);
-            const dispatched: string[] = [];
-            for (const [machine, by] of [
-              [hub, "hub"],
-              [spoke, "spoke"],
-            ] as const) {
-              const channels = yield* machine.run(PeerChannels.PeerChannels);
-              yield* channels.register(Echo, ({ text }) =>
-                Effect.sync(() => {
-                  dispatched.push(text);
-                  return { text, by };
-                }),
-              );
-            }
-            const hubChannels = yield* hub.run(PeerChannels.PeerChannels);
-            const spokeChannels = yield* spoke.run(PeerChannels.PeerChannels);
-            yield* hubChannels.register(Delegate, () => Effect.succeed({ ok: true }));
-            yield* spokeChannels.register(Delegate, () => Effect.succeed({ ok: true }));
-            yield* hub.machines.call(spoke.environmentId, Delegate, {});
-            const call = (text: string) =>
-              kind === "call-up" || kind === "reply-down"
-                ? spoke.machines.call(hub.environmentId, Echo, { text })
-                : hub.machines.call(spoke.environmentId, Echo, { text });
-            const matches = (direction: RelayDirection, frame: AuthenticatedFrame) =>
-              kind === "call-up"
-                ? direction === "spoke-to-hub" && frame.method === "peer.call"
-                : kind === "call-down"
-                  ? direction === "hub-to-spoke" &&
-                    frame.method === "Chunk" &&
-                    frame.payload.includes('"_tag":"Request"')
-                  : kind === "reply-up"
-                    ? direction === "spoke-to-hub" && frame.method === "peer.reply"
-                    : direction === "hub-to-spoke" &&
-                      frame.method === "Exit" &&
-                      frame.payload.includes('"by":"hub"');
-            let captured: string | undefined;
-            const held = yield* Deferred.make<void>();
-            const attacked = yield* Deferred.make<void>();
-            relay.intercept((direction, wire, forward) => {
-              const frame = authFrame(wire);
-              if (
-                Option.isNone(frame) ||
-                (!matches(direction, frame.value) &&
-                  !(
-                    kind === "call-down" &&
-                    attack === "reorder" &&
-                    captured !== undefined &&
-                    direction === "hub-to-spoke"
-                  ))
-              ) {
-                forward(direction, wire);
-                return;
-              }
-              if (attack === "replay" && captured === undefined) {
-                captured = wire;
-                forward(direction, wire);
-                return;
-              }
-              if (attack === "reorder" && captured === undefined) {
-                captured = wire;
-                Deferred.doneUnsafe(held, Effect.void);
-                return;
-              }
-              relay.intercept((nextDirection, nextWire, nextForward) =>
-                nextForward(nextDirection, nextWire),
-              );
-              if (attack === "tamper")
-                forward(
-                  direction,
-                  JSON.stringify({
-                    ...frame.value,
-                    payload: frame.value.payload.replaceAll("attack", "forged"),
-                  }),
-                );
-              else if (attack === "replay") forward(direction, captured!);
-              else if (attack === "reorder") {
-                forward(direction, wire);
-                forward(direction, captured!);
-              } else forward(direction === "spoke-to-hub" ? "hub-to-spoke" : "spoke-to-hub", wire);
-              Deferred.doneUnsafe(attacked, Effect.void);
-            });
-            if (attack === "replay") assert.strictEqual((yield* call("warmup")).text, "warmup");
-            const first = yield* call("attack-1").pipe(Effect.result, Effect.forkScoped);
-            let second: typeof first | undefined;
-            if (attack === "reorder") {
-              yield* Deferred.await(held);
-              second = yield* (
-                kind === "call-down"
-                  ? spoke.machines
-                      .call(hub.environmentId, Delegate, {})
-                      .pipe(Effect.as({ text: "barrier", by: "hub" }))
-                  : call("attack-2")
-              ).pipe(Effect.result, Effect.forkScoped);
-            }
-            yield* Deferred.await(attacked);
-            const result = yield* Fiber.join(first);
-            assert.strictEqual(result._tag, "Failure");
-            if (result._tag === "Failure")
-              assert.strictEqual(result.failure.reason, "disconnected");
-            if (second !== undefined)
-              assert.strictEqual((yield* Fiber.join(second))._tag, "Failure");
-            const expected = kind.startsWith("call")
-              ? attack === "replay"
-                ? ["warmup"]
-                : []
-              : attack === "replay"
-                ? ["warmup", "attack-1"]
-                : attack === "reorder"
-                  ? ["attack-1", "attack-2"]
-                  : ["attack-1"];
-            assert.deepStrictEqual(dispatched, expected);
-            assert.isTrue(Option.isSome(yield* spoke.run(readHubLink)));
-          }).pipe(Effect.scoped),
-        30_000,
-      );
-    }
-  }
-
-  for (const attack of ["tamper", "reorder", "reflect", "replay"] as const) {
-    it.live(
-      `rejects relay ${attack} of Unpaired without forgetting the pairing`,
-      () =>
-        Effect.gen(function* () {
-          const relay = makeActiveRelay();
-          const hub = yield* startMachine("hub", "cloud-server");
-          const spoke = yield* startMachine("spoke", "computer", relay.constructor);
-          yield* pair(hub, spoke);
-          const channels = yield* spoke.run(PeerChannels.PeerChannels);
-          yield* channels.register(Echo, ({ text }) => Effect.succeed({ text, by: "spoke" }));
-          // A completed hub call proves the inbox is subscribed before unpairing.
-          yield* hub.machines.call(spoke.environmentId, Echo, { text: "ready" });
-          const held = yield* Deferred.make<void>();
-          const attacked = yield* Deferred.make<void>();
-          let captured = "";
-          let earlier = "";
-          relay.intercept((direction, wire, forward) => {
-            const frame = authFrame(wire);
-            if (
-              attack === "reorder" &&
-              direction === "hub-to-spoke" &&
-              Option.isSome(frame) &&
-              frame.value.method === "Exit" &&
-              frame.value.payload.includes('"by":"hub"')
-            ) {
-              earlier = wire;
-              Deferred.doneUnsafe(held, Effect.void);
-              return;
-            }
-            if (
-              direction !== "hub-to-spoke" ||
-              Option.isNone(frame) ||
-              !frame.value.payload.includes('"_tag":"Unpaired"')
-            ) {
-              forward(direction, wire);
-              return;
-            }
+  const relayKinds = ["call-up", "call-down", "reply-up", "reply-down"] as const;
+  const relayAttacks = ["tamper", "replay", "reorder", "reflect"] as const;
+  it.live.each(relayKinds.flatMap((kind) => relayAttacks.map((attack) => ({ kind, attack }))))(
+    "rejects relay $attack of $kind before dispatch or accepting a reply",
+    ({ kind, attack }) =>
+      Effect.gen(function* () {
+        const relay = makeActiveRelay();
+        const hub = yield* startMachine("hub", "cloud-server");
+        const spoke = yield* startMachine("spoke", "computer", relay.constructor);
+        yield* pair(hub, spoke);
+        const dispatched: string[] = [];
+        for (const [machine, by] of [
+          [hub, "hub"],
+          [spoke, "spoke"],
+        ] as const) {
+          const channels = yield* machine.run(PeerChannels.PeerChannels);
+          yield* channels.register(Echo, ({ text }) =>
+            Effect.sync(() => {
+              dispatched.push(text);
+              return { text, by };
+            }),
+          );
+        }
+        const hubChannels = yield* hub.run(PeerChannels.PeerChannels);
+        const spokeChannels = yield* spoke.run(PeerChannels.PeerChannels);
+        yield* hubChannels.register(Delegate, () => Effect.succeed({ ok: true }));
+        yield* spokeChannels.register(Delegate, () => Effect.succeed({ ok: true }));
+        yield* hub.machines.call(spoke.environmentId, Delegate, {});
+        const call = (text: string) =>
+          kind === "call-up" || kind === "reply-down"
+            ? spoke.machines.call(hub.environmentId, Echo, { text })
+            : hub.machines.call(spoke.environmentId, Echo, { text });
+        const matches = (direction: RelayDirection, frame: AuthenticatedFrame) =>
+          kind === "call-up"
+            ? direction === "spoke-to-hub" && frame.method === "peer.call"
+            : kind === "call-down"
+              ? direction === "hub-to-spoke" &&
+                frame.method === "Chunk" &&
+                frame.payload.includes('"_tag":"Request"')
+              : kind === "reply-up"
+                ? direction === "spoke-to-hub" && frame.method === "peer.reply"
+                : direction === "hub-to-spoke" &&
+                  frame.method === "Exit" &&
+                  frame.payload.includes('"by":"hub"');
+        let captured: string | undefined;
+        const held = yield* Deferred.make<void>();
+        const attacked = yield* Deferred.make<void>();
+        relay.intercept((direction, wire, forward) => {
+          const frame = authFrame(wire);
+          if (
+            Option.isNone(frame) ||
+            (!matches(direction, frame.value) &&
+              !(
+                kind === "call-down" &&
+                attack === "reorder" &&
+                captured !== undefined &&
+                direction === "hub-to-spoke"
+              ))
+          ) {
+            forward(direction, wire);
+            return;
+          }
+          if (attack === "replay" && captured === undefined) {
             captured = wire;
-            if (attack === "tamper")
-              forward(
-                direction,
-                JSON.stringify({ ...frame.value, payload: frame.value.payload + " " }),
-              );
-            else if (attack === "reorder") {
-              forward(direction, wire);
-              forward(direction, earlier);
-            } else if (attack === "reflect") forward("spoke-to-hub", wire);
-            // Replay captures a real notice and withholds it until a new pairing/session.
-            Deferred.doneUnsafe(attacked, Effect.void);
-          });
-          if (attack === "reorder") {
-            const hubChannels = yield* hub.run(PeerChannels.PeerChannels);
-            yield* hubChannels.register(Echo, ({ text }) => Effect.succeed({ text, by: "hub" }));
-            yield* spoke.machines
-              .call(hub.environmentId, Echo, { text: "held" })
-              .pipe(Effect.ignore, Effect.forkScoped);
-            yield* Deferred.await(held);
+            forward(direction, wire);
+            return;
           }
-          yield* hub.machines.unpair({ environmentId: spoke.environmentId });
-          yield* Deferred.await(attacked);
-          yield* awaitLinkState(spoke, (state) => state.status === "revoked");
-          assert.isTrue(Option.isSome(yield* spoke.run(readHubLink)));
-          if (attack === "replay") {
-            yield* spoke.machines.unpair({ environmentId: hub.environmentId });
-            relay.intercept((direction, wire, forward) => forward(direction, wire));
-            yield* pair(hub, spoke);
-            const newLink = yield* spoke.run(readHubLink).pipe(Effect.map(Option.getOrThrow));
-            const dropped = yield* awaitLinkState(spoke, (state) => state.status !== "online").pipe(
-              Effect.forkScoped,
-            );
-            yield* Effect.sync(() => relay.inject("hub-to-spoke", captured));
-            yield* Fiber.join(dropped);
-            assert.strictEqual(
-              (yield* spoke.run(readHubLink).pipe(Effect.map(Option.getOrThrow))).accessToken,
-              newLink.accessToken,
-            );
-            yield* awaitLinkState(spoke, (state) => state.status === "online");
+          if (attack === "reorder" && captured === undefined) {
+            captured = wire;
+            Deferred.doneUnsafe(held, Effect.void);
+            return;
           }
-        }).pipe(Effect.scoped),
-      30_000,
-    );
-  }
+          relay.intercept((nextDirection, nextWire, nextForward) =>
+            nextForward(nextDirection, nextWire),
+          );
+          if (attack === "tamper")
+            forward(
+              direction,
+              JSON.stringify({
+                ...frame.value,
+                payload: frame.value.payload.replaceAll("attack", "forged"),
+              }),
+            );
+          else if (attack === "replay") forward(direction, captured!);
+          else if (attack === "reorder") {
+            forward(direction, wire);
+            forward(direction, captured!);
+          } else forward(direction === "spoke-to-hub" ? "hub-to-spoke" : "spoke-to-hub", wire);
+          Deferred.doneUnsafe(attacked, Effect.void);
+        });
+        if (attack === "replay") assert.strictEqual((yield* call("warmup")).text, "warmup");
+        const first = yield* call("attack-1").pipe(Effect.result, Effect.forkScoped);
+        let second: typeof first | undefined;
+        if (attack === "reorder") {
+          yield* Deferred.await(held);
+          second = yield* (
+            kind === "call-down"
+              ? spoke.machines
+                  .call(hub.environmentId, Delegate, {})
+                  .pipe(Effect.as({ text: "barrier", by: "hub" }))
+              : call("attack-2")
+          ).pipe(Effect.result, Effect.forkScoped);
+        }
+        yield* Deferred.await(attacked);
+        const result = yield* Fiber.join(first);
+        assert.strictEqual(result._tag, "Failure");
+        if (result._tag === "Failure") assert.strictEqual(result.failure.reason, "disconnected");
+        if (second !== undefined) assert.strictEqual((yield* Fiber.join(second))._tag, "Failure");
+        const expected = kind.startsWith("call")
+          ? attack === "replay"
+            ? ["warmup"]
+            : []
+          : attack === "replay"
+            ? ["warmup", "attack-1"]
+            : attack === "reorder"
+              ? ["attack-1", "attack-2"]
+              : ["attack-1"];
+        assert.deepStrictEqual(dispatched, expected);
+        assert.isTrue(Option.isSome(yield* spoke.run(readHubLink)));
+      }).pipe(Effect.scoped),
+    30_000,
+  );
+
+  it.live.each(["tamper", "reorder", "reflect", "replay"] as const)(
+    "rejects relay %s of Unpaired without forgetting the pairing",
+    (attack) =>
+      Effect.gen(function* () {
+        const relay = makeActiveRelay();
+        const hub = yield* startMachine("hub", "cloud-server");
+        const spoke = yield* startMachine("spoke", "computer", relay.constructor);
+        yield* pair(hub, spoke);
+        const channels = yield* spoke.run(PeerChannels.PeerChannels);
+        yield* channels.register(Echo, ({ text }) => Effect.succeed({ text, by: "spoke" }));
+        // A completed hub call proves the inbox is subscribed before unpairing.
+        yield* hub.machines.call(spoke.environmentId, Echo, { text: "ready" });
+        const held = yield* Deferred.make<void>();
+        const attacked = yield* Deferred.make<void>();
+        let captured = "";
+        let earlier = "";
+        relay.intercept((direction, wire, forward) => {
+          const frame = authFrame(wire);
+          if (
+            attack === "reorder" &&
+            direction === "hub-to-spoke" &&
+            Option.isSome(frame) &&
+            frame.value.method === "Exit" &&
+            frame.value.payload.includes('"by":"hub"')
+          ) {
+            earlier = wire;
+            Deferred.doneUnsafe(held, Effect.void);
+            return;
+          }
+          if (
+            direction !== "hub-to-spoke" ||
+            Option.isNone(frame) ||
+            !frame.value.payload.includes('"_tag":"Unpaired"')
+          ) {
+            forward(direction, wire);
+            return;
+          }
+          captured = wire;
+          if (attack === "tamper")
+            forward(
+              direction,
+              JSON.stringify({ ...frame.value, payload: frame.value.payload + " " }),
+            );
+          else if (attack === "reorder") {
+            forward(direction, wire);
+            forward(direction, earlier);
+          } else if (attack === "reflect") forward("spoke-to-hub", wire);
+          // Replay captures a real notice and withholds it until a new pairing/session.
+          Deferred.doneUnsafe(attacked, Effect.void);
+        });
+        if (attack === "reorder") {
+          const hubChannels = yield* hub.run(PeerChannels.PeerChannels);
+          yield* hubChannels.register(Echo, ({ text }) => Effect.succeed({ text, by: "hub" }));
+          yield* spoke.machines
+            .call(hub.environmentId, Echo, { text: "held" })
+            .pipe(Effect.ignore, Effect.forkScoped);
+          yield* Deferred.await(held);
+        }
+        yield* hub.machines.unpair({ environmentId: spoke.environmentId });
+        yield* Deferred.await(attacked);
+        yield* awaitLinkState(spoke, (state) => state.status === "revoked");
+        assert.isTrue(Option.isSome(yield* spoke.run(readHubLink)));
+        if (attack === "replay") {
+          yield* spoke.machines.unpair({ environmentId: hub.environmentId });
+          relay.intercept((direction, wire, forward) => forward(direction, wire));
+          yield* pair(hub, spoke);
+          const newLink = yield* spoke.run(readHubLink).pipe(Effect.map(Option.getOrThrow));
+          const dropped = yield* awaitLinkState(spoke, (state) => state.status !== "online").pipe(
+            Effect.forkScoped,
+          );
+          yield* Effect.sync(() => relay.inject("hub-to-spoke", captured));
+          yield* Fiber.join(dropped);
+          assert.strictEqual(
+            (yield* spoke.run(readHubLink).pipe(Effect.map(Option.getOrThrow))).accessToken,
+            newLink.accessToken,
+          );
+          yield* awaitLinkState(spoke, (state) => state.status === "online");
+        }
+      }).pipe(Effect.scoped),
+    30_000,
+  );
 
   it("accepts only loopback sockets, with explicit Serve forwarding and no public proxy markers", () => {
     const config = { tailscaleServeEnabled: true };

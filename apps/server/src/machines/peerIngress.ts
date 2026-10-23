@@ -1,4 +1,4 @@
-import { isIP } from "node:net";
+import * as NodeNet from "node:net";
 
 import {
   isLocalLoopbackHost,
@@ -46,7 +46,7 @@ export const acceptsPeerIngress = (
   const source = headers["x-forwarded-for"];
   return (
     source !== undefined &&
-    isIP(source) !== 0 &&
+    NodeNet.isIP(source) !== 0 &&
     (isSharedAddressSpaceHost(source) || (source.includes(":") && isTailnetHost(source))) &&
     headers["x-forwarded-proto"] === "https" &&
     Boolean(headers["x-forwarded-host"])
