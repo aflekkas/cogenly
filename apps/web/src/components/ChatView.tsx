@@ -459,6 +459,7 @@ import type {
   ComposerBannerStackItem,
 } from "./chat/ComposerBannerStack";
 import { BackgroundWorkBanner } from "./chat/BackgroundWorkBanner";
+import { useThreadApprovalBannerItems } from "./chat/useThreadApprovalBannerItems";
 import { ThreadStatusLine } from "./chat/ThreadStatusLine";
 import { classifyThreadKind, hasRightPanel, threadCapabilities } from "../threadCapabilities";
 import {
@@ -5502,6 +5503,10 @@ export default function ChatView(props: ChatViewProps) {
   };
   const onOpenRelatedThreadStable = useStableCallback(onOpenRelatedThread);
   const childThreadInputs = useChildThreadInputs(activeThreadRef);
+  const threadApprovalBannerItems = useThreadApprovalBannerItems(
+    environmentId,
+    activeThreadShell?.id ?? null,
+  );
   const childInputBannerItem = useMemo<ComposerBannerStackItem | null>(() => {
     const first = childThreadInputs[0];
     const parentAwaitingUser =
@@ -5941,6 +5946,7 @@ export default function ChatView(props: ChatViewProps) {
     const projectCloneItems = projectCloneBannerItem === null ? [] : [projectCloneBannerItem];
     if (!localCheckoutBranchMismatch || !showBranchMismatchBanner || !activeBranchMismatchKey) {
       return [
+        ...threadApprovalBannerItems,
         ...feedbackBannerItems,
         ...limitRecoveryItems,
         ...usageLimitsItems,
@@ -5950,6 +5956,7 @@ export default function ChatView(props: ChatViewProps) {
       ];
     }
     return [
+      ...threadApprovalBannerItems,
       ...feedbackBannerItems,
       ...limitRecoveryItems,
       ...usageLimitsItems,
@@ -6012,6 +6019,7 @@ export default function ChatView(props: ChatViewProps) {
     projectCloneBannerItem,
     showBranchMismatchBanner,
     systemComposerBannerItems,
+    threadApprovalBannerItems,
     usageLimitsBanner,
   ]);
 

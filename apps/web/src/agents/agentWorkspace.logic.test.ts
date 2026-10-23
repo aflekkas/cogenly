@@ -18,6 +18,7 @@ import {
   decisionsWaitingCount,
   decisionsWaitingLabel,
   describeApproval,
+  describeThreadApproval,
   describeCommitmentHistory,
   describeEventFilter,
   describeRunAction,
@@ -361,6 +362,58 @@ describe("describeApproval", () => {
       context,
     );
     expect(description.details).toEqual(["− Draft", "+ Send"]);
+  });
+});
+
+describe("describeThreadApproval", () => {
+  const threadId = ThreadId.make("thread-1");
+  const vault = (
+    payload: Partial<Extract<AgentApproval["action"], { actionKind: "vault_use" }>["payload"]>,
+  ) => ({
+    action: {
+      actionKind: "vault_use" as const,
+      payload: {
+        vaultItemId: "vault:1",
+        vaultItemName: "GitHub",
+        field: "password" as const,
+        domain: "github.com",
+        threadId,
+        ...payload,
+      },
+    },
+  });
+
+  it("asks to fill a field on the page's host, granting only this thread", () => {
+    expect(describeThreadApproval(vault({}))).toEqual({
+      title: "Fill your password for github.com from “GitHub”?",
+      details: ["Allowing lets this thread use the item from now on."],
+    });
+    expect(describeThreadApproval(vault({ field: "totp", domain: null }))?.title).toBe(
+      "Use your one-time code from “GitHub”?",
+    );
+  });
+
+  it("names a CLI token once and keeps its exposure warning", () => {
+    const message = "The agent and the commands it runs can read this token." as const;
+    const description = describeThreadApproval(
+      vault({
+        vaultItemName: `CLI token · Work GitHub. ${message}`,
+        field: "value",
+        domain: null,
+        processExposure: {
+          accountId: "account:1",
+          credentialId: "credential:1",
+          credentialRevision: 1,
+          threadId,
+          projectKey: "repository:repo-1",
+          message,
+        },
+      }),
+    );
+    expect(description).toEqual({
+      title: "Let this thread use “CLI token · Work GitHub”?",
+      details: [message],
+    });
   });
 });
 
