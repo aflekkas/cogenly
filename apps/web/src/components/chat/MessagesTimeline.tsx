@@ -242,9 +242,14 @@ import {
   deriveMessagesTimelineRowsWithState,
   attemptFoldRowId,
   turnFoldRowId,
+  type DisclosureOpenTimes,
   type MessagesTimelineRowsProjection,
+  disclosureOpenedRecently,
   liveWorkEntryLabel,
+  markDisclosureClosed,
+  markDisclosureOpened,
   resolveAssistantMessageCopyState,
+  resolveDisclosureHoldsEnd,
   resolveTimelineIsAtEnd,
   resolveTimelineMinimapHasPersistentGutter,
   resolveTimelineMinimapHeightStyle,
@@ -403,12 +408,13 @@ interface TimelineRowSharedState {
   onToggleWorkEntry: (anchorKey: string, collapsed: boolean) => boolean;
   /** A collapsed group's details finished animating out. */
   onWorkGroupClosed: (groupId: string) => void;
-  /** Groups opened by a toggle whose details row has not mounted yet. */
-  openingWorkGroupIds: Set<string>;
   /** A collapsed turn or attempt fold's revealed rows finished animating out. */
   onFoldClosed: (foldId: string) => void;
-  /** Folds opened by a toggle moments ago; rows they reveal grow in on mount. */
-  openingFoldIds: ReadonlySet<string>;
+  /**
+   * When the user last opened each group and fold. Rows they reveal grow in
+   * when they mount within DISCLOSURE_REVEAL_WINDOW_MS of the open.
+   */
+  disclosureOpens: DisclosureOpenTimes;
   onCancelWorktreeSetup: (() => void) | null;
   retryableWorkspacePreparationRunIds: ReadonlySet<RunId>;
   onRetryWorkspacePreparation: ((runId: RunId) => void) | null;
@@ -487,6 +493,8 @@ const TIMELINE_MAINTAIN_SCROLL_AT_END = {
     layout: true,
   },
 } as const satisfies MaintainScrollAtEndOptions;
+/** The list re-pins to its end from within this many viewports of it. */
+const TIMELINE_MAINTAIN_SCROLL_AT_END_THRESHOLD = 1;
 const EMPTY_TIMELINE_RUNS: ReadonlyArray<HandoffTimelineRun> = [];
 const EMPTY_RUN_IDS: ReadonlySet<RunId> = new Set();
 /** An opened thread shows after this many frames without a row resize... */
@@ -496,8 +504,12 @@ const FIRST_LAYOUT_HOLD_MAX_MS = 150;
 /** The longest an opened thread stays hidden, positioned or not. */
 const FIRST_LAYOUT_HOLD_LIMIT_MS = 600;
 const FIRST_LAYOUT_HOLD_STYLE = { opacity: 0 } as const;
-/** Rows a fold reveals that mount within this long of the open grow in. */
-const FOLD_OPEN_WINDOW_MS = 400;
+/**
+ * Rows a fold or group reveals that mount within this long of the open grow
+ * in. Covers the open motion plus the frames the list takes to mount rows that
+ * the growing ones leave room for.
+ */
+const DISCLOSURE_REVEAL_WINDOW_MS = 400;
 /** A closing fold drops its rows after this even if none reported the exit. */
 const FOLD_CLOSE_FALLBACK_MS = 600;
 /**
@@ -725,9 +737,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
   const [closingWorkGroupIds, setClosingWorkGroupIds] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
-  const [openingWorkGroupIds] = useState(() => new Set<string>());
   const [closingFoldIds, setClosingFoldIds] = useState<ReadonlySet<string>>(() => new Set());
-  const [openingFoldIds] = useState(() => new Set<string>());
+  const [disclosureOpens] = useState<DisclosureOpenTimes>(() => new Map());
   // Every open, the first one after a reload included, goes through the
   // restore below: it scrolls to the target (the end unless the user left the
   // thread scrolled up this session) and checks it landed before revealing.
@@ -764,9 +775,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
     setExpandedWorkGroupIds(paintedExpandedWorkGroupIds);
     setExpandedAttemptIds(paintedExpandedAttemptIds);
     setClosingWorkGroupIds(new Set());
-    openingWorkGroupIds.clear();
     setClosingFoldIds(new Set());
-    openingFoldIds.clear();
+    disclosureOpens.clear();
   }
   const citationThreadRef = useMemo(() => parseScopedThreadKey(routeThreadKey), [routeThreadKey]);
   const openPullRequest = useOpenPrLink(citationThreadRef ?? undefined);
@@ -842,11 +852,17 @@ const ConversationTimeline = memo(function ConversationTimeline({
     });
   }, [listRef, onToolOutputCollapsedAtEnd, pinDisclosureToEnd]);
 
+  // Whether the list follows its end right now (set each render below), so a
+  // toggle inside the list's follow band pins the end like the list would.
+  const listFollowsEndRef = useRef(false);
   const suspendEndScrollMaintenanceForDisclosure = useCallback(
     (anchorKey: string, collapsed = false) => {
       disclosureAnchorKeyRef.current = anchorKey;
       disclosureCollapsedRef.current = collapsed;
-      disclosurePinsEndRef.current = resolveTimelineIsAtEnd(listRef.current?.getState()) === true;
+      disclosurePinsEndRef.current = resolveDisclosureHoldsEnd(listRef.current?.getState(), {
+        active: listFollowsEndRef.current,
+        threshold: TIMELINE_MAINTAIN_SCROLL_AT_END_THRESHOLD,
+      });
       setDisclosureToggleSettling(true);
       scheduleDisclosureSettle();
       return disclosurePinsEndRef.current;
@@ -885,19 +901,21 @@ const ConversationTimeline = memo(function ConversationTimeline({
   const beginFoldToggle = useCallback(
     (foldId: string, collapsing: boolean) => {
       suspendEndScrollMaintenanceForDisclosure(foldId, collapsing);
+      const timers = foldClosingTimersRef.current;
+      const existingTimer = timers.get(foldId);
+      if (existingTimer !== undefined) clearTimeout(existingTimer);
+      timers.delete(foldId);
       if (collapsing) {
-        openingFoldIds.delete(foldId);
+        markDisclosureClosed(disclosureOpens, foldId);
         // Rows scrolled out of the list never report their exit.
-        const timers = foldClosingTimersRef.current;
-        const existingTimer = timers.get(foldId);
-        if (existingTimer !== undefined) clearTimeout(existingTimer);
         timers.set(
           foldId,
           setTimeout(() => onFoldClosed(foldId), FOLD_CLOSE_FALLBACK_MS),
         );
       } else if (!closingFoldIds.has(foldId)) {
-        openingFoldIds.add(foldId);
-        setTimeout(() => openingFoldIds.delete(foldId), FOLD_OPEN_WINDOW_MS);
+        // Reopening mid-close reuses the closing rows, so only a fresh open
+        // grows rows in.
+        markDisclosureOpened(disclosureOpens, foldId, performance.now());
       }
       setClosingFoldIds((existing) => {
         if (existing.has(foldId) === collapsing) return existing;
@@ -907,7 +925,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
         return next;
       });
     },
-    [closingFoldIds, onFoldClosed, openingFoldIds, suspendEndScrollMaintenanceForDisclosure],
+    [closingFoldIds, disclosureOpens, onFoldClosed, suspendEndScrollMaintenanceForDisclosure],
   );
 
   const onToggleTurnFold = useCallback(
@@ -955,14 +973,14 @@ const ConversationTimeline = memo(function ConversationTimeline({
       if (existingTimer !== undefined) clearTimeout(existingTimer);
       timers.delete(groupId);
       if (collapsing) {
-        openingWorkGroupIds.delete(groupId);
+        markDisclosureClosed(disclosureOpens, groupId);
         // A details row scrolled out of the list never reports its exit.
         timers.set(
           groupId,
           setTimeout(() => onWorkGroupClosed(groupId), FOLD_CLOSE_FALLBACK_MS),
         );
       } else if (!closingWorkGroupIds.has(groupId)) {
-        openingWorkGroupIds.add(groupId);
+        markDisclosureOpened(disclosureOpens, groupId, performance.now());
       }
       setClosingWorkGroupIds((existing) => {
         if (existing.has(groupId) === collapsing) return existing;
@@ -983,9 +1001,9 @@ const ConversationTimeline = memo(function ConversationTimeline({
     },
     [
       closingWorkGroupIds,
+      disclosureOpens,
       expandedWorkGroupIds,
       onWorkGroupClosed,
-      openingWorkGroupIds,
       suspendEndScrollMaintenanceForDisclosure,
     ],
   );
@@ -1384,6 +1402,17 @@ const ConversationTimeline = memo(function ConversationTimeline({
       ...(keys.length === 0 ? {} : { keys }),
     };
   }, [citationAlwaysRender, restoringAlwaysRender, fullscreenAppRowId]);
+  // Every reason the list stops following its end, except a disclosure's own hold.
+  const listFollowsEnd = !(
+    citationPositioning ||
+    (restoringThreadPosition && rememberedPosition?.atEnd === false) ||
+    sendGlideActive ||
+    !liveFollowEnabled ||
+    fullscreenAppRowId !== null
+  );
+  useLayoutEffect(() => {
+    listFollowsEndRef.current = listFollowsEnd;
+  }, [listFollowsEnd]);
   const [minimapHitStripWidth, setMinimapHitStripWidth] = useState(0);
   const [minimapCurrentIndex, setMinimapCurrentIndex] = useState<number | null>(null);
   const maintainVisibleContentPosition = useMemo(
@@ -1661,9 +1690,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
       onToggleWorkGroup,
       onToggleWorkEntry: suspendEndScrollMaintenanceForDisclosure,
       onWorkGroupClosed,
-      openingWorkGroupIds,
       onFoldClosed,
-      openingFoldIds,
+      disclosureOpens,
       onCancelWorktreeSetup: onCancelWorktreeSetup ?? null,
       retryableWorkspacePreparationRunIds,
       onRetryWorkspacePreparation: onRetryWorkspacePreparation ?? null,
@@ -1704,9 +1732,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
       onToggleWorkGroup,
       suspendEndScrollMaintenanceForDisclosure,
       onWorkGroupClosed,
-      openingWorkGroupIds,
       onFoldClosed,
-      openingFoldIds,
+      disclosureOpens,
       onCancelWorktreeSetup,
       retryableWorkspacePreparationRunIds,
       onRetryWorkspacePreparation,
@@ -1952,14 +1979,9 @@ const ConversationTimeline = memo(function ConversationTimeline({
                   // A short thread sits at the bottom, just above the composer.
                   alignItemsAtEnd
                   maintainScrollAtEnd={
-                    citationPositioning ||
-                    (restoringThreadPosition && rememberedPosition?.atEnd === false) ||
-                    sendGlideActive ||
-                    !liveFollowEnabled ||
-                    fullscreenAppRowId !== null ||
-                    disclosureToggleSettling
-                      ? false
-                      : TIMELINE_MAINTAIN_SCROLL_AT_END
+                    listFollowsEnd && !disclosureToggleSettling
+                      ? TIMELINE_MAINTAIN_SCROLL_AT_END
+                      : false
                   }
                   maintainVisibleContentPosition={
                     findActive ||
@@ -1968,7 +1990,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
                       ? false
                       : maintainVisibleContentPosition
                   }
-                  maintainScrollAtEndThreshold={1}
+                  maintainScrollAtEndThreshold={TIMELINE_MAINTAIN_SCROLL_AT_END_THRESHOLD}
                   onScroll={handleScroll}
                   onItemSizeChanged={handleItemSizeChanged}
                   className={cn(
@@ -2582,9 +2604,16 @@ function FoldRevealRow({
   closing: boolean;
   children: ReactNode;
 }) {
-  const { openingFoldIds, onFoldClosed } = use(TimelineRowCtx);
+  const { disclosureOpens, onFoldClosed } = use(TimelineRowCtx);
   // Read on mount, so a virtualized remount of an open fold stays still.
-  const [appear] = useState(() => openingFoldIds.has(foldId));
+  const [appear] = useState(() =>
+    disclosureOpenedRecently(
+      disclosureOpens,
+      foldId,
+      performance.now(),
+      DISCLOSURE_REVEAL_WINDOW_MS,
+    ),
+  );
   const onExitComplete = useCallback(() => onFoldClosed(foldId), [foldId, onFoldClosed]);
   return (
     <WorkLogCollapse open={!closing} appear={appear} onExitComplete={onExitComplete}>
@@ -2605,9 +2634,16 @@ function WorkGroupDetailsReveal({
   continues: boolean | undefined;
   children: ReactNode;
 }) {
-  const { openingWorkGroupIds, onWorkGroupClosed } = use(TimelineRowCtx);
-  // Consumed on mount, so a virtualized remount of an open group stays still.
-  const [appear] = useState(() => openingWorkGroupIds.delete(groupId));
+  const { disclosureOpens, onWorkGroupClosed } = use(TimelineRowCtx);
+  // Read on mount, so a virtualized remount of an open group stays still.
+  const [appear] = useState(() =>
+    disclosureOpenedRecently(
+      disclosureOpens,
+      groupId,
+      performance.now(),
+      DISCLOSURE_REVEAL_WINDOW_MS,
+    ),
+  );
   const onExitComplete = useCallback(
     () => onWorkGroupClosed(groupId),
     [groupId, onWorkGroupClosed],

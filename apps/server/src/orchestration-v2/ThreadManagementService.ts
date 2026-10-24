@@ -889,6 +889,7 @@ const make = Effect.gen(function* () {
       const projection = yield* getProjectThreadRecords(input, ["runs", "messages", "turnItems"], {
         messageIds: [input.messageId],
         turnItemTypes: ["user_message"],
+        turnItemMessageIds: [input.messageId],
       });
       const message = projection.messages.find((candidate) => candidate.id === input.messageId);
       const run =

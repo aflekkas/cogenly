@@ -707,14 +707,24 @@ function SidebarFooter({ className, ...props }: React.ComponentProps<"div">) {
 function SidebarContent({
   className,
   fixedHeader,
+  fixedFooter,
   ...props
 }: React.ComponentProps<"div"> & {
   /** Pinned above the scrolling list, like a dock. */
   fixedHeader?: React.ReactNode;
+  /** Pinned below the scrolling list, like a dock (the bottom sidebar layout). */
+  fixedFooter?: React.ReactNode;
 }) {
   return (
     <>
-      {fixedHeader ? <div className="w-full shrink-0">{fixedHeader}</div> : null}
+      {/* The dock sits right under the titlebar row, which already spaces itself, so its group
+          keeps only a small top inset. The nav rail's mt-px puts its first icon on the same
+          centre line as the dock (SidebarNavRail). */}
+      {fixedHeader ? (
+        <div className="w-full shrink-0 [&>[data-sidebar=group]:first-child]:pt-1.5">
+          {fixedHeader}
+        </div>
+      ) : null}
       {/* Rows take focus on click. Scroll padding would make the browser nudge
           the list whenever a focused row sits under the fade. */}
       <ScrollArea
@@ -737,6 +747,7 @@ function SidebarContent({
             // it, including across the fixed header's boundary.
             "flex w-full min-w-0 flex-col [overflow-anchor:none] [[data-collapsible=icon]_&]:overflow-hidden [&>[data-sidebar=group]+[data-sidebar=group]]:pt-0",
             fixedHeader && "[&>[data-sidebar=group]:first-child]:pt-0",
+            fixedFooter && "[&>[data-sidebar=group]:last-child]:pb-0",
             className,
           )}
           data-sidebar="content"
@@ -744,6 +755,13 @@ function SidebarContent({
           {...props}
         />
       </ScrollArea>
+      {/* Mirrors the header: a docked footer keeps the same small inset below
+          it as the header keeps above. */}
+      {fixedFooter ? (
+        <div className="w-full shrink-0 [&>[data-sidebar=group]:last-child]:pb-1.5">
+          {fixedFooter}
+        </div>
+      ) : null}
     </>
   );
 }
@@ -785,7 +803,7 @@ function SidebarMenuItem({ className, ...props }: React.ComponentProps<"li">) {
 }
 
 const sidebarMenuButtonVariants = cva(
-  "peer/menu-button flex w-full cursor-pointer items-center gap-[var(--sidebar-control-gap)] overflow-hidden text-left outline-hidden ring-ring transition-[width,height,padding] state-hover focus-visible:ring-2 focus-visible:ring-inset disabled:pointer-events-none disabled:opacity-64 aria-disabled:pointer-events-none aria-disabled:opacity-64 data-[active=true]:state-selected data-[active=true]:font-medium [[data-collapsible=icon]_&]:size-8! [[data-collapsible=icon]_&]:p-[var(--sidebar-content-inset)]! [&>span:last-child]:truncate [&>svg:not([class*='size-'])]:size-4 [&>svg]:shrink-0 [&>svg]:text-[var(--sidebar-icon-color)] hover:[&>svg]:text-sidebar-foreground active:[&>svg]:text-sidebar-foreground data-[active=true]:[&>svg]:text-sidebar-foreground",
+  "peer/menu-button flex w-full cursor-pointer items-center gap-[var(--sidebar-control-gap)] overflow-hidden text-left outline-hidden ring-ring transition-[width,height,padding,color,background-color,box-shadow,opacity] state-hover focus-visible:ring-2 focus-visible:ring-inset disabled:pointer-events-none disabled:opacity-64 aria-disabled:pointer-events-none aria-disabled:opacity-64 data-[active=true]:state-selected data-[active=true]:font-medium [[data-collapsible=icon]_&]:size-8! [[data-collapsible=icon]_&]:p-[var(--sidebar-content-inset)]! [&>span:last-child]:truncate [&>svg:not([class*='size-'])]:size-4 [&>svg]:shrink-0 [&>svg]:text-[var(--sidebar-icon-color)] hover:[&>svg]:text-sidebar-foreground active:[&>svg]:text-sidebar-foreground data-[active=true]:[&>svg]:text-sidebar-foreground",
   {
     defaultVariants: {
       size: "default",

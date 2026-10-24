@@ -37,6 +37,9 @@ const searchFieldPaddingClassName = {
   bare: { sm: "px-0", md: "px-0" },
 } as const;
 
+// Opacity only, so the trailing controls appear and leave in place (kept under reduced motion).
+const trailingFadeClassName = "transition-opacity duration-(--motion-duration-fast) ease-out";
+
 /** For an input placed inside a `SearchField`; `SearchInput` applies it itself. */
 const searchFieldInputClassName =
   "h-full min-w-0 flex-1 bg-transparent p-0 font-medium text-foreground leading-normal outline-none placeholder:text-(--sidebar-input-placeholder,var(--placeholder)) [&::-webkit-search-cancel-button]:appearance-none [&::-webkit-search-decoration]:appearance-none [&::-webkit-search-results-button]:appearance-none [&::-webkit-search-results-decoration]:appearance-none";
@@ -91,21 +94,43 @@ function SearchField({
         />
       )}
       {children}
-      {hasValue && onClear ? (
-        <Button
-          type="button"
-          size="icon-micro"
-          variant="ghost-muted"
-          className="shrink-0"
-          aria-label={clearLabel}
-          onClick={onClear}
-        >
-          <XIcon className="size-3" />
-        </Button>
-      ) : shortcut ? (
-        <Kbd className="shrink-0">{shortcut}</Kbd>
+      {/* The clear button is a 28px tile like the actions after it, in the same gapless row, so
+          it keeps their rhythm. Its slot is always reserved and the clear button and shortcut
+          hint share it, crossfading, so typing never shifts the actions. */}
+      {onClear || shortcut || actions ? (
+        <div className="flex shrink-0 items-center">
+          {onClear || shortcut ? (
+            <div className="grid shrink-0 place-items-center *:col-start-1 *:row-start-1">
+              {shortcut ? (
+                <Kbd
+                  aria-hidden={hasValue || undefined}
+                  className={cn(trailingFadeClassName, hasValue && "opacity-0")}
+                >
+                  {shortcut}
+                </Kbd>
+              ) : null}
+              {onClear ? (
+                <Button
+                  type="button"
+                  size="icon-sm"
+                  variant="ghost-muted"
+                  // Button already transitions opacity; only its timing is set here.
+                  className={cn(
+                    "duration-(--motion-duration-fast) ease-out",
+                    !hasValue && "pointer-events-none opacity-0",
+                  )}
+                  aria-label={clearLabel}
+                  inert={!hasValue || undefined}
+                  onClick={onClear}
+                >
+                  <XIcon className="size-3.5" />
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
+          {actions}
+        </div>
       ) : null}
-      {actions ? <div className="flex shrink-0 items-center">{actions}</div> : null}
     </div>
   );
 }

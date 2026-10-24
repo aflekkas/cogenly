@@ -8,6 +8,7 @@ import { useMediaQuery } from "~/hooks/useMediaQuery";
 import { cn } from "~/lib/utils";
 import {
   disclosureDuration,
+  disclosureExitDue,
   disclosurePanelPresent,
   initialDisclosurePanelState,
   reconcileDisclosurePanel,
@@ -113,18 +114,19 @@ export function DisclosureTrigger({
 }
 
 const REDUCED_MOTION = "(prefers-reduced-motion: reduce)";
-/** Longest disclosure motion; a close that never fires transitionend still unmounts after it. */
-const DISCLOSURE_MOTION_MS = 400;
+/** Longest disclosure motion (--motion-duration-base); a close that never fires transitionend still unmounts after it. */
+const DISCLOSURE_MOTION_MS = 220;
 
 /**
  * Grows disclosure content from zero height and fades it in; closing runs the
  * same motion back and unmounts once it ends, holding the last open content
  * meanwhile. Only an open that happens after mount animates, or the first one
  * when `appear` is set, so virtualized rows that remount open stay still.
- * `layout="group-content"` carries an expanded timeline group's trailing
- * space: while closing it grows to the gap the collapsed header will own, so
- * removing the row afterwards moves nothing. Reduced motion opens and closes
- * at once.
+ * `onExitComplete` fires once content this panel showed has left, never for a
+ * panel that mounted closed. `layout="group-content"` carries an expanded
+ * timeline group's trailing space: while closing it grows to the gap the
+ * collapsed header will own, so removing the row afterwards moves nothing.
+ * Reduced motion changes height at once and only fades an open in.
  */
 export function DisclosurePanel({
   open,
@@ -150,10 +152,19 @@ export function DisclosurePanel({
   useLayoutEffect(() => {
     onExitCompleteRef.current = onExitComplete;
   });
-  // Reports the close once nothing is left on screen, including a row that
-  // remounted closed or closed under reduced motion.
+  // Whether content this panel rendered is still waiting to report its exit.
+  const shownRef = useRef(present);
+  // Reports the close once the content it showed is gone, including a close
+  // under reduced motion. Owners fall back to a timer for panels that never
+  // showed anything (mounted closed, or scrolled out of the list).
   useEffect(() => {
-    if (!open && !present) onExitCompleteRef.current?.();
+    if (present) {
+      shownRef.current = true;
+      return;
+    }
+    if (!disclosureExitDue(open, present, shownRef.current)) return;
+    shownRef.current = false;
+    onExitCompleteRef.current?.();
   }, [open, present]);
   // A transition that never starts (hidden tab, interrupted style) still settles.
   useEffect(() => {
@@ -164,8 +175,21 @@ export function DisclosurePanel({
   if (!present) return null;
   const gapClassName =
     layout === "group-content" && !continues ? (open ? "pb-1" : "pb-2") : undefined;
-  if (reducedMotion) return <div className={gapClassName}>{children}</div>;
   const { animateEnter, moving } = state;
+  if (reducedMotion) {
+    // Height changes at once; an open still fades in, like every other surface.
+    return (
+      <div
+        className={cn(
+          gapClassName,
+          animateEnter &&
+            "transition-opacity duration-(--motion-duration-fast) ease-out starting:opacity-0",
+        )}
+      >
+        {children}
+      </div>
+    );
+  }
   return (
     <div
       inert={!open}

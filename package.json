@@ -18,6 +18,7 @@
     "icons:export": "node scripts/export-brand-icons.ts",
     "icons:check": "node scripts/export-brand-icons.ts --check",
     "icons:mark": "node scripts/render-cogenly-mark.ts",
+    "icons:dock": "node scripts/render-accent-dock-icons.ts",
     "licenses:sync": "node scripts/sync-third-party-license-notices.ts",
     "build": "vp run --filter './apps/*' build",
     "build:marketing": "vp run --filter @t3tools/marketing build",

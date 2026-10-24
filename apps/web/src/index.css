@@ -884,21 +884,36 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
   }
 }
 
-/* Sidebar rows and rail buttons cross-fade between rest, hover and selected:
-   the old highlight fades out as the new one fades in. state-fade opts other
-   surfaces (tinted rows) into the same cross-fade. Layered under utilities,
-   so a control that declares its own transition keeps it. */
-@layer components {
-  [data-app-sidebar] :is(.state-hover, .state-selected),
-  .state-fade,
-  .sidebar-row-motion {
-    transition-property: color, background-color, border-color, box-shadow, opacity, scale;
-    transition-duration: var(--motion-duration-fast);
-    transition-timing-function: --theme(--ease-standard);
+/* The one interactive-state transition. Hover, focus-visible, pressed,
+   highlighted and selected changes fade color, fill, border, ring and opacity
+   on --motion-duration-fast and ease-standard: the same both ways and with no
+   delay, so sweeping the pointer across adjacent targets cross-fades (the old
+   highlight fades out as the next fades in) instead of flickering. Reduced
+   motion keeps the fades, which are color and opacity, and drops the scale.
+   duration-* and ease-* still retime it. cn() treats it as a transition-*
+   class, so a className transition replaces it. Put it on hand-rolled hover
+   fills and hover-revealed actions; Button, Toggle and every state-hover /
+   state-selected element already have it. */
+@utility interactive {
+  transition-property:
+    color, background-color, border-color, outline-color, text-decoration-color, fill, stroke,
+    box-shadow, opacity, scale;
+  transition-duration: var(--tw-duration, var(--motion-duration-fast));
+  transition-timing-function: var(--tw-ease, --theme(--ease-standard));
 
-    @media (prefers-reduced-motion: reduce) {
-      transition-duration: 0s;
-    }
+  @variant motion-reduce {
+    transition-property:
+      color, background-color, border-color, outline-color, text-decoration-color, fill, stroke,
+      box-shadow, opacity;
+  }
+}
+
+/* Everything that wears the state system (including variant-gated
+   data-*:state-selected) gets the standard transition. Layered under
+   utilities, so a control that declares its own transition keeps it. */
+@layer components {
+  :is(.state-hover, [class*="state-selected"], [class*=":state-hover"], .sidebar-row-motion) {
+    @apply interactive;
   }
 }
 
@@ -2098,21 +2113,9 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
   --card-foreground: var(--color-zinc-800);
   --popover: var(--color-white);
   --popover-foreground: var(--color-zinc-800);
-  /* The brand orange from the logo (--color-brand-ember-*) is used sparingly:
-     the enabled send button, the boot splash and the "needs you" signal.
-     Light: a burnt orange that keeps white text at 4.7:1; the reds stay at
-     hue 0, this sits at 18. */
-  --brand-accent-fill: #c94a14;
-  --brand-accent-fill-hover: #b8420f;
-  --brand-accent-fill-deep: #b03d10;
+  /* The brand accent ramp (--brand-accent-*) lives with the accent presets
+     below ("Settings → Appearance → Accent color"). */
   --brand-accent-fill-foreground: var(--color-white);
-  --brand-accent-tint: color-mix(in srgb, var(--brand-accent-fill) 12%, transparent);
-  /* Text-bearing brand buttons: the same burnt orange (white text 4.7:1),
-     lifting a step on hover. */
-  --brand-accent-cta-top: var(--brand-accent-fill);
-  --brand-accent-cta-bottom: var(--brand-accent-fill-deep);
-  --brand-accent-cta-top-hover: #d9511a;
-  --brand-accent-cta-bottom-hover: var(--brand-accent-fill);
   /* Everything else that used to be the accent (primary buttons, focus rings,
      checks, switches, sliders, progress, badges, links, text selection) is
      neutral: near-black on white here, near-white on dark below. */
@@ -2242,20 +2245,7 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
     --card-foreground: #f2f4f7;
     --popover: #16181b;
     --popover-foreground: #f2f4f7;
-    /* Dark: the brand orange itself (hue 20), white on it like the glyph on
-       the app icon. */
-    --brand-accent-fill: #ff7b3a;
-    --brand-accent-fill-hover: #ff8a4c;
-    --brand-accent-fill-deep: #e63e22;
     --brand-accent-fill-foreground: var(--color-white);
-    --brand-accent-tint: color-mix(in srgb, var(--brand-accent-fill) 14%, transparent);
-    /* Text-bearing brand buttons start a step deeper than the icon-only send
-       tile so a semibold white label holds 3.2:1 at the top and 4.1:1 at the
-       bottom; hover lifts to the pure brand ramp. */
-    --brand-accent-cta-top: #f2652a;
-    --brand-accent-cta-bottom: var(--brand-accent-fill-deep);
-    --brand-accent-cta-top-hover: var(--brand-accent-fill);
-    --brand-accent-cta-bottom-hover: #f0472d;
     /* Neutral primary: the foreground white with the canvas as its text
        (17:1), a step dimmer on hover. */
     --primary: #f2f4f7;
@@ -3514,53 +3504,104 @@ code {
 }
 
 /* Settings → Appearance → Accent color (data-accent on <html>,
-   appearancePreferences.ts). Orange is the brand ramp defined with the theme
-   tokens; every other preset sets one base per theme and derives the ramp,
-   so send buttons, CTAs, highlights and the agent cursor follow it. Unlayered
-   so it outranks the theme blocks. */
-:root[data-accent="blue"] {
+   appearancePreferences.ts). Orange is the hand-tuned brand ramp; every other
+   preset sets one base per theme and derives the ramp, so send buttons, CTAs,
+   highlights and the agent cursor follow it. Unlayered so it outranks the
+   theme blocks. The presets are mirrored in packages/shared/src/accentColors.ts
+   and index.html's boot script (accentPresets.sync.test.ts pins them).
+
+   `data-accent-preview` scopes the same ramp to one element, so the settings
+   picker can show an accent without applying it. */
+
+/* Orange, the brand from the logo (--color-brand-ember-*), used sparingly:
+   the enabled send button, the boot splash and the "needs you" signal.
+   Light: a burnt orange that keeps white text at 4.7:1; the reds stay at hue
+   0, this sits at 18. Text-bearing brand buttons use the same burnt orange,
+   lifting a step on hover. */
+:root,
+[data-accent-preview="orange"] {
+  --brand-accent-fill: #c94a14;
+  --brand-accent-fill-hover: #b8420f;
+  --brand-accent-fill-deep: #b03d10;
+  --brand-accent-tint: color-mix(in srgb, var(--brand-accent-fill) 12%, transparent);
+  --brand-accent-cta-top: var(--brand-accent-fill);
+  --brand-accent-cta-bottom: var(--brand-accent-fill-deep);
+  --brand-accent-cta-top-hover: #d9511a;
+  --brand-accent-cta-bottom-hover: var(--brand-accent-fill);
+}
+/* Dark: the brand orange itself (hue 20), white on it like the glyph on the
+   app icon. Text-bearing brand buttons start a step deeper than the icon-only
+   send tile so a semibold white label holds 3.2:1 at the top and 4.1:1 at the
+   bottom; hover lifts to the pure brand ramp. */
+:root.dark,
+.dark [data-accent-preview="orange"] {
+  --brand-accent-fill: #ff7b3a;
+  --brand-accent-fill-hover: #ff8a4c;
+  --brand-accent-fill-deep: #e63e22;
+  --brand-accent-tint: color-mix(in srgb, var(--brand-accent-fill) 14%, transparent);
+  --brand-accent-cta-top: #f2652a;
+  --brand-accent-cta-bottom: var(--brand-accent-fill-deep);
+  --brand-accent-cta-top-hover: var(--brand-accent-fill);
+  --brand-accent-cta-bottom-hover: #f0472d;
+}
+:root[data-accent="blue"],
+[data-accent-preview="blue"] {
   --accent-preset: #2563eb;
 }
-:root.dark[data-accent="blue"] {
+:root.dark[data-accent="blue"],
+.dark [data-accent-preview="blue"] {
   --accent-preset: #4c8dff;
 }
-:root[data-accent="violet"] {
+:root[data-accent="violet"],
+[data-accent-preview="violet"] {
   --accent-preset: #7c3aed;
 }
-:root.dark[data-accent="violet"] {
+:root.dark[data-accent="violet"],
+.dark [data-accent-preview="violet"] {
   --accent-preset: #9d6bff;
 }
-:root[data-accent="green"] {
+:root[data-accent="green"],
+[data-accent-preview="green"] {
   --accent-preset: #15803d;
 }
-:root.dark[data-accent="green"] {
+:root.dark[data-accent="green"],
+.dark [data-accent-preview="green"] {
   --accent-preset: #2fb565;
 }
-:root[data-accent="pink"] {
+:root[data-accent="pink"],
+[data-accent-preview="pink"] {
   --accent-preset: #db2777;
 }
-:root.dark[data-accent="pink"] {
+:root.dark[data-accent="pink"],
+.dark [data-accent-preview="pink"] {
   --accent-preset: #f0559a;
 }
-:root[data-accent="teal"] {
+:root[data-accent="teal"],
+[data-accent-preview="teal"] {
   --accent-preset: #0f766e;
 }
-:root.dark[data-accent="teal"] {
+:root.dark[data-accent="teal"],
+.dark [data-accent-preview="teal"] {
   --accent-preset: #1fb3a5;
 }
-:root[data-accent="amber"] {
+:root[data-accent="amber"],
+[data-accent-preview="amber"] {
   --accent-preset: #b45309;
 }
-:root.dark[data-accent="amber"] {
+:root.dark[data-accent="amber"],
+.dark [data-accent-preview="amber"] {
   --accent-preset: #e8930c;
 }
-:root[data-accent="red"] {
+:root[data-accent="red"],
+[data-accent-preview="red"] {
   --accent-preset: #c42b2b;
 }
-:root.dark[data-accent="red"] {
+:root.dark[data-accent="red"],
+.dark [data-accent-preview="red"] {
   --accent-preset: #f04a4a;
 }
-:root[data-accent]:not([data-accent="orange"]) {
+:root[data-accent]:not([data-accent="orange"]),
+[data-accent-preview]:not([data-accent-preview="orange"]) {
   --brand-accent-fill: var(--accent-preset);
   --brand-accent-fill-hover: color-mix(in oklab, var(--accent-preset) 88%, white);
   --brand-accent-fill-deep: color-mix(in oklab, var(--accent-preset) 84%, black);

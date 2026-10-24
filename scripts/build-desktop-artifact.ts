@@ -1112,6 +1112,11 @@ export const DESKTOP_EXTRA_RESOURCES = [
 export const MAC_SPEECH_HELPER_EXTRA_RESOURCES = [
   { from: "apps/desktop/prod-resources/speech-helper", to: "speech-helper" },
 ] as const;
+// Accent Dock icons (scripts/render-accent-dock-icons.ts), read by DesktopDockIcon.ts.
+// buildResources is kept out of app.asar, so they ship beside it.
+export const MAC_DOCK_ICON_EXTRA_RESOURCES = [
+  { from: "apps/desktop/resources/dock-icons", to: "dock-icons" },
+] as const;
 export const LINUX_BROWSER_SECRET_EXTRA_RESOURCES = [
   { from: "apps/desktop/prod-resources/browser-secret", to: "browser-secret" },
 ] as const;
@@ -2709,6 +2714,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     extraResources: [
       ...DESKTOP_EXTRA_RESOURCES,
       ...(platform === "mac" ? MAC_SPEECH_HELPER_EXTRA_RESOURCES : []),
+      ...(platform === "mac" ? MAC_DOCK_ICON_EXTRA_RESOURCES : []),
       ...(platform === "linux" ? LINUX_BROWSER_SECRET_EXTRA_RESOURCES : []),
       ...(platform === "win" ? WINDOWS_SERVER_EXTRA_RESOURCES : []),
       ...(platform === "win" && wslRuntimeBundled ? WSL_RUNTIME_EXTRA_RESOURCES : []),

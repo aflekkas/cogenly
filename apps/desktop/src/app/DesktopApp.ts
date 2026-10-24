@@ -15,6 +15,7 @@ import { installDesktopIpcHandlers } from "../ipc/DesktopIpcHandlers.ts";
 import * as DesktopAppActivation from "./DesktopAppActivation.ts";
 import * as DesktopAppIdentity from "./DesktopAppIdentity.ts";
 import * as DesktopClerk from "./DesktopClerk.ts";
+import * as DesktopDockIcon from "./DesktopDockIcon.ts";
 import * as DesktopApplicationMenu from "../window/DesktopApplicationMenu.ts";
 import * as DesktopWindow from "../window/DesktopWindow.ts";
 import * as PreviewPasskeys from "../preview/Passkeys.ts";
@@ -330,6 +331,8 @@ const startup = Effect.gen(function* () {
     });
   }
   yield* appIdentity.configure;
+  // After the channel icon above: the last accent the renderer reported.
+  yield* DesktopDockIcon.restoreAccentDockIcon((yield* desktopSettings.get).accentColor);
   yield* previewPasskeys.configure;
   yield* applicationMenu.configure;
   yield* updates.configure;

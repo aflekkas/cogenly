@@ -23,6 +23,9 @@ Style with Tailwind classes in the component that renders the element.
 - Main content width comes from the `--content-*` tokens in `index.css`: pages render
   [`PageContent`](../../apps/web/src/components/PageContent.tsx) and the chat lane reads the same
   tokens. No page-level `max-w-*` or `mx-auto`; a wider page uses its `wide` variant.
+- Interactive states (hover, focus-visible, pressed, selected) transition through the
+  `interactive` utility in `index.css`; `state-hover` and `state-selected` include it, and the
+  `require-interactive-transition` lint flags a raw `hover:bg-*` without it.
 
 ## Composition
 

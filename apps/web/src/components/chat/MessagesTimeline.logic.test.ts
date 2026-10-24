@@ -19,7 +19,12 @@ import {
   collapseWorkEntryRuns,
   deriveMessagesTimelineRows,
   deriveTerminalAssistantMessageIds,
+  disclosureOpenedRecently,
+  markDisclosureClosed,
+  markDisclosureOpened,
+  resolveDisclosureHoldsEnd,
   turnFoldRowId,
+  type DisclosureOpenTimes,
   type MessagesTimelineRow,
   type TimelineLatestRun,
 } from "./MessagesTimeline.logic";
@@ -525,5 +530,66 @@ describe("a cut-off fragment never replaces the turn's answer", () => {
         new Set(),
       ),
     ]).toEqual(["fragment"]);
+  });
+});
+
+describe("rows a disclosure reveals grow in only right after the user opens it", () => {
+  const windowMs = 400;
+
+  it("grows in rows that mount within the window, for every row that reads it", () => {
+    const opens: DisclosureOpenTimes = new Map();
+    markDisclosureOpened(opens, "turn-fold:a", 1_000);
+    expect(disclosureOpenedRecently(opens, "turn-fold:a", 1_000, windowMs)).toBe(true);
+    // A second row, or a render React discarded and redid, still sees the open.
+    expect(disclosureOpenedRecently(opens, "turn-fold:a", 1_200, windowMs)).toBe(true);
+  });
+
+  it("shows later mounts at rest, so scrolling back to an open fold does not replay it", () => {
+    const opens: DisclosureOpenTimes = new Map();
+    markDisclosureOpened(opens, "work-group:a", 1_000);
+    expect(disclosureOpenedRecently(opens, "work-group:a", 1_401, windowMs)).toBe(false);
+    expect(opens.has("work-group:a")).toBe(false);
+  });
+
+  it("never grows in history nobody opened", () => {
+    expect(disclosureOpenedRecently(new Map(), "turn-fold:a", 0, windowMs)).toBe(false);
+  });
+
+  it("a reopen restarts the window instead of expiring with the earlier open", () => {
+    const opens: DisclosureOpenTimes = new Map();
+    markDisclosureOpened(opens, "turn-fold:a", 1_000);
+    markDisclosureClosed(opens, "turn-fold:a");
+    expect(disclosureOpenedRecently(opens, "turn-fold:a", 1_100, windowMs)).toBe(false);
+    markDisclosureOpened(opens, "turn-fold:a", 1_300);
+    expect(disclosureOpenedRecently(opens, "turn-fold:a", 1_500, windowMs)).toBe(true);
+  });
+});
+
+describe("a disclosure toggle keeps the end pinned wherever the list would re-pin it", () => {
+  const follow = { active: true, threshold: 1 };
+  const at = (distanceFromEnd: number) => ({
+    contentLength: 3_000,
+    scroll: 3_000 - 800 - distanceFromEnd,
+    scrollLength: 800,
+  });
+
+  it("pins at the end, with or without follow", () => {
+    expect(resolveDisclosureHoldsEnd(at(0), follow)).toBe(true);
+    expect(resolveDisclosureHoldsEnd(at(20), { ...follow, active: false })).toBe(true);
+  });
+
+  it("pins inside the follow band while streamed rows have not been pinned yet", () => {
+    expect(resolveDisclosureHoldsEnd(at(300), follow)).toBe(true);
+    expect(resolveDisclosureHoldsEnd(at(800), follow)).toBe(true);
+  });
+
+  it("holds the toggled row when reading history or beyond the band", () => {
+    expect(resolveDisclosureHoldsEnd(at(300), { ...follow, active: false })).toBe(false);
+    expect(resolveDisclosureHoldsEnd(at(801), follow)).toBe(false);
+  });
+
+  it("holds the toggled row before the list has measured", () => {
+    expect(resolveDisclosureHoldsEnd(undefined, follow)).toBe(false);
+    expect(resolveDisclosureHoldsEnd({ isAtEnd: false }, follow)).toBe(false);
   });
 });

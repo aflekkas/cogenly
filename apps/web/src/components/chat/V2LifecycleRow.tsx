@@ -633,7 +633,7 @@ function SubagentRow({
             onClick={() => props.onOpenThread(threadId)}
             className={cn(
               className,
-              "cursor-pointer state-hover state-fade focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70",
+              "cursor-pointer state-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70",
             )}
           />
         )

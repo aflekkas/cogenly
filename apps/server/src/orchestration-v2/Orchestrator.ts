@@ -8170,16 +8170,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
   ) =>
     Effect.gen(function* () {
-      const projection = yield* projectionStore
-        .getThreadRecords(
-          command.threadId,
-          ["runs", "messages", "nodes", "attempts", "subagents", "turnItems"],
-          { turnItemTypes: [], messageRoles: ["user"] },
-        )
-        .pipe(
-          Effect.mapError(() => new OrchestratorProjectionError({ threadId: command.threadId })),
-        );
-      const queuedRun = projection.runs.find((candidate) => candidate.id === command.runId);
+      // Cancelling reads only the queued run and the rows it owns, so the cost
+      // does not grow with the thread's history.
+      const { runs } = yield* loadProjectionForCommand(command, ["runs"], {
+        runIds: [command.runId],
+      });
+      const queuedRun = runs.find((candidate) => candidate.id === command.runId);
       if (queuedRun === undefined || queuedRun.status !== "queued") {
         return yield* new OrchestratorDispatchError({
           commandId: command.commandId,
@@ -8187,15 +8183,31 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           cause: `Run ${command.runId} is not queued.`,
         });
       }
+      const projection = yield* loadProjectionForCommand(
+        command,
+        ["messages", "nodes", "attempts"],
+        {
+          messageIds: [queuedRun.userMessageId],
+          nodeIds: queuedRun.rootNodeId === null ? [] : [queuedRun.rootNodeId],
+          attemptRunIds: [queuedRun.id],
+        },
+      );
       const queuedMessage = projection.messages.find(
         (candidate) => candidate.id === queuedRun.userMessageId,
       );
       if (queuedMessage?.delegatedCompletion !== undefined) {
+        // Disposing a delegated completion settles its whole cohort, which
+        // spans the parent run, its subagents and the delivery run.
+        const cohort = yield* loadProjectionForCommand(
+          command,
+          ["runs", "messages", "nodes", "attempts", "subagents"],
+          { messageRoles: ["user"] },
+        );
         const now = yield* DateTime.now;
         yield* disposeDelegatedCompletionCohort({
           command,
           events,
-          projection,
+          projection: cohort,
           parentRunId: queuedMessage.delegatedCompletion.parentRunId,
           disposition: "disposed",
           now,
@@ -11262,17 +11274,16 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       // Ordinary turns do not own a delegated delivery. Read just their input
       // before loading the cohort state needed to settle an actual delivery.
       const message = yield* projectionStore.getRunMessage(threadId, runId);
-      if (message?.delegatedCompletion === undefined) return;
-      const projection = yield* projectionStore.getThreadRecords(
-        threadId,
-        ["runs", "messages", "subagents"],
-        { messageRoles: ["user"] },
-      );
+      if (message?.delegatedCompletion === undefined || message.role !== "user") return;
+      // Only the delivery run, its parent run and the parent's subagents take
+      // part, so the read stays bounded on a thread with a long history.
+      const parentRunId = message.delegatedCompletion.parentRunId;
+      const projection = yield* projectionStore.getThreadRecords(threadId, ["runs", "subagents"], {
+        runIds: [runId, parentRunId],
+        subagentRunIds: [parentRunId],
+      });
       const deliveryRun = projection.runs.find((candidate) => candidate.id === runId);
-      const deliveryMessage =
-        deliveryRun === undefined
-          ? undefined
-          : projection.messages.find((candidate) => candidate.id === deliveryRun.userMessageId);
+      const deliveryMessage = deliveryRun?.userMessageId === message.id ? message : undefined;
       const messageOwnership = deliveryMessage?.delegatedCompletion;
       if (deliveryRun === undefined || messageOwnership === undefined) {
         return;

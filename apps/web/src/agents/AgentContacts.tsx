@@ -1,6 +1,7 @@
 import { useSensor, useSensors, type DragEndEvent, type UniqueIdentifier } from "@dnd-kit/core";
 import { arrayMove, SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { useAtomValue } from "@effect/atom-react";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { planPinnedReorder } from "@t3tools/client-runtime/state/thread-sort";
 import type { ContextMenuItem, EnvironmentId, ProjectLabelId } from "@t3tools/contracts";
 import { formatThreadLink } from "@t3tools/shared/threadLinks";
@@ -63,6 +64,7 @@ import { showCopiedToast, showCopyFailedToast } from "~/components/ui/copiedToas
 import { toastManager } from "~/components/ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
+import { useThreadIntentPrefetch } from "~/hooks/useThreadIntentPrefetch";
 import { useLocalStorage } from "~/hooks/useLocalStorage";
 import { useMediaQuery } from "~/hooks/useMediaQuery";
 import { useStableCallback } from "~/hooks/useStableCallback";
@@ -450,6 +452,11 @@ function AgentRow({
   // A row for an agent made in this session fades in once, when it first mounts.
   const [arrived] = useState(() => takeAgentArrival(agentContactKey(agent)));
   const setRowElement = useSidebarRowActionsOverlap();
+  const conversationRef = useMemo(
+    () => scopeThreadRef(agent.environmentId, agent.conversationThreadId),
+    [agent.environmentId, agent.conversationThreadId],
+  );
+  const intentPrefetch = useThreadIntentPrefetch(conversationRef);
   const rowRef = useRef<HTMLDivElement | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [facePicker, setFacePicker] = useState(false);
@@ -674,6 +681,7 @@ function AgentRow({
         }}
         onKeyDown={onKeyDown}
         onContextMenu={onContextMenu}
+        {...intentPrefetch}
       >
         {/* The face beside a Work card's three lines: name and status, the
             latest reply, then machine and model. */}

@@ -306,6 +306,55 @@ export function resolveTimelineIsAtEnd(state: TimelineEndState | undefined): boo
   return contentLength - scroll - scrollLength <= TIMELINE_FOLLOW_REARM_THRESHOLD_PX;
 }
 
+/**
+ * Whether a disclosure toggle keeps the end in view while rows resize, instead
+ * of holding the toggled row still. True at the end, and also anywhere the
+ * list's own follow would re-pin on the next row resize (`followThreshold`
+ * viewports from the end, while follow is on). Holding the row there would
+ * snap to the end as soon as the hold is released.
+ */
+export function resolveDisclosureHoldsEnd(
+  state: TimelineEndState | undefined,
+  endFollow: { readonly active: boolean; readonly threshold: number },
+): boolean {
+  if (resolveTimelineIsAtEnd(state) === true) return true;
+  if (!endFollow.active || !state) return false;
+  const { contentLength, scroll, scrollLength } = state;
+  if (contentLength === undefined || scroll === undefined || scrollLength === undefined) {
+    return false;
+  }
+  return contentLength - scroll - scrollLength <= endFollow.threshold * scrollLength;
+}
+
+/**
+ * When each timeline disclosure was last opened by the user, by id. A row a
+ * disclosure reveals reads this on mount: within `windowMs` of the open it
+ * grows in, later (a virtualized remount, or history) it shows at rest.
+ * Reading is idempotent, so a render React discards cannot use up the open.
+ */
+export type DisclosureOpenTimes = Map<string, number>;
+
+export function markDisclosureOpened(opens: DisclosureOpenTimes, id: string, now: number) {
+  opens.set(id, now);
+}
+
+export function markDisclosureClosed(opens: DisclosureOpenTimes, id: string) {
+  opens.delete(id);
+}
+
+export function disclosureOpenedRecently(
+  opens: DisclosureOpenTimes,
+  id: string,
+  now: number,
+  windowMs: number,
+): boolean {
+  const openedAt = opens.get(id);
+  if (openedAt === undefined) return false;
+  if (now - openedAt <= windowMs) return true;
+  opens.delete(id);
+  return false;
+}
+
 export function resolveTimelineMinimapHeightStyle(itemCount: number): string {
   const naturalHeight = Math.max(1, (itemCount - 1) * TIMELINE_MINIMAP_ITEM_SPACING);
   return `min(${naturalHeight}px, ${TIMELINE_MINIMAP_MAX_HEIGHT_CSS})`;

@@ -1,6 +1,7 @@
 /**
- * The sidebar search dock: one boxed row pinned above every tab's list
- * (Chats, Work, Agents, Projects, Settings). Search owns the row's text and
+ * The sidebar search dock: one boxed row pinned above every tab's list, or
+ * below it in the bottom sidebar layout (Chats, Work, Agents, Projects,
+ * Settings). Search owns the row's text and
  * spans it; the tab's own primary actions sit as icons at its end, after any
  * mode-specific filter: new chat, new task and add repository, new agent, new
  * project. Settings has none.
@@ -13,6 +14,7 @@ import {
   type RefObject,
 } from "react";
 
+import { type SidebarLayout, useSidebarLayout } from "~/appearancePreferences";
 import { cn } from "~/lib/utils";
 import { SearchInput } from "../ui/search-input";
 import { SidebarMenuButton } from "../ui/sidebar";
@@ -76,7 +78,7 @@ export function SidebarSearchDock({
   return (
     <SearchInput
       ref={searchInputRef}
-      size="md"
+      size="sm"
       value={searchQuery}
       onChange={(event) => onSearchQueryChange(event.currentTarget.value)}
       onKeyDown={onSearchKeyDown}
@@ -146,6 +148,7 @@ export function SidebarHeaderIconButton({
   ComponentProps<typeof SidebarMenuButton>,
   "children" | "className" | "tooltip" | "isActive" | "aria-label"
 >) {
+  const layout = useSidebarLayout();
   return (
     <Tooltip>
       <TooltipTrigger
@@ -166,7 +169,12 @@ export function SidebarHeaderIconButton({
           className="pointer-events-none absolute left-1/2 top-1/2 size-[max(100%,3rem)] -translate-1/2 pointer-fine:hidden"
         />
       </TooltipTrigger>
-      <TooltipPopup side="bottom">{tooltip}</TooltipPopup>
+      <TooltipPopup side={sidebarDockPopupSide(layout)}>{tooltip}</TooltipPopup>
     </Tooltip>
   );
+}
+
+/** Popups from the dock and its count bar open toward the list, away from the column's edge. */
+export function sidebarDockPopupSide(layout: SidebarLayout): "top" | "bottom" {
+  return layout === "bottom" ? "top" : "bottom";
 }

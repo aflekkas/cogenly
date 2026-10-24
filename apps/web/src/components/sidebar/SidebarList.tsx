@@ -5,6 +5,7 @@ import type {
   ReactNode,
 } from "react";
 
+import { type SidebarLayout, useSidebarLayout } from "~/appearancePreferences";
 import { cn } from "~/lib/utils";
 import { DisclosureChevron, DisclosurePanel } from "../ui/disclosure";
 
@@ -14,7 +15,8 @@ import { DisclosureChevron, DisclosurePanel } from "../ui/disclosure";
  * selected states, truncation and collapse read the same everywhere:
  *
  * - `SidebarList` — the list itself, reading down from the search dock above
- *   it; it fills the column when it `grow`s.
+ *   it, or in the bottom sidebar layout stacked up against the dock below it;
+ *   it fills the column when it `grow`s (`sidebarFillClassName`).
  * - `SidebarGroupHeader` — a group's heading: optional icon or badge, a label
  *   that truncates, a hairline, and a disclosure chevron when it collapses.
  * - `SidebarFoldRow` — a row under a collapsible heading, which folds with it.
@@ -40,6 +42,14 @@ import { DisclosureChevron, DisclosurePanel } from "../ui/disclosure";
  * the scroll viewport clips sideways as a backstop (see `SidebarContent`).
  */
 
+/**
+ * A sidebar column that fills the rest of the scroll area: its items read
+ * down from the top, or in the bottom layout stack up against the dock below.
+ */
+export function sidebarFillClassName(layout: SidebarLayout): string {
+  return cn("flex-1", layout === "bottom" && "justify-end");
+}
+
 export function SidebarList({
   density = "rows",
   grow = false,
@@ -51,13 +61,14 @@ export function SidebarList({
   /** Fill the rest of the column, so an empty state centres in it. */
   grow?: boolean;
 }) {
+  const layout = useSidebarLayout();
   return (
     <ul
       {...props}
       className={cn(
         "relative flex min-w-0 flex-col",
         density === "rows" && "gap-(--sidebar-row-gap)",
-        grow && "flex-1",
+        grow && sidebarFillClassName(layout),
         className,
       )}
     />

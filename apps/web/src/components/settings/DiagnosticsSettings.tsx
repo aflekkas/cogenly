@@ -364,7 +364,7 @@ function ProcessDiagnosticsTable({
               </tr>
             ) : null}
             {visibleProcesses.map((process) => (
-              <tr key={process.pid} className="hover:bg-muted/20">
+              <tr key={process.pid} className="interactive hover:bg-muted/20">
                 <td className="px-4 py-2 align-middle sm:pl-5">
                   <ProcessNameCell
                     process={process}
@@ -591,7 +591,7 @@ function ProcessResourceHistoryTable({
               </tr>
             ) : null}
             {processes.map((process) => (
-              <tr key={process.processKey} className="hover:bg-muted/20">
+              <tr key={process.processKey} className="interactive hover:bg-muted/20">
                 <td className="px-4 py-2 align-middle sm:pl-5">
                   <ResourceHistoryProcessNameCell
                     process={process}
@@ -1270,7 +1270,7 @@ export function DiagnosticsSettingsPanel() {
                 {data.latestWarningAndErrorLogs.map((event) => (
                   <tr
                     key={`${event.traceId}:${event.spanId}:${DateTime.formatIso(event.seenAt)}:${event.message}`}
-                    className="hover:bg-muted/15"
+                    className="interactive hover:bg-muted/15"
                   >
                     <td className="whitespace-nowrap px-4 py-3 align-top font-mono tabular-nums text-muted-foreground sm:pl-5">
                       {formatRelativeNoWrap(event.seenAt)}

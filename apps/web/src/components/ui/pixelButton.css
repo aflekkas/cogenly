@@ -1,5 +1,6 @@
 /* The pixel button: the composer's primary tile, a miniature of the boot
-   splash mosaic (index.html). Only that tile (send, queue, stop) wears it;
+   splash mosaic (index.html). Only that tile (send, queue, stop) wears it,
+   plus the accent picker's swatches and preview in Settings → Appearance;
    PixelToneGhost (pixelButton.tsx) runs its tone change.
 
    The surface is an 8x8 grid of 4px cells (a few merged 2x2), toned by height
@@ -30,10 +31,13 @@
    transparent, a no-op, so the ember ramp renders as drawn.
    Reduced motion: no sweep; hover is a brightness fade and the ghost a
    crossfade. */
-:root {
+:root,
+[data-accent-preview="orange"] {
   --pixel-tint-brand: transparent;
 }
-:root[data-accent]:not([data-accent="orange"]) {
+/* data-accent-preview scopes an accent to one element (the settings picker). */
+:root[data-accent]:not([data-accent="orange"]),
+[data-accent-preview]:not([data-accent-preview="orange"]) {
   --pixel-tint-brand: var(--brand-accent-fill);
 }
 
@@ -116,6 +120,11 @@
   --pixel-sweep: var(--pixel-sweep-danger);
   --pixel-tint: transparent;
   background-color: #f0514e;
+}
+
+/* A smaller tile on 3px cells (24px), the accent picker's swatches. */
+.pixel-button-swatch {
+  --pixel-cell: 3px;
 }
 
 /* The outgoing tone, stepping out over the new one. Rendered by PixelToneGhost

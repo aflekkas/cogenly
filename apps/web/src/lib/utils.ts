@@ -6,9 +6,13 @@ import { extendTailwindMerge } from "tailwind-merge";
 import { DraftId } from "../composerDraftStore";
 
 // The theme's extra font sizes (index.css). Unregistered, tailwind-merge reads
-// text-2xs as a colour and drops it next to text-muted-foreground.
+// text-2xs as a colour and drops it next to text-muted-foreground. `interactive`
+// (index.css) is a transition-property class, so a className transition replaces it.
 const twMerge = extendTailwindMerge({
-  extend: { theme: { text: ["menu", "2xs", "3xs", "4xs", "5xs"] } },
+  extend: {
+    theme: { text: ["menu", "2xs", "3xs", "4xs", "5xs"] },
+    classGroups: { transition: ["interactive"] },
+  },
 });
 
 export function cn(...inputs: CxOptions) {

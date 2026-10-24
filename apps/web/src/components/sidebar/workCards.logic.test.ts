@@ -1,3 +1,4 @@
+import { generateSpreadPinOrderKeys } from "@t3tools/client-runtime/state/thread-sort";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -6,6 +7,7 @@ import {
   moveInOrder,
   NO_PROJECT_WORK_GROUP,
   placeInGroupOrder,
+  planWorkCardReorder,
   toggleCollapsedSection,
   workCardLabel,
 } from "./workCards.logic";
@@ -128,6 +130,91 @@ describe("applyDrawnOrder", () => {
       "b",
       "new",
     ]);
+  });
+});
+
+describe("planWorkCardReorder", () => {
+  // The server's order is ascending keys: x, y, z.
+  const [low, mid, high] = generateSpreadPinOrderKeys(3) as [string, string, string];
+  const keysById = new Map([
+    ["x", low],
+    ["y", mid],
+    ["z", high],
+  ]);
+  /** The server's order after applying `writes`: ascending by key. */
+  const serverOrder = (writes: ReadonlyArray<{ id: string; orderKey: string }>) => {
+    const keys = new Map(keysById);
+    for (const write of writes) keys.set(write.id, write.orderKey);
+    return [...keys].toSorted(([, a], [, b]) => (a < b ? -1 : 1)).map(([id]) => id);
+  };
+
+  it("keys the drawn order as is in the top layout", () => {
+    // Drawn x, y, z; z moves up between x and y.
+    const writes = planWorkCardReorder({
+      layout: "top",
+      drawnOrder: ["x", "z", "y"],
+      keysById,
+      movedId: "z",
+    });
+    expect(writes).toHaveLength(1);
+    expect(writes[0]!.orderKey > low && writes[0]!.orderKey < mid).toBe(true);
+    expect(serverOrder(writes)).toEqual(["x", "z", "y"]);
+  });
+
+  it("keys the reverse of the drawn order in the bottom layout", () => {
+    // Drawn z, y, x (newest-first end at the bottom); z moves down between y and x.
+    const writes = planWorkCardReorder({
+      layout: "bottom",
+      drawnOrder: ["y", "z", "x"],
+      keysById,
+      movedId: "z",
+    });
+    expect(writes).toHaveLength(1);
+    expect(writes[0]!.orderKey > low && writes[0]!.orderKey < mid).toBe(true);
+    expect(serverOrder(writes).toReversed()).toEqual(["y", "z", "x"]);
+  });
+
+  it("saves the same order for the same move in either layout", () => {
+    // The same arrangement (server order x, z, y), drawn each layout's way.
+    const top = planWorkCardReorder({
+      layout: "top",
+      drawnOrder: ["x", "z", "y"],
+      keysById,
+      movedId: "z",
+    });
+    const bottom = planWorkCardReorder({
+      layout: "bottom",
+      drawnOrder: ["y", "z", "x"],
+      keysById,
+      movedId: "z",
+    });
+    expect(bottom).toEqual(top);
+  });
+
+  it("keys new, keyless cards once, avoiding keys held by cards not drawn", () => {
+    const held = generateSpreadPinOrderKeys(1)[0]!;
+    const keyless = new Map<string, string | null>([
+      ["new", null],
+      ["old", null],
+      ["elsewhere", held],
+    ]);
+    const bottom = planWorkCardReorder({
+      layout: "bottom",
+      drawnOrder: ["old", "new"],
+      keysById: keyless,
+      movedId: "new",
+    });
+    const keyOf = new Map(bottom.map((write) => [write.id, write.orderKey]));
+    // Drawn below, by the dock, so earlier in the server's order: a smaller key.
+    expect(keyOf.get("new")! < keyOf.get("old")!).toBe(true);
+    expect([...keyOf.values()]).not.toContain(held);
+    const top = planWorkCardReorder({
+      layout: "top",
+      drawnOrder: ["new", "old"],
+      keysById: keyless,
+      movedId: "new",
+    });
+    expect(top).toEqual(bottom);
   });
 });
 

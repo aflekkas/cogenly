@@ -65,7 +65,7 @@ function LicenseNoticeRow({
   return (
     <Collapsible open={open} onOpenChange={onOpenChange}>
       <article>
-        <div className="flex min-h-10 items-center hover:bg-muted/35 sm:min-h-9">
+        <div className="flex min-h-10 items-center interactive hover:bg-muted/35 sm:min-h-9">
           <CollapsibleTrigger className="flex min-h-10 min-w-0 flex-1 items-center gap-2.5 px-3 text-left sm:min-h-9 sm:px-4">
             <DisclosureChevron />
             <span className="flex min-w-0 flex-1 items-baseline gap-2">

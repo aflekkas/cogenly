@@ -285,7 +285,7 @@ function CommitmentRow({
   return (
     <article
       className={cn(
-        "flex flex-col gap-1.5 rounded-xl px-3 py-2 hover:bg-muted/30",
+        "flex flex-col gap-1.5 rounded-xl px-3 py-2 interactive hover:bg-muted/30",
         item.status === "proposed" && "border border-dashed border-border",
         closed && "opacity-70",
       )}

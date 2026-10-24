@@ -32,6 +32,7 @@ import * as ManagedRelay from "../relay/managedRelay.ts";
 import { subscribeDynamic } from "../rpc/client.ts";
 import { parseThreadKey, threadKey } from "./entities.ts";
 import { applyOrchestrationV2ProjectionEvent } from "./orchestrationV2Projection.ts";
+import { createRetainedSnapshotSet, RETAINED_THREAD_SNAPSHOT_LIMIT } from "./threadPrefetch.ts";
 import { THREAD_SNAPSHOT_IDLE_TTL_MS } from "./threadRetention.ts";
 import { followStreamInEnvironment } from "./runtime.ts";
 import * as ThreadHistoryController from "./threadHistoryController.ts";
@@ -998,6 +999,15 @@ export function createEnvironmentThreadStateAtoms<R, E>(
       Atom.withLabel(`environment-thread-resume:${key}`),
     ),
   );
+  // A left thread keeps its snapshot so returning paints at once, but only the
+  // most recently left few. Older ones resume from the persisted cache, so
+  // rapid switching cannot pile up projections for the whole idle TTL.
+  const retained = createRetainedSnapshotSet<ThreadResumeCache>(
+    RETAINED_THREAD_SNAPSHOT_LIMIT,
+    (cache) => {
+      cache.snapshot = undefined;
+    },
+  );
   const family = Atom.family((key: string) => {
     const { environmentId, threadId } = parseThreadKey(key);
     const resumeAtom = resumeFamily(key);
@@ -1006,6 +1016,8 @@ export function createEnvironmentThreadStateAtoms<R, E>(
         (get) => {
           get.mount(resumeAtom);
           const resume = get.once(resumeAtom);
+          retained.opened(key);
+          get.addFinalizer(() => retained.closed(key, resume));
           const live = threadStateChanges(environmentId, threadId, resume);
           return resume.snapshot === undefined
             ? live
@@ -1031,6 +1043,7 @@ export * as ThreadHistoryController from "./threadHistoryController.ts";
 // Flat so consumers' inferred types can name it.
 export type { ThreadHistoryLoadEarlierResult } from "./threadHistoryController.ts";
 export * from "./threadHistoryMerge.ts";
+export * from "./threadPrefetch.ts";
 export * from "./threadSnapshotHttp.ts";
 export * from "./composerPathSearch.ts";
 export * from "./threadCommands.ts";

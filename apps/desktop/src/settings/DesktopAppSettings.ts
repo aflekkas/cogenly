@@ -1,5 +1,7 @@
 import {
+  AppearanceAccentSchema,
   DesktopServerExposureModeSchema,
+  type AppearanceAccent,
   type DesktopServerExposureMode,
   type DesktopUpdateChannel,
 } from "@t3tools/contracts";
@@ -24,6 +26,9 @@ import {
 import { isValidDistroName } from "../wsl/wslPathParsing.ts";
 
 export interface DesktopSettings {
+  // The web client's accent (Settings → Appearance), mirrored so the Dock
+  // icon can follow it as soon as the app is ready on the next launch.
+  readonly accentColor: AppearanceAccent;
   readonly localEnvironmentEnabled: boolean;
   readonly linuxPasswordStore: LinuxPasswordStorePreference;
   readonly mainWindowBounds: DesktopWindowBounds | null;
@@ -73,6 +78,7 @@ export const DEFAULT_MAIN_WINDOW_SIZE = {
 } as const;
 
 export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
+  accentColor: "orange",
   localEnvironmentEnabled: true,
   linuxPasswordStore: DEFAULT_LINUX_PASSWORD_STORE,
   mainWindowBounds: null,
@@ -95,6 +101,8 @@ const DesktopWindowBoundsDocument = Schema.Struct({
 });
 
 const DesktopSettingsDocument = Schema.Struct({
+  // Unknown on load so an accent a newer build added never drops the document.
+  accentColor: Schema.optionalKey(Schema.Unknown),
   localEnvironmentEnabled: Schema.optionalKey(Schema.Boolean),
   linuxPasswordStore: Schema.optionalKey(Schema.Unknown),
   mainWindowBounds: Schema.optionalKey(Schema.NullOr(DesktopWindowBoundsDocument)),
@@ -120,6 +128,7 @@ const DesktopSettingsJson = fromLenientJson(DesktopSettingsDocument);
 const decodeDesktopSettingsJson = Schema.decodeEffect(DesktopSettingsJson);
 const encodeDesktopSettingsJson = Schema.encodeEffect(DesktopSettingsJson);
 const decodeDesktopWindowBounds = Schema.decodeUnknownOption(DesktopWindowBoundsSchema);
+const isAppearanceAccent = Schema.is(AppearanceAccentSchema);
 const desktopWindowBoundsEquivalence = Schema.toEquivalence(DesktopWindowBoundsSchema);
 
 const settingsChange = (settings: DesktopSettings, changed: boolean): DesktopSettingsChange => ({
@@ -155,6 +164,9 @@ export class DesktopAppSettings extends Context.Service<
   {
     readonly load: Effect.Effect<DesktopSettings>;
     readonly get: Effect.Effect<DesktopSettings>;
+    readonly setAccentColor: (
+      accent: AppearanceAccent,
+    ) => Effect.Effect<DesktopSettingsChange, DesktopSettingsWriteError>;
     readonly setLocalEnvironmentEnabled: (
       enabled: boolean,
     ) => Effect.Effect<DesktopSettingsChange, DesktopSettingsWriteError>;
@@ -225,6 +237,9 @@ function normalizeDesktopSettingsDocument(
     (parsed.wslBackendEnabled === undefined && parsed.wslMode === "wsl");
 
   return {
+    accentColor: isAppearanceAccent(parsed.accentColor)
+      ? parsed.accentColor
+      : defaultSettings.accentColor,
     localEnvironmentEnabled: parsed.localEnvironmentEnabled !== false,
     linuxPasswordStore: normalizeLinuxPasswordStorePreference(parsed.linuxPasswordStore),
     mainWindowBounds,
@@ -248,6 +263,9 @@ function toDesktopSettingsDocument(
 ): DesktopSettingsDocument {
   const document: Mutable<DesktopSettingsDocument> = {};
 
+  if (settings.accentColor !== defaults.accentColor) {
+    document.accentColor = settings.accentColor;
+  }
   if (settings.localEnvironmentEnabled !== defaults.localEnvironmentEnabled) {
     document.localEnvironmentEnabled = settings.localEnvironmentEnabled;
   }
@@ -370,6 +388,10 @@ function setWslOnly(settings: DesktopSettings, enabled: boolean): DesktopSetting
         ...settings,
         wslOnly: enabled,
       };
+}
+
+function setAccentColor(settings: DesktopSettings, accent: AppearanceAccent): DesktopSettings {
+  return settings.accentColor === accent ? settings : { ...settings, accentColor: accent };
 }
 
 function setLocalEnvironmentEnabled(settings: DesktopSettings, enabled: boolean): DesktopSettings {
@@ -527,6 +549,10 @@ export const make = Effect.gen(function* () {
       );
       return yield* SynchronizedRef.setAndGet(settingsRef, settings);
     }).pipe(Effect.withSpan("desktop.settings.load")),
+    setAccentColor: (accent) =>
+      persist((settings) => setAccentColor(settings, accent)).pipe(
+        Effect.withSpan("desktop.settings.setAccentColor", { attributes: { accent } }),
+      ),
     setMainWindowBounds: (bounds, isMaximized) =>
       persist((settings) => setMainWindowBounds(settings, bounds, isMaximized)).pipe(
         Effect.withSpan("desktop.settings.setMainWindowBounds", {
@@ -600,6 +626,7 @@ export const layerTest = (initialSettings: DesktopSettings = DEFAULT_DESKTOP_SET
       return DesktopAppSettings.of({
         get: SynchronizedRef.get(settingsRef),
         load: SynchronizedRef.get(settingsRef),
+        setAccentColor: (accent) => update((settings) => setAccentColor(settings, accent)),
         setMainWindowBounds: (bounds, isMaximized) =>
           update((settings) => setMainWindowBounds(settings, bounds, isMaximized)),
         setServerExposureMode: (mode) =>

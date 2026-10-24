@@ -74,27 +74,36 @@ export function MarkdownImageGalleryRow(props: { count: number; children: ReactN
   );
 }
 
-/** One gallery image with its caption (the alt text) and optional source link. */
-export function MarkdownGalleryFigure(props: {
-  caption: string;
+/**
+ * One block image from a figure paragraph (see `groupInlineImageGalleries`) with its caption
+ * beneath: the alt text as a label when the authored caption does not name the image, then the
+ * authored title, credit text, and source links, whose favicons come from the link renderer.
+ */
+export function MarkdownFigure(props: {
+  /** The alt text to label the caption with, or empty. */
+  label: string;
   media: ReactNode;
-  /** The link crediting the image, or null. */
-  source: ReactNode;
+  /** The authored caption, already rendered. */
+  caption: ReactNode[];
 }) {
   const single = use(GalleryCountContext) === 1;
-  const hasCaption = props.caption.length > 0 || props.source !== null;
+  const hasLabel = props.label.length > 0;
+  const hasCaption = props.caption.length > 0;
   return (
     <figure className={cn("flex min-w-0 flex-col gap-1.5", single && "w-full max-w-120")}>
       {props.media}
-      {hasCaption ? (
-        <figcaption className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs leading-snug text-muted-foreground">
-          {props.caption ? (
+      {hasLabel || hasCaption ? (
+        <figcaption className="min-w-0 text-xs leading-snug text-muted-foreground">
+          {hasLabel ? (
             // Copy-as-markdown already carries the alt text in the image itself.
-            <span data-markdown-copy="" className="min-w-0">
-              {props.caption}
+            <span data-markdown-copy="">{props.label}</span>
+          ) : null}
+          {hasLabel && hasCaption ? (
+            <span aria-hidden data-markdown-copy="">
+              {" · "}
             </span>
           ) : null}
-          {props.source}
+          {props.caption}
         </figcaption>
       ) : null}
     </figure>
@@ -188,7 +197,11 @@ export function MarkdownGalleryImage(props: {
     if (loaded === null && image.complete && image.naturalWidth > 0) settle(image, true);
   };
 
-  const ratio = single && loaded ? loaded.ratio : inlineImageAspectRatio(props.width, props.height);
+  const authoredRatio = inlineImageAspectRatio(props.width, props.height);
+  const hasAuthoredSize = Number(props.width) > 0 && Number(props.height) > 0;
+  // A lone failed image settles to a shorter 16:9 placeholder unless its size was authored.
+  const ratio =
+    single && loaded ? loaded.ratio : single && failed && !hasAuthoredSize ? 16 / 9 : authoredRatio;
   const knownWidth = loaded?.width || Number(props.width);
   // A tall lone image is capped by height and a small one by its own width; the box follows.
   const slotStyle: CSSProperties = {
@@ -260,13 +273,16 @@ export function MarkdownGalleryImage(props: {
       ) : failed ? (
         <span
           data-markdown-copy={props.copyMarkdown}
+          // Find indexes no image text, so the placeholder must not highlight either.
+          data-thread-find-ignore
           className={cn(
-            "absolute inset-0 flex items-center justify-center text-muted-foreground/50",
+            "absolute inset-0 flex items-center justify-center gap-1.5 p-2 text-xs text-muted-foreground/70",
             INLINE_IMAGE_FADE_CLASS_NAME,
             "starting:opacity-0",
           )}
         >
-          <ImageOffIcon aria-hidden className="size-4" />
+          <ImageOffIcon aria-hidden className="size-4 shrink-0" />
+          <span aria-hidden>Image unavailable</span>
         </span>
       ) : null}
     </div>
