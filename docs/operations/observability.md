@@ -38,7 +38,7 @@ Completed spans are written as NDJSON records to `serverTracePath`. The default 
 server starts: production and explicitly configured homes use
 `<home>/userdata/logs/server.trace.ndjson` (so `~/.cogenly/userdata/...` by default, or
 `/custom/path/userdata/...` with `--home-dir /custom/path`), a linked worktree dev run uses
-`<worktree>/.t3/userdata/logs/server.trace.ndjson`, and an implicit dev run outside a linked
+`<worktree>/.cogenly/userdata/logs/server.trace.ndjson`, and an implicit dev run outside a linked
 worktree uses `~/.cogenly/dev/logs/server.trace.ndjson`.
 
 Important fields common to both record types:
@@ -260,19 +260,19 @@ Resolve the path for the launch mode once. Production and explicitly configured 
 state under the base directory's `userdata` folder:
 
 ```bash
-TRACE_FILE="${COGENLY_HOME:-$HOME/.t3}/userdata/logs/server.trace.ndjson"
+TRACE_FILE="${COGENLY_HOME:-$HOME/.cogenly}/userdata/logs/server.trace.ndjson"
 ```
 
 A dev server started from a linked worktree defaults to that worktree's local home:
 
 ```bash
-TRACE_FILE="$WORKTREE/.t3/userdata/logs/server.trace.ndjson"
+TRACE_FILE="$WORKTREE/.cogenly/userdata/logs/server.trace.ndjson"
 ```
 
 Only an implicit dev run outside a linked worktree uses the shared dev directory:
 
 ```bash
-TRACE_FILE="$HOME/.t3/dev/logs/server.trace.ndjson"
+TRACE_FILE="$HOME/.cogenly/dev/logs/server.trace.ndjson"
 ```
 
 Tail the selected file:
@@ -372,12 +372,12 @@ Recommended flow in Grafana:
 2. Pick the `Tempo` data source.
 3. Set the time range to something recent like `Last 15 minutes`.
 4. Start broad. Do not begin with a very narrow query.
-5. Look for spans from the `t3code-server` or `t3code-desktop` service, then narrow by span name or
+5. Look for spans from the `cogenly-server` or `cogenly-desktop` service, then narrow by span name or
    attributes.
 
 Good first searches:
 
-- service name `t3code-server` or `t3code-desktop`, plus a resource attribute such as
+- service name `cogenly-server` or `cogenly-desktop`, plus a resource attribute such as
   `deployment.environment.name`
 - span names like `sendTurn` or a Git operation such as `GitVcsDriver.statusDetails.status`
 - Git spans whose `git.operation` attribute identifies the operation
@@ -584,7 +584,7 @@ The desktop main process is a second producer, assembled in
 `apps/desktop/src/app/DesktopObservability.ts`. It reads the same `COGENLY_OTLP_*` names and the same
 Settings entries as the backend it supervises, and covers work the backend cannot see: app startup,
 window and menu handling, backend supervision, and updates. It reports as service
-`t3code-desktop`, so a collector shows it alongside the backend rather than mixed into it. It
+`cogenly-desktop`, so a collector shows it alongside the backend rather than mixed into it. It
 exports traces and logs only; the main process records no metrics, so the metrics endpoint applies
 to the backend alone.
 
@@ -622,8 +622,8 @@ an `http` or `https` URL, a protocol other than `http/protobuf` or `http/json` s
 headers that are not `key=value` pairs with percent-encoded values turn that signal's export off
 with a startup warning, rather than sending it to the Settings endpoint.
 
-Service names are fixed: `t3code-server` for the backend and `t3code-desktop` for the desktop main
-process, both in `service.namespace` `t3code`. `OTEL_SERVICE_NAME` and a `service.name` or
+Service names are fixed: `cogenly-server` for the backend and `cogenly-desktop` for the desktop main
+process, both in `service.namespace` `cogenly`. `OTEL_SERVICE_NAME` and a `service.name` or
 `service.namespace` in `OTEL_RESOURCE_ATTRIBUTES` are ignored. Tell installations apart with other
 resource attributes, such as `OTEL_RESOURCE_ATTRIBUTES=deployment.environment.name=development`.
 
@@ -681,7 +681,7 @@ handler exits on `SIGUSR2`. After a crash the file can keep a stale pid that now
 different process, so check the pid first.
 
 ```bash
-pid="$(jq .pid "${COGENLY_HOME:-$HOME/.t3}/userdata/server-runtime.json")"
+pid="$(jq .pid "${COGENLY_HOME:-$HOME/.cogenly}/userdata/server-runtime.json")"
 ps -p "$pid" -o command=
 ```
 

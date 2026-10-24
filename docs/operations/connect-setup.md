@@ -49,14 +49,14 @@ In Clerk's OAuth applications settings:
 
 ## JWT template
 
-Create a Clerk JWT template named `t3-relay` with claims:
+Create a Clerk JWT template named `cogenly-relay` with claims:
 
 ```json
-{ "aud": "t3-code-relay" }
+{ "aud": "cogenly-relay" }
 ```
 
-Set `COGENLY_CLERK_JWT_TEMPLATE=t3-relay` for clients and
-`CLERK_JWT_AUDIENCE=t3-code-relay` for the relay. The production relay deployment environment
+Set `COGENLY_CLERK_JWT_TEMPLATE=cogenly-relay` for clients and
+`CLERK_JWT_AUDIENCE=cogenly-relay` for the relay. The production relay deployment environment
 also defines `CLERK_JWT_TEMPLATE`. The audience stays the same across relay stages; the relay
 URL selects the deployment.
 
@@ -77,21 +77,21 @@ persistence and system-browser callback delivery.
 
 ## Desktop passkeys
 
-For a production macOS app with bundle ID `com.t3tools.t3code`:
+For a production macOS app with bundle ID `com.cogenly.app`:
 
 1. Create an explicit macOS App ID in the Apple Developer portal with **Associated Domains**.
 2. Create a provisioning profile for that App ID and the distribution signing certificate.
 3. In Clerk's Native API settings, add an iOS app with the same Apple Team ID and bundle ID.
    This setting also configures Electron/macOS passkeys.
 4. Check `https://<frontend-api>/.well-known/apple-app-site-association`. Its
-   `webcredentials.apps` must include `<TEAM_ID>.com.t3tools.t3code`.
+   `webcredentials.apps` must include `<TEAM_ID>.com.cogenly.app`.
 5. Configure signing as described in the [release runbook](./release.md#signing-and-notarization).
 
 Local signed builds additionally use:
 
 ```dotenv
 COGENLY_APPLE_TEAM_ID=ABC1234567
-COGENLY_MACOS_PROVISIONING_PROFILE=/absolute/path/to/t3code.provisionprofile
+COGENLY_MACOS_PROVISIONING_PROFILE=/absolute/path/to/cogenly.provisionprofile
 # Override only when the RP domain differs from the Clerk Frontend API hostname.
 COGENLY_CLERK_PASSKEY_RP_DOMAINS=example.clerk.accounts.dev,clerk.example.com
 ```

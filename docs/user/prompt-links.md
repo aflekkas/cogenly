@@ -3,6 +3,8 @@
 A prompt link opens Cogenly with a prompt ready to send. Use one to share a prompt on social
 media, or to put a one-click fix in a pull request comment.
 
+Prompt links point at the hosted web app, so you can make them only when your Cogenly has one.
+
 A link never runs anything. It opens a draft. You read the prompt, then press Send. A link cannot
 change your permission mode, branch, or worktree. Your own defaults apply.
 
@@ -15,9 +17,9 @@ and the model you picked. Sent messages have a **Copy prompt link** button too.
 You can also write a link by hand:
 
 ```
-https://app.t3.codes/new?prompt=Rate%20my%20swearing
-https://app.t3.codes/new?prompt=Fix%20the%20build&repo=owner/name&provider=codex&model=gpt-5.5
-https://app.t3.codes/new?pr=owner/name/123&prompt=Fix%20the%20failing%20check
+https://<hosted-app>/new?prompt=Rate%20my%20swearing
+https://<hosted-app>/new?prompt=Fix%20the%20build&repo=owner/name&provider=codex&model=gpt-5.5
+https://<hosted-app>/new?pr=owner/name/123&prompt=Fix%20the%20failing%20check
 ```
 
 | Parameter  | Meaning                                                                       |
@@ -32,7 +34,7 @@ Encode the prompt for a URL. In JavaScript, use `encodeURIComponent`.
 
 ## Open a link
 
-On app.t3.codes, the link first asks where to open it: the desktop app, this browser
+On the hosted web app, the link first asks where to open it: the desktop app, this browser
 when it is connected to a machine, or the download page. Select **Remember my choice** to skip
 this step next time.
 
@@ -47,7 +49,7 @@ this step next time.
   worktree. Cogenly checks the code out only after you confirm, because the checkout runs your
   setup script on it.
 
-A thread link with a prompt, such as `https://app.t3.codes/<environment>/<thread>?prompt=…`,
+A thread link with a prompt, such as `https://<hosted-app>/<environment>/<thread>?prompt=…`,
 puts the prompt in that thread's composer. If you already typed a draft there, Cogenly asks
 before it replaces it.
 
