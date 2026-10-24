@@ -52,7 +52,10 @@ function Body({ active, className, ...props }: ComponentProps<"div"> & { active:
 // `data-pointer-focus` while focus came from the pointer, so a clicked tab
 // never takes the keyboard look even where the browser still matches
 // :focus-visible (a refocused window, focus moved after a shortcut).
-// Reduced motion keeps the crossfade and drops the scale.
+// Reduced motion keeps the crossfade and drops the scale. Whichever layer is
+// arriving waits 50ms (a transition takes the delay of the state it enters),
+// so the outgoing one is mostly gone first and the swap reads as a crossfade
+// rather than a snap: 200ms in all, both ways.
 const SWAP_LAYER =
   "absolute inset-0 flex items-center justify-center transition-[opacity,scale] duration-(--motion-duration-fast) ease-out";
 
@@ -96,8 +99,8 @@ function Icon({ className, children, ...props }: ComponentProps<"span">) {
         aria-hidden
         className={cn(
           SWAP_LAYER,
-          "group-hover/panel-tab:opacity-0 motion-safe:group-hover/panel-tab:scale-75",
-          "[[role=tablist]:not([data-pointer-focus])_[role=tab]:focus-visible_&]:opacity-0 motion-safe:[[role=tablist]:not([data-pointer-focus])_[role=tab]:focus-visible_&]:scale-75",
+          "delay-50 group-hover/panel-tab:opacity-0 group-hover/panel-tab:delay-0 motion-safe:group-hover/panel-tab:scale-75",
+          "[[role=tablist]:not([data-pointer-focus])_[role=tab]:focus-visible_&]:opacity-0 [[role=tablist]:not([data-pointer-focus])_[role=tab]:focus-visible_&]:delay-0 motion-safe:[[role=tablist]:not([data-pointer-focus])_[role=tab]:focus-visible_&]:scale-75",
         )}
       >
         {glyph}
@@ -106,8 +109,8 @@ function Icon({ className, children, ...props }: ComponentProps<"span">) {
         aria-hidden
         className={cn(
           SWAP_LAYER,
-          "opacity-0 group-hover/panel-tab:opacity-100 motion-safe:scale-75 motion-safe:group-hover/panel-tab:scale-100",
-          "[[role=tablist]:not([data-pointer-focus])_[role=tab]:focus-visible_&]:opacity-100 motion-safe:[[role=tablist]:not([data-pointer-focus])_[role=tab]:focus-visible_&]:scale-100",
+          "opacity-0 group-hover/panel-tab:opacity-100 group-hover/panel-tab:delay-50 motion-safe:scale-75 motion-safe:group-hover/panel-tab:scale-100",
+          "[[role=tablist]:not([data-pointer-focus])_[role=tab]:focus-visible_&]:opacity-100 [[role=tablist]:not([data-pointer-focus])_[role=tab]:focus-visible_&]:delay-50 motion-safe:[[role=tablist]:not([data-pointer-focus])_[role=tab]:focus-visible_&]:scale-100",
         )}
       >
         <X className="size-3" />

@@ -1,4 +1,8 @@
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import {
+  isAtomCommandInterrupted,
+  squashAtomCommandFailure,
+} from "@t3tools/client-runtime/state/runtime";
 import { deriveThreadQueueWorkflowState } from "@t3tools/client-runtime/state/thread-workflows";
 import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
 import type {
@@ -26,6 +30,7 @@ import {
   useRef,
   useState,
   type ComponentProps,
+  type MouseEvent,
   type Ref,
 } from "react";
 
@@ -38,9 +43,15 @@ import { cn } from "~/lib/utils";
 import { ComposerBanner } from "./ComposerBanner";
 import { NoticePresenceFrame } from "./ComposerBannerStack";
 import { composerStackBodyProps, useComposerStackFold } from "./ComposerStackColumn";
-import { mergeQueuedRowSlots, type QueuedRowSlot } from "./queuedRowPresence";
+import {
+  focusKeyAfterRemoval,
+  mergeQueuedRowSlots,
+  retainQueuedCancels,
+  type QueuedRowSlot,
+} from "./queuedRowPresence";
 import { PANEL_MOTION_EASING } from "~/lib/panelFlip";
 import { Button } from "../ui/button";
+import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 export interface EditQueuedRunRequest {
@@ -80,6 +91,20 @@ function measureQueuedRowTops(list: HTMLElement) {
 
 function prefersReducedMotion() {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+type RemovalFollowUp = "hold-rows" | "move-focus" | "none";
+
+/**
+ * What a × press needs next. A hovering pointer keeps the rows in place until
+ * it leaves the list; a keyboard press (no click count) moves focus on. Touch
+ * has already left the list by the time its click lands, so rows just close.
+ */
+function removalFollowUp(event: MouseEvent<HTMLElement>): RemovalFollowUp {
+  if (event.detail === 0) return "move-focus";
+  const native = event.nativeEvent;
+  const pointerType = "pointerType" in native ? native.pointerType : "mouse";
+  return pointerType === "touch" ? "none" : "hold-rows";
 }
 
 export interface QueuedRunsControlHandle {
@@ -137,18 +162,39 @@ export function QueuedRunsControl({
     () => (projection ? deriveThreadQueueWorkflowState(projection) : null),
     [projection],
   );
-  const queued = workflow?.queuedRuns ?? NO_QUEUED_RUNS;
+  // Removal is optimistic: a cancelled run leaves the list the moment its × is
+  // pressed and only comes back if the server refuses. Every view of the queue
+  // (rows, count, bulk actions, reorder indices) reads the filtered list.
+  const [cancelledRunIds, setCancelledRunIds] = useState<ReadonlySet<RunId>>(() => new Set());
+  const serverQueued = workflow?.queuedRuns ?? NO_QUEUED_RUNS;
+  const queued = useMemo(
+    () =>
+      cancelledRunIds.size === 0
+        ? serverQueued
+        : serverQueued.filter(({ run }) => !cancelledRunIds.has(run.id)),
+    [cancelledRunIds, serverQueued],
+  );
+  // While the pointer stays on the list after a click removal, rows that left
+  // keep their space (faded out) so the next × stays under the cursor; they
+  // close up once the pointer leaves.
+  const [holdLeavingRows, setHoldLeavingRows] = useState(false);
+  const rowsHeld = holdLeavingRows && listShown;
+  const focusAfterRemoveKeyRef = useRef<string | null>(null);
+  if (dragState !== null && !queued.some(({ run }) => run.id === dragState.runId)) {
+    // The dragged row left (removed here or elsewhere), so its dragend never comes.
+    setDragState(null);
+  }
   const activeRun = workflow?.activeRun ?? null;
   const canReorder = workflow?.canReorder === true;
   const queuedImageAttachmentIds = useMemo(() => {
     const ids: string[] = [];
-    for (const { attachments } of workflow?.queuedRuns ?? []) {
+    for (const { attachments } of serverQueued) {
       for (const attachment of attachments) {
         if (attachment.type === "image") ids.push(attachment.id);
       }
     }
     return ids;
-  }, [workflow]);
+  }, [serverQueued]);
   const queuedImageAttachmentResources = useMemo(
     () =>
       queuedImageAttachmentIds.map((attachmentId) => ({
@@ -245,16 +291,35 @@ export function QueuedRunsControl({
   }
   const itemsByKey = new Map(items.map((item) => [item.key, item]));
   const trayOpen = items.length > 0;
+  // An emptied queue keeps drawing its last rows while the tray closes, so a
+  // row removed here still counts as gone.
+  const isCancelledRow = (item: QueueItem) =>
+    item.runId !== null && cancelledRunIds.has(item.runId);
   const shownCount =
-    items.length > 0 ? items.length : presence.rows.filter((row) => !row.leaving).length;
+    items.length > 0
+      ? items.length
+      : presence.rows.filter((row) => !row.leaving && !isCancelledRow(row.item)).length;
   const removeLeftRow = useCallback((key: string) => {
     setPresence((current) => ({
       ...current,
       rows: current.rows.filter((row) => !(row.leaving && row.key === key)),
     }));
   }, []);
+  const serverQueuedRef = useRef(serverQueued);
+  useLayoutEffect(() => {
+    serverQueuedRef.current = serverQueued;
+  });
   const clearClosedTray = useCallback(() => {
     setPresence((current) => ({ ...current, rows: [] }));
+    // The list unmounts with the tray, so its pointerleave may never come.
+    setHoldLeavingRows(false);
+    // Nothing draws the cancelled rows any more, so drop the ones the server settled.
+    setCancelledRunIds((current) =>
+      retainQueuedCancels(
+        current,
+        serverQueuedRef.current.map(({ run }) => run.id),
+      ),
+    );
   }, []);
   // A queue already up when the composer mounts (a thread switch) is just there.
   const trayMountedRef = useRef(false);
@@ -301,6 +366,19 @@ export function QueuedRunsControl({
       );
       animation.id = QUEUED_ROW_REORDER_ANIMATION_ID;
     }
+  });
+
+  // Keyboard removal: the removed row goes inert, so focus moves to its neighbour.
+  useLayoutEffect(() => {
+    const key = focusAfterRemoveKeyRef.current;
+    const list = listRef.current;
+    if (key === null || !list) return;
+    focusAfterRemoveKeyRef.current = null;
+    list
+      .querySelector<HTMLElement>(
+        `[data-queued-row-key="${CSS.escape(key)}"] [data-queued-row-remove]`,
+      )
+      ?.focus();
   });
 
   const move = async (runId: RunId, beforeRunId: RunId | null) => {
@@ -401,16 +479,38 @@ export function QueuedRunsControl({
 
   if (presence.rows.length === 0) return null;
 
-  const remove = async (runId: RunId) => {
-    setBusyRunId(runId);
-    try {
-      await cancel({
-        environmentId: props.environmentId,
-        input: { threadId: props.threadId, runId },
-      });
-    } finally {
-      setBusyRunId(null);
+  // Never waits on the server: the row goes now, and rapid clicks each fire
+  // their own cancel (the commands run serially per thread).
+  const remove = (runId: RunId, rowKey: string, followUp: RemovalFollowUp) => {
+    if (cancelledRunIds.has(runId)) return;
+    if (followUp === "hold-rows") {
+      setHoldLeavingRows(true);
+    } else if (followUp === "move-focus") {
+      focusAfterRemoveKeyRef.current = focusKeyAfterRemoval(
+        items.filter((item) => item.runId !== null).map((item) => item.key),
+        rowKey,
+      );
     }
+    setCancelledRunIds((current) => new Set(current).add(runId));
+    void cancel({
+      environmentId: props.environmentId,
+      input: { threadId: props.threadId, runId },
+    }).then((result) => {
+      if (result._tag === "Success") return;
+      setCancelledRunIds((current) => {
+        if (!current.has(runId)) return current;
+        const next = new Set(current);
+        next.delete(runId);
+        return next;
+      });
+      if (isAtomCommandInterrupted(result)) return;
+      const error = squashAtomCommandFailure(result);
+      toastManager.add({
+        type: "error",
+        title: "Could not remove the queued message",
+        description: error instanceof Error ? error.message : "An error occurred.",
+      });
+    });
   };
 
   return (
@@ -529,7 +629,17 @@ export function QueuedRunsControl({
           >
             <div className="min-h-0 overflow-hidden">
               <ComposerBanner.Scroll className="[--composer-banner-scroll-max:--spacing(32)]">
-                <ComposerBanner.Children render={<ol ref={listRef} />} id={queueListId}>
+                <ComposerBanner.Children
+                  render={
+                    <ol
+                      ref={listRef}
+                      onPointerLeave={() => {
+                        if (holdLeavingRows) setHoldLeavingRows(false);
+                      }}
+                    />
+                  }
+                  id={queueListId}
+                >
                   {presence.rows.map((slot) => {
                     const item = (slot.leaving ? undefined : itemsByKey.get(slot.key)) ?? slot.item;
                     const previewText = replaceComposerContextReferences(item.text, (reference) =>
@@ -547,6 +657,9 @@ export function QueuedRunsControl({
                         key={slot.key}
                         rowKey={slot.key}
                         leaving={slot.leaving}
+                        // A row removed here as the queue empties stays for the tray's close.
+                        faded={slot.leaving || isCancelledRow(item)}
+                        held={rowsHeld}
                         animateEnter={slot.animateEnter}
                         onLeft={removeLeftRow}
                         aria-current={isEditing ? "true" : undefined}
@@ -742,9 +855,17 @@ export function QueuedRunsControl({
                                       <ComposerBanner.Dismiss
                                         variant="ghost-muted"
                                         aria-label="Remove queued message"
-                                        disabled={item.runId === null || anyBusy}
-                                        onClick={() => {
-                                          if (item.runId !== null) void remove(item.runId);
+                                        data-queued-row-remove=""
+                                        // Only a bulk action or this row's own steer/move holds it.
+                                        disabled={
+                                          item.runId === null ||
+                                          bulkAction !== null ||
+                                          busyRunId === item.runId
+                                        }
+                                        onClick={(event) => {
+                                          if (item.runId !== null) {
+                                            remove(item.runId, item.key, removalFollowUp(event));
+                                          }
                                         }}
                                       />
                                     }
@@ -768,10 +889,16 @@ export function QueuedRunsControl({
   );
 }
 
-/** One queue row: grows in when it arrives after the tray, collapses and fades when it leaves. */
+/**
+ * One queue row: grows in when it arrives after the tray. A row that leaves
+ * fades out at once and stops taking the pointer; it keeps its space while
+ * `held`, then collapses so the rows below close the gap.
+ */
 function QueuedRowPresence({
   rowKey,
   leaving,
+  faded,
+  held,
   animateEnter,
   onLeft,
   children,
@@ -779,20 +906,30 @@ function QueuedRowPresence({
 }: Omit<ComponentProps<"li">, "inert"> & {
   readonly rowKey: string;
   readonly leaving: boolean;
+  readonly faded: boolean;
+  readonly held: boolean;
   readonly animateEnter: boolean;
   readonly onLeft: (key: string) => void;
 }) {
   const handleClosed = useCallback(() => onLeft(rowKey), [onLeft, rowKey]);
+  // Once a leaving row starts to close it never reopens for a later hold.
+  const [closing, setClosing] = useState(false);
+  if (closing && !leaving) setClosing(false);
+  if (!closing && leaving && !held) setClosing(true);
+  const open = !leaving || (held && !closing);
   return (
     <li
       {...props}
       data-queued-row-key={rowKey}
-      aria-hidden={leaving || undefined}
-      inert={leaving}
-      className="min-w-0"
+      aria-hidden={faded || undefined}
+      inert={faded}
+      className={cn(
+        "min-w-0 transition-opacity duration-(--motion-duration-fast) ease-out",
+        faded && "pointer-events-none opacity-0",
+      )}
     >
       <NoticePresenceFrame
-        open={!leaving}
+        open={open}
         swapKey={null}
         animateMountRef={animateEnter ? ANIMATE_ROW_MOUNT : SKIP_ROW_MOUNT}
         onClosed={handleClosed}
