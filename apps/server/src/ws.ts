@@ -10,6 +10,8 @@ import * as GlobalSearch from "./search/GlobalSearch.ts";
 import * as Facts from "./context/FactService.ts";
 import * as Integrations from "./integrations/Integrations.ts";
 import * as Machines from "./machines/Machines.ts";
+import * as ProjectMove from "./threadSync/ProjectMove.ts";
+import * as ThreadTransfer from "./threadSync/ThreadTransfer.ts";
 import * as MachineSecurity from "./security/MachineSecurity.ts";
 import * as VisualStates from "./htmlRender/VisualState.ts";
 import * as Retrieval from "./context/ContextRetrievalService.ts";
@@ -1087,6 +1089,8 @@ const makeWsRpcHandlers = (
     const facts = yield* Facts.FactService;
     const integrations = yield* Integrations.Integrations;
     const machines = yield* Machines.Machines;
+    const threadTransfer = yield* ThreadTransfer.ThreadTransfer;
+    const projectMove = yield* ProjectMove.ProjectMove;
     const machineSecurity = yield* MachineSecurity.MachineSecurity;
     const visualStates = yield* VisualStates.VisualStateService;
     const retrieval = yield* Retrieval.ContextRetrievalService;
@@ -1638,6 +1642,7 @@ const makeWsRpcHandlers = (
       [WS_METHODS.projectLabelsSubscribeConfirmedThreadLabels]: () =>
         projectLabels.subscribeConfirmedThreadLabels(),
       [WS_METHODS.projectLabelsMoveThread]: (input) => projectLabels.moveThread(input),
+      [WS_METHODS.projectLabelsMoveToMachine]: (input) => projectMove.move(input),
       [WS_METHODS.projectLabelsForkThreadToProject]: (input) =>
         ProjectLabelFork.forkThreadToProject(input, {
           labels: projectLabels,
@@ -1708,6 +1713,7 @@ const makeWsRpcHandlers = (
       [WS_METHODS.machinesCreatePeerGrant]: (input) => machines.createPeerGrant(input),
       [WS_METHODS.machinesJoinHub]: (input) => machines.joinHub(input),
       [WS_METHODS.machinesUnpair]: (input) => machines.unpair(input),
+      [WS_METHODS.machinesMoveThreads]: (input) => threadTransfer.move(input),
       [WS_METHODS.factsList]: (input) => facts.list(input),
       [WS_METHODS.factsCreate]: (input) => facts.create(input),
       [WS_METHODS.visualStateGet]: (input) =>
@@ -2785,6 +2791,8 @@ type WsRequestServices =
   | Facts.FactService
   | Integrations.Integrations
   | Machines.Machines
+  | ThreadTransfer.ThreadTransfer
+  | ProjectMove.ProjectMove
   | MachineSecurity.MachineSecurity
   | FileSystem.FileSystem
   | GitHubRest.GitHubRest

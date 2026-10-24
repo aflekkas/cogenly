@@ -6,6 +6,7 @@ import * as T3Import from "./t3Import.ts";
 import * as ProjectLabels from "./projectLabel.ts";
 import * as Integrations from "./integration.ts";
 import * as Machines from "./machine.ts";
+import * as ThreadReplication from "./threadReplication.ts";
 import * as MachineSecurity from "./machineSecurity.ts";
 import * as Work from "./work.ts";
 import * as Vault from "./vault.ts";
@@ -530,6 +531,8 @@ export const WS_METHODS = {
   projectLabelsSubscribeThreadLabels: "projectLabels.subscribeThreadLabels",
   projectLabelsSubscribeConfirmedThreadLabels: "projectLabels.subscribeConfirmedThreadLabels",
   projectLabelsMoveThread: "projectLabels.moveThread",
+  // Hand a project's threads, agents and repositories to another paired machine.
+  projectLabelsMoveToMachine: "projectLabels.moveToMachine",
   projectLabelsForkThreadToProject: "projectLabels.forkThreadToProject",
   projectLabelsSetThreadLabels: "projectLabels.setThreadLabels",
   projectLabelsLinkSource: "projectLabels.linkSource",
@@ -620,6 +623,8 @@ export const WS_METHODS = {
   machinesCreatePeerGrant: "machines.createPeerGrant",
   machinesJoinHub: "machines.joinHub",
   machinesUnpair: "machines.unpair",
+  // Hand threads to another paired machine, which runs them from then on.
+  machinesMoveThreads: "machines.moveThreads",
   machineSecurityStatus: "machines.securityStatus",
 
   // Cloud environment methods
@@ -1977,6 +1982,17 @@ const WsProjectLabelsSubscribeConfirmedThreadLabelsRpc = Rpc.make(
     stream: true,
   },
 );
+// Moves are answered once the target runs the threads; skipped threads say why.
+const WsMachinesMoveThreadsRpc = Rpc.make(WS_METHODS.machinesMoveThreads, {
+  payload: ThreadReplication.ThreadMoveInput,
+  success: ThreadReplication.ThreadMoveResult,
+  error: Schema.Union([ThreadReplication.ThreadRemoteError, EnvironmentAuthorizationError]),
+});
+const WsProjectLabelsMoveToMachineRpc = Rpc.make(WS_METHODS.projectLabelsMoveToMachine, {
+  payload: ThreadReplication.ProjectMoveInput,
+  success: ThreadReplication.ProjectMoveResult,
+  error: Schema.Union([ThreadReplication.ThreadRemoteError, EnvironmentAuthorizationError]),
+});
 const WsProjectLabelsMoveThreadRpc = Rpc.make(WS_METHODS.projectLabelsMoveThread, {
   payload: ProjectLabels.MoveThreadProjectFolderInput,
   success: ProjectLabels.ThreadProjectFolderResult,
@@ -2568,6 +2584,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectLabelsSubscribeThreadLabelsRpc,
   WsProjectLabelsSubscribeConfirmedThreadLabelsRpc,
   WsProjectLabelsMoveThreadRpc,
+  WsProjectLabelsMoveToMachineRpc,
+  WsMachinesMoveThreadsRpc,
   WsProjectLabelsForkThreadToProjectRpc,
   WsProjectLabelsSetThreadLabelsRpc,
   WsProjectLabelsLinkSourceRpc,
