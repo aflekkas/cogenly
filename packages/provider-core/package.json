@@ -51,6 +51,10 @@
       "types": "./src/server/instanceIdentity.ts",
       "import": "./src/server/instanceIdentity.ts"
     },
+    "./server/machineHealthContext": {
+      "types": "./src/server/machineHealthContext.ts",
+      "import": "./src/server/machineHealthContext.ts"
+    },
     "./server/maintenance": {
       "types": "./src/server/maintenance.ts",
       "import": "./src/server/maintenance.ts"

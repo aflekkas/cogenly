@@ -17,6 +17,8 @@ import {
   buildIntegrationsContextLine,
   buildProjectManifest,
 } from "@t3tools/provider-core/server/runtimeInstructions";
+import { buildMachineHealthContextLine } from "@t3tools/provider-core/server/machineHealthContext";
+import * as HealthAlertsState from "../health/HealthAlertsState.ts";
 import { availableToConnect } from "../integrations/IntegrationCatalog.ts";
 import * as Integrations from "../integrations/Integrations.ts";
 import * as ProjectFiles from "../projectLabels/ProjectFiles.ts";
@@ -142,6 +144,16 @@ export const layerFromProjectStore: Layer.Layer<
             })),
             Effect.catch(() => Effect.succeed(noIntegrations)),
           );
+    // Best-effort like the integrations line: open health alerts, here and on
+    // paired machines. TODO(machines-context): move into the machines context
+    // block once it lands.
+    const healthAlerts = yield* Effect.serviceOption(HealthAlertsState.HealthAlertsState);
+    const machineHealthLine = Option.isNone(healthAlerts)
+      ? Effect.succeed(null)
+      : healthAlerts.value.current.pipe(
+          Effect.map((snapshot) => buildMachineHealthContextLine(snapshot.open)),
+          Effect.catchCause(() => Effect.succeed(null)),
+        );
     // The project context is best-effort turn context from the derived index:
     // any failure resolves to no folder rather than failing the turn.
     const projectFor = (
@@ -222,16 +234,25 @@ export const layerFromProjectStore: Layer.Layer<
           standalone.integrations,
           standalone.available,
         );
+        const manifest =
+          project !== undefined
+            ? project.manifest
+            : standaloneLine.length > 0
+              ? standaloneLine
+              : undefined;
+        const healthLine = yield* machineHealthLine;
+        const projectManifest =
+          healthLine === null
+            ? manifest
+            : manifest === undefined
+              ? healthLine
+              : `${manifest}\n${healthLine}`;
         return ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
           runtimeMode: "full-access",
           interactionMode: input.thread.interactionMode,
           cwd,
           ...conversationModeFor(input.thread),
-          ...(project !== undefined
-            ? { projectManifest: project.manifest }
-            : standaloneLine.length > 0
-              ? { projectManifest: standaloneLine }
-              : {}),
+          ...(projectManifest === undefined ? {} : { projectManifest }),
         });
       }),
     });

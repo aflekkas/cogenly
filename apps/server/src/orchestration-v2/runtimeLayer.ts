@@ -5,6 +5,7 @@ import * as ProcessRunner from "../processRunner.ts";
 import * as VisualStates from "../htmlRender/VisualState.ts";
 import * as GlobalSearch from "../search/GlobalSearch.ts";
 import * as Facts from "../context/FactService.ts";
+import * as HealthAlertsState from "../health/HealthAlertsState.ts";
 import * as Integrations from "../integrations/Integrations.ts";
 import * as LocalIntegrations from "../integrations/local/LocalIntegrations.ts";
 import * as LocalMcpRunner from "../integrations/local/LocalMcpRunner.ts";
@@ -104,6 +105,8 @@ const layerRuntimePolicyProvided = RuntimePolicy.layerFromProjectStore.pipe(
       ProjectLabelFolders.layer,
       // Nested: a merge would leave the files layer's folder requirement dangling.
       layerProjectFilesProvided,
+      // The same reference HealthAlerts publishes to in server.ts.
+      HealthAlertsState.layer,
     ),
   ),
 );
