@@ -53,6 +53,12 @@ export class MachineSetup extends Context.Service<
       step: MachineSetupStepId,
     ) => Effect.Effect<MachineSetupStatus, MachineSetupError>;
     /**
+     * The way back out of the "expose" step: removes this server's Serve
+     * mapping and saves Serve as off, so it stays off across restarts.
+     * Returns the updated status; the removal may finish in the background.
+     */
+    readonly disableServe: Effect.Effect<MachineSetupStatus, MachineSetupError>;
+    /**
      * Called once the server listens on `localPort`. Points a saved Serve
      * mapping at this run's port, or adopts one made by hand.
      */
@@ -93,7 +99,7 @@ const problemFor = (
     case "other":
       return step === "install"
         ? "Installing Tailscale didn't finish. Try again, or install it yourself."
-        : step === "expose" || step === "enable-https"
+        : step === "expose" || step === "enable-https" || step === "disable-expose"
           ? "Tailscale Serve didn't accept the setup. Run `tailscale serve status` on this machine to see why."
           : "Tailscale didn't finish that step. Try again.";
   }
@@ -219,7 +225,7 @@ export const make = Effect.gen(function* () {
             if (
               outcome._tag === "failed" &&
               outcome.reason === "permission-denied" &&
-              operation === "serve" &&
+              (operation === "serve" || operation === "serve-off") &&
               !retriedWithOperator &&
               (observation.host.root || observation.host.passwordlessSudo)
             ) {
@@ -239,6 +245,16 @@ export const make = Effect.gen(function* () {
                 localPort: observation.localPort,
               });
               yield* Effect.logInfo("Tailscale Serve now fronts this server", { servePort });
+            }
+            if (outcome._tag === "ok" && operation === "serve-off") {
+              yield* serveMode.set({
+                enabled: false,
+                servePort,
+                localPort: observation.localPort,
+              });
+              yield* Effect.logInfo("Tailscale Serve no longer fronts this server", {
+                servePort,
+              });
             }
             yield* update((current) => ({
               ...current,
@@ -277,17 +293,22 @@ export const make = Effect.gen(function* () {
         });
       }
       let servePort = observation.serveMode.servePort;
-      if (operation === "serve") {
+      if (operation === "serve" || operation === "serve-off") {
         const choice = chooseServePort(
           observation.serveMappings ?? [],
           observation.localPort,
           observation.serveMode.servePort,
           observation.serveMode.localPort,
         );
-        if (choice._tag === "none") {
-          return yield* new MachineSetupError({ step, reason: "unavailable" });
+        if (operation === "serve") {
+          if (choice._tag === "none") {
+            return yield* new MachineSetupError({ step, reason: "unavailable" });
+          }
+          servePort = choice.port;
+        } else if (choice._tag === "ours") {
+          // Turning off targets this server's own mapping when one is running.
+          servePort = choice.port;
         }
-        servePort = choice.port;
       }
       yield* update((current) => ({
         ...current,
@@ -299,6 +320,21 @@ export const make = Effect.gen(function* () {
       return yield* status;
     },
   );
+
+  const disableServe: MachineSetup["Service"]["disableServe"] = Effect.gen(function* () {
+    const observation = yield* observe;
+    if (observation.status?.backendState !== "Running") {
+      // Tailscale isn't answering, so no mapping is forwarding; still save
+      // the opt-out so a mapping left running is not adopted later.
+      yield* serveMode.set({
+        enabled: false,
+        servePort: observation.serveMode.servePort,
+        localPort: observation.serveMode.localPort ?? observation.localPort,
+      });
+      return yield* status;
+    }
+    return yield* runStep("disable-expose");
+  }).pipe(Effect.withSpan("MachineSetup.disableServe"));
 
   const subscribe: MachineSetup["Service"]["subscribe"] = Stream.unwrap(
     Effect.gen(function* () {
@@ -365,7 +401,7 @@ export const make = Effect.gen(function* () {
     return (yield* serveMode.current).enabled;
   }).pipe(Effect.withSpan("MachineSetup.adoptServe"));
 
-  return MachineSetup.of({ status, subscribe, runStep, start, adoptServe });
+  return MachineSetup.of({ status, subscribe, runStep, disableServe, start, adoptServe });
 });
 
 export const layer = Layer.effect(MachineSetup, make);

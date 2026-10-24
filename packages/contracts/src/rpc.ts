@@ -626,6 +626,7 @@ export const WS_METHODS = {
   machinesSetupStatus: "machines.setupStatus",
   machinesSetupSubscribe: "machines.setupSubscribe",
   machinesSetupRunStep: "machines.setupRunStep",
+  machinesSetupDisableServe: "machines.setupDisableServe",
 
   // Cloud environment methods
   cloudGetRelayClientStatus: "cloud.getRelayClientStatus",
@@ -2230,6 +2231,12 @@ const WsMachinesSetupRunStepRpc = Rpc.make(WS_METHODS.machinesSetupRunStep, {
   success: MachineSetup.MachineSetupStatus,
   error: machineSetupErrors,
 });
+/** Turns Tailscale Serve off for this server and saves that choice. */
+const WsMachinesSetupDisableServeRpc = Rpc.make(WS_METHODS.machinesSetupDisableServe, {
+  payload: Schema.Struct({}),
+  success: MachineSetup.MachineSetupStatus,
+  error: machineSetupErrors,
+});
 
 const WsFactsListRpc = Rpc.make(WS_METHODS.factsList, {
   payload: Facts.FactListInput,
@@ -2634,6 +2641,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsMachinesSetupStatusRpc,
   WsMachinesSetupSubscribeRpc,
   WsMachinesSetupRunStepRpc,
+  WsMachinesSetupDisableServeRpc,
   WsFactsListRpc,
   WsFactsCreateRpc,
   WsFactsUpdateRpc,

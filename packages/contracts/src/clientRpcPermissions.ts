@@ -105,6 +105,7 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.machinesSetupStatus]: AuthAccessWriteScope,
   [WS_METHODS.machinesSetupSubscribe]: AuthAccessWriteScope,
   [WS_METHODS.machinesSetupRunStep]: AuthAccessWriteScope,
+  [WS_METHODS.machinesSetupDisableServe]: AuthAccessWriteScope,
   [WS_METHODS.factsCreate]: AuthOrchestrationOperateScope,
   [WS_METHODS.factsUpdate]: AuthOrchestrationOperateScope,
   [WS_METHODS.factsSupersede]: AuthOrchestrationOperateScope,

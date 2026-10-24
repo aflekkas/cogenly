@@ -46,6 +46,7 @@ import {
 } from "../ui/dialog";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Spinner } from "../ui/spinner";
+import { Switch } from "../ui/switch";
 import { toastManager } from "../ui/toast";
 import { createIntegrationStatusFade } from "./integrationStatusMotion";
 import { useSettingsScope } from "./SettingsScopeContext";
@@ -190,6 +191,7 @@ function MachinesSection({
   );
   const canPair = useAtomValue(machinesRpc.pairWith.permissionAtom(environmentId));
   const canUnpair = useAtomValue(machinesRpc.unpair.permissionAtom(environmentId));
+  const setup = useMachineSetup(environment);
   const list = query.data;
 
   return (
@@ -226,6 +228,7 @@ function MachinesSection({
               machine={machine}
               list={list}
               canUnpair={canUnpair}
+              setup={machine.relation === "this" ? setup : null}
             />
           ))
       )}
@@ -242,15 +245,21 @@ function MachineRow({
   machine,
   list,
   canUnpair,
+  setup,
 }: {
   readonly environmentId: EnvironmentId;
   readonly viewedName: string;
   readonly machine: MachineInfo;
   readonly list: MachineListResult;
   readonly canUnpair: boolean;
+  readonly setup: MachineSetupView | null;
 }) {
   const unpair = useAtomCommand(machinesRpc.unpair, { reportFailure: false });
+  const disableServe = useAtomCommand(machinesRpc.disableServe, { reportFailure: false });
+  const runStep = useAtomCommand(machinesRpc.runStep, { reportFailure: false });
+  const canPrivateAccess = useAtomValue(machinesRpc.disableServe.permissionAtom(environmentId));
   const [busy, setBusy] = useState(false);
+  const [privateBusy, setPrivateBusy] = useState(false);
   const isThis = machine.relation === "this";
   // A peer is paired with the hub, not with this machine; unpair it there.
   const unpairable = !isThis && machine.relation !== "peer" && machine.pairing !== "self";
@@ -293,12 +302,61 @@ function MachineRow({
     }
   };
 
+  const served = setup?.status?.tailscale.served ?? null;
+  const setPrivateAccess = async (checked: boolean) => {
+    if (!checked) {
+      const spokes = list.link._tag === "hub" ? list.link.spokes : 0;
+      const message =
+        spokes > 0
+          ? `Turn off private access for ${machine.name}?\n${spokes === 1 ? "1 paired machine" : `${spokes} paired machines`} will disconnect until you turn it back on.`
+          : `Turn off private access for ${machine.name}?\nOther machines won't be able to reach it until you turn it back on.`;
+      const confirmed =
+        (await requestConfirmDialog(message, { variant: "destructive" })) ??
+        window.confirm(message);
+      if (!confirmed) return;
+    }
+    setPrivateBusy(true);
+    try {
+      const result = checked
+        ? await runStep({ environmentId, input: { step: "expose" } })
+        : await disableServe({ environmentId, input: {} });
+      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+        toastManager.add({
+          type: "error",
+          title: checked
+            ? `Couldn't turn on private access for ${machine.name}`
+            : `Couldn't turn off private access for ${machine.name}`,
+          description: failureMessage(squashAtomCommandFailure(result), "Try again in a moment."),
+        });
+      }
+    } finally {
+      setPrivateBusy(false);
+    }
+  };
+
   return (
     <SettingsRow
       title={isThis ? `${machine.name} (this machine)` : machine.name}
       description={description}
       control={
-        isThis && !unpairable ? undefined : (
+        isThis ? (
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">Private access</span>
+            {served === false ? (
+              <Badge size="sm" variant="outline">
+                Off
+              </Badge>
+            ) : null}
+            <Switch
+              size="sm"
+              checked={served === true}
+              disabled={!canPrivateAccess || setup?.status === null || privateBusy}
+              aria-label={`Private access for ${machine.name}`}
+              onCheckedChange={(checked) => void setPrivateAccess(checked)}
+            />
+            {privateBusy ? <Spinner /> : null}
+          </div>
+        ) : (
           <>
             <div ref={statusNode} className="flex">
               {presence === null ? null : (

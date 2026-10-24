@@ -143,6 +143,8 @@ export const operationCommand = (
           `http://127.0.0.1:${String(input.localPort)}`,
         ],
       ];
+    case "serve-off":
+      return [cli, ["serve", `--https=${String(input.servePort)}`, "off"]];
   }
 };
 

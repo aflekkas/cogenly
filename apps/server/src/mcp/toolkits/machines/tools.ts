@@ -48,12 +48,12 @@ export const MachinesToolkit = Toolkit.make(
     parameters: Schema.Struct({
       step: MachineSetupStepId.annotate({
         description:
-          "The checklist step to run; it must have an `action` in machine_setup_status. install installs Tailscale (Linux with passwordless sudo) or opens the App Store (macOS). start turns Tailscale on. sign-in starts the Tailscale sign-in and returns its link. enable-https and expose put this Cogenly behind Tailscale Serve on the private tailnet; when the tailnet has not allowed HTTPS yet, they return the approval link and finish by themselves once the user approves.",
+          "The checklist step to run; it must have an `action` in machine_setup_status. install installs Tailscale (Linux with passwordless sudo) or opens the App Store (macOS). start turns Tailscale on. sign-in starts the Tailscale sign-in and returns its link. enable-https and expose put this Cogenly behind Tailscale Serve on the private tailnet; when the tailnet has not allowed HTTPS yet, they return the approval link and finish by themselves once the user approves. disable-expose turns private access off: it removes this server's Serve mapping and saves Serve as off, so paired machines disconnect until expose turns it back on.",
       }),
     }),
     success: MachineSetupStatus,
     description:
-      "Run one machine setup step on this machine and return the updated checklist. It returns at once; slow steps show as working or waiting and finish in the background, so call machine_setup_status to follow them. Give the user any handoff it returns: open-url links to open, or the run-command to type in a terminal on this machine because it asks for their password. Never ask for or handle the password yourself. Requires a live full-access/default calling thread.",
+      "Run one machine setup step on this machine and return the updated checklist. It returns at once; slow steps show as working or waiting and finish in the background, so call machine_setup_status to follow them. Give the user any handoff it returns: open-url links to open, or the run-command to type in a terminal on this machine because it asks for their password. Never ask for or handle the password yourself. Use step disable-expose to turn private access off and expose to turn it back on. Requires a live full-access/default calling thread.",
   })
     .annotate(Tool.Readonly, false)
     .annotate(Tool.Destructive, false),

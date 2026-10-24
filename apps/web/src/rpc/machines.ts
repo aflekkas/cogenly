@@ -30,6 +30,10 @@ export const machinesRpc = {
     label: "machines:setupRunStep",
     tag: "machines.setupRunStep",
   }),
+  disableServe: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "machines:setupDisableServe",
+    tag: "machines.setupDisableServe",
+  }),
   unpair: createEnvironmentRpcCommand(connectionAtomRuntime, {
     label: "machines:unpair",
     tag: "machines.unpair",

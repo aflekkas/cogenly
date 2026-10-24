@@ -3,9 +3,11 @@ import {
   EnvironmentId,
   type MachineInfo,
   type MachineListResult,
+  type MachineSetupStatus,
   ProviderInstanceId,
   ThreadId,
 } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { McpSchema, McpServer } from "effect/ai";
@@ -80,6 +82,7 @@ const hubList: MachineListResult = {
 const makeServer = (options: {
   readonly pairMachines?: DesktopAppControl.DesktopAppControl["Service"]["pairMachines"];
   readonly unpaired?: Array<EnvironmentId>;
+  readonly disableServe?: MachineSetup.MachineSetup["Service"]["disableServe"];
 }) =>
   McpHttpServer.toolkitRegistration(MachinesToolkit, MachinesHandlers.layer).pipe(
     Layer.provideMerge(McpServer.McpServer.layer),
@@ -99,7 +102,9 @@ const makeServer = (options: {
               return { unpaired: true };
             }),
         }),
-        Layer.mock(MachineSetup.MachineSetup)({}),
+        Layer.mock(MachineSetup.MachineSetup)({
+          disableServe: options.disableServe ?? Effect.die("unused"),
+        }),
       ),
     ),
   );
@@ -117,6 +122,45 @@ const call = (
     Effect.provideService(McpInvocationContext.McpInvocationContext, scope),
     Effect.provideService(McpSchema.McpServerClient, mcpClient),
   );
+
+it.effect("machine_setup_step with disable-expose turns private access off", () =>
+  Effect.gen(function* () {
+    let called = false;
+    const offStatus: MachineSetupStatus = {
+      observedAt: DateTime.makeUnsafe("2026-10-24T12:00:00.000Z"),
+      platform: "linux",
+      tailscale: {
+        installed: true,
+        version: "1.90.1",
+        running: true,
+        signedIn: true,
+        tailnetName: "alex@example.com",
+        magicDnsName: "hub.tail1234.ts.net",
+        httpsEnabled: true,
+        served: false,
+        servePort: 443,
+      },
+      steps: [],
+      ready: false,
+      joinUrl: null,
+      problem: null,
+    };
+    const text = yield* call(threadCaller(fullAccessThreadId), "machine_setup_step", {
+      step: "disable-expose",
+    }).pipe(
+      Effect.provide(
+        makeServer({
+          disableServe: Effect.sync(() => {
+            called = true;
+            return offStatus;
+          }),
+        }),
+      ),
+    );
+    expect(called).toBe(true);
+    expect(JSON.parse(text)).toMatchObject({ ready: false, tailscale: { served: false } });
+  }),
+);
 
 it.effect("machine_pair asks the desktop app to pair and hears only the machines back", () =>
   Effect.gen(function* () {

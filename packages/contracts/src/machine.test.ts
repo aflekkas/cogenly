@@ -28,6 +28,7 @@ describe("machine RPC permissions", () => {
       WS_METHODS.machinesSetupStatus,
       WS_METHODS.machinesSetupSubscribe,
       WS_METHODS.machinesSetupRunStep,
+      WS_METHODS.machinesSetupDisableServe,
     ]) {
       expect(clientRpcRequiredScopes(method, {})).toEqual(["access:write"]);
     }

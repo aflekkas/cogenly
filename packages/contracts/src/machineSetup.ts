@@ -15,6 +15,10 @@ export const MachineSetupStepId = Schema.Literals([
   "sign-in",
   "enable-https",
   "expose",
+  // The way back out of "expose": removes this server's Serve mapping and
+  // saves Serve as off. Not a checklist row; the checklist shows it as the
+  // "expose" step becoming available again.
+  "disable-expose",
 ]);
 export type MachineSetupStepId = typeof MachineSetupStepId.Type;
 

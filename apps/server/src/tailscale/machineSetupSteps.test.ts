@@ -163,6 +163,16 @@ describe("machine setup checklist", () => {
     assert.include(stepOf(status, "expose").detail, "public internet");
   });
 
+  it("plans turning Serve off only once signed in", () => {
+    assert.equal(planStep("disable-expose", observation()), "serve-off");
+    assert.isNull(
+      planStep(
+        "disable-expose",
+        observation({ status: { ...signedIn, backendState: "NeedsLogin", httpsEnabled: null } }),
+      ),
+    );
+  });
+
   it("switches a refused step to the command that needs the user's password", () => {
     const refused = observation({
       machineName: "VPS",

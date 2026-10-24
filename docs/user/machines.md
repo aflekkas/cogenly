@@ -69,9 +69,7 @@ across restarts. If you ran `tailscale serve` yourself and it points at
 Cogenly's port, Cogenly uses it. If you set `COGENLY_TAILSCALE_SERVE=1` in a
 systemd drop-in, `cogenly doctor` moves that setting into Cogenly.
 
-`cogenly service install --no-tailscale-serve` turns this off. Cogenly then
-ignores any Serve mapping until you run Make reachable again. To remove the
-mapping itself, run `tailscale serve --https=<port> off`.
+Turn private access off or back on any time in Settings → Machines with the Private access switch on this machine.
 
 On the computer joining, prepare its key:
 

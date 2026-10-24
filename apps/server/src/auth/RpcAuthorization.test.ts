@@ -127,6 +127,7 @@ describe("RPC authorization scopes", () => {
       WS_METHODS.machinesSetupStatus,
       WS_METHODS.machinesSetupSubscribe,
       WS_METHODS.machinesSetupRunStep,
+      WS_METHODS.machinesSetupDisableServe,
     ]) {
       expect(requiredScopeForRpcMethod(method)).toBe(AuthAccessWriteScope);
       expect(clientRpcRequiredScopes(method, {})).toEqual([AuthAccessWriteScope]);

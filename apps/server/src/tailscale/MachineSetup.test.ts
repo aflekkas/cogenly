@@ -185,6 +185,74 @@ describe("MachineSetup", () => {
     }),
   );
 
+  it("runs `tailscale serve --https=<port> off` to remove this server's mapping", () => {
+    assert.deepEqual(
+      TailscaleHost.operationCommand("serve-off", {
+        cli: "tailscale",
+        host: linuxWithSudo,
+        user: "alex",
+        input: { localPort: 3773, servePort: 443 },
+      }),
+      ["tailscale", ["serve", "--https=443", "off"]],
+    );
+  });
+
+  it.effect("turns Serve off, saves the opt-out, and turns back on with Make reachable", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness({
+        mappings: [ours()],
+        mode: { enabled: true, servePort: 443, localPort: 3773 },
+        // The fake CLI reports the mapping until re-probed; `served` turns
+        // false only once the service saves Serve as off.
+        runs: {
+          "serve-off": [() => finished()],
+          serve: [() => finished()],
+        },
+      });
+      yield* Effect.gen(function* () {
+        const setup = yield* MachineSetup.MachineSetup;
+        const mode = yield* TailscaleServeMode.TailscaleServeMode;
+        assert.isTrue((yield* setup.status).ready);
+
+        yield* setup.disableServe;
+        const off = yield* awaitStatus(
+          (status) => !status.tailscale.served && stepOf(status, "expose").state === "todo",
+        );
+        assert.isFalse(off.ready);
+        assert.isNull(off.joinUrl);
+        assert.deepEqual(yield* mode.current, { enabled: false, servePort: 443, localPort: 3773 });
+        assert.isTrue(yield* mode.optedOut);
+        assert.deepEqual(
+          (yield* Ref.get(harness.calls)).map((call) => call.operation),
+          ["serve-off"],
+        );
+
+        yield* setup.runStep("expose");
+        assert.isTrue((yield* awaitStatus((status) => status.ready)).ready);
+        assert.isFalse(yield* mode.optedOut);
+      }).pipe(Effect.provide(harness.layer));
+    }),
+  );
+
+  it.effect("saves the opt-out when Tailscale isn't answering, with nothing to remove", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness({
+        status: null,
+        mappings: [ours()],
+        mode: { enabled: true, servePort: 443, localPort: 3773 },
+      });
+      yield* Effect.gen(function* () {
+        const setup = yield* MachineSetup.MachineSetup;
+        const mode = yield* TailscaleServeMode.TailscaleServeMode;
+        const off = yield* setup.disableServe;
+        assert.isFalse(off.tailscale.served);
+        assert.deepEqual(yield* mode.current, { enabled: false, servePort: 443, localPort: 3773 });
+        assert.isTrue(yield* mode.optedOut);
+        assert.deepEqual(yield* Ref.get(harness.calls), []);
+      }).pipe(Effect.provide(harness.layer));
+    }),
+  );
+
   it.effect("surfaces the tailnet's HTTPS approval link and finishes once it is approved", () =>
     Effect.gen(function* () {
       const approved = yield* Deferred.make<TailscaleHost.TailscaleCommandOutcome>();

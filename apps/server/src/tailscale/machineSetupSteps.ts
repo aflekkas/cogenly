@@ -80,7 +80,8 @@ export type MachineSetupOperation =
   | "open-app"
   | "connect"
   | "login"
-  | "serve";
+  | "serve"
+  | "serve-off";
 
 const isRunning = (status: TailscaleStatusSnapshot | null): status is TailscaleStatusSnapshot =>
   status !== null && status.backendState !== "Stopped";
@@ -112,6 +113,8 @@ export const planStep = (
     case "enable-https":
     case "expose":
       return isSignedIn(status) ? "serve" : null;
+    case "disable-expose":
+      return isSignedIn(status) ? "serve-off" : null;
   }
 };
 
@@ -150,6 +153,7 @@ const passwordHandoff = (
         : null;
     case "enable-https":
     case "expose":
+    case "disable-expose":
       return platform === "linux"
         ? commandHandoff(
             "sudo tailscale set --operator=$USER",

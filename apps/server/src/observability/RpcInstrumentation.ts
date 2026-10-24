@@ -140,6 +140,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.machinesSetupStatus]: "machines",
   [WS_METHODS.machinesSetupSubscribe]: "machines",
   [WS_METHODS.machinesSetupRunStep]: "machines",
+  [WS_METHODS.machinesSetupDisableServe]: "machines",
   [WS_METHODS.factsList]: "facts",
   [WS_METHODS.factsCreate]: "facts",
   [WS_METHODS.factsUpdate]: "facts",

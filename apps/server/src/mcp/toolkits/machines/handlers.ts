@@ -97,7 +97,9 @@ export const layer = McpToolAccess.toLayer(MachinesToolkit, {
   // Installs software and puts this server on the tailnet: full-access work callers only.
   machine_setup_step: McpToolAccess.writesEnvironmentAsWork(({ step }) =>
     MachineSetup.MachineSetup.pipe(
-      Effect.flatMap((setup) => setup.runStep(step)),
+      Effect.flatMap((setup) =>
+        step === "disable-expose" ? setup.disableServe : setup.runStep(step),
+      ),
       Effect.mapError(
         (error) =>
           new OrchestratorMcpFailure({

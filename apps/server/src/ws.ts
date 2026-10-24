@@ -1713,6 +1713,7 @@ const makeWsRpcHandlers = (
       [WS_METHODS.machinesSetupStatus]: () => machineSetup.status,
       [WS_METHODS.machinesSetupSubscribe]: () => machineSetup.subscribe,
       [WS_METHODS.machinesSetupRunStep]: (input) => machineSetup.runStep(input.step),
+      [WS_METHODS.machinesSetupDisableServe]: () => machineSetup.disableServe,
       [WS_METHODS.factsList]: (input) => facts.list(input),
       [WS_METHODS.factsCreate]: (input) => facts.create(input),
       [WS_METHODS.visualStateGet]: (input) =>
@@ -2742,11 +2743,16 @@ type WsRpcHandlersEffect = ReturnType<typeof makeWsRpcHandlers>;
 type WsRpcHandlers = Effect.Success<WsRpcHandlersEffect>;
 type WsRpcHandlerKeysA = Extract<keyof WsRpcHandlers, `p${string}`>;
 type WsRpcHandlerKeysB = Extract<keyof WsRpcHandlers, `s${string}`>;
+type WsRpcHandlerKeysC = Extract<keyof WsRpcHandlers, `m${string}`>;
 /** Resolve in smaller groups to stay within the RPC conditional type's instantiation budget. */
 type WsRpcHandlerServices =
   | RpcGroup.HandlersServices<WsRpcs, Pick<WsRpcHandlers, WsRpcHandlerKeysA>>
   | RpcGroup.HandlersServices<WsRpcs, Pick<WsRpcHandlers, WsRpcHandlerKeysB>>
-  | RpcGroup.HandlersServices<WsRpcs, Omit<WsRpcHandlers, WsRpcHandlerKeysA | WsRpcHandlerKeysB>>;
+  | RpcGroup.HandlersServices<WsRpcs, Pick<WsRpcHandlers, WsRpcHandlerKeysC>>
+  | RpcGroup.HandlersServices<
+      WsRpcs,
+      Omit<WsRpcHandlers, WsRpcHandlerKeysA | WsRpcHandlerKeysB | WsRpcHandlerKeysC>
+    >;
 
 const layerWsRpc = (
   ...args: Parameters<typeof makeWsRpcHandlers>
