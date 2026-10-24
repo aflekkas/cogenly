@@ -6,7 +6,8 @@
  * directory, written by machine setup, `cogenly service install
  * --tailscale-serve`, or `cogenly doctor`. The server reads it on every start,
  * however it is launched (desktop app, launchd, systemd), and setup changes it
- * live without a restart.
+ * live without a restart. A saved `enabled: false` is an opt-out: a Serve
+ * mapping left running is not adopted again.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -77,7 +78,16 @@ export class TailscaleServeMode extends Context.Service<
      * run, and the server turns its mapping off again at shutdown.
      */
     readonly explicit: boolean;
-    /** Takes effect at once and is saved for the next start. */
+    /**
+     * The user turned Serve off (`cogenly service install --no-tailscale-serve`,
+     * or a migrated drop-in that set it off), so a mapping still running is not
+     * adopted. Running a setup step turns it back on.
+     */
+    readonly optedOut: Effect.Effect<boolean>;
+    /**
+     * Takes effect at once and is saved for the next start, except under
+     * `--tailscale-serve`, which owns the setting for this run only.
+     */
     readonly set: (state: TailscaleServeModeState) => Effect.Effect<void>;
   }
 >()("cogenly-server/tailscale/TailscaleServeMode") {}
@@ -105,33 +115,49 @@ export const make = Effect.gen(function* () {
           servePort: DEFAULT_TAILSCALE_SERVE_PORT,
         })),
   );
+  // Setup only ever saves `enabled: true`, so a saved `false` is the user's choice.
+  const optedOut = yield* Ref.make(!explicit && Option.isSome(saved) && !saved.value.enabled);
   const set: TailscaleServeMode["Service"]["set"] = (next) =>
     Ref.set(state, next).pipe(
+      Effect.andThen(Ref.set(optedOut, !next.enabled)),
       Effect.andThen(
-        writeServePreference(filePath, next).pipe(
-          Effect.provideService(FileSystem.FileSystem, fs),
-          Effect.provideService(Path.Path, path),
-          Effect.catch((cause) =>
-            Effect.logWarning("Could not save the Tailscale Serve preference", { cause }),
-          ),
-        ),
+        explicit
+          ? Effect.void
+          : writeServePreference(filePath, next).pipe(
+              Effect.provideService(FileSystem.FileSystem, fs),
+              Effect.provideService(Path.Path, path),
+              Effect.catch((cause) =>
+                Effect.logWarning("Could not save the Tailscale Serve preference", { cause }),
+              ),
+            ),
       ),
       Effect.withSpan("TailscaleServeMode.set"),
     );
-  return TailscaleServeMode.of({ current: Ref.get(state), explicit, set });
+  return TailscaleServeMode.of({
+    current: Ref.get(state),
+    explicit,
+    optedOut: Ref.get(optedOut),
+    set,
+  });
 });
 
 export const layer = Layer.effect(TailscaleServeMode, make);
 
 /** For tests and callers that hold no state directory. */
-export const layerMemory = (initial: TailscaleServeModeState, explicit = false) =>
+export const layerMemory = (
+  initial: TailscaleServeModeState,
+  options: { readonly explicit?: boolean; readonly optedOut?: boolean } = {},
+) =>
   Layer.effect(
     TailscaleServeMode,
-    Effect.map(Ref.make(initial), (state) =>
-      TailscaleServeMode.of({
+    Effect.gen(function* () {
+      const state = yield* Ref.make(initial);
+      const optedOut = yield* Ref.make(options.optedOut ?? false);
+      return TailscaleServeMode.of({
         current: Ref.get(state),
-        explicit,
-        set: (next) => Ref.set(state, next),
-      }),
-    ),
+        explicit: options.explicit ?? false,
+        optedOut: Ref.get(optedOut),
+        set: (next) => Ref.set(state, next).pipe(Effect.andThen(Ref.set(optedOut, !next.enabled))),
+      });
+    }),
   );

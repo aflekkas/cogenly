@@ -57,6 +57,7 @@ const makeHarness = Effect.fn(function* (options: {
   readonly installed?: boolean;
   readonly mappings?: ReadonlyArray<ServePortMapping>;
   readonly mode?: TailscaleServeMode.TailscaleServeModeState;
+  readonly optedOut?: boolean;
   readonly runs?: Partial<Record<TailscaleHost.TailscaleHostOperation, ReadonlyArray<ScriptedRun>>>;
 }) {
   const probe = yield* Ref.make<TailscaleHost.TailscaleProbe>({
@@ -94,7 +95,9 @@ const makeHarness = Effect.fn(function* (options: {
   const layer = MachineSetup.layer.pipe(
     Layer.provideMerge(hostLayer),
     Layer.provideMerge(
-      TailscaleServeMode.layerMemory(options.mode ?? { enabled: false, servePort: 443 }),
+      TailscaleServeMode.layerMemory(options.mode ?? { enabled: false, servePort: 443 }, {
+        optedOut: options.optedOut ?? false,
+      }),
     ),
     Layer.provide(
       Layer.succeed(MachineIdentity.MachineIdentity)({
@@ -156,6 +159,28 @@ describe("MachineSetup", () => {
         assert.isTrue(yield* setup.adoptServe);
         const mode = yield* (yield* TailscaleServeMode.TailscaleServeMode).current;
         assert.isTrue(mode.enabled);
+      }).pipe(Effect.provide(harness.layer));
+    }),
+  );
+
+  it.effect("leaves a mapping alone after the user turned Serve off, until setup runs", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness({
+        mappings: [ours()],
+        optedOut: true,
+        runs: { serve: [() => finished()] },
+      });
+      yield* Effect.gen(function* () {
+        const setup = yield* MachineSetup.MachineSetup;
+        const mode = yield* TailscaleServeMode.TailscaleServeMode;
+        assert.isFalse((yield* setup.status).ready);
+        assert.isFalse(yield* setup.adoptServe);
+        assert.isFalse((yield* mode.current).enabled);
+
+        // Make reachable is the way back in.
+        yield* setup.runStep("expose");
+        assert.isTrue((yield* awaitStatus((status) => status.ready)).ready);
+        assert.isFalse(yield* mode.optedOut);
       }).pipe(Effect.provide(harness.layer));
     }),
   );

@@ -105,7 +105,9 @@ Serve mode is `TailscaleServeMode`: `--tailscale-serve` for one run, otherwise
 live. The headers alone never turn it on. A refused forwarded request only
 asks `MachineSetup.adoptServe` to read `tailscale serve status` from the local
 daemon, and Serve mode turns on only when a non-Funnel mapping targets this
-server's loopback port.
+server's loopback port. A saved `enabled: false` is the user's opt-out
+(`--no-tailscale-serve`) and is never adopted over. Under `--tailscale-serve`,
+setup changes stay in memory, so a one-run flag never becomes a saved setting.
 
 This boundary trusts local processes and proxy configuration. A locally
 configured public proxy that deliberately strips every ingress marker is

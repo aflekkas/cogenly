@@ -119,6 +119,8 @@ export const make = Effect.gen(function* () {
       if (observation.serveMode.enabled || observation.status?.backendState !== "Running") {
         return observation;
       }
+      // Turned off on purpose: a mapping left running stays unused until setup runs again.
+      if (yield* serveMode.optedOut) return observation;
       const choice = chooseServePort(
         observation.serveMappings ?? [],
         observation.localPort,
@@ -354,7 +356,9 @@ export const make = Effect.gen(function* () {
       const observation = yield* observe;
       if (!observation.serveMode.enabled) {
         yield* Effect.logWarning(
-          "Refused a peer request forwarded by Tailscale Serve: Serve doesn't point at this server's port, or Tailscale Funnel makes it public. Open Settings → Machines to set it up.",
+          (yield* serveMode.optedOut)
+            ? "Refused a peer request forwarded by Tailscale Serve: Serve is turned off for this Cogenly. Run the Make reachable step in Settings → Machines to turn it back on."
+            : "Refused a peer request forwarded by Tailscale Serve: Serve doesn't point at this server's port, or Tailscale Funnel makes it public. Open Settings → Machines to set it up.",
         );
       }
     }

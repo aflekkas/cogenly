@@ -16,12 +16,15 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 import { DEFAULT_TAILSCALE_SERVE_PORT } from "@t3tools/tailscale";
 
+import packageJson from "../../package.json" with { type: "json" };
 import * as BootService from "../cloud/bootService.ts";
+import { compareExactServiceVersions } from "../cloud/serviceProtocol.ts";
 import type * as ServerConfig from "../config.ts";
 import * as TailscaleServeMode from "../tailscale/TailscaleServeMode.ts";
 
 export interface ServeDropIn {
-  readonly enabled: boolean;
+  /** Null when the file sets only the port. */
+  readonly enabled: boolean | null;
   readonly servePort: number | null;
   /** The file sets nothing but Serve, so removing it changes nothing else. */
   readonly onlyServe: boolean;
@@ -30,7 +33,7 @@ export interface ServeDropIn {
 const SERVE_ENV = /^Environment="?COGENLY_TAILSCALE_SERVE=([^"\s]*)"?\s*$/u;
 const SERVE_PORT_ENV = /^Environment="?COGENLY_TAILSCALE_SERVE_PORT=(\d+)"?\s*$/u;
 
-/** Reads a systemd drop-in; null when it does not set COGENLY_TAILSCALE_SERVE. */
+/** Reads a systemd drop-in; null when it sets neither Serve variable. */
 export const parseServeDropIn = (contents: string): ServeDropIn | null => {
   let enabled: boolean | null = null;
   let servePort: number | null = null;
@@ -51,7 +54,36 @@ export const parseServeDropIn = (contents: string): ServeDropIn | null => {
     }
     onlyServe = false;
   }
-  return enabled === null ? null : { enabled, servePort, onlyServe };
+  return enabled === null && servePort === null ? null : { enabled, servePort, onlyServe };
+};
+
+/**
+ * Why moving the setting now could take Serve away from the running service,
+ * or null when it is safe. The service has to read this home's setting: a
+ * unit for another home, or a release from before the setting existed, would
+ * start without Serve once the drop-in is gone.
+ */
+export const serveMigrationBlocker = (
+  status: BootService.BootServiceStatus,
+  context: { readonly baseDir: string; readonly cliVersion: string },
+  resolvePath: (path: string) => string,
+): string | null => {
+  if (!status.supported || !status.installed) {
+    return "The background service isn't installed, so nothing reads the drop-in. Remove it yourself, or run `cogenly service install --tailscale-serve`.";
+  }
+  if (
+    status.installedBaseDir !== undefined &&
+    resolvePath(status.installedBaseDir) !== resolvePath(context.baseDir)
+  ) {
+    return `The background service serves ${status.installedBaseDir}, not this Cogenly home. Run \`cogenly doctor --base-dir ${status.installedBaseDir}\` instead.`;
+  }
+  if (
+    status.installedVersion !== undefined &&
+    compareExactServiceVersions(status.installedVersion, context.cliVersion) < 0
+  ) {
+    return `The background service runs cogenly@${status.installedVersion}, which doesn't read this setting. Run \`cogenly service install\` first, then \`cogenly doctor\` again.`;
+  }
+  return null;
 };
 
 const runQuiet = (command: string, args: ReadonlyArray<string>) =>
@@ -84,38 +116,55 @@ export const runTailscaleServeDoctor = Effect.fn("runTailscaleServeDoctor")(func
     const dropIn = parseServeDropIn(contents);
     if (dropIn !== null) found.push({ file, dropIn });
   }
-  const last = found.at(-1);
-  if (last === undefined) return;
+  // systemd applies drop-ins in name order, so the last file to set a variable wins.
+  const setting = found.findLast((entry) => entry.dropIn.enabled !== null);
+  if (setting === undefined) return;
+  const enabled = setting.dropIn.enabled === true;
+  const servePort =
+    found.findLast((entry) => entry.dropIn.servePort !== null)?.dropIn.servePort ??
+    DEFAULT_TAILSCALE_SERVE_PORT;
+  // Removing only some files would change what the rest set, the port above all.
+  const removable = found.every((entry) => entry.dropIn.onlyServe);
+  const files = found.map((entry) => entry.file).join(", ");
 
   yield* Console.log(
-    `\nKeep Tailscale Serve in Cogenly's settings (recommended)\n  ${last.file} sets COGENLY_TAILSCALE_SERVE. Cogenly keeps this setting itself now, so setup and \`cogenly service status\` can see it and Serve stays on across restarts.${last.dropIn.onlyServe ? " The drop-in sets nothing else and is removed." : " The drop-in sets other things too, so it stays; remove its COGENLY_TAILSCALE_SERVE lines yourself."}\n  Restarts the background service.`,
+    `\nKeep Tailscale Serve in Cogenly's settings (recommended)\n  ${files} ${found.length === 1 ? "sets" : "set"} COGENLY_TAILSCALE_SERVE. Cogenly keeps this setting itself now, so setup and \`cogenly service status\` can see it and Serve stays on across restarts.${removable ? ` ${found.length === 1 ? "The drop-in sets" : "The drop-ins set"} nothing else and ${found.length === 1 ? "is" : "are"} removed.` : " A drop-in sets other things too, so they all stay; remove their COGENLY_TAILSCALE_SERVE lines yourself."}\n  Restarts the background service.`,
   );
+  const service = yield* BootService.BootService;
+  const blocker = serveMigrationBlocker(
+    yield* service.status,
+    { baseDir: config.baseDir, cliVersion: packageJson.version },
+    path.resolve,
+  );
+  if (blocker !== null) {
+    yield* Console.log(`  Skipped: ${blocker}`);
+    return;
+  }
   if (options.dryRun) return;
   const interactive = options.interactive ?? Boolean(process.stdin.isTTY && process.stdout.isTTY);
-  const wanted = options.fix
-    ? true
-    : interactive
-      ? yield* Prompt.run(
-          Prompt.Confirm({
-            message: "Move Tailscale Serve into Cogenly's settings?",
-            initial: true,
-          }),
-        ).pipe(Effect.orElseSucceed(() => false))
-      : false;
+  if (!options.fix && !interactive) {
+    yield* Console.log("  Run in a terminal to choose it, or pass --fix.");
+    return;
+  }
+  const wanted =
+    options.fix ||
+    (yield* Prompt.run(
+      Prompt.Confirm({
+        message: "Move Tailscale Serve into Cogenly's settings?",
+        initial: true,
+      }),
+    ).pipe(Effect.orElseSucceed(() => false)));
   if (!wanted) return;
 
+  // Saved first: the service must find it before the drop-in stops setting it.
   const filePath = yield* TailscaleServeMode.servePreferencePath(config.stateDir);
-  yield* TailscaleServeMode.writeServePreference(filePath, {
-    enabled: last.dropIn.enabled,
-    servePort: last.dropIn.servePort ?? DEFAULT_TAILSCALE_SERVE_PORT,
-  });
-  if (found.every((entry) => entry.dropIn.onlyServe)) {
+  yield* TailscaleServeMode.writeServePreference(filePath, { enabled, servePort });
+  if (removable) {
     for (const entry of found) yield* fs.remove(entry.file);
     yield* runQuiet("systemctl", ["--user", "daemon-reload"]);
   }
-  const service = yield* BootService.BootService;
   const restarted = yield* service.restart;
   yield* Console.log(
-    `Tailscale Serve is ${last.dropIn.enabled ? "on" : "off"} in Cogenly's settings${restarted ? "; restarted the service" : ""}.`,
+    `Tailscale Serve is ${enabled ? `on (HTTPS port ${String(servePort)})` : "off"} in Cogenly's settings${restarted ? "; restarted the service" : ""}.`,
   );
 });

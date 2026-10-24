@@ -123,6 +123,10 @@ describe("RPC authorization scopes", () => {
       WS_METHODS.machinesCreatePeerGrant,
       WS_METHODS.machinesJoinHub,
       WS_METHODS.machinesUnpair,
+      // Setup installs software and exposes the server; its status carries sign-in links.
+      WS_METHODS.machinesSetupStatus,
+      WS_METHODS.machinesSetupSubscribe,
+      WS_METHODS.machinesSetupRunStep,
     ]) {
       expect(requiredScopeForRpcMethod(method)).toBe(AuthAccessWriteScope);
       expect(clientRpcRequiredScopes(method, {})).toEqual([AuthAccessWriteScope]);
