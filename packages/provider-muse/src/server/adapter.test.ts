@@ -581,6 +581,52 @@ describe("MuseAdapterV2", () => {
     }).pipe(Effect.scoped, Effect.provide(testLayer)),
   );
 
+  it.effect("keeps builder instructions separate from terminal and task instructions", () =>
+    Effect.gen(function* () {
+      yield* (yield* McpProviderSessions.McpProviderSessions).set({
+        environmentId: EnvironmentId.make("test-environment"),
+        threadId: THREAD_ID,
+        providerSessionId: "test-session",
+        providerInstanceId: INSTANCE_ID,
+        terminalToolsAvailable: true,
+        endpoint: "http://127.0.0.1:43210/mcp",
+        authorizationHeader: "Bearer conversation-terminal-token",
+        browserToolsAvailable: true,
+      });
+      const policy = ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+        ...runtimePolicy,
+        conversationMode: true,
+        builderMode: true,
+      });
+      const fake = yield* makeFakeMuse();
+      fake.host.initializeResult.grantedCapabilities.push("sessionMcp");
+      let readOnly: boolean | undefined;
+      const harness = yield* makeHarness(
+        fake,
+        INSTANCE_ID,
+        undefined,
+        undefined,
+        undefined,
+        policy,
+        {
+          createHost: async (options) => {
+            readOnly = options.readOnly;
+            return fake.host;
+          },
+        },
+      );
+      // The native shell and writes stay off; commands go through the MCP terminal.
+      assert.isTrue(readOnly);
+      yield* harness.runtime.startTurn(yield* turnInput(harness.providerThread, 1, policy));
+      const call = yield* fake.takeCall("turn/start");
+      const text = JSON.stringify(call.params.input);
+      assert.notInclude(text, "terminal_run");
+      assert.notInclude(text, "work_task");
+      assert.include(text, "<builder_mode>");
+      yield* fake.emit("turn/completed", { turnId: call.commandId, terminal: "completed" });
+    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+  );
+
   it.effect("omits the permission profile when a conversation host resumes", () =>
     Effect.gen(function* () {
       const policy = ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({

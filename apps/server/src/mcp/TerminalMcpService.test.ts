@@ -1,3 +1,5 @@
+import { agentFixture } from "../agents/agent.testkit.ts";
+import * as AgentStore from "../agents/AgentStore.ts";
 import * as CliCredentials from "../accounts/CliCredentials.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
@@ -82,7 +84,14 @@ it.effect(
         updatedAt: "2026-01-01T00:00:00Z",
         deletedAt: null,
       };
+      let agent = {
+        ...agentFixture(),
+        permissions: { ...agentFixture().permissions, deploy: false },
+      };
       const dependencies = Layer.mergeAll(
+        Layer.mock(AgentStore.AgentStore)({
+          forThread: (id) => Effect.succeed(id === "persistent" ? agent : null),
+        }),
         Layer.mock(CliCredentials.CliCredentials)({
           launch: () => Effect.succeed({ env: {}, complete: () => Effect.void }),
         }),
@@ -94,7 +103,7 @@ it.effect(
                 ? { ...liveThreadShell(id), surface: "builder" as const }
                 : id === "chat"
                   ? { ...liveThreadShell(id), surface: "chat" as const }
-                  : liveThreadShell(id, id === "restricted" ? { runtimeMode: "full-access" } : {}),
+                  : liveThreadShell(id, id === "plan" ? { interactionMode: "plan" } : {}),
             ),
         }),
         Layer.mock(ProjectService.ProjectService)({
@@ -128,8 +137,36 @@ it.effect(
           const error = yield* as("builder", operation).pipe(Effect.flip);
           expect(error.message).toContain("Builder threads cannot run commands");
         }
+        for (const id of ["plan"]) {
+          for (const operation of [
+            tools.run({ command: "echo forbidden", background: true }),
+            tools.write({ terminalId: "existing", input: "echo forbidden\n" }),
+          ]) {
+            const error = yield* as(id, operation).pipe(Effect.flip);
+            expect(error.message).toContain("full-access/default");
+          }
+        }
         expect(spawnedIn).toEqual([]);
         expect(inputs).toEqual([]);
+        const grantRefusal = yield* as(
+          "persistent",
+          tools.run({ command: "echo blocked", background: true }),
+        ).pipe(Effect.flip);
+        expect(grantRefusal.message).toContain("all sensitive agent grants");
+        agent = { ...agent, permissions: { ...agent.permissions, deploy: true } };
+        const agentTerminal = yield* as(
+          "persistent",
+          tools.run({ command: "cat", background: true }),
+        );
+        agent = { ...agent, permissions: { ...agent.permissions, deploy: false } };
+        const revoked = yield* as(
+          "persistent",
+          tools.write({ terminalId: agentTerminal.terminalId, input: "blocked" }),
+        ).pipe(Effect.flip);
+        expect(revoked.message).toContain("all sensitive agent grants");
+        expect(inputs).toEqual([]);
+        yield* as("persistent", tools.kill({ terminalId: agentTerminal.terminalId }));
+        signals.length = 0;
         const started = yield* as("A", tools.run({ command: "cat", background: true }));
         expect(yield* as("B", tools.list())).toEqual([]);
         expect(yield* as("A", tools.list())).toHaveLength(1);

@@ -1135,6 +1135,7 @@ export function makeClaudeQueryOptions(input: {
    * commands go through terminal_run. Absent: inferred from a disallowed Bash.
    */
   readonly terminalToolsAvailable?: boolean;
+  readonly runtimePolicy?: ProviderAdapter.ProviderAdapterV2RuntimePolicy;
   /** Threads filed in a project: appends the project manifest block. */
   readonly projectManifest?: string;
   readonly permissionMode?: PermissionMode;
@@ -1159,12 +1160,16 @@ export function makeClaudeQueryOptions(input: {
     ? { resume: input.nativeThreadId }
     : { sessionId: input.nativeThreadId };
   const selectedTools = input.tools ?? CLAUDE_CODE_PRESET_TOOLS;
-  // Conversation turns lose Bash whatever the credential grants, so only
-  // the credential says whether they have terminal_run.
-  const terminalTools =
-    input.builderMode !== true &&
-    (input.terminalToolsAvailable ??
-      (input.conversationMode !== true && input.disallowedTools?.includes("Bash") === true));
+  // Conversation turns lose Bash independently. Advertise MCP commands only
+  // when both the session and the current turn policy permit them.
+  const terminalTools = McpProviderSession.terminalToolsAuthorized({
+    runtimeMode: input.runtimePolicy?.runtimeMode ?? "full-access",
+    interactionMode: input.runtimePolicy?.interactionMode ?? "default",
+    builderMode: input.runtimePolicy?.builderMode ?? input.builderMode,
+    enabled:
+      input.terminalToolsAvailable ??
+      (input.conversationMode !== true && input.disallowedTools?.includes("Bash") === true),
+  });
   const selectionSettings =
     Object.keys(compiledSelection.settings).length === 0
       ? undefined
@@ -1921,8 +1926,10 @@ export function claudeEffectiveQueryPolicyKey(
     readonly mcpServers?: ClaudeQueryOptions["mcpServers"];
     readonly disallowedTools?: ReadonlyArray<string>;
   },
+  terminalAuthorized?: boolean,
 ): string {
   return JSON.stringify({
+    terminalAuthorized,
     runtimePolicy: claudeRuntimeQueryPolicyKey({
       ...queryPolicy,
       ...(mcpOverrides.allowedTools === undefined
@@ -8467,7 +8474,14 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               ...(conversationMode ? CLAUDE_CONVERSATION_DISALLOWED_TOOLS : []),
             ]),
           );
-          const queryPolicyKey = claudeEffectiveQueryPolicyKey(queryPolicy, mcpOverrides);
+          const queryPolicyKey = claudeEffectiveQueryPolicyKey(
+            queryPolicy,
+            mcpOverrides,
+            McpProviderSession.terminalToolsAuthorized({
+              ...turnInput.runtimePolicy,
+              enabled: McpProviderSession.terminalToolsAvailable(mcpSession),
+            }),
+          );
           const compiledSelection = compileClaudeModelSelection(turnInput.modelSelection);
           const resumeSessionAt = yield* getNativeConversationHeadId(turnInput.providerThread);
           const existing = yield* Ref.get(queryContext);
@@ -8572,6 +8586,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             environment: adapterOptions.environment,
             tools: queryPolicy.tools ?? CLAUDE_CODE_PRESET_TOOLS,
             ...(conversationMode ? { conversationMode } : {}),
+            runtimePolicy: turnInput.runtimePolicy,
             builderMode: turnInput.runtimePolicy.builderMode === true,
             terminalToolsAvailable: McpProviderSession.terminalToolsAvailable(mcpSession),
             ...(turnInput.runtimePolicy.projectManifest === undefined

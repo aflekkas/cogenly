@@ -1,3 +1,5 @@
+import * as AgentStore from "../agents/AgentStore.ts";
+import { terminalToolsAuthorized } from "@t3tools/provider-core/server/mcpSession";
 import * as CliCredentials from "../accounts/CliCredentials.ts";
 import { AccountError } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
@@ -17,7 +19,7 @@ import * as ProjectFiles from "../projectLabels/ProjectFiles.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
-import { assertFullAccess, assertLiveCaller, loadCaller, unavailable } from "./threadAccess.ts";
+import { assertLiveCaller, loadCaller, unavailable } from "./threadAccess.ts";
 
 const denied = (message: string) =>
   new OrchestratorMcpFailure({ code: "capability_denied", message });
@@ -62,6 +64,7 @@ export class TerminalMcpService extends Context.Service<
 >()("cogenly-server/mcp/TerminalMcpService") {}
 
 const make = Effect.gen(function* () {
+  const agents = yield* AgentStore.AgentStore;
   const manager = yield* TerminalManager.TerminalManager;
   const credentials = yield* CliCredentials.CliCredentials;
   const settings = yield* ServerSettings.ServerSettingsService;
@@ -85,13 +88,20 @@ const make = Effect.gen(function* () {
     yield* assertLiveCaller(context.caller);
     if (context.caller.caller?.surface === "builder")
       return yield* denied("Builder threads cannot run commands.");
-    // These PTYs run on the host. Do not let an MCP call bypass a provider sandbox or approval.
-    yield* assertFullAccess(
-      context.caller,
-      "Agent terminals require full-access mode with default interaction mode.",
-    );
-    if (!(yield* settings.getSettings.pipe(Effect.mapError(unavailable))).enableAgentTerminals)
-      return yield* denied("Agent terminals are disabled in server settings.");
+    const thread = context.caller.caller!;
+    const agent = yield* agents.forThread(thread.id).pipe(Effect.mapError(unavailable));
+    if (
+      !terminalToolsAuthorized({
+        enabled: (yield* settings.getSettings.pipe(Effect.mapError(unavailable)))
+          .enableAgentTerminals,
+        ...context.caller.limits,
+        builderMode: thread.surface === "builder",
+        agentPermissions: agent?.permissions,
+      })
+    )
+      return yield* denied(
+        "Agent terminals require enabled tools, full-access/default mode and all sensitive agent grants.",
+      );
     return context;
   });
   return TerminalMcpService.of({

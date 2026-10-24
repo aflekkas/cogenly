@@ -1,7 +1,13 @@
-import { EnvironmentId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import {
+  defaultAgentPermissions,
+  EnvironmentId,
+  ProviderInstanceId,
+  ThreadId,
+} from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 import {
   terminalToolsAvailable,
+  terminalToolsAuthorized,
   withAgentDeviceEnvironment,
   type McpProviderSessionConfig,
 } from "./mcpSession.ts";
@@ -55,5 +61,42 @@ describe("terminalToolsAvailable", () => {
     // shell: absent must not read as available.
     expect(terminalToolsAvailable(config())).toBe(false);
     expect(terminalToolsAvailable(undefined)).toBe(false);
+  });
+});
+
+describe("terminalToolsAuthorized", () => {
+  const base = { enabled: true, runtimeMode: "full-access", interactionMode: "default" } as const;
+  it("withholds commands for plan, disabled and builder turns", () => {
+    expect(terminalToolsAuthorized(base)).toBe(true);
+    expect(terminalToolsAuthorized({ ...base, interactionMode: "plan" })).toBe(false);
+    expect(terminalToolsAuthorized({ ...base, enabled: false })).toBe(false);
+    expect(terminalToolsAuthorized({ ...base, builderMode: true })).toBe(false);
+  });
+  it("requires every sensitive grant for persistent agents", () => {
+    expect(terminalToolsAuthorized({ ...base, agentPermissions: defaultAgentPermissions })).toBe(
+      false,
+    );
+    const granted = {
+      ...defaultAgentPermissions,
+      send: true,
+      create_pr: true,
+      merge: true,
+      deploy: true,
+      delete: true,
+    };
+    expect(terminalToolsAuthorized({ ...base, agentPermissions: granted })).toBe(true);
+    for (const grant of [
+      "read",
+      "execute",
+      "send",
+      "create_pr",
+      "merge",
+      "deploy",
+      "delete",
+    ] as const) {
+      expect(
+        terminalToolsAuthorized({ ...base, agentPermissions: { ...granted, [grant]: false } }),
+      ).toBe(false);
+    }
   });
 });

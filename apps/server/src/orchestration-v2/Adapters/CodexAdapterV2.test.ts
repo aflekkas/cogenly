@@ -646,13 +646,16 @@ describe("CodexAdapterV2 runtime policy", () => {
     }),
   );
 
-  const chatTurn = (terminalToolsAvailable: boolean) =>
+  const chatTurn = (
+    terminalToolsAvailable: boolean,
+    interactionMode: "default" | "plan" = "default",
+  ) =>
     CodexAdapterV2.buildCodexTurnStartParams({
       nativeThreadId: "native-chat-conversation",
       codexInput: [{ type: "text", text: "explain this idea" }],
       runtimePolicy: {
         runtimeMode: "full-access",
-        interactionMode: "default",
+        interactionMode,
         cwd: null,
         conversationMode: true,
       },
@@ -663,6 +666,17 @@ describe("CodexAdapterV2 runtime policy", () => {
       hasT3Mcp: true,
       terminalToolsAvailable,
     });
+
+  it.effect("does not promise terminal lookups to a plan-mode chat", () =>
+    Effect.gen(function* () {
+      const params = yield* chatTurn(true, "plan");
+      assert.notInclude(JSON.stringify(params.additionalContext), "terminal_run");
+      assert.include(
+        params.additionalContext?.cogenly_conversation?.value ?? "",
+        "you cannot run commands",
+      );
+    }),
+  );
 
   it.effect("lets chat-surface turns look things up through the terminal tools", () =>
     Effect.gen(function* () {

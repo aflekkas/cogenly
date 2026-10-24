@@ -704,8 +704,10 @@ export function buildCodexTurnStartParams(input: {
 }) {
   return Effect.gen(function* () {
     const conversationMode = input.runtimePolicy.conversationMode === true;
-    const terminalTools =
-      input.runtimePolicy.builderMode !== true && (input.terminalToolsAvailable ?? false);
+    const terminalTools = McpProviderSession.terminalToolsAuthorized({
+      ...input.runtimePolicy,
+      enabled: input.hasT3Mcp === true && input.terminalToolsAvailable === true,
+    });
     const runtimeModeDefaults = codexRuntimeModeTurnDefaults(
       input.runtimePolicy.runtimeMode,
       conversationMode,

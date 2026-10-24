@@ -2071,9 +2071,10 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
               );
           } else {
             const turnMcp = yield* mcpSessions.read(turnInput.threadId);
-            const terminalTools =
-              turnInput.runtimePolicy.builderMode !== true &&
-              McpProviderSession.terminalToolsAvailable(turnMcp);
+            const terminalTools = McpProviderSession.terminalToolsAuthorized({
+              ...turnInput.runtimePolicy,
+              enabled: McpProviderSession.terminalToolsAvailable(turnMcp),
+            });
             const result = yield* request(
               "turn/start",
               {

@@ -174,6 +174,7 @@ const layerCommandOutputHubProvided = CommandOutputHub.layer.pipe(
 );
 
 const layerProviderSessionManagerProvided = ProviderSessionManager.layer.pipe(
+  Layer.provide(AgentStore.layer),
   Layer.provide(
     Layer.mergeAll(
       layerCommandOutputHubProvided,

@@ -199,7 +199,7 @@ export function buildCodexDeveloperInstructions(
   interactionMode: ProviderInteractionMode,
   options?: {
     readonly conversationMode?: boolean;
-    readonly builder?: boolean;
+    readonly builder?: boolean | undefined;
     readonly terminal?: boolean;
   },
 ): string {

@@ -1,4 +1,11 @@
-import type { EnvironmentId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import type {
+  AgentPermissions,
+  EnvironmentId,
+  ProviderInstanceId,
+  ThreadId,
+  RuntimeMode,
+  ProviderInteractionMode,
+} from "@t3tools/contracts";
 
 export interface McpProviderSessionConfig {
   readonly environmentId: EnvironmentId;
@@ -59,4 +66,29 @@ export function withAgentDeviceEnvironment(
     ...rest,
     ...(shimDir ? { PATH: basePath ? `${shimDir}${separator}${basePath}` : shimDir } : {}),
   };
+}
+
+/** Shared prompt/execution policy. Callers re-read modes, settings and grants at execution. */
+export function terminalToolsAuthorized(input: {
+  readonly enabled: boolean;
+  readonly runtimeMode: RuntimeMode;
+  readonly interactionMode: ProviderInteractionMode;
+  readonly builderMode?: boolean | undefined;
+  /** null/absent is an ordinary thread; an agent supplies its current grants. */
+  readonly agentPermissions?: AgentPermissions | null | undefined;
+}): boolean {
+  return (
+    input.enabled &&
+    input.runtimeMode === "full-access" &&
+    input.interactionMode === "default" &&
+    input.builderMode !== true &&
+    (input.agentPermissions == null ||
+      (input.agentPermissions.read &&
+        input.agentPermissions.execute &&
+        input.agentPermissions.send &&
+        input.agentPermissions.create_pr &&
+        input.agentPermissions.merge &&
+        input.agentPermissions.deploy &&
+        input.agentPermissions.delete))
+  );
 }

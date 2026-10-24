@@ -171,7 +171,7 @@ When a request needs commands, files, code, or other tools (changing a repositor
  */
 export const conversationModeInstructions = (options: {
   readonly terminal: boolean;
-  readonly builder?: boolean;
+  readonly builder?: boolean | undefined;
 }) =>
   options.builder === true
     ? "<builder_mode>You are helping set up a Cogenly agent. Follow the agent builder instructions and use propose_agent for proposals. Do not read or change files, run commands, delegate, or start Work tasks here.</builder_mode>"

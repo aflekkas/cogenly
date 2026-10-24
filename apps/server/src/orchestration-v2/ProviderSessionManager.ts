@@ -1,3 +1,5 @@
+import * as AgentStore from "../agents/AgentStore.ts";
+import { terminalToolsAuthorized } from "@t3tools/provider-core/server/mcpSession";
 import { AgentScope } from "@t3tools/shared/AgentScope";
 import * as KeyedLock from "@t3tools/shared/KeyedLock";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
@@ -358,6 +360,7 @@ export const layerWithOptions = (
        * becoming "on" would violate the user's stated choice, whereas the
        * reverse costs an agent one toolset and is visible immediately (#7083).
        */
+      const agents = yield* Effect.serviceOption(AgentStore.AgentStore);
       const serverSettings = yield* Effect.serviceOption(ServerSettings.ServerSettingsService);
       const projectService = yield* Effect.serviceOption(ProjectService.ProjectService);
       const eventSink = yield* EventSink.EventSinkV2;
@@ -496,12 +499,31 @@ export const layerWithOptions = (
                 // same token or the process's tool calls fail auth.
                 const { browser: browserToolsAvailable, device: deviceToolsAvailable } =
                   yield* agentAccessSettings(threadId);
-                const terminalToolsAvailable = Option.isNone(serverSettings)
+                const terminalsEnabled = Option.isNone(serverSettings)
                   ? true
                   : yield* serverSettings.value.getSettings.pipe(
                       Effect.map((settings) => settings.enableAgentTerminals),
                       Effect.orElseSucceed(() => false),
                     );
+                const terminalToolsAvailable = yield* Effect.gen(function* () {
+                  const terminalThread = yield* projectionStore.getThread(threadId);
+                  const agent = Option.isSome(agents)
+                    ? yield* agents.value
+                        .forThread(threadId)
+                        .pipe(Effect.orElseSucceed(() => undefined))
+                    : terminalThread.agent === undefined
+                      ? null
+                      : undefined;
+                  return (
+                    agent !== undefined &&
+                    terminalToolsAuthorized({
+                      enabled: terminalsEnabled,
+                      ...terminalThread,
+                      builderMode: terminalThread.surface === "builder",
+                      agentPermissions: agent?.permissions,
+                    })
+                  );
+                }).pipe(Effect.orElseSucceed(() => false));
                 const capabilities = new Set<
                   import("../mcp/McpInvocationContext.ts").McpCapability
                 >(["orchestration", "worktree", "pull-requests"]);

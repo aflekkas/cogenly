@@ -270,6 +270,26 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
       : "";
   };
 
+  it("does not promise commands in a plan-mode conversation", () => {
+    const options = ClaudeAdapterV2.makeClaudeQueryOptions({
+      modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+      nativeThreadId: "plan-chat",
+      resume: false,
+      cwd: "/workspace",
+      conversationMode: true,
+      terminalToolsAvailable: true,
+      runtimePolicy: {
+        runtimeMode: "full-access",
+        interactionMode: "plan",
+        cwd: "/workspace",
+        conversationMode: true,
+      },
+    });
+    const text = JSON.stringify(options.systemPrompt);
+    assert.include(text, "you cannot run commands");
+    assert.notInclude(text, "terminal_run");
+  });
+
   it("lets chat mode look things up through terminal_run when the credential grants it", () => {
     const append = chatAppend(true);
     assert.include(append, "<conversation_mode>");
