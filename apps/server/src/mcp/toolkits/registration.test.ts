@@ -63,6 +63,7 @@ import * as SourceControlRepositoryService from "../../sourceControl/SourceContr
 import * as GitVcsDriver from "../../vcs/GitVcsDriver.ts";
 import * as Integrations from "../../integrations/Integrations.ts";
 import * as Machines from "../../machines/Machines.ts";
+import * as MachineSetup from "../../tailscale/MachineSetup.ts";
 import * as McpHttpServer from "../McpHttpServer.ts";
 import * as McpSessionRegistry from "../McpSessionRegistry.ts";
 import * as PreviewAutomationBroker from "../PreviewAutomationBroker.ts";
@@ -215,6 +216,7 @@ const layerStubServices = Layer.mergeAll(
   Layer.mock(Machines.Machines)({
     list: Effect.succeed({ machines: [], link: { _tag: "standalone" } }),
   }),
+  Layer.mock(MachineSetup.MachineSetup)({}),
   Layer.mock(ProjectionStore.ProjectionStoreV2)({}),
   Layer.mock(DeviceService.DeviceService)({
     list: Effect.succeed({
@@ -357,7 +359,13 @@ const smokeCases = [
   },
   {
     toolkit: "machines",
-    names: ["machines_list"],
+    names: [
+      "machine_pair",
+      "machine_setup_status",
+      "machine_setup_step",
+      "machine_unpair",
+      "machines_list",
+    ],
     tool: "machines_list",
     args: {},
     expected: { machines: [], link: { _tag: "standalone" } },

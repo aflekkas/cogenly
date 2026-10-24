@@ -1034,7 +1034,10 @@ export const layer = Layer.mergeAll(
   layerProjectLabelsRegistration,
   // Integrations bubbles to the server root like ProjectFiles.
   toolkitRegistration(IntegrationsToolkit, IntegrationsHandlers.layer),
-  toolkitRegistration(MachinesToolkit, MachinesHandlers.layer),
+  // machine_pair runs through the desktop app, which is signed in to both machines.
+  toolkitRegistration(MachinesToolkit, MachinesHandlers.layer).pipe(
+    Layer.provide(DesktopAppControl.layer),
+  ),
   // ProjectFiles bubbles to the server root like ThreadManagement.
   toolkitRegistration(ProjectFilesToolkit, ProjectFilesHandlers.layer),
   // ProjectHome bubbles to the server root like ProjectFiles.

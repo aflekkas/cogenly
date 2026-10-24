@@ -26,6 +26,7 @@ import { Route as SettingsProjectsRouteImport } from './routes/settings.projects
 import { Route as SettingsProjectTagsRouteImport } from './routes/settings.project-tags'
 import { Route as SettingsOpenSourceLicensesRouteImport } from './routes/settings.open-source-licenses'
 import { Route as SettingsMemoryRouteImport } from './routes/settings.memory'
+import { Route as SettingsMachinesRouteImport } from './routes/settings.machines'
 import { Route as SettingsKeybindingsRouteImport } from './routes/settings.keybindings'
 import { Route as SettingsIntegrationsRouteImport } from './routes/settings.integrations'
 import { Route as SettingsImportRouteImport } from './routes/settings.import'
@@ -126,6 +127,11 @@ const SettingsOpenSourceLicensesRoute =
 const SettingsMemoryRoute = SettingsMemoryRouteImport.update({
   id: '/memory',
   path: '/memory',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsMachinesRoute = SettingsMachinesRouteImport.update({
+  id: '/machines',
+  path: '/machines',
   getParentRoute: () => SettingsRoute,
 } as any)
 const SettingsKeybindingsRoute = SettingsKeybindingsRouteImport.update({
@@ -230,6 +236,7 @@ export interface FileRoutesByFullPath {
   '/settings/import': typeof SettingsImportRoute
   '/settings/integrations': typeof SettingsIntegrationsRoute
   '/settings/keybindings': typeof SettingsKeybindingsRoute
+  '/settings/machines': typeof SettingsMachinesRoute
   '/settings/memory': typeof SettingsMemoryRoute
   '/settings/open-source-licenses': typeof SettingsOpenSourceLicensesRoute
   '/settings/project-tags': typeof SettingsProjectTagsRoute
@@ -263,6 +270,7 @@ export interface FileRoutesByTo {
   '/settings/import': typeof SettingsImportRoute
   '/settings/integrations': typeof SettingsIntegrationsRoute
   '/settings/keybindings': typeof SettingsKeybindingsRoute
+  '/settings/machines': typeof SettingsMachinesRoute
   '/settings/memory': typeof SettingsMemoryRoute
   '/settings/open-source-licenses': typeof SettingsOpenSourceLicensesRoute
   '/settings/project-tags': typeof SettingsProjectTagsRoute
@@ -299,6 +307,7 @@ export interface FileRoutesById {
   '/settings/import': typeof SettingsImportRoute
   '/settings/integrations': typeof SettingsIntegrationsRoute
   '/settings/keybindings': typeof SettingsKeybindingsRoute
+  '/settings/machines': typeof SettingsMachinesRoute
   '/settings/memory': typeof SettingsMemoryRoute
   '/settings/open-source-licenses': typeof SettingsOpenSourceLicensesRoute
   '/settings/project-tags': typeof SettingsProjectTagsRoute
@@ -336,6 +345,7 @@ export interface FileRouteTypes {
     | '/settings/import'
     | '/settings/integrations'
     | '/settings/keybindings'
+    | '/settings/machines'
     | '/settings/memory'
     | '/settings/open-source-licenses'
     | '/settings/project-tags'
@@ -369,6 +379,7 @@ export interface FileRouteTypes {
     | '/settings/import'
     | '/settings/integrations'
     | '/settings/keybindings'
+    | '/settings/machines'
     | '/settings/memory'
     | '/settings/open-source-licenses'
     | '/settings/project-tags'
@@ -404,6 +415,7 @@ export interface FileRouteTypes {
     | '/settings/import'
     | '/settings/integrations'
     | '/settings/keybindings'
+    | '/settings/machines'
     | '/settings/memory'
     | '/settings/open-source-licenses'
     | '/settings/project-tags'
@@ -553,6 +565,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsMemoryRouteImport
       parentRoute: typeof SettingsRoute
     }
+    '/settings/machines': {
+      id: '/settings/machines'
+      path: '/machines'
+      fullPath: '/settings/machines'
+      preLoaderRoute: typeof SettingsMachinesRouteImport
+      parentRoute: typeof SettingsRoute
+    }
     '/settings/keybindings': {
       id: '/settings/keybindings'
       path: '/keybindings'
@@ -700,6 +719,7 @@ interface SettingsRouteChildren {
   SettingsImportRoute: typeof SettingsImportRoute
   SettingsIntegrationsRoute: typeof SettingsIntegrationsRoute
   SettingsKeybindingsRoute: typeof SettingsKeybindingsRoute
+  SettingsMachinesRoute: typeof SettingsMachinesRoute
   SettingsMemoryRoute: typeof SettingsMemoryRoute
   SettingsOpenSourceLicensesRoute: typeof SettingsOpenSourceLicensesRoute
   SettingsProjectTagsRoute: typeof SettingsProjectTagsRoute
@@ -721,6 +741,7 @@ const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsImportRoute: SettingsImportRoute,
   SettingsIntegrationsRoute: SettingsIntegrationsRoute,
   SettingsKeybindingsRoute: SettingsKeybindingsRoute,
+  SettingsMachinesRoute: SettingsMachinesRoute,
   SettingsMemoryRoute: SettingsMemoryRoute,
   SettingsOpenSourceLicensesRoute: SettingsOpenSourceLicensesRoute,
   SettingsProjectTagsRoute: SettingsProjectTagsRoute,

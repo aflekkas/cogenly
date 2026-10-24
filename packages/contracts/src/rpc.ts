@@ -7,6 +7,7 @@ import * as ProjectLabels from "./projectLabel.ts";
 import * as Integrations from "./integration.ts";
 import * as Machines from "./machine.ts";
 import * as MachineSecurity from "./machineSecurity.ts";
+import * as MachineSetup from "./machineSetup.ts";
 import * as Work from "./work.ts";
 import * as Vault from "./vault.ts";
 import * as Accounts from "./accounts.ts";
@@ -621,6 +622,11 @@ export const WS_METHODS = {
   machinesJoinHub: "machines.joinHub",
   machinesUnpair: "machines.unpair",
   machineSecurityStatus: "machines.securityStatus",
+  // Getting this machine ready to pair (Tailscale and Serve)
+  machinesSetupStatus: "machines.setupStatus",
+  machinesSetupSubscribe: "machines.setupSubscribe",
+  machinesSetupRunStep: "machines.setupRunStep",
+  machinesSetupDisableServe: "machines.setupDisableServe",
 
   // Cloud environment methods
   cloudGetRelayClientStatus: "cloud.getRelayClientStatus",
@@ -2203,6 +2209,34 @@ const WsMachinesUnpairRpc = Rpc.make(WS_METHODS.machinesUnpair, {
   success: Machines.MachineUnpairResult,
   error: machineErrors,
 });
+const machineSetupErrors = Schema.Union([
+  MachineSetup.MachineSetupError,
+  EnvironmentAuthorizationError,
+]);
+const WsMachinesSetupStatusRpc = Rpc.make(WS_METHODS.machinesSetupStatus, {
+  payload: Schema.Struct({}),
+  success: MachineSetup.MachineSetupStatus,
+  error: machineSetupErrors,
+});
+/** The status, then again whenever it changes, re-checked while subscribed. */
+const WsMachinesSetupSubscribeRpc = Rpc.make(WS_METHODS.machinesSetupSubscribe, {
+  payload: Schema.Struct({}),
+  success: MachineSetup.MachineSetupStatus,
+  error: machineSetupErrors,
+  stream: true,
+});
+/** Starts one step and returns at once; progress arrives through the status. */
+const WsMachinesSetupRunStepRpc = Rpc.make(WS_METHODS.machinesSetupRunStep, {
+  payload: MachineSetup.MachineSetupRunStepInput,
+  success: MachineSetup.MachineSetupStatus,
+  error: machineSetupErrors,
+});
+/** Turns Tailscale Serve off for this server and saves that choice. */
+const WsMachinesSetupDisableServeRpc = Rpc.make(WS_METHODS.machinesSetupDisableServe, {
+  payload: Schema.Struct({}),
+  success: MachineSetup.MachineSetupStatus,
+  error: machineSetupErrors,
+});
 
 const WsFactsListRpc = Rpc.make(WS_METHODS.factsList, {
   payload: Facts.FactListInput,
@@ -2604,6 +2638,10 @@ export const WsRpcGroup = RpcGroup.make(
   WsMachinesCreatePeerGrantRpc,
   WsMachinesJoinHubRpc,
   WsMachinesUnpairRpc,
+  WsMachinesSetupStatusRpc,
+  WsMachinesSetupSubscribeRpc,
+  WsMachinesSetupRunStepRpc,
+  WsMachinesSetupDisableServeRpc,
   WsFactsListRpc,
   WsFactsCreateRpc,
   WsFactsUpdateRpc,

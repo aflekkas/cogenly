@@ -19,13 +19,57 @@ vault items, integrations and memory facts do not sync yet. Pairing does not
 enable remote work launches. Matching project names are kept separately until
 you choose how to combine them.
 
+## Pair from Settings
+
+Machines talk to each other through Tailscale, a free app that gives your
+machines a private, encrypted link only you can use. Cogenly walks you through
+it; you don't need a terminal or the `cogenly` command on a Mac.
+
+Connect this client to both machines first (Settings → Connections). Then open
+Settings → Machines on the always-on machine and choose Add a machine, or run
+Add a machine from the command palette. Pick the machine to add, and follow the
+checklist for each machine until both are ready:
+
+- **Install Tailscale.** On Linux with passwordless `sudo`, Cogenly installs
+  it. On a Mac, Cogenly opens the App Store. Otherwise it shows the one
+  command to run, which asks for your password.
+- **Turn on Tailscale.** A Mac that slept or restarted can leave Tailscale
+  off; the checklist says so and opens it for you.
+- **Sign in to Tailscale.** Cogenly opens the sign-in page. Use the same
+  account on every machine.
+- **Turn on private HTTPS.** Your Tailscale network needs this once. Cogenly
+  opens Tailscale's approval page and finishes by itself after you approve.
+- **Make the machine reachable.** Cogenly gives it a private address only your
+  machines can reach, and keeps it across restarts.
+
+When both checklists are done, choose Pair. The join code passes between the
+machines for you; you never copy it.
+
+The same page lists every paired machine, whether it is online, and an Unpair
+button for each. `cogenly machines setup` shows the checklist in a terminal.
+
+You can also ask an agent to do all of this. It checks and runs each machine's
+steps, then pairs the machines through the desktop app the same way Add a
+machine does, so the join code never appears in the conversation. Pairing from
+an agent needs the desktop app on the computer the agent runs on, connected to
+both machines. An agent can unpair machines too.
+
 ## Pair from the terminal
 
-Keep Cogenly running on both machines. The computer joining must be able to
-reach the hub through Tailscale Serve HTTPS (start the hub with
-`--tailscale-serve`) or a private SSH forward to its loopback listener.
+Use this when one client can't connect to both machines. Keep Cogenly running
+on both machines. The computer joining must be able to reach the hub through
+Tailscale Serve HTTPS or a private SSH forward to its loopback listener.
 Public Connect URLs and public reverse proxies cannot carry peer pairing.
 See [remote access](./remote-access.md) to make the hub reachable.
+
+`cogenly machines setup` lists what the hub still needs, and
+`cogenly machines setup expose` puts it behind Tailscale Serve. For the
+background service, `cogenly service install --tailscale-serve` keeps that on
+across restarts. If you ran `tailscale serve` yourself and it points at
+Cogenly's port, Cogenly uses it. If you set `COGENLY_TAILSCALE_SERVE=1` in a
+systemd drop-in, `cogenly doctor` moves that setting into Cogenly.
+
+Turn private access off or back on any time in Settings → Machines with the Private access switch on this machine.
 
 On the computer joining, prepare its key:
 
