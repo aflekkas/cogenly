@@ -1026,6 +1026,7 @@ const make = (options: IntegrationsOptions = {}) =>
             });
           return yield* local.value.rpc(integration, method, params, labelId);
         }
+        yield* validateTransport(integration);
         const endpoint = new URL(integration.url);
         if (
           integration.credentialOrigin !== undefined &&
@@ -1153,6 +1154,24 @@ const make = (options: IntegrationsOptions = {}) =>
         return result;
       });
 
+    const validateTransport = (integration: Pick<Integration, "url" | "auth" | "headers">) =>
+      Effect.gen(function* () {
+        const endpoint = yield* Effect.try({
+          try: () => new URL(integration.url),
+          catch: () =>
+            new IntegrationError({ operation: "validate transport", reason: "invalid_request" }),
+        });
+        if (
+          (integration.auth?.type === "oauth" ||
+            Object.values(integration.headers).some((value) => value.trim() !== "")) &&
+          endpoint.protocol !== "https:"
+        )
+          return yield* new IntegrationError({
+            operation: "require HTTPS for credentials",
+            reason: "invalid_request",
+          });
+      });
+
     const validateUrl = (url: string) =>
       Effect.try({
         try: () => new URL(url),
@@ -1255,6 +1274,7 @@ const make = (options: IntegrationsOptions = {}) =>
           }
           yield* validateUrl(input.url);
           yield* validateAuth(input.auth, "create");
+          yield* validateTransport(input);
           for (const template of Object.values(input.headers)) {
             for (const ref of credentialRefsIn(template)) {
               if (Credentials.parseCredentialRef(ref) === undefined) {
@@ -1376,6 +1396,11 @@ const make = (options: IntegrationsOptions = {}) =>
           }
           if (input.url !== undefined) yield* validateUrl(input.url);
           yield* validateAuth(auth, "update");
+          yield* validateTransport({
+            url: input.url ?? current.url,
+            headers: input.headers ?? current.headers,
+            ...(auth === undefined ? {} : { auth }),
+          });
           const credentialOrigin = options?.preserveCredentialDestination
             ? (current.credentialOrigin ?? new URL(current.url).origin)
             : new URL(input.url ?? current.url).origin;
@@ -1582,6 +1607,7 @@ const make = (options: IntegrationsOptions = {}) =>
           }
           if (!usesOAuth(integration))
             return yield* new IntegrationError({ operation: "sign in", reason: "invalid_request" });
+          yield* validateTransport(integration);
           const origin = yield* selectCallbackOrigin(from, integration.browserOrigin);
           const redirectUri = `${origin}${OAuth.CALLBACK_PATH}`;
           const server = yield* protocol.discover(integration.url);

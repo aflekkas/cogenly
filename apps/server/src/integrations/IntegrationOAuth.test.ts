@@ -1,3 +1,4 @@
+import { loopbackHttpsPolicy, loopbackHttpsFetch } from "./https.testkit.ts";
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { NodeCrypto as EffectNodeCrypto, NodeHttpServer } from "@effect/platform-node";
@@ -240,7 +241,10 @@ const startMockAuthServer = Effect.gen(function* () {
       ),
     ),
   );
-  mock.base = HttpServer.formatAddress(Context.get(context, HttpServer.HttpServer).address);
+  mock.base = HttpServer.formatAddress(Context.get(context, HttpServer.HttpServer).address).replace(
+    /^http:/,
+    "https:",
+  );
   return mock;
 });
 
@@ -251,7 +255,7 @@ const gatewayLayer = () => {
   const stored = new Map<string, Uint8Array>();
   return Integrations.layer.pipe(
     // The mock servers listen on loopback, which production refuses.
-    Layer.provide(Layer.succeed(IntegrationEndpointPolicy, () => Effect.succeed(undefined))),
+    Layer.provide(Layer.succeed(IntegrationEndpointPolicy, loopbackHttpsPolicy)),
     Layer.provideMerge(Credentials.layer),
     Layer.provideMerge(Tokens.layer),
     Layer.provideMerge(Vault.layer),
@@ -301,7 +305,10 @@ const consent = (authorizationUrl: string, account: string) =>
     url.searchParams.set("account", account);
     const response = yield* client
       .execute(HttpClientRequest.get(url.href))
-      .pipe(Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }));
+      .pipe(
+        Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }),
+        Effect.provideService(FetchHttpClient.Fetch, loopbackHttpsFetch),
+      );
     expect(response.status).toBe(302);
     const back = new URL(response.headers.location!);
     expect(`${back.origin}${back.pathname}`).toBe(`${COGENLY_ORIGIN}${CALLBACK_PATH}`);
@@ -405,9 +412,7 @@ describe("Integration OAuth sign-in", () => {
         const restarted = Context.get(
           yield* Layer.build(
             Integrations.layerWith({}).pipe(
-              Layer.provide(
-                Layer.succeed(IntegrationEndpointPolicy, () => Effect.succeed(undefined)),
-              ),
+              Layer.provide(Layer.succeed(IntegrationEndpointPolicy, loopbackHttpsPolicy)),
             ),
           ),
           Integrations.Integrations,

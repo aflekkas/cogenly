@@ -129,14 +129,13 @@ export const resourceMetadataFromChallenge = (header: string | undefined): strin
 const stripSlash = (value: string) => value.replace(/\/+$/, "");
 
 /**
- * An endpoint the gateway may call: http(s), and https whenever the MCP
- * server itself is https, so a plain-http hop cannot carry codes or tokens.
+ * OAuth endpoints always require HTTPS, including discovered metadata,
+ * registration, authorization and token exchange.
  */
-const checkEndpoint = (value: string, mcpUrl: URL) => {
+const checkEndpoint = (value: string, _mcpUrl: URL) => {
   const url = URL.parse(value);
   if (url === null) return undefined;
-  if (url.protocol !== "https:" && url.protocol !== "http:") return undefined;
-  if (mcpUrl.protocol === "https:" && url.protocol !== "https:") return undefined;
+  if (url.protocol !== "https:") return undefined;
   return url;
 };
 
@@ -192,6 +191,8 @@ export const make = Effect.gen(function* () {
    */
   const send = (request: HttpClientRequest.HttpClientRequest, operation: string) =>
     Effect.gen(function* () {
+      if (URL.parse(request.url)?.protocol !== "https:")
+        return yield* failure(operation, "HTTPS required");
       const response = yield* client
         .execute(request)
         .pipe(Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }));
@@ -273,6 +274,7 @@ export const make = Effect.gen(function* () {
   const discover = (mcpUrl: string) =>
     Effect.gen(function* () {
       const endpoint = new URL(mcpUrl);
+      if (endpoint.protocol !== "https:") return yield* failure("discover", "HTTPS required");
       const probe = yield* send(
         HttpClientRequest.post(mcpUrl).pipe(
           HttpClientRequest.setHeader("accept", "application/json, text/event-stream"),

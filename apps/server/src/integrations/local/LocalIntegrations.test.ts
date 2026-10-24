@@ -1,3 +1,4 @@
+import { loopbackHttpsPolicy } from "../https.testkit.ts";
 import { describe, expect, it } from "@effect/vitest";
 import { NodeCrypto, NodeHttpServer } from "@effect/platform-node";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -109,9 +110,7 @@ const testLayer = (
   const local = Local.layer.pipe(Layer.provideMerge(runner), Layer.provideMerge(infrastructure));
   return Integrations.layer.pipe(
     Layer.provide(
-      allowLoopback
-        ? Layer.succeed(IntegrationEndpointPolicy, () => Effect.succeed(undefined))
-        : Layer.empty,
+      allowLoopback ? Layer.succeed(IntegrationEndpointPolicy, loopbackHttpsPolicy) : Layer.empty,
     ),
     Layer.provideMerge(local),
   );
@@ -640,7 +639,10 @@ describe("managed Google integrations", () => {
             ),
           ),
         );
-        base = HttpServer.formatAddress(Context.get(server, HttpServer.HttpServer).address);
+        base = HttpServer.formatAddress(Context.get(server, HttpServer.HttpServer).address).replace(
+          /^http:/,
+          "https:",
+        );
 
         const gateway = yield* Integrations.Integrations;
         const google = yield* gateway.create({

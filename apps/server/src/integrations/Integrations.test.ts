@@ -1,3 +1,4 @@
+import { loopbackHttpsPolicy } from "./https.testkit.ts";
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { EnvironmentId, IntegrationName, ProjectLabelId } from "@t3tools/contracts";
@@ -143,7 +144,7 @@ const fakeUpstreamWith = (redirectTo?: string) =>
             const port = typeof address === "object" && address !== null ? address.port : 0;
             resume(
               Effect.succeed({
-                url: `http://127.0.0.1:${port}/mcp`,
+                url: `https://127.0.0.1:${port}/mcp`,
                 seen,
                 close: () =>
                   Effect.sync(() => {
@@ -169,7 +170,7 @@ const noTokensLayer = Layer.succeed(Tokens.IntegrationTokens, {
 
 const layerWith = (options: Integrations.IntegrationsOptions = {}) =>
   Integrations.layerWith(options).pipe(
-    Layer.provide(Layer.succeed(IntegrationEndpointPolicy, () => Effect.succeed(undefined))),
+    Layer.provide(Layer.succeed(IntegrationEndpointPolicy, loopbackHttpsPolicy)),
     Layer.provide(credentialsLayer),
     Layer.provide(noTokensLayer),
     Layer.provideMerge(database),
@@ -685,6 +686,21 @@ describe("Integrations gateway", () => {
       ).pipe(Effect.provide(layerWith())),
   );
 
+  it.effect.each([
+    { auth: { type: "oauth" as const }, headers: {} },
+    { headers: { "X-Auth-Token": "{{credential:gmail.apiKey}}" } },
+    { headers: { authorization: "Bearer literal-secret" } },
+  ])("rejects plaintext remote OAuth and credential headers (%#)", (credentials) =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      const service = yield* Integrations.Integrations;
+      const result = yield* service
+        .create({ ...createInput("http://example.com/mcp"), ...credentials })
+        .pipe(Effect.result);
+      expect(result).toMatchObject({ _tag: "Failure", failure: { reason: "invalid_request" } });
+    }).pipe(Effect.provide(layerWith())),
+  );
+
   it.effect("never records custom credential headers in HTTP spans", () => {
     const spans: Array<Tracer.NativeSpan> = [];
     const tracer = Tracer.make({
@@ -847,7 +863,7 @@ describe("Integrations gateway", () => {
 const vaultLayer = () => {
   const stored = new Map<string, Uint8Array>();
   return Integrations.layer.pipe(
-    Layer.provide(Layer.succeed(IntegrationEndpointPolicy, () => Effect.succeed(undefined))),
+    Layer.provide(Layer.succeed(IntegrationEndpointPolicy, loopbackHttpsPolicy)),
     Layer.provide(Credentials.layer),
     Layer.provide(Tokens.layer),
     Layer.provideMerge(Vault.layer),
