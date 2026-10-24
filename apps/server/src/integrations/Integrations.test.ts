@@ -229,6 +229,20 @@ describe("resolveHeaderTemplates", () => {
   );
 });
 
+describe("tokenRefreshAt", () => {
+  it("refreshes a minute early, or halfway through a lifetime under two minutes", () => {
+    expect(Integrations.tokenRefreshAt(3_600_000, 0)).toBe(3_540_000);
+    expect(Integrations.tokenRefreshAt(120_000, 0)).toBe(60_000);
+    // A 30 second token is not due on every call, only after 15 seconds.
+    expect(Integrations.tokenRefreshAt(30_000, 0)).toBe(15_000);
+  });
+
+  it("keeps the minute without a known issue time, and never refreshes a token without expiry", () => {
+    expect(Integrations.tokenRefreshAt(100_000, null)).toBe(40_000);
+    expect(Integrations.tokenRefreshAt(null, 0)).toBeNull();
+  });
+});
+
 describe("Integrations gateway", () => {
   it.effect(
     "binds credentials to the approved origin and refuses unapproved destination edits",

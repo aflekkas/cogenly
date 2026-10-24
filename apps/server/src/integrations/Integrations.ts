@@ -54,6 +54,8 @@ const OAuthState = Schema.Struct({
   tokenItemId: Schema.optional(Schema.String),
   /** Access token expiry in epoch milliseconds; null when the server gave none. */
   expiresAt: Schema.optional(Schema.NullOr(Schema.Number)),
+  /** When to refresh it, set when it was issued; absent on state from before it was kept. */
+  refreshAt: Schema.optional(Schema.NullOr(Schema.Number)),
 });
 type OAuthState = typeof OAuthState.Type;
 
@@ -294,8 +296,19 @@ export interface SignInCallback {
 /** A pending sign-in lives this long, and only this many at once. */
 const SIGN_IN_TTL_MS = 10 * 60_000;
 const MAX_PENDING_SIGN_INS = 64;
-/** Refresh this long before the access token expires. */
+/** Refresh at most this long before the access token expires. */
 const REFRESH_SKEW_MS = 60_000;
+
+/**
+ * When a token issued at `issuedAtMs` is due a refresh: a minute before it
+ * expires, or halfway through a lifetime shorter than two minutes, so a
+ * short-lived token is not refreshed on every call. Null when it never expires.
+ */
+export function tokenRefreshAt(expiresAt: number | null, issuedAtMs: number | null): number | null {
+  if (expiresAt === null) return null;
+  const lifetime = issuedAtMs === null ? Infinity : Math.max(0, expiresAt - issuedAtMs);
+  return expiresAt - Math.min(REFRESH_SKEW_MS, lifetime / 2);
+}
 
 export class Integrations extends Context.Service<
   Integrations,
@@ -489,7 +502,11 @@ const make = (options: IntegrationsOptions = {}) =>
     /** Decrypted tokens per signed-in integration, so calls do not reopen the vault. */
     const liveTokens = new Map<
       IntegrationId,
-      Tokens.StoredTokens & { readonly itemId: string; readonly expiresAt: number | null }
+      Tokens.StoredTokens & {
+        readonly itemId: string;
+        readonly expiresAt: number | null;
+        readonly refreshAt: number | null;
+      }
     >();
     /** One refresh at a time per account; waiters reuse the token it produced. */
     const integrationLocks = new Map<IntegrationId, Semaphore.Semaphore>();
@@ -733,6 +750,7 @@ const make = (options: IntegrationsOptions = {}) =>
           ...stored.value,
           itemId: state.tokenItemId,
           expiresAt: state.expiresAt ?? null,
+          refreshAt: state.refreshAt ?? tokenRefreshAt(state.expiresAt ?? null, null),
         };
         liveTokens.set(integration.id, loaded);
         return loaded;
@@ -790,7 +808,7 @@ const make = (options: IntegrationsOptions = {}) =>
         }
         const nowMs = yield* Clock.currentTimeMillis;
         const expired = live.expiresAt !== null && live.expiresAt <= nowMs;
-        const expiring = live.expiresAt !== null && live.expiresAt - REFRESH_SKEW_MS <= nowMs;
+        const expiring = live.refreshAt !== null && live.refreshAt <= nowMs;
         if (live.accessToken !== rejected && !expiring) return live.accessToken;
         if (live.refreshToken === undefined) {
           if (live.accessToken !== rejected && !expired) return live.accessToken;
@@ -826,6 +844,7 @@ const make = (options: IntegrationsOptions = {}) =>
           });
         }
         const tokens = refreshed.success;
+        const refreshAt = tokenRefreshAt(tokens.expiresAt, nowMs);
         const itemId = yield* tokenStore.write({
           itemId: live.itemId,
           name: tokenItemName(integration),
@@ -838,12 +857,14 @@ const make = (options: IntegrationsOptions = {}) =>
           clientSecret: live.clientSecret,
           itemId,
           expiresAt: tokens.expiresAt,
+          refreshAt,
         });
         yield* persistState(id, (current) => ({
           ...current,
           signedIn: true,
           tokenItemId: itemId,
           expiresAt: tokens.expiresAt,
+          refreshAt,
         }));
         return tokens.accessToken;
       });
@@ -1808,6 +1829,7 @@ const make = (options: IntegrationsOptions = {}) =>
                 clientSecret,
                 itemId,
                 expiresAt: tokens.expiresAt,
+                refreshAt: tokenRefreshAt(tokens.expiresAt, nowMs),
               });
               yield* persistState(
                 integration.id,
@@ -1819,6 +1841,7 @@ const make = (options: IntegrationsOptions = {}) =>
                     : { registration: pending.registration }),
                   tokenItemId: itemId,
                   expiresAt: tokens.expiresAt,
+                  refreshAt: tokenRefreshAt(tokens.expiresAt, nowMs),
                 }),
                 new URL(pending.redirectUri).origin,
                 { signedInAt: yield* now, signedInViaAgent: pending.fromAgent },
