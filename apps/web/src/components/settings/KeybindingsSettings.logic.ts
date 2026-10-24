@@ -348,6 +348,7 @@ export function commandLabel(command: KeybindingCommand): string {
   if (command === "composer.sendAndNewThread") return "Composer: Send and Start New Thread";
   if (command === "thread.steerQueuedMessage") return "Queue: Send First Queued Message as Steer";
   if (command === "thread.editQueuedMessage") return "Queue: Edit Last Queued Message";
+  if (command === "thread.sendAllQueuedMessages") return "Queue: Send All Queued Messages Now";
   if (command === "thread.copyReference") return "Pull Request: Copy Link or Thread ID";
   // The mode id stays `tasks`; users know it as Work.
   if (command === "sidebar.mode.tasks") return "Sidebar: Mode: Work";

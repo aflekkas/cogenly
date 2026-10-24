@@ -23,34 +23,55 @@
    - Disabled (idle): the flat grey tile with a dark glyph.
 
    The brand ramp is the splash's own, fixed in both themes like the app icon.
+   Under any other accent (Settings → Appearance, data-accent on <html>) the
+   same sprites are recolored: a flat layer of the accent sits over each
+   sprite with `color` blending, which keeps the mosaic's lightness and takes
+   the accent's hue and saturation. The orange default keeps the tint
+   transparent, a no-op, so the ember ramp renders as drawn.
    Reduced motion: no sweep; hover is a brightness fade and the ghost a
    crossfade. */
+:root {
+  --pixel-tint-brand: transparent;
+}
+:root[data-accent]:not([data-accent="orange"]) {
+  --pixel-tint-brand: var(--brand-accent-fill);
+}
+
 .pixel-button {
   --pixel-cell: 4px;
   --pixel-size: calc(var(--pixel-cell) * 8);
   --pixel-face: var(--pixel-face-brand);
   --pixel-sweep: var(--pixel-sweep-brand);
+  --pixel-tint: var(--pixel-tint-brand);
   position: relative;
   isolation: isolate;
   overflow: hidden;
   /* The ramp's middle, under the image while it decodes. */
   background-color: #f3592a;
-  background-image: var(--pixel-face);
+  background-image: linear-gradient(var(--pixel-tint), var(--pixel-tint)), var(--pixel-face);
+  background-blend-mode: color, normal;
   background-size: var(--pixel-size) 100%;
   background-repeat: repeat-x;
   transition-property: color, background-color, box-shadow, opacity, scale, filter;
   transition-duration: var(--motion-duration-fast);
   transition-timing-function: var(--ease-out);
 
+  /* The tint layer is solid where the sweep is empty, so the sweep's own
+     sprite masks it back to the band's cells. The mask steps with it. */
   &::before {
     content: "";
     position: absolute;
     inset: 0;
     z-index: -1;
-    background-image: var(--pixel-sweep);
+    background-image: linear-gradient(var(--pixel-tint), var(--pixel-tint)), var(--pixel-sweep);
+    background-blend-mode: color, normal;
     background-size: var(--pixel-size) 1400%;
     background-repeat: repeat-x;
     background-position: 0 100%;
+    mask-image: var(--pixel-sweep);
+    mask-size: var(--pixel-size) 1400%;
+    mask-repeat: repeat-x;
+    mask-position: 0 100%;
     opacity: 0;
     transition: opacity var(--motion-duration-fast) var(--ease-out);
   }
@@ -93,6 +114,7 @@
 .pixel-button-danger {
   --pixel-face: var(--pixel-face-danger);
   --pixel-sweep: var(--pixel-sweep-danger);
+  --pixel-tint: transparent;
   background-color: #f0514e;
 }
 
@@ -111,8 +133,13 @@
   mask-position: 0 0;
   animation: pixel-button-exit 300ms steps(6, jump-none) both;
 
+  /* Tinted like the face; the exit mask trims the tint to the cells still
+     leaving. The tile's own --pixel-tint already follows the new tone. */
   &[data-tone-from="brand"] {
-    background-image: var(--pixel-exit-brand);
+    background-image:
+      linear-gradient(var(--pixel-tint-brand), var(--pixel-tint-brand)), var(--pixel-exit-brand);
+    background-blend-mode: color, normal;
+    mask-image: var(--pixel-exit-mask);
   }
 
   &[data-tone-from="danger"] {
@@ -128,10 +155,12 @@
 @keyframes pixel-button-sweep {
   from {
     background-position: 0 0;
+    mask-position: 0 0;
   }
 
   to {
     background-position: 0 100%;
+    mask-position: 0 100%;
   }
 }
 
@@ -139,12 +168,14 @@
 @keyframes pixel-button-sweep-loop {
   0% {
     background-position: 0 0;
+    mask-position: 0 0;
     animation-timing-function: steps(14, jump-none);
   }
 
   53.85%,
   100% {
     background-position: 0 100%;
+    mask-position: 0 100%;
   }
 }
 
@@ -180,7 +211,9 @@ html[data-document-hidden="true"] .pixel-button::before {
     animation: pixel-button-ghost-fade var(--motion-duration-fast) var(--ease-out) both;
 
     &[data-tone-from="brand"] {
-      background-image: var(--pixel-face-brand);
+      background-image:
+        linear-gradient(var(--pixel-tint-brand), var(--pixel-tint-brand)), var(--pixel-face-brand);
+      mask-image: none;
     }
 
     &[data-tone-from="danger"] {

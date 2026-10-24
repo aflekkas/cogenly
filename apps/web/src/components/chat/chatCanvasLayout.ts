@@ -11,7 +11,8 @@ export const DETAILS_CARD_CLEARANCE = 32;
 
 // The chat lane's side gutter follows the canvas's own width, not the
 // window's: tight when a panel squeezes chat, ramping linearly to the wide
-// gutter. 12px up to about 610px, 16px at 640px, 48px from 880px.
+// gutter. 12px up to about 610px, 16px at 640px, 48px from 880px. Pages get
+// the same ramp from --content-gutter in index.css; change both together.
 const LANE_GUTTER_MIN = 12;
 const LANE_GUTTER_MAX = 48;
 const LANE_GUTTER_RAMP_START = 640;

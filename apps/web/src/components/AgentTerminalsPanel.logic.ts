@@ -123,26 +123,6 @@ export function terminalSignalName(signal: number): string {
   return SIGNAL_NAMES[signal] ?? `signal ${signal}`;
 }
 
-/** Short status for a row or header, e.g. "Running", "Exited 0", "Failed · code 2". */
-export function terminalRunStateLabel(state: TerminalRunState): string {
-  switch (state.kind) {
-    case "starting":
-      return "Starting";
-    case "running":
-      return "Running";
-    case "succeeded":
-      return "Exited 0";
-    case "failed":
-      return `Failed · code ${state.exitCode}`;
-    case "killed":
-      return `Killed · ${terminalSignalName(state.signal)}`;
-    case "error":
-      return "Failed to start";
-    case "ended":
-      return "Exited";
-  }
-}
-
 /** The line written into the output once the process is gone. */
 export function terminalRunStateMessage(state: TerminalRunState): string | null {
   switch (state.kind) {

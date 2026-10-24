@@ -893,3 +893,50 @@ export function createEnvironmentRpcCommand<
     permissionAtom: permissions.permissionAtom,
   };
 }
+
+/**
+ * A command whose effect makes several protected requests, possibly on other
+ * environments through `EnvironmentRegistry.run`. `tag` gates the target
+ * environment before anything runs and supplies `permissionAtom`; every
+ * `requestGuarded` inside is authorized again against its own destination.
+ */
+export function createEnvironmentGuardedCommand<R, ER, Input, A, E>(
+  runtime: Atom.AtomRuntime<EnvironmentRegistry.EnvironmentRegistry | R, ER>,
+  options: {
+    readonly label: string;
+    readonly tag: ClientGuardedRpcTag;
+    readonly execute: (
+      input: Input,
+      environmentId: EnvironmentIdType,
+    ) => Effect.Effect<
+      A,
+      E,
+      EnvironmentSupervisor.EnvironmentSupervisor | EnvironmentRegistry.EnvironmentRegistry
+    >;
+    readonly scheduler?: AtomCommandScheduler;
+    readonly concurrency?: AtomCommandConcurrency<{
+      readonly environmentId: EnvironmentIdType;
+      readonly input: NoInfer<Input>;
+    }>;
+  },
+) {
+  const permissions = createCommandPermissions(runtime, options.tag);
+  const command = createEnvironmentCommand(runtime, {
+    label: options.label,
+    ...(options.scheduler === undefined ? {} : { scheduler: options.scheduler }),
+    ...(options.concurrency === undefined ? {} : { concurrency: options.concurrency }),
+    execute: (input: Input, registry, environmentId) =>
+      permissions.authorize(registry, environmentId).pipe(
+        Effect.andThen(() => options.execute(input, environmentId)),
+        Effect.provideService(RpcPermissionGuard, {
+          authorize: (id, method, payload) =>
+            createCommandPermissions(runtime, method).authorize(registry, id, payload),
+        }),
+      ),
+  });
+  return {
+    ...command,
+    requiredScopes: permissions.requiredScopes,
+    permissionAtom: permissions.permissionAtom,
+  };
+}

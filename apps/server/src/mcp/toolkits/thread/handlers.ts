@@ -358,6 +358,12 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
       targetRunId: input.targetRunId,
     })),
   ),
+  queue_clear: writesThread((input) =>
+    dispatch(input.threadId, (common) => ({ ...common, type: "queue.clear" })),
+  ),
+  queue_send_all: writesThread((input) =>
+    dispatch(input.threadId, (common) => ({ ...common, type: "queue.send-all" })),
+  ),
   thread_organize: writesThread((input) =>
     Effect.gen(function* () {
       const { threads, projection, shell } = yield* readThread(input.threadId);

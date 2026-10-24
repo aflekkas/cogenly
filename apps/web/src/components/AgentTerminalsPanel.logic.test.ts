@@ -16,9 +16,9 @@ import {
   isAgentTerminalRunning,
   runDurationMs,
   terminalRunState,
-  terminalRunStateLabel,
   terminalRunStateMessage,
   terminalSections,
+  terminalSignalName,
 } from "./AgentTerminalsPanel.logic";
 
 const environmentId = EnvironmentId.make("env-1");
@@ -90,18 +90,6 @@ describe("terminalRunState", () => {
     expect(isAgentTerminalRunning({ status: "exited" })).toBe(false);
   });
 
-  it("labels how a command finished", () => {
-    expect(terminalRunStateLabel(finished(0, null))).toBe("Exited 0");
-    expect(terminalRunStateLabel(finished(2, null))).toBe("Failed · code 2");
-    expect(terminalRunStateLabel(finished(null, 9))).toBe("Killed · SIGKILL");
-    expect(terminalRunStateLabel(finished(null, null))).toBe("Exited");
-    expect(
-      terminalRunStateLabel(
-        terminalRunState({ status: "error", exitCode: null, exitSignal: null }),
-      ),
-    ).toBe("Failed to start");
-  });
-
   it("reports a signalled process as killed even when node-pty sends code 0", () => {
     expect(finished(0, 15)).toEqual({ kind: "killed", signal: 15 });
     expect(terminalRunStateMessage(finished(0, 15))).toBe("Process killed by SIGTERM");
@@ -113,7 +101,8 @@ describe("terminalRunState", () => {
   });
 
   it("names unknown signals by number", () => {
-    expect(terminalRunStateLabel(finished(null, 31))).toBe("Killed · signal 31");
+    expect(terminalSignalName(9)).toBe("SIGKILL");
+    expect(terminalSignalName(31)).toBe("signal 31");
   });
 
   it("writes an exit line only once the process is gone", () => {

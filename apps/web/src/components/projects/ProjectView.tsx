@@ -45,6 +45,7 @@ import {
   projectLabelKey,
   projectLabelPaletteColor,
 } from "../../projectLabels/projectLabels.logic";
+import { linkedRepositoryRows } from "../../projectLabels/repositoryPicker.logic";
 import { reportProjectFolderFailure } from "../../projectLabels/useMoveThreadToFolder";
 import { useProjectArchive } from "../../projectLabels/useProjectArchive";
 import { useProjectContents } from "../../projectLabels/useProjectContents";
@@ -71,7 +72,7 @@ import {
 import { GitHubIcon } from "../Icons";
 import { OverlayPresence } from "../ui/overlay-presence";
 import { ScrollArea } from "../ui/scroll-area";
-import { WorkspacePageContainer } from "../WorkspacePageContainer";
+import { PageContent } from "../PageContent";
 import {
   AgentsCard,
   FilesCard,
@@ -320,12 +321,17 @@ function ProjectPage(props: {
   const projectGroups = useSidebarProjectGroups();
   const groupingSettings = useClientSettings(selectProjectGroupingSettings);
 
-  const linkedRepositories = useMemo(
+  // Every repository the project links, with its state on this machine:
+  // the same list the repository pickers show.
+  const repositoryRows = useMemo(
     () =>
-      label === null
+      entry === null
         ? []
-        : repositories.filter((repository) => label.repositoryIds.includes(repository.id)),
-    [label, repositories],
+        : linkedRepositoryRows({
+            project: entry,
+            localById: new Map(repositories.map((repository) => [repository.id, repository])),
+          }),
+    [entry, repositories],
   );
   const chats = useMemo(() => sortRecentFirst(contents?.chats ?? [], chatActivityAt), [contents]);
   const work = useMemo(() => sortRecentFirst(contents?.work ?? [], chatActivityAt), [contents]);
@@ -377,10 +383,10 @@ function ProjectPage(props: {
             ];
     return (
       <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
-        <div className="swap-motion flex flex-col gap-1 px-6 pt-4">
+        <PageContent width="wide" className="gap-1">
           <h1 className="truncate text-xl font-semibold tracking-tight">{title}</h1>
           {description ? <p className="text-sm text-muted-foreground">{description}</p> : null}
-        </div>
+        </PageContent>
       </div>
     );
   }
@@ -389,10 +395,10 @@ function ProjectPage(props: {
   const showSources = org === null || projectExtraSourceLinks(label.sourceLinks).length > 0;
 
   return (
-    <div className="swap-motion flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
       {/* The cards give keyboard access, so the viewport stays out of the tab order. */}
       <ScrollArea className="min-h-0 flex-1" viewportTabIndex={-1}>
-        <WorkspacePageContainer width="expanded">
+        <PageContent width="wide">
           <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
             <Button size="sm" variant="ghost-muted" onClick={backToProjects}>
               <ChevronLeftIcon />
@@ -489,11 +495,8 @@ function ProjectPage(props: {
             <ProjectCardSlot>
               <RepositoriesCard
                 environmentId={environmentId}
-                label={label}
                 folder={entry}
-                repositories={repositories}
-                linkedRepositories={linkedRepositories}
-                folderByRepository={directory.folderByRepository}
+                rows={repositoryRows}
                 onOpenRepository={openRepositorySettings}
               />
             </ProjectCardSlot>
@@ -524,7 +527,7 @@ function ProjectPage(props: {
               />
             </ProjectCardSlot>
           </section>
-        </WorkspacePageContainer>
+        </PageContent>
       </ScrollArea>
       <OverlayPresence when={editingSources && label}>
         {(label) => (

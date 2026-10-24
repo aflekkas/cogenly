@@ -92,7 +92,7 @@ export function UnanchoredWorkHandoffMarkers() {
   const tasks = state?.tasks?.anchors.unanchored ?? [];
   if (!state || (state.anchors.unanchored.length === 0 && tasks.length === 0)) return null;
   return (
-    <div className="mx-auto w-full min-w-0 max-w-(--chat-content-max-width) pb-2">
+    <div className="chat-content-lane pb-2">
       {tasks.length === 0 ? null : <WorkTaskCardList tasks={tasks} state={state} />}
       {state.anchors.unanchored.length === 0 ? null : (
         <WorkHandoffMarkerList links={state.anchors.unanchored} state={state} />

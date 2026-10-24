@@ -60,6 +60,8 @@ describe("SharedState", () => {
     Effect.gen(function* () {
       const state = yield* SharedState.SharedState;
       const live = yield* state.changes.pipe(Stream.toQueue({ capacity: 16 }));
+      // The queue subscribes on a forked fiber; let it run before the first write.
+      yield* TestClock.adjust(0);
       yield* state.write("project", "label:noop", project);
       yield* Queue.take(live);
       yield* state.write("project", "label:noop", project);
@@ -553,7 +555,7 @@ describe("SharedState", () => {
   const newerProject = change({
     ...project,
     iconColor: "teal",
-    repositories: [{ remote, directoryName: "athens-racing", iconPath: "assets/icon.png" }],
+    repositories: [{ remote, directoryName: "athens-racing", sparsePaths: ["apps/web"] }],
   });
   const newerSchedule = {
     ...change({ title: "Lap times", schedule: { type: "lunar", phase: "full" } }),
@@ -586,7 +588,7 @@ describe("SharedState", () => {
         // Fields it does not know are kept and passed on as they came.
         const expected = {
           iconColor: "teal",
-          repositories: [{ remote, directoryName: "athens-racing", iconPath: "assets/icon.png" }],
+          repositories: [{ remote, directoryName: "athens-racing", sparsePaths: ["apps/web"] }],
         };
         expect(readsAsNewer(yield* state.get("project", "label:peer"))).toEqual(expected);
         const relayed = (yield* state.readBatch(0, EnvironmentId.make("third"), false)).changes;
@@ -614,9 +616,9 @@ describe("SharedState", () => {
       expect(renamed?.fields.name).toBe("Renamed");
       expect(readsAsNewer(renamed)).toEqual({
         iconColor: "teal",
-        repositories: [{ remote, directoryName: "athens-racing", iconPath: "assets/icon.png" }],
+        repositories: [{ remote, directoryName: "athens-racing", sparsePaths: ["apps/web"] }],
       });
-      // Adding a repository rewrites the list; the unchanged one keeps its icon.
+      // Adding a repository rewrites the list; the unchanged one keeps its newer field.
       const other = "github.com/aflekkas/pit-wall";
       yield* state.write("project", "label:peer", {
         repositories: [
@@ -625,7 +627,7 @@ describe("SharedState", () => {
         ],
       });
       expect((yield* state.get("project", "label:peer"))?.fields.repositories).toEqual([
-        { remote, directoryName: "athens-racing", iconPath: "assets/icon.png" },
+        { remote, directoryName: "athens-racing", sparsePaths: ["apps/web"] },
         { remote: other, directoryName: null },
       ]);
     }).pipe(Effect.provide(layer)),
@@ -1106,5 +1108,26 @@ describe("SharedState", () => {
           },
         ]);
       }).pipe(Effect.provide(layer)),
+  );
+  it.effect("carries a peer's repository icon onto a link not cloned here", () =>
+    Effect.gen(function* () {
+      const state = yield* SharedState.SharedState;
+      const sql = yield* SqlClient.SqlClient;
+      const repositories = [
+        { remote: "github.com/org/repo", directoryName: "repo", iconPath: "public/icon.svg" },
+      ];
+      yield* state.receive(
+        {
+          after: 0,
+          cursor: 1,
+          changes: [{ ...change({ ...project, repositories }, 10), id: "label:icons" }],
+        },
+        peer,
+        false,
+      );
+      expect(yield* sql`SELECT repository_id,icon_path FROM label_repositories`).toEqual([
+        { repository_id: "remote:github.com/org/repo", icon_path: "public/icon.svg" },
+      ]);
+    }).pipe(Effect.provide(layer)),
   );
 });

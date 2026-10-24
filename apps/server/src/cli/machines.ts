@@ -22,6 +22,8 @@ import {
   type MachineListResult,
   ThreadId,
   type ThreadMoveResult,
+  type MachineSetupStatus,
+  MachineSetupStepId,
   WS_METHODS,
 } from "@t3tools/contracts";
 import * as Console from "effect/Console";
@@ -337,6 +339,65 @@ const joinCommand = Command.make("join", {
   ),
 );
 
+const STEP_MARKS: Record<MachineSetupStatus["steps"][number]["state"], string> = {
+  done: "✓",
+  todo: "·",
+  working: "…",
+  waiting: "…",
+  blocked: " ",
+};
+
+/** The setup checklist, with the exact thing to do next for each open step. */
+export const describeSetup = (status: MachineSetupStatus) => {
+  const lines = status.steps.flatMap((step) => [
+    `${STEP_MARKS[step.state]} ${step.title}: ${step.detail}`,
+    ...(step.action === null || step.state === "working" || step.state === "waiting"
+      ? []
+      : [`    Run: cogenly machines setup ${step.id}`]),
+    ...(step.handoff === null
+      ? []
+      : step.handoff._tag === "open-url"
+        ? [`    Open: ${step.handoff.url}`]
+        : [`    ${step.handoff.reason}`, `      ${step.handoff.command}`]),
+  ]);
+  return [
+    status.ready
+      ? `Ready to pair. Other machines reach this one at ${status.joinUrl ?? "its tailnet address"}.`
+      : "Getting this machine ready to pair:",
+    ...lines,
+    ...(status.problem === null ? [] : ["", status.problem]),
+  ].join("\n");
+};
+
+const setupCommand = Command.make("setup", {
+  ...projectLocationFlags,
+  step: Argument.Literals("step", MachineSetupStepId.literals).pipe(
+    Argument.withDescription("A step to run now. Omit it to see the checklist."),
+    Argument.optional,
+  ),
+  json: jsonFlag,
+}).pipe(
+  Command.withDescription(
+    "Get this machine ready to pair: install and sign in to Tailscale, and put this Cogenly on your private tailnet.",
+  ),
+  Command.withHandler((flags) =>
+    runLive(flags, (client) =>
+      (Option.isSome(flags.step)
+        ? client[WS_METHODS.machinesSetupRunStep]({ step: flags.step.value })
+        : client[WS_METHODS.machinesSetupStatus]({})
+      ).pipe(
+        Effect.mapError(describe),
+        Effect.flatMap((status) =>
+          flags.json
+            ? encodeJson(status).pipe(Effect.orDie)
+            : Effect.succeed(describeSetup(status)),
+        ),
+        Effect.flatMap(Console.log),
+      ),
+    ),
+  ),
+);
+
 const unpairCommand = Command.make("unpair", {
   ...projectLocationFlags,
   machine: Argument.String("machine").pipe(
@@ -551,6 +612,7 @@ export const machinesCommand = Command.make("machines").pipe(
   Command.withDescription("Pair this Cogenly with your other machines."),
   Command.withSubcommands([
     listCommand,
+    setupCommand,
     prepareCommand,
     pairCommand,
     joinCommand,

@@ -24,6 +24,7 @@ import {
   KeyboardIcon,
   KeyRoundIcon,
   Link2Icon,
+  MonitorSmartphoneIcon,
   PaletteIcon,
   Settings2Icon,
 } from "lucide-react";
@@ -31,7 +32,6 @@ import { useLocation, useNavigate } from "@tanstack/react-router";
 
 import { cn } from "~/lib/utils";
 import { useLegacySidebarEnabled } from "../../hooks/useSettings";
-import { crossfadeModeSwitch } from "../sidebar/modes/modeSwitchMotion";
 import { SidebarContent, SidebarFooter, SidebarGroup, useSidebar } from "../ui/sidebar";
 import { SidebarUtilityMenu } from "../sidebar/SidebarChrome";
 import { SidebarList, SidebarRowSubtitle, sidebarRowClassName } from "../sidebar/SidebarList";
@@ -77,6 +77,7 @@ const SETTINGS_SECTION_ICONS: Readonly<
   "/settings/data": DatabaseIcon,
   "/settings/import": ImportIcon,
   "/settings/connections": Link2Icon,
+  "/settings/machines": MonitorSmartphoneIcon,
   "/settings/archived": ArchiveIcon,
 };
 
@@ -176,28 +177,21 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isMobile, open, setOpen, setOpenMobile]);
 
+  // Picking a section selects its row the way picking a thread does: the row
+  // takes the selected fill at once and the page swaps, with no crossfade.
   const handleSectionClick = useCallback(
     (to: SettingsPath) => {
       if (isMobile) {
         setOpenMobile(false);
       }
-      const switchSection = () => {
-        void navigate({
-          to,
-          hash: "",
-          replace: true,
-          hashScrollIntoView: false,
-        });
-      };
-      // Another section crossfades in once its page commits (routes/settings.tsx).
-      if (pathname === to || pathname.startsWith(`${to}/`)) switchSection();
-      else
-        crossfadeModeSwitch(() => {
-          switchSection();
-          return true;
-        });
+      void navigate({
+        to,
+        hash: "",
+        replace: true,
+        hashScrollIntoView: false,
+      });
     },
-    [isMobile, navigate, pathname, setOpenMobile],
+    [isMobile, navigate, setOpenMobile],
   );
   const clearSearch = useCallback(() => {
     setQuery("");
@@ -255,7 +249,7 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
     <>
       <SidebarContent
         className="min-h-full"
-        fixedFooter={
+        fixedHeader={
           // The same search dock, in the same place, as every other tab;
           // Settings has no create action beside it.
           <SidebarGroup className="z-[1]">
@@ -284,8 +278,8 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
         }
       >
         {isSearching ? (
-          // Results stack up from the dock, like thread search in the other tabs.
-          <SidebarGroup className="flex-1 justify-end" role="presentation">
+          // Results read down from the dock, like thread search in the other tabs.
+          <SidebarGroup className="flex-1" role="presentation">
             {hasResults ? (
               <SidebarList
                 id="settings-search-results"
@@ -337,58 +331,40 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
             )}
           </SidebarGroup>
         ) : (
-          // The sections stay at the top of the column.
+          // The sections read down from the dock. Each is a plain sidebar row
+          // that carries its own selected fill, as a chat row does.
           <SidebarGroup>
-            <div className="sliding-selection relative isolate">
-              <SidebarList aria-label="Settings sections">
-                {activeNavIndex >= 0 ? (
-                  // One highlight slides between the rows, which keep their
-                  // selected text but drop their own fill. The rows are h-8
-                  // with the list's gap-1 between them.
-                  <li
-                    aria-hidden
-                    className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-8 list-none rounded-lg state-selected transition-transform duration-(--motion-duration-mode-switch) ease-out motion-reduce:transition-none"
-                    style={{
-                      transform: `translateY(calc(${activeNavIndex} * (100% + var(--spacing))))`,
-                    }}
-                  />
-                ) : null}
-                {navItems.map((item, index) => {
-                  const Icon = item.icon;
-                  const isActive = index === activeNavIndex;
-                  return (
-                    <li key={item.to} className="list-none">
-                      <button
-                        type="button"
-                        // The sliding highlight above owns the selected fill
-                        // (see the sliding-selection utility).
-                        data-slot="sidebar-menu-button"
-                        data-active={isActive}
-                        aria-current={isActive ? "page" : undefined}
-                        className={sidebarRowClassName({ selected: isActive })}
-                        onClick={() => handleSectionClick(item.to)}
+            <SidebarList aria-label="Settings sections">
+              {navItems.map((item, index) => {
+                const Icon = item.icon;
+                const isActive = index === activeNavIndex;
+                return (
+                  <li key={item.to} className="list-none">
+                    <button
+                      type="button"
+                      aria-current={isActive ? "page" : undefined}
+                      className={sidebarRowClassName({ selected: isActive })}
+                      onClick={() => handleSectionClick(item.to)}
+                    >
+                      <Icon className={SETTINGS_ICON_CLASS_NAME} />
+                      <span
+                        className={cn(
+                          "min-w-0 flex-1 truncate text-sm",
+                          isActive ? "text-foreground" : "text-foreground/80",
+                        )}
                       >
-                        <Icon className={SETTINGS_ICON_CLASS_NAME} />
-                        <span
-                          className={cn(
-                            "min-w-0 flex-1 truncate text-sm",
-                            isActive ? "text-foreground" : "text-foreground/80",
-                          )}
-                        >
-                          {item.label}
-                        </span>
-                      </button>
-                    </li>
-                  );
-                })}
-              </SidebarList>
-            </div>
+                        {item.label}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </SidebarList>
           </SidebarGroup>
         )}
       </SidebarContent>
       {/* Beside the navigation rail (which carries Settings, Usage and Updates)
-          the footer holds only what renders, so the search dock sits exactly
-          where it does in the other tabs. */}
+          the footer holds only what renders. */}
       <SidebarFooter className="empty:hidden">
         <Suspense fallback={null}>
           <T3ConnectSidebarSignIn />

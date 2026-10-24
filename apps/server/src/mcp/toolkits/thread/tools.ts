@@ -185,6 +185,18 @@ const QueuePromoteTool = Tool.make("queue_promote_to_steer", {
     "Deliver a queued message as steering to the specified active run. Existing provider and run-state rules apply.",
   parameters: Schema.Struct({ ...queueTarget, targetRunId: RunId }),
 }).annotate(Tool.Destructive, true);
+const QueueClearTool = Tool.make("queue_clear", {
+  ...commandTool,
+  description:
+    "Remove every message the user queued on a thread in one step. Automatic task deliveries stay queued. Omit threadId for this thread.",
+  parameters: Schema.Struct({ threadId: Schema.optional(ThreadId) }),
+}).annotate(Tool.Destructive, true);
+const QueueSendAllTool = Tool.make("queue_send_all", {
+  ...commandTool,
+  description:
+    "Join every queued message, in queue order, into one message and send it now: as steering into the running turn when its provider can steer, otherwise as the next turn. Releases a held queue. Omit threadId for this thread.",
+  parameters: Schema.Struct({ threadId: Schema.optional(ThreadId) }),
+}).annotate(Tool.Destructive, true);
 
 const requestTarget = { threadId: Schema.optional(ThreadId), requestId: RuntimeRequestId };
 const question = Schema.Struct({
@@ -387,4 +399,6 @@ export const ThreadToolkit = Toolkit.make(
   QueueCancelTool,
   QueueReorderTool,
   QueuePromoteTool,
+  QueueClearTool,
+  QueueSendAllTool,
 );

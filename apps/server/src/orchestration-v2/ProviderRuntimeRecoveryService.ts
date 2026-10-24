@@ -325,6 +325,17 @@ export const make = Effect.gen(function* () {
       const bufferedMessageIds = new Set(
         queuedMessages.filter(isBufferedProviderNotification).map((message) => message.id),
       );
+      // A delegated child has no user to resume its queue. Its parent's
+      // follow-up tasks and its own children's completion wakes stay queued,
+      // and delegated-task recovery starts them (Orchestrator.recoverDelegatedTasks).
+      const delegatedChild = projection.thread.lineage.relationshipToParent === "subagent";
+      const delegatedWakeIds = new Set(
+        delegatedChild
+          ? queuedMessages
+              .filter((message) => message.delegatedCompletion !== undefined)
+              .map((message) => message.id)
+          : [],
+      );
       // Buffered wakes lost their output with the process. Durable queued messages
       // keep their execution identities and order until the user resumes them.
       for (const run of queuedRuns) {
@@ -337,6 +348,11 @@ export const make = Effect.gen(function* () {
           continue;
         }
         if (run.queueHeld === true) continue;
+        if (
+          delegatedChild &&
+          (run.delegatedTaskId !== undefined || delegatedWakeIds.has(run.userMessageId))
+        )
+          continue;
         events.push({
           id: yield* allocateEventId(),
           type: "run.updated",
@@ -792,6 +808,15 @@ export const make = Effect.gen(function* () {
             (cause) => new ProviderRuntimeRecoveryError({ operation: "read-projections", cause }),
           ),
         );
+      // Sweep the previous process's effects first. The loop below enqueues a
+      // fresh turn start for each unstarted continuation it revives, and that
+      // start is process-bound too: sweeping after the loop cancelled it and
+      // left the run `starting` (a delegated task "running") forever.
+      const outboxReconciliation = yield* outbox.reconcileAfterProcessLoss.pipe(
+        Effect.mapError(
+          (cause) => new ProviderRuntimeRecoveryError({ operation: "drain-outbox", cause }),
+        ),
+      );
       let terminalizedRuns = 0;
       let stoppedSessions = 0;
       let closedRequests = 0;
@@ -817,11 +842,6 @@ export const make = Effect.gen(function* () {
         closedRequests += result.closedRequests;
         retiredEffects += result.retiredEffects;
       }
-      const outboxReconciliation = yield* outbox.reconcileAfterProcessLoss.pipe(
-        Effect.mapError(
-          (cause) => new ProviderRuntimeRecoveryError({ operation: "drain-outbox", cause }),
-        ),
-      );
       return {
         terminalizedRuns,
         stoppedSessions,

@@ -22,6 +22,15 @@ key before issuance, and old unbound grants are refused.
 Transfer the code privately. The CLI reads it through a hidden prompt or
 `--code-stdin`, never a positional argument or a suggested command line.
 
+Before pairing, neither server holds a credential for the other, so no server
+can run the exchange alone. Only a client signed in to both with access
+management can. Settings → Machines runs it as one client command
+([pairMachines.ts](../../packages/client-runtime/src/machines/pairMachines.ts)),
+authorizing each request against the machine it goes to. The `machine_pair` MCP
+tool asks the desktop app beside the agent's server to run that same command
+over its control socket. The code never enters an MCP transcript, client state,
+or a URL, and an agent on a machine without the desktop app cannot pair.
+
 The hub issues a one-year DPoP session with subject `peer`, holding
 `sync:replicate` and `peer:delegate`. Neither scope belongs to legacy, standard,
 or administrative client grants. Access-management authority is required to
@@ -95,10 +104,19 @@ loopback origin. Cloudflare adds `cf-ray` and client/forwarding headers; any
 `cf-*` header is a denial marker, never an authorization signal. This rejects
 Connect even when a public caller spoofs Tailscale headers. RFC Forwarded, Via,
 and X-Real-IP are refused too. Other X-Forwarded headers are refused unless
-`--tailscale-serve` is enabled, and then must match Serve's overwritten tuple:
-HTTPS, a single numeric tailnet source, and forwarded host. Public addresses,
-chains, and `Tailscale-Funnel-Request` are refused. Identity headers grant no
+Serve mode is on, and then must match Serve's overwritten tuple: HTTPS, a
+single numeric tailnet source, and forwarded host. Public addresses, chains,
+and `Tailscale-Funnel-Request` are refused. Identity headers grant no
 exception; tagged Tailscale nodes need none.
+
+Serve mode is `TailscaleServeMode`: `--tailscale-serve` for one run, otherwise
+`tailscale-serve.json` in the state directory, which machine setup changes
+live. The headers alone never turn it on. A refused forwarded request only
+asks `MachineSetup.adoptServe` to read `tailscale serve status` from the local
+daemon, and Serve mode turns on only when a non-Funnel mapping targets this
+server's loopback port. A saved `enabled: false` is the user's opt-out
+(`--no-tailscale-serve`) and is never adopted over. Under `--tailscale-serve`,
+setup changes stay in memory, so a one-run flag never becomes a saved setting.
 
 This boundary trusts local processes and proxy configuration. A locally
 configured public proxy that deliberately strips every ingress marker is

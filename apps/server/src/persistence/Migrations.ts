@@ -10,6 +10,7 @@
 
 import * as Migrator from "effect/sql/Migrator";
 import Migration0090 from "./Migrations/090_SharedBootstrap.ts";
+import Migration0091 from "./Migrations/091_RepositoryIconPath.ts";
 import Migration0092 from "./Migrations/092_ThreadReplication.ts";
 import Migration0093 from "./Migrations/093_ForwardCompatibleSync.ts";
 import * as Effect from "effect/Effect";
@@ -210,7 +211,7 @@ export const migrationEntries = [
   [88, "AccountProcessAccess", Migration0088],
   [89, "SharedDocuments", Migration0089],
   [90, "SharedBootstrap", Migration0090],
-  // 91 is RepositoryIconPath on the projects branch.
+  [91, "RepositoryIconPath", Migration0091],
   [92, "ThreadReplication", Migration0092],
   [93, "ForwardCompatibleSync", Migration0093],
 ] as const;

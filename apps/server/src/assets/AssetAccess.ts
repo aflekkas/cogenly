@@ -62,6 +62,7 @@ import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ThreadRouting from "../threadSync/ThreadRouting.ts";
 import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 import * as ProjectFaviconResolver from "../project/ProjectFaviconResolver.ts";
+import type * as RepositoryIconResolver from "../project/RepositoryIconResolver.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 import * as NativeAppIconResolver from "./NativeAppIconResolver.ts";
 import { extractIcnsPng } from "./icns.ts";
@@ -548,6 +549,8 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
   readonly projectFaviconPath?: string;
   /** The project's clone has not landed, so its icon is reported missing without a lookup. */
   readonly projectCheckoutPending?: boolean;
+  /** For a `repository-icon`: what RepositoryIconResolver found. */
+  readonly repositoryIcon?: RepositoryIconResolver.RepositoryIcon;
 }) {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -823,6 +826,42 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
       imageDimensions = readImageDimensions(image.bytes);
       break;
     }
+    case "repository-icon": {
+      // Served like a project's own icon: a file through the external-favicon
+      // claim (so `.icns` still converts), the avatar through the image
+      // proxy, and none as the favicon fallback marker clients already read.
+      const icon = input.repositoryIcon ?? null;
+      const iconFile =
+        icon?.kind === "file"
+          ? yield* resolveCanonicalFile(icon.path).pipe(Effect.orElseSucceed(() => null))
+          : null;
+      const avatar = icon?.kind === "avatar" ? parseImageProxyTarget(icon.url) : null;
+      if (iconFile !== null && isProjectFaviconPath(iconFile)) {
+        const crypto = yield* Crypto.Crypto;
+        const revision = yield* fileSystem.readFile(iconFile).pipe(
+          Effect.flatMap((bytes) => crypto.digest("SHA-256", bytes)),
+          Effect.map(Hex.encode),
+          Effect.mapError(
+            (cause) => new AssetProjectFaviconInspectionError({ resource: input.resource, cause }),
+          ),
+        );
+        claims = { version: 1, kind: "project-favicon-external", filePath: iconFile, expiresAt };
+        fileName = `${PROJECT_FAVICON_VERSION_PREFIX}${revision}-${path.basename(iconFile)}`;
+      } else if (avatar !== null && "url" in avatar) {
+        claims = { version: 1, kind: "remote-image", url: avatar.url, expiresAt };
+        fileName = `${PROJECT_FAVICON_VERSION_PREFIX}avatar-${remoteImageFileName(avatar.url)}`;
+      } else {
+        claims = {
+          version: 1,
+          kind: "project-favicon",
+          workspaceRoot: "",
+          relativePath: null,
+          expiresAt,
+        };
+        fileName = PROJECT_FAVICON_FALLBACK_MARKER;
+      }
+      break;
+    }
     case "native-app-icon": {
       claims = {
         version: 1,
@@ -869,7 +908,11 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
         }),
     ),
   );
-  if (claims.kind === "project-favicon" || claims.kind === "project-favicon-external") {
+  if (
+    claims.kind === "project-favicon" ||
+    claims.kind === "project-favicon-external" ||
+    input.resource._tag === "repository-icon"
+  ) {
     const issuedAt = yield* Clock.currentTimeMillis;
     expiresAt =
       (Math.floor(issuedAt / PROJECT_FAVICON_TOKEN_BUCKET_MS) + 2) *

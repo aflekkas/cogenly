@@ -7,7 +7,6 @@ import {
 import {
   CommandId,
   type MessageId,
-  resolveEnvironmentMachineKind,
   type ScopedThreadRef,
   WorkHandoffError,
 } from "@t3tools/contracts";
@@ -20,15 +19,7 @@ import {
   MessageSquareDashedIcon,
 } from "lucide-react";
 import * as Schema from "effect/Schema";
-import {
-  type ReactElement,
-  type ReactNode,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { type ReactElement, type ReactNode, useCallback, useMemo, useRef, useState } from "react";
 import { create } from "zustand";
 
 import { openCommandPalette } from "~/commandPaletteBus";
@@ -37,31 +28,14 @@ import {
   type EnvironmentProjectLabel,
   scopedRepositoryKey,
 } from "~/projectLabels/projectLabels.logic";
-import {
-  linkedGitHubOwners,
-  type OwnerSearchState,
-} from "~/projectLabels/projectSourceLinks.logic";
-import { remoteSectionRows } from "~/projectLabels/repositoryPicker.logic";
-import {
-  LocalRepositoryRowEnd,
-  ManageRepositoriesRowContent,
-  RemoteRepositoryRow,
-  RemoteRepositorySection,
-  RepositorySourceLabel,
-  ShowMoreRemoteRow,
-} from "~/projectLabels/RepositorySourceRows";
-import { useEnvironments, usePrimaryEnvironmentId } from "~/state/environments";
-import {
-  useCanRemoveRepositoryFromProject,
-  useRemoveRepositoryFromProject,
-} from "~/projectLabels/useRemoveRepositoryFromProject";
-import { useOwnerRepositorySearch } from "~/projectLabels/useOwnerRepositorySearch";
+import { ManageRepositoriesRowContent } from "~/projectLabels/RepositorySourceRows";
 import { useProjectLabelDirectory } from "~/projectLabels/useProjectLabels";
 import {
-  type RemoteCloneTarget,
-  useRemoteRepositoryClone,
-} from "~/projectLabels/useRemoteRepositoryClone";
-import { EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
+  RepositoryPickerGroupContent,
+  useRepositoryPicker,
+  type RepositoryPickerGroup,
+  type RepositoryPickerItem,
+} from "~/projectLabels/useRepositoryPicker";
 import { useScratchProject } from "~/hooks/useScratchProject";
 import { useThreadKind } from "~/hooks/useThreadKind";
 import { randomUUID } from "~/lib/utils";
@@ -252,15 +226,15 @@ export function useWorkPickerChoices(threadRef: ScopedThreadRef): ReadonlyArray<
   );
 }
 
-/** A Start Work picker row: a project to open, the way back, a place to start, or a GitHub result. */
-type StartWorkItem =
+/** A Start Work picker row of its own: a project to open, the way back, a place to start, or Manage. */
+type StartWorkRow =
   | {
       readonly kind: "project";
       readonly value: string;
       readonly label: string;
       readonly group: WorkProjectGroup<EnvironmentProjectLabel>;
     }
-  | { readonly kind: "back"; readonly value: string; readonly label: string }
+  | { readonly kind: "all-projects"; readonly value: string; readonly label: string }
   | {
       readonly kind: "manage";
       readonly value: string;
@@ -272,34 +246,21 @@ type StartWorkItem =
       readonly value: string;
       readonly label: string;
       readonly choice: WorkPickerChoice;
-    }
-  | {
-      readonly kind: "remote";
-      readonly value: string;
-      readonly label: string;
-      readonly remote: RemoteCloneTarget;
-    }
-  | {
-      /** The GitHub section's "Show more" row. */
-      readonly kind: "more";
-      readonly value: string;
-      readonly label: string;
-      readonly hidden: number;
     };
+type StartWorkItem = StartWorkRow | RepositoryPickerItem;
 
 interface StartWorkGroup {
   readonly value: string;
-  /** The chat's machine over a project's own repositories; the rest have no header. */
-  readonly label: string | null;
   readonly items: ReadonlyArray<StartWorkItem>;
-  /** The project's GitHub results, searched while the project is open. */
-  readonly remote?: { readonly project: EnvironmentProjectLabel; readonly state: OwnerSearchState };
+  /** Set on the shared repository list's groups, which render themselves. */
+  readonly shared?: RepositoryPickerGroup;
 }
 
 const NO_PROJECT_KEY = "no-project";
-const BACK_VALUE = "back";
+const ALL_PROJECTS_VALUE = "all-projects";
 const PROJECTS_GROUP = "projects";
 const ACTIONS_GROUP = "actions";
+const MANAGE_GROUP = "manage";
 
 const choiceItem = (choice: WorkPickerChoice): StartWorkItem => ({
   kind: "choice",
@@ -310,10 +271,11 @@ const choiceItem = (choice: WorkPickerChoice): StartWorkItem => ({
 
 /**
  * The chat's "Start Work in…" picker, anchored under `trigger`. It lists
- * projects first; a project's › (click, Enter or →) opens its repositories,
- * those on this machine and its GitHub repositories, and ← or the back row
+ * projects first; a project's › (click, Enter or →) opens the shared
+ * repository list for the chat's machine (every repository the project
+ * links, with its state there, and "Add repository"), and ← or the back row
  * returns. Typing searches every repository and project at once. A picked
- * repository starts Work; a GitHub one is cloned into its project first.
+ * repository starts Work; one not cloned on this machine is cloned first.
  */
 export function StartWorkPicker(props: {
   readonly threadRef: ScopedThreadRef;
@@ -335,21 +297,6 @@ export function StartWorkPicker(props: {
   const keepOpenRef = useRef(false);
   const highlightedRef = useRef<StartWorkItem | null>(null);
   const filter = useComboboxFilter();
-  const machineKind = resolveEnvironmentMachineKind(
-    useServerConfigs().get(threadRef.environmentId) ?? null,
-  );
-  // Work runs on the chat's machine; its repositories are named as being there.
-  const { environments } = useEnvironments();
-  const primaryEnvironmentId = usePrimaryEnvironmentId();
-  const machineLabel = environments.find(
-    (environment) => environment.environmentId === threadRef.environmentId,
-  )?.label;
-  const machineSectionLabel = machineLabel
-    ? `On ${machineLabel}`
-    : threadRef.environmentId === primaryEnvironmentId
-      ? "On this machine"
-      : "On another machine";
-  const [showAllRemote, setShowAllRemote] = useState(false);
 
   // Work runs on the chat's machine, so only that machine's projects list.
   const environmentIds = useMemo(() => [threadRef.environmentId], [threadRef.environmentId]);
@@ -378,27 +325,38 @@ export function StartWorkPicker(props: {
   const openProject = openGroup?.project ?? null;
 
   const navigate = useNavigate();
-  const canRemoveRepository = useCanRemoveRepositoryFromProject(threadRef.environmentId);
-  const removeRepositoryFromProject = useRemoveRepositoryFromProject();
-  const searchedProjects = useMemo(() => (openProject ? [openProject] : []), [openProject]);
-  const ownerSearch = useOwnerRepositorySearch(searchedProjects, query, open && !!openProject);
-  const remoteSearch = openProject ? ownerSearch.get(openProject.key) : undefined;
+  const closePicker = () => {
+    setOpen(false);
+    setQuery("");
+    setOpenProjectKey(null);
+  };
+  const repositoryPicker = useRepositoryPicker({
+    environmentId: threadRef.environmentId,
+    project: openProject,
+    // "No project" opens the repositories in none.
+    unfiledOnly: true,
+    open: open && openGroup !== null,
+    query,
+    leadRepositoryId: thread?.projectId ?? null,
+    onPick: (repository) => {
+      closePicker();
+      void startWork({
+        threadRef,
+        choice: repository.id,
+        ...(throughMessageId === undefined ? {} : { throughMessageId }),
+      });
+    },
+    onClose: closePicker,
+  });
 
   const groups = useMemo((): StartWorkGroup[] => {
     const trimmed = query.trim();
     const matches = (label: string) =>
       trimmed.length === 0 || filter.contains(label, trimmed, (candidate) => candidate);
-    const extras = choices.filter(
-      (choice) => choice.value === NO_REPOSITORY || choice.value === ADD_REPOSITORY,
-    );
-    const actions = (rows: ReadonlyArray<WorkPickerChoice>): StartWorkGroup[] => {
-      const items = rows
-        .filter((choice) => choice.value !== ADD_REPOSITORY || trimmed.length === 0)
-        .filter((choice) => matches(choice.label))
-        .map(choiceItem);
-      return items.length > 0 ? [{ value: ACTIONS_GROUP, label: null, items }] : [];
-    };
     if (openGroup === null) {
+      const extras = choices.filter(
+        (choice) => choice.value === NO_REPOSITORY || choice.value === ADD_REPOSITORY,
+      );
       const projectRows: StartWorkItem[] = projectGroups
         .map((group) => ({
           kind: "project" as const,
@@ -412,272 +370,148 @@ export function StartWorkPicker(props: {
         trimmed.length === 0
           ? []
           : projectGroups.flatMap((group) => group.choices.filter((c) => matches(c.label)));
+      const actionRows = extras
+        .filter((choice) => choice.value !== ADD_REPOSITORY || trimmed.length === 0)
+        .filter((choice) => matches(choice.label))
+        .map(choiceItem);
       return [
-        ...(projectRows.length > 0
-          ? [{ value: PROJECTS_GROUP, label: null, items: projectRows }]
-          : []),
+        ...(projectRows.length > 0 ? [{ value: PROJECTS_GROUP, items: projectRows }] : []),
         ...(repositoryRows.length > 0
-          ? [{ value: "repositories", label: null, items: repositoryRows.map(choiceItem) }]
+          ? [{ value: "repositories", items: repositoryRows.map(choiceItem) }]
           : []),
-        ...actions(extras),
+        ...(actionRows.length > 0 ? [{ value: ACTIONS_GROUP, items: actionRows }] : []),
       ];
     }
-    const groupKey = openGroup.key ?? NO_PROJECT_KEY;
-    const back: StartWorkGroup = {
-      value: BACK_VALUE,
-      label: null,
-      items: [{ kind: "back", value: BACK_VALUE, label: "All projects" }],
-    };
-    const local = openGroup.choices.filter((choice) => matches(choice.label)).map(choiceItem);
-    // A repository shows once: a clone the project holds wins over its GitHub row.
-    const remoteSection =
-      remoteSearch?.status === "done"
-        ? remoteSectionRows({
-            repositories: remoteSearch.repositories,
-            local: openGroup.choices.map((choice) => choice.repository?.repositoryIdentity),
-            searching: trimmed.length > 0,
-            expanded: showAllRemote,
-          })
-        : { rows: [], hidden: 0 };
-    const showRemote =
-      openProject !== null &&
-      remoteSearch !== undefined &&
-      (remoteSearch.status !== "done" || remoteSection.rows.length > 0);
-    // "Add repository…", then the project's page in Settings, which lists,
-    // removes and adds its repositories.
-    const openActions: StartWorkItem[] = [
-      ...(actions(extras.filter((choice) => choice.value === ADD_REPOSITORY))[0]?.items ?? []),
-      ...(openProject !== null && trimmed.length === 0
-        ? [
-            {
-              kind: "manage" as const,
-              value: "manage",
-              label: "Manage repositories…",
-              project: openProject,
-            },
-          ]
-        : []),
-    ];
+    const listing = repositoryPicker.mode === "list";
     return [
-      back,
-      ...(local.length > 0
+      // "Add repository" brings its own way back.
+      ...(listing
         ? [
             {
-              value: `local:${groupKey}`,
-              label: showRemote ? machineSectionLabel : null,
-              items: local,
-            },
-          ]
-        : []),
-      ...(showRemote && openProject !== null && remoteSearch !== undefined
-        ? [
-            {
-              value: `remote:${groupKey}`,
-              label: "On GitHub",
-              remote: { project: openProject, state: remoteSearch },
+              value: ALL_PROJECTS_VALUE,
               items: [
-                ...remoteSection.rows.map(({ repository, label }): StartWorkItem => ({
-                  kind: "remote",
-                  value: `remote:${groupKey}|${repository.nameWithOwner}`,
-                  label,
-                  remote: { project: openProject, repository },
-                })),
-                ...(remoteSection.hidden > 0
-                  ? [
-                      {
-                        kind: "more" as const,
-                        value: `remote:${groupKey}|more`,
-                        label: `Show ${remoteSection.hidden} more`,
-                        hidden: remoteSection.hidden,
-                      },
-                    ]
-                  : []),
+                { kind: "all-projects" as const, value: ALL_PROJECTS_VALUE, label: "All projects" },
               ],
             },
           ]
         : []),
-      ...(openActions.length > 0
-        ? [{ value: ACTIONS_GROUP, label: null, items: openActions }]
+      ...repositoryPicker.groups.map((group) => ({
+        value: group.value,
+        items: group.items,
+        shared: group,
+      })),
+      // The project's page in Settings lists, removes and adds its repositories.
+      ...(listing && openProject !== null && trimmed.length === 0
+        ? [
+            {
+              value: MANAGE_GROUP,
+              items: [
+                {
+                  kind: "manage" as const,
+                  value: MANAGE_GROUP,
+                  label: "Manage repositories…",
+                  project: openProject,
+                },
+              ],
+            },
+          ]
         : []),
     ];
   }, [
     choices,
     filter,
-    machineSectionLabel,
     openGroup,
     openProject,
     projectGroups,
     query,
-    remoteSearch,
-    showAllRemote,
+    repositoryPicker.groups,
+    repositoryPicker.mode,
   ]);
-
-  const remoteClone = useRemoteRepositoryClone(
-    (target) =>
-      open &&
-      groups.some((group) =>
-        group.items.some(
-          (item) =>
-            item.kind === "remote" &&
-            item.remote.project.key === target.project.key &&
-            item.remote.repository.nameWithOwner === target.repository.nameWithOwner,
-        ),
-      ),
-  );
-  // A GitHub repository picked here is cloned into its project; once it
-  // lands, Work starts in it.
-  const startAfterCloneRef = useRef(false);
-  const clonedRef = remoteClone.view?.phase === "done" ? remoteClone.ref : null;
-  useEffect(() => {
-    if (clonedRef === null) return;
-    const startNow = startAfterCloneRef.current;
-    startAfterCloneRef.current = false;
-    remoteClone.release();
-    if (!startNow) return;
-    setOpen(false);
-    void startWork({
-      threadRef,
-      choice: clonedRef.projectId,
-      announce: true,
-      ...(throughMessageId === undefined ? {} : { throughMessageId }),
-    });
-  });
 
   const showProject = (key: string | null) => {
     setOpenProjectKey(key);
     setQuery("");
-    setShowAllRemote(false);
+    repositoryPicker.reset();
   };
   const pick = (item: StartWorkItem) => {
-    if (item.kind === "more") {
-      keepOpenRef.current = true;
-      setShowAllRemote(true);
-      return;
-    }
-    if (item.kind === "project") {
-      keepOpenRef.current = true;
-      showProject(item.group.key ?? NO_PROJECT_KEY);
-      return;
-    }
-    if (item.kind === "back") {
-      keepOpenRef.current = true;
-      showProject(null);
-      return;
-    }
-    if (item.kind === "remote") {
-      keepOpenRef.current = true;
-      const view = remoteClone.isFor(item.remote) ? remoteClone.view : null;
-      if (view?.phase === "starting" || view?.phase === "running") return;
-      startAfterCloneRef.current = true;
-      if (view?.phase === "failed" || view?.phase === "cancelled") {
-        void remoteClone.retry();
+    switch (item.kind) {
+      case "project":
+        keepOpenRef.current = true;
+        showProject(item.group.key ?? NO_PROJECT_KEY);
         return;
-      }
-      void remoteClone.start(item.remote);
-      return;
+      case "all-projects":
+        keepOpenRef.current = true;
+        showProject(null);
+        return;
+      case "manage":
+        closePicker();
+        void navigate({
+          to: "/settings/project-tags",
+          search: {
+            projectEnvironmentId: item.project.environmentId,
+            projectLabelId: item.project.label.id,
+          },
+        });
+        return;
+      case "choice":
+        closePicker();
+        if (item.choice.value === ADD_REPOSITORY) {
+          openCommandPalette({ open: "add-project" });
+          return;
+        }
+        void startWork({
+          threadRef,
+          choice: item.choice.value,
+          ...(throughMessageId === undefined ? {} : { throughMessageId }),
+        });
+        return;
+      default:
+        if (repositoryPicker.pick(item)) {
+          keepOpenRef.current = true;
+          setQuery("");
+        }
     }
-    setOpen(false);
-    if (item.kind === "manage") {
-      void navigate({
-        to: "/settings/project-tags",
-        search: {
-          projectEnvironmentId: item.project.environmentId,
-          projectLabelId: item.project.label.id,
-        },
-      });
-      return;
-    }
-    if (item.choice.value === ADD_REPOSITORY) {
-      openCommandPalette(
-        openProject
-          ? {
-              open: "add-project",
-              into: { environmentId: openProject.environmentId, labelId: openProject.label.id },
-            }
-          : { open: "add-project" },
-      );
-      return;
-    }
-    void startWork({
-      threadRef,
-      choice: item.choice.value,
-      ...(throughMessageId === undefined ? {} : { throughMessageId }),
-    });
   };
 
   const renderItem = (item: StartWorkItem) => {
-    if (item.kind === "more") {
-      return <ShowMoreRemoteRow key={item.value} item={item} hidden={item.hidden} />;
+    switch (item.kind) {
+      case "manage":
+        return (
+          <ComboboxItem key={item.value} hideIndicator value={item} tone="action">
+            <ManageRepositoriesRowContent />
+          </ComboboxItem>
+        );
+      case "project":
+      case "all-projects":
+      case "choice": {
+        const isAdd = item.kind === "choice" && item.choice.value === ADD_REPOSITORY;
+        return (
+          <ComboboxItem
+            key={item.value}
+            hideIndicator
+            value={item}
+            tone={isAdd || item.kind === "all-projects" ? "action" : "default"}
+            divider={isAdd}
+          >
+            <ComboboxItemIcon>
+              {item.kind === "project" ? (
+                <ProjectFolderIcon color={item.group.project?.label.color} className="size-4" />
+              ) : item.kind === "all-projects" ? (
+                <ChevronLeftIcon className="size-4" />
+              ) : (
+                <WorkPickerChoiceIcon choice={item.choice} />
+              )}
+            </ComboboxItemIcon>
+            <span className="min-w-0 flex-1 truncate text-sm">{item.label}</span>
+            {item.kind === "project" ? (
+              <ChevronRightIcon aria-hidden className="ml-auto size-3.5 shrink-0" />
+            ) : null}
+          </ComboboxItem>
+        );
+      }
+      default:
+        return repositoryPicker.renderItem(item);
     }
-    if (item.kind === "remote") {
-      return (
-        <RemoteRepositoryRow
-          key={item.value}
-          item={item}
-          repository={item.remote.repository}
-          label={item.label}
-          clone={remoteClone}
-          view={remoteClone.isFor(item.remote) ? remoteClone.view : null}
-        />
-      );
-    }
-    if (item.kind === "manage") {
-      return (
-        <ComboboxItem key={item.value} hideIndicator value={item} tone="action">
-          <ManageRepositoriesRowContent />
-        </ComboboxItem>
-      );
-    }
-    const isAdd = item.kind === "choice" && item.choice.value === ADD_REPOSITORY;
-    // A repository row inside an open project, which the row can take out of it.
-    const projectRepository =
-      item.kind === "choice" && item.choice.repository && openProject !== null
-        ? item.choice.repository
-        : null;
-    return (
-      <ComboboxItem
-        key={item.value}
-        hideIndicator
-        value={item}
-        tone={isAdd || item.kind === "back" ? "action" : "default"}
-        divider={isAdd}
-      >
-        <ComboboxItemIcon>
-          {item.kind === "project" ? (
-            <ProjectFolderIcon color={item.group.project?.label.color} className="size-4" />
-          ) : item.kind === "back" ? (
-            <ChevronLeftIcon className="size-4" />
-          ) : (
-            <WorkPickerChoiceIcon choice={item.choice} />
-          )}
-        </ComboboxItemIcon>
-        <span className="min-w-0 flex-1 truncate text-sm">{item.label}</span>
-        {item.kind === "project" ? (
-          <ChevronRightIcon aria-hidden className="ml-auto size-3.5 shrink-0" />
-        ) : null}
-        {item.kind === "choice" && item.choice.repository ? (
-          <LocalRepositoryRowEnd
-            identity={item.choice.repository.repositoryIdentity}
-            removeLabel={`Remove ${item.label} from ${openProject?.label.name ?? "its project"}`}
-            {...(projectRepository !== null &&
-            openProject !== null &&
-            canRemoveRepository &&
-            openProject.label.repositoryIds.includes(projectRepository.id)
-              ? {
-                  onRemove: () => {
-                    setOpen(false);
-                    void removeRepositoryFromProject({
-                      project: openProject,
-                      repositoryId: projectRepository.id,
-                      title: item.label,
-                    });
-                  },
-                }
-              : {})}
-          />
-        ) : null}
-      </ComboboxItem>
-    );
   };
 
   return (
@@ -692,7 +526,7 @@ export function StartWorkPicker(props: {
       }}
       open={open && !pending}
       onOpenChange={(next, details) => {
-        // Opening a project, going back, or cloning keeps the picker up.
+        // Opening a project, going back, adding or cloning keeps the picker up.
         if (!next && details.reason === "item-press" && keepOpenRef.current) {
           keepOpenRef.current = false;
           return;
@@ -701,7 +535,7 @@ export function StartWorkPicker(props: {
         setQuery("");
         if (!next) {
           setOpenProjectKey(null);
-          setShowAllRemote(false);
+          repositoryPicker.reset();
         }
       }}
       value={null}
@@ -721,13 +555,16 @@ export function StartWorkPicker(props: {
         <ComboboxSearchInput
           aria-label={openGroup ? "Search repositories" : "Search projects and repositories"}
           placeholder={
-            openGroup
-              ? `Start Work in ${openGroup.project?.label.name ?? "a repository"}…`
-              : "Start Work in…"
+            openGroup === null
+              ? "Start Work in…"
+              : repositoryPicker.mode === "add"
+                ? repositoryPicker.searchPlaceholder
+                : `Start Work in ${openGroup.project?.label.name ?? "a repository"}…`
           }
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           onKeyDown={(event) => {
+            if (repositoryPicker.onSearchKeyDown(event)) return;
             const input = event.currentTarget;
             const atEnd = input.selectionStart === input.value.length;
             const highlighted = highlightedRef.current;
@@ -745,46 +582,37 @@ export function StartWorkPicker(props: {
           }}
         />
         <ComboboxEmpty>
-          {remoteSearch?.status === "loading" ? null : "No matching repositories."}
+          {openGroup === null ? "No matching repositories." : repositoryPicker.emptyText}
         </ComboboxEmpty>
         <ComboboxList>
           {(group: StartWorkGroup) => (
             <ComboboxGroup
               key={group.value}
               items={group.items}
-              className={group.value === ACTIONS_GROUP ? "not-first:mt-0" : undefined}
+              className={
+                group.value === ACTIONS_GROUP ||
+                group.value === MANAGE_GROUP ||
+                group.shared?.tight === true
+                  ? "not-first:mt-0"
+                  : undefined
+              }
             >
-              {/* A project opening or closing swaps the rows in with a fade. */}
-              <div className="reveal-motion">
-                {group.remote ? (
-                  <RemoteRepositorySection
-                    state={group.remote.state}
-                    owners={linkedGitHubOwners(group.remote.project)}
-                    renderItem={renderItem}
+              {/* A project opening or closing, or "Add repository", swaps the rows in with a fade. */}
+              <div
+                key={`${openProjectKey ?? ""}:${repositoryPicker.mode}`}
+                className="reveal-motion"
+              >
+                {group.shared ? (
+                  <RepositoryPickerGroupContent
+                    group={group.shared}
+                    renderItem={repositoryPicker.renderItem}
                   />
                 ) : (
-                  <>
-                    {group.label ? (
-                      <RepositorySourceLabel
-                        icon={
-                          <EnvironmentMachineIcon
-                            aria-hidden
-                            kind={machineKind}
-                            className="size-3"
-                          />
-                        }
-                        label={group.label}
-                      />
-                    ) : null}
-                    <ComboboxGroupItems
-                      inset={group.label !== null}
-                      afterHeader={group.label !== null}
-                    >
-                      <ComboboxCollection>
-                        {(item: StartWorkItem) => renderItem(item)}
-                      </ComboboxCollection>
-                    </ComboboxGroupItems>
-                  </>
+                  <ComboboxGroupItems inset={false}>
+                    <ComboboxCollection>
+                      {(item: StartWorkItem) => renderItem(item)}
+                    </ComboboxCollection>
+                  </ComboboxGroupItems>
                 )}
               </div>
             </ComboboxGroup>

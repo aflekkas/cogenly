@@ -30,6 +30,12 @@ import {
   isSettingsSearchScopeAvailable,
 } from "../components/settings/settingsSearch";
 
+/** Pages about one machine's own state: the scope picks exactly one environment. */
+const SINGLE_ENVIRONMENT_SETTINGS_PATHS: ReadonlySet<string> = new Set([
+  "/settings/providers",
+  "/settings/machines",
+]);
+
 function SettingsScopeBoundary({ pathname, children }: { pathname: string; children: ReactNode }) {
   const { scope, connectedEnvironments } = useSettingsScope();
   const hash = useLocation({ select: (location) => location.hash });
@@ -81,13 +87,14 @@ function SettingsContentLayout() {
   useEscapeToGoBack(navigateToMainApp);
   const { search, environment } = useSettingsScope();
   const contentScopeKey =
-    location.pathname === "/settings/diagnostics" || location.pathname === "/settings/providers"
+    location.pathname === "/settings/diagnostics" ||
+    SINGLE_ENVIRONMENT_SETTINGS_PATHS.has(location.pathname)
       ? environment?.environmentId
       : JSON.stringify(search);
   // The section's route, which changes only once its (lazily loaded) page
   // commits; until then the old page stays on screen. Hash and search changes
-  // within a section keep it. Its commit is the new frame of a section switch's
-  // crossfade (SettingsSidebarNav, the rail's Settings button).
+  // within a section keep it. Its commit is the new frame of the crossfade
+  // into Settings (the rail's Settings button).
   const sectionRouteId = useChildMatches({ select: (matches) => matches[0]?.routeId });
   useLayoutEffect(() => {
     if (sectionRouteId !== undefined) settleModeSwitchMainPane();
@@ -117,7 +124,7 @@ function SettingsRouteLayout() {
   return (
     <SettingsScopeProvider
       search={rawSearch}
-      singleEnvironment={pathname === "/settings/providers"}
+      singleEnvironment={SINGLE_ENVIRONMENT_SETTINGS_PATHS.has(pathname)}
       onChange={(next) => {
         // Send every axis so the retain middleware sees an explicit target
         // even when the choice is "all", which is the absence of a key.

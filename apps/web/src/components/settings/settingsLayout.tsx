@@ -22,7 +22,7 @@ import {
   usePrimarySettingsAvailable,
 } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
-import { WorkspacePageContainer, type WorkspacePageWidth } from "../WorkspacePageContainer";
+import { PageContent, type PageContentWidth } from "../PageContent";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { useOptionalSettingsScope } from "./SettingsScopeContext";
@@ -542,11 +542,11 @@ export function SettingResetButton({
 export function SettingsPageContainer({
   children,
   className,
-  width = "readable",
+  width = "default",
 }: {
   children: ReactNode;
   className?: string;
-  width?: WorkspacePageWidth;
+  width?: PageContentWidth;
 }) {
   const navigate = useNavigate();
   const hash = useLocation({ select: (location) => location.hash });
@@ -575,10 +575,10 @@ export function SettingsPageContainer({
         className="scroll-fade-y scrollbar-gutter-both flex-1 overflow-x-hidden overflow-y-auto"
         data-settings-page-scroll
       >
-        <WorkspacePageContainer width={width} className={cn("gap-8", className)}>
+        <PageContent width={width} className={cn("gap-8", className)}>
           <SettingsScopeSentence />
           {children}
-        </WorkspacePageContainer>
+        </PageContent>
       </div>
     </SettingsSearchTargetProvider>
   );

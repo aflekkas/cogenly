@@ -772,10 +772,10 @@ export const make = Effect.gen(function* () {
     Effect.map((settings) => settings.worktreesDirectory),
     Effect.orElseSucceed(() => ""),
   );
-  // New worktrees live beside their repository: inside its project folder
-  // when the repository belongs to a project, or beside an unfiled
-  // repository under the projects root. An explicit worktreesDirectory
-  // setting wins; anything unresolvable keeps the driver's default.
+  // New worktrees of a repository in a project live in the project's
+  // `.worktrees/`, mirroring its place under `repos/`; a repository in no
+  // project keeps the driver's default (`<Cogenly home>/worktrees`). An
+  // explicit worktreesDirectory setting wins.
   const resolveLocalWorktreeParent = Effect.fnUntraced(function* (cwd: string) {
     if (Option.isNone(sql) || Option.isNone(serverConfig)) return undefined;
     const settings = yield* serverSettingsService.getSettings.pipe(
@@ -790,18 +790,29 @@ export const make = Effect.gen(function* () {
       path,
     );
     let projectDir: string | null = null;
+    let repositoryDirectoryName: string | null = null;
     const project = yield* projects.findActiveByWorkspaceRoot(path.resolve(cwd)).pipe(
       Effect.map(Option.getOrNull),
       Effect.orElseSucceed(() => null),
     );
     if (project !== null) {
-      const rows = yield* sql.value<{ labelId: string; name: string }>`
-        SELECT l.label_id AS "labelId", l.name AS name
+      const rows = yield* sql.value<{
+        labelId: string;
+        name: string;
+        directoryName: string | null;
+      }>`
+        SELECT l.label_id AS "labelId", l.name AS name, r.directory_name AS "directoryName"
         FROM label_repositories r JOIN project_labels l ON l.label_id = r.label_id
         WHERE r.repository_id = ${project.projectId}
-      `.pipe(Effect.orElseSucceed(() => [] as ReadonlyArray<{ labelId: string; name: string }>));
+      `.pipe(
+        Effect.orElseSucceed(
+          () =>
+            [] as ReadonlyArray<{ labelId: string; name: string; directoryName: string | null }>,
+        ),
+      );
       const label = rows[0];
       if (label !== undefined) {
+        repositoryDirectoryName = label.directoryName;
         const ref = { id: ProjectLabelId.make(label.labelId), name: label.name };
         projectDir = Option.isSome(labelFolders)
           ? yield* labelFolders.value.dirForLabel(ref).pipe(
@@ -815,9 +826,8 @@ export const make = Effect.gen(function* () {
       resolveWorktreeParentDirectory({
         setting: "",
         defaultDir: config.worktreesDir,
-        repoCwd: cwd,
         projectDir,
-        projectsRoot,
+        repositoryDirectoryName,
         path,
         home,
       }) ?? undefined

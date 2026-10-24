@@ -11,8 +11,8 @@ const MAX_FADED_ROWS_PER_UPDATE = 40;
 
 /** `top` is where the row's layout box sits on screen (window coordinates, its
  * own running transforms excluded), so a list that shifts as a whole between
- * updates — a bottom-anchored list re-pinning its scroll, or a `justify-end`
- * column shrinking — moves only the rows that actually moved on screen. */
+ * updates — a list restoring its scroll position, say — moves only the rows
+ * that actually moved on screen. */
 type RowPosition = { top: number; left: number; width: number; height: number };
 
 function progress(animation: Animation) {

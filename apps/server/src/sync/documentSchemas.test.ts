@@ -26,6 +26,20 @@ describe("shared configuration schemas", () => {
   ])("accepts domain workspace references %s", (workspaceStrategy) =>
     validateChange(change("schedule", { workspaceStrategy })),
   );
+  it.effect("carries a repository's icon path, and only one inside the repository", () =>
+    Effect.gen(function* () {
+      const repositories = (iconPath: string) => [
+        { remote: "github.com/acme/site", directoryName: "site", iconPath },
+      ];
+      yield* validateChange(change("project", { repositories: repositories("public/icon.svg") }));
+      for (const outside of ["../secret.svg", "/etc/icon.svg", "~/icon.svg"])
+        expect(
+          (yield* Effect.result(
+            validateChange(change("project", { repositories: repositories(outside) })),
+          ))._tag,
+        ).toBe("Failure");
+    }),
+  );
   it.effect.each(["bad%id", "has space", "x".repeat(201)])(
     "rejects invalid new document id %s",
     (id) =>

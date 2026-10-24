@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-/** The pixel button's ramps (pixelButton.css): the ember brand, the red stop, the flat idle grey. */
+/** The pixel button's ramps (pixelButton.css): the accent brand, the red stop, the flat idle grey. */
 export type PixelTone = "brand" | "danger" | "idle";
 
 /**

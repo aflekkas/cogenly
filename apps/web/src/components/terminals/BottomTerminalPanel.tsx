@@ -523,13 +523,14 @@ export function BottomTerminalPanel(props: BottomTerminalPanelProps) {
           onPointerCancel={onResizePointerEnd}
           onLostPointerCapture={onResizePointerEnd}
         >
-          {/* The grabber: faint at rest, brighter while the edge is hovered or dragged. */}
-          <span className="pointer-events-none absolute top-[3px] left-1/2 h-[3px] w-8 -translate-x-1/2 rounded-full bg-foreground/10 transition-colors duration-(--motion-duration-fast) ease-out group-hover/resize:bg-foreground/25 group-active/resize:bg-foreground/35" />
+          {/* The grabber: hidden at rest, faint while the panel is hovered, brighter on the edge. */}
+          <span className="pointer-events-none absolute top-[3px] left-1/2 h-[3px] w-8 -translate-x-1/2 rounded-full bg-foreground/0 transition-colors duration-(--motion-duration-fast) ease-out group-hover/bottom-panel:bg-foreground/8 group-hover/resize:bg-foreground/25 group-active/resize:bg-foreground/35" />
         </div>
-        {/* No header row: the × sits in the top-right corner, beside the run's actions.
-            Its h-6 box at top-1.5 centres it on the run header's command line, and
-            end-3 matches the header's left text inset. */}
-        <div className="absolute end-3 top-1.5 z-30 flex h-6 items-center">
+        {/* No header row: the × sits in the top-right corner, beside the run's actions,
+            and stays quiet until the panel is hovered or focused. Its h-6 box at top-1.5
+            centres it on the run header's command line, and end-3 matches the header's
+            left text inset. */}
+        <div className="absolute end-3 top-1.5 z-30 flex h-6 items-center opacity-0 transition-opacity duration-(--motion-duration-fast) ease-out group-focus-within/bottom-panel:opacity-100 group-hover/bottom-panel:opacity-100 pointer-coarse:opacity-100 motion-reduce:transition-none">
           <Tooltip>
             <TooltipTrigger
               render={

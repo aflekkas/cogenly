@@ -40,6 +40,9 @@ import * as HubLink from "./machines/HubLink.ts";
 import * as MachineIdentity from "./machines/MachineIdentity.ts";
 import * as Machines from "./machines/Machines.ts";
 import * as MachineSecurity from "./security/MachineSecurity.ts";
+import * as MachineSetup from "./tailscale/MachineSetup.ts";
+import * as TailscaleHost from "./tailscale/TailscaleHost.ts";
+import * as TailscaleServeMode from "./tailscale/TailscaleServeMode.ts";
 import * as PeerChannels from "./machines/PeerChannels.ts";
 import * as PeerHttp from "./machines/peerHttp.ts";
 import * as PeerHub from "./machines/PeerHub.ts";
@@ -195,7 +198,7 @@ import * as OrchestrationHttp from "./orchestration-v2/http.ts";
 import * as ProjectHttp from "./project/http.ts";
 import * as NetService from "@t3tools/shared/Net";
 import * as RelayClient from "@t3tools/shared/relayClient";
-import { disableTailscaleServe, ensureTailscaleServe } from "@t3tools/tailscale";
+import { disableTailscaleServe } from "@t3tools/tailscale";
 import * as ServerActivation from "./serverActivation.ts";
 
 // MCP handoff thread IDs include escaped provenance and can exceed find-my-way's
@@ -578,6 +581,8 @@ const layerProviderInstallationRefresh = Layer.effectDiscard(
 const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   AgentAwarenessRelay.layer,
   MachineSecurity.layer,
+  // One instance for every transport: it remembers sign-ins and approvals in progress.
+  MachineSetup.layer.pipe(Layer.provide(TailscaleHost.layer), Layer.provide(MachineIdentity.layer)),
   // Paired machines: shared configuration, then thread logs, over one link.
   Layer.mergeAll(
     SharedSync.layer.pipe(Layer.provide(SharedState.layer)),
@@ -731,6 +736,7 @@ const layerRuntimeDependencies = layerRuntimeCoreDependencies.pipe(
   Layer.provideMerge(AnalyticsService.layer),
   Layer.provideMerge(ExternalLauncher.layer),
   Layer.provideMerge(DirectEndpoints.layer),
+  Layer.provideMerge(TailscaleServeMode.layer),
   Layer.provideMerge(ServerLifecycleEvents.layer),
   Layer.provide(NetService.layer),
 );
@@ -856,59 +862,49 @@ const layerMakeServer = Layer.unwrap(
           );
       }),
     );
-    const layerTailscaleServe = config.tailscaleServeEnabled
-      ? Layer.effectDiscard(
-          Effect.acquireRelease(
-            Effect.gen(function* () {
-              yield* Deferred.succeed(tailscaleParked, undefined).pipe(Effect.orDie);
-              yield* awaitActivation;
-              const server = yield* HttpServer.HttpServer;
-              const address = server.address;
-              if (typeof address === "string" || !("port" in address)) {
-                return null;
-              }
-
-              const localPort = address.port;
-              return yield* ensureTailscaleServe({
-                localPort,
-                servePort: config.tailscaleServePort,
-                localHost: "127.0.0.1",
-              }).pipe(
-                Effect.as({ localPort, servePort: config.tailscaleServePort }),
+    // Machine setup points a saved Serve mapping at this run's port, adopts
+    // one made by hand, and waits in the background when the tailnet has not
+    // approved HTTPS yet. Only `--tailscale-serve` turns Serve off at shutdown;
+    // a mapping set up through Cogenly persists, like `tailscale serve --bg`.
+    const layerTailscaleServe = Layer.effectDiscard(
+      Effect.acquireRelease(
+        Effect.gen(function* () {
+          yield* Deferred.succeed(tailscaleParked, undefined).pipe(Effect.orDie);
+          yield* awaitActivation;
+          const server = yield* HttpServer.HttpServer;
+          const address = server.address;
+          if (typeof address === "string" || !("port" in address)) {
+            return null;
+          }
+          const setup = yield* MachineSetup.MachineSetup;
+          const serveMode = yield* TailscaleServeMode.TailscaleServeMode;
+          yield* setup
+            .start(address.port)
+            .pipe(
+              Effect.catchCause((cause) =>
+                Effect.logWarning("Failed to configure Tailscale Serve", { cause }),
+              ),
+            );
+          return serveMode.explicit ? yield* serveMode.current : null;
+        }),
+        (configured) =>
+          configured
+            ? disableTailscaleServe({ servePort: configured.servePort }).pipe(
                 Effect.tap(() =>
-                  Effect.logInfo("Tailscale Serve configured", {
-                    localPort,
-                    servePort: config.tailscaleServePort,
+                  Effect.logInfo("Tailscale Serve disabled", {
+                    servePort: configured.servePort,
                   }),
                 ),
                 Effect.catch((cause) =>
-                  Effect.logWarning("Failed to configure Tailscale Serve", {
+                  Effect.logWarning("Failed to disable Tailscale Serve", {
                     cause,
-                    localPort,
-                    servePort: config.tailscaleServePort,
-                  }).pipe(Effect.as(null)),
+                    servePort: configured.servePort,
+                  }),
                 ),
-              );
-            }),
-            (configured) =>
-              configured
-                ? disableTailscaleServe({ servePort: configured.servePort }).pipe(
-                    Effect.tap(() =>
-                      Effect.logInfo("Tailscale Serve disabled", {
-                        servePort: configured.servePort,
-                      }),
-                    ),
-                    Effect.catch((cause) =>
-                      Effect.logWarning("Failed to disable Tailscale Serve", {
-                        cause,
-                        servePort: configured.servePort,
-                      }),
-                    ),
-                  )
-                : Effect.void,
-          ),
-        )
-      : Layer.empty;
+              )
+            : Effect.void,
+      ),
+    );
     const layerCloudDesiredLinkReconcile = Layer.effectDiscard(
       Effect.gen(function* () {
         const cloudLink = yield* CloudLink.CloudLink;
@@ -1142,7 +1138,7 @@ const layerMakeServer = Layer.unwrap(
           Deferred.await(runtimeStateParked),
           Deferred.await(cloudLinkParked),
           Deferred.await(routesReady),
-          ...(config.tailscaleServeEnabled ? [Deferred.await(tailscaleParked)] : []),
+          Deferred.await(tailscaleParked),
         ],
         { concurrency: "unbounded" },
       ).pipe(Effect.asVoid),

@@ -1197,6 +1197,36 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:projectLabels:cloneProjectLabelRepository",
       tag: WS_METHODS.projectLabelsCloneRepository,
     }),
+    /** Clone a repository the project links onto this machine; returns once the clone runs. */
+    checkoutProjectLabelRepository: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:projectLabels:checkoutProjectLabelRepository",
+      tag: WS_METHODS.projectLabelsCheckoutRepository,
+    }),
+    /** Delete this machine's checkout of a linked repository; the link stays. */
+    removeProjectLabelCheckout: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:projectLabels:removeProjectLabelCheckout",
+      tag: WS_METHODS.projectLabelsRemoveCheckout,
+    }),
+    /** Move a linked repository's checkout into `<project>/repos/<directoryName>`. */
+    adoptProjectLabelRepository: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:projectLabels:adoptProjectLabelRepository",
+      tag: WS_METHODS.projectLabelsAdoptRepository,
+    }),
+    /** Project folders no project claims; refresh after adopting or removing one. */
+    projectOrphanFolders: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:projectLabels:orphanFolders",
+      tag: WS_METHODS.projectLabelsListOrphanFolders,
+    }),
+    /** Make an orphan folder a project of the same name, keeping its contents. */
+    adoptProjectOrphanFolder: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:projectLabels:adoptProjectOrphanFolder",
+      tag: WS_METHODS.projectLabelsAdoptOrphanFolder,
+    }),
+    /** Delete an orphan folder that holds only an empty skeleton. */
+    removeProjectOrphanFolder: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:projectLabels:removeProjectOrphanFolder",
+      tag: WS_METHODS.projectLabelsRemoveOrphanFolder,
+    }),
     moveThreadProjectFolder: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:projectLabels:moveThreadProjectFolder",
       tag: WS_METHODS.projectLabelsMoveThread,

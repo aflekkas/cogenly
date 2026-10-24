@@ -30,7 +30,7 @@ function Shell({
       data-with-context={contextStrip || undefined}
       data-context-collapsed={contextStripCollapsed || undefined}
       className={cn(
-        "@container/composer-surface group/composer-surface relative isolate mx-auto w-full max-w-(--chat-content-max-width)",
+        "@container/composer-surface group/composer-surface chat-content-lane relative isolate",
         "[--chat-composer-drawer-inset:1.375rem] [--chat-composer-glass-surface:var(--message-surface)] [--chat-composer-outline:rgb(0_0_0/8%)]",
         "dark:[--chat-composer-glass-surface:var(--message-surface)] dark:[--surface-raised-shadow:var(--surface-halo,0_1px_2px_rgb(0_0_0/30%))] dark:[--corner-glow:4%] dark:[--corner-glow-top:2.8%] dark:[--surface-raised-sheen-top:transparent] dark:[--surface-raised-sheen-bottom:transparent] dark:[--chat-composer-highlight:transparent] dark:[--surface-raised-edge-top:var(--surface-edge,rgb(255_255_255/4%))] dark:[--surface-raised-edge-side:var(--surface-edge,rgb(255_255_255/4%))] dark:[--surface-raised-edge-bottom:var(--surface-edge,rgb(255_255_255/4%))] dark:[--chat-composer-outline:var(--surface-edge,rgb(255_255_255/4%))]",
         "[html[data-theme-id]_&]:[--chat-composer-glass-surface:var(--message-surface)] [html[data-theme-id]_&]:[--chat-composer-outline:var(--app-theme-toolbar-border)]",

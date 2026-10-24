@@ -10,7 +10,6 @@ import {
   type EnvironmentId,
   type Integration,
   type IntegrationCatalogEntry,
-  type IntegrationCatalogId,
   type IntegrationId,
   type IntegrationSummary,
   type IntegrationTestResult,
@@ -20,29 +19,20 @@ import {
 import {
   BlocksIcon,
   ExternalLinkIcon,
-  HashIcon,
-  KanbanIcon,
   KeyRoundIcon,
-  ListTodoIcon,
   LogInIcon,
-  MailIcon,
-  MessagesSquareIcon,
-  MicIcon,
   MoreHorizontalIcon,
-  NotebookTextIcon,
   PencilIcon,
-  PenToolIcon,
   PlugZapIcon,
   PlusIcon,
   PowerIcon,
   Trash2Icon,
-  VideoIcon,
   XIcon,
 } from "lucide-react";
 import { useLayoutEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
 
 import { AnimatedHeight } from "~/components/AnimatedHeight";
-import { GitHubIcon } from "~/components/Icons";
+import { INTEGRATION_LOGOS } from "~/components/IntegrationLogos";
 import { CopyButton } from "~/components/ui/copy-button";
 import { OverlayPresence } from "~/components/ui/overlay-presence";
 import { requestConfirmDialog } from "../../confirmDialog";
@@ -161,21 +151,6 @@ function settled<A, E>(title: string, result: AtomCommandResult<A, E>): A | null
   return null;
 }
 
-/** Which glyph each catalog entry shows; brand marks only where the app already has one. */
-const CATALOG_ICONS: Readonly<Record<IntegrationCatalogId, ComponentType<{ className?: string }>>> =
-  {
-    "google-workspace": MailIcon,
-    linear: ListTodoIcon,
-    notion: NotebookTextIcon,
-    github: GitHubIcon,
-    atlassian: KanbanIcon,
-    intercom: MessagesSquareIcon,
-    "wispr-flow": MicIcon,
-    slack: HashIcon,
-    fathom: VideoIcon,
-    figma: PenToolIcon,
-  };
-
 /** Opens a user guide section: the system browser on desktop, a new tab on the web. */
 function openDocs(anchor: string) {
   const url = integrationDocsUrl(anchor);
@@ -241,7 +216,8 @@ export function IntegrationServicesSettings() {
             return (
               <CatalogCard
                 key={group.entry.id}
-                icon={CATALOG_ICONS[group.entry.icon]}
+                icon={INTEGRATION_LOGOS[group.entry.icon]}
+                brand
                 name={group.entry.name}
                 description={group.entry.description}
                 action={
@@ -321,6 +297,8 @@ export function IntegrationServicesSettings() {
 /** One catalog entry: what agents can do with it, its button, and its accounts. */
 function CatalogCard(props: {
   readonly icon: ComponentType<{ className?: string }>;
+  /** A service's logo, drawn at full strength; a generic glyph stays muted. */
+  readonly brand?: boolean;
   readonly name: string;
   readonly description: string;
   readonly action: ReactNode;
@@ -332,7 +310,9 @@ function CatalogCard(props: {
   return (
     <div className="flex flex-col rounded-lg bg-card p-3 ring-1 ring-black/5 dark:bg-white/3 dark:ring-white/5">
       <div className="flex items-start gap-3">
-        <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+        <Icon
+          className={`mt-0.5 size-4 shrink-0 ${props.brand ? "text-foreground" : "text-muted-foreground"}`}
+        />
         <div className="min-w-0 flex-1">
           <h3 className="text-sm font-medium text-foreground">{props.name}</h3>
           <p className="text-xs text-muted-foreground">{props.description}</p>

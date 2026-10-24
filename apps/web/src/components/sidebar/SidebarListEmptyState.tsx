@@ -6,7 +6,7 @@ import type { ReactNode } from "react";
  * New chat"). Filters never land here (an empty filter cannot be chosen, see
  * `useSegmentSelection`); only a list with nothing at all does. Give it the
  * list's remaining height (a `flex-1` parent): it centres in the space between
- * the list's top and the dock below, lifted a little above true centre, the
+ * the dock above and the column's bottom, lifted a little above true centre, the
  * same in every mode. It fades in place on mount (opacity only).
  */
 export function SidebarListEmptyState(props: {

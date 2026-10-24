@@ -2,8 +2,6 @@ import type { DraftId } from "~/composerDraftStore";
 import { composerDraftHasUserContent, useComposerDraftStore } from "~/composerDraftStore";
 import {
   type EnvironmentId,
-  type ProjectLabelOwnerRepository,
-  resolveEnvironmentMachineKind,
   type ScopedProjectRef,
   type ThreadId,
   type ThreadSurface,
@@ -11,10 +9,9 @@ import {
 import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { isScratchProject } from "@t3tools/client-runtime/state/projects";
 import { useNavigate } from "@tanstack/react-router";
-import { CheckIcon, FolderGit2Icon, FolderPlusIcon } from "lucide-react";
+import { CheckIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { openCommandPalette } from "~/commandPaletteBus";
 import { useNewThreadHandler } from "~/hooks/useHandleNewThread";
 import { useScratchProject } from "~/hooks/useScratchProject";
 import { useClientSettings } from "~/hooks/useSettings";
@@ -29,7 +26,6 @@ import {
 } from "~/sidebarProjectGrouping";
 import { useProjects, useThreadShells } from "~/state/entities";
 import { useEnvironments, usePrimaryEnvironmentId } from "~/state/environments";
-import { EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
 import {
   setPendingProjectFolder,
   usePendingProjectFolderStore,
@@ -43,35 +39,21 @@ import {
   heroProjectSuffix,
   isPickableRepository,
   projectDefaultRepository,
-  repositoriesInProject,
   workDraftFolderId,
   workHeroBreadcrumb,
   workHeroLine,
 } from "~/projectLabels/projectMeta.logic";
 import { ComposerProjectPicker } from "~/projectLabels/ComposerProjectPicker";
 import {
-  linkedGitHubOwners,
-  type OwnerSearchState,
-} from "~/projectLabels/projectSourceLinks.logic";
-import {
-  groupRepositoriesByMachine,
-  remoteSectionRows,
-} from "~/projectLabels/repositoryPicker.logic";
-import {
-  LocalRepositoryRowEnd,
   ManageRepositoriesRowContent,
   ProjectFolderRowIcon,
-  RemoteRepositoryRow,
-  RemoteRepositorySection,
-  RepositorySourceLabel,
-  ShowMoreRemoteRow,
 } from "~/projectLabels/RepositorySourceRows";
 import {
-  useCanRemoveRepositoryFromProject,
-  useRemoveRepositoryFromProject,
-} from "~/projectLabels/useRemoveRepositoryFromProject";
-import { useOwnerRepositorySearch } from "~/projectLabels/useOwnerRepositorySearch";
-import { useRemoteRepositoryClone } from "~/projectLabels/useRemoteRepositoryClone";
+  RepositoryPickerGroupContent,
+  useRepositoryPicker,
+  type RepositoryPickerGroup,
+  type RepositoryPickerItem,
+} from "~/projectLabels/useRepositoryPicker";
 import { useProjectLabelDirectory } from "~/projectLabels/useProjectLabels";
 import { answerNoProjectPick, useWorkNoProjectPicked } from "~/projectLabels/workNoProjectPicks";
 import { chatGreeting } from "./chatGreeting";
@@ -100,48 +82,32 @@ import { ProjectFavicon } from "../ProjectFavicon";
 import { RepositoryBadge } from "../sidebar/modes/RepositoryBadge";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 
-// Picker values for the action rows; repositories are keyed by their logical
-// project key.
 /** The draft heading's FadeSwap slot, which a replacing draft's heading picks up from. */
 const DRAFT_HEADING_GROUP = "draft-heading";
-const ADD_PROJECT_VALUE = "add-project";
 const MANAGE_REPOSITORIES_VALUE = "manage-repositories";
-const ACTIONS_GROUP_KEY = "actions";
-const REPOSITORIES_GROUP_KEY = "repositories";
 // Work without a repository (in the project's folder): the row that leads the picker.
 const NO_REPOSITORY_VALUE = "no-repository";
 const NO_REPOSITORY_GROUP_KEY = "no-repository";
 
-type PickerEntry = ReturnType<typeof buildSidebarProjectPickerEntries>[number];
-
-interface PickerItem {
+/** A logical project's repository, for the default-repository pick a project choice makes. */
+interface RepositoryChoice {
   readonly value: string;
   readonly label: string;
-  /** The logical project key; empty on action rows and GitHub results. */
+  /** The logical project key. */
   readonly projectKey: string;
-  /** The project group the row is listed under. */
-  readonly groupKey: string;
-  /** A GitHub repository under a project's linked owner, not on this machine yet. */
-  readonly remote?: {
-    readonly project: EnvironmentProjectLabel;
-    readonly repository: ProjectLabelOwnerRepository;
-  };
-  /** The GitHub section's "Show more" row, with how many results it hides. */
-  readonly more?: number;
 }
+
+/** The hero's own rows around the shared repository list. */
+type HeroRow =
+  | { readonly kind: "no-repository"; readonly value: string; readonly label: string }
+  | { readonly kind: "manage"; readonly value: string; readonly label: string };
+type PickerItem = RepositoryPickerItem | HeroRow;
 
 interface PickerGroup {
   readonly value: string;
-  /** The header: the machine a run of repositories is on, or "On GitHub". */
-  readonly label: string | null;
-  /** The machine a section of the project's own repositories is on. */
-  readonly environmentId?: EnvironmentId;
   readonly items: readonly PickerItem[];
-  /** Set on the project's "On GitHub" section, which follows its own repositories. */
-  readonly remote?: {
-    readonly project: EnvironmentProjectLabel;
-    readonly state: OwnerSearchState;
-  };
+  /** Set on the shared list's groups, which render themselves. */
+  readonly shared?: RepositoryPickerGroup;
 }
 
 interface DraftHeroHeadlineProps {
@@ -170,7 +136,6 @@ export function DraftHeroHeadline({
   const getComposerDraft = useComposerDraftStore((store) => store.getComposerDraft);
   const applyStickyState = useComposerDraftStore((store) => store.applyStickyState);
   const setModelSelection = useComposerDraftStore((store) => store.setModelSelection);
-  const openAddProject = useCallback(() => openCommandPalette({ open: "add-project" }), []);
   const { scratchEnvironmentId, scratchWorkspaceRootFor, openScratchProject } = useScratchProject();
   const openProjectDraft = useNewThreadHandler();
   const navigate = useNavigate();
@@ -203,19 +168,6 @@ export function DraftHeroHeadline({
       projects,
       threads,
     ],
-  );
-  const environmentMachineById = useMemo(
-    () =>
-      new Map(
-        environments.map(
-          (environment) =>
-            [
-              environment.environmentId,
-              resolveEnvironmentMachineKind(environment.serverConfig),
-            ] as const,
-        ),
-      ),
-    [environments],
   );
   const projectPickerEntries = useMemo(
     () =>
@@ -286,9 +238,7 @@ export function DraftHeroHeadline({
   // surface was recorded keep the old guess.
   const isChatDraft = surface === undefined ? isScratchDraft : surface === "chat";
 
-  // The repository picker lists the Work project's own repositories, or with
-  // no project the ones in none. Folders live per environment; every
-  // connected one contributes.
+  // Folders live per environment; every connected one contributes.
   const environmentIds = useMemo(
     () => environments.map((environment) => environment.environmentId),
     [environments],
@@ -323,246 +273,114 @@ export function DraftHeroHeadline({
     canStartWithoutRepository: scratchWorkspaceRoot !== null,
   });
   const showProjectFolderRow = heroLine.projectFolderRow !== "hidden";
-  const breadcrumb = workHeroBreadcrumb({
-    projectName: workProject?.label.name ?? null,
-    repositoryName: activeProjectDisplayName,
-    hasRepository: !isScratchDraft,
-  });
+  // What a project pick moves the draft to: the logical projects' repositories.
   const repositoryItems = useMemo(
-    () =>
+    (): RepositoryChoice[] =>
       menuEntries.map(({ group }) => ({
         value: group.projectKey,
         label: group.displayName,
         projectKey: group.projectKey,
-        groupKey: "",
       })),
     [menuEntries],
   );
   const refsOfRepository = useCallback(
-    (item: PickerItem) => projectEntryByKey.get(item.projectKey)?.group.memberProjectRefs ?? [],
+    (item: RepositoryChoice) =>
+      projectEntryByKey.get(item.projectKey)?.group.memberProjectRefs ?? [],
     [projectEntryByKey],
   );
-  // Repositories belong to a project or to none: only the Work project's own
-  // are offered (or, with no project, those in none), so a pick never
-  // changes the project. The project picker does that.
-  const scopedRepositoryItems = useMemo(
-    () =>
-      repositoriesInProject({
-        items: repositoryItems,
-        refsOf: refsOfRepository,
-        project: workProject,
-        projects: projectDirectory.active,
-      }),
-    [projectDirectory.active, refsOfRepository, repositoryItems, workProject],
-  );
-  // What the project's own checkouts answer to on GitHub, so its GitHub
-  // results leave them out.
-  const projectRepositoryIdentities = useMemo(
-    () =>
-      scopedRepositoryItems.flatMap(
-        (item) =>
-          projectEntryByKey
-            .get(item.projectKey)
-            ?.group.memberProjects.map((member) => member.repositoryIdentity) ?? [],
-      ),
-    [projectEntryByKey, scopedRepositoryItems],
-  );
   const projectFolderRowLabel = heroLine.projectFolderRowLabel;
-  // The GitHub section shows a short preview until "Show more"; a search lists all.
-  const [showAllRemote, setShowAllRemote] = useState(false);
-  // Each repository sits under the machine its checkout is on, named by that
-  // machine's label, so a VPS clone never reads as "on this machine".
-  const machineSectionLabel = useCallback(
-    (environmentId: EnvironmentId) => {
-      const label = environmentLabelById.get(environmentId);
-      if (label) return `On ${label}`;
-      return environmentId === primaryEnvironmentId ? "On this machine" : "On another machine";
-    },
-    [environmentLabelById, primaryEnvironmentId],
-  );
-  const buildPickerGroups = useCallback(
-    (
-      items: readonly PickerItem[],
-      withActions: boolean,
-      withProjectFolder: boolean,
-      remote: OwnerSearchState | undefined = undefined,
-      searching = false,
-    ) => {
-      const groups: PickerGroup[] = [];
-      if (withProjectFolder) {
-        groups.push({
-          value: NO_REPOSITORY_GROUP_KEY,
-          label: null,
-          items: [
-            {
-              value: NO_REPOSITORY_VALUE,
-              label: projectFolderRowLabel,
-              projectKey: "",
-              groupKey: NO_REPOSITORY_GROUP_KEY,
-            },
-          ],
-        });
-      }
-      // The project's GitHub results follow its own repositories; while both
-      // show, each source has its header so the machine's clones and GitHub's
-      // repositories read apart. A repository shows once: a clone the project
-      // holds (all of them, not just the search's matches) wins.
-      const remoteSection =
-        remote?.status === "done"
-          ? remoteSectionRows({
-              repositories: remote.repositories,
-              local: projectRepositoryIdentities,
-              searching,
-              expanded: showAllRemote,
-            })
-          : { rows: [], hidden: 0 };
-      const showRemote =
-        workProject !== null &&
-        remote !== undefined &&
-        (remote.status !== "done" || remoteSection.rows.length > 0);
-      const machineSections = groupRepositoriesByMachine(
-        items.flatMap((item) => {
-          const environmentId = projectEntryByKey.get(item.projectKey)?.targetProject.environmentId;
-          return environmentId ? [{ item, environmentId }] : [];
-        }),
-        (entry) => entry.environmentId,
-        primaryEnvironmentId,
-      );
-      // Headers only once there is more than one source to tell apart.
-      const labelSections = showRemote || machineSections.length > 1;
-      for (const section of machineSections) {
-        const { environmentId } = section;
-        const groupKey = `${REPOSITORIES_GROUP_KEY}:${environmentId}`;
-        groups.push({
-          value: groupKey,
-          label: labelSections ? machineSectionLabel(environmentId) : null,
-          environmentId,
-          items: section.items.map(({ item }) => ({ ...item, groupKey })),
-        });
-      }
-      if (showRemote && workProject !== null && remote !== undefined) {
-        const groupKey = `remote:${workProject.key}`;
-        groups.push({
-          value: groupKey,
-          label: "On GitHub",
-          remote: { project: workProject, state: remote },
-          items: [
-            ...remoteSection.rows.map(({ repository, label }) => ({
-              value: `${groupKey}|${repository.nameWithOwner}`,
-              label,
-              projectKey: "",
-              groupKey,
-              remote: { project: workProject, repository },
-            })),
-            ...(remoteSection.hidden > 0
-              ? [
-                  {
-                    value: `${groupKey}|more`,
-                    label: `Show ${remoteSection.hidden} more`,
-                    projectKey: "",
-                    groupKey,
-                    more: remoteSection.hidden,
-                  },
-                ]
-              : []),
-          ],
-        });
-      }
-      if (withActions) {
-        groups.push({
-          value: ACTIONS_GROUP_KEY,
-          label: null,
-          items: [
-            {
-              value: ADD_PROJECT_VALUE,
-              label: "Add repository…",
-              projectKey: "",
-              groupKey: ACTIONS_GROUP_KEY,
-            },
-            // The project's page in Settings lists, removes and adds its repositories.
-            ...(workProject !== null
-              ? [
-                  {
-                    value: MANAGE_REPOSITORIES_VALUE,
-                    label: "Manage repositories…",
-                    projectKey: "",
-                    groupKey: ACTIONS_GROUP_KEY,
-                  },
-                ]
-              : []),
-          ],
-        });
-      }
-      return groups;
-    },
-    [
-      machineSectionLabel,
-      primaryEnvironmentId,
-      projectEntryByKey,
-      projectFolderRowLabel,
-      projectRepositoryIdentities,
-      showAllRemote,
-      workProject,
-    ],
-  );
   const [pickerOpen, setPickerOpen] = useState(false);
   const keepPickerOpenRef = useRef(false);
   const [pickerQuery, setPickerQuery] = useState("");
   const pickerFilter = useComboboxFilter();
-  // While open, the picker also lists the Work project's GitHub repositories:
-  // its linked owners', else the signed-in account's; recent pushes until a search.
-  const searchedProjects = useMemo(() => (workProject ? [workProject] : []), [workProject]);
-  const ownerSearch = useOwnerRepositorySearch(searchedProjects, pickerQuery, pickerOpen);
-  const remoteSearch = workProject ? ownerSearch.get(workProject.key) : undefined;
-  const pickerGroups = useMemo(
-    () => buildPickerGroups(scopedRepositoryItems, true, showProjectFolderRow, remoteSearch),
-    [buildPickerGroups, remoteSearch, scopedRepositoryItems, showProjectFolderRow],
+  const closePicker = useCallback(() => {
+    setPickerOpen(false);
+    setPickerQuery("");
+  }, []);
+  // The repositories on the draft's machine (the composer's "Run on"): the
+  // Work project's, every one it links with its state there, or with no
+  // project the machine's own. Picking one keeps the project.
+  const pickerEnvironmentId =
+    draftThread?.environmentId ?? activeProjectRef?.environmentId ?? primaryEnvironmentId;
+  const pickRepositoryRef = useRef<(repository: (typeof projects)[number]) => void>(() => {});
+  const repositoryPicker = useRepositoryPicker({
+    environmentId: pickerEnvironmentId,
+    project: workProject,
+    open: pickerOpen,
+    query: pickerQuery,
+    leadRepositoryId: isScratchDraft ? null : (activeProject?.id ?? null),
+    onPick: (repository) => pickRepositoryRef.current(repository),
+    onClose: closePicker,
+  });
+  const selectedRow = isScratchDraft
+    ? null
+    : (repositoryPicker.rows.find(
+        (row) =>
+          row.local !== null &&
+          row.local.environmentId === activeProjectRef?.environmentId &&
+          row.local.id === activeProjectRef.projectId,
+      ) ?? null);
+  // The repository reads by its folder name in the project, as its row does.
+  const breadcrumb = workHeroBreadcrumb({
+    projectName: workProject?.label.name ?? null,
+    repositoryName: selectedRow?.name ?? activeProjectDisplayName,
+    hasRepository: !isScratchDraft,
+  });
+  const noRepositoryItem = useMemo(
+    (): HeroRow => ({
+      kind: "no-repository",
+      value: NO_REPOSITORY_VALUE,
+      label: projectFolderRowLabel,
+    }),
+    [projectFolderRowLabel],
   );
-  const filteredPickerGroups = useMemo(() => {
-    const query = pickerQuery.trim();
-    if (query.length === 0) return pickerGroups;
-    return buildPickerGroups(
-      scopedRepositoryItems.filter((item) =>
-        pickerFilter.contains(item, query, (candidate) => candidate.label),
-      ),
-      false,
+  const listing = repositoryPicker.mode === "list";
+  const query = pickerQuery.trim();
+  const pickerGroups = useMemo((): PickerGroup[] => {
+    const showNoRepository =
       showProjectFolderRow &&
-        pickerFilter.contains(projectFolderRowLabel, query, (candidate) => candidate),
-      remoteSearch,
-      true,
-    );
+      listing &&
+      (query.length === 0 ||
+        pickerFilter.contains(projectFolderRowLabel, query, (candidate) => candidate));
+    return [
+      ...(showNoRepository ? [{ value: NO_REPOSITORY_GROUP_KEY, items: [noRepositoryItem] }] : []),
+      ...repositoryPicker.groups.map((group) => ({
+        value: group.value,
+        items: group.items,
+        shared: group,
+      })),
+      // The project's page in Settings lists, removes and adds its repositories.
+      ...(listing && workProject !== null && query.length === 0
+        ? [
+            {
+              value: MANAGE_REPOSITORIES_VALUE,
+              items: [
+                {
+                  kind: "manage" as const,
+                  value: MANAGE_REPOSITORIES_VALUE,
+                  label: "Manage repositories…",
+                },
+              ],
+            },
+          ]
+        : []),
+    ];
   }, [
-    buildPickerGroups,
-    remoteSearch,
+    listing,
+    noRepositoryItem,
     pickerFilter,
-    pickerGroups,
-    pickerQuery,
     projectFolderRowLabel,
-    scopedRepositoryItems,
+    query,
+    repositoryPicker.groups,
     showProjectFolderRow,
     workProject,
   ]);
-  const searchingGitHub = filteredPickerGroups.some((group) => group.remote !== undefined);
-  const remoteClone = useRemoteRepositoryClone(
-    (target) =>
-      pickerOpen &&
-      filteredPickerGroups.some((group) =>
-        group.items.some(
-          (item) =>
-            item.remote?.project.key === target.project.key &&
-            item.remote.repository.nameWithOwner === target.repository.nameWithOwner,
-        ),
-      ),
-  );
-  const projectFolderItem =
-    pickerGroups.find((group) => group.value === NO_REPOSITORY_GROUP_KEY)?.items[0] ?? null;
-  const selectedPickerItem =
+  const selectedPickerItem: PickerItem | null =
     heroLine.projectFolderRow === "selected"
-      ? projectFolderItem
-      : (pickerGroups
-          .filter((group) => group.environmentId !== undefined)
+      ? noRepositoryItem
+      : (repositoryPicker.groups
           .flatMap((group) => group.items)
-          .find((item) => item.projectKey === activeProjectKey) ?? null);
+          .find((item) => item.kind === "repository" && item.row.key === selectedRow?.key) ?? null);
 
   // The picker can change the draft's target while the no-project home is
   // still being opened; a stale continuation must not retarget it again.
@@ -587,8 +405,8 @@ export function DraftHeroHeadline({
   // draft instead opens the chosen project's own draft, like starting a new
   // thread there: moving it would replace that draft and strand whatever it
   // holds, such as the browser tabs of the no-project draft.
-  // `folder` is the project the Work lands in; the draft records it unless
-  // the repository's own project is that one, which Work follows anyway.
+  // `folder` is the project the Work lands in; the draft keeps it
+  // (workDraftFolderId), so a pick never drops the project.
   const selectProject = (
     project: (typeof projects)[number],
     logicalProjectKey: string,
@@ -605,7 +423,7 @@ export function DraftHeroHeadline({
     const folderId = workDraftFolderId({
       repository: { environmentId: project.environmentId, projectId: project.id },
       project: folder,
-      folderByRepository: projectDirectory.folderByRepository,
+      byKey: projectDirectory.byKey,
     });
     const fileDraft = (threadId: ThreadId) =>
       setPendingProjectFolder(
@@ -677,216 +495,92 @@ export function DraftHeroHeadline({
     return true;
   };
 
-  // A GitHub repository picked in the picker is cloned into its project; once
-  // the clone lands it becomes the draft's repository, as long as the draft
-  // still targets what it did when the clone started.
-  const cloneStartedForRef = useRef<string | null>(null);
-  const clonedRef = remoteClone.view?.phase === "done" ? remoteClone.ref : null;
-  const clonedProject = remoteClone.active?.project ?? null;
-  const clonedEntry = useMemo(() => {
-    if (clonedRef === null) return null;
-    const key = scopedProjectKey(clonedRef);
-    for (const entry of projectEntryByKey.values()) {
-      if (entry.group.memberProjectRefs.some((ref) => scopedProjectKey(ref) === key)) return entry;
-    }
-    return null;
-  }, [clonedRef, projectEntryByKey]);
+  // A picked repository becomes the draft's, in the Work project. One cloned
+  // here first arrives once its clone lands, as long as the draft still
+  // targets what it did.
   useEffect(() => {
-    if (clonedEntry === null || clonedProject === null) return;
-    // Waits for the new repository to reach the project list.
-    if (cloneStartedForRef.current === activeProjectKey) {
-      if (clonedEntry.group.projectKey !== activeProjectKey) {
-        selectProject(clonedEntry.targetProject, clonedEntry.group.projectKey, clonedProject);
-      }
-      setPickerOpen(false);
-      setPickerQuery("");
-    }
-    cloneStartedForRef.current = null;
-    remoteClone.release();
+    pickRepositoryRef.current = (repository) => {
+      closePicker();
+      const current =
+        !isScratchDraft &&
+        activeProjectRef !== null &&
+        activeProjectRef.environmentId === repository.environmentId &&
+        activeProjectRef.projectId === repository.id;
+      if (current) return;
+      selectProject(
+        repository,
+        deriveLogicalProjectKeyFromSettings(repository, projectGroupingSettings),
+        workProject,
+      );
+    };
   });
 
-  // A repository the project files on its own machine, which its row can take out.
-  const canRemoveRepository = useCanRemoveRepositoryFromProject(workProject?.environmentId ?? null);
-  const removeRepositoryFromProject = useRemoveRepositoryFromProject();
-  const projectMemberOf = (entry: PickerEntry | undefined) => {
-    if (!entry || workProject === null) return null;
-    return (
-      entry.group.memberProjects.find(
-        (member) =>
-          member.environmentId === workProject.environmentId &&
-          workProject.label.repositoryIds.includes(member.id),
-      ) ?? null
-    );
-  };
-  const removeFromProject = (entry: PickerEntry) => {
-    const member = projectMemberOf(entry);
-    if (member === null || workProject === null) return;
-    // The confirm takes over from the picker.
-    setPickerOpen(false);
-    setPickerQuery("");
-    void removeRepositoryFromProject({
-      project: workProject,
-      repositoryId: member.id,
-      title: entry.group.displayName,
-    });
-  };
-
-  // The first action row carries the hairline that sets the actions apart.
-  const filteredActionsLead =
-    filteredPickerGroups.find((group) => group.value === ACTIONS_GROUP_KEY)?.items[0]?.value ??
-    null;
-  const actionsFollowRows = filteredPickerGroups.some(
-    (group) => group.value !== ACTIONS_GROUP_KEY && group.items.length > 0,
-  );
-  const renderPickerItem = (item: PickerItem) => {
-    const entry = projectEntryByKey.get(item.projectKey);
-    const isAction = item.groupKey === ACTIONS_GROUP_KEY;
-    return (
-      <ComboboxItem
-        key={item.value}
-        hideIndicator
-        value={item}
-        tone={isAction ? "action" : "default"}
-        divider={item.value === filteredActionsLead && actionsFollowRows}
-      >
-        {item.value === MANAGE_REPOSITORIES_VALUE ? (
+  const renderHeroItem = (item: PickerItem) => {
+    if (item.kind === "manage") {
+      return (
+        <ComboboxItem key={item.value} hideIndicator value={item} tone="action">
           <ManageRepositoriesRowContent />
-        ) : (
-          <>
-            <ComboboxItemIcon>
-              {item.value === NO_REPOSITORY_VALUE ? (
-                <ProjectFolderRowIcon />
-              ) : item.value === ADD_PROJECT_VALUE ? (
-                <FolderPlusIcon className="size-4" />
-              ) : entry ? (
-                <ProjectFavicon
-                  project={entry.targetProject}
-                  className="size-4"
-                  fallback={<FolderGit2Icon className="size-4" />}
-                />
-              ) : null}
-            </ComboboxItemIcon>
-            <Tooltip>
-              <TooltipTrigger render={<span className="min-w-0 flex-1 truncate text-sm" />}>
-                {item.label}
-              </TooltipTrigger>
-              <TooltipPopup side="top">{item.label}</TooltipPopup>
-            </Tooltip>
-          </>
-        )}
-        {item.value === NO_REPOSITORY_VALUE && heroLine.projectFolderRow === "selected" ? (
-          <CheckIcon className="ml-auto" />
-        ) : null}
-        {entry ? (
-          <LocalRepositoryRowEnd
-            identity={entry.targetProject.repositoryIdentity}
-            removeLabel={`Remove ${entry.group.displayName} from ${workProject?.label.name ?? "the project"}`}
-            {...(canRemoveRepository && projectMemberOf(entry) !== null
-              ? { onRemove: () => removeFromProject(entry) }
-              : {})}
-          />
-        ) : null}
-      </ComboboxItem>
-    );
-  };
-
-  const renderRemoteItem = (item: PickerItem) => {
-    if (item.more !== undefined) {
-      return <ShowMoreRemoteRow key={item.value} item={item} hidden={item.more} />;
+        </ComboboxItem>
+      );
     }
-    const remote = item.remote;
-    if (!remote) return null;
-    return (
-      <RemoteRepositoryRow
-        key={item.value}
-        item={item}
-        repository={remote.repository}
-        label={item.label}
-        clone={remoteClone}
-        view={remoteClone.isFor(remote) ? remoteClone.view : null}
-      />
-    );
+    if (item.kind === "no-repository") {
+      return (
+        <ComboboxItem key={item.value} hideIndicator value={item}>
+          <ComboboxItemIcon>
+            <ProjectFolderRowIcon />
+          </ComboboxItemIcon>
+          <span className="min-w-0 flex-1 truncate text-sm">{item.label}</span>
+          {heroLine.projectFolderRow === "selected" ? <CheckIcon className="ml-auto" /> : null}
+        </ComboboxItem>
+      );
+    }
+    return repositoryPicker.renderItem(item);
   };
 
   const projectSelector = (
     <Combobox
       items={pickerGroups}
-      filteredItems={filteredPickerGroups}
+      filteredItems={pickerGroups}
       autoHighlight
       itemToStringLabel={(item: PickerItem) => item.label}
       isItemEqualToValue={(a: PickerItem, b: PickerItem) => a.value === b.value}
       open={pickerOpen}
       onOpenChange={(open, details) => {
-        // A GitHub result clones in place, with the picker still up.
+        // Cloning, "Add repository" and "Show more" keep the picker up.
         if (!open && details.reason === "item-press" && keepPickerOpenRef.current) {
           keepPickerOpenRef.current = false;
           return;
         }
         setPickerOpen(open);
         setPickerQuery("");
-        if (!open) setShowAllRemote(false);
+        if (!open) repositoryPicker.reset();
       }}
       value={selectedPickerItem}
       onValueChange={(item: PickerItem | null) => {
         if (!item) return;
-        // "Show more" lists the rest of the GitHub results in place.
-        if (item.more !== undefined) {
-          keepPickerOpenRef.current = true;
-          setShowAllRemote(true);
-          return;
-        }
-        // A GitHub result clones into its project with the picker still up,
-        // its row showing the progress; the repository is picked once it lands.
-        if (item.remote) {
-          keepPickerOpenRef.current = true;
-          const target = item.remote;
-          const view = remoteClone.isFor(target) ? remoteClone.view : null;
-          if (view?.phase === "starting" || view?.phase === "running") return;
-          if (view?.phase === "failed" || view?.phase === "cancelled") {
-            void remoteClone.retry();
-            return;
-          }
-          cloneStartedForRef.current = activeProjectKey;
-          void remoteClone.start(target);
-          return;
-        }
-        const addInto = workProject;
-        setPickerOpen(false);
-        if (item.value === NO_REPOSITORY_VALUE) {
+        if (item.kind === "no-repository") {
+          closePicker();
           // Already there when the draft has no repository.
           void startScratch();
           return;
         }
-        if (item.value === MANAGE_REPOSITORIES_VALUE) {
-          if (addInto) {
+        if (item.kind === "manage") {
+          closePicker();
+          if (workProject) {
             void navigate({
               to: "/settings/project-tags",
               search: {
-                projectEnvironmentId: addInto.environmentId,
-                projectLabelId: addInto.label.id,
+                projectEnvironmentId: workProject.environmentId,
+                projectLabelId: workProject.label.id,
               },
             });
           }
           return;
         }
-        if (item.value === ADD_PROJECT_VALUE) {
-          // With a project, the new repository goes into it.
-          if (addInto) {
-            openCommandPalette({
-              open: "add-project",
-              into: { environmentId: addInto.environmentId, labelId: addInto.label.id },
-            });
-          } else {
-            openAddProject();
-          }
-          return;
+        if (repositoryPicker.pick(item)) {
+          keepPickerOpenRef.current = true;
+          setPickerQuery("");
         }
-        // Only the project's own repositories are listed: the project stays.
-        const entry = projectEntryByKey.get(item.projectKey);
-        if (!entry || (item.projectKey === activeProjectKey && !isScratchDraft)) {
-          return;
-        }
-        selectProject(entry.targetProject, entry.group.projectKey, workProject);
       }}
     >
       <Tooltip>
@@ -923,10 +617,10 @@ export function DraftHeroHeadline({
                   project={activeProject}
                   // Sized in em to the heading, like the hero's other inline icons.
                   className="inline-block size-[0.78em] align-[-0.06em] me-[0.28em]"
-                  fallback={<RepositoryBadge name={activeProjectDisplayName} size="inline" />}
+                  fallback={<RepositoryBadge name={breadcrumb.repository.text} size="inline" />}
                 />
               ) : (
-                <RepositoryBadge name={activeProjectDisplayName} size="inline" />
+                <RepositoryBadge name={breadcrumb.repository.text} size="inline" />
               )
             ) : null}
             {breadcrumb.repository.text}
@@ -940,52 +634,41 @@ export function DraftHeroHeadline({
       <ComboboxPopup align="center" sideOffset={8} className="w-72" animateHeight>
         <ComboboxSearchInput
           aria-label="Search repositories"
-          placeholder="Search repositories…"
+          placeholder={repositoryPicker.searchPlaceholder}
           value={pickerQuery}
           onChange={(event) => setPickerQuery(event.target.value)}
+          onKeyDown={(event) => {
+            repositoryPicker.onSearchKeyDown(event);
+          }}
         />
-        <ComboboxEmpty>{searchingGitHub ? null : "No matching repositories."}</ComboboxEmpty>
+        <ComboboxEmpty>{repositoryPicker.emptyText}</ComboboxEmpty>
         <ComboboxList>
           {(group: PickerGroup) => (
             <ComboboxGroup
               key={group.value}
               items={group.items}
-              // The footer's divider spaces it; no group gap on top of that.
-              className={group.value === ACTIONS_GROUP_KEY ? "not-first:mt-0" : undefined}
+              // Action rows carry their own divider; no group gap on top of that.
+              className={
+                group.shared?.tight === true || group.value === MANAGE_REPOSITORIES_VALUE
+                  ? "not-first:mt-0"
+                  : undefined
+              }
             >
-              {group.remote ? (
-                <RemoteRepositorySection
-                  state={group.remote.state}
-                  owners={linkedGitHubOwners(group.remote.project)}
-                  renderItem={renderRemoteItem}
-                />
-              ) : (
-                // One flat list: the no-repository row, the project's
-                // repositories, then the footer actions.
-                <>
-                  {group.label ? (
-                    <RepositorySourceLabel
-                      icon={
-                        <EnvironmentMachineIcon
-                          aria-hidden
-                          kind={
-                            (group.environmentId
-                              ? environmentMachineById.get(group.environmentId)
-                              : undefined) ?? resolveEnvironmentMachineKind(null)
-                          }
-                          className="size-3"
-                        />
-                      }
-                      label={group.label}
-                    />
-                  ) : null}
-                  <ComboboxGroupItems afterHeader={group.label !== null}>
+              {/* A switch to "Add repository" and back swaps the rows in with a fade. */}
+              <div key={repositoryPicker.mode} className="reveal-motion">
+                {group.shared ? (
+                  <RepositoryPickerGroupContent
+                    group={group.shared}
+                    renderItem={repositoryPicker.renderItem}
+                  />
+                ) : (
+                  <ComboboxGroupItems inset={false}>
                     <ComboboxCollection>
-                      {(item: PickerItem) => renderPickerItem(item)}
+                      {(item: PickerItem) => renderHeroItem(item)}
                     </ComboboxCollection>
                   </ComboboxGroupItems>
-                </>
-              )}
+                )}
+              </div>
             </ComboboxGroup>
           )}
         </ComboboxList>
@@ -1060,12 +743,12 @@ export function DraftHeroHeadline({
         selectProject(entry.targetProject, entry.group.projectKey, project);
         return;
       }
-      // Staying put: Work already follows its repository's own project.
+      // Staying put: the project stays filed unless this machine lacks it.
       if (project !== null && activeProject !== null) {
         const folderId = workDraftFolderId({
           repository: { environmentId: activeProject.environmentId, projectId: activeProject.id },
           project,
-          folderByRepository: projectDirectory.folderByRepository,
+          byKey: projectDirectory.byKey,
         });
         if (folderId === null) setPendingProjectFolder(draftThread.threadId, null);
       }
@@ -1089,7 +772,7 @@ export function DraftHeroHeadline({
   const headingLabel = isChatDraft ? `${greeting}${greetingSuffix ?? ""}` : breadcrumb.label;
 
   return (
-    <div className="@container mx-auto flex w-full max-w-5xl flex-col items-center">
+    <div className="@container flex w-full flex-col items-center">
       {/* Sized to the pane, not the window: beside an open right panel the
           greeting steps down so it and its project stay on one line. A step
           rescales smoothly, and a project or breadcrumb that no longer fits

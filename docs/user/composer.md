@@ -65,6 +65,13 @@ Press `Option+Up` on macOS or `Alt+Up` on Windows and Linux with the cursor at t
 start of the composer to edit the most recently queued message. Change
 `thread.editQueuedMessage` to use another shortcut.
 
+Hover the **Queued** header for two bulk actions. **Send all** joins every queued
+message, in order and with its attachments, into one message and sends it now: it
+steers the running turn when the provider supports steering, and otherwise starts as
+the next turn, so a held queue resumes. **Clear all** removes every queued message
+after a second press to confirm. Bind `thread.sendAllQueuedMessages` in
+**Settings → Keybindings** to send all from the keyboard.
+
 ## Custom models
 
 To rename a built-in model on every client, edit the server's `settings.json` in its `userdata`

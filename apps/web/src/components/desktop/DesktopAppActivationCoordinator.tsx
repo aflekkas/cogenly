@@ -7,12 +7,14 @@ import { connectSshEnvironment } from "../../connection/onboarding";
 import {
   handleDesktopAddEnvironmentRequest,
   handleDesktopAppActivationRequest,
+  handleDesktopPairMachinesRequest,
 } from "../../desktopAppActivation";
 import { useNewThreadHandler } from "../../hooks/useHandleNewThread";
 import { findProjectByPath, inferProjectTitleFromPath } from "../../lib/projectPaths";
 import { newProjectId } from "../../lib/utils";
+import { machinesRpc } from "../../rpc/machines";
 import { readProjects, waitForProject } from "../../state/entities";
-import { usePrimaryEnvironment } from "../../state/environments";
+import { useEnvironments, usePrimaryEnvironment } from "../../state/environments";
 import { projectEnvironment } from "../../state/projects";
 import { useEnvironmentQuery } from "../../state/query";
 import { environmentShell } from "../../state/shell";
@@ -24,6 +26,8 @@ export function DesktopAppActivationCoordinator() {
   const createProject = useAtomCommand(projectEnvironment.create, { reportFailure: false });
   const openThread = useNewThreadHandler();
   const connectSsh = useAtomCommand(connectSshEnvironment, { reportFailure: false });
+  const pairMachines = useAtomCommand(machinesRpc.pairWith, { reportFailure: false });
+  const { environments } = useEnvironments();
   const queueRef = useRef(Promise.resolve());
   const activation = window.desktopBridge?.appActivation;
   const shell = useEnvironmentQuery(
@@ -88,52 +92,79 @@ export function DesktopAppActivationCoordinator() {
     },
   );
 
+  // `machine_pair`: the same command as Settings → Machines → Add a machine, so
+  // the join code stays inside it. The agent hears the outcome; the user gets a toast.
+  const pairRequested = useEffectEvent(
+    (request: Extract<DesktopAppActivationRequest, { type: "pair-machines" }>) =>
+      handleDesktopPairMachinesRequest(request, {
+        machines: environments.map((environment) => ({
+          environmentId: environment.environmentId,
+          label: environment.label.trim() || environment.environmentId,
+          connected: environment.connection.phase === "connected",
+        })),
+        pair: async ({ hub, joining }) => {
+          const result = await pairMachines({
+            environmentId: joining.environmentId,
+            input: { hubEnvironmentId: hub.environmentId, hubName: hub.name },
+          });
+          if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+        },
+        onPaired: ({ hub, joining }) =>
+          toastManager.add({
+            type: "success",
+            title: `Paired. ${joining.name} now syncs with ${hub.name}.`,
+          }),
+      }),
+  );
+
   const processRequest = useEffectEvent(async (request: DesktopAppActivationRequest) =>
     request.type === "add-environment"
       ? addEnvironment(request)
-      : handleDesktopAppActivationRequest(request, {
-          getTarget: () => {
-            if (
-              primaryEnvironment?.connection.phase !== "connected" ||
-              primaryEnvironment.serverConfig === null
-            ) {
-              return null;
-            }
-            return {
-              environmentId: primaryEnvironment.environmentId,
-              platform: primaryEnvironment.serverConfig.environment.platform.os,
-            };
-          },
-          findProject: (environmentId, workspaceRoot) =>
-            findProjectByPath(
-              readProjects().filter((project) => project.environmentId === environmentId),
-              workspaceRoot,
-            ) ?? null,
-          createProject: async (environmentId, workspaceRoot) => {
-            const projectId = newProjectId();
-            const result = await createProject({
-              environmentId,
-              input: {
-                projectId,
-                title: inferProjectTitleFromPath(workspaceRoot),
+      : request.type === "pair-machines"
+        ? pairRequested(request)
+        : handleDesktopAppActivationRequest(request, {
+            getTarget: () => {
+              if (
+                primaryEnvironment?.connection.phase !== "connected" ||
+                primaryEnvironment.serverConfig === null
+              ) {
+                return null;
+              }
+              return {
+                environmentId: primaryEnvironment.environmentId,
+                platform: primaryEnvironment.serverConfig.environment.platform.os,
+              };
+            },
+            findProject: (environmentId, workspaceRoot) =>
+              findProjectByPath(
+                readProjects().filter((project) => project.environmentId === environmentId),
                 workspaceRoot,
-                createWorkspaceRootIfMissing: false,
-                defaultModelSelection: null,
-              },
-            });
-            if (result._tag === "Failure") {
-              const error = squashAtomCommandFailure(result);
-              throw error instanceof Error
-                ? error
-                : new Error("Cogenly could not add the repository.");
-            }
-            return projectId;
-          },
-          waitForProject: async (projectRef) => {
-            await waitForProject(projectRef);
-          },
-          openThread: (projectRef) => openThread(projectRef),
-        }),
+              ) ?? null,
+            createProject: async (environmentId, workspaceRoot) => {
+              const projectId = newProjectId();
+              const result = await createProject({
+                environmentId,
+                input: {
+                  projectId,
+                  title: inferProjectTitleFromPath(workspaceRoot),
+                  workspaceRoot,
+                  createWorkspaceRootIfMissing: false,
+                  defaultModelSelection: null,
+                },
+              });
+              if (result._tag === "Failure") {
+                const error = squashAtomCommandFailure(result);
+                throw error instanceof Error
+                  ? error
+                  : new Error("Cogenly could not add the repository.");
+              }
+              return projectId;
+            },
+            waitForProject: async (projectRef) => {
+              await waitForProject(projectRef);
+            },
+            openThread: (projectRef) => openThread(projectRef),
+          }),
   );
 
   useEffect(() => {

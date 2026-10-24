@@ -41,6 +41,7 @@ import * as AgentSessionScanner from "../project/AgentSessionScanner.ts";
 import * as T3Import from "../t3Import/T3ImportService.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as RepositoryCheckout from "../project/RepositoryCheckout.ts";
+import * as RepositoryIconResolver from "../project/RepositoryIconResolver.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
 import * as CheckpointCaptureService from "./CheckpointCaptureService.ts";
@@ -324,7 +325,9 @@ const layerT3ImportProvided = T3Import.layer.pipe(
   ),
 );
 const layerRepositoryCheckoutProvided = RepositoryCheckout.layer.pipe(
-  Layer.provide(Layer.mergeAll(layerProjectService, layerProjectLabelsProvided)),
+  Layer.provide(
+    Layer.mergeAll(layerProjectService, layerProjectLabelsProvided, ProjectLabelFolders.layer),
+  ),
 );
 const layerThreadLaunchProvided = ThreadLaunchService.layer.pipe(
   Layer.provide(
@@ -544,6 +547,11 @@ const layerProductionBase = Layer.mergeAll(
   layerProjectService,
   layerManagedProjectFoldersProvided,
   layerThreadLaunchProvided,
+  layerRepositoryCheckoutProvided,
+  RepositoryIconResolver.layer,
+  RepositoryCheckout.layerRelocation.pipe(
+    Layer.provide(Layer.mergeAll(layerRepositoryCheckoutProvided, layerProjectLabelsProvided)),
+  ),
   layerWorkHandoffProvided,
   layerThreadLifecycleProvided,
   layerAgentsProvided,
@@ -576,7 +584,14 @@ const layerProductionBase = Layer.mergeAll(
   layerCliCredentialsProvided,
   layerAccountConnectionsProvided,
   UsageLimitRecoveryWorker.layer.pipe(
-    Layer.provide(Layer.mergeAll(ProjectionStore.layer, layerThreadManagementProvided)),
+    Layer.provide(AgentStore.layer),
+    Layer.provide(
+      Layer.mergeAll(
+        ProjectionStore.layer,
+        layerThreadManagementProvided,
+        UsageLimitHandoff.layer.pipe(Layer.provide(layerThreadManagementProvided)),
+      ),
+    ),
   ),
   UsageLimitHandoff.layer.pipe(Layer.provide(layerThreadManagementProvided)),
   layerProviderContinuationWorkerProvided,

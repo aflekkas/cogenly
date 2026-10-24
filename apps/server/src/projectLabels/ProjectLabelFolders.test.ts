@@ -194,4 +194,78 @@ describe("project label folders", () => {
       expect(yield* fs.readFileString(path.join(taken, "someone-else.txt"))).toBe("not ours");
     }).pipe(Effect.provide(foldersLayer("label-folders-collision"))),
   );
+
+  it.effect("removes a deleted project's unused folder and keeps one holding anything", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const labels = yield* Labels.ProjectLabelService;
+      const folders = yield* Folders.ProjectLabelFolders;
+      const unused = (yield* labels.create({ name: "Unused" })).label;
+      const kept = (yield* labels.create({ name: "Kept" })).label;
+      const unusedDir = (yield* folders.dirForLabel(unused)).dir;
+      const keptDir = (yield* folders.dirForLabel(kept)).dir;
+      yield* fs.writeFileString(path.join(keptDir, "Resources", "brief.md"), "keep\n");
+      yield* labels.delete(unused.id);
+      yield* labels.delete(kept.id);
+      expect(yield* fs.exists(unusedDir)).toBe(false);
+      expect(yield* fs.readFileString(path.join(keptDir, "Resources", "brief.md"))).toBe("keep\n");
+      // What stays is an orphan, listed for the user to adopt.
+      expect((yield* labels.listOrphanFolders()).folders).toEqual([
+        { dirName: "Kept", path: keptDir, reason: "deleted_project", empty: false },
+      ]);
+    }).pipe(Effect.provide(labelsLayer("label-folders-delete"))),
+  );
+
+  it.effect("adopts a folder whose marker names a deleted project instead of making (2)", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const labels = yield* Labels.ProjectLabelService;
+      const folders = yield* Folders.ProjectLabelFolders;
+      const old = (yield* labels.create({ name: "Personal" })).label;
+      const dir = (yield* folders.dirForLabel(old)).dir;
+      yield* fs.writeFileString(path.join(dir, "Resources", "notes.md"), "mine\n");
+      yield* labels.delete(old.id);
+      const fresh = (yield* labels.create({ name: "Personal" })).label;
+      expect((yield* folders.dirForLabel(fresh)).dir).toBe(dir);
+      expect(yield* fs.readFileString(idFileOf(dir))).toContain(fresh.id);
+      expect(yield* fs.exists(`${dir} (2)`)).toBe(false);
+      expect(yield* fs.readFileString(path.join(dir, "Resources", "notes.md"))).toBe("mine\n");
+    }).pipe(Effect.provide(labelsLayer("label-folders-abandoned"))),
+  );
+
+  it.effect("lists orphan folders, adopts one as a project, and removes only empty ones", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const labels = yield* Labels.ProjectLabelService;
+      const folders = yield* Folders.ProjectLabelFolders;
+      const root = yield* folders.projectsRoot;
+      yield* fs.makeDirectory(path.join(root, "Old Client", "repos", "site"), { recursive: true });
+      yield* fs.makeDirectory(path.join(root, "Leftover", "Resources"), { recursive: true });
+      // Finder's `.DS_Store` does not make a skeleton hold anything.
+      yield* fs.writeFileString(path.join(root, "Leftover", ".DS_Store"), "");
+      // Never orphans: unfiled repositories and worktree containers.
+      yield* fs.makeDirectory(path.join(root, "Repositories"), { recursive: true });
+      yield* fs.makeDirectory(path.join(root, ".worktrees"), { recursive: true });
+      expect(
+        (yield* labels.listOrphanFolders()).folders.map((folder) => [folder.dirName, folder.empty]),
+      ).toEqual([
+        ["Leftover", true],
+        ["Old Client", false],
+      ]);
+      // A folder with work in it is never removed, only adopted.
+      expect(yield* labels.removeOrphanFolder({ dirName: "Old Client" })).toEqual({
+        removed: false,
+      });
+      expect(yield* labels.removeOrphanFolder({ dirName: "Leftover" })).toEqual({ removed: true });
+      expect(yield* fs.exists(path.join(root, "Leftover"))).toBe(false);
+      const { label } = yield* labels.adoptOrphanFolder({ dirName: "Old Client" });
+      expect(label.name).toBe("Old Client");
+      expect((yield* folders.dirForLabel(label)).dir).toBe(path.join(root, "Old Client"));
+      expect(yield* fs.exists(path.join(root, "Old Client", "repos", "site"))).toBe(true);
+      expect((yield* labels.listOrphanFolders()).folders).toEqual([]);
+    }).pipe(Effect.provide(labelsLayer("label-folders-orphans"))),
+  );
 });

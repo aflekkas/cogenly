@@ -54,6 +54,7 @@ import * as VcsStatusBroadcaster from "../../vcs/VcsStatusBroadcaster.ts";
 import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
 import * as ManagedProjectFolders from "../../project/ManagedProjectFolders.ts";
 import * as ProjectCloneTracker from "../../project/ProjectCloneTracker.ts";
+import * as RepositoryCheckout from "../../project/RepositoryCheckout.ts";
 import * as RepositoryIdentityResolver from "../../project/RepositoryIdentityResolver.ts";
 import * as ThreadLaunchService from "../../orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadSearch from "../../orchestration-v2/ThreadSearch.ts";
@@ -65,6 +66,7 @@ import * as Integrations from "../../integrations/Integrations.ts";
 import * as Machines from "../../machines/Machines.ts";
 import * as ProjectMove from "../../threadSync/ProjectMove.ts";
 import * as ThreadTransfer from "../../threadSync/ThreadTransfer.ts";
+import * as MachineSetup from "../../tailscale/MachineSetup.ts";
 import * as McpHttpServer from "../McpHttpServer.ts";
 import * as McpSessionRegistry from "../McpSessionRegistry.ts";
 import * as PreviewAutomationBroker from "../PreviewAutomationBroker.ts";
@@ -219,6 +221,7 @@ const layerStubServices = Layer.mergeAll(
   }),
   Layer.mock(ThreadTransfer.ThreadTransfer)({}),
   Layer.mock(ProjectMove.ProjectMove)({}),
+  Layer.mock(MachineSetup.MachineSetup)({}),
   Layer.mock(ProjectionStore.ProjectionStoreV2)({}),
   Layer.mock(DeviceService.DeviceService)({
     list: Effect.succeed({
@@ -267,6 +270,7 @@ const layerStubServices = Layer.mergeAll(
   }),
   Layer.mock(SourceControlRepositoryService.SourceControlRepositoryService)({}),
   Layer.mock(ProjectCloneTracker.ProjectCloneTracker)({}),
+  Layer.mock(RepositoryCheckout.RepositoryCheckout)({}),
   Layer.mock(RepositoryIdentityResolver.RepositoryIdentityResolver)({}),
   Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
   Layer.mock(UsageLimitHandoff.UsageLimitHandoffService)({}),
@@ -361,7 +365,15 @@ const smokeCases = [
   },
   {
     toolkit: "machines",
-    names: ["machines_list", "machines_move_threads", "project_move_to_machine"],
+    names: [
+      "machine_pair",
+      "machine_setup_status",
+      "machine_setup_step",
+      "machine_unpair",
+      "machines_list",
+      "machines_move_threads",
+      "project_move_to_machine",
+    ],
     tool: "machines_list",
     args: {},
     expected: { machines: [], link: { _tag: "standalone" } },
@@ -559,6 +571,9 @@ const smokeCases = [
       "project_label_link_repository",
       "project_label_unlink_repository",
       "project_label_clone_repository",
+      "project_label_remove_checkout",
+      "project_label_move_repository",
+      "project_folders_reconcile",
       "project_label_file_thread",
       "thread_move_project_folder",
       "thread_set_project_labels",
@@ -686,11 +701,13 @@ const smokeCases = [
       "pending_request_read",
       "pending_request_respond",
       "queue_cancel",
+      "queue_clear",
       "queue_edit",
       "queue_list",
       "queue_promote_to_steer",
       "queue_read",
       "queue_reorder",
+      "queue_send_all",
       "thread_configuration",
       "thread_configure",
       "thread_fork",

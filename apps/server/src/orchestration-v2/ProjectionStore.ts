@@ -24,6 +24,7 @@ import type {
   OrchestrationV2ConversationMessage,
   OrchestrationV2DomainEvent,
   OrchestrationV2ProjectedTurnItem,
+  OrchestrationV2ProviderLimitKind,
   OrchestrationV2ProviderThread,
   OrchestrationV2ProviderTurn,
   OrchestrationV2Run,
@@ -170,7 +171,17 @@ export type ProjectionLimitRecoveryCandidate = Pick<
   | "updatedAt"
   | "limitRecovery"
   | "snoozedUntil"
->;
+> & {
+  /** The stop's limit kind; absent reads as an exhausted quota. */
+  readonly limitKind?: OrchestrationV2ProviderLimitKind | undefined;
+  /** A delegated task waits on the thread, so it recovers from a limit on its own. */
+  readonly delegated?: boolean;
+  /**
+   * The recorded limit recovery is the stop just before this one: on the same
+   * instance, with no run finished since. False starts a new retry streak.
+   */
+  readonly retryChained?: boolean;
+};
 
 /** The thread fields pull request sync reads, for a thread with at least one link. */
 export type ProjectionThreadPullRequests = Pick<
@@ -3664,9 +3675,26 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           readonly completed_at: string | null;
           readonly failure_payload_json: string;
           readonly last_error: string | null;
+          readonly awaiting_task_id: string | null;
+          readonly retry_chained: number;
         }>`
           SELECT t.payload_json, r.run_id, r.completed_at,
             item.payload_json AS failure_payload_json,
+            awaiting_task.subagent_id AS awaiting_task_id,
+            -- The recorded recovery belongs to the stop just before this one:
+            -- same instance, and nothing finished in between.
+            CASE
+              WHEN previous.run_id IS NULL THEN 0
+              WHEN json_extract(previous.payload_json, '$.providerInstanceId')
+                IS NOT json_extract(r.payload_json, '$.providerInstanceId') THEN 0
+              WHEN EXISTS (
+                SELECT 1 FROM orchestration_v2_projection_runs done
+                WHERE done.thread_id = t.thread_id
+                  AND done.status = 'completed'
+                  AND julianday(done.completed_at) > julianday(previous.completed_at)
+              ) THEN 0
+              ELSE 1
+            END AS retry_chained,
             (
               SELECT json_extract(session.payload_json, '$.lastError')
               -- Keep bindings outermost: one provider instance can hold every session.
@@ -3700,6 +3728,17 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             ORDER BY error.updated_at DESC, error.ordinal DESC, error.turn_item_id DESC
             LIMIT 1
           )
+          -- A delegated task, its parent's or a follow-up, still waiting on this child.
+          LEFT JOIN orchestration_v2_projection_subagents awaiting_task ON awaiting_task.subagent_id = (
+            SELECT task.subagent_id FROM orchestration_v2_projection_subagents task
+            WHERE task.child_thread_id = t.thread_id
+              AND json_extract(task.payload_json, '$.origin') = 'app_owned'
+              AND json_extract(task.payload_json, '$.result') IS NULL
+            LIMIT 1
+          )
+          LEFT JOIN orchestration_v2_projection_runs previous
+            ON previous.run_id = json_extract(t.payload_json, '$.limitRecovery.runId')
+            AND previous.thread_id = t.thread_id
           WHERE t.deleted_at IS NULL
             AND ${locallyOwned(sql`t.thread_id`)}
             AND json_extract(t.payload_json, '$.archivedAt') IS NULL
@@ -3713,6 +3752,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 AND json_extract(t.payload_json, '$.limitRecovery.resetAt') IS json_extract(item.payload_json, '$.failure.resetAt')
                 AND json_extract(t.payload_json, '$.limitRecovery.autoResume') = 1
                 AND julianday(json_extract(item.payload_json, '$.failure.resetAt')) <= julianday(${DateTime.formatIso(options.now)})
+                AND COALESCE(julianday(json_extract(t.payload_json, '$.limitRecovery.retryAt')), 0) <= julianday(${DateTime.formatIso(options.now)})
                 AND (
                   json_extract(t.payload_json, '$.snoozedUntil') IS NULL
                   OR julianday(json_extract(t.payload_json, '$.snoozedUntil')) <= julianday(${DateTime.formatIso(options.now)})
@@ -3723,8 +3763,23 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                   json_extract(t.payload_json, '$.limitRecovery.runId') IS NOT r.run_id
                   OR json_extract(t.payload_json, '$.limitRecovery.resetAt') IS NOT json_extract(item.payload_json, '$.failure.resetAt')
                 )
-                AND (${booleanInt(options.autoResume)} OR ${booleanInt(options.snooze)})
-                AND julianday(json_extract(item.payload_json, '$.failure.resetAt')) > julianday(${DateTime.formatIso(options.now)})
+                AND (
+                  (
+                    (${booleanInt(options.autoResume)} OR ${booleanInt(options.snooze)})
+                    AND julianday(json_extract(item.payload_json, '$.failure.resetAt')) > julianday(${DateTime.formatIso(options.now)})
+                  )
+                  -- The server decides these stops itself. A short-term rate
+                  -- limit it retries, while recent: an old one is left for a
+                  -- person.
+                  OR (
+                    json_extract(item.payload_json, '$.failure.limitKind') = 'rate_limit'
+                    AND julianday(COALESCE(r.completed_at, json_extract(t.payload_json, '$.updatedAt'))) > julianday(${DateTime.formatIso(options.now)}) - 1
+                  )
+                  -- A delegated child's stop it hands off or resumes however
+                  -- old, while a task waits on it (limitRecoveryPending holds
+                  -- that task until the stop is decided).
+                  OR awaiting_task.subagent_id IS NOT NULL
+                )
               )
             )
             AND NOT EXISTS (
@@ -3756,6 +3811,9 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             pendingRuntimeRequest: null,
             limitRecovery: thread.limitRecovery ?? null,
             snoozedUntil: thread.snoozedUntil ?? null,
+            limitKind: item.type === "error" ? item.failure.limitKind : undefined,
+            delegated: row.awaiting_task_id !== null,
+            retryChained: row.retry_chained === 1,
           });
         }
         return candidates;

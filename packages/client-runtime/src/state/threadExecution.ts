@@ -108,15 +108,15 @@ export function deriveThreadActivityRun(
 }
 
 /**
- * Provider-native subagent threads never get app runs: their work is a runless
- * root turn whose status follows the subagent. Returns when that work started
- * while it is still active, so clients can show the same working state (and
- * timer) as a run. Stop, queue, and steer stay run-only.
+ * The work a provider runs on a native subagent's thread is a runless root turn
+ * whose status follows the subagent; only messages sent to the child give it runs. Returns
+ * when that work started while it is still active, so clients can show the
+ * same working state (and timer) as a run. Stop, queue, and steer stay run-only.
  */
 export function deriveRunlessWorkStartedAt(
   projection: OrchestrationV2ThreadProjection,
 ): string | null {
-  const status = deriveProviderSubagentStatus(projection);
+  const status = nativeSubagentRootStatus(projection);
   return status !== null && isOrchestrationV2WorkActive(status.status) ? status.startedAt : null;
 }
 
@@ -126,12 +126,7 @@ export interface ProviderSubagentStatus {
   readonly completedAt: string | null;
 }
 
-/**
- * Status of a provider-native subagent thread (see
- * isProviderNativeSubagentThread), read from its runless root turn. Null
- * until that root turn arrives, and for every other thread.
- */
-export function deriveProviderSubagentStatus(
+function nativeSubagentRootStatus(
   projection: OrchestrationV2ThreadProjection,
 ): ProviderSubagentStatus | null {
   if (!isProviderNativeSubagentThread(projection.thread)) return null;
@@ -144,6 +139,50 @@ export function deriveProviderSubagentStatus(
     startedAt: node.startedAt === null ? null : DateTime.formatIso(node.startedAt),
     completedAt: node.completedAt === null ? null : DateTime.formatIso(node.completedAt),
   };
+}
+
+const RUN_SUBAGENT_STATUS: Record<
+  OrchestrationV2ThreadProjection["runs"][number]["status"],
+  OrchestrationV2ExecutionNode["status"]
+> = {
+  preparing: "pending",
+  queued: "pending",
+  starting: "pending",
+  running: "running",
+  waiting: "waiting",
+  completed: "completed",
+  interrupted: "interrupted",
+  failed: "failed",
+  cancelled: "cancelled",
+  rolled_back: "cancelled",
+};
+
+/**
+ * Status of a provider-native subagent thread (see
+ * isProviderNativeSubagentThread): its runless root turn, until a message
+ * sent to the child gives it runs of its own, then its latest run. A message
+ * still queued behind the native work leaves the native status in place, and
+ * native work the parent starts again shows while it runs or once it is the
+ * latest work. Null until that root turn arrives, and for every other thread.
+ */
+export function deriveProviderSubagentStatus(
+  projection: OrchestrationV2ThreadProjection,
+): ProviderSubagentStatus | null {
+  const native = nativeSubagentRootStatus(projection);
+  if (native === null) return null;
+  const run = presentedLatestRun(projection);
+  if (run === null || run.startedAt === null) return native;
+  const own: ProviderSubagentStatus = {
+    status: RUN_SUBAGENT_STATUS[run.status],
+    startedAt: DateTime.formatIso(run.startedAt),
+    completedAt: run.completedAt === null ? null : DateTime.formatIso(run.completedAt),
+  };
+  if (isOrchestrationV2WorkActive(own.status)) return own;
+  if (isOrchestrationV2WorkActive(native.status)) return native;
+  return native.startedAt !== null &&
+    Date.parse(native.startedAt) > DateTime.toEpochMillis(run.startedAt)
+    ? native
+    : own;
 }
 
 /** The observed selection belongs to the active provider thread, never a previous handoff. */
@@ -198,7 +237,7 @@ const SUBAGENT_STATUS_LABELS: Record<OrchestrationV2ExecutionNode["status"], str
 };
 
 /**
- * One line for the read-only subagent bar: "Working 12s", "Completed in 34s",
+ * One line for the subagent banner: "Working 12s", "Completed in 34s",
  * or just the status when no duration is known.
  */
 export function formatProviderSubagentStatus(
