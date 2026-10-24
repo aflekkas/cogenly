@@ -386,7 +386,9 @@ jobs:
           # app's Updates popover shows the bullets and stops at "## Build".
           range="$SHA"
           if [[ -n "$PREVIOUS_TAG" ]]; then range="$PREVIOUS_TAG..$SHA"; fi
-          git log --first-parent --format=%s "$range" \
+          # Every non-merge commit, not first-parent: main lands PRs as merge
+          # commits, whose subjects carry no notes.
+          git log --no-merges --format=%s "$range" \
             | node -e 'const { renderReleaseNotes } = require("./.github/scripts/release-plan.cjs");
                 let input = "";
                 process.stdin.on("data", (chunk) => (input += chunk));

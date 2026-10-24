@@ -106,6 +106,13 @@ export function cliReleaseIndexPageUrl(page: number): string | null {
     : `https://api.github.com/repos/${CLI_RELEASE_REPOSITORY}/releases?per_page=100&page=${page}`;
 }
 
+/** GitHub's release for one exact version, or null without a release origin. */
+export function cliReleaseTagApiUrl(version: string): string | null {
+  return CLI_RELEASE_REPOSITORY === null
+    ? null
+    : `https://api.github.com/repos/${CLI_RELEASE_REPOSITORY}/releases/tags/v${encodeURIComponent(version)}`;
+}
+
 /**
  * Picks the newest version on a channel from the release index. Tags are
  * `v<version>`; the channel is decided by the same rule the runtime uses, so

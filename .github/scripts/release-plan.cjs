@@ -72,15 +72,17 @@ function assertReleaseAssets(checksums, version) {
   if (missing.length > 0) throw new Error(`SHA256SUMS lacks ${missing.join(", ")}.`);
 }
 
-// Release notes come from the first-parent commit subjects since the previous
-// prod tag. Conventional `type(scope): subject` lines are grouped for users;
+// Release notes come from the non-merge commit subjects since the previous
+// prod tag, newest first; a merged PR's commits count, its merge commit does not. Conventional `type(scope): subject` lines are grouped for users;
 // build, CI and test noise is left out. The app's Updates popover reads these
 // `## Group` headings and bullets, and stops at `## Build`.
 const NOTE_GROUPS = [
-  { title: "New", types: ["feat"] },
-  { title: "Fixes", types: ["fix"] },
-  { title: "Improvements", types: ["perf", null] },
+  { title: "New", types: ["feat"], more: "new features" },
+  { title: "Fixes", types: ["fix"], more: "fixes" },
+  { title: "Improvements", types: ["perf", null], more: "improvements" },
 ];
+// A big release lists the newest entries of each group and counts the rest.
+const MAX_NOTES_PER_GROUP = 15;
 const SKIPPED_TYPES = new Set([
   "build",
   "chore",
@@ -120,9 +122,16 @@ function renderReleaseNotes(subjects) {
     seen.add(entry.text.toLowerCase());
     grouped.get(entry.group).push(entry.text);
   }
-  const sections = [...grouped]
-    .filter(([, items]) => items.length > 0)
-    .map(([title, items]) => `## ${title}\n\n${items.map((item) => `- ${item}`).join("\n")}\n`);
+  const sections = NOTE_GROUPS.filter((group) => grouped.get(group.title).length > 0).map(
+    (group) => {
+      const items = grouped.get(group.title);
+      const shown = items.slice(0, MAX_NOTES_PER_GROUP).map((item) => `- ${item}`);
+      if (items.length > MAX_NOTES_PER_GROUP) {
+        shown.push(`- And ${items.length - MAX_NOTES_PER_GROUP} more ${group.more}`);
+      }
+      return `## ${group.title}\n\n${shown.join("\n")}\n`;
+    },
+  );
   return sections.length > 0
     ? sections.join("\n")
     : "## Improvements\n\n- Behind-the-scenes maintenance\n";
