@@ -71,6 +71,48 @@ function optionText(option: ProjectOption): string {
   }
 }
 
+/** Share picker eligibility with the toolbar so absent controls take no layout space. */
+export function useComposerProjectPickerState(
+  environmentId: EnvironmentId,
+  threadId: ThreadId | null,
+  draftId: DraftId | null,
+) {
+  const environmentIds = useMemo(() => [environmentId], [environmentId]);
+  const directory = useProjectLabelDirectory(environmentIds);
+  const thread = useThreadShell(
+    useMemo(
+      () => (threadId === null ? null : scopeThreadRef(environmentId, threadId)),
+      [environmentId, threadId],
+    ),
+  );
+  const canMove = useAtomValue(
+    serverEnvironment.moveThreadProjectFolder.permissionAtom(environmentId),
+  );
+  const draft = useComposerDraftStore((store) =>
+    draftId === null ? undefined : store.draftThreadsByThreadKey[draftId],
+  );
+  const draftSurface = draft?.surface;
+  const isWorkDraft = thread === null && draftSurface === "work";
+  // Chats, and Work drafts: existing Work follows its repository (moved from
+  // its row's menu), and an agent's conversation belongs to the agent.
+  const surface = thread ? thread.source.surface : draftSurface;
+  // A project's own conversation is that project's for good, so it has no
+  // picker: the page it lives on already names the project.
+  const isChat =
+    surface !== "work" &&
+    surface !== "builder" &&
+    thread?.source.agent === undefined &&
+    !(thread !== null && isProjectChatThread(thread, directory.labels));
+
+  return {
+    directory,
+    thread,
+    draft,
+    isWorkDraft,
+    canPickProject: canMove && (isChat || isWorkDraft),
+  };
+}
+
 /**
  * The composer toolbar's project control: which project this chat belongs to.
  * A draft keeps its pick until it is sent (PendingProjectFolderCoordinator
@@ -96,18 +138,15 @@ export function ComposerProjectPicker(props: {
   readonly appearance?: "toolbar" | "hero" | "headline";
 }) {
   const { environmentId, threadId } = props;
-  const environmentIds = useMemo(() => [environmentId], [environmentId]);
-  const directory = useProjectLabelDirectory(environmentIds);
-  const thread = useThreadShell(
-    useMemo(() => scopeThreadRef(environmentId, threadId), [environmentId, threadId]),
+  const { directory, thread, draft, isWorkDraft, canPickProject } = useComposerProjectPickerState(
+    environmentId,
+    threadId,
+    props.draftId,
   );
   const pending = usePendingProjectFolderStore((state) => {
     const entry = state.byThreadId[threadId];
     return entry?.environmentId === environmentId ? entry : null;
   });
-  const canMove = useAtomValue(
-    serverEnvironment.moveThreadProjectFolder.permissionAtom(environmentId),
-  );
   const canCreate = useAtomValue(
     serverEnvironment.createProjectLabel.permissionAtom(environmentId),
   );
@@ -122,11 +161,6 @@ export function ComposerProjectPicker(props: {
     () => directory.active.filter((entry) => entry.environmentId === environmentId),
     [directory.active, environmentId],
   );
-  const draft = useComposerDraftStore((store) =>
-    props.draftId === null ? undefined : store.draftThreadsByThreadKey[props.draftId],
-  );
-  const draftSurface = draft?.surface;
-  const isWorkDraft = thread === null && draftSurface === "work";
   // The project a Work draft's repository is in, which it follows unless another is picked.
   const repositoryFolder =
     isWorkDraft && draft
@@ -170,17 +204,6 @@ export function ComposerProjectPicker(props: {
     return result;
   }, [canCreate, projects, query]);
 
-  // Chats, and Work drafts: existing Work follows its repository (moved from
-  // its row's menu), and an agent's conversation belongs to the agent.
-  const surface = thread ? thread.source.surface : draftSurface;
-  // A project's own conversation is that project's for good, so it has no
-  // picker: the page it lives on already names the project.
-  const isChat =
-    surface !== "work" &&
-    surface !== "builder" &&
-    thread?.source.agent === undefined &&
-    !(thread !== null && isProjectChatThread(thread, directory.labels));
-
   const isHeadline = props.appearance === "headline";
   const headlineIcon = (
     <ProjectFolderIcon
@@ -189,7 +212,7 @@ export function ComposerProjectPicker(props: {
       style={HERO_INLINE_ICON_STYLE}
     />
   );
-  if (!canMove || !(isChat || isWorkDraft)) {
+  if (!canPickProject) {
     // The Work hero still names its project when it cannot be changed here.
     return isHeadline ? (
       <WorkHeroCrumbText

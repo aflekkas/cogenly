@@ -155,7 +155,8 @@ type SubagentTurnItem = Extract<OrchestrationV2TurnItem, { readonly type: "subag
 type OpenRunOwnedSubagentProjection = {
   readonly subagents: ReadonlyMap<NodeId, OrchestrationV2Subagent>;
   readonly turnItems: ReadonlyMap<NodeId, SubagentTurnItem>;
-  readonly childTurnItems: ReadonlyMap<TurnItemId, OrchestrationV2TurnItem>;
+  /** Root reasoning/replies and open output in linked native child threads. */
+  readonly outputTurnItems: ReadonlyMap<TurnItemId, OrchestrationV2TurnItem>;
   readonly nodes: ReadonlyMap<NodeId, OrchestrationV2ExecutionNode>;
   /** Child threads once linked by a root-run subagent row; kept for cascade. */
   readonly linkedChildThreadIds: ReadonlySet<ThreadId>;
@@ -190,7 +191,7 @@ function emptyOpenRunOwnedSubagentProjection(): OpenRunOwnedSubagentProjection {
   return {
     subagents: new Map(),
     turnItems: new Map(),
-    childTurnItems: new Map(),
+    outputTurnItems: new Map(),
     nodes: new Map(),
     linkedChildThreadIds: new Set(),
   };
@@ -298,7 +299,7 @@ export function cascadeTerminalizeRunOwnedSubagents(input: {
         });
       }
     }
-    for (const turnItem of input.open.childTurnItems.values()) {
+    for (const turnItem of input.open.outputTurnItems.values()) {
       if (!childThreadIds.has(turnItem.threadId) || isSettledTurnItemStatus(turnItem.status)) {
         continue;
       }
@@ -673,10 +674,37 @@ export const layer: Layer.Layer<
         }
         const allocateEventId = () => idAllocator.allocate.event({ threadId: input.run.threadId });
         const open = input.openRunOwnedSubagents ?? emptyOpenRunOwnedSubagentProjection();
+        // Reasoning and streamed replies cannot outlive their own provider turn.
+        // Providers can omit the final item event on errors or an empty finish.
+        const rootOutputEvents = yield* Effect.forEach(
+          [...open.outputTurnItems.values()].filter(
+            (item) =>
+              item.threadId === input.run.threadId &&
+              item.runId === input.run.id &&
+              (item.type === "reasoning" || item.type === "assistant_message"),
+          ),
+          (item) =>
+            Effect.map(allocateEventId(), (id) => ({
+              id,
+              type: "turn-item.updated" as const,
+              threadId: input.run.threadId,
+              runId: input.run.id,
+              ...(item.nodeId === null ? {} : { nodeId: item.nodeId }),
+              providerInstanceId: input.run.providerInstanceId,
+              occurredAt: completedAt,
+              payload: {
+                ...item,
+                ...("streaming" in item ? { streaming: false } : {}),
+                status: input.terminal.status,
+                completedAt,
+                updatedAt: completedAt,
+              },
+            })),
+        );
         const hasOpenSubagentProjection =
           open.subagents.size > 0 ||
           open.turnItems.size > 0 ||
-          open.childTurnItems.size > 0 ||
+          open.outputTurnItems.size > 0 ||
           open.nodes.size > 0;
         const cascadedSubagentEvents =
           isRunOwnedSubagentTerminalStatus(input.terminal.status) && hasOpenSubagentProjection
@@ -739,6 +767,7 @@ export const layer: Layer.Layer<
                 ]
               : [],
           events: [
+            ...rootOutputEvents,
             // Terminalize open run-owned subagent rows before the root run
             // settles so projections never keep a forever-running subagent card.
             ...cascadedSubagentEvents,
@@ -1167,18 +1196,22 @@ export const layer: Layer.Layer<
                   });
                 }
                 if (
-                  belongsToOwnedChildThread &&
+                  (belongsToOwnedChildThread ||
+                    (belongsToRootRun &&
+                      event.turnItem.threadId === input.run.threadId &&
+                      (event.turnItem.type === "reasoning" ||
+                        event.turnItem.type === "assistant_message"))) &&
                   (event.turnItem.runId === null || belongsToRootRun) &&
                   deliverable
                 ) {
                   yield* Ref.update(openRunOwnedSubagents, (current) => {
-                    const childTurnItems = new Map(current.childTurnItems);
+                    const outputTurnItems = new Map(current.outputTurnItems);
                     if (isSettledTurnItemStatus(event.turnItem.status)) {
-                      childTurnItems.delete(event.turnItem.id);
+                      outputTurnItems.delete(event.turnItem.id);
                     } else {
-                      childTurnItems.set(event.turnItem.id, event.turnItem);
+                      outputTurnItems.set(event.turnItem.id, event.turnItem);
                     }
-                    return { ...current, childTurnItems };
+                    return { ...current, outputTurnItems };
                   });
                 }
                 if (belongsToRootRun && event.turnItem.type === "subagent") {

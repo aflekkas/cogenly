@@ -520,6 +520,53 @@ describe("startNewThreadForProject", () => {
 });
 
 describe("hasServerAcknowledgedLocalDispatch", () => {
+  it("does not release a new send when an older terminal projection arrives late", () => {
+    const newer = {
+      ...completedTurn,
+      runId: RunId.make("newer-turn"),
+      requestedAt: "2026-03-29T00:01:00.000Z",
+    };
+    const localDispatch = createLocalDispatchSnapshot(
+      makeThread({ latestRun: newer, runtime: readySession }),
+    );
+    expect(
+      hasServerAcknowledgedLocalDispatch({
+        localDispatch,
+        phase: "connecting",
+        latestRun: completedTurn,
+        runtime: { ...readySession, status: "starting", activeRunId: newer.runId },
+        hasPendingApproval: false,
+        hasPendingUserInput: false,
+        threadError: null,
+      }),
+    ).toBe(false);
+  });
+  it.each(["completed", "failed", "cancelled", "interrupted", "rolled_back"] as const)(
+    "releases optimistic activity when a newer turn is %s before stale connecting state catches up",
+    (status) => {
+      const localDispatch = createLocalDispatchSnapshot(
+        makeThread({ latestRun: completedTurn, runtime: readySession }),
+      );
+      const ended = {
+        ...completedTurn,
+        runId: RunId.make("turn-ended-without-output"),
+        status,
+        startedAt: null,
+        completedAt: "2026-03-29T00:01:30.000Z",
+      };
+      expect(
+        hasServerAcknowledgedLocalDispatch({
+          localDispatch,
+          phase: "connecting",
+          latestRun: ended,
+          runtime: { ...readySession, status: "starting", activeRunId: ended.runId },
+          hasPendingApproval: false,
+          hasPendingUserInput: false,
+          threadError: null,
+        }),
+      ).toBe(true);
+    },
+  );
   it("does not acknowledge unchanged server state", () => {
     const localDispatch = createLocalDispatchSnapshot(
       makeThread({ latestRun: completedTurn, runtime: readySession }),

@@ -1079,6 +1079,30 @@ export function hasServerAcknowledgedLocalDispatch(input: {
   if (input.hasPendingApproval || input.hasPendingUserInput || Boolean(input.threadError)) {
     return true;
   }
+  const latestRun = input.latestRun ?? null;
+  const latestRunChanged =
+    input.localDispatch.latestRunId !== (latestRun?.runId ?? null) ||
+    input.localDispatch.latestRunRequestedAt !== (latestRun?.requestedAt ?? null) ||
+    input.localDispatch.latestRunStartedAt !== (latestRun?.startedAt ?? null) ||
+    input.localDispatch.latestRunCompletedAt !== (latestRun?.completedAt ?? null);
+  // A turn can fail before it starts or finish before the shell catches up.
+  // Its terminal outcome releases the optimistic activity even if another
+  // projection still says connecting/running.
+  if (
+    latestRunChanged &&
+    latestRun !== null &&
+    (latestRun.runId === input.localDispatch.latestRunId ||
+      input.localDispatch.latestRunRequestedAt === null ||
+      (latestRun.requestedAt != null &&
+        Date.parse(latestRun.requestedAt) >=
+          Date.parse(input.localDispatch.latestRunRequestedAt))) &&
+    (latestRun.status === "completed" ||
+      latestRun.status === "failed" ||
+      latestRun.status === "cancelled" ||
+      latestRun.status === "interrupted" ||
+      latestRun.status === "rolled_back")
+  )
+    return true;
   // The thread shell can report a preparing, starting or already running run
   // before the detail projection behind `phase` loads, so either source still
   // connecting, or the shell running while the detail has not loaded, holds
@@ -1094,15 +1118,9 @@ export function hasServerAcknowledgedLocalDispatch(input: {
     return false;
   }
 
-  const latestRun = input.latestRun ?? null;
   const runtime = input.runtime ?? null;
   const latestUserMessageChanged =
     input.localDispatch.latestUserMessageId !== (input.latestUserMessageId ?? null);
-  const latestRunChanged =
-    input.localDispatch.latestRunId !== (latestRun?.runId ?? null) ||
-    input.localDispatch.latestRunRequestedAt !== (latestRun?.requestedAt ?? null) ||
-    input.localDispatch.latestRunStartedAt !== (latestRun?.startedAt ?? null) ||
-    input.localDispatch.latestRunCompletedAt !== (latestRun?.completedAt ?? null);
 
   if (input.phase === "running") {
     if (latestUserMessageChanged) {

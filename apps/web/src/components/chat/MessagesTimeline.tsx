@@ -2,6 +2,7 @@ import { ThreadFindTimelineContext } from "./ThreadFindProvider";
 import { shouldPreserveAssistantLineBreaks } from "@t3tools/shared/markdownPipeline";
 import { MarkdownFindContext, useFindRevealRef } from "./markdownFindContext";
 import { useChatCanvas } from "./ChatCanvasContext";
+import { useTimelineMinimapClearance } from "./useTimelineMinimapClearance";
 import { useMediaQuery } from "~/hooks/useMediaQuery";
 import { DisclosureChevron } from "../ui/disclosure";
 import {
@@ -2115,17 +2116,12 @@ function TimelineMinimap({
   onSelect: (item: TimelineMinimapItem) => void;
 }) {
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
-  // The rail's drawn height caps how many marks it holds (see buildTimelineMinimapMarks).
-  const [railHeight, setRailHeight] = useState(0);
-  const railRef = useCallback((node: HTMLDivElement | null) => {
-    if (!node) return;
-    const measure = () => {
-      const height = Math.round(node.getBoundingClientRect().height);
-      setRailHeight((current) => (current === height ? current : height));
-    };
-    measure();
-    return observeResize(node, measure);
-  }, []);
+  const {
+    ref: restingRailRef,
+    top: railTop,
+    height: railHeight,
+    animate: railAnimate,
+  } = useTimelineMinimapClearance(hitStripWidth > 0);
   const marks = useMemo(
     () => buildTimelineMinimapMarks(items, resolveTimelineMinimapMarkBudget(railHeight)),
     [items, railHeight],
@@ -2260,12 +2256,7 @@ function TimelineMinimap({
     >
       <div className="relative h-full w-full select-none">
         <div
-          className={cn(
-            "absolute top-1/2 right-3 -translate-y-1/2",
-            // The strip is width-capped to the side gutter so it never overlays
-            // the centered content column; with no usable gutter it goes inert.
-            hitStripWidth > 0 && !passThrough ? "pointer-events-auto" : "pointer-events-none",
-          )}
+          className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2"
           onMouseDown={() => {
             if (pressedOnStripRef.current) return;
             pressedOnStripRef.current = true;
@@ -2276,156 +2267,167 @@ function TimelineMinimap({
           onMouseMove={(event) => {
             if (event.buttons !== 0 && !pressedOnStripRef.current) setPassThrough(true);
           }}
-          ref={railRef}
+          ref={restingRailRef}
           style={{
             height: resolveTimelineMinimapHeightStyle(items.length),
             width: resolveTimelineMinimapInteractiveWidth(hitStripWidth, activeItem !== null),
           }}
         >
-          <TimelineMinimapNavigationButton
-            direction="previous"
-            disabled={previousItem === null}
-            interactive={navigationInteractive}
-            onClick={() => {
-              if (previousItem) onSelect(previousItem);
-            }}
-          />
-          <button
-            aria-label={`Jump to message: ${activeItem?.userText ?? "User message"}`}
-            className="absolute inset-y-0 right-0 w-full cursor-pointer bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
-            onBlur={() => setActiveIndex(null)}
-            onClick={(event) => {
-              if (timelineMinimapEventTargetsPreview(event.target)) {
-                return;
-              }
-              const nextIndex = resolveActiveIndexFromPointer(event);
-              const selectedItem = nextIndex === null ? null : (items[nextIndex] ?? null);
-              if (selectedItem) {
-                onSelect(selectedItem);
-              }
-              event.currentTarget.blur();
-            }}
-            onFocus={() => setActiveIndex((current) => current ?? resolvedCurrentIndex ?? 0)}
-            onKeyDown={(event) => {
-              if (event.key === "ArrowDown") {
-                event.preventDefault();
-                moveActiveIndex(1);
-              } else if (event.key === "ArrowUp") {
-                event.preventDefault();
-                moveActiveIndex(-1);
-              } else if (event.key === "Home") {
-                event.preventDefault();
-                setActiveIndex(marks[0]?.itemIndex ?? 0);
-              } else if (event.key === "End") {
-                event.preventDefault();
-                setActiveIndex(marks.at(-1)?.itemIndex ?? items.length - 1);
-              } else if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                if (activeItem) {
-                  onSelect(activeItem);
-                }
-              }
-            }}
-            onMouseLeave={() => setActiveIndex(null)}
-            onMouseMove={(event) => {
-              if (event.buttons !== 0 && !pressedOnStripRef.current) return;
-              updateActiveIndexFromPointer(event);
-            }}
-            onMouseDown={(event) => {
-              if (timelineMinimapEventTargetsPreview(event.target)) {
-                return;
-              }
-              event.preventDefault();
-            }}
-            type="button"
+          <div
+            className={cn(
+              "absolute right-0 w-full",
+              railAnimate &&
+                "transition-[top,height] duration-(--motion-duration-base) ease-standard motion-reduce:transition-none",
+              // Only the moved rail catches input; its resting box lets clicks through.
+              hitStripWidth > 0 && !passThrough ? "pointer-events-auto" : "pointer-events-none",
+            )}
+            style={{ top: railTop, height: railHeight || "100%" }}
           >
-            <div className="absolute top-0 right-3 h-full w-px bg-border/15" />
-            {marks.map((mark, ordinal) => {
-              const activeDistance =
-                activeMarkOrdinal === null ? null : Math.abs(ordinal - activeMarkOrdinal);
-              return (
-                // Compositor-friendly on purpose: the hover fisheye flips a band
-                // of marks on every pointer move, so a mark animates only
-                // transform and opacity. Width tiers are a scale-x on a fixed
-                // w-6 box; never background-color or width, which would force
-                // main-thread style/layout/paint for each transition.
-                <span
-                  aria-hidden="true"
-                  className={cn(
-                    "pointer-events-none absolute right-0 h-0.5 w-6 origin-right -translate-y-1/2 rounded-full transition-transform duration-200 ease-out motion-reduce:transition-none",
-                    // Agent and automation sends stay faint, so the rail reads as
-                    // where the user spoke.
-                    mark.typed ? "bg-muted-foreground/40" : "bg-muted-foreground/15",
-                    activeDistance === 0
-                      ? "scale-x-100"
-                      : activeDistance === 1
-                        ? "scale-x-[0.667]"
-                        : activeDistance === 2
-                          ? "scale-x-[0.417]"
-                          : "scale-x-[0.333]",
-                  )}
-                  data-minimap-strip
-                  key={mark.key}
-                  style={{ top: `${mark.topPercent}%` }}
-                >
-                  {/* The one bright mark (hovered, else being read) fades an overlay in,
-                      never repainting its fill, so moving it is an opacity cross-fade. */}
+            <TimelineMinimapNavigationButton
+              direction="previous"
+              disabled={previousItem === null}
+              interactive={navigationInteractive}
+              onClick={() => {
+                if (previousItem) onSelect(previousItem);
+              }}
+            />
+            <button
+              aria-label={`Jump to message: ${activeItem?.userText ?? "User message"}`}
+              className="absolute inset-y-0 right-0 w-full cursor-pointer bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
+              onBlur={() => setActiveIndex(null)}
+              onClick={(event) => {
+                if (timelineMinimapEventTargetsPreview(event.target)) {
+                  return;
+                }
+                const nextIndex = resolveActiveIndexFromPointer(event);
+                const selectedItem = nextIndex === null ? null : (items[nextIndex] ?? null);
+                if (selectedItem) {
+                  onSelect(selectedItem);
+                }
+                event.currentTarget.blur();
+              }}
+              onFocus={() => setActiveIndex((current) => current ?? resolvedCurrentIndex ?? 0)}
+              onKeyDown={(event) => {
+                if (event.key === "ArrowDown") {
+                  event.preventDefault();
+                  moveActiveIndex(1);
+                } else if (event.key === "ArrowUp") {
+                  event.preventDefault();
+                  moveActiveIndex(-1);
+                } else if (event.key === "Home") {
+                  event.preventDefault();
+                  setActiveIndex(marks[0]?.itemIndex ?? 0);
+                } else if (event.key === "End") {
+                  event.preventDefault();
+                  setActiveIndex(marks.at(-1)?.itemIndex ?? items.length - 1);
+                } else if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  if (activeItem) {
+                    onSelect(activeItem);
+                  }
+                }
+              }}
+              onMouseLeave={() => setActiveIndex(null)}
+              onMouseMove={(event) => {
+                if (event.buttons !== 0 && !pressedOnStripRef.current) return;
+                updateActiveIndexFromPointer(event);
+              }}
+              onMouseDown={(event) => {
+                if (timelineMinimapEventTargetsPreview(event.target)) {
+                  return;
+                }
+                event.preventDefault();
+              }}
+              type="button"
+            >
+              <div className="absolute top-0 right-3 h-full w-px bg-border/15" />
+              {marks.map((mark, ordinal) => {
+                const activeDistance =
+                  activeMarkOrdinal === null ? null : Math.abs(ordinal - activeMarkOrdinal);
+                return (
+                  // Compositor-friendly on purpose: the hover fisheye flips a band
+                  // of marks on every pointer move, so a mark animates only
+                  // transform and opacity. Width tiers are a scale-x on a fixed
+                  // w-6 box; never background-color or width, which would force
+                  // main-thread style/layout/paint for each transition.
                   <span
+                    aria-hidden="true"
                     className={cn(
-                      "absolute inset-0 rounded-full bg-muted-foreground/70 transition-opacity duration-(--motion-duration-base) ease-out",
-                      ordinal === highlightOrdinal ? "opacity-100" : "opacity-0",
+                      "pointer-events-none absolute right-0 h-0.5 w-6 origin-right -translate-y-1/2 rounded-full transition-transform duration-200 ease-out motion-reduce:transition-none",
+                      // Agent and automation sends stay faint, so the rail reads as
+                      // where the user spoke.
+                      mark.typed ? "bg-muted-foreground/40" : "bg-muted-foreground/15",
+                      activeDistance === 0
+                        ? "scale-x-100"
+                        : activeDistance === 1
+                          ? "scale-x-[0.667]"
+                          : activeDistance === 2
+                            ? "scale-x-[0.417]"
+                            : "scale-x-[0.333]",
                     )}
-                  />
-                </span>
-              );
-            })}
-            {shownPreview ? (
-              <span
-                aria-hidden={!previewOpen}
-                className={cn(
-                  "absolute right-8 w-80 origin-right cursor-text select-text duration-200 ease-out motion-reduce:transition-opacity",
-                  previewGlides
-                    ? "transition-[top,translate,opacity,scale]"
-                    : "transition-[opacity,scale]",
-                  previewOpen
-                    ? "pointer-events-auto scale-100 opacity-100"
-                    : "pointer-events-none scale-95 opacity-0 motion-reduce:scale-100",
-                )}
-                data-minimap-preview
-                onMouseMove={(event) => event.stopPropagation()}
-                style={{
-                  top: `${activeTopPercent}%`,
-                  translate: `0 ${activeTooltipTranslate}`,
-                }}
-              >
-                <span className="dropdown-glass surface-raised surface-raised-floating block rounded-xl p-3 text-left text-popover-foreground">
-                  <span className="block max-w-full overflow-hidden text-ellipsis whitespace-nowrap text-sm font-medium leading-5">
-                    {shownPreview.userText ?? "User message"}
-                  </span>
-                  {shownPreview.assistantText ? (
+                    data-minimap-strip
+                    key={mark.key}
+                    style={{ top: `${mark.topPercent}%` }}
+                  >
+                    {/* The one bright mark (hovered, else being read) fades an overlay in,
+                        never repainting its fill, so moving it is an opacity cross-fade. */}
                     <span
-                      className="mt-1 max-h-[3.75rem] overflow-hidden text-muted-foreground text-sm leading-5"
-                      style={{
-                        display: "-webkit-box",
-                        WebkitBoxOrient: "vertical",
-                        WebkitLineClamp: 3,
-                      }}
-                    >
-                      {shownPreview.assistantText}
+                      className={cn(
+                        "absolute inset-0 rounded-full bg-muted-foreground/70 transition-opacity duration-(--motion-duration-base) ease-out",
+                        ordinal === highlightOrdinal ? "opacity-100" : "opacity-0",
+                      )}
+                    />
+                  </span>
+                );
+              })}
+              {shownPreview ? (
+                <span
+                  aria-hidden={!previewOpen}
+                  className={cn(
+                    "absolute right-8 w-80 origin-right cursor-text select-text duration-200 ease-out motion-reduce:transition-opacity",
+                    previewGlides
+                      ? "transition-[top,translate,opacity,scale]"
+                      : "transition-[opacity,scale]",
+                    previewOpen
+                      ? "pointer-events-auto scale-100 opacity-100"
+                      : "pointer-events-none scale-95 opacity-0 motion-reduce:scale-100",
+                  )}
+                  data-minimap-preview
+                  onMouseMove={(event) => event.stopPropagation()}
+                  style={{
+                    top: `${activeTopPercent}%`,
+                    translate: `0 ${activeTooltipTranslate}`,
+                  }}
+                >
+                  <span className="dropdown-glass surface-raised surface-raised-floating block rounded-xl p-3 text-left text-popover-foreground">
+                    <span className="block max-w-full overflow-hidden text-ellipsis whitespace-nowrap text-sm font-medium leading-5">
+                      {shownPreview.userText ?? "User message"}
                     </span>
-                  ) : null}
+                    {shownPreview.assistantText ? (
+                      <span
+                        className="mt-1 max-h-[3.75rem] overflow-hidden text-muted-foreground text-sm leading-5"
+                        style={{
+                          display: "-webkit-box",
+                          WebkitBoxOrient: "vertical",
+                          WebkitLineClamp: 3,
+                        }}
+                      >
+                        {shownPreview.assistantText}
+                      </span>
+                    ) : null}
+                  </span>
                 </span>
-              </span>
-            ) : null}
-          </button>
-          <TimelineMinimapNavigationButton
-            direction="next"
-            disabled={nextItem === null}
-            interactive={navigationInteractive}
-            onClick={() => {
-              if (nextItem) onSelect(nextItem);
-            }}
-          />
+              ) : null}
+            </button>
+            <TimelineMinimapNavigationButton
+              direction="next"
+              disabled={nextItem === null}
+              interactive={navigationInteractive}
+              onClick={() => {
+                if (nextItem) onSelect(nextItem);
+              }}
+            />
+          </div>
         </div>
       </div>
     </div>

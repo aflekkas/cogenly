@@ -147,8 +147,8 @@ const DEFAULT_ANNOTATION_THEME: DesktopPreviewAnnotationTheme = {
   foreground: "oklch(0.269 0 0)",
   popover: "white",
   popoverForeground: "oklch(0.269 0 0)",
-  // The brand orange, as the app sends it (annotationTheme.ts).
-  primary: "#c94a14",
+  // Info blue, as the app sends it (annotationTheme.ts).
+  primary: "#3b82f6",
   primaryForeground: "white",
   muted: "rgb(0 0 0 / 4%)",
   mutedForeground: "oklch(0.556 0 0)",

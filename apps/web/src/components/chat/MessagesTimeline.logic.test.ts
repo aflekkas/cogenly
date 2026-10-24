@@ -14,6 +14,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import type { TimelineEntry, WorkLogEntry } from "../../session-logic";
 import type { ChatMessage } from "../../types";
+import { pendingSubagentCompletions } from "./pendingSubagentCompletions.logic";
 import {
   collapseRestartMarkers,
   collapseWorkEntryRuns,
@@ -37,7 +38,7 @@ function messageEntry(
   id: string,
   role: ChatMessage["role"],
   options: { streaming?: boolean; at: number },
-): TimelineEntry {
+): Extract<TimelineEntry, { kind: "message" }> {
   const timestamp = new Date(Date.UTC(2026, 0, 1, 0, 0, options.at)).toISOString();
   return {
     id,
@@ -250,6 +251,75 @@ describe("collapseWorkEntryRuns", () => {
   });
 });
 
+describe("terminal reasoning", () => {
+  const thinking: TimelineEntry = {
+    id: "unfinished-thought",
+    kind: "work",
+    createdAt: runningRun.startedAt!,
+    entry: {
+      id: "unfinished-thought",
+      createdAt: runningRun.startedAt!,
+      runId,
+      label: "Thinking",
+      detail: "I should inspect the source.",
+      itemType: "reasoning",
+      tone: "thinking",
+      toolLifecycleStatus: "inProgress",
+    },
+  };
+  it.each(["completed", "failed", "cancelled", "interrupted"] as const)(
+    "settles the last reasoning item when its run is %s without a final item event",
+    (status) => {
+      const rows = deriveMessagesTimelineRows({
+        timelineEntries: [messageEntry("user", "user", { at: 0 }), thinking],
+        latestRun: { ...completedRun, status },
+        runningRunId: null,
+        isWorking: false,
+        turnDiffSummaries: [],
+        supportsConversationRollback: false,
+        expandedWorkGroupIds: new Set(["work-group:unfinished-thought"]),
+      });
+      expect(
+        rows.some(
+          (row) =>
+            row.kind === "thinking" ||
+            row.kind === "working" ||
+            (row.kind === "work-live" && row.active),
+        ),
+      ).toBe(false);
+      const entries = rows.flatMap((row) => (row.kind === "work" ? row.groupedEntries : []));
+      expect(entries.every((entry) => entry.toolLifecycleStatus !== "inProgress")).toBe(true);
+    },
+  );
+
+  it("keeps a running turn's last thought live, then settles it on supersession", () => {
+    expect(rowsFor([thinking], true).some((row) => row.kind === "work-live" && row.active)).toBe(
+      true,
+    );
+    const laterRun = { ...runningRun, runId: RunId.make("resumed-run") };
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: [
+        thinking,
+        {
+          ...messageEntry("later-prompt", "user", { at: 10 }),
+          message: {
+            ...messageEntry("later-prompt", "user", { at: 10 }).message,
+            runId: laterRun.runId,
+          },
+        },
+      ],
+      latestRun: laterRun,
+      runningRunId: laterRun.runId,
+      isWorking: true,
+      turnDiffSummaries: [],
+      supportsConversationRollback: false,
+    });
+    expect(
+      rows.some((row) => row.kind === "work-live" && row.entry.id === thinking.id && row.active),
+    ).toBe(false);
+  });
+});
+
 describe("a turn's delegations read as one subagent row", () => {
   const at = (second: number) => DateTime.makeUnsafe(Date.UTC(2026, 0, 1, 0, 0, second));
   const base = (id: string, second: number) => ({
@@ -300,14 +370,19 @@ describe("a turn's delegations read as one subagent row", () => {
       },
     };
   };
-  const child = (id: string, second: number, prompt: string): TimelineEntry => ({
+  const child = (
+    id: string,
+    second: number,
+    prompt: string,
+    status: OrchestrationV2TurnItem["status"] = "running",
+  ): Extract<TimelineEntry, { kind: "event" }> => ({
     id,
     kind: "event",
     createdAt: DateTime.formatIso(at(second)),
     projectedItem: projected({
       ...base(id, second),
       type: "subagent",
-      status: "running",
+      status,
       subagentId: NodeId.make(`node-${id}`),
       origin: "app_owned",
       driver: ProviderDriverKind.make("claudeAgent"),
@@ -316,6 +391,146 @@ describe("a turn's delegations read as one subagent row", () => {
       prompt,
       result: null,
     }),
+  });
+
+  it.each(["failed", "completed", "cancelled", "interrupted"] as const)(
+    "keeps a %s delegated row before later messages",
+    (status) => {
+      const laterRunId = RunId.make("later-parent-run");
+      const laterMessage = messageEntry("later-user", "user", { at: 50 });
+      const rows = deriveMessagesTimelineRows({
+        timelineEntries: [
+          messageEntry("original-user", "user", { at: 0 }),
+          child("old-child", 1, "Integration work", status),
+          messageEntry("original-reply", "assistant", { at: 5 }),
+          { ...laterMessage, message: { ...laterMessage.message, runId: laterRunId } },
+        ],
+        latestRun: { ...completedRun, runId: laterRunId },
+        isWorking: false,
+        expandedRunIds: new Set([runId]),
+        turnDiffSummaries: [],
+        supportsConversationRollback: false,
+      });
+      const childIndex = rows.findIndex(
+        (row) => row.kind === "event" && row.projectedItem.item.id === "old-child",
+      );
+      expect(childIndex).toBeGreaterThanOrEqual(0);
+      expect(childIndex).toBeLessThan(
+        rows.findIndex((row) => row.kind === "message" && row.message.id === "later-user"),
+      );
+      expect(rows.some((row) => row.kind === "thinking" || row.kind === "working")).toBe(false);
+    },
+  );
+
+  it("keeps the old rate-limited Integrations task in history while Fork to VPS runs terminal commands", () => {
+    const title = "Integrations revamp: core catalog only + click-to-configure setup";
+    const failed = child("integrations-revamp", 1, title, "failed");
+    const failure = {
+      ...failed,
+      projectedItem: {
+        ...failed.projectedItem,
+        item: {
+          ...failed.projectedItem.item,
+          title,
+          completedAt: at(30),
+          updatedAt: at(30),
+          result: "Claude API rate limit reached. Try again later.",
+        },
+      },
+    };
+    const forkRunId = RunId.make("run:fork-to-vps");
+    const prompt = messageEntry("fork-to-vps", "user", { at: 3_000 });
+    const comment = messageEntry("launch-anywhere", "assistant", { at: 3_005 });
+    const forkEntries: TimelineEntry[] = [
+      messageEntry("original-request", "user", { at: 0 }),
+      failure,
+      messageEntry("original-reply", "assistant", { at: 5 }),
+      { ...prompt, message: { ...prompt.message, text: "Fork to VPS", runId: forkRunId } },
+      {
+        ...comment,
+        message: {
+          ...comment.message,
+          runId: forkRunId,
+          text: 'That should be part of "launch anywhere". Checking whether the branches already have it:',
+        },
+      },
+    ];
+    const command = (id: string, second: number): TimelineEntry => {
+      const item: OrchestrationV2TurnItem = {
+        ...base(id, second),
+        runId: forkRunId,
+        type: "dynamic_tool",
+        status: "running",
+        toolName: "mcp__cogenly__terminal_run",
+        input: { command: "git branch --show-current" },
+      };
+      const createdAt = DateTime.formatIso(at(second));
+      return {
+        id,
+        kind: "work",
+        createdAt,
+        entry: {
+          id,
+          createdAt,
+          runId: forkRunId,
+          itemType: "dynamic_tool",
+          tone: "tool",
+          label: "Running terminal command",
+          toolLifecycleStatus: "inProgress",
+          projectedItem: projected(item),
+          structuredPayload: item,
+        },
+      };
+    };
+
+    // The completion is still claimed, and its notification may be outside a
+    // paged snapshot. Neither permits it to follow this much later live turn.
+    const footer = pendingSubagentCompletions({
+      threadId: "thread-parent",
+      subagents: [
+        {
+          id: "node-integrations-revamp",
+          threadId: "thread-parent",
+          origin: "app_owned",
+          childThreadId: "thread-integrations-revamp",
+          status: "failed",
+          startedAtMs: DateTime.toEpochMillis(at(1)),
+          completedAtMs: DateTime.toEpochMillis(at(30)),
+          completionDelivery: { state: "claimed" },
+        },
+      ],
+      notifiedAtMsByChild: new Map(),
+      notifiedAtMsByTask: new Map(),
+      backgroundChildren: new Set(),
+      latestParentRunAtMs: Date.parse(prompt.createdAt),
+    });
+    expect(footer).toEqual([]);
+
+    const firstCommand = command("check-launch-anywhere", 3_006);
+    for (const liveCommands of [[firstCommand], [firstCommand, command("check-vps-fork", 3_010)]]) {
+      const rows = deriveMessagesTimelineRows({
+        timelineEntries: [...forkEntries, ...liveCommands],
+        latestRun: { ...runningRun, runId: forkRunId, startedAt: prompt.createdAt },
+        runningRunId: forkRunId,
+        isWorking: true,
+        activeTurnStartedAt: prompt.createdAt,
+        expandedRunIds: new Set([runId]),
+        turnDiffSummaries: [],
+        supportsConversationRollback: false,
+      });
+      const failedRows = rows.filter(
+        (row) => row.kind === "event" && row.projectedItem.item.id === failure.id,
+      );
+      expect(failedRows).toHaveLength(1);
+      expect(rows.indexOf(failedRows[0]!)).toBeLessThan(
+        rows.findIndex((row) => row.id === prompt.id),
+      );
+      expect(rows.at(-1)).toMatchObject({
+        kind: "work-live",
+        active: true,
+        entry: { id: liveCommands.at(-1)!.id, runId: forkRunId },
+      });
+    }
   });
 
   it("hides running delegate rows that a child carries and groups the children", () => {

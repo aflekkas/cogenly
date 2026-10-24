@@ -3,7 +3,11 @@ import * as AgentStore from "../../agents/AgentStore.ts";
 import * as OtelEnvironment from "@t3tools/shared/otelEnvironment";
 import { DEFAULT_SIGNAL_EXPORT } from "@t3tools/shared/observability";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import type { ProviderDriverKind, ProviderReplayTranscript } from "@t3tools/contracts";
+import type {
+  ProviderDriverKind,
+  ProviderReplayTranscript,
+  ResponseStreamingMode,
+} from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -278,6 +282,7 @@ export function layerWithRegistry<Error>(
       MigrationError | PlatformError.PlatformError | SqlError
     >;
     readonly runEffectWorker?: boolean;
+    readonly responseStreamingMode?: ResponseStreamingMode;
     // Start continuation runs for provider wake turns, as the live runtime does.
     // Off by default: most fixtures record no wake turn.
     readonly runContinuationWorker?: boolean;
@@ -313,7 +318,7 @@ export function layerWithRegistry<Error>(
     Layer.provide(Layer.merge(layerContinuationRequests, McpProviderSessions.layer)),
   );
   const layerServerSettings = ServerSettings.layerTest({
-    responseStreamingMode: "turn",
+    responseStreamingMode: options.responseStreamingMode ?? "turn",
     ...(options.continueThreadsAfterServerUpdate === undefined
       ? {}
       : { continueThreadsAfterServerUpdate: options.continueThreadsAfterServerUpdate }),

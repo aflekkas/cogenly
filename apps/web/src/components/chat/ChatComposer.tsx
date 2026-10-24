@@ -380,7 +380,10 @@ import { LAYOUT_MOTION_DURATION, readPanelAnimationsActive } from "../../panelAn
 import { useAtomCommand } from "../../state/use-atom-command";
 import { readEnvironmentScope } from "../../state/session";
 import { serverEnvironment } from "../../state/server";
-import { ComposerProjectPicker } from "../../projectLabels/ComposerProjectPicker";
+import {
+  ComposerProjectPicker,
+  useComposerProjectPickerState,
+} from "../../projectLabels/ComposerProjectPicker";
 import type { ReviewCommentContext } from "../../reviewCommentContext";
 
 function ComposerVideoThumbnail({ file }: { file: File }) {
@@ -4565,13 +4568,19 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const iconOnlyBlockCount = composerControlsCollapsed
     ? restingControlsIconOnlyBlockCount
     : expandedControlsLayout.iconOnlyBlockCount;
+  const { canPickProject } = useComposerProjectPickerState(
+    routeThreadRef.environmentId,
+    activeThreadId,
+    routeKind === "draft" ? draftId : null,
+  );
+  const showProjectPicker = activeThreadId !== null && canPickProject;
   const restingProviderTraitsPicker = renderProviderTraitsPicker({
     ...providerTraitsPickerInput,
     size: composerControlsCollapsed ? "xs" : "sm",
     // Traits is the first block, so it hides once every block after it has.
     hidden:
       composerControlsHidden ||
-      restingHiddenBlockCount > (planModeUiEnabled ? 1 : 0) + (activeThreadId !== null ? 1 : 0),
+      restingHiddenBlockCount > (planModeUiEnabled ? 1 : 0) + (showProjectPicker ? 1 : 0),
   });
   const restingBlockDefs = [
     ...(providerTraitsPicker
@@ -4599,7 +4608,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       : []),
     // Last, so a narrow toolbar drops it to its folder icon and then hides it
     // before the model or effort controls give way.
-    ...(activeThreadId !== null
+    ...(showProjectPicker
       ? [
           {
             id: "project",
