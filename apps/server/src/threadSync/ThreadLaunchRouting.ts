@@ -39,6 +39,8 @@ import * as Projects from "../orchestration-v2/ProjectStore.ts";
 import * as Git from "../vcs/GitVcsDriver.ts";
 import { derive } from "@t3tools/provider-core/server/IdAllocator";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
+import * as Clock from "effect/Clock";
+import * as Ref from "effect/Ref";
 import type * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import type * as FileSystem from "effect/FileSystem";
@@ -116,8 +118,19 @@ const make = Effect.gen(function* () {
   const providers = yield* Effect.serviceOption(ProviderRegistry.ProviderRegistry);
   const orchestrator = yield* Effect.serviceOption(Orchestrator.OrchestratorV2);
   const scheduler = yield* Scheduler.Scheduler;
-  if (Option.isSome(orchestrator))
-    yield* scheduler.register("remote-delegated-results", orchestrator.value.recoverDelegatedTasks);
+  if (Option.isSome(orchestrator)) {
+    const nextRecoveryAt = yield* Ref.make(0);
+    yield* scheduler.register(
+      "remote-delegated-results",
+      Effect.gen(function* () {
+        const now = yield* Clock.currentTimeMillis;
+        if (now < (yield* Ref.get(nextRecoveryAt))) return;
+        yield* Ref.set(nextRecoveryAt, now + 30_000);
+        if ((yield* machines.list).link._tag !== "standalone")
+          yield* orchestrator.value.recoverDelegatedTasks;
+      }),
+    );
+  }
   yield* registry.registerResultPending((threadId, taskId) =>
     Effect.gen(function* () {
       const owner = yield* replication.owner(threadId);
@@ -350,17 +363,15 @@ const make = Effect.gen(function* () {
         Effect.provideContext(context),
       );
       if (input.subagent !== undefined)
-        yield* threadSync
-          .sync(yield* nextHop(view, machine))
-          .pipe(
-            Effect.mapError(
-              () =>
-                new ThreadRemoteError({
-                  reason: "behind",
-                  detail: "The parent could not reach the target machine yet.",
-                }),
-            ),
-          );
+        yield* threadSync.sync(yield* nextHop(view, machine)).pipe(
+          Effect.mapError(
+            () =>
+              new ThreadRemoteError({
+                reason: "behind",
+                detail: "The parent could not reach the target machine yet.",
+              }),
+          ),
+        );
       const result = yield* callTarget(view, {
         target: machine,
         commandId: input.commandId,
@@ -388,30 +399,26 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const { machine, ...local } = command;
       if (machine === self)
-        return yield* threads
-          .dispatch(local)
-          .pipe(
-            Effect.mapError(
-              () =>
-                new ThreadRemoteError({
-                  reason: "rejected",
-                  detail: "This machine refused the delegated task.",
-                }),
-            ),
-          );
+        return yield* threads.dispatch(local).pipe(
+          Effect.mapError(
+            () =>
+              new ThreadRemoteError({
+                reason: "rejected",
+                detail: "This machine refused the delegated task.",
+              }),
+          ),
+        );
       const attach = (driver: import("@t3tools/contracts").ProviderDriverKind) =>
-        threads
-          .dispatch({ ...local, type: "delegated_task.attach", driver })
-          .pipe(
-            Effect.mapError(
-              () =>
-                new ThreadRemoteError({
-                  reason: "rejected",
-                  detail:
-                    "The child started, but its parent task could not be recorded. Retry with the same clientRequestId.",
-                }),
-            ),
-          );
+        threads.dispatch({ ...local, type: "delegated_task.attach", driver }).pipe(
+          Effect.mapError(
+            () =>
+              new ThreadRemoteError({
+                reason: "rejected",
+                detail:
+                  "The child started, but its parent task could not be recorded. Retry with the same clientRequestId.",
+              }),
+          ),
+        );
       const childThreadId = derive.delegatedTaskThread({ commandId: command.commandId });
       if (yield* threads.hasReceipt(command.commandId)) {
         const child = yield* projections.getThreadProjection(childThreadId).pipe(Effect.orDie);
@@ -438,17 +445,15 @@ const make = Effect.gen(function* () {
           .pipe(Effect.orDie, Effect.map(Option.getOrThrow));
         const cwd = parent.thread.worktreePath ?? project.workspaceRoot;
         const git = yield* Git.GitVcsDriver.pipe(Effect.provideContext(context));
-        const commit = yield* git
-          .resolveCommit({ cwd, revision: workspaceStrategy.baseRef })
-          .pipe(
-            Effect.mapError(
-              () =>
-                new ThreadRemoteError({
-                  reason: "needs-repository",
-                  detail: "The parent commit could not be resolved.",
-                }),
-            ),
-          );
+        const commit = yield* git.resolveCommit({ cwd, revision: workspaceStrategy.baseRef }).pipe(
+          Effect.mapError(
+            () =>
+              new ThreadRemoteError({
+                reason: "needs-repository",
+                detail: "The parent commit could not be resolved.",
+              }),
+          ),
+        );
         repositorySource = { cwd, revision: commit.commitSha };
         workspaceStrategy = {
           ...workspaceStrategy,
@@ -697,17 +702,15 @@ const make = Effect.gen(function* () {
             (error) => new ThreadRemoteError({ reason: "rejected", detail: error.message }),
           ),
         );
-      yield* sharedSync
-        .sync(caller.environmentId)
-        .pipe(
-          Effect.mapError(
-            () =>
-              new ThreadRemoteError({
-                reason: "behind",
-                detail: "The agent was created, but its configuration has not reached the caller.",
-              }),
-          ),
-        );
+      yield* sharedSync.sync(caller.environmentId).pipe(
+        Effect.mapError(
+          () =>
+            new ThreadRemoteError({
+              reason: "behind",
+              detail: "The agent was created, but its configuration has not reached the caller.",
+            }),
+        ),
+      );
       yield* threadSync.sync(caller.environmentId).pipe(Effect.ignore);
       return result;
     }),

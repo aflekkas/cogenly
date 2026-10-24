@@ -81,7 +81,7 @@ import {
   derivePendingBackgroundWork,
   pendingBackgroundTurnItems,
 } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
-import { isReplayedCommandId } from "./ReplayedCommandIds.ts";
+import { isReplicaCommandId, isReplayedCommandId } from "./ReplayedCommandIds.ts";
 import * as RemoteThreadLaunch from "./RemoteThreadLaunch.ts";
 import * as RemoteThreadCommands from "./RemoteThreadCommands.ts";
 import * as Context from "effect/Context";
@@ -11121,10 +11121,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
   ) =>
     Effect.gen(function* () {
       const childThreadId = childControls.thread.id;
-      const parentShell = yield* projectionStore.getThread(
-        childControls.thread.lineage.parentThreadId!,
-      );
-      if (parentShell.ownerMachine != null) return;
       const forkedFrom = childControls.thread.forkedFrom;
       if (
         childControls.thread.lineage.relationshipToParent !== "subagent" ||
@@ -11133,6 +11129,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       ) {
         return;
       }
+      const parentShell = yield* projectionStore.getThread(
+        childControls.thread.lineage.parentThreadId,
+      );
+      if (parentShell.ownerMachine != null) return;
       const taskRuns = childControls.runs.filter((run) => run.delegatedTaskId === options.taskId);
       const childRun =
         taskRuns.length === 0
@@ -12449,7 +12449,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         (stored) =>
           stored.event.type === "run.updated" &&
           !String(stored.commandId).startsWith("command:runtime-reconcile:") &&
-          // Imported or replicated history ran elsewhere; promoting a queue for it would start a run.
+          // Peer results may settle a local parent; imported history never wakes it.
+          (!isReplayedCommandId(stored.commandId) || isReplicaCommandId(stored.commandId)) &&
           (stored.event.payload.status === "completed" ||
             stored.event.payload.status === "interrupted" ||
             stored.event.payload.status === "failed" ||
@@ -12463,7 +12464,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
   yield* eventSink
     .stream({ afterSequence: terminalEventsAfterSequence, eventType: "thread.metadata-updated" })
     .pipe(
-      Stream.filter((stored) => isReplayedCommandId(stored.commandId)),
+      Stream.filter((stored) => isReplicaCommandId(stored.commandId)),
       Stream.runForEach((stored) => settleChildAfterLimitRecovery(stored.event.threadId)),
       Effect.forkDetach,
     );
@@ -12577,6 +12578,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
                 threadId,
                 Effect.gen(function* () {
                   const projection = yield* projectionStore.getThreadRecords(threadId, ["runs"]);
+                  if (projection.thread.ownerMachine != null) return;
                   // Only the run that consumed a cohort's current delivery
                   // message can settle it. A long-lived parent keeps every
                   // past delivery run, and finalizing each of them would
