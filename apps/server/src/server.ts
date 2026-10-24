@@ -173,6 +173,8 @@ import * as UsageService from "./usage/UsageService.ts";
 import * as Scheduler from "./scheduling/Scheduler.ts";
 import * as SharedState from "./sync/SharedState.ts";
 import * as SharedSync from "./sync/SharedSync.ts";
+import * as ThreadReplication from "./threadSync/ThreadReplication.ts";
+import * as ThreadSync from "./threadSync/ThreadSync.ts";
 import * as RuntimeLayer from "./orchestration-v2/runtimeLayer.ts";
 import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
 import * as ProjectLabelFolders from "./projectLabels/ProjectLabelFolders.ts";
@@ -572,9 +574,18 @@ const layerProviderInstallationRefresh = Layer.effectDiscard(
 const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   AgentAwarenessRelay.layer,
   MachineSecurity.layer,
-  SharedSync.layer.pipe(
+  // Paired machines: shared configuration, then thread logs, over one link.
+  Layer.mergeAll(
+    SharedSync.layer.pipe(Layer.provide(SharedState.layer)),
+    // The orchestrator's own sink: replicated events reach the same subscribers.
+    ThreadSync.layer.pipe(
+      Layer.provide(ThreadReplication.layer),
+      Layer.provide(
+        Layer.merge(RuntimeLayer.layerEventSink, EventStoreV2.layerFromOrchestrationEventStore),
+      ),
+    ),
+  ).pipe(
     Layer.provideMerge(layerMachines),
-    Layer.provide(SharedState.layer),
     Layer.provide(ServerEnvironment.layerIdentity),
     Layer.provide(Scheduler.layer),
   ),

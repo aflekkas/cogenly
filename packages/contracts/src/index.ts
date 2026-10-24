@@ -90,3 +90,4 @@ export * from "./machineSecurity.ts";
 export * from "./accounts.ts";
 
 export * from "./sharedDocument.ts";
+export * from "./threadReplication.ts";
