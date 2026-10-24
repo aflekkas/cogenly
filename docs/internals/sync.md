@@ -64,11 +64,11 @@ A remote-only repository link has no local checkout. Configuration sync never
 clones it. Provider instances referenced by model selections still need to be
 configured and signed in on the owner.
 
-Thread replication is separate and must remain single-writer. Agent
-conversations are created lazily only on their owner. Project chat IDs and
-existing thread bindings remain local; do not start appending replica events
-until Phase 3 establishes ownership for those existing fixed IDs. Shared
-project IDs identify one project; equal names with different IDs produce
+Thread replication is separate and single-writer; see
+[thread sync](./thread-sync.md). Agent conversations are created lazily only
+on their owner. An agent's `ownerMachine` changes only when the current owner
+authors it, after the agent's conversation has moved. Shared project IDs
+identify one project; equal names with different IDs produce
 possible-duplicate records rather than an automatic merge.
 
 Delete projections must not launch work or append replicated thread events.
