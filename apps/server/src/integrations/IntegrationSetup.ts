@@ -190,7 +190,28 @@ const githubSteps = (redirectUri: string | undefined): Array<IntegrationSetupSte
 
 const appClient = (input: SetupInput, problem?: string): IntegrationSetupAction | undefined => {
   const entry = input.entry;
-  if (entry === undefined) return undefined;
+  if (entry === undefined) {
+    if (input.integration?.auth?.type !== "oauth") return undefined;
+    const { account } = titleOf(input);
+    return {
+      type: "oauth_client",
+      ...baseOf(input),
+      title: `Set up ${account}'s OAuth client`,
+      message:
+        problem ??
+        `${account} needs an app of your own. Create an OAuth app with the service, then paste its client ID and secret here.`,
+      steps: [
+        { text: "Create an OAuth app in this service's developer settings." },
+        {
+          text: "Add this exact redirect URI to the app.",
+          ...(input.redirectUri === undefined
+            ? {}
+            : { copy: { label: "Authorized redirect URI", value: input.redirectUri } }),
+        },
+        { text: "Copy the app's client ID and secret, and paste them here." },
+      ],
+    };
+  }
   const { account } = titleOf(input);
   const base = { type: "oauth_client" as const, ...baseOf(input) };
   const synced =
@@ -486,6 +507,8 @@ export const agentNextStep = (
     case "oauth_client": {
       if (action.catalogId === "google-workspace")
         return `${action.message} ${settings}, by pasting the client ID and secret. Steps: ${steps(action.steps)} Or collect the downloaded client JSON privately with request_secret with saveToVault: {name: "${GOOGLE_CLIENT_ITEM}", type: "api_key", domains: ["${GOOGLE_HOST}"]} (never in chat), then ${retryCall}. See docs/user/integrations.md#connect-google.`;
+      if (entry === undefined)
+        return `${action.message} ${settings}, by pasting the client ID and secret into its private form. Steps: ${steps(action.steps)} Never ask for the secret in chat.`;
       const item = secretItemName(action.catalogId ?? "app", "client-secret", context.accountLabel);
       const host = entry?.kind === "remote" ? (entry.tokenHost ?? new URL(entry.url).hostname) : "";
       return `${action.message} ${settings}, by pasting the client ID and secret. Steps: ${steps(action.steps)} Or ask for the client ID, collect the client secret with request_secret with saveToVault: {name: "${item}", type: "api_key", domains: ["${host}"]} (never in chat), then ${retryCall} passing clientId and clientSecret: "{{credential:${item}.value}}".`;

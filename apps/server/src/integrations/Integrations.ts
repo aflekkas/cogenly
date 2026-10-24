@@ -2134,6 +2134,39 @@ const make = (options: IntegrationsOptions = {}) =>
         }),
       saveOAuthClient: (input, options) =>
         Effect.gen(function* () {
+          if (input.catalogId === undefined) {
+            const current = yield* getById(input.integrationId);
+            if (
+              current.transport !== "http" ||
+              !usesOAuth(current) ||
+              integrationCatalogEntryFor(current) !== undefined
+            )
+              return yield* new IntegrationError({
+                operation: "save OAuth client",
+                reason: "invalid_request",
+              });
+            const item = `${current.name}-client-secret`;
+            yield* saveSecret({
+              item,
+              type: "api_key",
+              fields: { value: input.clientSecret },
+              domains: [new URL(current.url).hostname],
+              label: `${current.displayName} client secret (${current.name})`,
+            });
+            yield* service.update(
+              {
+                id: current.id,
+                auth: {
+                  ...current.auth!,
+                  type: "oauth",
+                  clientId: input.clientId,
+                  clientSecret: `{{credential:${item}.value}}`,
+                },
+              },
+              { approveCredentials: true },
+            );
+            return yield* service.prepareSignIn(current.id, options.origin);
+          }
           const entry = integrationCatalogEntry(input.catalogId);
           if (
             entry === undefined ||

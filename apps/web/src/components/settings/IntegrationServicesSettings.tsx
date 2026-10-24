@@ -575,9 +575,11 @@ function AccountRow(props: {
               environmentId={environmentId}
               action={guided}
               target={
-                guided.type === "install_runtime" || guided.catalogId === undefined
+                guided.type === "install_runtime"
                   ? undefined
-                  : { catalogId: guided.catalogId, integrationId: integration.id }
+                  : guided.catalogId === undefined
+                    ? { integrationId: integration.id }
+                    : { catalogId: guided.catalogId, integrationId: integration.id }
               }
               disabled={!props.canWrite}
               onTest={() => void testNow()}

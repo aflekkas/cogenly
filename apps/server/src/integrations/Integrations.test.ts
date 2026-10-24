@@ -1135,6 +1135,63 @@ describe("Settings secret forms", () => {
     }).pipe(Effect.provide(offline)),
   );
 
+  it.effect(
+    "save a custom server's manual OAuth client privately without replacing its account",
+    () =>
+      Effect.gen(function* () {
+        savedSecrets.length = 0;
+        const service = yield* Integrations.Integrations;
+        const { integration } = yield* service.create({
+          ...createInput("https://mcp.custom.test/mcp", "custom-work"),
+          headers: {},
+          auth: { type: "oauth", scope: "read" },
+        });
+        const result = yield* service.saveOAuthClient(
+          {
+            integrationId: integration.id,
+            clientId: "custom-client",
+            clientSecret: "custom-PRIVATE-SECRET",
+          },
+          nowhere,
+        );
+        expect(result.integration).toMatchObject({
+          id: integration.id,
+          name: "custom-work",
+          auth: {
+            type: "oauth",
+            scope: "read",
+            clientId: "custom-client",
+            clientSecret: "{{credential:custom-work-client-secret.value}}",
+          },
+          approvedCredentialItems: ["custom-work-client-secret"],
+        });
+        expect(savedSecrets).toEqual([
+          expect.objectContaining({
+            item: "custom-work-client-secret",
+            fields: { value: "custom-PRIVATE-SECRET" },
+            domains: ["mcp.custom.test"],
+          }),
+        ]);
+        expect(result.setup).toMatchObject({ type: "retry", button: "sign_in" });
+        const listed = yield* service.list();
+        expect(listed.integrations).toHaveLength(1);
+        expect(JSON.stringify([result, listed])).not.toContain("custom-PRIVATE-SECRET");
+
+        const { integration: plain } = yield* service.create(
+          createInput("https://plain.custom.test/mcp", "plain"),
+        );
+        expect(
+          yield* service
+            .saveOAuthClient(
+              { integrationId: plain.id, clientId: "id", clientSecret: "secret" },
+              nowhere,
+            )
+            .pipe(Effect.flip),
+        ).toMatchObject({ reason: "invalid_request" });
+        expect(savedSecrets).toHaveLength(1);
+      }).pipe(Effect.provide(offline)),
+  );
+
   it.effect("store an app's client secret and point the account's sign-in at it", () =>
     Effect.gen(function* () {
       yield* runMigrations();

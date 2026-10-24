@@ -17,7 +17,6 @@ import { ensureLocalApi } from "../../localApi";
 import { integrationsRpc } from "../../rpc/integrations";
 import { useOrchestrationCommand } from "../../state/use-orchestration-command";
 import { Button } from "../ui/button";
-import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Spinner } from "../ui/spinner";
 import { CopyableValue } from "./CopyableValue";
@@ -26,7 +25,7 @@ import { urlHost } from "./integrationServices.logic";
 import { SecretInput } from "./SecretInput";
 
 /** Opens a link: the system browser on desktop, a new tab on the web. */
-export function openInBrowser(url: string) {
+function openInBrowser(url: string) {
   if (window.desktopBridge) void ensureLocalApi().shell.openExternal(url);
   else window.open(url, "_blank", "noopener,noreferrer");
 }
@@ -38,7 +37,13 @@ export function openInBrowser(url: string) {
  */
 export async function openSignInPage(link: () => Promise<string | null>) {
   const tab = window.desktopBridge ? null : window.open("", "_blank");
-  const url = await link();
+  let url: string | null;
+  try {
+    url = await link();
+  } catch (cause) {
+    tab?.close();
+    throw cause;
+  }
   if (url === null) {
     tab?.close();
     return;
@@ -48,16 +53,18 @@ export async function openSignInPage(link: () => Promise<string | null>) {
     tab.location.href = url;
     return;
   }
-  await ensureLocalApi().shell.openExternal(url);
+  if (window.desktopBridge) await ensureLocalApi().shell.openExternal(url);
+  else window.location.assign(url);
 }
 
 /** Who a saved client or key is for: an existing account, or a new one of the service. */
-export interface SetupTarget {
-  readonly catalogId: IntegrationCatalogId;
-  readonly integrationId?: IntegrationId | undefined;
-  /** A new account's name; empty for none. */
-  readonly accountLabel?: string | undefined;
-}
+type SetupTarget =
+  | {
+      readonly catalogId: IntegrationCatalogId;
+      readonly integrationId?: IntegrationId;
+      readonly accountLabel?: string;
+    }
+  | { readonly catalogId?: undefined; readonly integrationId: IntegrationId };
 
 /**
  * One guided setup step, inline: the service's numbered steps with their
@@ -115,7 +122,7 @@ export function IntegrationSetupGuide(props: {
             onSaved={props.onSaved}
           />
         </>
-      ) : (
+      ) : props.target.catalogId === undefined ? null : (
         <ApiKeyForm
           environmentId={props.environmentId}
           target={props.target}
@@ -176,6 +183,7 @@ interface SecretFormProps {
 }
 
 const targetFields = (target: SetupTarget) => {
+  if (target.catalogId === undefined) return { integrationId: target.integrationId };
   const accountLabel = target.accountLabel?.trim() ?? "";
   return {
     catalogId: target.catalogId,
@@ -184,7 +192,7 @@ const targetFields = (target: SetupTarget) => {
   };
 };
 
-/** Client ID in the open, client secret masked; saving signs in next. */
+/** Private client credentials go straight to the vault-backed service; saving signs in next. */
 function OAuthClientForm(props: SecretFormProps) {
   const save = useOrchestrationCommand(integrationsRpc.saveOAuthClient, { reportFailure: false });
   const id = useId();
@@ -194,6 +202,7 @@ function OAuthClientForm(props: SecretFormProps) {
   const [error, setError] = useState<string | null>(null);
 
   const submit = async () => {
+    if (props.disabled || pending) return;
     const problem =
       clientId.trim() === ""
         ? "Paste the app's client ID."
@@ -234,19 +243,24 @@ function OAuthClientForm(props: SecretFormProps) {
   };
 
   return (
-    <SecretForm pending={pending} error={error} submitLabel="Save and sign in" onSubmit={submit}>
+    <SecretForm
+      pending={pending}
+      disabled={props.disabled}
+      error={error}
+      submitLabel="Save and sign in"
+      onSubmit={submit}
+    >
       <fieldset
         disabled={pending || props.disabled}
         className="grid gap-2 @min-[32rem]/settings-row:grid-cols-2"
       >
         <div className="min-w-0 space-y-1">
           <Label htmlFor={`${id}-client-id`}>Client ID</Label>
-          <Input
+          <SecretInput
+            revealable
             id={`${id}-client-id`}
             value={clientId}
             maxLength={500}
-            autoComplete="off"
-            spellCheck={false}
             onChange={(event) => {
               setClientId(event.currentTarget.value);
               setError(null);
@@ -274,7 +288,11 @@ function OAuthClientForm(props: SecretFormProps) {
 
 /** Where to create the key, then the key, masked. */
 function ApiKeyForm(
-  props: SecretFormProps & { readonly label: string; readonly url: string | undefined },
+  props: Omit<SecretFormProps, "target"> & {
+    readonly target: Extract<SetupTarget, { readonly catalogId: IntegrationCatalogId }>;
+    readonly label: string;
+    readonly url: string | undefined;
+  },
 ) {
   const save = useOrchestrationCommand(integrationsRpc.saveApiKey, { reportFailure: false });
   const id = useId();
@@ -283,6 +301,7 @@ function ApiKeyForm(
   const [error, setError] = useState<string | null>(null);
 
   const submit = async () => {
+    if (props.disabled || pending) return;
     const problem =
       apiKey.trim() === ""
         ? `Paste the ${props.label.toLowerCase()}.`
@@ -296,7 +315,11 @@ function ApiKeyForm(
     try {
       const result = await save({
         environmentId: props.environmentId,
-        input: { ...targetFields(props.target), apiKey: apiKey.trim() },
+        input: {
+          ...targetFields(props.target),
+          catalogId: props.target.catalogId,
+          apiKey: apiKey.trim(),
+        },
       });
       if (result._tag !== "Success") {
         if (!isAtomCommandInterrupted(result))
@@ -325,7 +348,13 @@ function ApiKeyForm(
           Create one on {urlHost(props.url)}
         </Button>
       )}
-      <SecretForm pending={pending} error={error} submitLabel="Save" onSubmit={submit}>
+      <SecretForm
+        pending={pending}
+        disabled={props.disabled}
+        error={error}
+        submitLabel="Save"
+        onSubmit={submit}
+      >
         <fieldset disabled={pending || props.disabled} className="min-w-0 space-y-1">
           <Label htmlFor={`${id}-api-key`}>{props.label}</Label>
           <SecretInput
@@ -348,6 +377,7 @@ function ApiKeyForm(
 /** A secret form's frame: its fields, the save button, where the secret goes, and any failure. */
 function SecretForm(props: {
   readonly pending: boolean;
+  readonly disabled: boolean;
   readonly error: string | null;
   readonly submitLabel: string;
   readonly onSubmit: () => Promise<void>;
@@ -363,7 +393,7 @@ function SecretForm(props: {
     >
       {props.children}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <Button type="submit" size="xs" disabled={props.pending}>
+        <Button type="submit" size="xs" disabled={props.pending || props.disabled}>
           {props.pending ? <Spinner /> : null}
           {props.pending ? "Saving…" : props.submitLabel}
         </Button>

@@ -111,6 +111,29 @@ describe("setupActionFor, per service", () => {
   });
 });
 
+describe("custom server setup", () => {
+  it("turns missing manual clients and missing secrets into the same inline form", () => {
+    for (const reason of [
+      "client_id_required",
+      "credential_unresolved",
+      "credential_not_allowed",
+    ] as const) {
+      const action = setupActionFor({
+        entry: undefined,
+        integration: account({ clientId: "custom", clientSecret: "{{credential:custom.value}}" }),
+        status: "needs_sign_in",
+        reason,
+        redirectUri: "https://cogenly.example.com/oauth/integrations/callback",
+      });
+      expect(action).toMatchObject({ type: "oauth_client", integrationId: "integration:1" });
+      expect(steps(action).map((step) => step.copy?.value)).toContain(
+        "https://cogenly.example.com/oauth/integrations/callback",
+      );
+      expect(action).not.toHaveProperty("catalogId");
+    }
+  });
+});
+
 describe("setupActionFor, from errors", () => {
   it("maps every failure to the control that fixes it", () => {
     const slack = { entry: entry("slack"), integration: account() };

@@ -3,19 +3,21 @@
 Integrations connect Cogenly to outside services — Gmail, Linear, GitHub, or
 any remote MCP server — once, for every agent and every provider. You connect
 a service a single time and Claude, Codex, and Muse turns can all use it
-through Cogenly. Nothing about the providers' own MCP setup changes.
+through Cogenly. Their own connectors for catalog services are hidden by default;
+see [Claude and Codex connectors](#claude-and-codex-connectors).
 
 ## Default integrations
 
-Settings → Integrations opens on the services Cogenly knows how to connect.
-Choose **Connect** on one (or **Add account** for another account of it).
+Settings → Integrations lists your connected accounts first. Choose **Add**,
+then a service or **Custom MCP server**. Choose the same service again to add
+another account.
 Services that let Cogenly register itself sign in with one click. The others
 show a short guided setup right on the row: each step links to the exact page
 in the service's console and gives you the values to copy, such as the
 redirect address. Paste the client ID and secret, or the key, into the form at
 the end; Cogenly stores the secret in your vault and never shows it again.
 
-Each account then shows under its service as **Connected**, **Needs sign-in**,
+Each account then shows as **Connected**, **Needs sign-in**,
 or an error with what to do about it, such as **Sign in**, **Test again** or
 **Install uv**.
 
@@ -45,19 +47,19 @@ Cogenly signs in through it. Slack needs an HTTPS redirect address, so open
 Cogenly from its HTTPS address (a VPS, or your tailnet's HTTPS name) while
 doing this.
 
-Choose **Connect** on Slack and follow the steps: copy the manifest (it
+Choose **Add → Slack** and follow the steps: copy the manifest (it
 already contains your Cogenly address), create an app from it at
 [api.slack.com/apps](https://api.slack.com/apps), turn on **Model Context
 Protocol** on the app's **Agents & AI Apps** page, then paste the app's client
 ID and client secret from **Basic Information**. Cogenly opens Slack's sign-in
-next. For a second workspace, choose **Add account** and do the same there.
+next. For a second workspace, choose **Add → Slack** again and do the same there.
 
 ### Connect GitHub
 
 GitHub doesn't let Cogenly register itself either. The quickest way is a
 [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new)
 with access to the repositories agents should use: paste it when you choose
-**Connect**. To sign in instead, pick **Your OAuth app**, register one at
+**Add → GitHub**. To sign in instead, pick **Your OAuth app**, register one at
 [github.com/settings/applications/new](https://github.com/settings/applications/new)
 with the callback address the step shows, and paste its client ID and secret.
 GitHub's toolsets can be narrowed afterwards by adding an `X-MCP-Toolsets`
@@ -65,8 +67,7 @@ header in the account's **Edit**.
 
 ## Connect one
 
-For any other remote MCP server, choose **Add** on **Custom MCP server** under
-Services:
+For any other remote MCP server, choose **Add → Custom MCP server**:
 
 1. Enter a display name and the server's URL. The name agents use is filled in
    from the display name; change it before saving if you like, since it is
@@ -115,12 +116,12 @@ them on its own.
 
 If the service later stops accepting the sign-in (you revoked access, or it
 expired), the integration shows **Needs sign-in**. Choose **Sign in** again;
-**Reconnect** in the menu does the same for a connected one.
+**Sign in again** in the menu does the same for a connected one.
 
-Some custom servers don't let Cogenly register itself. Create an app with the
-service, add the redirect address shown in the editor (your Cogenly address
-followed by `/oauth/integrations/callback`), store the app's client secret in
-your vault, and enter the client ID and pick the secret with the key button.
+Some custom servers don't let Cogenly register itself. Choose **Set up** on
+the account's row, create an app with the service, and add the exact redirect
+address in the step. Paste its client ID and secret in the private form;
+Cogenly stores the secret in your vault and continues to sign-in.
 The browser you sign in with must be able to open that Cogenly address, so sign
 in from the address you normally use to reach Cogenly.
 
@@ -130,8 +131,8 @@ Google accounts ([below](#connect-google)) sign in the same way.
 ## More than one account
 
 Connect a service once per account, for example two Slack workspaces or a
-personal and a work Gmail: **Add account** on the service, with an **Account**
-label such as "Acme". Agents see "Slack · Acme" next to its name
+personal and a work Gmail: choose **Add**, pick the service again, and give
+the account a name such as "Acme". Agents see "Slack · Acme" next to its name
 (`slack-acme`) and pick the right one. Each connection signs in, and is used,
 separately. Google accounts work the same way: "Google · personal" and
 "Google · Spawn Partners" are two integrations.
@@ -142,7 +143,7 @@ Connect Gmail, Calendar, Drive and Docs with the **Google Workspace** entry.
 Each account is its own integration with an account label, and all of them
 use one Google OAuth client of your own, which you make once.
 
-Choose **Connect** on Google Workspace and name the account, such as
+Choose **Add → Google Workspace** and name the account, such as
 "personal". The first time, the row walks you through the client in Google
 Cloud, with a link to each page:
 
@@ -165,7 +166,7 @@ Cloud, with a link to each page:
 
 Cogenly saves the client in your vault as `google-oauth-client` and opens
 Google's sign-in. Choose the intended Google account and grant the requested
-permissions. Repeat with **Add account** for each account.
+permissions. Repeat with **Add → Google Workspace** for each account.
 
 Cogenly runs Google's server with [uv](https://docs.astral.sh/uv/). If uv is
 missing on the machine running Cogenly, the account shows **Install uv**;

@@ -362,11 +362,20 @@ const secretInputTarget = {
  * secret in the vault and the integration references it; the value never
  * appears in an integration, an event or a result.
  */
-export const IntegrationSaveOAuthClientInput = Schema.Struct({
-  ...secretInputTarget,
+const oauthClientSecretFields = {
   clientId: TrimmedNonEmptyString.check(Schema.isMaxLength(500)),
   clientSecret: TrimmedNonEmptyString.check(Schema.isMaxLength(8192)),
-});
+};
+export const IntegrationSaveOAuthClientInput = Schema.Union([
+  Schema.Struct({ ...secretInputTarget, ...oauthClientSecretFields }),
+  // A custom server already exists when discovery asks for a manual client.
+  Schema.Struct({
+    ...secretInputTarget,
+    catalogId: Schema.optional(IntegrationCatalogId),
+    integrationId: IntegrationId,
+    ...oauthClientSecretFields,
+  }),
+]);
 export type IntegrationSaveOAuthClientInput = typeof IntegrationSaveOAuthClientInput.Type;
 
 /** An API key or token typed into Settings, stored in the vault like a client secret. */

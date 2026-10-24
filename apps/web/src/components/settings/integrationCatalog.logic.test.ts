@@ -121,8 +121,15 @@ describe("setupControl", () => {
       steps: [{ text: "Make an app" }],
     };
     expect(control(slack)).toEqual({ kind: "expand", label: "Set up", action: slack });
-    // No catalog service to save a client for: only Edit can fix it.
+    // A target is needed to save the client; custom accounts use their id.
     expect(control({ ...slack, catalogId: undefined } as IntegrationSetupAction).kind).toBe("edit");
+    expect(
+      control({
+        ...slack,
+        catalogId: undefined,
+        integrationId: IntegrationId.make("integration:custom"),
+      } as IntegrationSetupAction).kind,
+    ).toBe("expand");
     expect(control({ type: "api_key", ...base, catalogId: "github", label: "Token" }).kind).toBe(
       "expand",
     );

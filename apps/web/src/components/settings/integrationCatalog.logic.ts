@@ -99,7 +99,7 @@ export type SetupControl =
  * One-click actions run from the row; anything with steps or a form opens
  * under it. `canInstall` is whether this connection may install software;
  * without it a missing runtime shows its command instead. A client or key
- * step that names no catalog service can only be fixed in Edit.
+ * step without a catalog service or existing account can only be fixed in Edit.
  */
 export function setupControl(action: IntegrationSetupAction, canInstall: boolean): SetupControl {
   switch (action.type) {
@@ -118,6 +118,9 @@ export function setupControl(action: IntegrationSetupAction, canInstall: boolean
         ? { kind: "install", label: `Install ${action.runtime}` }
         : { kind: "expand", label: "Set up", action };
     case "oauth_client":
+      return action.catalogId === undefined && action.integrationId === undefined
+        ? { kind: "edit", label: "Edit" }
+        : { kind: "expand", label: "Set up", action };
     case "api_key":
       return action.catalogId === undefined
         ? { kind: "edit", label: "Edit" }
