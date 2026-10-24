@@ -16,6 +16,7 @@ import * as Retrieval from "./context/ContextRetrievalService.ts";
 import * as Exports from "./export/ExportService.ts";
 import * as ProjectLabels from "./projectLabels/ProjectLabelService.ts";
 import * as ProjectLabelClone from "./projectLabels/ProjectLabelCloneRepository.ts";
+import * as RepositoryCheckout from "./project/RepositoryCheckout.ts";
 import * as ProjectLabelFolders from "./projectLabels/ProjectLabelFolders.ts";
 import * as ProjectLabelFork from "./projectLabels/ProjectLabelForkToProject.ts";
 import * as ProjectFiles from "./projectLabels/ProjectFiles.ts";
@@ -1122,6 +1123,7 @@ const makeWsRpcHandlers = (
     const usageLimitSources = yield* UsageLimitSources.UsageLimitSources;
     const worktreeSetupTracker = yield* WorktreeSetupTracker.WorktreeSetupTracker;
     const projectCloneTracker = yield* ProjectCloneTracker.ProjectCloneTracker;
+    const repositoryCheckout = yield* RepositoryCheckout.RepositoryCheckout;
     const repositoryIdentityResolver = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
     const agentSessionScanner = yield* AgentSessionScanner.AgentSessionScanner;
     const agentSessionImporter = yield* AgentSessionImporter.AgentSessionImporter;
@@ -1675,6 +1677,8 @@ const makeWsRpcHandlers = (
           folders: projectLabelFolders,
           refreshGitStatus,
         }),
+      [WS_METHODS.projectLabelsCheckoutRepository]: (input) =>
+        repositoryCheckout.checkoutRepository(input),
       [WS_METHODS.workStart]: (input) => workHandoff.start(input),
       [WS_METHODS.agentsApprovalsList]: (input) => agentWorkspace.listApprovals(input),
       [WS_METHODS.agentsRequestApproval]: (input) =>
@@ -2813,6 +2817,7 @@ type WsRequestServices =
   | ProjectLabels.ProjectLabelService
   | ProjectService.ProjectService
   | ProjectStore.ProjectStoreV2
+  | RepositoryCheckout.RepositoryCheckout
   | ProviderAuthService.ProviderAuthService
   | ProviderInstanceRegistry.ProviderInstanceRegistry
   | ProviderLatestVersions.ProviderLatestVersions

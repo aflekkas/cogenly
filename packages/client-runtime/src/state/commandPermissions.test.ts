@@ -493,6 +493,39 @@ it.effect(
     ),
 );
 
+it.effect("gates cloning a project's linked repository here on the source control grant", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const registry = yield* setup;
+      const checkout = createCommandPermissions(
+        runtime,
+        WS_METHODS.projectLabelsCheckoutRepository,
+      );
+      registry.set(
+        sessions(env),
+        AsyncResult.success({
+          ...grant(false),
+          scopes: [AuthOrchestrationOperateScope],
+          permissions: [AuthOrchestrationOperateScope],
+        }),
+      );
+      expect(registry.get(checkout.permissionAtom(env))).toBe(false);
+      expect((yield* checkout.authorize(registry, env).pipe(Effect.flip)).requiredPermission).toBe(
+        AuthSourceControlWriteScope,
+      );
+      registry.set(
+        sessions(env),
+        AsyncResult.success({
+          ...grant(false),
+          scopes: [AuthSourceControlWriteScope],
+          permissions: [AuthSourceControlWriteScope],
+        }),
+      );
+      expect(registry.get(checkout.permissionAtom(env))).toBe(true);
+    }),
+  ),
+);
+
 it.effect("honors exact empty permissions and preserves legacy parent grants", () =>
   Effect.scoped(
     Effect.gen(function* () {

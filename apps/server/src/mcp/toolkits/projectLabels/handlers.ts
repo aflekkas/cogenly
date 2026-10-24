@@ -2,15 +2,18 @@ import {
   OrchestratorMcpFailure,
   type OrchestrationDispatchCommandError,
   type ProjectLabelError,
+  type RepositoryCheckoutError,
   type SourceControlRepositoryError,
 } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Labels from "../../../projectLabels/ProjectLabelService.ts";
 import * as Clone from "../../../projectLabels/ProjectLabelCloneRepository.ts";
 import * as Clones from "../../../project/ProjectCloneTracker.ts";
+import * as Checkout from "../../../project/RepositoryCheckout.ts";
 import * as Projects from "../../../project/ProjectService.ts";
 import * as Identities from "../../../project/RepositoryIdentityResolver.ts";
 import * as Settings from "../../../serverSettings.ts";
@@ -35,6 +38,14 @@ const moveFailure = (error: ProjectLabelError) =>
           "A turn is running in this thread, so it cannot be moved yet. Wait for the turn to finish, then move it; the chat keeps its history and its next turn runs in the new project folder.",
       })
     : failure(error);
+const checkoutFailure = (error: RepositoryCheckoutError) =>
+  new OrchestratorMcpFailure({
+    code:
+      error.reason === "not_found" || error.reason === "not_linked"
+        ? "invalid_request"
+        : "orchestration_error",
+    message: error.message,
+  });
 const cloneFailure = (
   error: ProjectLabelError | SourceControlRepositoryError | OrchestrationDispatchCommandError,
 ) =>
@@ -151,12 +162,45 @@ export const layer = McpToolAccess.toLayer(ProjectLabelsToolkit, {
   project_label_clone_repository: McpToolAccess.writesEnvironment((input) =>
     Effect.gen(function* () {
       const broadcaster = yield* Broadcaster.VcsStatusBroadcaster;
+      const labels = yield* Labels.ProjectLabelService;
+      const projects = yield* Projects.ProjectService;
+      // A remote the project already links (say, from another machine) gets
+      // its checkout here, under its synced directory name, instead of a
+      // second link.
+      const remote = Clone.cloneInputRemote(input);
+      const { label } = yield* labels.read(input.id).pipe(Effect.mapError(failure));
+      const linked =
+        remote === null ? undefined : label.repositories?.find((link) => link.remote === remote);
+      if (linked?.remote) {
+        const checkouts = yield* Checkout.RepositoryCheckout;
+        const { repositoryId } = yield* checkouts
+          .checkoutRepository({ labelId: label.id, remote: linked.remote })
+          .pipe(Effect.mapError(checkoutFailure));
+        const project = yield* projects.getById(repositoryId).pipe(
+          Effect.map(Option.getOrUndefined),
+          Effect.mapError(
+            (error) =>
+              new OrchestratorMcpFailure({ code: "orchestration_error", message: error.message }),
+          ),
+        );
+        if (project === undefined)
+          return yield* new OrchestratorMcpFailure({
+            code: "orchestration_error",
+            message: `The checkout of ${linked.remote} has no repository record.`,
+          });
+        return {
+          projectId: repositoryId,
+          cwd: project.workspaceRoot,
+          remoteUrl: linked.remote,
+          repository: null,
+        };
+      }
       return yield* Clone.cloneRepositoryIntoLabel(
         input,
         {
-          labels: yield* Labels.ProjectLabelService,
+          labels,
           clones: yield* Clones.ProjectCloneTracker,
-          projects: yield* Projects.ProjectService,
+          projects,
           identities: yield* Identities.RepositoryIdentityResolver,
           settings: yield* Settings.ServerSettingsService,
           crypto: yield* Crypto.Crypto,

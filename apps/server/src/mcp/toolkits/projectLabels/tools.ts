@@ -22,6 +22,7 @@ import * as Path from "effect/Path";
 import { Tool, Toolkit } from "effect/ai";
 import * as Labels from "../../../projectLabels/ProjectLabelService.ts";
 import * as Clones from "../../../project/ProjectCloneTracker.ts";
+import * as Checkout from "../../../project/RepositoryCheckout.ts";
 import * as Projects from "../../../project/ProjectService.ts";
 import * as Identities from "../../../project/RepositoryIdentityResolver.ts";
 import * as Settings from "../../../serverSettings.ts";
@@ -149,10 +150,11 @@ export const ProjectLabelsToolkit = Toolkit.make(
     parameters: ProjectLabelCloneRepositoryInput,
     success: ProjectCloneStartResult,
     description:
-      "Clone a repository into a project folder. The destination resolves under the projects root, progress runs on the project-clone subscription, and the repository is filed in the folder. Starts the tracked clone and returns immediately. A clone that fails or is cancelled removes its repository again, so nothing half-made stays filed; clone again to retry. When a checkout of the repository is already on this machine, file it with project_label_link_repository instead of cloning a second copy.",
+      "Clone a repository into a project folder. The destination resolves under the projects root, progress runs on the project-clone subscription, and the repository is filed in the folder. Starts the tracked clone and returns immediately. A clone that fails or is cancelled removes its repository again, so nothing half-made stays filed; clone again to retry. Passing the remote of a repository the project already links (checkout not_cloned, missing or failed in project_label_read) clones that one onto this machine under its synced directory name instead, and keeps its record on failure so a retry resumes it. When a checkout of the repository is already on this machine, file it with project_label_link_repository instead of cloning a second copy.",
     dependencies: [
       ...shared.dependencies,
       Clones.ProjectCloneTracker,
+      Checkout.RepositoryCheckout,
       Projects.ProjectService,
       Identities.RepositoryIdentityResolver,
       Settings.ServerSettingsService,

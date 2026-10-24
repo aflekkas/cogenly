@@ -1197,6 +1197,11 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:projectLabels:cloneProjectLabelRepository",
       tag: WS_METHODS.projectLabelsCloneRepository,
     }),
+    /** Clone a repository the project links onto this machine; returns once the clone runs. */
+    checkoutProjectLabelRepository: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:projectLabels:checkoutProjectLabelRepository",
+      tag: WS_METHODS.projectLabelsCheckoutRepository,
+    }),
     moveThreadProjectFolder: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:projectLabels:moveThreadProjectFolder",
       tag: WS_METHODS.projectLabelsMoveThread,

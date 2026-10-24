@@ -48,6 +48,18 @@ export interface ProjectLabelCloneDeps {
 }
 
 /**
+ * The normalized remote a clone input names, for matching it against a
+ * project's links: `owner/repo` on GitHub, or a pasted remote URL. Null when
+ * it names no portable remote.
+ */
+export const cloneInputRemote = (input: ProjectLabelCloneRepositoryInput): string | null => {
+  if (input.remoteUrl !== undefined) return normalizeRepositoryRemote(input.remoteUrl);
+  if (input.repository !== undefined && (input.provider ?? "github") === "github")
+    return normalizeRepositoryRemote(`https://github.com/${input.repository}`);
+  return null;
+};
+
+/**
  * Clone a repository into a project: the destination resolves under the
  * projects root (`<root>/<Project>/<repo>`), the clone runs through the
  * tracked clone flow (progress on the project-clone subscription), and the

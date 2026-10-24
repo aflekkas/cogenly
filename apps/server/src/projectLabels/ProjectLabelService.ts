@@ -4,6 +4,7 @@ import {
   ProjectLabelId,
   ProjectLabelWithRepositories,
   ProjectSourceLink,
+  REMOTE_REPOSITORY_ID_PREFIX,
   ThreadProjectLabel,
   type ProjectLabelCreateInput,
   type ProjectLabelRepositoryCheckout,
@@ -92,6 +93,19 @@ export class ProjectLabelService extends Context.Service<
     readonly unlinkRepository: (
       input: ProjectLabelRepository,
     ) => Effect.Effect<{ label: ProjectLabelWithRepositories }, ProjectLabelError>;
+    /**
+     * Points a linked remote at this machine's checkout record, in one
+     * transaction: the `remote:` placeholder (or nothing, when it vanished)
+     * becomes `repositoryId`, and scheduled tasks bound to the placeholder
+     * follow it. RepositoryCheckout calls it once the record exists; the
+     * synced project data does not change, since it names repositories by
+     * remote and directory name.
+     */
+    readonly bindRepositoryCheckout: (input: {
+      readonly labelId: ProjectLabelId;
+      readonly remote: string;
+      readonly repositoryId: ProjectId;
+    }) => Effect.Effect<{ label: ProjectLabelWithRepositories }, ProjectLabelError>;
     readonly linkSource: (
       input: ProjectLabelSourceLinkInput,
     ) => Effect.Effect<{ label: ProjectLabelWithRepositories }, ProjectLabelError>;
@@ -687,6 +701,26 @@ const make = Effect.gen(function* () {
       ),
     linkRepository: (input) => repository(input, true),
     unlinkRepository: (input) => repository(input, false),
+    bindRepositoryCheckout: (input) =>
+      mutate(
+        "bindRepositoryCheckout",
+        input,
+        Effect.gen(function* () {
+          const remote = normalizeRepositoryRemote(input.remote) ?? input.remote;
+          const placeholder = `${REMOTE_REPOSITORY_ID_PREFIX}${remote}`;
+          const { label } = yield* get(input.labelId);
+          const directoryName =
+            label.repositories?.find((link) => link.remote === remote)?.directoryName ?? null;
+          // Drop the placeholder first so the rebind never trips the
+          // one-project-per-repository key, then file the checkout under the
+          // same remote and directory name.
+          yield* sql`DELETE FROM label_repositories WHERE label_id = ${input.labelId} AND repository_id = ${placeholder}`;
+          yield* sql`INSERT INTO label_repositories(label_id, repository_id, remote, directory_name) VALUES (${input.labelId}, ${input.repositoryId}, ${remote}, ${directoryName}) ON CONFLICT(repository_id) DO UPDATE SET label_id = excluded.label_id, remote = excluded.remote, directory_name = COALESCE(excluded.directory_name, label_repositories.directory_name)`;
+          yield* sql`INSERT INTO shared_repository_checkouts(remote, repository_id, directory_name) VALUES (${remote}, ${input.repositoryId}, ${directoryName}) ON CONFLICT(remote) DO UPDATE SET repository_id = excluded.repository_id, directory_name = excluded.directory_name`;
+          yield* sql`UPDATE scheduled_tasks SET project_id = ${input.repositoryId} WHERE project_id = ${placeholder}`;
+          return yield* get(input.labelId);
+        }),
+      ),
     linkSource: (input) => sourceLink(input, true),
     unlinkSource: (input) => sourceLink(input, false),
     setProjectChat: (input) =>

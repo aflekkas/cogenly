@@ -227,6 +227,60 @@ export const ProjectLabelCloneRepositoryInput = Schema.Struct({
   protocol: Schema.optional(SourceControlCloneProtocol),
 });
 export type ProjectLabelCloneRepositoryInput = typeof ProjectLabelCloneRepositoryInput.Type;
+
+/**
+ * Give a repository the project already links (by remote) a checkout on this
+ * machine: a `not_cloned` one clones into `<project folder>/<directoryName>`,
+ * a `missing` or `failed` one clones again in place, and a `ready` one is left
+ * alone. Returns once the clone is running; progress arrives on the
+ * project-clone subscription and the link's `checkout` state.
+ */
+export const ProjectLabelCheckoutRepositoryInput = Schema.Struct({
+  labelId: ProjectLabelId,
+  /** The link's remote, as `repositories[].remote` reports it. */
+  remote: TrimmedNonEmptyString,
+});
+export type ProjectLabelCheckoutRepositoryInput = typeof ProjectLabelCheckoutRepositoryInput.Type;
+export const ProjectLabelCheckoutRepositoryResult = Schema.Struct({
+  /** This machine's repository record for the remote. */
+  repositoryId: ProjectId,
+});
+export type ProjectLabelCheckoutRepositoryResult = typeof ProjectLabelCheckoutRepositoryResult.Type;
+
+export class RepositoryCheckoutError extends Schema.TaggedError<RepositoryCheckoutError>()(
+  "RepositoryCheckoutError",
+  {
+    repositoryId: ProjectId,
+    repositoryName: Schema.String,
+    reason: Schema.Literals([
+      "not_found",
+      "not_linked",
+      "no_remote",
+      "destination_taken",
+      "clone_failed",
+      "storage",
+    ]),
+    detail: Schema.optional(Schema.String),
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {
+  override get message(): string {
+    switch (this.reason) {
+      case "not_found":
+        return `Repository ${this.repositoryId} was not found.`;
+      case "not_linked":
+        return `${this.repositoryName} is not linked to this project.`;
+      case "no_remote":
+        return `${this.repositoryName} has no checkout and no known remote; clone it with project_label_clone_repository or link an existing checkout.`;
+      case "destination_taken":
+        return `${this.detail ?? "The destination folder"} already holds other files; move them away, then clone ${this.repositoryName} again.`;
+      case "clone_failed":
+        return `${this.repositoryName} could not be cloned${this.detail ? `: ${this.detail}` : ""}.`;
+      case "storage":
+        return `The checkout for ${this.repositoryName} could not be inspected.`;
+    }
+  }
+}
 /**
  * Legacy membership envelope. Arrays contain at most one effective folder per
  * thread; confidence/source/confirmation fields are fixed compatibility values.

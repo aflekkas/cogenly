@@ -321,7 +321,9 @@ const layerT3ImportProvided = T3Import.layer.pipe(
   ),
 );
 const layerRepositoryCheckoutProvided = RepositoryCheckout.layer.pipe(
-  Layer.provide(Layer.mergeAll(layerProjectService, layerProjectLabelsProvided)),
+  Layer.provide(
+    Layer.mergeAll(layerProjectService, layerProjectLabelsProvided, ProjectLabelFolders.layer),
+  ),
 );
 const layerThreadLaunchProvided = ThreadLaunchService.layer.pipe(
   Layer.provide(
@@ -541,6 +543,7 @@ const layerProductionBase = Layer.mergeAll(
   layerProjectService,
   layerManagedProjectFoldersProvided,
   layerThreadLaunchProvided,
+  layerRepositoryCheckoutProvided,
   layerWorkHandoffProvided,
   layerThreadLifecycleProvided,
   layerAgentsProvided,

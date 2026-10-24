@@ -536,6 +536,7 @@ export const WS_METHODS = {
   projectLabelsUnlinkSource: "projectLabels.unlinkSource",
   projectLabelsSearchOwnerRepositories: "projectLabels.searchOwnerRepositories",
   projectLabelsCloneRepository: "projectLabels.cloneRepository",
+  projectLabelsCheckoutRepository: "projectLabels.checkoutRepository",
   projectLabelsListResources: "projectLabels.listResources",
   projectLabelsSubscribeResources: "projectLabels.subscribeResources",
   projectLabelsAddResource: "projectLabels.addResource",
@@ -2034,6 +2035,14 @@ const WsProjectLabelsCloneRepositoryRpc = Rpc.make(WS_METHODS.projectLabelsClone
     EnvironmentAuthorizationError,
   ]),
 });
+// Clone a repository the project already links onto this machine. Returns
+// once the clone runs; the link's `checkout` state and the project-clone
+// subscription carry its progress.
+const WsProjectLabelsCheckoutRepositoryRpc = Rpc.make(WS_METHODS.projectLabelsCheckoutRepository, {
+  payload: ProjectLabels.ProjectLabelCheckoutRepositoryInput,
+  success: ProjectLabels.ProjectLabelCheckoutRepositoryResult,
+  error: Schema.Union([ProjectLabels.RepositoryCheckoutError, EnvironmentAuthorizationError]),
+});
 const WsProjectLabelsListResourcesRpc = Rpc.make(WS_METHODS.projectLabelsListResources, {
   payload: ProjectLabels.ProjectLabelKey,
   success: ProjectLabels.ProjectLabelListResourcesResult,
@@ -2574,6 +2583,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectLabelsUnlinkSourceRpc,
   WsProjectLabelsSearchOwnerRepositoriesRpc,
   WsProjectLabelsCloneRepositoryRpc,
+  WsProjectLabelsCheckoutRepositoryRpc,
   WsProjectLabelsListResourcesRpc,
   WsProjectLabelsSubscribeResourcesRpc,
   WsProjectLabelsAddResourceRpc,

@@ -4,20 +4,27 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   ProjectId,
   SourceControlProviderKind,
+  isRemoteRepositoryPlaceholder,
   SourceControlRepositoryError,
 } from "@t3tools/contracts";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
+import * as SqlClient from "effect/sql/SqlClient";
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
 import * as GitWorkflow from "../git/GitWorkflowService.ts";
+import * as Events from "../persistence/OrchestrationEventStore.ts";
+import * as Sqlite from "../persistence/Sqlite.ts";
+import { layerIdentity as layerSharedIdentity } from "../sync/testkit.ts";
+import * as ProjectLabelFolders from "../projectLabels/ProjectLabelFolders.ts";
 import * as ProjectLabelService from "../projectLabels/ProjectLabelService.ts";
 import * as SourceControlRepositoryService from "../sourceControl/SourceControlRepositoryService.ts";
 import * as ProjectCloneTracker from "./ProjectCloneTracker.ts";
@@ -26,8 +33,10 @@ import * as RepositoryCheckout from "./RepositoryCheckout.ts";
 
 const projectId = ProjectId.make("project:smile-express");
 
+// No user or system git config: hooks, templates and signing stay out of the tests.
+const gitEnv = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" };
 const git = (cwd: string, args: ReadonlyArray<string>) =>
-  NodeChildProcess.execFileSync("git", [...args], { cwd, stdio: "pipe" });
+  NodeChildProcess.execFileSync("git", [...args], { cwd, stdio: "pipe", env: gitEnv });
 
 /** A local bare repository holding one committed file, used as the remote. */
 function makeBareRemote(): string {
@@ -65,8 +74,9 @@ interface Box {
   onClone?: () => void;
 }
 
-function harness(box: Box) {
-  const repositories = Layer.mock(SourceControlRepositoryService.SourceControlRepositoryService)({
+/** The tracker's source control, cloning with real git and counting clones in `box`. */
+const gitRepositories = (box: Pick<Box, "cloneCalls" | "onPrepareClone" | "onClone">) =>
+  Layer.mock(SourceControlRepositoryService.SourceControlRepositoryService)({
     prepareClone: (input) =>
       (box.onPrepareClone ? box.onPrepareClone() : Effect.void).pipe(
         Effect.as({
@@ -83,7 +93,7 @@ function harness(box: Box) {
           NodeChildProcess.execFileSync(
             "git",
             ["clone", "--progress", "--", input.remoteUrl ?? "", input.destinationPath ?? ""],
-            { stdio: "pipe" },
+            { stdio: "pipe", env: gitEnv },
           );
           box.onClone?.();
           return {
@@ -102,7 +112,9 @@ function harness(box: Box) {
       }),
     discardClone: () => Effect.void,
   });
-  const clones = ProjectCloneTracker.layer.pipe(Layer.provide(repositories));
+
+function harness(box: Box) {
+  const clones = ProjectCloneTracker.layer.pipe(Layer.provide(gitRepositories(box)));
   return RepositoryCheckout.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
@@ -116,6 +128,7 @@ function harness(box: Box) {
           update: () => Effect.succeed({} as never),
         }),
         Layer.mock(GitWorkflow.GitWorkflowService)({ isRepository }),
+        Layer.mock(ProjectLabelFolders.ProjectLabelFolders)({}),
         clones,
         Layer.mock(ProjectLabelService.ProjectLabelService)({
           list: () =>
@@ -201,6 +214,7 @@ const runDuringClone = Effect.gen(function* () {
           update: () => Effect.succeed({} as never),
         }),
         Layer.mock(GitWorkflow.GitWorkflowService)({ isRepository }),
+        Layer.mock(ProjectLabelFolders.ProjectLabelFolders)({}),
         clones,
         Layer.mock(ProjectLabelService.ProjectLabelService)({
           list: () =>
@@ -378,5 +392,192 @@ describe("RepositoryCheckout.ensureCheckout", () => {
       expect(NodeFS.existsSync(NodePath.join(workspaceRoot, ".git"))).toBe(false);
       expect(box.cloneCalls).toBe(0);
     });
+  });
+});
+
+/**
+ * checkoutRepository against the real label service over a memory database:
+ * a project record lands in `projection_projects` like ProjectService does,
+ * and the project folder is `<root>/<Project>`.
+ */
+function checkoutHarness(projectDir: string, box: Pick<Box, "cloneCalls">) {
+  const database = Sqlite.layerMemory.pipe(Layer.provide(NodeServices.layer));
+  const persistence = Events.layer.pipe(Layer.provideMerge(database));
+  const labels = ProjectLabelService.layer.pipe(
+    Layer.provide(layerSharedIdentity),
+    Layer.provideMerge(persistence),
+    Layer.provide(NodeServices.layer),
+  );
+  const projects = Layer.unwrap(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const getById = (id: ProjectId) =>
+        sql<{ workspace_root: string; title: string }>`
+          SELECT workspace_root, title FROM projection_projects WHERE project_id = ${id} AND deleted_at IS NULL
+        `.pipe(
+          Effect.map((rows) =>
+            rows[0]
+              ? Option.some({ id, title: rows[0].title, workspaceRoot: rows[0].workspace_root })
+              : Option.none(),
+          ),
+          Effect.orDie,
+        );
+      return Layer.mock(ProjectService.ProjectService)({
+        create: (input) =>
+          Effect.gen(function* () {
+            if (input.createWorkspaceRootIfMissing)
+              NodeFS.mkdirSync(input.workspaceRoot, { recursive: true });
+            yield* sql`INSERT INTO projection_projects(project_id, title, workspace_root, scripts_json, created_at, updated_at) VALUES (${input.projectId}, ${input.title}, ${input.workspaceRoot}, '[]', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`.pipe(
+              Effect.orDie,
+            );
+            return {} as never;
+          }),
+        getById: (id) => getById(id) as never,
+        update: () => Effect.succeed({} as never),
+      });
+    }),
+  );
+  return RepositoryCheckout.layer.pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        projects,
+        Layer.mock(GitWorkflow.GitWorkflowService)({ isRepository }),
+        Layer.mock(ProjectLabelFolders.ProjectLabelFolders)({
+          ensureForLabel: () =>
+            Effect.sync(() => {
+              NodeFS.mkdirSync(projectDir, { recursive: true });
+              return { dir: projectDir, dirName: NodePath.basename(projectDir) };
+            }),
+        }),
+      ),
+    ),
+    Layer.provideMerge(ProjectCloneTracker.layer.pipe(Layer.provide(gitRepositories(box)))),
+    Layer.provideMerge(labels),
+    Layer.provideMerge(NodeServices.layer),
+  );
+}
+
+/** A project that links `remote` from another machine: only the placeholder exists here. */
+const linkFromElsewhere = (remote: string, directoryName: string) =>
+  Effect.gen(function* () {
+    const labels = yield* ProjectLabelService.ProjectLabelService;
+    const sql = yield* SqlClient.SqlClient;
+    const { label } = yield* labels.create({ name: "Spawn" });
+    const placeholder = `remote:${remote}`;
+    yield* sql`INSERT INTO label_repositories(label_id, repository_id, remote, directory_name) VALUES (${label.id}, ${placeholder}, ${remote}, ${directoryName})`;
+    yield* sql`INSERT INTO scheduled_tasks(task_id, title, prompt, enabled, schedule_json, project_id, workspace_strategy_json, model_selection_json, runtime_mode, interaction_mode, created_by, creation_source, created_at, updated_at, last_run_status, run_count) VALUES ('task:nightly', 'Nightly', 'Go', 1, '{}', ${placeholder}, '{"type":"root"}', '{}', 'full-access', 'default', 'user', 'web', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z', 'never', 0)`;
+    return label;
+  });
+
+const waitForCloneToSettle = (repositoryId: ProjectId) =>
+  Effect.gen(function* () {
+    const clones = yield* ProjectCloneTracker.ProjectCloneTracker;
+    return yield* clones.stream.pipe(
+      Stream.map((all) => all.find((clone) => clone.projectId === repositoryId)),
+      Stream.filter((clone) => clone === undefined || clone.phase !== "running"),
+      Stream.runHead,
+    );
+  });
+
+describe("RepositoryCheckout.checkoutRepository", () => {
+  it.effect("clones a repository linked from another machine into its project folder", () => {
+    const bare = makeBareRemote();
+    const projectDir = NodePath.join(tempRoot(), "Spawn");
+    const box = { cloneCalls: 0 };
+    return Effect.gen(function* () {
+      const label = yield* linkFromElsewhere(bare, "smile-express");
+      const checkouts = yield* RepositoryCheckout.RepositoryCheckout;
+      const labels = yield* ProjectLabelService.ProjectLabelService;
+      const sql = yield* SqlClient.SqlClient;
+      const { repositoryId } = yield* checkouts.checkoutRepository({
+        labelId: label.id,
+        remote: bare,
+      });
+      expect(isRemoteRepositoryPlaceholder(repositoryId)).toBe(false);
+      // The placeholder is gone in the same step the record appears, and
+      // the scheduled task bound to it follows.
+      expect(
+        yield* sql`SELECT repository_id, remote, directory_name FROM label_repositories`,
+      ).toEqual([{ repository_id: repositoryId, remote: bare, directory_name: "smile-express" }]);
+      expect(yield* sql`SELECT project_id FROM scheduled_tasks`).toEqual([
+        { project_id: repositoryId },
+      ]);
+      yield* waitForCloneToSettle(repositoryId);
+      const destination = NodePath.join(projectDir, "smile-express");
+      expect(NodeFS.readFileSync(NodePath.join(destination, "README.md"), "utf8")).toBe("hello\n");
+      expect((yield* labels.read(label.id)).label.repositories?.[0]?.checkout).toBe("ready");
+      // Asking again is a no-op: same record, no second clone.
+      expect(yield* checkouts.checkoutRepository({ labelId: label.id, remote: bare })).toEqual({
+        repositoryId,
+      });
+      expect(box.cloneCalls).toBe(1);
+    }).pipe(Effect.provide(checkoutHarness(projectDir, box)));
+  });
+
+  it.effect("a launch on the placeholder id clones first and waits for the checkout", () => {
+    const bare = makeBareRemote();
+    const projectDir = NodePath.join(tempRoot(), "Spawn");
+    const box = { cloneCalls: 0 };
+    return Effect.gen(function* () {
+      yield* linkFromElsewhere(bare, "smile-express");
+      const checkouts = yield* RepositoryCheckout.RepositoryCheckout;
+      yield* checkouts.ensureCheckout(ProjectId.make(`remote:${bare}`));
+      expect(
+        NodeFS.readFileSync(NodePath.join(projectDir, "smile-express", "README.md"), "utf8"),
+      ).toBe("hello\n");
+      expect(box.cloneCalls).toBe(1);
+    }).pipe(Effect.provide(checkoutHarness(projectDir, box)));
+  });
+
+  it.effect("adopts a checkout of the same repository already in the folder", () => {
+    const bare = makeBareRemote();
+    const projectDir = NodePath.join(tempRoot(), "Spawn");
+    NodeFS.mkdirSync(projectDir);
+    git(projectDir, ["clone", bare, "smile-express"]);
+    const box = { cloneCalls: 0 };
+    return Effect.gen(function* () {
+      const label = yield* linkFromElsewhere(bare, "smile-express");
+      const checkouts = yield* RepositoryCheckout.RepositoryCheckout;
+      const labels = yield* ProjectLabelService.ProjectLabelService;
+      yield* checkouts.checkoutRepository({ labelId: label.id, remote: bare });
+      expect(box.cloneCalls).toBe(0);
+      expect((yield* labels.read(label.id)).label.repositories?.[0]?.checkout).toBe("ready");
+    }).pipe(Effect.provide(checkoutHarness(projectDir, box)));
+  });
+
+  it.effect("refuses to clone over a folder that holds other files", () => {
+    const bare = makeBareRemote();
+    const projectDir = NodePath.join(tempRoot(), "Spawn");
+    NodeFS.mkdirSync(NodePath.join(projectDir, "smile-express"), { recursive: true });
+    NodeFS.writeFileSync(NodePath.join(projectDir, "smile-express", "notes.txt"), "mine\n");
+    const box = { cloneCalls: 0 };
+    return Effect.gen(function* () {
+      const label = yield* linkFromElsewhere(bare, "smile-express");
+      const checkouts = yield* RepositoryCheckout.RepositoryCheckout;
+      const sql = yield* SqlClient.SqlClient;
+      const error = yield* Effect.flip(
+        checkouts.checkoutRepository({ labelId: label.id, remote: bare }),
+      );
+      expect(error.reason).toBe("destination_taken");
+      expect(box.cloneCalls).toBe(0);
+      expect(yield* sql`SELECT repository_id FROM label_repositories`).toEqual([
+        { repository_id: `remote:${bare}` },
+      ]);
+      expect(
+        NodeFS.readFileSync(NodePath.join(projectDir, "smile-express", "notes.txt"), "utf8"),
+      ).toBe("mine\n");
+    }).pipe(Effect.provide(checkoutHarness(projectDir, box)));
+  });
+
+  it.effect("refuses a remote the project does not link", () => {
+    const projectDir = NodePath.join(tempRoot(), "Spawn");
+    return Effect.gen(function* () {
+      const label = yield* linkFromElsewhere("github.com/org/repo", "repo");
+      const checkouts = yield* RepositoryCheckout.RepositoryCheckout;
+      const error = yield* Effect.flip(
+        checkouts.checkoutRepository({ labelId: label.id, remote: "github.com/org/other" }),
+      );
+      expect(error.reason).toBe("not_linked");
+    }).pipe(Effect.provide(checkoutHarness(projectDir, { cloneCalls: 0 })));
   });
 });

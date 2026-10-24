@@ -97,6 +97,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.projectLabelsUnlinkSource]: "projectLabels",
   [WS_METHODS.projectLabelsSearchOwnerRepositories]: "projectLabels",
   [WS_METHODS.projectLabelsCloneRepository]: "projectLabels",
+  [WS_METHODS.projectLabelsCheckoutRepository]: "projectLabels",
   [WS_METHODS.projectLabelsListResources]: "projectLabels",
   [WS_METHODS.projectLabelsSubscribeResources]: "projectLabels",
   [WS_METHODS.projectLabelsAddResource]: "projectLabels",
