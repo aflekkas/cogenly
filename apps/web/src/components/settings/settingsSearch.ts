@@ -855,15 +855,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     localBackendManagementOnly: true,
   },
   {
-    id: "tailscale-https",
-    title: "Tailscale HTTPS",
-    to: "/settings/connections",
-    targetId: "connections-environment",
-    searchTerms: ["serve magicdns endpoint remote secure network"],
-    desktopOnly: true,
-    localBackendManagementOnly: true,
-  },
-  {
     id: "wsl-backend",
     title: "WSL backend",
     to: "/settings/connections",
@@ -941,7 +932,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/machines",
     searchTerms: [
       "pair paired pairing unpair hub always-on sync computers laptops servers online offline tailscale",
-      "private access tailscale serve",
+      "private access tailscale serve https magicdns tailnet",
     ],
   },
   {

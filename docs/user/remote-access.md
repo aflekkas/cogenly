@@ -124,8 +124,10 @@ unavailable or all eligible machines are full, choose a machine manually to cont
 
 ### Tailscale HTTPS
 
-Join both devices to the same tailnet. In the desktop app, enable **Tailscale
-HTTPS** in **Settings → Connections**. Turn it off there to remove that route.
+Join both devices to the same tailnet. On web or desktop, turn on **Private access**
+for the machine in **Settings → Machines**, and turn it off there to remove that
+route. It is the only Tailscale switch: the desktop app's earlier Tailscale HTTPS
+switch moved into it, so a machine that had it on keeps private access.
 
 To start a command-line server with Tailscale HTTPS:
 

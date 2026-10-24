@@ -184,7 +184,6 @@ describe("searchSettings", () => {
       "source-control-writing-style",
       "t3-connect",
       "hold-webhooks-while-offline",
-      "tailscale-https",
       "wsl-backend",
     ]);
     expect(available.map((item) => item.id).filter((id) => gatedIds.has(id))).toEqual([]);
@@ -316,6 +315,12 @@ describe("searchSettings", () => {
     ["project overview", "project-overview", "/settings/projects"],
   ])("routes %s to its owning category", (query, id, to) => {
     expect(searchSettings(query)[0]).toMatchObject({ id, to });
+  });
+
+  it("finds the one Tailscale switch on the Machines page", () => {
+    const results = searchSettings("tailscale serve");
+    expect(results[0]?.id).toBe("machines");
+    expect(results.every((item) => item.to === "/settings/machines")).toBe(true);
   });
 
   it("finds machine pairing on the Machines page", () => {

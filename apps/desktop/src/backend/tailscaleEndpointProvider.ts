@@ -93,7 +93,7 @@ const resolveTailscaleMagicDnsAdvertisedEndpoint = Effect.fn(
       status: isReachable ? "available" : "unavailable",
       description: isReachable
         ? "HTTPS endpoint served by Tailscale Serve."
-        : "MagicDNS hostname. Configure Tailscale Serve for HTTPS access.",
+        : "MagicDNS hostname. Turn on Private access in Settings → Machines for HTTPS access.",
     }),
   );
 });

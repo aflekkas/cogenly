@@ -17,6 +17,7 @@ import { resolveLinuxDesktopEntryName } from "./DesktopEarlyElectronStartup.ts";
 import { resolveDesktopBaseDir, resolveDesktopStateDir } from "./DesktopStatePaths.ts";
 import { isStagingDesktopVersion } from "../updates/updateChannels.ts";
 import type { OtlpProtocol } from "@t3tools/shared/observability";
+import { TAILSCALE_SERVE_PREFERENCE_FILE } from "@t3tools/tailscale";
 
 export interface MakeDesktopEnvironmentInput {
   readonly dirname: string;
@@ -50,6 +51,8 @@ export class DesktopEnvironment extends Context.Service<
     readonly clientSettingsPath: string;
     readonly savedEnvironmentRegistryPath: string;
     readonly serverSettingsPath: string;
+    /** The backend's saved Tailscale Serve preference, which Private access on Settings → Machines writes. */
+    readonly tailscaleServePreferencePath: string;
     readonly logDir: string;
     readonly browserArtifactsDir: string;
     readonly rootDir: string;
@@ -211,6 +214,7 @@ const make = Effect.fn("desktop.environment.make")(function* (
     clientSettingsPath: path.join(stateDir, "client-settings.json"),
     savedEnvironmentRegistryPath: path.join(stateDir, "saved-environments.json"),
     serverSettingsPath: path.join(stateDir, "settings.json"),
+    tailscaleServePreferencePath: path.join(stateDir, TAILSCALE_SERVE_PREFERENCE_FILE),
     logDir: path.join(stateDir, "logs"),
     browserArtifactsDir: path.join(stateDir, "browser-artifacts"),
     rootDir,

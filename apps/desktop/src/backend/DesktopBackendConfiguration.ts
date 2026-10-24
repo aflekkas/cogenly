@@ -571,8 +571,11 @@ const resolvePrimaryStartConfig = Effect.fn("desktop.backendConfiguration.resolv
       desktopBootstrapSecret: input.bootstrapSecret,
       // Failed Windows probes leave server hydration enabled for another attempt.
       shellEnvironmentPrepared: input.shellEnvironmentPrepared,
-      tailscaleServeEnabled: backendExposure.tailscaleServeEnabled,
-      tailscaleServePort: backendExposure.tailscaleServePort,
+      // Serve follows Private access, which the backend saves itself. `true`
+      // here would make this run own Serve: Machines changes wouldn't be saved
+      // and the mapping would be removed at shutdown. The port is then inert.
+      tailscaleServeEnabled: false,
+      tailscaleServePort: 443,
       desktopTelemetryFd: 4,
       desktopTelemetryControlFd: 5,
       desktopBrowserFd: 6,

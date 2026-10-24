@@ -122,6 +122,7 @@ Cogenly's port, Cogenly uses it. If you set `COGENLY_TAILSCALE_SERVE=1` in a
 systemd drop-in, `cogenly doctor` moves that setting into Cogenly.
 
 Turn private access off or back on any time in Settings → Machines with the Private access switch on this machine.
+It is the only Tailscale Serve switch in Cogenly; Settings → Connections links to it.
 
 On the computer joining, prepare its key:
 
