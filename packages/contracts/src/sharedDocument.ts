@@ -41,10 +41,20 @@ export const SharedDocumentChange = Schema.Struct({
   updatedBy: EnvironmentId,
 });
 export type SharedDocumentChange = typeof SharedDocumentChange.Type;
+/**
+ * A change as peers send it. The kind stays open so a newer peer's document
+ * kind reaches the receiver, which keeps it for a later build instead of
+ * refusing the whole batch (see docs/internals/sync.md).
+ */
+export const SharedDocumentChangeWire = Schema.Struct({
+  ...SharedDocumentChange.fields,
+  kind: SharedDocumentId,
+});
+export type SharedDocumentChangeWire = typeof SharedDocumentChangeWire.Type;
 export const SharedChangeBatch = Schema.Struct({
   after: Counter,
   cursor: Counter,
-  changes: Schema.Array(SharedDocumentChange).check(Schema.isMaxLength(SHARED_BATCH_LIMIT)),
+  changes: Schema.Array(SharedDocumentChangeWire).check(Schema.isMaxLength(SHARED_BATCH_LIMIT)),
 });
 export type SharedChangeBatch = typeof SharedChangeBatch.Type;
 export class SharedStateError extends Schema.TaggedError<SharedStateError>()("SharedStateError", {

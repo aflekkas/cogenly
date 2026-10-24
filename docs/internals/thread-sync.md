@@ -35,6 +35,17 @@ thread it also runs locally, such as one both machines imported from T3 or a
 project chat both created under the same fixed id, rather than interleave two
 histories.
 
+Batches carry events and metadata as plain JSON, and the receiver decodes each
+item, because a newer build's event type must not stall the stream on an older
+one. A thread with an item the receiver cannot decode is held whole: that item
+and every later one for the thread wait in `thread_replication_deferred`, in
+order, while other threads keep applying and the cursor advances. Startup
+replays a held thread once every item of it decodes, so after an update it
+catches up in its original order. Payload keys an older build does not know
+are dropped from its own copy; it never writes another machine's events back,
+so they are lost only where an older machine passes its copy on: a hub relaying
+to a third machine, or a thread moved to an older machine.
+
 ## Continuing a thread from another machine
 
 The orchestrator asks `RemoteThreadCommands` before dispatching, so every

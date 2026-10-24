@@ -2,7 +2,7 @@ import * as Schema from "effect/Schema";
 import { AuthPeerDelegateScope, AuthSyncReplicateScope } from "./auth.ts";
 import { EnvironmentId, EventId, ProjectId, ThreadId } from "./baseSchemas.ts";
 import { makePeerChannel } from "./machine.ts";
-import { OrchestrationV2DomainEventJson, OrchestrationV2ServerCommand } from "./orchestrationV2.ts";
+import { OrchestrationV2ServerCommand } from "./orchestrationV2.ts";
 import { ProjectLabelId } from "./projectLabel.ts";
 import { SharedRepositoryRemote } from "./sharedDocument.ts";
 
@@ -40,16 +40,18 @@ export const ThreadReplicaMeta = Schema.Struct({
 });
 export type ThreadReplicaMeta = typeof ThreadReplicaMeta.Type;
 
+/**
+ * Items travel as plain JSON and the receiver decodes each one: an event type
+ * or metadata a newer build added must hold back only its own thread, never
+ * fail the batch (see docs/internals/thread-sync.md). Senders encode events
+ * with `OrchestrationV2DomainEventJson` and metadata with `ThreadReplicaMeta`.
+ */
 export const ThreadReplicationBatch = Schema.Struct({
   after: ThreadReplicationCursor,
   cursor: ThreadReplicationCursor,
-  events: Schema.Array(OrchestrationV2DomainEventJson).check(
-    Schema.isMaxLength(THREAD_REPLICATION_BATCH_EVENTS),
-  ),
+  events: Schema.Array(Schema.Json).check(Schema.isMaxLength(THREAD_REPLICATION_BATCH_EVENTS)),
   /** Metadata for every thread with events in the batch, plus any whose metadata changed. */
-  meta: Schema.Array(ThreadReplicaMeta).check(
-    Schema.isMaxLength(THREAD_REPLICATION_BATCH_EVENTS * 2),
-  ),
+  meta: Schema.Array(Schema.Json).check(Schema.isMaxLength(THREAD_REPLICATION_BATCH_EVENTS * 2)),
 });
 export type ThreadReplicationBatch = typeof ThreadReplicationBatch.Type;
 

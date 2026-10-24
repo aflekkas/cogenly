@@ -16,7 +16,7 @@ import {
   THREAD_REPLICATION_BATCH_EVENTS,
   ThreadId,
   ThreadReplicaSource,
-  type ThreadReplicaMeta,
+  ThreadReplicaMeta,
   type ThreadReplicationBatch,
   type ThreadReplicationCursor,
   ThreadReplicationError,
@@ -26,6 +26,7 @@ import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
@@ -123,7 +124,20 @@ const isReplicationError = Schema.is(ThreadReplicationError);
 const isPortableSource = Schema.is(ThreadReplicaSource);
 const storage = (cause: unknown) =>
   isReplicationError(cause) ? cause : new ThreadReplicationError({ reason: "storage", cause });
-const encodeEvent = Schema.encodeEffect(Schema.fromJsonString(OrchestrationV2DomainEventJson));
+const encodeEventJson = Schema.encodeEffect(OrchestrationV2DomainEventJson);
+const decodeEventJson = Schema.decodeUnknownOption(OrchestrationV2DomainEventJson);
+const encodeMeta = Schema.encodeEffect(ThreadReplicaMeta);
+const decodeMeta = Schema.decodeUnknownOption(ThreadReplicaMeta);
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+const decodeJsonOption = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown));
+const rawField = (raw: unknown, key: string) =>
+  typeof raw === "object" && raw !== null && !Array.isArray(raw)
+    ? (raw as Record<string, unknown>)[key]
+    : undefined;
+const rawThreadId = (raw: unknown) => {
+  const value = rawField(raw, "threadId");
+  return typeof value === "string" ? value : undefined;
+};
 const decodeSource = Schema.decodeUnknownEffect(Schema.fromJsonString(ThreadReplicaSource));
 const encodeSource = Schema.encodeSync(Schema.fromJsonString(ThreadReplicaSource));
 /** A pending handoff: the machine taking the thread and the epoch it takes it at. */
@@ -270,7 +284,8 @@ const make = Effect.gen(function* () {
       candidates.length < THREAD_REPLICATION_BATCH_EVENTS
         ? latest.events
         : candidates.at(-1)!.sequence;
-    const events: Array<OrchestrationV2DomainEvent> = [];
+    const events: Array<Schema.Json> = [];
+    const eventThreads: Array<ThreadId> = [];
     if (candidates.length > 0) {
       const stored = yield* Stream.runCollect(
         eventStore.read({
@@ -281,12 +296,14 @@ const make = Effect.gen(function* () {
       let bytes = 0;
       for (const item of stored) {
         if (!wanted.has(item.sequence)) continue;
-        const size = Buffer.byteLength(yield* encodeEvent(item.event), "utf8");
+        const encoded = (yield* encodeEventJson(item.event)) as Schema.Json;
+        const size = Buffer.byteLength(encodeJson(encoded), "utf8");
         if (events.length > 0 && bytes + size > THREAD_REPLICATION_BATCH_BYTES - 16 * 1024) {
           eventsCursor = item.sequence - 1;
           break;
         }
-        events.push(item.event);
+        events.push(encoded);
+        eventThreads.push(item.event.threadId);
         bytes += size;
       }
     }
@@ -296,17 +313,16 @@ const make = Effect.gen(function* () {
     }>`SELECT seq, thread_id FROM thread_replication_meta_log WHERE seq > ${after.meta} AND seq <= ${latest.meta} ORDER BY seq LIMIT ${THREAD_REPLICATION_BATCH_EVENTS}`;
     const metaCursor =
       metaRows.length < THREAD_REPLICATION_BATCH_EVENTS ? latest.meta : metaRows.at(-1)!.seq;
-    const threadIds = [
-      ...new Set([
-        ...events.map((event) => event.threadId),
-        ...metaRows.map((row) => row.thread_id),
-      ]),
-    ];
+    const threadIds = [...new Set([...eventThreads, ...metaRows.map((row) => row.thread_id)])];
     const owners = yield* ownerRows(threadIds);
     const include = sendable(target, localOnly);
     const meta = yield* Effect.forEach(
       threadIds.filter((threadId) => include(owners.get(threadId))),
-      (threadId) => metaFor(threadId, owners.get(threadId)),
+      (threadId) =>
+        metaFor(threadId, owners.get(threadId)).pipe(
+          Effect.flatMap(encodeMeta),
+          Effect.map((encoded) => encoded as Schema.Json),
+        ),
     );
     return {
       after,
@@ -354,6 +370,178 @@ const make = Effect.gen(function* () {
     return rows[0] === undefined ? undefined : ProjectId.make(rows[0].project_id);
   });
 
+  /**
+   * Applies decoded metadata and events from `source`: owners first, then the
+   * events this machine lacks, then filing. Used by receive, and at startup
+   * for items an older build of this machine held back.
+   */
+  const applyItems = Effect.fn("ThreadReplication.applyItems")(function* (
+    metas: ReadonlyArray<ThreadReplicaMeta>,
+    events: ReadonlyArray<OrchestrationV2DomainEvent>,
+    source: EnvironmentId,
+    commandKey: string,
+  ) {
+    const metaByThread = new Map(metas.map((meta) => [meta.threadId, meta]));
+    const owners = yield* ownerRows([...metaByThread.keys()]);
+    const present = new Set(
+      (metaByThread.size === 0
+        ? []
+        : yield* sql<{
+            readonly thread_id: string;
+          }>`SELECT thread_id FROM orchestration_v2_projection_threads WHERE thread_id IN ${sql.in([...metaByThread.keys()])}`
+      ).map((row) => row.thread_id),
+    );
+    const accepted = new Map<ThreadId, { meta: ThreadReplicaMeta; projectId?: ProjectId }>();
+    for (const meta of metas) {
+      const row = owners.get(meta.threadId);
+      // Handing a thread to this machine is the handoff protocol's decision, never a replica's.
+      if (meta.owner === environmentId) continue;
+      if (row === undefined ? present.has(meta.threadId) : row.local === 1) {
+        yield* Effect.logWarning("Skipping a replicated thread this machine also runs", {
+          threadId: meta.threadId,
+          owner: meta.owner,
+        });
+        continue;
+      }
+      if (row !== undefined && meta.epoch < row.epoch) continue;
+      if (row !== undefined && meta.epoch === row.epoch && meta.owner !== row.owner_env) {
+        yield* Effect.logWarning("Skipping a conflicting thread owner", {
+          threadId: meta.threadId,
+        });
+        continue;
+      }
+      const projectId = yield* localProject(meta.source);
+      accepted.set(meta.threadId, { meta, ...(projectId === undefined ? {} : { projectId }) });
+    }
+
+    // Owners first: a crash after this leaves an empty replica, never a thread
+    // whose events look like this machine's own.
+    const now = DateTime.formatIso(yield* DateTime.now);
+    yield* sql.withTransaction(
+      Effect.forEach(
+        accepted.values(),
+        ({ meta }) =>
+          sql`INSERT INTO thread_owners(thread_id, owner_env, local, epoch, source_json, updated_at)
+              VALUES (${meta.threadId}, ${meta.owner}, 0, ${meta.epoch}, ${meta.source === null ? null : encodeSource(meta.source)}, ${now})
+              ON CONFLICT(thread_id) DO UPDATE SET owner_env = excluded.owner_env, epoch = excluded.epoch,
+                source_json = excluded.source_json, updated_at = excluded.updated_at
+              WHERE thread_owners.local = 0`,
+        { discard: true },
+      ),
+    );
+
+    const candidates = events.filter((event) => accepted.has(event.threadId));
+    const stored = new Set(
+      candidates.length === 0
+        ? []
+        : (yield* sql<{
+            readonly event_id: string;
+          }>`SELECT event_id FROM orchestration_events WHERE event_id IN ${sql.in(candidates.map((event) => event.id))}`).map(
+            (row) => row.event_id,
+          ),
+    );
+    const fresh = candidates
+      .filter((event) => !stored.has(event.id))
+      .map((event) => {
+        const projectId = accepted.get(event.threadId)?.projectId;
+        return projectId !== undefined &&
+          event.type.startsWith("thread.") &&
+          "projectId" in event.payload
+          ? ({ ...event, payload: { ...event.payload, projectId } } as OrchestrationV2DomainEvent)
+          : event;
+      });
+    if (fresh.length > 0) {
+      const commandId = CommandId.make(`${REPLICA_COMMAND_PREFIX}${source}:${commandKey}`);
+      // One event that cannot apply here must not wedge the cursor for the rest.
+      yield* eventSink.write({ commandId, events: fresh }).pipe(
+        Effect.catch(() =>
+          Effect.forEach(
+            fresh,
+            (event) =>
+              eventSink.write({ commandId, events: [event] }).pipe(
+                Effect.catch((error) =>
+                  Effect.logWarning("Skipping a replicated event that does not apply", {
+                    eventId: event.id,
+                    threadId: event.threadId,
+                    error: error.message,
+                  }),
+                ),
+              ),
+            { discard: true },
+          ),
+        ),
+      );
+    }
+
+    yield* sql.withTransaction(
+      Effect.gen(function* () {
+        for (const { meta } of accepted.values()) {
+          const filed = yield* sql<{
+            readonly label_id: string;
+          }>`SELECT label_id FROM thread_project_labels WHERE thread_id = ${meta.threadId}`;
+          if ((filed[0]?.label_id ?? null) === meta.folderId) continue;
+          yield* sql`DELETE FROM thread_project_labels WHERE thread_id = ${meta.threadId}`;
+          if (meta.folderId !== null)
+            yield* sql`INSERT INTO thread_project_labels(thread_id, label_id)
+                SELECT ${meta.threadId}, label_id FROM project_labels WHERE label_id = ${meta.folderId}`;
+        }
+      }),
+    );
+  });
+
+  /**
+   * Decodes a batch item by item. A thread with an item this build cannot read,
+   * or with items already held, is held whole and in order, so it never applies
+   * out of sequence; every other thread applies now.
+   */
+  const splitBatch = Effect.fn("ThreadReplication.splitBatch")(function* (
+    batch: ThreadReplicationBatch,
+    source: EnvironmentId,
+    trustedRelay: boolean,
+  ) {
+    const held = new Set(
+      (yield* sql<{
+        readonly thread_id: string;
+      }>`SELECT DISTINCT thread_id FROM thread_replication_deferred`).map((row) => row.thread_id),
+    );
+    const metas = batch.meta.map((raw) => ({
+      raw,
+      threadId: rawThreadId(raw),
+      decoded: decodeMeta(raw),
+    }));
+    const events = batch.events.map((raw) => ({
+      raw,
+      threadId: rawThreadId(raw),
+      decoded: decodeEventJson(raw),
+    }));
+    // Shape checks that hold for every build: each item names its thread,
+    // each event comes with its thread's metadata, and a peer speaks only
+    // for threads it owns unless it is this spoke's hub.
+    const metaThreads = new Set(metas.map((item) => item.threadId));
+    for (const item of [...metas, ...events])
+      if (item.threadId === undefined)
+        return yield* new ThreadReplicationError({ reason: "invalid-batch" });
+    for (const item of events)
+      if (!metaThreads.has(item.threadId))
+        return yield* new ThreadReplicationError({ reason: "invalid-batch" });
+    for (const item of metas)
+      if (!trustedRelay && rawField(item.raw, "owner") !== source)
+        return yield* new ThreadReplicationError({ reason: "invalid-batch" });
+    for (const item of metas) if (Option.isNone(item.decoded)) held.add(item.threadId!);
+    for (const item of events) if (Option.isNone(item.decoded)) held.add(item.threadId!);
+    const isHeld = (item: { readonly threadId: string | undefined }) => held.has(item.threadId!);
+    return {
+      deferred: [
+        ...metas.filter(isHeld).map((item) => ({ kind: "meta" as const, ...item })),
+        ...events.filter(isHeld).map((item) => ({ kind: "event" as const, ...item })),
+      ],
+      metas: metas.filter((item) => !isHeld(item)).flatMap((item) => Option.toArray(item.decoded)),
+      events: events
+        .filter((item) => !isHeld(item))
+        .flatMap((item) => Option.toArray(item.decoded)),
+    };
+  });
+
   const receive: ThreadReplication["Service"]["receive"] = Effect.fn("ThreadReplication.receive")(
     function* (batch, source, trustedRelay) {
       const previous = (yield* cursors(source)).received;
@@ -366,128 +554,79 @@ const make = Effect.gen(function* () {
         return yield* new ThreadReplicationError({ reason: "invalid-cursor" });
       if (batch.cursor.events <= previous.events && batch.cursor.meta <= previous.meta)
         return { acknowledged: previous };
-      const metaByThread = new Map(batch.meta.map((meta) => [meta.threadId, meta]));
-      for (const event of batch.events)
-        if (!metaByThread.has(event.threadId))
-          return yield* new ThreadReplicationError({ reason: "invalid-batch" });
-      for (const meta of batch.meta)
-        if (!trustedRelay && meta.owner !== source)
-          return yield* new ThreadReplicationError({ reason: "invalid-batch" });
-
-      const owners = yield* ownerRows([...metaByThread.keys()]);
-      const present = new Set(
-        (metaByThread.size === 0
-          ? []
-          : yield* sql<{
-              readonly thread_id: string;
-            }>`SELECT thread_id FROM orchestration_v2_projection_threads WHERE thread_id IN ${sql.in([...metaByThread.keys()])}`
-        ).map((row) => row.thread_id),
-      );
-      const accepted = new Map<ThreadId, { meta: ThreadReplicaMeta; projectId?: ProjectId }>();
-      for (const meta of batch.meta) {
-        const row = owners.get(meta.threadId);
-        // Handing a thread to this machine is the handoff protocol's decision, never a replica's.
-        if (meta.owner === environmentId) continue;
-        if (row === undefined ? present.has(meta.threadId) : row.local === 1) {
-          yield* Effect.logWarning("Skipping a replicated thread this machine also runs", {
-            threadId: meta.threadId,
-            owner: meta.owner,
-          });
-          continue;
-        }
-        if (row !== undefined && meta.epoch < row.epoch) continue;
-        if (row !== undefined && meta.epoch === row.epoch && meta.owner !== row.owner_env) {
-          yield* Effect.logWarning("Skipping a conflicting thread owner", {
-            threadId: meta.threadId,
-          });
-          continue;
-        }
-        const projectId = yield* localProject(meta.source);
-        accepted.set(meta.threadId, { meta, ...(projectId === undefined ? {} : { projectId }) });
-      }
-
-      // Owners first: a crash after this leaves an empty replica, never a thread
-      // whose events look like this machine's own.
-      const now = DateTime.formatIso(yield* DateTime.now);
-      yield* sql.withTransaction(
-        Effect.forEach(
-          accepted.values(),
-          ({ meta }) =>
-            sql`INSERT INTO thread_owners(thread_id, owner_env, local, epoch, source_json, updated_at)
-              VALUES (${meta.threadId}, ${meta.owner}, 0, ${meta.epoch}, ${meta.source === null ? null : encodeSource(meta.source)}, ${now})
-              ON CONFLICT(thread_id) DO UPDATE SET owner_env = excluded.owner_env, epoch = excluded.epoch,
-                source_json = excluded.source_json, updated_at = excluded.updated_at
-              WHERE thread_owners.local = 0`,
-          { discard: true },
-        ),
-      );
-
-      const candidates = batch.events.filter((event) => accepted.has(event.threadId));
-      const stored = new Set(
-        candidates.length === 0
-          ? []
-          : (yield* sql<{
-              readonly event_id: string;
-            }>`SELECT event_id FROM orchestration_events WHERE event_id IN ${sql.in(candidates.map((event) => event.id))}`).map(
-              (row) => row.event_id,
-            ),
-      );
-      const fresh = candidates
-        .filter((event) => !stored.has(event.id))
-        .map((event) => {
-          const projectId = accepted.get(event.threadId)?.projectId;
-          return projectId !== undefined &&
-            event.type.startsWith("thread.") &&
-            "projectId" in event.payload
-            ? ({ ...event, payload: { ...event.payload, projectId } } as OrchestrationV2DomainEvent)
-            : event;
+      const split = yield* splitBatch(batch, source, trustedRelay);
+      if (split.deferred.length > 0) {
+        yield* Effect.logWarning("Holding replicated threads this build cannot read yet", {
+          threads: [...new Set(split.deferred.map((item) => item.threadId))],
         });
-      if (fresh.length > 0) {
-        const commandId = CommandId.make(
-          `${REPLICA_COMMAND_PREFIX}${source}:${batch.cursor.events}`,
-        );
-        // One event that cannot apply here must not wedge the cursor for the rest.
-        yield* eventSink.write({ commandId, events: fresh }).pipe(
-          Effect.catch(() =>
-            Effect.forEach(
-              fresh,
-              (event) =>
-                eventSink.write({ commandId, events: [event] }).pipe(
-                  Effect.catch((error) =>
-                    Effect.logWarning("Skipping a replicated event that does not apply", {
-                      eventId: event.id,
-                      threadId: event.threadId,
-                      error: error.message,
-                    }),
-                  ),
-                ),
-              { discard: true },
-            ),
-          ),
-        );
+        for (const item of split.deferred)
+          yield* sql`INSERT INTO thread_replication_deferred(thread_id, item_kind, source_env, trusted_relay, item_json)
+            VALUES (${item.threadId!}, ${item.kind}, ${source}, ${trustedRelay ? 1 : 0}, ${encodeJson(item.raw)})`;
       }
-
-      yield* sql.withTransaction(
-        Effect.gen(function* () {
-          for (const { meta } of accepted.values()) {
-            const filed = yield* sql<{
-              readonly label_id: string;
-            }>`SELECT label_id FROM thread_project_labels WHERE thread_id = ${meta.threadId}`;
-            if ((filed[0]?.label_id ?? null) === meta.folderId) continue;
-            yield* sql`DELETE FROM thread_project_labels WHERE thread_id = ${meta.threadId}`;
-            if (meta.folderId !== null)
-              yield* sql`INSERT INTO thread_project_labels(thread_id, label_id)
-                SELECT ${meta.threadId}, label_id FROM project_labels WHERE label_id = ${meta.folderId}`;
-          }
-          yield* sql`INSERT INTO thread_replication_cursors(environment_id, received_events, received_meta)
-            VALUES (${source}, ${batch.cursor.events}, ${batch.cursor.meta})
-            ON CONFLICT(environment_id) DO UPDATE SET received_events = excluded.received_events,
-              received_meta = excluded.received_meta`;
-        }),
-      );
+      yield* applyItems(split.metas, split.events, source, `${batch.cursor.events}`);
+      yield* sql`INSERT INTO thread_replication_cursors(environment_id, received_events, received_meta)
+        VALUES (${source}, ${batch.cursor.events}, ${batch.cursor.meta})
+        ON CONFLICT(environment_id) DO UPDATE SET received_events = excluded.received_events,
+          received_meta = excluded.received_meta`;
       return { acknowledged: batch.cursor };
     },
     Effect.mapError(storage),
+  );
+
+  /**
+   * After an update, applies held threads this build can now read, each in
+   * its original order. A thread with any item still unreadable stays held.
+   */
+  const replayHeld = Effect.gen(function* () {
+    const rows = yield* sql<{
+      readonly seq: number;
+      readonly thread_id: string;
+      readonly item_kind: "meta" | "event";
+      readonly source_env: string;
+      readonly item_json: string;
+    }>`SELECT seq, thread_id, item_kind, source_env, item_json FROM thread_replication_deferred ORDER BY thread_id, seq`;
+    const byThread = new Map<string, Array<(typeof rows)[number]>>();
+    for (const row of rows)
+      byThread.set(row.thread_id, [...(byThread.get(row.thread_id) ?? []), row]);
+    for (const [threadId, items] of byThread) {
+      const decoded = items.map((row) => {
+        const raw = decodeJsonOption(row.item_json);
+        return {
+          row,
+          meta: row.item_kind === "meta" ? Option.flatMap(raw, decodeMeta) : Option.none(),
+          event: row.item_kind === "event" ? Option.flatMap(raw, decodeEventJson) : Option.none(),
+        };
+      });
+      // A row decodes to exactly one of the two; neither means still unreadable.
+      if (decoded.some((item) => Option.isNone(item.meta) && Option.isNone(item.event))) continue;
+      // Held items keep their sender; apply them in runs from one sender.
+      let at = 0;
+      while (at < decoded.length) {
+        const sender = decoded[at]!.row.source_env;
+        let end = at;
+        while (end < decoded.length && decoded[end]!.row.source_env === sender) end++;
+        const run = decoded.slice(at, end);
+        yield* applyItems(
+          run.flatMap((item) => Option.toArray(item.meta)),
+          run.flatMap((item) => Option.toArray(item.event)),
+          EnvironmentId.make(sender),
+          `held:${run[0]!.row.seq}`,
+        ).pipe(
+          Effect.catch((error) =>
+            Effect.logWarning("Dropping held replicated items that no longer apply", {
+              threadId,
+              reason: error.reason,
+            }),
+          ),
+        );
+        at = end;
+      }
+      yield* sql`DELETE FROM thread_replication_deferred WHERE thread_id = ${threadId}`;
+    }
+  }).pipe(
+    Effect.catchCause((cause) =>
+      Effect.logWarning("Could not replay held replicated threads", { cause }),
+    ),
   );
 
   const acknowledge: ThreadReplication["Service"]["acknowledge"] = Effect.fn(
@@ -640,6 +779,7 @@ const make = Effect.gen(function* () {
       return { source, projectId: yield* localProject(source) };
     }).pipe(Effect.orDie);
 
+  yield* replayHeld;
   return ThreadReplication.of({
     environmentId,
     owner,

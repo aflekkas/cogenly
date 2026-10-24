@@ -2,6 +2,7 @@ import {
   EventId,
   MessageId,
   type OrchestrationV2DomainEvent,
+  OrchestrationV2DomainEventJson,
   type OrchestrationV2ServerCommand,
   ProjectId,
   ProjectLabelError,
@@ -10,6 +11,7 @@ import {
 import type * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Stream from "effect/Stream";
 
@@ -166,6 +168,10 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
   const remoteCommands = yield* inStores(RemoteThreadCommands.RemoteThreadCommands);
   const projections = yield* inStores(Projections.ProjectionStoreV2);
   const sql = yield* machine.run(SqlClient.SqlClient);
+  /** A restart of this machine's replication, as after an update. */
+  const restartReplication = inStores(Layer.build(Layer.fresh(ThreadReplication.layer))).pipe(
+    Effect.asVoid,
+  );
   return {
     ...machine,
     replication,
@@ -176,6 +182,7 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
     checkouts,
     shared,
     remoteCommands,
+    restartReplication,
     sink,
     projections,
     sql,
@@ -183,6 +190,11 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
 });
 
 export const threadId = ThreadId.make("thread:on-laptop");
+
+/** An event as it travels in a replication batch. */
+export const encodeEvent = (event: OrchestrationV2DomainEvent) =>
+  encodeEventJson(event) as Schema.Json;
+const encodeEventJson = Schema.encodeSync(OrchestrationV2DomainEventJson);
 
 export const threadCreated = (
   id: string,

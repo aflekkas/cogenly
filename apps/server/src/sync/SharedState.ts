@@ -3,6 +3,7 @@ import {
   HybridClock,
   SharedChangeBatch,
   SharedDocumentChange,
+  SharedDocumentChangeWire,
   SharedStateError,
   SHARED_BATCH_BYTES,
   SHARED_BATCH_LIMIT,
@@ -12,13 +13,14 @@ import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
-import { validateChange } from "./documentSchemas.ts";
+import { checkIntegrity, preserveUnknown, splitChange, validateChange } from "./documentSchemas.ts";
 import { compareClock, mergeDocument, tickClock } from "./merge.ts";
 import { projectDocument, readConfiguration } from "./SharedDocumentProjection.ts";
 
@@ -103,6 +105,10 @@ const storage = (cause: unknown) =>
 const decodeJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json));
 const decodeChange = Schema.decodeUnknownEffect(Schema.fromJsonString(SharedDocumentChange));
 const decodeClock = Schema.decodeUnknownEffect(Schema.fromJsonString(HybridClock));
+const decodeBatch = Schema.decodeUnknownEffect(SharedChangeBatch);
+const decodeWireChange = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(SharedDocumentChangeWire),
+);
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -249,14 +255,19 @@ const make = Effect.gen(function* () {
       if (deleted) return false;
       return yield* new SharedStateError({ reason: "invalid-document" });
     }
+    // A newer build's nested fields in the stored value survive this write.
     const changed = Object.fromEntries(
-      Object.entries(fields).filter(
-        ([key, value]) =>
-          !current ||
-          !Object.hasOwn(current.fields, key) ||
-          encodeJson(value) !== encodeJson(current.fields[key]),
-      ),
-    );
+      Object.entries(fields)
+        .map(
+          ([key, value]) => [key, preserveUnknown(kind, key, value, current?.fields[key])] as const,
+        )
+        .filter(
+          ([key, value]) =>
+            !current ||
+            !Object.hasOwn(current.fields, key) ||
+            encodeJson(value) !== encodeJson(current.fields[key]),
+        ),
+    ) as SharedDocumentChange["fields"];
     if (!deleted && Object.keys(changed).length === 0) return false;
     const clock = yield* observe();
     const change: SharedDocumentChange = {
@@ -346,13 +357,60 @@ const make = Effect.gen(function* () {
     }
     return { after, cursor, changes };
   }, Effect.mapError(storage));
+  const defer = (change: SharedDocumentChangeWire, source: EnvironmentId, trustedRelay: boolean) =>
+    Effect.gen(function* () {
+      yield* Effect.logWarning("Keeping a shared change this build cannot read for a later one", {
+        kind: change.kind,
+        fields: Object.keys(change.fields),
+      });
+      yield* sql`INSERT INTO shared_deferred_changes(source_env,trusted_relay,change_json) VALUES (${source},${trustedRelay ? 1 : 0},${encodeJson(change)})`;
+    });
+  /**
+   * After an update, apply what an older build kept back. Fields it applied
+   * at the time merge again harmlessly; a change still unreadable waits on.
+   */
+  const applyDeferred = sql
+    .withTransaction(
+      Effect.gen(function* () {
+        const rows = yield* sql<{
+          seq: number;
+          change_json: string;
+        }>`SELECT seq,change_json FROM shared_deferred_changes ORDER BY seq`;
+        let changed = false;
+        for (const row of rows) {
+          const change = yield* decodeWireChange(row.change_json).pipe(Effect.option);
+          if (Option.isSome(change) && splitChange(change.value).deferred) continue;
+          if (Option.isSome(change)) {
+            const { accepted } = splitChange(change.value);
+            const applied = accepted
+              ? yield* persist(accepted, true).pipe(
+                  Effect.catchTags({
+                    SharedStateError: (error) =>
+                      Effect.logWarning("Dropping a kept shared change that no longer applies", {
+                        reason: error.reason,
+                      }).pipe(Effect.as(false)),
+                  }),
+                )
+              : false;
+            changed = applied || changed;
+          }
+          yield* sql`DELETE FROM shared_deferred_changes WHERE seq=${row.seq}`;
+        }
+        return changed;
+      }),
+    )
+    .pipe(
+      Effect.tap((changed) => (changed ? notify : Effect.void)),
+      Effect.catchCause((cause) =>
+        Effect.logWarning("Could not apply kept shared changes", { cause }),
+      ),
+    );
   const receive: SharedState["Service"]["receive"] = (input, source, trustedRelay) =>
     sql
       .withTransaction(
         Effect.gen(function* () {
-          const batch = yield* Schema.decodeUnknownEffect(SharedChangeBatch)(input, {
-            onExcessProperty: "error",
-          });
+          // Envelope keys a newer build adds are ignored, never a refusal.
+          const batch = yield* decodeBatch(input);
           if (
             (batch.changes.length > 1 &&
               new TextEncoder().encode(encodeJson(batch)).length > SHARED_BATCH_BYTES) ||
@@ -363,7 +421,7 @@ const make = Effect.gen(function* () {
           )
             return yield* new SharedStateError({ reason: "invalid-cursor" });
           for (const change of batch.changes) {
-            yield* validateChange(change);
+            yield* checkIntegrity(change);
             if (!trustedRelay && change.updatedBy !== source)
               return yield* new SharedStateError({ reason: "invalid-document" });
           }
@@ -373,7 +431,10 @@ const make = Effect.gen(function* () {
             return yield* new SharedStateError({ reason: "invalid-cursor" });
           let changed = false;
           for (const change of batch.changes) {
-            changed = (yield* persist(change, true)) || changed;
+            // What this build cannot read waits for a newer one; the rest applies now.
+            const { accepted, deferred } = splitChange(change);
+            if (deferred) yield* defer(change, source, trustedRelay);
+            if (accepted) changed = (yield* persist(accepted, true)) || changed;
             const latest = [
               ...Object.values(change.clocks),
               ...(change.tombstone ? [change.tombstone] : []),
@@ -411,6 +472,7 @@ const make = Effect.gen(function* () {
       }),
     )
     .pipe(Effect.mapError(storage));
+  yield* applyDeferred;
   const bootstrap: SharedState["Service"]["bootstrap"] = Effect.fn("SharedState.bootstrap")(
     function* (pairingKey) {
       const key = pairingKey ?? (yield* Ref.get(hub)) ?? "standalone";

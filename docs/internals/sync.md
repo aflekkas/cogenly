@@ -28,11 +28,34 @@ are not interchangeable with orchestration event sequences, thread
 and cursors together across recovery. There is no log compaction or cursor
 reset protocol yet.
 
-Only the three declared document kinds cross these channels. The receiver
-rejects unknown fields, malformed values, oversized multi-document batches, cursor
-gaps, forged authorship and ownership changes.
-V1 ownership is fixed after creation: transferring execution needs a separate
-handoff protocol. Only the owner machine may change an existing agent's or
+The receiver refuses a batch for what no build would accept: oversized
+multi-document batches, cursor gaps, a field without its clock, forged
+authorship and ownership changes. A refused batch fails whole and its cursor
+does not advance, so nothing that depends on the build may refuse one.
+
+Paired machines update at different times, so a machine regularly receives
+documents from a newer build. It applies what it understands and keeps the
+rest; it never refuses the change or stalls the stream for it
+([`documentSchemas.ts`](../../apps/server/src/sync/documentSchemas.ts)):
+
+- A key it does not know, at any depth, is stored and relayed as it came. No
+  projection reads it, since projections decode with this build's schema and
+  drop unknown keys.
+- A known field whose value it cannot validate (a newer build widened it, or a
+  peer sent something invalid) is never applied or relayed. The original
+  change waits in `shared_deferred_changes`, as does a document kind it does
+  not have, and is applied at startup once an update can read it.
+- Writing a document back never drops what it does not understand. Untouched
+  keys keep their stored value through the per-field merge, and a rewritten
+  field gets back the nested keys its stored value holds that this build does
+  not know (`preserveUnknown`). Array items pair up by their known content, so
+  an unchanged repository keeps a newer field after a sibling is added.
+
+So a new synced field needs no coordination: make it optional when it reads
+from a document, since older documents lack it. Removing or retyping a field
+still needs a decision, because older machines keep validating the old shape.
+
+Only the owner machine may change an existing agent's or
 schedule's sensitive fields (permissions, instructions, prompt, provider/model,
 runtime mode, triggers); other machines may only rename an agent, or rename and
 enable/disable a schedule, and deletes still retire work everywhere. Existing
