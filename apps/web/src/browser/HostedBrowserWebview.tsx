@@ -11,6 +11,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { previewBridge } from "~/components/preview/previewBridge";
 import { usePreviewBridge } from "~/components/preview/usePreviewBridge";
 import { useClientSettingsHydrated } from "~/hooks/useSettings";
+import { followPanelFlip, subscribePanelFlips } from "~/lib/panelFlip";
 import { cn, isMacPlatform } from "~/lib/utils";
 
 import { resolveBrowserSurfacePanelRect, useBrowserSurfaceStore } from "./browserSurfaceStore";
@@ -320,6 +321,21 @@ export function HostedBrowserWebview(props: {
     const frameId = window.requestAnimationFrame(syncContentPresentation);
     return () => window.cancelAnimationFrame(frameId);
   }, [syncContentPresentation]);
+
+  // The slot reports its laid-out rect, so while a panel glides the webview
+  // sits at its final place and replays the glide on the compositor: in step
+  // with the panel around it, with no per-frame bounds and no guest moves.
+  useEffect(
+    () =>
+      subscribePanelFlips(() => {
+        const wrapper = wrapperRef.current;
+        const slot = document.querySelector(
+          `[data-browser-surface-slot="${CSS.escape(runtimeTabId)}"]`,
+        );
+        if (wrapper && slot) followPanelFlip(slot, wrapper);
+      }),
+    [runtimeTabId],
+  );
 
   useEffect(() => {
     const wrapper = wrapperRef.current;

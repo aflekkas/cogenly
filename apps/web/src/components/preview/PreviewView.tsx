@@ -86,7 +86,11 @@ import { ServerBrowserSurface, type ServerBrowserHandle } from "~/browser/Server
 import { pickMarkers } from "~/browser/serverBrowserPick";
 import { cn } from "~/lib/utils";
 import { useBrowserSurfaceStore } from "~/browser/browserSurfaceStore";
-import { showBrowserTabInPanel } from "./floatingBrowserPreviewStore";
+import { floatingPreviewTabKey } from "./floatingBrowserPreview.logic";
+import {
+  showBrowserTabInPanel,
+  useFloatingBrowserPreviewStore,
+} from "./floatingBrowserPreviewStore";
 import { usePreviewSession } from "./usePreviewSession";
 import { useSitePermissions } from "./useSitePermissions";
 import { PreviewPermissionPrompt } from "./PreviewPermissionPrompt";
@@ -360,6 +364,25 @@ export function PreviewView({
     if (!visible || !tabId) return;
     return showBrowserTabInPanel(threadRefRef.current, tabId);
   }, [tabId, threadKey, visible]);
+
+  // Take control from the floating card: it opened the panel on this tab, and
+  // control changes hands once this panel's stream reports who drives.
+  const floatingTabKey = tabId ? floatingPreviewTabKey(threadKey, tabId) : null;
+  const takeControlRequested = useFloatingBrowserPreviewStore(
+    (state) => floatingTabKey !== null && state.takeControlKey === floatingTabKey,
+  );
+  useEffect(() => {
+    if (!takeControlRequested || !floatingTabKey || !visible) return;
+    if (!isServerTab) {
+      useFloatingBrowserPreviewStore.getState().clearTakeControl(floatingTabKey);
+      return;
+    }
+    if (!serverTabControl) return;
+    useFloatingBrowserPreviewStore.getState().clearTakeControl(floatingTabKey);
+    if (serverTabControl.canOperate && serverTabControl.controller !== "you") {
+      serverSurfaceRef.current?.takeControl();
+    }
+  }, [floatingTabKey, isServerTab, serverTabControl, takeControlRequested, visible]);
 
   const navigateToResolvedUrl = useCallback(
     async (resolvedUrl: string) => {

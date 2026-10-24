@@ -33,9 +33,19 @@ interface FloatingBrowserPreviewState {
   readonly corner: FloatingPreviewCorner | null;
   /** Where the user dropped the card, in window coordinates; null when docked to a corner. */
   readonly freePosition: FloatingPreviewPoint | null;
+  /** The card width the user resized to; null until they resize it. */
+  readonly width: number | null;
+  /**
+   * A streamed tab the card asked to take control of. The browser panel that
+   * opens on it takes control once its stream connects, then clears this.
+   */
+  readonly takeControlKey: string | null;
   readonly dismiss: (key: string) => void;
   readonly setCorner: (corner: FloatingPreviewCorner) => void;
   readonly setFreePosition: (position: FloatingPreviewPoint) => void;
+  readonly setWidth: (width: number) => void;
+  readonly requestTakeControl: (key: string) => void;
+  readonly clearTakeControl: (key: string) => void;
 }
 
 export const useFloatingBrowserPreviewStore = create<FloatingBrowserPreviewState>()(
@@ -46,9 +56,15 @@ export const useFloatingBrowserPreviewStore = create<FloatingBrowserPreviewState
       dismissedKey: null,
       corner: null,
       freePosition: null,
+      width: null,
+      takeControlKey: null,
       dismiss: (key) => set({ dismissedKey: key }),
       setCorner: (corner) => set({ corner, freePosition: null }),
       setFreePosition: (position) => set({ freePosition: position }),
+      setWidth: (width) => set({ width: Math.round(width) }),
+      requestTakeControl: (key) => set({ takeControlKey: key }),
+      clearTakeControl: (key) =>
+        set((state) => (state.takeControlKey === key ? { takeControlKey: null } : state)),
     }),
     {
       name: "cogenly:floating-browser-preview:v1",
@@ -57,8 +73,12 @@ export const useFloatingBrowserPreviewStore = create<FloatingBrowserPreviewState
       storage: createJSONStorage(() =>
         resolveStorage(typeof window !== "undefined" ? window.localStorage : undefined),
       ),
-      // Only where the user put the card survives a reload.
-      partialize: (state) => ({ corner: state.corner, freePosition: state.freePosition }),
+      // Only where the user put the card, and how big they made it, survives a reload.
+      partialize: (state) => ({
+        corner: state.corner,
+        freePosition: state.freePosition,
+        width: state.width,
+      }),
     },
   ),
 );
@@ -82,7 +102,11 @@ export function showBrowserTabInPanel(threadRef: ScopedThreadRef, tabId: string)
     useFloatingBrowserPreviewStore.setState((state) => {
       const count = state.shownCounts[key] ?? 0;
       const { [key]: _released, ...rest } = state.shownCounts;
-      return { shownCounts: count <= 1 ? rest : { ...rest, [key]: count - 1 } };
+      return {
+        shownCounts: count <= 1 ? rest : { ...rest, [key]: count - 1 },
+        // A take-control request the panel never got to answer must not fire on a later visit.
+        takeControlKey: state.takeControlKey === key ? null : state.takeControlKey,
+      };
     });
   };
 }

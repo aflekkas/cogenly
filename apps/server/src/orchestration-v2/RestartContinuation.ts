@@ -33,6 +33,26 @@ const CONTINUE_PROMPT = "Continue where you left off.";
 const MAX_CONTINUATION_CHAIN = 3;
 
 /**
+ * Whether `source` ends a chain of automatic continuations long enough that a
+ * person has to step in. A turn that keeps crashing the server would
+ * otherwise restart it forever.
+ */
+export function restartContinuationChainExhausted(
+  source: OrchestrationV2Run,
+  runs: ReadonlyArray<OrchestrationV2Run>,
+): boolean {
+  let chainLength = 0;
+  for (
+    let run: OrchestrationV2Run | undefined = source;
+    run?.restartContinuationOfRunId !== undefined && chainLength < MAX_CONTINUATION_CHAIN;
+    run = runs.find((candidate) => candidate.id === run?.restartContinuationOfRunId)
+  ) {
+    chainLength += 1;
+  }
+  return chainLength >= MAX_CONTINUATION_CHAIN;
+}
+
+/**
  * Whether a restart must leave this run for the user: the thread is put away,
  * the provider turn already ended, or the user owes an answer. Checked when
  * intent is recorded and again when the continuation is delivered. A
@@ -317,16 +337,7 @@ export const continueRestartedRun = Effect.fn("RestartContinuation.continueResta
     )
       return;
     if (projection.thread.providerInstanceId !== source.providerInstanceId) return;
-    // A turn that keeps crashing the server would otherwise restart it forever.
-    let chainLength = 0;
-    for (
-      let run: OrchestrationV2Run | undefined = source;
-      run?.restartContinuationOfRunId !== undefined && chainLength < MAX_CONTINUATION_CHAIN;
-      run = projection.runs.find((candidate) => candidate.id === run?.restartContinuationOfRunId)
-    ) {
-      chainLength += 1;
-    }
-    if (chainLength >= MAX_CONTINUATION_CHAIN) {
+    if (restartContinuationChainExhausted(source, projection.runs)) {
       yield* Effect.logWarning("Not continuing a run restarted too many times in a row", {
         threadId: input.threadId,
         sourceRunId: input.sourceRunId,

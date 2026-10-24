@@ -381,11 +381,11 @@ function Sidebar({
                   // lifts above it so the column slides out from under it.
                   "z-[45] shadow-(--sidebar-peek-shadow) transition-[translate,visibility] motion-reduce:translate-x-0 motion-reduce:transition-[opacity,visibility]",
                   peek === "open"
-                    ? "visible translate-x-0 duration-(--motion-duration-panel) ease-drawer"
+                    ? "visible translate-x-0 duration-(--motion-duration-panel) ease-panel"
                     : cn(
                         // Closes on the same duration and curve it opens on;
                         // LIST_COLUMN_PEEK_SETTLE_MS waits it out.
-                        "invisible duration-(--motion-duration-panel) ease-drawer motion-reduce:opacity-0",
+                        "invisible duration-(--motion-duration-panel) ease-panel motion-reduce:opacity-0",
                         side === "left" ? "-translate-x-full" : "translate-x-full",
                       ),
                 )
@@ -755,13 +755,9 @@ function SidebarContent({
           {...props}
         />
       </ScrollArea>
-      {/* Mirrors the header: a docked footer keeps the same small inset below
-          it as the header keeps above. */}
-      {fixedFooter ? (
-        <div className="w-full shrink-0 [&>[data-sidebar=group]:last-child]:pb-1.5">
-          {fixedFooter}
-        </div>
-      ) : null}
+      {/* A docked footer has no titlebar row spacing it from the column's edge, so it keeps the
+          group's full inset below it, matching the sides. */}
+      {fixedFooter ? <div className="w-full shrink-0">{fixedFooter}</div> : null}
     </>
   );
 }

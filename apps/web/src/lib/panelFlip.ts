@@ -34,8 +34,8 @@ import { observeResize } from "./observeResize";
  */
 export type PanelFlipAnchor = "start" | "center" | "end";
 
-/** Matches ease-standard in index.css. */
-export const PANEL_MOTION_EASING = "cubic-bezier(0.32, 0.72, 0, 1)";
+/** Matches ease-panel in index.css: a plain deceleration, so a long glide never shoves. */
+export const PANEL_MOTION_EASING = "cubic-bezier(0.25, 0.55, 0.3, 1)";
 
 /**
  * A toggle's glide begins one frame after its layout commits, so a motion of
@@ -49,6 +49,13 @@ const PANEL_FLIP_COLUMN_SELECTOR = "[data-panel-flip-column]";
 const PANEL_FLIP_ENTER_SELECTOR = "[data-panel-flip-enter]";
 const PANEL_FLIP_WINDOW_CONTAIN = "window";
 const PANEL_FLIP_ANIMATION_ID = "panel-flip";
+const PANEL_FLIP_FOLLOW_ANIMATION_ID = "panel-flip-follow";
+
+/** Each glide's starting offset and duration, for surfaces that replay it (followPanelFlip). */
+const glideMotions = new WeakMap<
+  Animation,
+  { readonly offset: number; readonly duration: number }
+>();
 
 interface HorizontalBounds {
   readonly left: number;
@@ -271,7 +278,14 @@ function flipPanelContent(
     element.style.visibility = "visible";
     heldEarly.push(element);
   }
-  for (const { element } of snapshot.entries) {
+  // A panel entering since the capture is not in the snapshot, but a glide it
+  // already plays (this flip's first aim) is settled with the rest, so it is
+  // measured where layout puts it rather than where its glide draws it.
+  const capturedElements = new Set(snapshot.entries.map((entry) => entry.element));
+  const entering = [
+    ...snapshot.root.querySelectorAll<HTMLElement>(PANEL_FLIP_ENTER_SELECTOR),
+  ].filter((element) => !capturedElements.has(element));
+  for (const element of [...capturedElements, ...entering]) {
     for (const animation of element.getAnimations()) {
       if (animation.id !== PANEL_FLIP_ANIMATION_ID) continue;
       if (resume) {
@@ -310,7 +324,7 @@ function flipPanelContent(
   // Marked content mounted since the capture (an opening panel) comes in from
   // the window edge it names. Snapshot entries keep document order; entering
   // elements follow, so an entering element's ancestor is indexed first too.
-  for (const element of snapshot.root.querySelectorAll<HTMLElement>(PANEL_FLIP_ENTER_SELECTOR)) {
+  for (const element of entering) {
     if (!indexByElement.has(element)) measure(element, null);
   }
   const resolved = measurements.map((measurement, index) => {
@@ -325,6 +339,7 @@ function flipPanelContent(
       { duration: durationMs, easing: PANEL_MOTION_EASING },
     );
     animation.id = PANEL_FLIP_ANIMATION_ID;
+    glideMotions.set(animation, { offset, duration: durationMs });
     if (element.dataset.panelFlipVisible !== undefined) holdVisibleUntilDone(element, animation);
     const elapsed = elapsedByElement.get(element);
     if (elapsed === undefined || waitingElements.has(element)) {
@@ -336,6 +351,80 @@ function flipPanelContent(
   // Content that ended up not gliding (no offset) and has no glide holding it snaps.
   for (const element of heldEarly) {
     if (!visibilityHolds.has(element)) element.style.removeProperty("visibility");
+  }
+  for (const listener of flipListeners) listener();
+}
+
+const flipListeners = new Set<() => void>();
+
+/**
+ * Calls listener whenever panel glides start or are re-aimed, in the task
+ * that creates them, before anything paints. For a surface positioned from a
+ * measured rect (the hosted browser): it places itself at the rect as laid
+ * out (readPanelFlipShift) and replays the glides (followPanelFlip).
+ */
+export function subscribePanelFlips(listener: () => void): () => void {
+  flipListeners.add(listener);
+  return () => flipListeners.delete(listener);
+}
+
+/** The panel glides playing on element and its marked ancestors. */
+function glidesCarrying(element: Element): Animation[] {
+  const glides: Animation[] = [];
+  let marked = element.closest(PANEL_FLIP_SELECTOR);
+  while (marked) {
+    for (const animation of marked.getAnimations()) {
+      if (animation.id === PANEL_FLIP_ANIMATION_ID && glideMotions.has(animation)) {
+        glides.push(animation);
+      }
+    }
+    marked = marked.parentElement?.closest(PANEL_FLIP_SELECTOR) ?? null;
+  }
+  return glides;
+}
+
+/**
+ * How far, in px, panel glides draw element right of where layout puts it
+ * right now. Subtract it from a measured rect to get the laid-out one.
+ */
+export function readPanelFlipShift(element: Element): number {
+  let shift = 0;
+  const targets = new Set<Element>();
+  for (const glide of glidesCarrying(element)) {
+    const target = glide.effect instanceof KeyframeEffect ? glide.effect.target : null;
+    if (target) targets.add(target);
+  }
+  for (const target of targets) {
+    shift += new DOMMatrixReadOnly(getComputedStyle(target).transform).m41;
+  }
+  return shift;
+}
+
+/**
+ * Plays the glides carrying source on target as well, on the compositor and
+ * in step with them, so a surface laid out apart from source (a fixed
+ * webview kept at source's laid-out rect) moves with it frame for frame,
+ * without a measure and a re-render per frame. Each glide adds its own
+ * translate, as nested glides add up on source. Replaces target's previous
+ * replay; call it again whenever the glides change (subscribePanelFlips).
+ */
+export function followPanelFlip(source: Element, target: HTMLElement): void {
+  for (const animation of target.getAnimations()) {
+    if (animation.id === PANEL_FLIP_FOLLOW_ANIMATION_ID) animation.cancel();
+  }
+  for (const glide of glidesCarrying(source)) {
+    const motion = glideMotions.get(glide);
+    if (!motion) continue;
+    const replay = target.animate(
+      [{ transform: `translateX(${motion.offset}px)` }, { transform: "translateX(0)" }],
+      { duration: motion.duration, easing: PANEL_MOTION_EASING, composite: "add" },
+    );
+    replay.id = PANEL_FLIP_FOLLOW_ANIMATION_ID;
+    if (pendingStart.has(glide)) {
+      startNextFrame(replay);
+    } else if (typeof glide.currentTime === "number") {
+      replay.currentTime = glide.currentTime;
+    }
   }
 }
 

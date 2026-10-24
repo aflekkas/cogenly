@@ -23,7 +23,7 @@ describe("parseAppearancePreferences", () => {
       fontSize: "default",
       motion: "reduce",
       usageMeter: "remaining",
-      sidebarLayout: "top",
+      sidebarLayout: "bottom",
     });
     expect(parseAppearancePreferences(JSON.stringify({ accent: "#3b82f6" })).accent).toBe("orange");
   });
@@ -37,13 +37,16 @@ describe("parseAppearancePreferences", () => {
     );
   });
 
-  it("reads the sidebar layout, top unless bottom is chosen", () => {
-    expect(
-      parseAppearancePreferences(JSON.stringify({ sidebarLayout: "bottom" })).sidebarLayout,
-    ).toBe("bottom");
+  it("reads the sidebar layout, bottom unless top is chosen", () => {
+    expect(parseAppearancePreferences(JSON.stringify({ sidebarLayout: "top" })).sidebarLayout).toBe(
+      "top",
+    );
     expect(
       parseAppearancePreferences(JSON.stringify({ sidebarLayout: "left" })).sidebarLayout,
-    ).toBe("top");
+    ).toBe("bottom");
+    expect(parseAppearancePreferences(JSON.stringify({ accent: "blue" })).sidebarLayout).toBe(
+      "bottom",
+    );
   });
 });
 

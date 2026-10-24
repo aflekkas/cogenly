@@ -49,7 +49,6 @@ import {
   retainQueuedCancels,
   type QueuedRowSlot,
 } from "./queuedRowPresence";
-import { PANEL_MOTION_EASING } from "~/lib/panelFlip";
 import { Button } from "../ui/button";
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -70,6 +69,8 @@ interface QueuedRowThumbnail {
 const QUEUED_RUN_DRAG_TYPE = "application/x-cogenly-queued-run";
 // Rows that change places glide to their new slot on the composer's timing.
 const QUEUED_ROW_REORDER_MS = 200;
+// ease-standard in index.css.
+const QUEUED_ROW_REORDER_EASING = "cubic-bezier(0.32, 0.72, 0, 1)";
 const ANIMATE_ROW_MOUNT = { current: true } as const;
 const SKIP_ROW_MOUNT = { current: false } as const;
 const QUEUED_ROW_REORDER_ANIMATION_ID = "queued-row-reorder";
@@ -362,7 +363,7 @@ export function QueuedRunsControl({
         reducedMotion
           ? [{ opacity: 0.4 }, { opacity: 1 }]
           : [{ translate: `0 ${offset}px` }, { translate: "0 0" }],
-        { duration: QUEUED_ROW_REORDER_MS, easing: PANEL_MOTION_EASING },
+        { duration: QUEUED_ROW_REORDER_MS, easing: QUEUED_ROW_REORDER_EASING },
       );
       animation.id = QUEUED_ROW_REORDER_ANIMATION_ID;
     }

@@ -228,15 +228,15 @@ last. A card's project is the one you filed it in, else the project its reposito
 Click a heading to fold its group away; the card you have open stays visible. In the first
 filter, drag a card up or down within its project to change its place; the other cards slide
 aside to show where it will land. With a card focused, `Alt+Up` and `Alt+Down` move it one
-place. New Work arrives at the top of its project. The server saves the
-order, so it survives a refresh and appears on your other connected devices. **Needs you**
+place. The server saves the order, so it survives a refresh and appears on your other connected devices. **Needs you**
 lists its tasks in the same order; **Snoozed** lists them by when they come back and
 **Settled** by when they settled, so cards don't move there.
 
-Search sits at the top of the sidebar by default. To dock it at the bottom instead, set
-**Settings → Appearance → Sidebar layout** to **Bottom**: lists then stack up toward search,
-and Work's cards are drawn the other way up, so new Work arrives at the bottom of its project,
-nearest search. Your saved order is the same in both layouts; each device keeps its own choice.
+Search is docked at the bottom of the sidebar by default: lists stack up toward it, and Work's
+cards are drawn the other way up, so new Work arrives at the bottom of its project, nearest
+search. To put search at the top and read lists down from it, with new Work at the top of its
+project, set **Settings → Appearance → Sidebar layout** to **Top**. Your saved order is the same in both layouts; each device keeps
+its own choice.
 
 On web and desktop, the list also animates section changes made with thread actions such as
 **Pin**, **Settle**, and **Snooze**. These transitions respect your system's reduced-motion

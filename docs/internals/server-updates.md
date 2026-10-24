@@ -92,7 +92,11 @@ refuse a thread that is archived, settled, or still snoozed, a cut turn whose pr
 turn already ended, and a run waiting on the user: an approval, question, or secret that was pending,
 or that recovery closed on the cut turn. Message-capable questions stay answerable, so
 they do not block. Delivery also stops after three consecutive continuations in one
-`restartContinuationOfRunId` chain, so a turn that crashes the server cannot loop. Stable
+`restartContinuationOfRunId` chain, so a turn that crashes the server cannot loop; recovery
+checks the same cap, so it never labels a capped run as resuming. Agent work threads
+resume too: recovery cancels rather than fails a run it resumes (continuations need a
+cancelled source), and the agent service waits for the pending continuation before
+recording the job's outcome. Stable
 command and message IDs prevent duplicate submissions after an outbox retry. Codex
 resumes without adding provider prompt text unless the turn lost background work;
 other adapters receive the continuation message through their normal turn path.

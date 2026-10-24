@@ -129,7 +129,7 @@ export function SubagentTooltipContent(props: {
             accentColor={entry?.accentColor}
             // Same treatment as the sidebar card: accent dot, account in the label.
             showBadge={showInstanceBadge}
-            iconClassName="size-3 shrink-0 grayscale opacity-60"
+            iconClassName="size-3 shrink-0"
           />
         ) : (
           <BotIcon className="size-3 shrink-0" />

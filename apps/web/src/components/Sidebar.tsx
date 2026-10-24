@@ -475,8 +475,7 @@ function SidebarProviderStack(props: {
       displayName={currentEntry.displayName}
       accentColor={currentEntry.accentColor}
       showBadge={showInstanceBadge}
-      // Glyph dims, the instance dot stays saturated.
-      iconClassName="size-3.5 opacity-60"
+      iconClassName="size-3.5"
       indicatorBackground="var(--provider-stack-ring)"
     />
   );
@@ -498,7 +497,7 @@ function SidebarProviderStack(props: {
           <ProviderInstanceIcon
             driverKind={entry.driverKind}
             displayName={entry.displayName}
-            iconClassName="size-3 opacity-35 grayscale"
+            iconClassName="size-3"
           />
         ),
       },

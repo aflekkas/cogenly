@@ -213,22 +213,28 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   /* Motion durations, tuned toward Apple's feel. fast: hover, press and color
      feedback. base: selection, status swaps, popovers and toasts. panel: the
      sidebar, right panel and bottom drawer opening and closing (see panelFlip).
-     slow: sheets and other large spatial moves. Pair them with ease-standard;
+     slow: sheets and other large spatial moves. Pair them with ease-standard
+     (panel with ease-panel);
      reduced motion zeroes the transitions that use them. */
   --motion-duration-fast: 150ms;
   --motion-duration-base: 220ms;
-  /* Deliberately past the 150-220ms guideline (AGENTS.md, Motion): the
-     maintainer asked for panel open/close to be slightly slower. Mirrored by
-     PANEL_ANIMATION_DURATION_MS in panelAnimations.ts, which the scripted
-     panel motion reads; change both together. */
-  --motion-duration-panel: 270ms;
+  /* Deliberately past the 150-220ms guideline (AGENTS.md, Motion): a panel
+     slide moves a large area (the sidebar, the right panel, the bottom drawer
+     and the content beside them) and needs room to breathe. Pair it with
+     ease-panel. Mirrored by PANEL_ANIMATION_DURATION_MS in panelAnimations.ts,
+     which the scripted panel motion reads; change both together. */
+  --motion-duration-panel: 300ms;
   --motion-duration-slow: 400ms;
   /* The mode switch crossfade (modeSwitchMotion.ts). */
   --motion-duration-mode-switch: 150ms;
   /* ease-standard for inline transitions and scripts (the theme token is
      inlined into utilities, so it has no runtime variable). */
-  --motion-ease-standard: cubic-bezier(0.32, 0.72, 0, 1);
-  /* The main content column every main-area page shares (PageContent, the
+  --motion-ease-standard: cubic-bezier(
+    0.32,
+    0.72,
+    0,
+    1
+  ); /* The main content column every main-area page shares (PageContent, the
      chat lane, agents): the composer lands at 853px. --content-wide-max-width
      is PageContent's `wide` variant for dashboards and tables. */
   --content-max-width: 53.8125rem;
@@ -334,6 +340,12 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   /* Overlays (popup-motion, dialogs, sheets) enter on drawer and leave on
      popup-exit, a quicker, simpler ease-in-out. */
   --ease-popup-exit: cubic-bezier(0.4, 0, 0.2, 1);
+  /* Panel open and close (with --motion-duration-panel): a plain deceleration
+     that is fastest on its first frame and never speeds up. standard peaks
+     mid-way at about four times its average speed, which over a 500px panel
+     shoves the content beside it; this one peaks near twice the average.
+     PANEL_MOTION_EASING in lib/panelFlip.ts mirrors it for scripted motion. */
+  --ease-panel: cubic-bezier(0.25, 0.55, 0.3, 1);
   /* Messaging motion: a critically damped spring for bubbles that travel
      (a sent text rising out of the composer, a reply growing out of the typing
      bubble). Quick to leave, no overshoot, a soft settle; pair with ~300ms. */

@@ -24,6 +24,7 @@ import {
 import { Children, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { observeResize } from "~/lib/observeResize";
+import { readPanelFlipShift } from "~/lib/panelFlip";
 import { cn } from "~/lib/utils";
 import {
   useProjects,
@@ -305,9 +306,12 @@ function ThreadDetailsDockCard(props: {
     const report = () => {
       const rect = card.getBoundingClientRect();
       const origin = canvas.getBoundingClientRect();
+      // As laid out: a resize during a panel toggle lands while the card's own
+      // glide still draws it elsewhere, and the chat must not make room for that.
+      const glide = readPanelFlipShift(card) - readPanelFlipShift(canvas);
       reportDetailsCard({
-        left: Math.round(rect.left - origin.left),
-        right: Math.round(rect.right - origin.left),
+        left: Math.round(rect.left - glide - origin.left),
+        right: Math.round(rect.right - glide - origin.left),
         bottom: Math.round(rect.bottom - origin.top),
       });
     };

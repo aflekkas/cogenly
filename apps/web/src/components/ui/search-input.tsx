@@ -26,15 +26,17 @@ const searchFieldVariants = {
   bare: "relative",
 } as const;
 
+// sm 32px, md 36px (the sidebar dock, level with its count bar), lg 44px (palette headers).
 const searchFieldSizeClassName = {
   sm: "h-8 gap-2 text-sm",
-  md: "h-11 gap-2 text-sm",
+  md: "h-9 gap-2 text-sm",
+  lg: "h-11 gap-2 text-sm",
 } as const;
 
 // Frame padding leaves room on the right for the trailing controls, which carry their own inset.
 const searchFieldPaddingClassName = {
-  field: { sm: "pr-1 pl-2.5", md: "pr-1 pl-2.5" },
-  bare: { sm: "px-0", md: "px-0" },
+  field: { sm: "pr-1 pl-2.5", md: "pr-1 pl-2.5", lg: "pr-1 pl-2.5" },
+  bare: { sm: "px-0", md: "px-0", lg: "px-0" },
 } as const;
 
 // Opacity only, so the trailing controls appear and leave in place (kept under reduced motion).

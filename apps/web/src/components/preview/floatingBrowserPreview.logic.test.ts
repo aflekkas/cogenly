@@ -2,14 +2,25 @@ import type { PreviewNavStatus } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  anchorResizedFloatingPreview,
   clampFloatingPreviewPosition,
   DEFAULT_FLOATING_PREVIEW_CORNER,
+  FLOATING_PREVIEW_ASPECT,
+  FLOATING_PREVIEW_CARD_WIDTH,
+  FLOATING_PREVIEW_MAX_WIDTH,
+  FLOATING_PREVIEW_MIN_WIDTH,
+  floatingPreviewCardSize,
   floatingPreviewCornerPosition,
   floatingPreviewPaneFits,
+  floatingPreviewResizeHandle,
+  floatingPreviewStatus,
   floatingPreviewTitle,
   migratePersistedPosition,
   nearestFloatingPreviewCorner,
+  oppositeFloatingPreviewCorner,
   previewTabHasPage,
+  resizeFloatingPreviewWidth,
+  resolveFloatingPreviewDriver,
   shouldShowFloatingPreview,
 } from "./floatingBrowserPreview.logic";
 
@@ -187,5 +198,123 @@ describe("floating preview labels", () => {
   it("titles the card by page title, then host", () => {
     expect(floatingPreviewTitle(page("https://example.com/a", "Docs"))).toBe("Docs");
     expect(floatingPreviewTitle(page("https://example.com/a"))).toBe("example.com");
+  });
+});
+
+describe("floatingPreviewCardSize", () => {
+  const roomy = { width: 2000, height: 1400 };
+
+  it("starts at the default card and keeps its 16:10 shape at any width", () => {
+    expect(floatingPreviewCardSize(null, roomy, { bottom: 0 })).toEqual({
+      width: FLOATING_PREVIEW_CARD_WIDTH,
+      height: Math.round(FLOATING_PREVIEW_CARD_WIDTH * FLOATING_PREVIEW_ASPECT),
+    });
+    expect(floatingPreviewCardSize(400, roomy, { bottom: 0 })).toEqual({ width: 400, height: 250 });
+  });
+
+  it("clamps to the minimum and maximum width", () => {
+    expect(floatingPreviewCardSize(10, roomy, { bottom: 0 }).width).toBe(
+      FLOATING_PREVIEW_MIN_WIDTH,
+    );
+    expect(floatingPreviewCardSize(5000, roomy, { bottom: 0 }).width).toBe(
+      FLOATING_PREVIEW_MAX_WIDTH,
+    );
+  });
+
+  it("shrinks to fit a narrow or short pane, but never below the minimum", () => {
+    // 60% of 600 px.
+    expect(floatingPreviewCardSize(500, { width: 600, height: 1400 }, { bottom: 0 }).width).toBe(
+      360,
+    );
+    // 400 - 150 composer - 24 margins leaves 226 px of height: 361.6 px wide at 16:10.
+    expect(floatingPreviewCardSize(500, { width: 2000, height: 400 }, { bottom: 150 }).width).toBe(
+      362,
+    );
+    expect(floatingPreviewCardSize(500, { width: 100, height: 100 }, { bottom: 0 }).width).toBe(
+      FLOATING_PREVIEW_MIN_WIDTH,
+    );
+  });
+});
+
+describe("floating preview resizing", () => {
+  const area = { left: 0, top: 0, right: 1000, bottom: 800 };
+  const card = { width: 248, height: 155 };
+
+  it("puts a docked card's grip across from its corner", () => {
+    expect(oppositeFloatingPreviewCorner("top-right")).toBe("bottom-left");
+    expect(oppositeFloatingPreviewCorner("bottom-left")).toBe("top-right");
+  });
+
+  it("puts a free card's grip on the corner facing the middle of the window", () => {
+    expect(floatingPreviewResizeHandle({ x: 700, y: 50 }, card, area)).toBe("bottom-left");
+    expect(floatingPreviewResizeHandle({ x: 20, y: 600 }, card, area)).toBe("top-right");
+  });
+
+  it("grows when the grip is pulled away from the card, led by the axis that moved most", () => {
+    expect(resizeFloatingPreviewWidth(248, "bottom-right", { dx: 40, dy: 0 })).toBe(288);
+    expect(resizeFloatingPreviewWidth(248, "bottom-left", { dx: -40, dy: 0 })).toBe(288);
+    expect(resizeFloatingPreviewWidth(248, "bottom-left", { dx: 40, dy: 0 })).toBe(208);
+    // 50 px down at 16:10 is 80 px of width, more than the 10 px across.
+    expect(resizeFloatingPreviewWidth(248, "bottom-right", { dx: 10, dy: 50 })).toBe(328);
+    expect(resizeFloatingPreviewWidth(248, "top-right", { dx: 0, dy: 50 })).toBe(168);
+  });
+
+  it("keeps the corner across from the grip in place", () => {
+    const start = { position: { x: 500, y: 300 }, card };
+    const bigger = { width: 348, height: 218 };
+    expect(anchorResizedFloatingPreview(start, "bottom-right", bigger)).toEqual({ x: 500, y: 300 });
+    expect(anchorResizedFloatingPreview(start, "top-left", bigger)).toEqual({ x: 400, y: 237 });
+  });
+});
+
+describe("floating preview driver", () => {
+  it("trusts a streamed tab's own control report over the session flag", () => {
+    const input = { agentDriving: true, desktopController: null };
+    expect(resolveFloatingPreviewDriver({ ...input, streamController: "agent" })).toBe("agent");
+    expect(resolveFloatingPreviewDriver({ ...input, streamController: "another-viewer" })).toBe(
+      "another-viewer",
+    );
+    expect(resolveFloatingPreviewDriver({ ...input, streamController: "unclaimed" })).toBe("none");
+    expect(resolveFloatingPreviewDriver({ ...input, streamController: null })).toBe("agent");
+  });
+
+  it("reads a desktop tab's last input", () => {
+    const input = { streamController: null, agentDriving: false };
+    expect(resolveFloatingPreviewDriver({ ...input, desktopController: "agent" })).toBe("agent");
+    expect(resolveFloatingPreviewDriver({ ...input, desktopController: "human" })).toBe("you");
+    expect(resolveFloatingPreviewDriver({ ...input, desktopController: "none" })).toBe("none");
+  });
+
+  it("says what the page is doing and how to take over", () => {
+    const loading = {
+      _tag: "Loading",
+      url: "https://example.com/a",
+      title: "",
+    } as PreviewNavStatus;
+    expect(floatingPreviewStatus({ driver: "agent", navStatus: loading, streamed: true })).toEqual({
+      chip: "Agent",
+      headline: "Agent is driving",
+      activity: "Loading example.com",
+      takeOver: "stream",
+    });
+    const desktop = floatingPreviewStatus({
+      driver: "agent",
+      navStatus: page("https://example.com/"),
+      streamed: false,
+    });
+    expect(desktop.activity).toBe("On example.com");
+    expect(desktop.takeOver).toBe("page");
+  });
+
+  it("shows no chip and offers no take-over while nobody else drives", () => {
+    for (const driver of ["you", "none"] as const) {
+      const status = floatingPreviewStatus({
+        driver,
+        navStatus: page("https://example.com/"),
+        streamed: true,
+      });
+      expect(status.chip).toBeNull();
+      expect(status.takeOver).toBeNull();
+    }
   });
 });

@@ -153,7 +153,7 @@ function CommandInput({
   return (
     <div className="px-[var(--command-shell-inset)] py-1.5">
       <SearchField
-        size="md"
+        size="lg"
         variant="bare"
         {...(startAddon ? { icon: startAddon } : {})}
         {...(className ? { className } : {})}

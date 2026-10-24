@@ -355,6 +355,50 @@ export function disclosureOpenedRecently(
   return false;
 }
 
+/** How recent a user message must be to count as just sent when it first shows up. */
+export const JUST_SENT_WINDOW_MS = 15_000;
+/** A thread's first rows only count a message this fresh: the send that opened it. */
+export const FIRST_SEND_WINDOW_MS = 3_000;
+
+/** The user messages a timeline has already shown, by id. */
+export interface UserMessageArrivals {
+  primed: boolean;
+  readonly known: Set<string>;
+}
+
+export function createUserMessageArrivals(): UserMessageArrivals {
+  return { primed: false, known: new Set() };
+}
+
+/**
+ * Records the user messages in `rows` not seen before and reports whether one
+ * is a fresh send or steer made while the thread was open. History, older
+ * pages and virtualized remounts never count, and an optimistic bubble swapped
+ * for its persisted copy keeps its id, so it is not a second arrival.
+ *
+ * The bubble itself always shows at once at full opacity; a fresh send only
+ * lets the live activity row under it ease in.
+ */
+export function recordUserMessageArrivals(
+  arrivals: UserMessageArrivals,
+  rows: ReadonlyArray<{
+    readonly kind: string;
+    readonly message?: { readonly id: string; readonly role: string; readonly createdAt: string };
+  }>,
+  now: number,
+): boolean {
+  let sent = false;
+  for (const row of rows) {
+    const message = row.kind === "message" ? row.message : undefined;
+    if (message?.role !== "user" || arrivals.known.has(message.id)) continue;
+    arrivals.known.add(message.id);
+    const age = now - Date.parse(message.createdAt);
+    if (age < (arrivals.primed ? JUST_SENT_WINDOW_MS : FIRST_SEND_WINDOW_MS)) sent = true;
+  }
+  if (rows.length > 0) arrivals.primed = true;
+  return sent;
+}
+
 export function resolveTimelineMinimapHeightStyle(itemCount: number): string {
   const naturalHeight = Math.max(1, (itemCount - 1) * TIMELINE_MINIMAP_ITEM_SPACING);
   return `min(${naturalHeight}px, ${TIMELINE_MINIMAP_MAX_HEIGHT_CSS})`;

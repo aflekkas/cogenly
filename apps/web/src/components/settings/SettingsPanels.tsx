@@ -1044,7 +1044,7 @@ export function AppearanceSettingsPanel() {
         />
         <SettingsRow
           {...searchableSetting("sidebar-layout")}
-          description="Top-down, or anchored to the bottom near search."
+          description="Anchored to the bottom near search, or top-down."
           resetAction={
             preferences.sidebarLayout !== DEFAULT_APPEARANCE_PREFERENCES.sidebarLayout ? (
               <SettingResetButton
