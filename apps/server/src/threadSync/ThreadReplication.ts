@@ -20,6 +20,7 @@ import {
   type ThreadReplicationBatch,
   type ThreadReplicationCursor,
   ThreadReplicationError,
+  ThreadRemoteError,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -80,6 +81,41 @@ export class ThreadReplication extends Context.Service<
     ) => Effect.Effect<void, ThreadReplicationError>;
     /** Fires after local thread events or metadata change. */
     readonly changes: Stream.Stream<void>;
+    /**
+     * Start handing a thread this machine runs to `target`: refuses unless it
+     * is idle, then fences local writes until finish or release. Returns the
+     * epoch the target takes it at.
+     */
+    readonly fence: (
+      threadId: ThreadId,
+      target: EnvironmentId,
+    ) => Effect.Effect<{ readonly epoch: number }, ThreadRemoteError>;
+    /** Drop a fence the target refused; the thread runs here again. */
+    readonly release: (threadId: ThreadId) => Effect.Effect<void>;
+    /** The target took the thread: record it as the owner and drop the fence. */
+    readonly finish: (threadId: ThreadId) => Effect.Effect<void>;
+    /** Fenced threads, for retrying commits whose reply was lost. */
+    readonly fenced: Effect.Effect<
+      ReadonlyArray<{
+        readonly threadId: ThreadId;
+        readonly target: EnvironmentId;
+        readonly epoch: number;
+      }>
+    >;
+    /**
+     * Take a replica from `from` at `epoch`. "already" when this machine took
+     * it at that epoch before; fails when `from` does not own it here.
+     */
+    readonly take: (
+      threadId: ThreadId,
+      from: EnvironmentId,
+      epoch: number,
+    ) => Effect.Effect<"taken" | "already", ThreadRemoteError>;
+    /** This machine's checkout of the project a replica runs in on its owner. */
+    readonly sourceProject: (threadId: ThreadId) => Effect.Effect<{
+      readonly source: ThreadReplicaSource | null;
+      readonly projectId: ProjectId | undefined;
+    }>;
   }
 >()("cogenly-server/threadSync/ThreadReplication") {}
 
@@ -90,6 +126,12 @@ const storage = (cause: unknown) =>
 const encodeEvent = Schema.encodeEffect(Schema.fromJsonString(OrchestrationV2DomainEventJson));
 const decodeSource = Schema.decodeUnknownEffect(Schema.fromJsonString(ThreadReplicaSource));
 const encodeSource = Schema.encodeSync(Schema.fromJsonString(ThreadReplicaSource));
+/** A pending handoff: the machine taking the thread and the epoch it takes it at. */
+const HandoffJson = Schema.fromJsonString(
+  Schema.Struct({ target: EnvironmentId, epoch: Schema.Number }),
+);
+const encodeHandoff = Schema.encodeSync(HandoffJson);
+const decodeHandoff = Schema.decodeUnknownSync(HandoffJson);
 const isCursor = (value: number, latest: number) =>
   Number.isSafeInteger(value) && value >= 0 && value <= latest;
 
@@ -475,6 +517,129 @@ const make = Effect.gen(function* () {
     Stream.catch(() => Stream.empty),
   );
 
+  // Work that would run, or answer, on this machine after the fence.
+  const busyReason = (threadId: ThreadId) =>
+    sql<{ readonly busy: string | null }>`SELECT CASE
+        WHEN EXISTS (SELECT 1 FROM orchestration_v2_projection_runs WHERE thread_id = ${threadId}
+          AND status IN ('queued','preparing','starting','running','waiting')) THEN 'It has a turn running or queued.'
+        WHEN EXISTS (SELECT 1 FROM orchestration_v2_projection_runtime_requests WHERE thread_id = ${threadId}
+          AND status IN ('pending','waiting')) THEN 'It is waiting for an answer.'
+        WHEN EXISTS (SELECT 1 FROM orchestration_v2_projection_subagents WHERE thread_id = ${threadId}
+          AND status IN ('pending','starting','running','waiting')) THEN 'A subagent is still working.'
+        WHEN EXISTS (SELECT 1 FROM orchestration_v2_effect_outbox WHERE thread_id = ${threadId}
+          AND status IN ('pending','running')) THEN 'It is still finishing its last turn.'
+        ELSE NULL END AS busy`.pipe(Effect.map((rows) => rows[0]?.busy ?? null));
+
+  const fence: ThreadReplication["Service"]["fence"] = (threadId, target) =>
+    sql
+      .withTransaction(
+        Effect.gen(function* () {
+          const row = (yield* ownerRows([threadId])).get(threadId);
+          if (row !== undefined && row.local === 0)
+            return yield* new ThreadRemoteError({ reason: "not-owner" });
+          if (row?.handoff_json != null)
+            return yield* new ThreadRemoteError({
+              reason: "moving",
+              detail: "This thread is already moving to another machine.",
+            });
+          const present = yield* sql<{
+            readonly thread_id: string;
+          }>`SELECT thread_id FROM orchestration_v2_projection_threads WHERE thread_id = ${threadId} AND deleted_at IS NULL`;
+          if (present.length === 0)
+            return yield* new ThreadRemoteError({
+              reason: "rejected",
+              detail: "This thread was not found.",
+            });
+          const busy = yield* busyReason(threadId);
+          if (busy !== null) return yield* new ThreadRemoteError({ reason: "busy", detail: busy });
+          const epoch = (row?.epoch ?? 0) + 1;
+          const handoff = encodeHandoff({ target, epoch });
+          const now = DateTime.formatIso(yield* DateTime.now);
+          yield* sql`INSERT INTO thread_owners(thread_id, owner_env, local, epoch, handoff_json, updated_at)
+            VALUES (${threadId}, ${environmentId}, 1, ${row?.epoch ?? 0}, ${handoff}, ${now})
+            ON CONFLICT(thread_id) DO UPDATE SET handoff_json = excluded.handoff_json, updated_at = excluded.updated_at`;
+          return { epoch };
+        }),
+      )
+      .pipe(
+        Effect.catchTags({
+          SqlError: (cause) => Effect.die(new ThreadReplicationError({ reason: "storage", cause })),
+        }),
+      );
+
+  const release: ThreadReplication["Service"]["release"] = (threadId) =>
+    sql`UPDATE thread_owners SET handoff_json = NULL WHERE thread_id = ${threadId} AND local = 1`.pipe(
+      Effect.asVoid,
+      Effect.orDie,
+    );
+
+  const finish: ThreadReplication["Service"]["finish"] = (threadId) =>
+    Effect.gen(function* () {
+      const row = (yield* ownerRows([threadId])).get(threadId);
+      if (row?.handoff_json == null || row.local === 0) return;
+      const { target, epoch } = decodeHandoff(row.handoff_json);
+      const now = DateTime.formatIso(yield* DateTime.now);
+      // The previous owner keeps a replica; where it ran travels for a later move back.
+      const source = yield* localSource(threadId);
+      yield* sql`UPDATE thread_owners SET owner_env = ${target}, local = 0, epoch = ${epoch},
+          handoff_json = NULL, source_json = ${source === null ? null : encodeSource(source)}, updated_at = ${now}
+        WHERE thread_id = ${threadId}`;
+    }).pipe(Effect.orDie);
+
+  const fenced: ThreadReplication["Service"]["fenced"] = sql<{
+    readonly thread_id: string;
+    readonly handoff_json: string;
+  }>`SELECT thread_id, handoff_json FROM thread_owners WHERE local = 1 AND handoff_json IS NOT NULL`.pipe(
+    Effect.map((rows) =>
+      rows.map((row) => ({
+        threadId: ThreadId.make(row.thread_id),
+        ...decodeHandoff(row.handoff_json),
+      })),
+    ),
+    Effect.orDie,
+  );
+
+  const take: ThreadReplication["Service"]["take"] = (threadId, from, epoch) =>
+    sql
+      .withTransaction(
+        Effect.gen(function* () {
+          const row = (yield* ownerRows([threadId])).get(threadId);
+          // Only the owner at epoch - 1 can start this handoff, so a newer
+          // epoch here means it was taken (and maybe moved on since).
+          if (row !== undefined && row.epoch >= epoch) return "already" as const;
+          if (
+            row === undefined ||
+            row.local === 1 ||
+            row.owner_env !== from ||
+            row.epoch + 1 !== epoch
+          )
+            return yield* new ThreadRemoteError({
+              reason: "not-owner",
+              detail: "This machine does not have that thread from the machine moving it.",
+            });
+          const now = DateTime.formatIso(yield* DateTime.now);
+          yield* sql`UPDATE thread_owners SET owner_env = ${environmentId}, local = 1, epoch = ${epoch},
+              handoff_json = NULL, updated_at = ${now}
+            WHERE thread_id = ${threadId}`;
+          return "taken" as const;
+        }),
+      )
+      .pipe(
+        Effect.catchTags({
+          SqlError: (cause) => Effect.die(new ThreadReplicationError({ reason: "storage", cause })),
+        }),
+      );
+
+  const sourceProject: ThreadReplication["Service"]["sourceProject"] = (threadId) =>
+    Effect.gen(function* () {
+      const row = (yield* ownerRows([threadId])).get(threadId);
+      const source =
+        row?.source_json == null
+          ? null
+          : yield* decodeSource(row.source_json).pipe(Effect.orElseSucceed(() => null));
+      return { source, projectId: yield* localProject(source) };
+    }).pipe(Effect.orDie);
+
   return ThreadReplication.of({
     environmentId,
     owner,
@@ -484,6 +649,12 @@ const make = Effect.gen(function* () {
     cursors,
     acknowledge,
     changes,
+    fence,
+    release,
+    finish,
+    fenced,
+    take,
+    sourceProject,
   });
 });
 

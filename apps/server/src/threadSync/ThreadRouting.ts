@@ -13,6 +13,7 @@ import {
   type MachineListResult,
   type OrchestrationV2ServerCommand,
   type PeerCallError,
+  type PeerChannel,
   THREAD_FORWARD_MAX_FILE_BYTES,
   ThreadAttachmentRead,
   type ThreadAttachmentFile,
@@ -22,6 +23,7 @@ import {
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
+import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -94,6 +96,17 @@ export class ThreadRouting extends Context.Service<
     readonly fetchAttachment: (
       attachmentId: string,
     ) => Effect.Effect<Option.Option<string>, ThreadRemoteError>;
+    /**
+     * Call `channel` on `machine`: directly from the hub, or through the hub
+     * from a spoke. The receiving handler relays when it is the hub and not
+     * the machine named in the payload.
+     */
+    readonly callMachine: <C extends PeerChannel>(
+      machine: EnvironmentId,
+      channel: C,
+      payload: C["payload"]["Type"],
+      timeout: Duration.Input,
+    ) => Effect.Effect<C["success"]["Type"], ThreadRemoteError>;
   }
 >()("cogenly-server/threadSync/ThreadRouting") {}
 
@@ -352,7 +365,21 @@ const make = Effect.gen(function* () {
     return Option.some(attachmentPath(file.name));
   });
 
-  return ThreadRouting.of({ fetchAttachment });
+  const callMachine: ThreadRouting["Service"]["callMachine"] = (
+    machine,
+    channel,
+    payload,
+    timeout,
+  ) =>
+    Effect.gen(function* () {
+      const hop = yield* nextHop(machine);
+      const view = yield* topology;
+      return yield* machines
+        .call(hop, channel, payload)
+        .pipe(Effect.timeout(timeout), fromPeer(view, machine));
+    });
+
+  return ThreadRouting.of({ fetchAttachment, callMachine });
 });
 
 export const layer = Layer.effect(ThreadRouting, make);

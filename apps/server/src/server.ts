@@ -175,6 +175,7 @@ import * as SharedState from "./sync/SharedState.ts";
 import * as SharedSync from "./sync/SharedSync.ts";
 import * as ThreadReplication from "./threadSync/ThreadReplication.ts";
 import * as ThreadRouting from "./threadSync/ThreadRouting.ts";
+import * as ThreadTransfer from "./threadSync/ThreadTransfer.ts";
 import * as RemoteThreadCommands from "./orchestration-v2/RemoteThreadCommands.ts";
 import * as ThreadSync from "./threadSync/ThreadSync.ts";
 import * as RuntimeLayer from "./orchestration-v2/runtimeLayer.ts";
@@ -581,12 +582,18 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
     SharedSync.layer.pipe(Layer.provide(SharedState.layer)),
     // The orchestrator's own sink, so replicated events reach the same
     // subscribers, and its forwarder registry, so routing sees its commands.
-    ThreadRouting.layer.pipe(
+    ThreadTransfer.layer.pipe(
+      Layer.provideMerge(ThreadRouting.layer),
       Layer.provideMerge(ThreadSync.layer),
       Layer.provide(ThreadReplication.layer),
       Layer.provide(RemoteThreadCommands.layer),
       Layer.provide(
-        Layer.merge(RuntimeLayer.layerEventSink, EventStoreV2.layerFromOrchestrationEventStore),
+        Layer.mergeAll(
+          RuntimeLayer.layerEventSink,
+          EventStoreV2.layerFromOrchestrationEventStore,
+          ProjectionStoreV2.layer,
+          ProjectStore.layer,
+        ),
       ),
     ),
   ).pipe(

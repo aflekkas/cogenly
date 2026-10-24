@@ -78,7 +78,18 @@ export type ThreadAttachmentFile = typeof ThreadAttachmentFile.Type;
 export class ThreadRemoteError extends Schema.TaggedError<ThreadRemoteError>()(
   "ThreadRemoteError",
   {
-    reason: Schema.Literals(["offline", "not-owner", "moving", "rejected", "too-large"]),
+    reason: Schema.Literals([
+      "offline",
+      "not-owner",
+      "moving",
+      "rejected",
+      "too-large",
+      // Handoff refusals a move reports per thread.
+      "busy",
+      "local-changes",
+      "needs-repository",
+      "behind",
+    ]),
     detail: Schema.optional(Schema.String),
   },
 ) {
@@ -112,6 +123,72 @@ export const ThreadAttachmentRead = makePeerChannel({
   scope: AuthPeerDelegateScope,
   payload: Schema.Struct({ attachmentId: ThreadAttachmentFile.fields.name }),
   success: Schema.NullOr(ThreadAttachmentFile),
+  error: ThreadRemoteError,
+});
+
+/** Threads one move request names, at most. Larger moves are split by the caller. */
+export const THREAD_MOVE_MAX_THREADS = 1000;
+
+export const ThreadMoveInput = Schema.Struct({
+  threadIds: Schema.Array(ThreadId).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(THREAD_MOVE_MAX_THREADS),
+  ),
+  /** The paired machine that runs the threads from now on. */
+  target: EnvironmentId,
+  /**
+   * Move Work threads whose worktree has uncommitted or unpushed changes.
+   * Those changes stay on the old machine; the target checks out the branch
+   * as pushed.
+   */
+  leaveLocalChanges: Schema.optional(Schema.Boolean),
+});
+export type ThreadMoveInput = typeof ThreadMoveInput.Type;
+
+export const ThreadMoveSkip = Schema.Struct({
+  threadId: ThreadId,
+  reason: ThreadRemoteError.fields.reason,
+  detail: Schema.String,
+});
+export type ThreadMoveSkip = typeof ThreadMoveSkip.Type;
+
+export const ThreadMoveResult = Schema.Struct({
+  /** Threads the target runs now, including ones it already ran. */
+  moved: Schema.Array(ThreadId),
+  /** Threads left where they were, with the reason. Moving them again retries. */
+  skipped: Schema.Array(ThreadMoveSkip),
+});
+export type ThreadMoveResult = typeof ThreadMoveResult.Type;
+
+/** Ask the machine that runs some threads to move them (the hub relays to a spoke). */
+export const ThreadMoveRequest = makePeerChannel({
+  name: "threads.move.v1",
+  scope: AuthPeerDelegateScope,
+  payload: ThreadMoveInput,
+  success: ThreadMoveResult,
+  error: ThreadRemoteError,
+});
+
+/**
+ * The second phase of a move, sent by the current owner once the target has
+ * every event: the target takes the thread at `epoch` or refuses. Repeating a
+ * commit the target already took succeeds, so the owner can retry after a
+ * lost reply.
+ */
+export const ThreadHandoffCommit = makePeerChannel({
+  name: "threads.handoff.commit.v1",
+  scope: AuthPeerDelegateScope,
+  payload: Schema.Struct({
+    threadId: ThreadId,
+    from: EnvironmentId,
+    to: EnvironmentId,
+    epoch: Counter,
+    /** The owner's last event for the thread; null for a thread without events. */
+    lastEventId: Schema.NullOr(EventId),
+    /** Attachment ids the target copies before it accepts, since the owner may go offline. */
+    attachmentIds: Schema.Array(ThreadAttachmentFile.fields.name),
+  }),
+  success: Schema.Struct({}),
   error: ThreadRemoteError,
 });
 
