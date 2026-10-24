@@ -68,6 +68,12 @@ const OWNER_ONLY_COMMANDS: ReadonlySet<OrchestrationV2ServerCommand["type"]> = n
   "thread.created.record",
 ]);
 
+/** Read-state bookkeeping, dropped rather than failed while the owner is offline. */
+const BEST_EFFORT_COMMANDS: ReadonlySet<OrchestrationV2ServerCommand["type"]> = new Set([
+  "thread.visit",
+  "thread.mark-unread",
+]);
+
 const decodeRemoteError = Schema.decodeUnknownOption(ThreadRemoteError);
 
 const commandAttachments = (
@@ -266,16 +272,32 @@ const make = Effect.gen(function* () {
           reason: "not-owner",
           detail: `${command.type} runs only on the machine that runs the thread.`,
         });
-      const hop = yield* nextHop(owner.owner);
-      const files = yield* readFiles(commandAttachments(command));
-      const view = yield* topology;
-      const result = yield* machines
-        .call(hop, ThreadCommandForward, { command, files })
-        .pipe(Effect.timeout("2 minutes"), fromPeer(view, owner.owner));
-      return Option.some(
-        yield* localResult(threadId, result.eventIds).pipe(
+      const forwarded = Effect.gen(function* () {
+        const hop = yield* nextHop(owner.owner);
+        const files = yield* readFiles(commandAttachments(command));
+        const view = yield* topology;
+        const result = yield* machines
+          .call(hop, ThreadCommandForward, { command, files })
+          .pipe(Effect.timeout("2 minutes"), fromPeer(view, owner.owner));
+        return yield* localResult(threadId, result.eventIds).pipe(
           Effect.mapError(() => new ThreadRemoteError({ reason: "rejected" })),
-        ),
+        );
+      });
+      // Opening a thread marks it read; that must not fail while its machine is away.
+      return Option.some(
+        yield* BEST_EFFORT_COMMANDS.has(command.type)
+          ? forwarded.pipe(
+              Effect.catchTags({
+                ThreadRemoteError: (error) =>
+                  error.reason === "offline"
+                    ? eventStore.latestSequence({ threadId }).pipe(
+                        Effect.map((sequence) => ({ sequence, storedEvents: [] })),
+                        Effect.mapError(() => error),
+                      )
+                    : Effect.fail(error),
+              }),
+            )
+          : forwarded,
       );
     }),
   );

@@ -95,6 +95,30 @@ describe("continuing a thread another machine runs", () => {
   );
 
   it.live(
+    "while the machine that runs a thread is away, marking it read is dropped and a message fails",
+    () =>
+      Effect.gen(function* () {
+        const hub = yield* startThreadMachine("away-hub", "cloud-server");
+        const laptop = yield* startThreadMachine("away-laptop", "computer");
+        yield* pair(hub, laptop);
+        const away = ThreadId.make("thread:away");
+        yield* hub.sql`INSERT INTO thread_owners(thread_id, owner_env, local, epoch, updated_at)
+          VALUES (${away}, 'env:unpaired', 0, 0, '2026-10-24T00:00:00.000Z')`;
+
+        const visited = yield* hub.remoteCommands.forward({
+          type: "thread.visit",
+          commandId: CommandId.make("command:visit"),
+          threadId: away,
+          visitedAt: "2026-10-24T00:00:00.000Z",
+        });
+        expect(Option.getOrThrow(visited).storedEvents).toEqual([]);
+        const sent = yield* Effect.flip(hub.remoteCommands.forward(send("hello?", away)));
+        expect(sent.reason).toBe("offline");
+      }).pipe(Effect.scoped),
+    30000,
+  );
+
+  it.live(
     "a replica reads an older attachment from the machine that runs the thread",
     () =>
       Effect.gen(function* () {
