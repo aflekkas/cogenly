@@ -7,11 +7,15 @@ notice.
 
 ## Update everything at once
 
-**Updates**, below Settings at the bottom left, lists the desktop app, each
-server, and each provider CLI on every connected machine with its version and
-status. A dot on it means something has an update. Update one row, or choose
-**Update all** to update every connected machine in one step: outdated
-providers, then servers that are behind, then the desktop app you are using.
+**Updates**, below Settings at the bottom left, lists the desktop app, the
+server, and each provider CLI once, however many machines you have connected.
+With several machines, a row sums up their versions, such as "1.4.12 → 1.4.13
+on 2 of 5 machines", and its **Update** button updates it everywhere it is
+behind. Click the row to see each machine's version and update one machine on
+its own. A dot on **Updates** means something has an update. Choose **Update
+all** to update every connected machine in one step: outdated providers, then
+servers that are behind, then the desktop app you are using. Machines your
+connection is not allowed to update are left out.
 **Check for updates** checks again. On a narrow window the update button sits
 at the bottom of the sidebar instead. Servers move to the
 version your desktop app is installing, or to your web app's version. A
@@ -66,7 +70,8 @@ is woken and told that this work stopped. A background shell, such as a dev serv
 does not wake it; the thread learns about it with your next message.
 A thread is not resumed while it waits for your approval, answer, or secret, or
 while it is archived, snoozed, or settled. After three automatic resumes in a row,
-the thread waits for your next message.
+the thread waits for your next message. Agent jobs resume the same way, and their
+result is posted once the resumed turn finishes.
 
 Updates from the previous orchestration system preserve conversation transcripts but cannot carry
 every kind of runtime history forward. Read [Threads from older Cogenly versions](./thread-migration.md)

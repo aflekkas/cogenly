@@ -6,10 +6,12 @@ import { PANEL_MOTION_SETTLE_MS } from "./lib/panelFlip";
 
 /**
  * The sidebar and list column, right panel and bottom drawer all open and
- * close at this duration: --motion-duration-panel in index.css, kept in step
- * by hand. Slightly past the 150-220ms guideline at the maintainer's request.
+ * close at this duration, on PANEL_MOTION_EASING: --motion-duration-panel and
+ * --ease-panel in index.css, kept in step by hand. Past the 150-220ms
+ * guideline on purpose: a panel slide moves a large area, and shorter reads
+ * as the content being shoved aside.
  */
-const PANEL_ANIMATION_DURATION_MS: PanelAnimationDurationMs = 270;
+const PANEL_ANIMATION_DURATION_MS: PanelAnimationDurationMs = 300;
 
 /** The panel motion's duration, for a caller that reads whether it plays at event time. */
 export const PANEL_ANIMATION_DURATION = PANEL_ANIMATION_DURATION_MS;

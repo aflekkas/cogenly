@@ -16,6 +16,7 @@ import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import * as EffectOutbox from "./EffectOutbox.ts";
@@ -23,7 +24,11 @@ import * as EventSink from "./EventSink.ts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ServerSettings from "../serverSettings.ts";
-import { isUnstartedRestartContinuation, restartContinuationRun } from "./RestartContinuation.ts";
+import {
+  isUnstartedRestartContinuation,
+  restartContinuationChainExhausted,
+  restartContinuationRun,
+} from "./RestartContinuation.ts";
 import { isBufferedProviderNotification } from "./NotificationMailbox.ts";
 import {
   endOrphanedNativeSubagent,
@@ -152,6 +157,21 @@ function resolveStaleBackgroundItemProviderInstanceId(
   return projection.providerThreads[0]?.providerInstanceId ?? projection.thread.providerInstanceId;
 }
 
+/** The interrupted-run row's text, saying what happens next. */
+function interruptedRunMessage(
+  trigger: "startup" | "shutdown",
+  resuming: boolean,
+  awaitingDelegation: boolean,
+): string {
+  const cut =
+    trigger === "startup"
+      ? "Cogenly restarted during this run."
+      : "Cogenly stopped during this run.";
+  if (resuming) return trigger === "startup" ? `${cut} Resuming…` : `${cut} It resumes on restart.`;
+  if (awaitingDelegation) return `${cut} Delegated tasks continue and report back here.`;
+  return cut;
+}
+
 /** An open item closed by recovery. A secret card also closes its form, so it takes no answer. */
 const cancelledItem = (
   item: OrchestrationV2ThreadProjection["turnItems"][number],
@@ -188,6 +208,22 @@ export const make = Effect.gen(function* () {
   const eventSink = yield* EventSink.EventSinkV2;
   const ids = yield* IdAllocator.IdAllocatorV2;
   const outbox = yield* EffectOutbox.EffectOutboxV2;
+  /**
+   * The run to resume, unless it ends a full chain of automatic continuations.
+   * Delivery enforces the cap too; checking it here keeps recovery from
+   * labelling a capped run as resuming. The recovery projection holds only
+   * recent runs, so a continuation's ancestors are read in full.
+   */
+  const resumableRun = (
+    projection: ProjectionStore.ProjectionRuntimeRecoveryState,
+    now: DateTime.Utc,
+  ) =>
+    Effect.gen(function* () {
+      const run = restartContinuationRun(projection, now);
+      if (run?.restartContinuationOfRunId === undefined) return run;
+      const { runs } = yield* projections.getThreadRecords(projection.thread.id, ["runs"]);
+      return restartContinuationChainExhausted(run, runs) ? undefined : run;
+    });
   const reconcileProjection = Effect.fn("ProviderRuntimeRecoveryService.reconcileProjection")(
     function* (
       projection: ProjectionStore.ProjectionRuntimeRecoveryState,
@@ -195,11 +231,33 @@ export const make = Effect.gen(function* () {
       continueAfterRestart: boolean,
     ) {
       const now = yield* DateTime.now;
-      // Scheduled agent jobs report an interrupted outcome rather than replaying
-      // their autonomous side effects. Ordinary conversation turns can resume.
+      // Agent work threads (scheduled agent jobs) resume like conversations:
+      // the continuation reuses the job's provider session instead of
+      // replaying it from the start. Their runs still fail when no resume is
+      // scheduled, so the agent records an interrupted outcome.
       const agentWork =
         projection.thread.agent?.role === "work" ||
         projection.thread.sourceAgentRunId !== undefined;
+      // Decided from the state before this reconcile. `restartContinuationRun`
+      // only picks a run whose provider turn was live (or a settled run that
+      // loses awaited work), never one that already has a continuation or ends
+      // a full continuation chain, and never one waiting on the user: a pending
+      // approval, question or secret keeps the run for the user to answer,
+      // since replaying the turn would ask again or act without the answer.
+      // Message-capable questions stay answerable, so they do not block.
+      const continuationRun =
+        continueAfterRestart && trigger === "startup"
+          ? yield* resumableRun(projection, now).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new ProviderRuntimeRecoveryError({
+                    operation: "read-projections",
+                    threadId: projection.thread.id,
+                    cause,
+                  }),
+              ),
+            )
+          : undefined;
       const runs = [] as Array<OrchestrationV2ThreadProjection["runs"][number]>;
       const revivedRuns = [] as Array<OrchestrationV2ThreadProjection["runs"][number]>;
       for (const run of nonterminalRuns(projection)) {
@@ -207,10 +265,7 @@ export const make = Effect.gen(function* () {
         // cancelling it and chaining another continuation would only stack a
         // "resumed" marker for a turn that never ran. It is left alone and
         // restarted below instead, keeping the marker it already has.
-        if (
-          !agentWork &&
-          isUnstartedRestartContinuation(run, projection.attempts, projection.providerTurns)
-        ) {
+        if (isUnstartedRestartContinuation(run, projection.attempts, projection.providerTurns)) {
           revivedRuns.push(run);
           continue;
         }
@@ -237,6 +292,42 @@ export const make = Effect.gen(function* () {
         }
         runs.push(run);
       }
+      // Runs whose cut is followed by an automatic resume: chosen above on
+      // startup, or captured by `prepareForShutdown` before a graceful stop.
+      // Their interrupted row is a notice rather than a failure.
+      const resumingRunIds = new Set<string>();
+      if (continuationRun !== undefined) resumingRunIds.add(continuationRun.id);
+      if (trigger === "shutdown" && continueAfterRestart) {
+        for (const run of runs) {
+          const prepared = yield* outbox.get(`effect:restart-continuation:${run.id}`).pipe(
+            Effect.mapError(
+              (cause) =>
+                new ProviderRuntimeRecoveryError({
+                  operation: "reconcile",
+                  threadId: projection.thread.id,
+                  cause,
+                }),
+            ),
+          );
+          if (
+            Option.exists(
+              prepared,
+              (effect) => effect.status === "pending" || effect.status === "running",
+            )
+          )
+            resumingRunIds.add(run.id);
+        }
+      }
+      // A run parked on delegate_task children is not resumed itself: each
+      // child thread is continued on its own and its result wakes this one.
+      const awaitsDelegatedTasks = (run: OrchestrationV2ThreadProjection["runs"][number]) =>
+        run.status === "waiting" &&
+        (projection.subagents ?? []).some(
+          (task) =>
+            isAppOwnedDelegation(task) &&
+            task.runId === run.id &&
+            isOrchestrationV2WorkActive(task.status),
+        );
       const messageRequestNodeIds = new Set(
         projection.runtimeRequests
           .filter(
@@ -368,6 +459,8 @@ export const make = Effect.gen(function* () {
       let nextItemOrdinal =
         projection.turnItems.reduce((max, item) => Math.max(max, item.ordinal), 0) + 1;
       for (const run of runs) {
+        const resuming = resumingRunIds.has(run.id);
+        const awaitingDelegation = !resuming && awaitsDelegatedTasks(run);
         events.push({
           id: yield* allocateEventId(),
           type: "run.updated",
@@ -377,7 +470,8 @@ export const make = Effect.gen(function* () {
           occurredAt: now,
           payload: {
             ...run,
-            status: agentWork ? "failed" : "cancelled",
+            // A continuation needs a cancelled source (see isRestartContinuationSource).
+            status: agentWork && !resuming ? "failed" : "cancelled",
             queuePosition: null,
             completedAt: now,
           },
@@ -400,15 +494,14 @@ export const make = Effect.gen(function* () {
             nativeItemRef: null,
             parentItemId: null,
             ordinal: nextItemOrdinal++,
-            status: "failed",
+            // Cancelled, not failed, when the work carries on: clients show
+            // it as a quiet notice instead of a red failure.
+            status: resuming || awaitingDelegation ? "cancelled" : "failed",
             title: "Run interrupted",
             failure: {
               class: "transport_error",
               code: "server_restarted",
-              message:
-                trigger === "startup"
-                  ? "Cogenly restarted during this run."
-                  : "Cogenly stopped during this run.",
+              message: interruptedRunMessage(trigger, resuming, awaitingDelegation),
               retryable: true,
             },
             startedAt: now,
@@ -674,10 +767,6 @@ export const make = Effect.gen(function* () {
           },
         });
       }
-      const continuationRun =
-        !agentWork && continueAfterRestart && trigger === "startup"
-          ? restartContinuationRun(projection, now)
-          : undefined;
       const effects: Array<EffectOutbox.PendingOrchestrationEffectV2> = continuationRun
         ? [
             {
@@ -846,7 +935,7 @@ export const make = Effect.gen(function* () {
             .continueThreadsAfterServerUpdate
         )
           return;
-        const run = restartContinuationRun(projection, yield* DateTime.now);
+        const run = yield* resumableRun(projection, yield* DateTime.now);
         if (!run) return;
         const commandId = CommandId.make(`command:restart-prepare:${run.id}`);
         yield* eventSink.writeWithEffects({

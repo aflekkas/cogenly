@@ -78,7 +78,7 @@ export function SidebarSearchDock({
   return (
     <SearchInput
       ref={searchInputRef}
-      size="sm"
+      size="md"
       value={searchQuery}
       onChange={(event) => onSearchQueryChange(event.currentTarget.value)}
       onKeyDown={onSearchKeyDown}

@@ -3,14 +3,26 @@
 import {
   createPreviewFramePainter,
   createPreviewStreamClient,
+  type PreviewStreamControl,
   type PreviewStreamViewport,
 } from "@t3tools/client-runtime/preview/server-browser-stream";
 import { AuthPreviewOperateScope, type ScopedThreadRef } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
-import { Bot, Globe2, X } from "lucide-react";
 import {
+  Bot,
+  ChevronDown,
+  EyeOff,
+  Globe2,
+  Hand,
+  PanelRight,
+  PictureInPicture2,
+  X,
+} from "lucide-react";
+import {
+  type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
   useEffect,
+  useEffectEvent,
   useLayoutEffect,
   useRef,
   useState,
@@ -18,6 +30,18 @@ import {
 import { createPortal } from "react-dom";
 
 import { useChatCanvas } from "~/components/chat/ChatCanvasContext";
+import { Button } from "~/components/ui/button";
+import {
+  Menu,
+  MenuGroup,
+  MenuGroupLabel,
+  MenuItem,
+  MenuPopup,
+  MenuSeparator,
+  MenuTrigger,
+} from "~/components/ui/menu";
+import { toastManager } from "~/components/ui/toast";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { useBrowserPointerStore } from "~/browser/browserPointerStore";
 import {
   acquireBrowserSurfaceActivity,
@@ -35,20 +59,31 @@ import { useEnvironmentScope } from "~/state/session";
 import { buildThreadRouteParams } from "~/threadRoutes";
 
 import {
+  anchorResizedFloatingPreview,
   clampFloatingPreviewToArea,
   type FloatingPreviewArea,
   type FloatingPreviewCorner,
+  FLOATING_PREVIEW_ASPECT,
   FLOATING_PREVIEW_CAPTURE_INTERVAL_MS,
-  FLOATING_PREVIEW_CARD_HEIGHT,
-  FLOATING_PREVIEW_CARD_WIDTH,
   DEFAULT_FLOATING_PREVIEW_CORNER,
   FLOATING_PREVIEW_DRAG_SLOP_PX,
+  FLOATING_PREVIEW_MAX_WIDTH,
+  FLOATING_PREVIEW_MIN_CARD_SIZE,
+  FLOATING_PREVIEW_MIN_WIDTH,
+  FLOATING_PREVIEW_RESIZE_STEP_PX,
   FLOATING_PREVIEW_STREAM_FRAME_INTERVAL_MS,
+  floatingPreviewCardSize,
   floatingPreviewCornerPosition,
   floatingPreviewPaneFits,
+  floatingPreviewResizeHandle,
+  floatingPreviewStatus,
   floatingPreviewTitle,
   type FloatingPreviewPoint,
   type FloatingPreviewSize,
+  type FloatingPreviewStatus,
+  oppositeFloatingPreviewCorner,
+  resizeFloatingPreviewWidth,
+  resolveFloatingPreviewDriver,
   resolveFloatingPreviewDrop,
   shouldShowFloatingPreview,
 } from "./floatingBrowserPreview.logic";
@@ -68,10 +103,6 @@ import { FaviconImage } from "./PreviewFaviconIcon";
 import { previewBridge } from "./previewBridge";
 import { usePreviewSession } from "./usePreviewSession";
 
-const CARD_SIZE: FloatingPreviewSize = {
-  width: FLOATING_PREVIEW_CARD_WIDTH,
-  height: FLOATING_PREVIEW_CARD_HEIGHT,
-};
 /** A dragged card stays below the window's titlebar row and off its edges. */
 const WORKSPACE_TITLEBAR_HEIGHT = 52;
 const WINDOW_EDGE_INSET = 8;
@@ -83,13 +114,39 @@ const FLOATING_PREVIEW_CORNERS: ReadonlyArray<FloatingPreviewCorner> = [
 ];
 const STREAM_JPEG_QUALITY = 60;
 const MAX_STREAM_REFUSALS = 2;
+/**
+ * Thumbnails ask for frames in steps of this many CSS px, so resizing the card
+ * reconnects the stream (or resizes captures) only when it crosses a step.
+ */
+const THUMBNAIL_WIDTH_STEP = 160;
+
+/** The grip's hit area in each corner, and the cursor that says which way it pulls. */
+const RESIZE_HANDLE_CLASS: Record<FloatingPreviewCorner, string> = {
+  "top-left": "top-0 left-0 cursor-nwse-resize",
+  "top-right": "top-0 right-0 cursor-nesw-resize",
+  "bottom-left": "bottom-0 left-0 cursor-nesw-resize",
+  "bottom-right": "bottom-0 right-0 cursor-nwse-resize",
+};
+/** The grip's visible mark: a short bracket hugging the card's rounded corner. */
+const RESIZE_GRIP_CLASS: Record<FloatingPreviewCorner, string> = {
+  "top-left": "top-1 left-1 rounded-tl-md border-t-2 border-l-2",
+  "top-right": "top-1 right-1 rounded-tr-md border-t-2 border-r-2",
+  "bottom-left": "bottom-1 left-1 rounded-bl-md border-b-2 border-l-2",
+  "bottom-right": "bottom-1 right-1 rounded-br-md border-r-2 border-b-2",
+};
+
+function thumbnailWidth(width: number): number {
+  return Math.ceil(width / THUMBNAIL_WIDTH_STEP) * THUMBNAIL_WIDTH_STEP;
+}
 
 /**
- * A small card over the chat for this thread's browser tab the panel showed
- * last, once the panel no longer shows it: closed or switched to another
- * surface. It mirrors the page with a throttled thumbnail;
- * clicking it reopens the panel on that tab, and the x dismisses it until the
- * tab is looked at again. Mounted once per chat pane.
+ * A card over the chat for this thread's browser tab the panel showed last,
+ * once the panel no longer shows it: closed or switched to another surface. It
+ * mirrors the page with a throttled thumbnail. Clicking it reopens the panel on
+ * that tab; it drags anywhere in the window (docking near pane corners) and
+ * resizes from the grip facing open space. While someone else drives, its chip
+ * says who and what the page is doing, and offers taking over. The x dismisses
+ * it until the tab is looked at again. Mounted once per chat pane.
  */
 export function FloatingBrowserPreview(props: {
   readonly activeThreadRef: ScopedThreadRef | null;
@@ -208,6 +265,21 @@ function FloatingBrowserPreviewCard({
   // A composer that is not docked (the centred draft hero) leaves the bottom free.
   const bottomInset = composerElement ? composerHeight : 0;
 
+  // The width the user chose, live while the grip is held; the pane may shrink it.
+  const storedWidth = useFloatingBrowserPreviewStore((state) => state.width);
+  const [resize, setResize] = useState<{
+    readonly handle: FloatingPreviewCorner;
+    readonly width: number;
+    /** A free card keeps the corner across from the grip in place; a docked one stays docked. */
+    readonly position: FloatingPreviewPoint | null;
+  } | null>(null);
+  const sizeFor = (width: number | null): FloatingPreviewSize =>
+    pane
+      ? floatingPreviewCardSize(width, pane, { bottom: bottomInset, right: minimapInset })
+      : floatingPreviewCardSize(width, { width: Infinity, height: Infinity }, { bottom: 0 });
+  const restingSize = sizeFor(storedWidth);
+  const size = resize ? sizeFor(resize.width) : restingSize;
+
   const shown = shouldShowFloatingPreview({
     targetKey: key,
     shownKeys: new Set(Object.keys(shownCounts)),
@@ -216,7 +288,8 @@ function FloatingBrowserPreviewCard({
     navStatus: snapshot?.navStatus ?? null,
     thumbnailAvailable: thumbnailSource !== null,
     poppedOut: desktopOverlay?.pictureInPicture === true,
-    paneFits: pane !== null && floatingPreviewPaneFits(pane, CARD_SIZE, bottomInset),
+    paneFits:
+      pane !== null && floatingPreviewPaneFits(pane, FLOATING_PREVIEW_MIN_CARD_SIZE, bottomInset),
   });
   // Mounts transparent and fades in on the next frame, so arriving on a thread
   // with a card to show reads the same as closing the panel in place.
@@ -238,9 +311,12 @@ function FloatingBrowserPreviewCard({
   // Positions are in window coordinates: the card may be dragged anywhere in
   // the window below the titlebar, over the sidebar too. A card left in a
   // corner docks to that corner of the chat pane.
-  const cornerPosition = (target: FloatingPreviewCorner): FloatingPreviewPoint | null => {
+  const cornerPosition = (
+    target: FloatingPreviewCorner,
+    card: FloatingPreviewSize,
+  ): FloatingPreviewPoint | null => {
     if (!pane) return null;
-    const inPane = floatingPreviewCornerPosition(target, pane, CARD_SIZE, {
+    const inPane = floatingPreviewCornerPosition(target, pane, card, {
       top: 0,
       bottom: bottomInset,
       right: minimapInset,
@@ -255,9 +331,17 @@ function FloatingBrowserPreviewCard({
     bottom: windowSize.height - WINDOW_EDGE_INSET,
   };
   const docked = freePosition
-    ? clampFloatingPreviewToArea(freePosition, windowArea, CARD_SIZE)
-    : cornerPosition(corner);
-  const position = drag ?? docked;
+    ? clampFloatingPreviewToArea(freePosition, windowArea, size)
+    : cornerPosition(corner, size);
+  const position = drag ?? resize?.position ?? docked;
+  // Held still while the grip is dragged, so it cannot jump corners under the pointer.
+  const resizeHandle =
+    resize?.handle ??
+    (freePosition && docked
+      ? floatingPreviewResizeHandle(docked, size, windowArea)
+      : oppositeFloatingPreviewCorner(corner));
+  // The close button takes the top corner the grip leaves free.
+  const closeOnLeft = resizeHandle === "top-right";
 
   const navigate = useNavigate();
   const openInPanel = () => {
@@ -275,8 +359,11 @@ function FloatingBrowserPreviewCard({
     if (!pane || !docked) return;
     const current = dragRef.current;
     if (event.type === "pointerdown") {
-      if (event.button !== 0 || !event.isPrimary) return;
-      if ((event.target as Element).closest("[data-floating-preview-close]")) return;
+      if (event.button !== 0 || !event.isPrimary || resize) return;
+      // The chip's menu renders in a portal, but its events still bubble here through React.
+      const target = event.target as Element;
+      if (!event.currentTarget.contains(target)) return;
+      if (target.closest("[data-floating-preview-control]")) return;
       dragRef.current = {
         pointerId: event.pointerId,
         startX: event.clientX,
@@ -300,7 +387,7 @@ function FloatingBrowserPreviewCard({
         clampFloatingPreviewToArea(
           { x: current.origin.x + dx, y: current.origin.y + dy },
           windowArea,
-          CARD_SIZE,
+          size,
         ),
       );
       return;
@@ -313,10 +400,10 @@ function FloatingBrowserPreviewCard({
       const dropped = clampFloatingPreviewToArea(
         { x: current.origin.x + dx, y: current.origin.y + dy },
         windowArea,
-        CARD_SIZE,
+        size,
       );
       const corners = Object.fromEntries(
-        FLOATING_PREVIEW_CORNERS.map((name) => [name, cornerPosition(name) ?? dropped]),
+        FLOATING_PREVIEW_CORNERS.map((name) => [name, cornerPosition(name, size) ?? dropped]),
       ) as Record<FloatingPreviewCorner, FloatingPreviewPoint>;
       const resolved = resolveFloatingPreviewDrop(dropped, corners);
       const store = useFloatingBrowserPreviewStore.getState();
@@ -326,12 +413,127 @@ function FloatingBrowserPreviewCard({
     setDrag(null);
   };
 
+  // The grip resizes from the corner it sits in; the corner across from it holds still.
+  const resizeRef = useRef<{
+    readonly pointerId: number;
+    readonly startX: number;
+    readonly startY: number;
+    readonly handle: FloatingPreviewCorner;
+    readonly startCard: FloatingPreviewSize;
+    /** Set for a free card, which moves to keep its far corner; null when docked. */
+    readonly startPosition: FloatingPreviewPoint | null;
+  } | null>(null);
+  const resizedTo = (
+    width: number,
+    handle: FloatingPreviewCorner,
+    from: { readonly position: FloatingPreviewPoint | null; readonly card: FloatingPreviewSize },
+  ) => {
+    const card = sizeFor(width);
+    const position = from.position
+      ? clampFloatingPreviewToArea(
+          anchorResizedFloatingPreview({ position: from.position, card: from.card }, handle, card),
+          windowArea,
+          card,
+        )
+      : null;
+    return { card, position };
+  };
+  const commitResize = (card: FloatingPreviewSize, position: FloatingPreviewPoint | null) => {
+    const store = useFloatingBrowserPreviewStore.getState();
+    store.setWidth(card.width);
+    if (position) store.setFreePosition(position);
+  };
+  const handleResizePointer = (event: ReactPointerEvent<HTMLElement>) => {
+    // The card's own drag never sees the grip.
+    event.stopPropagation();
+    if (!pane || !docked) return;
+    const current = resizeRef.current;
+    if (event.type === "pointerdown") {
+      if (event.button !== 0 || !event.isPrimary) return;
+      event.preventDefault();
+      event.currentTarget.setPointerCapture(event.pointerId);
+      resizeRef.current = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        handle: resizeHandle,
+        startCard: size,
+        startPosition: freePosition ? docked : null,
+      };
+      setResize({ handle: resizeHandle, width: size.width, position: null });
+      return;
+    }
+    if (!current || current.pointerId !== event.pointerId) return;
+    const width = resizeFloatingPreviewWidth(current.startCard.width, current.handle, {
+      dx: event.clientX - current.startX,
+      dy: event.clientY - current.startY,
+    });
+    const next = resizedTo(width, current.handle, {
+      position: current.startPosition,
+      card: current.startCard,
+    });
+    if (event.type === "pointermove") {
+      setResize({ handle: current.handle, width: next.card.width, position: next.position });
+      return;
+    }
+    resizeRef.current = null;
+    // A cancelled resize returns to the size it started at.
+    if (event.type === "pointerup") commitResize(next.card, next.position);
+    setResize(null);
+  };
+  const handleResizeKey = (event: ReactKeyboardEvent<HTMLElement>) => {
+    if (!docked) return;
+    const step =
+      event.key === "ArrowUp" || event.key === "ArrowRight"
+        ? FLOATING_PREVIEW_RESIZE_STEP_PX
+        : event.key === "ArrowDown" || event.key === "ArrowLeft"
+          ? -FLOATING_PREVIEW_RESIZE_STEP_PX
+          : 0;
+    if (step === 0) return;
+    event.preventDefault();
+    const next = resizedTo(size.width + step, resizeHandle, {
+      position: freePosition ? docked : null,
+      card: size,
+    });
+    commitResize(next.card, next.position);
+  };
+
   const navStatus = snapshot?.navStatus ?? { _tag: "Idle" as const };
   const url = navStatus._tag === "Idle" ? "" : navStatus.url;
-  const agentDriving = snapshot?.agentDriving === true || desktopOverlay?.controller === "agent";
+  // The card's watch-only stream reports who holds a streamed tab.
+  const [streamController, setStreamController] = useState<
+    PreviewStreamControl["controller"] | null
+  >(null);
+  const driver = resolveFloatingPreviewDriver({
+    streamController: thumbnailSource === "stream" ? streamController : null,
+    agentDriving: snapshot?.agentDriving === true,
+    desktopController: desktopOverlay?.controller ?? null,
+  });
+  const status = floatingPreviewStatus({ driver, navStatus, streamed });
+  const cursorController: BrowserController = driver === "agent" ? "agent" : "none";
   const favicon = desktopOverlay?.favicon ?? null;
   const capturedFavicon = favicon && sameOrigin(favicon.pageUrl, url) ? favicon.dataUrl : null;
   const title = floatingPreviewTitle(navStatus);
+  // Frames are requested for the resting size, so a resize in progress never reconnects.
+  const frameWidth = thumbnailWidth(restingSize.width);
+
+  const takeControl = () => {
+    useFloatingBrowserPreviewStore.getState().requestTakeControl(key);
+    openInPanel();
+  };
+  const popOut =
+    previewBridge && thumbnailSource === "desktop"
+      ? () => {
+          void previewBridge?.pictureInPicture.open(runtimeTabId).catch((error: unknown) => {
+            toastManager.add({
+              type: "error",
+              title: "Couldn't open the preview window",
+              description: error instanceof Error ? error.message : "An error occurred.",
+            });
+          });
+        }
+      : null;
+  const dismiss = () => useFloatingBrowserPreviewStore.getState().dismiss(key);
 
   const card = position ? (
     <section
@@ -341,14 +543,20 @@ function FloatingBrowserPreviewCard({
       data-floating-browser-preview={shown ? "shown" : "hidden"}
       className={cn(
         "group/floating-preview absolute top-0 left-0 touch-none overflow-hidden rounded-xl border border-border/70 bg-muted shadow-xl",
+        // Electron hit-tests window drag regions above every layer, so a card
+        // over the titlebar would lose its presses, the close button's first.
+        "[-webkit-app-region:no-drag]",
         "transition-opacity duration-(--motion-duration-base) ease-out",
-        // The card glides to its corner after a drop; it follows the pointer while dragged.
-        drag === null && "motion-safe:transition-[opacity,transform]",
+        // The card glides to its corner after a drop, and to a size set from the
+        // keyboard or forced by the pane; it follows the pointer while dragged or resized.
+        drag === null &&
+          resize === null &&
+          "motion-safe:transition-[opacity,transform,width,height]",
         opaque ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0",
       )}
       style={{
-        width: CARD_SIZE.width,
-        height: CARD_SIZE.height,
+        width: size.width,
+        height: size.height,
         transform: `translate3d(${Math.round(position.x)}px, ${Math.round(position.y)}px, 0)`,
       }}
       onPointerDown={handlePointer}
@@ -356,7 +564,7 @@ function FloatingBrowserPreviewCard({
       onPointerUp={handlePointer}
       onPointerCancel={handlePointer}
     >
-      {/* The page fills the card; its title sits on a soft scrim along the bottom. */}
+      {/* The page fills the card; clicking it opens the tab in the browser panel. */}
       <button
         type="button"
         className="absolute inset-0 block cursor-pointer text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
@@ -376,41 +584,91 @@ function FloatingBrowserPreviewCard({
             threadRef={threadRef}
             tabId={tabId}
             active={shown}
-            controller={agentDriving ? "agent" : "none"}
+            frameWidth={frameWidth}
+            controller={cursorController}
+            onController={setStreamController}
           />
         ) : thumbnailSource === "desktop" ? (
           <DesktopThumbnail
             runtimeTabId={runtimeTabId}
             active={shown}
+            frameWidth={frameWidth}
+            card={size}
             zoomFactor={desktopOverlay?.zoomFactor ?? 1}
-            controller={agentDriving ? "agent" : "none"}
+            controller={cursorController}
           />
         ) : null}
-        <span className="absolute inset-x-0 bottom-0 flex h-9 min-w-0 items-end gap-1.5 bg-linear-to-t from-black/70 to-transparent px-2.5 pb-2 text-white">
-          <FaviconImage
-            sources={[capturedFavicon, faviconUrlForOrigin(url, 32)]}
-            fallback={<Globe2 aria-hidden className="size-3.5 shrink-0 opacity-80" />}
-            className="size-3.5 shrink-0 rounded-sm object-contain"
-          />
-          <span className="min-w-0 flex-1 truncate text-xs leading-3.5 font-medium">{title}</span>
-          {agentDriving ? (
-            <span className="flex shrink-0 items-center gap-1 rounded-full bg-white/15 px-1.5 text-2xs leading-3.5 backdrop-blur-sm">
-              <Bot aria-hidden className="size-2.5" />
-              Agent
-            </span>
-          ) : null}
-        </span>
       </button>
-      {/* Shown on hover or keyboard focus, so the page reads clean at rest. */}
-      <button
-        type="button"
-        data-floating-preview-close=""
-        aria-label="Close browser preview"
-        onClick={() => useFloatingBrowserPreviewStore.getState().dismiss(key)}
-        className="absolute top-1.5 right-1.5 flex size-6 cursor-pointer items-center justify-center rounded-md bg-black/55 text-white opacity-0 backdrop-blur-sm transition-opacity duration-(--motion-duration-fast) ease-out outline-none group-hover/floating-preview:opacity-100 hover:bg-black/75 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+      {/* The title on a soft scrim along the bottom. Clicks fall through to the page. */}
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 flex min-w-0 items-center gap-1.5 bg-linear-to-t from-black/70 to-transparent px-3.5 pt-4 pb-1.5 text-white">
+        <FaviconImage
+          sources={[capturedFavicon, faviconUrlForOrigin(url, 32)]}
+          fallback={<Globe2 aria-hidden className="size-3.5 shrink-0 opacity-80" />}
+          className="size-3.5 shrink-0 rounded-sm object-contain"
+        />
+        <span className="min-w-0 flex-1 truncate text-xs leading-5 font-medium">{title}</span>
+        {status.chip ? (
+          <span data-floating-preview-control="" className="pointer-events-auto flex shrink-0">
+            <FloatingPreviewDriverMenu
+              status={status}
+              onTakeControl={takeControl}
+              onOpen={openInPanel}
+              onPopOut={popOut}
+              onDismiss={dismiss}
+            />
+          </span>
+        ) : null}
+      </div>
+      {/* Always shown and always hit-testable: a hover-only close faded in as the
+          pointer arrived, and its press could start a card drag. Its own
+          handlers keep the press away from the card's drag and the page's click. */}
+      <span
+        data-floating-preview-control=""
+        className={cn("absolute top-1.5 flex", closeOnLeft ? "left-1.5" : "right-1.5")}
+        onPointerDown={(event) => event.stopPropagation()}
       >
-        <X aria-hidden className="size-3.5" />
-      </button>
+        <Button
+          variant="media-close"
+          size="icon-sm"
+          aria-label="Close browser preview"
+          onClick={(event) => {
+            event.stopPropagation();
+            dismiss();
+          }}
+        >
+          <X aria-hidden />
+        </Button>
+      </span>
+      {/* The resize grip, in the corner facing open space; arrow keys step the size. */}
+      <div
+        role="slider"
+        tabIndex={0}
+        aria-label="Browser preview size"
+        aria-orientation="horizontal"
+        aria-valuemin={FLOATING_PREVIEW_MIN_WIDTH}
+        aria-valuemax={FLOATING_PREVIEW_MAX_WIDTH}
+        aria-valuenow={size.width}
+        aria-valuetext={`${size.width} by ${size.height} pixels`}
+        data-floating-preview-control=""
+        className={cn(
+          "group/resize absolute size-4 touch-none outline-none",
+          RESIZE_HANDLE_CLASS[resizeHandle],
+        )}
+        onPointerDown={handleResizePointer}
+        onPointerMove={handleResizePointer}
+        onPointerUp={handleResizePointer}
+        onPointerCancel={handleResizePointer}
+        onKeyDown={handleResizeKey}
+      >
+        <span
+          aria-hidden
+          className={cn(
+            "absolute size-2.5 border-white/80 transition-opacity duration-(--motion-duration-fast) ease-out group-hover/floating-preview:opacity-100 group-focus-visible/resize:opacity-100",
+            resize ? "opacity-100" : "opacity-0",
+            RESIZE_GRIP_CLASS[resizeHandle],
+          )}
+        />
+      </div>
     </section>
   ) : null;
 
@@ -438,16 +696,91 @@ function FloatingBrowserPreviewCard({
 }
 
 /**
+ * The chip on the card's title row while someone else drives: who, with what
+ * the page is doing on hover, and a menu to take over, open the tab, pop it
+ * into its own window (desktop), or hide the card.
+ */
+function FloatingPreviewDriverMenu(props: {
+  readonly status: FloatingPreviewStatus;
+  readonly onTakeControl: () => void;
+  readonly onOpen: () => void;
+  /** Null where the tab cannot get its own window. */
+  readonly onPopOut: (() => void) | null;
+  readonly onDismiss: () => void;
+}) {
+  const { status, onTakeControl, onOpen, onPopOut, onDismiss } = props;
+  const summary = `${status.headline} · ${status.activity}`;
+  return (
+    <Menu>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <MenuTrigger
+              render={<Button variant="overlay" size="micro" aria-label={`${summary}. Options`} />}
+            />
+          }
+        >
+          <Bot aria-hidden />
+          {status.chip}
+          <ChevronDown aria-hidden />
+        </TooltipTrigger>
+        <TooltipPopup>{summary}</TooltipPopup>
+      </Tooltip>
+      <MenuPopup side="top" align="end" sideOffset={6}>
+        <MenuGroup>
+          <MenuGroupLabel>{status.headline}</MenuGroupLabel>
+          <div className="max-w-64 truncate px-2 pb-1.5 text-xs text-muted-foreground">
+            {status.takeOver === "page"
+              ? `${status.activity} · use the page to take over`
+              : status.activity}
+          </div>
+        </MenuGroup>
+        <MenuSeparator />
+        {status.takeOver === "stream" ? (
+          <MenuItem onClick={onTakeControl}>
+            <Hand aria-hidden />
+            Take control
+          </MenuItem>
+        ) : null}
+        <MenuItem onClick={onOpen}>
+          <PanelRight aria-hidden />
+          Open in browser panel
+        </MenuItem>
+        {onPopOut ? (
+          <MenuItem onClick={onPopOut}>
+            <PictureInPicture2 aria-hidden />
+            Open in separate window
+          </MenuItem>
+        ) : null}
+        <MenuSeparator />
+        <MenuItem onClick={onDismiss}>
+          <EyeOff aria-hidden />
+          Hide preview
+        </MenuItem>
+      </MenuPopup>
+    </Menu>
+  );
+}
+
+/**
  * A streamed server tab, watched passively at a thumbnail's size and paced to
- * one frame a second. Connected only while the card shows.
+ * one frame a second. Connected only while the card shows; reconnects when the
+ * card is resized across a frame-width step.
  */
 function StreamThumbnail(props: {
   readonly threadRef: ScopedThreadRef;
   readonly tabId: string;
   readonly active: boolean;
+  /** CSS px of page width to ask frames for. */
+  readonly frameWidth: number;
   readonly controller: BrowserController;
+  /** Who holds the tab, as the stream reports it; null while disconnected. */
+  readonly onController: (controller: PreviewStreamControl["controller"] | null) => void;
 }) {
-  const { threadRef, tabId, active, controller } = props;
+  const { threadRef, tabId, active, frameWidth, controller, onController } = props;
+  const controllerChanged = useEffectEvent((next: PreviewStreamControl["controller"] | null) =>
+    onController(next),
+  );
   const environmentId = threadRef.environmentId;
   const access = usePreviewStreamAccess(environmentId);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -465,8 +798,8 @@ function StreamThumbnail(props: {
         access,
         threadId: threadRef.threadId,
         tabId,
-        maxWidth: FLOATING_PREVIEW_CARD_WIDTH * ratio,
-        maxHeight: FLOATING_PREVIEW_CARD_HEIGHT * ratio * 2,
+        maxWidth: frameWidth * ratio,
+        maxHeight: frameWidth * FLOATING_PREVIEW_ASPECT * ratio * 2,
         interactive: false,
         minFrameIntervalMs: FLOATING_PREVIEW_STREAM_FRAME_INTERVAL_MS,
         quality: STREAM_JPEG_QUALITY,
@@ -495,7 +828,10 @@ function StreamThumbnail(props: {
               ...placeAgentTarget(pointer, frame),
             });
         },
-        onConnectedChange: () => {},
+        onControl: (control) => controllerChanged(control.controller),
+        onConnectedChange: (connected) => {
+          if (!connected) controllerChanged(null);
+        },
         // A fresh ticket re-runs this effect; a viewer refused twice stays on its placeholder.
         onUnauthorized: () => {
           refusalsRef.current += 1;
@@ -506,8 +842,9 @@ function StreamThumbnail(props: {
     return () => {
       painter.stop();
       client.stop();
+      controllerChanged(null);
     };
-  }, [access, active, environmentId, tabId, threadRef.threadId]);
+  }, [access, active, environmentId, frameWidth, tabId, threadRef.threadId]);
   return (
     <>
       <canvas
@@ -584,10 +921,14 @@ interface CapturableWebview extends HTMLElement {
 function DesktopThumbnail(props: {
   readonly runtimeTabId: string;
   readonly active: boolean;
+  /** CSS px of page width to capture at. */
+  readonly frameWidth: number;
+  /** The card's current size, which the cursor maps onto. */
+  readonly card: FloatingPreviewSize;
   readonly zoomFactor: number;
   readonly controller: BrowserController;
 }) {
-  const { runtimeTabId, active, zoomFactor, controller } = props;
+  const { runtimeTabId, active, frameWidth, card, zoomFactor, controller } = props;
   const [source, setSource] = useState<string | null>(null);
   // The webview's own size: what the captured image shows, so the cursor maps through it.
   const [surface, setSurface] = useState<FloatingPreviewSize | null>(null);
@@ -596,7 +937,7 @@ function DesktopThumbnail(props: {
     const releaseActivity = acquireBrowserSurfaceActivity(runtimeTabId);
     let disposed = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
-    const width = Math.round(FLOATING_PREVIEW_CARD_WIDTH * (window.devicePixelRatio || 1));
+    const width = Math.round(frameWidth * (window.devicePixelRatio || 1));
     const capture = async () => {
       const webview = [...document.querySelectorAll("webview")].find(
         (element) => element.dataset.previewTab === runtimeTabId,
@@ -629,7 +970,7 @@ function DesktopThumbnail(props: {
       if (timer !== null) clearTimeout(timer);
       releaseActivity();
     };
-  }, [active, runtimeTabId]);
+  }, [active, frameWidth, runtimeTabId]);
   const [loaded, setLoaded] = useState(false);
   // Later captures swap in place; only the first one fades over the placeholder.
   return source ? (
@@ -650,7 +991,7 @@ function DesktopThumbnail(props: {
           runtimeTabId={runtimeTabId}
           zoomFactor={zoomFactor}
           surface={surface}
-          card={CARD_SIZE}
+          card={card}
           controller={controller}
         />
       ) : null}

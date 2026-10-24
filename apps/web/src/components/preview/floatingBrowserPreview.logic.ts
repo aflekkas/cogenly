@@ -225,6 +225,169 @@ export function clampFloatingPreviewPosition(
 export function floatingPreviewTitle(navStatus: PreviewNavStatus): string {
   if (navStatus._tag === "Idle") return "New tab";
   if (navStatus.title.trim().length > 0) return navStatus.title;
+  return floatingPreviewHost(navStatus);
+}
+
+function floatingPreviewHost(navStatus: PreviewNavStatus): string {
+  if (navStatus._tag === "Idle") return "a new tab";
   if (!URL.canParse(navStatus.url)) return navStatus.url;
   return new URL(navStatus.url).host || navStatus.url;
+}
+
+/** The card keeps the default card's 16:10 shape at every size. */
+export const FLOATING_PREVIEW_ASPECT = FLOATING_PREVIEW_CARD_HEIGHT / FLOATING_PREVIEW_CARD_WIDTH;
+export const FLOATING_PREVIEW_MIN_WIDTH = 200;
+export const FLOATING_PREVIEW_MAX_WIDTH = 560;
+/** One arrow-key press on the resize handle. */
+export const FLOATING_PREVIEW_RESIZE_STEP_PX = 24;
+/** A resized card never takes more than this share of the pane's width. */
+const FLOATING_PREVIEW_MAX_PANE_SHARE = 0.6;
+
+export const FLOATING_PREVIEW_MIN_CARD_SIZE: FloatingPreviewSize = {
+  width: FLOATING_PREVIEW_MIN_WIDTH,
+  height: Math.round(FLOATING_PREVIEW_MIN_WIDTH * FLOATING_PREVIEW_ASPECT),
+};
+
+/**
+ * The card's size for the width the user chose (null: the default), shrunk to
+ * fit the pane it floats over. The stored width stays as chosen, so a pane that
+ * grows again gets the chosen size back.
+ */
+export function floatingPreviewCardSize(
+  preferredWidth: number | null,
+  pane: FloatingPreviewSize,
+  insets: { readonly bottom: number; readonly right?: number },
+): FloatingPreviewSize {
+  const roomWidth = (pane.width - (insets.right ?? 0)) * FLOATING_PREVIEW_MAX_PANE_SHARE;
+  const roomHeight = pane.height - insets.bottom - FLOATING_PREVIEW_MARGIN * 2;
+  const maxWidth = Math.max(
+    FLOATING_PREVIEW_MIN_WIDTH,
+    Math.min(FLOATING_PREVIEW_MAX_WIDTH, roomWidth, roomHeight / FLOATING_PREVIEW_ASPECT),
+  );
+  const preferred = preferredWidth ?? FLOATING_PREVIEW_CARD_WIDTH;
+  const width = Math.round(Math.min(maxWidth, Math.max(FLOATING_PREVIEW_MIN_WIDTH, preferred)));
+  return { width, height: Math.round(width * FLOATING_PREVIEW_ASPECT) };
+}
+
+/**
+ * The corner the resize grip sits in: the one facing the middle of the area,
+ * so the card grows into open space and the corner it rests against stays put.
+ */
+export function floatingPreviewResizeHandle(
+  position: FloatingPreviewPoint,
+  card: FloatingPreviewSize,
+  area: FloatingPreviewArea,
+): FloatingPreviewCorner {
+  const centerX = position.x + card.width / 2;
+  const centerY = position.y + card.height / 2;
+  const vertical = centerY < (area.top + area.bottom) / 2 ? "bottom" : "top";
+  const horizontal = centerX < (area.left + area.right) / 2 ? "right" : "left";
+  return `${vertical}-${horizontal}`;
+}
+
+/** A docked card's grip sits across from the corner it rests in. */
+export function oppositeFloatingPreviewCorner(
+  corner: FloatingPreviewCorner,
+): FloatingPreviewCorner {
+  const vertical = corner.startsWith("top") ? "bottom" : "top";
+  const horizontal = corner.endsWith("left") ? "right" : "left";
+  return `${vertical}-${horizontal}`;
+}
+
+/**
+ * The width a grip drag asks for. Pulling the grip away from the card grows it;
+ * whichever axis moved further leads, so a diagonal drag tracks the pointer.
+ */
+export function resizeFloatingPreviewWidth(
+  startWidth: number,
+  handle: FloatingPreviewCorner,
+  delta: { readonly dx: number; readonly dy: number },
+): number {
+  const fromX = (handle.endsWith("right") ? 1 : -1) * delta.dx;
+  const fromY = ((handle.startsWith("bottom") ? 1 : -1) * delta.dy) / FLOATING_PREVIEW_ASPECT;
+  return startWidth + (Math.abs(fromX) >= Math.abs(fromY) ? fromX : fromY);
+}
+
+/** Where a resized card sits so the corner opposite its grip does not move. */
+export function anchorResizedFloatingPreview(
+  start: { readonly position: FloatingPreviewPoint; readonly card: FloatingPreviewSize },
+  handle: FloatingPreviewCorner,
+  card: FloatingPreviewSize,
+): FloatingPreviewPoint {
+  const { position } = start;
+  return {
+    x: handle.endsWith("left") ? position.x + start.card.width - card.width : position.x,
+    y: handle.startsWith("top") ? position.y + start.card.height - card.height : position.y,
+  };
+}
+
+/** Who drives the floated tab, as this client can tell. */
+export type FloatingPreviewDriver = "agent" | "you" | "another-viewer" | "none";
+
+/**
+ * A streamed tab's own control report wins when the card has one; otherwise
+ * the session's agent flag, or a desktop tab's last input, decides.
+ */
+export function resolveFloatingPreviewDriver(input: {
+  /** From the card's watch-only stream; null for desktop tabs or before it connects. */
+  readonly streamController: "agent" | "you" | "another-viewer" | "unclaimed" | null;
+  readonly agentDriving: boolean;
+  readonly desktopController: "human" | "agent" | "none" | null;
+}): FloatingPreviewDriver {
+  switch (input.streamController) {
+    case "agent":
+      return "agent";
+    case "you":
+      return "you";
+    case "another-viewer":
+      return "another-viewer";
+    case "unclaimed":
+      return "none";
+    case null:
+      break;
+  }
+  if (input.desktopController === "human") return "you";
+  if (input.agentDriving || input.desktopController === "agent") return "agent";
+  return "none";
+}
+
+export interface FloatingPreviewStatus {
+  /** The chip's label; null keeps the card's title row to itself. */
+  readonly chip: string | null;
+  readonly headline: string;
+  /** What the page is doing right now, in a few words. */
+  readonly activity: string;
+  /**
+   * How you take over: "stream" asks the environment's browser for control
+   * once the panel connects; "page" opens the panel, where using the page
+   * takes over. Null when nobody else drives.
+   */
+  readonly takeOver: "stream" | "page" | null;
+}
+
+/** What the card's driver chip says and offers. */
+export function floatingPreviewStatus(input: {
+  readonly driver: FloatingPreviewDriver;
+  readonly navStatus: PreviewNavStatus;
+  /** The tab streams from the environment's browser, which hands over control explicitly. */
+  readonly streamed: boolean;
+}): FloatingPreviewStatus {
+  const host = floatingPreviewHost(input.navStatus);
+  const activity =
+    input.navStatus._tag === "Loading"
+      ? `Loading ${host}`
+      : input.navStatus._tag === "LoadFailed"
+        ? `Couldn't load ${host}`
+        : `On ${host}`;
+  const takeOver = input.streamed ? "stream" : "page";
+  switch (input.driver) {
+    case "agent":
+      return { chip: "Agent", headline: "Agent is driving", activity, takeOver };
+    case "another-viewer":
+      return { chip: "Viewer", headline: "Another viewer is driving", activity, takeOver };
+    case "you":
+      return { chip: null, headline: "You're driving", activity, takeOver: null };
+    case "none":
+      return { chip: null, headline: "Nobody is driving", activity, takeOver: null };
+  }
 }

@@ -221,8 +221,10 @@ import {
   carryDisplacedCustomAnswerIntoPrompt,
   derivePendingUserInputProgress,
   projectPendingUserInputAnswer,
+  pruneSettledUserInputs,
   setPendingUserInputCustomAnswer,
   togglePendingUserInputOptionSelection,
+  withoutSettledUserInputs,
   type PendingUserInputDraftAnswer,
 } from "../pendingUserInput";
 import { seedUserInputDraftAnswers } from "@t3tools/client-runtime/state/thread-requests";
@@ -1502,6 +1504,10 @@ export default function ChatView(props: ChatViewProps) {
   const [respondingUserInputRequestIds, setRespondingUserInputRequestIds] = useState<
     RuntimeRequestId[]
   >([]);
+  // Questions this client answered or dismissed, hidden until the server drops them.
+  const [settledUserInputRequestIds, setSettledUserInputRequestIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   const [pendingUserInputAnswersByRequestId, setPendingUserInputAnswersByRequestId] = useState<
     Record<string, Record<string, PendingUserInputDraftAnswer>>
   >({});
@@ -2611,9 +2617,22 @@ export default function ChatView(props: ChatViewProps) {
     () => derivePendingApprovals(pendingRequests.approvals),
     [pendingRequests.approvals],
   );
-  const pendingUserInputs = useMemo(
+  const serverPendingUserInputs = useMemo(
     () => derivePendingUserInputs(pendingRequests.userInputs),
     [pendingRequests.userInputs],
+  );
+  const shownSettledUserInputRequestIds = pruneSettledUserInputs(
+    settledUserInputRequestIds,
+    serverPendingUserInputs,
+  );
+  if (shownSettledUserInputRequestIds !== settledUserInputRequestIds) {
+    setSettledUserInputRequestIds(shownSettledUserInputRequestIds);
+  }
+  // An answered card leaves once, when its response lands, and never comes
+  // back live while the server's update is still on its way.
+  const pendingUserInputs = useMemo(
+    () => withoutSettledUserInputs(serverPendingUserInputs, shownSettledUserInputRequestIds),
+    [serverPendingUserInputs, shownSettledUserInputRequestIds],
   );
   const activePendingUserInput = pendingUserInputs[0] ?? null;
   const activePendingRequestKey = JSON.stringify([
@@ -8249,6 +8268,11 @@ export default function ChatView(props: ChatViewProps) {
   };
   const onRespondToApprovalStable = useStableCallback(onRespondToApproval);
 
+  const settleUserInputRequest = (requestId: RuntimeRequestId) =>
+    setSettledUserInputRequestIds((existing) =>
+      existing.has(requestId) ? existing : new Set([...existing, requestId]),
+    );
+
   const onRespondToUserInput = async (
     requestId: RuntimeRequestId,
     answers: Record<string, unknown>,
@@ -8315,6 +8339,7 @@ export default function ChatView(props: ChatViewProps) {
         error instanceof Error ? error.message : "Failed to submit user input.",
       );
     }
+    if (result._tag === "Success") settleUserInputRequest(requestId);
     userInputResponsesInFlight.current.delete(responseKey);
     setRespondingUserInputRequestIds((existing) => existing.filter((id) => id !== requestId));
     return result;
@@ -8339,6 +8364,7 @@ export default function ChatView(props: ChatViewProps) {
         error instanceof Error ? error.message : "Failed to dismiss the question.",
       );
     }
+    if (result._tag === "Success") settleUserInputRequest(requestId);
     setRespondingUserInputRequestIds((existing) => existing.filter((id) => id !== requestId));
     return result;
   };

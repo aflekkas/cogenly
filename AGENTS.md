@@ -131,10 +131,10 @@ Architecture and its constraints: `docs/internals/overview.md`. Glossary: `docs/
 
 ## Motion
 
-- Every UI state change animates: short and purposeful, about 150 to 220ms ease-out. No snaps, no layout jumps, and nothing re-pops when the pointer moves between targets. Under `prefers-reduced-motion`, keep opacity fades only.
+- Every UI state change animates: short and purposeful, about 150 to 220ms ease-out. Panel open and close is the exception: it moves large areas, so it runs on `--motion-duration-panel` and `--ease-panel` (see [Panel motion](docs/internals/web-ui.md#panel-motion)). No snaps, no layout jumps, and nothing re-pops when the pointer moves between targets. Under `prefers-reduced-motion`, keep opacity fades only.
 - No rising/sliding fades: things appear with an opacity fade only (dialogs fade+scale). Directional motion only when content actually moves.
 - Reuse the shared primitives instead of inventing timings: the `--motion-duration-*` and `--ease-*` tokens in `apps/web/src/index.css`, `WorkLogCollapse` / `WorkLogChevron` / `WorkLogDisclosure` in `apps/web/src/components/chat/WorkLog.tsx` for height-plus-fade disclosures, the clamped message "Show more" in `MessagesTimeline.tsx`, and `modeSwitchMotion` (`apps/web/src/components/sidebar/modes/`) for screen switches.
-- Animate only the change a user made (a toggle, a send, an arrival), never history on load or virtualized remounts. Disclosures in the timeline go through its disclosure hold so the scroll position stays put and a timeline pinned to the end stays pinned.
+- Animate only the change a user made (a toggle, an arrival), never history on load or virtualized remounts. A user's own sent message appears instantly, without a fade. Disclosures in the timeline go through its disclosure hold so the scroll position stays put and a timeline pinned to the end stays pinned.
 
 ## Additional tips
 

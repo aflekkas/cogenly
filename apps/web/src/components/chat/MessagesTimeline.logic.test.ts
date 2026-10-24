@@ -17,11 +17,13 @@ import type { ChatMessage } from "../../types";
 import {
   collapseRestartMarkers,
   collapseWorkEntryRuns,
+  createUserMessageArrivals,
   deriveMessagesTimelineRows,
   deriveTerminalAssistantMessageIds,
   disclosureOpenedRecently,
   markDisclosureClosed,
   markDisclosureOpened,
+  recordUserMessageArrivals,
   resolveDisclosureHoldsEnd,
   turnFoldRowId,
   type DisclosureOpenTimes,
@@ -562,6 +564,59 @@ describe("rows a disclosure reveals grow in only right after the user opens it",
     expect(disclosureOpenedRecently(opens, "turn-fold:a", 1_100, windowMs)).toBe(false);
     markDisclosureOpened(opens, "turn-fold:a", 1_300);
     expect(disclosureOpenedRecently(opens, "turn-fold:a", 1_500, windowMs)).toBe(true);
+  });
+});
+
+describe("a user message counts as just sent only when it arrives fresh while the thread is open", () => {
+  const now = Date.UTC(2026, 0, 1, 0, 1, 0);
+  const userRow = (id: string, ageMs: number) => ({
+    kind: "message",
+    message: { id, role: "user", createdAt: new Date(now - ageMs).toISOString() },
+  });
+
+  it("does not count history when the thread first loads", () => {
+    const arrivals = createUserMessageArrivals();
+    expect(recordUserMessageArrivals(arrivals, [userRow("old", 60_000)], now)).toBe(false);
+  });
+
+  it("counts the send that opened the thread, if it is that fresh", () => {
+    const arrivals = createUserMessageArrivals();
+    expect(recordUserMessageArrivals(arrivals, [userRow("first", 500)], now)).toBe(true);
+  });
+
+  it("counts a send or steer that shows up after the first load", () => {
+    const arrivals = createUserMessageArrivals();
+    recordUserMessageArrivals(arrivals, [userRow("old", 60_000)], now);
+    expect(
+      recordUserMessageArrivals(arrivals, [userRow("old", 60_000), userRow("steer", 5_000)], now),
+    ).toBe(true);
+  });
+
+  it("does not count the persisted copy replacing an optimistic bubble again", () => {
+    const arrivals = createUserMessageArrivals();
+    recordUserMessageArrivals(arrivals, [userRow("old", 60_000)], now);
+    recordUserMessageArrivals(arrivals, [userRow("old", 60_000), userRow("sent", 100)], now);
+    // Same message id, new row object: the server confirmed the send.
+    expect(
+      recordUserMessageArrivals(arrivals, [userRow("old", 60_000), userRow("sent", 100)], now),
+    ).toBe(false);
+  });
+
+  it("ignores assistant messages", () => {
+    const arrivals = createUserMessageArrivals();
+    recordUserMessageArrivals(arrivals, [userRow("old", 60_000)], now);
+    expect(
+      recordUserMessageArrivals(
+        arrivals,
+        [
+          {
+            kind: "message",
+            message: { id: "reply", role: "assistant", createdAt: new Date(now).toISOString() },
+          },
+        ],
+        now,
+      ),
+    ).toBe(false);
   });
 });
 

@@ -336,6 +336,14 @@ const make = Effect.gen(function* () {
             ["preparing", "queued", "starting", "running", "waiting"].includes(run.status)
           )
             return;
+          // Restart recovery cancels (rather than fails) a job run it resumes.
+          // Its outcome is the continuation run's, so wait for that to start.
+          if (
+            run.status === "cancelled" &&
+            (yield* sql`SELECT 1 FROM orchestration_v2_effect_outbox WHERE effect_id = ${`effect:restart-continuation:${run.id}`} AND status IN ('pending', 'running')`)
+              .length > 0
+          )
+            return;
           const succeeded = run.status === "completed";
           const response = projection.messages
             .filter((m) => m.role === "assistant" && m.runId === run.id)

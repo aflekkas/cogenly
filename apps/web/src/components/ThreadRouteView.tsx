@@ -320,7 +320,9 @@ function ThreadRouteContent({
 
   return (
     <SidebarInset
-      className="h-svh min-h-0 overflow-hidden overscroll-y-none md:h-dvh"
+      // Clips vertically only: content gliding from where it was drawn crosses
+      // the pane's new left edge while the sidebar opens (panelFlip).
+      className="h-svh min-h-0 overflow-y-clip overscroll-y-none md:h-dvh"
       data-retained-thread-view={retained ? "" : undefined}
       inert={retained || undefined}
     >

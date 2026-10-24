@@ -359,6 +359,14 @@ describe("resolveWorkLogNotice", () => {
     expect(
       notice({ type: "error", failure: { class: "provider_error", message: "Boom" } }),
     ).toMatchObject({ icon: "circle-alert", tone: "danger" });
+    const restart = (status: string) =>
+      notice({
+        type: "error",
+        status,
+        failure: { class: "transport_error", code: "server_restarted", message: "Restarted" },
+      });
+    expect(restart("cancelled")).toEqual({ icon: "rotate-ccw", label: "Restarted", tone: "quiet" });
+    expect(restart("failed")).toMatchObject({ icon: "circle-alert", tone: "danger" });
     expect(notice({ type: "command_execution", input: "ls" })).toBeNull();
   });
 });

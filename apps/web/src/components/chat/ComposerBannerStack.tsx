@@ -15,13 +15,13 @@ import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { ComposerBanner, type ComposerBannerVariant } from "./ComposerBanner";
 import { foldNotices } from "./composerStackBudget.logic";
 import { observeResize } from "~/lib/observeResize";
-import { PANEL_MOTION_EASING } from "~/lib/panelFlip";
 
 // Match the duration-220 exit transition before removing a dismissed notice.
 const DISMISS_TRANSITION_MS = 220;
 // The attached notice opens, closes and swaps on this timing.
 const NOTICE_PRESENCE_MS = 200;
-const NOTICE_PRESENCE_EASING = PANEL_MOTION_EASING;
+// ease-standard in index.css.
+const NOTICE_PRESENCE_EASING = "cubic-bezier(0.32, 0.72, 0, 1)";
 // Share of a rise or sink spent fading, so the strip reads as a solid surface
 // sliding behind the composer rather than a floating fade.
 const SOLID_SURFACE_FADE_SHARE = 0.4;

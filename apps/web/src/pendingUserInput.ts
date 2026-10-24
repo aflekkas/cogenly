@@ -200,6 +200,37 @@ export function findFirstUnansweredPendingUserInputQuestionIndex(
   return unansweredIndex === -1 ? Math.max(questions.length - 1, 0) : unansweredIndex;
 }
 
+/**
+ * The questions to show: the server's pending list minus the ones this client
+ * already answered or dismissed. The response can come back before the
+ * server's update drops the request, and without this the card would turn
+ * live again for those frames before it leaves. Returns `pending` itself when
+ * nothing is held back.
+ */
+export function withoutSettledUserInputs<T extends { readonly requestId: string }>(
+  pending: T[],
+  settledRequestIds: ReadonlySet<string>,
+): T[] {
+  if (settledRequestIds.size === 0) return pending;
+  const shown = pending.filter((request) => !settledRequestIds.has(request.requestId));
+  return shown.length === pending.length ? pending : shown;
+}
+
+/**
+ * Forgets settled requests the server no longer lists, so a held request stops
+ * being held once it is gone. Returns `settledRequestIds` itself when nothing
+ * changed.
+ */
+export function pruneSettledUserInputs(
+  settledRequestIds: ReadonlySet<string>,
+  pending: ReadonlyArray<{ readonly requestId: string }>,
+): ReadonlySet<string> {
+  if (settledRequestIds.size === 0) return settledRequestIds;
+  const pendingIds = new Set(pending.map((request) => request.requestId));
+  const kept = [...settledRequestIds].filter((requestId) => pendingIds.has(requestId));
+  return kept.length === settledRequestIds.size ? settledRequestIds : new Set(kept);
+}
+
 export function derivePendingUserInputProgress(
   questions: ReadonlyArray<UserInputQuestion>,
   draftAnswers: Record<string, PendingUserInputDraftAnswer>,

@@ -4,7 +4,7 @@ import { useLayoutEffect, useRef } from "react";
 
 import { acquireBrowserSurface } from "./browserSurfaceStore";
 import { observeResize } from "../lib/observeResize";
-import { subscribePanelMotion } from "../lib/panelFlip";
+import { readPanelFlipShift, subscribePanelFlips } from "../lib/panelFlip";
 
 export function BrowserSurfaceSlot(props: {
   readonly tabId: string;
@@ -22,8 +22,11 @@ export function BrowserSurfaceSlot(props: {
     let lease = acquireBrowserSurface(tabId);
     const update = () => {
       const rect = element.getBoundingClientRect();
+      // Where layout puts the slot, not where a panel glide draws it: the
+      // webview stays at that rect and replays the glide itself.
+      const shift = readPanelFlipShift(element);
       const bounds = {
-        x: Math.round(rect.x),
+        x: Math.round(rect.x - shift),
         y: Math.round(rect.y),
         width: Math.max(1, Math.round(rect.width)),
         height: Math.max(1, Math.round(rect.height)),
@@ -48,8 +51,8 @@ export function BrowserSurfaceSlot(props: {
     // element carries the sidebar's width.
     observed.push(...document.querySelectorAll('[data-slot="sidebar-gap"]'));
     const stopObserving = observeResize(observed, update);
-    // Panels slide and content glides on transforms, which no resize reports.
-    const stopFollowingPanels = subscribePanelMotion(update);
+    // A panel toggle relays out once, in the task that starts its glides.
+    const stopFollowingPanels = subscribePanelFlips(update);
     window.addEventListener("resize", update);
     window.addEventListener("scroll", update, true);
     return () => {

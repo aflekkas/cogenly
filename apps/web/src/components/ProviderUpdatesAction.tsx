@@ -1,8 +1,9 @@
-import { PROVIDER_DISPLAY_NAMES } from "@t3tools/contracts";
+import { AuthProvidersManageScope, PROVIDER_DISPLAY_NAMES } from "@t3tools/contracts";
 import { useMemo, useRef, useState } from "react";
 
 import { useEnvironments } from "~/state/environments";
 import { serverEnvironment } from "~/state/server";
+import { useEnvironmentsWithScope } from "~/state/session";
 import { useAtomCommand } from "~/state/use-atom-command";
 import {
   canOneClickUpdateProviderCandidate,
@@ -18,8 +19,8 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
  * Every outdated provider with a one-click update on every connected machine,
  * plus a function that updates them all and reports the results in one toast.
  * Each server queues updates that share an installer, so sending them all
- * together is safe. The server still checks permissions: a session that
- * cannot operate a machine gets a failure line for it. The returned promise
+ * together is safe. Machines this session cannot manage providers on are left
+ * out; the server still checks the grant when the update runs. The returned promise
  * settles with every result when every update has finished. `quiet` skips the
  * toast, for a caller that reports the results itself.
  */
@@ -28,11 +29,15 @@ export function useProviderUpdates() {
   const updateProvider = useAtomCommand(serverEnvironment.updateProvider, {
     reportFailure: false,
   });
+  const permitted = useEnvironmentsWithScope(environments, AuthProvidersManageScope);
   const machines = useMemo(
     () =>
       environments.flatMap((environment) => {
         const providers = environment.serverConfig?.providers ?? [];
-        if (environment.connection.phase !== "connected") {
+        if (
+          environment.connection.phase !== "connected" ||
+          !permitted.has(environment.environmentId)
+        ) {
           return [];
         }
         const candidates = collectProviderUpdateCandidates(providers).filter((candidate) =>
@@ -42,7 +47,7 @@ export function useProviderUpdates() {
           ? [{ environmentId: environment.environmentId, label: environment.label, candidates }]
           : [];
       }),
-    [environments],
+    [environments, permitted],
   );
 
   const updateAll = async ({ quiet = false }: { readonly quiet?: boolean } = {}) => {

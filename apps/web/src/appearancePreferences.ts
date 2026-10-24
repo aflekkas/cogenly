@@ -48,7 +48,7 @@ export const DEFAULT_APPEARANCE_PREFERENCES: AppearancePreferences = {
   fontSize: "default",
   motion: "system",
   usageMeter: "remaining",
-  sidebarLayout: "top",
+  sidebarLayout: "bottom",
 };
 
 export const APPEARANCE_PREFERENCES_STORAGE_KEY = "cogenly:appearance-preferences";

@@ -1413,6 +1413,10 @@ export const WORK_LOG_NOTICES: {
 /** The notice row for a system or lifecycle item, or null for any other item. */
 export function resolveWorkLogNotice(item: OrchestrationV2TurnItem): WorkLogNotice | null {
   if (item.type === "error") {
+    // Restart recovery cancels (not fails) a run whose work carries on.
+    if (item.failure.code === "server_restarted" && item.status === "cancelled") {
+      return { icon: "rotate-ccw", label: item.failure.message, tone: "quiet" };
+    }
     return {
       icon: "circle-alert",
       label: item.failure.message,

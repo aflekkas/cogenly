@@ -51,6 +51,10 @@ out once at its final size, the panel slides on `translate`, and content marked 
 glides from where it was drawn on the same curve. See
 [`lib/panelFlip.ts`](../../apps/web/src/lib/panelFlip.ts).
 
+Panel motion runs on `--motion-duration-panel` and `--ease-panel`, longer than the 150-220ms
+guideline and without the mid-way rush of `ease-standard`: a slide that moves a large area at
+that pace reads as the content being shoved aside.
+
 - Never transform the main pane or the chat column. A transform makes it the containing block of
   its `position: fixed` titlebar controls, so they jump with it. Mark the content instead.
 - A new page marks its centered frame (`PageContent` already does) and a leading title
@@ -59,8 +63,13 @@ glides from where it was drawn on the same curve. See
   `observeResize` callbacks, each a synchronous React render.
 - Start a flip in the layout effect that commits the change. An animation started from a
   ResizeObserver callback lands a frame late, and that frame shows content at its final place.
-- Don't clip a pane's left edge horizontally. Content gliding in from where it was drawn crosses
-  the pane's new edge while the sidebar opens. The sidebar wrapper clips at the window's edges.
+- Don't clip a pane's left edge horizontally, its `SidebarInset` included (`overflow-y-clip`,
+  not `overflow-hidden`). Content gliding in from where it was drawn crosses the pane's new edge
+  while the sidebar opens, and a clip there cuts it off. The sidebar wrapper clips at the
+  window's edges.
+- A surface positioned from a measured rect (the desktop browser's fixed webview) takes the rect
+  as laid out (`readPanelFlipShift`) and replays the glides on itself (`followPanelFlip`). Moving
+  it per frame lags the compositor and moves the guest page every frame.
 - A maximized right panel's tabs ride the edge, but its body snaps. The body fills the pane, so a
   translate would push its right-anchored content off-screen.
 

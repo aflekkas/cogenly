@@ -283,8 +283,13 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
                   isSelected
                     ? "bg-muted/55 text-foreground"
                     : "bg-transparent text-foreground/85 hover:bg-muted/30",
-                  (disabled || isResponding) && "opacity-50 cursor-not-allowed",
-                  !disabled && !isResponding && "cursor-pointer",
+                  // A submitted answer keeps its look while it sends: the card leaves
+                  // in one fade once it lands, instead of dimming first.
+                  disabled || !canRespond
+                    ? "opacity-50 cursor-not-allowed"
+                    : isResponding
+                      ? "cursor-default"
+                      : "cursor-pointer",
                 );
                 const content = (
                   <>

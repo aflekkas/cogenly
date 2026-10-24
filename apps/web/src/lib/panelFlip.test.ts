@@ -1,6 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vite-plus/test";
 
-import { playPanelFlip, resolvePanelFlipOffsets, type PanelFlipSnapshot } from "./panelFlip";
+import {
+  followPanelFlip,
+  playPanelFlip,
+  resolvePanelFlipOffsets,
+  subscribePanelFlips,
+  type PanelFlipSnapshot,
+} from "./panelFlip";
 
 const bounds = (left: number, right: number) => ({ left, right });
 
@@ -138,6 +144,7 @@ function fakeElement(left: number, dataset: Record<string, string> = { panelFlip
       },
     },
     matches: () => true,
+    closest: () => fake,
     querySelector: () => null,
     parentElement: null,
     getBoundingClientRect: () => ({
@@ -308,6 +315,32 @@ describe("playPanelFlip", () => {
     // Hidden and held land in one style pass, not a hidden pass and then a visible one.
     expect(seen.length).toBeGreaterThan(0);
     expect(new Set(seen)).toEqual(new Set(["visible"]));
+  });
+
+  it("replays a glide on a surface laid out apart from it, starting on the same frame", async () => {
+    const panel = fakeElement(56);
+    const webview = fakeElement(0, {});
+    const follow = () =>
+      followPanelFlip(panel as unknown as Element, webview as unknown as HTMLElement);
+    const stop = subscribePanelFlips(follow);
+    try {
+      playPanelFlip(snapshotOf(panel, 336), 250);
+      expect(
+        webview.getAnimations().map((animation) => [animation.from, animation.playState]),
+      ).toEqual([["translateX(280px)", "paused"]]);
+      runNextFrame();
+      panel.getAnimations()[0]!.currentTime = 16;
+      // The resize step re-aims the glide: the replay follows, at the time it had reached.
+      panel.left = 100;
+      await runResizeStep();
+      expect(
+        webview
+          .getAnimations()
+          .map((animation) => [animation.from, animation.currentTime, animation.playState]),
+      ).toEqual([["translateX(236px)", 16, "running"]]);
+    } finally {
+      stop();
+    }
   });
 
   it("lets a hiding panel that does not move snap hidden", () => {
