@@ -29,9 +29,11 @@ import * as Machines from "../machines/Machines.ts";
 import * as PeerChannels from "../machines/PeerChannels.ts";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as RepositoryCheckout from "../project/RepositoryCheckout.ts";
+import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
 import * as ProjectLabelService from "../projectLabels/ProjectLabelService.ts";
 import * as ThreadReplication from "./ThreadReplication.ts";
 import * as ThreadRouting from "./ThreadRouting.ts";
+import { adoptLocalCheckout } from "./localCheckout.ts";
 import * as ThreadTransfer from "./ThreadTransfer.ts";
 
 export class ProjectMove extends Context.Service<
@@ -52,6 +54,12 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const fileSystem = yield* FileSystem.FileSystem;
   const checkout = yield* RepositoryCheckout.RepositoryCheckout;
+  const context = yield* Effect.context<
+    | SqlClient.SqlClient
+    | FileSystem.FileSystem
+    | RepositoryIdentityResolver.RepositoryIdentityResolver
+    | ProjectLabelService.ProjectLabelService
+  >();
   const self = replication.environmentId;
 
   /** A repository record whose checkout is on disk with files in it. */
@@ -62,9 +70,10 @@ const make = Effect.gen(function* () {
     );
 
   /**
-   * On the target: a checkout of each linked repository. checkoutRepository
-   * clones a link known here only by its remote, or one whose checkout is
-   * missing, into the project folder; clones run on after this answers.
+   * On the target: a checkout of each linked repository. A checkout of the
+   * remote already here joins the project where it is; otherwise
+   * checkoutRepository clones it into the project folder, and the clone runs
+   * on after this answers.
    */
   const prepareHere = Effect.fn("ProjectMove.prepareHere")(function* (id: ProjectLabelId) {
     const { label } = yield* labels.readActive(id).pipe(
@@ -94,6 +103,18 @@ const make = Effect.gen(function* () {
       }
       if (present) {
         results.push({ remote: link.remote, status: "present" });
+        continue;
+      }
+      // A checkout of it here, outside any other project, joins this one in place.
+      const adopted = yield* adoptLocalCheckout(id, link.remote).pipe(
+        Effect.provideContext(context),
+      );
+      if (Option.isSome(adopted)) {
+        results.push({
+          remote: link.remote,
+          status: "present",
+          detail: `Filed the checkout at ${adopted.value.workspaceRoot} into the project.`,
+        });
         continue;
       }
       const started = yield* Effect.result(

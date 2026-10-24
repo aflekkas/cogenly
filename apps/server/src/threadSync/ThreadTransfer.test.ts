@@ -4,6 +4,7 @@ import {
   type OrchestrationV2DomainEvent,
   ProjectId,
   ProjectLabelId,
+  ThreadId,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -278,6 +279,90 @@ describe("moving threads between paired machines", () => {
         expect((yield* hub.projections.getThreadProjection(threadId)).thread.projectId).toBe(
           `project:clone:${remote}`,
         );
+      }).pipe(Effect.scoped),
+    30000,
+  );
+
+  it.live(
+    "a chat from a T3 Code scratch folder moves into the target's No project",
+    () =>
+      Effect.gen(function* () {
+        const { hub, laptop, at } = yield* start("t3-scratch");
+        // T3 imports recorded ~/.t3/scratch as a repository; the hub has no No project yet.
+        yield* addProject(laptop, "/Users/someone/.t3/scratch");
+        yield* laptop.sink.write({ events: [threadCreated("event:created", at)] });
+        yield* laptop.sync.sync(hub.environmentId);
+
+        expect(
+          yield* laptop.transfer.move({ threadIds: [threadId], target: hub.environmentId }),
+        ).toEqual({ moved: [threadId], skipped: [] });
+        expect((yield* hub.projections.getThreadProjection(threadId)).thread.projectId).toBe(
+          "project:scratch",
+        );
+      }).pipe(Effect.scoped),
+    30000,
+  );
+
+  it.live(
+    "moving a project files the target's own checkout of it instead of cloning another",
+    () =>
+      Effect.gen(function* () {
+        const { hub, laptop, at } = yield* start("adopt");
+        const remote = "github.com/aflekkas/athens-racing";
+        const fileSystem = yield* hub.run(FileSystem.FileSystem);
+        const path = yield* hub.run(Path.Path);
+        const checkout = yield* fileSystem.makeTempDirectoryScoped();
+        yield* fileSystem.writeFileString(path.join(checkout, "README.md"), "racing");
+        hub.remotes.set(checkout, remote);
+        // The hub already works in its own unfiled checkout, with threads of its own.
+        const vpsRacing = ProjectId.make("project:vps-racing");
+        yield* hub.sql`INSERT INTO projection_projects(project_id, title, workspace_root, auto_pull, scripts_json, created_at, updated_at)
+          VALUES (${vpsRacing}, 'athens-racing', ${checkout}, 0, '[]', '2026-10-24T00:00:00.000Z', '2026-10-24T00:00:00.000Z')`;
+        const created = threadCreated("event:hub-created", at);
+        const hubThread = ThreadId.make("thread:on-hub");
+        yield* hub.sink.write({
+          events: [
+            {
+              ...created,
+              threadId: hubThread,
+              payload: { ...(created.payload as object), id: hubThread, projectId: vpsRacing },
+            } as OrchestrationV2DomainEvent,
+          ],
+        });
+        yield* addProject(laptop, "/Users/someone/racing");
+        for (const machine of [hub, laptop])
+          yield* machine.sql`INSERT INTO project_labels(label_id, name, created_at, updated_at)
+            VALUES ('label:racing', 'athens-racing', '2026-10-24T00:00:00.000Z', '2026-10-24T00:00:00.000Z')`;
+        yield* laptop.sql`INSERT INTO label_repositories(label_id, repository_id, remote)
+          VALUES ('label:racing', ${projectId}, ${remote})`;
+        yield* hub.sql`INSERT INTO label_repositories(label_id, repository_id, remote)
+          VALUES ('label:racing', ${`remote:${remote}`}, ${remote})`;
+        yield* laptop.sink.write({ events: [threadCreated("event:created", at)] });
+        yield* laptop.sql`INSERT INTO thread_project_labels(thread_id, label_id) VALUES (${threadId}, 'label:racing')`;
+        yield* laptop.sync.sync(hub.environmentId);
+
+        const result = yield* hub.projectMove.move({
+          id: ProjectLabelId.make("label:racing"),
+          target: hub.environmentId,
+        });
+        expect(result.repositories).toEqual([
+          {
+            remote,
+            status: "present",
+            detail: `Filed the checkout at ${checkout} into the project.`,
+          },
+        ]);
+        expect(hub.checkouts).toEqual([]);
+        expect(hub.bound).toEqual([{ labelId: "label:racing", remote, repositoryId: vpsRacing }]);
+        // Filing the checkout brings the hub's own threads in; they already run here.
+        expect([...result.threads.moved].sort()).toEqual([hubThread, threadId].sort());
+        // The moved thread runs in that checkout, and the hub's own threads join the project.
+        expect((yield* hub.projections.getThreadProjection(threadId)).thread.projectId).toBe(
+          vpsRacing,
+        );
+        expect(
+          yield* hub.sql`SELECT folder_id FROM effective_thread_project_folders WHERE thread_id = ${hubThread}`,
+        ).toEqual([{ folder_id: "label:racing" }]);
       }).pipe(Effect.scoped),
     30000,
   );

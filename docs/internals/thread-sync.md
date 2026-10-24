@@ -92,6 +92,12 @@ An agent runs where its conversation runs. After its conversation moves, S
 hands the agent and its schedules to T in shared state, which accepts an
 `ownerMachine` change only when its author is the current owner.
 
-A project move clones each linked repository on T first. It clones rather than
-copies: a clone uses T's credentials and carries no machine paths or
+A project move gets T a checkout of each linked repository first. A checkout
+of the same remote already on T that no other project claims is filed into the
+project in place (`localCheckout.ts`); otherwise T clones it. It clones rather
+than copies: a clone uses T's credentials and carries no machine paths or
 half-finished worktrees. Then it moves the project's threads.
+
+A thread whose project is a scratch folder on S (S's "No project", or a T3
+Code scratch folder an older import recorded as a repository) maps to T's
+"No project", which the commit creates if T has none yet.

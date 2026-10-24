@@ -40,8 +40,12 @@ from a laptop to an always-on server. Right-click a thread, or several selected
 threads, and choose **Move to**; the command palette offers the same for the
 open thread. A project's menu has **Move project to**. Moving a project clones
 each repository it links onto the new machine, using that machine's GitHub
-sign-in, then moves its threads and agents. Moving a single thread clones its
-repository too when the project links it. An agent moves with its schedules.
+sign-in, then moves its threads and agents. When the new machine already has a
+checkout of one of those repositories outside any project, that checkout joins
+the project where it is, with the threads already working in it, instead of a
+second clone. Moving a single thread clones its repository too when the project
+links it. Chats without a project, including ones imported from T3 Code, land
+in the new machine's "No project". An agent moves with its schedules.
 
 From the terminal, on any paired machine:
 

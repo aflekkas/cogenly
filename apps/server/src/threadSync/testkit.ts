@@ -11,6 +11,7 @@ import {
 import type * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Stream from "effect/Stream";
@@ -34,6 +35,9 @@ import * as ThreadTransfer from "./ThreadTransfer.ts";
 import * as ProjectMove from "./ProjectMove.ts";
 import * as ProjectLabelService from "../projectLabels/ProjectLabelService.ts";
 import * as RepositoryCheckout from "../project/RepositoryCheckout.ts";
+import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
+import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
+import * as ServerConfig from "../config.ts";
 
 /**
  * A paired-machine server with thread replication and routing over a real
@@ -82,6 +86,14 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
       return Layer.mock(ProjectLabelService.ProjectLabelService)({
+        // Swaps the remote-only placeholder for the record, as the service does.
+        bindRepositoryCheckout: ({ labelId, remote, repositoryId }) =>
+          Effect.gen(function* () {
+            bound.push({ labelId, remote, repositoryId });
+            yield* sql`UPDATE label_repositories SET repository_id = ${repositoryId}
+              WHERE label_id = ${labelId} AND remote = ${remote}`;
+            return { label: undefined as never };
+          }).pipe(Effect.orDie),
         readActive: (id) =>
           Effect.gen(function* () {
             const label = (yield* sql<{
@@ -119,6 +131,45 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
   );
   // Cloning stands in as binding the link to a new record, as bindRepositoryCheckout does.
   const checkouts: Array<{ readonly labelId: string; readonly remote: string }> = [];
+  // Which folders are checkouts of which remote, as git would report them.
+  const remotes = new Map<string, string>();
+  const identities = Layer.succeed(RepositoryIdentityResolver.RepositoryIdentityResolver, {
+    resolve: (cwd) =>
+      Effect.succeed(
+        remotes.has(cwd)
+          ? {
+              canonicalKey: remotes.get(cwd)!,
+              locator: {
+                source: "git-remote" as const,
+                remoteName: "origin",
+                remoteUrl: `https://${remotes.get(cwd)!}.git`,
+              },
+            }
+          : null,
+      ),
+  });
+  // "No project" is <home>/scratch, created on demand like ManagedProjectFolders does.
+  const folders = Layer.unwrap(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const config = yield* ServerConfig.ServerConfig;
+      const path = yield* Path.Path;
+      const root = path.resolve(config.baseDir, "scratch");
+      return Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+        ensureScratchProject: Effect.gen(function* () {
+          const projectId = ProjectId.make("project:scratch");
+          yield* sql`INSERT OR IGNORE INTO projection_projects(project_id, title, workspace_root, auto_pull, scripts_json, created_at, updated_at)
+            VALUES (${projectId}, 'No project', ${root}, 0, '[]', '2026-10-24T00:00:00.000Z', '2026-10-24T00:00:00.000Z')`;
+          return { projectId };
+        }).pipe(Effect.orDie),
+      });
+    }),
+  );
+  const bound: Array<{
+    readonly labelId: string;
+    readonly remote: string;
+    readonly repositoryId: string;
+  }> = [];
   const repositoryCheckout = Layer.unwrap(
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
@@ -151,6 +202,8 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
         Layer.provide(ProjectStore.layer),
         Layer.provide(labels),
         Layer.provide(repositoryCheckout),
+        Layer.provide(identities),
+        Layer.provide(folders),
         Layer.provideMerge(SharedState.layer),
         Layer.provide(
           Layer.succeed(Machines.Machines, { ...machine.machines, subscribe: Stream.never }),
@@ -180,6 +233,8 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
     transfer,
     projectMove,
     checkouts,
+    bound,
+    remotes,
     shared,
     remoteCommands,
     restartReplication,

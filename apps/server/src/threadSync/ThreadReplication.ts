@@ -130,6 +130,12 @@ const encodeMeta = Schema.encodeEffect(ThreadReplicaMeta);
 const decodeMeta = Schema.decodeUnknownOption(ThreadReplicaMeta);
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const decodeJsonOption = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown));
+/**
+ * T3 Code's no-project folder, or a per-chat folder in it: imports from T3
+ * Code once recorded these as repositories (migration 084 keeps those that
+ * still own threads). Their threads are scratch chats on any machine.
+ */
+const isT3Scratch = (root: string) => /(^|[\\/])\.t3[\\/]scratch([\\/]|$)/.test(root);
 const rawField = (raw: unknown, key: string) =>
   typeof raw === "object" && raw !== null && !Array.isArray(raw)
     ? (raw as Record<string, unknown>)[key]
@@ -223,7 +229,10 @@ const make = Effect.gen(function* () {
     const row = rows[0];
     if (row === undefined) return null;
     const projectId = ProjectId.make(row.project_id);
-    if (row.workspace_root !== null && path.resolve(row.workspace_root) === scratchRoot)
+    if (
+      row.workspace_root !== null &&
+      (path.resolve(row.workspace_root) === scratchRoot || isT3Scratch(row.workspace_root))
+    )
       return { projectId, kind: "scratch", remote: null } satisfies ThreadReplicaSource;
     const repository = { projectId, kind: "repository" as const, remote: row.remote };
     // A remote the shared schema refuses (a local path, say) stays local-only.
