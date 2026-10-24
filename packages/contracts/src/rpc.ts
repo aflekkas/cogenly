@@ -625,6 +625,7 @@ export const WS_METHODS = {
   machinesUnpair: "machines.unpair",
   // Hand threads to another paired machine, which runs them from then on.
   machinesMoveThreads: "machines.moveThreads",
+  machinesMoveAllThreads: "machines.moveAllThreads",
   machineSecurityStatus: "machines.securityStatus",
 
   // Cloud environment methods
@@ -1988,6 +1989,11 @@ const WsMachinesMoveThreadsRpc = Rpc.make(WS_METHODS.machinesMoveThreads, {
   success: ThreadReplication.ThreadMoveResult,
   error: Schema.Union([ThreadReplication.ThreadRemoteError, EnvironmentAuthorizationError]),
 });
+const WsMachinesMoveAllThreadsRpc = Rpc.make(WS_METHODS.machinesMoveAllThreads, {
+  payload: ThreadReplication.ThreadMoveAllInput,
+  success: ThreadReplication.ThreadMoveResult,
+  error: Schema.Union([ThreadReplication.ThreadRemoteError, EnvironmentAuthorizationError]),
+});
 const WsProjectLabelsMoveToMachineRpc = Rpc.make(WS_METHODS.projectLabelsMoveToMachine, {
   payload: ThreadReplication.ProjectMoveInput,
   success: ThreadReplication.ProjectMoveResult,
@@ -2586,6 +2592,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectLabelsMoveThreadRpc,
   WsProjectLabelsMoveToMachineRpc,
   WsMachinesMoveThreadsRpc,
+  WsMachinesMoveAllThreadsRpc,
   WsProjectLabelsForkThreadToProjectRpc,
   WsProjectLabelsSetThreadLabelsRpc,
   WsProjectLabelsLinkSourceRpc,

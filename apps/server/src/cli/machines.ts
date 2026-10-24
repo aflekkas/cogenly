@@ -13,12 +13,15 @@
  */
 import {
   AuthAccessWriteScope,
+  AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
   AuthSettingsWriteScope,
   type MachineInfo,
   MachineJoinCode,
   MachineRole,
   type MachineListResult,
+  ThreadId,
+  type ThreadMoveResult,
   WS_METHODS,
 } from "@t3tools/contracts";
 import * as Console from "effect/Console";
@@ -42,9 +45,10 @@ import { readPersistedServerRuntimeState } from "../serverRuntimeState.ts";
 import { projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
 import { liveWebSocketUrl, liveWebSocketUrlSource, makeLiveRpcClient } from "./liveServer.ts";
 
-/** Read machines, and pair or unpair them: pairing is access management. */
+/** Read machines, pair or unpair them (access management), and move threads between them. */
 const MACHINES_CLI_SCOPES = [
   AuthOrchestrationReadScope,
+  AuthOrchestrationOperateScope,
   AuthSettingsWriteScope,
   AuthAccessWriteScope,
 ] as const;
@@ -407,6 +411,142 @@ const renameCommand = Command.make("rename", {
   ),
 );
 
+/** A machine by name or environment id; `allowThis` also matches this machine. */
+const findMachine = (machines: ReadonlyArray<MachineInfo>, wanted: string, allowThis: boolean) => {
+  const trimmed = wanted.trim();
+  const matches = machines.filter(
+    (machine) =>
+      (allowThis || machine.relation !== "this") &&
+      (machine.environmentId === trimmed || machine.name.toLowerCase() === trimmed.toLowerCase()),
+  );
+  const match = matches[0];
+  return match !== undefined && matches.length === 1
+    ? Effect.succeed(match)
+    : Effect.fail(
+        new MachinesCliError({
+          reason:
+            matches.length > 1
+              ? `More than one machine is named "${trimmed}". Use its environment id.`
+              : `No ${allowThis ? "" : "paired "}machine matches "${trimmed}". Run \`cogenly machines list\`.`,
+        }),
+      );
+};
+
+/** At most this many skipped threads are listed; --json has them all. */
+const SKIPS_SHOWN = 20;
+
+const describeMove = (target: string, result: ThreadMoveResult) =>
+  [
+    `${result.moved.length} ${result.moved.length === 1 ? "thread runs" : "threads run"} on ${target} now.`,
+    ...(result.skipped.length === 0
+      ? []
+      : [
+          `Skipped ${result.skipped.length}; moving them again retries:`,
+          ...result.skipped
+            .slice(0, SKIPS_SHOWN)
+            .map((skip) => `  ${skip.threadId}: ${skip.detail}`),
+          ...(result.skipped.length > SKIPS_SHOWN
+            ? [`  …and ${result.skipped.length - SKIPS_SHOWN} more (use --json).`]
+            : []),
+        ]),
+  ].join("\n");
+
+const moveCommand = Command.make("move", {
+  ...projectLocationFlags,
+  to: Flag.String("to").pipe(
+    Flag.withDescription(
+      "The paired machine that runs them from now on: its name or environment id.",
+    ),
+  ),
+  from: Flag.String("from").pipe(
+    Flag.withDescription("Move every thread this machine runs (a name, an id, or this machine's)."),
+    Flag.optional,
+  ),
+  project: Flag.String("project").pipe(
+    Flag.withDescription(
+      "Move a project: clone its repositories on the target, then move its threads and agents.",
+    ),
+    Flag.optional,
+  ),
+  threads: Flag.String("threads").pipe(
+    Flag.withDescription("Comma-separated thread ids to move."),
+    Flag.optional,
+  ),
+  leaveLocalChanges: Flag.Boolean("leave-local-changes").pipe(
+    Flag.withDescription(
+      "Also move Work with uncommitted or unpushed changes; those changes stay on the old machine.",
+    ),
+    Flag.withDefault(false),
+  ),
+  json: jsonFlag,
+}).pipe(
+  Command.withDescription(
+    "Move threads, a project, or everything one machine runs to another paired machine. Every machine keeps showing them; the target runs them.",
+  ),
+  Command.withHandler((flags) =>
+    runLive(flags, (client) =>
+      Effect.gen(function* () {
+        const chosen = [flags.from, flags.project, flags.threads].filter(Option.isSome).length;
+        if (chosen !== 1)
+          return yield* new MachinesCliError({
+            reason: "Choose what to move: --from <machine>, --project <name> or --threads <ids>.",
+          });
+        const { machines } = yield* client[WS_METHODS.machinesList]({}).pipe(
+          Effect.mapError(describe),
+        );
+        const target = yield* findMachine(machines, flags.to, false);
+        const options = flags.leaveLocalChanges ? { leaveLocalChanges: true } : {};
+        const print = (result: unknown, text: string) =>
+          (flags.json ? encodeJson(result).pipe(Effect.orDie) : Effect.succeed(text)).pipe(
+            Effect.flatMap(Console.log),
+          );
+        if (Option.isSome(flags.project)) {
+          const named = flags.project.value.trim();
+          const { labels } = yield* client[WS_METHODS.projectLabelsList]({}).pipe(
+            Effect.mapError(describe),
+          );
+          const label = labels.find(
+            (candidate) =>
+              candidate.id === named || candidate.name.toLowerCase() === named.toLowerCase(),
+          );
+          if (label === undefined)
+            return yield* new MachinesCliError({ reason: `No project is named "${named}".` });
+          const result = yield* client[WS_METHODS.projectLabelsMoveToMachine]({
+            id: label.id,
+            target: target.environmentId,
+            ...options,
+          }).pipe(Effect.mapError(describe));
+          return yield* print(
+            result,
+            [
+              ...result.repositories.map(
+                (repository) =>
+                  `${repository.remote}: ${repository.status}${repository.detail ? ` (${repository.detail})` : ""}`,
+              ),
+              describeMove(target.name, result.threads),
+            ].join("\n"),
+          );
+        }
+        const result = Option.isSome(flags.from)
+          ? yield* client[WS_METHODS.machinesMoveAllThreads]({
+              from: (yield* findMachine(machines, flags.from.value, true)).environmentId,
+              target: target.environmentId,
+              ...options,
+            }).pipe(Effect.mapError(describe))
+          : yield* client[WS_METHODS.machinesMoveThreads]({
+              threadIds: Option.getOrElse(flags.threads, () => "")
+                .split(",")
+                .map((id) => ThreadId.make(id.trim()))
+                .filter((id) => id.length > 0),
+              target: target.environmentId,
+              ...options,
+            }).pipe(Effect.mapError(describe));
+        return yield* print(result, describeMove(target.name, result));
+      }),
+    ),
+  ),
+);
+
 export const machinesCommand = Command.make("machines").pipe(
   Command.withDescription("Pair this Cogenly with your other machines."),
   Command.withSubcommands([
@@ -416,5 +556,6 @@ export const machinesCommand = Command.make("machines").pipe(
     joinCommand,
     unpairCommand,
     renameCommand,
+    moveCommand,
   ]),
 );

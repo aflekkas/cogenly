@@ -139,6 +139,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.machinesJoinHub]: "machines",
   [WS_METHODS.machinesUnpair]: "machines",
   [WS_METHODS.machinesMoveThreads]: "machines",
+  [WS_METHODS.machinesMoveAllThreads]: "machines",
   [WS_METHODS.factsList]: "facts",
   [WS_METHODS.factsCreate]: "facts",
   [WS_METHODS.factsUpdate]: "facts",

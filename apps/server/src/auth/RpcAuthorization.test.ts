@@ -228,7 +228,11 @@ describe("RPC authorization scopes", () => {
   });
 
   it("requires operate access to move threads or a project to another machine, on the client too", () => {
-    for (const method of [WS_METHODS.machinesMoveThreads, WS_METHODS.projectLabelsMoveToMachine]) {
+    for (const method of [
+      WS_METHODS.machinesMoveThreads,
+      WS_METHODS.machinesMoveAllThreads,
+      WS_METHODS.projectLabelsMoveToMachine,
+    ]) {
       expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationOperateScope);
       expect(clientRpcRequiredScopes(method, {})).toEqual([AuthOrchestrationOperateScope]);
     }

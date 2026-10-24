@@ -145,6 +145,14 @@ export const ThreadMoveInput = Schema.Struct({
 });
 export type ThreadMoveInput = typeof ThreadMoveInput.Type;
 
+/** Every live thread `from` runs, such as all of a laptop's threads to the hub. */
+export const ThreadMoveAllInput = Schema.Struct({
+  from: EnvironmentId,
+  target: EnvironmentId,
+  leaveLocalChanges: Schema.optional(Schema.Boolean),
+});
+export type ThreadMoveAllInput = typeof ThreadMoveAllInput.Type;
+
 export const ThreadMoveSkip = Schema.Struct({
   threadId: ThreadId,
   reason: ThreadRemoteError.fields.reason,

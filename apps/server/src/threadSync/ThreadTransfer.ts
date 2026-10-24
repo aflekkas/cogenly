@@ -18,6 +18,7 @@ import {
   ThreadMoveRequest,
   type ThreadMoveResult,
   type ThreadMoveSkip,
+  THREAD_MOVE_MAX_THREADS,
   ThreadRemoteError,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
@@ -69,6 +70,12 @@ export class ThreadTransfer extends Context.Service<
      * Busy threads and Work with unpushed changes are skipped, not waited on.
      */
     readonly move: (input: ThreadMoveInput) => Effect.Effect<ThreadMoveResult, ThreadRemoteError>;
+    /** Move every live thread `from` runs, such as all of a laptop's threads to the hub. */
+    readonly moveAllFrom: (input: {
+      readonly from: EnvironmentId;
+      readonly target: EnvironmentId;
+      readonly leaveLocalChanges?: boolean | undefined;
+    }) => Effect.Effect<ThreadMoveResult, ThreadRemoteError>;
     /** Retry commits whose reply was lost. The scheduler runs this. */
     readonly resume: Effect.Effect<void>;
   }
@@ -450,7 +457,39 @@ const make = Effect.gen(function* () {
   });
   yield* scheduler.register("thread-transfer", resume);
 
-  return ThreadTransfer.of({ move: (input) => moveFrom(input, undefined), resume });
+  const moveAllFrom: ThreadTransfer["Service"]["moveAllFrom"] = Effect.fn(
+    "ThreadTransfer.moveAllFrom",
+  )(function* ({ from, target, leaveLocalChanges }) {
+    const rows = yield* (
+      from === self
+        ? sql<{
+            readonly thread_id: string;
+          }>`SELECT t.thread_id FROM orchestration_v2_projection_threads t
+          WHERE t.deleted_at IS NULL
+            AND NOT EXISTS (SELECT 1 FROM thread_owners o WHERE o.thread_id = t.thread_id AND o.local = 0)`
+        : sql<{ readonly thread_id: string }>`SELECT o.thread_id FROM thread_owners o
+          JOIN orchestration_v2_projection_threads t ON t.thread_id = o.thread_id
+          WHERE o.local = 0 AND o.owner_env = ${from} AND t.deleted_at IS NULL`
+    ).pipe(Effect.orDie);
+    const threadIds = rows.map((row) => row.thread_id as ThreadId);
+    const moved: Array<ThreadId> = [];
+    const skipped: Array<ThreadMoveSkip> = [];
+    for (let at = 0; at < threadIds.length; at += THREAD_MOVE_MAX_THREADS) {
+      const result = yield* moveFrom(
+        {
+          threadIds: threadIds.slice(at, at + THREAD_MOVE_MAX_THREADS),
+          target,
+          ...(leaveLocalChanges === undefined ? {} : { leaveLocalChanges }),
+        },
+        undefined,
+      );
+      moved.push(...result.moved);
+      skipped.push(...result.skipped);
+    }
+    return { moved, skipped } satisfies ThreadMoveResult;
+  });
+
+  return ThreadTransfer.of({ move: (input) => moveFrom(input, undefined), moveAllFrom, resume });
 });
 
 export const layer = Layer.effect(ThreadTransfer, make);

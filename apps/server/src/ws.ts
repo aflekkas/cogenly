@@ -1714,6 +1714,7 @@ const makeWsRpcHandlers = (
       [WS_METHODS.machinesJoinHub]: (input) => machines.joinHub(input),
       [WS_METHODS.machinesUnpair]: (input) => machines.unpair(input),
       [WS_METHODS.machinesMoveThreads]: (input) => threadTransfer.move(input),
+      [WS_METHODS.machinesMoveAllThreads]: (input) => threadTransfer.moveAllFrom(input),
       [WS_METHODS.factsList]: (input) => facts.list(input),
       [WS_METHODS.factsCreate]: (input) => facts.create(input),
       [WS_METHODS.visualStateGet]: (input) =>

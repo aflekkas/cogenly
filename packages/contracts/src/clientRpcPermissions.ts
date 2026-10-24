@@ -69,6 +69,7 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.projectLabelsMoveThread]: AuthOrchestrationOperateScope,
   [WS_METHODS.projectLabelsMoveToMachine]: AuthOrchestrationOperateScope,
   [WS_METHODS.machinesMoveThreads]: AuthOrchestrationOperateScope,
+  [WS_METHODS.machinesMoveAllThreads]: AuthOrchestrationOperateScope,
   [WS_METHODS.projectLabelsForkThreadToProject]: AuthOrchestrationOperateScope,
   [WS_METHODS.projectLabelsSetThreadLabels]: AuthOrchestrationOperateScope,
   [WS_METHODS.projectLabelsAddResource]: AuthOrchestrationOperateScope,
