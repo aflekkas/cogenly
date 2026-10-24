@@ -25,6 +25,7 @@ import { TraitsPicker } from "../chat/TraitsPicker";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { toastManager } from "../ui/toast";
 import { Switch } from "../ui/switch";
+import { ScopedSwitch } from "./ScopedSwitch";
 import { searchableSetting } from "./settingsSearch";
 import { useSettingsScope } from "./SettingsScopeContext";
 import {
@@ -53,7 +54,7 @@ function isWorktreeSubmodules(value: string | null): value is WorktreeSubmodules
 export function ProjectDefaultsSettings({
   category,
 }: {
-  category: "general" | "integrations" | "source-control";
+  category: "models" | "new-threads" | "integrations" | "source-control";
 }) {
   const { scope, target, targets, connectedEnvironments } = useSettingsScope();
   const settings = useScopedSettings();
@@ -141,8 +142,7 @@ export function ProjectDefaultsSettings({
       serverScoped
       settingKeys={["defaultModelSelection"]}
       mixed={mixedModel}
-      id="default-model"
-      title="Model"
+      {...searchableSetting("default-model")}
       description={
         isProjectScope
           ? "Model for new threads in this project."
@@ -254,26 +254,28 @@ export function ProjectDefaultsSettings({
     />
   );
 
+  // The Models page puts the default model in a section of its own.
+  if (category === "models") return modelRow;
+
   return (
     <SettingsSection
       id={
-        category === "general"
+        category === "new-threads"
           ? "project-defaults"
           : category === "integrations"
             ? "browser-access"
             : "source-control-defaults"
       }
       title={
-        category === "general"
+        category === "new-threads"
           ? "New threads"
           : category === "integrations"
             ? "Agent access"
             : "Repositories"
       }
     >
-      {category === "general" ? (
+      {category === "new-threads" ? (
         <>
-          {modelRow}
           {workspaceRow}
           <SettingsRow
             serverScoped
@@ -319,6 +321,36 @@ export function ProjectDefaultsSettings({
                   ))}
                 </SelectPopup>
               </Select>
+            }
+          />
+          <SettingsRow
+            serverScoped
+            settingKeys={["newWorktreesStartFromOrigin"]}
+            {...searchableSetting("start-from-origin")}
+            description="Creates the worktree from the latest matching branch on origin instead of your local branch."
+            resetAction={
+              settings.newWorktreesStartFromOrigin !==
+              DEFAULT_SERVER_SETTINGS.newWorktreesStartFromOrigin ? (
+                <SettingResetButton
+                  label="new worktrees start from origin"
+                  onClick={() =>
+                    updateSettings({
+                      newWorktreesStartFromOrigin:
+                        DEFAULT_SERVER_SETTINGS.newWorktreesStartFromOrigin,
+                    })
+                  }
+                />
+              ) : null
+            }
+            control={
+              <ScopedSwitch
+                settingKeys={["newWorktreesStartFromOrigin"]}
+                checked={settings.newWorktreesStartFromOrigin}
+                onCheckedChange={(checked) =>
+                  updateSettings({ newWorktreesStartFromOrigin: Boolean(checked) })
+                }
+                aria-label="Start new worktrees from origin by default"
+              />
             }
           />
         </>

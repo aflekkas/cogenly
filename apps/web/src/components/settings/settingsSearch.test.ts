@@ -3,11 +3,15 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import {
   filterAvailableSettingsSearchItems,
   getSettingsSearchTargetScope,
-  isSettingsOverviewVisible,
   isSettingsSearchScopeAvailable,
+  movedGeneralSettingsPath,
   searchableSetting,
   searchSettings,
+  SETTINGS_DETAIL_PARENTS,
+  SETTINGS_NAV_GROUPS,
   SETTINGS_SEARCH_ITEMS,
+  SETTINGS_SECTION_LABELS,
+  settingsNavPathFor,
   type SettingsSearchItem,
 } from "./settingsSearch";
 
@@ -297,15 +301,18 @@ describe("searchSettings", () => {
   });
 
   it.each([
-    ["default model", "default-model", "/settings/general"],
-    ["new threads", "project-defaults", "/settings/general"],
-    ["workspace", "new-threads", "/settings/general"],
+    ["default model", "default-model", "/settings/models"],
+    ["text generation model", "text-generation-model", "/settings/models"],
+    ["new threads", "project-defaults", "/settings/new-threads"],
+    ["workspace", "new-threads", "/settings/new-threads"],
+    ["projects folder", "projects-folder", "/settings/new-threads"],
+    ["live processes", "diagnostics", "/settings/diagnostics"],
     ["agent browser access", "agent-browser-access", "/settings/integrations"],
     ["connect a machine", "remote-environments", "/settings/connections"],
     ["private access", "machines", "/settings/machines"],
     ["orphan folders", "project-folders", "/settings/project-tags"],
     ["automatically pull", "automatic-pull", "/settings/source-control"],
-    ["actions", "project-actions", "/settings/general"],
+    ["actions", "project-actions", "/settings/new-threads"],
     ["project overview", "project-overview", "/settings/projects"],
   ])("routes %s to its owning category", (query, id, to) => {
     expect(searchSettings(query)[0]).toMatchObject({ id, to });
@@ -401,17 +408,53 @@ describe("settings search targets", () => {
 });
 
 describe("settings sidebar scope", () => {
-  it("shows the Repository page only once a repository is open", () => {
-    expect(isSettingsOverviewVisible({})).toBe(false);
-    expect(isSettingsOverviewVisible({ machine: "remote" })).toBe(false);
-    expect(isSettingsOverviewVisible({ project: "label:1" })).toBe(false);
-    expect(isSettingsOverviewVisible({ repository: "repo-group" })).toBe(true);
-  });
-
   it("keeps project actions to a project scope", () => {
     const actions = getSettingsSearchTargetScope("project-actions")!;
     expect(isSettingsSearchScopeAvailable(actions.scope, "project")).toBe(true);
     expect(isSettingsSearchScopeAvailable(actions.scope, "all")).toBe(false);
     expect(isSettingsSearchScopeAvailable(actions.scope, "environment")).toBe(false);
+  });
+});
+
+describe("settings navigation", () => {
+  it("lists every page once, in the sidebar or as a detail page", () => {
+    const navPaths = SETTINGS_NAV_GROUPS.flatMap((group) => group.paths);
+    const detailPaths = Object.keys(SETTINGS_DETAIL_PARENTS);
+    expect(new Set(navPaths).size).toBe(navPaths.length);
+    expect(
+      [...navPaths, ...detailPaths.filter((path) => path in SETTINGS_SECTION_LABELS)].toSorted(),
+    ).toEqual(Object.keys(SETTINGS_SECTION_LABELS).toSorted());
+  });
+
+  it.each([
+    ["/settings/models", "/settings/models"],
+    ["/settings/diagnostics", "/settings/diagnostics"],
+    ["/settings/projects", "/settings/project-tags"],
+    ["/settings/open-source-licenses", "/settings/general"],
+    ["/settings/general/", "/settings/general"],
+    ["/threads", null],
+  ])("highlights %s as %s", (pathname, expected) => {
+    expect(settingsNavPathFor(pathname)).toBe(expected);
+  });
+
+  it.each([
+    ["#default-model", "/settings/models"],
+    ["text-generation-model", "/settings/models"],
+    ["project-defaults", "/settings/new-threads"],
+    ["projects-folder", "/settings/new-threads"],
+    ["project-actions", "/settings/new-threads"],
+    ["diagnostics", "/settings/diagnostics"],
+    ["send-shortcut", null],
+    ["", null],
+  ])("sends the old General anchor %s to %s", (hash, expected) => {
+    expect(movedGeneralSettingsPath(hash)).toBe(expected);
+  });
+
+  it("moves every General anchor that no search result still places on General", () => {
+    const items: ReadonlyArray<SettingsSearchItem> = SETTINGS_SEARCH_ITEMS;
+    for (const item of items) {
+      const moved = movedGeneralSettingsPath(item.targetId ?? item.id);
+      if (moved) expect(item.to).toBe(moved);
+    }
   });
 });

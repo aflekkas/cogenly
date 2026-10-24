@@ -362,7 +362,7 @@ function buildPaletteRemoteSourceReadiness(
           ...entry,
           hint: entry.hint.replace(
             "Open Source Control settings",
-            "Open Settings -> Source Control",
+            "Open Settings → Source control",
           ),
         };
   };
@@ -1831,7 +1831,7 @@ function OpenCommandPaletteDialog(props: {
                 }
               />
               <TooltipPopup align="end" side="left">
-                {disabledHint ?? "Open Settings -> Source Control to configure this provider."}
+                {disabledHint ?? "Open Settings → Source control to configure this provider."}
               </TooltipPopup>
             </Tooltip>
           </span>

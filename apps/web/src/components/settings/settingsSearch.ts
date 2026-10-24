@@ -5,11 +5,7 @@ import { STATIC_KEYBINDING_COMMANDS, type KeybindingCommand } from "@t3tools/con
 import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
 import { DEFAULT_KEYBINDINGS } from "@t3tools/shared/keybindings";
 import { commandLabel, RETIRED_KEYBINDING_COMMANDS } from "./KeybindingsSettings.logic";
-import {
-  validateSettingsScopeSearch,
-  type ResolvedSettingsScope,
-  type SettingsScopeSearch,
-} from "./settingsScope";
+import type { ResolvedSettingsScope } from "./settingsScope";
 
 export type SettingsPath =
   | "/settings/projects"
@@ -29,7 +25,9 @@ export type SettingsPath =
   | "/settings/import"
   | "/settings/connections"
   | "/settings/machines"
-  | "/settings/archived";
+  | "/settings/archived"
+  | "/settings/models"
+  | "/settings/new-threads";
 
 /**
  * Where a setting can be edited. Device-local rows have no scope: they render
@@ -91,29 +89,114 @@ export interface SettingsSearchAvailability {
 }
 
 /**
- * Section labels in sidebar order. The sidebar nav and the search-result
- * subtitles both render from this record, so each label exists once.
+ * Section labels. The sidebar nav, the breadcrumb, the command palette and
+ * the search-result subtitles all render from this record, so each label
+ * exists once.
  */
 export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
-  "/settings/diagnostics": "Diagnostics",
-  "/settings/projects": "Repository",
   "/settings/general": "General",
-  "/settings/project-tags": "Projects",
-  "/settings/memory": "Memory",
-  "/settings/vault": "Vault",
   "/settings/appearance": "Appearance",
   "/settings/keybindings": "Keybindings",
   "/settings/providers": "Providers",
+  "/settings/models": "Models",
   "/settings/integrations": "Integrations",
-  "/settings/scheduled-tasks": "Scheduled Tasks",
-  "/settings/source-control": "Source Control",
+  "/settings/memory": "Memory",
+  "/settings/scheduled-tasks": "Scheduled tasks",
+  "/settings/vault": "Vault",
+  "/settings/project-tags": "Projects",
+  "/settings/projects": "Repository",
+  "/settings/new-threads": "New threads",
+  "/settings/source-control": "Source control",
+  "/settings/machines": "Machines",
+  "/settings/connections": "Connections",
   "/settings/storage": "Storage",
   "/settings/data": "Data",
   "/settings/import": "Import",
-  "/settings/connections": "Connections",
-  "/settings/machines": "Machines",
+  "/settings/diagnostics": "Diagnostics",
   "/settings/archived": "Archive",
 };
+
+/**
+ * The settings sidebar, in order. The first group has no heading. Detail
+ * pages are reached from a page and highlight it instead, see
+ * `SETTINGS_DETAIL_PARENTS`.
+ */
+export const SETTINGS_NAV_GROUPS: ReadonlyArray<{
+  readonly label: string | null;
+  readonly paths: ReadonlyArray<SettingsPath>;
+}> = [
+  { label: null, paths: ["/settings/general", "/settings/appearance", "/settings/keybindings"] },
+  { label: "Models & providers", paths: ["/settings/providers", "/settings/models"] },
+  {
+    label: "Agents",
+    paths: [
+      "/settings/integrations",
+      "/settings/memory",
+      "/settings/scheduled-tasks",
+      "/settings/vault",
+    ],
+  },
+  {
+    label: "Projects",
+    paths: ["/settings/project-tags", "/settings/new-threads", "/settings/source-control"],
+  },
+  { label: "Machines", paths: ["/settings/machines", "/settings/connections"] },
+  {
+    label: "Advanced",
+    paths: [
+      "/settings/storage",
+      "/settings/data",
+      "/settings/import",
+      "/settings/diagnostics",
+      "/settings/archived",
+    ],
+  },
+];
+
+/** Pages outside the sidebar, and the sidebar page each one belongs to. */
+export const SETTINGS_DETAIL_PARENTS: Readonly<Record<string, SettingsPath>> = {
+  "/settings/projects": "/settings/project-tags",
+  "/settings/open-source-licenses": "/settings/general",
+};
+
+/** The sidebar entry to highlight for `pathname`, or null outside Settings. */
+export function settingsNavPathFor(pathname: string): SettingsPath | null {
+  const normalized = pathname.replace(/\/+$/, "");
+  const parent = SETTINGS_DETAIL_PARENTS[normalized];
+  if (parent) return parent;
+  for (const group of SETTINGS_NAV_GROUPS) {
+    const match = group.paths.find(
+      (path) => normalized === path || normalized.startsWith(`${path}/`),
+    );
+    if (match) return match;
+  }
+  return null;
+}
+
+/**
+ * Where a link to a row that moved off General now lands. Old links keep
+ * their anchor, so `/settings/general#default-model` opens the Models page
+ * at that row.
+ */
+const MOVED_GENERAL_ANCHORS: Readonly<Record<string, SettingsPath>> = {
+  "default-model": "/settings/models",
+  "text-generation": "/settings/models",
+  "text-generation-model": "/settings/models",
+  "project-defaults": "/settings/new-threads",
+  "new-threads": "/settings/new-threads",
+  "worktree-submodules": "/settings/new-threads",
+  "start-from-origin": "/settings/new-threads",
+  "projects-and-threads": "/settings/new-threads",
+  "add-project-starts-in": "/settings/new-threads",
+  "projects-folder": "/settings/new-threads",
+  "project-actions": "/settings/new-threads",
+  diagnostics: "/settings/diagnostics",
+};
+
+/** The new page for an old General anchor, or null when it still lives on General. */
+export function movedGeneralSettingsPath(hash: string): SettingsPath | null {
+  return MOVED_GENERAL_ANCHORS[hash.replace(/^#/, "")] ?? null;
+}
 
 /** Anchor id of the first row bound to `command` on the Keybindings page. */
 export function keybindingSearchAnchorId<Command extends KeybindingCommand>(command: Command) {
@@ -216,10 +299,10 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "project-defaults",
     title: "New threads",
-    to: "/settings/general",
+    to: "/settings/new-threads",
     scope: "project-defaults",
     searchTerms: [
-      "project defaults overrides model workspace submodules machines projects repositories inheritance all projects",
+      "project defaults overrides workspace worktree submodules start from origin machines projects repositories inheritance all projects",
     ],
   },
   {
@@ -257,7 +340,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "default-model",
     title: "Default model",
-    to: "/settings/general",
+    to: "/settings/models",
     scope: "project-defaults",
     searchTerms: ["new thread project provider reasoning effort"],
   },
@@ -413,35 +496,35 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "new-threads",
     title: "Workspace",
-    to: "/settings/general",
+    to: "/settings/new-threads",
     scope: "project-defaults",
     searchTerms: ["new threads default workspace mode draft local worktree"],
   },
   {
     id: "worktree-submodules",
     title: "Submodules",
-    to: "/settings/general",
+    to: "/settings/new-threads",
     scope: "project-defaults",
     searchTerms: ["git submodule init recursive top-level none worktree cogenly.json"],
   },
   {
     id: "start-from-origin",
     title: "Start from origin",
-    to: "/settings/general",
+    to: "/settings/new-threads",
     scope: "project-defaults",
     searchTerms: ["new worktrees latest matching remote branch local"],
   },
   {
     id: "add-project-starts-in",
     title: "Add repository starts in",
-    to: "/settings/general",
+    to: "/settings/new-threads",
     scope: "environment-defaults",
     searchTerms: ["add project base directory folder browser path home"],
   },
   {
     id: "projects-folder",
     title: "Projects folder",
-    to: "/settings/general",
+    to: "/settings/new-threads",
     scope: "environment-defaults",
     searchTerms: ["projects root cogenly clone new repository location directory path"],
   },
@@ -467,7 +550,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "text-generation-model",
     title: "Text generation model",
-    to: "/settings/general",
+    to: "/settings/models",
     scope: "project-defaults",
     searchTerms: ["generated thread titles source control content default provider"],
   },
@@ -502,8 +585,8 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "diagnostics",
     title: "Diagnostics",
-    to: "/settings/general",
-    searchTerms: ["logs traces processes resource history failures spans cpu memory"],
+    to: "/settings/diagnostics",
+    searchTerms: ["logs traces live processes resource history failures spans cpu memory"],
   },
   {
     id: "open-source-licenses",
@@ -744,7 +827,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "project-actions",
     title: "Actions",
-    to: "/settings/general",
+    to: "/settings/new-threads",
     scope: "project",
     searchTerms: ["commands scripts setup run dev server checkout worktree cogenly.json import"],
   },
@@ -911,6 +994,8 @@ const SETTINGS_CATEGORY_SCOPES: Readonly<Record<SettingsPath, SettingsSearchScop
   "/settings/machines": null,
   "/settings/scheduled-tasks": null,
   "/settings/archived": "project-defaults",
+  "/settings/models": null,
+  "/settings/new-threads": null,
 };
 
 /** Search keeps the selected target. A missing row can explain its owning scope instead. */
@@ -943,11 +1028,6 @@ export function isSettingsSearchScopeAvailable(
     case "project-defaults":
       return scopeKind === "environment" || scopeKind === "all" || scopeKind === "project";
   }
-}
-
-/** The Repository page joins the sidebar once a repository has been opened. */
-export function isSettingsOverviewVisible(search: SettingsScopeSearch): boolean {
-  return validateSettingsScopeSearch({ ...search }).repository !== undefined;
 }
 
 /**
