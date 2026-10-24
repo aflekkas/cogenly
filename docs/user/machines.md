@@ -33,6 +33,13 @@ machine that runs the thread. If that machine is offline, sending fails with
 a notice instead of waiting; reading still works. Attachments open from any
 machine and are copied over the first time you view them.
 
+To start a conversation on another machine, pick it in the composer's **Run
+on** control before you send; every paired machine is listed, even one you are
+not connected to. A new conversation runs on the machine that has the project's
+repository unless you pick another. A machine without the repository clones it
+first. If the machine you picked is offline, nothing starts and your draft
+stays as it was; the notice offers to run it on this machine instead.
+
 ## Move threads and projects
 
 Move threads to the machine you want them to run on, for example everything
