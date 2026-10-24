@@ -47,6 +47,7 @@ import * as ProviderSessionManager from "../ProviderSessionManager.ts";
 import * as CommandOutputRecorder from "./CommandOutputRecorder.ts";
 import * as ProviderSwitchService from "../ProviderSwitchService.ts";
 import * as ProviderTurnControlService from "../ProviderTurnControlService.ts";
+import * as MachinesTurnContext from "../MachinesTurnContext.ts";
 import * as ProviderTurnStartService from "../ProviderTurnStartService.ts";
 import * as ProviderTurnStartServiceTestkit from "../ProviderTurnStartService.testkit.ts";
 import * as McpAppModelContext from "../../mcpApps/McpAppModelContext.ts";
@@ -412,6 +413,7 @@ export function layerWithRegistry<Error>(
           Layer.orDie,
         ),
         layerContextHandoffServiceProvided,
+        MachinesTurnContext.layer,
         layerEventSinkProvided,
         IdAllocator.layer,
         layerStores,

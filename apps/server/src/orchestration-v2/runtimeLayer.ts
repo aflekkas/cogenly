@@ -61,6 +61,7 @@ import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ProjectionMaintenance from "./ProjectionMaintenance.ts";
 import * as ProjectStore from "./ProjectStore.ts";
 import * as ProviderAdapterRegistry from "./ProviderAdapterRegistry.ts";
+import * as MachinesTurnContext from "./MachinesTurnContext.ts";
 import * as ProviderContinuationRequests from "@t3tools/provider-core/server/ProviderContinuationRequests";
 import * as RemoteThreadCommands from "./RemoteThreadCommands.ts";
 import * as ProviderContinuationService from "./ProviderContinuationService.ts";
@@ -209,6 +210,8 @@ const layerProviderTurnStartServiceProvided = ProviderTurnStartService.layer.pip
   Layer.provide(
     Layer.mergeAll(
       layerContextHandoffServiceProvided,
+      // Same reference as the machine link's, which registers the reader.
+      MachinesTurnContext.layer,
       layerEventSinkProvided,
       IdAllocator.layer,
       ProjectionStore.layer,
