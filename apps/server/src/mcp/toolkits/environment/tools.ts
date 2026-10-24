@@ -47,7 +47,7 @@ const shared = {
 const EnvironmentReadTool = Tool.make("environment_read", {
   ...shared,
   description:
-    "Read this server's identity and selected environment preferences, including the projects root. Provider/model availability is exposed by orchestrator_capabilities. Writing instructions are limited to 4,000 characters.",
+    "Read this server's identity and selected preferences. The projects root, provider update checks and background activity belong to this machine; the rest are universal across paired machines. Provider/model availability is exposed by orchestrator_capabilities. Writing instructions are limited to 4,000 characters.",
   success: Schema.Struct({
     environmentId: ExecutionEnvironmentDescriptor.fields.environmentId,
     label: Schema.String,
@@ -61,7 +61,7 @@ const EnvironmentReadTool = Tool.make("environment_read", {
 const EnvironmentPreferencesTool = Tool.make("environment_preferences_update", {
   ...shared,
   description:
-    "Update selected environment-wide preferences through normal settings persistence and notifications. Requires a live full-access/default calling thread. Omitted fields are preserved; empty customInstructions clears them. setModelEffortDefault sets the reasoning effort a model starts at ({ provider: instance id, model: slug, option: { id: the model's effort option id from orchestrator_capabilities, e.g. reasoningEffort or effort, value } }); option null restores the model's own default.",
+    "Update selected preferences through normal settings persistence and notifications. Requires a live full-access/default calling thread. defaultThreadEnvMode, setModelEffortDefault, newWorktreesStartFromOrigin, enableAgentTerminals and sourceControlWritingStyle are universal: they reach every paired machine. enableProviderUpdateChecks and backgroundActivity apply to this machine only. Omitted fields are preserved; empty customInstructions clears them. setModelEffortDefault sets the reasoning effort a model starts at ({ provider: instance id, model: slug, option: { id: the model's effort option id from orchestrator_capabilities, e.g. reasoningEffort or effort, value } }); option null restores the model's own default.",
   parameters: Schema.Struct({
     defaultThreadEnvMode: ServerSettingsPatch.fields.defaultThreadEnvMode,
     setModelEffortDefault: ServerSettingsPatch.fields.setModelEffortDefault,

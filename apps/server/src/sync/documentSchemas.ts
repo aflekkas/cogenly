@@ -13,6 +13,7 @@ import {
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
+import { validateSettingsFields } from "./settingsDocument.ts";
 
 const decodeChange = Schema.decodeUnknownEffect(SharedDocumentChange);
 const isPortableId = Schema.is(SharedDocumentId);
@@ -125,6 +126,11 @@ export const validateChange = (change: SharedDocumentChange) =>
       (change.tombstone && change.tombstone.node !== change.updatedBy)
     )
       return yield* invalid();
+    // Settings documents are never deleted: a reset is a field value.
+    if (change.kind === "settings") {
+      if (change.tombstone) return yield* invalid();
+      return yield* validateSettingsFields(change.id, change.fields);
+    }
     yield* Schema.decodeUnknownEffect(partials[change.kind])(change.fields, {
       onExcessProperty: "error",
     }).pipe(

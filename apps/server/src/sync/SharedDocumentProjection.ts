@@ -56,6 +56,8 @@ export const readConfiguration = Effect.fn("SharedState.readConfiguration")(func
   id: string,
 ) {
   const sql = yield* SqlClient.SqlClient;
+  // Settings live in settings.json; SettingsSync writes their documents directly.
+  if (kind === "settings") return null;
   if (kind === "project") {
     const rows = yield* sql<{
       name: string;
@@ -252,6 +254,8 @@ export const projectDocument = Effect.fn("SharedState.projectDocument")(function
 ) {
   const sql = yield* SqlClient.SqlClient;
   const { kind, id, fields } = document;
+  // SettingsSync applies settings documents to settings.json outside this transaction.
+  if (kind === "settings") return;
   const at = DateTime.formatIso(yield* DateTime.now);
   if (kind === "project")
     yield* sql`INSERT INTO shared_repository_checkouts(remote,repository_id,directory_name) SELECT r.remote,r.repository_id,r.directory_name FROM label_repositories r JOIN projection_projects p ON p.project_id=r.repository_id WHERE r.remote IS NOT NULL AND p.deleted_at IS NULL GROUP BY r.remote ON CONFLICT(remote) DO UPDATE SET repository_id=excluded.repository_id,directory_name=excluded.directory_name`;

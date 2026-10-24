@@ -172,6 +172,7 @@ import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as UsageService from "./usage/UsageService.ts";
 import * as Scheduler from "./scheduling/Scheduler.ts";
 import * as SharedState from "./sync/SharedState.ts";
+import * as SettingsSync from "./sync/SettingsSync.ts";
 import * as SharedSync from "./sync/SharedSync.ts";
 import * as RuntimeLayer from "./orchestration-v2/runtimeLayer.ts";
 import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
@@ -577,6 +578,11 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
     Layer.provide(SharedState.layer),
     Layer.provide(ServerEnvironment.layerIdentity),
     Layer.provide(Scheduler.layer),
+  ),
+  // Universal settings and project overrides follow the user to paired machines.
+  SettingsSync.layer.pipe(
+    Layer.provide(SharedState.layer),
+    Layer.provide(ServerEnvironment.layerIdentity),
   ),
   // Asks Cogenly Connect to deliver webhooks it held while this environment was offline.
   HeldHooksWaker.layer,

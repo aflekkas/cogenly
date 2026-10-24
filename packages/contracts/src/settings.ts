@@ -1165,6 +1165,50 @@ export type ServerSettings = typeof ServerSettings.Type;
 export const DEFAULT_SERVER_SETTINGS: ServerSettings = Schema.decodeSync(ServerSettings)({});
 
 /**
+ * Server settings that are the same on every paired machine: preferences and
+ * policies, never paths, credentials, machine identity or resource limits.
+ * Paired machines replicate them, and clients write them to every machine
+ * they reach. Every other `ServerSettings` key is machine-local.
+ */
+export const UNIVERSAL_SERVER_SETTING_KEYS = [
+  "favorites",
+  "providerModelPreferences",
+  "modelEffortDefaults",
+  "defaultModelSelection",
+  "textGenerationModelSelection",
+  "sourceControlWriterModelSelection",
+  "reviewGuideModelSelection",
+  "defaultRuntimeMode",
+  "responseStreamingMode",
+  "enableAgentTerminals",
+  "continueThreadsAfterServerUpdate",
+  "snoozeLimitedThreads",
+  "autoResumeLimitedThreads",
+  "enableAgentBrowserAccess",
+  "enableAgentDeviceAccess",
+  "defaultAutoPull",
+  "defaultProjectScripts",
+  "defaultThreadEnvMode",
+  "newWorktreesStartFromOrigin",
+  "worktreeSubmodules",
+  "branchNamingMode",
+  "branchNamePrefix",
+  "branchNameInstructions",
+  "removeAgentCreditsOnMerge",
+  "sourceControlWritingStyle",
+  "reviewGuidesEnabled",
+  "reviewGuideInstructions",
+  "pullRequestMergeMethod",
+] as const satisfies ReadonlyArray<keyof ServerSettings>;
+export type UniversalServerSettingKey = (typeof UNIVERSAL_SERVER_SETTING_KEYS)[number];
+
+const UNIVERSAL_KEYS: ReadonlySet<string> = new Set(UNIVERSAL_SERVER_SETTING_KEYS);
+/** Whether a server setting key follows the user to every paired machine. */
+export function isUniversalServerSettingKey(key: string): key is UniversalServerSettingKey {
+  return UNIVERSAL_KEYS.has(key);
+}
+
+/**
  * Read the legacy `enabled` flag embedded in a provider instance config
  * blob. The envelope-level `ProviderInstanceConfig.enabled` is the single
  * flag going forward; this reader exists for old settings files that still

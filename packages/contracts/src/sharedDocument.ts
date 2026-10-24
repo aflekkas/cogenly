@@ -29,7 +29,11 @@ export const HybridClock = Schema.Struct({
   node: SharedDocumentId,
 });
 export type HybridClock = typeof HybridClock.Type;
-export const SharedDocumentKind = Schema.Literals(["project", "agent", "schedule"]);
+/**
+ * `settings` documents carry universal server settings (id `universal`) and a
+ * project's setting overrides (id `project:<label id>`); see SettingsSync.
+ */
+export const SharedDocumentKind = Schema.Literals(["project", "agent", "schedule", "settings"]);
 export type SharedDocumentKind = typeof SharedDocumentKind.Type;
 /** A delta contains only fields authored by this edit; relay preserves their clocks. */
 export const SharedDocumentChange = Schema.Struct({
