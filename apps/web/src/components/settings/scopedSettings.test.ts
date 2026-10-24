@@ -17,6 +17,7 @@ import {
   planScopedSettingsClear,
   planScopedSettingsPatch,
   resolveScopedSettingsTargets,
+  selectMachineLocalSettingsTargets,
 } from "./scopedSettings";
 import { buildSettingsProjectFolders, resolveSettingsScope } from "./settingsScope";
 
@@ -92,6 +93,72 @@ function writtenTo(plan: ReturnType<typeof planScopedSettingsPatch>) {
 }
 
 describe("scoped settings writes", () => {
+  it("keeps the Actions editor's reads and dedicated writer on the selected machine", () => {
+    const scope = resolveSettingsScope(
+      { project: "label:app", machine: vpsId },
+      folders,
+      environments,
+      options,
+    );
+    const targets = resolveScopedSettingsTargets(scope, environments);
+    expect(
+      selectMachineLocalSettingsTargets(scope, targets).map((target) => [
+        target.environmentId,
+        target.projectId,
+      ]),
+    ).toEqual([[vpsId, appVps.id]]);
+    // An unavailable selected machine must not silently edit a different machine.
+    expect(
+      selectMachineLocalSettingsTargets(
+        scope,
+        targets.filter((target) => target.environmentId !== vpsId),
+      ),
+    ).toEqual([]);
+  });
+
+  it("writes lifecycle scripts only to the selected machine, including project overrides", () => {
+    const scripts = [
+      {
+        id: "setup",
+        name: "Setup",
+        command: "echo local",
+        icon: "play" as const,
+        runOnWorktreeCreate: true,
+        runOnSettle: true,
+      },
+    ];
+    expect(
+      writtenTo(planScopedSettingsPatch(all, environments, { defaultProjectScripts: scripts })),
+    ).toEqual([[macId, { defaultProjectScripts: scripts }]]);
+    const scope = resolveSettingsScope(
+      { project: "label:app", machine: vpsId },
+      folders,
+      environments,
+      options,
+    );
+    expect(
+      writtenTo(
+        planScopedSettingsPatch(scope, environments, {
+          defaultProjectScripts: scripts,
+          defaultAutoPull: false,
+        }),
+      ),
+    ).toEqual([
+      [macId, { projectSettingsOverrides: { [appMac.id]: { defaultAutoPull: false } } }],
+      [
+        vpsId,
+        {
+          projectSettingsOverrides: {
+            [appVps.id]: { defaultAutoPull: false, defaultProjectScripts: scripts },
+          },
+        },
+      ],
+    ]);
+    expect(
+      writtenTo(planScopedSettingsClear(scope, environments, ["defaultProjectScripts"])),
+    ).toEqual([[vpsId, { projectSettingsOverrides: { [appVps.id]: null } }]]);
+  });
+
   it("writes a universal setting to every connected machine", () => {
     const plan = planScopedSettingsPatch(all, environments, { defaultAutoPull: false });
     expect(writtenTo(plan)).toEqual([

@@ -6,6 +6,7 @@ import { InfoIcon, Undo2Icon } from "lucide-react";
 import {
   DEFAULT_SERVER_SETTINGS,
   isUniversalServerSettingKey,
+  isMachineLocalProjectSettingKey,
   type ServerSettings,
 } from "@t3tools/contracts";
 import * as Equal from "effect/Equal";
@@ -39,6 +40,7 @@ import {
   type ProjectOverrideEntry,
   scopedSettingsAreMixed,
   scopedSettingsSource,
+  selectMachineLocalSettingsTargets,
 } from "./scopedSettings";
 import {
   overridingProjectsFrom,
@@ -299,16 +301,25 @@ export function SettingsRow({
   const targetRef = useSettingsSearchTarget<HTMLDivElement>(rowProps.id);
   const primarySettingsAvailable = usePrimarySettingsAvailable();
   const context = useOptionalSettingsScope();
+  const machineLocalProjectSetting =
+    settingKeys.length > 0 && settingKeys.every(isMachineLocalProjectSettingKey);
+  const rowTargets = context
+    ? machineLocalProjectSetting
+      ? selectMachineLocalSettingsTargets(context.scope, context.targets)
+      : context.targets
+    : [];
+  const rowEnvironments = context
+    ? machineLocalProjectSetting
+      ? selectMachineLocalSettingsTargets(context.scope, context.connectedEnvironments)
+      : context.connectedEnvironments
+    : [];
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const primaryEnvironment = usePrimaryEnvironment();
   const primaryCanWrite = useEnvironmentScope(primaryEnvironmentId, AuthSettingsWriteScope);
-  const writableIds = useEnvironmentsWithScope(
-    context?.connectedEnvironments ?? [],
-    AuthSettingsWriteScope,
-  );
+  const writableIds = useEnvironmentsWithScope(rowEnvironments, AuthSettingsWriteScope);
   const canWriteSettings = context
-    ? context.connectedEnvironments.length > 0 &&
-      context.connectedEnvironments.every((target) => writableIds.has(target.environmentId))
+    ? rowEnvironments.length > 0 &&
+      rowEnvironments.every((target) => writableIds.has(target.environmentId))
     : primaryCanWrite;
   const clearOverrides = useClearScopedSettings();
   const clearProjectOverrides = useClearProjectOverrides();
@@ -320,20 +331,18 @@ export function SettingsRow({
   // visible so the user sees the value for all projects, but cannot change it here.
   const environmentWide = isProjectScope && serverScoped && scopedKeys.length === 0;
   const mixed =
-    mixedOverride ?? (context !== null && scopedSettingsAreMixed(context.targets, settingKeys));
-  const source =
-    context && isProjectScope ? scopedSettingsSource(context.targets, scopedKeys) : null;
+    mixedOverride ?? (context !== null && scopedSettingsAreMixed(rowTargets, settingKeys));
+  const source = context && isProjectScope ? scopedSettingsSource(rowTargets, scopedKeys) : null;
   const unavailable =
     serverScoped &&
-    (!canWriteSettings ||
-      !(context ? context.connectedEnvironments.length > 0 : primarySettingsAvailable));
+    (!canWriteSettings || !(context ? rowEnvironments.length > 0 : primarySettingsAvailable));
   // A machine-local row on a page about every machine names the machine it changes.
   const machineLabel =
     context !== null &&
     serverScoped &&
     machineLocal &&
     !context.machinePage &&
-    !isProjectScope &&
+    (!isProjectScope || machineLocalProjectSetting) &&
     context.environments.length > 1 ? (
       <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
         on <MachineScopeMenu />
@@ -407,7 +416,7 @@ export function SettingsRow({
           !canWriteSettings
             ? `This connection lacks permission to change settings on ${
                 context
-                  ? context.connectedEnvironments
+                  ? rowEnvironments
                       .filter((target) => !writableIds.has(target.environmentId))
                       .map((target) => target.label)
                       .join(", ") || "the selected machine"
@@ -429,7 +438,7 @@ export function SettingsRow({
   const customized =
     context !== null &&
     settingKeys.some((key) =>
-      context.targets.some((candidate) => {
+      rowTargets.some((candidate) => {
         const environmentSettings = environmentSettingsById.get(candidate.environmentId);
         return (
           environmentSettings !== undefined &&
@@ -461,8 +470,8 @@ export function SettingsRow({
       <SettingInheritance
         state={inheritance.state}
         summary={inheritance.summary}
-        targets={context.targets}
-        environments={context.connectedEnvironments}
+        targets={rowTargets}
+        environments={rowEnvironments}
         keys={settingKeys}
         overridingProjects={overridingProjects}
         {...(canWriteSettings

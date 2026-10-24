@@ -4,6 +4,7 @@ import {
   type EnvironmentId,
   isNullableProjectSettingsOverride,
   isUniversalServerSettingKey,
+  isMachineLocalProjectSettingKey,
   PROJECT_SCOPED_SERVER_SETTING_KEYS,
   type ProjectId,
   type ProjectScopedServerSettingKey,
@@ -147,6 +148,13 @@ export function resolveScopedSettingsTargets(
     : [];
 }
 
+/** A machine-local editor must not fall back to another machine's values or write targets. */
+export function selectMachineLocalSettingsTargets<
+  T extends { readonly environmentId: EnvironmentId },
+>(scope: ResolvedSettingsScope, targets: readonly T[]): readonly T[] {
+  return targets.filter((target) => target.environmentId === scope.machineId);
+}
+
 export function scopedSettingsAreMixed(
   targets: readonly Pick<ScopedSettingsTarget, "settings">[],
   keys: readonly (keyof ServerSettings)[],
@@ -194,7 +202,8 @@ function projectOverrideWrites(
     current: ProjectSettingsOverrides,
     settings: ServerSettings,
     projectId: ProjectId,
-  ) => ProjectSettingsOverrides | null,
+    environmentId: EnvironmentId,
+  ) => ProjectSettingsOverrides | null | undefined,
 ): ScopedServerWrite[] {
   const byId = new Map(environments.map((environment) => [environment.environmentId, environment]));
   const writes = new Map<EnvironmentId, ScopedServerWrite>();
@@ -208,7 +217,13 @@ function projectOverrideWrites(
       continue;
     }
     const settings = environment.serverConfig.settings;
-    const entry = update(settings.projectSettingsOverrides[member.id] ?? {}, settings, member.id);
+    const entry = update(
+      settings.projectSettingsOverrides[member.id] ?? {},
+      settings,
+      member.id,
+      member.environmentId,
+    );
+    if (entry === undefined) continue;
     const existing = writes.get(member.environmentId);
     writes.set(member.environmentId, {
       environmentId: member.environmentId,
@@ -258,7 +273,7 @@ function withWorktreeCleanupMirror(
  * Outside a project, universal keys go to every connected environment (paired
  * machines sync them too, which covers offline ones) and machine-local keys to
  * the scope's machine only. A project scope writes the scopable keys into each
- * of its repositories' override entries, on every environment. A write that
+ * of its repositories' override entries; executable definitions stay on the selected machine. A write that
  * cannot reach every target it names is refused whole. Client keys always
  * persist locally.
  */
@@ -282,45 +297,55 @@ export function planScopedSettingsPatch(
   const machine = environments.find((environment) => environment.environmentId === machineId);
   const machineLocalKeys = serverKeys.filter((key) => !isUniversalServerSettingKey(key));
   const machineUnreachable =
-    !isProjectScope && machineLocalKeys.length > 0 && !(machine && isConnected(machine));
+    (isProjectScope
+      ? serverKeys.some(isMachineLocalProjectSettingKey)
+      : machineLocalKeys.length > 0) && !(machine && isConnected(machine));
   const serverWrites: ScopedServerWrite[] =
     serverKeys.length === 0
       ? []
       : isProjectScope
-        ? unscopableKeys.length > 0
+        ? unscopableKeys.length > 0 || machineUnreachable
           ? []
-          : projectOverrideWrites(scope, environments, (current, settings, projectId) => {
-              // Object-valued keys arrive as partial patches (the writing style
-              // rows send one field); an override entry stores the whole value,
-              // so complete the patch from the target's effective value.
-              const effective = resolveProjectSettings(settings, projectId).settings;
-              const next: Record<string, unknown> = { ...current };
-              for (const [key, value] of Object.entries(serverPatch)) {
-                if (key === "worktreeCleanup" && serverPatch.worktreeCleanup?.mode === "custom") {
-                  next[key] = {
-                    mode: "custom",
-                    rules: {
-                      ...resolveWorktreeCleanup(settings, projectId),
-                      ...serverPatch.worktreeCleanup.rules,
-                    },
-                  };
-                  continue;
+          : projectOverrideWrites(
+              scope,
+              environments,
+              (current, settings, projectId, environmentId) => {
+                // Object-valued keys arrive as partial patches (the writing style
+                // rows send one field); an override entry stores the whole value,
+                // so complete the patch from the target's effective value.
+                const effective = resolveProjectSettings(settings, projectId).settings;
+                const next: Record<string, unknown> = { ...current };
+                const entries = Object.entries(serverPatch).filter(
+                  ([key]) => !isMachineLocalProjectSettingKey(key) || environmentId === machineId,
+                );
+                if (entries.length === 0) return undefined;
+                for (const [key, value] of entries) {
+                  if (key === "worktreeCleanup" && serverPatch.worktreeCleanup?.mode === "custom") {
+                    next[key] = {
+                      mode: "custom",
+                      rules: {
+                        ...resolveWorktreeCleanup(settings, projectId),
+                        ...serverPatch.worktreeCleanup.rules,
+                      },
+                    };
+                    continue;
+                  }
+                  // A picker's "Inherit" sends null; for keys whose override
+                  // cannot store null that means remove the override.
+                  if (
+                    value === null &&
+                    !isNullableProjectSettingsOverride(key as ProjectScopedServerSettingKey)
+                  ) {
+                    delete next[key];
+                    continue;
+                  }
+                  const base = effective[key as keyof ServerSettings];
+                  next[key] =
+                    isPlainObject(value) && isPlainObject(base) ? { ...base, ...value } : value;
                 }
-                // A picker's "Inherit" sends null; for keys whose override
-                // cannot store null that means remove the override.
-                if (
-                  value === null &&
-                  !isNullableProjectSettingsOverride(key as ProjectScopedServerSettingKey)
-                ) {
-                  delete next[key];
-                  continue;
-                }
-                const base = effective[key as keyof ServerSettings];
-                next[key] =
-                  isPlainObject(value) && isPlainObject(base) ? { ...base, ...value } : value;
-              }
-              return next as ProjectSettingsOverrides;
-            })
+                return next as ProjectSettingsOverrides;
+              },
+            )
         : (scope.kind === "all" || scope.kind === "environment") && !machineUnreachable
           ? environments.filter(isConnected).flatMap((environment) => {
               const previous = environment.serverConfig?.settings;
@@ -365,8 +390,17 @@ export function planScopedSettingsClear(
 ) {
   const serverWrites =
     scope.kind === "project"
-      ? projectOverrideWrites(scope, environments, (_current, settings, projectId) =>
-          clearProjectSettingsOverrides(settings, projectId, keys),
+      ? projectOverrideWrites(
+          scope,
+          environments,
+          (_current, settings, projectId, environmentId) => {
+            const selected = keys.filter(
+              (key) => !isMachineLocalProjectSettingKey(key) || environmentId === scope.machineId,
+            );
+            return selected.length
+              ? clearProjectSettingsOverrides(settings, projectId, selected)
+              : undefined;
+          },
         )
       : [];
   return {

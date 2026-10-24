@@ -1104,6 +1104,11 @@ export const PROJECT_SCOPED_SERVER_SETTING_KEYS = [
 ] as const;
 export type ProjectScopedServerSettingKey = (typeof PROJECT_SCOPED_SERVER_SETTING_KEYS)[number];
 
+/** Executable definitions require configuration on each destination machine. */
+export function isMachineLocalProjectSettingKey(key: string): boolean {
+  return key === "defaultProjectScripts";
+}
+
 export const ProjectProviderInstanceOverride = Schema.Struct({
   enabled: Schema.optionalKey(Schema.Boolean),
 });
@@ -1535,7 +1540,6 @@ export const UNIVERSAL_SERVER_SETTING_KEYS = [
   "enableAgentBrowserAccess",
   "enableAgentDeviceAccess",
   "defaultAutoPull",
-  "defaultProjectScripts",
   "defaultThreadEnvMode",
   "newWorktreesStartFromOrigin",
   "worktreeSubmodules",

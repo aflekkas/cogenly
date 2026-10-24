@@ -17,8 +17,8 @@ Changing a value for all projects never touches a project's own override. When p
 the setting you are editing, the layers icon counts them and lists each one with its value: click a
 project to open it, or **Reset all** to make them follow All projects again.
 
-Some settings belong to one machine, such as where its projects folder is, its background activity,
-or its device hub. On a page with other settings these rows say which machine they change, such
+Some settings belong to one machine, such as project actions, where its projects folder is,
+its background activity, or its device hub. On a page with other settings these rows say which machine they change, such
 as "on MacBook", and you can switch the machine there. Pages about one machine's own state,
 Providers, Machines, Storage and Diagnostics, ask for a machine instead of a project: they show
 your primary machine until you pick another. If projects still have their own provider switch or
@@ -86,8 +86,9 @@ pull request merge method and the model that writes commit messages and pull req
 edit the value for all projects or a project's override, depending on the project chosen at the top.
 
 With a project selected, New threads also holds the project's actions. Editing them gives the
-project its own list, on every repository it holds, and reset returns to the list for all
-projects. A repository's `cogenly.json` actions can be imported there.
+project its own list on the selected machine's repositories, and reset returns to that machine's
+list for all projects. Actions never sync between machines; configure them separately on each one.
+A repository's `cogenly.json` actions can be imported there.
 
 The Repository page, opened from a repository in the sidebar, sits under Projects and holds that
 repository's name, icon, checkouts and removal.

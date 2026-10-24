@@ -9,6 +9,7 @@
  */
 import {
   PROJECT_SCOPED_SERVER_SETTING_KEYS,
+  isMachineLocalProjectSettingKey,
   ProjectSettingsOverrides,
   ServerSettings,
   UNIVERSAL_SERVER_SETTING_KEYS,
@@ -31,7 +32,7 @@ export const settingsDocumentAddress = (documentId: string) =>
 
 /** Every key a project override entry can hold. */
 export const PROJECT_SETTINGS_SYNC_KEYS = [
-  ...PROJECT_SCOPED_SERVER_SETTING_KEYS,
+  ...PROJECT_SCOPED_SERVER_SETTING_KEYS.filter((key) => !isMachineLocalProjectSettingKey(key)),
   "providerInstances",
 ] as const satisfies ReadonlyArray<keyof ProjectSettingsOverrides>;
 export type ProjectSettingsSyncKey = (typeof PROJECT_SETTINGS_SYNC_KEYS)[number];

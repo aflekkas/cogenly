@@ -119,6 +119,38 @@ describe("planSettingsReconcile", () => {
       projects: new Map(),
     }).base;
 
+  it("ignores lifecycle scripts in older peer documents and preserves local overrides", () => {
+    const scripts = [
+      {
+        id: "setup",
+        name: "Setup",
+        command: "echo peer",
+        icon: "play" as const,
+        runOnWorktreeCreate: true,
+        runOnSettle: true,
+      },
+    ];
+    const local = {
+      ...DEFAULT_SERVER_SETTINGS,
+      projectSettingsOverrides: {
+        [repository]: { defaultProjectScripts: [] },
+      },
+    };
+    const plan = planSettingsReconcile({
+      settings: local,
+      base: new Map(),
+      projects: new Map([["label:app", [repository]]]),
+      documents: new Map([
+        [UNIVERSAL_SETTINGS_DOCUMENT_ID, { defaultProjectScripts: scripts }],
+        [projectSettingsDocumentId("label:app"), { defaultProjectScripts: { value: scripts } }],
+      ]),
+    });
+    expect(plan.settings).toBeNull();
+    expect(
+      [...plan.publish.values()].every((fields) => !Object.hasOwn(fields, "defaultProjectScripts")),
+    ).toBe(true);
+  });
+
   it("never publishes machine-local settings", () => {
     const plan = planSettingsReconcile({
       settings: settings({ projectsRoot: "/srv/projects", worktreesDirectory: "/mnt/wt" }),

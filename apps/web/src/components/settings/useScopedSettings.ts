@@ -40,6 +40,7 @@ import {
   planScopedSettingsPatch,
   scopedSettingsAreMixed,
   scopedSettingsSource,
+  selectMachineLocalSettingsTargets,
   type ProjectOverrideEntry,
   type ScopedSettingsPatch,
 } from "./scopedSettings";
@@ -252,8 +253,11 @@ export function useProviderInstanceOverrides(instanceId: ProviderInstanceId) {
   };
 }
 
-export function useScopedSettingsWriteAllowed() {
-  const { connectedEnvironments } = useSettingsScope();
+export function useScopedSettingsWriteAllowed(machineLocal = false) {
+  const { scope, connectedEnvironments: scopedEnvironments } = useSettingsScope();
+  const connectedEnvironments = machineLocal
+    ? selectMachineLocalSettingsTargets(scope, scopedEnvironments)
+    : scopedEnvironments;
   const writable = useEnvironmentsWithScope(connectedEnvironments, AuthSettingsWriteScope);
   return (
     connectedEnvironments.length > 0 &&

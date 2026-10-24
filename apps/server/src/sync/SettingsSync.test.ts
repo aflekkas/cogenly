@@ -55,6 +55,54 @@ const start = Effect.fn("startSettingsMachine")(function* (
 
 describe("settings sync between paired machines", () => {
   it.live(
+    "lifecycle scripts stay local in universal settings and project overrides",
+    () =>
+      Effect.gen(function* () {
+        const hubRepository = ProjectId.make("scripts-hub-repo");
+        const spokeRepository = ProjectId.make("scripts-spoke-repo");
+        const hub = yield* start("scripts-hub", "cloud-server", hubRepository);
+        const spoke = yield* start("scripts-spoke", "computer", spokeRepository);
+        yield* pair(hub, spoke);
+        const scripts = [
+          {
+            id: "setup",
+            name: "Setup",
+            command: "echo peer-script",
+            icon: "play" as const,
+            runOnWorktreeCreate: true,
+            runOnSettle: true,
+          },
+        ];
+        yield* hub.settings.updateSettings({
+          defaultProjectScripts: scripts,
+          projectSettingsOverrides: { [hubRepository]: { defaultProjectScripts: scripts } },
+        });
+        yield* hub.reconcile;
+        yield* spoke.reconcile;
+        yield* spoke.sync.sync(hub.environmentId);
+        yield* hub.reconcile;
+        yield* spoke.reconcile;
+        const local = yield* hub.settings.getSettings;
+        const remote = yield* spoke.settings.getSettings;
+        expect(local.defaultProjectScripts).toEqual(scripts);
+        expect(local.projectSettingsOverrides[hubRepository]?.defaultProjectScripts).toEqual(
+          scripts,
+        );
+        expect(remote.defaultProjectScripts).toEqual([]);
+        expect(
+          remote.projectSettingsOverrides[spokeRepository]?.defaultProjectScripts,
+        ).toBeUndefined();
+        expect((yield* hub.state.get("settings", "universal"))?.fields ?? {}).not.toHaveProperty(
+          "defaultProjectScripts",
+        );
+        expect((yield* hub.state.get("project-settings", LABEL))?.fields ?? {}).not.toHaveProperty(
+          "defaultProjectScripts",
+        );
+      }).pipe(Effect.scoped),
+    20000,
+  );
+
+  it.live(
     "universal settings and project overrides follow the user; machine-local ones stay",
     () =>
       Effect.gen(function* () {
