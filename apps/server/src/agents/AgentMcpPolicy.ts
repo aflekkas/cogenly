@@ -284,6 +284,7 @@ const make = Effect.gen(function* () {
             auth: update.auth === undefined ? (current.auth ?? null) : update.auth,
           };
           if (
+            Integrations.integrationAccountLabelChanged(current, payload) ||
             Integrations.integrationDestinationChanged(current, payload) ||
             Integrations.integrationScopeWidened(current, payload)
           ) {

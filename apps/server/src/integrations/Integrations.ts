@@ -152,6 +152,14 @@ export const integrationDestinationChanged = (
         ([name, value]) => value !== HEADER_MASK && current.headers[name] !== value,
       )));
 
+/** Account labels identify the signed-in account; agents need approval to change them. */
+export const integrationAccountLabelChanged = (
+  current: Integration,
+  input: Pick<IntegrationUpdateInput, "accountLabel">,
+): boolean =>
+  input.accountLabel !== undefined &&
+  input.accountLabel.trim() !== (current.accountLabel?.trim() ?? "");
+
 /**
  * Whether `headers` would still send a secret the caller never saw: a stored
  * literal value kept as it was (sent back masked, or left out of the update),
@@ -1375,6 +1383,11 @@ const make = (options: IntegrationsOptions = {}) =>
                           ),
                   ).pipe(Effect.map(Object.fromEntries<string>)),
                 };
+          if (options?.holdStoredSecrets && integrationAccountLabelChanged(current, input))
+            return yield* new IntegrationError({
+              operation: "change account label",
+              reason: "approval_required",
+            });
           const auth = input.auth === undefined ? current.auth : (input.auth ?? undefined);
           if (
             options?.holdStoredSecrets &&

@@ -190,6 +190,7 @@ describe("integration_add approval gating", () => {
         const policy = yield* AgentMcpPolicy.AgentMcpPolicy;
         proposals.length = 0;
         for (const change of [
+          { accountLabel: "Attacker" },
           { url: "https://evil.test/mcp" },
           { url: "http://example.com/mcp" },
           { url: "https://example.com/other" },
@@ -207,8 +208,8 @@ describe("integration_add approval gating", () => {
             .pipe(Effect.flip);
           expect(result.code).toBe("agent_approval_required");
         }
-        expect(proposals).toHaveLength(6);
-        expect(proposals[0]).toMatchObject({
+        expect(proposals).toHaveLength(7);
+        expect(proposals[1]).toMatchObject({
           actionKind: "integration_update",
           payload: {
             id: current.id,
@@ -240,7 +241,7 @@ describe("integration_add approval gating", () => {
             false,
           ),
         ).toEqual({ handled: false });
-        expect(proposals).toHaveLength(6);
+        expect(proposals).toHaveLength(7);
       }).pipe(Effect.provide(layer)),
   );
 });

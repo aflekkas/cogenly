@@ -701,6 +701,35 @@ describe("Integrations gateway", () => {
     }).pipe(Effect.provide(layerWith())),
   );
 
+  it.effect("requires approval for account-label changes by thread agents", () =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      const service = yield* Integrations.Integrations;
+      const { integration } = yield* service.create({
+        ...createInput("https://example.com/mcp"),
+        headers: {},
+        accountLabel: "Owner",
+      });
+      expect(
+        yield* service
+          .update({ id: integration.id, accountLabel: "Attacker" }, { holdStoredSecrets: true })
+          .pipe(Effect.result),
+      ).toMatchObject({ _tag: "Failure", failure: { reason: "approval_required" } });
+      expect(
+        (yield* service.update(
+          { id: integration.id, accountLabel: "Owner" },
+          { holdStoredSecrets: true },
+        )).integration.accountLabel,
+      ).toBe("Owner");
+      expect(
+        (yield* service.update(
+          { id: integration.id, accountLabel: "Work" },
+          { approveCredentials: true },
+        )).integration.accountLabel,
+      ).toBe("Work");
+    }).pipe(Effect.provide(layerWith())),
+  );
+
   it.effect("never records custom credential headers in HTTP spans", () => {
     const spans: Array<Tracer.NativeSpan> = [];
     const tracer = Tracer.make({
