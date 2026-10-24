@@ -105,7 +105,7 @@ import {
   threadForksIntoProjects,
 } from "../projectLabels/projectLabels.logic";
 import { cloneableRepositoryRows } from "../projectLabels/repositoryPicker.logic";
-import { RepositoryRowIcon } from "../projectLabels/RepositorySourceRows";
+import { ProjectFolderRowIcon, RepositoryRowIcon } from "../projectLabels/RepositorySourceRows";
 import {
   reportProjectFolderFailure,
   useMoveThreadToFolder,
@@ -1449,7 +1449,7 @@ function OpenCommandPaletteDialog(props: {
           "none",
         ],
         title: "No repository",
-        icon: <MessageSquareDashedIcon className={ITEM_ICON_CLASS} />,
+        icon: <ProjectFolderRowIcon className={ITEM_ICON_CLASS} />,
         shortcutCommand: "chat.newWithoutProject" as const,
         // Picking where to start new Work, so this is Work without a repository.
         run: () => startScratchThread(scratchTargetEnvironmentId, { surface: "work" }),

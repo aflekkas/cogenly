@@ -163,6 +163,24 @@ function rowFromLink<Local extends RepositoryListLocal>(
   };
 }
 
+/**
+ * What `RepositoryRowIcon` needs beyond the record for a repository listed
+ * outside the shared list: the remote and recorded icon of the link `project`
+ * holds for it, or nothing when no project links it.
+ */
+export function linkedRepositoryIcon(
+  project: EnvironmentProjectLabel | null,
+  repositoryId: ProjectId,
+): { readonly remote: string | null; readonly iconPath: string | null } {
+  const link =
+    project === null
+      ? undefined
+      : projectRepositoryLinks(project.label).find((each) => each.repositoryId === repositoryId);
+  if (project === null || link === undefined) return { remote: null, iconPath: null };
+  const row = rowFromLink(link, project, null);
+  return { remote: row.remote, iconPath: row.iconPath };
+}
+
 const compareNames = (left: string, right: string) =>
   left.localeCompare(right, "en", { sensitivity: "base" });
 

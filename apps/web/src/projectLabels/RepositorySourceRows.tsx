@@ -447,6 +447,6 @@ export function ManageRepositoriesRowContent() {
 }
 
 /** The "No repository (project folder)" row's mark: the folder itself, not the project's colour. */
-export function ProjectFolderRowIcon() {
-  return <FolderIcon className="size-4" />;
+export function ProjectFolderRowIcon(props: { readonly className?: string }) {
+  return <FolderIcon className={props.className ?? "size-4"} />;
 }

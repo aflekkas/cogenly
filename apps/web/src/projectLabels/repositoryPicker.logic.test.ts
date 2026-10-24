@@ -20,6 +20,7 @@ import {
   gitHubRepositoryKeys,
   gitHubRepositoryOf,
   isRepositoryRequestSettled,
+  linkedRepositoryIcon,
   linkedRepositoryRows,
   machineRepositoryRows,
   projectRepositoryLinks,
@@ -274,6 +275,21 @@ describe("linkedRepositoryRows", () => {
       ["platform", "No remote"],
       ["platform", "Spawn-Partners"],
     ]);
+  });
+});
+
+describe("linkedRepositoryIcon", () => {
+  it("reads the link's remote, so a row outside the list resolves the same icon", () => {
+    expect(linkedRepositoryIcon(spawn, ProjectId.make("platform-id"))).toEqual({
+      remote: "github.com/Spawn-Partners/platform",
+      iconPath: null,
+    });
+  });
+
+  it("knows no remote for a repository no project links", () => {
+    const none = { remote: null, iconPath: null };
+    expect(linkedRepositoryIcon(null, ProjectId.make("platform-id"))).toEqual(none);
+    expect(linkedRepositoryIcon(spawn, ProjectId.make("elsewhere"))).toEqual(none);
   });
 });
 
