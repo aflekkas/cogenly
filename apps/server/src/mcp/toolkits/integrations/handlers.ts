@@ -53,6 +53,13 @@ const failure = (cause: unknown): OrchestratorMcpFailure => {
       code: "orchestration_error",
       message: "The integration request could not be completed.",
     });
+  // Another machine renews this sign-in; a new one from the owner is not needed.
+  const waiting = Integrations.refreshWaitMessage(cause);
+  if (waiting !== undefined)
+    return new OrchestratorMcpFailure({
+      code: "invalid_request",
+      message: `${waiting} The integration works again once that machine is online and its refreshed sign-in syncs here; try again later.`,
+    });
   const agentMessage = AGENT_MESSAGES[cause.reason];
   return new OrchestratorMcpFailure({
     code: agentMessage === undefined ? "orchestration_error" : "invalid_request",

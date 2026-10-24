@@ -178,6 +178,7 @@ import * as SharedState from "./sync/SharedState.ts";
 import * as SharedSync from "./sync/SharedSync.ts";
 import * as SharedSyncStatus from "./sync/SharedSyncStatus.ts";
 import * as VaultSync from "./vault/VaultSync.ts";
+import * as IntegrationSyncBinding from "./integrations/IntegrationSyncBinding.ts";
 import * as ThreadReplication from "./threadSync/ThreadReplication.ts";
 import * as ThreadRouting from "./threadSync/ThreadRouting.ts";
 import * as ThreadTransfer from "./threadSync/ThreadTransfer.ts";
@@ -580,6 +581,12 @@ const layerProviderInstallationRefresh = Layer.effectDiscard(
   }),
 );
 
+const layerVaultSync = VaultSync.layer.pipe(
+  Layer.provide(RuntimeLayer.layerVaultProvided),
+  Layer.provide(RuntimeLayer.layerVaultSyncCapture),
+  Layer.provide(SharedState.layer),
+);
+
 const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   AgentAwarenessRelay.layer,
   MachineSecurity.layer,
@@ -590,10 +597,12 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
     SharedSync.layer.pipe(Layer.provide(SharedState.layer)),
     SharedSyncStatus.layer,
     // Vault items shared with paired machines, end-to-end encrypted over the same documents.
-    VaultSync.layer.pipe(
-      Layer.provide(RuntimeLayer.layerVaultProvided),
+    layerVaultSync,
+    // Web integration sign-ins ride the vault: who refreshes them, and renewing them in time.
+    IntegrationSyncBinding.layer.pipe(
+      Layer.provide(layerVaultSync),
       Layer.provide(RuntimeLayer.layerVaultSyncCapture),
-      Layer.provide(SharedState.layer),
+      Layer.provide(RuntimeLayer.layerIntegrationSyncPeers),
     ),
     // The orchestrator's own sink, so replicated events reach the same
     // subscribers, and its forwarder registry, so routing sees its commands.

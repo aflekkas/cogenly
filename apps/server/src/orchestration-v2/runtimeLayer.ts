@@ -9,6 +9,7 @@ import * as Integrations from "../integrations/Integrations.ts";
 import * as LocalIntegrations from "../integrations/local/LocalIntegrations.ts";
 import * as LocalMcpRunner from "../integrations/local/LocalMcpRunner.ts";
 import * as IntegrationCredentials from "../integrations/IntegrationCredentials.ts";
+import * as IntegrationSyncPeers from "../integrations/IntegrationSyncPeers.ts";
 import * as IntegrationTokens from "../integrations/IntegrationTokens.ts";
 import * as Retrieval from "../context/ContextRetrievalService.ts";
 import * as Exports from "../export/ExportService.ts";
@@ -382,10 +383,15 @@ const layerLocalIntegrationsProvided = LocalIntegrations.layer.pipe(
   Layer.provide(LocalMcpRunner.layer),
   Layer.provide(layerIntegrationCredentials),
 );
+// Shared with IntegrationSyncBinding, which attaches the paired-machine view once Machines exist.
+export const layerIntegrationSyncPeers = IntegrationSyncPeers.layer.pipe(
+  Layer.provide(ServerEnvironment.layerIdentity),
+);
 const layerIntegrationsProvided = Integrations.layer.pipe(
   Layer.provide(layerIntegrationCredentials),
   Layer.provide(IntegrationTokens.layer.pipe(Layer.provide(layerVaultProvided))),
   Layer.provide(layerLocalIntegrationsProvided),
+  Layer.provide(layerIntegrationSyncPeers),
 );
 const layerAgentsProvided = Agents.layer.pipe(
   Layer.provide(

@@ -1,7 +1,7 @@
-import { loopbackHttpsPolicy, loopbackHttpsFetch } from "./https.testkit.ts";
+import { loopbackHttpsPolicy } from "./https.testkit.ts";
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { NodeCrypto as EffectNodeCrypto, NodeHttpServer } from "@effect/platform-node";
+import { NodeCrypto as EffectNodeCrypto } from "@effect/platform-node";
 import { EnvironmentId, IntegrationName, type IntegrationId } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
@@ -12,19 +12,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
-import {
-  FetchHttpClient,
-  HttpClient,
-  HttpClientRequest,
-  HttpRouter,
-  HttpServer,
-  HttpServerRequest,
-  HttpServerResponse,
-} from "effect/http";
-// @effect-diagnostics-next-line nodeBuiltinImport:off -- The mock authorization server checks PKCE with a plain SHA-256.
-import * as NodeCrypto from "node:crypto";
-// @effect-diagnostics-next-line nodeBuiltinImport:off -- NodeHttpServer.layer takes a node:http server factory.
-import * as NodeHttp from "node:http";
+import { FetchHttpClient, HttpRouter } from "effect/http";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
@@ -35,221 +23,16 @@ import * as Credentials from "./IntegrationCredentials.ts";
 import { CALLBACK_PATH } from "./IntegrationOAuth.ts";
 import * as Integrations from "./Integrations.ts";
 import * as IntegrationOAuthHttp from "./integrationOAuthHttp.ts";
+import * as IntegrationSyncPeers from "./IntegrationSyncPeers.ts";
 import * as Tokens from "./IntegrationTokens.ts";
 import { IntegrationEndpointPolicy } from "./RemoteEndpoint.ts";
-
-/**
- * A local OAuth 2.1 authorization server and MCP resource server in one:
- * protected-resource and authorization-server metadata, dynamic client
- * registration, PKCE authorization codes bound to `resource`, rotating
- * refresh tokens, and an MCP endpoint that answers 401 with a
- * `resource_metadata` challenge to anything without a live token.
- */
-interface MockAuthServer {
-  base: string;
-  registrations: number;
-  refreshes: number;
-  /** Refresh tokens answer invalid_grant, as after the user revokes access. */
-  revoked: boolean;
-  omitPkce?: boolean;
-  requireIssuer?: boolean;
-  tokenGate?: { entered: Deferred.Deferred<void>; resume: Deferred.Deferred<void> };
-  readonly clients: Map<string, ReadonlyArray<string>>;
-  readonly codes: Map<
-    string,
-    { clientId: string; challenge: string; redirectUri: string; account: string; resource: string }
-  >;
-  /** Live access tokens, by token: the account they act for. */
-  readonly accessTokens: Map<string, string>;
-  readonly refreshTokens: Map<string, string>;
-  /** Every bearer the MCP endpoint saw, in order. */
-  readonly bearers: Array<string | undefined>;
-}
-
-const reply = (body: unknown, status = 200, headers: Record<string, string> = {}) =>
-  HttpServerResponse.jsonUnsafe(body, { status, headers });
-
-const startMockAuthServer = Effect.gen(function* () {
-  const mock: MockAuthServer = {
-    base: "",
-    registrations: 0,
-    refreshes: 0,
-    revoked: false,
-    clients: new Map(),
-    codes: new Map(),
-    accessTokens: new Map(),
-    refreshTokens: new Map(),
-    bearers: [],
-  };
-  let issued = 0;
-  const issue = (account: string) => {
-    issued += 1;
-    const accessToken = `access-${account}-${issued}-secretvalue`;
-    const refreshToken = `refresh-${account}-${issued}-secretvalue`;
-    mock.accessTokens.set(accessToken, account);
-    mock.refreshTokens.set(refreshToken, account);
-    return {
-      access_token: accessToken,
-      refresh_token: refreshToken,
-      token_type: "Bearer",
-      expires_in: 3600,
-    };
-  };
-  const form = (request: HttpServerRequest.HttpServerRequest) =>
-    request.text.pipe(Effect.map((text) => new URLSearchParams(text)));
-
-  const routes = Layer.mergeAll(
-    HttpRouter.add("GET", "/.well-known/oauth-protected-resource/mcp", () =>
-      Effect.succeed(
-        reply({
-          resource: `${mock.base}/mcp`,
-          authorization_servers: [`${mock.base}/auth`],
-          scopes_supported: ["read", "write"],
-        }),
-      ),
-    ),
-    // Path-aware RFC 8414 metadata: the issuer has a path.
-    HttpRouter.add("GET", "/.well-known/oauth-authorization-server/auth", () =>
-      Effect.succeed(
-        reply({
-          issuer: `${mock.base}/auth`,
-          authorization_endpoint: `${mock.base}/auth/authorize`,
-          token_endpoint: `${mock.base}/auth/token`,
-          registration_endpoint: `${mock.base}/auth/register`,
-          ...(mock.omitPkce ? {} : { code_challenge_methods_supported: ["S256"] }),
-          authorization_response_iss_parameter_supported: mock.requireIssuer === true,
-          token_endpoint_auth_methods_supported: ["none"],
-        }),
-      ),
-    ),
-    HttpRouter.add("POST", "/auth/register", (request) =>
-      request.json.pipe(
-        Effect.map((body) => {
-          mock.registrations += 1;
-          const clientId = `client-${mock.registrations}`;
-          mock.clients.set(clientId, (body as { redirect_uris: Array<string> }).redirect_uris);
-          return reply({ client_id: clientId, token_endpoint_auth_method: "none" }, 201);
-        }),
-        Effect.orDie,
-      ),
-    ),
-    // Consent: the test plays the browser and picks the account with `account`.
-    HttpRouter.add("GET", "/auth/authorize", (request) =>
-      Effect.sync(() => {
-        const params = new URL(request.url, mock.base).searchParams;
-        const clientId = params.get("client_id") ?? "";
-        const redirectUri = params.get("redirect_uri") ?? "";
-        if (
-          !mock.clients.get(clientId)?.includes(redirectUri) ||
-          params.get("code_challenge_method") !== "S256" ||
-          params.get("response_type") !== "code"
-        )
-          return reply({ error: "invalid_request" }, 400);
-        const code = `code-${mock.codes.size + 1}`;
-        mock.codes.set(code, {
-          clientId,
-          challenge: params.get("code_challenge") ?? "",
-          redirectUri,
-          account: params.get("account") ?? "default",
-          resource: params.get("resource") ?? "",
-        });
-        const back = new URL(redirectUri);
-        back.searchParams.set("code", code);
-        back.searchParams.set("state", params.get("state") ?? "");
-        back.searchParams.set("iss", `${mock.base}/auth`);
-        return HttpServerResponse.redirect(back.href, { status: 302 });
-      }),
-    ),
-    HttpRouter.add("POST", "/auth/token", (request) =>
-      form(request).pipe(
-        Effect.tap(() =>
-          mock.tokenGate === undefined
-            ? Effect.void
-            : Effect.gen(function* () {
-                yield* Deferred.succeed(mock.tokenGate!.entered, undefined);
-                yield* Deferred.await(mock.tokenGate!.resume);
-              }),
-        ),
-        Effect.map((params) => {
-          if (params.get("resource") !== `${mock.base}/mcp`)
-            return reply({ error: "invalid_target" }, 400);
-          if (params.get("grant_type") === "authorization_code") {
-            const grant = mock.codes.get(params.get("code") ?? "");
-            mock.codes.delete(params.get("code") ?? "");
-            const verifier = params.get("code_verifier") ?? "";
-            const challenge = NodeCrypto.createHash("sha256").update(verifier).digest("base64url");
-            if (
-              grant === undefined ||
-              grant.clientId !== params.get("client_id") ||
-              grant.redirectUri !== params.get("redirect_uri") ||
-              grant.challenge !== challenge ||
-              grant.resource !== `${mock.base}/mcp`
-            )
-              return reply({ error: "invalid_grant" }, 400);
-            return reply(issue(grant.account));
-          }
-          if (params.get("grant_type") === "refresh_token") {
-            mock.refreshes += 1;
-            const account = mock.refreshTokens.get(params.get("refresh_token") ?? "");
-            if (mock.revoked || account === undefined)
-              return reply({ error: "invalid_grant" }, 400);
-            mock.refreshTokens.delete(params.get("refresh_token") ?? "");
-            return reply(issue(account));
-          }
-          return reply({ error: "unsupported_grant_type" }, 400);
-        }),
-        Effect.orDie,
-      ),
-    ),
-    HttpRouter.add("POST", "/mcp", (request) =>
-      request.json.pipe(
-        Effect.map((raw) => {
-          const body = raw as { id: number; method: string; params?: { name?: string } };
-          const bearer = /^Bearer (.+)$/.exec(request.headers.authorization ?? "")?.[1];
-          mock.bearers.push(bearer);
-          const account = bearer === undefined ? undefined : mock.accessTokens.get(bearer);
-          if (account === undefined)
-            return reply({ error: "invalid_token" }, 401, {
-              "www-authenticate": `Bearer resource_metadata="${mock.base}/.well-known/oauth-protected-resource/mcp"`,
-            });
-          if (body.method === "initialize")
-            return reply({
-              jsonrpc: "2.0",
-              id: body.id,
-              result: { protocolVersion: "2025-06-18" },
-            });
-          if (body.method === "tools/list")
-            return reply({
-              jsonrpc: "2.0",
-              id: body.id,
-              result: { tools: [{ name: "whoami", description: "", inputSchema: {} }] },
-            });
-          // Echoes the bearer back, as a careless server might.
-          return reply({
-            jsonrpc: "2.0",
-            id: body.id,
-            result: {
-              content: [{ type: "text", text: `account=${account} token=${bearer}` }],
-            },
-          });
-        }),
-        Effect.orDie,
-      ),
-    ),
-  );
-  const context = yield* Layer.build(
-    HttpRouter.serve(routes, { disableListenLog: true, disableLogger: true }).pipe(
-      Layer.provideMerge(
-        NodeHttpServer.layer(() => NodeHttp.createServer(), { port: 0, host: "127.0.0.1" }),
-      ),
-    ),
-  );
-  mock.base = HttpServer.formatAddress(Context.get(context, HttpServer.HttpServer).address).replace(
-    /^http:/,
-    "https:",
-  );
-  return mock;
-});
+import {
+  COGENLY_ORIGIN,
+  type MockAuthServer,
+  consent,
+  linearInput,
+  startMockAuthServer,
+} from "./oauthServer.testkit.ts";
 
 const database = Sqlite.layerMemory.pipe(Layer.provide(NodeServices.layer));
 
@@ -261,6 +44,7 @@ const gatewayLayer = () => {
     Layer.provide(Layer.succeed(IntegrationEndpointPolicy, loopbackHttpsPolicy)),
     Layer.provideMerge(Credentials.layer),
     Layer.provideMerge(Tokens.layer),
+    Layer.provideMerge(IntegrationSyncPeers.layerFor("env:test")),
     Layer.provideMerge(Vault.layer),
     Layer.provide(
       Layer.mock(ServerSecretStore.ServerSecretStore)({
@@ -280,47 +64,11 @@ const gatewayLayer = () => {
   );
 };
 
-/** Where clients reach Cogenly in these tests; the callback is never fetched. */
-const COGENLY_ORIGIN = "https://cogenly.example";
-
 const addLinear = (mock: MockAuthServer, name: string, accountLabel?: string) =>
   Effect.gen(function* () {
     const service = yield* Integrations.Integrations;
-    const { integration } = yield* service.create({
-      name: IntegrationName.make(name),
-      displayName: "Linear",
-      transport: "http",
-      url: `${mock.base}/mcp`,
-      headers: {},
-      scope: { type: "all" },
-      hint: "",
-      auth: { type: "oauth" },
-      ...(accountLabel === undefined ? {} : { accountLabel }),
-    });
+    const { integration } = yield* service.create(linearInput(mock, name, accountLabel));
     return integration;
-  });
-
-/** Plays the browser: opens the link, consents as `account`, and returns the callback query. */
-const consent = (authorizationUrl: string, account: string) =>
-  Effect.gen(function* () {
-    const client = yield* HttpClient.HttpClient;
-    const url = new URL(authorizationUrl);
-    url.searchParams.set("account", account);
-    const response = yield* client
-      .execute(HttpClientRequest.get(url.href))
-      .pipe(
-        Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }),
-        Effect.provideService(FetchHttpClient.Fetch, loopbackHttpsFetch),
-      );
-    expect(response.status).toBe(302);
-    const back = new URL(response.headers.location!);
-    expect(`${back.origin}${back.pathname}`).toBe(`${COGENLY_ORIGIN}${CALLBACK_PATH}`);
-    return {
-      state: back.searchParams.get("state") ?? undefined,
-      code: back.searchParams.get("code") ?? undefined,
-      error: back.searchParams.get("error") ?? undefined,
-      iss: back.searchParams.get("iss") ?? undefined,
-    };
   });
 
 const signIn = (id: IntegrationId, account: string) =>

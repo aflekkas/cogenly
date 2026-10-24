@@ -33,10 +33,12 @@ import * as SqlClient from "effect/sql/SqlClient";
 
 import { redactUpstream, toolErrorMessage, upstreamErrorMessage } from "./UpstreamResult.ts";
 import { selectCallbackOrigin, type SignInOrigin } from "./SignInOrigin.ts";
+import { hostMatchesAnyDomain } from "../vault/VaultPolicy.ts";
 import { redactValue } from "../vault/VaultRedactor.ts";
 import { resolveCatalogConnect } from "./IntegrationCatalog.ts";
 import * as Credentials from "./IntegrationCredentials.ts";
 import * as OAuth from "./IntegrationOAuth.ts";
+import { IntegrationSyncPeers } from "./IntegrationSyncPeers.ts";
 import * as Tokens from "./IntegrationTokens.ts";
 import * as Local from "./local/LocalIntegrations.ts";
 import { GOOGLE_WORKSPACE_VERSION } from "./local/GoogleWorkspace.ts";
@@ -54,6 +56,8 @@ const OAuthState = Schema.Struct({
   tokenItemId: Schema.optional(Schema.String),
   /** Access token expiry in epoch milliseconds; null when the server gave none. */
   expiresAt: Schema.optional(Schema.NullOr(Schema.Number)),
+  /** The only machine that refreshes this grant; absent means this one. */
+  refreshOwner: Schema.optional(Schema.String),
 });
 type OAuthState = typeof OAuthState.Type;
 
@@ -297,6 +301,18 @@ const MAX_PENDING_SIGN_INS = 64;
 /** Refresh this long before the access token expires. */
 const REFRESH_SKEW_MS = 60_000;
 
+/**
+ * The operation of a `sign_in_required` error that is not this machine's to
+ * fix: another machine refreshes the shared sign-in. Its cause is the message.
+ */
+export const REFRESH_WAIT_OPERATION = "wait for another machine to refresh";
+
+/** The message for an error raised while another machine owns the refresh, if it is one. */
+export const refreshWaitMessage = (error: IntegrationError): string | undefined =>
+  error.operation === REFRESH_WAIT_OPERATION && typeof error.cause === "string"
+    ? error.cause
+    : undefined;
+
 export class Integrations extends Context.Service<
   Integrations,
   {
@@ -374,6 +390,25 @@ export class Integrations extends Context.Service<
       input: IntegrationCatalogConnectInput,
       options: IntegrationWriteOptions & { readonly origin: SignInOrigin },
     ) => Effect.Effect<IntegrationMutationResult, IntegrationError>;
+    /**
+     * Signs in web (non-local) OAuth integrations from sign-ins that arrived
+     * through vault sync: one that is not signed in here, or whose token item
+     * is gone, takes the newest synced item naming its id, when the item's
+     * allowed domains cover the integration's host. A signed-in integration
+     * whose item was removed or emptied needs sign-in again. Runs after vault
+     * sync changes an item, at startup, and on create; call it after writing
+     * an integration definition another way, e.g. projecting a synced one.
+     * Never changes `updatedAt`. `integrationId` limits it to one integration.
+     */
+    readonly adoptSyncedSignIns: (
+      integrationId?: IntegrationId,
+    ) => Effect.Effect<void, IntegrationError>;
+    /**
+     * Scheduler only: while the vault is shared, refreshes sign-ins this
+     * machine owns the refresh of shortly before they expire, so the new
+     * tokens reach every machine before any of them needs them.
+     */
+    readonly refreshSharedSignIns: Effect.Effect<void>;
   }
 >()("cogenly-server/integrations/Integrations") {}
 
@@ -427,11 +462,54 @@ const CHECK_MESSAGES: Partial<Record<IntegrationError["reason"], string>> = {
 };
 
 /** Status text owners and agents see; upstream messages are already bounded. */
-const checkMessage = (reason: IntegrationError["reason"], cause: unknown): string => {
+const checkMessage = (error: IntegrationError): string => {
+  const waiting = refreshWaitMessage(error);
+  if (waiting !== undefined) return waiting;
+  const { reason, cause } = error;
   const base = CHECK_MESSAGES[reason] ?? "The request could not be completed.";
   return reason === "upstream_error" && typeof cause === "string" && cause.trim() !== ""
     ? `${base} ${cause.trim().slice(0, MAX_UPSTREAM_MESSAGE_CHARS)}`
     : base;
+};
+
+/** The non-secret half of a sign-in, as it travels with the token item. */
+const signInAttachment = (
+  integrationId: IntegrationId,
+  state: {
+    readonly server: OAuth.OAuthServer;
+    readonly registration: OAuth.OAuthClientRegistration | undefined;
+    readonly expiresAt: number | null;
+    readonly refreshOwner: string;
+  },
+): Tokens.SignInAttachment => ({
+  kind: "integration-oauth",
+  v: 1,
+  integrationId,
+  server: state.server,
+  ...(state.registration === undefined ? {} : { registration: state.registration }),
+  expiresAt: state.expiresAt,
+  refreshOwner: state.refreshOwner,
+});
+
+/**
+ * Whether a synced sign-in item may sign `integration` in on this machine: it
+ * names the integration, still holds a usable grant, may be sent to the
+ * integration's host, and uses the kind of client the definition does.
+ */
+const adoptable = (
+  integration: StoredIntegration,
+  signIn: Tokens.AttachedSignIn,
+  nowMs: number,
+): boolean => {
+  const { attachment } = signIn;
+  if (attachment.integrationId !== integration.id || !signIn.hasAccessToken) return false;
+  if (!signIn.hasRefreshToken && attachment.expiresAt !== null && attachment.expiresAt <= nowMs)
+    return false;
+  const host = Option.liftThrowable(() => new URL(integration.url).hostname)();
+  if (Option.isNone(host) || !hostMatchesAnyDomain(host.value, signIn.item.allowedDomains))
+    return false;
+  // A configured client id signs in without a registration; otherwise the registration is the client.
+  return (integration.auth?.clientId === undefined) === (attachment.registration !== undefined);
 };
 
 /** One vault item per integration account, named by its id so renames never collide. */
@@ -445,6 +523,7 @@ const make = (options: IntegrationsOptions = {}) =>
     const client = yield* HttpClient.HttpClient;
     const credentials = yield* Credentials.IntegrationCredentials;
     const tokenStore = yield* Tokens.IntegrationTokens;
+    const peers = yield* IntegrationSyncPeers;
     const protocol = yield* OAuth.make;
     const local = yield* Effect.serviceOption(Local.LocalIntegrations);
     const endpointPolicy = yield* IntegrationEndpointPolicy;
@@ -486,11 +565,22 @@ const make = (options: IntegrationsOptions = {}) =>
         }
       >(),
     );
-    /** Decrypted tokens per signed-in integration, so calls do not reopen the vault. */
+    /**
+     * Decrypted tokens per signed-in integration, so calls do not reopen the
+     * vault. An entry is good while its item's revision stays the same; a
+     * refresh on another machine arrives as a new revision.
+     */
     const liveTokens = new Map<
       IntegrationId,
-      Tokens.StoredTokens & { readonly itemId: string; readonly expiresAt: number | null }
+      Tokens.StoredTokens & {
+        readonly itemId: string;
+        readonly revision: number;
+        readonly expiresAt: number | null;
+        readonly refreshOwner: string;
+      }
     >();
+    /** One adoption pass at a time; each is idempotent. */
+    const adoptPermit = yield* Semaphore.make(1);
     /** One refresh at a time per account; waiters reuse the token it produced. */
     const integrationLocks = new Map<IntegrationId, Semaphore.Semaphore>();
     const integrationLock = (id: IntegrationId) => {
@@ -657,7 +747,7 @@ const make = (options: IntegrationsOptions = {}) =>
     /** Records an upstream outcome; clients hear only when the status changes. */
     const recordCheck = (integration: Integration, outcome: { ok: true } | IntegrationError) =>
       Effect.gen(function* () {
-        const message = "ok" in outcome ? undefined : checkMessage(outcome.reason, outcome.cause);
+        const message = "ok" in outcome ? undefined : checkMessage(outcome);
         const checkedAt = yield* now;
         const previous = yield* Ref.getAndUpdate(checks, (current) =>
           new Map(current).set(integration.id, {
@@ -710,8 +800,31 @@ const make = (options: IntegrationsOptions = {}) =>
         yield* notify;
       }).pipe(Effect.ignore);
 
+    /**
+     * The grant itself is dead (revoked, or expired with nothing to refresh
+     * it): needs sign-in here, and its tokens are emptied so every machine
+     * sharing the item stops using it too. The client secret stays for the
+     * next sign-in.
+     */
+    const retireGrant = (integration: StoredIntegration, message: string) =>
+      Effect.gen(function* () {
+        yield* markNeedsSignIn(integration, message);
+        const itemId = integration.oauthState?.tokenItemId;
+        if (itemId !== undefined) yield* tokenStore.clearGrant(itemId).pipe(Effect.ignore);
+      });
+
     const signInRequired = (operation: string) =>
       new IntegrationError({ operation, reason: "sign_in_required" });
+
+    /** Another machine refreshes this grant; this one waits for the tokens it syncs. */
+    const waitForRefreshOwner = (owner: string) =>
+      Effect.gen(function* () {
+        return yield* new IntegrationError({
+          operation: REFRESH_WAIT_OPERATION,
+          reason: "sign_in_required",
+          cause: `Waiting for ${yield* peers.label(owner)} to refresh this sign-in.`,
+        });
+      });
 
     /** Forgets an account's tokens, e.g. after its server or client changed. */
     const dropTokens = (integration: StoredIntegration) =>
@@ -726,13 +839,26 @@ const make = (options: IntegrationsOptions = {}) =>
         const state = integration.oauthState;
         if (!state?.signedIn || state.tokenItemId === undefined) return undefined;
         const live = liveTokens.get(integration.id);
-        if (live !== undefined && live.itemId === state.tokenItemId) return live;
+        if (live !== undefined && live.itemId === state.tokenItemId) {
+          const revision = yield* tokenStore.revision(state.tokenItemId);
+          if (Option.isSome(revision) && revision.value === live.revision) return live;
+        }
         const stored = yield* tokenStore.read(state.tokenItemId);
-        if (Option.isNone(stored)) return undefined;
+        if (Option.isNone(stored)) {
+          liveTokens.delete(integration.id);
+          return undefined;
+        }
+        // The attachment travels with the tokens, so its expiry and refresh owner are theirs.
+        const attachment =
+          stored.value.attachment?.integrationId === integration.id
+            ? stored.value.attachment
+            : undefined;
         const loaded = {
-          ...stored.value,
+          ...stored.value.tokens,
           itemId: state.tokenItemId,
-          expiresAt: state.expiresAt ?? null,
+          revision: stored.value.revision,
+          expiresAt: attachment === undefined ? (state.expiresAt ?? null) : attachment.expiresAt,
+          refreshOwner: attachment?.refreshOwner ?? state.refreshOwner ?? peers.self,
         };
         liveTokens.set(integration.id, loaded);
         return loaded;
@@ -778,6 +904,10 @@ const make = (options: IntegrationsOptions = {}) =>
      * A usable access token. Refreshes when it is about to expire, or when the
      * server just refused `rejected`. One refresh per account at a time: a
      * caller that waited finds the token the refresh produced and uses it.
+     * Only the grant's refresh owner refreshes. Servers that rotate refresh
+     * tokens revoke the whole grant when an old one is reused, so a second
+     * refresher would sign the owner out everywhere; any other machine uses
+     * the synced token while it is valid, then waits for the owner's next one.
      */
     const accessToken = (id: IntegrationId, rejected?: string) =>
       Effect.gen(function* () {
@@ -791,10 +921,19 @@ const make = (options: IntegrationsOptions = {}) =>
         const nowMs = yield* Clock.currentTimeMillis;
         const expired = live.expiresAt !== null && live.expiresAt <= nowMs;
         const expiring = live.expiresAt !== null && live.expiresAt - REFRESH_SKEW_MS <= nowMs;
+        if (live.refreshOwner !== peers.self) {
+          if (live.accessToken !== rejected && !expired) return live.accessToken;
+          // Nothing can renew a grant without a refresh token, so waiting would never end.
+          if (live.refreshToken === undefined) {
+            yield* markNeedsSignIn(integration, "The sign-in expired. Sign in again.");
+            return yield* signInRequired("authorize");
+          }
+          return yield* waitForRefreshOwner(live.refreshOwner);
+        }
         if (live.accessToken !== rejected && !expiring) return live.accessToken;
         if (live.refreshToken === undefined) {
           if (live.accessToken !== rejected && !expired) return live.accessToken;
-          yield* markNeedsSignIn(integration, "The sign-in expired. Sign in again.");
+          yield* retireGrant(integration, "The sign-in expired. Sign in again.");
           return yield* signInRequired("authorize");
         }
         const oauth = yield* oauthClient(
@@ -813,10 +952,7 @@ const make = (options: IntegrationsOptions = {}) =>
           .pipe(Effect.result);
         if (refreshed._tag === "Failure") {
           if (refreshed.failure.revoked) {
-            yield* markNeedsSignIn(
-              integration,
-              "The sign-in was revoked or expired. Sign in again.",
-            );
+            yield* retireGrant(integration, "The sign-in was revoked or expired. Sign in again.");
             return yield* signInRequired("refresh");
           }
           return yield* new IntegrationError({
@@ -826,26 +962,88 @@ const make = (options: IntegrationsOptions = {}) =>
           });
         }
         const tokens = refreshed.success;
-        const itemId = yield* tokenStore.write({
+        // Through the vault, the new tokens reseal and reach every machine sharing it.
+        const written = yield* tokenStore.write({
           itemId: live.itemId,
           name: tokenItemName(integration),
           label: `${integrationTitle(integration)} sign-in`,
           host: new URL(integration.url).hostname,
           tokens: { ...tokens, clientSecret: live.clientSecret },
+          attachment: signInAttachment(id, {
+            server: state.server,
+            registration: state.registration,
+            expiresAt: tokens.expiresAt,
+            refreshOwner: live.refreshOwner,
+          }),
         });
         liveTokens.set(id, {
           ...tokens,
           clientSecret: live.clientSecret,
-          itemId,
+          itemId: written.itemId,
+          revision: written.revision,
           expiresAt: tokens.expiresAt,
+          refreshOwner: live.refreshOwner,
         });
         yield* persistState(id, (current) => ({
           ...current,
           signedIn: true,
-          tokenItemId: itemId,
+          tokenItemId: written.itemId,
           expiresAt: tokens.expiresAt,
+          refreshOwner: live.refreshOwner,
         }));
         return tokens.accessToken;
+      });
+
+    /**
+     * Refreshes a sign-in this machine owns the refresh of but has no
+     * integration for yet, e.g. a spoke's sign-in on a hub its definition has
+     * not reached. Only a registered client can: a configured client's secret
+     * lives with the definition.
+     */
+    const refreshDetached = (signIn: Tokens.AttachedSignIn) =>
+      Effect.gen(function* () {
+        const registration = signIn.attachment.registration;
+        if (registration === undefined) return;
+        const stored = yield* tokenStore.read(signIn.item.id);
+        if (Option.isNone(stored)) return;
+        const { tokens: current, attachment } = stored.value;
+        const nowMs = yield* Clock.currentTimeMillis;
+        if (
+          attachment === undefined ||
+          attachment.refreshOwner !== peers.self ||
+          current.refreshToken === undefined ||
+          attachment.expiresAt === null ||
+          attachment.expiresAt - REFRESH_SKEW_MS > nowMs
+        )
+          return;
+        const refreshed = yield* protocol
+          .refresh({
+            server: attachment.server,
+            client: {
+              clientId: registration.clientId,
+              clientSecret: current.clientSecret,
+              authMethod: registration.authMethod,
+            },
+            refreshToken: current.refreshToken,
+            nowMs,
+          })
+          .pipe(Effect.result);
+        if (refreshed._tag === "Failure") {
+          if (refreshed.failure.revoked) return yield* tokenStore.clearGrant(signIn.item.id);
+          return yield* new IntegrationError({
+            operation: "refresh",
+            reason: "upstream_error",
+            cause: refreshed.failure.message,
+          });
+        }
+        yield* tokenStore.write({
+          itemId: signIn.item.id,
+          name: signIn.item.name,
+          label: signIn.item.label ?? signIn.item.name,
+          host: signIn.item.allowedDomains[0] ?? "",
+          tokens: { ...refreshed.success, clientSecret: current.clientSecret },
+          attachment: { ...attachment, expiresAt: refreshed.success.expiresAt },
+        });
       });
 
     /** A streamable-HTTP JSON-RPC message to the integration, with its resolved headers. */
@@ -999,11 +1197,10 @@ const make = (options: IntegrationsOptions = {}) =>
                 Effect.flatMap((fresh) =>
                   exchange(integration, method, params, labelId, fresh).pipe(
                     Effect.tapError((error) =>
-                      error.reason === "sign_in_required"
-                        ? markNeedsSignIn(
-                            integration,
-                            "The server refused the sign-in. Sign in again.",
-                          )
+                      // A machine that does not refresh this grant leaves that call to its owner.
+                      error.reason === "sign_in_required" &&
+                      (liveTokens.get(integration.id)?.refreshOwner ?? peers.self) === peers.self
+                        ? retireGrant(integration, "The server refused the sign-in. Sign in again.")
                         : Effect.void,
                     ),
                   ),
@@ -1028,10 +1225,11 @@ const make = (options: IntegrationsOptions = {}) =>
           );
         }),
         Effect.tapError((error) =>
-          // A refused sign-in recorded its own, more specific status.
+          // A refused sign-in recorded its own, more specific status; waiting on
+          // another machine's refresh is a status of its own.
           error.reason === "not_found" ||
           error.reason === "disabled" ||
-          error.reason === "sign_in_required"
+          (error.reason === "sign_in_required" && refreshWaitMessage(error) === undefined)
             ? Effect.void
             : recordCheck(integration, error),
         ),
@@ -1236,6 +1434,127 @@ const make = (options: IntegrationsOptions = {}) =>
         Effect.mapError(failure("write", "storage")),
       );
 
+    const adoptSyncedSignIns: Integrations["Service"]["adoptSyncedSignIns"] = (only) =>
+      Effect.gen(function* () {
+        // Local integrations sign in per machine; their sign-ins never enter the vault.
+        const remote = (yield* rows()).filter(
+          (integration) =>
+            integration.transport !== "local" &&
+            usesOAuth(integration) &&
+            (only === undefined || integration.id === only),
+        );
+        if (remote.length === 0) return;
+        const attached = yield* tokenStore.attached;
+        const nowMs = yield* Clock.currentTimeMillis;
+        let changed = false;
+        for (const { id } of remote) {
+          const adopted = yield* Effect.gen(function* () {
+            const integration = yield* getById(id);
+            const state = integration.oauthState;
+            if (state?.signedIn && state.tokenItemId !== undefined) {
+              const pointed = attached.find((signIn) => signIn.item.id === state.tokenItemId);
+              // An item from before sign-ins synced has no attachment; it only has to exist.
+              const usable =
+                pointed !== undefined
+                  ? pointed.hasAccessToken
+                  : Option.isSome(yield* tokenStore.revision(state.tokenItemId));
+              if (usable) return false;
+            }
+            const next = attached.find((signIn) => adoptable(integration, signIn, nowMs));
+            if (next === undefined) {
+              // Signed out elsewhere, or the item was deleted: only a new sign-in helps.
+              if (state?.signedIn)
+                yield* markNeedsSignIn(integration, "The sign-in was removed. Sign in again.");
+              return false;
+            }
+            liveTokens.delete(id);
+            yield* persistState(id, () => ({
+              signedIn: true,
+              server: next.attachment.server,
+              ...(next.attachment.registration === undefined
+                ? {}
+                : { registration: next.attachment.registration }),
+              tokenItemId: next.item.id,
+              expiresAt: next.attachment.expiresAt,
+              refreshOwner: next.attachment.refreshOwner,
+            }));
+            yield* Ref.update(checks, (current) => {
+              const updated = new Map(current);
+              updated.delete(id);
+              return updated;
+            });
+            return true;
+          }).pipe(integrationLock(id).withPermits(1));
+          changed = changed || adopted;
+        }
+        if (changed) yield* notify;
+      }).pipe(
+        adoptPermit.withPermits(1),
+        Effect.mapError(failure("adopt synced sign-ins", "storage")),
+        Effect.withSpan("Integrations.adoptSyncedSignIns"),
+      );
+
+    const refreshSharedSignIns: Integrations["Service"]["refreshSharedSignIns"] = Effect.gen(
+      function* () {
+        if (!(yield* peers.sharing)) return;
+        const nowMs = yield* Clock.currentTimeMillis;
+        const due = (yield* tokenStore.attached).filter(
+          ({ attachment, hasAccessToken, hasRefreshToken }) =>
+            attachment.refreshOwner === peers.self &&
+            hasAccessToken &&
+            hasRefreshToken &&
+            attachment.expiresAt !== null &&
+            attachment.expiresAt - REFRESH_SKEW_MS <= nowMs,
+        );
+        if (due.length === 0) return;
+        const all = yield* rows();
+        for (const signIn of due) {
+          const id = IntegrationId.make(signIn.attachment.integrationId);
+          const integration = all.find((entry) => entry.id === id);
+          const signsIn =
+            integration !== undefined &&
+            integration.transport !== "local" &&
+            usesOAuth(integration) &&
+            integration.oauthState?.signedIn === true &&
+            integration.oauthState.tokenItemId === signIn.item.id;
+          // An integration here that uses another item, or none yet, is adoption's to settle.
+          if (integration !== undefined && !signsIn) continue;
+          yield* (signsIn ? accessToken(id).pipe(Effect.asVoid) : refreshDetached(signIn)).pipe(
+            integrationLock(id).withPermits(1),
+            Effect.catch((error) =>
+              Effect.logWarning("Could not refresh a shared integration sign-in", {
+                reason: error.reason,
+              }),
+            ),
+          );
+        }
+      },
+    ).pipe(
+      Effect.catch((error) =>
+        Effect.logWarning("Could not check shared integration sign-ins", { reason: error.reason }),
+      ),
+      Effect.withSpan("Integrations.refreshSharedSignIns"),
+    );
+
+    // Sign-ins that arrive through vault sync, and removals, apply here as they land.
+    yield* tokenStore.syncedChanges.pipe(
+      Stream.runForEach((change) =>
+        Effect.sync(() => {
+          for (const [id, live] of liveTokens)
+            if (live.itemId === change.itemId) liveTokens.delete(id);
+        }).pipe(
+          Effect.andThen(adoptSyncedSignIns()),
+          Effect.catch((error) =>
+            Effect.logWarning("Could not apply a synced integration sign-in", {
+              reason: error.reason,
+            }),
+          ),
+        ),
+      ),
+      Effect.forkScoped,
+    );
+    yield* adoptSyncedSignIns().pipe(Effect.ignore);
+
     if (Option.isSome(local)) {
       yield* rows().pipe(
         Effect.flatMap((all) =>
@@ -1363,6 +1682,8 @@ const make = (options: IntegrationsOptions = {}) =>
           if (integration.transport === "local" && Option.isSome(local))
             yield* local.value.start(integration).pipe(Effect.ignore);
           yield* notify;
+          // A sign-in for this id may already have arrived through the vault.
+          yield* adoptSyncedSignIns(integration.id).pipe(Effect.ignore);
           return { integration: redactIntegration(integration) };
         }).pipe(Effect.mapError(failure("create", "storage"))),
       update: (masked, options) =>
@@ -1546,11 +1867,15 @@ const make = (options: IntegrationsOptions = {}) =>
             })),
             Effect.catch((error: IntegrationError) =>
               Effect.succeed<IntegrationTestResult>({
-                status: error.reason === "sign_in_required" ? "needs_sign_in" : "disconnected",
+                status:
+                  error.reason === "sign_in_required" && refreshWaitMessage(error) === undefined
+                    ? "needs_sign_in"
+                    : "disconnected",
                 toolCount: 0,
                 message:
-                  error.reason === "upstream_error" && typeof error.cause === "string"
-                    ? checkMessage(error.reason, error.cause)
+                  (error.reason === "upstream_error" && typeof error.cause === "string") ||
+                  refreshWaitMessage(error) !== undefined
+                    ? checkMessage(error)
                     : `Could not connect (${error.reason}).`,
               }),
             ),
@@ -1738,6 +2063,7 @@ const make = (options: IntegrationsOptions = {}) =>
           if (
             !integration.enabled ||
             !usesOAuth(integration) ||
+            integration.transport === "local" ||
             definitionKey(integration) !== pending.definition
           )
             return yield* rejected;
@@ -1753,16 +2079,13 @@ const make = (options: IntegrationsOptions = {}) =>
             return yield* rejected;
           }
           const previous = integration.oauthState;
-          const stored =
-            previous?.tokenItemId === undefined
-              ? Option.none<Tokens.StoredTokens>()
-              : yield* tokenStore.read(previous.tokenItemId);
           // A reused registration's secret is the one stored with the earlier sign-in.
           const clientSecret =
             pending.newClientSecret ??
             (pending.registration !== undefined &&
-            pending.registration.clientId === previous?.registration?.clientId
-              ? Option.getOrUndefined(stored)?.clientSecret
+            previous?.tokenItemId !== undefined &&
+            pending.registration.clientId === previous.registration?.clientId
+              ? yield* tokenStore.clientSecret(previous.tokenItemId)
               : undefined);
           const oauth = yield* oauthClient(
             integration,
@@ -1789,6 +2112,8 @@ const make = (options: IntegrationsOptions = {}) =>
                   }),
               ),
             );
+          // A new sign-in anywhere replaces the shared item and picks its refresher afresh.
+          const refreshOwner = yield* peers.defaultRefreshOwner;
           // The exchange does not block edits. Only a current definition may commit
           // its result; stale tokens never enter the vault or an upstream request.
           yield* integrationLock(integration.id).withPermits(1)(
@@ -1796,18 +2121,27 @@ const make = (options: IntegrationsOptions = {}) =>
               const current = yield* getById(integration.id);
               if (!current.enabled || definitionKey(current) !== pending.definition)
                 return yield* rejected;
-              const itemId = yield* tokenStore.write({
-                itemId: previous?.tokenItemId,
+              // Adopted from another machine meanwhile: replace that item, not a second one.
+              const { itemId, revision } = yield* tokenStore.write({
+                itemId: current.oauthState?.tokenItemId ?? previous?.tokenItemId,
                 name: tokenItemName(integration),
                 label: `${integrationTitle(integration)} sign-in`,
                 host: new URL(integration.url).hostname,
                 tokens: { ...tokens, clientSecret },
+                attachment: signInAttachment(integration.id, {
+                  server: pending.server,
+                  registration: pending.registration,
+                  expiresAt: tokens.expiresAt,
+                  refreshOwner,
+                }),
               });
               liveTokens.set(integration.id, {
                 ...tokens,
                 clientSecret,
                 itemId,
+                revision,
                 expiresAt: tokens.expiresAt,
+                refreshOwner,
               });
               yield* persistState(
                 integration.id,
@@ -1819,6 +2153,7 @@ const make = (options: IntegrationsOptions = {}) =>
                     : { registration: pending.registration }),
                   tokenItemId: itemId,
                   expiresAt: tokens.expiresAt,
+                  refreshOwner,
                 }),
                 new URL(pending.redirectUri).origin,
                 { signedInAt: yield* now, signedInViaAgent: pending.fromAgent },
@@ -1889,6 +2224,8 @@ const make = (options: IntegrationsOptions = {}) =>
             .pipe(Effect.option);
           return Option.isSome(signIn) ? { integration, signIn: signIn.value } : { integration };
         }),
+      adoptSyncedSignIns,
+      refreshSharedSignIns,
     });
     return service;
   });
@@ -1898,7 +2235,8 @@ type Requirements =
   | Crypto.Crypto
   | HttpClient.HttpClient
   | Credentials.IntegrationCredentials
-  | Tokens.IntegrationTokens;
+  | Tokens.IntegrationTokens
+  | IntegrationSyncPeers;
 
 export const layerWith = (
   options: IntegrationsOptions,
