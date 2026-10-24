@@ -544,6 +544,9 @@ const layerProductionBase = Layer.mergeAll(
   layerManagedProjectFoldersProvided,
   layerThreadLaunchProvided,
   layerRepositoryCheckoutProvided,
+  RepositoryCheckout.layerRelocation.pipe(
+    Layer.provide(Layer.mergeAll(layerRepositoryCheckoutProvided, layerProjectLabelsProvided)),
+  ),
   layerWorkHandoffProvided,
   layerThreadLifecycleProvided,
   layerAgentsProvided,

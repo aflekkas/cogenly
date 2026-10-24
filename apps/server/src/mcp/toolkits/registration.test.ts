@@ -558,6 +558,7 @@ const smokeCases = [
       "project_label_unlink_repository",
       "project_label_clone_repository",
       "project_label_remove_checkout",
+      "project_label_move_repository",
       "project_label_file_thread",
       "thread_move_project_folder",
       "thread_set_project_labels",

@@ -1680,6 +1680,8 @@ const makeWsRpcHandlers = (
       [WS_METHODS.projectLabelsCheckoutRepository]: (input) =>
         repositoryCheckout.checkoutRepository(input),
       [WS_METHODS.projectLabelsRemoveCheckout]: (input) => repositoryCheckout.removeCheckout(input),
+      [WS_METHODS.projectLabelsAdoptRepository]: (input) =>
+        repositoryCheckout.adoptRepository(input),
       [WS_METHODS.workStart]: (input) => workHandoff.start(input),
       [WS_METHODS.agentsApprovalsList]: (input) => agentWorkspace.listApprovals(input),
       [WS_METHODS.agentsRequestApproval]: (input) =>

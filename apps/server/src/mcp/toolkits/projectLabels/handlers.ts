@@ -56,6 +56,12 @@ const cloneFailure = (
         message: error._tag === "SourceControlRepositoryError" ? error.detail : error.message,
       });
 export const layer = McpToolAccess.toLayer(ProjectLabelsToolkit, {
+  project_label_move_repository: McpToolAccess.writesEnvironment((input) =>
+    Effect.gen(function* () {
+      const checkouts = yield* Checkout.RepositoryCheckout;
+      return yield* checkouts.adoptRepository(input).pipe(Effect.mapError(checkoutFailure));
+    }),
+  ),
   project_label_remove_checkout: McpToolAccess.writesEnvironment((input) =>
     Effect.gen(function* () {
       const checkouts = yield* Checkout.RepositoryCheckout;

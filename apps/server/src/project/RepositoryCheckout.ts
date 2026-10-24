@@ -10,7 +10,11 @@ import {
   type ProjectLabelCheckoutRepositoryInput,
   type ProjectLabelCheckoutRepositoryResult,
   type ProjectLabelId,
+  type ProjectLabelAdoptRepositoryInput,
+  type ProjectLabelAdoptRepositoryResult,
   type ProjectLabelRemoveCheckoutInput,
+  type ProjectLabelWithRepositories,
+  PROJECT_REPOSITORIES_SEGMENT,
   type ProjectLabelRemoveCheckoutResult,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
@@ -84,6 +88,26 @@ export class RepositoryCheckout extends Context.Service<
     readonly removeCheckout: (
       input: ProjectLabelRemoveCheckoutInput,
     ) => Effect.Effect<ProjectLabelRemoveCheckoutResult, RepositoryCheckoutError>;
+    /**
+     * Moves a linked repository's checkout to `<project>/repos/<directoryName>`
+     * (from anywhere: `~/Documents/Projects/spawn-platform` becomes
+     * `<project>/repos/platform`), runs `git worktree repair` so its
+     * worktrees follow, and repoints the record's workspace root. Refuses
+     * while a turn runs in it or a worktree lives inside it.
+     */
+    readonly adoptRepository: (
+      input: ProjectLabelAdoptRepositoryInput,
+    ) => Effect.Effect<ProjectLabelAdoptRepositoryResult, RepositoryCheckoutError>;
+    /**
+     * Re-derives where the project's checkouts belong after its owner
+     * changed: every checkout already under its `repos/` that no longer sits
+     * at its directory name is moved there through adoptRepository. Checkouts
+     * kept outside the project folder are left for the user to move. A
+     * repository that cannot move now is skipped and logged.
+     */
+    readonly relocateProjectRepositories: (
+      labelId: ProjectLabelId,
+    ) => Effect.Effect<{ readonly moved: ReadonlyArray<ProjectId> }, RepositoryCheckoutError>;
   }
 >()("cogenly-server/project/RepositoryCheckout") {}
 
@@ -658,12 +682,198 @@ const make = Effect.gen(function* () {
       }),
     );
 
+  const isInside = (candidate: string, dir: string) => {
+    const relative = path.relative(path.resolve(dir), path.resolve(candidate));
+    return relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative);
+  };
+
+  const adoptLink = Effect.fn("RepositoryCheckout.adoptLink")(function* (
+    label: ProjectLabelWithRepositories,
+    repositoryId: ProjectId,
+  ) {
+    const link = label.repositories?.find((candidate) => candidate.repositoryId === repositoryId);
+    if (link === undefined || isRemoteRepositoryPlaceholder(repositoryId))
+      return yield* new RepositoryCheckoutError({
+        repositoryId,
+        repositoryName: link?.directoryName ?? repositoryId,
+        reason: "not_linked",
+      });
+    const project = Option.getOrUndefined(
+      yield* projects
+        .getById(repositoryId)
+        .pipe(Effect.mapError(storage(repositoryId, repositoryId))),
+    );
+    const repositoryName =
+      link.directoryName ??
+      (project && repositoryDirectoryName(project.workspaceRoot)) ??
+      repositoryId;
+    const fail = storage(repositoryId, repositoryName);
+    const refuse = (reason: RepositoryCheckoutError["reason"], detail?: string) =>
+      new RepositoryCheckoutError({
+        repositoryId,
+        repositoryName,
+        reason,
+        ...(detail === undefined ? {} : { detail }),
+      });
+    if (project === undefined) return yield* refuse("not_found");
+    const { dir } = yield* folders.ensureForLabel(label).pipe(Effect.mapError(fail));
+    const source = path.resolve(project.workspaceRoot);
+    const destination = path.resolve(projectRepositoryDirectory(dir, repositoryName, path));
+    if (source === destination) return { moved: false, workspaceRoot: destination };
+    yield* assertIdle(repositoryId, repositoryName);
+    if ((yield* clones.get(repositoryId))?.phase === "running")
+      return yield* refuse("move_failed", "it is still cloning");
+    const own = yield* hasOwnCheckout(source);
+    if (!own && (yield* entriesOf(source)).length === 0)
+      return yield* refuse("move_failed", "there is no checkout on this machine to move");
+    // A worktree inside the folder would move with it under git's feet.
+    const threadWorktrees = yield* sql<{ readonly worktree_path: string }>`
+      SELECT json_extract(payload_json, '$.worktreePath') AS worktree_path
+      FROM orchestration_v2_projection_threads
+      WHERE deleted_at IS NULL AND json_extract(payload_json, '$.worktreePath') IS NOT NULL
+    `.pipe(Effect.mapError(fail));
+    const gitWorktrees = own
+      ? (yield* gitOut(source, "RepositoryCheckout.worktrees", [
+          "worktree",
+          "list",
+          "--porcelain",
+        ]).pipe(Effect.mapError(fail)))
+          .split("\n")
+          .flatMap((line) => (line.startsWith("worktree ") ? [line.slice("worktree ".length)] : []))
+      : [];
+    // git reports real paths; the record may hold a symlinked one.
+    const realSource = yield* fileSystem.realPath(source).pipe(Effect.orElseSucceed(() => source));
+    if (
+      [...threadWorktrees.map((row) => row.worktree_path), ...gitWorktrees].some(
+        (worktree) => isInside(worktree, source) || isInside(worktree, realSource),
+      )
+    )
+      return yield* refuse("worktrees_inside");
+    if (yield* fileSystem.exists(destination).pipe(Effect.orElseSucceed(() => false))) {
+      if ((yield* entriesOf(destination)).length > 0)
+        return yield* refuse("destination_taken", destination);
+      yield* fileSystem.remove(destination, { recursive: true }).pipe(Effect.mapError(fail));
+    }
+    yield* fileSystem
+      .makeDirectory(path.dirname(destination), { recursive: true })
+      .pipe(Effect.mapError(fail));
+    yield* fileSystem
+      .rename(source, destination)
+      .pipe(Effect.mapError((cause) => refuse("move_failed", cause.message)));
+    // Linked worktrees point back at the main checkout's `.git`; repair
+    // rewrites both sides for the new location.
+    if (own)
+      yield* gitOut(destination, "RepositoryCheckout.repairWorktrees", ["worktree", "repair"]).pipe(
+        Effect.ignoreCause({ log: true }),
+      );
+    const commandSuffix = yield* crypto.randomUUIDv4().pipe(Effect.mapError(fail));
+    yield* projects
+      .update({
+        commandId: CommandId.make(`repository-adopt:${repositoryId}:${commandSuffix}`),
+        projectId: repositoryId,
+        workspaceRoot: destination,
+      })
+      .pipe(
+        // The record must never point at a folder that is not there: put the
+        // checkout back where the record still says it is.
+        Effect.tapError(() => fileSystem.rename(destination, source).pipe(Effect.ignore)),
+        Effect.mapError((cause) => refuse("move_failed", cause.message)),
+      );
+    if (Option.isSome(identities)) {
+      yield* identities.value.resolve(source, { refresh: true }).pipe(Effect.ignore);
+      yield* identities.value.resolve(destination, { refresh: true }).pipe(Effect.ignore);
+    }
+    yield* labels.notifyCheckoutChanged;
+    return { moved: true, workspaceRoot: destination };
+  });
+
+  const readLabel = (labelId: ProjectLabelId) =>
+    labels.read(labelId).pipe(
+      Effect.map(({ label }) => label),
+      Effect.mapError(
+        (cause) =>
+          new RepositoryCheckoutError({
+            repositoryId: ProjectId.make(labelId),
+            repositoryName: labelId,
+            reason: cause.reason === "not_found" ? "not_found" : "storage",
+            cause,
+          }),
+      ),
+    );
+
+  const adoptRepository: RepositoryCheckout["Service"]["adoptRepository"] = (input) =>
+    checkoutLock.withPermits(1)(
+      readLabel(input.labelId).pipe(
+        Effect.flatMap((label) => adoptLink(label, input.repositoryId)),
+      ),
+    );
+
+  const relocateProjectRepositories: RepositoryCheckout["Service"]["relocateProjectRepositories"] =
+    (labelId) =>
+      checkoutLock.withPermits(1)(
+        Effect.gen(function* () {
+          const label = yield* readLabel(labelId);
+          const { dir } = yield* folders
+            .dirForLabel(label)
+            .pipe(Effect.mapError(storage(ProjectId.make(labelId), label.name)));
+          const repos = path.join(dir, PROJECT_REPOSITORIES_SEGMENT);
+          const moved: Array<ProjectId> = [];
+          for (const link of label.repositories ?? []) {
+            if (isRemoteRepositoryPlaceholder(link.repositoryId) || link.directoryName === null)
+              continue;
+            const project = Option.getOrUndefined(
+              yield* projects.getById(link.repositoryId).pipe(Effect.orElseSucceed(Option.none)),
+            );
+            if (project === undefined || !isInside(project.workspaceRoot, repos)) continue;
+            const result = yield* adoptLink(label, link.repositoryId).pipe(
+              Effect.tapError((error) =>
+                Effect.logWarning("Project repository could not follow its new folder name", {
+                  repositoryId: link.repositoryId,
+                  reason: error.reason,
+                }),
+              ),
+              Effect.orElseSucceed(() => ({ moved: false })),
+            );
+            if (result.moved) moved.push(link.repositoryId);
+          }
+          return { moved };
+        }),
+      );
+
   return RepositoryCheckout.of({
     ensureCheckout,
     checkoutRepository,
     resolveRepository,
     removeCheckout,
+    adoptRepository,
+    relocateProjectRepositories,
   });
 });
 
 export const layer = Layer.effect(RepositoryCheckout, make);
+
+/**
+ * Keeps checkouts inside project folders where their derived names point:
+ * after any project change (an owner linked or unlinked here, or synced from
+ * another machine), every project's in-folder checkouts are relocated.
+ */
+export const layerRelocation = Layer.effectDiscard(
+  Effect.gen(function* () {
+    const checkouts = yield* RepositoryCheckout;
+    const labels = yield* ProjectLabelService.ProjectLabelService;
+    const changes = yield* labels.subscribeChanges;
+    yield* changes.pipe(
+      Stream.runForEach(() =>
+        labels.list().pipe(
+          Effect.flatMap(({ labels: all }) =>
+            Effect.forEach(all, (label) => checkouts.relocateProjectRepositories(label.id), {
+              discard: true,
+            }),
+          ),
+          Effect.ignoreCause({ log: true }),
+        ),
+      ),
+      Effect.forkScoped,
+    );
+  }),
+);

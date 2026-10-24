@@ -5,6 +5,8 @@ import {
   ProjectLabelCloneRepositoryInput,
   ProjectCloneStartResult,
   ProjectLabelCreateInput,
+  ProjectLabelAdoptRepositoryInput,
+  ProjectLabelAdoptRepositoryResult,
   ProjectLabelRemoveCheckoutInput,
   ProjectLabelRemoveCheckoutResult,
   ProjectLabelDeleteResult,
@@ -176,4 +178,12 @@ export const ProjectLabelsToolkit = Toolkit.make(
       "Delete this machine's checkout of a repository the project links, keeping the link, the repository record and its threads: checkout then reads missing, and project_label_clone_repository with its remote brings it back. Refused for a repository with no remote, while a turn runs in it, or while it holds work found nowhere else (other worktrees, uncommitted or stashed changes, unpushed commits). Confirm with the user first.",
     dependencies: [...shared.dependencies, Checkout.RepositoryCheckout],
   }).annotate(Tool.Destructive, true),
+  Tool.make("project_label_move_repository", {
+    ...shared,
+    parameters: ProjectLabelAdoptRepositoryInput,
+    success: ProjectLabelAdoptRepositoryResult,
+    description:
+      "Move a linked repository's checkout on this machine into its place in the project folder, <project>/repos/<directoryName> (repos/<repo> for the project's own GitHub owner, repos/<owner>/<repo> for any other), renaming a checkout kept elsewhere under another folder name. Its worktrees are repaired and its record and threads follow. Refused while a turn runs in it or a worktree lives inside it; returns moved:false when it is already in place.",
+    dependencies: [...shared.dependencies, Checkout.RepositoryCheckout],
+  }).annotate(Tool.Destructive, false),
 );

@@ -427,7 +427,16 @@ describe("RepositoryCheckout.ensureCheckout", () => {
  * a project record lands in `projection_projects` like ProjectService does,
  * and the project folder is `<root>/<Project>`.
  */
-function checkoutHarness(projectDir: string, box: Pick<Box, "cloneCalls">) {
+function checkoutHarness(
+  projectDir: string,
+  box: Pick<Box, "cloneCalls">,
+  options?: {
+    /** Runs the relocation reactor too. */
+    readonly relocation?: boolean;
+    /** Told about every workspace-root update, like the record's event. */
+    readonly onMoved?: (projectId: ProjectId, workspaceRoot: string) => Effect.Effect<void>;
+  },
+) {
   const database = Sqlite.layerMemory.pipe(Layer.provide(NodeServices.layer));
   const persistence = Events.layer.pipe(Layer.provideMerge(database));
   const labels = ProjectLabelService.layer.pipe(
@@ -460,11 +469,20 @@ function checkoutHarness(projectDir: string, box: Pick<Box, "cloneCalls">) {
             return {} as never;
           }),
         getById: (id) => getById(id) as never,
-        update: () => Effect.succeed({} as never),
+        update: (input) =>
+          Effect.gen(function* () {
+            if (input.workspaceRoot !== undefined) {
+              yield* sql`UPDATE projection_projects SET workspace_root = ${input.workspaceRoot} WHERE project_id = ${input.projectId}`.pipe(
+                Effect.orDie,
+              );
+              if (options?.onMoved) yield* options.onMoved(input.projectId, input.workspaceRoot);
+            }
+            return {} as never;
+          }),
       });
     }),
   );
-  return RepositoryCheckout.layer.pipe(
+  const checkout = RepositoryCheckout.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
         projects,
@@ -476,6 +494,8 @@ function checkoutHarness(projectDir: string, box: Pick<Box, "cloneCalls">) {
               NodeFS.mkdirSync(projectDir, { recursive: true });
               return { dir: projectDir, dirName: NodePath.basename(projectDir) };
             }),
+          dirForLabel: () =>
+            Effect.succeed({ dir: projectDir, dirName: NodePath.basename(projectDir) }),
         }),
       ),
     ),
@@ -483,6 +503,9 @@ function checkoutHarness(projectDir: string, box: Pick<Box, "cloneCalls">) {
     Layer.provideMerge(labels),
     Layer.provideMerge(NodeServices.layer),
   );
+  return options?.relocation
+    ? RepositoryCheckout.layerRelocation.pipe(Layer.provideMerge(checkout))
+    : checkout;
 }
 
 /** A project that links `remote` from another machine: only the placeholder exists here. */
@@ -710,5 +733,149 @@ describe("RepositoryCheckout.removeCheckout", () => {
       );
       expect(error).toMatchObject({ reason: "thread_active" });
     }).pipe(Effect.provide(checkoutHarness(projectDir, { cloneCalls: 0 })));
+  });
+});
+
+describe("RepositoryCheckout.adoptRepository", () => {
+  /** A checkout of `bare` kept outside any project folder, linked into a project. */
+  const linkedElsewhere = (bare: string, folder: string) =>
+    Effect.gen(function* () {
+      const labels = yield* ProjectLabelService.ProjectLabelService;
+      const sql = yield* SqlClient.SqlClient;
+      const elsewhere = NodePath.join(tempRoot(), folder);
+      git(NodePath.dirname(elsewhere), ["clone", bare, folder]);
+      const repositoryId = ProjectId.make(`repo:${folder}`);
+      yield* sql`INSERT INTO projection_projects(project_id, title, workspace_root, scripts_json, created_at, updated_at) VALUES (${repositoryId}, ${folder}, ${elsewhere}, '[]', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`;
+      const { label } = yield* labels.create({ name: "Spawn" });
+      yield* sql`INSERT INTO label_repositories(label_id, repository_id, remote, directory_name) VALUES (${label.id}, ${repositoryId}, ${bare}, ${folder})`;
+      return { label, repositoryId, elsewhere };
+    });
+
+  it.effect("renames a checkout kept elsewhere into repos/<repo>, worktrees and all", () => {
+    const bare = makeBareRemote();
+    const projectDir = NodePath.join(tempRoot(), "Spawn");
+    return Effect.gen(function* () {
+      const { label, repositoryId, elsewhere } = yield* linkedElsewhere(bare, "spawn-smile");
+      const worktree = NodePath.join(tempRoot(), "fix-login");
+      git(elsewhere, ["worktree", "add", worktree, "-b", "fix-login"]);
+      const checkouts = yield* RepositoryCheckout.RepositoryCheckout;
+      const labels = yield* ProjectLabelService.ProjectLabelService;
+      const destination = NodePath.join(projectDir, "repos", "smile-express");
+      // The folder follows the remote's name, not the old checkout's.
+      expect((yield* labels.read(label.id)).label.repositories?.[0]?.directoryName).toBe(
+        "smile-express",
+      );
+      expect(yield* checkouts.adoptRepository({ labelId: label.id, repositoryId })).toEqual({
+        moved: true,
+        workspaceRoot: destination,
+      });
+      expect(NodeFS.existsSync(elsewhere)).toBe(false);
+      expect(NodeFS.readFileSync(NodePath.join(destination, "README.md"), "utf8")).toBe("hello\n");
+      // The record follows, and the worktree still knows its repository.
+      expect((yield* labels.read(label.id)).label.repositories?.[0]?.checkout).toBe("ready");
+      expect(git(worktree, ["rev-parse", "--git-common-dir"]).toString().trim()).toBe(
+        NodeFS.realpathSync(NodePath.join(destination, ".git")),
+      );
+      // Already in place: nothing to do.
+      expect(yield* checkouts.adoptRepository({ labelId: label.id, repositoryId })).toEqual({
+        moved: false,
+        workspaceRoot: destination,
+      });
+    }).pipe(Effect.provide(checkoutHarness(projectDir, { cloneCalls: 0 })));
+  });
+
+  it.effect("refuses while a worktree lives inside the checkout or a turn runs in it", () => {
+    const bare = makeBareRemote();
+    const projectDir = NodePath.join(tempRoot(), "Spawn");
+    return Effect.gen(function* () {
+      const { label, repositoryId, elsewhere } = yield* linkedElsewhere(bare, "spawn-smile");
+      const checkouts = yield* RepositoryCheckout.RepositoryCheckout;
+      const sql = yield* SqlClient.SqlClient;
+      const attempt = checkouts.adoptRepository({ labelId: label.id, repositoryId }).pipe(
+        Effect.flip,
+        Effect.map((error) => error.reason),
+      );
+      git(elsewhere, ["worktree", "add", NodePath.join(elsewhere, ".inner"), "-b", "inner"]);
+      expect(yield* attempt).toBe("worktrees_inside");
+      git(elsewhere, ["worktree", "remove", NodePath.join(elsewhere, ".inner")]);
+      yield* sql`INSERT INTO orchestration_v2_projection_threads(thread_id, project_id, title, default_provider, runtime_mode, interaction_mode, created_at, updated_at, payload_json) VALUES ('thread:busy', ${repositoryId}, 'Busy', 'codex', 'full-access', 'default', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z', '{}')`;
+      yield* sql`INSERT INTO orchestration_v2_projection_runs(run_id, thread_id, ordinal, provider, status, requested_at, payload_json) VALUES ('run:busy', 'thread:busy', 1, 'codex', 'running', '2026-01-01T00:00:00.000Z', '{}')`;
+      expect(yield* attempt).toBe("thread_active");
+      expect(NodeFS.existsSync(NodePath.join(elsewhere, "README.md"))).toBe(true);
+    }).pipe(Effect.provide(checkoutHarness(projectDir, { cloneCalls: 0 })));
+  });
+});
+
+describe("RepositoryCheckout.relocateProjectRepositories", () => {
+  /**
+   * A project owned by Spawn-Partners with its `platform` already in
+   * `repos/platform`; its remote is a GitHub one so the owner decides the
+   * folder (nothing here talks to GitHub).
+   */
+  const ownedProject = (projectDir: string) =>
+    Effect.gen(function* () {
+      const labels = yield* ProjectLabelService.ProjectLabelService;
+      const sql = yield* SqlClient.SqlClient;
+      const checkout = NodePath.join(projectDir, "repos", "platform");
+      NodeFS.mkdirSync(checkout, { recursive: true });
+      git(checkout, ["init", "--initial-branch=main"]);
+      git(checkout, ["remote", "add", "origin", "https://github.com/spawn-partners/platform.git"]);
+      const repositoryId = ProjectId.make("repo:platform");
+      yield* sql`INSERT INTO projection_projects(project_id, title, workspace_root, scripts_json, created_at, updated_at) VALUES (${repositoryId}, 'platform', ${checkout}, '[]', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`;
+      const { label } = yield* labels.create({ name: "Spawn" });
+      const owner = (name: string) => ({
+        id: label.id,
+        link: { kind: "github-owner" as const, owner: name },
+      });
+      yield* labels.linkSource(owner("Spawn-Partners"));
+      yield* sql`INSERT INTO label_repositories(label_id, repository_id, remote, directory_name) VALUES (${label.id}, ${repositoryId}, 'github.com/spawn-partners/platform', 'platform')`;
+      return { label, repositoryId, owner };
+    });
+
+  it.effect("moves in-folder checkouts to the folders a new owner derives", () => {
+    const projectDir = NodePath.join(tempRoot(), "Spawn");
+    return Effect.gen(function* () {
+      const { label, repositoryId, owner } = yield* ownedProject(projectDir);
+      const labels = yield* ProjectLabelService.ProjectLabelService;
+      const checkouts = yield* RepositoryCheckout.RepositoryCheckout;
+      expect(yield* checkouts.relocateProjectRepositories(label.id)).toEqual({ moved: [] });
+      yield* labels.unlinkSource(owner("Spawn-Partners"));
+      yield* labels.linkSource(owner("bartr-app"));
+      expect(yield* checkouts.relocateProjectRepositories(label.id)).toEqual({
+        moved: [repositoryId],
+      });
+      const moved = NodePath.join(projectDir, "repos", "spawn-partners", "platform");
+      expect(NodeFS.existsSync(NodePath.join(moved, ".git"))).toBe(true);
+      expect(NodeFS.existsSync(NodePath.join(projectDir, "repos", "platform"))).toBe(false);
+      expect((yield* labels.read(label.id)).label.repositories?.[0]).toMatchObject({
+        directoryName: "spawn-partners/platform",
+        checkout: "ready",
+      });
+    }).pipe(Effect.provide(checkoutHarness(projectDir, { cloneCalls: 0 })));
+  });
+
+  it.effect("relocates by itself when the project's owner changes", () => {
+    const projectDir = NodePath.join(tempRoot(), "Spawn");
+    const moved = Deferred.makeUnsafe<string>();
+    return Effect.gen(function* () {
+      const { owner } = yield* ownedProject(projectDir);
+      const labels = yield* ProjectLabelService.ProjectLabelService;
+      yield* labels.unlinkSource(owner("Spawn-Partners"));
+      expect(yield* Deferred.await(moved)).toBe(
+        NodePath.join(projectDir, "repos", "spawn-partners", "platform"),
+      );
+    }).pipe(
+      Effect.provide(
+        checkoutHarness(
+          projectDir,
+          { cloneCalls: 0 },
+          {
+            relocation: true,
+            onMoved: (_, workspaceRoot) =>
+              Deferred.succeed(moved, workspaceRoot).pipe(Effect.asVoid),
+          },
+        ),
+      ),
+    );
   });
 });

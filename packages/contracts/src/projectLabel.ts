@@ -365,6 +365,25 @@ export const ProjectLabelRemoveCheckoutResult = Schema.Struct({
 });
 export type ProjectLabelRemoveCheckoutResult = typeof ProjectLabelRemoveCheckoutResult.Type;
 
+/**
+ * Move a linked repository's checkout into its place in the project folder,
+ * `<project>/repos/<directoryName>` (renaming a `spawn-platform` checkout to
+ * `platform`), repairing its worktrees and repointing its record. Refused
+ * while a turn runs in it or a worktree lives inside it; a no-op when it is
+ * already there.
+ */
+export const ProjectLabelAdoptRepositoryInput = Schema.Struct({
+  labelId: ProjectLabelId,
+  repositoryId: ProjectId,
+});
+export type ProjectLabelAdoptRepositoryInput = typeof ProjectLabelAdoptRepositoryInput.Type;
+export const ProjectLabelAdoptRepositoryResult = Schema.Struct({
+  /** False when the checkout was already in place. */
+  moved: Schema.Boolean,
+  workspaceRoot: TrimmedNonEmptyString,
+});
+export type ProjectLabelAdoptRepositoryResult = typeof ProjectLabelAdoptRepositoryResult.Type;
+
 export class RepositoryCheckoutError extends Schema.TaggedError<RepositoryCheckoutError>()(
   "RepositoryCheckoutError",
   {
@@ -380,6 +399,8 @@ export class RepositoryCheckoutError extends Schema.TaggedError<RepositoryChecko
       "uncommitted_changes",
       "unpushed_commits",
       "thread_active",
+      "worktrees_inside",
+      "move_failed",
       "storage",
     ]),
     detail: Schema.optional(Schema.String),
@@ -406,6 +427,10 @@ export class RepositoryCheckoutError extends Schema.TaggedError<RepositoryChecko
         return `${this.repositoryName} has commits that are on no remote; push them first.`;
       case "thread_active":
         return `A turn is running in ${this.repositoryName}; wait for it to finish.`;
+      case "worktrees_inside":
+        return `${this.repositoryName} has a worktree inside its folder; remove it before moving the repository.`;
+      case "move_failed":
+        return `${this.repositoryName} could not be moved${this.detail ? `: ${this.detail}` : ""}.`;
       case "storage":
         return `The checkout for ${this.repositoryName} could not be inspected.`;
     }

@@ -538,6 +538,7 @@ export const WS_METHODS = {
   projectLabelsCloneRepository: "projectLabels.cloneRepository",
   projectLabelsCheckoutRepository: "projectLabels.checkoutRepository",
   projectLabelsRemoveCheckout: "projectLabels.removeCheckout",
+  projectLabelsAdoptRepository: "projectLabels.adoptRepository",
   projectLabelsListResources: "projectLabels.listResources",
   projectLabelsSubscribeResources: "projectLabels.subscribeResources",
   projectLabelsAddResource: "projectLabels.addResource",
@@ -2050,6 +2051,12 @@ const WsProjectLabelsRemoveCheckoutRpc = Rpc.make(WS_METHODS.projectLabelsRemove
   success: ProjectLabels.ProjectLabelRemoveCheckoutResult,
   error: Schema.Union([ProjectLabels.RepositoryCheckoutError, EnvironmentAuthorizationError]),
 });
+// Move a linked repository's checkout into its project folder.
+const WsProjectLabelsAdoptRepositoryRpc = Rpc.make(WS_METHODS.projectLabelsAdoptRepository, {
+  payload: ProjectLabels.ProjectLabelAdoptRepositoryInput,
+  success: ProjectLabels.ProjectLabelAdoptRepositoryResult,
+  error: Schema.Union([ProjectLabels.RepositoryCheckoutError, EnvironmentAuthorizationError]),
+});
 const WsProjectLabelsListResourcesRpc = Rpc.make(WS_METHODS.projectLabelsListResources, {
   payload: ProjectLabels.ProjectLabelKey,
   success: ProjectLabels.ProjectLabelListResourcesResult,
@@ -2592,6 +2599,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectLabelsCloneRepositoryRpc,
   WsProjectLabelsCheckoutRepositoryRpc,
   WsProjectLabelsRemoveCheckoutRpc,
+  WsProjectLabelsAdoptRepositoryRpc,
   WsProjectLabelsListResourcesRpc,
   WsProjectLabelsSubscribeResourcesRpc,
   WsProjectLabelsAddResourceRpc,
