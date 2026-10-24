@@ -469,6 +469,15 @@ function checkoutHarness(
             return {} as never;
           }),
         getById: (id) => getById(id) as never,
+        getByWorkspaceRoot: (workspaceRoot) =>
+          sql<{ project_id: ProjectId }>`
+            SELECT project_id FROM projection_projects WHERE workspace_root = ${workspaceRoot} AND deleted_at IS NULL
+          `.pipe(
+            Effect.orDie,
+            Effect.flatMap((rows) =>
+              rows[0] ? getById(rows[0].project_id) : Effect.succeed(Option.none()),
+            ),
+          ) as never,
         update: (input) =>
           Effect.gen(function* () {
             if (input.workspaceRoot !== undefined) {
@@ -627,6 +636,62 @@ describe("RepositoryCheckout.checkoutRepository", () => {
           "utf8",
         ),
       ).toBe("mine\n");
+    }).pipe(Effect.provide(checkoutHarness(projectDir, box)));
+  });
+
+  /** The state a checkout leaves when binding its new record fails: the record, still the placeholder. */
+  const recordLeftUnbound = (destination: string) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const repositoryId = ProjectId.make("earlier-record");
+      NodeFS.mkdirSync(destination, { recursive: true });
+      yield* sql`INSERT INTO projection_projects(project_id, title, workspace_root, scripts_json, created_at, updated_at) VALUES (${repositoryId}, 'smile-express', ${destination}, '[]', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`;
+      return repositoryId;
+    });
+
+  it.effect("a retry after a failed bind binds the record the clone already made", () => {
+    const bare = makeBareRemote();
+    const projectDir = NodePath.join(tempRoot(), "Spawn");
+    NodeFS.mkdirSync(NodePath.join(projectDir, "repos"), { recursive: true });
+    git(NodePath.join(projectDir, "repos"), ["clone", bare, "smile-express"]);
+    const box = { cloneCalls: 0 };
+    return Effect.gen(function* () {
+      const label = yield* linkFromElsewhere(bare, "smile-express");
+      const earlier = yield* recordLeftUnbound(NodePath.join(projectDir, "repos", "smile-express"));
+      const checkouts = yield* RepositoryCheckout.RepositoryCheckout;
+      const sql = yield* SqlClient.SqlClient;
+      expect(yield* checkouts.checkoutRepository({ labelId: label.id, remote: bare })).toEqual({
+        repositoryId: earlier,
+      });
+      expect(yield* sql`SELECT project_id FROM projection_projects`).toEqual([
+        { project_id: earlier },
+      ]);
+      expect(yield* sql`SELECT repository_id FROM label_repositories`).toEqual([
+        { repository_id: earlier },
+      ]);
+      expect(box.cloneCalls).toBe(0);
+    }).pipe(Effect.provide(checkoutHarness(projectDir, box)));
+  });
+
+  it.effect("a retry after a failed bind and a failed clone clones into that record", () => {
+    const bare = makeBareRemote();
+    const projectDir = NodePath.join(tempRoot(), "Spawn");
+    const box = { cloneCalls: 0 };
+    return Effect.gen(function* () {
+      const label = yield* linkFromElsewhere(bare, "smile-express");
+      const destination = NodePath.join(projectDir, "repos", "smile-express");
+      const earlier = yield* recordLeftUnbound(destination);
+      const checkouts = yield* RepositoryCheckout.RepositoryCheckout;
+      const sql = yield* SqlClient.SqlClient;
+      expect(yield* checkouts.checkoutRepository({ labelId: label.id, remote: bare })).toEqual({
+        repositoryId: earlier,
+      });
+      yield* waitForCloneToSettle(earlier);
+      expect(NodeFS.readFileSync(NodePath.join(destination, "README.md"), "utf8")).toBe("hello\n");
+      expect(yield* sql`SELECT project_id FROM projection_projects`).toEqual([
+        { project_id: earlier },
+      ]);
+      expect(box.cloneCalls).toBe(1);
     }).pipe(Effect.provide(checkoutHarness(projectDir, box)));
   });
 
