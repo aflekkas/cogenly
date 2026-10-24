@@ -2317,7 +2317,16 @@ export default function ChatView(props: ChatViewProps) {
   const serverConfig = activeThread
     ? (activeEnvironment?.serverConfig ?? null)
     : (primaryEnvironment?.serverConfig ?? null);
-  const providerStatuses = serverConfig?.providers ?? EMPTY_PROVIDERS;
+  const machineProviders = useEnvironmentQuery(
+    pickedRunOnMachine !== null && pickedRunOnMachine !== environmentId
+      ? serverEnvironment.machineProviders({
+          environmentId,
+          input: { machine: pickedRunOnMachine },
+        })
+      : null,
+  );
+  const providerStatuses =
+    machineProviders.data?.providers ?? serverConfig?.providers ?? EMPTY_PROVIDERS;
   const selectedProviderByThreadId = composerActiveProvider ?? null;
   const threadProvider =
     activeThread?.modelSelection.instanceId ??

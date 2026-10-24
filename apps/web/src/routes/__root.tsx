@@ -21,6 +21,7 @@ import { AppErrorScreen } from "../components/AppErrorScreen";
 import { AppSidebarLayout } from "../components/AppSidebarLayout";
 import { CommandPalette } from "../components/CommandPalette";
 import { CustomSnoozeDialogHost } from "../components/CustomSnoozeDialog";
+import { LaunchMachineDialog } from "../machines/LaunchMachineDialog";
 import { ConfirmDialogHost } from "../components/ConfirmDialogHost";
 import { KeybindingsConfigWarning } from "../components/KeybindingsConfigWarning";
 import { FirstRunGate } from "../components/onboarding/FirstRunGate";
@@ -224,6 +225,7 @@ function RootRouteView() {
         <ThreadReadCoordinator />
         <ReopenClosedViewShortcut />
         <ConfirmDialogHost />
+        <LaunchMachineDialog />
         <CustomSnoozeDialogHost />
         <SlowRpcRequestToastCoordinator />
         <PermissionUpdateNotice />

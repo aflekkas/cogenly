@@ -7,6 +7,7 @@ import {
 import {
   CommandId,
   type MessageId,
+  type EnvironmentId,
   type ScopedThreadRef,
   WorkHandoffError,
 } from "@t3tools/contracts";
@@ -22,6 +23,7 @@ import * as Schema from "effect/Schema";
 import { type ReactElement, type ReactNode, useCallback, useMemo, useRef, useState } from "react";
 import { create } from "zustand";
 
+import { requestLaunchMachine } from "~/machines/LaunchMachineDialog";
 import { openCommandPalette } from "~/commandPaletteBus";
 import { ProjectFolderIcon } from "~/projectLabels/ProjectFolderMark";
 import {
@@ -110,6 +112,7 @@ const retryCommandIds = new Map<string, CommandId>();
 
 export interface StartWorkRequest {
   readonly threadRef: ScopedThreadRef;
+  readonly machine?: EnvironmentId;
   readonly choice: WorkRepositoryChoice;
   /** The last chat message the Work carries over; absent means the whole chat. */
   readonly throughMessageId?: MessageId;
@@ -127,7 +130,13 @@ export function useStartWork(): (request: StartWorkRequest) => Promise<void> {
   const startWork = useAtomCommand(serverEnvironment.startWork, { reportFailure: false });
   const { openScratchProject } = useScratchProject();
   return useCallback(
-    async ({ threadRef, choice, throughMessageId, announce = false }) => {
+    async function start({
+      threadRef,
+      choice,
+      throughMessageId,
+      announce = false,
+      machine: selectedMachine,
+    }: StartWorkRequest) {
       const key = scopedThreadKey(threadRef);
       if (usePendingStarts.getState().pending.has(key)) return;
       setPending(key, true);
@@ -136,11 +145,13 @@ export function useStartWork(): (request: StartWorkRequest) => Promise<void> {
         : null;
       try {
         const { environmentId } = threadRef;
+        const machine = selectedMachine ?? (await requestLaunchMachine(environmentId));
+        if (machine === null) return;
         // "No repository" is the environment's scratch project, created on first use.
         const targetProjectId =
           choice === NO_REPOSITORY ? (await openScratchProject(environmentId))?.id : choice;
         if (targetProjectId === undefined) return;
-        const attemptKey = `${key}|${throughMessageId ?? ""}|${targetProjectId}`;
+        const attemptKey = `${key}|${throughMessageId ?? ""}|${targetProjectId}|${machine}`;
         const commandId = retryCommandIds.get(attemptKey) ?? CommandId.make(randomUUID());
         retryCommandIds.set(attemptKey, commandId);
         const result = await startWork({
@@ -149,6 +160,7 @@ export function useStartWork(): (request: StartWorkRequest) => Promise<void> {
             commandId,
             sourceThreadId: threadRef.threadId,
             targetProjectId,
+            ...(machine === environmentId ? {} : { machine }),
             ...(throughMessageId === undefined ? {} : { throughMessageId }),
           },
         });
@@ -162,7 +174,26 @@ export function useStartWork(): (request: StartWorkRequest) => Promise<void> {
           toastManager.add({
             type: "error",
             title: "Could not start Work",
-            description: described.message,
+            description:
+              isWorkHandoffError(failure) && failure.machineOffline
+                ? "That machine is offline. Nothing was queued."
+                : described.message,
+            ...(isWorkHandoffError(failure) && failure.machineOffline
+              ? {
+                  actionProps: {
+                    children: "Run on this machine",
+                    onClick: () => {
+                      void start({
+                        threadRef,
+                        choice,
+                        ...(throughMessageId === undefined ? {} : { throughMessageId }),
+                        announce,
+                        machine: environmentId,
+                      });
+                    },
+                  },
+                }
+              : {}),
           });
           return;
         }
@@ -338,6 +369,14 @@ export function StartWorkPicker(props: {
     open: open && openGroup !== null,
     query,
     leadRepositoryId: thread?.projectId ?? null,
+    onPickUncloned: (choice) => {
+      closePicker();
+      void startWork({
+        threadRef,
+        choice,
+        ...(throughMessageId === undefined ? {} : { throughMessageId }),
+      });
+    },
     onPick: (repository) => {
       closePicker();
       void startWork({

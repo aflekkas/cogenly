@@ -1237,6 +1237,10 @@ export function createServerEnvironmentAtoms<R, E>(
       tag: WS_METHODS.projectLabelsMoveToMachine,
     }),
     /** The machines this environment is paired with, live: a fresh list after every change. */
+    machineProviders: createEnvironmentGuardedRpcQueryAtomFamily(runtime, {
+      label: "environment-data:machines:providers",
+      tag: WS_METHODS.machinesCatalog,
+    }),
     machinesLive: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
       label: "environment-data:machines:live",
       tag: WS_METHODS.machinesSubscribe,

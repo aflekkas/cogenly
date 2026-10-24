@@ -7,7 +7,8 @@ repository remotes and source links, agent profiles, fallback chains and
 scheduled-task configuration, and every conversation. Changes made while a
 machine is offline catch up when it reconnects.
 
-Agents and schedules run only on their owner machine. New ones default to the
+Agents and schedule timers run only on their owner machine. A schedule can
+start each fresh conversation on another machine. New owners default to the
 hub; existing ones keep the machine they were created on until you
 [move them](#move-threads-and-projects). Editing a profile or schedule on
 another machine updates the owner's configuration without starting a second
@@ -39,6 +40,19 @@ not connected to. A new conversation runs on the machine that has the project's
 repository unless you pick another. A machine without the repository clones it
 first. If the machine you picked is offline, nothing starts and your draft
 stays as it was; the notice offers to run it on this machine instead.
+
+Start Work asks which machine to use after you choose its repository. You can
+also choose a machine when creating an agent or editing a schedule. A schedule
+bound to an existing conversation follows that conversation instead. A fresh
+scheduled conversation whose target is offline fails that run; it is not queued.
+
+Agents can name a paired machine with `machine` on `thread_launch`,
+`create_threads`, `work_start`, `delegate_task`, and `schedule_task` (or when
+updating a schedule). Names and environment IDs work; `this` means the machine
+the agent runs on and `auto` means the hub. Isolated delegated work carries the
+parent's committed code to the target. Its committed result branch can come
+back when the parent reads the task result, without a push; uncommitted changes
+stay on their original machine.
 
 ## Move threads and projects
 

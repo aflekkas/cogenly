@@ -1,7 +1,7 @@
 import { useAtomValue } from "@effect/atom-react";
 import { isAtomCommandInterrupted } from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/models";
-import type { EnvironmentId, ProjectId } from "@t3tools/contracts";
+import { type EnvironmentId, ProjectId } from "@t3tools/contracts";
 import { ChevronLeftIcon, FolderPlusIcon } from "lucide-react";
 import {
   type KeyboardEvent as ReactKeyboardEvent,
@@ -125,6 +125,8 @@ export function useRepositoryPicker(input: {
   readonly leadRepositoryId?: ProjectId | null;
   /** A repository was picked, linked, or cloned and is ready here. */
   readonly onPick: (repository: EnvironmentProject) => void;
+  /** A launch service can resolve a remote-only row after choosing its machine. */
+  readonly onPickUncloned?: (repositoryId: ProjectId) => void;
   /** The picker gives way to a dialog or another surface. */
   readonly onClose: () => void;
 }) {
@@ -392,6 +394,10 @@ export function useRepositoryPicker(input: {
     switch (item.kind) {
       case "repository": {
         const { row } = item;
+        if (row.local === null && row.remote !== null && input.onPickUncloned !== undefined) {
+          input.onPickUncloned(ProjectId.make(`remote:${row.remote}`));
+          return false;
+        }
         const view = checkouts.viewOf(row);
         // A row being removed or moved here is not picked mid-way.
         if (view.kind === "working") return true;
