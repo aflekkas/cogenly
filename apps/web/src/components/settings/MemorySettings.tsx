@@ -6,6 +6,8 @@ import { useMemo, useState } from "react";
 import { useAgents } from "../../agents/agentsClient";
 import { FACT_STATUS_FILTERS, filterFacts, type FactStatusFilter } from "../../memory/facts.logic";
 import { FactEditorDialog, FactList, factInputFromDraft } from "../../memory/FactList";
+import { peerSyncIndicator, pendingFor } from "../../machines/peerSync.logic";
+import { useSyncPeers } from "../../machines/usePeerSync";
 import { useFactActions, useFactNavigation, useFacts } from "../../memory/useFacts";
 import { sortProjectLabels } from "../../projectLabels/projectLabels.logic";
 import { useEnvironmentProjectLabels } from "../../projectLabels/useProjectLabels";
@@ -13,6 +15,7 @@ import { Button } from "../ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "../ui/empty";
 import { SearchInput } from "../ui/search-input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
+import { PeerSyncRow } from "./PeerSyncRow";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
 
@@ -40,7 +43,11 @@ export function MemorySettings() {
     ...(labelId === ALL ? {} : { labelId: labelId as ProjectLabelId }),
     ...(agentId === ALL ? {} : { agentId: agentId as AgentId }),
   });
-  const actions = useFactActions(environmentId, list.refresh);
+  const syncPeers = useSyncPeers(environmentId, "fact");
+  const actions = useFactActions(environmentId, () => {
+    list.refresh();
+    syncPeers.refresh();
+  });
   const navigation = useFactNavigation(environmentId);
   const facts = useMemo(
     () => filterFacts(list.facts, { status, query }),
@@ -171,6 +178,21 @@ export function MemorySettings() {
         confirmed facts as context. Proposals are never used until you confirm them. Private facts
         stay with you and the agent they belong to.
       </p>
+      {syncPeers.peers.length > 0 ? (
+        <SettingsSection id="memory-machines" title="Paired machines">
+          {syncPeers.peers.map((peer) => (
+            <PeerSyncRow
+              key={peer.environmentId}
+              machine={peer.label}
+              indicator={peerSyncIndicator({
+                machine: peer.label,
+                online: peer.online,
+                pending: pendingFor(peer, "fact"),
+              })}
+            />
+          ))}
+        </SettingsSection>
+      ) : null}
       <OverlayPresence when={creating && environmentId}>
         {(environmentId) => (
           <FactEditorDialog
