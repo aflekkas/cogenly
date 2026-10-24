@@ -35,6 +35,7 @@ export const makeControllableProvider = (
   // The latest session's queue, for events not tied to a turn input.
   let queue: EventQueue;
   const queues = new Map<ProviderInstanceId, EventQueue>();
+  const sessionQueues: Array<EventQueue> = [];
   let ordinal = 0;
   const publish = (event: ProviderAdapter.ProviderAdapterV2Event) => Queue.offer(queue, event);
   const publishFor = (
@@ -106,6 +107,10 @@ export const makeControllableProvider = (
     begin(input).pipe(Effect.asVoid);
   let compact: NonNullable<ProviderAdapter.ProviderAdapterV2SessionRuntime["compactThread"]> = () =>
     Effect.die("Unexpected compaction");
+  const resumes: Array<ProviderThreadId> = [];
+  let resume: ProviderAdapter.ProviderAdapterV2SessionRuntime["resumeThread"] = ({
+    providerThread,
+  }) => Effect.succeed(providerThread);
   const registry = Layer.mock(Registry.ProviderAdapterRegistryV2)({
     list: () => Effect.succeed(instanceIds.map((id) => ProviderInstanceId.make(id))),
     // Separate accounts never share native threads.
@@ -130,6 +135,7 @@ export const makeControllableProvider = (
                 ProviderAdapter.ProviderAdapterV2Error
               >();
               queues.set(instanceId, queue);
+              sessionQueues.push(queue);
               const threadKey = (threadId: string) =>
                 instanceId === defaultInstanceId ? threadId : `${instanceId}:${threadId}`;
               const now = yield* DateTime.now;
@@ -174,7 +180,11 @@ export const makeControllableProvider = (
                     createdAt: now,
                     updatedAt: now,
                   }),
-                resumeThread: ({ providerThread }) => Effect.succeed(providerThread),
+                resumeThread: (input) =>
+                  Effect.suspend(() => {
+                    resumes.push(input.providerThread.id);
+                    return resume(input);
+                  }),
                 startTurn: (input) => start(input),
                 compactThread: (input) => compact(input),
                 steerTurn: (input) =>
@@ -195,16 +205,23 @@ export const makeControllableProvider = (
     registry,
     turns,
     steers,
+    resumes,
     begin,
     finish,
     publish,
     publishFor,
+    /** Publishes on the nth session opened, such as a parent's after its child opened one. */
+    publishOn: (session: number, event: ProviderAdapter.ProviderAdapterV2Event) =>
+      Queue.offer(sessionQueues[session]!, event),
     failEvents: (error: ProviderAdapter.ProviderAdapterV2Error) => Queue.fail(queue, error),
     setStart: (value: typeof start) => {
       start = value;
     },
     setCompact: (value: typeof compact) => {
       compact = value;
+    },
+    setResume: (value: typeof resume) => {
+      resume = value;
     },
   };
 };
