@@ -924,6 +924,36 @@ export function parseCodexGoalCommand(text: string): CodexGoalCommand | null {
   }
 }
 
+/** Codex names no retry-after; a throttled turn retries this long after it stopped. */
+const CODEX_RATE_LIMIT_RETRY_MS = 60_000;
+
+/**
+ * Splits a Codex limit stop. `usageLimitExceeded`, or a rate-limit snapshot
+ * showing a spent window, is an exhausted quota that lasts until that
+ * window's reset. A bare `rateLimitExceeded` is a short-term throttle that
+ * gets a near reset the server retries at.
+ */
+export function classifyCodexLimitFailure(
+  failure: OrchestrationV2ProviderFailure,
+  snapshot: CodexRateLimitSnapshot | undefined,
+  nowMs: number,
+): OrchestrationV2ProviderFailure {
+  const windowResetAt = codexUsageLimitResetAt(snapshot);
+  if (
+    failure.limitKind === "quota" ||
+    failure.code === "usageLimitExceeded" ||
+    windowResetAt !== null
+  ) {
+    return { ...failure, limitKind: "quota", resetAt: windowResetAt ?? failure.resetAt ?? null };
+  }
+  return {
+    ...failure,
+    limitKind: "rate_limit",
+    resetAt:
+      failure.resetAt ?? DateTime.formatIso(DateTime.makeUnsafe(nowMs + CODEX_RATE_LIMIT_RETRY_MS)),
+  };
+}
+
 type CodexThreadGoal = CodexSchema.V2ThreadGoalUpdatedNotification["goal"];
 
 const CODEX_GOAL_STATUSES = {
@@ -5126,10 +5156,11 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                 status: terminalStatus,
                 failure:
                   failure.class === "usage_limit"
-                    ? {
-                        ...failure,
-                        resetAt: codexUsageLimitResetAt(yield* Ref.get(rateLimitSnapshot)),
-                      }
+                    ? classifyCodexLimitFailure(
+                        failure,
+                        yield* Ref.get(rateLimitSnapshot),
+                        DateTime.toEpochMillis(yield* DateTime.now),
+                      )
                     : failure,
                 ...(input.providerRetry === undefined
                   ? {}
@@ -5161,12 +5192,19 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             event.status === "failed" && event.failure.class === "usage_limit"
               ? {
                   ...event,
-                  failure: {
-                    ...event.failure,
-                    resetAt:
-                      event.failure.resetAt ??
-                      codexUsageLimitResetAt(yield* Ref.get(rateLimitSnapshot)),
-                  },
+                  failure:
+                    event.failure.limitKind === undefined
+                      ? classifyCodexLimitFailure(
+                          event.failure,
+                          yield* Ref.get(rateLimitSnapshot),
+                          DateTime.toEpochMillis(yield* DateTime.now),
+                        )
+                      : {
+                          ...event.failure,
+                          resetAt:
+                            event.failure.resetAt ??
+                            codexUsageLimitResetAt(yield* Ref.get(rateLimitSnapshot)),
+                        },
                 }
               : event;
           yield* emitProviderEvent(current);

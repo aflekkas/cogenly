@@ -69,7 +69,7 @@ const interruptRequest = {
 } as unknown as OrchestrationV2TurnItem;
 
 describe("classifyDelegatedTaskFailure", () => {
-  it("reads a usage limit as a rate limit with its reset", () => {
+  it("reads an exhausted window as a usage limit, and a 429 as a rate limit, with resets", () => {
     expect(
       classifyDelegatedTaskFailure({
         run: childRun(),
@@ -77,10 +77,21 @@ describe("classifyDelegatedTaskFailure", () => {
         afterRestart: false,
       }),
     ).toEqual({
-      kind: "rate_limit",
+      kind: "usage_limit",
       message: "You've hit your session limit · resets 3:20pm",
       resetAt,
     });
+    const rateLimited = {
+      ...usageLimitError,
+      failure: { ...(usageLimitError as { failure: object }).failure, limitKind: "rate_limit" },
+    } as OrchestrationV2TurnItem;
+    expect(
+      classifyDelegatedTaskFailure({
+        run: childRun(),
+        turnItems: [rateLimited],
+        afterRestart: false,
+      })?.kind,
+    ).toBe("rate_limit");
   });
 
   it("ignores a deliberate Stop or task_cancel", () => {
@@ -279,8 +290,9 @@ describe("deliverDelegatedTaskFailureNotice", () => {
       const notice = notices[0]!;
       expect(notice.id).toBe("message:delegated-task-failure:task:browser:run:browser");
       expect(notice.createdBy).toBe("agent");
-      expect(notice.text).toContain("rate limit");
-      expect(notice.text).toContain(`Resume it after ${resetAt}`);
+      expect(notice.text).toContain("usage limit");
+      expect(notice.text).toContain("thread_limit_handoff (threadId thread:browser)");
+      expect(notice.text).toContain(`resume it after ${resetAt}`);
       expect(notice.notification).toMatchObject({
         source: {
           kind: "delegated_task",
@@ -288,12 +300,12 @@ describe("deliverDelegatedTaskFailureNotice", () => {
           childThreadId: "thread:browser",
         },
         outcome: "failed",
-        summary: 'Agent "Task browser" stopped: rate limit',
+        summary: 'Agent "Task browser" stopped: usage limit',
         delegatedFailures: [
           {
             taskId: "task:browser",
             childRunId: "run:browser",
-            kind: "rate_limit",
+            kind: "usage_limit",
             resetAt,
             partialWork: true,
           },

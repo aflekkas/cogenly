@@ -24,6 +24,7 @@ import type {
   OrchestrationV2ConversationMessage,
   OrchestrationV2DomainEvent,
   OrchestrationV2ProjectedTurnItem,
+  OrchestrationV2ProviderLimitKind,
   OrchestrationV2ProviderThread,
   OrchestrationV2ProviderTurn,
   OrchestrationV2Run,
@@ -170,7 +171,12 @@ export type ProjectionLimitRecoveryCandidate = Pick<
   | "updatedAt"
   | "limitRecovery"
   | "snoozedUntil"
->;
+> & {
+  /** The stop's limit kind; absent reads as an exhausted quota. */
+  readonly limitKind?: OrchestrationV2ProviderLimitKind | undefined;
+  /** The thread is a delegated child, which recovers from a limit on its own. */
+  readonly delegated?: boolean;
+};
 
 /** The thread fields pull request sync reads, for a thread with at least one link. */
 export type ProjectionThreadPullRequests = Pick<
@@ -3702,6 +3708,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 AND json_extract(t.payload_json, '$.limitRecovery.resetAt') IS json_extract(item.payload_json, '$.failure.resetAt')
                 AND json_extract(t.payload_json, '$.limitRecovery.autoResume') = 1
                 AND julianday(json_extract(item.payload_json, '$.failure.resetAt')) <= julianday(${DateTime.formatIso(options.now)})
+                AND COALESCE(julianday(json_extract(t.payload_json, '$.limitRecovery.retryAt')), 0) <= julianday(${DateTime.formatIso(options.now)})
                 AND (
                   json_extract(t.payload_json, '$.snoozedUntil') IS NULL
                   OR julianday(json_extract(t.payload_json, '$.snoozedUntil')) <= julianday(${DateTime.formatIso(options.now)})
@@ -3712,8 +3719,23 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                   json_extract(t.payload_json, '$.limitRecovery.runId') IS NOT r.run_id
                   OR json_extract(t.payload_json, '$.limitRecovery.resetAt') IS NOT json_extract(item.payload_json, '$.failure.resetAt')
                 )
-                AND (${booleanInt(options.autoResume)} OR ${booleanInt(options.snooze)})
-                AND julianday(json_extract(item.payload_json, '$.failure.resetAt')) > julianday(${DateTime.formatIso(options.now)})
+                AND (
+                  (
+                    (${booleanInt(options.autoResume)} OR ${booleanInt(options.snooze)})
+                    AND julianday(json_extract(item.payload_json, '$.failure.resetAt')) > julianday(${DateTime.formatIso(options.now)})
+                  )
+                  -- The server decides these stops itself: a short-term rate
+                  -- limit it retries, and a delegated child's stop it hands
+                  -- off or resumes without a user to choose. Only recent
+                  -- stops: an old one is left for a person.
+                  OR (
+                    (
+                      json_extract(item.payload_json, '$.failure.limitKind') = 'rate_limit'
+                      OR json_extract(t.payload_json, '$.lineage.relationshipToParent') = 'subagent'
+                    )
+                    AND julianday(COALESCE(r.completed_at, json_extract(t.payload_json, '$.updatedAt'))) > julianday(${DateTime.formatIso(options.now)}) - 1
+                  )
+                )
               )
             )
             AND NOT EXISTS (
@@ -3745,6 +3767,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             pendingRuntimeRequest: null,
             limitRecovery: thread.limitRecovery ?? null,
             snoozedUntil: thread.snoozedUntil ?? null,
+            limitKind: item.type === "error" ? item.failure.limitKind : undefined,
+            delegated: thread.lineage.relationshipToParent === "subagent",
           });
         }
         return candidates;

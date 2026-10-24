@@ -186,6 +186,13 @@ type DelegateTaskResult = {
   latestTerminalResultContextTransferId: string | null;
   hasPendingQuestion: boolean;
   waitTimedOut: boolean;
+  stoppedOn?: "rate_limit" | "usage_limit" | "restart" | null;
+  recovery?:
+    | { type: "retrying"; at: string; attempt: number }
+    | { type: "handed_off"; providerInstanceId: string; model: string }
+    | { type: "resuming_at_reset"; at: string }
+    | { type: "resuming_after_restart" }
+    | null;
 };
 ```
 
@@ -200,8 +207,17 @@ later follow-ups. `hasPendingChildRuns` reports later queued or executing turns;
 `latestTerminal*` exposes later executed, non-monitor results without replacing
 the published task result.
 
+A child stopped by a limit is not failed while the server recovers it, and `stoppedOn` with
+`recovery` says how: a rate limit (429) retries on the same instance with backoff; a spent quota,
+or a rate limit that outlasted its retries, hands off to the best-ranked instance with headroom
+(`thread_limit_handoff_options`) with the child's context and the stopped request; with nothing
+available a quota resumes at its reset. The task stays nonterminal throughout, and the
+continuation's result becomes the task's. A handoff or scheduled resume queues one `updated`
+notice on the parent; retries do not. Turning off the child's resume ends the wait, and the limit
+becomes the task's failure.
+
 When a child run fails or is cut off, whatever the wait mode, the parent also gets a queued
-failure notice. This covers a provider error, a usage limit with its reset time, a restart that
+failure notice. This covers a provider error, a limit nothing could recover, a restart that
 cancelled it, and a provider session that died. The notice waits behind the parent's current turn
 and names the task, the failure kind, the error, whether partial work may remain, and a suggested
 action. It never resumes or retries the child. A user Stop, a parent Stop, and `task_cancel`

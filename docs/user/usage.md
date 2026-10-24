@@ -55,6 +55,16 @@ Agents see the same headroom: `orchestrator_capabilities` reports each account's
 so you can ask an agent to delegate to the account with room. An agent can also continue a stopped
 thread on another account when you ask it to.
 
+A short-term rate limit is not a spent quota. When a provider throttles requests rather than
+reporting an exhausted window, the thread retries on its own after a short wait, backing off from a
+minute up to fifteen, for up to five tries in a row. The notice above the composer shows the next
+try, and **Don't resume** stops it.
+
+Tasks an agent delegates recover without you. A delegated task that stops on a limit moves to the
+best account with room, keeping its conversation, and the agent that delegated it is told where it
+went. When no account has room, it resumes at the reset instead, and the delegating agent waits for
+it. Turn off its resume from the task's own thread to stop it there.
+
 ## Connect a CLIProxyAPI hub
 
 To see pooled accounts, open **Settings → Providers → Usage providers → Add hub**. Choose the
