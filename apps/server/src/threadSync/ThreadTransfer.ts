@@ -271,7 +271,10 @@ const make = Effect.gen(function* () {
       !view.machines.some(
         (machine) =>
           machine.environmentId === input.target &&
-          (machine.relation === "hub" || machine.relation === "spoke"),
+          // A spoke reaches the hub's other spokes through the hub.
+          (machine.relation === "hub" ||
+            machine.relation === "spoke" ||
+            machine.relation === "peer"),
       )
     )
       return yield* new ThreadRemoteError({

@@ -105,6 +105,44 @@ describe("moving threads between paired machines", () => {
   );
 
   it.live(
+    "one spoke hands a thread to another through the hub, attachments included",
+    () =>
+      Effect.gen(function* () {
+        const { hub, laptop, at } = yield* start("spokes");
+        const mini = yield* startThreadMachine("spokes-mini", "computer");
+        yield* pair(hub, mini);
+        yield* addProject(laptop, "/Users/someone/racing");
+        yield* addProject(mini, "/Users/other/racing");
+        yield* laptop.sink.write({ events: [threadCreated("event:created", at)] });
+        const fileSystem = yield* laptop.run(FileSystem.FileSystem);
+        const path = yield* laptop.run(Path.Path);
+        const image = "thread-on-laptop-00000000-0000-4000-8000-000000000020";
+        const laptopDir = (yield* laptop.run(ServerConfig.ServerConfig)).attachmentsDir;
+        yield* fileSystem.makeDirectory(laptopDir, { recursive: true });
+        yield* fileSystem.writeFileString(path.join(laptopDir, `${image}.png`), "png");
+
+        expect(
+          yield* laptop.transfer.move({ threadIds: [threadId], target: mini.environmentId }),
+        ).toEqual({ moved: [threadId], skipped: [] });
+        expect(yield* mini.replication.owner(threadId)).toMatchObject({ local: true, epoch: 1 });
+        expect(yield* laptop.replication.owner(threadId)).toMatchObject({
+          local: false,
+          owner: mini.environmentId,
+        });
+        const miniDir = (yield* mini.run(ServerConfig.ServerConfig)).attachmentsDir;
+        expect(yield* fileSystem.readFileString(path.join(miniDir, `${image}.png`))).toBe("png");
+        // The hub learns the new owner from it.
+        yield* mini.sync.sync(hub.environmentId);
+        expect(yield* hub.replication.owner(threadId)).toMatchObject({
+          local: false,
+          owner: mini.environmentId,
+          epoch: 1,
+        });
+      }).pipe(Effect.scoped),
+    30000,
+  );
+
+  it.live(
     "a busy thread, or one whose repository the target lacks, stays where it is",
     () =>
       Effect.gen(function* () {
