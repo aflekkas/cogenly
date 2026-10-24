@@ -646,27 +646,10 @@ const PairingLinkListRow = memo(function PairingLinkListRow({
     window.isSecureContext &&
     navigator.clipboard?.writeText != null;
 
-  /** CopyButton wiring for one pairing value: its success toast, and the reveal dialog on failure. */
+  /** CopyButton wiring for one pairing value: the reveal dialog on failure. */
   const pairingCopyProps = (value: string, kind: "code" | "hosted-link" | "link") => ({
     value,
     target: "pairing value",
-    onCopied: () => {
-      toastManager.add({
-        type: "success",
-        title:
-          kind === "hosted-link"
-            ? "Hosted app link copied"
-            : kind === "link"
-              ? "Pairing URL copied"
-              : "Pairing code copied",
-        description:
-          kind === "hosted-link"
-            ? "Open it in the browser on the device you want to connect."
-            : kind === "link"
-              ? "Open it in the client you want to pair to this environment."
-              : "Paste it into another client to finish pairing.",
-      });
-    },
     onError: (error: Error) => {
       // Captured per attempt so concurrent copies cannot make the dialog
       // reveal a different value than the one that failed.

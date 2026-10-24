@@ -19,6 +19,7 @@ import {
 import ChatMarkdown from "../ChatMarkdown";
 import { EllipsisIcon } from "lucide-react";
 import { Button } from "../ui/button";
+import { CopyButton } from "../ui/copy-button";
 import { Input } from "../ui/input";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { cn } from "~/lib/utils";
@@ -34,7 +35,6 @@ import {
 } from "../ui/dialog";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { projectEnvironment } from "~/state/projects";
-import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { readEnvironmentScope, useEnvironmentScope } from "~/state/session";
 
@@ -61,18 +61,6 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
   const writeProjectFile = useAtomCommand(projectEnvironment.writeFile, {
     reportFailure: false,
   });
-  const { copyToClipboard, isCopied } = useCopyToClipboard({
-    target: "plan",
-    onError: (error) => {
-      toastManager.add(
-        stackedThreadToast({
-          type: "error",
-          title: "Could not copy plan",
-          description: error instanceof Error ? error.message : "An error occurred while copying.",
-        }),
-      );
-    },
-  });
   const savePathInputId = useId();
   const title = proposedPlanTitle(planMarkdown) ?? "Proposed plan";
   const lineCount = planMarkdown.split("\n").length;
@@ -92,10 +80,6 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
 
   const handleDownload = () => {
     downloadPlanAsTextFile(downloadFilename, saveContents);
-  };
-
-  const handleCopyPlan = () => {
-    copyToClipboard(saveContents);
   };
 
   const openSaveDialog = () => {
@@ -171,25 +155,39 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
             {title}
           </h3>
         </div>
-        <Menu>
-          <MenuTrigger
-            render={<Button aria-label="Plan actions" size="icon-xs" variant="outline" />}
-          >
-            <EllipsisIcon aria-hidden="true" className="size-4" />
-          </MenuTrigger>
-          <MenuPopup align="end">
-            <MenuItem onClick={handleCopyPlan}>
-              {isCopied ? "Copied!" : "Copy to clipboard"}
-            </MenuItem>
-            <MenuItem onClick={handleDownload}>Download as markdown</MenuItem>
-            <MenuItem
-              onClick={openSaveDialog}
-              disabled={!canWriteFiles || !workspaceRoot || isSavingToWorkspace}
+        <div className="flex items-center gap-1">
+          <CopyButton
+            label="Copy plan"
+            onError={(error) => {
+              toastManager.add(
+                stackedThreadToast({
+                  type: "error",
+                  title: "Could not copy plan",
+                  description: error.message,
+                }),
+              );
+            }}
+            target="plan"
+            value={saveContents}
+            variant="outline"
+          />
+          <Menu>
+            <MenuTrigger
+              render={<Button aria-label="Plan actions" size="icon-xs" variant="outline" />}
             >
-              Save to workspace
-            </MenuItem>
-          </MenuPopup>
-        </Menu>
+              <EllipsisIcon aria-hidden="true" className="size-4" />
+            </MenuTrigger>
+            <MenuPopup align="end">
+              <MenuItem onClick={handleDownload}>Download as markdown</MenuItem>
+              <MenuItem
+                onClick={openSaveDialog}
+                disabled={!canWriteFiles || !workspaceRoot || isSavingToWorkspace}
+              >
+                Save to workspace
+              </MenuItem>
+            </MenuPopup>
+          </Menu>
+        </div>
       </div>
       <div className="mt-4">
         <div

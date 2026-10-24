@@ -228,7 +228,7 @@ last. A card's project is the one you filed it in, else the project its reposito
 Click a heading to fold its group away; the card you have open stays visible. In the first
 filter, drag a card up or down within its project to change its place; the other cards slide
 aside to show where it will land. With a card focused, `Alt+Up` and `Alt+Down` move it one
-place. New Work arrives at the bottom of its project, nearest search. The server saves the
+place. New Work arrives at the top of its project. The server saves the
 order, so it survives a refresh and appears on your other connected devices. **Needs you**
 lists its tasks in the same order; **Snoozed** lists them by when they come back and
 **Settled** by when they settled, so cards don't move there.

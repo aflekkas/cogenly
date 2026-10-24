@@ -23,6 +23,7 @@ import { environmentShell } from "../state/shell";
 import {
   buildThreadRouteParams,
   isThreadRouteSnapshotAuthoritative,
+  resolveAgentConversationRemoval,
   resolveThreadRouteRenderState,
   type ThreadRouteTarget,
 } from "../threadRoutes";
@@ -50,7 +51,7 @@ export function ThreadRouteView({
   retained?: boolean;
 }) {
   const navigate = useNavigate();
-  const { agents } = useAgents();
+  const { agents, loading: agentsLoading, reconnecting: agentsReconnecting } = useAgents();
   const contact =
     target.kind === "server"
       ? (agents.find(
@@ -60,6 +61,19 @@ export function ThreadRouteView({
         ) ?? null)
       : null;
   const agentConversation = useAgentConversation(contact);
+  // Deleting an agent keeps its conversation thread, so without this the route
+  // would fall back to a plain chat of it.
+  const [shownAgentThreadKey, setShownAgentThreadKey] = useState<string | null>(null);
+  const agentRemoval = resolveAgentConversationRemoval({
+    shownAgentThreadKey,
+    routeThreadKey: target.kind === "server" ? scopedThreadKey(target.threadRef) : null,
+    agentPresent: contact !== null,
+    agentsSettled: !agentsLoading && !agentsReconnecting,
+  });
+  if (agentRemoval.shownAgentThreadKey !== shownAgentThreadKey) {
+    setShownAgentThreadKey(agentRemoval.shownAgentThreadKey);
+  }
+  const agentRemoved = agentRemoval.removed;
   const draftId = target.kind === "draft" ? target.draftId : null;
   const draftSession = useComposerDraftStore((store) =>
     draftId === null ? null : store.getDraftSession(draftId),
@@ -179,6 +193,14 @@ export function ThreadRouteView({
     }
   }, [bootstrapComplete, environmentHasAnyThreads, navigate, renderState, retained, target]);
 
+  // The open agent left the agents list: deleted here, on another device, or
+  // by an agent over MCP. Land again like a missing thread does: the index
+  // opens the next agent, or the Agents empty state when none are left.
+  useEffect(() => {
+    if (!agentRemoved || retained) return;
+    void navigate({ to: "/", replace: true });
+  }, [agentRemoved, navigate, retained]);
+
   useEffect(() => {
     if (target.kind !== "server" || !serverThreadStarted || !draftThread) {
       return;
@@ -187,7 +209,10 @@ export function ThreadRouteView({
   }, [draftThread, serverThreadStarted, target]);
 
   let view: React.ReactNode = null;
-  if (agentConversation) {
+  if (agentRemoved) {
+    // Nothing until the redirect lands, not a frame of the bare conversation.
+    view = null;
+  } else if (agentConversation) {
     view = (
       <AgentConversation
         key={`${agentConversation.environmentId}:${agentConversation.id}`}

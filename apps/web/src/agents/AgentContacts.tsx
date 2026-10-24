@@ -117,8 +117,8 @@ const flipKey = (agent: AgentContact) => `agent:${agentContactKey(agent)}`;
 /**
  * The Agents list: one card per agent, the size of a Work card (its face,
  * then its name and status over two lines of its latest reply). Like the
- * other lists it stacks up from the bottom of the column against the search
- * dock. Once any agent is filed in a project, cards group under their project
+ * other lists it reads down from the search dock at the top of the column.
+ * Once any agent is filed in a project, cards group under their project
  * folders (in name order, No project last), each group collapsible; a group's
  * right-click menu starts a new agent in it. Cards sort inside their group by
  * drag or alt+arrow, as Work's do (`orderAgentsForList`). The Needs attention
@@ -324,8 +324,10 @@ export function AgentContacts({
           Reconnecting…
         </p>
       )}
-      {/* With no agents at all the list column is hidden and the index route shows
-          the one empty state; only the attention filter can be empty here. */}
+      {/* With no agents the index route hides the list column and shows the full
+          empty state (mascot and Create your first agent); a deleted agent's
+          route lands there too (ThreadRouteView). Elsewhere the list keeps the
+          one-line empty state every mode shares. */}
       <SidebarSortContext
         sensors={sensors}
         collisionDetection={collision}

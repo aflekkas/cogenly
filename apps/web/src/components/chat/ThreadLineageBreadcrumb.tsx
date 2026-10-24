@@ -3,7 +3,7 @@ import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
 import type { ThreadId } from "@t3tools/contracts";
 import { ChevronLeftIcon, EllipsisIcon } from "lucide-react";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 
 import { cn } from "~/lib/utils";
 
@@ -82,13 +82,20 @@ function ThreadHeaderTitleContent(props: {
   const ancestors = useThreadLineageChain(props.shell);
   const segments = collapseThreadBreadcrumb(ancestors);
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
+  // A rename fades the new title in place; opening another thread shows its
+  // title at once, like the rest of the page.
+  const threadKey = props.shell ? `${props.shell.environmentId}:${props.shell.id}` : null;
+  const [titleSwap, setTitleSwap] = useState({ threadKey, title: props.title, fade: false });
+  if (titleSwap.threadKey !== threadKey || titleSwap.title !== props.title) {
+    setTitleSwap({ threadKey, title: props.title, fade: titleSwap.threadKey === threadKey });
+  }
   if (props.shell === null || segments === null) {
     return (
       <h2
-        // Keyed by title: a navigation or rename fades the new one in place.
         key={props.title}
         className={cn(
-          "swap-motion min-w-0 truncate text-sm font-medium text-foreground",
+          titleSwap.fade && "swap-motion",
+          "min-w-0 truncate text-sm font-medium text-foreground",
           HEADER_TITLE_MAX_WIDTH_CLASS,
         )}
         // Leads the top bar, so it rides the pane's left edge when the sidebar toggles.
@@ -148,12 +155,12 @@ function ThreadHeaderTitleContent(props: {
 
   return (
     <nav
-      // Keyed by thread: a navigation mounts a fresh trail that fades in place.
+      // Keyed by thread: a navigation mounts a fresh trail, shown at once.
       key={`${props.shell.environmentId}:${props.shell.id}`}
       aria-label="Thread lineage"
       className={cn(
         // Clickable through the desktop titlebar's drag strip it sits in.
-        "swap-motion flex min-w-0 items-center text-xs [-webkit-app-region:no-drag]",
+        "flex min-w-0 items-center text-xs [-webkit-app-region:no-drag]",
         HEADER_TITLE_MAX_WIDTH_CLASS,
       )}
       data-panel-flip="start"

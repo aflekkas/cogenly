@@ -20,6 +20,9 @@ Style with Tailwind classes in the component that renders the element.
 - No `style={{ ... }}` or inline `<style>` for static values a class covers. Values computed at
   runtime are fine.
 - Theme-only rules use `@variant dark` and `@variant light`, not `.dark` selectors.
+- Main content width comes from the `--content-*` tokens in `index.css`: pages render
+  [`PageContent`](../../apps/web/src/components/PageContent.tsx) and the chat lane reads the same
+  tokens. No page-level `max-w-*` or `mx-auto`; a wider page uses its `wide` variant.
 
 ## Composition
 
@@ -47,7 +50,7 @@ glides from where it was drawn on the same curve. See
 
 - Never transform the main pane or the chat column. A transform makes it the containing block of
   its `position: fixed` titlebar controls, so they jump with it. Mark the content instead.
-- A new page marks its centered frame (`WorkspacePageContainer` already does) and a leading title
+- A new page marks its centered frame (`PageContent` already does) and a leading title
   that isn't a `WorkspaceBreadcrumb` with `data-panel-flip="start"`. Unmarked content snaps.
 - Don't animate panel widths or header padding. Every frame would rerun the chat's
   `observeResize` callbacks, each a synchronous React render.

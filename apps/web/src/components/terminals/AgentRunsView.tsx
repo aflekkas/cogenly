@@ -1,3 +1,4 @@
+import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import type { ScopedThreadRef } from "@t3tools/contracts";
 import { Bot, ChevronDown, ExternalLink, SquareTerminal } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
@@ -5,14 +6,13 @@ import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 
 import { CopyButton } from "~/components/ui/copy-button";
 import { type TerminalContextSelection } from "~/lib/terminalContext";
 import { cn } from "~/lib/utils";
+import { useProject, useThreadShell } from "~/state/entities";
 import {
   adjacentTerminalId,
   formatRunDuration,
   isAgentTerminalRunning,
   runDurationMs,
   terminalRunState,
-  terminalRunStateLabel,
-  terminalSignalName,
   type AgentTerminalEntry,
 } from "../AgentTerminalsPanel.logic";
 import { StopGlyph } from "../StopGlyph";
@@ -38,7 +38,14 @@ import {
   useDetectedRunUrl,
   useOpenRunUrl,
 } from "./terminalParts";
-import { runListTitle, shortenHomePath, type RunGroup } from "./bottomPanel.logic";
+import {
+  isLongRun,
+  runHeaderCommand,
+  runListTitle,
+  runLocationLabel,
+  runOutcomeLabel,
+  type RunGroup,
+} from "./bottomPanel.logic";
 
 type IconActionSize = "icon-micro" | "icon-xs";
 
@@ -123,32 +130,22 @@ function LiveRunActions(props: {
   );
 }
 
-/** How a finished row ended: its exit code, signal, or how long it took. Live rows show their stop. */
-function RunRowMeta({ entry }: { entry: AgentTerminalEntry }) {
+/**
+ * How a run ended, how long it took and when, as quiet text: `exit 127 · 3s ·
+ * 10:49:19`. For the row tooltip and the header's status hover.
+ */
+function runSummary(entry: AgentTerminalEntry): string {
   const state = terminalRunState(entry);
-  const base = "w-10 shrink-0 text-right text-3xs tabular-nums";
-  if (state.kind === "running" || state.kind === "starting") return null;
-  if (state.kind === "failed") {
-    return (
-      <span className={cn(base, "font-mono text-destructive-foreground")}>
-        exit {state.exitCode}
-      </span>
-    );
-  }
-  if (state.kind === "killed") {
-    return (
-      <span className={cn(base, "font-mono text-muted-foreground")}>
-        {terminalSignalName(state.signal)}
-      </span>
-    );
-  }
-  if (state.kind === "error") {
-    return <span className={cn(base, "text-destructive-foreground")}>failed</span>;
-  }
+  const live = isAgentTerminalRunning(entry);
   const duration = runDurationMs(entry);
-  return duration === null ? null : (
-    <span className={cn(base, "text-muted-foreground/70")}>{formatRunDuration(duration)}</span>
-  );
+  const at = formatRunTimestamp(live ? entry.startedAt : entry.updatedAt);
+  return [
+    runOutcomeLabel(state) ?? (state.kind === "succeeded" ? "exit 0" : "exited"),
+    duration === null ? null : formatRunDuration(duration),
+    at ? `${live ? "started" : "ended"} ${at}` : null,
+  ]
+    .filter((part) => part !== null)
+    .join(" · ");
 }
 
 interface RunRowProps {
@@ -172,6 +169,8 @@ function RunRow({
 }: RunRowProps) {
   const state = terminalRunState(entry);
   const live = isAgentTerminalRunning(entry);
+  // Only a long run says how long in the list; the rest is in the tooltip.
+  const duration = runDurationMs(entry);
   return (
     <Tooltip>
       <TooltipTrigger
@@ -202,17 +201,28 @@ function RunRow({
           {runListTitle(entry.label)}
         </span>
         {live ? (
-          <LiveRunActions
-            threadRef={threadRef}
-            entry={entry}
-            canOperate={canOperate}
-            onStop={onStop}
-          />
+          <span
+            className={cn(
+              "flex shrink-0 items-center opacity-0 transition-opacity duration-(--motion-duration-fast) ease-out group-hover:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100",
+              selected && "opacity-100",
+            )}
+          >
+            <LiveRunActions
+              threadRef={threadRef}
+              entry={entry}
+              canOperate={canOperate}
+              onStop={onStop}
+            />
+          </span>
+        ) : isLongRun(duration) ? (
+          <span className="shrink-0 text-3xs whitespace-nowrap text-muted-foreground/60 tabular-nums">
+            {formatRunDuration(duration)}
+          </span>
         ) : null}
-        <RunRowMeta entry={entry} />
       </TooltipTrigger>
       <TooltipPopup side="right" align="start" variant="code">
-        {entry.label}
+        <span className="line-clamp-6 whitespace-pre-wrap">{entry.label}</span>
+        <span className="mt-1 block text-muted-foreground">{runSummary(entry)}</span>
       </TooltipPopup>
     </Tooltip>
   );
@@ -222,7 +232,8 @@ const runOptionId = (terminalId: string) => `agent-run-${terminalId}`;
 
 /**
  * "Running" or "Finished" over its rows, with its count; the heading folds
- * the rows with the shared disclosure motion.
+ * the rows with the shared disclosure motion. Only shown while both groups
+ * have runs: one group alone is just the list.
  */
 function RunGroupSection(props: {
   label: string;
@@ -241,7 +252,7 @@ function RunGroupSection(props: {
           onKeyDown={(event) => event.stopPropagation()}
         >
           {props.label}
-          <span className="-ms-1 tabular-nums">({props.count})</span>
+          <span className="-ms-0.5 text-muted-foreground/40 tabular-nums">{props.count}</span>
         </DisclosureTrigger>
       </div>
       <DisclosurePanel open={props.open}>{props.children}</DisclosurePanel>
@@ -261,6 +272,7 @@ function RunSwitcher(props: {
 }) {
   const live = props.runs.slice(0, props.liveRunCount);
   const finished = props.runs.slice(props.liveRunCount);
+  const grouped = live.length > 0 && finished.length > 0;
   const item = (entry: AgentTerminalEntry) => (
     <MenuRadioItem key={entry.terminalId} value={entry.terminalId}>
       <RunStateGlyph state={terminalRunState(entry)} />
@@ -269,6 +281,17 @@ function RunSwitcher(props: {
       </span>
     </MenuRadioItem>
   );
+  const group = (label: string, entries: ReadonlyArray<AgentTerminalEntry>) =>
+    entries.length === 0 ? null : (
+      <MenuGroup>
+        {grouped ? (
+          <MenuGroupLabel>
+            {label} <span className="text-muted-foreground/60 tabular-nums">{entries.length}</span>
+          </MenuGroupLabel>
+        ) : null}
+        {entries.map(item)}
+      </MenuGroup>
+    );
   return (
     <Menu>
       <MenuTrigger
@@ -280,14 +303,9 @@ function RunSwitcher(props: {
           />
         }
       >
-        <span className="min-w-0 truncate">
-          <span aria-hidden className="text-muted-foreground/50">
-            ${" "}
-          </span>
-          {props.selected.label}
-        </span>
+        <span className="min-w-0 truncate">{runHeaderCommand(props.selected.label).text}</span>
         {props.runs.length > 1 ? (
-          <ChevronDown aria-hidden className="size-3 shrink-0 text-muted-foreground" />
+          <ChevronDown aria-hidden className="size-3 shrink-0 text-muted-foreground/60" />
         ) : null}
       </MenuTrigger>
       <MenuPopup align="start" className="max-w-[min(32rem,90vw)]">
@@ -295,69 +313,50 @@ function RunSwitcher(props: {
           value={props.selected.terminalId}
           onValueChange={(terminalId) => props.onSelect(String(terminalId))}
         >
-          {live.length > 0 ? (
-            <MenuGroup>
-              <MenuGroupLabel>Running ({live.length})</MenuGroupLabel>
-              {live.map(item)}
-            </MenuGroup>
-          ) : null}
-          {finished.length > 0 ? (
-            <MenuGroup>
-              <MenuGroupLabel>Finished ({finished.length})</MenuGroupLabel>
-              {finished.map(item)}
-            </MenuGroup>
-          ) : null}
+          {group("Running", live)}
+          {group("Finished", finished)}
         </MenuRadioGroup>
       </MenuPopup>
     </Menu>
   );
 }
 
-/** `Running · started 12:09 PM`, or how it ended, how long it took and when. */
-function RunStatusLine({ entry }: { entry: AgentTerminalEntry }) {
+/**
+ * One quiet word after the command: `Running`, a nonzero `exit 1`, a signal,
+ * or for a clean exit only how long it took. The rest is in its tooltip.
+ */
+function RunStatus({ entry }: { entry: AgentTerminalEntry }) {
   const state = terminalRunState(entry);
-  const live = isAgentTerminalRunning(entry);
-  const started = formatRunTimestamp(entry.startedAt);
-  const ended = live ? null : formatRunTimestamp(entry.updatedAt);
-  const duration = live ? null : runDurationMs(entry);
-  // Wall-clock times are secondary: a narrow drawer drops them, keeping the duration.
-  const parts = [
-    live
-      ? started
-        ? { text: `started ${started}`, clock: true }
-        : null
-      : duration !== null
-        ? { text: formatRunDuration(duration), clock: false }
-        : null,
-    ended ? { text: `ended ${ended}`, clock: true } : null,
-  ].filter((part) => part !== null);
+  const duration = runDurationMs(entry);
+  const text = runOutcomeLabel(state) ?? (duration === null ? null : formatRunDuration(duration));
+  if (text === null) return null;
   return (
-    <span
-      role="status"
-      key={state.kind}
-      className="swap-motion flex shrink-0 items-center gap-1.5 tabular-nums"
-    >
-      <span className={cn("font-medium", runToneText(state))}>
-        {live ? "Running" : terminalRunStateLabel(state)}
-      </span>
-      {parts.map((part) => (
-        <span
-          key={part.text}
-          className={cn("flex items-center gap-1.5", part.clock && "@max-[26rem]/terminals:hidden")}
-        >
-          <span aria-hidden className="text-muted-foreground/50">
-            ·
-          </span>
-          {part.text}
-        </span>
-      ))}
-    </span>
+    <Tooltip>
+      <TooltipTrigger
+        delay={400}
+        render={
+          <span
+            role="status"
+            key={state.kind}
+            className={cn(
+              "swap-motion flex h-6 shrink-0 cursor-default items-center text-3xs whitespace-nowrap tabular-nums",
+              // A stopped run is not a failure: only exits and launch errors read red.
+              state.kind === "killed" ? "text-muted-foreground" : runToneText(state),
+            )}
+          />
+        }
+      >
+        {text}
+      </TooltipTrigger>
+      <TooltipPopup side="bottom">{runSummary(entry)}</TooltipPopup>
+    </Tooltip>
   );
 }
 
 /**
- * The selected run's command on one line (click to see all of it), its
- * actions, and under it the folder it ran in and how it stands.
+ * The selected run's command on one line (click to see all of it), how it
+ * stands, and its actions. The folder it ran in shows only when it is not the
+ * thread's own workspace.
  */
 function RunCommandHeader({
   threadRef,
@@ -375,11 +374,21 @@ function RunCommandHeader({
 }) {
   const [expanded, setExpanded] = useState(false);
   const live = isAgentTerminalRunning(entry);
-  const location = shortenHomePath(entry.worktreePath ?? entry.cwd);
+  const shell = useThreadShell(threadRef);
+  const project = useProject(
+    shell ? scopeProjectRef(threadRef.environmentId, shell.projectId) : null,
+  );
+  const location = runLocationLabel(
+    entry.cwd,
+    // As the server resolves it: the thread's worktree, else its project's folder.
+    entry.worktreePath ?? project?.workspaceRoot ?? null,
+  );
+  // Copy and the tooltip keep the full command; the line drops `export …;` setup.
+  const display = runHeaderCommand(entry.label);
   const toggle = (element: HTMLElement) => {
     // Selecting part of the command is not a request to expand it.
     if (window.getSelection()?.toString()) return;
-    if (!expanded && element.scrollWidth <= element.clientWidth) return;
+    if (!expanded && !display.abridged && element.scrollWidth <= element.clientWidth) return;
     setExpanded((value) => !value);
   };
   return (
@@ -388,7 +397,7 @@ function RunCommandHeader({
     // the actions keep between themselves.
     <div
       className={cn(
-        "swap-motion flex shrink-0 flex-col gap-0.5 border-b border-border/50 px-3 pt-1.5 pb-2 @min-[40rem]/terminals:pe-10",
+        "group/run-header swap-motion flex shrink-0 flex-col px-3 pt-1.5 pb-1 @min-[40rem]/terminals:pe-10",
         switcher && "pe-10",
       )}
     >
@@ -414,11 +423,14 @@ function RunCommandHeader({
             switcher && "@max-[40rem]/terminals:hidden",
           )}
         >
-          <span aria-hidden className="text-muted-foreground/50 select-none">
-            ${" "}
-          </span>
-          {entry.label}
+          {expanded ? entry.label : display.text}
+          {!expanded && display.abridged ? (
+            <span aria-hidden className="text-muted-foreground/50 select-none">
+              {" …"}
+            </span>
+          ) : null}
         </code>
+        <RunStatus entry={entry} />
         <div className="flex h-6 shrink-0 items-center gap-1">
           {live ? (
             <LiveRunActions
@@ -429,22 +441,23 @@ function RunCommandHeader({
               onStop={onStop}
             />
           ) : null}
-          <CopyButton
-            label="Copy command"
-            size="icon-xs"
-            target="command"
-            value={entry.label}
-            variant="ghost"
-          />
+          {/* Copy stays out of the way until the header is hovered or focused. */}
+          <span className="flex opacity-0 transition-opacity duration-(--motion-duration-fast) ease-out group-hover/run-header:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100 motion-reduce:transition-none">
+            <CopyButton
+              label="Copy command"
+              size="icon-xs"
+              target="command"
+              value={entry.label}
+              variant="ghost"
+            />
+          </span>
         </div>
       </div>
-      <div className="flex min-w-0 items-center gap-3 text-3xs text-muted-foreground">
-        {/* Narrow, the folder is dropped first; how the run stands is what matters. */}
-        <span className="flex min-w-0 flex-1 font-mono text-muted-foreground/80 @max-[26rem]/terminals:hidden">
+      {location ? (
+        <span className="-mt-0.5 flex min-w-0 font-mono text-3xs text-muted-foreground/60">
           <MiddleTruncate value={location} />
         </span>
-        <RunStatusLine entry={entry} />
-      </div>
+      ) : null}
     </div>
   );
 }
@@ -501,11 +514,12 @@ export function AgentRunsView(props: AgentRunsViewProps) {
 
   const live = props.runs.slice(0, props.liveRunCount);
   const finished = props.runs.slice(props.liveRunCount);
+  // Headings, and so folding, only while both groups have runs.
+  const grouped = live.length > 0 && finished.length > 0;
   // Arrows move through the rows on screen; a folded group's runs are skipped.
-  const navigable = [
-    ...(props.groupsOpen.live ? live : []),
-    ...(props.groupsOpen.finished ? finished : []),
-  ];
+  const navigable = grouped
+    ? [...(props.groupsOpen.live ? live : []), ...(props.groupsOpen.finished ? finished : [])]
+    : props.runs;
 
   const onListKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const step =
@@ -566,7 +580,8 @@ export function AgentRunsView(props: AgentRunsViewProps) {
       <div
         className={cn(
           "flex min-h-0 shrink-0 flex-col",
-          "max-h-[38%] border-b border-border/50",
+          // One surface: a faint hairline is the only split between list and output.
+          "max-h-[38%] border-b border-border/30",
           // Compact and narrow, the run menu in the header stands in for the list.
           props.compact && "@max-[40rem]/terminals:border-b-0",
           "@min-[40rem]/terminals:max-h-none @min-[40rem]/terminals:w-60 @min-[40rem]/terminals:border-e @min-[40rem]/terminals:border-b-0",
@@ -587,28 +602,32 @@ export function AgentRunsView(props: AgentRunsViewProps) {
             // (inset, size and gap) so a scrolled row never slides under it.
             !props.listHeader && "@max-[40rem]/terminals:me-9",
             props.compact && "@max-[40rem]/terminals:hidden",
+            // Without group headings the first row lines up with the run's command.
+            !grouped && "pt-1",
           )}
         >
-          {live.length > 0 ? (
-            <RunGroupSection
-              label="Running"
-              count={live.length}
-              open={groupsOpen.live}
-              onToggle={() => onGroupOpenChange("live", !groupsOpen.live)}
-            >
-              {rows(live)}
-            </RunGroupSection>
-          ) : null}
-          {finished.length > 0 ? (
-            <RunGroupSection
-              label="Finished"
-              count={finished.length}
-              open={groupsOpen.finished}
-              onToggle={() => onGroupOpenChange("finished", !groupsOpen.finished)}
-            >
-              {rows(finished)}
-            </RunGroupSection>
-          ) : null}
+          {grouped ? (
+            <>
+              <RunGroupSection
+                label="Running"
+                count={live.length}
+                open={groupsOpen.live}
+                onToggle={() => onGroupOpenChange("live", !groupsOpen.live)}
+              >
+                {rows(live)}
+              </RunGroupSection>
+              <RunGroupSection
+                label="Finished"
+                count={finished.length}
+                open={groupsOpen.finished}
+                onToggle={() => onGroupOpenChange("finished", !groupsOpen.finished)}
+              >
+                {rows(finished)}
+              </RunGroupSection>
+            </>
+          ) : (
+            rows(props.runs)
+          )}
         </div>
       </div>
       <section

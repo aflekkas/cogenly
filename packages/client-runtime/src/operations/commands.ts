@@ -1009,6 +1009,26 @@ export const resumeThreadQueue = Effect.fn("EnvironmentCommands.resumeThreadQueu
   });
 });
 
+export const clearThreadQueue = Effect.fn("EnvironmentCommands.clearThreadQueue")(function* (
+  input: ThreadCommandInput,
+) {
+  return yield* dispatch({
+    type: "queue.clear",
+    commandId: yield* allocateCommandId(input),
+    threadId: input.threadId,
+  });
+});
+
+export const sendAllQueuedMessages = Effect.fn("EnvironmentCommands.sendAllQueuedMessages")(
+  function* (input: ThreadCommandInput) {
+    return yield* dispatch({
+      type: "queue.send-all",
+      commandId: yield* allocateCommandId(input),
+      threadId: input.threadId,
+    });
+  },
+);
+
 export const reorderQueuedRun = Effect.fn("EnvironmentCommands.reorderQueuedRun")(function* (
   input: ReorderQueuedRunInput,
 ) {

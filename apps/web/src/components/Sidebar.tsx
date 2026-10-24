@@ -319,14 +319,12 @@ import {
   groupWorkCards,
   moveInOrder,
   placeInGroupOrder,
-  planWorkCardReorder,
   toggleCollapsedSection,
   workCardLabel,
   workGroupSectionKey,
 } from "./sidebar/workCards.logic";
 import { SidebarListRevealSentinel, useSidebarListReveal } from "./sidebar/SidebarListReveal";
 import { useSidebarListAnchor } from "./sidebar/useSidebarListAnchor";
-import { sidebarListEdge } from "./sidebar/sidebarListAnchor.logic";
 import { useAgentListFilter } from "../agents/agentListFilter";
 import { AgentsShelfBar } from "../agents/AgentsShelfBar";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
@@ -3004,9 +3002,8 @@ export default function Sidebar() {
   }, [snoozedThreads]);
 
   // The settled tail renders in pages: history shouldn't dominate the
-  // sidebar, and the common lookups are recent. The sentinel above its
-  // oldest row (the list grows upward) reveals the next page as it scrolls
-  // into view. Each mode keeps the pages it revealed.
+  // sidebar, and the common lookups are recent. The sentinel below its
+  // oldest row reveals the next page as it scrolls into view. Each mode keeps the pages it revealed.
   const { count: settledVisibleCount, reveal: revealMoreSettled } = useSidebarListReveal({
     listKey: "settled",
     resetKey: sidebarMode,
@@ -3732,7 +3729,8 @@ export default function Sidebar() {
     const keysById = new Map(
       [...threadByKeyRef.current].map(([id, thread]) => [id, thread.activeOrderKey ?? null]),
     );
-    const writes = planWorkCardReorder({ drawnOrder: order, keysById, movedId: key });
+    // Work draws the server's active order as is, so the drawn order is the one keyed.
+    const writes = planPinnedReorder({ orderedIds: order, keysById, movedId: key });
     if (writes.length === 0) {
       setWorkDrag(null);
       return;
@@ -3994,9 +3992,9 @@ export default function Sidebar() {
   // A project picked in the Work hero rides on a draft until its first send,
   // and files the draft's card under that project.
   const pendingFolderByThreadId = usePendingProjectFolderStore((state) => state.byThreadId);
-  // Work's cards as drawn, top to bottom: the filter's threads in reverse of
-  // their order (new work lowest, by the dock), then the unsent drafts, newest
-  // lowest. While a card is saving a move the list previews the new order.
+  // Work's cards as drawn, top to bottom: the unsent drafts, newest first,
+  // then the filter's threads in their order (new work first, just under the
+  // dock). While a card is saving a move the list previews the new order.
   // `groups` files them under project headings, each keeping that order.
   const workRows = useMemo(() => {
     if (sidebarMode !== "tasks") return null;
@@ -4015,7 +4013,6 @@ export default function Sidebar() {
       }
       threads.push({ key: item.key, section: item.section });
     }
-    threads.reverse();
     const savedOrder = threads.map((entry) => entry.key);
     const drawnOrder =
       workDrag !== null && shown === "active"
@@ -4027,7 +4024,7 @@ export default function Sidebar() {
     // The saved order now draws what the preview does.
     const dropLanded = drawnOrder.every((key, index) => savedOrder[index] === key);
     const drafts =
-      shown === "active" ? workDrafts.toSorted((a, b) => a.createdAtMs - b.createdAtMs) : [];
+      shown === "active" ? workDrafts.toSorted((a, b) => b.createdAtMs - a.createdAtMs) : [];
     // One stable folder per project (rowFolderByKey), for the heading's mark.
     const projectOf = (entry: EnvironmentProjectLabel | null | undefined) =>
       entry
@@ -4038,8 +4035,8 @@ export default function Sidebar() {
           }
         : null;
     const cards: WorkCardEntry[] = [
-      ...previewed.map((entry) => ({ kind: "thread" as const, ...entry })),
       ...drafts.map((draft) => ({ kind: "draft" as const, key: `draft:${draft.draftId}`, draft })),
+      ...previewed.map((entry) => ({ kind: "thread" as const, ...entry })),
     ];
     const groups = groupWorkCards(cards, (card) => {
       if (card.kind === "thread") {
@@ -4178,10 +4175,8 @@ export default function Sidebar() {
   );
   const sidebarListHasRows = sidebarListItems.length + visibleDraftSessionCount > 0;
   const sidebarModeListRef = useRef<HTMLDivElement | null>(null);
-  // Each list (a mode and its filter, or search) keeps its own place. Active
-  // lists fill from the bottom, against the dock; Chats, search and the
-  // put-away shelves (Settled newest first, Snoozed soonest wake first) run
-  // from the top.
+  // Each list (a mode and its filter, or search) keeps its own place, read
+  // down from the dock; one never seen before opens on its first rows.
   const agentListFilter = useAgentListFilter();
   useSidebarListAnchor(
     sidebarModeListRef,
@@ -4192,7 +4187,6 @@ export default function Sidebar() {
         : sidebarMode === "agents"
           ? `agents:${agentListFilter}`
           : sidebarMode,
-    sidebarListEdge({ searching: isSearchingThreads, mode: sidebarMode, shelf: openShelf ?? null }),
   );
   const listMotionModeRef = useRef(sidebarMode);
   const listMotionShelfRef = useRef(openShelf);
@@ -5140,25 +5134,23 @@ export default function Sidebar() {
       <SidebarContent
         className="min-h-full"
         fixedHeader={
-          // Desktop switches modes from the navigation rail; the mobile sheet
-          // keeps the segmented switcher above the list.
-          navRailVisible ? null : (
-            <SidebarGroup className="z-[1]">
+          // Lifted above the stage backdrop, whose fade would otherwise paint
+          // across the search field's outline.
+          <SidebarGroup className="z-[1]">
+            {/* Desktop switches modes from the navigation rail; the mobile
+                sheet keeps the segmented switcher above search. */}
+            {navRailVisible ? null : (
               <SidebarModeSwitcher
+                className="mb-2.5"
                 mode={sidebarMode}
                 onModeChange={sidebarModes.selectMode}
                 decisionsWaiting={sidebarModes.decisionsWaiting}
                 keybindings={keybindings}
               />
-            </SidebarGroup>
-          )
-        }
-        fixedFooter={
-          // Search and the add/new actions dock under the list, which stacks
-          // up from the bottom toward them.
-          // Lifted above the stage backdrop, whose fade would otherwise paint
-          // across the search field's outline.
-          <SidebarGroup className="z-[1]">
+            )}
+            {/* Search and the add/new actions dock above the list, then the
+                mode's count bar; the list reads down from them. */}
+            {threadHeader}
             {sidebarMode === "tasks" ? (
               <SidebarShelfBar
                 activeIcon={SIDEBAR_MODE_ICONS.tasks}
@@ -5173,11 +5165,10 @@ export default function Sidebar() {
               />
             ) : null}
             {sidebarMode === "agents" ? <AgentsShelfBar /> : null}
-            {threadHeader}
           </SidebarGroup>
         }
       >
-        <SidebarGroup ref={sidebarModeListRef} className="flex-1 justify-end" role="presentation">
+        <SidebarGroup ref={sidebarModeListRef} className="flex-1" role="presentation">
           {isSearchingThreads ? (
             threadSearchResults.length > 0 ? (
               <TooltipProvider
@@ -5438,7 +5429,7 @@ export default function Sidebar() {
                   // Work's live cards (All, Needs attention) sit under project
                   // headings, "No project" last,
                   // each group in the order the user arranged (workRows) with
-                  // its drafts newest at the bottom. A folded heading keeps
+                  // its drafts first, newest at the top. A folded heading keeps
                   // only the open card; cards drag within their group.
                   if (workRows !== null) {
                     for (const group of workRows.groups) {
@@ -5650,14 +5641,12 @@ export default function Sidebar() {
                   // land below the last row.
                   <SidebarListRevealSentinel
                     key={`settled:${settledVisibleCount}`}
-                    edge="bottom"
                     onReveal={revealMoreSettled}
                   />
                 ) : null}
                 {chatWindow !== null && chatWindow.hiddenCount > 0 ? (
                   <SidebarListRevealSentinel
                     key={`chats:${chatVisibleCount}`}
-                    edge="bottom"
                     onReveal={revealMoreChats}
                   />
                 ) : null}

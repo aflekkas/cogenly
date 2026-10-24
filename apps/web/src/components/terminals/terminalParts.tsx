@@ -3,10 +3,10 @@ import {
   AuthTerminalReadScope,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
-import { Ban, Check, CircleAlert, X } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { readLocalApi } from "~/localApi";
+import { cn } from "~/lib/utils";
 import { previewEnvironment } from "../../state/preview";
 import { useEnvironmentQuery } from "../../state/query";
 import { readEnvironmentScope, useEnvironmentScope } from "../../state/session";
@@ -37,34 +37,28 @@ export const RUN_TONE_TEXT: Record<TerminalRunTone, string> = {
 };
 
 /**
- * A static marker for how a run stands. Live is a dot, never a spinner. Every
- * state sits in the same box, so a column of them lines up.
+ * A static dot for how a run stands, so the command carries the row. Live is
+ * green, never a spinner; a failure is red; success and a bare exit stay faint;
+ * a stopped run is a hollow ring. Every state sits in the same box, so a column
+ * of them lines up.
  */
 export function RunStateGlyph({ state }: { state: TerminalRunState }) {
   return (
-    <span aria-hidden className="flex size-3.5 shrink-0 items-center justify-center">
-      <RunStateMark state={state} />
+    <span aria-hidden className="flex size-3 shrink-0 items-center justify-center">
+      <span className={cn("size-1.5 rounded-full", RUN_STATE_DOT[state.kind])} />
     </span>
   );
 }
 
-function RunStateMark({ state }: { state: TerminalRunState }) {
-  switch (state.kind) {
-    case "starting":
-    case "running":
-      return <span className="size-1.5 rounded-full bg-success ring-3 ring-success/15" />;
-    case "ended":
-      return <span className="size-1.5 rounded-full bg-muted-foreground/40" />;
-    case "succeeded":
-      return <Check className="size-3.5 text-success/75" />;
-    case "failed":
-      return <X className="size-3.5 text-destructive-foreground" />;
-    case "killed":
-      return <Ban className="size-3 text-muted-foreground" />;
-    case "error":
-      return <CircleAlert className="size-3.5 text-destructive-foreground" />;
-  }
-}
+const RUN_STATE_DOT: Record<TerminalRunState["kind"], string> = {
+  starting: "bg-success ring-3 ring-success/15",
+  running: "bg-success ring-3 ring-success/15",
+  succeeded: "bg-muted-foreground/25",
+  ended: "bg-muted-foreground/25",
+  killed: "border border-muted-foreground/60",
+  failed: "bg-destructive-foreground/85",
+  error: "bg-destructive-foreground/85",
+};
 
 export function runToneText(state: TerminalRunState): string {
   return RUN_TONE_TEXT[terminalRunStateTone(state)];

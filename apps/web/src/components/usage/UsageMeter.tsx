@@ -91,10 +91,7 @@ export function MeterMarker({
   );
 }
 
-/**
- * The remaining / used switch. One control for Settings and the Usage page, so
- * the two cannot drift apart.
- */
+/** The remaining / used switch, shown under Settings → Appearance → Usage meters. */
 export function UsageMeterModeToggle() {
   const { preferences, update } = useAppearancePreferences();
   return (

@@ -33,14 +33,6 @@ describe("describeCopiedToast", () => {
       label: "feat/toasts",
     });
   });
-
-  it("copies of content say only that something was copied", () => {
-    expect(describeCopiedToast({ kind: "clipboard" })).toEqual({
-      title: "Copied to clipboard",
-      label: null,
-      icon: null,
-    });
-  });
 });
 
 describe("plainToastLabel", () => {

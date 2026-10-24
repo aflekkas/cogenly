@@ -1,14 +1,6 @@
+import { CaptureIcon, PickElementIcon } from "~/components/ui/animated-icons";
 import { RefreshIcon } from "~/components/ui/refresh-icon";
-import {
-  ArrowLeft,
-  ArrowRight,
-  Bot,
-  Camera,
-  ExternalLink,
-  Globe,
-  Lock,
-  MousePointerClick,
-} from "lucide-react";
+import { ArrowLeft, ArrowRight, Bot, ExternalLink, Globe, Lock } from "lucide-react";
 import {
   type FormEvent,
   type KeyboardEvent,
@@ -260,6 +252,8 @@ export function PreviewChromeRow({
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [draft, setDraft] = useState(url);
   const [inputFocused, setInputFocused] = useState(false);
+  // Screenshots taken from the camera button; each one plays CaptureIcon's shutter.
+  const [shots, setShots] = useState(0);
   const address = url.length > 0 ? parseAddress(url) : null;
   // At rest the field holds nothing and the display beside it shows the URL;
   // the input's own text appears when it is being edited.
@@ -414,7 +408,7 @@ export function PreviewChromeRow({
               disabled={pickDisabled}
               pressed={pickActive ?? false}
             >
-              <MousePointerClick className={cn(pickActive && "text-brand-accent")} />
+              <PickElementIcon active={pickActive ?? false} />
             </ToolbarButton>
           ) : null}
           {onCapture ? (
@@ -424,14 +418,18 @@ export function PreviewChromeRow({
                   <Button
                     variant={recording ? "secondary" : "ghost"}
                     size="icon-sm"
-                    onClick={(event) => onCapture(event.shiftKey)}
+                    onClick={(event) => {
+                      // Only a screenshot fires the shutter, not starting or stopping a recording.
+                      if (!recording && !event.shiftKey) setShots((count) => count + 1);
+                      onCapture(event.shiftKey);
+                    }}
                     aria-label={recording ? "Stop recording" : "Capture screenshot"}
                     type="button"
                     disabled={captureDisabled}
                   />
                 }
               >
-                <Camera className={cn(recording && "text-destructive")} />
+                <CaptureIcon shot={shots} recording={recording ?? false} />
                 {recording ? (
                   <span className="absolute top-1 right-1 size-1.5 animate-status-pulse rounded-full bg-destructive" />
                 ) : null}

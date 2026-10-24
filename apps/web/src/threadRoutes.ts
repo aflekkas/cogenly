@@ -42,6 +42,27 @@ export function resolveThreadRouteRenderState(input: {
   return "missing";
 }
 
+/**
+ * Whether a thread route that showed an agent's conversation must leave it,
+ * because the agent is gone (deleted here, elsewhere, or over MCP) while its
+ * conversation thread remains. `shownAgentThreadKey` is the route thread last
+ * shown as an agent's conversation; keep the returned one for the next call.
+ * It clears once the route moves on, so a leftover conversation opened later
+ * stays open. A list still loading or reconnecting proves nothing.
+ */
+export function resolveAgentConversationRemoval(input: {
+  shownAgentThreadKey: string | null;
+  routeThreadKey: string | null;
+  agentPresent: boolean;
+  agentsSettled: boolean;
+}): { readonly shownAgentThreadKey: string | null; readonly removed: boolean } {
+  if (input.agentPresent) return { shownAgentThreadKey: input.routeThreadKey, removed: false };
+  if (input.routeThreadKey === null || input.shownAgentThreadKey !== input.routeThreadKey) {
+    return { shownAgentThreadKey: null, removed: false };
+  }
+  return { shownAgentThreadKey: input.shownAgentThreadKey, removed: input.agentsSettled };
+}
+
 export function buildThreadRouteParams(ref: ScopedThreadRef): {
   environmentId: EnvironmentId;
   threadId: ThreadId;

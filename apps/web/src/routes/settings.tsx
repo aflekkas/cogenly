@@ -86,8 +86,8 @@ function SettingsContentLayout() {
       : JSON.stringify(search);
   // The section's route, which changes only once its (lazily loaded) page
   // commits; until then the old page stays on screen. Hash and search changes
-  // within a section keep it. Its commit is the new frame of a section switch's
-  // crossfade (SettingsSidebarNav, the rail's Settings button).
+  // within a section keep it. Its commit is the new frame of the crossfade
+  // into Settings (the rail's Settings button).
   const sectionRouteId = useChildMatches({ select: (matches) => matches[0]?.routeId });
   useLayoutEffect(() => {
     if (sectionRouteId !== undefined) settleModeSwitchMainPane();

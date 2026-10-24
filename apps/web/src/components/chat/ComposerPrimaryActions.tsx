@@ -325,7 +325,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
       type={showStop || showResume ? "button" : "submit"}
       className={cn(
         "flex h-9 w-9 items-center justify-center rounded-tile text-white shadow-xs enabled:cursor-pointer hover:scale-105 active:shadow-none disabled:pointer-events-none disabled:shadow-none disabled:hover:scale-100 sm:h-8 sm:w-8 [&_svg]:pointer-events-none",
-        // The boot splash's pixel mosaic (pixelButton.css): ember to send,
+        // The boot splash's pixel mosaic (pixelButton.css): the accent to send,
         // red to stop, a flat grey tile with a dark arrow while there is
         // nothing to send. Light sweeps down the cells while a run is live.
         "pixel-button enabled:shadow-black/24",

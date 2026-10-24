@@ -278,6 +278,12 @@ export function summarizeT3ToolCalls(
         quantity(countEntities(entityIds("queuedRunId")), "queued message"),
       );
       break;
+    case "queue-clear":
+      label = phrase("Cleared", "clear", `the queue ${times}`);
+      break;
+    case "queue-send-all":
+      label = phrase("Sent", "send", `all queued messages ${times}`);
+      break;
     case "question-list":
       label = phrase("Listed", "list", `pending questions ${times}`);
       break;

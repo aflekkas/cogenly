@@ -40,3 +40,28 @@ export function mergeQueuedRowSlots<Item>(
   });
   return merged;
 }
+
+/**
+ * Optimistic cancels still worth tracking: those whose run is still queued.
+ * Run ids never return to the queue once cancelled, so a stale id is harmless
+ * and the set only needs trimming when nothing is drawing it.
+ */
+export function retainQueuedCancels<Id>(
+  cancelled: ReadonlySet<Id>,
+  queuedIds: Iterable<Id>,
+): ReadonlySet<Id> {
+  if (cancelled.size === 0) return cancelled;
+  const queued = new Set(queuedIds);
+  const kept = new Set([...cancelled].filter((id) => queued.has(id)));
+  return kept.size === cancelled.size ? cancelled : kept;
+}
+
+/** The row to move focus to when `removedKey` leaves: the next one, else the previous. */
+export function focusKeyAfterRemoval(
+  keys: ReadonlyArray<string>,
+  removedKey: string,
+): string | null {
+  const index = keys.indexOf(removedKey);
+  if (index === -1) return null;
+  return keys[index + 1] ?? keys[index - 1] ?? null;
+}

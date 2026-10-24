@@ -974,13 +974,6 @@ export function ProviderInstanceCard({
                 label="Copy update command"
                 target="update command"
                 value={updateCommand}
-                onCopied={() =>
-                  toastManager.add({
-                    type: "success",
-                    title: `${displayName} update command copied`,
-                    description: "Run it in a terminal when you are ready to update.",
-                  })
-                }
                 onError={(error) =>
                   toastManager.add(
                     stackedThreadToast({

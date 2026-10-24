@@ -1089,7 +1089,7 @@ export function DraftHeroHeadline({
   const headingLabel = isChatDraft ? `${greeting}${greetingSuffix ?? ""}` : breadcrumb.label;
 
   return (
-    <div className="@container mx-auto flex w-full max-w-5xl flex-col items-center">
+    <div className="@container flex w-full flex-col items-center">
       {/* Sized to the pane, not the window: beside an open right panel the
           greeting steps down so it and its project stay on one line. A step
           rescales smoothly, and a project or breadcrumb that no longer fits

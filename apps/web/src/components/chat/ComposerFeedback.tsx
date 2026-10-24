@@ -4,9 +4,7 @@ import {
 } from "@t3tools/client-runtime/state/threads";
 import { MessageSquareIcon } from "lucide-react";
 
-import { writeTextToClipboard } from "../../hooks/useCopyToClipboard";
-import { Button } from "../ui/button";
-import { toastManager } from "../ui/toast";
+import { CopyButton } from "../ui/copy-button";
 import type { ComposerBannerStackItem } from "./ComposerBannerStack";
 
 export function feedbackBannerItem(
@@ -24,23 +22,15 @@ export function feedbackBannerItem(
     ...notice,
     actions:
       submission.status === "sent" ? (
-        <Button
+        <CopyButton
+          label="Copy feedback thread ID"
           size="xs"
+          target="Codex feedback thread ID"
+          value={submission.feedbackId}
           variant="ghost"
-          onClick={() => {
-            void writeTextToClipboard(submission.feedbackId, "Codex feedback thread ID").catch(
-              (error: unknown) => {
-                toastManager.add({
-                  type: "error",
-                  title: "Could not copy thread ID",
-                  description: error instanceof Error ? error.message : "An error occurred.",
-                });
-              },
-            );
-          }}
         >
           Copy ID
-        </Button>
+        </CopyButton>
       ) : undefined,
     ...(submission.status !== "uploading"
       ? { dismissLabel: "Dismiss feedback notice", onDismiss }
