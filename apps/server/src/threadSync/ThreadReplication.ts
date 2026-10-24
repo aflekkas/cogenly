@@ -117,6 +117,12 @@ export class ThreadReplication extends Context.Service<
       readonly source: ThreadReplicaSource | null;
       readonly projectId: ProjectId | undefined;
     }>;
+    /** Where a thread in `projectId` runs, in terms another machine can map. */
+    readonly projectSource: (projectId: ProjectId) => Effect.Effect<ThreadReplicaSource>;
+    /** This machine's checkout of a portable source; undefined when it has none. */
+    readonly localProject: (
+      source: Pick<ThreadReplicaSource, "kind" | "remote">,
+    ) => Effect.Effect<ProjectId | undefined>;
   }
 >()("cogenly-server/threadSync/ThreadReplication") {}
 
@@ -216,19 +222,24 @@ const make = Effect.gen(function* () {
   const localSource = Effect.fn("ThreadReplication.localSource")(function* (threadId: string) {
     const rows = yield* sql<{
       readonly project_id: string;
+    }>`SELECT project_id FROM orchestration_v2_projection_threads WHERE thread_id = ${threadId}`;
+    return rows[0] === undefined
+      ? null
+      : yield* projectSourceOf(ProjectId.make(rows[0].project_id));
+  });
+
+  const projectSourceOf = Effect.fn("ThreadReplication.projectSource")(function* (
+    projectId: ProjectId,
+  ) {
+    const rows = yield* sql<{
       readonly workspace_root: string | null;
       readonly remote: string | null;
-    }>`SELECT t.project_id, p.workspace_root,
+    }>`SELECT (SELECT p.workspace_root FROM projection_projects p WHERE p.project_id = ${projectId}) AS workspace_root,
         COALESCE(
-          (SELECT r.remote FROM label_repositories r WHERE r.repository_id = t.project_id AND r.remote IS NOT NULL LIMIT 1),
-          (SELECT c.remote FROM shared_repository_checkouts c WHERE c.repository_id = t.project_id LIMIT 1)
-        ) AS remote
-      FROM orchestration_v2_projection_threads t
-      LEFT JOIN projection_projects p ON p.project_id = t.project_id
-      WHERE t.thread_id = ${threadId}`;
-    const row = rows[0];
-    if (row === undefined) return null;
-    const projectId = ProjectId.make(row.project_id);
+          (SELECT r.remote FROM label_repositories r WHERE r.repository_id = ${projectId} AND r.remote IS NOT NULL LIMIT 1),
+          (SELECT c.remote FROM shared_repository_checkouts c WHERE c.repository_id = ${projectId} LIMIT 1)
+        ) AS remote`;
+    const row = rows[0] ?? { workspace_root: null, remote: null };
     if (
       row.workspace_root !== null &&
       (path.resolve(row.workspace_root) === scratchRoot || isT3Scratch(row.workspace_root))
@@ -359,7 +370,7 @@ const make = Effect.gen(function* () {
 
   // Project ids are local; map the owner's checkout to this machine's copy of it.
   const localProject = Effect.fn("ThreadReplication.localProject")(function* (
-    source: ThreadReplicaSource | null,
+    source: Pick<ThreadReplicaSource, "kind" | "remote"> | null,
   ) {
     if (source === null) return undefined;
     const rows =
@@ -804,6 +815,8 @@ const make = Effect.gen(function* () {
     fenced,
     take,
     sourceProject,
+    projectSource: (projectId) => projectSourceOf(projectId).pipe(Effect.orDie),
+    localProject: (source) => localProject(source).pipe(Effect.orDie),
   });
 });
 

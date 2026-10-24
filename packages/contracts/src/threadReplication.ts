@@ -1,9 +1,29 @@
 import * as Schema from "effect/Schema";
+import { AgentId } from "./agent.ts";
 import { AuthPeerDelegateScope, AuthSyncReplicateScope } from "./auth.ts";
-import { EnvironmentId, EventId, ProjectId, ThreadId } from "./baseSchemas.ts";
+import {
+  CommandId,
+  EnvironmentId,
+  EventId,
+  MessageId,
+  ProjectId,
+  ScheduledTaskId,
+  ThreadId,
+  TrimmedNonEmptyString,
+} from "./baseSchemas.ts";
+import { ChatAttachment } from "./chatAttachment.ts";
+import { OrchestrationMessageContext } from "./composerContext.ts";
 import { makePeerChannel } from "./machine.ts";
-import { OrchestrationV2ServerCommand } from "./orchestrationV2.ts";
+import { ModelSelection } from "./modelSelection.ts";
+import {
+  OrchestrationV2Actor,
+  OrchestrationV2CreationSource,
+  OrchestrationV2ServerCommand,
+  ThreadSurface,
+  WorkOrigin,
+} from "./orchestrationV2.ts";
 import { ProjectLabelId } from "./projectLabel.ts";
+import { ProviderInteractionMode, RuntimeMode } from "./providerPolicy.ts";
 import { SharedRepositoryRemote } from "./sharedDocument.ts";
 
 /** One batch: a single larger event still travels alone so it cannot wedge a cursor. */
@@ -230,6 +250,95 @@ export const ProjectMovePrepare = makePeerChannel({
   scope: AuthPeerDelegateScope,
   payload: Schema.Struct({ id: ProjectLabelId, target: EnvironmentId }),
   success: Schema.Array(ProjectMoveRepository),
+  error: ThreadRemoteError,
+});
+
+/**
+ * The project a thread launched on another machine runs in, in terms any
+ * machine can map: its "No project", or its checkout of a repository by
+ * remote. `labelId` names the project that links the remote, so the target
+ * can clone it there when it has no checkout.
+ */
+export const ThreadLaunchProject = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("scratch") }),
+  Schema.Struct({
+    kind: Schema.Literal("repository"),
+    remote: SharedRepositoryRemote,
+    labelId: Schema.optional(ProjectLabelId),
+  }),
+]);
+export type ThreadLaunchProject = typeof ThreadLaunchProject.Type;
+
+/**
+ * A launch as another machine runs it. Paths are machine-local, so a
+ * workspace is the project root or a new worktree, never an existing one.
+ */
+export const ThreadLaunchPortable = Schema.Struct({
+  surface: Schema.optionalKey(ThreadSurface),
+  workOrigin: Schema.optionalKey(WorkOrigin),
+  sourceThreadId: Schema.optionalKey(ThreadId),
+  sourceAgentId: Schema.optionalKey(AgentId),
+  sourceAgentRunId: Schema.optionalKey(Schema.String),
+  agent: Schema.optionalKey(
+    Schema.Struct({ id: AgentId, role: Schema.Literals(["conversation", "work"]) }),
+  ),
+  title: Schema.String,
+  generateTitle: Schema.optionalKey(Schema.Boolean),
+  modelSelection: ModelSelection,
+  runtimeMode: RuntimeMode,
+  interactionMode: ProviderInteractionMode,
+  workspaceStrategy: Schema.Union([
+    Schema.Struct({
+      type: Schema.Literal("root"),
+      branch: Schema.optional(TrimmedNonEmptyString),
+    }),
+    Schema.Struct({
+      type: Schema.Literal("worktree"),
+      baseRef: TrimmedNonEmptyString,
+      branch: Schema.optional(TrimmedNonEmptyString),
+      startFromOrigin: Schema.optional(Schema.Boolean),
+    }),
+  ]),
+  projectFolderId: Schema.optionalKey(ProjectLabelId),
+  initialMessage: Schema.optionalKey(
+    Schema.Struct({
+      messageId: Schema.optionalKey(MessageId),
+      scheduledTaskId: Schema.optionalKey(ScheduledTaskId),
+      senderThreadId: Schema.optionalKey(ThreadId),
+      text: Schema.String,
+      attachments: Schema.Array(ChatAttachment),
+      context: Schema.optional(OrchestrationMessageContext),
+    }),
+  ),
+  createdBy: OrchestrationV2Actor,
+  creationSource: OrchestrationV2CreationSource,
+});
+export type ThreadLaunchPortable = typeof ThreadLaunchPortable.Type;
+
+/**
+ * Start a new thread on `target`, which owns it from its first event and
+ * runs its first turn. Sent to the target, or to the hub, which relays it.
+ * The same command id (and thread id, when the caller chose one) makes a
+ * retry return the thread the first attempt created. The target pushes the
+ * new thread's events to the caller before it replies.
+ */
+export const ThreadLaunchRemote = makePeerChannel({
+  name: "threads.launch.v1",
+  scope: AuthPeerDelegateScope,
+  payload: Schema.Struct({
+    target: EnvironmentId,
+    commandId: CommandId,
+    threadId: Schema.optional(ThreadId),
+    project: ThreadLaunchProject,
+    launch: ThreadLaunchPortable,
+    /** Files of the initial message's attachments, by their names here. */
+    files: Schema.Array(ThreadAttachmentFile),
+  }),
+  success: Schema.Struct({
+    threadId: ThreadId,
+    resumed: Schema.Boolean,
+    eventIds: Schema.Array(EventId),
+  }),
   error: ThreadRemoteError,
 });
 

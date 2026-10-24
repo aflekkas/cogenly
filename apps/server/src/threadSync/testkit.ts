@@ -8,9 +8,10 @@ import {
   ProjectLabelError,
   ThreadId,
 } from "@t3tools/contracts";
-import type * as DateTime from "effect/DateTime";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -25,7 +26,10 @@ import * as EventStore from "../orchestration-v2/EventStore.ts";
 import * as Projections from "../orchestration-v2/ProjectionStore.ts";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as RemoteThreadCommands from "../orchestration-v2/RemoteThreadCommands.ts";
+import * as RemoteThreadLaunch from "../orchestration-v2/RemoteThreadLaunch.ts";
+import * as ThreadLaunch from "../orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
+import * as ThreadLaunchRouting from "./ThreadLaunchRouting.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import * as SharedState from "../sync/SharedState.ts";
 import * as ThreadReplication from "./ThreadReplication.ts";
@@ -61,12 +65,59 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
           ),
         ),
         RemoteThreadCommands.layer,
+        RemoteThreadLaunch.layer,
       ),
     ),
   );
   const inStores = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     machine.run(Effect.provideContext(effect, stores as never));
   const sink = yield* inStores(EventSink.EventSinkV2);
+  const projections = yield* inStores(Projections.ProjectionStoreV2);
+  /**
+   * Launches this machine ran itself, as its ThreadLaunchService was asked:
+   * the thread and its first message are written here, so this machine owns
+   * them from the first event. A repeated command returns the same thread.
+   */
+  const launched: Array<ThreadLaunch.ThreadLaunchInput> = [];
+  const launches = Layer.mock(ThreadLaunch.ThreadLaunchService)({
+    launch: (input) =>
+      Effect.gen(function* () {
+        launched.push(input);
+        const id = input.threadId ?? ThreadId.make(`thread:launched:${input.commandId}`);
+        const existing = yield* Effect.option(projections.getThreadProjection(id));
+        if (Option.isSome(existing))
+          return { threadId: id, projection: existing.value, resumed: true };
+        const at = yield* DateTime.now;
+        const thread = idleThreadProjection(liveThreadShell(id)).thread;
+        yield* sink.write({
+          commandId: input.commandId,
+          events: [
+            {
+              id: EventId.make(`event:${input.commandId}:created`),
+              type: "thread.created",
+              threadId: id,
+              occurredAt: at,
+              payload: { ...thread, title: input.title, projectId: input.projectId },
+            },
+            ...(input.initialMessage === undefined
+              ? []
+              : [
+                  userMessage(
+                    `event:${input.commandId}:message`,
+                    at,
+                    input.initialMessage.text,
+                    id,
+                  ),
+                ]),
+          ],
+        });
+        return {
+          threadId: id,
+          projection: yield* projections.getThreadProjection(id),
+          resumed: false,
+        };
+      }).pipe(Effect.orDie),
+  });
   const replicationContext = yield* inStores(Layer.build(ThreadReplication.layer));
   const replication = yield* ThreadReplication.ThreadReplication.pipe(
     Effect.provideContext(replicationContext),
@@ -189,7 +240,7 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
   );
   const context = yield* inStores(
     Layer.build(
-      ProjectMove.layer.pipe(
+      Layer.merge(ProjectMove.layer, ThreadLaunchRouting.layer).pipe(
         Layer.provideMerge(ThreadTransfer.layer),
         Layer.provideMerge(ThreadRouting.layer),
         Layer.provideMerge(ThreadSync.layer),
@@ -210,6 +261,7 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
         ),
         Layer.provide(Layer.succeed(Scheduler.Scheduler, { register: () => Effect.void })),
         Layer.provide(threads),
+        Layer.provide(launches),
       ),
     ),
   );
@@ -219,7 +271,7 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
   const shared = yield* SharedState.SharedState.pipe(Effect.provideContext(context));
   const projectMove = yield* ProjectMove.ProjectMove.pipe(Effect.provideContext(context));
   const remoteCommands = yield* inStores(RemoteThreadCommands.RemoteThreadCommands);
-  const projections = yield* inStores(Projections.ProjectionStoreV2);
+  const remoteLaunch = yield* inStores(RemoteThreadLaunch.RemoteThreadLaunch);
   const sql = yield* machine.run(SqlClient.SqlClient);
   /** A restart of this machine's replication, as after an update. */
   const restartReplication = inStores(Layer.build(Layer.fresh(ThreadReplication.layer))).pipe(
@@ -237,6 +289,8 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
     remotes,
     shared,
     remoteCommands,
+    remoteLaunch,
+    launched,
     restartReplication,
     sink,
     projections,
@@ -267,16 +321,17 @@ export const userMessage = (
   id: string,
   at: DateTime.Utc,
   text: string,
+  thread: ThreadId = threadId,
 ): OrchestrationV2DomainEvent => ({
   id: EventId.make(id),
   type: "message.updated",
-  threadId,
+  threadId: thread,
   occurredAt: at,
   payload: {
     createdBy: "user",
     creationSource: "web",
     id: MessageId.make(`message:${id}`),
-    threadId,
+    threadId: thread,
     runId: null,
     nodeId: null,
     role: "user",

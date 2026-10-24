@@ -5,12 +5,13 @@
  * worked on before it joined a project. Moving that project here files that
  * checkout into it, where it is, instead of cloning a second copy beside it.
  */
-import type { ProjectId, ProjectLabelId } from "@t3tools/contracts";
+import { type ProjectId, type ProjectLabelId, ThreadRemoteError } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/sql/SqlClient";
 
+import * as RepositoryCheckout from "../project/RepositoryCheckout.ts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
 import { normalizeRepositoryRemote } from "../project/RepositoryRemote.ts";
 import * as ProjectLabelService from "../projectLabels/ProjectLabelService.ts";
@@ -49,4 +50,26 @@ export const adoptLocalCheckout = Effect.fn("localCheckout.adopt")(function* (
     return Option.some({ repositoryId, workspaceRoot: candidate.workspace_root });
   }
   return Option.none<{ readonly repositoryId: ProjectId; readonly workspaceRoot: string }>();
+});
+
+/**
+ * This machine's record for `remote`, which the project links: its own
+ * checkout filed in place, or a clone started into the project. Turns wait
+ * for a clone; a clone that cannot start fails with `needs-repository`.
+ */
+export const ensureLocalCheckout = Effect.fn("localCheckout.ensure")(function* (
+  labelId: ProjectLabelId,
+  remote: string,
+) {
+  const adopted = yield* adoptLocalCheckout(labelId, remote);
+  if (Option.isSome(adopted)) return adopted.value.repositoryId;
+  const checkout = yield* RepositoryCheckout.RepositoryCheckout;
+  const { repositoryId } = yield* checkout
+    .checkoutRepository({ labelId, remote })
+    .pipe(
+      Effect.mapError(
+        (error) => new ThreadRemoteError({ reason: "needs-repository", detail: error.message }),
+      ),
+    );
+  return repositoryId;
 });

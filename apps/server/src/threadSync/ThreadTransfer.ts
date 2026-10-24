@@ -50,7 +50,7 @@ import * as Projections from "../orchestration-v2/ProjectionStore.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import * as SharedState from "../sync/SharedState.ts";
 import * as ThreadReplication from "./ThreadReplication.ts";
-import { adoptLocalCheckout } from "./localCheckout.ts";
+import { ensureLocalCheckout } from "./localCheckout.ts";
 import * as ThreadRouting from "./ThreadRouting.ts";
 import * as ThreadSync from "./ThreadSync.ts";
 
@@ -104,11 +104,11 @@ const make = Effect.gen(function* () {
   const path = yield* Path.Path;
   // Absent in unit layers without git: local changes are then not checked.
   const git = yield* Effect.serviceOption(GitWorkflow.GitWorkflowService);
-  const checkout = yield* RepositoryCheckout.RepositoryCheckout;
   const folders = yield* ManagedProjectFolders.ManagedProjectFolders;
   const context = yield* Effect.context<
     | SqlClient.SqlClient
     | FileSystem.FileSystem
+    | RepositoryCheckout.RepositoryCheckout
     | RepositoryIdentityResolver.RepositoryIdentityResolver
     | ProjectLabelService.ProjectLabelService
   >();
@@ -418,19 +418,9 @@ const make = Effect.gen(function* () {
             Effect.orDie,
           );
     if (linked[0] !== undefined && source?.remote != null) {
-      const labelId = ProjectLabelId.make(linked[0].label_id);
-      const adopted = yield* adoptLocalCheckout(labelId, source.remote).pipe(
+      yield* ensureLocalCheckout(ProjectLabelId.make(linked[0].label_id), source.remote).pipe(
         Effect.provideContext(context),
       );
-      if (Option.isNone(adopted))
-        yield* checkout
-          .checkoutRepository({ labelId, remote: source.remote })
-          .pipe(
-            Effect.mapError(
-              (error) =>
-                new ThreadRemoteError({ reason: "needs-repository", detail: error.message }),
-            ),
-          );
       if ((yield* replication.sourceProject(threadId)).projectId !== undefined) return;
     }
     return yield* new ThreadRemoteError({

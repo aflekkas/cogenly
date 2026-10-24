@@ -63,6 +63,7 @@ import * as ProjectStore from "./ProjectStore.ts";
 import * as ProviderAdapterRegistry from "./ProviderAdapterRegistry.ts";
 import * as ProviderContinuationRequests from "@t3tools/provider-core/server/ProviderContinuationRequests";
 import * as RemoteThreadCommands from "./RemoteThreadCommands.ts";
+import * as RemoteThreadLaunch from "./RemoteThreadLaunch.ts";
 import * as ProviderContinuationService from "./ProviderContinuationService.ts";
 import * as ThreadTitleRegenerationService from "./ThreadTitleRegenerationService.ts";
 import * as ProviderEventIngestor from "./ProviderEventIngestor.ts";
@@ -340,6 +341,8 @@ const layerThreadLaunchProvided = ThreadLaunchService.layer.pipe(
       layerThreadManagementProvided,
       layerCommandReceiptStoreProvided,
       IdAllocator.layer,
+      // Same reference as thread sync's launch router, which registers the launcher.
+      RemoteThreadLaunch.layer,
     ),
   ),
 );

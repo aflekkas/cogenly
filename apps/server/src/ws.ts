@@ -276,6 +276,7 @@ import * as UsageLimitSources from "./usage/UsageLimitSources.ts";
 
 const CONFIG_DISCOVERY_TIMEOUT = Duration.seconds(5);
 const isProviderUploadFeedbackError = Schema.is(ProviderUploadFeedbackError);
+const isProjectLabelError = Schema.is(ProjectLabelError);
 
 const resolveDiscoveryForConfig = <A, E, R>(
   discovery: Effect.Effect<A, E, R>,
@@ -1558,6 +1559,7 @@ const makeWsRpcHandlers = (
                       }),
                   createdBy: "user",
                   creationSource: input.creationSource ?? "web",
+                  ...(input.machine === undefined ? {} : { machine: input.machine }),
                 }).pipe(Effect.provide(intakeContext)),
               )
               .pipe(
@@ -1585,16 +1587,22 @@ const makeWsRpcHandlers = (
                       message: cause.message,
                       cause,
                     }),
-                  ThreadLaunchError: (cause) =>
-                    new OrchestrationV2ThreadLaunchError({
+                  ThreadLaunchError: (cause) => {
+                    // Another machine's refusal, or its absence, says why in its own words.
+                    const remote = ThreadLaunchService.remoteLaunchFailure(cause);
+                    return new OrchestrationV2ThreadLaunchError({
                       commandId: input.commandId,
                       projectId: input.projectId,
                       // A refused project pick (missing or archived) says why.
-                      message: Schema.is(ProjectLabelError)(cause.cause)
-                        ? cause.cause.message
-                        : "Failed to launch thread",
+                      message:
+                        remote?.message ??
+                        (isProjectLabelError(cause.cause)
+                          ? cause.cause.message
+                          : "Failed to launch thread"),
+                      ...(remote?.reason === "offline" ? { machineOffline: true } : {}),
                       cause,
-                    }),
+                    });
+                  },
                   ServerRuntimeStartupError: (cause) =>
                     new OrchestrationV2ThreadLaunchError({
                       commandId: input.commandId,
