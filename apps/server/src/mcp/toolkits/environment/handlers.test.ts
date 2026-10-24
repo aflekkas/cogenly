@@ -193,6 +193,7 @@ it.effect("environment_preferences_update sets the projects root", () =>
           }),
           Layer.succeed(DesktopAppControl.DesktopAppControl, {
             addEnvironment: () => Effect.die("unused"),
+            pairMachines: () => Effect.die("unused"),
           }),
           Layer.succeed(MachineSecurity.MachineSecurity, { status: Effect.die("unused") }),
           Layer.mock(ChildProcessSpawner.ChildProcessSpawner)({}),
