@@ -223,7 +223,10 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "memory",
     title: "Memory",
     to: "/settings/memory",
-    searchTerms: ["facts remember forget correct context proposed confirm agents knowledge"],
+    searchTerms: [
+      "facts remember forget correct context proposed confirm agents knowledge",
+      "sync synced syncing other machines offline",
+    ],
   },
   {
     id: "vault",
@@ -231,6 +234,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/vault",
     searchTerms: [
       "secrets passwords logins credentials api keys cards notes one-time codes totp approvals usage log",
+      "share vault sharing sync synced other machines this machine only keep on this machine",
     ],
   },
   {

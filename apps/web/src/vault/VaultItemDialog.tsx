@@ -4,9 +4,11 @@ import type {
   ProjectLabelWithRepositories,
   VaultItemMetadata,
   VaultItemType,
+  VaultPortabilityReason,
 } from "@t3tools/contracts";
 import { useId, useState } from "react";
 
+import { vaultPortabilityExplanation } from "../machines/peerSync.logic";
 import { SecretInput } from "../components/settings/SecretInput";
 import { Button } from "../components/ui/button";
 import { Checkbox } from "../components/ui/checkbox";
@@ -67,6 +69,8 @@ export function VaultItemDialog(props: {
   readonly defaultScopeProjectId: ProjectLabelId | null;
   readonly labels: ReadonlyArray<ProjectLabelWithRepositories>;
   readonly agents: ReadonlyArray<{ readonly id: AgentId; readonly name: string }>;
+  /** Whether this machine shares with others, so keeping an item here means something. */
+  readonly paired: boolean;
   readonly onClose: () => void;
   readonly onSave: (draft: VaultDraft) => Promise<void>;
 }) {
@@ -240,6 +244,13 @@ export function VaultItemDialog(props: {
                 agents={props.agents}
                 onChange={update}
               />
+              {props.paired && draft.portability !== null ? (
+                <VaultPortabilityField
+                  draft={draft}
+                  reason={props.item?.portabilityReason}
+                  onChange={update}
+                />
+              ) : null}
             </fieldset>
           </form>
         </DialogPanel>
@@ -256,6 +267,34 @@ export function VaultItemDialog(props: {
         </DialogFooter>
       </DialogPopup>
     </Dialog>
+  );
+}
+
+/** Keep a shared item on this machine. A rule-held item shows checked and can't be changed. */
+function VaultPortabilityField(props: {
+  readonly draft: VaultDraft;
+  readonly reason: VaultPortabilityReason | undefined;
+  readonly onChange: (patch: Partial<VaultDraft>) => void;
+}) {
+  const byRule = props.reason !== undefined;
+  return (
+    <div className="space-y-1.5">
+      <label className="flex items-center gap-2 text-sm">
+        <Checkbox
+          checked={byRule || props.draft.portability === "machine"}
+          disabled={byRule}
+          onCheckedChange={(checked) =>
+            props.onChange({ portability: checked === true ? "machine" : "shared" })
+          }
+        />
+        Keep on this machine only
+      </label>
+      <p className="ps-6 text-xs text-muted-foreground">
+        {byRule
+          ? vaultPortabilityExplanation(props.reason)
+          : "Machines you share the vault with don't get it. Machines that already have it keep their copy."}
+      </p>
+    </div>
   );
 }
 

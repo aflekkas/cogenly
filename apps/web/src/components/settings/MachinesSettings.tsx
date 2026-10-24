@@ -20,7 +20,7 @@ import {
   ExternalLinkIcon,
   PlusIcon,
 } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { AnimatedHeight } from "~/components/AnimatedHeight";
 import { CopyButton } from "~/components/ui/copy-button";
@@ -48,7 +48,7 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { Spinner } from "../ui/spinner";
 import { Switch } from "../ui/switch";
 import { toastManager } from "../ui/toast";
-import { createIntegrationStatusFade } from "./integrationStatusMotion";
+import { useStatusFade } from "./integrationStatusMotion";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
@@ -68,22 +68,6 @@ function openInBrowser(url: string) {
 
 function failureMessage(cause: unknown, fallback: string): string {
   return cause instanceof Error && cause.message.trim().length > 0 ? cause.message : fallback;
-}
-
-/** Fades an element when `status` changes, never on mount. */
-function useStatusFade<T extends HTMLElement>(status: string) {
-  const node = useRef<T>(null);
-  const fade = useRef<ReturnType<typeof createIntegrationStatusFade> | null>(null);
-  useLayoutEffect(() => {
-    if (!node.current) return;
-    const created = createIntegrationStatusFade(node.current);
-    fade.current = created;
-    return () => created.dispose();
-  }, []);
-  useLayoutEffect(() => {
-    fade.current?.update(status);
-  }, [status]);
-  return node;
 }
 
 function machineKindLabel(machine: MachineInfo): string {

@@ -14,8 +14,10 @@ import type {
 } from "@t3tools/contracts";
 
 import { toastManager } from "../components/ui/toast";
+import { useLiveRefresh } from "../hooks/useLiveRefresh";
 import { vaultRpc } from "../rpc/vault";
 import { useEnvironmentQuery } from "../state/query";
+import { useAtomCommand } from "../state/use-atom-command";
 import { useOrchestrationCommand } from "../state/use-orchestration-command";
 
 const EMPTY_ITEMS: ReadonlyArray<VaultItemMetadata> = [];
@@ -49,6 +51,50 @@ export function useVaultUsage(environmentId: EnvironmentId | null, itemId?: Vaul
     error: query.error,
     isLoaded: query.data !== null,
     refresh: query.refresh,
+  };
+}
+
+/**
+ * Whether this machine and each directly paired one share their vaults, and
+ * whether this connection may change that. Re-reads like `useSyncPeers`.
+ * `status` stays null for a connection without access management.
+ */
+export function useVaultSharing(environmentId: EnvironmentId | null, onChanged?: () => void) {
+  const canRead = useAtomValue(vaultRpc.sharingStatus.permissionAtom(environmentId));
+  const canWrite = useAtomValue(vaultRpc.setPeerSharing.permissionAtom(environmentId));
+  const query = useEnvironmentQuery(
+    environmentId === null || !canRead
+      ? null
+      : vaultRpc.sharingStatus({ environmentId, input: {} }),
+  );
+  useLiveRefresh(query.refresh, {
+    enabled: environmentId !== null && canRead,
+    key: `vault-sharing:${environmentId}`,
+  });
+  const setPeerSharing = useAtomCommand(vaultRpc.setPeerSharing, { reportFailure: false });
+  return {
+    canRead: environmentId !== null && canRead,
+    canWrite: environmentId !== null && canWrite,
+    status: query.data,
+    error: query.error,
+    setPeerSharing: async (
+      peer: { readonly environmentId: EnvironmentId; readonly label: string },
+      enabled: boolean,
+    ) => {
+      if (environmentId === null) return;
+      const result = settled(
+        enabled
+          ? `Couldn't share the vault with ${peer.label}`
+          : `Couldn't stop sharing the vault with ${peer.label}`,
+        await setPeerSharing({
+          environmentId,
+          input: { environmentId: peer.environmentId, enabled },
+        }),
+      );
+      // A refused share can still have learned something, such as a changed key.
+      query.refresh();
+      if (result !== null) onChanged?.();
+    },
   };
 }
 
