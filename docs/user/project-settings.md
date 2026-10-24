@@ -114,7 +114,8 @@ applies when the repository and environment are both on **Inherit**.
 
 ## Worktree location
 
-New worktrees go in the `worktrees` folder of the Cogenly home directory. To put them somewhere else,
+New worktrees go in the `.worktrees` folder of the repository's project folder. A repository in no
+project uses the `worktrees` folder of the Cogenly home directory. To put them somewhere else,
 such as another drive, set **Settings → Storage → Worktree location** to an absolute path like
 `D:\worktrees` or `~/worktrees`. The setting is per machine. Existing worktrees stay where they
 are, and cleanup covers both the default folder and the custom one.

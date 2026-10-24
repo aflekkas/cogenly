@@ -52,6 +52,7 @@ export interface ServerUpdateTarget {
   readonly environmentId: EnvironmentId;
   readonly serverLabel: string;
   readonly selfUpdate: ServerSelfUpdateCapability | null;
+  /** Unused: the manual command is `cogenly update` for every install. */
   readonly installation?: ServerInstallation | undefined;
   readonly desktopAppUpdate?: boolean;
   readonly threadContinuation?: boolean;
@@ -107,7 +108,7 @@ export function useServerUpdate() {
           description:
             selfUpdate === "desktop-managed"
               ? `Desktop app relaunched on ${result.value.targetVersion}.`
-              : `Reconnected on t3@${result.value.targetVersion}.`,
+              : `Reconnected on ${result.value.targetVersion}.`,
         });
       }
       return { status: "updated" };
@@ -226,7 +227,6 @@ export function ServerUpdateAction({
   environmentId,
   serverLabel,
   selfUpdate,
-  installation,
   desktopAppUpdate = false,
   threadContinuation = false,
   targetVersion,
@@ -245,16 +245,12 @@ export function ServerUpdateAction({
   );
   const update = useServerUpdate();
   const { copyToClipboard } = useCopyToClipboard<{ command: string }>({
-    target: installation?.kind === "npm-global" ? "update command" : "relaunch command",
+    target: "update command",
     onCopy: ({ command }) => {
       toastManager.add({
         type: "success",
-        title:
-          installation?.kind === "npm-global" ? "Update command copied" : "Relaunch command copied",
-        description:
-          installation?.kind === "npm-global"
-            ? `Run \`${command}\` on ${serverLabel}, then restart t3 with your usual options.`
-            : `Stop cogenly on ${serverLabel}, then relaunch with \`${command}\` using the same subcommand and options. This does not update an installed cogenly command.`,
+        title: "Update command copied",
+        description: `Run \`${command}\` on ${serverLabel}. It asks before restarting the background service; restart a server you started by hand yourself.`,
       });
     },
     onError: (error) => {
@@ -305,14 +301,8 @@ export function ServerUpdateAction({
     );
   }
 
-  const manualCommand =
-    selfUpdate === null ? manualServerUpdateCommand(targetVersion, installation) : null;
-  const actionLabel =
-    manualCommand !== null
-      ? installation?.kind === "npm-global"
-        ? "Copy update command"
-        : "Copy relaunch command"
-      : label;
+  const manualCommand = selfUpdate === null ? manualServerUpdateCommand(targetVersion) : null;
+  const actionLabel = manualCommand !== null ? "Copy update command" : label;
   const onClick =
     manualCommand !== null
       ? () => copyToClipboard(manualCommand, { command: manualCommand })
@@ -387,7 +377,7 @@ export function OutdatedServerUpdateAction({
       toastManager.add({
         type: "success",
         title: `${serverLabel} updated`,
-        description: `Reconnected on t3@${result.value.targetVersion}.`,
+        description: `Reconnected on ${result.value.targetVersion}.`,
       });
     } catch (error) {
       toastManager.add({

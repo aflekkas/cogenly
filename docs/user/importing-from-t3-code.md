@@ -6,8 +6,9 @@ the same computer and never changes it.
 
 ## What comes over
 
-- **Projects.** Each T3 Code project you pick. A project whose folder is already
-  in Cogenly is merged into it, not duplicated.
+- **Projects.** Each T3 Code project you pick comes over as a repository, outside
+  any Cogenly project. A folder that is already a repository in Cogenly gets the
+  threads, not a duplicate.
 - **Chats without a project.** T3 Code's Scratch chats are not picked by default.
   Pick them and they come over under **No project**, not as a repository.
 - **Full history.** Every message, tool call, and run in each thread, not a
@@ -21,8 +22,9 @@ the same computer and never changes it.
   its own config folder), Cogenly adds the same instance so those threads resume
   against the same Claude, Codex, or Muse sessions.
 - **Keybindings and models.** Your shortcuts, default models, and favorite models.
-  These only fill gaps: anything you already set in Cogenly is kept. You can
-  turn this off before importing.
+  These only fill gaps: anything you already set in Cogenly is kept. Default and
+  favorite models also reach your paired machines. You can turn this off before
+  importing.
 
 ## What does not come over
 

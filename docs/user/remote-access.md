@@ -150,15 +150,6 @@ tailscale serve --https=443 off
 If that port is already in use, choose another with
 `--tailscale-serve-port`. See `cogenly pair --help` for other pairing options.
 
-### Hosted web app
-
-[app.t3.codes](https://app.t3.codes) needs an HTTPS endpoint. It connects directly
-to your server; a hosted pairing link does not make an unreachable backend
-reachable or convert HTTP to HTTPS.
-
-For a plain HTTP LAN endpoint, use the direct pairing URL in a browser that can
-open it, or pair from the desktop app.
-
 ## Desktop-managed SSH
 
 In the desktop app, open **Settings → Connections → Add environment**, choose
@@ -266,7 +257,7 @@ sudo cogenly browser setup
 The server shows the exact line for how you started it, such as
 `sudo cogenly browser setup`, and keeps your `PATH` when Node is installed only
 for your user. Where `cogenly` is not on your `PATH`, such as with only the
-desktop app installed, it names the full path of the app's own `t3` instead. It allows Chrome's sandbox with an AppArmor profile and installs
+desktop app installed, it names the full path of the app's own `cogenly` instead. It allows Chrome's sandbox with an AppArmor profile and installs
 any missing libraries with apt. It is safe to run again. Without `sudo`, it
 only reports what it would change.
 
@@ -390,8 +381,8 @@ when SSH closes, see [background-service troubleshooting](./background-service.m
 | HTTP 403 without a recognized error                       | Check relay access, proxies, and firewall rules. Keep any Cloudflare Ray ID for a bug report.                                                              |
 | HTTP 408, 429, or 5xx                                     | Check network and relay availability. Startup retries temporary failures for up to ten minutes.                                                            |
 
-After fixing a permanent rejection, restart the host's server. On Linux, use
-`systemctl --user restart t3code.service` for the background service. For a
+After fixing a permanent rejection, restart the host's server. Use
+`cogenly service restart` for the background service. For a
 foreground server, stop it and run `cogenly serve` again with your usual options.
 Include the diagnostic message and trace ID when reporting a persistent failure.
 
