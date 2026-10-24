@@ -1,8 +1,8 @@
 import * as Schema from "effect/Schema";
-import { AuthSyncReplicateScope } from "./auth.ts";
-import { EnvironmentId, ProjectId, ThreadId } from "./baseSchemas.ts";
+import { AuthPeerDelegateScope, AuthSyncReplicateScope } from "./auth.ts";
+import { EnvironmentId, EventId, ProjectId, ThreadId } from "./baseSchemas.ts";
 import { makePeerChannel } from "./machine.ts";
-import { OrchestrationV2DomainEventJson } from "./orchestrationV2.ts";
+import { OrchestrationV2DomainEventJson, OrchestrationV2ServerCommand } from "./orchestrationV2.ts";
 import { ProjectLabelId } from "./projectLabel.ts";
 import { SharedRepositoryRemote } from "./sharedDocument.ts";
 
@@ -64,6 +64,56 @@ export class ThreadReplicationError extends Schema.TaggedError<ThreadReplication
     return `Thread replication failed (${this.reason}).`;
   }
 }
+
+/** Attachments a forwarded command carries total at most this many bytes. */
+export const THREAD_FORWARD_MAX_FILE_BYTES = 32 * 1024 * 1024;
+
+/** An attachment file by its name in the attachments directory; the name derives from its id. */
+export const ThreadAttachmentFile = Schema.Struct({
+  name: Schema.String.check(Schema.isPattern(/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,254}$/)),
+  base64: Schema.String,
+});
+export type ThreadAttachmentFile = typeof ThreadAttachmentFile.Type;
+
+export class ThreadRemoteError extends Schema.TaggedError<ThreadRemoteError>()(
+  "ThreadRemoteError",
+  {
+    reason: Schema.Literals(["offline", "not-owner", "moving", "rejected", "too-large"]),
+    detail: Schema.optional(Schema.String),
+  },
+) {
+  override get message() {
+    return this.detail ?? `The machine that runs this thread refused (${this.reason}).`;
+  }
+}
+
+/**
+ * A command for a thread another machine runs, sent to that machine (or to
+ * the hub, which relays it to the spoke that runs it). The owner dispatches
+ * it, pushes the resulting events back, then replies with their ids.
+ */
+export const ThreadCommandForward = makePeerChannel({
+  name: "threads.command.v1",
+  scope: AuthPeerDelegateScope,
+  payload: Schema.Struct({
+    command: OrchestrationV2ServerCommand,
+    files: Schema.Array(ThreadAttachmentFile),
+  }),
+  success: Schema.Struct({ eventIds: Schema.Array(EventId) }),
+  error: ThreadRemoteError,
+});
+
+/**
+ * Read one attachment file by id. Ids start with their thread's segment, so
+ * the hub can relay the read to the spoke that runs that thread.
+ */
+export const ThreadAttachmentRead = makePeerChannel({
+  name: "threads.attachment.read.v1",
+  scope: AuthPeerDelegateScope,
+  payload: Schema.Struct({ attachmentId: ThreadAttachmentFile.fields.name }),
+  success: Schema.NullOr(ThreadAttachmentFile),
+  error: ThreadRemoteError,
+});
 
 /** Push the sender's next batch; the reply names the cursor the receiver committed. */
 export const ThreadReplicationApply = makePeerChannel({

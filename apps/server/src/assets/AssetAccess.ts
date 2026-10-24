@@ -59,6 +59,7 @@ import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import { parseAttachmentFileExtension, resolveAttachmentPathById } from "../attachmentStore.ts";
 import * as ServerConfig from "../config.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
+import * as ThreadRouting from "../threadSync/ThreadRouting.ts";
 import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 import * as ProjectFaviconResolver from "../project/ProjectFaviconResolver.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
@@ -245,6 +246,27 @@ const optionOnNotFound = <A, R>(
         error.reason._tag === "NotFound" ? Effect.succeed(Option.none<A>()) : Effect.fail(error),
     }),
   );
+
+/**
+ * The attachment's file here. An attachment of a thread another machine runs
+ * is copied from that machine on first use; null when neither has it.
+ */
+const findAttachmentPath = Effect.fn("AssetAccess.findAttachmentPath")(function* (
+  attachmentsDir: string,
+  attachmentId: string,
+) {
+  const local = resolveAttachmentPathById({ attachmentsDir, attachmentId });
+  if (local !== null) return local;
+  const routing = yield* Effect.serviceOption(ThreadRouting.ThreadRouting);
+  if (Option.isNone(routing)) return null;
+  return yield* routing.value.fetchAttachment(attachmentId).pipe(
+    Effect.map(Option.getOrNull),
+    Effect.tapError((cause) =>
+      Effect.logWarning("Could not copy an attachment from its machine.", { attachmentId, cause }),
+    ),
+    Effect.orElseSucceed(() => null),
+  );
+});
 
 /** Reads a stored MCP HTML snapshot; null means it exceeds the preview limit. */
 export const readMcpAppHtml = Effect.fn("AssetAccess.readMcpAppHtml")(function* (filePath: string) {
@@ -627,10 +649,10 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
     }
     case "attachment": {
       const config = yield* ServerConfig.ServerConfig;
-      const attachmentPath = resolveAttachmentPathById({
-        attachmentsDir: config.attachmentsDir,
-        attachmentId: input.resource.attachmentId,
-      });
+      const attachmentPath = yield* findAttachmentPath(
+        config.attachmentsDir,
+        input.resource.attachmentId,
+      );
       if (!attachmentPath) {
         return yield* new AssetAttachmentNotFoundError({
           resource: input.resource,

@@ -83,10 +83,10 @@ export class ThreadReplication extends Context.Service<
   }
 >()("cogenly-server/threadSync/ThreadReplication") {}
 
+const isReplicationError = Schema.is(ThreadReplicationError);
+const isPortableSource = Schema.is(ThreadReplicaSource);
 const storage = (cause: unknown) =>
-  Schema.is(ThreadReplicationError)(cause)
-    ? cause
-    : new ThreadReplicationError({ reason: "storage", cause });
+  isReplicationError(cause) ? cause : new ThreadReplicationError({ reason: "storage", cause });
 const encodeEvent = Schema.encodeEffect(Schema.fromJsonString(OrchestrationV2DomainEventJson));
 const decodeSource = Schema.decodeUnknownEffect(Schema.fromJsonString(ThreadReplicaSource));
 const encodeSource = Schema.encodeSync(Schema.fromJsonString(ThreadReplicaSource));
@@ -171,7 +171,7 @@ const make = Effect.gen(function* () {
       return { projectId, kind: "scratch", remote: null } satisfies ThreadReplicaSource;
     const repository = { projectId, kind: "repository" as const, remote: row.remote };
     // A remote the shared schema refuses (a local path, say) stays local-only.
-    return Schema.is(ThreadReplicaSource)(repository) && row.remote !== null
+    return isPortableSource(repository) && row.remote !== null
       ? repository
       : ({ projectId, kind: "local", remote: null } satisfies ThreadReplicaSource);
   });

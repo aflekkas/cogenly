@@ -1500,6 +1500,8 @@ export function threadShellFromProjection(
     projectId: projection.thread.projectId,
     projectFolderId: projection.thread.projectFolderId ?? null,
     projectFolderSource: projection.thread.projectFolderSource ?? null,
+    // Omitted for this machine's own threads, which are most of a shell snapshot.
+    ...(projection.thread.ownerMachine ? { ownerMachine: projection.thread.ownerMachine } : {}),
     title: projection.thread.title,
     providerInstanceId: projection.thread.providerInstanceId,
     modelSelection: projection.thread.modelSelection,
@@ -1815,6 +1817,7 @@ function shellFromState(input: {
     projectId: input.state.thread.projectId,
     projectFolderId: input.state.thread.projectFolderId ?? null,
     projectFolderSource: input.state.thread.projectFolderSource ?? null,
+    ...(input.state.thread.ownerMachine ? { ownerMachine: input.state.thread.ownerMachine } : {}),
     title: input.state.thread.title,
     providerInstanceId: input.state.thread.providerInstanceId,
     modelSelection: input.state.thread.modelSelection,
@@ -2838,7 +2841,9 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             '$.projectFolderSource', CASE
               WHEN EXISTS (SELECT 1 FROM thread_project_labels WHERE thread_id = ${threadId}) THEN 'explicit'
               WHEN EXISTS (SELECT 1 FROM effective_thread_project_folders WHERE thread_id = ${threadId} AND folder_id IS NOT NULL) THEN 'repository'
-              ELSE NULL END) AS payload_json
+              ELSE NULL END,
+            '$.ownerMachine',
+              (SELECT owner_env FROM thread_owners WHERE thread_id = ${threadId} AND local = 0)) AS payload_json
           FROM orchestration_v2_projection_threads
           WHERE thread_id = ${threadId}
           LIMIT 1
@@ -5401,7 +5406,9 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 '$.projectFolderSource', CASE
                   WHEN EXISTS (SELECT 1 FROM thread_project_labels e WHERE e.thread_id = t.thread_id) THEN 'explicit'
                   WHEN EXISTS (SELECT 1 FROM effective_thread_project_folders f WHERE f.thread_id = t.thread_id AND f.folder_id IS NOT NULL) THEN 'repository'
-                  ELSE NULL END) AS payload_json,
+                  ELSE NULL END,
+                '$.ownerMachine',
+                  (SELECT o.owner_env FROM thread_owners o WHERE o.thread_id = t.thread_id AND o.local = 0)) AS payload_json,
               CASE
                 WHEN json_extract(t.payload_json, '$.forkedFrom.type') = 'run'
                   THEN json_extract(t.payload_json, '$.forkedFrom.threadId')

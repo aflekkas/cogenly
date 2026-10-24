@@ -1,102 +1,16 @@
 import { describe, expect, it } from "@effect/vitest";
-import {
-  EventId,
-  MessageId,
-  ThreadId,
-  ThreadReplicationApply,
-  type OrchestrationV2DomainEvent,
-} from "@t3tools/contracts";
+import { ThreadReplicationApply } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
-import * as SqlClient from "effect/sql/SqlClient";
-import * as Stream from "effect/Stream";
 
-import * as Machines from "../machines/Machines.ts";
-import { pair, startMachine } from "../machines/testkit.ts";
-import { idleThreadProjection, liveThreadShell } from "../mcp/McpToolAccess.testkit.ts";
-import * as EffectOutbox from "../orchestration-v2/EffectOutbox.ts";
+import { pair } from "../machines/testkit.ts";
 import * as EventSink from "../orchestration-v2/EventSink.ts";
-import * as EventStore from "../orchestration-v2/EventStore.ts";
-import * as Projections from "../orchestration-v2/ProjectionStore.ts";
-import * as Scheduler from "../scheduling/Scheduler.ts";
-import * as ThreadReplication from "./ThreadReplication.ts";
-import * as ThreadSync from "./ThreadSync.ts";
-
-const start = Effect.fn("startThreadSyncMachine")(function* (
-  name: string,
-  role: "computer" | "cloud-server",
-) {
-  const machine = yield* startMachine(name, role);
-  const stores = yield* machine.run(
-    Layer.build(
-      EventSink.layer.pipe(
-        Layer.provideMerge(Layer.mergeAll(EventStore.layer, Projections.layer, EffectOutbox.layer)),
-      ),
-    ),
-  );
-  const inStores = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-    machine.run(Effect.provideContext(effect, stores as never));
-  const replicationContext = yield* inStores(Layer.build(ThreadReplication.layer));
-  const replication = yield* ThreadReplication.ThreadReplication.pipe(
-    Effect.provideContext(replicationContext),
-  );
-  // Explicit passes in tests: no live change stream, no scheduler sleeps.
-  const syncContext = yield* machine.run(
-    Layer.build(
-      ThreadSync.layer.pipe(
-        Layer.provide(
-          Layer.succeed(ThreadReplication.ThreadReplication, {
-            ...replication,
-            changes: Stream.never,
-          }),
-        ),
-        Layer.provide(
-          Layer.succeed(Machines.Machines, { ...machine.machines, subscribe: Stream.never }),
-        ),
-        Layer.provide(Layer.succeed(Scheduler.Scheduler, { register: () => Effect.void })),
-      ),
-    ),
-  );
-  const sync = yield* ThreadSync.ThreadSync.pipe(Effect.provideContext(syncContext));
-  const sink = yield* inStores(EventSink.EventSinkV2);
-  const projections = yield* inStores(Projections.ProjectionStoreV2);
-  const sql = yield* machine.run(SqlClient.SqlClient);
-  return { ...machine, replication, sync, sink, projections, sql };
-});
-
-const threadId = ThreadId.make("thread:on-laptop");
-const thread = (
-  id: string,
-  at: DateTime.Utc,
-  title = "On the laptop",
-): OrchestrationV2DomainEvent => ({
-  id: EventId.make(id),
-  type: "thread.created",
+import {
+  startThreadMachine as start,
+  threadCreated as thread,
   threadId,
-  occurredAt: at,
-  payload: { ...idleThreadProjection(liveThreadShell(threadId)).thread, title },
-});
-const message = (id: string, at: DateTime.Utc, text: string): OrchestrationV2DomainEvent => ({
-  id: EventId.make(id),
-  type: "message.updated",
-  threadId,
-  occurredAt: at,
-  payload: {
-    createdBy: "user",
-    creationSource: "web",
-    id: MessageId.make(`message:${id}`),
-    threadId,
-    runId: null,
-    nodeId: null,
-    role: "user",
-    text,
-    attachments: [],
-    streaming: false,
-    createdAt: at,
-    updatedAt: at,
-  },
-});
+  userMessage as message,
+} from "./testkit.ts";
 
 describe("thread replication over the machine link", () => {
   it.live(
@@ -118,6 +32,11 @@ describe("thread replication over the machine link", () => {
         expect(replica.thread.title).toBe("On the laptop");
         expect(replica.messages.map((entry) => entry.text)).toEqual(["hello"]);
         expect((yield* hub.replication.owner(threadId))?.owner).toBe(laptop.environmentId);
+        // The thread list names the machine that runs a thread, and only for replicas.
+        expect(replica.thread.ownerMachine).toBe(laptop.environmentId);
+        expect(
+          (yield* laptop.projections.getThreadProjection(threadId)).thread.ownerMachine,
+        ).toBeNull();
         const local = yield* Effect.flip(
           hub.sink.write({ events: [message("event:hub", at, "x")] }),
         );

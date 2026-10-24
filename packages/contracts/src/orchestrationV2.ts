@@ -14,6 +14,7 @@ import {
   CommandId,
   ContextHandoffId,
   ContextTransferId,
+  EnvironmentId,
   EventId,
   IsoDateTime,
   MessageId,
@@ -402,6 +403,8 @@ export const OrchestrationV2AppThread = Schema.Struct({
   projectFolderId: Schema.optional(Schema.NullOr(ProjectLabelId)),
   /** Absent only on older servers/caches. Null means unfiled. */
   projectFolderSource: Schema.optional(ProjectFolderSource),
+  /** Read-time: the paired machine that runs this thread. Null or absent: this machine. */
+  ownerMachine: Schema.optional(Schema.NullOr(EnvironmentId)),
   ...WorkMetadataFields,
   workHandoffs: Schema.optional(Schema.Array(WorkHandoffLink)),
   /** Tasks this chat's agent proposed or started, each shown as a card in the chat. */
@@ -2060,6 +2063,8 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   projectFolderId: Schema.optional(Schema.NullOr(ProjectLabelId)),
   /** Absent only on older servers/caches. Null means unfiled. */
   projectFolderSource: Schema.optional(ProjectFolderSource),
+  /** The paired machine that runs this thread. Null or absent: this machine. */
+  ownerMachine: Schema.optional(Schema.NullOr(EnvironmentId)),
   ...WorkMetadataFields,
   workHandoffs: Schema.optional(Schema.Array(WorkHandoffLink)),
   workTasks: Schema.optional(Schema.Array(WorkTask)),
@@ -3445,6 +3450,11 @@ export type OrchestrationV2InternalCommand = typeof OrchestrationV2InternalComma
 
 /** Everything the server's orchestrator accepts: client commands plus internal ones. */
 export type OrchestrationV2ServerCommand = OrchestrationV2Command | OrchestrationV2InternalCommand;
+/** For server-to-server forwarding only; clients send `OrchestrationV2Command`. */
+export const OrchestrationV2ServerCommand = Schema.Union([
+  OrchestrationV2Command,
+  OrchestrationV2InternalCommand,
+]);
 
 export const ORCHESTRATION_V2_WS_METHODS = {
   dispatchCommand: "orchestration.dispatchCommand",
