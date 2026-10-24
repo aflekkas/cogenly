@@ -593,6 +593,7 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
       Layer.provideMerge(ThreadRouting.layer),
       Layer.provideMerge(ThreadSync.layer),
       Layer.provide(ThreadReplication.layer),
+      Layer.provide(ProjectLabelFolders.layer),
       Layer.provide(RemoteThreadCommands.layer),
       // Agents follow their conversation; the same layer as SharedSync's.
       Layer.provide(SharedState.layer),

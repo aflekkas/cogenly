@@ -16,6 +16,7 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Stream from "effect/Stream";
 
+import * as GitWorkflow from "../git/GitWorkflowService.ts";
 import * as Machines from "../machines/Machines.ts";
 import { startMachine } from "../machines/testkit.ts";
 import { idleThreadProjection, liveThreadShell } from "../mcp/McpToolAccess.testkit.ts";
@@ -33,6 +34,7 @@ import * as ThreadRouting from "./ThreadRouting.ts";
 import * as ThreadSync from "./ThreadSync.ts";
 import * as ThreadTransfer from "./ThreadTransfer.ts";
 import * as ProjectMove from "./ProjectMove.ts";
+import * as ProjectLabelFolders from "../projectLabels/ProjectLabelFolders.ts";
 import * as ProjectLabelService from "../projectLabels/ProjectLabelService.ts";
 import * as RepositoryCheckout from "../project/RepositoryCheckout.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
@@ -50,6 +52,7 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
   dispatch: (
     command: OrchestrationV2ServerCommand,
   ) => ReadonlyArray<OrchestrationV2DomainEvent> = () => [],
+  gitStatus?: GitWorkflow.GitWorkflowService["Service"]["status"],
 ) {
   const machine = yield* startMachine(name, role);
   const stores = yield* machine.run(
@@ -201,6 +204,12 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
         ),
         Layer.provide(ProjectStore.layer),
         Layer.provide(labels),
+        Layer.provide(
+          Layer.mock(ProjectLabelFolders.ProjectLabelFolders)({
+            dirForLabel: (label) =>
+              Effect.succeed({ dir: `/projects/${label.name}`, dirName: label.name }),
+          }),
+        ),
         Layer.provide(repositoryCheckout),
         Layer.provide(identities),
         Layer.provide(folders),
@@ -210,6 +219,11 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
         ),
         Layer.provide(Layer.succeed(Scheduler.Scheduler, { register: () => Effect.void })),
         Layer.provide(threads),
+        Layer.provide(
+          gitStatus === undefined
+            ? Layer.empty
+            : Layer.mock(GitWorkflow.GitWorkflowService)({ status: gitStatus }),
+        ),
       ),
     ),
   );

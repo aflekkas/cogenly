@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest";
 import {
   EventId,
+  THREAD_REPLICATION_BATCH_BYTES,
   type OrchestrationV2DomainEvent,
   ThreadId,
   ThreadReplicationApply,
@@ -84,7 +85,7 @@ describe("thread replication across builds", () => {
           hub.sql<{
             readonly thread_id: string;
           }>`SELECT thread_id FROM thread_replication_deferred ORDER BY seq`;
-        expect((yield* held()).length).toBe(6);
+        expect((yield* held()).length).toBe(5);
 
         // An update that reads every held item replays the thread in its order.
         yield* hub.sql`DELETE FROM thread_replication_deferred WHERE item_json LIKE '%event:reaction%'`;
@@ -191,3 +192,212 @@ describe("thread replication over the machine link", () => {
     30000,
   );
 });
+
+describe("replication safety regressions", () => {
+  it.live(
+    "a spoke cannot steal another spoke's thread by increasing its epoch, even after unpairing",
+    () =>
+      Effect.gen(function* () {
+        const hub = yield* start("claim-hub", "cloud-server");
+        const owner = yield* start("claim-owner", "computer");
+        const peer = yield* start("claim-peer", "computer");
+        yield* pair(hub, owner);
+        yield* pair(hub, peer);
+        const at = yield* DateTime.now;
+        yield* owner.sink.write({ events: [thread("event:original", at)] });
+        yield* owner.sync.sync(hub.environmentId);
+        yield* hub.machines.unpair({ environmentId: owner.environmentId });
+        yield* hub.replication.receive(
+          {
+            after: { events: 0, meta: 0 },
+            cursor: { events: 1, meta: 0 },
+            meta: [
+              { threadId, owner: peer.environmentId, epoch: 50, folderId: null, source: null },
+            ],
+            events: [encodeEvent(thread("event:hijack", at, "hijacked"))],
+          },
+          peer.environmentId,
+          false,
+        );
+        expect((yield* hub.replication.owner(threadId))?.owner).toBe(owner.environmentId);
+        expect((yield* hub.projections.getThread(threadId)).title).toBe("On the laptop");
+      }).pipe(Effect.scoped),
+    30000,
+  );
+
+  it.live(
+    "globally keyed messages cannot be moved into a peer's thread",
+    () =>
+      Effect.gen(function* () {
+        const hub = yield* start("identity-hub", "cloud-server");
+        const peer = yield* start("identity-peer", "computer");
+        yield* pair(hub, peer);
+        const at = yield* DateTime.now;
+        yield* hub.sink.write({
+          events: [thread("event:victim", at), message("event:message", at, "keep me")],
+        });
+        const attacker = ThreadId.make("thread:attacker");
+        const stolen = forThread(attacker, message("event:message", at, "stolen"));
+        const rejected = yield* Effect.result(
+          hub.replication.receive(
+            {
+              after: { events: 0, meta: 0 },
+              cursor: { events: 2, meta: 0 },
+              meta: [
+                {
+                  threadId: attacker,
+                  owner: peer.environmentId,
+                  epoch: 0,
+                  folderId: null,
+                  source: null,
+                },
+              ],
+              events: [
+                encodeEvent(forThread(attacker, thread("event:attacker", at))),
+                encodeEvent(stolen),
+              ],
+            },
+            peer.environmentId,
+            false,
+          ),
+        );
+        expect(rejected._tag).toBe("Failure");
+        expect(
+          (yield* hub.projections.getThreadProjection(threadId)).messages.map((x) => x.text),
+        ).toEqual(["keep me"]);
+        expect((yield* hub.replication.cursors(peer.environmentId)).received.events).toBe(0);
+      }).pipe(Effect.scoped),
+    30000,
+  );
+
+  it.live(
+    "unknown event and metadata fields survive a relay and ownership transfer",
+    () =>
+      Effect.gen(function* () {
+        const hub = yield* start("raw-hub", "cloud-server");
+        const peer = yield* start("raw-peer", "computer");
+        const other = yield* start("raw-other", "computer");
+        yield* pair(hub, peer);
+        yield* pair(hub, other);
+        const at = yield* DateTime.now;
+        const event = encodeEvent(message("event:raw-message", at, "hello"));
+        const raw = {
+          ...(event as object),
+          futureEnvelope: { version: 12 },
+          payload: {
+            ...(event as { payload: object }).payload,
+            futurePayload: { important: true },
+          },
+        };
+        yield* hub.replication.receive(
+          {
+            after: { events: 0, meta: 0 },
+            cursor: { events: 2, meta: 0 },
+            events: [encodeEvent(thread("event:raw-thread", at)), raw],
+            meta: [
+              {
+                threadId,
+                owner: peer.environmentId,
+                epoch: 0,
+                folderId: null,
+                source: null,
+                futureMeta: "keep",
+              },
+            ],
+          },
+          peer.environmentId,
+          false,
+        );
+        yield* hub.sync.sync(other.environmentId);
+        const relayed = yield* other.replication.readBatch(
+          { events: 0, meta: 0 },
+          hub.environmentId,
+          false,
+        );
+        expect(relayed.events).toContainEqual(raw);
+        expect(relayed.meta[0]).toMatchObject({ futureMeta: "keep" });
+        yield* hub.replication.take(threadId, peer.environmentId, 1);
+        const moved = yield* hub.replication.readBatch(
+          { events: 0, meta: 0 },
+          other.environmentId,
+          true,
+        );
+        expect(moved.events).toContainEqual(raw);
+        expect(moved.meta[0]).toMatchObject({ owner: hub.environmentId, futureMeta: "keep" });
+      }).pipe(Effect.scoped),
+    30000,
+  );
+
+  it.live(
+    "a failed projection does not acknowledge or lose an event on retry",
+    () =>
+      Effect.gen(function* () {
+        const hub = yield* start("retry-hub", "cloud-server");
+        const peer = yield* start("retry-peer", "computer");
+        yield* pair(hub, peer);
+        const at = yield* DateTime.now;
+        yield* peer.sink.write({
+          events: [thread("event:retry-thread", at), message("event:retry-message", at, "once")],
+        });
+        yield* hub.sql`CREATE TRIGGER reject_message BEFORE INSERT ON orchestration_v2_projection_messages BEGIN SELECT RAISE(FAIL, 'test failure'); END`;
+        expect((yield* Effect.result(peer.sync.sync(hub.environmentId)))._tag).toBe("Failure");
+        expect((yield* hub.replication.cursors(peer.environmentId)).received.events).toBe(0);
+        yield* hub.sql`DROP TRIGGER reject_message`;
+        yield* peer.sync.sync(hub.environmentId);
+        yield* peer.sync.sync(hub.environmentId);
+        expect(
+          (yield* hub.projections.getThreadProjection(threadId)).messages.map((x) => x.text),
+        ).toEqual(["once"]);
+        expect(yield* hub.replication.eventCount(threadId)).toBe(2);
+      }).pipe(Effect.scoped),
+    30000,
+  );
+});
+
+it.live(
+  "a 700-thread backfill stays within the wire budget and a move can sync beyond 64 batches",
+  () =>
+    Effect.gen(function* () {
+      const hub = yield* start("backfill-hub", "cloud-server");
+      const peer = yield* start("backfill-peer", "computer");
+      yield* pair(hub, peer);
+      const at = yield* DateTime.now;
+      const many = Array.from({ length: 700 }, (_, index) =>
+        forThread(ThreadId.make(`thread:backfill-${index}`), thread(`event:backfill-${index}`, at)),
+      );
+      yield* peer.sink.write({
+        events: [
+          ...many,
+          thread("event:large-thread", at),
+          ...Array.from({ length: 70 }, (_, index) =>
+            message(
+              `event:large-${index}`,
+              DateTime.add(at, { seconds: index }),
+              "x".repeat(150 * 1024),
+            ),
+          ),
+        ],
+      });
+      const batches: Array<number> = [];
+      let cursor = { events: 0, meta: 0 };
+      for (;;) {
+        const batch = yield* peer.replication.readBatch(cursor, hub.environmentId, true);
+        if (batch.cursor.events === cursor.events && batch.cursor.meta === cursor.meta) break;
+        batches.push(Buffer.byteLength(JSON.stringify(batch)));
+        expect(batches.at(-1)).toBeLessThanOrEqual(THREAD_REPLICATION_BATCH_BYTES);
+        cursor = batch.cursor;
+      }
+      expect(batches.length).toBeGreaterThan(64);
+      yield* peer.sync.syncThrough(hub.environmentId, cursor.events);
+      expect((yield* peer.replication.cursors(hub.environmentId)).acknowledged.events).toBe(
+        cursor.events,
+      );
+      expect(yield* hub.replication.eventCount(threadId)).toBe(71);
+      expect(
+        (yield* hub.sql<{
+          count: number;
+        }>`SELECT COUNT(*) AS count FROM orchestration_v2_projection_threads`)[0]?.count,
+      ).toBe(701);
+    }).pipe(Effect.scoped),
+  60000,
+);

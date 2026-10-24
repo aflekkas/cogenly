@@ -65,15 +65,10 @@ const make = Effect.gen(function* () {
 
   yield* channels.register(ThreadReplicationApply, (batch, caller) =>
     Effect.gen(function* () {
-      const { link, machines: known } = yield* topology;
+      const { link } = yield* topology;
       // A spoke trusts relayed authorship only from the hub it pinned.
       const trustedRelay = link._tag === "spoke" && link.hubEnvironmentId === caller.environmentId;
-      return yield* replication.receive(
-        batch,
-        caller.environmentId,
-        trustedRelay,
-        pairedMachines(known),
-      );
+      return yield* replication.receive(batch, caller.environmentId, trustedRelay);
     }),
   );
 

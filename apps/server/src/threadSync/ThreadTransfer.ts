@@ -16,6 +16,7 @@ import {
   type ThreadAdoptInput,
   type ThreadAdoptResult,
   ThreadHandoffCommit,
+  ThreadHandoffReceipts,
   ThreadHandoffPreview,
   type ThreadId,
   type ThreadMoveInput,
@@ -36,6 +37,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as SqlClient from "effect/sql/SqlClient";
+import * as Schema from "effect/Schema";
 
 import {
   parseThreadSegmentFromAttachmentId,
@@ -51,12 +53,13 @@ import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
 import * as RepositoryCheckout from "../project/RepositoryCheckout.ts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
+import * as ProjectLabelFolders from "../projectLabels/ProjectLabelFolders.ts";
 import * as ProjectLabelService from "../projectLabels/ProjectLabelService.ts";
 import * as Projections from "../orchestration-v2/ProjectionStore.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import * as SharedState from "../sync/SharedState.ts";
 import * as ThreadReplication from "./ThreadReplication.ts";
-import { adoptLocalCheckout, findLocalCheckout } from "./localCheckout.ts";
+import { adoptLocalCheckout, findLocalCheckout, previewClonePath } from "./localCheckout.ts";
 import * as ThreadRouting from "./ThreadRouting.ts";
 import * as ThreadSync from "./ThreadSync.ts";
 
@@ -132,6 +135,8 @@ const make = Effect.gen(function* () {
     | FileSystem.FileSystem
     | RepositoryIdentityResolver.RepositoryIdentityResolver
     | ProjectLabelService.ProjectLabelService
+    | ProjectLabelFolders.ProjectLabelFolders
+    | Path.Path
   >();
   const self = replication.environmentId;
   // ManagedProjectFolders keeps "No project" here.
@@ -157,11 +162,21 @@ const make = Effect.gen(function* () {
     const exists = yield* fileSystem
       .exists(entry.worktreePath)
       .pipe(Effect.orElseSucceed(() => false));
-    if (!exists) return;
+    if (!exists)
+      return yield* new ThreadRemoteError({
+        reason: "local-changes",
+        detail:
+          "Its worktree is missing, so its pushed state cannot be verified. Restore it first, or explicitly leave local changes behind.",
+      });
     const status = yield* git.value
       .status({ cwd: entry.worktreePath })
       .pipe(Effect.orElseSucceed(() => undefined));
-    if (status === undefined || !status.isRepo) return;
+    if (status === undefined || !status.isRepo)
+      return yield* new ThreadRemoteError({
+        reason: "local-changes",
+        detail:
+          "Could not verify the worktree's local changes and pushed commits. Check it first, or explicitly leave local changes behind.",
+      });
     const detail = status.hasWorkingTreeChanges
       ? `${entry.worktreePath} has uncommitted changes.`
       : !status.hasUpstream
@@ -215,6 +230,47 @@ const make = Effect.gen(function* () {
   const hopTo = (view: Effect.Success<typeof topology>, target: EnvironmentId) =>
     view.link._tag === "spoke" ? view.link.hubEnvironmentId : target;
 
+  const copyReceipts = Effect.fn("ThreadTransfer.copyReceipts")(function* (
+    threadId: ThreadId,
+    target: EnvironmentId,
+    epoch: number,
+  ) {
+    let after = "";
+    for (;;) {
+      const rows = yield* sql<{
+        readonly command_id: string;
+        readonly command_type: string;
+        readonly accepted_at: string;
+        readonly status: "accepted" | "rejected";
+        readonly error: string | null;
+      }>`SELECT command_id, command_type, accepted_at, status, error FROM orchestration_command_receipts
+        WHERE aggregate_kind = 'thread' AND aggregate_id = ${threadId} AND command_id > ${after}
+        ORDER BY command_id LIMIT 128`.pipe(Effect.orDie);
+      // An empty batch is also a capability check: older targets must refuse
+      // a move they cannot keep idempotent, before either side changes owner.
+      yield* routing.callMachine(
+        target,
+        ThreadHandoffReceipts,
+        {
+          threadId,
+          from: self,
+          to: target,
+          epoch,
+          receipts: rows.map((row) => ({
+            commandId: CommandId.make(row.command_id),
+            commandType: row.command_type,
+            acceptedAt: row.accepted_at,
+            status: row.status,
+            error: row.error,
+          })),
+        },
+        "2 minutes",
+      );
+      if (rows.length < 128) return;
+      after = rows.at(-1)!.command_id;
+    }
+  });
+
   // Phase two from the owner: push what the target lacks, then ask it to take the thread.
   const commit = Effect.fn("ThreadTransfer.commit")(function* (
     threadId: ThreadId,
@@ -223,6 +279,7 @@ const make = Effect.gen(function* () {
   ) {
     yield* sendThread(threadId, hopTo(yield* topology, target));
     const last = yield* lastEvent(threadId);
+    yield* copyReceipts(threadId, target, epoch);
     yield* routing.callMachine(
       target,
       ThreadHandoffCommit,
@@ -242,9 +299,9 @@ const make = Effect.gen(function* () {
   /** Commit, then settle the fence by the answer: finish, release, or keep for a retry. */
   const settle = (threadId: ThreadId, target: EnvironmentId, epoch: number) =>
     commit(threadId, target, epoch).pipe(
-      Effect.tap(() => replication.finish(threadId)),
+      Effect.tap(() => replication.finish(threadId, target, epoch)),
       Effect.tapError((error) =>
-        isTransient(error) ? Effect.void : replication.release(threadId),
+        isTransient(error) ? Effect.void : replication.release(threadId, target, epoch),
       ),
     );
 
@@ -334,11 +391,19 @@ const make = Effect.gen(function* () {
     if (ready.length === 0) return { planned, skipped };
     // The target places threads from its replicas; bring them up to date, as a move would.
     const hop = hopTo(yield* topology, target);
-    yield* threadSync.sync(hop).pipe(Effect.ignore);
+    const last = yield* Effect.forEach(ready, lastEvent);
+    yield* threadSync
+      .syncThrough(hop, Math.max(0, ...last.map((item) => item?.sequence ?? 0)))
+      .pipe(Effect.ignore);
     for (let at = 0; at < ready.length; at += PREVIEW_CHUNK) {
       const chunk = ready.slice(at, at + PREVIEW_CHUNK);
       const answer = yield* Effect.result(
-        routing.callMachine(target, ThreadHandoffPreview, { threadIds: chunk, to: target }, "5 minutes"),
+        routing.callMachine(
+          target,
+          ThreadHandoffPreview,
+          { threadIds: chunk, to: target },
+          "5 minutes",
+        ),
       );
       if (answer._tag === "Failure") {
         for (const threadId of chunk) skipped.push(skip(threadId, answer.failure));
@@ -486,13 +551,17 @@ const make = Effect.gen(function* () {
    * changed directory makes the next turn start a fresh one seeded with the
    * thread's history.
    */
-  const rehome = Effect.fn("ThreadTransfer.rehome")(function* (threadId: ThreadId, epoch: number) {
+  const rehome = Effect.fn("ThreadTransfer.rehome")(function* (
+    threadId: ThreadId,
+    epoch: number,
+    beforeWrite: Effect.Effect<unknown, ThreadRemoteError> = Effect.void,
+  ) {
     const entry = yield* projections.getThread(threadId).pipe(Effect.orDie);
     const localProject = Option.isSome(yield* projects.get(entry.projectId).pipe(Effect.orDie))
       ? entry.projectId
       : ((yield* replication.sourceProject(threadId)).projectId ?? entry.projectId);
     const worktreePath = yield* targetWorktreePath(entry);
-    if (localProject === entry.projectId && worktreePath === entry.worktreePath) return;
+    const changed = localProject !== entry.projectId || worktreePath !== entry.worktreePath;
     // Read-time fields are not part of the stored thread.
     const {
       projectFolderId: _folder,
@@ -501,20 +570,31 @@ const make = Effect.gen(function* () {
       ...stored
     } = entry;
     yield* sink
-      .write({
+      .writeAtomic({
+        beforeWrite,
         commandId: CommandId.make(`command:handoff:${threadId}:${epoch}`),
-        events: [
-          {
-            id: EventId.make(`event:handoff:${threadId}:${epoch}`),
-            type: "thread.metadata-updated",
-            threadId,
-            providerInstanceId: entry.providerInstanceId,
-            occurredAt: yield* DateTime.now,
-            payload: { ...stored, projectId: localProject, worktreePath },
-          },
-        ],
+        events: changed
+          ? [
+              {
+                id: EventId.make(`event:handoff:${threadId}:${epoch}`),
+                type: "thread.metadata-updated",
+                threadId,
+                providerInstanceId: entry.providerInstanceId,
+                occurredAt: yield* DateTime.now,
+                payload: { ...stored, projectId: localProject, worktreePath },
+              },
+            ]
+          : [],
       })
-      .pipe(Effect.orDie);
+      .pipe(
+        Effect.mapError(
+          () =>
+            new ThreadRemoteError({
+              reason: "offline",
+              detail: "The target could not commit the handoff; it can be retried.",
+            }),
+        ),
+      );
   });
 
   const noRepository = (remote: string | null | undefined) =>
@@ -608,7 +688,10 @@ const make = Effect.gen(function* () {
       return placed(
         Option.isSome(found)
           ? `${found.value.workspaceRoot} (filed into the project)`
-          : `a new clone of ${source.remote}`,
+          : `${yield* previewClonePath(labelId, source.remote).pipe(
+              Effect.provideContext(context),
+              Effect.mapError(() => noRepository(source.remote)),
+            )} (new clone)`,
       );
     }
     return yield* noRepository(source?.remote);
@@ -620,7 +703,10 @@ const make = Effect.gen(function* () {
         const view = yield* topology;
         if (view.link._tag !== "hub" || to === caller.environmentId)
           return yield* new ThreadRemoteError({ reason: "not-owner" });
-        yield* threadSync.sync(to).pipe(Effect.ignore);
+        const last = yield* Effect.forEach(threadIds, lastEvent);
+        yield* threadSync
+          .syncThrough(to, Math.max(0, ...last.map((item) => item?.sequence ?? 0)))
+          .pipe(Effect.ignore);
         return yield* routing.callMachine(to, ThreadHandoffPreview, { threadIds, to }, "5 minutes");
       }
       const placed: Array<ThreadMovePlacement> = [];
@@ -631,6 +717,67 @@ const make = Effect.gen(function* () {
         else skipped.push(skip(threadId, result.failure));
       }
       return { placed, skipped };
+    }),
+  );
+
+  yield* channels.register(ThreadHandoffReceipts, (payload, caller) =>
+    Effect.gen(function* () {
+      const view = yield* topology;
+      if (payload.to !== self) {
+        if (view.link._tag !== "hub" || caller.environmentId !== payload.from)
+          return yield* new ThreadRemoteError({ reason: "not-owner" });
+        yield* sendThread(payload.threadId, payload.to);
+        return yield* routing.callMachine(payload.to, ThreadHandoffReceipts, payload, "2 minutes");
+      }
+      const relayed =
+        view.link._tag === "spoke" && view.link.hubEnvironmentId === caller.environmentId;
+      if (caller.environmentId !== payload.from && !relayed)
+        return yield* new ThreadRemoteError({ reason: "not-owner" });
+      return yield* sql
+        .withTransaction(
+          Effect.gen(function* () {
+            const owner = yield* replication.owner(payload.threadId);
+            if (owner !== undefined && owner.epoch >= payload.epoch) return {};
+            if (
+              owner === undefined ||
+              owner.local ||
+              owner.owner !== payload.from ||
+              owner.epoch + 1 !== payload.epoch
+            )
+              return yield* new ThreadRemoteError({ reason: "not-owner" });
+            const last = yield* lastEvent(payload.threadId);
+            for (const receipt of payload.receipts) {
+              yield* Schema.decodeUnknownEffect(Schema.DateTimeUtcFromString)(
+                receipt.acceptedAt,
+              ).pipe(
+                Effect.mapError(
+                  () =>
+                    new ThreadRemoteError({
+                      reason: "rejected",
+                      detail: "A command receipt has an invalid timestamp.",
+                    }),
+                ),
+              );
+              const existing = yield* sql<{
+                readonly aggregate_id: string;
+              }>`SELECT aggregate_id FROM orchestration_command_receipts WHERE command_id = ${receipt.commandId}`;
+              if (existing.some((row) => row.aggregate_id !== payload.threadId))
+                return yield* new ThreadRemoteError({
+                  reason: "rejected",
+                  detail: "A command receipt belongs to another thread.",
+                });
+              yield* sql`INSERT OR IGNORE INTO orchestration_command_receipts
+          (command_id, aggregate_kind, aggregate_id, command_type, accepted_at, result_sequence, status, error)
+          VALUES (${receipt.commandId}, 'thread', ${payload.threadId}, ${receipt.commandType}, ${receipt.acceptedAt}, ${last?.sequence ?? 0}, ${receipt.status}, ${receipt.error})`;
+            }
+            return {};
+          }),
+        )
+        .pipe(
+          Effect.catchTags({
+            SqlError: () => Effect.fail(new ThreadRemoteError({ reason: "offline" })),
+          }),
+        );
     }),
   );
 
@@ -645,7 +792,20 @@ const make = Effect.gen(function* () {
           return yield* new ThreadRemoteError({ reason: "not-owner" });
         yield* replication.expectHandoff(payload.threadId, payload.from, payload.to, payload.epoch);
         yield* sendThread(payload.threadId, payload.to);
-        return yield* routing.callMachine(payload.to, ThreadHandoffCommit, payload, "10 minutes");
+        return yield* routing
+          .callMachine(payload.to, ThreadHandoffCommit, payload, "10 minutes")
+          .pipe(
+            Effect.tapError((error) =>
+              isTransient(error)
+                ? Effect.void
+                : replication.cancelExpectedHandoff(
+                    payload.threadId,
+                    payload.from,
+                    payload.to,
+                    payload.epoch,
+                  ),
+            ),
+          );
       }
       const relayed =
         view.link._tag === "spoke" && view.link.hubEnvironmentId === caller.environmentId;
@@ -653,6 +813,13 @@ const make = Effect.gen(function* () {
         return yield* new ThreadRemoteError({ reason: "not-owner" });
       const owner = yield* replication.owner(payload.threadId);
       if (owner === undefined || owner.epoch < payload.epoch) {
+        if (
+          owner === undefined ||
+          owner.local ||
+          owner.owner !== payload.from ||
+          owner.epoch + 1 !== payload.epoch
+        )
+          return yield* new ThreadRemoteError({ reason: "not-owner" });
         const behind = new ThreadRemoteError({
           reason: "behind",
           detail: "This machine has not received the whole thread yet.",
@@ -660,7 +827,7 @@ const make = Effect.gen(function* () {
         if (payload.lastEventId !== null) {
           const present = yield* sql<{
             readonly event_id: string;
-          }>`SELECT event_id FROM orchestration_events WHERE event_id = ${payload.lastEventId}`.pipe(
+          }>`SELECT event_id FROM orchestration_events WHERE event_id = ${payload.lastEventId} AND stream_id = ${payload.threadId}`.pipe(
             Effect.orDie,
           );
           if (present.length === 0) return yield* behind;
@@ -669,9 +836,14 @@ const make = Effect.gen(function* () {
         // could not apply; taking the thread then would make the gap its log.
         if (
           payload.eventCount !== undefined &&
-          (yield* replication.eventCount(payload.threadId)) < payload.eventCount
+          (yield* replication.eventCount(payload.threadId)) !== payload.eventCount
         )
           return yield* behind;
+        const held =
+          yield* sql`SELECT 1 FROM thread_replication_deferred WHERE thread_id = ${payload.threadId} LIMIT 1`.pipe(
+            Effect.orDie,
+          );
+        if (held.length > 0) return yield* behind;
         yield* requireProject(payload.threadId);
         // The old owner may go offline for good once this answers.
         for (const attachmentId of payload.attachmentIds)
@@ -679,12 +851,19 @@ const make = Effect.gen(function* () {
             resolveAttachmentPathById({ attachmentsDir: config.attachmentsDir, attachmentId }) ===
             null
           )
-            yield* routing.fetchAttachment(attachmentId);
+            if (Option.isNone(yield* routing.fetchAttachment(attachmentId)))
+              return yield* new ThreadRemoteError({
+                reason: "rejected",
+                detail: "A thread attachment is unavailable on its owner.",
+              });
       }
-      yield* replication.take(payload.threadId, payload.from, payload.epoch);
-      // A retried commit re-homes again only while the thread still runs here.
-      if ((yield* replication.owner(payload.threadId))?.local === true)
-        yield* rehome(payload.threadId, payload.epoch);
+      // Ownership and the machine-local paths commit before the sink publishes.
+      if (owner !== undefined && owner.epoch >= payload.epoch && !owner.local) return {};
+      yield* rehome(
+        payload.threadId,
+        payload.epoch,
+        replication.take(payload.threadId, payload.from, payload.epoch),
+      );
       return {};
     }),
   );
@@ -756,6 +935,12 @@ const make = Effect.gen(function* () {
   const adoptFrom: ThreadTransfer["Service"]["adoptFrom"] = Effect.fn("ThreadTransfer.adoptFrom")(
     function* (input) {
       const view = yield* topology;
+      if (view.link._tag === "spoke")
+        return yield* new ThreadRemoteError({
+          reason: "rejected",
+          detail:
+            "Recover lost-machine threads on the hub. Unpair a lost hub before recovering its threads here.",
+        });
       const paired = ThreadSync.pairedMachines(view.machines);
       const unpaired = (yield* replication.unpairedOwners(paired)).map((row) => ({
         environmentId: row.owner,
@@ -789,18 +974,41 @@ const make = Effect.gen(function* () {
         const replica = owner !== undefined && !owner.local;
         const result = yield* Effect.result(
           Effect.gen(function* () {
+            yield* replication.preflight(threadId, true);
+            const held =
+              yield* sql`SELECT 1 FROM thread_replication_deferred WHERE thread_id = ${threadId} LIMIT 1`.pipe(
+                Effect.orDie,
+              );
+            if (held.length > 0)
+              return yield* new ThreadRemoteError({
+                reason: "behind",
+                detail: "Update this machine before recovering a thread with unreadable events.",
+              });
+            if ((yield* agentsConversing([threadId])).length > 0)
+              return yield* new ThreadRemoteError({
+                reason: "rejected",
+                detail:
+                  "Recover this agent's ownership and schedules before adopting its conversation.",
+              });
             if (input.dryRun === true) {
               if (replica) yield* placement(threadId);
               return;
             }
             if (replica) yield* requireProject(threadId);
-            const taken = yield* replication.adopt(threadId, lost);
-            if (taken === undefined)
-              return yield* new ThreadRemoteError({
-                reason: "rejected",
-                detail: "Its owner changed while adopting it.",
-              });
-            if (taken.replica) yield* rehome(threadId, taken.epoch);
+            const take = replication.adopt(threadId, lost).pipe(
+              Effect.flatMap((taken) =>
+                taken === undefined
+                  ? Effect.fail(
+                      new ThreadRemoteError({
+                        reason: "rejected",
+                        detail: "Its owner changed while adopting it.",
+                      }),
+                    )
+                  : Effect.void,
+              ),
+            );
+            if (replica && owner !== undefined) yield* rehome(threadId, owner.epoch + 1, take);
+            else yield* take;
           }),
         );
         if (result._tag === "Success") adopted.push(threadId);

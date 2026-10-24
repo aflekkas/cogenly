@@ -7,7 +7,7 @@ export default Effect.gen(function* () {
   // build's decoding dropped fields, so relaying or moving the thread on
   // passes those fields along.
   yield* sql`CREATE TABLE thread_replication_raw_events (
-    event_id TEXT PRIMARY KEY,
+    event_id TEXT PRIMARY KEY REFERENCES orchestration_events(event_id) ON DELETE CASCADE,
     event_json TEXT NOT NULL
   )`;
   // Thread metadata keys from a newer owner that this build does not know.

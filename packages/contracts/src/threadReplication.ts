@@ -1,6 +1,6 @@
 import * as Schema from "effect/Schema";
 import { AuthPeerDelegateScope, AuthSyncReplicateScope } from "./auth.ts";
-import { EnvironmentId, EventId, ProjectId, ThreadId } from "./baseSchemas.ts";
+import { CommandId, EnvironmentId, EventId, ProjectId, ThreadId } from "./baseSchemas.ts";
 import { makePeerChannel } from "./machine.ts";
 import { OrchestrationV2ServerCommand } from "./orchestrationV2.ts";
 import { ProjectLabelId } from "./projectLabel.ts";
@@ -208,6 +208,31 @@ export const ThreadMoveRequest = makePeerChannel({
  * commit the target already took succeeds, so the owner can retry after a
  * lost reply.
  */
+/** Receipt data is portable; result sequences are remapped to the receiver's log. */
+export const ThreadReplicaCommandReceipt = Schema.Struct({
+  commandId: CommandId,
+  commandType: Schema.String,
+  acceptedAt: Schema.String,
+  status: Schema.Literals(["accepted", "rejected"]),
+  error: Schema.NullOr(Schema.String),
+});
+export type ThreadReplicaCommandReceipt = typeof ThreadReplicaCommandReceipt.Type;
+
+/** Idempotency receipts accompany a move so a retried command cannot start another turn. */
+export const ThreadHandoffReceipts = makePeerChannel({
+  name: "threads.handoff.receipts.v1",
+  scope: AuthPeerDelegateScope,
+  payload: Schema.Struct({
+    threadId: ThreadId,
+    from: EnvironmentId,
+    to: EnvironmentId,
+    epoch: Counter,
+    receipts: Schema.Array(ThreadReplicaCommandReceipt).check(Schema.isMaxLength(128)),
+  }),
+  success: Schema.Struct({}),
+  error: ThreadRemoteError,
+});
+
 export const ThreadHandoffCommit = makePeerChannel({
   name: "threads.handoff.commit.v1",
   scope: AuthPeerDelegateScope,

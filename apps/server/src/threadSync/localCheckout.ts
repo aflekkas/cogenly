@@ -9,10 +9,16 @@ import type { ProjectId, ProjectLabelId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
 import { normalizeRepositoryRemote } from "../project/RepositoryRemote.ts";
+import * as ProjectLabelFolders from "../projectLabels/ProjectLabelFolders.ts";
+import {
+  projectRepositoryDirectory,
+  repositoryDirectoryNameFromRemote,
+} from "../project/ProjectsRoot.ts";
 import * as ProjectLabelService from "../projectLabels/ProjectLabelService.ts";
 
 /**
@@ -63,4 +69,22 @@ export const findLocalCheckout = Effect.fn("localCheckout.find")(function* (
     });
   }
   return Option.none<{ readonly repositoryId: ProjectId; readonly workspaceRoot: string }>();
+});
+
+/** The exact destination checkoutRepository would use, without reserving or creating it. */
+export const previewClonePath = Effect.fn("localCheckout.previewClonePath")(function* (
+  labelId: ProjectLabelId,
+  remote: string,
+) {
+  const labels = yield* ProjectLabelService.ProjectLabelService;
+  const folders = yield* ProjectLabelFolders.ProjectLabelFolders;
+  const path = yield* Path.Path;
+  const { label } = yield* labels.readActive(labelId);
+  const link = label.repositories?.find((item) => item.remote === remote);
+  const { dir } = yield* folders.dirForLabel(label);
+  return projectRepositoryDirectory(
+    dir,
+    link?.directoryName ?? repositoryDirectoryNameFromRemote({ remoteUrl: remote }),
+    path,
+  );
 });
