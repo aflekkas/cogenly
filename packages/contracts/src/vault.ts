@@ -193,7 +193,7 @@ export type VaultUsageListResult = typeof VaultUsageListResult.Type;
  * Vault sharing with one directly paired machine (docs/internals/vault-sync.md).
  * `waiting_for_peer`: this machine shares, the other has not turned it on.
  * `key_changed`: the other machine now presents a different vault key than the
- * one pinned here; turning sharing off and on again trusts the new one.
+ * one pinned here. Re-pairing clears the pin; the UI tells the owner to do that.
  */
 export const VaultPeerSharingState = Schema.Literals([
   "not_shared",
@@ -255,7 +255,7 @@ const VAULT_FAILURE_MESSAGES = {
   peer_unavailable: "Vault sharing needs that machine paired directly with this one and online.",
   peer_key_invalid: "That machine did not present a valid vault key.",
   peer_key_changed:
-    "That machine's vault key changed. Turn sharing off and on again to trust the new key.",
+    "That machine's vault key changed. Unpair it and pair again, then turn sharing back on.",
 } as const;
 
 export const VaultFailureReason = Schema.Literals(
