@@ -1690,8 +1690,9 @@ const make = (options: IntegrationsOptions = {}) =>
           if (pending === undefined || pending.expiresAtMs <= nowMs) return yield* rejected;
           // RFC 9207: a response naming another issuer is a mix-up attempt.
           if (
-            callback.iss !== undefined &&
-            callback.iss.replace(/\/+$/, "") !== pending.server.issuer.replace(/\/+$/, "")
+            (pending.server.authorizationResponseIssParameterSupported === true &&
+              callback.iss === undefined) ||
+            (callback.iss !== undefined && callback.iss !== pending.server.issuer)
           )
             return yield* rejected;
           const integration = yield* getById(pending.integrationId);

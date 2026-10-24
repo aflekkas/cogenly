@@ -51,6 +51,8 @@ interface MockAuthServer {
   refreshes: number;
   /** Refresh tokens answer invalid_grant, as after the user revokes access. */
   revoked: boolean;
+  omitPkce?: boolean;
+  requireIssuer?: boolean;
   tokenGate?: { entered: Deferred.Deferred<void>; resume: Deferred.Deferred<void> };
   readonly clients: Map<string, ReadonlyArray<string>>;
   readonly codes: Map<
@@ -114,7 +116,8 @@ const startMockAuthServer = Effect.gen(function* () {
           authorization_endpoint: `${mock.base}/auth/authorize`,
           token_endpoint: `${mock.base}/auth/token`,
           registration_endpoint: `${mock.base}/auth/register`,
-          code_challenge_methods_supported: ["S256"],
+          ...(mock.omitPkce ? {} : { code_challenge_methods_supported: ["S256"] }),
+          authorization_response_iss_parameter_supported: mock.requireIssuer === true,
           token_endpoint_auth_methods_supported: ["none"],
         }),
       ),
@@ -342,6 +345,49 @@ const whoami = (name: string) =>
   });
 
 describe("Integration OAuth sign-in", () => {
+  it.effect("refuses omitted PKCE metadata before registering a client", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* runMigrations();
+        const mock = yield* startMockAuthServer;
+        mock.omitPkce = true;
+        const integration = yield* addLinear(mock, "linear");
+        const service = yield* Integrations.Integrations;
+        expect(
+          yield* service
+            .beginSignIn(integration.id, { origin: COGENLY_ORIGIN })
+            .pipe(Effect.result),
+        ).toMatchObject({ _tag: "Failure" });
+        expect(mock.registrations).toBe(0);
+      }),
+    ).pipe(Effect.provide(gatewayLayer())),
+  );
+
+  it.effect.each(["missing", "normalized"] as const)(
+    "rejects %s response issuer when the server advertises iss",
+    (response) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* runMigrations();
+          const mock = yield* startMockAuthServer;
+          mock.requireIssuer = true;
+          const integration = yield* addLinear(mock, "linear");
+          const service = yield* Integrations.Integrations;
+          const link = yield* service.beginSignIn(integration.id, { origin: COGENLY_ORIGIN });
+          const callback = yield* consent(link.authorizationUrl, "owner");
+          expect(
+            yield* service
+              .completeSignIn({
+                ...callback,
+                iss: response === "missing" ? undefined : `${callback.iss}/`,
+              })
+              .pipe(Effect.result),
+          ).toMatchObject({ _tag: "Failure" });
+          expect(mock.accessTokens.size).toBe(0);
+        }),
+      ).pipe(Effect.provide(gatewayLayer())),
+  );
+
   it.effect.each(["auth", "url", "client"] as const)(
     "requires owner approval before an agent drops a grant through %s",
     (field) =>

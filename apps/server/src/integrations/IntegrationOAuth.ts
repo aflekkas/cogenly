@@ -36,6 +36,7 @@ export const OAuthServer = Schema.Struct({
   registrationEndpoint: Schema.optional(Schema.String),
   scopesSupported: Schema.optional(Schema.Array(Schema.String)),
   tokenEndpointAuthMethods: Schema.optional(Schema.Array(Schema.String)),
+  authorizationResponseIssParameterSupported: Schema.optional(Schema.Boolean),
 });
 export type OAuthServer = typeof OAuthServer.Type;
 
@@ -97,6 +98,7 @@ const AuthorizationServerMetadata = Schema.Struct({
   token_endpoint: Schema.String,
   registration_endpoint: Schema.optional(Schema.String),
   code_challenge_methods_supported: Schema.optional(Schema.Array(Schema.String)),
+  authorization_response_iss_parameter_supported: Schema.optional(Schema.Boolean),
   token_endpoint_auth_methods_supported: Schema.optional(Schema.Array(Schema.String)),
 });
 const RegistrationResponse = Schema.Struct({
@@ -322,10 +324,7 @@ export const make = Effect.gen(function* () {
       // RFC 8414 §3.3: the metadata must describe the issuer it was fetched for.
       if (stripSlash(found.issuer) !== stripSlash(issuer.href))
         return yield* failure("discover", "issuer mismatch");
-      if (
-        found.code_challenge_methods_supported !== undefined &&
-        !found.code_challenge_methods_supported.includes("S256")
-      )
+      if (!found.code_challenge_methods_supported?.includes("S256"))
         return yield* failure("discover", "no PKCE");
       const authorizationEndpoint = checkEndpoint(found.authorization_endpoint, endpoint);
       const tokenEndpoint = checkEndpoint(found.token_endpoint, endpoint);
@@ -348,6 +347,8 @@ export const make = Effect.gen(function* () {
       return {
         resource,
         issuer: found.issuer,
+        authorizationResponseIssParameterSupported:
+          found.authorization_response_iss_parameter_supported === true,
         authorizationEndpoint: authorizationEndpoint.href,
         tokenEndpoint: tokenEndpoint.href,
         ...(registrationEndpoint === undefined
