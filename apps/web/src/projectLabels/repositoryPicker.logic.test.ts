@@ -18,6 +18,7 @@ import {
   describeCloneFailure,
   gitHubRepositoryKeys,
   gitHubRepositoryOf,
+  isRepositoryRequestSettled,
   linkedRepositoryRows,
   machineRepositoryRows,
   projectRepositoryLinks,
@@ -231,6 +232,8 @@ describe("linkedRepositoryRows", () => {
     const athens = rows.find((row) => row.name === "aflekkas/athens-racing");
     expect(athens).toMatchObject({
       repositoryId: null,
+      // Unlinking names the placeholder, so it works before any clone here.
+      linkId: "remote:github.com/aflekkas/athens-racing",
       local: null,
       remote: "github.com/aflekkas/athens-racing",
       detail: null,
@@ -345,14 +348,30 @@ describe("repositoryRowView", () => {
     expect(repositoryRowView({ checkout: "ready" }, null, null)).toEqual({ kind: "ready" });
     expect(repositoryRowView({ checkout: "not_cloned" }, null, null)).toEqual({
       kind: "needs-clone",
+      cloneable: true,
     });
     expect(repositoryRowView({ checkout: "missing" }, null, null)).toEqual({
       kind: "needs-clone",
+      cloneable: true,
     });
     expect(repositoryRowView({ checkout: "failed" }, null, clone("failed", 3, "boom"))).toEqual({
       kind: "failed",
       message: "boom",
+      cloneable: true,
     });
+  });
+
+  it("promises no clone where picking the row cannot start one", () => {
+    expect(repositoryRowView({ checkout: "missing" }, null, null, { cloneable: false })).toEqual({
+      kind: "needs-clone",
+      cloneable: false,
+    });
+  });
+
+  it("shows a removal or move this client runs over everything else", () => {
+    expect(
+      repositoryRowView({ checkout: "ready" }, null, null, { cloneable: true, work: "removing" }),
+    ).toEqual({ kind: "working", work: "removing" });
   });
 
   it("shows git's own progress while the clone runs, and no number it does not have", () => {
@@ -377,18 +396,38 @@ describe("repositoryRowView", () => {
     expect(repositoryRowView({ checkout: "failed" }, started, clone("failed", 7, "new"))).toEqual({
       kind: "failed",
       message: "new",
+      cloneable: true,
     });
     expect(repositoryRowView({ checkout: "ready" }, started, null)).toEqual({ kind: "ready" });
   });
 
-  it("shows a refused clone with the server's words", () => {
-    expect(
-      repositoryRowView(
-        { checkout: "not_cloned" },
-        { phase: "error", message: "No access." },
-        null,
-      ),
-    ).toEqual({ kind: "failed", message: "No access." });
+  it("lets the server speak once it has overtaken the request", () => {
+    const repositoryId = ProjectId.make("finance-id");
+    const started = { phase: "started" as const, repositoryId, baselineSequence: null };
+    // Cloned, then removed from this machine: the old request no longer reads as starting.
+    expect(isRepositoryRequestSettled({ checkout: "ready" }, started, null)).toBe(true);
+    expect(isRepositoryRequestSettled({ checkout: "missing" }, started, clone("done", 1))).toBe(
+      true,
+    );
+    expect(repositoryRowView({ checkout: "missing" }, started, clone("done", 1))).toEqual({
+      kind: "needs-clone",
+      cloneable: true,
+    });
+    // Before the server reports anything, the request still holds.
+    expect(isRepositoryRequestSettled({ checkout: "missing" }, started, null)).toBe(false);
+    expect(isRepositoryRequestSettled({ checkout: "missing" }, { phase: "starting" }, null)).toBe(
+      false,
+    );
+  });
+
+  it("shows a refused clone with the server's words, until it is cloned some other way", () => {
+    const refused = { phase: "error" as const, message: "No access." };
+    expect(repositoryRowView({ checkout: "not_cloned" }, refused, null)).toEqual({
+      kind: "failed",
+      message: "No access.",
+      cloneable: true,
+    });
+    expect(repositoryRowView({ checkout: "ready" }, refused, null)).toEqual({ kind: "ready" });
   });
 });
 

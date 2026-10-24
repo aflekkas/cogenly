@@ -58,41 +58,50 @@ export function RepositoryRowIcon(props: {
   return <FolderGit2Icon className={className} />;
 }
 
-/** The text a row's state reads as, for its trailing mark and accessible name. */
-export function repositoryRowStatusText(view: RepositoryRowView): string | null {
+/** The text a row's state reads as at its end. */
+function repositoryRowStatusText(view: RepositoryRowView): string | null {
   switch (view.kind) {
     case "ready":
       return null;
     case "needs-clone":
-      return "Clone to set up";
+      // Only promise a clone where picking the row starts one.
+      return view.cloneable ? "Clone to set up" : "Not on this machine";
     case "starting":
       return "Starting clone…";
     case "cloning":
       return view.progress ?? "Cloning…";
     case "failed":
-      return "Clone failed · Retry";
+      return view.cloneable ? "Clone failed · Retry" : "Clone failed";
+    case "working":
+      return view.work === "removing"
+        ? "Removing from this machine…"
+        : view.work === "moving"
+          ? "Moving…"
+          : null;
   }
 }
 
 /**
  * A row's state on the selected machine, at its end: nothing once cloned,
  * "Clone to set up", the clone's own progress while it runs (a spinner only
- * while the server reports it running), or the failure. Each change fades.
+ * while the server reports it running, or while a removal or move this
+ * client asked for is in flight), or the failure. Each change fades.
  */
 export function RepositoryRowStatus(props: { readonly view: RepositoryRowView }) {
   const text = repositoryRowStatusText(props.view);
   if (text === null) return null;
   const { kind } = props.view;
+  const busy = kind === "cloning" || kind === "working";
   return (
     <span
       key={kind}
-      role={kind === "cloning" || kind === "starting" ? "status" : undefined}
+      role={busy || kind === "starting" ? "status" : undefined}
       className={cn(
         "swap-motion flex min-w-0 max-w-1/2 shrink-0 items-center gap-1 text-2xs tabular-nums",
         kind === "failed" ? "text-destructive-foreground" : "text-muted-foreground",
       )}
     >
-      {kind === "cloning" ? <Spinner size="xs" tone="muted" /> : null}
+      {busy ? <Spinner size="xs" tone="muted" /> : null}
       <span className="truncate">{text}</span>
     </span>
   );

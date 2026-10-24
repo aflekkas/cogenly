@@ -79,6 +79,11 @@ export interface RepositoryListRow<Local extends RepositoryListLocal = Repositor
   readonly key: string;
   /** This machine's record; null for one linked from another machine and not cloned here. */
   readonly repositoryId: ProjectId | null;
+  /**
+   * The id the project links it by (a `remote:` placeholder when it is not
+   * cloned here), which unlinking names; null when no project links it.
+   */
+  readonly linkId: ProjectId | null;
   readonly remote: string | null;
   /** The project's folder name for it under `repos/`, when the project links it. */
   readonly directoryName: string | null;
@@ -140,6 +145,7 @@ function rowFromLink<Local extends RepositoryListLocal>(
   return {
     key: rowKey(remote, link.repositoryId),
     repositoryId: placeholder ? null : link.repositoryId,
+    linkId: link.repositoryId,
     remote,
     directoryName: link.directoryName,
     name:
@@ -238,6 +244,7 @@ export function machineRepositoryRows<Local extends RepositoryListLocal>(input: 
       return {
         key: rowKey(null, local.id),
         repositoryId: local.id,
+        linkId: null,
         remote: null,
         directoryName: null,
         name: local.title,
@@ -309,27 +316,58 @@ export type RepositoryCloneProgress = Pick<
   "phase" | "stage" | "percent" | "detail" | "error" | "sequence"
 >;
 
+/** A row action this client is running: removing it from this machine, moving it, or unlinking it. */
+export type RepositoryRowWork = "removing" | "moving" | "unlinking";
+
 /** How a row shows its state on the selected machine. */
 export type RepositoryRowView =
   | { readonly kind: "ready" }
-  | { readonly kind: "needs-clone" }
+  /** Not cloned here; `cloneable` when picking it here would clone it. */
+  | { readonly kind: "needs-clone"; readonly cloneable: boolean }
   | { readonly kind: "starting" }
   /** `progress` is git's own stage and percent; null while none is reported. */
   | { readonly kind: "cloning"; readonly progress: string | null }
-  | { readonly kind: "failed"; readonly message: string | null };
+  | { readonly kind: "failed"; readonly message: string | null; readonly cloneable: boolean }
+  | { readonly kind: "working"; readonly work: RepositoryRowWork };
+
+/**
+ * Whether a request this client made has been overtaken by what the server
+ * says: the link reports the checkout ready or cloning, or the clone it
+ * started has ended. From then on the server's state alone speaks, so a
+ * later removal reads "Clone to set up" rather than an old "Starting clone…".
+ */
+export function isRepositoryRequestSettled(
+  row: Pick<RepositoryListRow, "checkout">,
+  request: RepositoryCheckoutRequest,
+  clone: RepositoryCloneProgress | null,
+): boolean {
+  if (request.phase === "starting") return false;
+  if (row.checkout === "ready" || row.checkout === "cloning") return true;
+  if (request.phase === "error") return false;
+  return clone !== null && clone.sequence !== request.baselineSequence && clone.phase !== "running";
+}
 
 /**
  * The row's state from what the server says (the link's checkout and the
- * tracked clone) and what this client asked for. A clone asked for here
- * reads as starting until the server reports it running, landed or failed,
- * so the row never shows an older failure or a spinner nothing backs.
+ * tracked clone), what this client asked for, and what it is doing to the
+ * row now. A clone asked for here reads as starting until the server
+ * reports it running, landed or failed, so the row never shows an older
+ * failure or a spinner nothing backs. `cloneable` says whether picking the
+ * row here can clone it (a remote, a project, and permission).
  */
 export function repositoryRowView(
   row: Pick<RepositoryListRow, "checkout">,
   request: RepositoryCheckoutRequest | null,
   clone: RepositoryCloneProgress | null,
+  options: { readonly cloneable: boolean; readonly work?: RepositoryRowWork | null } = {
+    cloneable: true,
+  },
 ): RepositoryRowView {
-  if (request?.phase === "error") return { kind: "failed", message: request.message };
+  const { cloneable } = options;
+  if (options.work) return { kind: "working", work: options.work };
+  const live =
+    request !== null && !isRepositoryRequestSettled(row, request, clone) ? request : null;
+  if (live?.phase === "error") return { kind: "failed", message: live.message, cloneable };
   const running = clone?.phase === "running" ? clone : null;
   if (running !== null || row.checkout === "cloning") {
     return {
@@ -337,17 +375,20 @@ export function repositoryRowView(
       progress: running === null ? null : projectCloneProgressSummary(running),
     };
   }
-  if (request?.phase === "starting") return { kind: "starting" };
+  if (live?.phase === "starting") return { kind: "starting" };
   if (row.checkout === "ready") return { kind: "ready" };
-  if (request?.phase === "started") {
-    const fresh = clone !== null && clone.sequence !== request.baselineSequence;
-    if (fresh && (clone.phase === "failed" || clone.phase === "cancelled")) {
-      return { kind: "failed", message: clone.error };
-    }
-    return { kind: "starting" };
+  if (live?.phase === "started") return { kind: "starting" };
+  if (
+    request?.phase === "started" &&
+    clone !== null &&
+    clone.sequence !== request.baselineSequence
+  ) {
+    if (clone.phase === "failed" || clone.phase === "cancelled")
+      return { kind: "failed", message: clone.error, cloneable };
   }
-  if (row.checkout === "failed") return { kind: "failed", message: clone?.error ?? null };
-  return { kind: "needs-clone" };
+  if (row.checkout === "failed")
+    return { kind: "failed", message: clone?.error ?? null, cloneable };
+  return { kind: "needs-clone", cloneable };
 }
 
 /** Results the "Add repository" list shows before "Show more"; a search shows them all. */

@@ -131,7 +131,7 @@ export function RepositoriesCard(props: {
     serverEnvironment.linkProjectLabelRepository.permissionAtom(environmentId),
   );
   const checkouts = useRepositoryCheckouts(environmentId);
-  const rowActions = useRepositoryRowActions(environmentId);
+  const rowActions = useRepositoryRowActions(environmentId, checkouts);
   const arrived = useArrivedKeys(
     rows.map((row) => row.key),
     true,
@@ -159,13 +159,11 @@ export function RepositoriesCard(props: {
         const view = checkouts.viewOf(row);
         const action = repositoryRowAction(row);
         const { project, repositoryId } = row;
+        const cloneable = (view.kind === "needs-clone" || view.kind === "failed") && view.cloneable;
         const onOpen =
-          action === "select" && repositoryId !== null
+          action === "select" && repositoryId !== null && view.kind === "ready"
             ? () => props.onOpenRepository(repositoryId)
-            : action === "checkout" &&
-                project !== null &&
-                checkouts.canCheckout &&
-                view.kind !== "starting"
+            : cloneable && project !== null
               ? () => void checkouts.start({ ...row, project })
               : undefined;
         return (
@@ -182,11 +180,14 @@ export function RepositoriesCard(props: {
                 )
               }
               arrived={arrived.has(row.key)}
+              removing={view.kind === "working" && view.work === "unlinking"}
               {...(onOpen ? { onOpen } : {})}
               ariaLabel={
-                action === "checkout"
+                cloneable
                   ? `Clone ${row.name} to this machine`
-                  : `Repository settings for ${row.name}`
+                  : view.kind === "ready"
+                    ? `Repository settings for ${row.name}`
+                    : row.name
               }
               menu={<RepositoryRowMenu label={`${row.name} actions`} actions={rowActions(row)} />}
             />

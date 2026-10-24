@@ -526,6 +526,46 @@ it.effect("gates cloning a project's linked repository here on the source contro
   ),
 );
 
+it.effect(
+  "gates removing and moving checkouts on source control, and orphan folders on operate",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const registry = yield* setup;
+        const sourceControl = [
+          WS_METHODS.projectLabelsRemoveCheckout,
+          WS_METHODS.projectLabelsAdoptRepository,
+        ].map((method) => createCommandPermissions(runtime, method));
+        const operate = [
+          WS_METHODS.projectLabelsAdoptOrphanFolder,
+          WS_METHODS.projectLabelsRemoveOrphanFolder,
+        ].map((method) => createCommandPermissions(runtime, method));
+        const holding = (scope: typeof AuthOrchestrationOperateScope) =>
+          registry.set(
+            sessions(env),
+            AsyncResult.success({ ...grant(false), scopes: [scope], permissions: [scope] }),
+          );
+        holding(AuthOrchestrationOperateScope);
+        for (const command of sourceControl) {
+          expect(registry.get(command.permissionAtom(env))).toBe(false);
+          expect(
+            (yield* command.authorize(registry, env).pipe(Effect.flip)).requiredPermission,
+          ).toBe(AuthSourceControlWriteScope);
+        }
+        for (const command of operate) expect(registry.get(command.permissionAtom(env))).toBe(true);
+        holding(AuthSourceControlWriteScope);
+        for (const command of sourceControl)
+          expect(registry.get(command.permissionAtom(env))).toBe(true);
+        for (const command of operate) {
+          expect(registry.get(command.permissionAtom(env))).toBe(false);
+          expect(
+            (yield* command.authorize(registry, env).pipe(Effect.flip)).requiredPermission,
+          ).toBe(AuthOrchestrationOperateScope);
+        }
+      }),
+    ),
+);
+
 it.effect("honors exact empty permissions and preserves legacy parent grants", () =>
   Effect.scoped(
     Effect.gen(function* () {

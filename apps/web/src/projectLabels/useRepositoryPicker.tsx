@@ -304,7 +304,7 @@ export function useRepositoryPicker(input: {
   }, [addOptions, filter, gitHubState, input.addOnly, mode, project, rows, trimmed]);
 
   const checkouts = useRepositoryCheckouts(environmentId);
-  const rowActions = useRepositoryRowActions(environmentId);
+  const rowActions = useRepositoryRowActions(environmentId, checkouts);
   const canLink = useAtomValue(
     serverEnvironment.linkProjectLabelRepository.permissionAtom(environmentId),
   );
@@ -392,17 +392,20 @@ export function useRepositoryPicker(input: {
     switch (item.kind) {
       case "repository": {
         const { row } = item;
-        const action = repositoryRowAction(row);
-        if (action === "select" && row.local !== null) {
+        const view = checkouts.viewOf(row);
+        // A row being removed or moved here is not picked mid-way.
+        if (view.kind === "working") return true;
+        if (repositoryRowAction(row) === "select" && row.local !== null) {
           input.onPick(row.local);
           return false;
         }
-        if (action === "checkout" && row.project !== null && checkouts.canCheckout) {
-          const view = checkouts.viewOf(row);
-          if (view.kind === "starting" || view.kind === "cloning") return true;
+        if (
+          (view.kind === "needs-clone" || view.kind === "failed") &&
+          view.cloneable &&
+          row.project !== null
+        ) {
           pendingPickKey.current = row.key;
           void checkouts.start({ ...row, project: row.project });
-          return true;
         }
         return true;
       }

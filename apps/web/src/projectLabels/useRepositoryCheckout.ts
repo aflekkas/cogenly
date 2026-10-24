@@ -5,7 +5,7 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentId, ProjectCloneSnapshot, ProjectId } from "@t3tools/contracts";
 import { Atom } from "effect/reactivity";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { requestConfirmDialog } from "../confirmDialog";
 import { environmentProjectClonesAtom } from "../state/projectClones";
@@ -15,10 +15,13 @@ import type { EnvironmentProjectLabel } from "./projectLabels.logic";
 import {
   canMoveIntoProjectFolder,
   canRemoveCheckout,
+  isRepositoryRequestSettled,
+  repositoryRowAction,
   repositoryRowView,
   type RepositoryCheckoutRequest,
   type RepositoryListRow,
   type RepositoryRowView,
+  type RepositoryRowWork,
 } from "./repositoryPicker.logic";
 import { repositoryRowMenuIcons, type RepositoryRowMenuAction } from "./RepositorySourceRows";
 import { reportProjectFolderFailure } from "./useMoveThreadToFolder";
@@ -56,8 +59,23 @@ export function useRepositoryCheckouts(environmentId: EnvironmentId | null) {
   const [requests, setRequests] = useState<ReadonlyMap<string, RepositoryCheckoutRequest>>(
     () => new Map(),
   );
+  const [work, setWork] = useState<ReadonlyMap<string, RepositoryRowWork>>(() => new Map());
   const requestKey = (row: Pick<RepositoryListRow, "key" | "project">) =>
     `${row.project?.key ?? ""}|${row.key}`;
+  // Requests the server's state has overtaken, noted while rendering rows
+  // and dropped after the render, so a request never outlives its clone.
+  const settled = useRef(new Set<string>());
+  useEffect(() => {
+    if (settled.current.size === 0) return;
+    const keys = [...settled.current];
+    settled.current.clear();
+    setRequests((current) => {
+      if (!keys.some((key) => current.has(key))) return current;
+      const next = new Map(current);
+      for (const key of keys) next.delete(key);
+      return next;
+    });
+  });
   const cloneFor = useCallback(
     (repositoryId: ProjectId | null) =>
       repositoryId === null
@@ -115,17 +133,41 @@ export function useRepositoryCheckouts(environmentId: EnvironmentId | null) {
       return request?.phase === "started" ? request.repositoryId : null;
     },
     viewOf: (row: RepositoryListRow): RepositoryRowView => {
-      const request = requests.get(requestKey(row)) ?? null;
+      const key = requestKey(row);
+      const request = requests.get(key) ?? null;
       const repositoryId =
         row.repositoryId ?? (request?.phase === "started" ? request.repositoryId : null);
-      return repositoryRowView(row, request, cloneFor(repositoryId));
+      const clone = cloneFor(repositoryId);
+      if (request !== null && isRepositoryRequestSettled(row, request, clone))
+        settled.current.add(key);
+      return repositoryRowView(row, request, clone, {
+        cloneable: canCheckout && repositoryRowAction(row) === "checkout",
+        work: work.get(key) ?? null,
+      });
     },
     /** Forgets what was asked for a row, so its next state comes from the server alone. */
     forget: (row: RepositoryListRow) => {
       if (requests.has(requestKey(row))) setRequest(requestKey(row), null);
     },
+    /** Runs a row action, showing it on the row (`working`) until it settles. */
+    track: async <A>(row: RepositoryListRow, kind: RepositoryRowWork, run: () => Promise<A>) => {
+      const key = requestKey(row);
+      setWork((current) => new Map(current).set(key, kind));
+      try {
+        return await run();
+      } finally {
+        setWork((current) => {
+          const next = new Map(current);
+          next.delete(key);
+          return next;
+        });
+      }
+    },
   };
 }
+
+/** What `useRepositoryCheckouts` gives the row actions: a way to show work on a row. */
+export type RepositoryRowWorkTracker = Pick<ReturnType<typeof useRepositoryCheckouts>, "track">;
 
 /**
  * The row menu's machine actions: "Remove from this machine" (deletes the
@@ -152,17 +194,23 @@ export function useRepositoryMachineActions(environmentId: EnvironmentId | null)
     () => ({
       canRemoveCheckout: mayRemoveCheckout,
       canAdopt,
-      removeFromMachine: async (row: RepositoryListRow): Promise<boolean> => {
-        if (row.project === null || row.repositoryId === null) return false;
-        const message = `Remove ${row.name} from this machine?\nIts folder here is deleted. ${row.project.label.name} keeps it, and any machine can clone it again.`;
+      removeFromMachine: async (
+        row: RepositoryListRow,
+        during: <A>(run: () => Promise<A>) => Promise<A> = (run) => run(),
+      ): Promise<boolean> => {
+        const { project, repositoryId } = row;
+        if (project === null || repositoryId === null) return false;
+        const message = `Remove ${row.name} from this machine?\nIts folder here is deleted. ${project.label.name} keeps it, and any machine can clone it again.`;
         const confirmed =
           (await requestConfirmDialog(message, { variant: "destructive" })) ??
           window.confirm(message);
         if (!confirmed) return false;
-        const result = await removeCheckout({
-          environmentId: row.project.environmentId,
-          input: { labelId: row.project.label.id, repositoryId: row.repositoryId },
-        });
+        const result = await during(() =>
+          removeCheckout({
+            environmentId: project.environmentId,
+            input: { labelId: project.label.id, repositoryId },
+          }),
+        );
         if (result._tag === "Failure") {
           if (!isAtomCommandInterrupted(result)) {
             reportProjectFolderFailure(`Could not remove ${row.name} from this machine`, result);
@@ -198,7 +246,10 @@ export function useRepositoryMachineActions(environmentId: EnvironmentId | null)
  * connection may do it. `onLeave` runs first, for a picker that closes
  * before a dialog.
  */
-export function useRepositoryRowActions(environmentId: EnvironmentId | null) {
+export function useRepositoryRowActions(
+  environmentId: EnvironmentId | null,
+  tracker: RepositoryRowWorkTracker,
+) {
   const machine = useRepositoryMachineActions(environmentId);
   const canUnlink = useCanRemoveRepositoryFromProject(environmentId);
   const removeFromProject = useRemoveRepositoryFromProject();
@@ -210,13 +261,18 @@ export function useRepositoryRowActions(environmentId: EnvironmentId | null) {
       options.onLeave?.();
       void run();
     };
+    // Shown on the row only while the request runs, never during its confirm.
+    const during =
+      (kind: RepositoryRowWork) =>
+      <A>(run: () => Promise<A>) =>
+        tracker.track(row, kind, run);
     const actions: RepositoryRowMenuAction[] = [];
     if (machine.canAdopt && canMoveIntoProjectFolder(row)) {
       actions.push({
         key: "move-into-project-folder",
         label: "Move into project folder",
         icon: repositoryRowMenuIcons.moveIntoProjectFolder,
-        onSelect: leave(() => machine.moveIntoProjectFolder(row)),
+        onSelect: leave(() => during("moving")(() => machine.moveIntoProjectFolder(row))),
       });
     }
     if (machine.canRemoveCheckout && canRemoveCheckout(row)) {
@@ -225,17 +281,26 @@ export function useRepositoryRowActions(environmentId: EnvironmentId | null) {
         label: "Remove from this machine",
         icon: repositoryRowMenuIcons.removeFromMachine,
         destructive: true,
-        onSelect: leave(() => machine.removeFromMachine(row)),
+        onSelect: leave(() => machine.removeFromMachine(row, during("removing"))),
       });
     }
-    const { project, repositoryId } = row;
-    if ((options.unlink ?? true) && canUnlink && project !== null && repositoryId !== null) {
+    // By the link's own id, so a repository not cloned here can be unlinked too.
+    const { project, linkId } = row;
+    if ((options.unlink ?? true) && canUnlink && project !== null && linkId !== null) {
       actions.push({
         key: "remove-from-project",
         label: `Remove from ${project.label.name}`,
         icon: repositoryRowMenuIcons.removeFromProject,
         destructive: true,
-        onSelect: leave(() => removeFromProject({ project, repositoryId, title: row.name })),
+        onSelect: leave(() =>
+          removeFromProject({
+            project,
+            repositoryId: linkId,
+            title: row.name,
+            onDisk: row.repositoryId !== null,
+            during: during("unlinking"),
+          }),
+        ),
       });
     }
     return actions;
