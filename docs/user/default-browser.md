@@ -9,6 +9,6 @@ Choose **Cogenly** under **System Settings → Desktop & Dock → Default web br
 choose another browser there.
 
 HTML files you open from Finder open the same way. [Prompt links](prompt-links.md) to
-app.t3.codes open in the app as a draft.
+the hosted web app open in the app as a draft.
 
 A link that launches Cogenly waits until the app has connected to its environment, then opens.
