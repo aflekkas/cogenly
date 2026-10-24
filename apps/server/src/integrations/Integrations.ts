@@ -52,6 +52,7 @@ import * as Tokens from "./IntegrationTokens.ts";
 import { StoredIntegration } from "./StoredIntegration.ts";
 import type { OAuthState } from "./StoredIntegration.ts";
 import * as IntegrationSync from "../sync/IntegrationSync.ts";
+import { integrationNotSyncedReason } from "../sync/integrationDocument.ts";
 import * as Local from "./local/LocalIntegrations.ts";
 import { GOOGLE_WORKSPACE_VERSION } from "./local/GoogleWorkspace.ts";
 import { IntegrationEndpointPolicy, withPublicEndpoint } from "./RemoteEndpoint.ts";
@@ -756,7 +757,9 @@ const make = (options: IntegrationsOptions = {}) =>
                 ...(failureReason === undefined ? {} : { reason: failureReason }),
                 ...(message === undefined ? {} : { message }),
               });
+              const notSyncedReason = integrationNotSyncedReason(integration);
               return {
+                ...(notSyncedReason === undefined ? {} : { notSyncedReason }),
                 integration: redactIntegration({
                   ...integration,
                   ...(localProvenance === undefined

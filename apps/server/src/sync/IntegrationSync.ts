@@ -16,7 +16,11 @@ import * as SqlClient from "effect/sql/SqlClient";
 import * as Machines from "../machines/Machines.ts";
 import { StoredIntegration } from "../integrations/StoredIntegration.ts";
 import { SharedState } from "./SharedState.ts";
-import { decodeIntegrationFields, integrationFields } from "./integrationDocument.ts";
+import {
+  decodeIntegrationFields,
+  integrationFields,
+  integrationNotSyncedReason,
+} from "./integrationDocument.ts";
 
 export class IntegrationSync extends Context.Service<
   IntegrationSync,
@@ -55,6 +59,7 @@ const make = Effect.gen(function* () {
           name: mapping && value.name === mapping.local_name ? mapping.shared_name : value.name,
         });
       const fields = portable(current);
+      if (fields === undefined) return;
       const before = previous === undefined ? undefined : portable(previous);
       const changed = Object.fromEntries(
         Object.entries(fields).filter(
@@ -71,8 +76,8 @@ const make = Effect.gen(function* () {
       payload_json: string;
     }>`SELECT payload_json FROM integrations WHERE id=${document.id}`;
     const current = rows[0] ? yield* decode(rows[0].payload_json) : undefined;
-    // A received document can never replace an existing local command runner.
-    if (current && current.transport !== "http") return false;
+    // A received document cannot replace a definition intentionally kept local.
+    if (current && integrationNotSyncedReason(current) !== undefined) return false;
     const mapping = (yield* alias(document.id))[0];
     const version = json({
       fields: document.fields,
@@ -166,9 +171,10 @@ const make = Effect.gen(function* () {
     }>`SELECT payload_json FROM integrations WHERE deleted_at IS NULL ORDER BY id`;
     for (const row of rows) {
       const current = yield* decode(row.payload_json);
+      const fields = integrationFields(current);
       if (
-        current.transport === "http" &&
-        Option.isSome(decodeIntegrationFields(integrationFields(current))) &&
+        fields !== undefined &&
+        Option.isSome(decodeIntegrationFields(fields)) &&
         !(yield* shared.get("integration", current.id))
       )
         yield* publish(current);

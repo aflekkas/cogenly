@@ -290,6 +290,8 @@ export type IntegrationSetupAction = typeof IntegrationSetupAction.Type;
 
 /** What clients and `integrations_list` see: never resolved credentials, and literal header values masked. */
 export const IntegrationSummary = Schema.Struct({
+  /** Present when the definition stays local; safe to show without exposing the URL. */
+  notSyncedReason: Schema.optional(Schema.String),
   integration: Integration,
   status: IntegrationConnectionStatus,
   toolCount: Schema.NullOr(Schema.Number),

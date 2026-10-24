@@ -125,6 +125,71 @@ const paired = Effect.gen(function* () {
 
 describe("integration definitions between paired machines", () => {
   it.live(
+    "URL credentials and unrecognized query parameters never publish or bootstrap",
+    () =>
+      Effect.gen(function* () {
+        const { hub, spoke } = yield* paired;
+        const queries = [
+          "api_key=secret",
+          "token=secret",
+          "key=secret",
+          "access_token=secret",
+          "X-Amz-Signature=secret",
+          "sig=secret",
+          "unknown=secret",
+          "%74oken=secret",
+        ];
+        for (const [index, query] of queries.entries()) {
+          const url = `https://example.com/mcp?${query}`;
+          const created = (yield* hub.integrations.create({
+            name: IntegrationName.make(`query-${index}`),
+            displayName: "Private endpoint",
+            transport: "http",
+            url,
+            headers: {},
+            scope: { type: "all" },
+            hint: "",
+          })).integration;
+          expect(yield* hub.state.get("integration", created.id)).toBeUndefined();
+          const existing = {
+            ...definition(`integration:bootstrap-${index}`, `bootstrap-${index}`),
+            url,
+          };
+          yield* hub.store(existing);
+          yield* exchange(hub, spoke);
+          expect(yield* hub.state.get("integration", existing.id)).toBeUndefined();
+          expect(yield* spoke.read(created.id)).toBeUndefined();
+          expect(yield* spoke.read(existing.id)).toBeUndefined();
+          const summary = (yield* hub.integrations.list()).integrations.find(
+            (item) => item.integration.id === created.id,
+          )!;
+          expect(summary).toHaveProperty(
+            "notSyncedReason",
+            "Not synced: URL query parameters may contain credentials.",
+          );
+        }
+        // A previously shared endpoint can become local without exporting its new URL
+        // or having the old shared document overwrite the local edit on reconciliation.
+        const original = definition("integration:query-edit", "query-edit");
+        yield* hub.store(original);
+        yield* exchange(hub, spoke);
+        const url = "https://example.com/mcp?token=local-secret";
+        yield* hub.integrations.update({ id: original.id, url });
+        yield* exchange(hub, spoke);
+        expect((yield* hub.read(original.id))?.url).toBe(url);
+        expect(
+          JSON.stringify((yield* hub.state.get("integration", original.id))?.fields),
+        ).not.toContain("local-secret");
+        expect((yield* spoke.read(original.id))?.url).toBe(original.url);
+        // The way back becomes shareable again.
+        yield* hub.integrations.update({ id: original.id, url: "https://example.com/public" });
+        yield* exchange(hub, spoke);
+        expect((yield* spoke.read(original.id))?.url).toBe("https://example.com/public");
+      }).pipe(Effect.scoped),
+    20000,
+  );
+
+  it.live(
     "scope widening clears local authorization while narrowing preserves it",
     () =>
       Effect.gen(function* () {
@@ -306,6 +371,12 @@ describe("integration definitions between paired machines", () => {
         } satisfies Record<string, Schema.Json>;
         yield* send("integration:forged", fields);
         expect(yield* spoke.read("integration:forged")).toBeUndefined();
+        yield* send("integration:credential-url", {
+          ...fields,
+          transport: "http",
+          url: "https://example.com/mcp?token=peer-secret",
+        });
+        expect(yield* spoke.read("integration:credential-url")).toBeUndefined();
         yield* send("integration:safe", {
           ...fields,
           transport: "http",
