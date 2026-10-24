@@ -1,8 +1,8 @@
 import { flushSync } from "react-dom";
 
 /**
- * The one motion of a mode switch (Chats, Work, Agents, Projects, and the
- * settings sections): a pure crossfade of the whole window, opacity only.
+ * The one motion of a mode switch (Chats, Work, Agents, Projects, and
+ * Settings): a pure crossfade of the whole window, opacity only.
  * Nothing moves. It is a same-document view transition of the root: the old
  * frame fades out while the new one fades in, blended with plus-lighter, so
  * whatever is the same in both modes (the rail, the search bar, the header)

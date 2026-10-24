@@ -123,6 +123,11 @@ describe("RPC authorization scopes", () => {
       WS_METHODS.machinesCreatePeerGrant,
       WS_METHODS.machinesJoinHub,
       WS_METHODS.machinesUnpair,
+      // Setup installs software and exposes the server; its status carries sign-in links.
+      WS_METHODS.machinesSetupStatus,
+      WS_METHODS.machinesSetupSubscribe,
+      WS_METHODS.machinesSetupRunStep,
+      WS_METHODS.machinesSetupDisableServe,
     ]) {
       expect(requiredScopeForRpcMethod(method)).toBe(AuthAccessWriteScope);
       expect(clientRpcRequiredScopes(method, {})).toEqual([AuthAccessWriteScope]);
@@ -225,6 +230,26 @@ describe("RPC authorization scopes", () => {
     expect(requiredScopeForRpcMethod(WS_METHODS.subscribeProjectClones)).toBe(
       AuthOrchestrationReadScope,
     );
+  });
+
+  it.each([WS_METHODS.projectLabelsAdoptOrphanFolder, WS_METHODS.projectLabelsRemoveOrphanFolder])(
+    "requires operate access for %s, on the client too, while listing orphans is a read",
+    (method) => {
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationOperateScope);
+      expect(clientRpcRequiredScopes(method, {})).toEqual([AuthOrchestrationOperateScope]);
+      expect(requiredScopeForRpcMethod(WS_METHODS.projectLabelsListOrphanFolders)).toBe(
+        AuthOrchestrationReadScope,
+      );
+    },
+  );
+
+  it.each([
+    WS_METHODS.projectLabelsCheckoutRepository,
+    WS_METHODS.projectLabelsRemoveCheckout,
+    WS_METHODS.projectLabelsAdoptRepository,
+  ])("requires source control writes for %s, on the client too", (method) => {
+    expect(requiredScopeForRpcMethod(method)).toBe(AuthSourceControlWriteScope);
+    expect(clientRpcRequiredScopes(method, {})).toEqual([AuthSourceControlWriteScope]);
   });
 
   it("separates viewing pull request file progress from writing it", () => {

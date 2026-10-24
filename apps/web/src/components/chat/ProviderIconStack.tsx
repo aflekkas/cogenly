@@ -33,10 +33,12 @@ export function ProviderIconStack(props: {
           // `isolate` keeps each glyph's own z-index inside its chip, so later
           // chips paint over earlier ones whole, glyph and all.
           className={cn(
-            "relative isolate inline-flex size-4 shrink-0 items-center justify-center rounded-full bg-(--provider-stack-ring) ring-2 ring-(--provider-stack-ring)",
+            // A 1px ring and a 4px tuck keep the cut a hairline, so the glyph
+            // underneath stays recognizable rather than cropped in half.
+            "relative isolate inline-flex size-4 shrink-0 items-center justify-center rounded-full bg-(--provider-stack-ring) ring-1 ring-(--provider-stack-ring)",
             "motion-safe:transition-[translate,background-color,box-shadow] motion-safe:duration-(--motion-duration-fast) motion-safe:ease-standard",
             "motion-safe:group-any-hover/provider-stack:translate-x-[calc(var(--stack-depth)*-3px)]",
-            index > 0 && "-ml-1.25",
+            index > 0 && "-ml-1",
           )}
           style={{ "--stack-depth": last - index } as CSSProperties}
         >

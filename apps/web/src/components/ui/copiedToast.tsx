@@ -9,7 +9,10 @@ const COPIED_TOAST_ICONS = {
   branch: GitBranchIcon,
 } as const;
 
-/** "Link copied" with the copied thing named in a small chip below, or "Copied to clipboard". */
+/**
+ * "Link copied" with the copied thing named in a small chip below. Only for copies with no
+ * visible control, such as context-menu items; a `CopyButton` gives its own feedback.
+ */
 export function showCopiedToast(subject: CopiedToastSubject) {
   const { title, label, icon } = describeCopiedToast(subject);
   const Icon = icon ? COPIED_TOAST_ICONS[icon] : null;
@@ -27,11 +30,6 @@ export function showCopiedToast(subject: CopiedToastSubject) {
         }
       : {}),
   });
-}
-
-/** The plain "Copied to clipboard" toast, for copy controls with no better name for the text. */
-export function showClipboardCopiedToast() {
-  showCopiedToast({ kind: "clipboard" });
 }
 
 export function showCopyFailedToast(error: Error) {

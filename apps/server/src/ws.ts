@@ -11,11 +11,15 @@ import * as Facts from "./context/FactService.ts";
 import * as Integrations from "./integrations/Integrations.ts";
 import * as Machines from "./machines/Machines.ts";
 import * as MachineSecurity from "./security/MachineSecurity.ts";
+import * as MachineSetup from "./tailscale/MachineSetup.ts";
 import * as VisualStates from "./htmlRender/VisualState.ts";
 import * as Retrieval from "./context/ContextRetrievalService.ts";
 import * as Exports from "./export/ExportService.ts";
 import * as ProjectLabels from "./projectLabels/ProjectLabelService.ts";
 import * as ProjectLabelClone from "./projectLabels/ProjectLabelCloneRepository.ts";
+import * as RepositoryCheckout from "./project/RepositoryCheckout.ts";
+import * as RepositoryIconResolver from "./project/RepositoryIconResolver.ts";
+import { resolveProjectsRootDirectory } from "./project/ProjectsRoot.ts";
 import * as ProjectLabelFolders from "./projectLabels/ProjectLabelFolders.ts";
 import * as ProjectLabelFork from "./projectLabels/ProjectLabelForkToProject.ts";
 import * as ProjectFiles from "./projectLabels/ProjectFiles.ts";
@@ -1088,6 +1092,7 @@ const makeWsRpcHandlers = (
     const integrations = yield* Integrations.Integrations;
     const machines = yield* Machines.Machines;
     const machineSecurity = yield* MachineSecurity.MachineSecurity;
+    const machineSetup = yield* MachineSetup.MachineSetup;
     const visualStates = yield* VisualStates.VisualStateService;
     const retrieval = yield* Retrieval.ContextRetrievalService;
     const scheduledTasks = yield* ScheduledTasks.ScheduledTaskService;
@@ -1122,6 +1127,8 @@ const makeWsRpcHandlers = (
     const usageLimitSources = yield* UsageLimitSources.UsageLimitSources;
     const worktreeSetupTracker = yield* WorktreeSetupTracker.WorktreeSetupTracker;
     const projectCloneTracker = yield* ProjectCloneTracker.ProjectCloneTracker;
+    const repositoryCheckout = yield* RepositoryCheckout.RepositoryCheckout;
+    const repositoryIcons = yield* RepositoryIconResolver.RepositoryIconResolver;
     const repositoryIdentityResolver = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
     const agentSessionScanner = yield* AgentSessionScanner.AgentSessionScanner;
     const agentSessionImporter = yield* AgentSessionImporter.AgentSessionImporter;
@@ -1266,6 +1273,7 @@ const makeWsRpcHandlers = (
             otlpLogsEnabled: config.otlpLogsUrl !== undefined,
           },
           settings,
+          defaultProjectsRoot: resolveProjectsRootDirectory("", home, config.baseDir, path),
           shellResumeCompletionMarker: true,
           threadResumeCompletionMarker: true,
           threadSnapshotPagination: true,
@@ -1675,6 +1683,16 @@ const makeWsRpcHandlers = (
           folders: projectLabelFolders,
           refreshGitStatus,
         }),
+      [WS_METHODS.projectLabelsCheckoutRepository]: (input) =>
+        repositoryCheckout.checkoutRepository(input),
+      [WS_METHODS.projectLabelsRemoveCheckout]: (input) => repositoryCheckout.removeCheckout(input),
+      [WS_METHODS.projectLabelsAdoptRepository]: (input) =>
+        repositoryCheckout.adoptRepository(input),
+      [WS_METHODS.projectLabelsListOrphanFolders]: () => projectLabels.listOrphanFolders(),
+      [WS_METHODS.projectLabelsAdoptOrphanFolder]: (input) =>
+        projectLabels.adoptOrphanFolder(input),
+      [WS_METHODS.projectLabelsRemoveOrphanFolder]: (input) =>
+        projectLabels.removeOrphanFolder(input),
       [WS_METHODS.workStart]: (input) => workHandoff.start(input),
       [WS_METHODS.agentsApprovalsList]: (input) => agentWorkspace.listApprovals(input),
       [WS_METHODS.agentsRequestApproval]: (input) =>
@@ -1708,6 +1726,10 @@ const makeWsRpcHandlers = (
       [WS_METHODS.machinesCreatePeerGrant]: (input) => machines.createPeerGrant(input),
       [WS_METHODS.machinesJoinHub]: (input) => machines.joinHub(input),
       [WS_METHODS.machinesUnpair]: (input) => machines.unpair(input),
+      [WS_METHODS.machinesSetupStatus]: () => machineSetup.status,
+      [WS_METHODS.machinesSetupSubscribe]: () => machineSetup.subscribe,
+      [WS_METHODS.machinesSetupRunStep]: (input) => machineSetup.runStep(input.step),
+      [WS_METHODS.machinesSetupDisableServe]: () => machineSetup.disableServe,
       [WS_METHODS.factsList]: (input) => facts.list(input),
       [WS_METHODS.factsCreate]: (input) => facts.create(input),
       [WS_METHODS.visualStateGet]: (input) =>
@@ -2349,6 +2371,12 @@ const makeWsRpcHandlers = (
               workspaceRoot: input.resource.cwd,
             });
           }
+          if (input.resource._tag === "repository-icon") {
+            return yield* issueAssetUrl({
+              resource: input.resource,
+              repositoryIcon: yield* repositoryIcons.resolve(input.resource.remote),
+            });
+          }
           if (input.resource._tag === "project-favicon") {
             const project = yield* projectStore.findActiveByWorkspaceRoot(input.resource.cwd).pipe(
               Effect.mapError(
@@ -2737,11 +2765,16 @@ type WsRpcHandlersEffect = ReturnType<typeof makeWsRpcHandlers>;
 type WsRpcHandlers = Effect.Success<WsRpcHandlersEffect>;
 type WsRpcHandlerKeysA = Extract<keyof WsRpcHandlers, `p${string}`>;
 type WsRpcHandlerKeysB = Extract<keyof WsRpcHandlers, `s${string}`>;
+type WsRpcHandlerKeysC = Extract<keyof WsRpcHandlers, `m${string}`>;
 /** Resolve in smaller groups to stay within the RPC conditional type's instantiation budget. */
 type WsRpcHandlerServices =
   | RpcGroup.HandlersServices<WsRpcs, Pick<WsRpcHandlers, WsRpcHandlerKeysA>>
   | RpcGroup.HandlersServices<WsRpcs, Pick<WsRpcHandlers, WsRpcHandlerKeysB>>
-  | RpcGroup.HandlersServices<WsRpcs, Omit<WsRpcHandlers, WsRpcHandlerKeysA | WsRpcHandlerKeysB>>;
+  | RpcGroup.HandlersServices<WsRpcs, Pick<WsRpcHandlers, WsRpcHandlerKeysC>>
+  | RpcGroup.HandlersServices<
+      WsRpcs,
+      Omit<WsRpcHandlers, WsRpcHandlerKeysA | WsRpcHandlerKeysB | WsRpcHandlerKeysC>
+    >;
 
 const layerWsRpc = (
   ...args: Parameters<typeof makeWsRpcHandlers>
@@ -2786,6 +2819,7 @@ type WsRequestServices =
   | Integrations.Integrations
   | Machines.Machines
   | MachineSecurity.MachineSecurity
+  | MachineSetup.MachineSetup
   | FileSystem.FileSystem
   | GitHubRest.GitHubRest
   | GitWorkflowService.GitWorkflowService
@@ -2813,6 +2847,8 @@ type WsRequestServices =
   | ProjectLabels.ProjectLabelService
   | ProjectService.ProjectService
   | ProjectStore.ProjectStoreV2
+  | RepositoryCheckout.RepositoryCheckout
+  | RepositoryIconResolver.RepositoryIconResolver
   | ProviderAuthService.ProviderAuthService
   | ProviderInstanceRegistry.ProviderInstanceRegistry
   | ProviderLatestVersions.ProviderLatestVersions

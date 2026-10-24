@@ -67,6 +67,7 @@ interface CopyButtonProps {
   target?: string;
   /** Extra clipboard flavors written beside the plain text when the platform allows. */
   extraFlavors?: Readonly<Record<string, string>>;
+  /** Follow-up work after a successful copy. Not for feedback: the button already confirms it. */
   onCopied?: () => void;
   /** Replaces the default "Could not copy" toast. */
   onError?: (error: Error) => void;

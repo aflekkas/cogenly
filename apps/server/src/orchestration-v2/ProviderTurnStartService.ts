@@ -5,6 +5,7 @@ import { modelSelectionsEqual } from "@t3tools/shared/model";
 import { projectComposerContextForProvider } from "@t3tools/shared/composerContextReferences";
 import {
   CommandId,
+  isProviderNativeSubagentThread,
   latestProviderTurnForAttempt,
   type OrchestrationV2DomainEvent,
   type OrchestrationV2ExecutionNode,
@@ -811,7 +812,11 @@ export const layer: Layer.Layer<
             }),
           );
           // An agent's first session on another provider gets the same seed as a rotation.
-          return created === undefined || !rotateAgentSession
+          // So does a provider-native subagent's first turn of its own: its provider kept
+          // that conversation inside the parent's session.
+          const seedsNativeSubagent =
+            isProviderNativeSubagentThread(projection.thread) && previousAgentRun === undefined;
+          return created === undefined || !(rotateAgentSession || seedsNativeSubagent)
             ? created
             : yield* seedFreshSession(created);
         }
@@ -821,8 +826,28 @@ export const layer: Layer.Layer<
             handoff.delivery?.nativeThreadId === providerThread.nativeThreadRef?.nativeId &&
             handoff.delivery?.status === "pending",
         );
+        // The parent can run a provider-native subagent again after the child's own
+        // last turn began, even while it runs. Claude keeps that work in the parent's
+        // session, so the child's own session never saw it and starts fresh from the
+        // whole transcript. Codex runs it on the child's own native thread, which has it.
+        const previousStartedAt = previousAgentRun?.startedAt ?? null;
+        const missedNativeWork =
+          isProviderNativeSubagentThread(projection.thread) && previousStartedAt !== null
+            ? (yield* projectionStore
+                .getThreadRecords(input.threadId, ["nodes"], { omitSettledLeafNodes: true })
+                .pipe(
+                  Effect.mapError((cause) => new ProviderTurnStartError({ runId, cause })),
+                )).nodes.some(
+                (node) =>
+                  node.kind === "root_turn" &&
+                  node.runId === null &&
+                  node.providerThreadId !== providerThread.id &&
+                  node.startedAt !== null &&
+                  DateTime.isGreaterThan(node.startedAt, previousStartedAt),
+              )
+            : false;
         const resumed = yield* Effect.result(
-          uncertainDelivery || rotateAgentSession || cwdChanged
+          uncertainDelivery || rotateAgentSession || cwdChanged || missedNativeWork
             ? Effect.fail(
                 new ProviderAdapter.ProviderAdapterTurnStartError({
                   driver: session.driver,
@@ -851,7 +876,9 @@ export const layer: Layer.Layer<
             ? "uncertain_history_delivery"
             : cwdChanged
               ? "cwd_changed"
-              : "resume_failed",
+              : missedNativeWork
+                ? "missed_native_subagent_work"
+                : "resume_failed",
           errorTag: resumed.failure._tag,
         });
         const replacement = yield* loadFromProvider(

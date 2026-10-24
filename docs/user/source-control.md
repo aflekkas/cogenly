@@ -45,6 +45,22 @@ are in place. A toast tracks progress and lets you cancel; if the clone fails, r
 toast or from the banner above the composer. Starting work in a repository that is not on this
 machine yet clones it first, before the agent starts.
 
+## Repositories in a project
+
+A project keeps its repositories in its folder, at
+`~/.cogenly/projects/<Project>/repos/`. Each one is named after its repository:
+`platform` for one owned by the project's GitHub owner, and `owner/repo`, such
+as `aflekkas/athens-racing`, for one from another owner. You cannot rename them.
+That keeps the folder the same on every machine, and two repositories with the
+same name from different owners never clash. A repository with no remote keeps
+its own folder name.
+
+A repository you cloned elsewhere before keeps working where it is. Move it into
+its project folder from its menu in the project's repository list. Its worktrees
+come along, and its threads follow. Folders under `~/.cogenly/projects` that no
+project claims, such as those left by a deleted project, are listed in
+**Settings → Projects**. Adopt one as a project, or remove it if it is empty.
+
 ## Pull requests with agents
 
 Ask Claude Code or Codex to commit, push, publish a repository without a remote, or open, inspect

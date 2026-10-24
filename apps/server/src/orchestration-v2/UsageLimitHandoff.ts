@@ -12,6 +12,7 @@ import {
   type ModelSelection,
   type OrchestrationV2Actor,
   type OrchestrationV2CreationSource,
+  type OrchestrationV2Notification,
   type OrchestrationV2ThreadShell,
   type ProviderInstanceId,
   type ProviderUsageHeadroom,
@@ -32,7 +33,11 @@ import * as Layer from "effect/Layer";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as ThreadManagement from "./ThreadManagementService.ts";
-import { limitAutoResumeUpdate, limitRecoveryStatus } from "./UsageLimitStop.ts";
+import {
+  LIMIT_HANDOFF_CANCEL_COMMAND_PREFIX,
+  limitAutoResumeUpdate,
+  limitRecoveryStatus,
+} from "./UsageLimitStop.ts";
 
 /** A usage reading older than this is reported, but flagged as possibly out of date. */
 export const USAGE_STALE_AFTER_MS = 30 * 60_000;
@@ -233,6 +238,8 @@ export class UsageLimitHandoffService extends Context.Service<
       input: UsageLimitHandoffAcceptInput & {
         readonly createdBy: OrchestrationV2Actor;
         readonly creationSource: OrchestrationV2CreationSource;
+        /** Shows the continuation as a timeline row, as an automatic handoff does. */
+        readonly notification?: OrchestrationV2Notification;
       },
     ) => Effect.Effect<UsageLimitHandoffAcceptResult, UsageLimitHandoffError>;
   }
@@ -345,7 +352,7 @@ const make = Effect.gen(function* () {
         yield* threads
           .dispatch({
             type: "thread.metadata.update",
-            commandId: CommandId.make(`limit-handoff-cancel:${identity}`),
+            commandId: CommandId.make(`${LIMIT_HANDOFF_CANCEL_COMMAND_PREFIX}${identity}`),
             threadId,
             limitRecovery: cancelResume,
           })
@@ -362,6 +369,7 @@ const make = Effect.gen(function* () {
           manualContinuationOfRunId: input.runId,
           modelSelection,
           text: "Continue where you left off.",
+          ...(input.notification === undefined ? {} : { notification: input.notification }),
           attachments: [],
           dispatchMode: { type: "start_immediately" },
           createdBy: input.createdBy,

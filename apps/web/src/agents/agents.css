@@ -144,11 +144,13 @@
   --scroll-fade-start-size: 0.75rem;
 }
 /* The messages and the composer share the chat view's content lane, so the
-   composer sits exactly where it does in Chats and Work. */
+   composer sits exactly where it does in Chats and Work, with the same side
+   gutter (--content-gutter, which resolves against the scroller's width). */
 @utility agent-messages {
-  max-width: var(--chat-content-max-width);
+  max-width: calc(var(--chat-content-max-width) + 2 * var(--content-gutter));
   margin: 0 auto;
-  padding: calc(var(--chat-header-overlap, 0px) + 8px) var(--chat-content-inset) 20px;
+  padding: calc(var(--chat-header-overlap, 0px) + 8px)
+    calc(var(--content-gutter) + var(--chat-content-inset)) 20px;
   display: flex;
   flex-direction: column;
   min-height: 100%;
@@ -411,10 +413,10 @@
 }
 @utility agent-composer-area {
   flex: none;
-  max-width: var(--chat-content-max-width);
+  max-width: calc(var(--chat-content-max-width) + 2 * var(--content-gutter));
   width: 100%;
   margin: 0 auto;
-  padding: 12px var(--chat-content-inset) 20px;
+  padding: 12px calc(var(--content-gutter) + var(--chat-content-inset)) 20px;
 }
 @utility agent-system-line {
   align-self: stretch;

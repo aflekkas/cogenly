@@ -954,4 +954,25 @@ describe("SharedState", () => {
         ]);
       }).pipe(Effect.provide(layer)),
   );
+  it.effect("carries a peer's repository icon onto a link not cloned here", () =>
+    Effect.gen(function* () {
+      const state = yield* SharedState.SharedState;
+      const sql = yield* SqlClient.SqlClient;
+      const repositories = [
+        { remote: "github.com/org/repo", directoryName: "repo", iconPath: "public/icon.svg" },
+      ];
+      yield* state.receive(
+        {
+          after: 0,
+          cursor: 1,
+          changes: [{ ...change({ ...project, repositories }, 10), id: "label:icons" }],
+        },
+        peer,
+        false,
+      );
+      expect(yield* sql`SELECT repository_id,icon_path FROM label_repositories`).toEqual([
+        { repository_id: "remote:github.com/org/repo", icon_path: "public/icon.svg" },
+      ]);
+    }).pipe(Effect.provide(layer)),
+  );
 });

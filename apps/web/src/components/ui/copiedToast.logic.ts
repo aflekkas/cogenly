@@ -4,7 +4,6 @@
  * branch), never the raw clipboard text: no markdown and no URLs.
  */
 export type CopiedToastSubject =
-  | { readonly kind: "clipboard" }
   | { readonly kind: "thread-link"; readonly link: string; readonly threadTitle?: string }
   | { readonly kind: "thread-id"; readonly threadId: string; readonly threadTitle?: string }
   | { readonly kind: "path"; readonly path: string }
@@ -46,9 +45,6 @@ function lastPathSegment(path: string): string {
 
 export function describeCopiedToast(subject: CopiedToastSubject): CopiedToastContent {
   switch (subject.kind) {
-    // Message and other content copies: what was copied is already on screen.
-    case "clipboard":
-      return { title: "Copied to clipboard", label: null, icon: null };
     case "thread-link":
       return {
         title: "Link copied",

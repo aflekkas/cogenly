@@ -79,7 +79,8 @@ describe("local shared document captures", () => {
           { id: a, repositories: "[]" },
           {
             id: b,
-            repositories: '[{"remote":"github.com/org/repo","directoryName":"clone-one"}]',
+            // Synced under the name its remote derives, not the checkout's folder.
+            repositories: '[{"remote":"github.com/org/repo","directoryName":"org/repo"}]',
           },
         ].sort((left, right) => left.id.localeCompare(right.id)),
       );

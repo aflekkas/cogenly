@@ -5,6 +5,9 @@ import {
   ProjectLabelError,
   SourceControlProviderKind,
   SourceControlRepositoryError,
+  projectHomeOwner,
+  repositoryDirectoryNameFor,
+  repositoryRemoteParts,
   type ProjectLabelCloneRepositoryInput,
 } from "@t3tools/contracts";
 import type * as Crypto from "effect/Crypto";
@@ -14,6 +17,7 @@ import type * as Path from "effect/Path";
 
 import { normalizeRepositoryRemote } from "../project/RepositoryRemote.ts";
 import {
+  projectRepositoryDirectory,
   repositoryDirectoryNameFromRemote,
   resolveProjectsRootDirectory,
   sanitizePathSegment,
@@ -29,7 +33,7 @@ import type * as ProjectLabelService from "./ProjectLabelService.ts";
 export interface ProjectLabelCloneDeps {
   readonly labels: Pick<
     ProjectLabelService.ProjectLabelService["Service"],
-    "readActive" | "linkRepository"
+    "readActive" | "linkRepository" | "ensureHomeOwner"
   >;
   readonly clones: Pick<ProjectCloneTracker.ProjectCloneTracker["Service"], "start">;
   readonly projects: Pick<ProjectService.ProjectService["Service"], "create" | "update" | "delete">;
@@ -48,8 +52,21 @@ export interface ProjectLabelCloneDeps {
 }
 
 /**
+ * The normalized remote a clone input names, for matching it against a
+ * project's links: `owner/repo` on GitHub, or a pasted remote URL. Null when
+ * it names no portable remote.
+ */
+export const cloneInputRemote = (input: ProjectLabelCloneRepositoryInput): string | null => {
+  if (input.remoteUrl !== undefined) return normalizeRepositoryRemote(input.remoteUrl);
+  if (input.repository !== undefined && (input.provider ?? "github") === "github")
+    return normalizeRepositoryRemote(`https://github.com/${input.repository}`);
+  return null;
+};
+
+/**
  * Clone a repository into a project: the destination resolves under the
- * projects root (`<root>/<Project>/<repo>`), the clone runs through the
+ * projects root (`<root>/<Project>/repos/<repo>`, or `repos/<owner>/<repo>`
+ * for an owner other than the project's), the clone runs through the
  * tracked clone flow (progress on the project-clone subscription), and the
  * repository is filed in the project — immediately, so the picker shows it
  * while it clones, and again once it lands, which files its GitHub link too.
@@ -92,7 +109,16 @@ export const cloneRepositoryIntoLabel = Effect.fn("ProjectLabelCloneRepository.c
                 new ProjectLabelError({ operation: "cloneRepository", reason: "storage", cause }),
             ),
           )).dir;
-  const destinationPath = deps.path.join(projectDir, sanitizePathSegment(folderName, "repository"));
+  // The folder is derived, never chosen: the remote's name under the
+  // project's home owner (recorded now if the project has none yet).
+  const remote = cloneInputRemote(input);
+  const homeOwner =
+    remote !== null && repositoryRemoteParts(remote)?.host === "github.com"
+      ? yield* deps.labels.ensureHomeOwner(label.id).pipe(Effect.orElseSucceed(() => null))
+      : projectHomeOwner(label.sourceLinks);
+  const directoryName =
+    (remote === null ? null : repositoryDirectoryNameFor(remote, homeOwner)) ?? folderName;
+  const destinationPath = projectRepositoryDirectory(projectDir, directoryName, deps.path);
   const projectId =
     input.projectId ??
     ProjectId.make(
@@ -108,7 +134,7 @@ export const cloneRepositoryIntoLabel = Effect.fn("ProjectLabelCloneRepository.c
   const started = yield* deps.clones.start(
     {
       projectId,
-      title: input.title ?? folderName,
+      title: input.title ?? directoryName,
       createdAt: DateTime.formatIso(yield* DateTime.now),
       ...(input.provider === undefined ? {} : { provider: input.provider }),
       ...(input.repository === undefined ? {} : { repository: input.repository }),

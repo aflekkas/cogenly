@@ -228,8 +228,20 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   /* ease-standard for inline transitions and scripts (the theme token is
      inlined into utilities, so it has no runtime variable). */
   --motion-ease-standard: cubic-bezier(0.32, 0.72, 0, 1);
-  /* The reference column: the composer lands at 853px. */
-  --chat-content-max-width: 53.8125rem;
+  /* The main content column every main-area page shares (PageContent, the
+     chat lane, agents): the composer lands at 853px. --content-wide-max-width
+     is PageContent's `wide` variant for dashboards and tables. */
+  --content-max-width: 53.8125rem;
+  --content-wide-max-width: 72rem;
+  /* The column's side gutter, as a share of its containing block's width so
+     pages need no measuring: mirrors resolveChatLaneGutter (chatCanvasLayout),
+     which ChatCanvas measures for the chat lane. 12px up to about 610px, 48px
+     from 880px. Use only in inline paddings, margins and widths, where %
+     resolves against the containing block's width. */
+  --content-gutter: clamp(12px, 13.3333% - 69.3333px, 48px);
+  /* The chat's lane follows the column unless the Chat width setting widens
+     it (data-chat-width below). */
+  --chat-content-max-width: var(--content-max-width);
   /* Transcript text sits this far inside the lane; the composer and user
      bubbles share the inset so the column has one left and right edge. */
   --chat-content-inset: 0.25rem;
@@ -364,14 +376,6 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --color-update-surface: var(--update-surface);
   --color-success-foreground: var(--success-foreground);
   --color-success: var(--success);
-  /* The send button: the accent, run as the logo's ember gradient from the
-     top-left to the bottom-right. While nothing can be sent it is a flat
-     grey (89,92,93) with a dark arrow, as in the reference. */
-  --color-send-top: var(--brand-accent-fill);
-  --color-send-bottom: var(--brand-accent-fill-deep);
-  --color-send-top-hover: var(--brand-accent-fill-hover);
-  --color-send-bottom-hover: var(--brand-accent-fill);
-  --color-send-foreground: var(--brand-accent-fill-foreground);
   /* The brand orange as a colour utility, for the few deliberate uses. */
   --color-brand-accent: var(--brand-accent-fill);
   --color-brand-accent-foreground: var(--brand-accent-fill-foreground);
@@ -850,18 +854,6 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
     box-shadow:
       var(--tw-inset-shadow, 0 0 #0000), var(--tw-inset-ring-shadow, 0 0 #0000),
       var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);
-  }
-}
-
-/* Around a menu whose selection fill is one highlight sliding behind its rows
-   (the settings nav): the selected row keeps its selected text, drops its own fill. */
-@utility sliding-selection {
-  & [data-slot="sidebar-menu-button"][data-active="true"] {
-    --state-selected-fill: transparent;
-    --state-selected-sheen-top: transparent;
-    --state-selected-sheen-bottom: transparent;
-    --state-selected-highlight: transparent;
-    --state-selected-shadow: 0 0 #0000;
   }
 }
 
@@ -1421,6 +1413,85 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
   will-change: var(--visible-animation-will-change, auto);
 }
 
+/* Toolbar glyphs that answer their button (ui/animated-icons.tsx). Each plays
+   once per hover or shot and ends on the resting frame, so leaving mid-way
+   never snaps. Units are the 24px view box; the pick glyph scales about the
+   pointer's tip. Reduced motion drops the hover burst and keeps fades. */
+@keyframes pick-icon-rays-burst {
+  from {
+    opacity: 0;
+    scale: 0.55;
+  }
+}
+
+@keyframes pick-icon-arrow-nudge {
+  40% {
+    translate: -1.5px -1.5px;
+  }
+}
+
+@keyframes capture-icon-shutter {
+  40% {
+    scale: 0.45;
+    fill-opacity: 1;
+  }
+}
+
+@keyframes capture-icon-flash {
+  40% {
+    fill-opacity: 1;
+  }
+}
+
+@layer components {
+  .pick-icon {
+    transition: color var(--motion-duration-base) --theme(--ease-out);
+  }
+  .pick-icon :is(.pick-icon-rays, .pick-icon-arrow) {
+    transform-box: view-box;
+    transform-origin: 9.5px 9.5px;
+  }
+  .pick-icon-arrow {
+    fill: currentColor;
+    fill-opacity: 0;
+    transition: fill-opacity var(--motion-duration-base) --theme(--ease-out);
+  }
+  .pick-icon[data-active] .pick-icon-arrow {
+    fill-opacity: 0.3;
+  }
+
+  .capture-icon-lens {
+    fill: currentColor;
+    fill-opacity: 0;
+    transform-box: fill-box;
+    transform-origin: center;
+  }
+  .capture-icon-lens[data-shot] {
+    animation: capture-icon-shutter var(--motion-duration-base) --theme(--ease-out);
+  }
+
+  @media (hover: hover) and (prefers-reduced-motion: no-preference) {
+    :hover:not(:disabled, [data-disabled], [aria-disabled="true"])
+      > .pick-icon:not(:root[data-reduce-motion] *) {
+      & .pick-icon-rays {
+        animation: pick-icon-rays-burst var(--motion-duration-base) --theme(--ease-out);
+      }
+      & .pick-icon-arrow {
+        animation: pick-icon-arrow-nudge var(--motion-duration-base) --theme(--ease-out);
+      }
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .capture-icon-lens[data-shot] {
+      animation-name: capture-icon-flash;
+    }
+  }
+  :root[data-reduce-motion] .capture-icon-lens[data-shot] {
+    animation-name: capture-icon-flash;
+  }
+}
+
 /* An update's progress bar when the updater reports no percentage: a short
    segment sweeps across while the update runs, paused offscreen like
    visible-animate-spin (pair with observeVisibleAnimation). Reduced motion
@@ -1825,6 +1896,8 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
     @apply flex h-10 min-h-10 shrink-0 items-center border-b border-border/60 bg-background;
   }
 
+  /* The content column inside the chat canvas, whose lanes already pad by the
+     gutter (ChatCanvas). Pages use PageContent instead. */
   .chat-content-lane {
     margin-inline: auto;
     width: 100%;
@@ -3179,10 +3252,11 @@ code {
   --diff-deletion-foreground: light-dark(var(--color-red-600), var(--color-red-400));
 }
 
-/* Chat width setting. Comfortable keeps the default --chat-content-max-width,
-   which sizes the timeline lane, the composer, and ChatCanvas's width probe. */
+/* Chat width setting. Comfortable keeps --chat-content-max-width on the shared
+   --content-max-width; it sizes the timeline lane, the composer, agent
+   conversations and ChatCanvas's width probe. Pages keep the shared column. */
 :root[data-chat-width="wide"] {
-  --chat-content-max-width: 72rem;
+  --chat-content-max-width: var(--content-wide-max-width);
 }
 
 :root[data-chat-width="full"] {

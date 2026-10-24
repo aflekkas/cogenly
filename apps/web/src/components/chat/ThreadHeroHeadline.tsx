@@ -87,7 +87,7 @@ export function ThreadHeroHeadline({
   );
 
   return (
-    <div className="@container mx-auto flex w-full max-w-5xl flex-col items-center">
+    <div className="@container flex w-full flex-col items-center">
       <h1
         ref={headingRef}
         aria-label={headingLabel}

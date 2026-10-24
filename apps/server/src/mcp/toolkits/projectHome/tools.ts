@@ -39,7 +39,7 @@ const receipt =
 export const ProjectHomeToolkit = Toolkit.make(
   Tool.make("project_overview", {
     ...shared,
-    description: `Show the project's configuration: name, instructions, repositories (with ids), linked GitHub sources and its project chat. ${target}`,
+    description: `Show the project's configuration: name, instructions, repositories (with ids and checkout, their state on this machine: ready, not_cloned, missing, cloning or failed), linked GitHub sources and its project chat. ${target}`,
     parameters: ProjectTargetInput,
     success: ProjectOverviewResult,
   })

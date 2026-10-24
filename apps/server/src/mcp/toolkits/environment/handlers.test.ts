@@ -1,5 +1,10 @@
 import { expect, it } from "@effect/vitest";
-import { EnvironmentId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import {
+  DEFAULT_SERVER_SETTINGS,
+  EnvironmentId,
+  ProviderInstanceId,
+  ThreadId,
+} from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -76,7 +81,10 @@ const makeServer = (
         Layer.mock(ServerEnvironment.ServerEnvironment)({}),
         Layer.mock(Settings.ServerSettingsService)({}),
         Layer.mock(ThreadCommandExecutor.ThreadCommandExecutor)({}),
-        Layer.succeed(DesktopAppControl.DesktopAppControl, { addEnvironment }),
+        Layer.succeed(DesktopAppControl.DesktopAppControl, {
+          addEnvironment,
+          pairMachines: () => Effect.die("machine_pair is not exercised here"),
+        }),
         Layer.succeed(MachineSecurity.MachineSecurity, {
           status: Effect.die("machine_security_status is not exercised here"),
         }),
@@ -153,4 +161,63 @@ it.effect("environment_add says when no desktop app runs beside this environment
       ),
     ),
   ),
+);
+
+it.effect("environment_preferences_update sets the projects root", () =>
+  Effect.gen(function* () {
+    const patches: Array<unknown> = [];
+    const server = McpHttpServer.toolkitRegistration(
+      EnvironmentToolkit,
+      EnvironmentHandlers.layer,
+    ).pipe(
+      Layer.provideMerge(McpServer.McpServer.layer),
+      Layer.provideMerge(
+        Layer.mergeAll(
+          Layer.mock(ThreadManagement.ThreadManagementService)({
+            getThreadShell: (threadId) => Effect.succeed(shells.get(threadId) ?? null),
+          }),
+          Layer.mock(ServerEnvironment.ServerEnvironment)({
+            getDescriptor: Effect.succeed({
+              environmentId: EnvironmentId.make("environment"),
+            } as never),
+          }),
+          Layer.mock(Settings.ServerSettingsService)({
+            updateSettings: (patch) =>
+              Effect.sync(() => {
+                patches.push(patch);
+                return { ...DEFAULT_SERVER_SETTINGS, ...patch } as never;
+              }),
+          }),
+          Layer.mock(ThreadCommandExecutor.ThreadCommandExecutor)({
+            withLock: (_threadId, effect) => effect,
+          }),
+          Layer.succeed(DesktopAppControl.DesktopAppControl, {
+            addEnvironment: () => Effect.die("unused"),
+            pairMachines: () => Effect.die("unused"),
+          }),
+          Layer.succeed(MachineSecurity.MachineSecurity, { status: Effect.die("unused") }),
+          Layer.mock(ChildProcessSpawner.ChildProcessSpawner)({}),
+        ),
+      ),
+    );
+    const text = yield* McpServer.McpServer.pipe(
+      Effect.flatMap((mcp) =>
+        mcp.callTool({
+          name: "environment_preferences_update",
+          arguments: { projectsRoot: "~/Work/projects" },
+        }),
+      ),
+      Effect.map(({ content }) =>
+        content.map((part) => (part.type === "text" ? part.text : "")).join(""),
+      ),
+      Effect.provideService(
+        McpInvocationContext.McpInvocationContext,
+        threadCaller(fullAccessThreadId),
+      ),
+      Effect.provideService(McpSchema.McpServerClient, mcpClient),
+      Effect.provide(server),
+    );
+    expect(patches).toEqual([{ projectsRoot: "~/Work/projects" }]);
+    expect(JSON.parse(text)).toMatchObject({ projectsRoot: "~/Work/projects" });
+  }),
 );

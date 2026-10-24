@@ -26,6 +26,14 @@ const popoverPopupWidthClassName = {
   lg: "w-96",
 } as const;
 
+// Base UI fixes the positioner's height when the popup opens and pins the popup to the
+// positioner's bottom only for side="top". A popup beside its anchor and aligned to its end
+// (the rail's Updates popover) would otherwise grow downward past the anchor and off the window
+// when its content gets taller while open; that overflow scrolls the page when Base UI refocuses
+// the popup. Pinned to the bottom, it grows upward instead, inside --available-height.
+const popoverEndAlignedBesideClassName =
+  "[&[data-align=end]:not([data-side=top],[data-side=bottom])]:absolute [&[data-align=end]:not([data-side=top],[data-side=bottom])]:bottom-0";
+
 // The inset around the content. "compact" suits dense content (a list, a code excerpt, a
 // row of reactions); "none" is for content that draws its own frame edge to edge.
 const popoverViewportPaddingClassName = {
@@ -127,6 +135,7 @@ function PopoverPopup({
           className={cn(
             "relative flex h-(--popup-height,auto) w-(--popup-width,auto) origin-(--transform-origin) rounded-lg text-popover-foreground outline-none popup-motion transition-[width,height,opacity,scale,translate] before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-lg)-1px)] has-data-[slot=calendar]:rounded-xl has-data-[slot=calendar]:before:rounded-[calc(var(--radius-xl)-1px)]",
             variant !== "panel" && "dropdown-glass surface-raised surface-raised-floating",
+            variant !== "panel" && popoverEndAlignedBesideClassName,
             tooltipStyle &&
               "w-fit text-balance rounded-md text-xs before:rounded-[calc(var(--radius-md)-1px)]",
             bubble &&

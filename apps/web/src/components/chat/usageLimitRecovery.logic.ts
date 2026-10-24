@@ -1,7 +1,9 @@
-import type {
-  OrchestrationV2LimitRecovery,
-  OrchestrationV2LimitRecoveryUpdate,
-  RunId,
+import {
+  limitRecoveryResumeAt,
+  MAX_RATE_LIMIT_RETRIES,
+  type OrchestrationV2LimitRecovery,
+  type OrchestrationV2LimitRecoveryUpdate,
+  type RunId,
 } from "@t3tools/contracts";
 import type { TimestampFormat } from "@t3tools/contracts/settings";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
@@ -24,8 +26,17 @@ export interface UsageLimitStop {
 export type UsageLimitRecoveryState =
   /** The provider gave no reset time this stop can wait for. */
   | { readonly kind: "no-reset" }
-  /** Continues on its own at `resumesAt`: the reset, or a snooze that outlasts it. */
-  | { readonly kind: "scheduled"; readonly resetAt: string; readonly resumesAt: string }
+  /**
+   * Continues on its own at `resumesAt`: the reset, a retry backoff, or a
+   * snooze that outlasts them. `retryAttempt` marks a short-term rate limit
+   * the server is retrying.
+   */
+  | {
+      readonly kind: "scheduled";
+      readonly resetAt: string;
+      readonly resumesAt: string;
+      readonly retryAttempt?: number;
+    }
   /** The user opted this stop out; the reset is still ahead. */
   | { readonly kind: "cancelled"; readonly resetAt: string }
   /** Scheduled and due: the server is starting the continuation. */
@@ -55,11 +66,17 @@ export function resolveUsageLimitRecovery(
   if (!autoResume)
     return resetMs <= nowMs ? { kind: "reset-passed", resetAt } : { kind: "cancelled", resetAt };
   const { snoozedUntil } = stop;
+  const dueAt = recorded === null ? resetAt : limitRecoveryResumeAt(recorded);
   const resumesAt =
-    snoozedUntil !== null && Date.parse(snoozedUntil) > resetMs ? snoozedUntil : resetAt;
+    snoozedUntil !== null && Date.parse(snoozedUntil) > Date.parse(dueAt) ? snoozedUntil : dueAt;
   return Date.parse(resumesAt) <= nowMs
     ? { kind: "resuming", resetAt }
-    : { kind: "scheduled", resetAt, resumesAt };
+    : {
+        kind: "scheduled",
+        resetAt,
+        resumesAt,
+        ...(recorded?.retryAttempt === undefined ? {} : { retryAttempt: recorded.retryAttempt }),
+      };
 }
 
 /** The stop a thread shell is in, or null when it is not stopped on a usage limit. */
@@ -115,6 +132,12 @@ export function usageLimitRecoveryCopy(
   switch (state.kind) {
     case "scheduled": {
       const countdown = formatResetCountdown(Date.parse(state.resumesAt), nowMs);
+      if (state.retryAttempt !== undefined) {
+        return {
+          title: `Retrying automatically ${countdown}`,
+          description: `Rate limited by the provider. Retry ${state.retryAttempt} of ${MAX_RATE_LIMIT_RETRIES}.`,
+        };
+      }
       return {
         title: `Resumes automatically ${upcomingPhrase(state.resumesAt, timestampFormat, nowMs)}`,
         description:

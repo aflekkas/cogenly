@@ -34,8 +34,8 @@ export const SIDEBAR_SORT_MODIFIERS = [restrictToVerticalAxis, restrictToFirstSc
 
 /**
  * The list scrolls only when a card is held right at its top or bottom edge
- * (dnd-kit's default reaches a fifth of the viewport in, which in a list that
- * fills from the bottom is most of the cards). Layout-shift compensation is
+ * (dnd-kit's default reaches a fifth of the viewport in, which in a short
+ * column is most of the cards). Layout-shift compensation is
  * off: it scrolls the whole column to chase a card whose box moved as the
  * drag began, which reads as the list jumping.
  */

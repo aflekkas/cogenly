@@ -66,7 +66,9 @@ export class DesktopAppActivationBroker {
             "request-timeout",
             request.type === "add-environment"
               ? "The desktop app did not finish adding the environment in time."
-              : "The desktop app did not finish opening the project in time.",
+              : request.type === "pair-machines"
+                ? "The desktop app did not finish pairing the machines in time."
+                : "The desktop app did not finish opening the project in time.",
           ),
         );
       }, this.#requestTimeoutMs(request));

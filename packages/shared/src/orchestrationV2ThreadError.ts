@@ -32,19 +32,24 @@ export function latestRootProviderFailure(
   return latest?.failure ?? null;
 }
 
-/** A distinct session failure supersedes the turn's classification. */
+/**
+ * A distinct session failure supersedes the turn's classification, except a
+ * limit stop: the CLI exiting after the limit does not lift it, and the stop
+ * must stay visible to its handoff and recovery.
+ */
 export function threadErrorSummary(
   failure: OrchestrationV2ProviderFailure | null,
   sessionError: string | null,
 ) {
   const currentFailure =
-    sessionError !== null && sessionError !== failure?.message ? null : failure;
+    sessionError !== null && sessionError !== failure?.message && failure?.class !== "usage_limit"
+      ? null
+      : failure;
   return {
     usageLimitResetAt:
       currentFailure?.class === "usage_limit" ? (currentFailure.resetAt ?? null) : null,
     lastError: sessionError ?? failure?.message ?? null,
-    lastErrorClass:
-      sessionError !== null && sessionError !== failure?.message ? null : (failure?.class ?? null),
+    lastErrorClass: currentFailure?.class ?? null,
   };
 }
 

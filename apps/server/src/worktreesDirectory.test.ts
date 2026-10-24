@@ -16,51 +16,44 @@ const projectsRoot = "/home/tester/Cogenly";
 
 it.layer(NodePath.layer)("worktreesDirectory", (it) => {
   describe("resolveWorktreeParentDirectory", () => {
-    it.effect("puts a project repository's worktrees inside its project folder", () =>
-      Effect.gen(function* () {
-        const path = yield* Path.Path;
-        const projectDir = path.join(projectsRoot, "Spawn Partners");
-        expect(
-          resolveWorktreeParentDirectory({
-            setting: "",
-            defaultDir,
-            repoCwd: path.join(projectDir, "acme"),
-            projectDir,
-            projectsRoot,
-            path,
-            home,
-          }),
-        ).toBe(path.join(projectDir, WORKTREES_SEGMENT));
-      }),
+    it.effect(
+      "puts a project repository's worktrees in its project's .worktrees, mirroring repos/",
+      () =>
+        Effect.gen(function* () {
+          const path = yield* Path.Path;
+          const projectDir = path.join(projectsRoot, "Spawn Partners");
+          expect(
+            resolveWorktreeParentDirectory({
+              setting: "",
+              defaultDir,
+              projectDir,
+              repositoryDirectoryName: "platform",
+              path,
+              home,
+            }),
+          ).toBe(path.join(projectDir, ".worktrees"));
+          // Another owner's repository sits under repos/<owner>/, and so do its worktrees.
+          expect(
+            resolveWorktreeParentDirectory({
+              setting: "",
+              defaultDir,
+              projectDir,
+              repositoryDirectoryName: "aflekkas/athens-racing",
+              path,
+              home,
+            }),
+          ).toBe(path.join(projectDir, ".worktrees", "aflekkas"));
+        }),
     );
 
-    it.effect("puts an unfiled repository's worktrees beside it under Repositories", () =>
+    it.effect("keeps the default directory for repositories in no project", () =>
       Effect.gen(function* () {
         const path = yield* Path.Path;
         expect(
           resolveWorktreeParentDirectory({
             setting: "",
             defaultDir,
-            repoCwd: path.join(projectsRoot, "Repositories", "acme"),
             projectDir: null,
-            projectsRoot,
-            path,
-            home,
-          }),
-        ).toBe(path.join(projectsRoot, "Repositories", WORKTREES_SEGMENT));
-      }),
-    );
-
-    it.effect("keeps the default directory for repositories outside the projects root", () =>
-      Effect.gen(function* () {
-        const path = yield* Path.Path;
-        expect(
-          resolveWorktreeParentDirectory({
-            setting: "",
-            defaultDir,
-            repoCwd: "/elsewhere/acme",
-            projectDir: null,
-            projectsRoot,
             path,
             home,
           }),
@@ -76,9 +69,7 @@ it.layer(NodePath.layer)("worktreesDirectory", (it) => {
           resolveWorktreeParentDirectory({
             setting: "/custom/worktrees",
             defaultDir,
-            repoCwd: path.join(projectDir, "acme"),
             projectDir,
-            projectsRoot,
             path,
             home,
           }),
@@ -93,9 +84,7 @@ it.layer(NodePath.layer)("worktreesDirectory", (it) => {
           resolveWorktreeParentDirectory({
             setting: "relative/worktrees",
             defaultDir,
-            repoCwd: path.join(projectsRoot, "Repositories", "acme"),
             projectDir: null,
-            projectsRoot,
             path,
             home,
           }),
@@ -113,9 +102,12 @@ it.layer(NodePath.layer)("worktreesDirectory", (it) => {
           ["Spawn Partners", "Repositories"],
           path,
         );
+        // Worktrees made before `.worktrees/` stay managed where they are.
         expect(projectRoots).toEqual([
           path.join(projectsRoot, "Spawn Partners", WORKTREES_SEGMENT),
+          path.join(projectsRoot, "Spawn Partners", "worktrees"),
           path.join(projectsRoot, "Repositories", WORKTREES_SEGMENT),
+          path.join(projectsRoot, "Repositories", "worktrees"),
         ]);
         const managed = managedWorktreesDirectories(
           { worktreesDirectory: "", previousWorktreesDirectories: [] },

@@ -70,7 +70,7 @@ describe("project files", () => {
     }).pipe(Effect.provide(filesLayer("label-files-list"))),
   );
 
-  it.effect("never lists or reads the reserved worktrees folder", () =>
+  it.effect("never lists, reads or recalls repos/, .worktrees/ or the legacy worktrees/", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
@@ -79,26 +79,27 @@ describe("project files", () => {
       const label = labelRef("label:worktrees", "Worktrees Me");
       yield* seedLabel(label.id, label.name);
       const { dir } = yield* folders.ensureForLabel(label);
-      yield* fs.makeDirectory(path.join(dir, "worktrees", "repo", "fix-login"), {
-        recursive: true,
-      });
-      yield* fs.writeFileString(
-        path.join(dir, "worktrees", "repo", "fix-login", "code.ts"),
-        "code\n",
-      );
+      const reserved = [
+        "worktrees/repo/fix-login/code.ts",
+        ".worktrees/aflekkas/repo/fix-login/code.ts",
+        "repos/aflekkas/repo/code.ts",
+      ];
+      for (const relative of reserved) {
+        yield* fs.makeDirectory(path.dirname(path.join(dir, relative)), { recursive: true });
+        yield* fs.writeFileString(path.join(dir, relative), "code\n");
+      }
       yield* fs.writeFileString(path.join(dir, "top.txt"), "top\n");
       const { resources } = yield* files.listResources(label.id);
       const paths = resources.map((resource) => resource.relativePath);
       expect(paths).toContain("top.txt");
-      expect(paths.some((p) => p === "worktrees" || p.startsWith("worktrees/"))).toBe(false);
-      const read = yield* files
-        .readResource({ id: label.id, relativePath: "worktrees/repo/fix-login/code.ts" })
-        .pipe(Effect.flip);
-      expect(read.reason).toBe("invalid_path");
+      for (const top of ["worktrees", ".worktrees", "repos"])
+        expect(paths.some((p) => p === top || p.startsWith(`${top}/`))).toBe(false);
+      for (const relativePath of reserved) {
+        const read = yield* files.readResource({ id: label.id, relativePath }).pipe(Effect.flip);
+        expect(read.reason).toBe("invalid_path");
+      }
       const recall = yield* files.searchResources({ labelId: label.id, query: "code" });
-      expect(recall.matches.map((match) => match.relativePath)).not.toContain(
-        "worktrees/repo/fix-login/code.ts",
-      );
+      expect(recall.matches).toEqual([]);
     }).pipe(Effect.provide(filesLayer("label-files-worktrees"))),
   );
 

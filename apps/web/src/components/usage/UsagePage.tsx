@@ -20,10 +20,9 @@ import {
   WorkspaceBreadcrumbSeparator,
   WorkspaceBreadcrumbText,
 } from "../WorkspaceBreadcrumb";
-import { WorkspacePageContainer } from "../WorkspacePageContainer";
+import { PageContent } from "../PageContent";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import { UsageLimitsSection } from "./UsageLimits";
-import { UsageMeterModeToggle } from "./UsageMeter";
 
 interface LimitsEnvironment {
   readonly environmentId: EnvironmentId;
@@ -127,10 +126,8 @@ export function UsagePage() {
                 </>
               ) : null}
             </WorkspaceBreadcrumb>
-            <div className="ms-auto">
-              <UsageMeterModeToggle />
-            </div>
             <Button
+              className="ms-auto"
               onClick={refresh}
               aria-label="Refresh limits"
               aria-busy={isRefreshing}
@@ -146,13 +143,13 @@ export function UsagePage() {
         {/* The page's buttons and rows give keyboard access, so the viewport
             stays out of the tab order and never frames the whole page. */}
         <ScrollArea className="min-h-0 flex-1" viewportTabIndex={-1}>
-          <WorkspacePageContainer width="wide">
+          <PageContent>
             {environments.length === 0 ? (
               <p className="text-sm text-muted-foreground">Connect an environment to see limits.</p>
             ) : (
               <UsageLimitsSection selectedEnvironmentIds={selectedEnvironmentIds} now={limitsNow} />
             )}
-          </WorkspacePageContainer>
+          </PageContent>
         </ScrollArea>
       </div>
     </SidebarInset>

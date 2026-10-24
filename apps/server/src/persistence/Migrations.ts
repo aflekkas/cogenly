@@ -10,7 +10,8 @@
 
 import * as Migrator from "effect/sql/Migrator";
 import Migration0090 from "./Migrations/090_SharedBootstrap.ts";
-import Migration0091 from "./Migrations/091_SharedSettings.ts";
+import Migration0091 from "./Migrations/091_RepositoryIconPath.ts";
+import Migration0092 from "./Migrations/092_SharedSettings.ts";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import { reconcileV2PreviewMigration } from "./reconcileV2PreviewMigration.ts";
@@ -209,7 +210,8 @@ export const migrationEntries = [
   [88, "AccountProcessAccess", Migration0088],
   [89, "SharedDocuments", Migration0089],
   [90, "SharedBootstrap", Migration0090],
-  [91, "SharedSettings", Migration0091],
+  [91, "RepositoryIconPath", Migration0091],
+  [92, "SharedSettings", Migration0092],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

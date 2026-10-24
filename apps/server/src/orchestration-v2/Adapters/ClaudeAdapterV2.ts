@@ -2778,6 +2778,49 @@ function isClaudeTaskNotificationOriginResult(message: SDKMessage): message is S
   return message.type === "result" && message.origin?.kind === "task-notification";
 }
 
+/** A 429 that resets within this window is a short-term throttle, not an exhausted quota. */
+const CLAUDE_RATE_LIMIT_RETRY_MAX_MS = 15 * 60_000;
+const CLAUDE_RATE_LIMIT_RETRY_MIN_MS = 30_000;
+const CLAUDE_RATE_LIMIT_RETRY_DEFAULT_MS = 60_000;
+
+/**
+ * Splits a Claude limit stop into a short-term rate limit or an exhausted
+ * quota. Only a rejected usage window (a `rate_limit_event`) or a blocking
+ * limit proves the quota is spent; a bare 429 after the CLI used up its own
+ * retries is a throttle, so it gets a near reset (the CLI's last backoff,
+ * which honors retry-after) that the server retries at.
+ */
+export function classifyClaudeLimitFailure(input: {
+  readonly failure: OrchestrationV2ProviderFailure;
+  readonly windowRejected: boolean;
+  readonly windowResetAt: string | null;
+  readonly retryDelayMs: number | undefined;
+  readonly completedAt: DateTime.Utc;
+}): OrchestrationV2ProviderFailure {
+  if (input.windowRejected || input.failure.limitKind === "quota") {
+    return {
+      ...input.failure,
+      limitKind: "quota",
+      resetAt: input.windowResetAt ?? input.failure.resetAt ?? null,
+    };
+  }
+  if (input.failure.limitKind === "rate_limit" && input.failure.resetAt) return input.failure;
+  const delayMs = Math.min(
+    CLAUDE_RATE_LIMIT_RETRY_MAX_MS,
+    Math.max(
+      CLAUDE_RATE_LIMIT_RETRY_MIN_MS,
+      input.retryDelayMs ?? CLAUDE_RATE_LIMIT_RETRY_DEFAULT_MS,
+    ),
+  );
+  return {
+    ...input.failure,
+    limitKind: "rate_limit",
+    resetAt: DateTime.formatIso(
+      DateTime.makeUnsafe(DateTime.toEpochMillis(input.completedAt) + delayMs),
+    ),
+  };
+}
+
 function providerFailureFromResult(
   message: SDKResultMessage,
   completedAt: DateTime.Utc,
@@ -2808,6 +2851,7 @@ function providerFailureFromResult(
         code: "api_error_429",
         retryable: true,
         resetAt: DateTime.formatIso(DateTime.makeUnsafe(resetMs)),
+        limitKind: seconds * 1_000 <= CLAUDE_RATE_LIMIT_RETRY_MAX_MS ? "rate_limit" : "quota",
       });
     }
   }
@@ -2863,6 +2907,7 @@ function providerFailureFromApiRetry(message: SDKAPIRetryMessage): Orchestration
           ? "transport_error"
           : "provider_error",
     retryable: true,
+    ...(message.error_status === 429 ? { limitKind: "rate_limit" as const } : {}),
   });
 }
 
@@ -3044,6 +3089,9 @@ interface ActiveClaudeTurnContext {
   readonly rejectedRateLimitTypes: Set<string>;
   readonly rateLimitResetTimes: Map<string, string | null>;
   latestAssistantRateLimited: boolean;
+  // The CLI's last backoff for a 429 (it honors retry-after), so a turn that
+  // ends rate limited retries no sooner than the API asked.
+  rateLimitRetryDelayMs: number | undefined;
   // Usage of the results that steers ended, oldest first. The final result's
   // usage covers only its own segment, so the turn bills these as well.
   readonly steeredSegmentUsage: Array<SDKResultMessage["usage"]>;
@@ -7183,6 +7231,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               retryDelayMs: Math.max(0, Math.trunc(message.retry_delay_ms)),
             };
             const failure = providerFailureFromApiRetry(message);
+            if (message.error_status === 429) {
+              context.rateLimitRetryDelayMs = retry.retryDelayMs ?? undefined;
+            }
             const itemOrdinal =
               previous?.itemOrdinal ??
               (yield* resolveItemOrdinal(context, `terminal-failure:${context.providerTurnId}`));
@@ -7912,12 +7963,17 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             // can't grant a permission, so show the CLI's own text instead.
             const permissionDenied =
               message.subtype === "success" && message.api_error_status === 403;
+            const windowRejected =
+              context.rejectedRateLimitTypes.size > 0 ||
+              message.terminal_reason === "blocking_limit";
             const failureHint = permissionDenied
               ? message.result
               : (context.authenticationFailureMessage ??
-                (usageLimited
-                  ? "Claude usage limit reached. Send the message again once the limit resets."
-                  : undefined));
+                (!usageLimited
+                  ? undefined
+                  : windowRejected
+                    ? "Claude usage limit reached. Send the message again once the limit resets."
+                    : "Claude API rate limit reached. Try again later."));
             const resetTimes = Array.from(context.rateLimitResetTimes.values());
             const resetAt =
               resetTimes.length > 0 && resetTimes.every((time) => time !== null)
@@ -7928,7 +7984,13 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               : providerFailureFromResult(message, completedAt, failureHint, usageLimited);
             const terminalFailure =
               resultFailure?.class === "usage_limit"
-                ? { ...resultFailure, resetAt: resetAt ?? resultFailure.resetAt ?? null }
+                ? classifyClaudeLimitFailure({
+                    failure: resultFailure,
+                    windowRejected,
+                    windowResetAt: resetAt,
+                    retryDelayMs: context.rateLimitRetryDelayMs,
+                    completedAt,
+                  })
                 : resultFailure;
             yield* finalizeActiveTurn({
               context,
@@ -8913,6 +8975,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               rejectedRateLimitTypes: new Set(),
               rateLimitResetTimes: new Map(),
               latestAssistantRateLimited: false,
+              rateLimitRetryDelayMs: undefined,
               steeredSegmentUsage: [],
               subagentsByTaskId: new Map(),
               subagentsByToolUseId: new Map(),

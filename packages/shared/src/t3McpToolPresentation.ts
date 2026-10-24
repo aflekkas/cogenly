@@ -36,6 +36,8 @@ export type T3McpToolSummaryAction =
   | "queue-cancel"
   | "queue-reorder"
   | "queue-steer"
+  | "queue-clear"
+  | "queue-send-all"
   | "question-list"
   | "question-read"
   | "question-respond"
@@ -310,6 +312,13 @@ const T3_MCP_TOOLS: Readonly<Record<string, T3McpToolDefinition>> = {
   queue_promote_to_steer: tool(
     ["Steer with", "Steering with", "Requested steering with", "a queued message"],
     "queue-steer",
+  ),
+  queue_clear: tool(["Clear", "Clearing", "Cleared", "the queue"], "queue-clear"),
+  queue_send_all: tool(
+    ["Send", "Sending", "Sent", "all queued messages"],
+    "queue-send-all",
+    "t3-code",
+    "Send all queued messages",
   ),
   pending_request_list: tool(["List", "Listing", "Listed", "pending questions"], "question-list"),
   pending_request_read: tool(["Read", "Reading", "Read", "pending questions"], "question-read"),

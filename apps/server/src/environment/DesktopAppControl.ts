@@ -9,6 +9,7 @@ import {
   DesktopAppActivationResponse,
   type DesktopAppActivationRequest,
   type DesktopAppEnvironmentAdded,
+  type DesktopAppMachinesPaired,
 } from "@t3tools/contracts";
 import { resolveDesktopAppControlAddress } from "@t3tools/shared/desktopAppControl";
 import { parseAddEnvironmentRequest } from "@t3tools/shared/environmentLinks";
@@ -26,6 +27,8 @@ import * as ServerConfig from "../config.ts";
 export const DESKTOP_APP_RESPONSE_TIMEOUT_MS = 17_000;
 /** Longer than the desktop's own ten-minute budget for connecting a host, so its answer arrives. */
 export const DESKTOP_APP_ADD_ENVIRONMENT_TIMEOUT_MS = 10 * 60_000 + 15_000;
+/** Longer than the desktop's two-minute budget for pairing machines. */
+export const DESKTOP_APP_PAIR_MACHINES_TIMEOUT_MS = 2 * 60_000 + 15_000;
 const MAX_RESPONSE_BYTES = 64 * 1024;
 const isDesktopAppActivationResponse = Schema.is(DesktopAppActivationResponse);
 
@@ -184,6 +187,15 @@ export class DesktopAppControl extends Context.Service<
       readonly ssh: string;
       readonly name?: string | undefined;
     }) => Effect.Effect<DesktopAppEnvironmentAdded, DesktopAppControlError>;
+    /**
+     * Pairs two machines the desktop app is connected to, as Settings → Machines
+     * does. The app holds a session on both, which neither server has for the
+     * other before pairing, so the join code never leaves the app.
+     */
+    readonly pairMachines: (input: {
+      readonly hub: string;
+      readonly joining: string;
+    }) => Effect.Effect<DesktopAppMachinesPaired, DesktopAppControlError>;
   }
 >()("cogenly-server/environment/DesktopAppControl") {}
 
@@ -215,6 +227,32 @@ const makeAt = (addresses: DesktopAppControlAddresses) =>
         ? [addresses.address]
         : [addresses.address, addresses.fallbackAddress];
 
+    /** Sends one request and returns the desktop's success, or its failure as an error. */
+    const send = (
+      makeRequest: (requestId: string) => DesktopAppActivationRequest,
+      timeoutMs: number,
+    ) =>
+      Effect.gen(function* () {
+        const requestId = yield* crypto.randomUUIDv4().pipe(Effect.orDie);
+        const response = yield* Effect.tryPromise({
+          try: () =>
+            sendDesktopAppRequest({ ...addresses, timeoutMs, request: makeRequest(requestId) }),
+          catch: (cause) => new DesktopAppControlUnreachableError({ candidateAddresses, cause }),
+        });
+        if (!response.ok) {
+          return yield* new DesktopAppControlRequestFailedError({
+            code: response.code,
+            detail: response.message,
+          });
+        }
+        return response;
+      });
+
+    const differentAnswer = new DesktopAppControlRequestFailedError({
+      code: "internal-error",
+      detail: "The desktop app answered a different request.",
+    });
+
     const addEnvironment = Effect.fn("DesktopAppControl.addEnvironment")(function* (input: {
       readonly ssh: string;
       readonly name?: string | undefined;
@@ -223,38 +261,46 @@ const makeAt = (addresses: DesktopAppControlAddresses) =>
       if (!parsed.ok) {
         return yield* new DesktopAppControlInvalidInputError({ reason: parsed.error });
       }
-      const requestId = yield* crypto.randomUUIDv4().pipe(Effect.orDie);
-      const response = yield* Effect.tryPromise({
-        try: () =>
-          sendDesktopAppRequest({
-            ...addresses,
-            timeoutMs: DESKTOP_APP_ADD_ENVIRONMENT_TIMEOUT_MS,
-            request: {
-              version: DESKTOP_APP_ACTIVATION_PROTOCOL_VERSION,
-              requestId,
-              type: "add-environment",
-              ssh: parsed.value.ssh,
-              ...(parsed.value.name === null ? {} : { name: parsed.value.name }),
-            },
-          }),
-        catch: (cause) => new DesktopAppControlUnreachableError({ candidateAddresses, cause }),
-      });
-      if (!response.ok) {
-        return yield* new DesktopAppControlRequestFailedError({
-          code: response.code,
-          detail: response.message,
-        });
-      }
-      if (!("environmentId" in response)) {
-        return yield* new DesktopAppControlRequestFailedError({
-          code: "internal-error",
-          detail: "The desktop app answered a different request.",
-        });
-      }
+      const response = yield* send(
+        (requestId) => ({
+          version: DESKTOP_APP_ACTIVATION_PROTOCOL_VERSION,
+          requestId,
+          type: "add-environment",
+          ssh: parsed.value.ssh,
+          ...(parsed.value.name === null ? {} : { name: parsed.value.name }),
+        }),
+        DESKTOP_APP_ADD_ENVIRONMENT_TIMEOUT_MS,
+      );
+      if (!("environmentId" in response)) return yield* differentAnswer;
       return response;
     });
 
-    return DesktopAppControl.of({ addEnvironment });
+    const pairMachines = Effect.fn("DesktopAppControl.pairMachines")(function* (input: {
+      readonly hub: string;
+      readonly joining: string;
+    }) {
+      const hub = input.hub.trim();
+      const joining = input.joining.trim();
+      if (hub.length === 0 || joining.length === 0) {
+        return yield* new DesktopAppControlInvalidInputError({
+          reason: "Name both machines: the always-on hub and the machine joining it.",
+        });
+      }
+      const response = yield* send(
+        (requestId) => ({
+          version: DESKTOP_APP_ACTIVATION_PROTOCOL_VERSION,
+          requestId,
+          type: "pair-machines",
+          hub,
+          joining,
+        }),
+        DESKTOP_APP_PAIR_MACHINES_TIMEOUT_MS,
+      );
+      if (!("hub" in response)) return yield* differentAnswer;
+      return response;
+    });
+
+    return DesktopAppControl.of({ addEnvironment, pairMachines });
   });
 
 /** The desktop app that shares this server's Cogenly home, as the desktop-managed server does. */

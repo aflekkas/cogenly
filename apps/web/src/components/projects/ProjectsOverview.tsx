@@ -5,6 +5,7 @@ import { FolderIcon, FolderPlusIcon, LaptopMinimalIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useAgents } from "../../agents/agentsClient";
+import { cn } from "../../lib/utils";
 import { openCreateProjectDialog } from "../../projectLabels/CreateProjectDialogHost";
 import { ProjectFolderIcon } from "../../projectLabels/ProjectFolderMark";
 import { ProjectLabelEditorDialog } from "../../projectLabels/ProjectLabelEditorDialog";
@@ -14,6 +15,7 @@ import {
   type EnvironmentProjectLabel,
   type ProjectLabelKey,
 } from "../../projectLabels/projectLabels.logic";
+import { projectRepositoryLinks } from "../../projectLabels/repositoryPicker.logic";
 import { useProjectContents } from "../../projectLabels/useProjectContents";
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import { environmentPresentations } from "../../state/presentation";
@@ -32,7 +34,8 @@ import {
 import { OverlayPresence } from "../ui/overlay-presence";
 import { ScrollArea } from "../ui/scroll-area";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
-import { WorkspacePageContainer } from "../WorkspacePageContainer";
+import { PageContent } from "../PageContent";
+import { ProjectOrphanFolders } from "./ProjectOrphanFolders";
 import { latestProjectActivity, projectPanelSummary } from "./projectPanel.logic";
 import { useProjectFolderMenu } from "./useProjectFolderMenu";
 
@@ -156,6 +159,8 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
   const { agents } = useAgents();
   const presentations = useAtomValue(environmentPresentations.presentationsAtom);
   const [filter, setFilter] = useState<ProjectsFilter>("active");
+  // Only a filter the user picked fades the grid; opening the page shows it at once.
+  const [filterPicked, setFilterPicked] = useState(false);
   const [renaming, setRenaming] = useState<EnvironmentProjectLabel | null>(null);
   const [linking, setLinking] = useState<EnvironmentProjectLabel | null>(null);
 
@@ -191,7 +196,7 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
   return (
     <>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
-        <WorkspacePageContainer width="expanded" className="pb-0">
+        <PageContent width="wide" className="pb-0">
           <div className="flex w-full min-w-0 items-center gap-3">
             <p className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
               Repositories, chats, Work, files and agents grouped by effort. Agents can change any
@@ -205,7 +210,10 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
                   value={[shownFilter]}
                   onValueChange={(next) => {
                     const value = next[0];
-                    if (value === "active" || value === "archived") setFilter(value);
+                    if (value === "active" || value === "archived") {
+                      setFilter(value);
+                      setFilterPicked(true);
+                    }
                   }}
                 >
                   <Toggle value="active">Active</Toggle>
@@ -223,11 +231,11 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
               </Button>
             </span>
           </div>
-        </WorkspacePageContainer>
+        </PageContent>
 
         {/* The tiles give keyboard access, so the viewport stays out of the tab order. */}
         <ScrollArea className="min-h-0 flex-1" viewportTabIndex={-1}>
-          <WorkspacePageContainer width="expanded">
+          <PageContent width="wide">
             {directory.labels.length === 0 ? (
               <Empty>
                 <EmptyHeader>
@@ -256,7 +264,10 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
               <ul
                 key={shownFilter}
                 aria-label={shownFilter === "archived" ? "Archived projects" : "Projects"}
-                className="swap-motion grid grid-cols-[repeat(auto-fill,minmax(16rem,1fr))] gap-3"
+                className={cn(
+                  filterPicked && "swap-motion",
+                  "grid grid-cols-[repeat(auto-fill,minmax(16rem,1fr))] gap-3",
+                )}
               >
                 {shown.map((entry) => {
                   const contents = byProject.get(entry.key);
@@ -266,7 +277,8 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
                       entry={entry}
                       summary={
                         projectPanelSummary({
-                          repositories: entry.label.repositoryIds.length,
+                          // Every linked repository, as the project page lists them.
+                          repositories: projectRepositoryLinks(entry.label).length,
                           chats: contents?.chats.length ?? 0,
                           work: contents?.work.length ?? 0,
                           files: 0,
@@ -288,7 +300,8 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
                 })}
               </ul>
             )}
-          </WorkspacePageContainer>
+          </PageContent>
+          <ProjectOrphanFolders environmentId={props.environmentId} />
         </ScrollArea>
       </div>
       <OverlayPresence when={renaming}>

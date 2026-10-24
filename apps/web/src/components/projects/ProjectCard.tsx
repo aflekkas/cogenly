@@ -95,6 +95,8 @@ export function ProjectCardRow(props: {
   readonly removing?: boolean;
   readonly onOpen?: () => void;
   readonly ariaLabel?: string;
+  /** The row's own menu (a repository's), shown like the remove action. */
+  readonly menu?: ReactNode;
   /** Remove (or unlink, or unfile) this item; omit for rows that can't be removed here. */
   readonly onRemove?: () => void;
   readonly removeLabel?: string;
@@ -142,6 +144,7 @@ export function ProjectCardRow(props: {
           {props.meta}
         </span>
       ) : null}
+      {props.menu ? <span className="-me-1 flex shrink-0 items-center">{props.menu}</span> : null}
       {props.onRemove ? (
         <span
           className="-me-1 flex shrink-0 items-center opacity-0 transition-opacity duration-(--motion-duration-fast) ease-standard group-hover/card-row:opacity-100 group-focus-within/card-row:opacity-100 pointer-coarse:opacity-100"

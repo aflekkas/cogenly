@@ -33,7 +33,12 @@ export const ProjectFields = Schema.Struct({
   instructions: Schema.String.check(Schema.isMaxLength(PROJECT_INSTRUCTIONS_MAX_LENGTH)),
   archivedAt: Schema.NullOr(IsoDateTime),
   repositories: Schema.Array(
-    Schema.Struct({ remote: Remote, directoryName: Schema.NullOr(RelativePath) }),
+    Schema.Struct({
+      remote: Remote,
+      directoryName: Schema.NullOr(RelativePath),
+      // The icon a checkout found, relative to the repository root.
+      iconPath: Schema.optionalKey(RelativePath.check(Schema.isMaxLength(1024))),
+    }),
   ),
   sourceLinks: Schema.Array(ProjectSourceLink),
   createdAt: Agent.fields.createdAt,

@@ -1,4 +1,8 @@
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import {
+  isAtomCommandInterrupted,
+  squashAtomCommandFailure,
+} from "@t3tools/client-runtime/state/runtime";
 import { deriveThreadQueueWorkflowState } from "@t3tools/client-runtime/state/thread-workflows";
 import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
 import type {
@@ -9,6 +13,7 @@ import type {
   ThreadId,
 } from "@t3tools/contracts";
 import {
+  ArrowUpIcon,
   Clock3Icon,
   CornerUpRightIcon,
   GripVerticalIcon,
@@ -25,6 +30,7 @@ import {
   useRef,
   useState,
   type ComponentProps,
+  type MouseEvent,
   type Ref,
 } from "react";
 
@@ -37,9 +43,15 @@ import { cn } from "~/lib/utils";
 import { ComposerBanner } from "./ComposerBanner";
 import { NoticePresenceFrame } from "./ComposerBannerStack";
 import { composerStackBodyProps, useComposerStackFold } from "./ComposerStackColumn";
-import { mergeQueuedRowSlots, type QueuedRowSlot } from "./queuedRowPresence";
+import {
+  focusKeyAfterRemoval,
+  mergeQueuedRowSlots,
+  retainQueuedCancels,
+  type QueuedRowSlot,
+} from "./queuedRowPresence";
 import { PANEL_MOTION_EASING } from "~/lib/panelFlip";
 import { Button } from "../ui/button";
+import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 export interface EditQueuedRunRequest {
@@ -81,8 +93,23 @@ function prefersReducedMotion() {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
+type RemovalFollowUp = "hold-rows" | "move-focus" | "none";
+
+/**
+ * What a × press needs next. A hovering pointer keeps the rows in place until
+ * it leaves the list; a keyboard press (no click count) moves focus on. Touch
+ * has already left the list by the time its click lands, so rows just close.
+ */
+function removalFollowUp(event: MouseEvent<HTMLElement>): RemovalFollowUp {
+  if (event.detail === 0) return "move-focus";
+  const native = event.nativeEvent;
+  const pointerType = "pointerType" in native ? native.pointerType : "mouse";
+  return pointerType === "touch" ? "none" : "hold-rows";
+}
+
 export interface QueuedRunsControlHandle {
   steerNext: (repeat: boolean) => boolean;
+  sendAll: (repeat: boolean) => boolean;
   editLatest: (repeat: boolean) => boolean;
 }
 
@@ -93,6 +120,7 @@ export function QueuedRunsControl({
   readonly ref?: Ref<QueuedRunsControlHandle>;
   readonly steerShortcutLabel?: string | null;
   readonly editShortcutLabel?: string | null;
+  readonly sendAllShortcutLabel?: string | null;
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
   readonly optimisticMessages: ReadonlyArray<
@@ -115,6 +143,12 @@ export function QueuedRunsControl({
   const listShown = expanded && !stackFold.folded;
   const queueListId = useId();
   const [busyRunId, setBusyRunId] = useState<RunId | null>(null);
+  const clearQueue = useAtomCommand(threadEnvironment.clearThreadQueue);
+  const sendAllQueued = useAtomCommand(threadEnvironment.sendAllQueuedMessages);
+  const [bulkAction, setBulkAction] = useState<"clear" | "send-all" | null>(null);
+  // Clear all removes the whole queue, so its first press only arms it.
+  const [confirmingClear, setConfirmingClear] = useState(false);
+  const anyBusy = busyRunId !== null || bulkAction !== null;
   // Live drag-reorder state: the dragged run and the queue index the row
   // would be inserted at (0..queued.length) as of the latest dragover.
   const [dragState, setDragState] = useState<{
@@ -128,18 +162,39 @@ export function QueuedRunsControl({
     () => (projection ? deriveThreadQueueWorkflowState(projection) : null),
     [projection],
   );
-  const queued = workflow?.queuedRuns ?? NO_QUEUED_RUNS;
+  // Removal is optimistic: a cancelled run leaves the list the moment its × is
+  // pressed and only comes back if the server refuses. Every view of the queue
+  // (rows, count, bulk actions, reorder indices) reads the filtered list.
+  const [cancelledRunIds, setCancelledRunIds] = useState<ReadonlySet<RunId>>(() => new Set());
+  const serverQueued = workflow?.queuedRuns ?? NO_QUEUED_RUNS;
+  const queued = useMemo(
+    () =>
+      cancelledRunIds.size === 0
+        ? serverQueued
+        : serverQueued.filter(({ run }) => !cancelledRunIds.has(run.id)),
+    [cancelledRunIds, serverQueued],
+  );
+  // While the pointer stays on the list after a click removal, rows that left
+  // keep their space (faded out) so the next × stays under the cursor; they
+  // close up once the pointer leaves.
+  const [holdLeavingRows, setHoldLeavingRows] = useState(false);
+  const rowsHeld = holdLeavingRows && listShown;
+  const focusAfterRemoveKeyRef = useRef<string | null>(null);
+  if (dragState !== null && !queued.some(({ run }) => run.id === dragState.runId)) {
+    // The dragged row left (removed here or elsewhere), so its dragend never comes.
+    setDragState(null);
+  }
   const activeRun = workflow?.activeRun ?? null;
   const canReorder = workflow?.canReorder === true;
   const queuedImageAttachmentIds = useMemo(() => {
     const ids: string[] = [];
-    for (const { attachments } of workflow?.queuedRuns ?? []) {
+    for (const { attachments } of serverQueued) {
       for (const attachment of attachments) {
         if (attachment.type === "image") ids.push(attachment.id);
       }
     }
     return ids;
-  }, [workflow]);
+  }, [serverQueued]);
   const queuedImageAttachmentResources = useMemo(
     () =>
       queuedImageAttachmentIds.map((attachmentId) => ({
@@ -236,16 +291,35 @@ export function QueuedRunsControl({
   }
   const itemsByKey = new Map(items.map((item) => [item.key, item]));
   const trayOpen = items.length > 0;
+  // An emptied queue keeps drawing its last rows while the tray closes, so a
+  // row removed here still counts as gone.
+  const isCancelledRow = (item: QueueItem) =>
+    item.runId !== null && cancelledRunIds.has(item.runId);
   const shownCount =
-    items.length > 0 ? items.length : presence.rows.filter((row) => !row.leaving).length;
+    items.length > 0
+      ? items.length
+      : presence.rows.filter((row) => !row.leaving && !isCancelledRow(row.item)).length;
   const removeLeftRow = useCallback((key: string) => {
     setPresence((current) => ({
       ...current,
       rows: current.rows.filter((row) => !(row.leaving && row.key === key)),
     }));
   }, []);
+  const serverQueuedRef = useRef(serverQueued);
+  useLayoutEffect(() => {
+    serverQueuedRef.current = serverQueued;
+  });
   const clearClosedTray = useCallback(() => {
     setPresence((current) => ({ ...current, rows: [] }));
+    // The list unmounts with the tray, so its pointerleave may never come.
+    setHoldLeavingRows(false);
+    // Nothing draws the cancelled rows any more, so drop the ones the server settled.
+    setCancelledRunIds((current) =>
+      retainQueuedCancels(
+        current,
+        serverQueuedRef.current.map(({ run }) => run.id),
+      ),
+    );
   }, []);
   // A queue already up when the composer mounts (a thread switch) is just there.
   const trayMountedRef = useRef(false);
@@ -294,6 +368,19 @@ export function QueuedRunsControl({
     }
   });
 
+  // Keyboard removal: the removed row goes inert, so focus moves to its neighbour.
+  useLayoutEffect(() => {
+    const key = focusAfterRemoveKeyRef.current;
+    const list = listRef.current;
+    if (key === null || !list) return;
+    focusAfterRemoveKeyRef.current = null;
+    list
+      .querySelector<HTMLElement>(
+        `[data-queued-row-key="${CSS.escape(key)}"] [data-queued-row-remove]`,
+      )
+      ?.focus();
+  });
+
   const move = async (runId: RunId, beforeRunId: RunId | null) => {
     if (listRef.current) {
       reorderSnapshotRef.current = {
@@ -317,7 +404,7 @@ export function QueuedRunsControl({
   const completeDrag = (runId: RunId, insertIndex: number | null) => {
     setDragState(null);
     dragArmedRunIdRef.current = null;
-    if (insertIndex === null || busyRunId !== null) return;
+    if (insertIndex === null || anyBusy) return;
     const draggedIndex = queued.findIndex(({ run }) => run.id === runId);
     if (draggedIndex === -1) return;
     // Inserting immediately before or after itself is a no-op.
@@ -341,18 +428,41 @@ export function QueuedRunsControl({
     }
   };
 
+  // Bulk actions wait while a queued message is open in the composer, so the
+  // draft being edited never loses its queue entry underneath it.
+  const canBulkAct = queued.length > 0 && props.editingRunId === null;
+  const bulkInFlightRef = useRef(false);
+  const runBulkAction = async (action: "clear" | "send-all") => {
+    setConfirmingClear(false);
+    if (!canBulkAct || bulkInFlightRef.current) return;
+    bulkInFlightRef.current = true;
+    setBulkAction(action);
+    try {
+      const target = { environmentId: props.environmentId, input: { threadId: props.threadId } };
+      await (action === "clear" ? clearQueue(target) : sendAllQueued(target));
+    } finally {
+      bulkInFlightRef.current = false;
+      setBulkAction(null);
+    }
+  };
+
   useImperativeHandle(ref, () => ({
     steerNext(repeat) {
       const next = queued[0];
       if (!next || !workflow?.canPromoteToSteer) return false;
-      if (!repeat && busyRunId === null) void steer(next.run.id);
+      if (!repeat && !anyBusy) void steer(next.run.id);
+      return true;
+    },
+    sendAll(repeat) {
+      if (!canBulkAct) return false;
+      if (!repeat && !anyBusy) void runBulkAction("send-all");
       return true;
     },
     // Declines while a queued message is already being edited so the key keeps
     // moving the caret inside that draft.
     editLatest(repeat) {
       const latest = queued.at(-1);
-      if (!latest || props.editingRunId !== null || busyRunId !== null) return false;
+      if (!latest || props.editingRunId !== null || anyBusy) return false;
       if (!repeat) {
         setExpanded(true);
         if (stackFold.folded) stackFold.reveal();
@@ -369,16 +479,38 @@ export function QueuedRunsControl({
 
   if (presence.rows.length === 0) return null;
 
-  const remove = async (runId: RunId) => {
-    setBusyRunId(runId);
-    try {
-      await cancel({
-        environmentId: props.environmentId,
-        input: { threadId: props.threadId, runId },
-      });
-    } finally {
-      setBusyRunId(null);
+  // Never waits on the server: the row goes now, and rapid clicks each fire
+  // their own cancel (the commands run serially per thread).
+  const remove = (runId: RunId, rowKey: string, followUp: RemovalFollowUp) => {
+    if (cancelledRunIds.has(runId)) return;
+    if (followUp === "hold-rows") {
+      setHoldLeavingRows(true);
+    } else if (followUp === "move-focus") {
+      focusAfterRemoveKeyRef.current = focusKeyAfterRemoval(
+        items.filter((item) => item.runId !== null).map((item) => item.key),
+        rowKey,
+      );
     }
+    setCancelledRunIds((current) => new Set(current).add(runId));
+    void cancel({
+      environmentId: props.environmentId,
+      input: { threadId: props.threadId, runId },
+    }).then((result) => {
+      if (result._tag === "Success") return;
+      setCancelledRunIds((current) => {
+        if (!current.has(runId)) return current;
+        const next = new Set(current);
+        next.delete(runId);
+        return next;
+      });
+      if (isAtomCommandInterrupted(result)) return;
+      const error = squashAtomCommandFailure(result);
+      toastManager.add({
+        type: "error",
+        title: "Could not remove the queued message",
+        description: error instanceof Error ? error.message : "An error occurred.",
+      });
+    });
   };
 
   return (
@@ -397,16 +529,19 @@ export function QueuedRunsControl({
           data-chat-composer-collapsed-controls="true"
           className="relative z-0"
         >
-          <ComposerBanner.Row
-            render={<button type="button" />}
-            aria-label={listShown ? "Collapse queued messages" : "Expand queued messages"}
-            aria-expanded={listShown}
-            aria-controls={queueListId}
-            onPointerDown={(event) => event.preventDefault()}
-            onClick={() =>
-              expanded && stackFold.folded ? stackFold.reveal() : setExpanded((value) => !value)
-            }
-          >
+          {/* The whole header toggles the list; the bulk actions sit above that toggle. */}
+          <ComposerBanner.Row className="relative" onPointerLeave={() => setConfirmingClear(false)}>
+            <button
+              type="button"
+              aria-label={listShown ? "Collapse queued messages" : "Expand queued messages"}
+              aria-expanded={listShown}
+              aria-controls={queueListId}
+              className="absolute inset-0 cursor-pointer rounded-md focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
+              onPointerDown={(event) => event.preventDefault()}
+              onClick={() =>
+                expanded && stackFold.folded ? stackFold.reveal() : setExpanded((value) => !value)
+              }
+            />
             <ComposerBanner.Icon>
               <ListOrderedIcon />
             </ComposerBanner.Icon>
@@ -414,6 +549,71 @@ export function QueuedRunsControl({
               Queued
             </ComposerBanner.Content>
             <ComposerBanner.Actions>
+              {queued.length > 0 ? (
+                <span
+                  data-active={confirmingClear || bulkAction !== null || undefined}
+                  className={cn(
+                    "relative flex items-center gap-1 opacity-0 transition-opacity duration-150 ease-out",
+                    "group-hover/banner-row:opacity-100 group-focus-within/banner-row:opacity-100 data-active:opacity-100 pointer-coarse:opacity-100",
+                  )}
+                >
+                  <Tooltip>
+                    <TooltipTrigger render={<span className="flex shrink-0" />}>
+                      <Button
+                        size="xs"
+                        variant="ghost-muted"
+                        disabled={!canBulkAct || anyBusy}
+                        onClick={() => void runBulkAction("send-all")}
+                      >
+                        <ArrowUpIcon className="size-3.5" />
+                        Send all
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipPopup>
+                      {props.editingRunId !== null
+                        ? "Finish editing the queued message first"
+                        : `${
+                            workflow?.canPromoteToSteer
+                              ? "Steer every queued message into the running turn as one message"
+                              : "Send every queued message now as one message"
+                          }${props.sendAllShortcutLabel ? ` (${props.sendAllShortcutLabel})` : ""}`}
+                    </TooltipPopup>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger render={<span className="flex shrink-0" />}>
+                      <Button
+                        size="xs"
+                        variant={confirmingClear ? "ghost-destructive" : "ghost-muted"}
+                        aria-label={
+                          confirmingClear
+                            ? `Confirm removing all ${queued.length} queued messages`
+                            : "Remove all queued messages"
+                        }
+                        disabled={!canBulkAct || anyBusy}
+                        onClick={() =>
+                          confirmingClear ? void runBulkAction("clear") : setConfirmingClear(true)
+                        }
+                        onBlur={() => setConfirmingClear(false)}
+                        onKeyDown={(event) => {
+                          if (event.key !== "Escape" || !confirmingClear) return;
+                          event.preventDefault();
+                          event.stopPropagation();
+                          setConfirmingClear(false);
+                        }}
+                      >
+                        {confirmingClear ? `Clear ${queued.length}?` : "Clear all"}
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipPopup>
+                      {props.editingRunId !== null
+                        ? "Finish editing the queued message first"
+                        : confirmingClear
+                          ? "Press again to remove every queued message"
+                          : "Remove every queued message"}
+                    </TooltipPopup>
+                  </Tooltip>
+                </span>
+              ) : null}
               <ComposerBanner.Count>{shownCount}</ComposerBanner.Count>
               <ComposerBanner.ToggleIcon expanded={listShown} />
             </ComposerBanner.Actions>
@@ -429,7 +629,17 @@ export function QueuedRunsControl({
           >
             <div className="min-h-0 overflow-hidden">
               <ComposerBanner.Scroll className="[--composer-banner-scroll-max:--spacing(32)]">
-                <ComposerBanner.Children render={<ol ref={listRef} />} id={queueListId}>
+                <ComposerBanner.Children
+                  render={
+                    <ol
+                      ref={listRef}
+                      onPointerLeave={() => {
+                        if (holdLeavingRows) setHoldLeavingRows(false);
+                      }}
+                    />
+                  }
+                  id={queueListId}
+                >
                   {presence.rows.map((slot) => {
                     const item = (slot.leaving ? undefined : itemsByKey.get(slot.key)) ?? slot.item;
                     const previewText = replaceComposerContextReferences(item.text, (reference) =>
@@ -441,15 +651,15 @@ export function QueuedRunsControl({
                     const rowServerIndex = item.serverIndex;
                     const isEditing = rowRunId !== null && rowRunId === props.editingRunId;
                     const rowDraggable =
-                      rowRunId !== null &&
-                      rowServerIndex !== null &&
-                      canReorder &&
-                      busyRunId === null;
+                      rowRunId !== null && rowServerIndex !== null && canReorder && !anyBusy;
                     return (
                       <QueuedRowPresence
                         key={slot.key}
                         rowKey={slot.key}
                         leaving={slot.leaving}
+                        // A row removed here as the queue empties stays for the tray's close.
+                        faded={slot.leaving || isCancelledRow(item)}
+                        held={rowsHeld}
                         animateEnter={slot.animateEnter}
                         onLeft={removeLeftRow}
                         aria-current={isEditing ? "true" : undefined}
@@ -514,12 +724,12 @@ export function QueuedRunsControl({
                                 variant="ghost-muted"
                                 aria-label="Reorder queued message (drag, or press the arrow keys)"
                                 className="cursor-grab active:cursor-grabbing disabled:cursor-default"
-                                disabled={busyRunId !== null}
+                                disabled={anyBusy}
                                 onPointerDown={() => {
                                   dragArmedRunIdRef.current = rowRunId;
                                 }}
                                 onKeyDown={(event) => {
-                                  if (busyRunId !== null) return;
+                                  if (anyBusy) return;
                                   if (event.key === "ArrowUp" && rowServerIndex > 0) {
                                     event.preventDefault();
                                     void move(rowRunId, queued[rowServerIndex - 1]?.run.id ?? null);
@@ -591,7 +801,7 @@ export function QueuedRunsControl({
                                         size="icon-xs"
                                         variant="ghost-muted"
                                         aria-label="Edit queued message"
-                                        disabled={item.runId === null || busyRunId !== null}
+                                        disabled={item.runId === null || anyBusy}
                                         onClick={() => {
                                           if (item.runId !== null && item.messageId !== null) {
                                             props.onEditQueuedRun({
@@ -618,7 +828,7 @@ export function QueuedRunsControl({
                                       variant="ghost-muted"
                                       disabled={
                                         item.runId === null ||
-                                        busyRunId !== null ||
+                                        anyBusy ||
                                         !workflow?.canPromoteToSteer
                                       }
                                       onClick={() => {
@@ -645,9 +855,17 @@ export function QueuedRunsControl({
                                       <ComposerBanner.Dismiss
                                         variant="ghost-muted"
                                         aria-label="Remove queued message"
-                                        disabled={item.runId === null || busyRunId !== null}
-                                        onClick={() => {
-                                          if (item.runId !== null) void remove(item.runId);
+                                        data-queued-row-remove=""
+                                        // Only a bulk action or this row's own steer/move holds it.
+                                        disabled={
+                                          item.runId === null ||
+                                          bulkAction !== null ||
+                                          busyRunId === item.runId
+                                        }
+                                        onClick={(event) => {
+                                          if (item.runId !== null) {
+                                            remove(item.runId, item.key, removalFollowUp(event));
+                                          }
                                         }}
                                       />
                                     }
@@ -671,10 +889,16 @@ export function QueuedRunsControl({
   );
 }
 
-/** One queue row: grows in when it arrives after the tray, collapses and fades when it leaves. */
+/**
+ * One queue row: grows in when it arrives after the tray. A row that leaves
+ * fades out at once and stops taking the pointer; it keeps its space while
+ * `held`, then collapses so the rows below close the gap.
+ */
 function QueuedRowPresence({
   rowKey,
   leaving,
+  faded,
+  held,
   animateEnter,
   onLeft,
   children,
@@ -682,20 +906,30 @@ function QueuedRowPresence({
 }: Omit<ComponentProps<"li">, "inert"> & {
   readonly rowKey: string;
   readonly leaving: boolean;
+  readonly faded: boolean;
+  readonly held: boolean;
   readonly animateEnter: boolean;
   readonly onLeft: (key: string) => void;
 }) {
   const handleClosed = useCallback(() => onLeft(rowKey), [onLeft, rowKey]);
+  // Once a leaving row starts to close it never reopens for a later hold.
+  const [closing, setClosing] = useState(false);
+  if (closing && !leaving) setClosing(false);
+  if (!closing && leaving && !held) setClosing(true);
+  const open = !leaving || (held && !closing);
   return (
     <li
       {...props}
       data-queued-row-key={rowKey}
-      aria-hidden={leaving || undefined}
-      inert={leaving}
-      className="min-w-0"
+      aria-hidden={faded || undefined}
+      inert={faded}
+      className={cn(
+        "min-w-0 transition-opacity duration-(--motion-duration-fast) ease-out",
+        faded && "pointer-events-none opacity-0",
+      )}
     >
       <NoticePresenceFrame
-        open={!leaving}
+        open={open}
         swapKey={null}
         animateMountRef={animateEnter ? ANIMATE_ROW_MOUNT : SKIP_ROW_MOUNT}
         onClosed={handleClosed}

@@ -707,12 +707,10 @@ function SidebarFooter({ className, ...props }: React.ComponentProps<"div">) {
 function SidebarContent({
   className,
   fixedHeader,
-  fixedFooter,
   ...props
 }: React.ComponentProps<"div"> & {
+  /** Pinned above the scrolling list, like a dock. */
   fixedHeader?: React.ReactNode;
-  /** Pinned below the scrolling list, like a dock. */
-  fixedFooter?: React.ReactNode;
 }) {
   return (
     <>
@@ -746,7 +744,6 @@ function SidebarContent({
           {...props}
         />
       </ScrollArea>
-      {fixedFooter ? <div className="w-full shrink-0">{fixedFooter}</div> : null}
     </>
   );
 }

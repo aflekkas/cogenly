@@ -49,8 +49,8 @@ export interface SidebarSegment {
 }
 
 /**
- * The count bar above the search dock, shared by every mode's filters (Work's
- * four, Agents' two). It spans the dock's width like the search field under
+ * The count bar under the search dock, shared by every mode's filters (Work's
+ * four, Agents' two). It spans the dock's width like the search field above
  * it, splits that width into equal segments, and slides one highlight between
  * them. A segment with nothing in it dims and cannot be chosen, so a filter
  * never opens onto an empty list; callers resolve the selection with
@@ -71,7 +71,7 @@ export function SidebarSegmentBar({
     <div
       role="tablist"
       aria-label={ariaLabel}
-      className="relative isolate mb-2.5 flex h-9 w-full rounded-rail bg-(--sidebar-shelf-bar) p-0.5"
+      className="relative isolate mt-2.5 flex h-9 w-full rounded-rail bg-(--sidebar-shelf-bar) p-0.5"
     >
       {/* One highlight, one segment wide, glides to the selected segment. */}
       <span
@@ -128,7 +128,7 @@ export function SidebarSegmentBar({
                 {segment.pending ? "…" : formatSidebarShelfCount(segment.count)}
               </span>
             </TooltipTrigger>
-            <TooltipPopup side="top">{selectable ? label : segment.emptyLabel}</TooltipPopup>
+            <TooltipPopup side="bottom">{selectable ? label : segment.emptyLabel}</TooltipPopup>
           </Tooltip>
         );
       })}
@@ -137,7 +137,7 @@ export function SidebarSegmentBar({
 }
 
 /**
- * The count bar above the search dock: all tasks, the ones that need the
+ * The count bar under the search dock: all tasks, the ones that need the
  * user, then one segment per shelf. Choosing a filter opens it and closes the
  * others; choosing the open one (or the first segment) goes back to all tasks.
  */
