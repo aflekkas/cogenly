@@ -22,11 +22,14 @@ export default Effect.gen(function* () {
   // The owner's decision to share this vault with one directly paired machine,
   // and that machine's vault key as it presented it over the link. The
   // pairing key ties the decision to one pairing; re-pairing drops it.
+  // `peer_sharing` is what that machine last said over the link about sharing
+  // back; nothing is wrapped for it or accepted from it until it says yes.
   yield* sql`CREATE TABLE vault_peer_shares (
     environment_id TEXT PRIMARY KEY,
     public_key TEXT NOT NULL,
     pairing_key TEXT NOT NULL,
-    authorized_at TEXT NOT NULL
+    authorized_at TEXT NOT NULL,
+    peer_sharing INTEGER NOT NULL DEFAULT 0
   )`;
   // The revision of each synced vault document this machine last projected
   // or wrote, and whether it could read it. `local_name` is the name the item
@@ -40,4 +43,7 @@ export default Effect.gen(function* () {
   yield* sql`ALTER TABLE vault_items ADD COLUMN portability TEXT NOT NULL DEFAULT 'shared' CHECK(portability IN ('shared','machine'))`;
   // Non-secret state other features keep with an item and sync inside its payload.
   yield* sql`ALTER TABLE vault_items ADD COLUMN sync_attachment_json TEXT`;
+  // What a newer build sealed into an item that this build cannot read,
+  // encrypted like the item, so a local edit seals it back unchanged.
+  yield* sql`ALTER TABLE vault_items ADD COLUMN sync_extras TEXT`;
 });

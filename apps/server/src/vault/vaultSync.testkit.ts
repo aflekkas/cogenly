@@ -195,7 +195,7 @@ export const startNode = Effect.fn("startVaultNode")(function* (network: Network
 export type VaultNode = Effect.Success<ReturnType<typeof startNode>>;
 
 /** One direction of a SharedSync pass: a spoke sends only its own changes; the hub relays. */
-const push = (from: VaultNode, to: VaultNode, toIsSpoke: boolean) =>
+export const push = (from: VaultNode, to: VaultNode, toIsSpoke: boolean) =>
   Effect.gen(function* () {
     while (true) {
       const after = (yield* to.state.cursors(from.environmentId)).received;

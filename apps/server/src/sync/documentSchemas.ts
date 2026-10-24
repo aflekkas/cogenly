@@ -152,23 +152,51 @@ const Base64 = Schema.String.check(
   Schema.isMaxLength(4 * 1024 * 1024),
   Schema.isPattern(/^[A-Za-z0-9+/_-]*={0,2}$/),
 );
-/** An item payload sealed under one revision's data key; see vault/VaultCrypto.ts. */
+/**
+ * One author's newest revision of an item (`sealed:<author>`), sealed under
+ * that revision's data key; see vault/VaultCrypto.ts.
+ */
 export const VaultSealedField = Schema.Struct({
   v: Schema.Literal(1),
-  author: PortableId,
   nonce: Base64,
   ciphertext: Base64,
 });
-/** That data key for one recipient (`wrap:<recipient environment id>`). */
+/** That data key for one recipient, made by one holder (`wrap:<recipient>:<by>`). */
 export const VaultWrapField = Schema.Struct({
   v: Schema.Literal(1),
-  by: PortableId,
   sealedDigest: Base64,
   ephemeralPublicKey: Base64,
   nonce: Base64,
   ciphertext: Base64,
 });
+export const VAULT_SEALED_PREFIX = "sealed:";
 export const VAULT_WRAP_PREFIX = "wrap:";
+// An environment id inside a vault field key; environment ids never contain ":".
+const VaultKeySegment = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,199}$/;
+export type VaultFieldKey =
+  | { readonly _tag: "sealed"; readonly author: string }
+  | { readonly _tag: "wrap"; readonly recipient: string; readonly by: string };
+/** The meaning of a vault document key; undefined for a key this build does not know. */
+export const parseVaultKey = (key: string): VaultFieldKey | undefined => {
+  if (key.startsWith(VAULT_SEALED_PREFIX)) {
+    const author = key.slice(VAULT_SEALED_PREFIX.length);
+    return VaultKeySegment.test(author) ? { _tag: "sealed", author } : undefined;
+  }
+  if (key.startsWith(VAULT_WRAP_PREFIX)) {
+    const [recipient, by, ...rest] = key.slice(VAULT_WRAP_PREFIX.length).split(":");
+    return rest.length === 0 &&
+      recipient !== undefined &&
+      by !== undefined &&
+      VaultKeySegment.test(recipient) &&
+      VaultKeySegment.test(by)
+      ? { _tag: "wrap", recipient, by }
+      : undefined;
+  }
+  return undefined;
+};
+export const vaultSealedKey = (author: string) => `${VAULT_SEALED_PREFIX}${author}`;
+export const vaultWrapKey = (recipient: string, by: string) =>
+  `${VAULT_WRAP_PREFIX}${recipient}:${by}`;
 type FieldCodec = {
   readonly decode: (value: unknown) => Option.Option<unknown>;
   readonly encode: (value: unknown) => Option.Option<unknown>;
@@ -186,13 +214,35 @@ const codecs = (fields: Schema.Struct.Fields): ReadonlyMap<string, FieldCodec> =
   new Map(Object.entries(fields).map(([key, schema]) => [key, codec(schema)]));
 const sealedCodec = codec(VaultSealedField);
 const wrapCodec = codec(VaultWrapField);
-// One field per recipient, so concurrent recipient additions never clobber each other.
-const vaultCodecFor = (key: string) =>
-  key === "sealed"
-    ? sealedCodec
-    : key.startsWith(VAULT_WRAP_PREFIX) && isPortableId(key.slice(VAULT_WRAP_PREFIX.length))
-      ? wrapCodec
-      : undefined;
+// One field per author and per recipient and wrapper, so concurrent writers
+// never clobber each other, and one machine can only ever write its own.
+const vaultCodecFor = (key: string) => {
+  const parsed = parseVaultKey(key);
+  return parsed === undefined ? undefined : parsed._tag === "sealed" ? sealedCodec : wrapCodec;
+};
+/** The machine a vault field belongs to: a revision's author or a wrap's maker. */
+const vaultFieldOwner = (key: string) => {
+  const parsed = parseVaultKey(key);
+  return parsed === undefined ? undefined : parsed._tag === "sealed" ? parsed.author : parsed.by;
+};
+/**
+ * The part of a vault change its author may make: only its own revisions and
+ * wraps, and never a tombstone, since a delete is a sealed revision that only
+ * holders can open. Anything else is dropped, never refused, so a machine
+ * outside the vault cannot mask, freeze or delete what holders wrote.
+ */
+const vaultAuthored = (change: SharedDocumentChangeWire): SharedDocumentChangeWire => {
+  const keys = Object.keys(change.fields).filter((key) => {
+    const owner = vaultFieldOwner(key);
+    return owner === undefined || owner === change.updatedBy;
+  });
+  return {
+    ...change,
+    fields: Object.fromEntries(keys.map((key) => [key, change.fields[key]!])),
+    clocks: Object.fromEntries(keys.map((key) => [key, change.clocks[key]!])),
+    tombstone: null,
+  };
+};
 /** What this build reads of each document kind; any other key is a newer build's. */
 const FIELD_CODECS: Readonly<Record<SharedDocumentKind, FieldCodecs>> = {
   project: codecs(ProjectFields.fields),
@@ -232,24 +282,27 @@ export const checkIntegrity = (change: SharedDocumentChangeWire) =>
  * no projection here. A known field whose value does not validate here (a
  * newer build widened it, or a peer sent something invalid) is held back:
  * it is never applied, and `deferred` asks the caller to keep the original
- * for a later build. An unknown document kind is deferred whole.
+ * for a later build. An unknown document kind is deferred whole. A vault
+ * change keeps only what its author may write (`vaultAuthored`).
  */
 export const splitChange = (
   change: SharedDocumentChangeWire,
 ): { readonly accepted: SharedDocumentChange | null; readonly deferred: boolean } => {
   if (!isKnownKind(change.kind)) return { accepted: null, deferred: true };
+  const authored = change.kind === "vault" ? vaultAuthored(change) : change;
   const known = FIELD_CODECS[change.kind];
-  const keep = Object.keys(change.fields).filter((key) => {
+  const keys = Object.keys(authored.fields);
+  const keep = keys.filter((key) => {
     const fieldCodec = known.get(key);
-    return fieldCodec === undefined || Option.isSome(fieldCodec.decode(change.fields[key]));
+    return fieldCodec === undefined || Option.isSome(fieldCodec.decode(authored.fields[key]));
   });
-  const deferred = keep.length !== Object.keys(change.fields).length;
-  const fields = Object.fromEntries(keep.map((key) => [key, change.fields[key]!]));
-  const clocks = Object.fromEntries(keep.map((key) => [key, change.clocks[key]!]));
+  const deferred = keep.length !== keys.length;
+  const fields = Object.fromEntries(keep.map((key) => [key, authored.fields[key]!]));
+  const clocks = Object.fromEntries(keep.map((key) => [key, authored.clocks[key]!]));
   const accepted =
-    keep.length === 0 && change.tombstone === null
+    keep.length === 0 && authored.tombstone === null
       ? null
-      : { ...change, kind: change.kind, fields, clocks };
+      : { ...authored, kind: change.kind, fields, clocks };
   return { accepted, deferred };
 };
 
@@ -260,6 +313,13 @@ export const validateChange = (change: SharedDocumentChange) =>
     const { accepted, deferred } = splitChange(change);
     const known = FIELD_CODECS[change.kind];
     if (deferred || Object.keys(accepted?.fields ?? {}).some((key) => !known.has(key)))
+      return yield* invalid();
+    // A vault write that splitChange would trim is a bug here, not a peer's forgery.
+    if (
+      change.kind === "vault" &&
+      (change.tombstone !== null ||
+        Object.keys(accepted?.fields ?? {}).length !== Object.keys(change.fields).length)
+    )
       return yield* invalid();
   });
 

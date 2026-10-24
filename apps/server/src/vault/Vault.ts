@@ -124,6 +124,7 @@ interface VaultRow {
   readonly deleted_at: string | null;
   readonly portability: string;
   readonly sync_attachment_json: string | null;
+  readonly sync_extras: string | null;
 }
 
 const FIELD_KEYS = [
@@ -212,6 +213,19 @@ const BodyJson = Schema.fromJsonString(
   Schema.Struct({ nonce: Schema.String, ciphertext: Schema.String }),
 );
 const AttachmentJson = Schema.fromJsonString(Schema.Record(Schema.String, Schema.Json));
+const SyncExtrasJson = Schema.fromJsonString(
+  Schema.Struct({
+    body: Schema.Struct({ nonce: Schema.String, ciphertext: Schema.String }),
+    key: Schema.Struct({
+      environmentId: Schema.String,
+      ephemeralPublicKey: Schema.String,
+      nonce: Schema.String,
+      ciphertext: Schema.String,
+    }),
+  }),
+);
+const encodeSyncExtrasJson = Schema.encodeSync(SyncExtrasJson);
+const decodeSyncExtrasOption = Schema.decodeUnknownOption(SyncExtrasJson);
 const ApprovalActionJson = Schema.fromJsonString(AgentApprovalAction);
 const encodeStoredJson = Schema.encodeSync(StoredFieldsJson);
 const encodeMetadataJson = Schema.encodeSync(MetadataJson);
@@ -347,12 +361,14 @@ export class Vault extends Context.Service<
     readonly recapture: (itemId: string) => Effect.Effect<void, VaultError>;
     /**
      * VaultSync only: store a synced item with this machine's own encryption,
-     * keeping local policy. Returns the name it has here, which differs from
-     * the synced one when that name was taken in the item's scope.
+     * keeping local policy. An item deleted here comes back as a new arrival.
+     * Returns the name it has here, which differs from the synced one when
+     * that name was taken in the item's scope.
      */
     readonly applySynced: (input: {
       readonly itemId: string;
       readonly payload: VaultSyncCapture.VaultSyncPayload;
+      readonly extras: VaultSyncCapture.VaultSyncExtras;
       readonly sourceLabel: string;
     }) => Effect.Effect<string, VaultError>;
     /** VaultSync only: an incoming delete; wipes the ciphertext like `delete`. */
@@ -542,6 +558,50 @@ const make = Effect.gen(function* () {
       return { ciphertext: encodeBodyJson(body), wrappedKeys: encodeWrappedKeysJson([wrapped]) };
     });
 
+  // A synced item's payload keys this build cannot read, encrypted like its
+  // secrets (they may be secrets) under their own data key.
+  const extrasScope = (itemId: string) => `${itemId}#sync-extras`;
+  const encryptExtras = (itemId: string, extras: VaultSyncCapture.VaultSyncExtras | undefined) =>
+    Effect.gen(function* () {
+      if (extras === undefined || Object.keys(extras).length === 0) return null;
+      const pair = yield* keyPair;
+      const dataKey = VaultCrypto.randomDataKey();
+      return encodeSyncExtrasJson({
+        body: VaultCrypto.encryptBody({
+          dataKey,
+          plaintext: encodeAttachmentJson(extras),
+          itemId: extrasScope(itemId),
+        }),
+        key: VaultCrypto.wrapDataKey({
+          recipientPublicKey: pair.publicKey,
+          dataKey,
+          environmentId,
+          itemId: extrasScope(itemId),
+        }),
+      });
+    });
+  const decryptExtras = (row: VaultRow) =>
+    Effect.gen(function* () {
+      if (row.sync_extras === null) return undefined;
+      const sealed = Option.getOrUndefined(decodeSyncExtrasOption(row.sync_extras));
+      if (sealed === undefined || sealed.key.environmentId !== environmentId) return undefined;
+      const pair = yield* keyPair;
+      const plaintext = Option.liftThrowable(() =>
+        VaultCrypto.decryptBody({
+          dataKey: VaultCrypto.unwrapDataKey({
+            wrapped: sealed.key,
+            privateKey: pair.privateKey,
+            itemId: extrasScope(row.id),
+          }),
+          body: sealed.body,
+          itemId: extrasScope(row.id),
+        }),
+      )();
+      return Option.isNone(plaintext)
+        ? undefined
+        : Option.getOrUndefined(decodeAttachmentOption(plaintext.value));
+    });
+
   const audit = (input: {
     itemId: string;
     threadId?: ThreadId | undefined;
@@ -667,7 +727,11 @@ const make = Effect.gen(function* () {
       : Option.getOrUndefined(decodeAttachmentOption(row.sync_attachment_json));
 
   /** What syncs of a row: the sealed payload's content, never policy or usage. */
-  const syncSource = (row: VaultRow, stored: StoredFields): VaultSyncCapture.VaultSyncSource => {
+  const syncSource = (
+    row: VaultRow,
+    stored: StoredFields,
+    extras: VaultSyncCapture.VaultSyncExtras | undefined,
+  ): VaultSyncCapture.VaultSyncSource => {
     const label = parseMetadata(row.metadata_json).label;
     const cardLast4 = cardLast4Of(stored);
     const attachment = attachmentOf(row);
@@ -675,6 +739,7 @@ const make = Effect.gen(function* () {
       id: row.id,
       deleted: false,
       portability: row.portability,
+      extras,
       payload: {
         name: row.name,
         type: row.type as VaultItemType,
@@ -705,7 +770,7 @@ const make = Effect.gen(function* () {
           name: row.name,
           portability: row.portability,
         });
-      yield* capture(syncSource(row, yield* decryptStored(row)));
+      yield* capture(syncSource(row, yield* decryptStored(row), yield* decryptExtras(row)));
     });
 
   const encodeAttachment = (attachment: Readonly<Record<string, Schema.Json>> | null) =>
@@ -935,13 +1000,17 @@ const make = Effect.gen(function* () {
       return { status: "allowed", item, field: input.field, value } as const;
     }).pipe(Effect.mapError(wrap));
 
+  // The contract's item name limit, and the share of it a machine's name may take in a suffix.
   const SYNC_NAME_LIMIT = 200;
-  const applySynced: Vault["Service"]["applySynced"] = ({ itemId, payload, sourceLabel }) =>
+  const SYNC_LABEL_LIMIT = 60;
+  const applySynced: Vault["Service"]["applySynced"] = ({ itemId, payload, extras, sourceLabel }) =>
     Effect.gen(function* () {
-      const existing = (yield* sql<VaultRow>`SELECT * FROM vault_items WHERE id = ${itemId}`)[0];
-      if (existing?.deleted_at) return existing.name;
+      const found = (yield* sql<VaultRow>`SELECT * FROM vault_items WHERE id = ${itemId}`)[0];
+      // An item deleted here and edited elsewhere later arrives again, as new.
+      const existing = found?.deleted_at ? undefined : found;
       const stored = cleanStored(payload.secretFields);
       const encrypted = yield* encryptStored(itemId, stored);
+      const sealedExtras = yield* encryptExtras(itemId, extras);
       const taken = (name: string) =>
         sql<{
           id: string;
@@ -949,11 +1018,15 @@ const make = Effect.gen(function* () {
           Effect.map((rows) => rows.length > 0),
         );
       // Two machines can each have an item with this name; the arrival is renamed here.
+      const label =
+        sourceLabel.length > SYNC_LABEL_LIMIT
+          ? `${sourceLabel.slice(0, SYNC_LABEL_LIMIT - 1).trimEnd()}…`
+          : sourceLabel;
       const withSuffix = (suffix: string) =>
         `${payload.name.slice(0, SYNC_NAME_LIMIT - suffix.length).trimEnd()}${suffix}`;
       let name: string = payload.name;
-      if (yield* taken(name)) name = withSuffix(` (from ${sourceLabel})`);
-      if (yield* taken(name)) name = withSuffix(` (from ${sourceLabel}, ${itemId.slice(-6)})`);
+      if (yield* taken(name)) name = withSuffix(` (from ${label})`);
+      if (yield* taken(name)) name = withSuffix(` (from ${label}, ${itemId.slice(-6)})`);
       const metadata = encodeMetadataJson({
         ...(payload.label ? { label: payload.label } : {}),
         fields: fieldsOf(stored),
@@ -966,10 +1039,13 @@ const make = Effect.gen(function* () {
         const secretsChanged =
           Option.isNone(previous) || encodeStoredJson(previous.value) !== encodeStoredJson(stored);
         // Local policy, approvals and portability stay as they are.
-        yield* sql`UPDATE vault_items SET name = ${name}, type = ${payload.type}, scope_project_id = ${payload.scopeProjectId}, metadata_json = ${metadata}, allowed_domains_json = ${domains}, ciphertext = ${encrypted.ciphertext}, wrapped_keys_json = ${encrypted.wrappedKeys}, credential_revision = credential_revision + ${secretsChanged ? 1 : 0}, sync_attachment_json = ${attachment}, created_at = ${payload.createdAt}, updated_at = ${payload.updatedAt} WHERE id = ${itemId} AND deleted_at IS NULL`;
+        yield* sql`UPDATE vault_items SET name = ${name}, type = ${payload.type}, scope_project_id = ${payload.scopeProjectId}, metadata_json = ${metadata}, allowed_domains_json = ${domains}, ciphertext = ${encrypted.ciphertext}, wrapped_keys_json = ${encrypted.wrappedKeys}, credential_revision = credential_revision + ${secretsChanged ? 1 : 0}, sync_attachment_json = ${attachment}, sync_extras = ${sealedExtras}, created_at = ${payload.createdAt}, updated_at = ${payload.updatedAt} WHERE id = ${itemId} AND deleted_at IS NULL`;
+      } else if (found) {
+        // Back from a local delete: like a first arrival, it asks before any agent uses it.
+        yield* sql`UPDATE vault_items SET name = ${name}, type = ${payload.type}, scope_project_id = ${payload.scopeProjectId}, metadata_json = ${metadata}, policy_json = ${encodePolicyJson(defaultVaultPolicy)}, allowed_domains_json = ${domains}, ciphertext = ${encrypted.ciphertext}, wrapped_keys_json = ${encrypted.wrappedKeys}, credential_revision = credential_revision + 1, sync_attachment_json = ${attachment}, sync_extras = ${sealedExtras}, created_at = ${payload.createdAt}, updated_at = ${payload.updatedAt}, deleted_at = NULL WHERE id = ${itemId}`;
       } else {
         // A first arrival asks before any agent here may use it.
-        yield* sql`INSERT INTO vault_items(id, name, type, scope_project_id, metadata_json, policy_json, allowed_domains_json, ciphertext, wrapped_keys_json, created_at, updated_at, sync_attachment_json) VALUES (${itemId}, ${name}, ${payload.type}, ${payload.scopeProjectId}, ${metadata}, ${encodePolicyJson(defaultVaultPolicy)}, ${domains}, ${encrypted.ciphertext}, ${encrypted.wrappedKeys}, ${payload.createdAt}, ${payload.updatedAt}, ${attachment})`;
+        yield* sql`INSERT INTO vault_items(id, name, type, scope_project_id, metadata_json, policy_json, allowed_domains_json, ciphertext, wrapped_keys_json, created_at, updated_at, sync_attachment_json, sync_extras) VALUES (${itemId}, ${name}, ${payload.type}, ${payload.scopeProjectId}, ${metadata}, ${encodePolicyJson(defaultVaultPolicy)}, ${domains}, ${encrypted.ciphertext}, ${encrypted.wrappedKeys}, ${payload.createdAt}, ${payload.updatedAt}, ${attachment}, ${sealedExtras})`;
       }
       yield* invalidateScrubCache;
       yield* PubSub.publish(syncedChanges, { itemId, removed: false });
@@ -983,7 +1059,7 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const at = yield* now;
       const removed =
-        yield* sql`UPDATE vault_items SET deleted_at = ${at}, ciphertext = '', wrapped_keys_json = '[]', updated_at = ${at} WHERE id = ${itemId} AND deleted_at IS NULL RETURNING id`;
+        yield* sql`UPDATE vault_items SET deleted_at = ${at}, ciphertext = '', wrapped_keys_json = '[]', sync_extras = NULL, updated_at = ${at} WHERE id = ${itemId} AND deleted_at IS NULL RETURNING id`;
       yield* invalidateScrubCache;
       if (removed.length > 0) yield* PubSub.publish(syncedChanges, { itemId, removed: true });
     }).pipe(
@@ -1039,7 +1115,7 @@ const make = Effect.gen(function* () {
           const deleted = yield* sql<{
             name: string;
             portability: string;
-          }>`UPDATE vault_items SET deleted_at = ${at}, ciphertext = '', wrapped_keys_json = '[]', updated_at = ${at} WHERE id = ${input.id} AND deleted_at IS NULL RETURNING name, portability`;
+          }>`UPDATE vault_items SET deleted_at = ${at}, ciphertext = '', wrapped_keys_json = '[]', sync_extras = NULL, updated_at = ${at} WHERE id = ${input.id} AND deleted_at IS NULL RETURNING name, portability`;
           if (deleted[0])
             yield* capture({
               id: input.id,

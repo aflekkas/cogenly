@@ -1,11 +1,13 @@
 /**
  * Vault replication between directly paired machines. The owner shares this
- * vault with a peer explicitly (`setPeerSharing`); a machine reads an item only
- * through a wrap made by itself or by a peer it shares with. Incoming
- * documents project into `vault_items` here, asynchronously, with this
- * machine's own encryption; a holder then forwards the current revision to
- * its other share peers. Transports call these methods; agents have no tool
- * that authorizes a new holder. See docs/internals/vault-sync.md.
+ * vault with a peer explicitly (`setPeerSharing`); a peer becomes a holder
+ * once it says over the direct link that it shares back. Revisions are
+ * wrapped only for holders, and a machine reads a revision only through a
+ * wrap made by itself or by a holder. Incoming documents project into
+ * `vault_items` here, asynchronously, with this machine's own encryption; a
+ * holder then forwards the current revision to its other holders. Transports
+ * call these methods; agents have no tool that authorizes a new holder. See
+ * docs/internals/vault-sync.md.
  */
 import {
   type MachineInfo,
@@ -28,7 +30,6 @@ import * as Stream from "effect/Stream";
 
 import * as Machines from "../machines/Machines.ts";
 import * as PeerChannels from "../machines/PeerChannels.ts";
-import { VAULT_WRAP_PREFIX, decodeVaultWrap } from "../sync/documentSchemas.ts";
 import * as SharedState from "../sync/SharedState.ts";
 import * as Vault from "./Vault.ts";
 import * as VaultCrypto from "./VaultCrypto.ts";
@@ -43,11 +44,13 @@ export class VaultSync extends Context.Service<
     readonly setPeerSharing: (
       input: VaultSetPeerSharingInput,
     ) => Effect.Effect<VaultSharingStatus, VaultError>;
+    /** Asks each online direct peer whether it shares back, and records the answer. */
     readonly sharingStatus: Effect.Effect<VaultSharingStatus, VaultError>;
     /**
      * Idempotent. `incoming` projects and forwards what peers sent; `full`
-     * also brings every local item's document up to date, for startup and
-     * after the share list changes.
+     * also captures local items that never synced, for startup and after
+     * the share list changes. Both first ask online share peers whether they
+     * still share back.
      */
     readonly reconcile: (mode: ReconcileMode) => Effect.Effect<void, VaultError>;
     /** Forgets shares whose peer is no longer directly paired under the same pairing. */
@@ -92,18 +95,31 @@ const make = Effect.gen(function* () {
     Effect.mapError(storage),
   );
 
+  // Read on every use of a share, so an expired or revoked pairing ends it
+  // even when no machine list change announces that.
+  yield* capture.bindPairings(
+    directPeers.pipe(
+      Effect.map(
+        (peers) =>
+          new Map(peers.map((peer) => [peer.environmentId as string, pairingKeyOf(peer)] as const)),
+      ),
+    ),
+  );
+
   yield* channels.register(VaultPeerKey, (_, caller) =>
     Effect.gen(function* () {
       const pair = yield* capture.keyPair;
-      const rows =
-        yield* sql`SELECT 1 FROM vault_peer_shares WHERE environment_id = ${caller.environmentId}`;
-      return { publicKey: pair.publicKey, sharing: rows.length > 0 };
+      const shares = yield* capture.shares;
+      return {
+        publicKey: pair.publicKey,
+        sharing: shares.some((share) => share.environmentId === caller.environmentId),
+      };
     }).pipe(Effect.orDie),
   );
 
   const revokeStale: VaultSync["Service"]["revokeStale"] = Effect.gen(function* () {
     const paired = new Map((yield* directPeers).map((m) => [m.environmentId, pairingKeyOf(m)]));
-    for (const share of yield* capture.shares)
+    for (const share of yield* capture.recordedShares)
       if (paired.get(share.environmentId) !== share.pairingKey) {
         // Unpairing on either side, or pairing again, ends sharing. Copies stay.
         yield* sql`DELETE FROM vault_peer_shares WHERE environment_id = ${share.environmentId}`;
@@ -113,6 +129,48 @@ const make = Effect.gen(function* () {
         });
       }
   }).pipe(Effect.mapError(storage), Effect.withSpan("VaultSync.revokeStale"));
+
+  /**
+   * What an online direct peer says now about its key and whether it shares
+   * with this machine. On a share, that answer decides whether the peer is a
+   * holder: nothing is wrapped for it or accepted from it until it says yes,
+   * and a no or a different key stops both.
+   */
+  const ask = (peer: MachineInfo, share: VaultSyncCapture.VaultShare | undefined) =>
+    Effect.gen(function* () {
+      if (!peer.online) return;
+      const reply = yield* machines
+        .call(peer.environmentId, VaultPeerKey, {})
+        .pipe(Effect.timeout("5 seconds"), Effect.option);
+      if (Option.isNone(reply)) return;
+      const keyChanged = share !== undefined && reply.value.publicKey !== share.publicKey;
+      lastSeen.set(peer.environmentId, { sharing: reply.value.sharing, keyChanged });
+      if (share === undefined) return;
+      const peerSharing = reply.value.sharing && !keyChanged;
+      if (peerSharing === share.peerSharing) return;
+      yield* sql`UPDATE vault_peer_shares SET peer_sharing = ${peerSharing ? 1 : 0} WHERE environment_id = ${share.environmentId} AND pairing_key = ${share.pairingKey}`;
+      yield* Effect.logInfo(
+        peerSharing
+          ? "A paired machine now shares its vault back"
+          : "A paired machine no longer shares its vault back",
+        { peer: share.environmentId },
+      );
+    });
+
+  /** Asks online direct peers, those this machine shares with or, for status, all of them. */
+  const refreshPeers = (everyone: boolean) =>
+    Effect.gen(function* () {
+      const peers = yield* directPeers;
+      const shares = yield* capture.shares;
+      yield* Effect.forEach(
+        peers,
+        (peer) => {
+          const share = shares.find((row) => row.environmentId === peer.environmentId);
+          return everyone || share !== undefined ? ask(peer, share) : Effect.void;
+        },
+        { concurrency: "unbounded", discard: true },
+      );
+    });
 
   const appliedRows = sql<AppliedRow>`SELECT * FROM vault_sync_applied`.pipe(
     Effect.map((rows) => new Map(rows.map((row) => [row.item_id, row]))),
@@ -137,6 +195,10 @@ const make = Effect.gen(function* () {
     return documents;
   });
 
+  /**
+   * Brings the local row to the newest revision this machine can read, edit
+   * or delete alike, so every holder ends on the same one.
+   */
   const project = (
     document: SharedDocumentChange,
     applied: AppliedRow | undefined,
@@ -151,45 +213,48 @@ const make = Effect.gen(function* () {
       const machineOnly =
         local !== undefined &&
         effectivePortability({ id: document.id, ...local }, yield* rules).portability === "machine";
-      if (document.tombstone) {
-        if (applied?.state === "deleted") return;
-        if (local && !local.deleted_at && !machineOnly) yield* vault.removeSynced(document.id);
-        yield* markApplied(document.id, null, "deleted", null);
-        return;
-      }
-      if (document.fields.sealed === undefined) return;
-      const digest = VaultCrypto.sealedDigestOf(document.fields.sealed);
-      if (applied?.state === "applied" && applied.sealed_digest === digest) {
-        // Already here; a holder still forwards to share peers that lack it.
-        if (machineOnly) return;
-        if ((yield* capture.missingRecipients(document, digest)).length === 0) return;
-        const opened = yield* capture.open(document);
-        if (opened._tag === "opened") yield* capture.forward(document, opened);
-        return;
-      }
       const opened = yield* capture.open(document);
-      if (opened._tag !== "opened") {
-        if (opened._tag === "waiting")
-          yield* markApplied(document.id, digest, "waiting", applied?.local_name ?? null);
+      if (opened._tag === "missing") return;
+      if (opened._tag === "waiting") {
+        // Nothing here is readable yet. An item already here stays as it is.
+        if (applied === undefined || applied.state === "waiting")
+          yield* markApplied(document.id, null, "waiting", applied?.local_name ?? null);
         return;
       }
-      // A local delete wins (full reconcile tombstones it); a machine-only item
-      // here keeps its local copy and is not forwarded.
-      if (local?.deleted_at || machineOnly) {
-        yield* markApplied(document.id, digest, "applied", applied?.local_name ?? null);
+      const deleted = opened.content._tag === "deleted";
+      if (applied?.sealed_digest === opened.digest && applied.state !== "waiting") {
+        // Already here; a holder still forwards to holders that lack it.
+        if (!machineOnly) yield* capture.forward(document, opened);
         return;
       }
-      const localName = yield* vault.applySynced({
-        itemId: document.id,
-        payload: opened.payload,
-        sourceLabel: labels.get(opened.author) ?? "another machine",
-      });
-      yield* markApplied(
-        document.id,
-        digest,
-        "applied",
-        localName === opened.payload.name ? null : localName,
-      );
+      // A machine-only item here keeps its local copy and is not forwarded.
+      if (machineOnly) {
+        yield* markApplied(
+          document.id,
+          opened.digest,
+          deleted ? "deleted" : "applied",
+          applied?.local_name ?? null,
+        );
+        return;
+      }
+      if (opened.content._tag === "deleted") {
+        if (local && !local.deleted_at) yield* vault.removeSynced(document.id);
+        yield* markApplied(document.id, opened.digest, "deleted", null);
+      } else {
+        const { payload, extras } = opened.content;
+        const localName = yield* vault.applySynced({
+          itemId: document.id,
+          payload,
+          extras,
+          sourceLabel: labels.get(opened.author) ?? "another machine",
+        });
+        yield* markApplied(
+          document.id,
+          opened.digest,
+          "applied",
+          localName === payload.name ? null : localName,
+        );
+      }
       yield* capture.forward(document, opened);
     }).pipe(
       Effect.mapError(storage),
@@ -198,6 +263,8 @@ const make = Effect.gen(function* () {
 
   const reconcileOnce = (mode: ReconcileMode) =>
     Effect.gen(function* () {
+      yield* revokeStale;
+      yield* refreshPeers(false);
       const labels = new Map(
         (yield* topology.pipe(
           Effect.map((view) => view.machines),
@@ -217,23 +284,15 @@ const make = Effect.gen(function* () {
         );
       if (mode === "incoming") return;
       if ((yield* capture.shares).length === 0) return;
-      const after = yield* appliedRows;
-      const byId = new Map(documents.map((document) => [document.id, document]));
+      // Every item with a document was brought up to date and forwarded
+      // above; local edits to it wrote their own revisions. What remains is
+      // items that never synced.
+      const synced = new Set(documents.map((document) => document.id));
       const rows = yield* sql<{
         id: string;
-        deleted_at: string | null;
-      }>`SELECT id, deleted_at FROM vault_items ORDER BY id`;
+      }>`SELECT id FROM vault_items WHERE deleted_at IS NULL ORDER BY id`;
       for (const row of rows) {
-        const document = byId.get(row.id);
-        const live = document !== undefined && document.tombstone === null;
-        const readable =
-          live &&
-          after.get(row.id)?.state === "applied" &&
-          document.fields.sealed !== undefined &&
-          after.get(row.id)?.sealed_digest === VaultCrypto.sealedDigestOf(document.fields.sealed);
-        // Never overwrite a revision this machine cannot read with an older copy.
-        const due = row.deleted_at === null ? document === undefined || readable : live;
-        if (!due) continue;
+        if (synced.has(row.id)) continue;
         yield* vault.recapture(row.id).pipe(
           Effect.catch((error) =>
             Effect.logWarning("Vault sync could not capture an item", {
@@ -249,66 +308,53 @@ const make = Effect.gen(function* () {
     reconcileOnce(mode).pipe(permit.withPermits(1));
 
   const sharingStatus: VaultSync["Service"]["sharingStatus"] = Effect.gen(function* () {
+    yield* refreshPeers(true);
     const peers = yield* directPeers;
     const shares = yield* capture.shares;
-    const documents = (yield* vaultDocuments).filter(
-      (document) => document.tombstone === null && document.fields.sealed !== undefined,
-    );
-    const digests = new Map(
-      documents.map((document) => [
-        document.id,
-        VaultCrypto.sealedDigestOf(document.fields.sealed),
-      ]),
-    );
+    const documents = yield* vaultDocuments;
     const applied = yield* appliedRows;
-    const count = (wanted: AppliedRow["state"]) =>
-      documents.filter((document) => {
-        const row = applied.get(document.id);
-        return row?.state === wanted && row.sealed_digest === digests.get(document.id);
-      }).length;
-    const entries = yield* Effect.forEach(
-      peers,
-      (peer) =>
-        Effect.gen(function* () {
-          const share = shares.find((row) => row.environmentId === peer.environmentId);
-          const remote = peer.online
-            ? yield* machines
-                .call(peer.environmentId, VaultPeerKey, {})
-                .pipe(Effect.timeout("5 seconds"), Effect.option)
-            : Option.none();
-          if (Option.isSome(remote))
-            lastSeen.set(peer.environmentId, {
-              sharing: remote.value.sharing,
-              keyChanged: share !== undefined && remote.value.publicKey !== share.publicKey,
-            });
-          const seen = lastSeen.get(peer.environmentId);
-          const peerSharing = seen?.sharing ?? null;
-          const itemsShared = share
-            ? documents.filter((document) => {
-                const wrap = decodeVaultWrap(
-                  document.fields[`${VAULT_WRAP_PREFIX}${peer.environmentId}`],
-                );
-                return Option.isSome(wrap) && wrap.value.sealedDigest === digests.get(document.id);
-              }).length
-            : 0;
-          return {
-            environmentId: peer.environmentId,
-            label: peer.name,
-            online: peer.online,
-            state: !share
-              ? "not_shared"
-              : seen?.keyChanged
-                ? "key_changed"
-                : peerSharing
-                  ? "shared"
-                  : "waiting_for_peer",
-            peerSharing,
-            itemsShared,
-          } satisfies VaultPeerSharing;
-        }),
-      { concurrency: "unbounded" },
-    );
-    return { peers: entries, itemsShared: count("applied"), itemsWaiting: count("waiting") };
+    // The revision each readable item has here, as projection or capture recorded it.
+    const current = documents.flatMap((document) => {
+      const row = applied.get(document.id);
+      if (row?.state !== "applied") return [];
+      const revision = VaultSyncCapture.revisionsOf(document).find(
+        (candidate) => candidate.digest === row.sealed_digest,
+      );
+      return revision ? [{ document, revision }] : [];
+    });
+    const itemsWaiting = documents.filter(
+      (document) => applied.get(document.id)?.state === "waiting",
+    ).length;
+    const entries = peers.map((peer) => {
+      const share = shares.find((row) => row.environmentId === peer.environmentId);
+      const seen = lastSeen.get(peer.environmentId);
+      // Counted only for a holder, and only through wraps it would accept.
+      const itemsShared = share?.peerSharing
+        ? current.filter(({ document, revision }) =>
+            VaultSyncCapture.hasRevision(
+              document,
+              peer.environmentId,
+              revision,
+              capture.environmentId,
+            ),
+          ).length
+        : 0;
+      return {
+        environmentId: peer.environmentId,
+        label: peer.name,
+        online: peer.online,
+        state: !share
+          ? "not_shared"
+          : seen?.keyChanged
+            ? "key_changed"
+            : share.peerSharing
+              ? "shared"
+              : "waiting_for_peer",
+        peerSharing: share ? share.peerSharing : (seen?.sharing ?? null),
+        itemsShared,
+      } satisfies VaultPeerSharing;
+    });
+    return { peers: entries, itemsShared: current.length, itemsWaiting };
   }).pipe(Effect.mapError(storage), Effect.withSpan("VaultSync.sharingStatus"));
 
   const setPeerSharing: VaultSync["Service"]["setPeerSharing"] = (input) =>
@@ -329,7 +375,7 @@ const make = Effect.gen(function* () {
       );
       if (!VaultCrypto.isX25519PublicKey(reply.publicKey))
         return yield* new VaultError({ reason: "peer_key_invalid" });
-      const existing = (yield* capture.shares).find(
+      const existing = (yield* capture.recordedShares).find(
         (share) => share.environmentId === peer.environmentId,
       );
       if (existing) {
@@ -341,10 +387,12 @@ const make = Effect.gen(function* () {
           });
           return yield* new VaultError({ reason: "peer_key_changed" });
         }
+        yield* ask(peer, existing);
+        yield* reconcile("full");
         return yield* sharingStatus;
       }
       const at = DateTime.formatIso(yield* DateTime.now);
-      yield* sql`INSERT INTO vault_peer_shares(environment_id, public_key, pairing_key, authorized_at) VALUES (${peer.environmentId}, ${reply.publicKey}, ${pairingKeyOf(peer)}, ${at})`;
+      yield* sql`INSERT INTO vault_peer_shares(environment_id, public_key, pairing_key, authorized_at, peer_sharing) VALUES (${peer.environmentId}, ${reply.publicKey}, ${pairingKeyOf(peer)}, ${at}, ${reply.sharing ? 1 : 0})`;
       lastSeen.set(peer.environmentId, { sharing: reply.sharing, keyChanged: false });
       yield* reconcile("full");
       return yield* sharingStatus;
@@ -359,9 +407,10 @@ const make = Effect.gen(function* () {
     effect.pipe(
       Effect.catch((error) => Effect.logWarning("Vault sync deferred", { reason: error.reason })),
     );
-  yield* logged(revokeStale.pipe(Effect.andThen(reconcile("full"))));
+  yield* logged(reconcile("full"));
+  // A pairing, presence or session change can end a share or make a peer a holder.
   yield* machines.subscribe.pipe(
-    Stream.runForEach(() => logged(revokeStale)),
+    Stream.runForEach(() => logged(reconcile("incoming"))),
     Effect.catch((error) => Effect.logWarning("Vault sync stopped watching machines", { error })),
     Effect.forkScoped,
   );

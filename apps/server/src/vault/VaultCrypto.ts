@@ -147,32 +147,40 @@ export const decryptBody = (input: {
     "utf8",
   );
 
-/** True for a base64 SPKI DER X25519 public key, the only kind a vault peer may pin. */
+/**
+ * True for a base64 SPKI DER X25519 public key that a key exchange accepts,
+ * the only kind a vault peer may pin. A low-order point parses as X25519 but
+ * yields no shared secret, which would fail every later wrap for that peer.
+ */
 export const isX25519PublicKey = (encoded: string): boolean => {
   try {
-    return keyObjectFromRaw(encoded, "public").asymmetricKeyType === "x25519";
+    const key = keyObjectFromRaw(encoded, "public");
+    if (key.asymmetricKeyType !== "x25519") return false;
+    const trial = NodeCrypto.generateKeyPairSync("x25519");
+    return NodeCrypto.diffieHellman({ privateKey: trial.privateKey, publicKey: key }).some(
+      (byte) => byte !== 0,
+    );
   } catch {
     return false;
   }
 };
 
 /**
- * Synced vault documents (docs/internals/vault-sync.md). `sealed` is the item
- * payload under a fresh data key per revision; its AAD binds the field clock
- * SharedState assigned, so a relay cannot replay an old value under a newer
- * clock. Each recipient gets its own `wrap:<id>` field holding that data key.
+ * Synced vault documents (docs/internals/vault-sync.md). `sealed:<author>` is
+ * that author's newest revision of the item payload under a fresh data key;
+ * its AAD binds the item, the author and the field clock SharedState
+ * assigned, so a relay cannot replay an old value under a newer clock or
+ * another author. `wrap:<recipient>:<by>` holds that data key for one
+ * recipient, made by one holder.
  */
 export interface VaultSealed {
   readonly v: 1;
-  readonly author: string;
   readonly nonce: string;
   readonly ciphertext: string;
 }
 
 export interface VaultWrap {
   readonly v: 1;
-  /** The holder that made this wrap; the recipient checks it against a key it trusts. */
-  readonly by: string;
   readonly sealedDigest: string;
   readonly ephemeralPublicKey: string;
   readonly nonce: string;
@@ -189,13 +197,36 @@ const sealedAad = (itemId: string, author: string, clock: VaultSealClock) =>
   Buffer.from(
     canonicalPeerJson({
       domain: "cogenly-vault-sealed",
-      v: 1,
+      v: 2,
       itemId,
       author,
       clock: { wall: clock.wall, logical: clock.logical, node: clock.node },
     }),
     "utf8",
   );
+
+/**
+ * Sealed plaintexts are padded to a power of two, at least this long, so a
+ * relay learns a size bucket rather than the length of a secret.
+ */
+export const VAULT_PADDED_MINIMUM = 512;
+
+const pad = (plaintext: string): Buffer => {
+  const body = Buffer.from(plaintext, "utf8");
+  let size = VAULT_PADDED_MINIMUM;
+  while (size < body.length + 4) size *= 2;
+  const padded = Buffer.alloc(size);
+  padded.writeUInt32BE(body.length, 0);
+  body.copy(padded, 4);
+  return padded;
+};
+
+const unpad = (padded: Buffer): string => {
+  if (padded.length < 4) throw new Error("Sealed payload is too short.");
+  const length = padded.readUInt32BE(0);
+  if (length > padded.length - 4) throw new Error("Sealed payload length is out of range.");
+  return padded.subarray(4, 4 + length).toString("utf8");
+};
 
 export const sealVaultPayload = (input: {
   readonly dataKey: Uint8Array;
@@ -206,34 +237,63 @@ export const sealVaultPayload = (input: {
 }): VaultSealed => {
   const body = aesGcmEncrypt(
     Buffer.from(input.dataKey),
-    Buffer.from(input.plaintext, "utf8"),
+    pad(input.plaintext),
     sealedAad(input.itemId, input.author, input.clock),
   );
-  return { v: 1, author: input.author, nonce: body.nonce, ciphertext: body.ciphertext };
+  return { v: 1, nonce: body.nonce, ciphertext: body.ciphertext };
 };
 
-/** Throws unless `sealed` was made for this item, by its author, at exactly `clock`. */
+/** Throws unless `sealed` was made for this item, by `author`, at exactly `clock`. */
 export const openVaultPayload = (input: {
   readonly dataKey: Uint8Array;
   readonly sealed: VaultSealed;
   readonly itemId: string;
+  readonly author: string;
   readonly clock: VaultSealClock;
 }): string =>
-  aesGcmDecrypt(
-    Buffer.from(input.dataKey),
-    { nonce: input.sealed.nonce, ciphertext: input.sealed.ciphertext },
-    sealedAad(input.itemId, input.sealed.author, input.clock),
-  ).toString("utf8");
+  unpad(
+    aesGcmDecrypt(
+      Buffer.from(input.dataKey),
+      { nonce: input.sealed.nonce, ciphertext: input.sealed.ciphertext },
+      sealedAad(input.itemId, input.author, input.clock),
+    ),
+  );
 
-/** What a wrap commits to; covers every key of the stored value, newer ones included. */
-export const sealedDigestOf = (sealed: unknown): string => peerDigest(canonicalPeerJson(sealed));
+/**
+ * What a wrap commits to: one author's revision. Covers every key of the
+ * stored value, newer ones included.
+ */
+export const sealedDigestOf = (author: string, sealed: unknown): string =>
+  peerDigest(canonicalPeerJson({ author, sealed }));
 
-const wrapInfo = (itemId: string, by: string, recipient: string) =>
-  canonicalPeerJson({ domain: "cogenly-vault-wrap", v: 2, itemId, by, recipient });
+/** A key re-encoded from its parsed form, so equal keys bind equal bytes. */
+const canonicalPublicKey = (key: NodeCrypto.KeyObject) => encodeKeyObject(key, "public");
+
+const wrapInfo = (input: {
+  readonly itemId: string;
+  readonly by: string;
+  readonly recipient: string;
+  readonly sealedDigest: string;
+  readonly ephemeralPublicKey: NodeCrypto.KeyObject;
+  readonly senderPublicKey: NodeCrypto.KeyObject;
+  readonly recipientPublicKey: NodeCrypto.KeyObject;
+}) =>
+  canonicalPeerJson({
+    domain: "cogenly-vault-wrap",
+    v: 3,
+    itemId: input.itemId,
+    by: input.by,
+    recipient: input.recipient,
+    sealedDigest: input.sealedDigest,
+    ephemeralPublicKey: canonicalPublicKey(input.ephemeralPublicKey),
+    senderPublicKey: canonicalPublicKey(input.senderPublicKey),
+    recipientPublicKey: canonicalPublicKey(input.recipientPublicKey),
+  });
 
 /**
  * Authenticated wrap: the key mixes an ephemeral DH with the sender's static
  * DH, so only a holder of `by`'s private key can produce one that verifies.
+ * The info, also the AAD, binds all three public keys and both identities.
  */
 const deriveAuthenticatedWrapKey = (
   ephemeralShared: Buffer,
@@ -254,30 +314,34 @@ const deriveAuthenticatedWrapKey = (
 export const wrapVaultDataKey = (input: {
   readonly dataKey: Uint8Array;
   readonly itemId: string;
-  readonly sealed: VaultSealed;
+  readonly sealedDigest: string;
   readonly by: string;
   readonly senderPrivateKey: string;
   readonly recipient: string;
   readonly recipientPublicKey: string;
 }): VaultWrap => {
   const recipientKey = keyObjectFromRaw(input.recipientPublicKey, "public");
+  const senderKey = keyObjectFromRaw(input.senderPrivateKey, "private");
   const ephemeral = NodeCrypto.generateKeyPairSync("x25519");
-  const sealedDigest = sealedDigestOf(input.sealed);
-  const info = wrapInfo(input.itemId, input.by, input.recipient);
+  const info = wrapInfo({
+    itemId: input.itemId,
+    by: input.by,
+    recipient: input.recipient,
+    sealedDigest: input.sealedDigest,
+    ephemeralPublicKey: ephemeral.publicKey,
+    senderPublicKey: NodeCrypto.createPublicKey(senderKey),
+    recipientPublicKey: recipientKey,
+  });
   const wrapKey = deriveAuthenticatedWrapKey(
     NodeCrypto.diffieHellman({ privateKey: ephemeral.privateKey, publicKey: recipientKey }),
-    NodeCrypto.diffieHellman({
-      privateKey: keyObjectFromRaw(input.senderPrivateKey, "private"),
-      publicKey: recipientKey,
-    }),
-    sealedDigest,
+    NodeCrypto.diffieHellman({ privateKey: senderKey, publicKey: recipientKey }),
+    input.sealedDigest,
     info,
   );
   const encrypted = aesGcmEncrypt(wrapKey, Buffer.from(input.dataKey), Buffer.from(info, "utf8"));
   return {
     v: 1,
-    by: input.by,
-    sealedDigest,
+    sealedDigest: input.sealedDigest,
     ephemeralPublicKey: encodeKeyObject(ephemeral.publicKey, "public"),
     nonce: encrypted.nonce,
     ciphertext: encrypted.ciphertext,
@@ -285,31 +349,36 @@ export const wrapVaultDataKey = (input: {
 };
 
 /**
- * Throws unless the wrap was made for `recipient` by the holder of
- * `senderPublicKey`, over exactly this `sealed` value.
+ * Throws unless the wrap was made for `recipient` by `by`, the holder of
+ * `senderPublicKey`, over exactly the revision with `sealedDigest`.
  */
 export const unwrapVaultDataKey = (input: {
   readonly wrap: VaultWrap;
   readonly itemId: string;
-  readonly sealed: VaultSealed;
+  readonly sealedDigest: string;
+  readonly by: string;
+  readonly senderPublicKey: string;
   readonly recipient: string;
   readonly recipientPrivateKey: string;
-  readonly senderPublicKey: string;
 }): Uint8Array => {
-  const sealedDigest = sealedDigestOf(input.sealed);
-  if (input.wrap.sealedDigest !== sealedDigest) throw new Error("Wrap is for another revision.");
+  if (input.wrap.sealedDigest !== input.sealedDigest)
+    throw new Error("Wrap is for another revision.");
   const privateKey = keyObjectFromRaw(input.recipientPrivateKey, "private");
-  const info = wrapInfo(input.itemId, input.wrap.by, input.recipient);
+  const ephemeralKey = keyObjectFromRaw(input.wrap.ephemeralPublicKey, "public");
+  const senderKey = keyObjectFromRaw(input.senderPublicKey, "public");
+  const info = wrapInfo({
+    itemId: input.itemId,
+    by: input.by,
+    recipient: input.recipient,
+    sealedDigest: input.sealedDigest,
+    ephemeralPublicKey: ephemeralKey,
+    senderPublicKey: senderKey,
+    recipientPublicKey: NodeCrypto.createPublicKey(privateKey),
+  });
   const wrapKey = deriveAuthenticatedWrapKey(
-    NodeCrypto.diffieHellman({
-      privateKey,
-      publicKey: keyObjectFromRaw(input.wrap.ephemeralPublicKey, "public"),
-    }),
-    NodeCrypto.diffieHellman({
-      privateKey,
-      publicKey: keyObjectFromRaw(input.senderPublicKey, "public"),
-    }),
-    sealedDigest,
+    NodeCrypto.diffieHellman({ privateKey, publicKey: ephemeralKey }),
+    NodeCrypto.diffieHellman({ privateKey, publicKey: senderKey }),
+    input.sealedDigest,
     info,
   );
   const dataKey = aesGcmDecrypt(
