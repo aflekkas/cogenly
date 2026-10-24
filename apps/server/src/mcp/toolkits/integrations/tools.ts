@@ -1,11 +1,11 @@
 import {
+  IntegrationAgentListResult,
+  IntegrationAgentResult,
   IntegrationByNameInput,
   IntegrationCallInput,
   IntegrationCallResult,
   IntegrationAddToolInput,
   IntegrationDeleteResult,
-  IntegrationListResult,
-  IntegrationMutationResult,
   IntegrationRemoveInput,
   IntegrationToolsResult,
   IntegrationUpdateByNameInput,
@@ -33,9 +33,9 @@ export const IntegrationsToolkit = Toolkit.make(
   Tool.make("integrations_list", {
     ...shared,
     parameters: Tool.EmptyParams,
-    success: IntegrationListResult,
+    success: IntegrationAgentListResult,
     description:
-      "List Cogenly-managed integrations connected for this project: name, display name, account label, hint, status (connected, needs_sign_in, error with message) and tool count. One service can be connected several times, e.g. two Slack workspaces; the account label tells them apart. Credentials are never shown.",
+      "List Cogenly-managed integrations connected for this project: name, display name, account label, hint, status (connected, needs_sign_in, error with message) and tool count. An account that isn't usable carries nextStep (what to tell the user, in plain words) and settingsUrl (a link that opens that step in Settings). One service can be connected several times, e.g. two Slack workspaces; the account label tells them apart. Credentials are never shown.",
   })
     .annotate(Tool.Readonly, true)
     .annotate(Tool.Destructive, false),
@@ -61,16 +61,16 @@ export const IntegrationsToolkit = Toolkit.make(
   Tool.make("integration_add", {
     ...shared,
     parameters: IntegrationAddToolInput,
-    success: IntegrationMutationResult,
+    success: IntegrationAgentResult,
     description:
-      'Connect an integration. For a default service pass catalogId: google-workspace (Gmail, Calendar, Drive, Docs, Sheets; needs accountLabel), linear, notion, github, atlassian, intercom (needs region "us" or "eu"), wispr-flow, slack or fathom, plus an accountLabel to tell accounts apart (e.g. "work"). When the result has signIn.authorizationUrl, give that link to the user to open in their browser; after that it keeps working, including for scheduled runs. When something is missing first (a region, apiKey, clientId and clientSecret, or the Google OAuth client), the error says what to collect and how. Secrets are always vault references {{credential:<item>.<field>}} collected with request_secret, never values. On a VPS: set callbackOrigin to its reachable HTTPS origin for any OAuth integration, or ask the user to sign in first through Settings on that address. For any other remote MCP server omit catalogId and pass name, displayName, transport "http", url, headers, scope and hint; set auth {type: "oauth"} for OAuth sign-in (servers without automatic client registration also need auth.clientId and auth.clientSecret). Persistent agents need owner approval first.',
+      'Connect an integration. For a default service pass catalogId: google-workspace (Gmail, Calendar, Drive, Docs; needs accountLabel), slack, github, linear, notion, wispr-flow or fathom, plus an accountLabel to tell accounts apart (e.g. "work"). When the result has signIn.authorizationUrl, give that link to the user to open in their browser; after that it keeps working, including for scheduled runs. When something has to happen first (a key, the user\'s own app, Google\'s OAuth client, or installing uv), the result has nextStep saying exactly what to tell the user and settingsUrl, a link that opens that step in Settings; relay both. Secrets are always vault references {{credential:<item>.<field>}} collected with request_secret and saveToVault, never values in chat. On a VPS: set callbackOrigin to its reachable HTTPS origin for any OAuth integration, or ask the user to sign in first through Settings on that address. For any other remote MCP server omit catalogId and pass name, displayName, transport "http", url, headers, scope and hint; set auth {type: "oauth"} for OAuth sign-in (servers without automatic client registration also need auth.clientId and auth.clientSecret). Persistent agents need owner approval first.',
   }).annotate(Tool.Destructive, false),
   Tool.make("integration_update", {
     ...shared,
     parameters: IntegrationUpdateByNameInput,
-    success: IntegrationMutationResult,
+    success: IntegrationAgentResult,
     description:
-      "Change a connected integration by name: display name, account label, transport, url, headers, auth, enabled, project scope, or hint. Omitted fields are preserved. When the integration needs a (new) sign-in, remote OAuth or a managed Google account, the result includes signIn.authorizationUrl for the user to open; call this with just the name to get a fresh link. Widening project scope needs owner approval. Persistent agents also need approval for URL, transport, header, or auth changes.",
+      "Change a connected integration by name: display name, account label, transport, url, headers, auth, enabled, project scope, or hint. Omitted fields are preserved. When the integration needs a (new) sign-in, remote OAuth or a managed Google account, the result includes signIn.authorizationUrl for the user to open; call this with just the name to get a fresh link. When something else blocks it, the result has nextStep and settingsUrl, as for integration_add. Widening project scope needs owner approval. Persistent agents also need approval for URL, transport, header, or auth changes.",
   }).annotate(Tool.Destructive, false),
   Tool.make("integration_remove", {
     ...shared,

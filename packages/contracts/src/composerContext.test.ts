@@ -137,6 +137,17 @@ const knownRecords: Record<(typeof COMPOSER_CONTEXT_KINDS)[number], Record<strin
     projectFolderId: "label-1",
     name: "Spawn Partners",
   },
+  integration: {
+    ...base,
+    kind: "integration",
+    label: "Gmail · work",
+    integrationId: "integration:1",
+    name: "google-work",
+    serviceName: "Google Workspace",
+    displayName: "Google",
+    accountLabel: "work",
+    icon: "google-workspace",
+  },
 };
 
 describe("ComposerContextRecord", () => {
@@ -160,6 +171,11 @@ describe("ComposerContextRecord", () => {
       label: "Future",
       payload: { anything: [1, 2, 3] },
     });
+  });
+
+  it("keeps an integration source whose catalog icon was since dropped", () => {
+    const decoded = decodeRecord({ ...knownRecords.integration, icon: "atlassian" });
+    expect(Option.getOrThrow(decoded)).toMatchObject({ kind: "integration", icon: null });
   });
 
   it("does not let a malformed known kind slide through as unknown", () => {

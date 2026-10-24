@@ -1,7 +1,7 @@
 import { useAtomValue } from "@effect/atom-react";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { EnvironmentId, ProjectLabelId, ThreadId } from "@t3tools/contracts";
-import { CheckIcon, FolderIcon, FolderMinusIcon, PlusIcon } from "lucide-react";
+import { FolderIcon, FolderMinusIcon, PlusIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import {
@@ -14,12 +14,18 @@ import {
   Combobox,
   ComboboxEmpty,
   ComboboxItem,
-  ComboboxItemIcon,
   ComboboxList,
   ComboboxPopup,
   ComboboxSearchInput,
   ComboboxTrigger,
 } from "../components/ui/combobox";
+import {
+  SearchListRowCheck,
+  SearchListRowIcon,
+  SearchListRowLabel,
+  SearchListRowText,
+  SearchListRowTrailing,
+} from "../components/ui/search-list";
 import { InlineButton } from "../components/ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 import { type DraftId, useComposerDraftStore } from "../composerDraftStore";
@@ -258,6 +264,10 @@ export function ComposerProjectPicker(props: {
   const triggerLabel = current ? `Project: ${current.label.name}` : "No project";
   const isHero = props.appearance === "hero";
   const inSentence = isHero || isHeadline;
+  const isChosen = (option: ProjectOption) =>
+    option.kind === "project"
+      ? option.id === current?.label.id
+      : option.kind === "none" && current === null;
 
   const picker = (
     <Combobox
@@ -376,37 +386,7 @@ export function ComposerProjectPicker(props: {
               divider={(option.kind === "new" || option.kind === "create") && options.length > 1}
               disabled={busy || (option.kind === "create" && option.name.length > 200)}
             >
-              {option.kind === "project" ? (
-                <>
-                  <ComboboxItemIcon>
-                    <ProjectFolderIcon color={option.color} className="size-4" />
-                  </ComboboxItemIcon>
-                  <span className="min-w-0 flex-1 truncate">{option.name}</span>
-                  {option.id === current?.label.id ? <CheckIcon className="ml-auto" /> : null}
-                </>
-              ) : option.kind === "new" ? (
-                <>
-                  <ComboboxItemIcon>
-                    <PlusIcon />
-                  </ComboboxItemIcon>
-                  <span className="min-w-0 flex-1 truncate">New project…</span>
-                </>
-              ) : option.kind === "none" ? (
-                <>
-                  <ComboboxItemIcon>
-                    <FolderMinusIcon className="text-muted-foreground" />
-                  </ComboboxItemIcon>
-                  <span className="min-w-0 flex-1 truncate">No project</span>
-                  {current === null ? <CheckIcon className="ml-auto" /> : null}
-                </>
-              ) : (
-                <>
-                  <ComboboxItemIcon>
-                    <PlusIcon />
-                  </ComboboxItemIcon>
-                  <span className="min-w-0 flex-1 truncate">New project “{option.name}”…</span>
-                </>
-              )}
+              <ProjectOptionRow option={option} chosen={isChosen(option)} />
             </ComboboxItem>
           )}
         </ComboboxList>
@@ -414,4 +394,37 @@ export function ComposerProjectPicker(props: {
     </Combobox>
   );
   return picker;
+}
+
+function ProjectOptionRow(props: { readonly option: ProjectOption; readonly chosen: boolean }) {
+  const { option } = props;
+  const icon =
+    option.kind === "project" ? (
+      <ProjectFolderIcon color={option.color} className="size-4" />
+    ) : option.kind === "none" ? (
+      <FolderMinusIcon />
+    ) : (
+      <PlusIcon />
+    );
+  const label =
+    option.kind === "project"
+      ? option.name
+      : option.kind === "none"
+        ? "No project"
+        : option.kind === "new"
+          ? "New project…"
+          : `New project “${option.name}”…`;
+  return (
+    <>
+      <SearchListRowIcon>{icon}</SearchListRowIcon>
+      <SearchListRowText>
+        <SearchListRowLabel>{label}</SearchListRowLabel>
+      </SearchListRowText>
+      {props.chosen ? (
+        <SearchListRowTrailing>
+          <SearchListRowCheck />
+        </SearchListRowTrailing>
+      ) : null}
+    </>
+  );
 }

@@ -651,6 +651,14 @@ export const SETTINGS_SEARCH_ITEMS = [
     ],
   },
   {
+    id: "provider-connectors",
+    title: "Use provider connectors too",
+    to: "/settings/integrations",
+    searchTerms: [
+      "claude.ai connectors chatgpt apps codex plugins mcp servers duplicate native gmail slack notion linear",
+    ],
+  },
+  {
     id: "agent-browser-access",
     title: "Agent browser access",
     to: "/settings/integrations",

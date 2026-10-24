@@ -148,7 +148,7 @@ describe("integration_add approval gating", () => {
         .beforeTool(
           scopeFor(true),
           "integration_add",
-          { catalogId: "intercom", region: "eu", accountLabel: "Support" },
+          { catalogId: "linear", accountLabel: "Support" },
           false,
         )
         .pipe(Effect.result);
@@ -160,8 +160,8 @@ describe("integration_add approval gating", () => {
         {
           actionKind: "integration_add",
           payload: expect.objectContaining({
-            name: "intercom-support",
-            url: "https://mcp.eu.intercom.com/mcp",
+            name: "linear-support",
+            url: "https://mcp.linear.app/mcp",
             accountLabel: "Support",
             auth: { type: "oauth" },
           }),
@@ -170,11 +170,11 @@ describe("integration_add approval gating", () => {
 
       // A missing input is the agent's next step, not a proposal.
       const missing = yield* policy
-        .beforeTool(scopeFor(true), "integration_add", { catalogId: "intercom" }, false)
+        .beforeTool(scopeFor(true), "integration_add", { catalogId: "slack" }, false)
         .pipe(Effect.result);
       expect(missing).toMatchObject({
         _tag: "Failure",
-        failure: { code: "invalid_request", message: expect.stringContaining("region") },
+        failure: { code: "invalid_request", message: expect.stringContaining("request_secret") },
       });
       expect(proposals).toHaveLength(1);
     }).pipe(Effect.provide(layer)),

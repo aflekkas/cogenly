@@ -957,6 +957,14 @@ export const ServerSettings = Schema.Struct({
   projectAgentBrowserAccessOverrides: Schema.Record(ProjectId, Schema.Boolean).pipe(
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
+  /**
+   * Off by default: Cogenly integrations are the only source for the services
+   * in the integrations catalog, so provider adapters keep the provider's own
+   * duplicate connectors and MCP servers (claude.ai connectors, ChatGPT apps,
+   * plugin servers) away from agents. On lets those reach agents too. Applies
+   * to provider sessions opened after the change.
+   */
+  useProviderConnectors: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   defaultAutoPull: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   defaultProjectScripts: Schema.Array(ProjectScript).pipe(
     Schema.withDecodingDefault(Effect.succeed([])),
@@ -1192,6 +1200,7 @@ export const UNIVERSAL_SERVER_SETTING_KEYS = [
   "reviewGuidesEnabled",
   "reviewGuideInstructions",
   "pullRequestMergeMethod",
+  "useProviderConnectors",
 ] as const satisfies ReadonlyArray<keyof ServerSettings>;
 export type UniversalServerSettingKey = (typeof UNIVERSAL_SERVER_SETTING_KEYS)[number];
 
@@ -1419,6 +1428,7 @@ export const ServerSettingsPatch = Schema.Struct({
   projectAgentBrowserAccessOverrides: Schema.optionalKey(
     Schema.Record(ProjectId, Schema.NullOr(Schema.Boolean)),
   ),
+  useProviderConnectors: Schema.optionalKey(Schema.Boolean),
   defaultAutoPull: Schema.optionalKey(Schema.Boolean),
   defaultProjectScripts: Schema.optionalKey(Schema.Array(ProjectScript)),
   projectScriptOverrides: Schema.optionalKey(

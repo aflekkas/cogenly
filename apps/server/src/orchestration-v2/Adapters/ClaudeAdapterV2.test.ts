@@ -276,6 +276,62 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
   });
 });
 
+describe("ClaudeAdapterV2 provider connector duplicates", () => {
+  const deniedFor = (useProviderConnectors?: boolean) =>
+    ClaudeAdapterV2.makeClaudeQueryOptions({
+      modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+      nativeThreadId: "connector-thread",
+      resume: false,
+      cwd: "/workspace",
+      settings: AUTO_COMPACT_CLAUDE_SETTINGS,
+      ...(useProviderConnectors === undefined ? {} : { useProviderConnectors }),
+    }).settings as {
+      readonly deniedMcpServers?: ReadonlyArray<Record<string, string>>;
+      readonly autoCompactWindow?: number;
+      readonly showThinkingSummaries?: boolean;
+    };
+
+  it("denies claude.ai connectors and MCP servers the Cogenly catalog covers", () => {
+    const settings = deniedFor();
+    const denied = settings.deniedMcpServers ?? [];
+    for (const entry of [
+      { serverName: "claude.ai Gmail" },
+      { serverName: "claude.ai Google Calendar" },
+      { serverName: "claude.ai Google Drive" },
+      { serverName: "claude.ai Slack" },
+      { serverName: "claude.ai Notion" },
+      { serverName: "claude.ai Wispr Flow" },
+      { serverName: "claude.ai Fathom" },
+      { serverUrl: "https://mcp.linear.app/*" },
+      { serverUrl: "https://mcp.slack.com/*" },
+      { serverUrl: "https://api.fathom.ai/*" },
+    ]) {
+      assert.deepInclude(denied, entry);
+    }
+    // Services the catalog doesn't cover keep their connectors.
+    for (const kept of [
+      "claude.ai Figma",
+      "claude.ai Atlassian",
+      "claude.ai Intercom",
+      "claude.ai Claude Docs",
+      "claude.ai Spawn Partners",
+    ]) {
+      assert.notDeepInclude(denied, { serverName: kept });
+    }
+    assert.notDeepInclude(denied, { serverUrl: "https://mcp.figma.com/*" });
+    assert.notDeepInclude(denied, { serverUrl: "https://mcp.atlassian.com/*" });
+    // The denylist joins the session's other flag settings instead of replacing them.
+    assert.equal(settings.autoCompactWindow, 300_000);
+    assert.equal(settings.showThinkingSummaries, true);
+  });
+
+  it("lets every provider connector through when the user opts in", () => {
+    const settings = deniedFor(true);
+    assert.isUndefined(settings.deniedMcpServers);
+    assert.equal(settings.autoCompactWindow, 300_000);
+  });
+});
+
 describe("ClaudeAdapterV2 MCP query overrides", () => {
   const T3_MCP_SERVERS = {
     cogenly: {

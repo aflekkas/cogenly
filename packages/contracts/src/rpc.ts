@@ -621,6 +621,10 @@ export const WS_METHODS = {
   integrationsBeginSignIn: "integrations.beginSignIn",
   integrationsConnectFromCatalog: "integrations.connectFromCatalog",
   integrationsSubscribe: "integrations.subscribe",
+  integrationsSaveOAuthClient: "integrations.saveOAuthClient",
+  integrationsSaveApiKey: "integrations.saveApiKey",
+  integrationsInstallRuntime: "integrations.installRuntime",
+  integrationsSubscribeSources: "integrations.subscribeSources",
 
   // Machines: this server, its hub, and its paired spokes
   machinesList: "machines.list",
@@ -2217,16 +2221,44 @@ const WsIntegrationsBeginSignInRpc = Rpc.make(WS_METHODS.integrationsBeginSignIn
   success: Integrations.IntegrationSignIn,
   error: Schema.Union([Integrations.IntegrationError, EnvironmentAuthorizationError]),
 });
-/** Connects a default catalog entry; returns the sign-in link when it needs one. */
+/**
+ * Connects a default catalog entry; returns the sign-in link when it needs
+ * one, or the next setup action when something has to happen first.
+ */
 const WsIntegrationsConnectFromCatalogRpc = Rpc.make(WS_METHODS.integrationsConnectFromCatalog, {
   payload: Integrations.IntegrationCatalogConnectInput,
-  success: Integrations.IntegrationMutationResult,
+  success: Integrations.IntegrationConnectResult,
   error: Schema.Union([Integrations.IntegrationError, EnvironmentAuthorizationError]),
 });
 /** The list, then again after every change (including a finished sign-in). */
 const WsIntegrationsSubscribeRpc = Rpc.make(WS_METHODS.integrationsSubscribe, {
   payload: Schema.Struct({}),
   success: Integrations.IntegrationListResult,
+  error: Schema.Union([Integrations.IntegrationError, EnvironmentAuthorizationError]),
+  stream: true,
+});
+/** Stores an app's client secret in the vault, wires the integration to it, and connects. */
+const WsIntegrationsSaveOAuthClientRpc = Rpc.make(WS_METHODS.integrationsSaveOAuthClient, {
+  payload: Integrations.IntegrationSaveOAuthClientInput,
+  success: Integrations.IntegrationConnectResult,
+  error: Schema.Union([Integrations.IntegrationError, EnvironmentAuthorizationError]),
+});
+/** Stores an API key in the vault, wires the integration to it, and connects. */
+const WsIntegrationsSaveApiKeyRpc = Rpc.make(WS_METHODS.integrationsSaveApiKey, {
+  payload: Integrations.IntegrationSaveApiKeyInput,
+  success: Integrations.IntegrationConnectResult,
+  error: Schema.Union([Integrations.IntegrationError, EnvironmentAuthorizationError]),
+});
+/** Installs a program a managed integration runs (uv), with a fixed command. */
+const WsIntegrationsInstallRuntimeRpc = Rpc.make(WS_METHODS.integrationsInstallRuntime, {
+  payload: Integrations.IntegrationInstallRuntimeInput,
+  success: Integrations.IntegrationInstallRuntimeResult,
+  error: Schema.Union([Integrations.IntegrationError, EnvironmentAuthorizationError]),
+});
+/** Connected accounts for the composer's Sources picker, again after every change. */
+const WsIntegrationsSubscribeSourcesRpc = Rpc.make(WS_METHODS.integrationsSubscribeSources, {
+  payload: Schema.Struct({}),
+  success: Integrations.IntegrationSourcesResult,
   error: Schema.Union([Integrations.IntegrationError, EnvironmentAuthorizationError]),
   stream: true,
 });
@@ -2703,6 +2735,10 @@ export const WsRpcGroup = RpcGroup.make(
   WsIntegrationsBeginSignInRpc,
   WsIntegrationsConnectFromCatalogRpc,
   WsIntegrationsSubscribeRpc,
+  WsIntegrationsSaveOAuthClientRpc,
+  WsIntegrationsSaveApiKeyRpc,
+  WsIntegrationsInstallRuntimeRpc,
+  WsIntegrationsSubscribeSourcesRpc,
   WsMachineSecurityStatusRpc,
   WsMachinesListRpc,
   WsMachinesSubscribeRpc,

@@ -110,9 +110,11 @@ import {
   type IntegrationTest,
 } from "./integrationServices.logic";
 import { createIntegrationStatusFade } from "./integrationStatusMotion";
+import { ScopedSwitch } from "./ScopedSwitch";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { SettingsRow, SettingsSection } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
+import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings";
 
 const EMPTY_SUMMARIES: ReadonlyArray<IntegrationSummary> = [];
 const EMPTY_VAULT_ITEMS: ReadonlyArray<VaultItemMetadata> = [];
@@ -265,6 +267,7 @@ export function IntegrationServicesSettings() {
           </CatalogCard>
         </div>
       )}
+      <ProviderConnectorsSettingRow />
       <OverlayPresence when={editor !== null && environmentId !== null ? editor : null}>
         {(open) =>
           environmentId === null ? null : (
@@ -291,6 +294,31 @@ export function IntegrationServicesSettings() {
         }
       </OverlayPresence>
     </SettingsSection>
+  );
+}
+
+/**
+ * Off by default: the catalog above is the only route agents get to its
+ * services, and Claude's and Codex's own connectors for them stay hidden.
+ */
+function ProviderConnectorsSettingRow() {
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
+  return (
+    <SettingsRow
+      serverScoped
+      {...searchableSetting("provider-connectors")}
+      description="Also give agents Claude's and Codex's own connectors for the services above, such as claude.ai Gmail or ChatGPT's Slack app. Off keeps one copy of each service. Applies to new agent sessions."
+      settingKeys={["useProviderConnectors"]}
+      control={
+        <ScopedSwitch
+          settingKeys={["useProviderConnectors"]}
+          checked={settings.useProviderConnectors}
+          onCheckedChange={(checked) => updateSettings({ useProviderConnectors: Boolean(checked) })}
+          aria-label="Use provider connectors too"
+        />
+      }
+    />
   );
 }
 

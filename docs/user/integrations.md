@@ -8,53 +8,60 @@ through Cogenly. Nothing about the providers' own MCP setup changes.
 ## Default integrations
 
 Settings → Integrations opens on the services Cogenly knows how to connect.
-Choose **Connect** on one (or **Add account** for another account of it), fill
-in what it asks for, and sign in. Each account then shows under its service with
-its status and **Sign in**, **Reconnect** and **Remove**. Secrets are picked
-from your vault, so store a key or client secret there first.
+Choose **Connect** on one (or **Add account** for another account of it).
+Services that let Cogenly register itself sign in with one click. The others
+show a short guided setup right on the row: each step links to the exact page
+in the service's console and gives you the values to copy, such as the
+redirect address. Paste the client ID and secret, or the key, into the form at
+the end; Cogenly stores the secret in your vault and never shows it again.
 
-| Service                                                 | What it needs                                                                                 |
-| ------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| Google Workspace (Gmail, Calendar, Drive, Docs, Sheets) | Your own Google OAuth client and uv; see [Connect Google](#connect-google).                   |
-| Linear                                                  | Sign in, or an API key                                                                        |
-| Notion                                                  | Sign in                                                                                       |
-| GitHub                                                  | A personal access token, or an OAuth app you create                                           |
-| Atlassian (Jira, Confluence)                            | Sign in                                                                                       |
-| Intercom                                                | Where your workspace is hosted (US or EU), then sign in or an access token. Mostly read-only. |
-| Wispr Flow                                              | Sign in. Needs Notetaker and Cloud Sync on your Wispr account.                                |
-| Slack                                                   | A Slack app you create; see [Connect Slack](#connect-slack).                                  |
-| Fathom                                                  | Sign in                                                                                       |
-| Figma                                                   | Not available yet: Figma only admits clients it approved.                                     |
+Each account then shows under its service as **Connected**, **Needs sign-in**,
+or an error with what to do about it, such as **Sign in**, **Test again** or
+**Install uv**.
 
-Anything else is a **Custom MCP server** ([below](#connect-one)). GitHub's
-toolsets can be narrowed afterwards by adding an `X-MCP-Toolsets` header in the
-account's **Edit**.
+- **Google Workspace** (Gmail, Calendar, Drive, Docs): your own Google OAuth
+  client, made once in a guided setup; see [Connect Google](#connect-google).
+- **Slack**: a Slack app you create from Cogenly's manifest; see
+  [Connect Slack](#connect-slack).
+- **GitHub**: a personal access token, or your own OAuth app; see
+  [Connect GitHub](#connect-github).
+- **Linear**: sign in, or an API key.
+- **Notion**, **Fathom**: sign in.
+- **Wispr Flow**: sign in. Needs Notetaker and Cloud Sync on your Wispr account.
+
+Anything else, including Jira, Confluence, Intercom or Figma, is a **Custom MCP
+server** ([below](#connect-one)). Accounts you connected from an earlier
+catalog keep working there.
 
 Or ask an agent: "Connect my Linear" or "Connect my work Gmail". It connects
-the service and gives you the sign-in link, or tells you what it needs first,
-such as your region or a key it collects through a private card.
+the service and gives you the sign-in link, or tells you what comes first and
+gives you a link that opens that step in Settings. It can also collect a key or
+client secret itself through a private card.
 
 ### Connect Slack
 
 Slack doesn't let Cogenly register itself, so you create a Slack app once and
-Cogenly signs in through it. Slack needs an HTTPS redirect URL, so open Cogenly
-from its HTTPS address (a VPS, or your tailnet's HTTPS name) while doing this.
+Cogenly signs in through it. Slack needs an HTTPS redirect address, so open
+Cogenly from its HTTPS address (a VPS, or your tailnet's HTTPS name) while
+doing this.
 
-1. In Settings → Integrations, choose **Connect** on Slack and **Copy
-   manifest**. It already contains your redirect URL, the Cogenly address
-   followed by `/oauth/integrations/callback`.
-2. At [api.slack.com/apps](https://api.slack.com/apps), choose **Create New
-   App → From a manifest**, pick your workspace, and paste it.
-3. In the app's **Agents & AI Apps** page, turn on **Model Context Protocol**.
-4. Under **Basic Information**, copy the client ID. Store the client secret as
-   an **API key** vault item allowing `slack.com`.
-5. Back in Cogenly, enter the client ID, pick the secret with the key button,
-   and choose **Connect and sign in**.
+Choose **Connect** on Slack and follow the steps: copy the manifest (it
+already contains your Cogenly address), create an app from it at
+[api.slack.com/apps](https://api.slack.com/apps), turn on **Model Context
+Protocol** on the app's **Agents & AI Apps** page, then paste the app's client
+ID and client secret from **Basic Information**. Cogenly opens Slack's sign-in
+next. For a second workspace, choose **Add account** and do the same there.
 
-For a second workspace, create an app there the same way and choose **Add
-account**.
-An agent can do steps 4 and 5 for you: it collects the secret with
-`request_secret` and calls `integration_add` with `catalogId: "slack"`.
+### Connect GitHub
+
+GitHub doesn't let Cogenly register itself either. The quickest way is a
+[fine-grained personal access token](https://github.com/settings/personal-access-tokens/new)
+with access to the repositories agents should use: paste it when you choose
+**Connect**. To sign in instead, pick **Your OAuth app**, register one at
+[github.com/settings/applications/new](https://github.com/settings/applications/new)
+with the callback address the step shows, and paste its client ID and secret.
+GitHub's toolsets can be narrowed afterwards by adding an `X-MCP-Toolsets`
+header in the account's **Edit**.
 
 ## Connect one
 
@@ -110,13 +117,12 @@ If the service later stops accepting the sign-in (you revoked access, or it
 expired), the integration shows **Needs sign-in**. Choose **Sign in** again;
 **Reconnect** in the menu does the same for a connected one.
 
-Some services don't let Cogenly register itself (Slack: see
-[Connect Slack](#connect-slack)). Create an app with the service, add the
-redirect URL shown in the editor (your Cogenly address followed by
-`/oauth/integrations/callback`), store the app's client secret in your vault,
-and enter the client ID and pick the secret with the key button. The browser
-you sign in with must be able to open that Cogenly address, so sign in from
-the address you normally use to reach Cogenly.
+Some custom servers don't let Cogenly register itself. Create an app with the
+service, add the redirect address shown in the editor (your Cogenly address
+followed by `/oauth/integrations/callback`), store the app's client secret in
+your vault, and enter the client ID and pick the secret with the key button.
+The browser you sign in with must be able to open that Cogenly address, so sign
+in from the address you normally use to reach Cogenly.
 
 Ask an agent to connect one and it replies with a sign-in link for you to open.
 Google accounts ([below](#connect-google)) sign in the same way.
@@ -132,55 +138,47 @@ separately. Google accounts work the same way: "Google · personal" and
 
 ## Connect Google
 
-Connect Gmail, Calendar, Drive, Docs and Sheets with the **Google Workspace**
-preset. Each account is its own integration with an account label, and all of
-them reuse your Google OAuth client.
+Connect Gmail, Calendar, Drive and Docs with the **Google Workspace** entry.
+Each account is its own integration with an account label, and all of them
+use one Google OAuth client of your own, which you make once.
 
-1. Install [uv](https://docs.astral.sh/uv/getting-started/installation/) on the
-   machine running Cogenly (`brew install uv` on a Mac). Cogenly installs and
-   runs its pinned Google server automatically.
-2. In the [Google Cloud console](https://console.cloud.google.com/), create a
-   project. Under **APIs & Services → Library**, enable **Gmail API**, **Google
-   Calendar API**, **Google Drive API**, **Google Docs API** and **Google Sheets
-   API**.
-3. Configure the OAuth consent screen in **Google Auth Platform**. For personal
-   Gmail, choose **External** and publish it as **In production**. The
-   “unverified app” warning is expected for your own client; continue only for
-   the client you created. For a Workspace domain, choose **Internal** in a
-   project belonging to your organization. Your administrator may need to allow
-   the client. For a mix of personal and Workspace accounts, use External; an
-   Internal client only admits members of its organization. Avoid **Testing**:
-   these Workspace permissions make refresh tokens
+Choose **Connect** on Google Workspace and name the account, such as
+"personal". The first time, the row walks you through the client in Google
+Cloud, with a link to each page:
+
+1. Create a project.
+2. Turn on the Gmail, Calendar, Drive, Docs and Sheets APIs.
+3. Set up the consent screen. For personal Gmail, choose **External**; for a
+   Workspace domain, **Internal** in a project of your organization (your
+   administrator may need to allow the client). For a mix, use External.
+4. Under **Audience**, publish the app so it reads **In production**. In
+   **Testing**, Google's refresh tokens
    [expire after seven days](https://developers.google.com/identity/protocols/oauth2#expiration).
-4. Create an OAuth client of type **Web application**. Add this **Authorized
-   redirect URI** for Cogenly running on your Mac:
+   The "unverified app" warning is expected for your own client.
+5. Add the scopes the step lists.
+6. Create an OAuth client of type **Web application** with the exact
+   **Authorized redirect URI** the step shows, your Cogenly address followed
+   by `/oauth/integrations/google/callback`. On a VPS, open Settings from its
+   HTTPS address so that is the address used, and make your proxy forward
+   `/oauth/integrations/google/` to Cogenly.
+7. Paste the client ID and secret into the form.
 
-   `http://localhost:4773/oauth/integrations/google/callback`
+Cogenly saves the client in your vault as `google-oauth-client` and opens
+Google's sign-in. Choose the intended Google account and grant the requested
+permissions. Repeat with **Add account** for each account.
 
-   Use your Cogenly server's port if it differs. For a VPS, use its reachable
-   HTTPS origin instead, for example:
+Cogenly runs Google's server with [uv](https://docs.astral.sh/uv/). If uv is
+missing on the machine running Cogenly, the account shows **Install uv**;
+choose it, or run `brew install uv`, and the account starts without a restart.
 
-   `https://cogenly.example.com/oauth/integrations/google/callback`
-
-   Your proxy must forward `/oauth/integrations/google/` to Cogenly. The URI
-   must match exactly. Download the client's JSON file.
-
-5. Store that JSON as the value of an environment-wide **API key** vault item
-   named `google-oauth-client`, with allowed domain `accounts.google.com`.
-   Ask an agent to collect it privately with `request_secret` and
-   `saveToVault: {name: "google-oauth-client", type: "api_key", domains: ["accounts.google.com"]}`.
-   Paste the JSON into the private card, never chat.
-   Alternatively, create a **Login** item with the same name and domain, using
-   the client ID as its username and the client secret as its password.
-6. Choose **Connect** on Google Workspace in Settings → Integrations and name
-   the account, such as "personal", or ask an agent to "connect my Gmail"
-   (`integration_add` with `catalogId: "google-workspace"`). Connecting from
-   your VPS address uses it as the callback origin; an agent on a VPS also
-   passes `callbackOrigin: "https://cogenly.example.com"`, matching step 4.
-   Open the sign-in link, choose the intended Google account, and grant the
-   requested permissions. Repeat with **Add account** for each account.
-   Google tools may ask for `user_google_email`; give the agent the email
-   address you signed in with.
+An agent can do this too: ask it to "connect my Gmail". It relays the same
+steps with a link to them in Settings, or collects the downloaded client JSON
+through a private card (`request_secret` with
+`saveToVault: {name: "google-oauth-client", type: "api_key", domains: ["accounts.google.com"]}`)
+and connects with `integration_add` and `catalogId: "google-workspace"`. An
+agent on a VPS also passes `callbackOrigin: "https://cogenly.example.com"`.
+Google tools may ask for `user_google_email`; give the agent the email address
+you signed in with.
 
 On a VPS, the callback goes through Cogenly's HTTPS origin to the account's
 private local server; your browser never needs to reach localhost on the VPS.
@@ -208,7 +206,8 @@ integrations are not connected yet:
 Agents discover and use services through three tools, so a new integration
 never adds new tools to every conversation:
 
-- `integrations_list` — what is connected here, with status and tool counts.
+- `integrations_list` — what is connected here, with status and tool counts,
+  and for an account that isn't usable, what to do next and a Settings link.
 - `integration_tools(name)` — one integration's tools and input schemas.
 - `integration_call(name, tool, args)` — call a tool.
 
@@ -218,3 +217,18 @@ They can change or remove only integrations available in their project.
 Widening an integration’s project scope, or pointing one that holds a pasted
 token or vault credential at a new server, requires you to make the change in
 Settings → Integrations.
+
+### Claude and Codex connectors
+
+Claude and Codex bring connectors of their own: claude.ai connectors, ChatGPT
+apps, and MCP servers from plugins or your `~/.claude` and `~/.codex` config.
+For the services in the default catalog, Cogenly turns those copies off in the
+agents it runs, connected in Cogenly or not, so each service shows up once and
+goes through Cogenly integrations. Connectors for services the catalog doesn't
+cover, such as Figma, stay available. Your Claude and Codex config is not
+changed.
+
+To give agents the provider connectors as well, turn on **Use provider
+connectors too** in Settings → Integrations. It applies to agent sessions that
+start after the change. MCP servers that run as a local command, rather than
+at a URL, are never turned off.

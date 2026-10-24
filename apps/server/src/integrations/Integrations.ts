@@ -2,13 +2,23 @@ import {
   Integration,
   IntegrationError,
   IntegrationId,
+  IntegrationSyncedFrom,
+  integrationCatalogEntry,
+  integrationCatalogEntryFor,
   type IntegrationCallResult,
   type IntegrationAddInput,
   type IntegrationCatalogConnectInput,
+  type IntegrationConnectResult,
+  type IntegrationInstallRuntimeResult,
   type IntegrationMutationResult,
   type IntegrationListResult,
   type IntegrationName,
+  type IntegrationRuntime,
+  type IntegrationSaveApiKeyInput,
+  type IntegrationSaveOAuthClientInput,
   type IntegrationSignIn,
+  type IntegrationSource,
+  type IntegrationSourcesResult,
   type IntegrationSummary,
   type IntegrationTestResult,
   type IntegrationToolsResult,
@@ -34,8 +44,10 @@ import * as SqlClient from "effect/sql/SqlClient";
 import { redactUpstream, toolErrorMessage, upstreamErrorMessage } from "./UpstreamResult.ts";
 import { selectCallbackOrigin, type SignInOrigin } from "./SignInOrigin.ts";
 import { redactValue } from "../vault/VaultRedactor.ts";
-import { resolveCatalogConnect } from "./IntegrationCatalog.ts";
+import { catalogIntegrationName, resolveCatalogConnect } from "./IntegrationCatalog.ts";
 import * as Credentials from "./IntegrationCredentials.ts";
+import { GOOGLE_CLIENT_ITEM, catalogSetupFor, setupActionFor } from "./IntegrationSetup.ts";
+import * as Installer from "./local/RuntimeInstaller.ts";
 import * as OAuth from "./IntegrationOAuth.ts";
 import * as Tokens from "./IntegrationTokens.ts";
 import * as Local from "./local/LocalIntegrations.ts";
@@ -61,6 +73,8 @@ const StoredIntegration = Schema.Struct({
   ...Integration.fields,
   oauthState: Schema.optional(OAuthState),
   browserOrigin: Schema.optional(Schema.String),
+  /** Set by machine sync on a definition another machine signed in to. */
+  syncedFrom: Schema.optional(IntegrationSyncedFrom),
 });
 type StoredIntegration = typeof StoredIntegration.Type;
 
@@ -129,7 +143,12 @@ export const redactHeaders = (headers: Readonly<Record<string, string>>): Record
 
 /** What leaves the service: masked headers and no OAuth state. */
 const redactIntegration = (integration: Integration | StoredIntegration): Integration => {
-  const { oauthState: _, browserOrigin: _origin, ...rest } = integration as StoredIntegration;
+  const {
+    oauthState: _,
+    browserOrigin: _origin,
+    syncedFrom: _synced,
+    ...rest
+  } = integration as StoredIntegration;
   return { ...rest, headers: redactHeaders(integration.headers) };
 };
 
@@ -365,17 +384,77 @@ export class Integrations extends Context.Service<
     ) => Effect.Effect<{ integration: Integration }, IntegrationError>;
     /**
      * Connects a default catalog entry (a remote service or the Google preset)
-     * under an unused name, and starts its sign-in when it has one. A sign-in
-     * that cannot start leaves the integration saved without a link; it then
-     * reads "Needs sign-in" with the reason. A request missing an input fails
-     * `invalid_request` with the next step as its cause.
+     * under an unused name, and starts its sign-in when it has one. When a key,
+     * the owner's app or Google's client is missing, nothing is created and the
+     * result is the setup action instead. A sign-in that cannot start leaves
+     * the integration saved, with the action that unblocks it. Any other
+     * missing input fails `invalid_request` with the next step as its cause.
      */
     readonly connectFromCatalog: (
       input: IntegrationCatalogConnectInput,
       options: IntegrationWriteOptions & { readonly origin: SignInOrigin },
-    ) => Effect.Effect<IntegrationMutationResult, IntegrationError>;
+    ) => Effect.Effect<IntegrationConnectResult, IntegrationError>;
+    /**
+     * An account's sign-in link when it needs one and one can start, otherwise
+     * the action that unblocks it (a missing runtime, client or key). Agents
+     * get links only for accounts that never signed in.
+     */
+    readonly prepareSignIn: (
+      id: IntegrationId,
+      origin: SignInOrigin,
+    ) => Effect.Effect<IntegrationConnectResult, IntegrationError>;
+    /**
+     * Stores an app's client secret in the vault (Google's shared client as
+     * `google-oauth-client`, any other as `<name>-client-secret`), points the
+     * account at it, and connects or signs in. The secret never leaves the vault.
+     */
+    readonly saveOAuthClient: (
+      input: IntegrationSaveOAuthClientInput,
+      options: { readonly origin: SignInOrigin },
+    ) => Effect.Effect<IntegrationConnectResult, IntegrationError>;
+    /** Stores an API key as `<name>-api-key` and sends it as the account's bearer token. */
+    readonly saveApiKey: (
+      input: IntegrationSaveApiKeyInput,
+      options: { readonly origin: SignInOrigin },
+    ) => Effect.Effect<IntegrationConnectResult, IntegrationError>;
+    /** Installs a runtime a managed account needs; accounts waiting on it start on the next list. */
+    readonly installRuntime: (
+      runtime: IntegrationRuntime,
+    ) => Effect.Effect<IntegrationInstallRuntimeResult, IntegrationError>;
+    /** Enabled accounts for the composer's Sources picker, again whenever one changes. */
+    readonly subscribeSources: () => Stream.Stream<IntegrationSourcesResult, IntegrationError>;
   }
 >()("cogenly-server/integrations/Integrations") {}
+
+/** One account as the Sources picker shows it; not yet usable reads as needs sign-in or error. */
+export const integrationSource = (summary: IntegrationSummary): IntegrationSource => {
+  const { integration } = summary;
+  const entry = integrationCatalogEntryFor(integration);
+  const status =
+    summary.status === "needs_sign_in"
+      ? ("needs_sign_in" as const)
+      : summary.status === "error" || summary.status === "disconnected"
+        ? ("error" as const)
+        : ("connected" as const);
+  const message = status === "connected" ? undefined : (summary.message ?? summary.setup?.title);
+  return {
+    id: integration.id,
+    name: integration.name,
+    displayName: integration.displayName,
+    icon: entry?.icon ?? null,
+    serviceName: entry?.name ?? integration.displayName,
+    accountLabel: integration.accountLabel?.trim() || null,
+    status,
+    ...(message === undefined ? {} : { message }),
+    scope: integration.scope,
+    ...(summary.syncedFrom === undefined ? {} : { syncedFrom: summary.syncedFrom }),
+  };
+};
+
+const remoteRedirectUri = (origin: string | undefined) => {
+  const parsed = origin === undefined ? null : URL.parse(origin);
+  return parsed === null ? undefined : `${parsed.origin}${OAuth.CALLBACK_PATH}`;
+};
 
 const RpcEnvelope = {
   jsonrpc: Schema.Literal("2.0"),
@@ -447,6 +526,9 @@ const make = (options: IntegrationsOptions = {}) =>
     const tokenStore = yield* Tokens.IntegrationTokens;
     const protocol = yield* OAuth.make;
     const local = yield* Effect.serviceOption(Local.LocalIntegrations);
+    // Settings' secret forms and the uv installer; absent in suites that do not use them.
+    const secretWriter = yield* Effect.serviceOption(Credentials.IntegrationSecrets);
+    const installer = yield* Effect.serviceOption(Installer.RuntimeInstaller);
     const endpointPolicy = yield* IntegrationEndpointPolicy;
     const ttlMs = options.toolCacheTtlMs ?? DEFAULT_TOOL_CACHE_TTL_MS;
     const timeoutMs = options.upstreamTimeoutMs ?? DEFAULT_UPSTREAM_TIMEOUT_MS;
@@ -463,6 +545,7 @@ const make = (options: IntegrationsOptions = {}) =>
           readonly updatedAt: string;
           readonly ok: boolean;
           readonly message?: string;
+          readonly reason?: IntegrationError["reason"];
           readonly checkedAt: string;
         }
       >(),
@@ -583,6 +666,42 @@ const make = (options: IntegrationsOptions = {}) =>
         return { process, status };
       });
 
+    const runtimePlan = (
+      runtime: IntegrationRuntime,
+    ): Effect.Effect<{ readonly canInstall: boolean; readonly command: string }> =>
+      Option.isSome(installer)
+        ? installer.value.plan(runtime)
+        : Effect.succeed({ canInstall: false, command: "brew install uv" });
+
+    /** The redirect URI the account's app must accept, when this server knows its address. */
+    const redirectUriFor = (integration: StoredIntegration): Effect.Effect<string | undefined> =>
+      integration.transport === "local"
+        ? Option.isSome(local)
+          ? local.value.redirectUri(integration)
+          : Effect.succeed(undefined)
+        : Effect.succeed(remoteRedirectUri(integration.browserOrigin));
+
+    /** The setup action for an account that is not usable, from its status and last failure. */
+    const setupFor = (
+      integration: StoredIntegration,
+      status: IntegrationSummary["status"],
+      failure: { readonly reason?: IntegrationError["reason"]; readonly message?: string },
+    ) =>
+      Effect.gen(function* () {
+        if (status !== "needs_sign_in" && status !== "error") return undefined;
+        return setupActionFor({
+          entry: integrationCatalogEntryFor(integration),
+          integration,
+          status,
+          reason: failure.reason,
+          message: failure.message,
+          redirectUri: yield* redirectUriFor(integration),
+          runtime:
+            failure.reason === "local_runtime_missing" ? yield* runtimePlan("uv") : undefined,
+          syncedFrom: integration.syncedFrom,
+        });
+      });
+
     const summaries = (
       integrations: ReadonlyArray<StoredIntegration>,
       includeProcessOutput = false,
@@ -618,6 +737,20 @@ const make = (options: IntegrationsOptions = {}) =>
                 integration.transport === "local" && Option.isSome(local)
                   ? yield* local.value.signInProvenance(integration.id)
                   : undefined;
+              const failureReason =
+                managed === undefined
+                  ? failed
+                    ? current?.reason
+                    : undefined
+                  : managed.process.state === "missing_runtime"
+                    ? ("local_runtime_missing" as const)
+                    : managed.status === "error"
+                      ? (managed.process.reason ?? current?.reason)
+                      : undefined;
+              const setup = yield* setupFor(integration, status, {
+                ...(failureReason === undefined ? {} : { reason: failureReason }),
+                ...(message === undefined ? {} : { message }),
+              });
               return {
                 integration: redactIntegration({
                   ...integration,
@@ -628,6 +761,10 @@ const make = (options: IntegrationsOptions = {}) =>
                 status,
                 toolCount: status === "connected" && cached ? cached.result.tools.length : null,
                 ...(message === undefined ? {} : { message }),
+                ...(setup === undefined ? {} : { setup }),
+                ...(integration.syncedFrom === undefined
+                  ? {}
+                  : { syncedFrom: integration.syncedFrom }),
                 ...(current === undefined ? {} : { checkedAt: current.checkedAt as never }),
                 ...(managed === undefined
                   ? {}
@@ -664,6 +801,7 @@ const make = (options: IntegrationsOptions = {}) =>
             updatedAt: integration.updatedAt,
             ok: "ok" in outcome,
             ...(message === undefined ? {} : { message }),
+            ...("ok" in outcome ? {} : { reason: outcome.reason }),
             checkedAt,
           }),
         );
@@ -704,6 +842,7 @@ const make = (options: IntegrationsOptions = {}) =>
             updatedAt: integration.updatedAt,
             ok: false,
             message,
+            reason: "sign_in_required",
             checkedAt,
           }),
         );
@@ -1253,6 +1392,40 @@ const make = (options: IntegrationsOptions = {}) =>
         Effect.forkScoped,
       );
     }
+
+    /** Stores a secret typed into Settings; the failure carries no cause, so no value can leak. */
+    const saveSecret = (
+      input: Credentials.IntegrationSecretInput,
+    ): Effect.Effect<void, IntegrationError> =>
+      Option.isNone(secretWriter)
+        ? Effect.fail(new IntegrationError({ operation: "save secret", reason: "storage" }))
+        : secretWriter.value
+            .save(input)
+            .pipe(
+              Effect.mapError(
+                () => new IntegrationError({ operation: "save secret", reason: "storage" }),
+              ),
+            );
+
+    /** The account a secret form updates, which must belong to that catalog entry. */
+    const targetAccount = (
+      id: IntegrationId | undefined,
+      catalogId: string,
+    ): Effect.Effect<StoredIntegration | undefined, IntegrationError> =>
+      id === undefined
+        ? Effect.succeed(undefined)
+        : getById(id).pipe(
+            Effect.flatMap((current) =>
+              integrationCatalogEntryFor(current)?.id === catalogId
+                ? Effect.succeed(current)
+                : Effect.fail(
+                    new IntegrationError({
+                      operation: "save credentials",
+                      reason: "invalid_request",
+                    }),
+                  ),
+            ),
+          );
 
     const service: Integrations["Service"] = Integrations.of({
       list: (options) =>
@@ -1864,31 +2037,250 @@ const make = (options: IntegrationsOptions = {}) =>
         ),
       connectFromCatalog: (request, options) =>
         Effect.gen(function* () {
+          const entry = integrationCatalogEntry(request.catalogId);
           const resolution = resolveCatalogConnect(request, {
             existingNames: new Set((yield* rows()).map((integration) => integration.name)),
             requestOrigin: options.origin.origin,
             fromAgent: options.origin.fromAgent,
           });
-          if (resolution._tag === "needs")
+          if (resolution._tag === "needs") {
+            // A missing key or app is a guided step, not a failure.
+            const setup =
+              entry === undefined || resolution.mode === undefined
+                ? undefined
+                : catalogSetupFor({
+                    entry,
+                    mode: resolution.mode,
+                    redirectUri: remoteRedirectUri(options.origin.origin),
+                  });
+            if (setup !== undefined) return { setup } satisfies IntegrationConnectResult;
             return yield* new IntegrationError({
               operation: "connect from catalog",
               reason: "invalid_request",
               cause: resolution.message,
             });
-          const { integration } = yield* service.create(resolution.input, {
-            ...options,
-            fromAgent: options.origin.fromAgent,
-            ownerOrigin: options.origin.fromAgent ? undefined : options.origin.origin,
-          });
-          if (!resolution.signsIn) return { integration };
-          const signIn = yield* service
-            .beginSignIn(integration.id, {
-              ...options.origin,
-              callbackOrigin: request.inputs?.callbackOrigin,
+          }
+          const created = yield* service
+            .create(resolution.input, {
+              ...options,
+              fromAgent: options.origin.fromAgent,
+              ownerOrigin: options.origin.fromAgent ? undefined : options.origin.origin,
             })
-            .pipe(Effect.option);
-          return Option.isSome(signIn) ? { integration, signIn: signIn.value } : { integration };
+            .pipe(Effect.result);
+          if (created._tag === "Failure") {
+            const error = created.failure;
+            // No usable Google client yet: nothing is created, and the row shows how to make one.
+            if (
+              entry?.kind === "local-preset" &&
+              (error.reason === "google_client_missing" ||
+                error.reason === "credential_not_allowed" ||
+                error.reason === "credential_unresolved")
+            ) {
+              const setup = setupActionFor({
+                entry,
+                reason: error.reason,
+                redirectUri: Option.isSome(local)
+                  ? yield* local.value.redirectUri(undefined, options.origin)
+                  : undefined,
+              });
+              if (setup !== undefined) return { setup } satisfies IntegrationConnectResult;
+            }
+            return yield* Effect.fail(error);
+          }
+          const { integration } = created.success;
+          if (!resolution.signsIn) return { integration } satisfies IntegrationConnectResult;
+          return yield* service.prepareSignIn(integration.id, {
+            ...options.origin,
+            callbackOrigin: request.inputs?.callbackOrigin,
+          });
         }),
+      prepareSignIn: (id, from) =>
+        Effect.gen(function* () {
+          const stored = yield* getById(id);
+          const integration = redactIntegration(stored);
+          if (!usesOAuth(stored) && stored.transport !== "local")
+            return { integration } satisfies IntegrationConnectResult;
+          const summary = (yield* summaries([stored])).integrations[0];
+          if (summary === undefined) return { integration };
+          const keep = summary.setup === undefined ? {} : { setup: summary.setup };
+          if (summary.status === "error") return { integration, ...keep };
+          if (summary.status !== "needs_sign_in") return { integration };
+          // Only the owner reauthorizes an account that signed in before.
+          if (from.fromAgent && summary.integration.provenance?.signedInAt !== undefined)
+            return { integration, ...keep };
+          const signIn = yield* service.beginSignIn(id, from).pipe(Effect.result);
+          if (signIn._tag === "Success") return { integration, signIn: signIn.success };
+          const error = signIn.failure;
+          if (error.reason === "approval_required") return { integration, ...keep };
+          const setup = setupActionFor({
+            entry: integrationCatalogEntryFor(stored),
+            integration: stored,
+            status: "needs_sign_in",
+            reason: error.reason,
+            // A refused callback origin explains itself; anything else gets the plain status text.
+            message:
+              error.reason === "invalid_request" && typeof error.cause === "string"
+                ? error.cause
+                : checkMessage(error.reason, error.cause),
+            redirectUri:
+              stored.transport === "local"
+                ? yield* redirectUriFor(stored)
+                : (remoteRedirectUri(from.origin) ?? (yield* redirectUriFor(stored))),
+            runtime:
+              error.reason === "local_runtime_missing" ? yield* runtimePlan("uv") : undefined,
+            syncedFrom: stored.syncedFrom,
+          });
+          return setup === undefined ? { integration } : { integration, setup };
+        }),
+      saveOAuthClient: (input, options) =>
+        Effect.gen(function* () {
+          const entry = integrationCatalogEntry(input.catalogId);
+          if (
+            entry === undefined ||
+            (entry.kind === "remote" && !entry.auth.some((auth) => auth.kind === "oauth_app"))
+          )
+            return yield* new IntegrationError({
+              operation: "save OAuth client",
+              reason: "invalid_request",
+            });
+          const current = yield* targetAccount(input.integrationId, entry.id);
+          if (entry.kind === "local-preset") {
+            // One client serves every Google account, under the preset's fixed item name.
+            yield* saveSecret({
+              item: GOOGLE_CLIENT_ITEM,
+              type: "login",
+              fields: { username: input.clientId, password: input.clientSecret },
+              domains: ["accounts.google.com"],
+              label: "Google OAuth client",
+            });
+            if (current !== undefined) {
+              // A running process holds the old client; the next start reads the new one.
+              if (Option.isSome(local)) yield* local.value.stop(current.id, current);
+              yield* notify;
+              return yield* service.prepareSignIn(current.id, options.origin);
+            }
+            // Accounts waiting for a client start with it on the next list.
+            yield* notify;
+            if (input.accountLabel === undefined) return {} satisfies IntegrationConnectResult;
+            return yield* service.connectFromCatalog(
+              {
+                catalogId: entry.id,
+                accountLabel: input.accountLabel,
+                ...(input.scope === undefined ? {} : { scope: input.scope }),
+              },
+              { approveCredentials: true, origin: options.origin },
+            );
+          }
+          const name =
+            current?.name ??
+            catalogIntegrationName(
+              entry,
+              input.accountLabel,
+              new Set((yield* rows()).map((integration) => integration.name)),
+            );
+          const item = `${name}-client-secret`;
+          yield* saveSecret({
+            item,
+            type: "api_key",
+            fields: { value: input.clientSecret },
+            domains: [entry.tokenHost ?? new URL(entry.url).hostname],
+            label: `${entry.name} client secret (${name})`,
+          });
+          const clientSecret = `{{credential:${item}.value}}`;
+          if (current !== undefined) {
+            yield* service.update(
+              {
+                id: current.id,
+                auth: {
+                  type: "oauth",
+                  clientId: input.clientId,
+                  clientSecret,
+                  ...(entry.oauthScope === undefined ? {} : { scope: entry.oauthScope }),
+                },
+              },
+              { approveCredentials: true },
+            );
+            return yield* service.prepareSignIn(current.id, options.origin);
+          }
+          return yield* service.connectFromCatalog(
+            {
+              catalogId: entry.id,
+              ...(input.accountLabel === undefined ? {} : { accountLabel: input.accountLabel }),
+              inputs: { auth: "oauth_app", clientId: input.clientId, clientSecret },
+              ...(input.scope === undefined ? {} : { scope: input.scope }),
+            },
+            { approveCredentials: true, origin: options.origin },
+          );
+        }),
+      saveApiKey: (input, options) =>
+        Effect.gen(function* () {
+          const entry = integrationCatalogEntry(input.catalogId);
+          if (entry?.kind !== "remote" || !entry.auth.some((auth) => auth.kind === "api_key"))
+            return yield* new IntegrationError({
+              operation: "save API key",
+              reason: "invalid_request",
+            });
+          const current = yield* targetAccount(input.integrationId, entry.id);
+          const name =
+            current?.name ??
+            catalogIntegrationName(
+              entry,
+              input.accountLabel,
+              new Set((yield* rows()).map((integration) => integration.name)),
+            );
+          const item = `${name}-api-key`;
+          yield* saveSecret({
+            item,
+            type: "api_key",
+            fields: { value: input.apiKey },
+            domains: [new URL(entry.url).hostname],
+            label: `${entry.name} key (${name})`,
+          });
+          const reference = `{{credential:${item}.value}}`;
+          if (current !== undefined) {
+            const { integration } = yield* service.update(
+              {
+                id: current.id,
+                headers: { Authorization: `Bearer ${reference}` },
+                // A key replaces a sign-in; its tokens are dropped.
+                ...(current.auth === undefined ? {} : { auth: null }),
+              },
+              { approveCredentials: true },
+            );
+            return { integration } satisfies IntegrationConnectResult;
+          }
+          return yield* service.connectFromCatalog(
+            {
+              catalogId: entry.id,
+              ...(input.accountLabel === undefined ? {} : { accountLabel: input.accountLabel }),
+              inputs: { auth: "api_key", apiKey: reference },
+              ...(input.scope === undefined ? {} : { scope: input.scope }),
+            },
+            { approveCredentials: true, origin: options.origin },
+          );
+        }),
+      installRuntime: (runtime) =>
+        Effect.gen(function* () {
+          if (Option.isNone(installer))
+            return {
+              installed: false,
+              message: "Cogenly can't install programs on this machine.",
+            } satisfies IntegrationInstallRuntimeResult;
+          const result = yield* installer.value.install(runtime);
+          // Listing starts the accounts that were waiting for it.
+          if (result.installed) yield* notify;
+          return result;
+        }),
+      subscribeSources: () =>
+        service.subscribe().pipe(
+          Stream.map(({ integrations }): IntegrationSourcesResult => ({
+            sources: integrations
+              .filter((summary) => summary.integration.enabled)
+              .map(integrationSource),
+          })),
+          // Status flips without a source change (a tool count, a check time) push nothing.
+          Stream.changesWith((a, b) => JSON.stringify(a) === JSON.stringify(b)),
+        ),
     });
     return service;
   });

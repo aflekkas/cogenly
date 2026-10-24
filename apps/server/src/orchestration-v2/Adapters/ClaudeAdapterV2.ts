@@ -109,6 +109,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
+import { CLAUDE_DENIED_DUPLICATE_MCP_SERVERS } from "../../integrations/ProviderConnectorDuplicates.ts";
 import { resolveClaudeSdkExecutablePath } from "../../provider/Drivers/ClaudeExecutable.ts";
 import { planClaudeSkillDispatch } from "../../provider/Drivers/ClaudeSkillDispatch.ts";
 import { discoverClaudeSkills } from "../../provider/Drivers/ClaudeSkills.ts";
@@ -1105,6 +1106,22 @@ function claudeLiveSelectionFlagSettings(
   };
 }
 
+/**
+ * Adds the denylist that keeps Claude's own copies of Cogenly catalog services
+ * (claude.ai connectors, plugin and user MCP servers) out of the session. It
+ * travels as per-session flag settings, so the user's config files stay as
+ * they are, and it holds for the process's native subagents as well.
+ */
+function withDeniedDuplicateMcpServers(settings: ClaudeSdkSettings | undefined): ClaudeSdkSettings {
+  return {
+    ...settings,
+    deniedMcpServers: [
+      ...(settings?.deniedMcpServers ?? []),
+      ...CLAUDE_DENIED_DUPLICATE_MCP_SERVERS,
+    ],
+  };
+}
+
 export function makeClaudeQueryOptions(input: {
   readonly modelSelection: ModelSelection;
   readonly nativeThreadId: string;
@@ -1136,6 +1153,8 @@ export function makeClaudeQueryOptions(input: {
   readonly onUserDialog?: ClaudeQueryOptions["onUserDialog"];
   readonly supportedDialogKinds?: ClaudeQueryOptions["supportedDialogKinds"];
   readonly allowDangerouslySkipPermissions?: boolean;
+  /** True lets Claude's own connectors for Cogenly catalog services load too. */
+  readonly useProviderConnectors?: boolean;
 }): ClaudeAgentSdkQueryOptions {
   const compiledSelection = compileClaudeModelSelection(input.modelSelection);
   const {
@@ -1163,13 +1182,17 @@ export function makeClaudeQueryOptions(input: {
       : typeof input.sdkSettings === "object" && input.sdkSettings !== null
         ? ({ ...input.sdkSettings, ...selectionSettings } as ClaudeSdkSettings)
         : selectionSettings;
-  const effectiveQuerySettings =
+  const compactedQuerySettings =
     input.settings?.autoCompactWindow === undefined || input.settings.autoCompactWindow.length === 0
       ? querySettings
       : ({
           ...(typeof querySettings === "object" && querySettings !== null ? querySettings : {}),
           autoCompactWindow: Number(input.settings.autoCompactWindow),
         } as ClaudeSdkSettings);
+  const effectiveQuerySettings =
+    input.useProviderConnectors === true || typeof compactedQuerySettings === "string"
+      ? compactedQuerySettings
+      : withDeniedDuplicateMcpServers(compactedQuerySettings);
   const options: ClaudeAgentSdkQueryOptions = {
     model: compiledSelection.apiModelId,
     tools: claudeAgentSdkQueryToolsForSdk(selectedTools),
@@ -8640,6 +8663,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             canUseTool,
             onUserDialog,
             supportedDialogKinds: ["resume_return"],
+            ...(turnInput.runtimePolicy.useProviderConnectors === true
+              ? { useProviderConnectors: true }
+              : {}),
           });
           const querySession = yield* queryRunner
             .open({
