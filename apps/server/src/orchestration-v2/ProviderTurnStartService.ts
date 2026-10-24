@@ -32,6 +32,7 @@ import * as GitWorkflowService from "../git/GitWorkflowService.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProviderAuthService from "../provider/ProviderAuthService.ts";
 import * as EventSink from "./EventSink.ts";
+import * as MachinesTurnContext from "./MachinesTurnContext.ts";
 import * as ContextHandoffService from "./ContextHandoffService.ts";
 import {
   DEFAULT_HANDOFF_TOKEN_CAP,
@@ -98,6 +99,7 @@ export const layer: Layer.Layer<
   ProviderTurnStartServiceV2,
   never,
   | AgentStore.AgentStore
+  | MachinesTurnContext.MachinesTurnContext
   | EventSink.EventSinkV2
   | ContextHandoffService.ContextHandoffServiceV2
   | IdAllocator.IdAllocatorV2
@@ -114,6 +116,7 @@ export const layer: Layer.Layer<
   ProviderTurnStartServiceV2,
   Effect.gen(function* () {
     const agentStore = yield* AgentStore.AgentStore;
+    const machinesTurnContext = yield* MachinesTurnContext.MachinesTurnContext;
     const eventSink = yield* EventSink.EventSinkV2;
     const contextHandoffService = yield* ContextHandoffService.ContextHandoffServiceV2;
     const idAllocator = yield* IdAllocator.IdAllocatorV2;
@@ -1071,8 +1074,12 @@ export const layer: Layer.Layer<
       const turnContext = yield* agentStore
         .context(input.threadId, runId)
         .pipe(Effect.mapError((cause) => new ProviderTurnStartError({ runId, cause })));
+      // Per turn, in the user message: a machine going offline then changes
+      // only the newest turn and never invalidates the cached prefix.
+      const machinesContext = yield* machinesTurnContext.read;
       const userText = [
         turnContext,
+        machinesContext,
         projectComposerContextForProvider({
           text: message.text,
           records: message.context?.records ?? [],

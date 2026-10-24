@@ -183,6 +183,8 @@ import * as ProjectMove from "./threadSync/ProjectMove.ts";
 import * as RemoteThreadCommands from "./orchestration-v2/RemoteThreadCommands.ts";
 import * as RemoteThreadLaunch from "./orchestration-v2/RemoteThreadLaunch.ts";
 import * as ThreadLaunchRouting from "./threadSync/ThreadLaunchRouting.ts";
+import * as MachinesTurnContext from "./orchestration-v2/MachinesTurnContext.ts";
+import * as MachinesTurnContextLive from "./machines/machinesTurnContext.ts";
 import * as ThreadSync from "./threadSync/ThreadSync.ts";
 import * as RuntimeLayer from "./orchestration-v2/runtimeLayer.ts";
 import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
@@ -588,6 +590,8 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   // Paired machines: shared configuration, then thread logs, over one link.
   Layer.mergeAll(
     SharedSync.layer.pipe(Layer.provide(SharedState.layer)),
+    // Same reference as turn start's, which reads the block.
+    MachinesTurnContextLive.layer.pipe(Layer.provide(MachinesTurnContext.layer)),
     // The orchestrator's own sink, so replicated events reach the same
     // subscribers, and its forwarder registry, so routing sees its commands.
     // Its launcher registry, so a launch naming another machine reaches it.
