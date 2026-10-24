@@ -244,6 +244,8 @@ describe("project label folders", () => {
       const root = yield* folders.projectsRoot;
       yield* fs.makeDirectory(path.join(root, "Old Client", "repos", "site"), { recursive: true });
       yield* fs.makeDirectory(path.join(root, "Leftover", "Resources"), { recursive: true });
+      // Finder's `.DS_Store` does not make a skeleton hold anything.
+      yield* fs.writeFileString(path.join(root, "Leftover", ".DS_Store"), "");
       // Never orphans: unfiled repositories and worktree containers.
       yield* fs.makeDirectory(path.join(root, "Repositories"), { recursive: true });
       yield* fs.makeDirectory(path.join(root, ".worktrees"), { recursive: true });

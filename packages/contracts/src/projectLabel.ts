@@ -438,6 +438,7 @@ export class RepositoryCheckoutError extends Schema.TaggedError<RepositoryChecko
       "thread_active",
       "worktrees_inside",
       "move_failed",
+      "protected_folder",
       "storage",
     ]),
     detail: Schema.optional(Schema.String),
@@ -459,7 +460,7 @@ export class RepositoryCheckoutError extends Schema.TaggedError<RepositoryChecko
       case "has_worktrees":
         return `${this.repositoryName} has worktrees on this machine; remove them first.`;
       case "uncommitted_changes":
-        return `${this.repositoryName} has uncommitted or stashed changes on this machine; commit and push them, or discard them, first.`;
+        return `${this.repositoryName} has uncommitted, stashed or ignored local files on this machine${this.detail ? ` (${this.detail})` : ""}; commit and push them, or remove them, first.`;
       case "unpushed_commits":
         return `${this.repositoryName} has commits that are on no remote; push them first.`;
       case "thread_active":
@@ -468,6 +469,8 @@ export class RepositoryCheckoutError extends Schema.TaggedError<RepositoryChecko
         return `${this.repositoryName} has a worktree inside its folder; remove it before moving the repository.`;
       case "move_failed":
         return `${this.repositoryName} could not be moved${this.detail ? `: ${this.detail}` : ""}.`;
+      case "protected_folder":
+        return `${this.repositoryName}'s record points at ${this.detail ?? "a folder"}, which holds more than this repository; it is never deleted.`;
       case "storage":
         return `The checkout for ${this.repositoryName} could not be inspected.`;
     }

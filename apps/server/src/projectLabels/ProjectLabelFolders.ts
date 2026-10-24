@@ -252,7 +252,8 @@ const make = Effect.gen(function* () {
         .readDirectory(dir)
         .pipe(Effect.mapError(fail("scan", undefined, dir)));
       for (const entry of entries) {
-        if (entry === PROJECT_LABEL_ID_FILE) continue;
+        // Finder drops `.DS_Store` into any folder it opens.
+        if (entry === PROJECT_LABEL_ID_FILE || entry === ".DS_Store") continue;
         const reserved =
           entry === PROJECT_LABEL_RESOURCES_SEGMENT ||
           entry === PROJECT_REPOSITORIES_SEGMENT ||

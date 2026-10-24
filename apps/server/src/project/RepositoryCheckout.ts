@@ -17,6 +17,7 @@ import {
   PROJECT_REPOSITORIES_SEGMENT,
   type ProjectLabelRemoveCheckoutResult,
 } from "@t3tools/contracts";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
@@ -111,6 +112,43 @@ export class RepositoryCheckout extends Context.Service<
   }
 >()("cogenly-server/project/RepositoryCheckout") {}
 
+// Ignored output an install or build recreates. Anything else git ignores
+// (an `.env`, local data, editor settings) exists only on this machine.
+const REBUILDABLE_IGNORED = new Set([
+  ".DS_Store",
+  ".cache",
+  ".eslintcache",
+  ".expo",
+  ".gradle",
+  ".mypy_cache",
+  ".next",
+  ".nuxt",
+  ".output",
+  ".parcel-cache",
+  ".pytest_cache",
+  ".ruff_cache",
+  ".svelte-kit",
+  ".turbo",
+  ".venv",
+  ".vercel",
+  "DerivedData",
+  "Pods",
+  "__pycache__",
+  "build",
+  "coverage",
+  "dist",
+  "node_modules",
+  "out",
+  "target",
+  "venv",
+]);
+
+/** Whether a `git status --ignored` path is rebuildable output (`apps/web/dist/`). */
+export function isRebuildableIgnored(entry: string): boolean {
+  const name = entry.replace(/\/+$/, "").split("/").at(-1) ?? "";
+  return REBUILDABLE_IGNORED.has(name) || name.endsWith(".log") || name.endsWith(".tsbuildinfo");
+}
+
 /** Turns a stored remote back into clone input for the tracked clone flow. */
 export function cloneInputForRemote(remote: string): {
   readonly provider?: SourceControlProviderKind;
@@ -153,6 +191,7 @@ const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const sql = yield* SqlClient.SqlClient;
   const vcs = yield* GitVcsDriver.GitVcsDriver;
+  const home = yield* HostProcess.HomeDirectory;
   const identities = yield* Effect.serviceOption(
     RepositoryIdentityResolver.RepositoryIdentityResolver,
   );
@@ -173,6 +212,44 @@ const make = Effect.gen(function* () {
 
   const entriesOf = (dir: string) =>
     fileSystem.readDirectory(dir).pipe(Effect.orElseSucceed((): ReadonlyArray<string> => []));
+
+  const isInside = (candidate: string, dir: string) => {
+    const relative = path.relative(path.resolve(dir), path.resolve(candidate));
+    return relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative);
+  };
+
+  /**
+   * Whether `destination` would land inside another checkout under the
+   * project's `repos/` (a home-owner repository named like another linked
+   * owner, `repos/acme` vs `repos/acme/site`), which git would see as its files.
+   */
+  const insideOtherCheckout = (destination: string, projectDir: string) =>
+    Effect.gen(function* () {
+      const repos = path.resolve(projectDir, PROJECT_REPOSITORIES_SEGMENT);
+      let current = path.dirname(path.resolve(destination));
+      while (isInside(current, repos)) {
+        if (
+          yield* fileSystem
+            .exists(path.join(current, ".git"))
+            .pipe(Effect.orElseSucceed(() => false))
+        )
+          return true;
+        current = path.dirname(current);
+      }
+      return false;
+    });
+
+  /** Whether two paths name the same folder (a case-only rename on APFS). */
+  const sameFolder = (left: string, right: string) =>
+    Effect.gen(function* () {
+      const [a, b] = yield* Effect.all([fileSystem.stat(left), fileSystem.stat(right)]);
+      return (
+        Option.isSome(a.ino) &&
+        Option.isSome(b.ino) &&
+        a.ino.value === b.ino.value &&
+        a.dev === b.dev
+      );
+    }).pipe(Effect.orElseSucceed(() => false));
 
   const waitForClone = (repositoryId: ProjectId) =>
     Effect.scoped(
@@ -366,6 +443,13 @@ const make = Effect.gen(function* () {
 
         const { dir } = yield* folders.ensureForLabel(label).pipe(Effect.mapError(fail));
         const destination = projectRepositoryDirectory(dir, repositoryName, path);
+        if (yield* insideOtherCheckout(destination, dir))
+          return yield* new RepositoryCheckoutError({
+            repositoryId: link.repositoryId,
+            repositoryName,
+            reason: "destination_taken",
+            detail: destination,
+          });
         const createRecord = (repositoryId: ProjectId) =>
           projects
             .create({
@@ -579,6 +663,8 @@ const make = Effect.gen(function* () {
       ),
     );
 
+  const gitRun = (cwd: string, operation: string, args: ReadonlyArray<string>) =>
+    vcs.execute({ operation, cwd, args, timeoutMs: 30_000, allowNonZeroExit: true });
   const gitOut = (cwd: string, operation: string, args: ReadonlyArray<string>) =>
     vcs
       .execute({ operation, cwd, args, timeoutMs: 30_000 })
@@ -586,9 +672,18 @@ const make = Effect.gen(function* () {
 
   /**
    * Refuses when the checkout holds work found nowhere else: other
-   * worktrees, uncommitted or stashed changes, or commits on no remote.
+   * worktrees, uncommitted, untracked, stashed or git-ignored files (other
+   * than rebuildable output), commits or tags on no remote, a detached HEAD
+   * on no remote, and the same inside every checked-out submodule. Flags are
+   * explicit so a repository's own config (`status.showUntrackedFiles=no`,
+   * ignored submodules) cannot hide anything.
    */
-  const assertNothingLocal = (repositoryId: ProjectId, repositoryName: string, cwd: string) =>
+  const assertNothingLocal = (
+    repositoryId: ProjectId,
+    repositoryName: string,
+    cwd: string,
+    checkWorktrees = true,
+  ): Effect.Effect<void, RepositoryCheckoutError> =>
     Effect.gen(function* () {
       const refuse = (reason: RepositoryCheckoutError["reason"], detail?: string) =>
         new RepositoryCheckoutError({
@@ -597,27 +692,72 @@ const make = Effect.gen(function* () {
           reason,
           ...(detail === undefined ? {} : { detail }),
         });
-      const worktrees = (yield* gitOut(cwd, "RepositoryCheckout.worktrees", [
-        "worktree",
-        "list",
+      if (checkWorktrees) {
+        const worktrees = (yield* gitOut(cwd, "RepositoryCheckout.worktrees", [
+          "worktree",
+          "list",
+          "--porcelain",
+        ]))
+          .split("\n\n")
+          .filter((entry) => entry.startsWith("worktree ") && !/\nprunable/.test(entry));
+        if (worktrees.length > 1) return yield* refuse("has_worktrees", `${worktrees.length - 1}`);
+      }
+      const status = yield* gitOut(cwd, "RepositoryCheckout.status", [
+        "status",
         "--porcelain",
-      ]))
-        .split("\n\n")
-        .filter((entry) => entry.startsWith("worktree ") && !/\nprunable/.test(entry));
-      if (worktrees.length > 1) return yield* refuse("has_worktrees", `${worktrees.length - 1}`);
-      const status = yield* gitOut(cwd, "RepositoryCheckout.status", ["status", "--porcelain"]);
+        "-z",
+        "--untracked-files=normal",
+        "--ignored=traditional",
+        "--ignore-submodules=none",
+      ]);
+      const entries = status.split("\0").filter((entry) => entry.length > 0);
+      if (entries.some((entry) => !entry.startsWith("!! ")))
+        return yield* refuse("uncommitted_changes");
+      const localOnly = entries
+        .map((entry) => entry.slice(3))
+        .filter((entry) => !isRebuildableIgnored(entry));
+      if (localOnly.length > 0)
+        return yield* refuse(
+          "uncommitted_changes",
+          `git ignores files that exist only here: ${localOnly.slice(0, 5).join(", ")}${localOnly.length > 5 ? ", …" : ""}`,
+        );
       const stashes = yield* gitOut(cwd, "RepositoryCheckout.stashes", ["stash", "list"]);
-      if (status.length > 0 || stashes.length > 0) return yield* refuse("uncommitted_changes");
+      if (stashes.length > 0) return yield* refuse("uncommitted_changes");
+      // A detached HEAD is on no branch; an unborn one has nothing to lose.
+      const head = yield* gitRun(cwd, "RepositoryCheckout.head", [
+        "rev-parse",
+        "--verify",
+        "-q",
+        "HEAD",
+      ]);
       const unpushed = yield* gitOut(cwd, "RepositoryCheckout.unpushed", [
-        "log",
-        "--branches",
-        "--not",
-        "--remotes",
-        "--oneline",
+        "rev-list",
         "-n",
         "1",
+        "--branches",
+        "--tags",
+        ...(head.exitCode === 0 && head.stdout.trim().length > 0 ? ["HEAD"] : []),
+        "--not",
+        "--remotes",
       ]);
       if (unpushed.length > 0) return yield* refuse("unpushed_commits");
+      if (
+        yield* fileSystem
+          .exists(path.join(cwd, ".gitmodules"))
+          .pipe(Effect.orElseSucceed(() => false))
+      ) {
+        const submodules = (yield* gitOut(cwd, "RepositoryCheckout.submodules", [
+          "submodule",
+          "foreach",
+          "--quiet",
+          "--recursive",
+          `printf '%s\\0' "$toplevel/$sm_path"`,
+        ]))
+          .split("\0")
+          .filter((entry) => entry.length > 0);
+        for (const submodule of submodules)
+          yield* assertNothingLocal(repositoryId, repositoryName, submodule, false);
+      }
     }).pipe(
       Effect.catchTags({
         GitCommandError: (cause) => Effect.fail(storage(repositoryId, repositoryName)(cause)),
@@ -663,9 +803,37 @@ const make = Effect.gen(function* () {
         const root = project.workspaceRoot;
         if (!(yield* fileSystem.exists(root).pipe(Effect.orElseSucceed(() => false))))
           return { removed: false };
+        // A record pointing at a folder that holds other projects (the
+        // projects root, a project folder, a home directory) is never a
+        // checkout to delete, whatever git says about it.
+        const realRoot = yield* fileSystem.realPath(root).pipe(Effect.orElseSucceed(() => root));
+        const projectsRoot = yield* folders.projectsRoot.pipe(Effect.orElseSucceed(() => null));
+        const { dir: projectDir } = yield* folders
+          .dirForLabel(label)
+          .pipe(Effect.orElseSucceed(() => ({ dir: null })));
+        const sheltering = [home, projectsRoot, projectDir].flatMap((dir) =>
+          dir === null ? [] : [path.resolve(dir)],
+        );
+        if (
+          [path.resolve(root), path.resolve(realRoot)].some(
+            (candidate) =>
+              path.parse(candidate).root === candidate ||
+              sheltering.some((dir) => dir === candidate || isInside(dir, candidate)),
+          )
+        )
+          return yield* new RepositoryCheckoutError({
+            repositoryId: link.repositoryId,
+            repositoryName,
+            reason: "protected_folder",
+            detail: root,
+          });
         if (yield* hasOwnCheckout(root))
           yield* assertNothingLocal(link.repositoryId, repositoryName, root);
-        else if ((yield* entriesOf(root)).length > 0)
+        else if (
+          (yield* fileSystem
+            .readDirectory(root)
+            .pipe(Effect.mapError(storage(link.repositoryId, repositoryName)))).length > 0
+        )
           // Files that are not a checkout of this repository cannot be proven safe to delete.
           return yield* new RepositoryCheckoutError({
             repositoryId: link.repositoryId,
@@ -681,11 +849,6 @@ const make = Effect.gen(function* () {
         return { removed: true };
       }),
     );
-
-  const isInside = (candidate: string, dir: string) => {
-    const relative = path.relative(path.resolve(dir), path.resolve(candidate));
-    return relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative);
-  };
 
   const adoptLink = Effect.fn("RepositoryCheckout.adoptLink")(function* (
     label: ProjectLabelWithRepositories,
@@ -723,24 +886,28 @@ const make = Effect.gen(function* () {
     yield* assertIdle(repositoryId, repositoryName);
     if ((yield* clones.get(repositoryId))?.phase === "running")
       return yield* refuse("move_failed", "it is still cloning");
-    const own = yield* hasOwnCheckout(source);
-    if (!own && (yield* entriesOf(source)).length === 0)
-      return yield* refuse("move_failed", "there is no checkout on this machine to move");
+    // Only a checkout of its own moves: a folder without `.git` may be a
+    // subfolder of some other repository, which the move would tear out.
+    if (!(yield* hasOwnCheckout(source)))
+      return yield* refuse(
+        "move_failed",
+        "there is no checkout of its own on this machine to move",
+      );
+    if (yield* insideOtherCheckout(destination, dir))
+      return yield* refuse("destination_taken", destination);
     // A worktree inside the folder would move with it under git's feet.
     const threadWorktrees = yield* sql<{ readonly worktree_path: string }>`
       SELECT json_extract(payload_json, '$.worktreePath') AS worktree_path
       FROM orchestration_v2_projection_threads
       WHERE deleted_at IS NULL AND json_extract(payload_json, '$.worktreePath') IS NOT NULL
     `.pipe(Effect.mapError(fail));
-    const gitWorktrees = own
-      ? (yield* gitOut(source, "RepositoryCheckout.worktrees", [
-          "worktree",
-          "list",
-          "--porcelain",
-        ]).pipe(Effect.mapError(fail)))
-          .split("\n")
-          .flatMap((line) => (line.startsWith("worktree ") ? [line.slice("worktree ".length)] : []))
-      : [];
+    const gitWorktrees = (yield* gitOut(source, "RepositoryCheckout.worktrees", [
+      "worktree",
+      "list",
+      "--porcelain",
+    ]).pipe(Effect.mapError(fail)))
+      .split("\n")
+      .flatMap((line) => (line.startsWith("worktree ") ? [line.slice("worktree ".length)] : []));
     // git reports real paths; the record may hold a symlinked one.
     const realSource = yield* fileSystem.realPath(source).pipe(Effect.orElseSucceed(() => source));
     if (
@@ -749,23 +916,59 @@ const make = Effect.gen(function* () {
       )
     )
       return yield* refuse("worktrees_inside");
-    if (yield* fileSystem.exists(destination).pipe(Effect.orElseSucceed(() => false))) {
-      if ((yield* entriesOf(destination)).length > 0)
+    // On a case-insensitive disk `repos/Platform` and `repos/platform` are
+    // one folder: a case-only rename goes through a temporary name.
+    const caseOnly = yield* sameFolder(source, destination);
+    if (
+      !caseOnly &&
+      (yield* fileSystem.exists(destination).pipe(Effect.orElseSucceed(() => true)))
+    ) {
+      // Only an empty folder gives way; a file, or one that cannot be read, stays.
+      const info = yield* fileSystem.stat(destination).pipe(Effect.mapError(fail));
+      const entries =
+        info.type === "Directory"
+          ? yield* fileSystem.readDirectory(destination).pipe(Effect.mapError(fail))
+          : null;
+      if (entries === null || entries.length > 0)
         return yield* refuse("destination_taken", destination);
-      yield* fileSystem.remove(destination, { recursive: true }).pipe(Effect.mapError(fail));
+      yield* fileSystem.remove(destination).pipe(Effect.mapError(fail));
     }
     yield* fileSystem
       .makeDirectory(path.dirname(destination), { recursive: true })
       .pipe(Effect.mapError(fail));
-    yield* fileSystem
-      .rename(source, destination)
-      .pipe(Effect.mapError((cause) => refuse("move_failed", cause.message)));
+    const move = (from: string, to: string) =>
+      caseOnly
+        ? Effect.gen(function* () {
+            const staging = `${to}.cogenly-move-${(yield* crypto.randomUUIDv4()).slice(0, 8)}`;
+            yield* fileSystem.rename(from, staging);
+            yield* fileSystem
+              .rename(staging, to)
+              .pipe(Effect.tapError(() => fileSystem.rename(staging, from).pipe(Effect.ignore)));
+          })
+        : fileSystem.rename(from, to);
+    yield* move(source, destination).pipe(
+      Effect.mapError((cause) => refuse("move_failed", cause.message)),
+    );
     // Linked worktrees point back at the main checkout's `.git`; repair
     // rewrites both sides for the new location.
-    if (own)
-      yield* gitOut(destination, "RepositoryCheckout.repairWorktrees", ["worktree", "repair"]).pipe(
-        Effect.ignoreCause({ log: true }),
+    const repair = (at: string) =>
+      gitRun(at, "RepositoryCheckout.repairWorktrees", ["worktree", "repair"]).pipe(
+        Effect.mapError((cause) => refuse("move_failed", cause.message)),
+        Effect.flatMap((result) =>
+          result.exitCode === 0
+            ? Effect.void
+            : Effect.fail(
+                refuse("move_failed", result.stderr.trim() || "git worktree repair failed"),
+              ),
+        ),
       );
+    // Anything failing after the rename puts the checkout back where the
+    // record still says it is, and its worktrees with it.
+    const rollback = move(destination, source).pipe(
+      Effect.andThen(repair(source)),
+      Effect.ignoreCause({ log: true }),
+    );
+    yield* repair(destination).pipe(Effect.tapError(() => rollback));
     const commandSuffix = yield* crypto.randomUUIDv4().pipe(Effect.mapError(fail));
     yield* projects
       .update({
@@ -774,9 +977,7 @@ const make = Effect.gen(function* () {
         workspaceRoot: destination,
       })
       .pipe(
-        // The record must never point at a folder that is not there: put the
-        // checkout back where the record still says it is.
-        Effect.tapError(() => fileSystem.rename(destination, source).pipe(Effect.ignore)),
+        Effect.tapError(() => rollback),
         Effect.mapError((cause) => refuse("move_failed", cause.message)),
       );
     if (Option.isSome(identities)) {
@@ -846,6 +1047,15 @@ const make = Effect.gen(function* () {
               ];
               for (const candidate of candidates) {
                 if (!(yield* hasOwnCheckout(candidate))) continue;
+                // Only this repository's checkout: never repoint a record at
+                // some other repository that happens to sit there.
+                if (link.remote !== null && Option.isSome(identities)) {
+                  const identity = yield* identities.value
+                    .resolve(candidate, { refresh: true })
+                    .pipe(Effect.orElseSucceed(() => null));
+                  if (normalizeRepositoryRemote(identity?.locator.remoteUrl) !== link.remote)
+                    continue;
+                }
                 const suffix = yield* crypto
                   .randomUUIDv4()
                   .pipe(Effect.orElseSucceed(() => "repoint"));

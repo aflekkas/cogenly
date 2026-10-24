@@ -721,6 +721,99 @@ describe("RepositoryCheckout.removeCheckout", () => {
     }).pipe(Effect.provide(checkoutHarness(projectDir, { cloneCalls: 0 })));
   });
 
+  it.effect(
+    "refuses work that git config, ignores, a detached HEAD or a submodule would hide",
+    () => {
+      const bare = makeBareRemote();
+      const projectDir = NodePath.join(tempRoot(), "Spawn");
+      const destination = NodePath.join(projectDir, "repos", "smile-express");
+      const commit = (cwd: string, message: string) =>
+        git(cwd, [
+          "-c",
+          "user.name=T",
+          "-c",
+          "user.email=t@example.com",
+          "commit",
+          "--allow-empty",
+          "-m",
+          message,
+        ]);
+      return Effect.gen(function* () {
+        const { label, repositoryId, checkouts } = yield* clonedHere(bare);
+        const attempt = checkouts.removeCheckout({ labelId: label.id, repositoryId }).pipe(
+          Effect.flip,
+          Effect.map((error) => error.reason),
+        );
+
+        // A repository configured to hide untracked files still has them.
+        git(destination, ["config", "status.showUntrackedFiles", "no"]);
+        NodeFS.writeFileSync(NodePath.join(destination, "draft.md"), "wip\n");
+        expect(yield* attempt).toBe("uncommitted_changes");
+        NodeFS.rmSync(NodePath.join(destination, "draft.md"));
+
+        // An ignored `.env` exists only here; ignored build output does not count.
+        NodeFS.writeFileSync(
+          NodePath.join(destination, ".git", "info", "exclude"),
+          ".env\nnode_modules/\n",
+        );
+        NodeFS.mkdirSync(NodePath.join(destination, "node_modules", "left-pad"), {
+          recursive: true,
+        });
+        NodeFS.writeFileSync(
+          NodePath.join(destination, "node_modules", "left-pad", "index.js"),
+          "",
+        );
+        NodeFS.writeFileSync(NodePath.join(destination, ".env"), "TOKEN=1\n");
+        const ignored = yield* Effect.flip(
+          checkouts.removeCheckout({ labelId: label.id, repositoryId }),
+        );
+        expect(ignored).toMatchObject({ reason: "uncommitted_changes" });
+        expect(ignored.detail).toContain(".env");
+        NodeFS.rmSync(NodePath.join(destination, ".env"));
+
+        // A commit on a detached HEAD is on no branch and no remote.
+        git(destination, ["checkout", "--detach"]);
+        commit(destination, "detached");
+        expect(yield* attempt).toBe("unpushed_commits");
+        git(destination, ["checkout", "main"]);
+
+        // A submodule's own commits count too.
+        const library = makeBareRemote();
+        git(destination, ["-c", "protocol.file.allow=always", "submodule", "add", library, "lib"]);
+        commit(destination, "add lib");
+        git(destination, ["push", "origin", "HEAD"]);
+        commit(NodePath.join(destination, "lib"), "library work");
+        git(destination, ["add", "lib"]);
+        commit(destination, "bump lib");
+        git(destination, ["push", "origin", "HEAD"]);
+        expect(yield* attempt).toBe("unpushed_commits");
+        git(NodePath.join(destination, "lib"), ["push", "origin", "HEAD:main"]);
+        git(NodePath.join(destination, "lib"), ["fetch", "origin"]);
+
+        expect(yield* checkouts.removeCheckout({ labelId: label.id, repositoryId })).toEqual({
+          removed: true,
+        });
+      }).pipe(Effect.provide(checkoutHarness(projectDir, { cloneCalls: 0 })));
+    },
+  );
+
+  it.effect("never deletes a record that points at a folder holding other projects", () => {
+    const bare = makeBareRemote();
+    const projectDir = NodePath.join(tempRoot(), "Spawn");
+    return Effect.gen(function* () {
+      const { label, repositoryId, checkouts } = yield* clonedHere(bare);
+      const sql = yield* SqlClient.SqlClient;
+      // The project folder itself, made a clean checkout so git alone would allow it.
+      git(projectDir, ["init", "--initial-branch=main"]);
+      yield* sql`UPDATE projection_projects SET workspace_root = ${projectDir} WHERE project_id = ${repositoryId}`;
+      const error = yield* Effect.flip(
+        checkouts.removeCheckout({ labelId: label.id, repositoryId }),
+      );
+      expect(error).toMatchObject({ reason: "protected_folder" });
+      expect(NodeFS.existsSync(NodePath.join(projectDir, "repos", "smile-express"))).toBe(true);
+    }).pipe(Effect.provide(checkoutHarness(projectDir, { cloneCalls: 0 })));
+  });
+
   it.effect("refuses while a turn runs in the repository", () => {
     const bare = makeBareRemote();
     const projectDir = NodePath.join(tempRoot(), "Spawn");
@@ -782,6 +875,46 @@ describe("RepositoryCheckout.adoptRepository", () => {
         moved: false,
         workspaceRoot: destination,
       });
+    }).pipe(Effect.provide(checkoutHarness(projectDir, { cloneCalls: 0 })));
+  });
+
+  it.effect("never tears a subfolder out of some other repository", () => {
+    const bare = makeBareRemote();
+    const projectDir = NodePath.join(tempRoot(), "Spawn");
+    return Effect.gen(function* () {
+      const { label, repositoryId, elsewhere } = yield* linkedElsewhere(bare, "monorepo");
+      const sql = yield* SqlClient.SqlClient;
+      const subfolder = NodePath.join(elsewhere, "packages", "app");
+      NodeFS.mkdirSync(subfolder, { recursive: true });
+      NodeFS.writeFileSync(NodePath.join(subfolder, "index.ts"), "");
+      yield* sql`UPDATE projection_projects SET workspace_root = ${subfolder} WHERE project_id = ${repositoryId}`;
+      const checkouts = yield* RepositoryCheckout.RepositoryCheckout;
+      const error = yield* Effect.flip(
+        checkouts.adoptRepository({ labelId: label.id, repositoryId }),
+      );
+      expect(error).toMatchObject({ reason: "move_failed" });
+      expect(NodeFS.existsSync(NodePath.join(subfolder, "index.ts"))).toBe(true);
+    }).pipe(Effect.provide(checkoutHarness(projectDir, { cloneCalls: 0 })));
+  });
+
+  it.effect("renames a checkout whose folder differs from its name only in case", () => {
+    const bare = makeBareRemote();
+    const projectDir = NodePath.join(tempRoot(), "Spawn");
+    return Effect.gen(function* () {
+      const { label, repositoryId, elsewhere } = yield* linkedElsewhere(bare, "spawn-smile");
+      const sql = yield* SqlClient.SqlClient;
+      const upper = NodePath.join(projectDir, "repos", "Smile-Express");
+      NodeFS.mkdirSync(NodePath.dirname(upper), { recursive: true });
+      NodeFS.renameSync(elsewhere, upper);
+      yield* sql`UPDATE projection_projects SET workspace_root = ${upper} WHERE project_id = ${repositoryId}`;
+      const checkouts = yield* RepositoryCheckout.RepositoryCheckout;
+      const destination = NodePath.join(projectDir, "repos", "smile-express");
+      expect(yield* checkouts.adoptRepository({ labelId: label.id, repositoryId })).toEqual({
+        moved: true,
+        workspaceRoot: destination,
+      });
+      expect(NodeFS.readdirSync(NodePath.join(projectDir, "repos"))).toEqual(["smile-express"]);
+      expect(NodeFS.readFileSync(NodePath.join(destination, "README.md"), "utf8")).toBe("hello\n");
     }).pipe(Effect.provide(checkoutHarness(projectDir, { cloneCalls: 0 })));
   });
 
