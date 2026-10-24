@@ -143,6 +143,11 @@ export interface CheckpointServiceV2Shape {
     readonly appRunOrdinal: number | null;
     readonly capturedAt: DateTime.Utc;
   }) => Effect.Effect<OrchestrationV2Checkpoint, CheckpointServiceV2Error>;
+  /** Read-only preflight before rollback can create a worktree or open a provider. */
+  readonly assertRestorable: (input: {
+    readonly scope: OrchestrationV2CheckpointScope;
+    readonly checkpoint: OrchestrationV2Checkpoint;
+  }) => Effect.Effect<void, CheckpointServiceV2Error>;
   readonly restore: (input: {
     readonly scope: OrchestrationV2CheckpointScope;
     readonly checkpoint: OrchestrationV2Checkpoint;
@@ -509,6 +514,22 @@ export const layer: Layer.Layer<
         ),
       );
 
+    const assertRestorable: CheckpointServiceV2Shape["assertRestorable"] = (input) =>
+      Effect.gen(function* () {
+        const exists = yield* checkpointStore
+          .hasCheckpointRef({
+            cwd: input.scope.cwd,
+            checkpointRef: input.checkpoint.ref,
+          })
+          .pipe(Effect.orElseSucceed(() => false));
+        if (input.checkpoint.status !== "ready" || !exists)
+          return yield* new CheckpointRestoreError({
+            scopeId: input.scope.id,
+            checkpointId: input.checkpoint.id,
+            cause: "Checkpoint ref is unavailable on this machine.",
+          });
+      });
+
     const restore: CheckpointServiceV2Shape["restore"] = (input) =>
       withWorkspaceLock(
         input.scope.cwd,
@@ -580,6 +601,7 @@ export const layer: Layer.Layer<
       captureBaseline,
       materializeBaselineCheckpoint,
       capture,
+      assertRestorable,
       restore,
       deleteStaleRefs,
     } satisfies CheckpointServiceV2Shape);
