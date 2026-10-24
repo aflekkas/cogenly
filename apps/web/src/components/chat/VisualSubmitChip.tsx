@@ -57,7 +57,7 @@ export function VisualSubmitChip(props: {
       <div className="flex items-center rounded-full border border-success/25 bg-success/8 text-success-foreground text-xs dark:bg-success/12">
         <button
           type="button"
-          className="flex min-w-0 items-center gap-1.5 rounded-s-full py-1 ps-2.5 pe-1.5 hover:bg-success/10 focus-visible:outline-2 focus-visible:outline-ring"
+          className="flex min-w-0 items-center gap-1.5 rounded-s-full py-1 ps-2.5 pe-1.5 interactive hover:bg-success/10 focus-visible:outline-2 focus-visible:outline-ring"
           onClick={() => {
             if (!reveal()) setExpanded((open) => !open);
           }}
@@ -77,7 +77,7 @@ export function VisualSubmitChip(props: {
           type="button"
           aria-expanded={expanded}
           aria-label={expanded ? "Hide submitted result" : "Show submitted result"}
-          className="flex items-center self-stretch rounded-e-full border-success/20 border-s ps-1.5 pe-2 hover:bg-success/10 focus-visible:outline-2 focus-visible:outline-ring"
+          className="flex items-center self-stretch rounded-e-full border-success/20 border-s ps-1.5 pe-2 interactive hover:bg-success/10 focus-visible:outline-2 focus-visible:outline-ring"
           onClick={() => setExpanded((open) => !open)}
         >
           <ChevronDownIcon

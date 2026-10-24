@@ -103,7 +103,10 @@ export function AgentActivity({
                 : CircleDashedIcon;
         const actions = actionsByRun.get(run.id) ?? [];
         return (
-          <article key={run.id} className="flex gap-2.5 rounded-xl px-2.5 py-2 hover:bg-muted/30">
+          <article
+            key={run.id}
+            className="flex gap-2.5 rounded-xl px-2.5 py-2 interactive hover:bg-muted/30"
+          >
             <Icon
               className={cn(
                 "mt-0.5 size-4 shrink-0",

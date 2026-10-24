@@ -1,3 +1,4 @@
+import { APPEARANCE_ACCENTS, type AppearanceAccent } from "@t3tools/contracts";
 import { useCallback, useSyncExternalStore } from "react";
 
 /**
@@ -6,19 +7,11 @@ import { useCallback, useSyncExternalStore } from "react";
  * color scheme and applied as attributes on <html> (data-accent,
  * data-font-size, data-reduce-motion), which index.css reads. index.html's
  * boot script applies the same attributes before first paint, so keep the
- * storage key and attribute names in sync with it.
+ * storage key and attribute names in sync with it. The desktop shell gets the
+ * accent too, for its Dock icon.
  */
-export const ACCENT_COLORS = [
-  "orange",
-  "blue",
-  "violet",
-  "green",
-  "pink",
-  "teal",
-  "amber",
-  "red",
-] as const;
-export type AccentColor = (typeof ACCENT_COLORS)[number];
+export const ACCENT_COLORS = APPEARANCE_ACCENTS;
+export type AccentColor = AppearanceAccent;
 
 export const FONT_SIZES = ["small", "default", "large"] as const;
 export type FontSizePreference = (typeof FONT_SIZES)[number];
@@ -34,11 +27,20 @@ export type MotionPreference = (typeof MOTION_PREFERENCES)[number];
 export const USAGE_METER_MODES = ["remaining", "used"] as const;
 export type UsageMeterMode = (typeof USAGE_METER_MODES)[number];
 
+/**
+ * Where the sidebar's search dock sits and which way its lists read: "top"
+ * reads down from the dock under the titlebar; "bottom" docks search at the
+ * foot of the column and stacks lists up toward it. Read by React only.
+ */
+export const SIDEBAR_LAYOUTS = ["top", "bottom"] as const;
+export type SidebarLayout = (typeof SIDEBAR_LAYOUTS)[number];
+
 export interface AppearancePreferences {
   readonly accent: AccentColor;
   readonly fontSize: FontSizePreference;
   readonly motion: MotionPreference;
   readonly usageMeter: UsageMeterMode;
+  readonly sidebarLayout: SidebarLayout;
 }
 
 export const DEFAULT_APPEARANCE_PREFERENCES: AppearancePreferences = {
@@ -46,6 +48,7 @@ export const DEFAULT_APPEARANCE_PREFERENCES: AppearancePreferences = {
   fontSize: "default",
   motion: "system",
   usageMeter: "remaining",
+  sidebarLayout: "top",
 };
 
 export const APPEARANCE_PREFERENCES_STORAGE_KEY = "cogenly:appearance-preferences";
@@ -75,6 +78,11 @@ export function parseAppearancePreferences(raw: string | null): AppearancePrefer
       USAGE_METER_MODES,
       record.usageMeter,
       DEFAULT_APPEARANCE_PREFERENCES.usageMeter,
+    ),
+    sidebarLayout: oneOf(
+      SIDEBAR_LAYOUTS,
+      record.sidebarLayout,
+      DEFAULT_APPEARANCE_PREFERENCES.sidebarLayout,
     ),
   };
 }
@@ -113,11 +121,19 @@ export function readAppearancePreferences(): AppearancePreferences {
   return cachedPreferences;
 }
 
+let sentDesktopAccent: AccentColor | undefined;
+
 function applyToDocument(preferences: AppearancePreferences) {
   const root = document.documentElement;
   for (const [name, value] of Object.entries(appearanceRootAttributes(preferences))) {
     if (value === null) root.removeAttribute(name);
     else root.setAttribute(name, value);
+  }
+  // The desktop shell mirrors the accent into the macOS Dock icon and keeps it
+  // for its next launch. Sent once per change; every window sends the same value.
+  if (sentDesktopAccent !== preferences.accent) {
+    sentDesktopAccent = preferences.accent;
+    void window.desktopBridge?.setAccentColor?.(preferences.accent).catch(() => undefined);
   }
 }
 
@@ -157,6 +173,15 @@ export function useAppearancePreferences() {
     [],
   );
   return { preferences, update } as const;
+}
+
+/** The sidebar layout preference, live: the sidebar's shared pieces all read this one flag. */
+export function useSidebarLayout(): SidebarLayout {
+  return useSyncExternalStore(
+    subscribe,
+    () => readAppearancePreferences().sidebarLayout,
+    () => DEFAULT_APPEARANCE_PREFERENCES.sidebarLayout,
+  );
 }
 
 const REDUCED_MOTION_QUERY = /prefers-reduced-motion\s*:\s*(reduce|no-preference)/i;

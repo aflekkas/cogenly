@@ -6,6 +6,8 @@ Every tracked icon is rendered from `brand/cogenly-mark.svg`: a rounded tile of 
 
 Run `vp run icons:mark` from the repository root to re-render the web favicons, apple-touch icons, Linux/universal PNGs, Windows ICOs, and macOS PNGs (with the 100px pre-Tahoe safe area) for all three channels, plus the `apps/web/public` copies. It rasterizes with headless Chromium through the server's `playwright-core`; pass `--chromium <path>` to pick the binary. The desktop build turns the macOS PNG into `icon.icns` with `iconutil`, so no `.icns` is tracked.
 
+The macOS Dock icon follows the accent color (Settings → Appearance). Run `vp run icons:dock` after changing the mark or an accent preset to re-render `apps/desktop/resources/dock-icons/<accent>.png`: the same mark and safe area with its ember recolored by the CSS `color` blend, the white glyph untouched. Orange has no variant; it is the bundle icon.
+
 The Icon Composer projects below still carry the old T3 artwork, so `icons:export` and `icons:check` do not describe the shipped icons. Replace or redesign those projects before using that pipeline again.
 
 ## Icon Composer pipeline

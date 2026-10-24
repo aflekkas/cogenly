@@ -265,6 +265,11 @@ export default defineConfig({
         rules: { "t3code/no-outset-state-indicators": "error" },
       },
       {
+        // Hover fills fade on the shared interactive timing (index.css) instead of snapping.
+        files: ["apps/web/src/**"],
+        rules: { "t3code/require-interactive-transition": "error" },
+      },
+      {
         // Colors come from theme tokens so status tones follow custom themes. components/ui
         // has no findings and stays covered too.
         files: ["apps/web/src/**"],

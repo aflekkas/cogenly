@@ -233,6 +233,11 @@ order, so it survives a refresh and appears on your other connected devices. **N
 lists its tasks in the same order; **Snoozed** lists them by when they come back and
 **Settled** by when they settled, so cards don't move there.
 
+Search sits at the top of the sidebar by default. To dock it at the bottom instead, set
+**Settings → Appearance → Sidebar layout** to **Bottom**: lists then stack up toward search,
+and Work's cards are drawn the other way up, so new Work arrives at the bottom of its project,
+nearest search. Your saved order is the same in both layouts; each device keeps its own choice.
+
 On web and desktop, the list also animates section changes made with thread actions such as
 **Pin**, **Settle**, and **Snooze**. These transitions respect your system's reduced-motion
 preference. While dragging, rows follow the insertion gap without replaying a second transition

@@ -1,6 +1,8 @@
 import { BellDotIcon, CircleCheckIcon, ClockIcon, type LucideIcon } from "lucide-react";
 
+import { useSidebarLayout } from "~/appearancePreferences";
 import { cn } from "~/lib/utils";
+import { sidebarDockPopupSide } from "./SidebarSearchDock";
 import { isSegmentSelectable } from "./sidebarSegments.logic";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
@@ -67,11 +69,16 @@ export function SidebarSegmentBar({
   onSelect: (index: number) => void;
   ariaLabel?: string;
 }) {
+  const layout = useSidebarLayout();
   return (
     <div
       role="tablist"
       aria-label={ariaLabel}
-      className="relative isolate mt-2.5 flex h-9 w-full rounded-rail bg-(--sidebar-shelf-bar) p-0.5"
+      className={cn(
+        "relative isolate flex h-9 w-full rounded-rail bg-(--sidebar-shelf-bar) p-0.5",
+        // Under the search dock, or over it in the bottom layout.
+        layout === "bottom" ? "mb-2.5" : "mt-2.5",
+      )}
     >
       {/* One highlight, one segment wide, glides to the selected segment. */}
       <span
@@ -128,7 +135,9 @@ export function SidebarSegmentBar({
                 {segment.pending ? "…" : formatSidebarShelfCount(segment.count)}
               </span>
             </TooltipTrigger>
-            <TooltipPopup side="bottom">{selectable ? label : segment.emptyLabel}</TooltipPopup>
+            <TooltipPopup side={sidebarDockPopupSide(layout)}>
+              {selectable ? label : segment.emptyLabel}
+            </TooltipPopup>
           </Tooltip>
         );
       })}

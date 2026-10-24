@@ -71,6 +71,8 @@ export class ElectronApp extends Context.Service<
     ) => Effect.Effect<boolean>;
     readonly setDesktopName: (desktopName: string) => Effect.Effect<void>;
     readonly setDockIcon: (iconPath: string) => Effect.Effect<void>;
+    /** Puts the bundle's own icon back in the Dock after `setDockIcon`; false if Electron refused. */
+    readonly resetDockIcon: Effect.Effect<boolean>;
     readonly appendCommandLineSwitch: (switchName: string, value?: string) => Effect.Effect<void>;
     readonly onBeforeQuitForUpdate: (
       listener: () => void,
@@ -183,6 +185,20 @@ export const make = ElectronApp.of({
     Effect.sync(() => {
       Electron.app.dock?.setIcon(iconPath);
     }),
+  resetDockIcon: Effect.sync(() => {
+    // Electron's DockSetIcon treats null as "no image", which clears
+    // NSApp.applicationIconImage back to the bundle icon. The typings only
+    // admit an image or a path, so a build that rejects null reports false.
+    const dock = Electron.app.dock as
+      | { setIcon(image: Electron.NativeImage | string | null): void }
+      | undefined;
+    try {
+      dock?.setIcon(null);
+      return true;
+    } catch {
+      return false;
+    }
+  }),
   appendCommandLineSwitch: (switchName, value) =>
     Effect.sync(() => {
       if (value === undefined) {

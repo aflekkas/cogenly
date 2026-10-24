@@ -134,6 +134,7 @@ import {
 } from "../threadSelectionStore";
 import { useAcknowledgeThreadWoke, useThreadActions } from "../hooks/useThreadActions";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
+import { useThreadIntentPrefetch } from "../hooks/useThreadIntentPrefetch";
 import { useSidebarProjectGroups } from "../hooks/useSidebarProjectGroups";
 import { useTerminalFocus } from "../hooks/useTerminalFocus";
 import { isCommandPaletteOpen, openCommandPalette } from "../commandPaletteBus";
@@ -319,12 +320,16 @@ import {
   groupWorkCards,
   moveInOrder,
   placeInGroupOrder,
+  planWorkCardReorder,
   toggleCollapsedSection,
   workCardLabel,
+  workCardsReadUp,
   workGroupSectionKey,
 } from "./sidebar/workCards.logic";
 import { SidebarListRevealSentinel, useSidebarListReveal } from "./sidebar/SidebarListReveal";
 import { useSidebarListAnchor } from "./sidebar/useSidebarListAnchor";
+import { sidebarListEdge } from "./sidebar/sidebarListAnchor.logic";
+import { useSidebarLayout } from "../appearancePreferences";
 import { useAgentListFilter } from "../agents/agentListFilter";
 import { AgentsShelfBar } from "../agents/AgentsShelfBar";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
@@ -833,7 +838,7 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
             <span className="relative ml-auto flex h-5 min-w-8 shrink-0 items-stretch justify-end text-xs">
               <span
                 aria-hidden
-                className="pointer-events-none flex items-center gap-1 self-center font-medium text-warning-foreground transition-opacity duration-(--motion-duration-base) ease-standard motion-reduce:transition-none group-has-[:focus-visible]/sidebar-row:opacity-0 group-any-hover/sidebar-row:opacity-0"
+                className="pointer-events-none flex items-center gap-1 self-center font-medium text-warning-foreground interactive group-has-[:focus-visible]/sidebar-row:opacity-0 group-any-hover/sidebar-row:opacity-0"
               >
                 <SquarePenIcon className={draftPenClassName} />
                 Draft
@@ -1129,6 +1134,7 @@ const SidebarChatRow = memo(function SidebarChatRow(props: {
     () => scopeThreadRef(thread.environmentId, thread.id),
     [thread.environmentId, thread.id],
   );
+  const intentPrefetch = useThreadIntentPrefetch(threadRef);
   const threadKey = scopedThreadKey(threadRef);
   const canOperateThread = useEnvironmentScope(thread.environmentId, AuthOrchestrationOperateScope);
   useEffect(() => {
@@ -1273,6 +1279,7 @@ const SidebarChatRow = memo(function SidebarChatRow(props: {
         onDoubleClick={handleDoubleClick}
         onKeyDown={handleKeyDown}
         onContextMenu={handleContextMenu}
+        {...intentPrefetch}
       >
         {/* The pin's slot opens from nothing, so pinning eases the title over
             instead of jumping it. Its negative margin cancels the row gap
@@ -1422,6 +1429,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     () => scopeThreadRef(thread.environmentId, thread.id),
     [thread.environmentId, thread.id],
   );
+  const intentPrefetch = useThreadIntentPrefetch(threadRef);
   const threadKey = scopedThreadKey(threadRef);
   const canOperateThread = useEnvironmentScope(thread.environmentId, AuthOrchestrationOperateScope);
   useEffect(() => {
@@ -1863,6 +1871,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
           onDoubleClick={handleDoubleClick}
           onKeyDown={handleKeyDown}
           onContextMenu={handleContextMenu}
+          {...intentPrefetch}
         >
           {accessibleTitle}
           {/* Settled history recedes: dimmed favicon at rest, restored on
@@ -1894,7 +1903,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
           >
             <span
               className={cn(
-                "inline-flex justify-end tabular-nums text-secondary-label transition-opacity duration-(--motion-duration-base) ease-standard motion-reduce:transition-none",
+                "inline-flex justify-end tabular-nums text-secondary-label interactive",
                 !isWoke && "group-any-hover/sidebar-row:opacity-0",
               )}
             >
@@ -1939,7 +1948,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                   onClick={handleUnsnoozeClick}
                   onPointerDown={handleActionPointerDown}
                   className={cn(
-                    "pointer-events-none absolute inset-y-0 right-0 -mr-1 inline-flex cursor-pointer items-center gap-1 rounded-md bg-transparent px-1.5 text-xs text-muted-foreground opacity-0 transition-opacity duration-(--motion-duration-base) ease-standard motion-reduce:transition-none hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-any-hover/sidebar-row:pointer-events-auto group-any-hover/sidebar-row:opacity-100",
+                    "pointer-events-none absolute inset-y-0 right-0 -mr-1 inline-flex cursor-pointer items-center gap-1 rounded-md bg-transparent px-1.5 text-xs text-muted-foreground opacity-0 interactive hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-any-hover/sidebar-row:pointer-events-auto group-any-hover/sidebar-row:opacity-100",
                     isWoke && "group-any-hover/sidebar-row:static",
                   )}
                 >
@@ -1956,7 +1965,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                       onClick={handleUnsettleClick}
                       onPointerDown={handleActionPointerDown}
                       className={cn(
-                        "pointer-events-none absolute inset-y-0 right-0 -mr-1 inline-flex cursor-pointer items-center gap-1 rounded-md bg-transparent px-1.5 text-xs text-muted-foreground opacity-0 transition-opacity duration-(--motion-duration-base) ease-standard motion-reduce:transition-none hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-any-hover/sidebar-row:pointer-events-auto group-any-hover/sidebar-row:opacity-100",
+                        "pointer-events-none absolute inset-y-0 right-0 -mr-1 inline-flex cursor-pointer items-center gap-1 rounded-md bg-transparent px-1.5 text-xs text-muted-foreground opacity-0 interactive hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-any-hover/sidebar-row:pointer-events-auto group-any-hover/sidebar-row:opacity-100",
                         isWoke && "group-any-hover/sidebar-row:static",
                       )}
                     />
@@ -1973,7 +1982,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 onClick={handleSettleClick}
                 onPointerDown={handleActionPointerDown}
                 className={cn(
-                  "pointer-events-none absolute inset-y-0 right-0 inline-flex cursor-pointer items-center gap-1 rounded-md bg-transparent px-2 text-xs text-muted-foreground opacity-0 transition-opacity duration-(--motion-duration-base) ease-standard motion-reduce:transition-none hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-any-hover/sidebar-row:pointer-events-auto group-any-hover/sidebar-row:opacity-100",
+                  "pointer-events-none absolute inset-y-0 right-0 inline-flex cursor-pointer items-center gap-1 rounded-md bg-transparent px-2 text-xs text-muted-foreground opacity-0 interactive hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-any-hover/sidebar-row:pointer-events-auto group-any-hover/sidebar-row:opacity-100",
                   isWoke && "group-any-hover/sidebar-row:static",
                 )}
               >
@@ -2010,6 +2019,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
         onDoubleClick={handleDoubleClick}
         onKeyDown={handleKeyDown}
         onContextMenu={handleContextMenu}
+        {...intentPrefetch}
       >
         {accessibleTitle}
         <SidebarCardBody>
@@ -2055,7 +2065,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                   isWokeStatus
                     ? "pointer-events-auto"
                     : "pointer-events-none group-has-[:focus-visible]/sidebar-status-slot:opacity-0 group-any-hover/sidebar-row:opacity-0",
-                  "flex items-center self-center justify-self-end tabular-nums text-secondary-label transition-opacity duration-(--motion-duration-base) ease-standard motion-reduce:transition-none",
+                  "flex items-center self-center justify-self-end tabular-nums text-secondary-label interactive",
                   snoozeMenuOpen && "pointer-events-none opacity-0",
                 )}
               >
@@ -2143,7 +2153,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                     // would keep the controls pinned over the status label
                     // once the pointer moves away (e.g. after a failed
                     // settle) instead of cross-fading back.
-                    "pointer-events-none absolute inset-y-0 right-0 flex items-stretch opacity-0 transition-opacity duration-(--motion-duration-base) ease-standard motion-reduce:transition-none has-[:focus-visible]:pointer-events-auto has-[:focus-visible]:opacity-100 group-any-hover/sidebar-row:pointer-events-auto group-any-hover/sidebar-row:opacity-100",
+                    "pointer-events-none absolute inset-y-0 right-0 flex items-stretch opacity-0 interactive has-[:focus-visible]:pointer-events-auto has-[:focus-visible]:opacity-100 group-any-hover/sidebar-row:pointer-events-auto group-any-hover/sidebar-row:opacity-100",
                     isWokeStatus &&
                       "has-[:focus-visible]:static group-any-hover/sidebar-row:static",
                     snoozeMenuOpen && "pointer-events-auto opacity-100",
@@ -2454,6 +2464,9 @@ export default function Sidebar() {
   // AppSidebarLayout shows the navigation rail beside this sidebar on wider
   // windows (the legacy sidebar never mounts this component).
   const navRailVisible = !isMobile;
+  // Top docks search under the titlebar; bottom docks it at the column's foot
+  // and stacks the lists up toward it (Settings → Appearance).
+  const sidebarLayout = useSidebarLayout();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const confirmThreadDelete = useClientSettings((s) => s.confirmThreadDelete);
   const confirmThreadArchive = useClientSettings((s) => s.confirmThreadArchive);
@@ -2946,6 +2959,16 @@ export default function Sidebar() {
   const threadSearchInputRef = useRef<HTMLInputElement>(null);
   const [threadSearchQuery, setThreadSearchQuery] = useState("");
   const [activeSearchResultIndex, setActiveSearchResultIndex] = useState(0);
+  // The query belongs to the mode it was typed in: switching modes starts the
+  // next list unfiltered. Reset during render, not in an effect, so the new
+  // mode never paints one frame filtered by the old query. Opening a result
+  // stays in its mode, so it never trips this. Settings remounts the column.
+  const [threadSearchMode, setThreadSearchMode] = useState(sidebarMode);
+  if (threadSearchMode !== sidebarMode) {
+    setThreadSearchMode(sidebarMode);
+    setThreadSearchQuery("");
+    setActiveSearchResultIndex(0);
+  }
   const isSearchingThreads = threadSearchQuery.trim().length > 0;
   const searchableThreads = useMemo(
     () => [...activeThreads, ...workingThreads, ...snoozedThreads, ...settledThreads],
@@ -3729,8 +3752,14 @@ export default function Sidebar() {
     const keysById = new Map(
       [...threadByKeyRef.current].map(([id, thread]) => [id, thread.activeOrderKey ?? null]),
     );
-    // Work draws the server's active order as is, so the drawn order is the one keyed.
-    const writes = planPinnedReorder({ orderedIds: order, keysById, movedId: key });
+    // The bottom layout draws the server's order reversed; the planner keys
+    // the server's order either way, so a saved order means the same in both.
+    const writes = planWorkCardReorder({
+      layout: sidebarLayout,
+      drawnOrder: order,
+      keysById,
+      movedId: key,
+    });
     if (writes.length === 0) {
       setWorkDrag(null);
       return;
@@ -3992,10 +4021,12 @@ export default function Sidebar() {
   // A project picked in the Work hero rides on a draft until its first send,
   // and files the draft's card under that project.
   const pendingFolderByThreadId = usePendingProjectFolderStore((state) => state.byThreadId);
-  // Work's cards as drawn, top to bottom: the unsent drafts, newest first,
-  // then the filter's threads in their order (new work first, just under the
-  // dock). While a card is saving a move the list previews the new order.
-  // `groups` files them under project headings, each keeping that order.
+  // Work's cards as drawn, top to bottom, with new work nearest the dock: in
+  // the top layout the unsent drafts, newest first, then the filter's threads
+  // in their order (new work first); in the bottom layout the reverse, the
+  // threads reversed then the drafts, newest lowest. While a card is saving a
+  // move the list previews the new order. `groups` files them under project
+  // headings, each keeping that order.
   const workRows = useMemo(() => {
     if (sidebarMode !== "tasks") return null;
     const shown = openShelf ?? "active";
@@ -4013,6 +4044,8 @@ export default function Sidebar() {
       }
       threads.push({ key: item.key, section: item.section });
     }
+    const readUp = workCardsReadUp(sidebarLayout);
+    if (readUp) threads.reverse();
     const savedOrder = threads.map((entry) => entry.key);
     const drawnOrder =
       workDrag !== null && shown === "active"
@@ -4024,7 +4057,11 @@ export default function Sidebar() {
     // The saved order now draws what the preview does.
     const dropLanded = drawnOrder.every((key, index) => savedOrder[index] === key);
     const drafts =
-      shown === "active" ? workDrafts.toSorted((a, b) => b.createdAtMs - a.createdAtMs) : [];
+      shown === "active"
+        ? workDrafts.toSorted((a, b) =>
+            readUp ? a.createdAtMs - b.createdAtMs : b.createdAtMs - a.createdAtMs,
+          )
+        : [];
     // One stable folder per project (rowFolderByKey), for the heading's mark.
     const projectOf = (entry: EnvironmentProjectLabel | null | undefined) =>
       entry
@@ -4034,10 +4071,15 @@ export default function Sidebar() {
             folder: rowFolderByKey.get(entry.key) ?? null,
           }
         : null;
-    const cards: WorkCardEntry[] = [
-      ...drafts.map((draft) => ({ kind: "draft" as const, key: `draft:${draft.draftId}`, draft })),
-      ...previewed.map((entry) => ({ kind: "thread" as const, ...entry })),
-    ];
+    const draftCards = drafts.map((draft) => ({
+      kind: "draft" as const,
+      key: `draft:${draft.draftId}`,
+      draft,
+    }));
+    const threadCards = previewed.map((entry) => ({ kind: "thread" as const, ...entry }));
+    const cards: WorkCardEntry[] = readUp
+      ? [...threadCards, ...draftCards]
+      : [...draftCards, ...threadCards];
     const groups = groupWorkCards(cards, (card) => {
       if (card.kind === "thread") {
         const thread = threadByKey.get(card.key);
@@ -4060,6 +4102,7 @@ export default function Sidebar() {
     pendingFolderByThreadId,
     projectLabelDirectory,
     rowFolderByKey,
+    sidebarLayout,
     sidebarListItems,
     sidebarMode,
     threadByKey,
@@ -4175,8 +4218,9 @@ export default function Sidebar() {
   );
   const sidebarListHasRows = sidebarListItems.length + visibleDraftSessionCount > 0;
   const sidebarModeListRef = useRef<HTMLDivElement | null>(null);
-  // Each list (a mode and its filter, or search) keeps its own place, read
-  // down from the dock; one never seen before opens on its first rows.
+  // Each list (a mode and its filter, or search) keeps its own place against
+  // its edge: read down from the dock in the top layout, while in the bottom
+  // layout Work's active lists and Agents open on their last rows by the dock.
   const agentListFilter = useAgentListFilter();
   useSidebarListAnchor(
     sidebarModeListRef,
@@ -4187,6 +4231,12 @@ export default function Sidebar() {
         : sidebarMode === "agents"
           ? `agents:${agentListFilter}`
           : sidebarMode,
+    sidebarListEdge({
+      layout: sidebarLayout,
+      searching: isSearchingThreads,
+      mode: sidebarMode,
+      shelf: openShelf ?? null,
+    }),
   );
   const listMotionModeRef = useRef(sidebarMode);
   const listMotionShelfRef = useRef(openShelf);
@@ -5127,6 +5177,33 @@ export default function Sidebar() {
       onClearSearch={clearThreadSearch}
     />
   );
+  // Desktop switches modes from the navigation rail; the mobile sheet keeps
+  // the segmented switcher at the top of the column in either layout.
+  const modeSwitcher = navRailVisible ? null : (
+    <SidebarModeSwitcher
+      className={sidebarLayout === "top" ? "mb-2.5" : ""}
+      mode={sidebarMode}
+      onModeChange={sidebarModes.selectMode}
+      decisionsWaiting={sidebarModes.decisionsWaiting}
+      keybindings={keybindings}
+    />
+  );
+  const shelfBar =
+    sidebarMode === "tasks" ? (
+      <SidebarShelfBar
+        activeIcon={SIDEBAR_MODE_ICONS.tasks}
+        activeLabel="All tasks"
+        activeEmptyLabel="Nothing in progress"
+        activeCount={activeThreads.length}
+        attentionCount={attentionThreadKeys.size}
+        snoozedCount={snoozedThreads.length}
+        settledCount={settledThreads.length}
+        openShelf={openShelf}
+        onOpenShelf={openSidebarShelf}
+      />
+    ) : sidebarMode === "agents" ? (
+      <AgentsShelfBar />
+    ) : null;
   return (
     <>
       <ThreadContextDragGhost />
@@ -5134,41 +5211,36 @@ export default function Sidebar() {
       <SidebarContent
         className="min-h-full"
         fixedHeader={
-          // Lifted above the stage backdrop, whose fade would otherwise paint
-          // across the search field's outline.
-          <SidebarGroup className="z-[1]">
-            {/* Desktop switches modes from the navigation rail; the mobile
-                sheet keeps the segmented switcher above search. */}
-            {navRailVisible ? null : (
-              <SidebarModeSwitcher
-                className="mb-2.5"
-                mode={sidebarMode}
-                onModeChange={sidebarModes.selectMode}
-                decisionsWaiting={sidebarModes.decisionsWaiting}
-                keybindings={keybindings}
-              />
-            )}
-            {/* Search and the add/new actions dock above the list, then the
-                mode's count bar; the list reads down from them. */}
-            {threadHeader}
-            {sidebarMode === "tasks" ? (
-              <SidebarShelfBar
-                activeIcon={SIDEBAR_MODE_ICONS.tasks}
-                activeLabel="All tasks"
-                activeEmptyLabel="Nothing in progress"
-                activeCount={activeThreads.length}
-                attentionCount={attentionThreadKeys.size}
-                snoozedCount={snoozedThreads.length}
-                settledCount={settledThreads.length}
-                openShelf={openShelf}
-                onOpenShelf={openSidebarShelf}
-              />
-            ) : null}
-            {sidebarMode === "agents" ? <AgentsShelfBar /> : null}
-          </SidebarGroup>
+          sidebarLayout === "top" ? (
+            // Lifted above the stage backdrop, whose fade would otherwise paint
+            // across the search field's outline.
+            <SidebarGroup className="z-[1]">
+              {modeSwitcher}
+              {/* Search and the add/new actions dock above the list, then the
+                  mode's count bar; the list reads down from them. */}
+              {threadHeader}
+              {shelfBar}
+            </SidebarGroup>
+          ) : modeSwitcher ? (
+            <SidebarGroup className="z-[1]">{modeSwitcher}</SidebarGroup>
+          ) : null
+        }
+        fixedFooter={
+          sidebarLayout === "bottom" ? (
+            // The mode's count bar, then search and the add/new actions, dock
+            // under the list, which stacks up from the bottom toward them.
+            <SidebarGroup className="z-[1]">
+              {shelfBar}
+              {threadHeader}
+            </SidebarGroup>
+          ) : null
         }
       >
-        <SidebarGroup ref={sidebarModeListRef} className="flex-1" role="presentation">
+        <SidebarGroup
+          ref={sidebarModeListRef}
+          className={sidebarLayout === "bottom" ? "flex-1 justify-end" : "flex-1"}
+          role="presentation"
+        >
           {isSearchingThreads ? (
             threadSearchResults.length > 0 ? (
               <TooltipProvider

@@ -111,6 +111,23 @@ export const DesktopUpdateStatusSchema = Schema.Literals([
 ]);
 export const DesktopRuntimeArchSchema = Schema.Literals(["arm64", "x64", "other"]);
 export const DesktopThemeSchema = Schema.Literals(["light", "dark", "system"]);
+/**
+ * Settings → Appearance → Accent color. Orange is the brand default; the web
+ * client stores the choice per device and the desktop shell mirrors it into
+ * the macOS Dock icon.
+ */
+export const APPEARANCE_ACCENTS = [
+  "orange",
+  "blue",
+  "violet",
+  "green",
+  "pink",
+  "teal",
+  "amber",
+  "red",
+] as const;
+export const AppearanceAccentSchema = Schema.Literals(APPEARANCE_ACCENTS);
+export type AppearanceAccent = (typeof APPEARANCE_ACCENTS)[number];
 export const DesktopUpdateChannelSchema = Schema.Literals(["latest", "staging"]);
 export const DesktopAppStageLabelSchema = Schema.Literals([
   "Alpha",
@@ -1150,6 +1167,11 @@ export interface DesktopBridge {
    * web callers fall back to a plain file input.
    */
   setTheme: (theme: DesktopTheme) => Promise<void>;
+  /**
+   * Mirrors the accent into the macOS Dock icon and remembers it for the next
+   * launch. A no-op elsewhere; absent on desktop builds predating it.
+   */
+  setAccentColor?: (accent: AppearanceAccent) => Promise<void>;
   showContextMenu: <T extends string>(
     items: readonly ContextMenuItem<T>[],
     position?: { x: number; y: number },

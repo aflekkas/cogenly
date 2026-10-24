@@ -43,6 +43,10 @@
       "types": "./src/themePalettes.ts",
       "import": "./src/themePalettes.ts"
     },
+    "./accentColors": {
+      "types": "./src/accentColors.ts",
+      "import": "./src/accentColors.ts"
+    },
     "./projectFavicon": {
       "types": "./src/projectFavicon.ts",
       "import": "./src/projectFavicon.ts"

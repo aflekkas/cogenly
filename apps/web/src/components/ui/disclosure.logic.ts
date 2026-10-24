@@ -54,11 +54,19 @@ export function disclosurePanelPresent(state: DisclosurePanelState, reducedMotio
   return state.mounted && !(reducedMotion && !state.open);
 }
 
-/** Disclosures open on the slow token and leave at 0.7x, like panels. */
+/**
+ * Whether a closed panel reports its exit now: only once content it showed has
+ * left the DOM. A panel that mounted closed never showed anything. A fold's
+ * rows share one exit, so a row that scrolls into view while its fold closes
+ * must not report it and drop the rows still animating out.
+ */
+export function disclosureExitDue(open: boolean, present: boolean, shown: boolean) {
+  return !open && !present && shown;
+}
+
+/** Disclosures open on the base motion token and leave on the fast one. */
 export function disclosureDuration(open: boolean) {
   return {
-    transitionDuration: open
-      ? "var(--motion-duration-slow)"
-      : "calc(var(--motion-duration-slow) * 0.7)",
+    transitionDuration: open ? "var(--motion-duration-base)" : "var(--motion-duration-fast)",
   };
 }

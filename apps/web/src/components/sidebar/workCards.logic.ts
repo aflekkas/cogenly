@@ -1,9 +1,21 @@
+import { planPinnedReorder } from "@t3tools/client-runtime/state/thread-sort";
+
+import type { SidebarLayout } from "~/appearancePreferences";
+
 /**
- * Work's cards are drawn top to bottom in the server's active order, which
- * puts new, unarranged work first, just under the search dock. The list shows
- * them under project headings (`groupWorkCards`), each group keeping that
- * order. Orders here read top to bottom as drawn.
+ * The server's active order puts new, unarranged work first, and Work draws
+ * it with that end nearest the search dock: top to bottom as is in the top
+ * layout (`workCardsReadUp` false), reversed in the bottom layout, where the
+ * list stacks up toward the dock. The list shows them under project headings
+ * (`groupWorkCards`), each group keeping that order. Orders here read top to
+ * bottom as drawn; `planWorkCardReorder` maps them back to the server's order,
+ * so a saved order means the same in both layouts.
  */
+
+/** Whether Work draws its cards in reverse of the server's order, newest at the bottom. */
+export function workCardsReadUp(layout: SidebarLayout): boolean {
+  return layout === "bottom";
+}
 
 /**
  * A Work card's first line, after T3's: the repository, led by the project it
@@ -122,6 +134,27 @@ export function applyDrawnOrder(drawn: readonly string[], preview: readonly stri
   const present = new Set(drawn);
   const known = new Set(preview);
   return [...preview.filter((key) => present.has(key)), ...drawn.filter((key) => !known.has(key))];
+}
+
+/**
+ * The order-key writes that put the cards in `drawnOrder` (top to bottom).
+ * Keys follow the server's order, which the bottom layout draws reversed, so
+ * there the drawn order is reversed before planning. One write moves one card
+ * between keyed neighbours; next to new, keyless cards the list is keyed once
+ * in full. `keysById` should carry every active thread's key, so a new key
+ * never repeats one held by a card not drawn.
+ */
+export function planWorkCardReorder(input: {
+  readonly layout: SidebarLayout;
+  readonly drawnOrder: readonly string[];
+  readonly keysById: ReadonlyMap<string, string | null | undefined>;
+  readonly movedId: string;
+}): ReadonlyArray<{ readonly id: string; readonly orderKey: string }> {
+  return planPinnedReorder({
+    orderedIds: workCardsReadUp(input.layout) ? input.drawnOrder.toReversed() : input.drawnOrder,
+    keysById: input.keysById,
+    movedId: input.movedId,
+  });
 }
 
 /**

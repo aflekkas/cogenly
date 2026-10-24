@@ -34,11 +34,19 @@ function hex(channel: number): string {
   return Math.round(channel).toString(16).padStart(2, "0").toUpperCase();
 }
 
+type Rgb = readonly [number, number, number];
+/** Maps each ember tone to the color drawn; the accent Dock icons pass a tint. */
+export type ToneRecolor = (tone: Rgb) => Rgb;
+const asDrawn: ToneRecolor = (tone) => tone;
+
 /** The ember gradient quantized into `steps` tones, top to bottom. */
-function tones(steps: number): ReadonlyArray<string> {
+function tones(steps: number, recolor: ToneRecolor): ReadonlyArray<string> {
   return Array.from({ length: steps }, (_, index) => {
     const t = index / (steps - 1);
-    return `#${EMBER_FROM.map((from, channel) => hex(from + (EMBER_TO[channel]! - from) * t)).join("")}`;
+    const lerp = (channel: 0 | 1 | 2) =>
+      EMBER_FROM[channel] + (EMBER_TO[channel] - EMBER_FROM[channel]) * t;
+    const tone: Rgb = [lerp(0), lerp(1), lerp(2)];
+    return `#${recolor(tone).map(hex).join("")}`;
   });
 }
 
@@ -51,8 +59,8 @@ function toneAt(column: number, row: number, cells: number, steps: number): numb
 }
 
 /** One `<rect>` per horizontal run of equal tone, clipped to the rounded tile. */
-function pixelTile(id: string, cells: number, steps: number): string {
-  const palette = tones(steps);
+function pixelTile(id: string, cells: number, steps: number, recolor: ToneRecolor): string {
+  const palette = tones(steps, recolor);
   const size = BOX / cells;
   const rects: string[] = [];
   for (let row = 0; row < cells; row++) {
@@ -80,8 +88,15 @@ function svg(body: string): string {
 const RIM =
   '<rect x="1.75" y="1.75" width="124.5" height="124.5" rx="26.25" stroke="#FFFFFF" stroke-opacity="0.18" stroke-width="1.5"/>';
 
-export const COGENLY_MARK = svg(`${pixelTile("cogenly-tile", 16, 3)}\n  ${RIM}\n  ${GLYPH}`);
-export const COGENLY_MARK_SMALL = svg(`${pixelTile("cogenly-tile-small", 8, 3)}\n  ${SMALL_GLYPH}`);
+/** The full mark; `recolor` changes only the ember tiles, never the white rim or glyph. */
+export function cogenlyMark(recolor: ToneRecolor = asDrawn): string {
+  return svg(`${pixelTile("cogenly-tile", 16, 3, recolor)}\n  ${RIM}\n  ${GLYPH}`);
+}
+
+export const COGENLY_MARK = cogenlyMark();
+export const COGENLY_MARK_SMALL = svg(
+  `${pixelTile("cogenly-tile-small", 8, 3, asDrawn)}\n  ${SMALL_GLYPH}`,
+);
 
 const writeCogenlyMarks = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;

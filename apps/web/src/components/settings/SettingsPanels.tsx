@@ -51,11 +51,12 @@ import { buildHostedChannelSelectionUrl, type HostedAppChannel } from "../../hos
 import { useTheme } from "../../hooks/useTheme";
 import { BrowserAppearanceSettingRow } from "./IntegrationsSettings";
 import { DEFAULT_APPEARANCE_MODE, type AppearanceMode } from "../../theme";
+import { AccentColorSettingRow } from "./AccentColorSettingRow";
 import {
-  ACCENT_COLORS,
   DEFAULT_APPEARANCE_PREFERENCES,
-  type AccentColor,
   type FontSizePreference,
+  SIDEBAR_LAYOUTS,
+  type SidebarLayout,
   useAppearancePreferences,
 } from "../../appearancePreferences";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
@@ -433,6 +434,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(appearance.motion !== DEFAULT_APPEARANCE_PREFERENCES.motion ? ["Reduce motion"] : []),
       ...(appearance.usageMeter !== DEFAULT_APPEARANCE_PREFERENCES.usageMeter
         ? ["Usage meters"]
+        : []),
+      ...(appearance.sidebarLayout !== DEFAULT_APPEARANCE_PREFERENCES.sidebarLayout
+        ? ["Sidebar layout"]
         : []),
       ...(settings.diffColorScheme !== DEFAULT_UNIFIED_SETTINGS.diffColorScheme
         ? ["Diff colors"]
@@ -957,27 +961,9 @@ const FONT_SIZE_LABELS: Record<FontSizePreference, string> = {
   large: "Large",
 };
 
-const ACCENT_COLOR_LABELS: Record<AccentColor, string> = {
-  orange: "Orange",
-  blue: "Blue",
-  violet: "Violet",
-  green: "Green",
-  pink: "Pink",
-  teal: "Teal",
-  amber: "Amber",
-  red: "Red",
-};
-
-/** Each preset's swatch, the dark-theme base from index.css (the brand orange for orange). */
-const ACCENT_SWATCHES: Record<AccentColor, string> = {
-  orange: "#ff7b3a",
-  blue: "#4c8dff",
-  violet: "#9d6bff",
-  green: "#2fb565",
-  pink: "#f0559a",
-  teal: "#1fb3a5",
-  amber: "#e8930c",
-  red: "#f04a4a",
+const SIDEBAR_LAYOUT_LABELS: Record<SidebarLayout, string> = {
+  top: "Top",
+  bottom: "Bottom",
 };
 
 /** A single-choice segmented control for a settings row. */
@@ -1034,56 +1020,7 @@ export function AppearanceSettingsPanel() {
             />
           }
         />
-        <SettingsRow
-          {...searchableSetting("accent-color")}
-          description="The color of send buttons, highlights and other accents."
-          resetAction={
-            preferences.accent !== DEFAULT_APPEARANCE_PREFERENCES.accent ? (
-              <SettingResetButton
-                label="accent color"
-                onClick={() => update({ accent: DEFAULT_APPEARANCE_PREFERENCES.accent })}
-              />
-            ) : null
-          }
-          control={
-            <div role="radiogroup" aria-label="Accent color" className="flex flex-wrap gap-1.5">
-              {ACCENT_COLORS.map((accent) => {
-                const selected = preferences.accent === accent;
-                return (
-                  <Tooltip key={accent}>
-                    <TooltipTrigger
-                      render={
-                        <button
-                          type="button"
-                          role="radio"
-                          aria-checked={selected}
-                          aria-label={ACCENT_COLOR_LABELS[accent]}
-                          onClick={() => update({ accent })}
-                          className="flex size-6 cursor-pointer items-center justify-center rounded-full -outline-offset-2 transition-shadow duration-(--motion-duration-fast) ease-standard focus-visible:outline-2 focus-visible:outline-ring motion-reduce:transition-none"
-                          style={{
-                            backgroundColor: ACCENT_SWATCHES[accent],
-                            boxShadow: selected
-                              ? `0 0 0 2px var(--background), 0 0 0 4px ${ACCENT_SWATCHES[accent]}`
-                              : undefined,
-                          }}
-                        >
-                          {selected ? (
-                            <CheckIcon
-                              aria-hidden
-                              className="size-3.5 text-white"
-                              strokeWidth={3}
-                            />
-                          ) : null}
-                        </button>
-                      }
-                    />
-                    <TooltipPopup side="top">{ACCENT_COLOR_LABELS[accent]}</TooltipPopup>
-                  </Tooltip>
-                );
-              })}
-            </div>
-          }
-        />
+        <AccentColorSettingRow />
         <SettingsRow
           {...searchableSetting("font-size")}
           description="Scales text and spacing across the app on this device."
@@ -1102,6 +1039,29 @@ export function AppearanceSettingsPanel() {
               options={["small", "default", "large"]}
               labels={FONT_SIZE_LABELS}
               onChange={(fontSize) => update({ fontSize })}
+            />
+          }
+        />
+        <SettingsRow
+          {...searchableSetting("sidebar-layout")}
+          description="Top-down, or anchored to the bottom near search."
+          resetAction={
+            preferences.sidebarLayout !== DEFAULT_APPEARANCE_PREFERENCES.sidebarLayout ? (
+              <SettingResetButton
+                label="sidebar layout"
+                onClick={() =>
+                  update({ sidebarLayout: DEFAULT_APPEARANCE_PREFERENCES.sidebarLayout })
+                }
+              />
+            ) : null
+          }
+          control={
+            <SettingsSegmented
+              label="Sidebar layout"
+              value={preferences.sidebarLayout}
+              options={SIDEBAR_LAYOUTS}
+              labels={SIDEBAR_LAYOUT_LABELS}
+              onChange={(sidebarLayout) => update({ sidebarLayout })}
             />
           }
         />

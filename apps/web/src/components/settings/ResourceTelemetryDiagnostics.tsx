@@ -607,7 +607,7 @@ function ProcessTable({
               </tr>
             ) : null}
             {visible.map((process) => (
-              <tr key={processIdentityKey(process)} className="hover:bg-muted/20">
+              <tr key={processIdentityKey(process)} className="interactive hover:bg-muted/20">
                 <td className="px-4 py-2 sm:pl-5">
                   <ProcessTreeName
                     process={process}
@@ -709,7 +709,10 @@ function HistoryProcessTable({
               </tr>
             ) : null}
             {processes.map((process) => (
-              <tr key={processSummaryIdentityKey(process)} className="hover:bg-muted/20">
+              <tr
+                key={processSummaryIdentityKey(process)}
+                className="interactive hover:bg-muted/20"
+              >
                 <td className="px-4 py-2 sm:pl-5">
                   <Tooltip>
                     <TooltipTrigger
@@ -788,7 +791,10 @@ function AttributionTable({ entries }: { entries: ReadonlyArray<ResourceAttribut
             </tr>
           ) : null}
           {entries.map((entry) => (
-            <tr key={`${entry.component}:${entry.operation}`} className="hover:bg-muted/20">
+            <tr
+              key={`${entry.component}:${entry.operation}`}
+              className="interactive hover:bg-muted/20"
+            >
               <td className="truncate px-4 py-2 font-medium text-foreground sm:pl-5">
                 {entry.component}
               </td>

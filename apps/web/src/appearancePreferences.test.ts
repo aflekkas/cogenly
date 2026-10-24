@@ -18,7 +18,13 @@ describe("parseAppearancePreferences", () => {
       parseAppearancePreferences(
         JSON.stringify({ accent: "blue", fontSize: "huge", motion: "reduce" }),
       ),
-    ).toEqual({ accent: "blue", fontSize: "default", motion: "reduce", usageMeter: "remaining" });
+    ).toEqual({
+      accent: "blue",
+      fontSize: "default",
+      motion: "reduce",
+      usageMeter: "remaining",
+      sidebarLayout: "top",
+    });
     expect(parseAppearancePreferences(JSON.stringify({ accent: "#3b82f6" })).accent).toBe("orange");
   });
 
@@ -29,6 +35,15 @@ describe("parseAppearancePreferences", () => {
     expect(parseAppearancePreferences(JSON.stringify({ usageMeter: "spent" })).usageMeter).toBe(
       "remaining",
     );
+  });
+
+  it("reads the sidebar layout, top unless bottom is chosen", () => {
+    expect(
+      parseAppearancePreferences(JSON.stringify({ sidebarLayout: "bottom" })).sidebarLayout,
+    ).toBe("bottom");
+    expect(
+      parseAppearancePreferences(JSON.stringify({ sidebarLayout: "left" })).sidebarLayout,
+    ).toBe("top");
   });
 });
 
@@ -48,6 +63,7 @@ describe("appearanceRootAttributes", () => {
         fontSize: "large",
         motion: "reduce",
         usageMeter: "used",
+        sidebarLayout: "bottom",
       }),
     ).toEqual({
       "data-accent": "teal",

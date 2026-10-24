@@ -3,10 +3,14 @@ import { useAgents, useAgentConversation } from "../agents/agentsClient";
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import type { ScopedThreadRef } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
-import { useEffect, useLayoutEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import ChatView from "./ChatView";
-import { resolveDraftPromotionNavigationTarget, threadHasStarted } from "./ChatView.logic";
+import {
+  peekRememberedThreadTimeline,
+  resolveDraftPromotionNavigationTarget,
+  threadHasStarted,
+} from "./ChatView.logic";
 import { waitForDraftHeroTransition } from "./chat/draftHeroTransition";
 import { SidebarInset } from "./ui/sidebar";
 import { settleModeSwitchMainPane } from "./sidebar/modes/modeSwitchMotion";
@@ -20,6 +24,13 @@ import { useSidebarPendingFileDropStore } from "../sidebarPendingFileDropStore";
 import { useEnvironmentThreadRefs, useThreadRefs, useThreadShell } from "../state/entities";
 import { useEnvironmentQuery } from "../state/query";
 import { environmentShell } from "../state/shell";
+import { useEnvironmentThread } from "../state/threads";
+import {
+  isThreadRouteContentReady,
+  resolveThreadRouteHold,
+  threadRouteHoldRemainingMs,
+} from "../threadRouteHold";
+import { threadRouteTargetKey } from "../threadRouteSlots";
 import {
   buildThreadRouteParams,
   isThreadRouteSnapshotAuthoritative,
@@ -42,6 +53,10 @@ import {
  * an element only survives a route swap when the same parent renders it.
  * `retained`: the route has moved on and this view only stands in, inert,
  * until the next route has content, so it must not redirect.
+ *
+ * Moving to a thread whose content is still loading keeps the current one on
+ * screen, inert, for up to THREAD_ROUTE_HOLD_MAX_MS, so the next appears
+ * complete instead of filling in (see threadRouteHold.ts).
  */
 export function ThreadRouteView({
   target,
@@ -49,6 +64,58 @@ export function ThreadRouteView({
 }: {
   target: ThreadRouteTarget;
   retained?: boolean;
+}) {
+  const hold = useThreadRouteHold(target, retained);
+  return <ThreadRouteContent target={hold.target} retained={retained || hold.holding} />;
+}
+
+function useThreadRouteHold(target: ThreadRouteTarget, retained: boolean) {
+  const [shown, setShown] = useState<ThreadRouteTarget | null>(null);
+  const [expired, setExpired] = useState(false);
+  const nextRef = target.kind === "server" ? target.threadRef : null;
+  // Mounting the next thread here starts its load while the current one shows;
+  // the opened view reads the same state, and leaving it early cancels it.
+  const nextState = useEnvironmentThread(nextRef?.environmentId ?? null, nextRef?.threadId ?? null);
+  const nextShell = useThreadShell(nextRef);
+  const nextReady =
+    nextRef === null ||
+    isThreadRouteContentReady({
+      state: nextState,
+      shell: nextShell,
+      hasRememberedTimeline: peekRememberedThreadTimeline(scopedThreadKey(nextRef)) !== null,
+    });
+  const decision = resolveThreadRouteHold({ shown, next: target, nextReady, expired, retained });
+  if (
+    !decision.holding &&
+    (shown === null || threadRouteTargetKey(shown) !== threadRouteTargetKey(decision.target))
+  ) {
+    setShown(decision.target);
+  }
+  if (!decision.holding && expired) setExpired(false);
+  // One bound per hold, even when the destination changes again mid-hold.
+  const holdSinceRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!decision.holding) {
+      holdSinceRef.current = null;
+      return;
+    }
+    const since = holdSinceRef.current ?? performance.now();
+    holdSinceRef.current = since;
+    const timeout = window.setTimeout(
+      () => setExpired(true),
+      threadRouteHoldRemainingMs(since, performance.now()),
+    );
+    return () => window.clearTimeout(timeout);
+  }, [decision.holding]);
+  return decision;
+}
+
+function ThreadRouteContent({
+  target,
+  retained,
+}: {
+  target: ThreadRouteTarget;
+  retained: boolean;
 }) {
   const navigate = useNavigate();
   const { agents, loading: agentsLoading, reconnecting: agentsReconnecting } = useAgents();

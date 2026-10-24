@@ -849,7 +849,7 @@ const PairingLinkListRow = memo(function PairingLinkListRow({
                         "flex w-full items-baseline gap-2 rounded-lg border px-2.5 py-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
                         isSelected
                           ? "border-foreground/60 bg-muted/30"
-                          : "border-border/50 hover:bg-muted/20",
+                          : "border-border/50 interactive hover:bg-muted/20",
                       )}
                       onClick={() => setQrEndpointId(option.id)}
                     >
@@ -2885,7 +2885,9 @@ export function ConnectionsSettings() {
         aria-pressed={selected}
         className={cn(
           "group flex min-h-24 items-start gap-3 rounded-lg border p-4 text-left",
-          selected ? "border-primary/50 bg-primary/5" : "border-border/60 hover:bg-muted/40",
+          selected
+            ? "border-primary/50 bg-primary/5"
+            : "border-border/60 interactive hover:bg-muted/40",
         )}
         disabled={isAddingSavedBackend}
         onClick={() => {

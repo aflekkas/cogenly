@@ -226,7 +226,7 @@ const make = Effect.gen(function* () {
       return { hubEnvironmentId: self.environmentId, signature };
     });
 
-  const readRows = Effect.gen(function* () {
+  const queryRows = Effect.gen(function* () {
     const rows = yield* sql<{
       readonly environment_id: string;
       readonly session_id: string;
@@ -247,6 +247,28 @@ const make = Effect.gen(function* () {
     );
   });
 
+  // Machine lists, shared-document sync and socket handshakes read these rows
+  // several times a second, and only this service writes them. Reads reuse the
+  // last result until a write below invalidates it. A read that overlapped a
+  // write is returned but not kept, so it cannot restore stale rows.
+  let cachedRows: ReadonlyArray<SpokeRow> | undefined;
+  let rowsVersion = 0;
+  const rowsChanged = Effect.sync(() => {
+    rowsVersion++;
+    cachedRows = undefined;
+  });
+  const readRows = Effect.suspend(() => {
+    if (cachedRows !== undefined) return Effect.succeed(cachedRows);
+    const version = rowsVersion;
+    return queryRows.pipe(
+      Effect.tap((rows) =>
+        Effect.sync(() => {
+          if (version === rowsVersion) cachedRows = rows;
+        }),
+      ),
+    );
+  });
+
   const rowForSession = (sessionId: AuthSessionId) =>
     readRows.pipe(
       Effect.map((rows) => rows.find((row) => row.sessionId === sessionId)),
@@ -262,7 +284,7 @@ const make = Effect.gen(function* () {
         const encoded = yield* encodeReport(report);
         yield* sql`UPDATE machine_peers SET last_seen_at = ${now}, report_json = ${encoded} WHERE environment_id = ${environmentId}`;
       }
-    }).pipe(Effect.ignore({ log: true }));
+    }).pipe(Effect.ensuring(rowsChanged), Effect.ignore({ log: true }));
 
   const spokes: PeerHub["Service"]["spokes"] = Effect.gen(function* () {
     const rows = yield* readRows.pipe(Effect.mapError(storage("list")));
@@ -390,7 +412,10 @@ const make = Effect.gen(function* () {
         session_id = excluded.session_id,
         report_json = excluded.report_json,
         paired_at = excluded.paired_at,
-        last_seen_at = excluded.last_seen_at`.pipe(Effect.mapError(storage("join")));
+        last_seen_at = excluded.last_seen_at`.pipe(
+        Effect.ensuring(rowsChanged),
+        Effect.mapError(storage("join")),
+      );
       yield* publishChange;
       const grantedScopes = issued.session.scopes.filter(isAuthPeerScope);
       const signature = yield* withSecrets(
@@ -440,6 +465,7 @@ const make = Effect.gen(function* () {
       }
       yield* auth.revokeSession(row.sessionId).pipe(Effect.mapError(storage("unpair")));
       yield* sql`DELETE FROM machine_peers WHERE environment_id = ${row.environmentId} AND session_id = ${row.sessionId}`.pipe(
+        Effect.ensuring(rowsChanged),
         Effect.mapError(storage("unpair")),
       );
       yield* publishChange;

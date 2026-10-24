@@ -270,9 +270,17 @@ export interface ProjectionRecordFilter {
   readonly runIds?: ReadonlyArray<RunId>;
   readonly turnItemTypes?: ReadonlyArray<OrchestrationV2TurnItem["type"]>;
   readonly turnItemStatuses?: ReadonlyArray<OrchestrationV2TurnItem["status"]>;
+  /** Only user and assistant message items carrying one of these message ids. */
+  readonly turnItemMessageIds?: ReadonlyArray<MessageId>;
   // Skips finished tool call, assistant message and reasoning nodes of finished
   // runs. Command decisions only read root, subagent and active-run nodes.
   readonly omitSettledLeafNodes?: boolean;
+  /** Only these nodes, read by primary key. */
+  readonly nodeIds?: ReadonlyArray<NodeId>;
+  /** Only the attempts of these runs. */
+  readonly attemptRunIds?: ReadonlyArray<RunId>;
+  /** Only the subagents spawned by these runs. */
+  readonly subagentRunIds?: ReadonlyArray<RunId>;
 }
 
 type ProjectionNode = OrchestrationV2ThreadProjection["nodes"][number];
@@ -1178,10 +1186,60 @@ function booleanInt(value: boolean): 0 | 1 {
   return value ? 1 : 0;
 }
 
+// Every command re-reads the control rows of its thread (runs, nodes,
+// subagents, user messages), and on a long thread schema-decoding them cost
+// several times the SQLite read while only a few rows had changed. Decoded rows
+// are kept by their exact stored JSON, so an unchanged row reuses its earlier
+// value and a changed one decodes again. Callers treat decoded rows as
+// immutable. Tool output and other large payloads are not kept, and the oldest
+// entries go once the total stored JSON exceeds the budget.
+const DECODED_ROW_MAX_CHARS = 64 * 1024;
+const DECODED_ROWS_BUDGET_CHARS = 16 * 1024 * 1024;
+const decodedRows = new Map<string, { readonly decode: unknown; readonly value: unknown }>();
+let decodedRowChars = 0;
+
+const rememberDecodedRow = (json: string, decode: unknown, value: unknown) => {
+  if (json.length > DECODED_ROW_MAX_CHARS) return;
+  if (!decodedRows.has(json)) decodedRowChars += json.length;
+  decodedRows.set(json, { decode, value });
+  for (const key of decodedRows.keys()) {
+    if (decodedRowChars <= DECODED_ROWS_BUDGET_CHARS) break;
+    decodedRows.delete(key);
+    decodedRowChars -= key.length;
+  }
+};
+
 const decodeRows =
   <A, E>(decode: (json: string) => Effect.Effect<A, E>, threadId: ThreadId) =>
   (rows: ReadonlyArray<PayloadRow>): Effect.Effect<Array<A>, ProjectionStoreReadError> =>
-    Effect.forEach(rows, (row) => decode(row.payload_json)).pipe(
+    Effect.suspend(() => {
+      const values = Array.from<A>({ length: rows.length });
+      const misses: Array<number> = [];
+      for (let index = 0; index < rows.length; index++) {
+        const json = rows[index]!.payload_json;
+        const cached = decodedRows.get(json);
+        if (cached?.decode === decode) {
+          // Reinsert so the entry counts as recently used.
+          decodedRows.delete(json);
+          decodedRows.set(json, cached);
+          values[index] = cached.value as A;
+        } else {
+          misses.push(index);
+        }
+      }
+      if (misses.length === 0) return Effect.succeed(values);
+      return Effect.forEach(
+        misses,
+        (index) =>
+          decode(rows[index]!.payload_json).pipe(
+            Effect.map((value) => {
+              rememberDecodedRow(rows[index]!.payload_json, decode, value);
+              values[index] = value;
+            }),
+          ),
+        { discard: true },
+      ).pipe(Effect.as(values));
+    }).pipe(
       Effect.mapError(
         (cause) =>
           new ProjectionStoreReadError({
@@ -2855,6 +2913,13 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                   ${filter?.turnItemStatuses === undefined ? sql`` : sql`AND status IN (SELECT value FROM json_each(${encodeIdList(filter.turnItemStatuses)}))`}
                   ${filter?.turnItemRunId === undefined ? sql`` : sql`AND run_id = ${filter.turnItemRunId}`}
                   ${filter?.turnItemRunIds === undefined ? sql`` : sql`AND (run_id IN (SELECT value FROM json_each(${encodeIdList(filter.turnItemRunIds.filter((id): id is RunId => id !== null))})) OR (${filter.turnItemRunIds.includes(null) ? 1 : 0} = 1 AND run_id IS NULL))`}
+                  ${
+                    filter?.turnItemMessageIds === undefined
+                      ? sql``
+                      : // Spelled exactly as the message-item index, so SQLite uses it.
+                        sql`AND type IN ('user_message', 'assistant_message')
+                          AND json_extract(payload_json, '$.messageId') IN (SELECT value FROM json_each(${encodeIdList(filter.turnItemMessageIds)}))`
+                  }
                 ORDER BY ordinal ASC, turn_item_id ASC
               `
               : yield* sql<PayloadRow>`
@@ -3145,6 +3210,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             SELECT payload_json
             FROM orchestration_v2_projection_run_attempts
             WHERE thread_id = ${threadId}
+              ${filter?.attemptRunIds === undefined ? sql`` : sql`AND run_id IN (SELECT value FROM json_each(${encodeIdList(filter.attemptRunIds)}))`}
             ORDER BY run_id ASC, attempt_ordinal ASC
           `
               : sql<PayloadRow>`
@@ -3158,8 +3224,15 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             ? Effect.succeed([])
             : window === undefined
               ? sql<PayloadRow>`
-            SELECT payload_json
-            FROM orchestration_v2_projection_nodes AS node
+            SELECT node.payload_json
+            ${
+              filter?.nodeIds === undefined
+                ? sql`FROM orchestration_v2_projection_nodes AS node`
+                : // Requested IDs stay outermost, so each node is a primary key lookup.
+                  sql`FROM json_each(${encodeIdList(filter.nodeIds)}) AS requested
+                    CROSS JOIN orchestration_v2_projection_nodes AS node
+                      ON node.node_id = requested.value`
+            }
             WHERE node.thread_id = ${threadId}
               ${
                 filter?.omitSettledLeafNodes === true
@@ -3197,6 +3270,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             SELECT payload_json
             FROM orchestration_v2_projection_subagents
             WHERE thread_id = ${threadId}
+              ${filter?.subagentRunIds === undefined ? sql`` : sql`AND run_id IN (SELECT value FROM json_each(${encodeIdList(filter.subagentRunIds)}))`}
             ORDER BY COALESCE(started_at, ''), subagent_id ASC
           `
               : sql<PayloadRow>`
@@ -3449,10 +3523,16 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         // A metadata read must preserve message ordering without decoding tool output.
         const messageOrdinals = new Map<string, number>();
         if (fields !== undefined && fields.includes("messages") && messages.length > 1) {
+          // Only the loaded messages are sorted. Spelled exactly as the
+          // message-item index, so each ID is an index seek and no payload is read.
           const rows = yield* sql<{ message_id: string; ordinal: number }>`
             SELECT json_extract(payload_json, '$.messageId') AS message_id, MIN(ordinal) AS ordinal
             FROM orchestration_v2_projection_turn_items
-            WHERE thread_id = ${threadId} AND type IN ('user_message', 'assistant_message')
+            WHERE thread_id = ${threadId}
+              AND type IN ('user_message', 'assistant_message')
+              AND json_extract(payload_json, '$.messageId') IN (
+                SELECT value FROM json_each(${encodeIdList(messages.map((message) => message.id))})
+              )
             GROUP BY json_extract(payload_json, '$.messageId')
           `;
           for (const row of rows) messageOrdinals.set(row.message_id, row.ordinal);
@@ -6436,8 +6516,21 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
               filter?.runIds === undefined
                 ? projection.runs
                 : projection.runs.filter((row) => filter.runIds!.includes(row.id)),
+            attempts:
+              filter?.attemptRunIds === undefined
+                ? projection.attempts
+                : projection.attempts.filter((row) => filter.attemptRunIds!.includes(row.runId)),
+            subagents:
+              filter?.subagentRunIds === undefined
+                ? projection.subagents
+                : projection.subagents.filter(
+                    (row) => row.runId !== null && filter.subagentRunIds!.includes(row.runId),
+                  ),
             turnItems: projection.turnItems.filter(
               (row) =>
+                (filter?.turnItemMessageIds === undefined ||
+                  ((row.type === "user_message" || row.type === "assistant_message") &&
+                    filter.turnItemMessageIds.includes(row.messageId))) &&
                 (filter?.turnItemRunIds === undefined ||
                   filter.turnItemRunIds.includes(row.runId)) &&
                 (filter?.turnItemTypes === undefined || filter.turnItemTypes.includes(row.type)) &&
@@ -6445,10 +6538,12 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
                   filter.turnItemStatuses.includes(row.status)) &&
                 (filter?.turnItemRunId === undefined || filter.turnItemRunId === row.runId),
             ),
-            nodes:
-              filter?.omitSettledLeafNodes === true
-                ? projection.nodes.filter((node) => !isSettledLeafNode(node, projection.runs))
-                : projection.nodes,
+            nodes: projection.nodes.filter(
+              (node) =>
+                (filter?.nodeIds === undefined || filter.nodeIds.includes(node.id)) &&
+                (filter?.omitSettledLeafNodes !== true ||
+                  !isSettledLeafNode(node, projection.runs)),
+            ),
           };
           return Object.fromEntries([
             ["thread", projection.thread],

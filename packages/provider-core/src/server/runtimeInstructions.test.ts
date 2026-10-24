@@ -205,7 +205,8 @@ describe("integrations context line", () => {
 describe("CONVERSATION_MODE_INSTRUCTIONS", () => {
   it("biases visual answers toward inline pictures from real sources", () => {
     expect(CONVERSATION_MODE_INSTRUCTIONS).toContain("asks for pictures");
-    expect(CONVERSATION_MODE_INSTRUCTIONS).toContain("1-4 relevant images inline");
+    expect(CONVERSATION_MODE_INSTRUCTIONS).toContain("1-4 relevant images");
+    expect(CONVERSATION_MODE_INSTRUCTIONS).toContain("each on its own line");
     expect(CONVERSATION_MODE_INSTRUCTIONS).toContain("![alt](url)");
     expect(CONVERSATION_MODE_INSTRUCTIONS).toContain("image_search");
     expect(CONVERSATION_MODE_INSTRUCTIONS).toContain("never invent URLs");

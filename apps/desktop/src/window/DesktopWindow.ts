@@ -8,7 +8,8 @@ import * as Ref from "effect/Ref";
 
 import * as Electron from "electron";
 
-import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts";
+import { DEFAULT_CLIENT_SETTINGS, type AppearanceAccent } from "@t3tools/contracts";
+import { ACCENT_PRESETS, colorBlend, hexToRgb, rgbToHex } from "@t3tools/shared/accentColors";
 
 import * as DesktopAssets from "../app/DesktopAssets.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
@@ -201,11 +202,25 @@ export function resolveInitialMainWindowBounds(
 const LOADING_MARK_SVG = `<svg class="mark" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg"><path class="c" d="M79.85 41.64A28 28 0 1 0 79.85 86.36" stroke="#FFFFFF" stroke-width="16" stroke-linecap="round"/><g class="arm"><circle class="dot" cx="91" cy="64" r="9" fill="#FFFFFF"/></g></svg>`;
 const LOADING_MARK_CSS = `.mark{width:80px;height:80px;overflow:visible}.mark *{transform-box:view-box}.mark .arm{transform-origin:63px 64px;animation:orbit 2.4s cubic-bezier(.65,0,.35,1) infinite}.mark .dot{animation:reach 2.4s cubic-bezier(.65,0,.35,1) infinite}@keyframes orbit{0%{transform:rotate(0)}66%,100%{transform:rotate(-360deg)}}@keyframes reach{0%{transform:translateX(0)}14%{transform:translateX(30px)}52%{transform:translateX(30px);animation-timing-function:cubic-bezier(.22,1,.36,1)}88%,100%{transform:translateX(0)}}@media (prefers-reduced-motion:reduce){.mark *{animation:none}}`;
 
+// The connecting splash's first-frame color: the ember's middle, under the
+// accent tint like the web splash (colorBlend is CSS's `color` blend mode).
+const SPLASH_EMBER = "#f25d30";
+
+/** The accent's tint for the splash (its vivid dark-theme base), or null for orange. */
+function splashAccentTint(accent: AppearanceAccent): string | null {
+  return accent === "orange" ? null : ACCENT_PRESETS[accent].dark;
+}
+
 // A self-contained "Connecting to WSL" splash, shown immediately in wsl-only
 // mode while the WSL backend (which serves the renderer) cold-boots. Inlined as
 // a data URL so it needs no bundled asset and no backend — pure CSS, no JS.
-function buildConnectingSplashDataUrl(): string {
-  const html = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><style>html,body{margin:0;height:100%}body{background:linear-gradient(180deg,#ff7b3a,#e63e22);color:rgba(255,255,255,.85);font-family:system-ui,-apple-system,'Segoe UI',sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;-webkit-user-select:none;user-select:none;-webkit-app-region:drag}.label{font-size:13px}${LOADING_MARK_CSS}</style></head><body>${LOADING_MARK_SVG}<div class="label">Connecting to WSL…</div></body></html>`;
+// Under another accent the ember takes its hue, as the web boot splash does.
+function buildConnectingSplashDataUrl(accent: AppearanceAccent): string {
+  const tint = splashAccentTint(accent);
+  const background = tint
+    ? `background:linear-gradient(${tint},${tint}),linear-gradient(180deg,#ff7b3a,#e63e22);background-blend-mode:color,normal;`
+    : "background:linear-gradient(180deg,#ff7b3a,#e63e22);";
+  const html = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><style>html,body{margin:0;height:100%}body{${background}color:rgba(255,255,255,.85);font-family:system-ui,-apple-system,'Segoe UI',sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;-webkit-user-select:none;user-select:none;-webkit-app-region:drag}.label{font-size:13px}${LOADING_MARK_CSS}</style></head><body>${LOADING_MARK_SVG}<div class="label">Connecting to WSL…</div></body></html>`;
   return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
 }
 
@@ -916,6 +931,8 @@ export const make = Effect.gen(function* () {
     const existingWindow = yield* electronWindow.currentMainOrFirst;
     if (Option.isSome(existingWindow)) return;
 
+    const { accentColor } = yield* desktopSettings.get;
+    const tint = splashAccentTint(accentColor);
     const splash = yield* electronWindow.create({
       width: 360,
       height: 220,
@@ -928,7 +945,9 @@ export const make = Effect.gen(function* () {
       show: false,
       skipTaskbar: false,
       // The splash's ember, so the window's first frame matches it in either theme.
-      backgroundColor: "#f25d30",
+      backgroundColor: tint
+        ? rgbToHex(colorBlend(hexToRgb(SPLASH_EMBER), hexToRgb(tint)))
+        : SPLASH_EMBER,
       title: environment.displayName,
       webPreferences: {
         contextIsolation: true,
@@ -946,7 +965,7 @@ export const make = Effect.gen(function* () {
         splash.show();
       }
     });
-    void splash.loadURL(buildConnectingSplashDataUrl());
+    void splash.loadURL(buildConnectingSplashDataUrl(accentColor));
     yield* logWindowInfo("connecting splash shown");
   }).pipe(
     // The splash is best-effort UX — never let it fail startup.

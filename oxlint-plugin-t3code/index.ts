@@ -14,6 +14,7 @@ import noRpcPermissionBypass from "./rules/no-rpc-permission-bypass.ts";
 import noUnscopedHas from "./rules/no-unscoped-has.ts";
 import preferCatchTags from "./rules/prefer-catch-tags.ts";
 import requireCenteredScrollGutter from "./rules/require-centered-scroll-gutter.ts";
+import requireInteractiveTransition from "./rules/require-interactive-transition.ts";
 import requireSuppressionReason from "./rules/require-suppression-reason.ts";
 
 export default definePlugin({
@@ -35,6 +36,7 @@ export default definePlugin({
     "no-unscoped-has": noUnscopedHas,
     "prefer-catch-tags": preferCatchTags,
     "require-centered-scroll-gutter": requireCenteredScrollGutter,
+    "require-interactive-transition": requireInteractiveTransition,
     "require-suppression-reason": requireSuppressionReason,
   },
 });

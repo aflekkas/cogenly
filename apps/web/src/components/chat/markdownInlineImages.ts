@@ -1,7 +1,7 @@
 /**
  * Pure helpers behind inline web images in assistant markdown: which images
- * form a gallery row, how each one's URL is loaded, and how a half-streamed
- * image is held back until its markdown is complete.
+ * become captioned figures and gallery rows, how each one's URL is loaded, and
+ * how a half-streamed image is held back until its markdown is complete.
  */
 
 import type { AssetUrlState } from "@t3tools/client-runtime/state/assets";
@@ -119,10 +119,54 @@ export function inlineImageAspectRatio(width: unknown, height: unknown): number 
     : 4 / 3;
 }
 
-// Text that may sit between an image and the link crediting it: "·", "—", "Source:", "via".
-const SOURCE_SEPARATOR =
-  /^[\s·•|—–\-:,(]*(?:(?:source|via|credit|photo|image|from)\s*:?)?[\s·•|—–\-:,(]*$/i;
-const SOURCE_CLOSER = /^[\s)]*$/;
+// Punctuation that sits between an image, its caption, and its source links: "·", "—", "|", "(…)".
+const SEPARATORS = /[\s·•|—–\-:,;/()[\]]+/g;
+const LEADING_EDGE_SEPARATORS = /^[\s·•|—–\-:,;/]+/;
+const TRAILING_EDGE_SEPARATORS = /[\s·•|—–\-:,;/]+$/;
+const EDGE_SEPARATOR_ONLY = /^[\s·•|—–\-:,;/]*$/;
+// Words that open a credit rather than a sentence: "Source:", "via", "Photo by", "©".
+const ATTRIBUTION_LEAD =
+  /^(?:©|(?:sources?|via|credits?|photo(?:graph)?|image|picture|from|courtesy|by)\b)/i;
+const ATTRIBUTION_WORDS =
+  /©|\b(?:sources?|via|credits?|photo(?:graph)?|image|picture|from|courtesy(?:\s+of)?|by)\b/gi;
+/** Caption or title text longer than this reads as prose, so the image stays inline. */
+const MAX_CAPTION_TEXT_LENGTH = 120;
+const CAPTION_INLINE_TAGS = new Set([
+  "a",
+  "b",
+  "code",
+  "del",
+  "em",
+  "i",
+  "s",
+  "span",
+  "strong",
+  "sub",
+  "sup",
+]);
+const EMPHASIS_TAGS = new Set(["b", "em", "i", "strong"]);
+const BLOCK_TAGS = new Set([
+  "blockquote",
+  "details",
+  "div",
+  "figure",
+  "h1",
+  "h2",
+  "h3",
+  "h4",
+  "h5",
+  "h6",
+  "hr",
+  "ol",
+  "p",
+  "pre",
+  "table",
+  "ul",
+]);
+
+function textNode(value: string): InlineImageHastNode {
+  return { type: "text", value };
+}
 
 function isWhitespaceText(node: InlineImageHastNode): boolean {
   return node.type === "text" && (node.value ?? "").trim().length === 0;
@@ -152,85 +196,292 @@ function hostLabel(href: string): string {
   return parseWebUrl(href)?.hostname.replace(/^www\./, "") ?? href;
 }
 
+function hastText(node: InlineImageHastNode): string {
+  if (node.type === "text") return node.value ?? "";
+  return (node.children ?? []).map(hastText).join("");
+}
+
+function containsImage(node: InlineImageHastNode): boolean {
+  return isElement(node, "img") || (node.children ?? []).some(containsImage);
+}
+
+function isSeparatorText(node: InlineImageHastNode): boolean {
+  return node.type === "text" && (node.value ?? "").replace(SEPARATORS, "") === "";
+}
+
 interface GalleryUnit {
   readonly image: InlineImageHastNode;
+  /** The page a wrapping `[![alt](image)](page)` link pointed at, as a host-labelled link. */
   readonly source: InlineImageHastNode | null;
+  /** A title that named the image before it, such as `**Salem Witch Museum**`. */
+  lead: InlineImageHastNode[];
+  /** Credit text and source links that followed the image. */
+  caption: InlineImageHastNode[];
+}
+
+/** A web image, or `[![alt](image)](page)` whose page becomes the image's source link. */
+function figureImage(node: InlineImageHastNode): Omit<GalleryUnit, "lead" | "caption"> | null {
+  if (isWebImage(node)) return { image: node, source: null };
+  const href = webLinkHref(node);
+  if (href === null) return null;
+  const inner = meaningfulChildren(node);
+  const image = inner[0];
+  if (inner.length !== 1 || !image || !isWebImage(image)) return null;
+  return {
+    image,
+    source: {
+      type: "element",
+      tagName: "a",
+      properties: { ...node.properties },
+      children: [textNode(hostLabel(href))],
+    },
+  };
+}
+
+function isCaptionNode(node: InlineImageHastNode): boolean {
+  if (node.type === "text") return true;
+  return (
+    node.type === "element" && CAPTION_INLINE_TAGS.has(node.tagName ?? "") && !containsImage(node)
+  );
+}
+
+/** What a run of caption nodes says once its links and separators are set aside. */
+function captionShape(nodes: readonly InlineImageHastNode[]) {
+  let hasLink = false;
+  let emphasized = true;
+  const parts: string[] = [];
+  for (const node of nodes) {
+    if (isElement(node, "a")) {
+      hasLink = true;
+      continue;
+    }
+    if (isSeparatorText(node)) continue;
+    if (node.type !== "element" || !EMPHASIS_TAGS.has(node.tagName ?? "")) emphasized = false;
+    parts.push(hastText(node));
+  }
+  const words = parts.join(" ").replace(SEPARATORS, " ").trim();
+  return { words, hasLink, emphasized: emphasized && words.length > 0 };
 }
 
 /**
- * Reads a paragraph that holds nothing but web images, each optionally
- * credited by a link right after it or wrapped in one. Null for anything
- * else: an image inside a sentence stays inline.
+ * Whether text beside an image credits or names it rather than continuing a sentence: nothing
+ * but links and separators, or short text that is emphasized, opens with a credit word, or sits
+ * with a source link. Plain words with no link ("is our logo") and lowercase text that carries on
+ * a sentence stay prose.
  */
-function paragraphGalleryUnits(paragraph: InlineImageHastNode): GalleryUnit[] | null {
-  if (!isElement(paragraph, "p")) return null;
-  const children = paragraph.children ?? [];
-  const units: GalleryUnit[] = [];
-  let index = 0;
-  const skipWhitespace = () => {
-    while (index < children.length) {
-      const child = children[index];
-      if (!child || !(isWhitespaceText(child) || isElement(child, "br"))) break;
-      index += 1;
+function isCaption(nodes: readonly InlineImageHastNode[]): boolean {
+  if (!nodes.every(isCaptionNode)) return false;
+  const { words, hasLink, emphasized } = captionShape(nodes);
+  if (words.length === 0) return true;
+  if (words.length > MAX_CAPTION_TEXT_LENGTH) return false;
+  if (emphasized || ATTRIBUTION_LEAD.test(words)) return true;
+  return hasLink && !/^\p{Ll}/u.test(words);
+}
+
+/** A short bold or italic title, such as `**Salem Witch Museum**`, that names a figure. */
+function isTitle(nodes: readonly InlineImageHastNode[]): boolean {
+  if (!nodes.every(isCaptionNode)) return false;
+  const { words, hasLink, emphasized } = captionShape(nodes);
+  return !hasLink && emphasized && words.length <= MAX_CAPTION_TEXT_LENGTH;
+}
+
+/** Whether caption content names its image itself, so the alt text need not repeat it. */
+function describesImage(nodes: readonly InlineImageHastNode[]): boolean {
+  return captionShape(nodes).words.replace(ATTRIBUTION_WORDS, "").trim().length > 0;
+}
+
+/** Drops the separators at a caption's edges and a "(…)" wrapped around all of it. */
+function trimCaption(nodes: readonly InlineImageHastNode[]): InlineImageHastNode[] {
+  const result = [...nodes];
+  const isEdgeSeparator = (node: InlineImageHastNode | undefined) =>
+    node?.type === "text" && EDGE_SEPARATOR_ONLY.test(node.value ?? "");
+  const trimEdges = () => {
+    while (isEdgeSeparator(result[0])) result.shift();
+    while (isEdgeSeparator(result.at(-1))) result.pop();
+    const first = result[0];
+    if (first?.type === "text") {
+      result[0] = textNode((first.value ?? "").replace(LEADING_EDGE_SEPARATORS, ""));
+    }
+    const last = result.at(-1);
+    if (last?.type === "text") {
+      result[result.length - 1] = textNode(
+        (last.value ?? "").replace(TRAILING_EDGE_SEPARATORS, ""),
+      );
     }
   };
-  skipWhitespace();
-  while (index < children.length) {
-    const child = children[index];
-    if (!child) return null;
-    if (isWebImage(child)) {
-      index += 1;
-      // An optional separator, then a text link that credits the image.
-      let lookahead = index;
-      const separator = children[lookahead];
-      if (separator?.type === "text" && SOURCE_SEPARATOR.test(separator.value ?? "")) {
-        lookahead += 1;
-      }
-      const link = children[lookahead];
-      const linkHref = webLinkHref(link);
-      if (link && linkHref && !meaningfulChildren(link).some((part) => isElement(part, "img"))) {
-        index = lookahead + 1;
-        const closer = children[index];
-        if (closer?.type === "text" && SOURCE_CLOSER.test(closer.value ?? "")) index += 1;
-        units.push({ image: child, source: link });
-      } else {
-        units.push({ image: child, source: null });
-      }
-    } else if (webLinkHref(child) !== null) {
-      // `[![alt](image)](page)`: the page becomes the image's source chip.
-      const inner = meaningfulChildren(child);
-      const image = inner[0];
-      if (inner.length !== 1 || !image || !isWebImage(image)) return null;
-      index += 1;
-      units.push({
-        image,
-        source: {
-          type: "element",
-          tagName: "a",
-          properties: { ...child.properties },
-          children: [{ type: "text", value: hostLabel(webLinkHref(child) ?? "") }],
-        },
-      });
-    } else {
-      return null;
-    }
-    skipWhitespace();
+  trimEdges();
+  const first = result[0];
+  const last = result.at(-1);
+  if (
+    first?.type === "text" &&
+    last?.type === "text" &&
+    (first.value ?? "").startsWith("(") &&
+    (last.value ?? "").endsWith(")")
+  ) {
+    result[0] = textNode((first.value ?? "").slice(1));
+    const lastIndex = result.length - 1;
+    const lastValue = result[lastIndex]?.value ?? "";
+    result[lastIndex] = textNode(lastValue.slice(0, -1));
+    trimEdges();
   }
-  return units.length > 0 ? units : null;
+  return result.filter((node) => node.type !== "text" || (node.value ?? "").length > 0);
+}
+
+/** Joins two caption parts with a " · " that copy-as-markdown leaves out. */
+function joinCaption(
+  first: InlineImageHastNode[],
+  second: InlineImageHastNode[],
+): InlineImageHastNode[] {
+  if (first.length === 0) return second;
+  if (second.length === 0) return first;
+  const separator: InlineImageHastNode = {
+    type: "element",
+    tagName: "span",
+    properties: { ariaHidden: "true", dataMarkdownCopy: " " },
+    children: [textNode(" · ")],
+  };
+  return [...first, separator, ...second];
+}
+
+interface Line {
+  readonly nodes: InlineImageHastNode[];
+  /** The soft (`\n`) or hard (`<br>`) break that ended the line, for rejoining prose. */
+  end: InlineImageHastNode | null;
+}
+
+/** Splits inline content at its soft and hard line breaks. */
+function splitLines(children: readonly InlineImageHastNode[]): Line[] {
+  let line: Line = { nodes: [], end: null };
+  const lines = [line];
+  const breakLine = (end: InlineImageHastNode) => {
+    line.end = end;
+    line = { nodes: [], end: null };
+    lines.push(line);
+  };
+  for (const child of children) {
+    if (isElement(child, "br")) {
+      breakLine(child);
+      continue;
+    }
+    const value = child.type === "text" ? (child.value ?? "") : "";
+    if (!value.includes("\n")) {
+      line.nodes.push(child);
+      continue;
+    }
+    value.split("\n").forEach((part, index) => {
+      if (index > 0) breakLine(textNode("\n"));
+      if (part) line.nodes.push(textNode(part));
+    });
+  }
+  return lines;
+}
+
+function isBlankLine(line: Line): boolean {
+  return line.nodes.every(isWhitespaceText);
+}
+
+/**
+ * Reads one line as figures: web images, each optionally followed by its caption, with an
+ * optional title before the first. Null when the line is prose with an image in it.
+ */
+function figureLine(nodes: readonly InlineImageHastNode[]): GalleryUnit[] | null {
+  const lead: InlineImageHastNode[] = [];
+  const units: GalleryUnit[] = [];
+  for (const node of nodes) {
+    const found = figureImage(node);
+    if (found) {
+      units.push({ ...found, lead: [], caption: [] });
+    } else {
+      (units.at(-1)?.caption ?? lead).push(node);
+    }
+  }
+  const first = units[0];
+  if (!first) return null;
+  if (!(lead.every(isCaptionNode) && captionShape(lead).words === "") && !isTitle(lead)) {
+    return null;
+  }
+  if (!units.every((unit) => isCaption(unit.caption))) return null;
+  first.lead = lead;
+  return units;
+}
+
+type Segment = { readonly prose: Line[] } | { readonly units: GalleryUnit[] };
+
+/**
+ * Splits a paragraph's inline content into prose and figures. A line holding only images and
+ * their captions becomes figures; a title line right above one names it, and a credit line right
+ * below one captions its last image. Null when the content has no figure line.
+ */
+function figureSegments(children: readonly InlineImageHastNode[]): Segment[] | null {
+  const segments: Segment[] = [];
+  let prose: Line[] = [];
+  let captionTarget: GalleryUnit | null = null;
+  for (const line of splitLines(children)) {
+    if (isBlankLine(line)) {
+      if (prose.length > 0) prose.push(line);
+      continue;
+    }
+    const units = figureLine(line.nodes);
+    if (units) {
+      const title = prose.at(-1);
+      const first = units[0];
+      if (first && first.lead.every(isWhitespaceText) && title && isTitle(title.nodes)) {
+        prose.pop();
+        first.lead = title.nodes;
+      }
+      if (prose.some((proseLine) => !isBlankLine(proseLine))) segments.push({ prose });
+      prose = [];
+      const previous = segments.at(-1);
+      if (previous && "units" in previous) previous.units.push(...units);
+      else segments.push({ units });
+      captionTarget = units.at(-1) ?? null;
+      continue;
+    }
+    if (captionTarget && isCaption(line.nodes)) {
+      captionTarget.caption = joinCaption(
+        trimCaption(captionTarget.caption),
+        trimCaption(line.nodes),
+      );
+      captionTarget = null;
+      continue;
+    }
+    captionTarget = null;
+    prose.push(line);
+  }
+  if (!segments.some((segment) => "units" in segment)) return null;
+  if (prose.some((line) => !isBlankLine(line))) segments.push({ prose });
+  return segments;
+}
+
+/** Rejoins prose lines with the breaks between them, dropping blank lines at the edges. */
+function proseNodes(lines: readonly Line[]): InlineImageHastNode[] {
+  const start = lines.findIndex((line) => !isBlankLine(line));
+  let end = lines.length;
+  while (end > start && isBlankLine(lines[end - 1] ?? { nodes: [], end: null })) end -= 1;
+  return lines
+    .slice(Math.max(start, 0), end)
+    .flatMap((line, index, kept) =>
+      index < kept.length - 1 && line.end ? [...line.nodes, line.end] : line.nodes,
+    );
 }
 
 function galleryFigure(unit: GalleryUnit): InlineImageHastNode {
+  const caption = joinCaption(
+    joinCaption(trimCaption(unit.lead), trimCaption(unit.caption)),
+    unit.source ? [unit.source] : [],
+  );
   const alt = unit.image.properties?.alt;
   return {
     type: "element",
     tagName: "figure",
     properties: {
       dataMarkdownGalleryItem: true,
-      dataCaption: typeof alt === "string" ? alt.trim() : "",
+      // The alt text labels the caption unless the authored caption already names the image.
+      dataCaption: typeof alt === "string" && !describesImage(caption) ? alt.trim() : "",
     },
     children: [
       { ...unit.image, properties: { ...unit.image.properties, dataGalleryItem: true } },
-      ...(unit.source ? [unit.source] : []),
+      ...caption,
     ],
   };
 }
@@ -244,17 +495,40 @@ function galleryRow(units: GalleryUnit[]): InlineImageHastNode {
   };
 }
 
+/** A tight list item: its inline content sits directly in the `li`, with no paragraph. */
+function isInlineListItem(node: InlineImageHastNode): boolean {
+  return (
+    isElement(node, "li") &&
+    !(node.children ?? []).some(
+      (child) => child.type === "element" && BLOCK_TAGS.has(child.tagName ?? ""),
+    )
+  );
+}
+
 /**
- * Turns each run of image-only paragraphs into one gallery row: a `div`
- * carrying `dataMarkdownGallery` and `dataGalleryCount`, holding one `figure`
- * per image with its caption (`dataCaption`) and an optional source link.
- * Consecutive images, whether in one paragraph or in adjacent ones, share a
- * row. Mutates and returns the tree.
+ * Turns figure lines into gallery rows: a `div` carrying `dataMarkdownGallery` and
+ * `dataGalleryCount`, holding one `figure` per image. Each figure's first child is the image;
+ * the rest is its caption (title, credit text, source links), and `dataCaption` is the alt text
+ * to label it with when that caption does not name the image itself.
+ *
+ * A figure line holds only web images plus links, separators like "·" or "—", and short
+ * attribution or title text. Prose lines around it stay paragraphs, and an image inside a
+ * sentence stays inline. Consecutive figures, whether in one paragraph or in adjacent ones,
+ * share a row. Mutates and returns the tree.
  */
 export function groupInlineImageGalleries<T extends InlineImageHastNode>(tree: T): T {
   const visit = (node: InlineImageHastNode) => {
     const children = node.children;
     if (!children) return;
+    if (isInlineListItem(node)) {
+      const segments = figureSegments(children);
+      if (segments) {
+        node.children = segments.flatMap((segment) =>
+          "units" in segment ? [galleryRow(segment.units)] : proseNodes(segment.prose),
+        );
+      }
+      return;
+    }
     const next: InlineImageHastNode[] = [];
     let run: GalleryUnit[] = [];
     // Whitespace between paragraphs of one run; restored if the run ends there.
@@ -266,10 +540,17 @@ export function groupInlineImageGalleries<T extends InlineImageHastNode>(tree: T
       pending = [];
     };
     for (const child of children) {
-      const units = paragraphGalleryUnits(child);
-      if (units) {
-        run.push(...units);
-        pending = [];
+      const segments = isElement(child, "p") ? figureSegments(child.children ?? []) : null;
+      if (segments) {
+        for (const segment of segments) {
+          if ("units" in segment) {
+            run.push(...segment.units);
+            pending = [];
+          } else {
+            flush();
+            next.push({ ...child, children: proseNodes(segment.prose) });
+          }
+        }
         continue;
       }
       if (run.length > 0 && isWhitespaceText(child)) {

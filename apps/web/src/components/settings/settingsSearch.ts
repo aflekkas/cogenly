@@ -282,6 +282,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["appearance text size zoom small large scale"],
   },
   {
+    id: "sidebar-layout",
+    title: "Sidebar layout",
+    to: "/settings/appearance",
+    searchTerms: ["appearance sidebar search dock top bottom anchored list order"],
+  },
+  {
     id: "usage-meters",
     title: "Usage meters",
     to: "/settings/appearance",

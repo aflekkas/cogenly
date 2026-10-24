@@ -653,7 +653,7 @@ function PermissionRow({
   onChange: (value: boolean) => void;
 }) {
   return (
-    <label className="flex min-h-8 cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-1 hover:bg-muted/40">
+    <label className="flex min-h-8 cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-1 interactive hover:bg-muted/40">
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="text-sm font-medium text-foreground/80">{label}</span>
         <span className="text-xs text-muted-foreground">{description}</span>

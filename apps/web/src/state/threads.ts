@@ -27,6 +27,8 @@ export const threadEnvironment: ThreadEnvironmentAtoms = createThreadEnvironment
   environmentSnapshotAtom,
 );
 const environmentThreads = createEnvironmentThreadStateAtoms(connectionAtomRuntime);
+/** The one live state atom per thread; mounting it loads and follows the thread. */
+export const environmentThreadStateAtom = environmentThreads.stateAtom;
 export const environmentThreadDetails = createEnvironmentThreadDetailAtoms(
   environmentThreads.stateAtom,
 );

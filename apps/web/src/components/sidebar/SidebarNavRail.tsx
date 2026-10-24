@@ -199,8 +199,9 @@ export function SidebarNavRail({
         aria-label="Sidebar view"
         aria-orientation="vertical"
         onKeyDown={handleTabsKeyDown}
-        // The toggle is chrome, not a mode: a wider gap sets it apart.
-        className="mt-1.5 flex flex-col items-center gap-1"
+        // The toggle is chrome, not a mode: a wider gap sets it apart. The first
+        // icon's centre lines up with the sidebar search dock beside it.
+        className="mt-px flex flex-col items-center gap-1"
       >
         {SIDEBAR_MODES.map((segment, segmentIndex) => {
           // A utility page (Settings, Usage, Projects) owns the main area, so

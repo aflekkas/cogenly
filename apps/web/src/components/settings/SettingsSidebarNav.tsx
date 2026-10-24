@@ -33,6 +33,7 @@ import { cn } from "~/lib/utils";
 import { useLegacySidebarEnabled } from "../../hooks/useSettings";
 import { SidebarContent, SidebarFooter, SidebarGroup, useSidebar } from "../ui/sidebar";
 import { SidebarUtilityMenu } from "../sidebar/SidebarChrome";
+import { useSidebarLayout } from "../../appearancePreferences";
 import { SidebarList, SidebarRowSubtitle, sidebarRowClassName } from "../sidebar/SidebarList";
 import { SidebarSearchDock, type SidebarDockAction } from "../sidebar/SidebarSearchDock";
 import { scrollToSettingsTarget } from "./settingsLayout";
@@ -112,6 +113,7 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
   const { isMobile, setOpenMobile, open, setOpen } = useSidebar();
   const legacySidebarEnabled = useLegacySidebarEnabled();
   const navRailVisible = !isMobile && !legacySidebarEnabled;
+  const sidebarLayout = useSidebarLayout();
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
   const [activeResultIndex, setActiveResultIndex] = useState(0);
@@ -243,41 +245,47 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
     },
     [activeResultIndex, clearSearch, handleSearchResultClick, isSearching, results],
   );
+  // The same search dock, in the same place, as every other tab (above the
+  // list, or below it in the bottom layout); Settings has no create action.
+  const searchDock = (
+    <SidebarGroup className="z-[1]">
+      <SidebarSearchDock
+        actions={NO_DOCK_ACTIONS}
+        searchInputRef={searchInputRef}
+        searchQuery={query}
+        onSearchQueryChange={(value) => {
+          setQuery(value);
+          setActiveResultIndex(0);
+        }}
+        onSearchKeyDown={handleSearchKeyDown}
+        searchLabel="Search settings"
+        clearLabel="Clear settings search"
+        shortcut="/"
+        results={{
+          listId: "settings-search-results",
+          optionId: (index) => `settings-search-result-${results[index]?.id ?? ""}`,
+          visible: isSearching,
+          count: results.length,
+          activeIndex: activeResultIndex,
+        }}
+        onClearSearch={clearSearch}
+      />
+    </SidebarGroup>
+  );
   return (
     <>
       <SidebarContent
         className="min-h-full"
-        fixedHeader={
-          // The same search dock, in the same place, as every other tab;
-          // Settings has no create action beside it.
-          <SidebarGroup className="z-[1]">
-            <SidebarSearchDock
-              actions={NO_DOCK_ACTIONS}
-              searchInputRef={searchInputRef}
-              searchQuery={query}
-              onSearchQueryChange={(value) => {
-                setQuery(value);
-                setActiveResultIndex(0);
-              }}
-              onSearchKeyDown={handleSearchKeyDown}
-              searchLabel="Search settings"
-              clearLabel="Clear settings search"
-              shortcut="/"
-              results={{
-                listId: "settings-search-results",
-                optionId: (index) => `settings-search-result-${results[index]?.id ?? ""}`,
-                visible: isSearching,
-                count: results.length,
-                activeIndex: activeResultIndex,
-              }}
-              onClearSearch={clearSearch}
-            />
-          </SidebarGroup>
-        }
+        fixedHeader={sidebarLayout === "top" ? searchDock : null}
+        fixedFooter={sidebarLayout === "bottom" ? searchDock : null}
       >
         {isSearching ? (
-          // Results read down from the dock, like thread search in the other tabs.
-          <SidebarGroup className="flex-1" role="presentation">
+          // Results sit by the dock, like thread search in the other tabs:
+          // reading down from it, or stacked up against it in the bottom layout.
+          <SidebarGroup
+            className={sidebarLayout === "bottom" ? "flex-1 justify-end" : "flex-1"}
+            role="presentation"
+          >
             {hasResults ? (
               <SidebarList
                 id="settings-search-results"
@@ -329,7 +337,8 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
             )}
           </SidebarGroup>
         ) : (
-          // The sections read down from the dock. Each is a plain sidebar row
+          // The sections read down from the top of the column in either
+          // layout. Each is a plain sidebar row
           // that carries its own selected fill, as a chat row does.
           <SidebarGroup>
             <SidebarList aria-label="Settings sections">

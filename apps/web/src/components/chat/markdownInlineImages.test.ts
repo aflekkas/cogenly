@@ -34,18 +34,184 @@ const root = (...children: InlineImageHastNode[]): InlineImageHastNode => ({
   children,
 });
 
+const em = (...children: InlineImageHastNode[]): InlineImageHastNode => ({
+  type: "element",
+  tagName: "em",
+  properties: {},
+  children,
+});
+const li = (...children: InlineImageHastNode[]): InlineImageHastNode => ({
+  type: "element",
+  tagName: "li",
+  properties: {},
+  children,
+});
+
+function plain(node: InlineImageHastNode): string {
+  // Copy-hidden separators render as " · " but are not authored text.
+  if (node.properties?.dataMarkdownCopy !== undefined) return " · ";
+  return node.type === "text" ? (node.value ?? "") : (node.children ?? []).map(plain).join("");
+}
+
 function galleries(tree: InlineImageHastNode) {
   return (tree.children ?? [])
     .filter((node) => node.properties?.dataMarkdownGallery === true)
     .map((gallery) =>
-      (gallery.children ?? []).map((figure) => ({
-        caption: figure.properties?.dataCaption,
-        src: figure.children?.[0]?.properties?.src,
-        source: figure.children?.[1]?.properties?.href ?? null,
-        sourceLabel: figure.children?.[1]?.children?.[0]?.value ?? null,
-      })),
+      (gallery.children ?? []).map((figure) => {
+        const [image, ...caption] = figure.children ?? [];
+        const sourceLink = caption.find((node) => node.tagName === "a");
+        return {
+          caption: figure.properties?.dataCaption,
+          src: image?.properties?.src,
+          source: sourceLink?.properties?.href ?? null,
+          sourceLabel: sourceLink ? plain(sourceLink) : null,
+        };
+      }),
     );
 }
+
+function captionText(tree: InlineImageHastNode): string[] {
+  return galleries(tree).length === 0
+    ? []
+    : (tree.children ?? [])
+        .filter((node) => node.properties?.dataMarkdownGallery === true)
+        .flatMap((gallery) => gallery.children ?? [])
+        .map((figure) => {
+          const label = String(figure.properties?.dataCaption ?? "");
+          const authored = (figure.children ?? []).slice(1).map(plain).join("");
+          return [label, authored].filter(Boolean).join(" · ");
+        });
+}
+
+const MUSEUM = "https://upload.wikimedia.org/salem.jpg";
+const COMMONS = "https://commons.wikimedia.org/wiki/File:Salem.jpg";
+
+describe("groupInlineImageGalleries figure paragraphs", () => {
+  it("makes a paragraph with only an image a captioned figure", () => {
+    const tree = groupInlineImageGalleries(root(p(img(MUSEUM, "Salem Witch Museum"))));
+    expect(captionText(tree)).toEqual(["Salem Witch Museum"]);
+    expect(tree.children?.[0]?.properties?.dataGalleryCount).toBe(1);
+  });
+
+  it("captions an image followed by its source link with the alt text and the link", () => {
+    const tree = groupInlineImageGalleries(
+      root(p(img(MUSEUM, "Salem Witch Museum"), text(" "), a(COMMONS, text("Wikimedia Commons")))),
+    );
+    expect(galleries(tree)).toEqual([
+      [
+        {
+          caption: "Salem Witch Museum",
+          src: MUSEUM,
+          source: COMMONS,
+          sourceLabel: "Wikimedia Commons",
+        },
+      ],
+    ]);
+    expect(captionText(tree)).toEqual(["Salem Witch Museum · Wikimedia Commons"]);
+  });
+
+  it("drops the separator between an image and its link, and uses an authored caption over alt", () => {
+    const dotted = groupInlineImageGalleries(
+      root(p(img(MUSEUM, "Museum"), text(" · "), a(COMMONS, text("Wikimedia Commons")))),
+    );
+    expect(captionText(dotted)).toEqual(["Museum · Wikimedia Commons"]);
+
+    const authored = groupInlineImageGalleries(
+      root(
+        p(
+          img(MUSEUM, "Museum"),
+          text(" "),
+          em(text("The museum at dusk")),
+          text(" — "),
+          a(COMMONS, text("Wikimedia Commons")),
+        ),
+      ),
+    );
+    // Separators between authored parts stay as written.
+    expect(captionText(authored)).toEqual(["The museum at dusk — Wikimedia Commons"]);
+  });
+
+  it("takes a bold title line above and a credit line below into the caption", () => {
+    const tree = groupInlineImageGalleries(
+      root(
+        p(
+          text("Some context first.\n"),
+          { type: "element", tagName: "strong", children: [text("Freedom Trail")] },
+          text("\n"),
+          img("https://a.test/trail.jpg", "Trail"),
+          text("\nSource: "),
+          a(COMMONS, text("Wikimedia")),
+        ),
+      ),
+    );
+    expect(tree.children?.map((node) => node.tagName)).toEqual(["p", "div"]);
+    expect(plain(tree.children?.[0] ?? text(""))).toBe("Some context first.");
+    expect(captionText(tree)).toEqual(["Freedom Trail · Source: Wikimedia"]);
+  });
+
+  it("puts several captioned images of one paragraph in one gallery row", () => {
+    const tree = groupInlineImageGalleries(
+      root(
+        p(
+          img("https://a.test/1.jpg", "One"),
+          text(" "),
+          a(COMMONS, text("Commons")),
+          text("\n"),
+          img("https://a.test/2.jpg", "Two"),
+          text(" · "),
+          a("https://example.com/two", text("Example")),
+        ),
+      ),
+    );
+    expect(galleries(tree).map((row) => row.map((figure) => figure.source))).toEqual([
+      [COMMONS, "https://example.com/two"],
+    ]);
+    expect(tree.children?.[0]?.properties?.dataGalleryCount).toBe(2);
+  });
+
+  it("keeps an image inside a sentence inline, with or without a link", () => {
+    const before = p(text("The logo "), img("https://a.test/logo.png"), text(" sits on top."));
+    const after = p(
+      img("https://a.test/logo.png"),
+      text(" is our logo, see "),
+      a(COMMONS, text("here")),
+    );
+    const unlinked = p(img("https://a.test/logo.png"), text(" Our logo, used everywhere."));
+    const tree = groupInlineImageGalleries(root(before, after, unlinked));
+    expect(tree.children).toEqual([before, after, unlinked]);
+  });
+
+  it("keeps a figure for an image that cannot load, such as plain http", () => {
+    // The block placeholder replaces the image at render time; the caption stays.
+    const tree = groupInlineImageGalleries(
+      root(
+        p(img("http://a.test/old.jpg", "Freedom Trail"), text(" "), a(COMMONS, text("Commons"))),
+      ),
+    );
+    expect(galleries(tree)).toEqual([
+      [
+        {
+          caption: "Freedom Trail",
+          src: "http://a.test/old.jpg",
+          source: COMMONS,
+          sourceLabel: "Commons",
+        },
+      ],
+    ]);
+  });
+
+  it("splits a tight list item into its text and a figure", () => {
+    const item = li(
+      text("Salem, the witch trial town.\n"),
+      img(MUSEUM, "Museum"),
+      text(" "),
+      a(COMMONS, text("Commons")),
+    );
+    groupInlineImageGalleries(root(item));
+    expect(item.children?.map((node) => node.tagName ?? node.type)).toEqual(["text", "div"]);
+    expect(captionText(item)).toEqual(["Museum · Commons"]);
+  });
+});
 
 describe("groupInlineImageGalleries", () => {
   it("joins images in one paragraph and in adjacent paragraphs into one row", () => {
@@ -84,6 +250,7 @@ describe("groupInlineImageGalleries", () => {
     expect(galleries(tree)).toEqual([
       [
         {
+          // "Source:" is a credit word, not a name, so the alt text still labels the caption.
           caption: "Eiffel Tower",
           src: "https://a.test/tower.jpg",
           source: "https://en.wikipedia.org/wiki/Eiffel_Tower",

@@ -126,7 +126,7 @@ import {
 import {
   INLINE_IMAGE_FADE_CLASS_NAME,
   inlineWebImageSource,
-  MarkdownGalleryFigure,
+  MarkdownFigure,
   MarkdownGalleryImage,
   MarkdownImageGalleryRow,
 } from "./chat/MarkdownWebImageGallery";
@@ -1652,13 +1652,17 @@ export const ChatMarkdownAssetImage = memo(function ChatMarkdownAssetImage(props
   );
 });
 
+// The text kept on one line with the favicon: a URL's protocol, a label's first word.
 function leadingExternalLinkTextLength(text: string): number {
   const protocol = /^(?:https?:\/\/)/i.exec(text)?.[0];
   if (protocol) return protocol.length;
+  if (/\s/.test(text)) return /^\S*/.exec(text)?.[0].length ?? 0;
   return Math.min(text.length, 1);
 }
 
+// A bare URL may break anywhere; a worded label wraps between words like the prose around it.
 function breakableExternalLinkText(text: string): ReactNode[] {
+  if (/\s/.test(text)) return [text];
   return Array.from(text, (character, index) => (
     <React.Fragment key={`${index}:${character}`}>
       {character}
@@ -2709,17 +2713,17 @@ const CHAT_MARKDOWN_COMPONENTS = {
     }
     return <div {...props}>{children}</div>;
   },
-  figure: function MarkdownFigure({ node, children, ...props }) {
+  figure: function MarkdownFigureRenderer({ node, children, ...props }) {
     if (node?.properties?.dataMarkdownGalleryItem !== true) {
       return <figure {...props}>{children}</figure>;
     }
-    const [media = null, source = null] = Children.toArray(children);
-    const caption = node.properties.dataCaption;
+    const [media = null, ...caption] = Children.toArray(children);
+    const label = node.properties.dataCaption;
     return (
-      <MarkdownGalleryFigure
-        caption={typeof caption === "string" ? caption : ""}
+      <MarkdownFigure
+        label={typeof label === "string" ? label : ""}
         media={media}
-        source={source}
+        caption={caption}
       />
     );
   },

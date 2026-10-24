@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  disclosureExitDue,
   disclosurePanelPresent,
   initialDisclosurePanelState,
   reconcileDisclosurePanel,
@@ -68,5 +69,24 @@ describe("disclosure panel state", () => {
     const closing = reconcileDisclosurePanel(initialDisclosurePanelState(true, false), false);
     expect(disclosurePanelPresent(closing, true)).toBe(false);
     expect(disclosurePanelPresent(initialDisclosurePanelState(true, false), true)).toBe(true);
+  });
+
+  it("reports the exit once content it showed has left", () => {
+    const closing = reconcileDisclosurePanel(initialDisclosurePanelState(true, false), false);
+    expect(disclosureExitDue(false, disclosurePanelPresent(closing, false), true)).toBe(false);
+    const settled = settleDisclosurePanel(closing);
+    expect(disclosureExitDue(false, disclosurePanelPresent(settled, false), true)).toBe(true);
+  });
+
+  it("a panel that mounted closed never reports an exit", () => {
+    // A fold's row scrolling into view mid-close must not end the fold's close.
+    const mountedClosed = initialDisclosurePanelState(false, false);
+    expect(disclosureExitDue(false, disclosurePanelPresent(mountedClosed, false), false)).toBe(
+      false,
+    );
+  });
+
+  it("an open panel never reports an exit", () => {
+    expect(disclosureExitDue(true, false, true)).toBe(false);
   });
 });
