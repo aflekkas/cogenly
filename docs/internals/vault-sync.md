@@ -72,6 +72,40 @@ live in the state directory, never in the vault, so they never sync. Making an
 item machine-only stops later revisions. Machines that already have a copy keep
 it.
 
+## Integration sign-ins
+
+A web integration's OAuth tokens are one vault item, so they travel like any
+other item. Its attachment carries the non-secret rest of the sign-in
+(integration id, authorization server, registered client, expiry, refresh
+owner); the tokens and a registered client's secret stay in the sealed secret
+fields. Code: [Integrations.ts](../../apps/server/src/integrations/Integrations.ts)
+and [IntegrationTokens.ts](../../apps/server/src/integrations/IntegrationTokens.ts).
+
+- **Adoption.** Integration definitions do not live in the vault, so a machine
+  links them up itself: `Integrations.adoptSyncedSignIns` signs in a local
+  definition that is not signed in from the newest readable item whose
+  attachment names its id. It runs on `Vault.syncedChanges`, at startup, on
+  create, and wherever another path writes a definition. It never adopts for a
+  `transport: "local"` integration, or when the item's allowed domains do not
+  cover the integration's host: the domains are signed into the item, the
+  attachment's server is only the author's claim. A removed or emptied item
+  makes a signed-in integration need sign-in.
+- **One refresher.** Many servers rotate refresh tokens and revoke the whole
+  grant when an old one is reused, so two machines refreshing on their own can
+  sign the owner out everywhere. Only the attachment's `refreshOwner` calls the
+  token endpoint. A sign-in names the hub when it is made on a spoke whose hub
+  reads this vault (the hub is always on), otherwise the machine it was made
+  on. Another machine uses the synced access token until it expires or is
+  refused, then fails with "Waiting for <machine> to refresh this sign-in"
+  without touching its own sign-in state. The owner refreshes due items from
+  the scheduler while the vault has a share peer, including items for a
+  definition that has not reached it, when the client is a registered one.
+  A grant the owner finds dead is emptied in the item, so every machine shows
+  **Needs sign-in**. Cached decrypted tokens are keyed by `credential_revision`.
+- **A lost refresher.** Nothing elects a new one. If the refresh owner is
+  unpaired or gone, the others wait until the next sign-in on one of them,
+  which replaces the item and picks the refresher by the rule above.
+
 ## Projection is asynchronous
 
 [sync.md](./sync.md) projects a merged document in the merge transaction. Vault

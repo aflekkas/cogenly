@@ -12,6 +12,7 @@ import { FetchHttpClient, HttpClient } from "effect/http";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/sql/SqlClient";
+import * as Stream from "effect/Stream";
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- The fake upstream is a plain node:http server; Effect has no test HTTP server for this.
 import * as NodeHttp from "node:http";
 
@@ -23,6 +24,7 @@ import { runMigrations } from "../persistence/Migrations.ts";
 import * as Credentials from "./IntegrationCredentials.ts";
 import { availableToConnect } from "./IntegrationCatalog.ts";
 import * as Integrations from "./Integrations.ts";
+import * as IntegrationSyncPeers from "./IntegrationSyncPeers.ts";
 import * as Tokens from "./IntegrationTokens.ts";
 import { IntegrationEndpointPolicy } from "./RemoteEndpoint.ts";
 import * as Workspace from "../agents/AgentWorkspaceService.ts";
@@ -164,8 +166,13 @@ const fakeUpstream = fakeUpstreamWith();
 /** These tests never sign in; OAuth has its own suite over the real vault. */
 const noTokensLayer = Layer.succeed(Tokens.IntegrationTokens, {
   read: () => Effect.succeed(Option.none()),
+  revision: () => Effect.succeed(Option.none()),
+  clientSecret: () => Effect.succeed(undefined),
   write: () => Effect.die("no OAuth in this suite"),
+  clearGrant: () => Effect.void,
   remove: () => Effect.void,
+  attached: Effect.succeed([]),
+  syncedChanges: Stream.never,
 });
 
 const layerWith = (options: Integrations.IntegrationsOptions = {}) =>
@@ -173,6 +180,7 @@ const layerWith = (options: Integrations.IntegrationsOptions = {}) =>
     Layer.provide(Layer.succeed(IntegrationEndpointPolicy, loopbackHttpsPolicy)),
     Layer.provide(credentialsLayer),
     Layer.provide(noTokensLayer),
+    Layer.provide(IntegrationSyncPeers.layerFor("env:test")),
     Layer.provideMerge(database),
     Layer.provideMerge(FetchHttpClient.layer),
     Layer.provide(NodeServices.layer),
@@ -895,6 +903,7 @@ const vaultLayer = () => {
     Layer.provide(Layer.succeed(IntegrationEndpointPolicy, loopbackHttpsPolicy)),
     Layer.provide(Credentials.layer),
     Layer.provide(Tokens.layer),
+    Layer.provide(IntegrationSyncPeers.layerFor("env:test")),
     Layer.provideMerge(Vault.layer),
     Layer.provide(
       Layer.mock(ServerSecretStore.ServerSecretStore)({

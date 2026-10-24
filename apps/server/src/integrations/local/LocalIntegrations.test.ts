@@ -28,6 +28,7 @@ import * as Sqlite from "../../persistence/Sqlite.ts";
 import { runMigrations } from "../../persistence/Migrations.ts";
 import * as Credentials from "../IntegrationCredentials.ts";
 import * as Integrations from "../Integrations.ts";
+import * as IntegrationSyncPeers from "../IntegrationSyncPeers.ts";
 import * as Tokens from "../IntegrationTokens.ts";
 import { IntegrationEndpointPolicy } from "../RemoteEndpoint.ts";
 import * as Local from "./LocalIntegrations.ts";
@@ -116,7 +117,11 @@ const testLayer = (
     FetchHttpClient.layer,
     credentials(missing, format),
     // Remote OAuth tokens are only read once a remote sign-in completes, which no test here does.
-    Layer.mock(Tokens.IntegrationTokens)({}),
+    Layer.mock(Tokens.IntegrationTokens)({
+      attached: Effect.succeed([]),
+      syncedChanges: Stream.never,
+    }),
+    IntegrationSyncPeers.layerFor("env:test"),
     Sqlite.layerMemory.pipe(Layer.provide(NodeServices.layer)),
     ServerConfig.layerTest(process.cwd(), { prefix: "local-integrations-" }).pipe(
       Layer.provide(NodeServices.layer),
