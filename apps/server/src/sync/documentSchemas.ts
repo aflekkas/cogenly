@@ -1,5 +1,11 @@
+// @effect-diagnostics-next-line nodeBuiltinImport:off -- document ids hash synchronously; Effect's Crypto digest is async.
+import * as NodeCrypto from "node:crypto";
 import {
   Agent,
+  AgentId,
+  ContextPrincipal,
+  Fact,
+  FactId,
   IsoDateTime,
   PROJECT_INSTRUCTIONS_MAX_LENGTH,
   ProjectLabel,
@@ -91,6 +97,57 @@ export const ScheduleFields = Schema.Struct({
   ownerMachine: PortableId,
   createdAt: Agent.fields.createdAt,
 });
+const LegacyNoteText = Schema.String.check(Schema.isMaxLength(4000));
+/**
+ * A fact's status is not a field. Each transition sets its own marker, and
+ * the projection ranks them retracted > superseded > confirmed > proposed, so
+ * concurrent transitions on two machines end in the same status.
+ */
+export const FactFields = Schema.Struct({
+  // The fact's own id, present only when it is not a portable document id.
+  factId: FactId,
+  subject: Fact.fields.subject,
+  predicate: Schema.NullOr(TrimmedNonEmptyString.check(Schema.isMaxLength(500))),
+  text: Fact.fields.text,
+  labelIds: Fact.fields.labelIds,
+  visibility: Fact.fields.visibility,
+  agentId: Schema.NullOr(AgentId),
+  sourceRefs: Fact.fields.sourceRefs,
+  validFrom: Schema.NullOr(IsoDateTime),
+  supersedes: Schema.NullOr(FactId),
+  createdBy: ContextPrincipal,
+  createdAt: IsoDateTime,
+  // The memory_* note id and source a fact answers to, when it has one.
+  legacyNoteId: Schema.NullOr(LegacyNoteText),
+  legacySource: Schema.NullOr(LegacyNoteText),
+  // Cleared only by a later explicit demotion to a proposal.
+  confirmedAt: Schema.NullOr(IsoDateTime),
+  supersededBy: Schema.NullOr(FactId),
+  retractedAt: Schema.NullOr(IsoDateTime),
+});
+/** How a projection reads a fact: the fields a fact is created with, and the rest when present. */
+const FactDocument = Schema.Struct({
+  ...FactFields.fields,
+  factId: Schema.optional(FactFields.fields.factId),
+  predicate: Schema.optional(FactFields.fields.predicate),
+  agentId: Schema.optional(FactFields.fields.agentId),
+  validFrom: Schema.optional(FactFields.fields.validFrom),
+  supersedes: Schema.optional(FactFields.fields.supersedes),
+  legacyNoteId: Schema.optional(FactFields.fields.legacyNoteId),
+  legacySource: Schema.optional(FactFields.fields.legacySource),
+  confirmedAt: Schema.optional(FactFields.fields.confirmedAt),
+  supersededBy: Schema.optional(FactFields.fields.supersededBy),
+  retractedAt: Schema.optional(FactFields.fields.retractedAt),
+});
+/**
+ * The document id for a fact. New fact ids are portable; legacy memory ids
+ * (`legacy-memory:["agent","note"]`) are not, so they hash, and the document
+ * carries the original in `factId`.
+ */
+export const factDocumentId = (factId: string) =>
+  isPortableId(factId)
+    ? factId
+    : `fact:digest:${NodeCrypto.createHash("sha256").update(factId).digest("hex").slice(0, 32)}`;
 type FieldCodec = {
   readonly decode: (value: unknown) => Option.Option<unknown>;
   readonly encode: (value: unknown) => Option.Option<unknown>;
@@ -111,6 +168,7 @@ const FIELD_CODECS: Readonly<Record<SharedDocumentKind, ReadonlyMap<string, Fiel
   project: codecs(ProjectFields.fields),
   agent: codecs(AgentFields.fields),
   schedule: codecs(ScheduleFields.fields),
+  fact: codecs(FactFields.fields),
 };
 const isKnownKind = Schema.is(SharedDocumentKind);
 const invalid = (cause?: unknown) => new SharedStateError({ reason: "invalid-document", cause });
@@ -230,3 +288,4 @@ export const preserveUnknown = (
 export const decodeProject = Schema.decodeUnknownEffect(ProjectFields);
 export const decodeAgent = Schema.decodeUnknownEffect(AgentFields);
 export const decodeSchedule = Schema.decodeUnknownEffect(ScheduleFields);
+export const decodeFact = Schema.decodeUnknownEffect(FactDocument);

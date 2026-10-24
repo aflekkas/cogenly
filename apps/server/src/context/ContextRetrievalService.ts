@@ -14,7 +14,6 @@ import {
   type RunId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
-import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -516,10 +515,6 @@ const make = Effect.gen(function* () {
       }).pipe(Effect.mapError(wrap)),
   });
 });
-export const layer: Layer.Layer<
-  ContextRetrievalService,
-  never,
-  SqlClient.SqlClient | Crypto.Crypto
-> = Layer.effect(ContextRetrievalService, make).pipe(
+export const layer = Layer.effect(ContextRetrievalService, make).pipe(
   Layer.provide(Layer.merge(Facts.layer, Access.layer)),
 );

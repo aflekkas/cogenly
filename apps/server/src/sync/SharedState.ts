@@ -20,7 +20,13 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
-import { checkIntegrity, preserveUnknown, splitChange, validateChange } from "./documentSchemas.ts";
+import {
+  checkIntegrity,
+  factDocumentId,
+  preserveUnknown,
+  splitChange,
+  validateChange,
+} from "./documentSchemas.ts";
 import { compareClock, mergeDocument, tickClock } from "./merge.ts";
 import { projectDocument, readConfiguration } from "./SharedDocumentProjection.ts";
 
@@ -487,6 +493,13 @@ const make = Effect.gen(function* () {
               ["project", yield* sql<{ id: string }>`SELECT label_id AS id FROM project_labels`],
               ["agent", yield* sql<{ id: string }>`SELECT agent_id AS id FROM agents`],
               ["schedule", yield* sql<{ id: string }>`SELECT task_id AS id FROM scheduled_tasks`],
+              // After agents, so a peer receives a fact's agent before the fact.
+              [
+                "fact",
+                (yield* sql<{ id: string }>`SELECT id FROM facts ORDER BY rowid`).map((row) => ({
+                  id: factDocumentId(row.id),
+                })),
+              ],
             ] as const)
               for (const row of rows)
                 yield* Effect.gen(function* () {

@@ -1,7 +1,7 @@
 import * as Schema from "effect/Schema";
 import { AuthSyncReplicateScope } from "./auth.ts";
 import { EnvironmentId } from "./baseSchemas.ts";
-import { makePeerChannel } from "./machine.ts";
+import { MachineRelation, makePeerChannel } from "./machine.ts";
 
 export const SHARED_BATCH_LIMIT = 32;
 export const SHARED_BATCH_BYTES = 256 * 1024;
@@ -29,7 +29,7 @@ export const HybridClock = Schema.Struct({
   node: SharedDocumentId,
 });
 export type HybridClock = typeof HybridClock.Type;
-export const SharedDocumentKind = Schema.Literals(["project", "agent", "schedule"]);
+export const SharedDocumentKind = Schema.Literals(["project", "agent", "schedule", "fact"]);
 export type SharedDocumentKind = typeof SharedDocumentKind.Type;
 /** A delta contains only fields authored by this edit; relay preserves their clocks. */
 export const SharedDocumentChange = Schema.Struct({
@@ -65,6 +65,28 @@ export class SharedStateError extends Schema.TaggedError<SharedStateError>()("Sh
     return `Shared state failed (${this.reason}).`;
   }
 }
+/** Omit `kinds` for every kind this build syncs. */
+export const SharedSyncStatusInput = Schema.Struct({
+  kinds: Schema.optional(Schema.Array(SharedDocumentKind)),
+});
+export type SharedSyncStatusInput = typeof SharedSyncStatusInput.Type;
+/** What one directly paired machine has not yet acknowledged, by document kind. */
+export const SharedSyncPeerStatus = Schema.Struct({
+  environmentId: EnvironmentId,
+  label: Schema.String,
+  online: Schema.Boolean,
+  relation: MachineRelation,
+  kinds: Schema.Array(
+    Schema.Struct({
+      kind: SharedDocumentKind,
+      /** Local changes the peer has not acknowledged and would receive on the next pass. */
+      pendingOutgoing: Counter,
+    }),
+  ),
+});
+export type SharedSyncPeerStatus = typeof SharedSyncPeerStatus.Type;
+export const SharedSyncStatusResult = Schema.Struct({ peers: Schema.Array(SharedSyncPeerStatus) });
+export type SharedSyncStatusResult = typeof SharedSyncStatusResult.Type;
 export const SharedChangesRead = makePeerChannel({
   name: "sync.documents.read.v1",
   scope: AuthSyncReplicateScope,

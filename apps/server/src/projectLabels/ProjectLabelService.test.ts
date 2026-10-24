@@ -615,7 +615,9 @@ describe("project labels", () => {
       yield* seed;
       const labels = yield* Labels.ProjectLabelService;
       const facts = yield* Facts.FactService.pipe(
-        Effect.provide(Facts.layer.pipe(Layer.provide(NodeServices.layer))),
+        Effect.provide(
+          Facts.layer.pipe(Layer.provide(layerSharedIdentity), Layer.provide(NodeServices.layer)),
+        ),
       );
       const label = (yield* labels.create({ name: "Context" })).label;
       const fact = (yield* facts.create({
