@@ -5,7 +5,7 @@ export default Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   // SQLite cannot widen a CHECK constraint in place.
   yield* sql`CREATE TABLE shared_documents_next (
-    kind TEXT NOT NULL CHECK(kind IN ('project','agent','schedule','settings')), id TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK(kind IN ('project','agent','schedule','settings','project-settings')), id TEXT NOT NULL,
     fields_json TEXT NOT NULL, clocks_json TEXT NOT NULL, tombstone_json TEXT,
     updated_by_env TEXT NOT NULL, PRIMARY KEY(kind,id)
   )`;

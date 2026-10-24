@@ -30,10 +30,17 @@ export const HybridClock = Schema.Struct({
 });
 export type HybridClock = typeof HybridClock.Type;
 /**
- * `settings` documents carry universal server settings (id `universal`) and a
- * project's setting overrides (id `project:<label id>`); see SettingsSync.
+ * `settings` carries universal server settings (id `universal`), and
+ * `project-settings` one project's setting overrides (id: the project
+ * folder's id); see SettingsSync.
  */
-export const SharedDocumentKind = Schema.Literals(["project", "agent", "schedule", "settings"]);
+export const SharedDocumentKind = Schema.Literals([
+  "project",
+  "agent",
+  "schedule",
+  "settings",
+  "project-settings",
+]);
 export type SharedDocumentKind = typeof SharedDocumentKind.Type;
 /** A delta contains only fields authored by this edit; relay preserves their clocks. */
 export const SharedDocumentChange = Schema.Struct({
@@ -45,10 +52,20 @@ export const SharedDocumentChange = Schema.Struct({
   updatedBy: EnvironmentId,
 });
 export type SharedDocumentChange = typeof SharedDocumentChange.Type;
+/**
+ * A change as peers send it. The kind stays open so a newer peer's document
+ * kind reaches the receiver, which keeps it for a later build instead of
+ * refusing the whole batch (see docs/internals/sync.md).
+ */
+export const SharedDocumentChangeWire = Schema.Struct({
+  ...SharedDocumentChange.fields,
+  kind: SharedDocumentId,
+});
+export type SharedDocumentChangeWire = typeof SharedDocumentChangeWire.Type;
 export const SharedChangeBatch = Schema.Struct({
   after: Counter,
   cursor: Counter,
-  changes: Schema.Array(SharedDocumentChange).check(Schema.isMaxLength(SHARED_BATCH_LIMIT)),
+  changes: Schema.Array(SharedDocumentChangeWire).check(Schema.isMaxLength(SHARED_BATCH_LIMIT)),
 });
 export type SharedChangeBatch = typeof SharedChangeBatch.Type;
 export class SharedStateError extends Schema.TaggedError<SharedStateError>()("SharedStateError", {

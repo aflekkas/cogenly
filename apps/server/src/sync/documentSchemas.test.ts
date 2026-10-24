@@ -2,7 +2,7 @@ import { describe, expect, it } from "@effect/vitest";
 import { EnvironmentId, type SharedDocumentChange } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import { normalizeRepositoryRemote } from "../project/RepositoryRemote.ts";
-import { validateChange } from "./documentSchemas.ts";
+import { splitChange, validateChange } from "./documentSchemas.ts";
 
 const node = EnvironmentId.make("local");
 const change = (kind: SharedDocumentChange["kind"], fields: SharedDocumentChange["fields"]) => ({
@@ -40,28 +40,33 @@ describe("shared configuration schemas", () => {
         ).toBe("Failure");
     }),
   );
-  it.effect("settings documents carry only universal keys and project overrides", () =>
+  it.effect("a local settings write carries only universal keys and project overrides", () =>
     Effect.gen(function* () {
-      const settings = (id: string, fields: SharedDocumentChange["fields"]) =>
-        Effect.result(validateChange({ ...change("settings", fields), id }));
-      expect((yield* settings("universal", { branchNamePrefix: "feat" }))._tag).toBe("Success");
+      const write = (
+        kind: "settings" | "project-settings",
+        id: string,
+        fields: SharedDocumentChange["fields"],
+      ) => Effect.result(validateChange({ ...change(kind, fields), id }));
+      expect((yield* write("settings", "universal", { branchNamePrefix: "feat" }))._tag).toBe(
+        "Success",
+      );
       expect(
-        (yield* settings("project:label-one", {
+        (yield* write("project-settings", "label-one", {
           defaultAutoPull: { value: true },
           branchNamePrefix: null,
         }))._tag,
       ).toBe("Success");
-      for (const [id, fields] of [
+      for (const [kind, fields] of [
         // Machine-local keys never travel.
-        ["universal", { projectsRoot: "/srv/projects" }],
-        ["project:label-one", { projectsRoot: { value: "/srv" } }],
+        ["settings", { projectsRoot: "/srv/projects" }],
+        ["project-settings", { projectsRoot: { value: "/srv" } }],
         // Overrides are `null` or `{ value }`, with values the schema accepts.
-        ["project:label-one", { defaultAutoPull: true }],
-        ["project:label-one", { defaultAutoPull: { value: "yes" } }],
-        ["project:", { defaultAutoPull: { value: true } }],
-        ["somewhere-else", { branchNamePrefix: "feat" }],
+        ["project-settings", { defaultAutoPull: true }],
+        ["project-settings", { defaultAutoPull: { value: "yes" } }],
       ] as const)
-        expect((yield* settings(id, fields))._tag).toBe("Failure");
+        expect(
+          (yield* write(kind, kind === "settings" ? "universal" : "label-one", fields))._tag,
+        ).toBe("Failure");
       expect(
         (yield* Effect.result(
           validateChange({
@@ -73,6 +78,21 @@ describe("shared configuration schemas", () => {
       ).toBe("Failure");
     }),
   );
+  it("a newer build's settings keep their unknown keys and hold values this build cannot read", () => {
+    const { accepted, deferred } = splitChange({
+      ...change("project-settings", {
+        defaultAutoPull: { value: true },
+        branchNamingMode: { value: "lunar" },
+        accentTheme: { value: "dark" },
+      }),
+      id: "label-one",
+    });
+    expect(deferred).toBe(true);
+    expect(accepted?.fields).toEqual({
+      defaultAutoPull: { value: true },
+      accentTheme: { value: "dark" },
+    });
+  });
   it.effect.each(["bad%id", "has space", "x".repeat(201)])(
     "rejects invalid new document id %s",
     (id) =>

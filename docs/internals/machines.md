@@ -7,9 +7,9 @@ spokes, never both. Client connection catalogs remain independent of this link.
 
 The link carries machine presence, self reports, and registered typed channels.
 [Shared state](./sync.md) uses those channels for project, agent and schedule
-configuration. Settings, threads, files and credentials do not replicate yet,
-and the link does not launch work remotely. Provider reports contain status,
-never login tokens.
+configuration, and [thread sync](./thread-sync.md) for threads and commands
+routed to the machine that runs them. Settings, resource files and credentials
+do not replicate yet. Provider reports contain status, never login tokens.
 
 ## Pairing establishes a separate audience
 

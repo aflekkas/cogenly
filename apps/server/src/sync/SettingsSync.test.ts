@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@effect/vitest";
 import { ProjectId } from "@t3tools/contracts";
+import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -45,6 +46,7 @@ const start = Effect.fn("startSettingsMachine")(function* (
   const services = Effect.provideContext(syncContext);
   return {
     ...machine,
+    state,
     sync: yield* SharedSync.SharedSync.pipe(services),
     settings: yield* ServerSettings.ServerSettingsService.pipe(services),
     reconcile: (yield* SettingsSync.SettingsSync.pipe(services)).reconcile,
@@ -127,6 +129,68 @@ describe("settings sync between paired machines", () => {
         yield* spoke.sync.sync(hub.environmentId);
         yield* spoke.reconcile;
         expect((yield* spoke.settings.getSettings).branchNamingMode).toBe("semantic");
+      }).pipe(Effect.scoped),
+    20000,
+  );
+
+  it.live(
+    "an older build keeps syncing past a newer build's settings and keeps what it cannot read",
+    () =>
+      Effect.gen(function* () {
+        const hub = yield* start("newer-hub", "cloud-server", ProjectId.make("newer-hub-repo"));
+        const spoke = yield* start("older-spoke", "computer", ProjectId.make("older-spoke-repo"));
+        yield* pair(hub, spoke);
+        // What a newer hub sends: a key this build lacks, a value it cannot read
+        // for a key it knows, and a value it can.
+        const fields = { branchNamePrefix: "feat", branchNamingMode: "lunar", accentTheme: "dark" };
+        const wall = yield* Clock.currentTimeMillis;
+        const after = (yield* spoke.state.cursors(hub.environmentId)).received;
+        yield* spoke.state.receive(
+          {
+            after,
+            cursor: after + 1,
+            changes: [
+              {
+                kind: "settings",
+                id: "universal",
+                fields,
+                clocks: Object.fromEntries(
+                  Object.keys(fields).map((key) => [
+                    key,
+                    { wall, logical: 0, node: hub.environmentId },
+                  ]),
+                ),
+                tombstone: null,
+                updatedBy: hub.environmentId,
+              },
+            ],
+          },
+          hub.environmentId,
+          false,
+        );
+        expect((yield* spoke.state.cursors(hub.environmentId)).received).toBe(after + 1);
+        yield* spoke.reconcile;
+        const settings = yield* spoke.settings.getSettings;
+        expect(settings.branchNamePrefix).toBe("feat");
+        expect(settings.branchNamingMode).toBe("static");
+        // The unknown key stays in the document; the unreadable value waits for an update.
+        expect((yield* spoke.state.get("settings", "universal"))?.fields).toEqual({
+          branchNamePrefix: "feat",
+          accentTheme: "dark",
+        });
+        const sql = yield* spoke.run(SqlClient.SqlClient);
+        expect(
+          (yield* sql<{ count: number }>`SELECT count(*) AS count FROM shared_deferred_changes`)[0]
+            ?.count,
+        ).toBe(1);
+
+        // A later local edit publishes without dropping the newer key.
+        yield* spoke.settings.updateSettings({ branchNamePrefix: "fix" });
+        yield* spoke.reconcile;
+        expect((yield* spoke.state.get("settings", "universal"))?.fields).toMatchObject({
+          branchNamePrefix: "fix",
+          accentTheme: "dark",
+        });
       }).pipe(Effect.scoped),
     20000,
   );

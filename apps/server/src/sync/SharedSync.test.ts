@@ -205,7 +205,7 @@ describe("shared documents over the authenticated machine link", () => {
   );
 
   it.live(
-    "rejects a paired peer's spoofed author and absolute-path payload",
+    "refuses a paired peer's spoofed author, and never applies or relays an absolute path",
     () =>
       Effect.gen(function* () {
         const hub = yield* start("validate-hub", "cloud-server");
@@ -219,6 +219,7 @@ describe("shared documents over the authenticated machine link", () => {
           tombstone: null,
           updatedBy: spoke.environmentId,
         };
+        // An unreadable value is held back rather than stalling the link.
         expect(
           (yield* Effect.result(
             spoke.machines.call(hub.environmentId, SharedChangesApply, {
@@ -227,7 +228,7 @@ describe("shared documents over the authenticated machine link", () => {
               changes: [bad],
             }),
           ))._tag,
-        ).toBe("Failure");
+        ).toBe("Success");
         const forged = {
           ...bad,
           fields: { name: "Spoofed" },

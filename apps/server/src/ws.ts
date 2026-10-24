@@ -10,6 +10,8 @@ import * as GlobalSearch from "./search/GlobalSearch.ts";
 import * as Facts from "./context/FactService.ts";
 import * as Integrations from "./integrations/Integrations.ts";
 import * as Machines from "./machines/Machines.ts";
+import * as ProjectMove from "./threadSync/ProjectMove.ts";
+import * as ThreadTransfer from "./threadSync/ThreadTransfer.ts";
 import * as MachineSecurity from "./security/MachineSecurity.ts";
 import * as MachineSetup from "./tailscale/MachineSetup.ts";
 import * as VisualStates from "./htmlRender/VisualState.ts";
@@ -1091,6 +1093,8 @@ const makeWsRpcHandlers = (
     const facts = yield* Facts.FactService;
     const integrations = yield* Integrations.Integrations;
     const machines = yield* Machines.Machines;
+    const threadTransfer = yield* ThreadTransfer.ThreadTransfer;
+    const projectMove = yield* ProjectMove.ProjectMove;
     const machineSecurity = yield* MachineSecurity.MachineSecurity;
     const machineSetup = yield* MachineSetup.MachineSetup;
     const visualStates = yield* VisualStates.VisualStateService;
@@ -1646,6 +1650,7 @@ const makeWsRpcHandlers = (
       [WS_METHODS.projectLabelsSubscribeConfirmedThreadLabels]: () =>
         projectLabels.subscribeConfirmedThreadLabels(),
       [WS_METHODS.projectLabelsMoveThread]: (input) => projectLabels.moveThread(input),
+      [WS_METHODS.projectLabelsMoveToMachine]: (input) => projectMove.move(input),
       [WS_METHODS.projectLabelsForkThreadToProject]: (input) =>
         ProjectLabelFork.forkThreadToProject(input, {
           labels: projectLabels,
@@ -1726,6 +1731,8 @@ const makeWsRpcHandlers = (
       [WS_METHODS.machinesCreatePeerGrant]: (input) => machines.createPeerGrant(input),
       [WS_METHODS.machinesJoinHub]: (input) => machines.joinHub(input),
       [WS_METHODS.machinesUnpair]: (input) => machines.unpair(input),
+      [WS_METHODS.machinesMoveThreads]: (input) => threadTransfer.move(input),
+      [WS_METHODS.machinesMoveAllThreads]: (input) => threadTransfer.moveAllFrom(input),
       [WS_METHODS.machinesSetupStatus]: () => machineSetup.status,
       [WS_METHODS.machinesSetupSubscribe]: () => machineSetup.subscribe,
       [WS_METHODS.machinesSetupRunStep]: (input) => machineSetup.runStep(input.step),
@@ -2765,7 +2772,7 @@ type WsRpcHandlersEffect = ReturnType<typeof makeWsRpcHandlers>;
 type WsRpcHandlers = Effect.Success<WsRpcHandlersEffect>;
 type WsRpcHandlerKeysA = Extract<keyof WsRpcHandlers, `p${string}`>;
 type WsRpcHandlerKeysB = Extract<keyof WsRpcHandlers, `s${string}`>;
-type WsRpcHandlerKeysC = Extract<keyof WsRpcHandlers, `m${string}`>;
+type WsRpcHandlerKeysC = Extract<keyof WsRpcHandlers, `m${string}` | `a${string}`>;
 /** Resolve in smaller groups to stay within the RPC conditional type's instantiation budget. */
 type WsRpcHandlerServices =
   | RpcGroup.HandlersServices<WsRpcs, Pick<WsRpcHandlers, WsRpcHandlerKeysA>>
@@ -2818,6 +2825,8 @@ type WsRequestServices =
   | Facts.FactService
   | Integrations.Integrations
   | Machines.Machines
+  | ThreadTransfer.ThreadTransfer
+  | ProjectMove.ProjectMove
   | MachineSecurity.MachineSecurity
   | MachineSetup.MachineSetup
   | FileSystem.FileSystem

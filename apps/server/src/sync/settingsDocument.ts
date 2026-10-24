@@ -1,8 +1,9 @@
 /**
- * Shared `settings` documents. `universal` holds the keys in
- * `UNIVERSAL_SERVER_SETTING_KEYS` as their JSON encoding. `project:<label id>`
- * holds one project's overrides: each key is `null` (inherit) or
- * `{ value }`, so an override whose value is itself null stays expressible.
+ * Shared settings documents. The `settings` document `universal` holds the
+ * keys in `UNIVERSAL_SERVER_SETTING_KEYS` as their JSON encoding. A
+ * `project-settings` document, id the project folder id, holds that
+ * project's overrides: each key is `null` (inherit) or `{ value }`, so an
+ * override whose value is itself null stays expressible.
  *
  * @module settingsDocument
  */
@@ -10,18 +11,23 @@ import {
   PROJECT_SCOPED_SERVER_SETTING_KEYS,
   ProjectSettingsOverrides,
   ServerSettings,
-  SharedStateError,
   UNIVERSAL_SERVER_SETTING_KEYS,
   type UniversalServerSettingKey,
 } from "@t3tools/contracts";
-import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 export const UNIVERSAL_SETTINGS_DOCUMENT_ID = "universal";
-const PROJECT_DOCUMENT_PREFIX = "project:";
+const PROJECT_KEY_PREFIX = "project:";
 
-export const projectSettingsDocumentId = (labelId: string) =>
-  `${PROJECT_DOCUMENT_PREFIX}${labelId}`;
+/** SettingsSync's own key for a project's document, in plans and the base table. */
+export const projectSettingsDocumentId = (labelId: string) => `${PROJECT_KEY_PREFIX}${labelId}`;
+
+/** The shared document behind one of SettingsSync's document keys. */
+export const settingsDocumentAddress = (documentId: string) =>
+  documentId.startsWith(PROJECT_KEY_PREFIX)
+    ? ({ kind: "project-settings", id: documentId.slice(PROJECT_KEY_PREFIX.length) } as const)
+    : ({ kind: "settings", id: documentId } as const);
 
 /** Every key a project override entry can hold. */
 export const PROJECT_SETTINGS_SYNC_KEYS = [
@@ -51,11 +57,56 @@ const UniversalPartialJson = Schema.toCodecJson(
 );
 const OverridesJson = Schema.toCodecJson(ProjectSettingsOverrides);
 const encodeUniversal = Schema.encodeSync(UniversalSettingsJson);
-const decodeUniversalPartial = Schema.decodeUnknownSync(UniversalPartialJson);
+const decodeUniversalPartial = Schema.decodeUnknownOption(UniversalPartialJson);
+const encodeUniversalPartial = Schema.encodeUnknownOption(UniversalPartialJson);
 const encodeOverrides = Schema.encodeSync(OverridesJson);
-const decodeOverrides = Schema.decodeUnknownSync(OverridesJson);
-const validateUniversalPartial = Schema.decodeUnknownEffect(UniversalPartialJson);
-const validateOverrides = Schema.decodeUnknownEffect(OverridesJson);
+const decodeOverridesOption = Schema.decodeUnknownOption(OverridesJson);
+const encodeOverridesOption = Schema.encodeUnknownOption(OverridesJson);
+
+/** Reads and writes one document field's value, as documentSchemas' field codecs do. */
+interface SettingsFieldCodec {
+  readonly decode: (value: unknown) => Option.Option<unknown>;
+  readonly encode: (value: unknown) => Option.Option<unknown>;
+}
+
+/** One key of a struct codec, read and written on its own. */
+const keyOf = (run: (input: unknown) => Option.Option<unknown>, key: string) => (value: unknown) =>
+  run({ [key]: value }).pipe(
+    Option.filter((result) => typeof result === "object" && result !== null && key in result),
+    Option.map((result) => (result as Record<string, unknown>)[key]),
+  );
+
+/** What this build reads of a `settings` document, per key. */
+export const UNIVERSAL_SETTINGS_CODECS: ReadonlyMap<string, SettingsFieldCodec> = new Map(
+  UNIVERSAL_SERVER_SETTING_KEYS.map((key) => [
+    key,
+    { decode: keyOf(decodeUniversalPartial, key), encode: keyOf(encodeUniversalPartial, key) },
+  ]),
+);
+
+const isValueBox = (value: unknown): value is { readonly value: unknown } =>
+  typeof value === "object" &&
+  value !== null &&
+  !Array.isArray(value) &&
+  Object.keys(value).length === 1 &&
+  Object.hasOwn(value, "value");
+
+/** `null`, or `{ value }` with the key's override value run through `run`. */
+const boxed =
+  (run: (input: unknown) => Option.Option<unknown>, key: string) =>
+  (field: unknown): Option.Option<unknown> => {
+    if (field === null) return Option.some(null);
+    if (!isValueBox(field)) return Option.none();
+    return keyOf(run, key)(field.value).pipe(Option.map((value) => ({ value })));
+  };
+
+/** What this build reads of a `project-settings` document, per key. */
+export const PROJECT_SETTINGS_CODECS: ReadonlyMap<string, SettingsFieldCodec> = new Map(
+  PROJECT_SETTINGS_SYNC_KEYS.map((key) => [
+    key,
+    { decode: boxed(decodeOverridesOption, key), encode: boxed(encodeOverridesOption, key) },
+  ]),
+);
 
 /** The universal keys' JSON values; an encoding that omits null reads as null. */
 export function encodeUniversalSettings(
@@ -75,12 +126,9 @@ export function decodeUniversalSetting<K extends UniversalServerSettingKey>(
   key: K,
   value: Schema.Json,
 ): ServerSettings[K] | undefined {
-  try {
-    const decoded = decodeUniversalPartial({ [key]: value }) as Partial<UniversalSettings>;
-    return Object.hasOwn(decoded, key) ? (decoded[key] as ServerSettings[K]) : undefined;
-  } catch {
-    return undefined;
-  }
+  return Option.getOrUndefined(keyOf(decodeUniversalPartial, key)(value)) as
+    | ServerSettings[K]
+    | undefined;
 }
 
 /** An override entry as `null | { value }` per key, the shape a project document stores. */
@@ -100,49 +148,13 @@ export function encodeProjectOverrides(
 export function decodeProjectOverrides(
   fields: Readonly<Record<string, Schema.Json>>,
 ): ProjectSettingsOverrides {
-  const entry: Record<string, Schema.Json> = {};
+  const entry: Record<string, unknown> = {};
   for (const key of PROJECT_SETTINGS_SYNC_KEYS) {
     const field = fields[key];
-    if (field === null || field === undefined || typeof field !== "object" || Array.isArray(field))
-      continue;
-    if (!Object.hasOwn(field, "value")) continue;
-    const value = (field as { readonly value: Schema.Json }).value;
-    try {
-      Object.assign(entry, decodeOverrides({ [key]: value }));
-    } catch {
-      // A value this build cannot read stays in the document, unapplied.
-    }
+    if (!isValueBox(field)) continue;
+    // A value this build cannot read stays in the document, unapplied.
+    const decoded = keyOf(decodeOverridesOption, key)(field.value);
+    if (Option.isSome(decoded)) entry[key] = decoded.value;
   }
   return entry as ProjectSettingsOverrides;
 }
-
-const PROJECT_KEYS: ReadonlySet<string> = new Set(PROJECT_SETTINGS_SYNC_KEYS);
-
-/** Reject unknown ids, unknown keys and values the settings schemas refuse. */
-export const validateSettingsFields = (id: string, fields: Readonly<Record<string, Schema.Json>>) =>
-  Effect.gen(function* () {
-    const invalid = (cause?: unknown) =>
-      new SharedStateError({ reason: "invalid-document", cause });
-    if (id === UNIVERSAL_SETTINGS_DOCUMENT_ID) {
-      yield* validateUniversalPartial(fields, {
-        onExcessProperty: "error",
-      }).pipe(Effect.mapError(invalid));
-      return;
-    }
-    if (!id.startsWith(PROJECT_DOCUMENT_PREFIX) || id.length === PROJECT_DOCUMENT_PREFIX.length)
-      return yield* invalid();
-    const entry: Record<string, Schema.Json> = {};
-    for (const [key, field] of Object.entries(fields)) {
-      if (!PROJECT_KEYS.has(key)) return yield* invalid();
-      if (field === null) continue;
-      if (
-        typeof field !== "object" ||
-        Array.isArray(field) ||
-        Object.keys(field).length !== 1 ||
-        !Object.hasOwn(field, "value")
-      )
-        return yield* invalid();
-      entry[key] = (field as { readonly value: Schema.Json }).value;
-    }
-    yield* validateOverrides(entry, { onExcessProperty: "error" }).pipe(Effect.mapError(invalid));
-  });

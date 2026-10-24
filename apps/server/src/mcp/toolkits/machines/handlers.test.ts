@@ -16,6 +16,8 @@ import * as DesktopAppControl from "../../../environment/DesktopAppControl.ts";
 import * as Machines from "../../../machines/Machines.ts";
 import * as ThreadManagement from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as MachineSetup from "../../../tailscale/MachineSetup.ts";
+import * as ProjectMove from "../../../threadSync/ProjectMove.ts";
+import * as ThreadTransfer from "../../../threadSync/ThreadTransfer.ts";
 import * as McpHttpServer from "../../McpHttpServer.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import { liveThreadShell } from "../../McpToolAccess.testkit.ts";
@@ -102,6 +104,8 @@ const makeServer = (options: {
               return { unpaired: true };
             }),
         }),
+        Layer.mock(ThreadTransfer.ThreadTransfer)({}),
+        Layer.mock(ProjectMove.ProjectMove)({}),
         Layer.mock(MachineSetup.MachineSetup)({
           disableServe: options.disableServe ?? Effect.die("unused"),
         }),

@@ -28,13 +28,34 @@ are not interchangeable with orchestration event sequences, thread
 and cursors together across recovery. There is no log compaction or cursor
 reset protocol yet.
 
-Only the four declared document kinds cross these channels. The receiver
-rejects unknown fields, malformed values, oversized multi-document batches, cursor
-gaps, forged authorship and ownership changes. A rejected batch fails whole and its
-cursor does not advance, so adding a synced field (even an optional, nested one such
-as a repository's `iconPath`) stalls a peer on an older build until it updates too.
-V1 ownership is fixed after creation: transferring execution needs a separate
-handoff protocol. Only the owner machine may change an existing agent's or
+The receiver refuses a batch for what no build would accept: oversized
+multi-document batches, cursor gaps, a field without its clock, forged
+authorship and ownership changes. A refused batch fails whole and its cursor
+does not advance, so nothing that depends on the build may refuse one.
+
+Paired machines update at different times, so a machine regularly receives
+documents from a newer build. It applies what it understands and keeps the
+rest; it never refuses the change or stalls the stream for it
+([`documentSchemas.ts`](../../apps/server/src/sync/documentSchemas.ts)):
+
+- A key it does not know, at any depth, is stored and relayed as it came. No
+  projection reads it, since projections decode with this build's schema and
+  drop unknown keys.
+- A known field whose value it cannot validate (a newer build widened it, or a
+  peer sent something invalid) is never applied or relayed. The original
+  change waits in `shared_deferred_changes`, as does a document kind it does
+  not have, and is applied at startup once an update can read it.
+- Writing a document back never drops what it does not understand. Untouched
+  keys keep their stored value through the per-field merge, and a rewritten
+  field gets back the nested keys its stored value holds that this build does
+  not know (`preserveUnknown`). Array items pair up by their known content, so
+  an unchanged repository keeps a newer field after a sibling is added.
+
+So a new synced field needs no coordination: make it optional when it reads
+from a document, since older documents lack it. Removing or retyping a field
+still needs a decision, because older machines keep validating the old shape.
+
+Only the owner machine may change an existing agent's or
 schedule's sensitive fields (permissions, instructions, prompt, provider/model,
 runtime mode, triggers); other machines may only rename an agent, or rename and
 enable/disable a schedule, and deletes still retire work everywhere. Existing
@@ -74,17 +95,17 @@ shared value is a peer edit to apply. Before the first agreement, a key still at
 its default adopts the peer's value instead of publishing the default. Only
 `UNIVERSAL_SERVER_SETTING_KEYS` and project overrides travel. Paths, provider
 instances, resource limits, machine identity and credentials stay local by
-omission. Adding a key to the universal list is a sync format change like
-any other synced field. Project overrides are stored per local repository
-because every resolver reads them that way. Their document is keyed by the
-project folder ID, and every repository in that folder carries the same
+omission. Adding a key to the universal list follows the rule for any new synced
+field: an older machine keeps it unread until it updates. Project overrides are stored per local repository
+because every resolver reads them that way. Their `project-settings`
+document is keyed by the project folder ID, and every repository in that folder carries the same
 entry.
 
-Thread replication is separate and must remain single-writer. Agent
-conversations are created lazily only on their owner. Project chat IDs and
-existing thread bindings remain local; do not start appending replica events
-until Phase 3 establishes ownership for those existing fixed IDs. Shared
-project IDs identify one project; equal names with different IDs produce
+Thread replication is separate and single-writer; see
+[thread sync](./thread-sync.md). Agent conversations are created lazily only
+on their owner. An agent's `ownerMachine` changes only when the current owner
+authors it, after the agent's conversation has moved. Shared project IDs
+identify one project; equal names with different IDs produce
 possible-duplicate records rather than an automatic merge.
 
 Delete projections must not launch work or append replicated thread events.

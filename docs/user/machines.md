@@ -1,31 +1,75 @@
 # Pair your machines
 
-Pair your Cogenly servers to see which machines are online and establish a link
-between them. Choose an always-on machine as the hub; your other computers
-connect out to it. Each machine can join one hub. Paired machines sync project
-names, instructions, archive state, repository remotes and source links, plus
-agent profiles, fallback chains and scheduled-task configuration. They also sync
-your settings and each project's own settings. Settings that describe one
-machine stay on it: provider setup and sign-ins, folders such as the projects
-root, storage and backups, background activity, and devices. Changes made while
-a machine is offline catch up when it reconnects. Update every machine to the
-same version; a machine on an older version pauses syncing until it updates.
+Pair your Cogenly servers to use one Cogenly across them. Choose an always-on
+machine as the hub; your other computers connect out to it. Each machine can
+join one hub. Paired machines sync project names, instructions, archive state,
+repository remotes and source links, agent profiles, fallback chains and
+scheduled-task configuration, and every conversation. They also sync your
+settings and each project's own settings. Settings that describe one machine
+stay on it: provider setup and sign-ins, folders such as the projects root,
+storage and backups, background activity, and devices. Changes made while a
+machine is offline catch up when it reconnects. A machine on an older version
+keeps syncing and picks up anything newer once it updates.
 
 Agents and schedules run only on their owner machine. New ones default to the
-hub; existing ones keep the machine they were created on. Ownership cannot be
-changed yet. Editing a profile or schedule on another machine updates the
-owner's configuration without starting a second copy. Provider sign-ins and
-an agent's current fallback position stay on the owner.
+hub; existing ones keep the machine they were created on until you
+[move them](#move-threads-and-projects). Editing a profile or schedule on
+another machine updates the owner's configuration without starting a second
+copy. Provider sign-ins and an agent's current fallback position stay on the
+owner.
 
 Repository checkouts and worktrees stay local, but every machine lists all of a
 project's repositories. One that is not on this machine yet is marked as needing
-a clone. Pick it, and it clones into the project's folder on this machine. A
+a clone. Pick it, and it clones into the project's folder on this machine;
+[moving a project](#move-threads-and-projects) clones all of them there. A
 repository's folder is named after the repository, so it lands in the same
 place everywhere. Removing a repository from one machine frees the disk space
-and keeps it in the project, so you can clone it back later. Conversations, resource files,
-vault items, integrations and memory facts do not sync yet. Pairing does not
-enable remote work launches. Matching project names are kept separately until
-you choose how to combine them.
+and keeps it in the project, so you can clone it back later. Resource files,
+vault items, integrations and memory facts do not sync yet. Matching
+project names are kept separately until you choose how to combine them.
+
+## Your conversations on every machine
+
+Chats, Work and agent conversations show up on every paired machine. Each one
+runs on one machine, shown as "Runs on" in the thread header. Open it from any
+machine to read it, follow it live, or send a message: the message runs on the
+machine that runs the thread. If that machine is offline, sending fails with
+a notice instead of waiting; reading still works. Attachments open from any
+machine and are copied over the first time you view them.
+
+## Move threads and projects
+
+Move threads to the machine you want them to run on, for example everything
+from a laptop to an always-on server. Right-click a thread, or several selected
+threads, and choose **Move to**; the command palette offers the same for the
+open thread. A project's menu has **Move project to**. Moving a project clones
+each repository it links onto the new machine, using that machine's GitHub
+sign-in, then moves its threads and agents. When the new machine already has a
+checkout of one of those repositories outside any project, that checkout joins
+the project where it is, with the threads already working in it, instead of a
+second clone. Moving a single thread clones its repository too when the project
+links it. Chats without a project, including ones imported from T3 Code, land
+in the new machine's "No project". An agent moves with its schedules.
+
+From the terminal, on any paired machine:
+
+```sh
+cogenly machines move --from 'MacBook' --to 'Cloud server · my-host'
+cogenly machines move --project athens-racing --to 'Cloud server · my-host'
+cogenly machines move --threads <id>,<id> --to 'Cloud server · my-host'
+```
+
+Agents can do the same with `machines_move_threads` and
+`project_move_to_machine`.
+
+Some threads are skipped, each with a reason, and stay where they were. That
+happens when a turn is running or waiting for an answer, when Work has
+uncommitted or unpushed changes in its worktree, or when no project on the new
+machine links the thread's repository. Move them again to retry, or add
+`--leave-local-changes` to move Work anyway. Those changes then stay on the old
+machine, and the new machine checks out the branch as last pushed. A moved
+thread starts a fresh provider session that continues from its history. Diffs
+and restore points from before the move stay on the old machine.
 
 ## Pair from Settings
 

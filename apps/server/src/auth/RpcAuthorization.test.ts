@@ -232,6 +232,17 @@ describe("RPC authorization scopes", () => {
     );
   });
 
+  it("requires operate access to move threads or a project to another machine, on the client too", () => {
+    for (const method of [
+      WS_METHODS.machinesMoveThreads,
+      WS_METHODS.machinesMoveAllThreads,
+      WS_METHODS.projectLabelsMoveToMachine,
+    ]) {
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationOperateScope);
+      expect(clientRpcRequiredScopes(method, {})).toEqual([AuthOrchestrationOperateScope]);
+    }
+  });
+
   it.each([WS_METHODS.projectLabelsAdoptOrphanFolder, WS_METHODS.projectLabelsRemoveOrphanFolder])(
     "requires operate access for %s, on the client too, while listing orphans is a read",
     (method) => {

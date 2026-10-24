@@ -68,6 +68,7 @@ import {
   RuntimeMode,
   ThreadLinkedPullRequest,
   ThreadId,
+  ThreadRemoteError,
   type TurnItemId,
 } from "@t3tools/contracts";
 import { modelSelectionsEqual } from "@t3tools/shared/model";
@@ -80,7 +81,8 @@ import {
   derivePendingBackgroundWork,
   pendingBackgroundTurnItems,
 } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
-import { isT3ImportCommandId } from "../t3Import/T3ImportCommandIds.ts";
+import { isReplayedCommandId } from "./ReplayedCommandIds.ts";
+import * as RemoteThreadCommands from "./RemoteThreadCommands.ts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -282,6 +284,7 @@ export function canReplayCommandReceipt(
 }
 
 export const OrchestratorV2Error = Schema.Union([
+  ThreadRemoteError,
   OrchestratorDispatchError,
   OrchestratorCommandRejectedError,
   OrchestratorProjectionError,
@@ -483,7 +486,7 @@ function upsertWorkTask(
   return existing.map((candidate, at) => (at === index ? merged : candidate));
 }
 
-function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
+export function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
   switch (command.type) {
     case "work.handoff.record":
     case "work.task.propose":
@@ -930,6 +933,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
   const runtimePolicy = yield* RuntimePolicyV2;
   const threadForkService = yield* ThreadForkServiceV2;
   const threadDispatch = yield* ThreadCommandExecutor.ThreadCommandExecutor;
+  // Absent outside the full server: every thread is then local.
+  const remoteCommands = yield* Effect.serviceOption(RemoteThreadCommands.RemoteThreadCommands);
 
   const mapDispatchError =
     (command: OrchestrationV2ServerCommand) =>
@@ -12225,6 +12230,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
 
   const dispatchWithReceipt = (command: OrchestrationV2ServerCommand) =>
     Effect.gen(function* () {
+      // A thread another machine runs takes its commands there, from every entry point.
+      if (Option.isSome(remoteCommands)) {
+        const forwarded = yield* remoteCommands.value.forward(command);
+        if (Option.isSome(forwarded)) return forwarded.value;
+      }
       const dispatch = threadDispatch.withLock(
         commandThreadId(command),
         dispatchWithReceiptEffect(command),
@@ -12332,8 +12342,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         (stored) =>
           stored.event.type === "run.updated" &&
           !String(stored.commandId).startsWith("command:runtime-reconcile:") &&
-          // Imported T3 history ended long ago; promoting a queue for it would start a run.
-          !isT3ImportCommandId(stored.commandId) &&
+          // Imported or replicated history ran elsewhere; promoting a queue for it would start a run.
+          !isReplayedCommandId(stored.commandId) &&
           (stored.event.payload.status === "completed" ||
             stored.event.payload.status === "interrupted" ||
             stored.event.payload.status === "failed" ||
@@ -12678,8 +12688,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         .pipe(Effect.map((latest) => eventSink.stream({ afterSequence: latest }))),
     ).pipe(
       // Reactors on this stream (settlement, PR sync, delegated questions,
-      // awareness) act on new activity; imported T3 history is not new.
-      Stream.filter((stored) => !isT3ImportCommandId(stored.commandId)),
+      // awareness) act on new activity; imported and replicated history is not new.
+      Stream.filter((stored) => !isReplayedCommandId(stored.commandId)),
       Stream.map((stored) => stored.event),
       Stream.mapError(
         (cause) =>

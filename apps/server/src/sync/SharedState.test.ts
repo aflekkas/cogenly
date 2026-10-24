@@ -1,6 +1,12 @@
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { EnvironmentId, SharedStateError, type SharedDocumentChange } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  SharedStateError,
+  type SharedDocumentChange,
+  type SharedDocumentChangeWire,
+} from "@t3tools/contracts";
+import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -44,7 +50,7 @@ const change = (fields: SharedDocumentChange["fields"], wall = 10): SharedDocume
   tombstone: null,
   updatedBy: peer,
 });
-const batch = (changes: SharedDocumentChange[], after = 0) => ({
+const batch = (changes: SharedDocumentChangeWire[], after = 0) => ({
   after,
   cursor: after + 1,
   changes,
@@ -54,6 +60,8 @@ describe("SharedState", () => {
     Effect.gen(function* () {
       const state = yield* SharedState.SharedState;
       const live = yield* state.changes.pipe(Stream.toQueue({ capacity: 16 }));
+      // The queue subscribes on a forked fiber; let it run before the first write.
+      yield* TestClock.adjust(0);
       yield* state.write("project", "label:noop", project);
       yield* Queue.take(live);
       yield* state.write("project", "label:noop", project);
@@ -524,27 +532,155 @@ describe("SharedState", () => {
     }).pipe(Effect.provide(layer)),
   );
 
-  it.effect("validates authorship, clock bounds, fields, nested paths and cursor gaps", () =>
+  it.effect("refuses forged authorship, missing clocks and cursor gaps", () =>
     Effect.gen(function* () {
       const state = yield* SharedState.SharedState;
-      const bad = [
+      for (const forged of [
         { ...change(project), updatedBy: local },
-        change({ repositories: [{ remote: "/tmp/repo", directoryName: null }] }),
-        change({
-          repositories: [{ remote: "github.com/org/repo", directoryName: "../../escape" }],
-        }),
-        change({ sourceLinks: [{ kind: "github-owner", owner: "valid", path: "/tmp" }] }),
         { ...change({ name: "x" }), clocks: {} },
-        change({ instructions: "x".repeat(100_000) }),
-      ];
-      for (const invalid of bad)
-        expect((yield* Effect.result(state.receive(batch([invalid]), peer, false)))._tag).toBe(
+      ])
+        expect((yield* Effect.result(state.receive(batch([forged]), peer, false)))._tag).toBe(
           "Failure",
         );
       expect(
         (yield* Effect.result(state.receive(batch([change(project)], 5), peer, false)))._tag,
       ).toBe("Failure");
       expect((yield* Effect.result(state.acknowledge(peer, 99)))._tag).toBe("Failure");
+      expect((yield* state.cursors(peer)).received).toBe(0);
+    }).pipe(Effect.provide(layer)),
+  );
+  // What a newer build might send: a field this build lacks, a nested one,
+  // a value it cannot read, and a document kind it does not have.
+  const remote = "github.com/aflekkas/athens-racing";
+  const newerProject = change({
+    ...project,
+    iconColor: "teal",
+    repositories: [{ remote, directoryName: "athens-racing", sparsePaths: ["apps/web"] }],
+  });
+  const newerSchedule = {
+    ...change({ title: "Lap times", schedule: { type: "lunar", phase: "full" } }),
+    kind: "schedule" as const,
+    id: "task:laps",
+  };
+  const newerKind = { ...change({ theme: "dark" }), kind: "setting", id: "setting:theme" };
+  const readsAsNewer = (stored: Pick<SharedDocumentChange, "fields"> | undefined) => ({
+    iconColor: stored?.fields.iconColor,
+    repositories: stored?.fields.repositories,
+  });
+  it.effect(
+    "an older build keeps syncing past a newer document and keeps what it cannot read",
+    () =>
+      Effect.gen(function* () {
+        const state = yield* SharedState.SharedState;
+        const sql = yield* SqlClient.SqlClient;
+        yield* state.receive(
+          { after: 0, cursor: 3, changes: [newerProject, newerSchedule, newerKind] },
+          peer,
+          false,
+        );
+        // The stream moves on, and what this build reads is applied.
+        expect((yield* state.cursors(peer)).received).toBe(3);
+        yield* state.receive(batch([change({ name: "Racing" }, 20)], 3), peer, false);
+        expect(yield* sql`SELECT name FROM project_labels WHERE label_id='label:peer'`).toEqual([
+          { name: "Racing" },
+        ]);
+        expect((yield* state.get("schedule", "task:laps"))?.fields).toEqual({ title: "Lap times" });
+        // Fields it does not know are kept and passed on as they came.
+        const expected = {
+          iconColor: "teal",
+          repositories: [{ remote, directoryName: "athens-racing", sparsePaths: ["apps/web"] }],
+        };
+        expect(readsAsNewer(yield* state.get("project", "label:peer"))).toEqual(expected);
+        const relayed = (yield* state.readBatch(0, EnvironmentId.make("third"), false)).changes;
+        expect(readsAsNewer(relayed[0])).toEqual(expected);
+        // The unreadable schedule value and the unknown kind wait for an update.
+        expect(
+          (yield* sql<{ count: number }>`SELECT count(*) AS count FROM shared_deferred_changes`)[0]
+            ?.count,
+        ).toBe(2);
+      }).pipe(Effect.provide(layer)),
+  );
+  it.effect("writing a document back keeps the fields a newer build added", () =>
+    Effect.gen(function* () {
+      const state = yield* SharedState.SharedState;
+      const sql = yield* SqlClient.SqlClient;
+      yield* state.receive(batch([newerProject]), peer, false);
+      // A local rename captures every field this build reads, repositories included.
+      yield* sql`UPDATE project_labels SET name='Renamed' WHERE label_id='label:peer'`;
+      yield* state.capture("project", "label:peer");
+      const written = yield* sql<{
+        change_json: string;
+      }>`SELECT change_json FROM shared_changes ORDER BY cursor DESC LIMIT 1`;
+      expect(Object.keys(JSON.parse(written[0]!.change_json).fields)).toEqual(["name"]);
+      const renamed = yield* state.get("project", "label:peer");
+      expect(renamed?.fields.name).toBe("Renamed");
+      expect(readsAsNewer(renamed)).toEqual({
+        iconColor: "teal",
+        repositories: [{ remote, directoryName: "athens-racing", sparsePaths: ["apps/web"] }],
+      });
+      // Adding a repository rewrites the list; the unchanged one keeps its newer field.
+      const other = "github.com/aflekkas/pit-wall";
+      yield* state.write("project", "label:peer", {
+        repositories: [
+          { remote, directoryName: "athens-racing" },
+          { remote: other, directoryName: null },
+        ],
+      });
+      expect((yield* state.get("project", "label:peer"))?.fields.repositories).toEqual([
+        { remote, directoryName: "athens-racing", sparsePaths: ["apps/web"] },
+        { remote: other, directoryName: null },
+      ]);
+    }).pipe(Effect.provide(layer)),
+  );
+  it.effect("after an update, applies what an older build kept back", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      // Kept by an older build; this build reads all of it.
+      yield* sql`INSERT INTO shared_deferred_changes(source_env,trusted_relay,change_json)
+        VALUES (${peer}, 0, ${JSON.stringify(change(project))})`;
+      const context = yield* Layer.build(
+        Layer.fresh(SharedState.layer).pipe(
+          Layer.provide(
+            Layer.succeed(ServerEnvironment.ServerEnvironmentIdentity, {
+              getEnvironmentId: Effect.succeed(local),
+            }),
+          ),
+        ),
+      );
+      const updated = yield* SharedState.SharedState.pipe(Effect.provideContext(context));
+      expect((yield* updated.get("project", "label:peer"))?.fields.name).toBe("Shared");
+      expect(yield* sql`SELECT * FROM shared_deferred_changes`).toEqual([]);
+    }).pipe(Effect.scoped, Effect.provide(layer)),
+  );
+  it.effect("never applies or relays a known field it cannot validate, and moves on", () =>
+    Effect.gen(function* () {
+      const state = yield* SharedState.SharedState;
+      const sql = yield* SqlClient.SqlClient;
+      yield* state.receive(batch([change(project)]), peer, false);
+      const held = [
+        change({ repositories: [{ remote: "/tmp/repo", directoryName: null }] }, 11),
+        change(
+          { repositories: [{ remote: "github.com/org/repo", directoryName: "../../escape" }] },
+          12,
+        ),
+        change({ instructions: "x".repeat(100_000) }, 13),
+      ];
+      for (const [index, invalid] of held.entries())
+        yield* state.receive(batch([invalid], index + 1), peer, false);
+      expect((yield* state.cursors(peer)).received).toBe(held.length + 1);
+      const stored = yield* state.get("project", "label:peer");
+      expect(stored?.fields.repositories).toEqual([]);
+      expect(stored?.fields.instructions).toBe("");
+      // Kept for a later build, but never passed on to another machine.
+      expect(
+        (yield* state.readBatch(0, EnvironmentId.make("third"), false)).changes.map(
+          (relayed) => Object.keys(relayed.fields).length,
+        ),
+      ).toEqual([Object.keys(project).length]);
+      expect(
+        (yield* sql<{ count: number }>`SELECT count(*) AS count FROM shared_deferred_changes`)[0]
+          ?.count,
+      ).toBe(held.length);
     }).pipe(Effect.provide(layer)),
   );
   it.effect("preserves queued future clocks and bounds only local observation", () =>
@@ -610,6 +746,25 @@ describe("SharedState", () => {
       expect(result._tag).toBe("Failure");
       if (result._tag === "Failure") expect(result.failure).toBeInstanceOf(SharedStateError);
       expect((yield* state.get("agent", "agent:one"))?.fields.ownerMachine).toBe(local);
+    }).pipe(Effect.provide(layer)),
+  );
+  it.effect("lets only the owner hand its agent to another machine", () =>
+    Effect.gen(function* () {
+      const state = yield* SharedState.SharedState;
+      yield* state.write("agent", "agent:moving", { ownerMachine: local });
+      yield* state.write("agent", "agent:moving", { ownerMachine: peer });
+      expect((yield* state.get("agent", "agent:moving"))?.fields.ownerMachine).toBe(peer);
+      const third = EnvironmentId.make("third");
+      const theft = {
+        // A clock newer than the handoff, so only authorship can refuse it.
+        ...change({ ownerMachine: third }, (yield* Clock.currentTimeMillis) + 60_000),
+        kind: "agent" as const,
+        id: "agent:moving",
+        updatedBy: third,
+      };
+      const result = yield* Effect.result(state.receive(batch([theft]), peer, true));
+      expect(result._tag).toBe("Failure");
+      expect((yield* state.get("agent", "agent:moving"))?.fields.ownerMachine).toBe(peer);
     }).pipe(Effect.provide(layer)),
   );
   it.effect(

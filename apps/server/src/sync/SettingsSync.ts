@@ -22,7 +22,11 @@ import * as SqlClient from "effect/sql/SqlClient";
 import * as Stream from "effect/Stream";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { SharedState } from "./SharedState.ts";
-import { projectSettingsDocumentId, UNIVERSAL_SETTINGS_DOCUMENT_ID } from "./settingsDocument.ts";
+import {
+  projectSettingsDocumentId,
+  settingsDocumentAddress,
+  UNIVERSAL_SETTINGS_DOCUMENT_ID,
+} from "./settingsDocument.ts";
 import {
   canonicalJson,
   planSettingsReconcile,
@@ -71,7 +75,8 @@ const make = Effect.gen(function* () {
       UNIVERSAL_SETTINGS_DOCUMENT_ID,
       ...[...projects.keys()].map(projectSettingsDocumentId),
     ]) {
-      const document = yield* shared.get("settings", id);
+      const address = settingsDocumentAddress(id);
+      const document = yield* shared.get(address.kind, address.id);
       if (document) documents.set(id, document.fields);
     }
     const base = new Map(
@@ -108,8 +113,10 @@ const make = Effect.gen(function* () {
       if (plan === undefined) return;
       // Publish before recording, and record applied values only after the
       // file write: an interrupted pass then repeats rather than reverting.
-      for (const [documentId, fields] of plan.publish)
-        yield* shared.write("settings", documentId, fields);
+      for (const [documentId, fields] of plan.publish) {
+        const address = settingsDocumentAddress(documentId);
+        yield* shared.write(address.kind, address.id, fields);
+      }
       if (plan.base.length > 0) yield* recordBase(plan.base);
     }),
   );
