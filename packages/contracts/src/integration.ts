@@ -22,7 +22,7 @@ export const IntegrationName = TrimmedNonEmptyString.check(
 export type IntegrationName = typeof IntegrationName.Type;
 
 /** Local endpoints are allocated by Cogenly, never taken from user-entered URLs. */
-export const IntegrationTransport = Schema.Literals(["http", "local"]);
+export const IntegrationTransport = Schema.Literals(["http", "local", "stdio"]);
 export type IntegrationTransport = typeof IntegrationTransport.Type;
 
 /** The account is the integration's `accountLabel`, as for remote integrations. */
@@ -32,6 +32,14 @@ export const LocalIntegrationConfig = Schema.Struct({
   callbackOrigin: TrimmedNonEmptyString.check(Schema.isMaxLength(2000)),
 });
 export type LocalIntegrationConfig = typeof LocalIntegrationConfig.Type;
+
+/** A server-owned stdio process. Secret environment values are vault references. */
+export const IntegrationCommand = Schema.Struct({
+  command: TrimmedNonEmptyString.check(Schema.isMaxLength(2000)),
+  args: Schema.Array(Schema.String.check(Schema.isMaxLength(4000))).check(Schema.isMaxLength(100)),
+  env: Schema.Record(Schema.String, Schema.String.check(Schema.isMaxLength(4000))),
+});
+export type IntegrationCommand = typeof IntegrationCommand.Type;
 
 /** All projects, or only the listed project folders (by label id). */
 export const IntegrationScope = Schema.Union([
@@ -73,6 +81,7 @@ const integrationFields = {
   displayName: TrimmedNonEmptyString.check(Schema.isMaxLength(200)),
   transport: IntegrationTransport,
   local: Schema.optional(LocalIntegrationConfig),
+  command: Schema.optional(IntegrationCommand),
   url: TrimmedNonEmptyString.check(Schema.isMaxLength(2000)),
   headers: IntegrationHeaders,
   enabled: Schema.Boolean,
@@ -168,6 +177,7 @@ export const IntegrationAddToolInput = Schema.Struct({
   displayName: Schema.optional(integrationFields.displayName),
   transport: Schema.optional(IntegrationTransport),
   local: integrationFields.local,
+  command: integrationFields.command,
   url: Schema.optional(integrationFields.url),
   headers: Schema.optional(IntegrationHeaders),
   enabled: Schema.optional(Schema.Boolean),
@@ -181,6 +191,7 @@ export type IntegrationAddToolInput = typeof IntegrationAddToolInput.Type;
 
 export const IntegrationUpdateInput = Schema.Struct({
   id: IntegrationId,
+  command: Schema.optional(IntegrationCommand),
   displayName: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(200))),
   transport: Schema.optional(IntegrationTransport),
   url: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(2000))),
@@ -453,6 +464,7 @@ export type IntegrationDeleteResult = typeof IntegrationDeleteResult.Type;
 export const IntegrationTestResult = Schema.Struct({
   /** Server time when this test began; later subscription outcomes supersede it. */
   checkedAt: Schema.optional(IsoDateTime),
+  reason: Schema.optional(Schema.String),
   status: IntegrationConnectionStatus,
   toolCount: Schema.Number,
   message: Schema.String,
@@ -474,6 +486,7 @@ export class IntegrationError extends Schema.TaggedError<IntegrationError>()("In
     "invalid_request",
     "approval_required",
     "sign_in_required",
+    "scope_missing",
     /** The server has no dynamic client registration; the owner must supply a client id. */
     "client_id_required",
     /** The Google preset needs the owner's OAuth client in the vault. */
@@ -522,6 +535,7 @@ export const IntegrationCallResult = Schema.Struct({
 export type IntegrationCallResult = typeof IntegrationCallResult.Type;
 
 export const IntegrationUpdateByNameInput = Schema.Struct({
+  command: Schema.optional(IntegrationCommand),
   name: IntegrationName,
   callbackOrigin: GoogleWorkspaceAddInput.fields.callbackOrigin,
   displayName: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(200))),
@@ -544,3 +558,16 @@ export const IntegrationSetupGuideResult = Schema.Struct({
   service: Schema.String,
   instructions: Schema.String,
 });
+
+export const IntegrationNativeImportPreview = Schema.Struct({
+  definitions: Schema.Array(IntegrationCreateInput),
+  reconnect: Schema.Array(Schema.String),
+  warnings: Schema.Array(Schema.String),
+});
+export type IntegrationNativeImportPreview = typeof IntegrationNativeImportPreview.Type;
+export const IntegrationNativeImportResult = Schema.Struct({
+  imported: Schema.Array(Schema.String),
+  reconnect: Schema.Array(Schema.String),
+  warnings: Schema.Array(Schema.String),
+});
+export type IntegrationNativeImportResult = typeof IntegrationNativeImportResult.Type;

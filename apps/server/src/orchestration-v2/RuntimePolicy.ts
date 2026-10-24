@@ -130,7 +130,9 @@ export const layerFromProjectStore: Layer.Layer<
     const useProviderConnectors = Option.isNone(serverSettings)
       ? Effect.succeed(false)
       : serverSettings.value.getSettings.pipe(
-          Effect.map((settings) => settings.useProviderConnectors),
+          Effect.map(
+            (settings) => settings.useProviderConnectors || !settings.nativeMcpImportReviewed,
+          ),
           Effect.orElseSucceed(() => false),
         );
     // The integrations line is best-effort turn context too: any failure

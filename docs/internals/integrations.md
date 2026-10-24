@@ -1,156 +1,74 @@
 # Integrations gateway
 
-One gateway, not one MCP config per provider. Cogenly already exposes a
-single `cogenly` MCP endpoint to every provider turn; integrations ride that
-endpoint instead of being written into each CLI's native MCP config. Native
-CLI MCPs are untouched by this work and are removed, if ever, one by one.
+Integrations belong to Cogenly, so every provider, delegated child and scheduled
+run reaches the same project-scoped service through the `cogenly` MCP endpoint.
+Agents discover tools on demand through `integrations_list`, `integration_tools`
+and `integration_call`. Setup knowledge is repository data exposed by
+`integration_setup_guide`; Settings manages accounts rather than reproducing
+vendor setup flows. Add service knowledge there without adding a client wizard.
 
-Agents get three generic tools — `integrations_list`, `integration_tools`,
-`integration_call` — plus management tools (`integration_add`,
-`integration_update`, `integration_remove`). A new integration adds zero tools
-to the model's context; discovery is one call away. The alternative (proxying
-every upstream tool into the endpoint) trades a bounded context for unbounded
-tool overload as integrations grow.
+Native CLI servers, plugins and hosted connectors otherwise bypass Cogenly's
+scope, status and credential handling and duplicate its tools. They are suppressed
+by default after the owner reviews or skips the native-definition import offer.
+The single preference `useProviderConnectors` restores native configuration for
+new sessions. The shared runtime policy carries it to all turn paths. Native
+configuration is never rewritten.
 
-Credentials are resolved server-side, right before the upstream request, from
-`{{credential:<item>.<field>}}` header templates
-([Integrations.ts](../../apps/server/src/integrations/Integrations.ts)).
-Resolution fails closed: a missing or malformed reference fails the call and
-no request is sent. Resolved values never cross back — not in tool results,
-not in list output (which returns templates, never values), not in errors
-(upstream messages are bounded and credential-free by construction). The
-resolver sits behind the small `IntegrationCredentials` interface, backed by
-the [vault](./vault.md): a reference is a vault item name and field, and a
-missing item or field counts as no credential. Accounts may associate metadata
-with those vault items; legacy integration references keep their names. CLI
-process exposure is a separate permission and resolves through AccountAccess
-with authenticated thread/project/agent/provider context. The integration
-resolver's unrestricted server caller must not be reused for process delivery.
+Claude uses strict MCP configuration and disables claude.ai MCP loading in its
+environment. Administrator-managed `managed-mcp.json` rejects the strict flag;
+Cogenly omits that flag, and administrator-managed servers may remain available.
+Codex has no strict flag: before launching each session, Cogenly captures only
+enabled server names from `mcp list --json` and disables each, plus plugins/apps,
+using session overrides. Thread configuration also covers project-local servers
+and propagates to native children. A failed server enumeration fails session
+startup rather than silently restoring bypass access. Muse SDK 1.4.6 only admits
+additive session MCP configuration and ignores unknown keys; native suppression
+is unsupported and its turns carry that notice.
 
-Persistent agents must obtain owner approval to add an integration or change its
-URL, transport, or headers. Update approvals freeze those fields together so a
-pending proposal cannot inherit newly attached credentials. Ordinary agent edits
-preserve that destination in the service, and credential resolution checks the
-stored approved origin. Settings edits authorize the new origin directly.
+Imports are disconnected definitions. Header and environment values become vault
+references; potentially secret command arguments are withheld for agent review.
+This prevents import from turning existing credentials into plain settings or
+starting arbitrary imported processes. claude.ai authorization is account-hosted
+and cannot be migrated; connector names discovered with the CLI or present in local definitions are listed for renewed
+consent, with an explicit warning when account-hosted discovery is unavailable.
 
-Integration definitions live in the `integrations` table (migration 083) as
-payload JSON with a tombstone, shaped to become shared documents under sync:
-edits resolve per field later without a schema change. Upstream tool lists
-are cached per integration version with a short TTL and invalidated on edit;
-calls use streamable-HTTP JSON-RPC with a bounded timeout, and upstream
-failures map to a small set of reasons agents can act on.
+Project scope and destination approvals live in the service. Every gateway entry
+point takes the caller's project label; inaccessible accounts look absent.
+Persistent agents request approval for new accounts or destination changes.
+Credentials are resolved immediately before a request, never in tool results.
+Changing an endpoint or OAuth client invalidates its grant. Tool lists and health
+are cached by definition version; subscriptions update Settings and Sources on
+mutations and observed status changes.
 
-Project scope is enforced in the service, not the toolkit: every gateway
-entry point takes the caller's project label (or `null` for unfiled turns,
-`undefined` for the unrestricted owner view) and scoped integrations are
-indistinguishable from missing ones outside their projects. The per-turn
-context line is built in `RuntimePolicy` through `buildProjectManifest`, so
-all three adapters carry it with no per-provider code.
+## OAuth origins and state
 
-`integrations.list` reports `connected` only while the tool cache holds the
-current version, `error` with a message when the last upstream round trip for
-this version failed, and `needs_sign_in` for an OAuth integration without a
-usable grant. A passing `testConnection` refills that cache; Settings also
-keeps its last test result per integration version to show the failure reason.
-`integrations.subscribe` pushes the list after every change and status flip.
-`integrations.subscribeSources` is the same feed cut down for the composer's
-Sources picker (no headers or OAuth state), at `orchestration:read` because the
-composer runs on every paired client; it pushes only when a source changes.
+Remote OAuth discovers authorization metadata, dynamically registers where
+supported, and uses single-use state bound to PKCE and the integration definition.
+Tokens live in vault items; refresh is serialized per account. The public callback
+is authorized by state, so the consenting browser need not have a Cogenly session.
+Pending authorization does not survive a server restart.
 
-## Setup actions
+The callback origin must be reachable from the consenting browser. On a VPS or
+Tailscale connection, the agent supplies the public HTTPS origin on first setup;
+loopback MCP requests cannot infer it. Subsequent requests reuse the account's
+successful browser origin. Registered clients are reused only with matching
+redirect URIs. A new consent invalidates older pending flows for the account.
 
-Every account that isn't usable carries one `IntegrationSetupAction`
-(`sign_in`, `oauth_client`, `api_key`, `install_runtime`, `retry`, `fix`),
-computed by the pure `setupActionFor` in
-[IntegrationSetup.ts](../../apps/server/src/integrations/IntegrationSetup.ts)
-from the catalog entry, the status, and the last failure's reason. Settings
-renders it on the row; agents get the same action rendered as `nextStep` plus a
-`settingsUrl` (`/settings/integrations?setup=<integration or catalog id>`), and
-tool failures are worded through the same mapping, so the two surfaces can't
-disagree. Add a failure reason there, not as a message in a handler.
+## Server-owned processes
 
-A missing key, app or Google client is a setup action, not an error:
-`connectFromCatalog` creates nothing and returns the action. The owner's
-secret forms (`saveOAuthClient`, `saveApiKey`) write the vault through
-`IntegrationSecrets`, never the integration payload: Google's shared client is
-the `google-oauth-client` login item allowing `accounts.google.com`, any other
-secret `<integration name>-client-secret` or `-api-key` allowing its token or
-endpoint host, so accounts of one service never share an item by accident.
+Generic stdio definitions launch commands without a shell, resolve secret
+environment templates from the vault, restart after crashes, and stop after five
+minutes without an active request (Google gets fifteen minutes so a pending
+consent link can finish). Disabled or removed definitions retire the
+process and cannot be restarted by stale in-flight requests. Process cleanup
+signals only the captured process identity.
 
-## OAuth sign-in
-
-An integration with `auth: { type: "oauth" }` signs in per the MCP
-authorization spec ([IntegrationOAuth.ts](../../apps/server/src/integrations/IntegrationOAuth.ts)).
-Constraints that are not obvious from the code:
-
-- The redirect URI is `<origin>/oauth/integrations/callback` on the origin the
-  request that started sign-in reached (the WebSocket upgrade for Settings, the
-  MCP request for agents), like `/oauth/mcp`. A browser elsewhere cannot open a
-  loopback origin, so an agent's loopback request uses that account's last
-  successful browser origin, persisted as server-only state (in the account
-  directory for Google). A first-time loopback request needs an explicit
-  `callbackOrigin`, or a sign-in through Settings on the reachable address.
-  Dynamic registrations record their redirect URIs and are reused only for the
-  same one.
-- The callback is unauthenticated: the browser that consents need not hold a
-  Cogenly session. The single-use `state`, bound in memory to the PKCE verifier
-  and to the integration's URL at the time, is the authority; pending sign-ins
-  do not survive a restart. Its path is untraced because the query carries the
-  code.
-- Non-secret OAuth state (endpoints, client registration, expiry, signed-in) is
-  persisted inside the integration payload but never leaves the service; tokens
-  are a vault item ([vault](./vault.md)). A new URL or client id drops both.
-- One refresh per account at a time: waiters re-read the token under the lock
-  and use what the refresh produced. A token-endpoint refusal of the grant marks
-  the integration `needs_sign_in`, and later calls fail before any request, so
-  a revoked grant never loops.
-
-## Managed local servers
-
-A `local` integration is a fixed preset (today only Google Workspace,
-[local/](../../apps/server/src/integrations/local/)), never a command from
-Settings or MCP: Cogenly pins the package, runs one process per account over stdio, and passes the OAuth client through
-the environment, never argv. Only its state-bearing OAuth callback listener uses a runner-allocated loopback
-port. MCP has no HTTP listener, and the pinned launcher removes the package's
-attachment routes and missing-state callback fallback. Remote URLs,
-including OAuth discovery and token endpoints, go through
-[RemoteEndpoint.ts](../../apps/server/src/integrations/RemoteEndpoint.ts),
-which refuses non-public addresses and pins the connection to the checked DNS
-answers.
-
-There is one sign-in entry point: `beginSignIn` returns an `IntegrationSignIn`
-for both kinds, and `needs_sign_in` means the same thing for both. A local
-link is a ten-minute capability ticket on the account's fixed callback origin
-(Google needs that exact redirect URI registered), which asks the process for
-its consent URL; the callback is routed to the process by the OAuth `state` it
-issued. The process keeps the Google grant on disk, so Cogenly does not hold
-those tokens. A rejected grant is tracked separately from its credential file;
-only an explicit sign-in moves that file aside and restarts the process for
-reauthorization. Any committed edit retires the running definition (a stale
-in-flight request cannot restart it); an empty update changes nothing, so
-asking for a fresh link does not kill a pending sign-in.
-
-`integrations.installRuntime` installs uv with a fixed command (Homebrew when
-present, else Astral's installer) behind `RuntimeInstaller`, never a command
-from the caller. Managed processes also search uv's install directories, and a
-failed start is retried on every list, so an install takes effect without a
-restart.
-
-Clients have no RPC for an integration's tool list; only agents see tools,
-through `integration_tools`.
-
-## Default catalog
-
-The catalog ([integrationCatalog.ts](../../packages/contracts/src/integrationCatalog.ts))
-is static data shared by the server, Settings and the context line, kept to the
-core services: Google Workspace, Slack, GitHub, Linear, Notion, Wispr Flow and
-Fathom, one endpoint each. Connecting an entry resolves it, in one pure function
-([IntegrationCatalog.ts](../../apps/server/src/integrations/IntegrationCatalog.ts)),
-into an ordinary integration definition; nothing records which entry it came
-from. Settings groups accounts by matching the endpoint (or the local preset),
-so hand-added integrations for a catalog URL group too, and accounts of a
-service the catalog later drops simply group as custom and keep working. A
-persistent agent's catalog request is proposed as the resolved definition, so
-the owner approves exactly what gets created. Every catalog id also needs a
-decision in
-[ProviderConnectorDuplicates.ts](../../apps/server/src/integrations/ProviderConnectorDuplicates.ts).
+Google Workspace uses pinned `workspace-mcp` 2.1.2 over stdio, with a callback-only
+loopback listener. Its launcher replaces the package's credential-file backend
+with a vault bridge before importing the package entry point. Each process gets
+a separate capability through its environment; the bridge is untraced, returns
+no-store responses, and is retired on disconnect or replacement. Both initial
+grants and refreshed grants go to the vault. The user's Google client is also
+vault-backed; no token or secret is an argv value. Google state and non-secret
+browser-origin metadata may remain in the account directory. The package's
+attachment routes and missing-state callback fallback are removed.

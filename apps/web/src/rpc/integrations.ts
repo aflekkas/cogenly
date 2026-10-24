@@ -11,6 +11,14 @@ import { connectionAtomRuntime } from "../connection/runtime";
  * finished in another browser or started by an agent.
  */
 export const integrationsRpc = {
+  previewNative: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "integrations:previewNative",
+    tag: "integrations.previewNative",
+  }),
+  importNative: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "integrations:importNative",
+    tag: "integrations.importNative",
+  }),
   list: createEnvironmentRpcSubscriptionAtomFamily(connectionAtomRuntime, {
     label: "integrations:live",
     tag: "integrations.subscribe",

@@ -371,6 +371,13 @@ export const setupActionFor = (input: SetupInput): IntegrationSetupAction | unde
       return credentialProblem(input, false);
     case "credential_not_allowed":
       return credentialProblem(input, true);
+    case "scope_missing":
+      return signIn({
+        ...input,
+        message:
+          "The grant is missing a required scope. Ask the user to approve the required permissions and verify a read operation.",
+        reason: "sign_in_required",
+      });
     case "sign_in_required":
       return input.syncedFrom !== undefined && usesClientSecret(input)
         ? (appClient(input) ?? signIn(input))
@@ -489,7 +496,7 @@ export const agentNextStep = (
           )
           .join("\n")
       : "";
-  return `${integrationSetupGuide(context.entry?.id ?? "custom").instructions}\n\nCurrent requirement: ${action.title}. ${copies}\n${retry}`;
+  return `${integrationSetupGuide(context.entry?.id ?? "custom").instructions}\n\nCurrent requirement: ${action.title}. ${action.type === "install_runtime" ? action.command : ["sign_in", "retry", "fix"].includes(action.type) ? action.message : ""} ${copies}\n${retry}`;
 };
 
 /** A connect or update result for an agent: its setup action, in words and as a Settings link. */

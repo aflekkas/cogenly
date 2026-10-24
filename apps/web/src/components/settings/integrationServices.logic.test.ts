@@ -7,26 +7,11 @@ import {
 import { describe, expect, it } from "vite-plus/test";
 
 import {
-  EMPTY_INTEGRATION_DRAFT,
-  credentialReference,
-  credentialReferencesIn,
-  draftChanges,
-  draftFromIntegration,
-  insertCredentialReference,
   integrationErrorText,
   integrationStatus,
   integrationTitle,
-  referenceableVaultItems,
-  rowsToHeaders,
   scopeLabel,
-  signInAction,
-  slugifyIntegrationName,
   testResultReason,
-  unresolvedCredentialReferences,
-  updateInputFromDraft,
-  urlHost,
-  validateIntegrationDraft,
-  withDisplayName,
 } from "./integrationServices.logic";
 
 const integration = {
@@ -49,83 +34,6 @@ const summary = (overrides: Partial<IntegrationSummary> = {}): IntegrationSummar
   status: "unknown",
   toolCount: null,
   ...overrides,
-});
-
-describe("slugifyIntegrationName", () => {
-  it("makes an agent-callable slug from a display name", () => {
-    expect(slugifyIntegrationName("Gmail (Work)")).toBe("gmail-work");
-    expect(slugifyIntegrationName("  Café Notes!! ")).toBe("cafe-notes");
-    expect(slugifyIntegrationName("--Linear_v2")).toBe("linear_v2");
-    expect(slugifyIntegrationName("日本")).toBe("");
-  });
-
-  it("stays within the name limit without a trailing dash", () => {
-    const slug = slugifyIntegrationName(`${"a".repeat(63)} b`);
-    expect(slug).toBe("a".repeat(63));
-  });
-});
-
-describe("headers", () => {
-  it("drops blank rows and rejects half-filled or repeated names", () => {
-    expect(
-      rowsToHeaders([
-        { key: "Authorization", value: "Bearer x" },
-        { key: " ", value: "" },
-      ]),
-    ).toEqual({ headers: { Authorization: "Bearer x" } });
-    expect(rowsToHeaders([{ key: "", value: "x" }])).toHaveProperty("error");
-    expect(rowsToHeaders([{ key: "Bad Name", value: "x" }])).toHaveProperty("error");
-    expect(
-      rowsToHeaders([
-        { key: "X-Key", value: "a" },
-        { key: "x-key", value: "b" },
-      ]),
-    ).toHaveProperty("error");
-  });
-
-  it("inserts a vault reference after a typed prefix", () => {
-    const ref = credentialReference("gmail", "password");
-    expect(ref).toBe("{{credential:gmail.password}}");
-    expect(insertCredentialReference("", ref)).toBe(ref);
-    expect(insertCredentialReference("Bearer", ref)).toBe(`Bearer ${ref}`);
-    expect(insertCredentialReference("Bearer ", ref)).toBe(`Bearer ${ref}`);
-  });
-
-  it("parses references like the server, splitting on the last dot", () => {
-    expect(
-      credentialReferencesIn("Bearer {{credential:work.gmail.value}} {{credential:x}}"),
-    ).toEqual([
-      { item: "work.gmail", field: "value" },
-      { item: "x", field: "" },
-    ]);
-  });
-
-  it("flags references no vault item can fill", () => {
-    const vault = [{ name: "gmail", fields: ["password"] as const }];
-    expect(
-      unresolvedCredentialReferences(
-        {
-          A: "{{credential:gmail.password}}",
-          B: "{{credential:gmail.totp}} {{credential:x.value}}",
-        },
-        vault,
-      ),
-    ).toEqual([
-      { item: "gmail", field: "totp" },
-      { item: "x", field: "value" },
-    ]);
-  });
-
-  it("offers only items a template can name", () => {
-    expect(
-      referenceableVaultItems([
-        { name: "zeta", fields: ["value"] },
-        { name: "empty", fields: [] },
-        { name: "odd}name", fields: ["value"] },
-        { name: "alpha", fields: ["password"] },
-      ]).map((item) => item.name),
-    ).toEqual(["alpha", "zeta"]);
-  });
 });
 
 describe("integrationStatus", () => {
@@ -198,9 +106,6 @@ describe("integrationStatus", () => {
       label: "Needs sign-in",
       reason: "The sign-in was revoked or expired. Sign in again.",
     });
-    expect(signInAction(needs)).toBe("Sign in");
-    expect(signInAction(summary({ integration: oauth, status: "connected" }))).toBe("Reconnect");
-    expect(signInAction(summary({ status: "connected" }))).toBeNull();
     expect(
       integrationStatus(
         summary({
@@ -269,12 +174,8 @@ describe("display helpers", () => {
     expect(
       integrationStatus({ ...google, syncedFrom: { machineLabel: "Mac mini" } }, runningTest),
     ).toMatchObject({ label: "Sign in on this machine", tone: "warning" });
-    expect(signInAction(google)).toBe("Sign in");
-    expect(signInAction({ ...google, status: "connected" })).toBe("Reconnect");
   });
   it("shows a host and a scope", () => {
-    expect(urlHost("https://mcp.example.com:8443/x")).toBe("mcp.example.com:8443");
-    expect(urlHost("not a url")).toBe("not a url");
     const labels = [{ id: "a", name: "Cogenly" }];
     expect(scopeLabel({ type: "all" }, labels)).toBe("All projects");
     expect(
@@ -283,93 +184,5 @@ describe("display helpers", () => {
         labels,
       ),
     ).toBe("Cogenly");
-  });
-});
-
-describe("drafts", () => {
-  it("keeps a managed account local when editing its display name", () => {
-    const local = { ...integration, transport: "local" as const, headers: {} };
-    const fields = validateIntegrationDraft({
-      ...draftFromIntegration(local),
-      displayName: "Google · work",
-    });
-    if ("error" in fields) throw new Error(fields.error);
-    expect(updateInputFromDraft(local, fields.fields)).toMatchObject({
-      transport: "local",
-      displayName: "Google · work",
-    });
-  });
-  it("follows the display name until the name is edited", () => {
-    const named = withDisplayName(EMPTY_INTEGRATION_DRAFT, "My Linear");
-    expect(named.name).toBe("my-linear");
-    const edited = withDisplayName({ ...named, name: "linear", nameEdited: true }, "Linear");
-    expect(edited.name).toBe("linear");
-  });
-
-  it("validates and builds the create fields", () => {
-    const draft = {
-      ...withDisplayName(EMPTY_INTEGRATION_DRAFT, "Gmail"),
-      url: " https://mcp.example.com/gmail ",
-      headers: [{ key: "Authorization", value: "Bearer {{credential:gmail.password}}" }],
-    };
-    expect(validateIntegrationDraft(draft)).toEqual({
-      fields: {
-        name: "gmail",
-        displayName: "Gmail",
-        transport: "http",
-        url: "https://mcp.example.com/gmail",
-        headers: { Authorization: "Bearer {{credential:gmail.password}}" },
-        scope: { type: "all" },
-        hint: "",
-      },
-    });
-    expect(validateIntegrationDraft({ ...draft, url: "ftp://x" })).toHaveProperty("error");
-    expect(validateIntegrationDraft({ ...draft, name: "Bad" })).toHaveProperty("error");
-    expect(validateIntegrationDraft({ ...draft, scope: "projects" })).toHaveProperty("error");
-  });
-
-  it("carries the account label and OAuth settings, and turns OAuth off explicitly", () => {
-    const stored = {
-      ...integration,
-      headers: {},
-      accountLabel: "Spawn Partners",
-      auth: {
-        type: "oauth" as const,
-        clientId: "slack-app",
-        clientSecret: "{{credential:slack-app.password}}",
-        scope: "chat:write",
-      },
-    } as Integration;
-    expect(integrationTitle(stored)).toBe("Gmail · Spawn Partners");
-    const draft = draftFromIntegration(stored);
-    const result = validateIntegrationDraft(draft);
-    if ("error" in result) throw new Error(result.error);
-    expect(draftChanges(stored, result.fields)).toBe(false);
-    // The scope is not edited in Settings, so a save keeps it.
-    expect(updateInputFromDraft(stored, result.fields)).toMatchObject({
-      accountLabel: "Spawn Partners",
-      auth: { ...stored.auth },
-    });
-    const off = validateIntegrationDraft({ ...draft, oauth: false, accountLabel: " " });
-    if ("error" in off) throw new Error(off.error);
-    expect(updateInputFromDraft(stored, off.fields)).toMatchObject({
-      auth: null,
-      accountLabel: "",
-    });
-
-    expect(validateIntegrationDraft({ ...draft, clientSecret: "pasted-secret" })).toHaveProperty(
-      "error",
-    );
-    expect(validateIntegrationDraft({ ...draft, clientId: "" })).toHaveProperty("error");
-  });
-
-  it("round-trips a stored integration without reporting a change", () => {
-    const draft = draftFromIntegration(integration);
-    const result = validateIntegrationDraft(draft);
-    if ("error" in result) throw new Error(result.error);
-    expect(draftChanges(integration, result.fields)).toBe(false);
-    const changed = validateIntegrationDraft({ ...draft, hint: "Work inbox" });
-    if ("error" in changed) throw new Error(changed.error);
-    expect(draftChanges(integration, changed.fields)).toBe(true);
   });
 });

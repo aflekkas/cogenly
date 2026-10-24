@@ -88,6 +88,8 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   // Seeing what a thread waits on is a read; deciding it is agents.approve / agents.reject.
   [WS_METHODS.threadApprovalsSubscribe]: AuthOrchestrationReadScope,
   [WS_METHODS.agentsStartWork]: AuthOrchestrationOperateScope,
+  [WS_METHODS.integrationsPreviewNative]: AuthOrchestrationOperateScope,
+  [WS_METHODS.integrationsImportNative]: AuthOrchestrationOperateScope,
   [WS_METHODS.integrationsList]: AuthOrchestrationReadScope,
   // Creating or changing an integration hands agents a new credentialed
   // upstream, and testing one spends a resolved credential on the network.

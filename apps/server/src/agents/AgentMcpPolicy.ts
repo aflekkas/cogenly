@@ -280,6 +280,9 @@ const make = Effect.gen(function* () {
             url: update.url ?? current.url,
             transport: update.transport ?? current.transport,
             headers: update.headers ?? current.headers,
+            ...((update.command ?? current.command)
+              ? { command: update.command ?? current.command }
+              : {}),
             // A client secret reference is part of the destination too.
             auth: update.auth === undefined ? (current.auth ?? null) : update.auth,
           };

@@ -96,6 +96,22 @@ const addedByAgent = (fail: (cause: unknown) => OrchestratorMcpFailure) =>
   });
 
 export const layer = McpToolAccess.toLayer(IntegrationsToolkit, {
+  integration_native_preview: McpToolAccess.writesEnvironment(() =>
+    Effect.gen(function* () {
+      const scope = yield* Invocation.McpInvocationContext;
+      return yield* (yield* Integrations.Integrations)
+        .previewNative()
+        .pipe(Effect.mapError(failureAt(scope.httpOrigin)));
+    }),
+  ),
+  integration_install_runtime: McpToolAccess.writesEnvironment((input) =>
+    Effect.gen(function* () {
+      const scope = yield* Invocation.McpInvocationContext;
+      return yield* (yield* Integrations.Integrations)
+        .installRuntime(input.runtime)
+        .pipe(Effect.mapError(failureAt(scope.httpOrigin)));
+    }),
+  ),
   integration_setup_guide: McpToolAccess.reads((input) =>
     Effect.gen(function* () {
       return yield* (yield* Integrations.Integrations).setupGuide(input.service);
@@ -220,6 +236,7 @@ export const layer = McpToolAccess.toLayer(IntegrationsToolkit, {
             ...(input.url === undefined ? {} : { url: input.url }),
             ...(input.transport === undefined ? {} : { transport: input.transport }),
             ...(input.headers === undefined ? {} : { headers: input.headers }),
+            ...(input.command === undefined ? {} : { command: input.command }),
             ...(input.enabled === undefined ? {} : { enabled: input.enabled }),
             ...(input.scope === undefined ? {} : { scope: input.scope }),
             ...(input.hint === undefined ? {} : { hint: input.hint }),
@@ -228,11 +245,11 @@ export const layer = McpToolAccess.toLayer(IntegrationsToolkit, {
           },
           {
             preserveCredentialDestination: agent !== null,
-            // An agent never moves a stored token or vault credential to a new destination;
-            // the owner makes that change in Settings.
-            holdStoredSecrets: true,
+            // Persistent agents use the owner-approval path; the owner's chat
+            // can configure its own connections, still subject to vault domains.
+            holdStoredSecrets: agent !== null,
             callerLabelId: label,
-            preserveScope: true,
+            preserveScope: agent !== null,
           },
         )
         .pipe(Effect.mapError(fail));

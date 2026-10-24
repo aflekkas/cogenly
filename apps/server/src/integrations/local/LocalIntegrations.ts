@@ -1,3 +1,4 @@
+import * as GoogleTokens from "./GoogleTokenStore.ts";
 import {
   IntegrationError,
   IntegrationProvenance,
@@ -15,6 +16,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as PubSub from "effect/PubSub";
 import * as Schema from "effect/Schema";
@@ -82,6 +84,10 @@ export class LocalIntegrations extends Context.Service<
     readonly authorize: (
       ticket: string,
     ) => Effect.Effect<{ readonly url?: string; readonly connected: boolean }, IntegrationError>;
+    readonly credentialRequest: (
+      capability: string,
+      input: unknown,
+    ) => Effect.Effect<unknown, IntegrationError>;
     readonly callback: (query: string) => Effect.Effect<boolean, IntegrationError>;
   }
 >()("cogenly-server/integrations/local/LocalIntegrations") {}
@@ -99,9 +105,6 @@ const AuthResult = Schema.Struct({
 });
 const isStartGoogleAuth = Schema.is(Schema.Struct({ name: Schema.Literal("start_google_auth") }));
 const decodeAuthResult = Schema.decodeUnknownOption(AuthResult);
-const decodeToken = Schema.decodeUnknownOption(
-  Schema.fromJsonString(Schema.Struct({ refresh_token: Schema.String })),
-);
 const browserOriginJson = Schema.fromJsonString(Schema.String);
 const decodeBrowserOrigin = Schema.decodeUnknownEffect(browserOriginJson);
 const encodeBrowserOrigin = Schema.encodeEffect(browserOriginJson);
@@ -127,6 +130,19 @@ const mapLocalError = (cause: Runner.LocalMcpError) =>
 
 const make = Effect.gen(function* () {
   const runner = yield* Runner.LocalMcpRunner;
+  const googleTokens = yield* GoogleTokens.GoogleTokenStore;
+  const credentialCapabilities = new Map<string, string>();
+  const tokenRedactions = new Map<string, string[]>();
+  const rememberTokens = (id: string, grant: GoogleTokens.GoogleGrant) => {
+    const values = tokenRedactions.get(id);
+    for (const token of [
+      grant.credentials.token,
+      grant.credentials.refresh_token,
+      grant.credentials.client_secret,
+    ]) {
+      if (token && values && !values.includes(token)) values.push(token);
+    }
+  };
   const credentials = yield* Credentials.IntegrationCredentials;
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -294,16 +310,13 @@ const make = Effect.gen(function* () {
       );
     });
   const hasCredentials = (id: string) =>
-    Effect.gen(function* () {
-      const directory = credentialsFor(id);
-      if (!(yield* fs.exists(directory))) return false;
-      for (const file of yield* fs.readDirectory(directory)) {
-        if (!file.endsWith(".json") || file === "oauth_states.json") continue;
-        const decoded = decodeToken(yield* fs.readFileString(path.join(directory, file)));
-        if (decoded._tag === "Some" && decoded.value.refresh_token) return true;
-      }
-      return false;
-    }).pipe(Effect.mapError(storageError));
+    googleTokens
+      .read(id)
+      .pipe(
+        Effect.map(
+          (grant) => grant._tag === "Some" && Boolean(grant.value.credentials.refresh_token),
+        ),
+      );
   const prune = (now: number) => {
     for (const [key, ticket] of tickets) if (ticket.expires <= now) tickets.delete(key);
     for (const [key, state] of states) if (state.expires <= now) states.delete(key);
@@ -319,14 +332,76 @@ const make = Effect.gen(function* () {
         if (
           !integration.enabled ||
           integration.deletedAt !== null ||
-          integration.local?.preset !== "google-workspace" ||
-          integration.local.version !== GOOGLE_WORKSPACE_VERSION
+          (integration.transport !== "stdio" &&
+            (integration.local?.preset !== "google-workspace" ||
+              integration.local.version !== GOOGLE_WORKSPACE_VERSION))
         )
           return yield* new IntegrationError({
             operation: "start local integration",
             reason: "invalid_request",
           });
-        if (active.has(integration.id)) return;
+        if (active.has(integration.id)) {
+          const state = (yield* runner.status(integration.id))?.state;
+          if (state === "running" || state === "starting" || state === "failed") return;
+          active.delete(integration.id);
+        }
+        if (integration.transport === "stdio") {
+          const command = integration.command;
+          if (!command || command.args.includes("<reenter-reviewed-arguments>"))
+            return yield* new IntegrationError({
+              operation: "restore reviewed command arguments",
+              reason: "invalid_request",
+            });
+          const env: Record<string, string> = { ...environment };
+          const secrets: string[] = [];
+          for (const [key, template] of Object.entries(command.env)) {
+            let value = template;
+            for (const match of template.matchAll(/\{\{credential:([^}]*)\}\}/g)) {
+              const ref = match[1]!;
+              if (!Credentials.parseCredentialRef(ref))
+                return yield* new IntegrationError({
+                  operation: "resolve stdio environment",
+                  reason: "credential_unresolved",
+                });
+              const secret = yield* credentials
+                .resolve(ref, {
+                  host: "localhost",
+                  scopeProjectId: labelId,
+                  approvedItems: integration.approvedCredentialItems ?? [],
+                })
+                .pipe(Effect.mapError(credentialError));
+              if (secret._tag === "None")
+                return yield* new IntegrationError({
+                  operation: "resolve stdio environment",
+                  reason: "credential_unresolved",
+                });
+              value = value.replaceAll(match[0], () => secret.value);
+              secrets.push(secret.value);
+            }
+            if (value.includes("{{"))
+              return yield* new IntegrationError({
+                operation: "resolve stdio environment",
+                reason: "credential_unresolved",
+              });
+            env[key] = value;
+          }
+          yield* runner
+            .start({
+              id: integration.id,
+              runtime: command.command,
+              args: command.args,
+              version: "custom",
+              directory: directoryFor(integration.id),
+              env,
+              secrets,
+              transport: "stdio",
+              port: 0,
+              idleTimeoutMs: 5 * 60_000,
+            })
+            .pipe(Effect.mapError(mapLocalError));
+          active.add(integration.id);
+          return;
+        }
         const secrets = yield* client(labelId);
         const callbackOrigin = yield* originFor(integration).pipe(Effect.flatMap(validOrigin));
         const directory = directoryFor(integration.id);
@@ -344,7 +419,15 @@ const make = Effect.gen(function* () {
         yield* fs
           .symlink(path.sep === "\\" ? "\\\\.\\NUL" : "/dev/null", logFile)
           .pipe(Effect.mapError(storageError));
+        const capability = yield* crypto.randomUUIDv4().pipe(Effect.mapError(storageError));
+        for (const [key, id] of credentialCapabilities)
+          if (id === integration.id) credentialCapabilities.delete(key);
+        credentialCapabilities.set(capability, integration.id);
         const spec = googleWorkspaceSpec({
+          credentialBridge: {
+            url: `http://127.0.0.1:${config.port}/oauth/integrations/google/credentials`,
+            capability,
+          },
           id: integration.id,
           directory,
           credentialsDirectory,
@@ -353,7 +436,13 @@ const make = Effect.gen(function* () {
           ...secrets,
           environment,
         });
-        yield* runner.start(spec).pipe(Effect.mapError(mapLocalError));
+        const processSecrets = [...spec.secrets];
+        tokenRedactions.set(integration.id, processSecrets);
+        const grant = yield* googleTokens.read(integration.id);
+        if (grant._tag === "Some") rememberTokens(integration.id, grant.value);
+        yield* runner
+          .start({ ...spec, secrets: processSecrets })
+          .pipe(Effect.mapError(mapLocalError));
         active.add(integration.id);
         if (failures.delete(integration.id)) yield* changed;
       }).pipe(
@@ -449,6 +538,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const origin = yield* validOrigin(
           configuredOrigin ||
+            input.callbackOrigin ||
             (source?.fromAgent
               ? `http://localhost:${config.port}`
               : (source?.origin ?? input.callbackOrigin ?? `http://localhost:${config.port}`)),
@@ -464,17 +554,23 @@ const make = Effect.gen(function* () {
           Effect.gen(function* () {
             replacements.set(id, replacement ? definitionKey(replacement) : null);
             active.delete(id);
+            for (const [key, account] of credentialCapabilities)
+              if (account === id) credentialCapabilities.delete(key);
             failures.delete(id);
             for (const [key, ticket] of tickets)
               if (ticket.integration.id === id) tickets.delete(key);
             for (const [key, state] of states) if (state.integration.id === id) states.delete(key);
             yield* runner.stop(id);
+            tokenRedactions.delete(id);
             if (replacement === undefined) {
               yield* fs
                 .remove(directoryFor(id), { recursive: true, force: true })
                 .pipe(Effect.mapError(storageError));
               activeOrigins.delete(id);
               rejectedGrants.delete(id);
+              yield* googleTokens.remove(id);
+              for (const [key, account] of credentialCapabilities)
+                if (account === id) credentialCapabilities.delete(key);
             }
           }),
         ),
@@ -488,6 +584,7 @@ const make = Effect.gen(function* () {
         const origin =
           integration === undefined
             ? configuredOrigin ||
+              source?.origin ||
               (source?.fromAgent
                 ? `http://localhost:${config.port}`
                 : (source?.origin ?? `http://localhost:${config.port}`))
@@ -521,24 +618,15 @@ const make = Effect.gen(function* () {
             return undefined;
           const previousOrigin = yield* originFor(integration);
           const known = yield* readBrowserOrigin(integration.id);
-          if (
-            from?.fromAgent &&
-            (known !== undefined ||
-              (yield* hasCredentials(integration.id)) ||
-              (yield* fs
-                .exists(`${credentialsFor(integration.id)}.previous`)
-                .pipe(Effect.mapError(storageError))))
-          )
-            return yield* new IntegrationError({
-              operation: "reauthorize Google from Settings",
-              reason: "approval_required",
-            });
           const configured = integration.local.callbackOrigin;
           const publicConfigured = !isLoopbackHost(new URL(configured).hostname);
           const origin = yield* selectCallbackOrigin(
             {
               ...from,
-              callbackOrigin: undefined,
+              callbackOrigin:
+                (configuredOrigin || undefined) ??
+                known ??
+                (publicConfigured ? configured : from?.callbackOrigin),
               origin: from?.fromAgent
                 ? undefined
                 : (known ?? (publicConfigured ? configured : (from?.origin ?? configured))),
@@ -547,20 +635,12 @@ const make = Effect.gen(function* () {
           ).pipe(Effect.flatMap(validOrigin));
           const replaceCredentials = reauthenticate && (yield* hasCredentials(integration.id));
           activeOrigins.set(integration.id, origin);
-          // Only an explicit sign-in retires the on-disk grant. A changed
+          // Only an explicit sign-in retires the vault grant. A changed
           // callback also needs a fresh process with the matching redirect URI.
           if (replaceCredentials || origin !== previousOrigin) {
             yield* runner.stop(integration.id);
             active.delete(integration.id);
-            if (replaceCredentials) {
-              const backup = `${credentialsFor(integration.id)}.previous`;
-              yield* fs
-                .remove(backup, { recursive: true, force: true })
-                .pipe(Effect.mapError(storageError));
-              yield* fs
-                .rename(credentialsFor(integration.id), backup)
-                .pipe(Effect.mapError(storageError));
-            }
+            if (replaceCredentials) yield* googleTokens.remove(integration.id);
             for (const [key, ticket] of tickets)
               if (ticket.integration.id === integration.id) tickets.delete(key);
             for (const [key, state] of states)
@@ -633,6 +713,38 @@ const make = Effect.gen(function* () {
           return { connected: false, url: auth.url };
         }),
       ),
+    credentialRequest: (capability, input) =>
+      Effect.gen(function* () {
+        const id = credentialCapabilities.get(capability);
+        if (!id)
+          return yield* new IntegrationError({
+            operation: "authorize credential bridge",
+            reason: "not_found",
+          });
+        const request = yield* Schema.decodeUnknownEffect(
+          Schema.Struct({
+            operation: Schema.Literals(["read", "write", "remove"]),
+            grant: Schema.optional(GoogleTokens.GoogleGrant),
+          }),
+        )(input).pipe(Effect.mapError(storageError));
+        if (request.operation === "read") {
+          const grant = yield* googleTokens.read(id);
+          if (grant._tag === "Some") rememberTokens(id, grant.value);
+          return { grant: Option.getOrNull(grant) };
+        }
+        if (request.operation === "remove") {
+          yield* googleTokens.remove(id);
+          return { ok: true };
+        }
+        if (!request.grant)
+          return yield* new IntegrationError({
+            operation: "write Google grant",
+            reason: "invalid_request",
+          });
+        rememberTokens(id, request.grant);
+        yield* googleTokens.write(id, request.grant);
+        return { ok: true };
+      }),
     callback: (query) =>
       Effect.gen(function* () {
         const received = new URLSearchParams(query);
@@ -651,12 +763,6 @@ const make = Effect.gen(function* () {
           params.has("error")
         )
           return false;
-        if (
-          entry.fromAgent &&
-          ((yield* hasCredentials(entry.integration.id)) ||
-            (yield* readBrowserOrigin(entry.integration.id)) !== undefined)
-        )
-          return false;
         // Consume before forwarding: an uncertain exchange is never replayed automatically.
         states.delete(state!);
         const success = yield* runner
@@ -664,6 +770,8 @@ const make = Effect.gen(function* () {
           .pipe(Effect.mapError(mapLocalError));
         const connected = success && (yield* hasCredentials(entry.integration.id));
         if (connected) {
+          for (const [key, pending] of states)
+            if (pending.integration.id === entry.integration.id) states.delete(key);
           const provenance = {
             signedInAt: yield* DateTime.now.pipe(Effect.map(DateTime.formatIso)),
             signedInViaAgent: entry.fromAgent,

@@ -1,3 +1,5 @@
+import * as GoogleTokenStore from "../integrations/local/GoogleTokenStore.ts";
+import * as NativeIntegrationImport from "../integrations/NativeIntegrationImport.ts";
 import * as AccountConnections from "../accounts/AccountConnections.ts";
 import * as AccountAccess from "../accounts/AccountAccess.ts";
 import * as CliCredentials from "../accounts/CliCredentials.ts";
@@ -109,12 +111,14 @@ const layerIntegrationCredentials = IntegrationCredentials.layer.pipe(
   Layer.provide(layerVaultProvided),
 );
 const layerLocalIntegrationsProvided = LocalIntegrations.layer.pipe(
+  Layer.provide(GoogleTokenStore.layer.pipe(Layer.provide(layerVaultProvided))),
   Layer.provide(LocalMcpRunner.layer),
   Layer.provide(layerIntegrationCredentials),
 );
 // Shared by reference so the runtime policy, agent MCP policy and settings
 // all read one gateway (one tool cache, one change stream).
 export const layerIntegrationsProvided = Integrations.layer.pipe(
+  Layer.provide(NativeIntegrationImport.layer),
   Layer.provide(layerIntegrationCredentials),
   Layer.provide(IntegrationTokens.layer.pipe(Layer.provide(layerVaultProvided))),
   Layer.provide(layerLocalIntegrationsProvided),

@@ -106,30 +106,138 @@ export function IntegrationServicesSettings() {
         />
       </SettingsSection>
       <SettingsSection title="Provider connectors" hideTitle>
-        <ProviderConnectorsSettingRow />
+        <ProviderConnectorsSettingRow key={environmentId ?? "none"} environmentId={environmentId} />
       </SettingsSection>
     </>
   );
 }
 
-function ProviderConnectorsSettingRow() {
+function ProviderConnectorsSettingRow({
+  environmentId,
+}: {
+  readonly environmentId: EnvironmentId | null;
+}) {
   const settings = useScopedSettings();
   const updateSettings = useUpdateScopedSettings();
-  return (
-    <SettingsRow
-      serverScoped
-      {...searchableSetting("provider-connectors")}
-      description="Agents use Cogenly's integrations instead of the provider's native MCP servers and apps. Turn off to restore native configuration. Applies to new provider sessions; Muse and administrator-managed Claude servers may remain available."
-      settingKeys={["useProviderConnectors"]}
-      control={
-        <ScopedSwitch
-          settingKeys={["useProviderConnectors"]}
-          checked={!settings.useProviderConnectors}
-          onCheckedChange={(checked) => updateSettings({ useProviderConnectors: !checked })}
-          aria-label="Use only Cogenly integrations"
-        />
+  const preview = useOrchestrationCommand(integrationsRpc.previewNative, { reportFailure: false });
+  const importNative = useOrchestrationCommand(integrationsRpc.importNative, {
+    reportFailure: false,
+  });
+  const canImport = useAtomValue(integrationsRpc.importNative.permissionAtom(environmentId));
+  const [offer, setOffer] = useState<
+    import("@t3tools/contracts").IntegrationNativeImportPreview | null
+  >(null);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const review = async (accept: boolean) => {
+    if (environmentId === null) return;
+    setPending(true);
+    setError(null);
+    try {
+      if (accept) {
+        const result = await importNative({ environmentId, input: {} });
+        if (result._tag !== "Success") {
+          if (!isAtomCommandInterrupted(result))
+            setError(integrationErrorText(squashAtomCommandFailure(result)));
+          return;
+        }
       }
-    />
+      updateSettings({ nativeMcpImportReviewed: true });
+    } finally {
+      setPending(false);
+    }
+  };
+  return (
+    <>
+      <AnimatedHeight>
+        {!settings.nativeMcpImportReviewed && !settings.useProviderConnectors ? (
+          <SettingsRow
+            title="Review your native integrations first"
+            description="Native servers stay available until you import their definitions or skip this offer. Imported connections stay disconnected until an agent collects secrets and verifies them."
+            control={
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={pending || !canImport || environmentId === null}
+                  onClick={() =>
+                    void (async () => {
+                      if (environmentId === null) return;
+                      setPending(true);
+                      try {
+                        const result = await preview({ environmentId, input: {} });
+                        if (result._tag === "Success") setOffer(result.value);
+                        else if (!isAtomCommandInterrupted(result))
+                          setError(integrationErrorText(squashAtomCommandFailure(result)));
+                      } finally {
+                        setPending(false);
+                      }
+                    })()
+                  }
+                >
+                  Review import
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={pending || !canImport}
+                  onClick={() => void review(false)}
+                >
+                  Skip import
+                </Button>
+              </div>
+            }
+          >
+            <AnimatedHeight>
+              {offer ? (
+                <div className="space-y-2 pb-3 text-sm">
+                  <p>
+                    {offer.definitions.length
+                      ? offer.definitions.map((definition) => definition.name).join(", ")
+                      : "No native definitions found."}
+                  </p>
+                  {offer.reconnect.map((name) => (
+                    <p key={name}>{name}: reconnect with an agent</p>
+                  ))}
+                  {offer.warnings.map((warning) => (
+                    <p key={warning}>{warning}</p>
+                  ))}
+                  <Button
+                    size="sm"
+                    disabled={pending || !canImport}
+                    onClick={() => void review(true)}
+                  >
+                    Import definitions and continue
+                  </Button>
+                </div>
+              ) : null}
+            </AnimatedHeight>
+            <AnimatedHeight>
+              {error ? (
+                <p role="alert" className="pb-2 text-sm text-destructive">
+                  {error}
+                </p>
+              ) : null}
+            </AnimatedHeight>
+          </SettingsRow>
+        ) : null}
+      </AnimatedHeight>
+
+      <SettingsRow
+        serverScoped
+        {...searchableSetting("provider-connectors")}
+        description="Agents use Cogenly's integrations instead of the provider's native MCP servers and apps. Turn off to restore native configuration. Applies to new provider sessions; Muse and administrator-managed Claude servers may remain available."
+        settingKeys={["useProviderConnectors"]}
+        control={
+          <ScopedSwitch
+            settingKeys={["useProviderConnectors"]}
+            checked={!settings.useProviderConnectors}
+            onCheckedChange={(checked) => updateSettings({ useProviderConnectors: !checked })}
+            aria-label="Use only Cogenly integrations"
+          />
+        }
+      />
+    </>
   );
 }
 

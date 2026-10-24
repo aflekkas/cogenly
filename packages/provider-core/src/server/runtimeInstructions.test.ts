@@ -139,7 +139,7 @@ describe("integrations context line", () => {
   it("says provider connectors are off only when there is a line to add it to", () => {
     const connected = [{ name: "linear", displayName: "Linear", status: "connected" as const }];
     expect(buildIntegrationsContextLine(connected, ["notion"], true)).toBe(
-      "Connected integrations: linear (Linear). Use integration_tools / integration_call. Also available to connect with integration_add catalogId: notion. In Cogenly these services come only through Cogenly integrations; the provider's own connectors for them (claude.ai connectors, ChatGPT apps, plugin MCP servers) are turned off.",
+      "Connected integrations: linear (Linear). Use integration_tools / integration_call. Also available to connect: notion. Read integration_setup_guide before integration_add. Use Cogenly integrations. Native MCP servers, plugins and apps are turned off for supported providers; Muse and administrator-managed Claude configurations may still expose native servers.",
     );
     expect(buildIntegrationsContextLine(connected, ["notion"])).not.toContain("turned off");
     expect(buildIntegrationsContextLine([], [], true)).toBe("");
@@ -188,14 +188,14 @@ describe("integrations context line", () => {
     expect(
       buildIntegrationsContextLine([], ["google-workspace (Gmail, Calendar, Drive)", "slack"]),
     ).toBe(
-      "Integrations available to connect with integration_add catalogId: google-workspace (Gmail, Calendar, Drive), slack.",
+      "Integrations available to connect: google-workspace (Gmail, Calendar, Drive), slack. Read integration_setup_guide before integration_add.",
     );
     const line = buildIntegrationsContextLine(
       [{ name: "linear", displayName: "Linear", status: "connected" }],
       ["notion"],
     );
     expect(line).toBe(
-      "Connected integrations: linear (Linear). Use integration_tools / integration_call. Also available to connect with integration_add catalogId: notion.",
+      "Connected integrations: linear (Linear). Use integration_tools / integration_call. Also available to connect: notion. Read integration_setup_guide before integration_add.",
     );
     expect(line).not.toContain("\n");
   });

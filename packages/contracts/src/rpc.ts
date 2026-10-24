@@ -614,6 +614,8 @@ export const WS_METHODS = {
 
   // Cogenly-managed integrations (upstream MCP servers behind the gateway)
   integrationsList: "integrations.list",
+  integrationsPreviewNative: "integrations.previewNative",
+  integrationsImportNative: "integrations.importNative",
   integrationsCreate: "integrations.create",
   integrationsUpdate: "integrations.update",
   integrationsDelete: "integrations.delete",
@@ -2191,6 +2193,16 @@ const WsAgentsActivityRpc = Rpc.make(WS_METHODS.agentsActivity, {
   success: AgentWorkspace.AgentActivityResult,
   error: Schema.Union([Agents.AgentError, EnvironmentAuthorizationError]),
 });
+const WsIntegrationsPreviewNativeRpc = Rpc.make(WS_METHODS.integrationsPreviewNative, {
+  payload: Schema.Struct({}),
+  success: Integrations.IntegrationNativeImportPreview,
+  error: Schema.Union([Integrations.IntegrationError, EnvironmentAuthorizationError]),
+});
+const WsIntegrationsImportNativeRpc = Rpc.make(WS_METHODS.integrationsImportNative, {
+  payload: Schema.Struct({}),
+  success: Integrations.IntegrationNativeImportResult,
+  error: Schema.Union([Integrations.IntegrationError, EnvironmentAuthorizationError]),
+});
 const WsIntegrationsListRpc = Rpc.make(WS_METHODS.integrationsList, {
   payload: Schema.Struct({}),
   success: Integrations.IntegrationListResult,
@@ -2727,6 +2739,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsThreadApprovalsSubscribeRpc,
   WsAgentsStartWorkRpc,
   WsAgentsActivityRpc,
+  WsIntegrationsPreviewNativeRpc,
+  WsIntegrationsImportNativeRpc,
   WsIntegrationsListRpc,
   WsIntegrationsCreateRpc,
   WsIntegrationsUpdateRpc,

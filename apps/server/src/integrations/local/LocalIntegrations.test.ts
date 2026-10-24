@@ -1,3 +1,4 @@
+import * as GoogleTokens from "./GoogleTokenStore.ts";
 import { loopbackHttpsPolicy } from "../https.testkit.ts";
 import { describe, expect, it } from "@effect/vitest";
 import { NodeCrypto, NodeHttpServer } from "@effect/platform-node";
@@ -74,6 +75,30 @@ const testLayer = (
   callbacks?: Array<string>,
   installer?: Layer.Layer<Installer.RuntimeInstaller>,
 ) => {
+  const grants = new Map<string, GoogleTokens.GoogleGrant>();
+  const grant: GoogleTokens.GoogleGrant = {
+    email: "fixture@example.com",
+    credentials: {
+      token: "fixture-access",
+      refresh_token: "fixture-refresh",
+      token_uri: "https://oauth2.googleapis.com/token",
+      client_id: "fake-client-id",
+      client_secret: "fake-client-secret",
+      scopes: [],
+      expiry: null,
+    },
+  };
+  const tokenStore = GoogleTokens.GoogleTokenStore.of({
+    read: (id) => Effect.sync(() => Option.fromUndefinedOr(grants.get(id))),
+    write: (id, value) =>
+      Effect.sync(() => {
+        grants.set(id, value);
+      }),
+    remove: (id) =>
+      Effect.sync(() => {
+        grants.delete(id);
+      }),
+  });
   const runtimeIsMissing = () => (typeof runtime === "boolean" ? runtime : runtime.missing);
   // Replace the external package at the process boundary; exercise the real supervisor and gateway.
   const runner = Layer.effect(
@@ -84,7 +109,13 @@ const testLayer = (
         ...actual,
         callback: (id, query) => {
           callbacks?.push(query);
-          return actual.callback(id, query);
+          return actual
+            .callback(id, query)
+            .pipe(
+              Effect.tap((ok) =>
+                ok ? tokenStore.write(id, grant).pipe(Effect.orDie) : Effect.void,
+              ),
+            );
         },
         status:
           diagnostics === undefined
@@ -116,6 +147,7 @@ const testLayer = (
     }),
   ).pipe(Layer.provide(Runner.layerWith({ restartDelayMs: 10, requestTimeoutMs: 2000 })));
   const infrastructure = Layer.mergeAll(
+    Layer.succeed(GoogleTokens.GoogleTokenStore, tokenStore),
     NodeServices.layer,
     NodeCrypto.layer,
     FetchHttpClient.layer,
@@ -289,38 +321,21 @@ describe("managed Google integrations", () => {
     15_000,
   );
 
-  it.live("ignores an agent's Google origin in both preset and full definitions", () => {
+  it.live("uses an explicit reachable Google callback origin supplied by an agent", () => {
     const specs: Array<Runner.LocalMcpSpec> = [];
     return Effect.gen(function* () {
       yield* runMigrations();
       const gateway = yield* Integrations.Integrations;
-      const first = yield* gateway.create(
-        {
-          preset: "google-workspace",
-          accountLabel: "work",
-          callbackOrigin: "https://attacker.example",
-        },
+      const { integration } = yield* gateway.create(
+        { preset: "google-workspace", accountLabel: "work", callbackOrigin: "https://vps.example" },
         { fromAgent: true },
       );
-      expect(first.integration.local?.callbackOrigin).not.toBe("https://attacker.example");
-      const next = yield* gateway.create(
-        {
-          ...first.integration,
-          name: IntegrationName.make("google-other"),
-          local: { ...first.integration.local!, callbackOrigin: "https://attacker.example" },
-        },
-        { fromAgent: true },
-      );
-      expect(next.integration.local?.callbackOrigin).not.toBe("https://attacker.example");
-      expect(
-        yield* gateway
-          .beginSignIn(first.integration.id, {
-            origin: "https://attacker.example",
-            callbackOrigin: "https://attacker.example",
-            fromAgent: true,
-          })
-          .pipe(Effect.result),
-      ).toMatchObject({ _tag: "Failure" });
+      const link = yield* gateway.beginSignIn(integration.id, {
+        origin: undefined,
+        fromAgent: true,
+      });
+      expect(link.redirectUri).toBe(`https://vps.example${GOOGLE_CALLBACK_PATH}`);
+      expect(specs[0]?.env.GOOGLE_OAUTH_REDIRECT_URI).toBe(link.redirectUri);
     }).pipe(Effect.scoped, Effect.provide(testLayer(specs)));
   });
 
@@ -388,10 +403,11 @@ describe("managed Google integrations", () => {
       );
       yield* restarted.start(integration);
       expect(
-        yield* restarted
-          .signInLink(integration, true, { origin: "http://localhost:3000", fromAgent: true })
-          .pipe(Effect.result),
-      ).toMatchObject({ _tag: "Failure", failure: { reason: "approval_required" } });
+        yield* restarted.signInLink(integration, true, {
+          origin: "http://localhost:3000",
+          fromAgent: true,
+        }),
+      ).toHaveProperty("authorizationUrl");
       const retry = yield* restarted.signInLink(integration, true, {
         origin: "https://vps.example",
       });
@@ -435,9 +451,13 @@ describe("managed Google integrations", () => {
         if (tool === "reject-grant") expect(yield* local.signedIn(integration.id)).toBe(false);
         yield* Fiber.join(rejected);
         expect((yield* gateway.list()).integrations[0]?.status).toBe("needs_sign_in");
-        expect(yield* fs.exists(credential)).toBe(true);
+        expect((yield* (yield* GoogleTokens.GoogleTokenStore).read(integration.id))._tag).toBe(
+          "Some",
+        );
         const retry = yield* gateway.beginSignIn(integration.id, { origin: undefined });
-        expect(yield* fs.exists(credential)).toBe(false);
+        expect((yield* (yield* GoogleTokens.GoogleTokenStore).read(integration.id))._tag).toBe(
+          "None",
+        );
         const next = yield* local.authorize(
           new URL(retry.authorizationUrl).searchParams.get("ticket")!,
         );
@@ -499,21 +519,17 @@ describe("managed Google integrations", () => {
           expect(reply.integration).toBeUndefined();
           expect(reply.setup?.type).toBe("oauth_client");
           expect(reply.settingsUrl).toBe("/settings/integrations?setup=google-workspace");
-          expect(reply.nextStep).toContain(
-            'request_secret with saveToVault: {name: "google-oauth-client"',
-          );
-          expect(reply.nextStep).toContain("docs/user/integrations.md#connect-google");
-          expect(reply.nextStep).toContain("call integration_add again");
+          expect(reply.nextStep).toContain("request_secret");
+          expect(reply.nextStep).toContain("google-oauth-client");
+          expect(reply.nextStep).toContain("Retry integration_add");
         } else if (runtimeMissing) {
           // The account is saved; installing uv is the step before sign-in.
           expect(reply.integration).toBeDefined();
           expect(reply.setup?.type).toBe("install_runtime");
           expect(reply.nextStep).toContain("brew install uv");
         } else {
-          // A loopback agent request can't pick the browser's address, so the owner signs in.
           expect(reply.integration).toBeDefined();
-          expect(reply.setup).toBeDefined();
-          expect(reply.nextStep).toContain("/settings/integrations?setup=integration%3A");
+          expect(reply).toHaveProperty("signIn.authorizationUrl");
         }
       }).pipe(Effect.scoped, Effect.provide(testLayer([], missing, "json", false, runtimeMissing))),
   );
@@ -655,10 +671,18 @@ describe("managed Google integrations", () => {
         accountLabel: "work",
         callbackOrigin: "https://cogenly.example.com",
       });
-      yield* fs.writeFileString(
-        `${specs[0]!.env.WORKSPACE_MCP_CREDENTIALS_DIR}/work.json`,
-        JSON.stringify({ refresh_token: "grant" }),
-      );
+      yield* (yield* GoogleTokens.GoogleTokenStore).write(integration.id, {
+        email: "work@example.com",
+        credentials: {
+          token: "access",
+          refresh_token: "grant",
+          token_uri: "https://oauth2.googleapis.com/token",
+          client_id: "id",
+          client_secret: "secret",
+          scopes: [],
+          expiry: null,
+        },
+      });
       const result = yield* gateway.callTool(integration.name, "tool-error", {}, undefined);
       expect(result.isError).toBe(true);
       const summary = (yield* gateway.list()).integrations[0]!;
@@ -930,4 +954,74 @@ describe("managed Google integrations", () => {
         );
       }).pipe(Effect.scoped, Effect.provide(testLayer([], false, "json", true))),
   );
+});
+
+it.live("injects custom stdio secrets from the vault without placing them on argv", () => {
+  const specs: Array<Runner.LocalMcpSpec> = [];
+  return Effect.gen(function* () {
+    yield* runMigrations();
+    const gateway = yield* Integrations.Integrations;
+    const { integration } = yield* gateway.create({
+      name: IntegrationName.make("custom-worker"),
+      displayName: "Worker",
+      transport: "stdio",
+      url: "https://localhost",
+      headers: {},
+      scope: { type: "all" },
+      hint: "",
+      command: {
+        command: "npx",
+        args: ["-y", "example-mcp@1.0.0"],
+        env: { FIXTURE_CUSTOM_KEY: "{{credential:custom.value}}" },
+      },
+    });
+    expect(specs).toHaveLength(0);
+    const result = yield* gateway.callTool(integration.name, "echo", {}, undefined);
+    expect(specs[0]?.env.FIXTURE_CUSTOM_KEY).toContain("fake-client-secret");
+    expect(JSON.stringify(specs[0]?.args)).not.toContain("fake-client-secret");
+    expect(JSON.stringify(result)).toContain('customSecretPresent\\\":true');
+    expect(specs[0]?.idleTimeoutMs).toBe(300000);
+    yield* gateway.update({ id: integration.id, enabled: false });
+    expect(yield* (yield* Runner.LocalMcpRunner).status(integration.id)).toBeUndefined();
+  }).pipe(Effect.scoped, Effect.provide(testLayer(specs)));
+});
+
+it.live("authorizes the Google vault bridge per process and retires it on disconnect", () => {
+  const specs: Array<Runner.LocalMcpSpec> = [];
+  return Effect.gen(function* () {
+    yield* runMigrations();
+    const gateway = yield* Integrations.Integrations;
+    const local = yield* Local.LocalIntegrations;
+    const { integration } = yield* gateway.create({
+      preset: "google-workspace",
+      accountLabel: "work",
+      callbackOrigin: "https://vps.example",
+    });
+    const capability = specs[0]!.env.COGENLY_GOOGLE_CREDENTIAL_CAPABILITY!;
+    const grant = {
+      email: "work@example.com",
+      credentials: {
+        token: "fixture-access",
+        refresh_token: "fixture-refresh",
+        client_id: "id",
+        client_secret: "secret",
+        token_uri: "https://oauth2.googleapis.com/token",
+        scopes: [],
+        expiry: null,
+      },
+    };
+    expect(
+      (yield* local
+        .credentialRequest("wrong-capability", { operation: "read" })
+        .pipe(Effect.result))._tag,
+    ).toBe("Failure");
+    yield* local.credentialRequest(capability, { operation: "write", grant });
+    expect(yield* local.credentialRequest(capability, { operation: "read" })).toEqual({ grant });
+    expect(yield* local.signedIn(integration.id)).toBe(true);
+    expect(JSON.stringify(specs[0]!.args)).not.toContain(capability);
+    yield* gateway.update({ id: integration.id, enabled: false });
+    expect(
+      (yield* local.credentialRequest(capability, { operation: "read" }).pipe(Effect.result))._tag,
+    ).toBe("Failure");
+  }).pipe(Effect.scoped, Effect.provide(testLayer(specs)));
 });

@@ -60,7 +60,7 @@ interface FakeUpstream {
 }
 
 /** A real in-process HTTP MCP server speaking streamable-HTTP JSON-RPC. */
-const fakeUpstreamWith = (redirectTo?: string) =>
+const fakeUpstreamWith = (redirectTo?: string, denyListScope = false) =>
   Effect.acquireRelease(
     Effect.sync(() => {
       const seen: FakeUpstream["seen"] = [];
@@ -91,6 +91,18 @@ const fakeUpstreamWith = (redirectTo?: string) =>
             reply(
               { jsonrpc: "2.0", id: body.id, result: { protocolVersion: "2025-03-26" } },
               { "mcp-session-id": "session-1" },
+            );
+          } else if (body.method === "tools/list" && denyListScope) {
+            response.writeHead(403, {
+              "content-type": "application/json",
+              "www-authenticate": 'Bearer error="insufficient_scope"',
+            });
+            response.end(
+              JSON.stringify({
+                jsonrpc: "2.0",
+                id: body.id,
+                error: { code: -32000, message: "insufficient_scope: required read scope missing" },
+              }),
             );
           } else if (body.method === "tools/list") {
             reply({
@@ -1422,3 +1434,22 @@ describe("Integration credential destinations", () => {
     ),
   );
 });
+
+it.effect(
+  "verification reports missing scopes separately from authentication and reachability",
+  () =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      const upstream = yield* fakeUpstreamWith(undefined, true);
+      const gateway = yield* Integrations.Integrations;
+      const { integration } = yield* gateway.create(createInput(upstream.url));
+      expect(yield* gateway.testConnection(integration.id)).toMatchObject({
+        status: "disconnected",
+        reason: "scope_missing",
+        toolCount: 0,
+      });
+      expect((yield* gateway.list()).integrations[0]?.message).toContain(
+        "missing a required scope",
+      );
+    }).pipe(Effect.scoped, Effect.provide(layerWith())),
+);

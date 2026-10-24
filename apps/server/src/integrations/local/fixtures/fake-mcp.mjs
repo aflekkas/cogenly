@@ -67,6 +67,7 @@ const handle = (body, reply) => {
             args: body.params?.arguments,
             argv: process.argv,
             secretPresent: Boolean(process.env.FIXTURE_SECRET),
+            customSecretPresent: Boolean(process.env.FIXTURE_CUSTOM_KEY),
             pid: process.pid,
             authCount,
           }),
