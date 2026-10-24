@@ -31,7 +31,7 @@ New worktree branches are named when the worktree is created: a short slug
 from your first message under a `c/` prefix, such as `c/fix-login-redirect`.
 The worktree folder is named by that slug and never moves.
 
-In **Settings → Source Control → Worktree branch naming**, choose a static prefix,
+In **Settings → Source control → Worktree branch naming**, choose a static prefix,
 a model-selected semantic prefix such as `feat/` or `fix/`, or custom instructions
 for the complete name. The static prefix defaults to `c/`; a trailing slash is
 optional, and an empty prefix adds nothing. Invalid characters in a static prefix
@@ -79,17 +79,18 @@ than** on the task.
 
 ## Defaults and inheritance
 
-General contains the model and workspace for new threads. Integrations controls agent browser
-access. Source Control contains automatic pull, the default pull request merge method and text
-generation. The same rows edit the value for all projects or a project's override, depending on
-the project chosen at the top.
+Models holds the default model for new threads and the text generation model. New threads holds
+the workspace, submodules and start-from-origin defaults, and where added repositories go.
+Integrations controls agent browser access. Source control contains automatic pull, the default
+pull request merge method and the model that writes commit messages and pull requests. The same rows
+edit the value for all projects or a project's override, depending on the project chosen at the top.
 
-With a project selected, General also holds the project's actions. Editing them gives the
+With a project selected, New threads also holds the project's actions. Editing them gives the
 project its own list, on every repository it holds, and reset returns to the list for all
 projects. A repository's `cogenly.json` actions can be imported there.
 
-The Repository page, opened from a repository in the sidebar, holds that repository's name, icon,
-checkouts and removal.
+The Repository page, opened from a repository in the sidebar, sits under Projects and holds that
+repository's name, icon, checkouts and removal.
 
 Settings a repository can also declare in `cogenly.json`, such as the workspace for new threads,
 resolve in one order: a project override, then the value for all projects, then `cogenly.json`,
@@ -98,7 +99,7 @@ that still has a `t3.json` and no `cogenly.json` is read the same way; rename th
 convenient. Browser access changes apply when an agent session next starts.
 
 New worktrees initialize git submodules recursively. If that step is slow because the repository
-declares many nested submodules, set **Submodules** in **Settings → General** (with a project
+declares many nested submodules, set **Submodules** in **Settings → New threads** (with a project
 selected to override it there) to **Top level only** to stop at the ones the repository declares
 itself, or **Skip** to leave them for a setup script. It resolves in the same order as the
 workspace default: a `"worktreeSubmodules"` value in the `cogenly.json` of the branch being checked out
@@ -155,7 +156,7 @@ from the icon palette, derived from the saved repository name. For example, `Neb
 
 ## Keep the default branch current
 
-In Source Control, enable **Automatically pull** to keep the default-branch checkout up to date
+In Source control, enable **Automatically pull** to keep the default-branch checkout up to date
 with its configured upstream. Leave **All projects** to set the default or choose a project to override it.
 Cogenly only pulls when it can fast-forward and the checkout has no changed files, untracked files,
 or local commits. It skips checkouts on another branch or without an upstream. If a checkout has
