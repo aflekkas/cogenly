@@ -13,7 +13,6 @@ import {
   heroProjectSuffix,
   isPickableRepository,
   projectDefaultRepository,
-  repositoriesInProject,
   threadProjectMeta,
   toggleCollapsedGroup,
   workDraftFolderId,
@@ -271,41 +270,42 @@ describe("projectDefaultRepository", () => {
 });
 
 describe("workDraftFolderId", () => {
-  const folderByRepository = new Map([
-    [`${env}:platform`, spawn],
-    [`${other}:platform`, remote],
-  ]);
   const repository = (projectId: string, environmentId: EnvironmentId = env) => ({
     environmentId,
     projectId: ProjectId.make(projectId),
   });
+  const file = (
+    repositoryRef: ReturnType<typeof repository>,
+    project: EnvironmentProjectLabel | null,
+  ) => workDraftFolderId({ repository: repositoryRef, project, byKey });
 
-  it("records nothing when Work follows its repository's own project", () => {
-    expect(
-      workDraftFolderId({ repository: repository("platform"), project: spawn, folderByRepository }),
-    ).toBeNull();
-    expect(
-      workDraftFolderId({ repository: repository("loose"), project: null, folderByRepository }),
-    ).toBeNull();
+  it("keeps the draft's project when a repository in it is picked", () => {
+    // The repository's own project stays filed, so the pick never drops it.
+    expect(file(repository("platform"), spawn)).toBe(spawn.label.id);
+    // A repository just cloned here, which no project lists yet.
+    expect(file(repository("just-cloned"), spawn)).toBe(spawn.label.id);
   });
 
   it("files Work in a project that is not its repository's", () => {
-    expect(
-      workDraftFolderId({ repository: repository("loose"), project: mind, folderByRepository }),
-    ).toBe(mind.label.id);
-    expect(
-      workDraftFolderId({ repository: repository("platform"), project: bartr, folderByRepository }),
-    ).toBe(bartr.label.id);
+    expect(file(repository("loose"), mind)).toBe(mind.label.id);
+    expect(file(repository("platform"), bartr)).toBe(bartr.label.id);
   });
 
-  it("drops a project on another machine than the repository", () => {
+  it("records nothing without a project", () => {
+    expect(file(repository("loose"), null)).toBeNull();
+  });
+
+  it("keeps a synced project on the repository's machine, and drops one that machine lacks", () => {
+    const synced = folder(other, "spawn", "Spawn Partners");
+    const withSynced = new Map([...byKey, [synced.key, synced] as const]);
     expect(
       workDraftFolderId({
-        repository: repository("loose", other),
-        project: mind,
-        folderByRepository,
+        repository: repository("platform", other),
+        project: spawn,
+        byKey: withSynced,
       }),
-    ).toBeNull();
+    ).toBe(spawn.label.id);
+    expect(file(repository("loose", other), mind)).toBeNull();
   });
 });
 
@@ -313,32 +313,6 @@ describe("toggleCollapsedGroup", () => {
   it("toggles one group without touching the others", () => {
     expect(toggleCollapsedGroup(["env:bartr"], "env:spawn")).toEqual(["env:bartr", "env:spawn"]);
     expect(toggleCollapsedGroup(["env:bartr", "env:spawn"], "env:spawn")).toEqual(["env:bartr"]);
-  });
-});
-
-describe("repositoriesInProject", () => {
-  const repo = (name: string, environmentId: EnvironmentId = env) => ({
-    name,
-    refs: [{ environmentId, projectId: ProjectId.make(name) }],
-  });
-  const items = [repo("loose"), repo("platform"), repo("shared"), repo("platform", other)];
-  const scope = (project: EnvironmentProjectLabel | null) =>
-    repositoriesInProject({ items, refsOf: (item) => item.refs, project, projects }).map(
-      (item) => `${item.refs[0]?.environmentId}:${item.name}`,
-    );
-
-  it("lists only the picked project's repositories, on its machine", () => {
-    expect(scope(spawn)).toEqual(["env:platform", "env:shared"]);
-    expect(scope(bartr)).toEqual(["env:shared"]);
-    expect(scope(remote)).toEqual(["other:platform"]);
-  });
-
-  it("lists nothing for a project without repositories", () => {
-    expect(scope(mind)).toEqual([]);
-  });
-
-  it("lists only repositories in no project without one", () => {
-    expect(scope(null)).toEqual(["env:loose"]);
   });
 });
 

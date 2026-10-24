@@ -54,6 +54,7 @@ import * as VcsStatusBroadcaster from "../../vcs/VcsStatusBroadcaster.ts";
 import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
 import * as ManagedProjectFolders from "../../project/ManagedProjectFolders.ts";
 import * as ProjectCloneTracker from "../../project/ProjectCloneTracker.ts";
+import * as RepositoryCheckout from "../../project/RepositoryCheckout.ts";
 import * as RepositoryIdentityResolver from "../../project/RepositoryIdentityResolver.ts";
 import * as ThreadLaunchService from "../../orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadSearch from "../../orchestration-v2/ThreadSearch.ts";
@@ -265,6 +266,7 @@ const layerStubServices = Layer.mergeAll(
   }),
   Layer.mock(SourceControlRepositoryService.SourceControlRepositoryService)({}),
   Layer.mock(ProjectCloneTracker.ProjectCloneTracker)({}),
+  Layer.mock(RepositoryCheckout.RepositoryCheckout)({}),
   Layer.mock(RepositoryIdentityResolver.RepositoryIdentityResolver)({}),
   Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
   Layer.mock(UsageLimitHandoff.UsageLimitHandoffService)({}),
@@ -563,6 +565,9 @@ const smokeCases = [
       "project_label_link_repository",
       "project_label_unlink_repository",
       "project_label_clone_repository",
+      "project_label_remove_checkout",
+      "project_label_move_repository",
+      "project_folders_reconcile",
       "project_label_file_thread",
       "thread_move_project_folder",
       "thread_set_project_labels",

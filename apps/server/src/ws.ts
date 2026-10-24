@@ -17,6 +17,9 @@ import * as Retrieval from "./context/ContextRetrievalService.ts";
 import * as Exports from "./export/ExportService.ts";
 import * as ProjectLabels from "./projectLabels/ProjectLabelService.ts";
 import * as ProjectLabelClone from "./projectLabels/ProjectLabelCloneRepository.ts";
+import * as RepositoryCheckout from "./project/RepositoryCheckout.ts";
+import * as RepositoryIconResolver from "./project/RepositoryIconResolver.ts";
+import { resolveProjectsRootDirectory } from "./project/ProjectsRoot.ts";
 import * as ProjectLabelFolders from "./projectLabels/ProjectLabelFolders.ts";
 import * as ProjectLabelFork from "./projectLabels/ProjectLabelForkToProject.ts";
 import * as ProjectFiles from "./projectLabels/ProjectFiles.ts";
@@ -1124,6 +1127,8 @@ const makeWsRpcHandlers = (
     const usageLimitSources = yield* UsageLimitSources.UsageLimitSources;
     const worktreeSetupTracker = yield* WorktreeSetupTracker.WorktreeSetupTracker;
     const projectCloneTracker = yield* ProjectCloneTracker.ProjectCloneTracker;
+    const repositoryCheckout = yield* RepositoryCheckout.RepositoryCheckout;
+    const repositoryIcons = yield* RepositoryIconResolver.RepositoryIconResolver;
     const repositoryIdentityResolver = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
     const agentSessionScanner = yield* AgentSessionScanner.AgentSessionScanner;
     const agentSessionImporter = yield* AgentSessionImporter.AgentSessionImporter;
@@ -1268,6 +1273,7 @@ const makeWsRpcHandlers = (
             otlpLogsEnabled: config.otlpLogsUrl !== undefined,
           },
           settings,
+          defaultProjectsRoot: resolveProjectsRootDirectory("", home, config.baseDir, path),
           shellResumeCompletionMarker: true,
           threadResumeCompletionMarker: true,
           threadSnapshotPagination: true,
@@ -1677,6 +1683,16 @@ const makeWsRpcHandlers = (
           folders: projectLabelFolders,
           refreshGitStatus,
         }),
+      [WS_METHODS.projectLabelsCheckoutRepository]: (input) =>
+        repositoryCheckout.checkoutRepository(input),
+      [WS_METHODS.projectLabelsRemoveCheckout]: (input) => repositoryCheckout.removeCheckout(input),
+      [WS_METHODS.projectLabelsAdoptRepository]: (input) =>
+        repositoryCheckout.adoptRepository(input),
+      [WS_METHODS.projectLabelsListOrphanFolders]: () => projectLabels.listOrphanFolders(),
+      [WS_METHODS.projectLabelsAdoptOrphanFolder]: (input) =>
+        projectLabels.adoptOrphanFolder(input),
+      [WS_METHODS.projectLabelsRemoveOrphanFolder]: (input) =>
+        projectLabels.removeOrphanFolder(input),
       [WS_METHODS.workStart]: (input) => workHandoff.start(input),
       [WS_METHODS.agentsApprovalsList]: (input) => agentWorkspace.listApprovals(input),
       [WS_METHODS.agentsRequestApproval]: (input) =>
@@ -2355,6 +2371,12 @@ const makeWsRpcHandlers = (
               workspaceRoot: input.resource.cwd,
             });
           }
+          if (input.resource._tag === "repository-icon") {
+            return yield* issueAssetUrl({
+              resource: input.resource,
+              repositoryIcon: yield* repositoryIcons.resolve(input.resource.remote),
+            });
+          }
           if (input.resource._tag === "project-favicon") {
             const project = yield* projectStore.findActiveByWorkspaceRoot(input.resource.cwd).pipe(
               Effect.mapError(
@@ -2825,6 +2847,8 @@ type WsRequestServices =
   | ProjectLabels.ProjectLabelService
   | ProjectService.ProjectService
   | ProjectStore.ProjectStoreV2
+  | RepositoryCheckout.RepositoryCheckout
+  | RepositoryIconResolver.RepositoryIconResolver
   | ProviderAuthService.ProviderAuthService
   | ProviderInstanceRegistry.ProviderInstanceRegistry
   | ProviderLatestVersions.ProviderLatestVersions

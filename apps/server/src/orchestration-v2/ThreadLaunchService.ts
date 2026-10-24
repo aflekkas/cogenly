@@ -2,6 +2,7 @@ import * as WorktreeSetupTracker from "../project/WorktreeSetupTracker.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import {
+  isRemoteRepositoryPlaceholder,
   CommandId,
   type ChatAttachment,
   type MessageId,
@@ -906,8 +907,25 @@ const make = Effect.gen(function* () {
     );
   });
 
+  /**
+   * A launch naming a repository linked from another machine (a `remote:`
+   * placeholder, as a synced scheduled task is bound) starts its clone into
+   * the project folder and launches into the new record; preparation then
+   * waits on that clone like any other.
+   */
+  const resolveRemoteRepository = (input: ThreadLaunchInput) =>
+    Effect.gen(function* () {
+      if (!isRemoteRepositoryPlaceholder(input.projectId) || Option.isNone(repositoryCheckout))
+        return input;
+      const { repositoryId } = yield* repositoryCheckout.value
+        .resolveRepository(input.projectId)
+        .pipe(Effect.mapError(mapError(input, "resolve-project")));
+      return { ...input, projectId: repositoryId };
+    });
+
   const launch: ThreadLaunchService["Service"]["launch"] = Effect.fn("ThreadLaunchService.launch")(
-    function* (input) {
+    function* (requested) {
+      const input = yield* resolveRemoteRepository(requested);
       const project = yield* projects.getById(input.projectId).pipe(
         Effect.mapError(mapError(input, "resolve-project")),
         Effect.flatMap(

@@ -67,10 +67,15 @@ export const readConfiguration = Effect.fn("SharedState.readConfiguration")(func
     }>`SELECT * FROM project_labels WHERE label_id=${id}`;
     const row = rows[0];
     if (!row) return null;
-    const repositories = yield* sql<{
+    // A remote cloned twice here still carries one icon.
+    const repositoryRows = yield* sql<{
       remote: string;
       directoryName: string | null;
-    }>`SELECT DISTINCT remote, directory_name AS directoryName FROM label_repositories WHERE label_id=${id} AND remote IS NOT NULL ORDER BY remote`;
+      iconPath: string | null;
+    }>`SELECT remote, directory_name AS directoryName, MAX(icon_path) AS iconPath FROM label_repositories WHERE label_id=${id} AND remote IS NOT NULL GROUP BY remote, directory_name ORDER BY remote`;
+    const repositories = repositoryRows.map(({ iconPath, ...link }) =>
+      iconPath === null ? link : { ...link, iconPath },
+    );
     const sources = yield* sql<{
       kind: string;
       owner: string;
@@ -171,6 +176,18 @@ export const readConfiguration = Effect.fn("SharedState.readConfiguration")(func
   };
 }, Effect.mapError(storage));
 
+const decodeClock = Schema.decodeUnknownEffect(Schema.fromJsonString(HybridClock));
+const decodeRepositoryRefs = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(
+    Schema.Array(
+      Schema.Struct({
+        remote: Schema.String,
+        directoryName: Schema.NullOr(Schema.String),
+        iconPath: Schema.optionalKey(Schema.String),
+      }),
+    ),
+  ),
+);
 // The legacy read model allows one project per repository. Concurrent moves in
 // different documents therefore need a deterministic winner across those documents.
 const reconcileRepositories = Effect.fn("SharedState.reconcileRepositories")(function* () {
@@ -182,17 +199,11 @@ const reconcileRepositories = Effect.fn("SharedState.reconcileRepositories")(fun
   }>`SELECT d.id,json_extract(d.fields_json,'$.repositories') AS repositories,json_extract(d.clocks_json,'$.repositories') AS clock FROM shared_documents d JOIN project_labels l ON l.label_id=d.id WHERE d.kind='project' AND d.tombstone_json IS NULL AND json_type(d.fields_json,'$.repositories')='array'`;
   const winners = new Map<
     string,
-    { id: string; clock: HybridClock; directoryName: string | null }
+    { id: string; clock: HybridClock; directoryName: string | null; iconPath: string | null }
   >();
   for (const row of refs) {
-    const clock = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(HybridClock))(row.clock);
-    const repositories = yield* Schema.decodeUnknownEffect(
-      Schema.fromJsonString(
-        Schema.Array(
-          Schema.Struct({ remote: Schema.String, directoryName: Schema.NullOr(Schema.String) }),
-        ),
-      ),
-    )(row.repositories);
+    const clock = yield* decodeClock(row.clock);
+    const repositories = yield* decodeRepositoryRefs(row.repositories);
     for (const link of repositories) {
       const previous = winners.get(link.remote);
       if (
@@ -200,7 +211,12 @@ const reconcileRepositories = Effect.fn("SharedState.reconcileRepositories")(fun
         compareClock(clock, previous.clock) > 0 ||
         (compareClock(clock, previous.clock) === 0 && row.id > previous.id)
       )
-        winners.set(link.remote, { id: row.id, clock, directoryName: link.directoryName });
+        winners.set(link.remote, {
+          id: row.id,
+          clock,
+          directoryName: link.directoryName,
+          iconPath: link.iconPath ?? null,
+        });
     }
   }
   const checkouts = yield* sql<{
@@ -239,8 +255,9 @@ const reconcileRepositories = Effect.fn("SharedState.reconcileRepositories")(fun
     const clones = localByRemote.get(remote)?.values() ?? [
       { repository_id: `remote:${remote}`, directory_name: winner.directoryName },
     ];
+    // The synced icon wins; a checkout here that lacks that file records its own on read.
     for (const clone of clones)
-      yield* sql`INSERT INTO label_repositories(label_id,repository_id,remote,directory_name) VALUES (${winner.id},${clone.repository_id},${remote},${clone.directory_name ?? winner.directoryName}) ON CONFLICT(repository_id) DO UPDATE SET label_id=excluded.label_id,remote=excluded.remote,directory_name=excluded.directory_name`;
+      yield* sql`INSERT INTO label_repositories(label_id,repository_id,remote,directory_name,icon_path) VALUES (${winner.id},${clone.repository_id},${remote},${clone.directory_name ?? winner.directoryName},${winner.iconPath}) ON CONFLICT(repository_id) DO UPDATE SET label_id=excluded.label_id,remote=excluded.remote,directory_name=excluded.directory_name,icon_path=COALESCE(excluded.icon_path,label_repositories.icon_path)`;
   }
 });
 

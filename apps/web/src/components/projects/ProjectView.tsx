@@ -40,6 +40,7 @@ import {
   projectLabelKey,
   projectLabelPaletteColor,
 } from "../../projectLabels/projectLabels.logic";
+import { linkedRepositoryRows } from "../../projectLabels/repositoryPicker.logic";
 import { reportProjectFolderFailure } from "../../projectLabels/useMoveThreadToFolder";
 import { useProjectArchive } from "../../projectLabels/useProjectArchive";
 import { useProjectContents } from "../../projectLabels/useProjectContents";
@@ -271,12 +272,17 @@ function ProjectPage(props: {
   const projectGroups = useSidebarProjectGroups();
   const groupingSettings = useClientSettings(selectProjectGroupingSettings);
 
-  const linkedRepositories = useMemo(
+  // Every repository the project links, with its state on this machine:
+  // the same list the repository pickers show.
+  const repositoryRows = useMemo(
     () =>
-      label === null
+      entry === null
         ? []
-        : repositories.filter((repository) => label.repositoryIds.includes(repository.id)),
-    [label, repositories],
+        : linkedRepositoryRows({
+            project: entry,
+            localById: new Map(repositories.map((repository) => [repository.id, repository])),
+          }),
+    [entry, repositories],
   );
   const chats = useMemo(() => sortRecentFirst(contents?.chats ?? [], chatActivityAt), [contents]);
   const work = useMemo(() => sortRecentFirst(contents?.work ?? [], chatActivityAt), [contents]);
@@ -429,11 +435,8 @@ function ProjectPage(props: {
             <ProjectCardSlot>
               <RepositoriesCard
                 environmentId={environmentId}
-                label={label}
                 folder={entry}
-                repositories={repositories}
-                linkedRepositories={linkedRepositories}
-                folderByRepository={directory.folderByRepository}
+                rows={repositoryRows}
                 onOpenRepository={openRepositorySettings}
               />
             </ProjectCardSlot>

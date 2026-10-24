@@ -220,7 +220,11 @@ const make = Effect.gen(function* () {
               title,
               ...(link === undefined
                 ? {}
-                : { remote: link.remote, directoryName: link.directoryName }),
+                : {
+                    remote: link.remote,
+                    directoryName: link.directoryName,
+                    ...(link.checkout === undefined ? {} : { checkout: link.checkout }),
+                  }),
             };
           }),
         ),

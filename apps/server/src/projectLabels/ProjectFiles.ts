@@ -2,6 +2,7 @@
 import * as NodeCrypto from "node:crypto";
 
 import {
+  PROJECT_REPOSITORIES_SEGMENT,
   PROJECT_RECALL_DEFAULT_LIMIT,
   PROJECT_RECALL_MAX_LIMIT,
   PROJECT_RESOURCE_READ_DEFAULT_LIMIT,
@@ -41,7 +42,7 @@ import {
 } from "../attachmentStore.ts";
 import * as ServerConfig from "../config.ts";
 import { fileHeaderMimeType } from "../workspace/fileHeaderMimeType.ts";
-import { WORKTREES_SEGMENT } from "../worktreesDirectory.ts";
+import { isWorktreesSegment } from "../worktreesDirectory.ts";
 import {
   PROJECT_LABEL_ID_FILE,
   PROJECT_LABEL_RESOURCES_SEGMENT,
@@ -107,6 +108,12 @@ export class ProjectFiles extends Context.Service<
     >;
   }
 >()("cogenly-server/projectLabels/ProjectFiles") {}
+
+/** Top-level project entries that are never resources: the id file, `repos/` and worktrees. */
+const isReservedEntry = (entry: string): boolean =>
+  entry === PROJECT_LABEL_ID_FILE ||
+  entry === PROJECT_REPOSITORIES_SEGMENT ||
+  isWorktreesSegment(entry);
 
 const MAX_RESOURCE_ENTRIES = 10_000;
 const MAX_INDEXED_TEXT_BYTES = 262_144;
@@ -327,8 +334,8 @@ const make = Effect.gen(function* () {
     );
     const stack: Array<{ full: string; relative: string }> = [...top]
       .sort()
-      // The id file and the reserved `worktrees/` folder are not resources.
-      .filter((entry) => entry !== PROJECT_LABEL_ID_FILE && entry !== WORKTREES_SEGMENT)
+      // The id file and the reserved `repos/` and worktree folders are not resources.
+      .filter((entry) => !isReservedEntry(entry))
       .map((entry) => ({ full: path.join(dir, entry), relative: entry }));
     while (stack.length > 0) {
       const current = stack.pop();
@@ -551,7 +558,7 @@ const make = Effect.gen(function* () {
     full: string,
   ) {
     const top = relative.split("/")[0] ?? "";
-    if (top === PROJECT_LABEL_ID_FILE || top === WORKTREES_SEGMENT) {
+    if (isReservedEntry(top)) {
       return yield* invalidPath(operation);
     }
     if (yield* isDirectory(path.join(dir, top))) {
@@ -964,14 +971,14 @@ const make = Effect.gen(function* () {
           },
         })
         .pipe(
-          // The reserved `worktrees/` folder churns with every checkout;
-          // none of it is a resource, so it never triggers a rescan.
+          // The reserved `repos/` and worktree folders churn with every
+          // checkout; none of it is a resource, so it never triggers a rescan.
           Stream.filter((event) => {
             const relative = path.isAbsolute(event.path)
               ? path.relative(dir, event.path)
               : event.path;
-            return (
-              relative.split(/[\\/]/).find((segment) => segment.length > 0) !== WORKTREES_SEGMENT
+            return !isReservedEntry(
+              relative.split(/[\\/]/).find((segment) => segment.length > 0) ?? "",
             );
           }),
           Stream.debounce(WATCH_DEBOUNCE),

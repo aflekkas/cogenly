@@ -30,16 +30,25 @@ export function useRemoveRepositoryFromProject() {
       };
       readonly repositoryId: ProjectId;
       readonly title: string;
+      /** False for a repository not cloned on this machine: nothing here is on disk. */
+      readonly onDisk?: boolean;
+      /** Wraps the request once confirmed, so a row can show it running. */
+      readonly during?: <A>(run: () => Promise<A>) => Promise<A>;
     }): Promise<boolean> => {
-      const message = `Remove ${input.title} from ${input.project.label.name}?\nThe repository stays on disk, and its Work leaves the project with it. Add it back any time with Add repository.`;
+      const message =
+        input.onDisk === false
+          ? `Remove ${input.title} from ${input.project.label.name}?\nIt is not cloned on this machine, and any checkout on another machine stays on its disk. Add it back any time with Add repository.`
+          : `Remove ${input.title} from ${input.project.label.name}?\nThe repository stays on disk, and its Work leaves the project with it. Add it back any time with Add repository.`;
       const confirmed =
         (await requestConfirmDialog(message, { variant: "destructive" })) ??
         window.confirm(message);
       if (!confirmed) return false;
-      const result = await unlink({
-        environmentId: input.project.environmentId,
-        input: { labelId: input.project.label.id, repositoryId: input.repositoryId },
-      });
+      const request = () =>
+        unlink({
+          environmentId: input.project.environmentId,
+          input: { labelId: input.project.label.id, repositoryId: input.repositoryId },
+        });
+      const result = await (input.during ? input.during(request) : request());
       if (result._tag === "Failure") {
         if (!isAtomCommandInterrupted(result)) {
           reportProjectFolderFailure(`Could not remove ${input.title}`, result);

@@ -904,13 +904,6 @@ export const StorageCleanupSettings = Schema.Struct({
 });
 export type StorageCleanupSettings = typeof StorageCleanupSettings.Type;
 
-/**
- * The projects-root default before project workspaces: `~/Cogenly`. Kept for
- * clients to show as an example path. The live default is empty, which the
- * server resolves to `<Cogenly home>/projects`.
- */
-export const DEFAULT_PROJECTS_ROOT = "~/Cogenly";
-
 export const ServerSettings = Schema.Struct({
   // Null means no client has migrated this preference yet; an empty value is
   // authoritative so another device cannot resurrect cleared preferences.
