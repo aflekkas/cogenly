@@ -17,7 +17,6 @@ import {
   ComboboxCollection,
   ComboboxGroupItems,
   ComboboxItem,
-  ComboboxItemIcon,
   useComboboxFilter,
 } from "../components/ui/combobox";
 import { requestConfirmDialog } from "../confirmDialog";
@@ -43,6 +42,7 @@ import {
 import {
   GitHubRepositoryRow,
   GitHubSearchStatus,
+  PickerRowContent,
   RepositoryPickerRow,
   RepositoryRowError,
   RepositoryRowIcon,
@@ -502,19 +502,13 @@ export function useRepositoryPicker(input: {
             tone="action"
             divider={item.kind === "add" ? hasRows : true}
           >
-            <ComboboxItemIcon>
-              <FolderPlusIcon className="size-4" />
-            </ComboboxItemIcon>
-            <span className="min-w-0 flex-1 truncate text-sm">{item.label}</span>
+            <PickerRowContent icon={<FolderPlusIcon className="size-4" />} label={item.label} />
           </ComboboxItem>
         );
       case "back":
         return (
           <ComboboxItem key={item.value} hideIndicator value={item} tone="action">
-            <ComboboxItemIcon>
-              <ChevronLeftIcon className="size-4" />
-            </ComboboxItemIcon>
-            <span className="min-w-0 flex-1 truncate text-sm">{item.label}</span>
+            <PickerRowContent icon={<ChevronLeftIcon className="size-4" />} label={item.label} />
           </ComboboxItem>
         );
       case "add-more":
