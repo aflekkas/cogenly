@@ -218,3 +218,18 @@ They can change or remove only integrations available in their project.
 Widening an integration’s project scope, or pointing one that holds a pasted
 token or vault credential at a new server, requires you to make the change in
 Settings → Integrations.
+
+### Claude and Codex connectors
+
+Claude and Codex bring connectors of their own: claude.ai connectors, ChatGPT
+apps, and MCP servers from plugins or your `~/.claude` and `~/.codex` config.
+For the services in the default catalog, Cogenly turns those copies off in the
+agents it runs, connected in Cogenly or not, so each service shows up once and
+goes through Cogenly integrations. Connectors for services the catalog doesn't
+cover, such as Figma, stay available. Your Claude and Codex config is not
+changed.
+
+To give agents the provider connectors as well, turn on **Use provider
+connectors too** in Settings → Integrations. It applies to agent sessions that
+start after the change. MCP servers that run as a local command, rather than
+at a URL, are never turned off.

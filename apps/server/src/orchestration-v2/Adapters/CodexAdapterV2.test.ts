@@ -1345,6 +1345,71 @@ describe("Codex terminal routing", () => {
   });
 });
 
+describe("Codex provider connector duplicates", () => {
+  // As the owner's account lists them: usable ChatGPT apps, and config.toml servers.
+  const duplicates = CodexAdapterV2.codexProviderDuplicates({
+    apps: [
+      { id: "connector_2128aebfecb84f64a069897515042a44", name: "Gmail" },
+      { id: "connector_947e0d954944416db111db556030eea6", name: "Google Calendar" },
+      { id: "connector_76869538009648d5b282a4bb21c3d157", name: "GitHub" },
+      { id: "asdk_app_69a1d78e929881919bba0dbda1f6436d", name: "Slack" },
+      { id: "asdk_app_6a5ae9736be0819199d06d61ac171080", name: "Wispr Flow" },
+      { id: "connector_68de829bf7648191acd70a907364c67c", name: "Spotify" },
+      { id: "asdk_app_6aa2b88dd4e881918d850abcf8b92206", name: "Spawn Partners" },
+    ],
+    mcpServers: {
+      linear: { url: "https://mcp.linear.app/mcp" },
+      "notion-sse": { url: "https://mcp.notion.com/sse" },
+      "spawn-prod-followups": { url: "https://portal.spawnpartners.com/api/mcp/connect" },
+      node_repl: { command: "/Applications/ChatGPT.app/node_repl" },
+    },
+  });
+
+  it("finds the apps and HTTP servers the Cogenly catalog covers, and only those", () => {
+    assert.deepEqual(duplicates, {
+      appIds: [
+        "connector_2128aebfecb84f64a069897515042a44",
+        "connector_947e0d954944416db111db556030eea6",
+        "connector_76869538009648d5b282a4bb21c3d157",
+        "asdk_app_69a1d78e929881919bba0dbda1f6436d",
+        "asdk_app_6a5ae9736be0819199d06d61ac171080",
+      ],
+      mcpServerNames: ["linear", "notion-sse"],
+    });
+  });
+
+  it("turns the duplicates off in the thread config without touching the rest", () => {
+    const { config } = CodexAdapterV2.codexThreadRuntimeParams({
+      mcpSession: undefined,
+      providerDuplicates: duplicates,
+    });
+    assert.equal(config["apps.connector_2128aebfecb84f64a069897515042a44.enabled"], false);
+    assert.equal(config["apps.asdk_app_69a1d78e929881919bba0dbda1f6436d.enabled"], false);
+    assert.equal(config["mcp_servers.linear.enabled"], false);
+    assert.equal(config["mcp_servers.notion-sse.enabled"], false);
+    assert.isUndefined(config["apps.connector_68de829bf7648191acd70a907364c67c.enabled"]);
+    assert.isUndefined(config["mcp_servers.spawn-prod-followups.enabled"]);
+    assert.equal(config["apps._default.default_tools_approval_mode"], "approve");
+  });
+
+  it("keeps every provider connector when the user opts in", () => {
+    const { config } = CodexAdapterV2.codexThreadRuntimeParams({
+      mcpSession: undefined,
+      runtimePolicy: {
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        cwd: "/workspace",
+        useProviderConnectors: true,
+      },
+      providerDuplicates: duplicates,
+    });
+    assert.deepEqual(
+      Object.keys(config).filter((key) => key.endsWith(".enabled") && !key.startsWith("tools.")),
+      [],
+    );
+  });
+});
+
 describe("Codex runtime approval transport", () => {
   it.effect(
     "answers native command, file, permission and MCP requests without pending approvals",
