@@ -812,6 +812,12 @@ export const OrchestrationV2Subagent = Schema.Struct({
   // blocking tool call). Absent on legacy records; treated as settled_only.
   completionWake: Schema.optional(Schema.Literals(["always", "settled_only"])),
   completionDelivery: Schema.optional(OrchestrationV2DelegatedCompletionTaskDelivery),
+  /**
+   * Set on an app-owned task started by a message to an existing subagent's
+   * thread after that subagent ran: the task whose child it continues. Its
+   * result is an update to that task's, which keeps its own.
+   */
+  followUpOf: Schema.optional(NodeId),
   status: Schema.Literals([
     "idle",
     "pending",

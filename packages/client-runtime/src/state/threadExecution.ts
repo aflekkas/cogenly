@@ -116,7 +116,7 @@ export function deriveThreadActivityRun(
 export function deriveRunlessWorkStartedAt(
   projection: OrchestrationV2ThreadProjection,
 ): string | null {
-  const status = deriveProviderSubagentStatus(projection);
+  const status = nativeSubagentRootStatus(projection);
   return status !== null && isOrchestrationV2WorkActive(status.status) ? status.startedAt : null;
 }
 
@@ -126,12 +126,7 @@ export interface ProviderSubagentStatus {
   readonly completedAt: string | null;
 }
 
-/**
- * Status of a provider-native subagent thread (see
- * isProviderNativeSubagentThread), read from its runless root turn. Null
- * until that root turn arrives, and for every other thread.
- */
-export function deriveProviderSubagentStatus(
+function nativeSubagentRootStatus(
   projection: OrchestrationV2ThreadProjection,
 ): ProviderSubagentStatus | null {
   if (!isProviderNativeSubagentThread(projection.thread)) return null;
@@ -143,6 +138,43 @@ export function deriveProviderSubagentStatus(
     status: node.status,
     startedAt: node.startedAt === null ? null : DateTime.formatIso(node.startedAt),
     completedAt: node.completedAt === null ? null : DateTime.formatIso(node.completedAt),
+  };
+}
+
+const RUN_SUBAGENT_STATUS: Record<
+  OrchestrationV2ThreadProjection["runs"][number]["status"],
+  OrchestrationV2ExecutionNode["status"]
+> = {
+  preparing: "pending",
+  queued: "pending",
+  starting: "pending",
+  running: "running",
+  waiting: "waiting",
+  completed: "completed",
+  interrupted: "interrupted",
+  failed: "failed",
+  cancelled: "cancelled",
+  rolled_back: "cancelled",
+};
+
+/**
+ * Status of a provider-native subagent thread (see
+ * isProviderNativeSubagentThread): its runless root turn, until a message
+ * sent to the child gives it runs of its own, then its latest run. A message
+ * still queued behind the native work leaves the native status in place.
+ * Null until that root turn arrives, and for every other thread.
+ */
+export function deriveProviderSubagentStatus(
+  projection: OrchestrationV2ThreadProjection,
+): ProviderSubagentStatus | null {
+  const native = nativeSubagentRootStatus(projection);
+  if (native === null) return null;
+  const run = presentedLatestRun(projection);
+  if (run === null || run.startedAt === null) return native;
+  return {
+    status: RUN_SUBAGENT_STATUS[run.status],
+    startedAt: DateTime.formatIso(run.startedAt),
+    completedAt: run.completedAt === null ? null : DateTime.formatIso(run.completedAt),
   };
 }
 

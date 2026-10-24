@@ -418,9 +418,12 @@ retry and the normal snooze choices.
 On web and desktop, use **Agents** to follow work delegated to subagents.
 Stop on a thread also stops the subagents it delegated to.
 
-Subagent threads started by the agent can't take messages; message the parent
-thread instead. When such a subagent needs an approval or an answer, the parent
-thread asks for it.
+You can message a subagent from its own thread. While it runs, a subagent the
+agent started with its own tools takes your message once its current work ends;
+one started with `delegate_task` takes it the way any running thread does. When
+your message produces a new result after the subagent reported, the parent
+thread is told it has an updated result. When a subagent the agent started with
+its own tools needs an approval or an answer, the parent thread asks for it.
 
 Expand a tool call in the conversation to see its full command and output.
 Summaries shorten shell wrappers and can still describe the latest call after it

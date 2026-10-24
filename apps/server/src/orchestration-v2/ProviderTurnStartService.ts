@@ -5,6 +5,7 @@ import { modelSelectionsEqual } from "@t3tools/shared/model";
 import { projectComposerContextForProvider } from "@t3tools/shared/composerContextReferences";
 import {
   CommandId,
+  isProviderNativeSubagentThread,
   latestProviderTurnForAttempt,
   type OrchestrationV2DomainEvent,
   type OrchestrationV2ExecutionNode,
@@ -811,7 +812,11 @@ export const layer: Layer.Layer<
             }),
           );
           // An agent's first session on another provider gets the same seed as a rotation.
-          return created === undefined || !rotateAgentSession
+          // So does a provider-native subagent's first turn of its own: its provider kept
+          // that conversation inside the parent's session.
+          const seedsNativeSubagent =
+            isProviderNativeSubagentThread(projection.thread) && previousAgentRun === undefined;
+          return created === undefined || !(rotateAgentSession || seedsNativeSubagent)
             ? created
             : yield* seedFreshSession(created);
         }

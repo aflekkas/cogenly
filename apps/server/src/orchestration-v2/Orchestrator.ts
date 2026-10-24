@@ -21,6 +21,7 @@ import {
   type ChatAttachment,
   CommandId,
   ContextHandoffId,
+  isOrchestrationV2WorkActive,
   isProviderNativeSubagentThread,
   MessageId,
   type NodeId,
@@ -576,6 +577,25 @@ function isBlockingRun(run: OrchestrationV2Run): boolean {
 }
 
 /**
+ * A provider-native subagent still working under its parent's turn. Its
+ * provider owns that conversation and takes no steering from the app, so
+ * messages sent to the child queue until this work ends.
+ */
+function nativeSubagentWorkActive(
+  projection: Pick<OrchestrationV2ThreadProjection, "thread" | "nodes">,
+): boolean {
+  return (
+    isProviderNativeSubagentThread(projection.thread) &&
+    projection.nodes.some(
+      (node) =>
+        node.kind === "root_turn" &&
+        node.runId === null &&
+        isOrchestrationV2WorkActive(node.status),
+    )
+  );
+}
+
+/**
  * A parent thread is "live" for wake purposes while a run is still producing
  * agent output. A run parked at "waiting" is post-terminal drain, so its agent
  * turn is over and a wake is still needed.
@@ -615,11 +635,26 @@ function legacyPullRequestLink(
   );
 }
 
-function delegatedCompletionWakeDetail(taskIds: ReadonlyArray<string>): string {
+function delegatedCompletionWakeDetail(
+  taskIds: ReadonlyArray<string>,
+  subagents: ReadonlyArray<OrchestrationV2Subagent>,
+): string {
   const taskList = taskIds.join(", ");
-  return taskIds.length === 1
-    ? `Delegated task ${taskList} reached a terminal state. Use task_status with taskId ${taskList} to read the result.`
-    : `Delegated tasks ${taskList} reached terminal states. Use task_status with each taskId to read the results.`;
+  const detail =
+    taskIds.length === 1
+      ? `Delegated task ${taskList} reached a terminal state. Use task_status with taskId ${taskList} to read the result.`
+      : `Delegated tasks ${taskList} reached terminal states. Use task_status with each taskId to read the results.`;
+  // A follow-up's id is new to the parent, so name the subagent it updates.
+  const followUps = taskIds.flatMap((taskId) => {
+    const task = subagents.find((candidate) => candidate.id === taskId);
+    if (task?.followUpOf === undefined) return [];
+    const sender = task.createdBy === "user" ? "The user" : "An agent";
+    const name = task.title === null ? "" : ` "${task.title}"`;
+    return [
+      `Task ${task.id} is a follow-up: ${sender} sent subagent${name} (thread ${task.childThreadId}) a new message after it reported, so its result updates the earlier result of ${task.followUpOf}, which is unchanged.`,
+    ];
+  });
+  return [detail, ...followUps].join(" ");
 }
 
 function isTerminalDelegatedTaskStatus(status: OrchestrationV2Subagent["status"]): boolean {
@@ -1337,6 +1372,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         projection.thread.archivedAt !== null ||
         projection.thread.deletedAt !== null ||
         projection.runs.some(isBlockingRun) ||
+        nativeSubagentWorkActive(projection) ||
         projection.runs.some((run) => run.status === "queued" && run.queueHeld === true)
       ) {
         return;
@@ -2146,7 +2182,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             occurredAt: now,
             payload: {
               ...message,
-              text: delegatedCompletionWakeDetail(remainingTaskIds),
+              text: delegatedCompletionWakeDetail(remainingTaskIds, projection.subagents),
               delegatedCompletion: {
                 parentRunId: parentRun.id,
                 generation: delivery.generation,
@@ -4924,7 +4960,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       const dispatchText =
         delegatedCompletion === undefined
           ? command.text
-          : delegatedCompletionWakeDetail(delegatedCompletion.taskIds);
+          : delegatedCompletionWakeDetail(delegatedCompletion.taskIds, projection.subagents);
       const sourcePlanProjection =
         command.sourcePlanRef === undefined
           ? null
@@ -5023,9 +5059,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           ? latestRun
           : undefined;
       const queueBehindRun = activeRun ?? worktreeMissingRun;
+      const queueBehindNativeWork =
+        queueBehindRun === undefined && nativeSubagentWorkActive(projection);
       const pendingMergeBackTransfers = pendingMergeBackTransfersForThread(projection);
       const shouldQueue =
-        queueBehindRun !== undefined &&
+        (queueBehindRun !== undefined || queueBehindNativeWork) &&
         (dispatchMode.type === "defer_start" ||
           dispatchMode.type === "start_immediately" ||
           dispatchMode.type === "queue_after_active");
@@ -5040,9 +5078,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         const queueProviderThread =
           activeProviderThread ??
           projection.providerThreads.find(
-            (candidate) => candidate.id === queueBehindRun.providerThreadId,
+            (candidate) => candidate.id === queueBehindRun?.providerThreadId,
           );
-        if (queueProviderThread === undefined) {
+        // Native subagent work has no app run, and a Claude child no provider
+        // thread of its own yet; the queued run then gets a fresh one below.
+        if (queueProviderThread === undefined && queueBehindRun !== undefined) {
           return yield* new OrchestratorDispatchError({
             commandId: command.commandId,
             commandType: command.type,
@@ -5053,6 +5093,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         const ordinal = nextRunOrdinal(projection);
         const runId = idAllocator.derive.run({ threadId: command.threadId, ordinal });
         const targetProviderThread =
+          queueProviderThread !== undefined &&
           modelSelection.instanceId === queueProviderThread.providerInstanceId
             ? queueProviderThread
             : rootProviderThreadsForProvider(projection, modelSelection.instanceId)[0];
@@ -5100,7 +5141,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         const attemptId = idAllocator.derive.runAttempt({ runId, attemptOrdinal: 1 });
         const rootNodeId = idAllocator.derive.rootNode({ runId });
         const checkpointScope =
-          queueBehindRun.status === "preparing" || worktreeMissingRun !== undefined
+          queueBehindRun?.status === "preparing" || worktreeMissingRun !== undefined
             ? null
             : yield* runtimePolicy.resolve({ thread: projection.thread, modelSelection }).pipe(
                 Effect.flatMap((resolvedRuntimePolicy) =>
@@ -6973,12 +7014,14 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       .pipe(mapDispatchError(command));
     const original = parent.subagents.find(
       (task) =>
-        task.origin === "app_owned" &&
         task.childThreadId === child.id &&
         task.id === (child.forkedFrom?.type === "node" ? child.forkedFrom.nodeId : undefined),
     );
-    // Before first publication, follow-ups remain part of the original task.
-    if (original === undefined || original.result === null) return;
+    // Before first publication, follow-ups remain part of an app-owned task.
+    // A provider-native task's lifecycle is its provider's and never includes
+    // app runs, so every message to its child is a follow-up of its own.
+    if (original === undefined || (original.origin === "app_owned" && original.result === null))
+      return;
     const owner =
       parent.runs.filter(isBlockingRun).toSorted((a, b) => b.ordinal - a.ordinal)[0] ??
       latestExecutedRun(parent.runs);
@@ -6988,6 +7031,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     const taskId = idAllocator.derive.delegatedTaskNode({ commandId: command.commandId });
     const task: OrchestrationV2Subagent = {
       ...original,
+      origin: "app_owned",
+      nativeTaskRef: null,
+      workflow: undefined,
+      followUpOf: original.id,
       createdBy: command.createdBy,
       driver: adapter.driver,
       id: taskId,
@@ -10455,7 +10502,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               ? undefined
               : {
                   ...message,
-                  text: delegatedCompletionWakeDetail(taskIds),
+                  text: delegatedCompletionWakeDetail(taskIds, input.parentProjection.subagents),
                   delegatedCompletion: {
                     parentRunId: input.parentRun.id,
                     generation: delivery.generation,
@@ -11336,22 +11383,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         yield* dispatchProviderSessionDetach(command, events, effects);
         break;
       case "message.dispatch": {
-        // The provider owns a native subagent's conversation, so a sent
-        // message has nowhere to go. Answers to a subagent's questions never
-        // target it either: adapters ask them on the top-level parent thread.
-        const thread = yield* projectionStore
-          .getThread(command.threadId)
-          .pipe(
-            Effect.mapError(
-              (cause) => new OrchestratorProjectionError({ threadId: command.threadId, cause }),
-            ),
-          );
-        if (isProviderNativeSubagentThread(thread)) {
-          return yield* new OrchestratorSubagentThreadReadOnlyError({
-            commandId: command.commandId,
-            threadId: command.threadId,
-          });
-        }
+        // A provider-native subagent's provider owns its live conversation, so
+        // a message sent to it waits behind that work (dispatchMessage queues
+        // it) and then runs as the child's own follow-up turn.
         yield* dispatchMessage(command, events, effects);
         yield* recordSubagentFollowup(command, events).pipe(mapDispatchError(command));
         break;
@@ -11831,6 +11865,32 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             stored.event.payload.status === "rolled_back"),
       ),
       Stream.runForEach(handleTerminalRun),
+      Effect.forkDetach,
+    );
+
+  // Messages sent to a provider-native subagent queue behind its native work,
+  // which has no run: its child's runless root turn is what ends.
+  yield* eventSink
+    .stream({ afterSequence: terminalEventsAfterSequence, eventType: "node.updated" })
+    .pipe(
+      Stream.filter(
+        (stored) =>
+          stored.event.type === "node.updated" &&
+          stored.event.payload.kind === "root_turn" &&
+          stored.event.payload.runId === null &&
+          !isOrchestrationV2WorkActive(stored.event.payload.status),
+      ),
+      Stream.runForEach((stored) => {
+        const threadId = stored.event.threadId;
+        return threadDispatch.withLock(threadId, startNextQueuedRun(threadId)).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("Failed to start a message queued for a native subagent", {
+              threadId,
+              cause,
+            }),
+          ),
+        );
+      }),
       Effect.forkDetach,
     );
 
