@@ -1,4 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { EnvironmentId, type MachineSetupStatus, type MachineSelfReport } from "@t3tools/contracts";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -6,6 +7,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
 
 import * as ServerConfig from "../config.ts";
 import * as MachineIdentity from "../machines/MachineIdentity.ts";
@@ -40,6 +42,11 @@ interface Call {
   readonly input: TailscaleHost.TailscaleRunInput;
 }
 
+type ScriptedRun = (
+  input: TailscaleHost.TailscaleRunInput,
+  probe: Ref.Ref<TailscaleHost.TailscaleProbe>,
+) => Effect.Effect<TailscaleHost.TailscaleRun>;
+
 /**
  * A fake machine: `probe` reads the current Tailscale state from a ref, and
  * each `run` takes the next scripted response for its operation.
@@ -50,14 +57,7 @@ const makeHarness = Effect.fn(function* (options: {
   readonly installed?: boolean;
   readonly mappings?: ReadonlyArray<ServePortMapping>;
   readonly mode?: TailscaleServeMode.TailscaleServeModeState;
-  readonly runs?: Partial<
-    Record<
-      TailscaleHost.TailscaleHostOperation,
-      ReadonlyArray<
-        (input: TailscaleHost.TailscaleRunInput) => Effect.Effect<TailscaleHost.TailscaleRun>
-      >
-    >
-  >;
+  readonly runs?: Partial<Record<TailscaleHost.TailscaleHostOperation, ReadonlyArray<ScriptedRun>>>;
 }) {
   const probe = yield* Ref.make<TailscaleHost.TailscaleProbe>({
     installed: options.installed ?? true,
@@ -76,7 +76,9 @@ const makeHarness = Effect.fn(function* (options: {
       Ref.update(calls, (all) => [...all, { operation, input }]).pipe(
         Effect.andThen(() => {
           const next = scripted.get(operation)?.shift();
-          return next === undefined ? Effect.die(`unexpected tailscale ${operation}`) : next(input);
+          return next === undefined
+            ? Effect.die(`unexpected tailscale ${operation}`)
+            : next(input, probe);
         }),
       ),
   });
@@ -101,7 +103,15 @@ const makeHarness = Effect.fn(function* (options: {
         changes: Stream.never,
       }),
     ),
-    Layer.provide(Layer.mock(ServerConfig.ServerConfig)({ port: 3773 })),
+    Layer.provide(
+      Layer.effect(
+        ServerConfig.ServerConfig,
+        Effect.map(ServerConfig.ServerConfig, (config) => ({ ...config, port: 3773 })),
+      ).pipe(
+        Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "cogenly-machine-setup-" })),
+        Layer.provide(NodeServices.layer),
+      ),
+    ),
   );
   return { probe, calls, layer };
 });
@@ -129,6 +139,23 @@ describe("MachineSetup", () => {
         assert.equal(status.joinUrl, "https://hub.tail1234.ts.net/");
         const mode = yield* (yield* TailscaleServeMode.TailscaleServeMode).current;
         assert.deepEqual(mode, { enabled: true, servePort: 443, localPort: 3773 });
+      }).pipe(Effect.provide(harness.layer));
+    }),
+  );
+
+  it.effect("adopts a hand-made mapping when peer ingress refuses what Serve forwarded", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness({});
+      yield* Effect.gen(function* () {
+        const setup = yield* MachineSetup.MachineSetup;
+        assert.isFalse(yield* setup.adoptServe);
+        // `tailscale serve` run by hand; refusals within the half minute don't re-check.
+        yield* Ref.update(harness.probe, (probe) => ({ ...probe, serveMappings: [ours()] }));
+        assert.isFalse(yield* setup.adoptServe);
+        yield* TestClock.adjust("30 seconds");
+        assert.isTrue(yield* setup.adoptServe);
+        const mode = yield* (yield* TailscaleServeMode.TailscaleServeMode).current;
+        assert.isTrue(mode.enabled);
       }).pipe(Effect.provide(harness.layer));
     }),
   );
@@ -176,8 +203,8 @@ describe("MachineSetup", () => {
         runs: {
           serve: [
             () => finished({ _tag: "failed", reason: "permission-denied" }),
-            () =>
-              Ref.update(harness.probe, (probe) => ({ ...probe, serveMappings: [ours()] })).pipe(
+            (_input, probe) =>
+              Ref.update(probe, (current) => ({ ...current, serveMappings: [ours()] })).pipe(
                 Effect.andThen(finished()),
               ),
           ],
@@ -259,9 +286,9 @@ describe("MachineSetup", () => {
         mode: { enabled: true, servePort: 443, localPort: 3000 },
         runs: {
           serve: [
-            (input) =>
-              Ref.update(harness.probe, (probe) => ({
-                ...probe,
+            (input, probe) =>
+              Ref.update(probe, (current) => ({
+                ...current,
                 serveMappings: [ours(input.localPort)],
               })).pipe(Effect.andThen(finished())),
           ],

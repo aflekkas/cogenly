@@ -36,6 +36,7 @@ import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as SessionStore from "../auth/SessionStore.ts";
 import { deriveAuthClientMetadata } from "../auth/utils.ts";
 import * as ServerConfig from "../config.ts";
+import * as MachineSetup from "../tailscale/MachineSetup.ts";
 import * as TailscaleServeMode from "../tailscale/TailscaleServeMode.ts";
 import { acceptsPeerIngress } from "./peerIngress.ts";
 import * as PeerHub from "./PeerHub.ts";
@@ -66,15 +67,25 @@ export const layer = Layer.unwrap(
     const crypto = yield* Crypto.Crypto;
     // Machine setup can put the server behind Tailscale Serve while it runs.
     const serveMode = yield* Effect.serviceOption(TailscaleServeMode.TailscaleServeMode);
+    const setup = yield* Effect.serviceOption(MachineSetup.MachineSetup);
     const acceptsIngress = (request: HttpServerRequest.HttpServerRequest) =>
-      Option.match(serveMode, {
-        onNone: () => Effect.succeed(config.tailscaleServeEnabled),
-        onSome: (mode) => Effect.map(mode.current, (current) => current.enabled),
-      }).pipe(
-        Effect.map((tailscaleServeEnabled) =>
-          acceptsPeerIngress(request, { ...config, tailscaleServeEnabled }),
-        ),
-      );
+      Effect.gen(function* () {
+        const tailscaleServeEnabled = yield* Option.match(serveMode, {
+          onNone: () => Effect.succeed(config.tailscaleServeEnabled),
+          onSome: (mode) => Effect.map(mode.current, (current) => current.enabled),
+        });
+        if (acceptsPeerIngress(request, { ...config, tailscaleServeEnabled })) return true;
+        // Refused only because Serve is off here: a `tailscale serve` made by
+        // hand may front this server. Adopt it if so, otherwise log why not.
+        if (
+          tailscaleServeEnabled ||
+          Option.isNone(setup) ||
+          !acceptsPeerIngress(request, { ...config, tailscaleServeEnabled: true })
+        ) {
+          return false;
+        }
+        return yield* setup.value.adoptServe;
+      });
 
     const identity = HttpRouter.add(
       "POST",

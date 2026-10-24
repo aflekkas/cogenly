@@ -15,6 +15,7 @@ import {
   type MachineSetupStatus,
   type MachineSetupStepId,
 } from "@t3tools/contracts";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -56,8 +57,16 @@ export class MachineSetup extends Context.Service<
      * mapping at this run's port, or adopts one made by hand.
      */
     readonly start: (localPort: number) => Effect.Effect<void>;
+    /**
+     * Peer ingress refused a request Tailscale Serve forwarded. Checks, at
+     * most every half minute, whether Serve fronts this server, adopting the
+     * mapping if so or logging why not. True when Serve is now accepted.
+     */
+    readonly adoptServe: Effect.Effect<boolean>;
   }
 >()("cogenly-server/tailscale/MachineSetup") {}
+
+const ADOPT_RECHECK_MS = 30_000;
 
 const without = <A>(set: ReadonlySet<A>, value: A): ReadonlySet<A> => {
   const next = new Set(set);
@@ -335,7 +344,24 @@ export const make = Effect.gen(function* () {
     yield* launch("expose", "serve", observation, servePort);
   });
 
-  return MachineSetup.of({ status, subscribe, runStep, start });
+  const lastAdoptCheck = yield* Ref.make<number | null>(null);
+  const adoptServe: MachineSetup["Service"]["adoptServe"] = Effect.gen(function* () {
+    const now = yield* Clock.currentTimeMillis;
+    const due = yield* Ref.modify(lastAdoptCheck, (last) =>
+      last !== null && now - last < ADOPT_RECHECK_MS ? [false, last] : [true, now],
+    );
+    if (due) {
+      const observation = yield* observe;
+      if (!observation.serveMode.enabled) {
+        yield* Effect.logWarning(
+          "Refused a peer request forwarded by Tailscale Serve: Serve doesn't point at this server's port, or Tailscale Funnel makes it public. Open Settings → Machines to set it up.",
+        );
+      }
+    }
+    return (yield* serveMode.current).enabled;
+  }).pipe(Effect.withSpan("MachineSetup.adoptServe"));
+
+  return MachineSetup.of({ status, subscribe, runStep, start, adoptServe });
 });
 
 export const layer = Layer.effect(MachineSetup, make);

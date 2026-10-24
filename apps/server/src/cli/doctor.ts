@@ -7,6 +7,7 @@ import { Command, Flag, GlobalFlag, Prompt } from "effect/cli";
 import * as BootService from "../cloud/bootService.ts";
 import * as DatabaseMaintenance from "../persistence/DatabaseMaintenance.ts";
 import { projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
+import { runTailscaleServeDoctor } from "./doctorTailscale.ts";
 import * as CliService from "./service.ts";
 
 const formatBytes = (bytes: number) =>
@@ -115,6 +116,9 @@ export const doctorCommand = Command.make("doctor", {
       const config = yield* resolveCliAuthConfig(flags, logLevel);
       yield* runDoctor(config.dbPath, { fix: flags.fix, dryRun: flags.dryRun }).pipe(
         Effect.provide(Layer.merge(DatabaseMaintenance.layer, CliService.layer(config))),
+      );
+      yield* runTailscaleServeDoctor(config, { fix: flags.fix, dryRun: flags.dryRun }).pipe(
+        Effect.provide(CliService.layer(config)),
       );
     }),
   ),

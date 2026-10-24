@@ -4,6 +4,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as Terminal from "effect/Terminal";
 import { Command, Flag, GlobalFlag, Prompt } from "effect/cli";
 import * as CliError from "effect/cli/CliError";
@@ -14,6 +15,7 @@ import * as BootService from "../cloud/bootService.ts";
 import { compareExactServiceVersions } from "../cloud/serviceProtocol.ts";
 import type * as ServerConfig from "../config.ts";
 import * as ProcessRunner from "../processRunner.ts";
+import * as TailscaleServeMode from "../tailscale/TailscaleServeMode.ts";
 import { isValidTimeZone, normalizeTimeZoneSetting } from "../scheduling/serverTimeZone.ts";
 import { projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
 
@@ -71,6 +73,7 @@ export const reconcileService = Effect.fn("cli.service.reconcile")(function* (op
 export function formatServiceStatus(
   status: BootService.BootServiceStatus,
   cliVersion: string,
+  options: { readonly tailscaleServe?: boolean } = {},
 ): string {
   if (!status.supported) {
     return "Cogenly service\n  Status: unavailable on this machine\n  Supported on: Linux with systemd, macOS with launchd";
@@ -78,6 +81,12 @@ export function formatServiceStatus(
   if (!status.installed) {
     return "Cogenly service\n  Status: not installed\n  Next: Run `cogenly service install`.";
   }
+  const serve =
+    options.tailscaleServe === undefined
+      ? []
+      : [
+          `  Tailscale Serve: ${options.tailscaleServe ? "on, kept across restarts" : "off (turn on with `cogenly service install --tailscale-serve`)"}`,
+        ];
   const installedVersion = status.installedVersion ?? cliVersion;
   const problems = (status.problems ?? []).map(
     (problem) => `  [${problem}] ${BootService.formatBootServiceProblem(problem)}`,
@@ -92,6 +101,7 @@ export function formatServiceStatus(
       `  Status: installed · cogenly@${installedVersion} (newer than this cogenly@${cliVersion} CLI)`,
       `  Unit: ${status.unitPath}`,
       `  Logs: ${status.logPath}`,
+      ...serve,
       ...problems,
       `  Next: Run \`cogenly update ${installedVersion}\` to match it, or pass \`--allow-downgrade\` to \`cogenly service install\` explicitly.`,
     ].join("\n");
@@ -101,6 +111,7 @@ export function formatServiceStatus(
     `  Status: ${status.current ? `installed · cogenly@${installedVersion}` : "needs an update or repair"}`,
     `  Unit: ${status.unitPath}`,
     `  Logs: ${status.logPath}`,
+    ...serve,
     ...problems,
     ...(status.current ? [] : ["  Next: Run `cogenly service install` to repair it."]),
   ].join("\n");
@@ -108,11 +119,13 @@ export function formatServiceStatus(
 
 const runServiceCommand = Effect.fn("cli.service.run")(function* <A, E>(
   flags: { readonly baseDir: Parameters<typeof resolveCliAuthConfig>[0]["baseDir"] },
-  run: Effect.Effect<A, E, BootService.BootService | FileSystem.FileSystem>,
+  run: (
+    config: ServerConfig.ServerConfig["Service"],
+  ) => Effect.Effect<A, E, BootService.BootService | FileSystem.FileSystem | Path.Path>,
 ) {
   const logLevel = yield* GlobalFlag.LogLevel;
   const config = yield* resolveCliAuthConfig(flags, logLevel);
-  return yield* run.pipe(Effect.provide(layer(config)));
+  return yield* run(config).pipe(Effect.provide(layer(config)));
 });
 
 const serviceReconcileFlags = {
@@ -141,13 +154,45 @@ const serviceInstallFlags = {
     ),
     Flag.optional,
   ),
+  tailscaleServe: Flag.Boolean("tailscale-serve").pipe(
+    Flag.withDescription(
+      "Keep this Cogenly on your private tailnet through Tailscale Serve on every start, so your other machines can pair with it. --no-tailscale-serve turns that off. Saved in Cogenly's home, not the unit.",
+    ),
+    Flag.optional,
+  ),
 };
+
+/**
+ * Saves whether the server keeps itself behind Tailscale Serve. The server
+ * reads this on every start however it is launched, so the service needs no
+ * environment variable or drop-in for it.
+ */
+export const setTailscaleServePreference = Effect.fn("cli.service.setTailscaleServe")(function* (
+  config: ServerConfig.ServerConfig["Service"],
+  enabled: boolean,
+) {
+  const filePath = yield* TailscaleServeMode.servePreferencePath(config.stateDir);
+  const saved = yield* TailscaleServeMode.readServePreference(filePath);
+  yield* TailscaleServeMode.writeServePreference(filePath, {
+    ...Option.getOrUndefined(saved),
+    enabled,
+    servePort: Option.match(saved, {
+      onNone: () => config.tailscaleServePort,
+      onSome: (preference) => preference.servePort,
+    }),
+  });
+});
+
+const readTailscaleServeEnabled = (config: ServerConfig.ServerConfig["Service"]) =>
+  TailscaleServeMode.servePreferencePath(config.stateDir).pipe(
+    Effect.flatMap(TailscaleServeMode.readServePreference),
+    Effect.map((saved) => Option.isSome(saved) && saved.value.enabled),
+  );
 
 const serviceInstallCommand = Command.make("install", serviceInstallFlags).pipe(
   Command.withDescription("Install Cogenly as a background service for this user."),
   Command.withHandler((flags) =>
-    runServiceCommand(
-      flags,
+    runServiceCommand(flags, (config) =>
       Effect.gen(function* () {
         const format = Option.getOrUndefined(flags.format);
         if (format !== undefined && format !== "systemd" && format !== "launchd") {
@@ -170,11 +215,27 @@ const serviceInstallCommand = Command.make("install", serviceInstallFlags).pipe(
           yield* Console.log(rendered.contents.trimEnd());
           return;
         }
+        // Saved before the service (re)starts, so its first start already uses it.
+        if (Option.isSome(flags.tailscaleServe)) {
+          yield* setTailscaleServePreference(config, flags.tailscaleServe.value);
+          yield* Console.log(
+            flags.tailscaleServe.value
+              ? "Cogenly will keep itself on your tailnet through Tailscale Serve."
+              : "Cogenly will no longer put itself behind Tailscale Serve. An existing mapping stays until `tailscale serve --https=<port> off`.",
+          );
+        }
         const result = yield* reconcileService({
           allowDowngrade: flags.allowDowngrade,
           ...(timeZone === undefined ? {} : { timeZone }),
         });
         if (!result.changed) {
+          if (Option.isSome(flags.tailscaleServe)) {
+            // A running server reads the setting at start.
+            const service = yield* BootService.BootService;
+            yield* service.restart;
+            yield* Console.log("Restarted the Cogenly service to apply it.");
+            return;
+          }
           yield* Console.log(
             `Cogenly service is already installed with cogenly@${packageJson.version}.`,
           );
@@ -194,8 +255,7 @@ const serviceUpdateCommand = Command.make("update", serviceReconcileFlags).pipe(
   Command.withDescription("Deprecated. Run `cogenly update` to move to a newer release."),
   Command.unlisted,
   Command.withHandler((flags) =>
-    runServiceCommand(
-      flags,
+    runServiceCommand(flags, () =>
       Effect.gen(function* () {
         yield* Console.log(
           "`cogenly service update` is deprecated: run `cogenly update` to move to a newer release, or `cogenly service install` to repair the service. Repairing now.",
@@ -218,8 +278,7 @@ const serviceRestartCommand = Command.make("restart", projectLocationFlags).pipe
     "Restart the background service. Picks up a version installed by `cogenly update` that was not restarted at the time.",
   ),
   Command.withHandler((flags) =>
-    runServiceCommand(
-      flags,
+    runServiceCommand(flags, () =>
       Effect.gen(function* () {
         const service = yield* BootService.BootService;
         const status = yield* service.status;
@@ -237,8 +296,7 @@ const serviceRestartCommand = Command.make("restart", projectLocationFlags).pipe
 const serviceUninstallCommand = Command.make("uninstall", projectLocationFlags).pipe(
   Command.withDescription("Stop and remove the Cogenly background service."),
   Command.withHandler((flags) =>
-    runServiceCommand(
-      flags,
+    runServiceCommand(flags, () =>
       Effect.gen(function* () {
         const service = yield* BootService.BootService;
         const removed = yield* service.uninstall;
@@ -253,11 +311,14 @@ const serviceUninstallCommand = Command.make("uninstall", projectLocationFlags).
 const serviceStatusCommand = Command.make("status", projectLocationFlags).pipe(
   Command.withDescription("Show whether the Cogenly background service is installed."),
   Command.withHandler((flags) =>
-    runServiceCommand(
-      flags,
+    runServiceCommand(flags, (config) =>
       Effect.gen(function* () {
         const service = yield* BootService.BootService;
-        yield* Console.log(formatServiceStatus(yield* service.status, packageJson.version));
+        yield* Console.log(
+          formatServiceStatus(yield* service.status, packageJson.version, {
+            tailscaleServe: yield* readTailscaleServeEnabled(config),
+          }),
+        );
       }),
     ),
   ),
@@ -281,8 +342,7 @@ const serviceLogsCommand = Command.make("logs", {
 }).pipe(
   Command.withDescription("Print the tail of the background service log."),
   Command.withHandler((flags) =>
-    runServiceCommand(
-      flags,
+    runServiceCommand(flags, () =>
       Effect.gen(function* () {
         if (flags.lines < 1) {
           return yield* new CliError.UserError({
