@@ -397,6 +397,10 @@ export const CLAUDE_CONVERSATION_DISALLOWED_TOOLS: ReadonlyArray<string> = [
   "Bash",
   "BashOutput",
   "KillShell",
+  "Agent",
+  "Task",
+  "TaskOutput",
+  "TaskStop",
 ];
 
 function claudeAgentSdkQueryToolsForSdk(

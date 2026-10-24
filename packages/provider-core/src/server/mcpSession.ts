@@ -40,12 +40,9 @@ export interface McpProviderSessionConfig {
 }
 
 /**
- * Whether the Cogenly terminal tools are definitely available to this
- * session: an MCP session is present and its credential explicitly grants
- * terminal tools. Adapters disable the provider's native shell only when
- * this is true. A credential that never stated terminal availability
- * (`terminalToolsAvailable` undefined) keeps the native shell, so the agent
- * always has some way to run commands instead of none.
+ * Whether the session explicitly offers terminal tools. Conversation turns
+ * disable native shell execution independently; Work keeps its native shell
+ * when this flag is absent. Prompt selection also checks the turn policy.
  */
 export const terminalToolsAvailable = (
   config: Pick<McpProviderSessionConfig, "terminalToolsAvailable"> | undefined,

@@ -469,7 +469,7 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
   });
 
   it("disallows file writes and the shell for conversation turns", () => {
-    for (const tool of ["Edit", "Write", "MultiEdit", "NotebookEdit", "Bash"]) {
+    for (const tool of ["Edit", "Write", "MultiEdit", "NotebookEdit", "Bash", "Agent", "Task"]) {
       assert.include(ClaudeAdapterV2.CLAUDE_CONVERSATION_DISALLOWED_TOOLS, tool);
     }
   });

@@ -1346,6 +1346,28 @@ describe("Codex terminal routing", () => {
     authorizationHeader: "Bearer test",
     browserToolsAvailable: false,
   };
+  it("disables native commands and delegation for conversations regardless of MCP availability", () => {
+    for (const mcpSession of [
+      undefined,
+      session,
+      { ...session, terminalToolsAvailable: false },
+      { ...session, terminalToolsAvailable: true },
+    ]) {
+      const params = CodexAdapterV2.codexThreadRuntimeParams({
+        mcpSession,
+        runtimePolicy: {
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          cwd: null,
+          conversationMode: true,
+        },
+      });
+      assert.equal(params.config["features.shell_tool"], false);
+      assert.equal(params.config["features.multi_agent"], false);
+      assert.equal(params.config["features.multi_agent_v2"], false);
+    }
+  });
+
   it("disables all native shell execution while the terminal MCP server is attached", () => {
     const params = CodexAdapterV2.codexThreadRuntimeParams({
       mcpSession: { ...session, terminalToolsAvailable: true },

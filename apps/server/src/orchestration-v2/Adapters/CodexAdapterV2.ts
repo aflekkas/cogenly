@@ -1371,14 +1371,20 @@ export function codexThreadRuntimeParams(input: {
     ...(input.modelSelection === undefined ? {} : { model: input.modelSelection.model }),
     config: {
       ...CODEX_THREAD_CONFIG,
+      ...(input.runtimePolicy?.conversationMode === true
+        ? {
+            "features.shell_tool": false,
+            "features.multi_agent": false,
+            "features.multi_agent_v2": false,
+          }
+        : {}),
       ...(mcpSession === undefined
         ? {}
         : {
             // Codex gates both exec_command and write_stdin on ShellTool before UnifiedExec.
             // https://github.com/openai/codex/blob/main/codex-rs/core/src/tools/spec_plan.rs#L1234-L1260
-            // The native shell is disabled only when the credential
-            // explicitly grants the Cogenly terminal tools; an absent flag
-            // keeps the shell so the agent can still run commands.
+            // Work sessions retain their native shell unless MCP terminals are granted.
+            // Conversations disable it independently above.
             ...(McpProviderSession.terminalToolsAvailable(mcpSession)
               ? { "features.shell_tool": false }
               : {}),
