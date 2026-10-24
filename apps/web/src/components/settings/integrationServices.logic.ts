@@ -121,8 +121,9 @@ export const VAULT_FIELD_LABEL: Readonly<Record<VaultField, string>> = {
 
 const REASON_TEXT: Readonly<Record<IntegrationError["reason"], string>> = {
   google_client_missing:
-    "Store your Google OAuth client JSON in vault item google-oauth-client and allow accounts.google.com.",
-  local_runtime_missing: "Install uv (brew install uv on macOS), then try connecting again.",
+    "Google needs an OAuth client of your own first. Add Google Workspace to set one up.",
+  local_runtime_missing:
+    "uv isn't installed on the machine running Cogenly. Install it, then try again.",
   storage: "Cogenly could not read or save this integration.",
   not_found: "This integration no longer exists.",
   conflict: "Another integration already uses this name.",
@@ -137,7 +138,7 @@ const REASON_TEXT: Readonly<Record<IntegrationError["reason"], string>> = {
   approval_required: "Widening project access needs owner approval.",
   sign_in_required: "Sign in to this service to use it.",
   client_id_required:
-    "This service does not register apps automatically. Create an OAuth app with it and enter its client ID and secret.",
+    "This service needs an app of your own. Add the app's client ID and secret, then sign in.",
 };
 
 export function integrationReasonText(reason: IntegrationError["reason"]): string {
@@ -203,9 +204,11 @@ export interface IntegrationTest {
 }
 
 /**
- * What a row shows. Tests belong to one integration version and expire when
- * a subscription reports a newer server outcome. Both timestamps use the
- * server clock, so a client's clock cannot keep an old result alive.
+ * What a row shows: Connected, Needs sign-in (Sign in on this machine for an
+ * account synced from another one), Error, or Off, worded like the composer's
+ * Sources badges. Tests belong to one integration version and expire when a
+ * subscription reports a newer server outcome. Both timestamps use the server
+ * clock, so a client's clock cannot keep an old result alive.
  */
 export function integrationStatus(
   summary: IntegrationSummary,
@@ -220,7 +223,7 @@ export function integrationStatus(
   if (managed?.state === "failed" || managed?.state === "missing_runtime") {
     return {
       tone: "error",
-      label: managed.state === "missing_runtime" ? "Missing runtime" : "Failed",
+      label: "Error",
       reason: summary.message ?? managed.message ?? (managed.stderrTail || null),
       toolCount: null,
     };
@@ -229,7 +232,7 @@ export function integrationStatus(
   if (summary.status === "needs_sign_in") {
     return {
       tone: "warning",
-      label: "Needs sign-in",
+      label: summary.syncedFrom === undefined ? "Needs sign-in" : "Sign in on this machine",
       reason: summary.message ?? null,
       toolCount: null,
       ...checked,

@@ -1495,7 +1495,11 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
   );
 }
 
-export function IntegrationsSettingsPanel() {
+export function IntegrationsSettingsPanel(props: {
+  /** `?setup=`: an account or catalog service whose setup step opens. */
+  readonly setupTarget?: string | undefined;
+  readonly onSetupHandled?: (() => void) | undefined;
+}) {
   // Client-local preview defaults are editable only where the preview exists.
   const previewDefaultsDisabled = !isElectron;
   const previewDefaults = (
@@ -1512,7 +1516,10 @@ export function IntegrationsSettingsPanel() {
 
   return (
     <SettingsPageContainer>
-      <IntegrationServicesSettings />
+      <IntegrationServicesSettings
+        setupTarget={props.setupTarget}
+        onSetupHandled={props.onSetupHandled}
+      />
       {/* Server-authoritative agent access is scoped by the header selection;
           the preview defaults below are device-local and ignore it. */}
       <ProjectDefaultsSettings category="integrations" />

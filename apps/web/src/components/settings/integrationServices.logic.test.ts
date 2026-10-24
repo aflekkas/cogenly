@@ -251,7 +251,7 @@ describe("display helpers", () => {
         summary({ managed: { state: "failed", version: "2.1.2", stderrTail: "Process exited" } }),
         runningTest,
       ),
-    ).toMatchObject({ label: "Failed", tone: "error", reason: "Process exited" });
+    ).toMatchObject({ label: "Error", tone: "error", reason: "Process exited" });
     expect(
       integrationStatus(
         summary({ managed: { state: "starting", version: "2.1.2", stderrTail: "" } }),
@@ -265,6 +265,10 @@ describe("display helpers", () => {
       managed: { state: "running", version: "2.1.2", stderrTail: "" },
     });
     expect(integrationStatus(google, runningTest)).toMatchObject({ label: "Needs sign-in" });
+    // An account synced from another machine signs in here separately.
+    expect(
+      integrationStatus({ ...google, syncedFrom: { machineLabel: "Mac mini" } }, runningTest),
+    ).toMatchObject({ label: "Sign in on this machine", tone: "warning" });
     expect(signInAction(google)).toBe("Sign in");
     expect(signInAction({ ...google, status: "connected" })).toBe("Reconnect");
   });

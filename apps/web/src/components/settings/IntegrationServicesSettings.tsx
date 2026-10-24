@@ -5,20 +5,23 @@ import {
   type AtomCommandResult,
 } from "@t3tools/client-runtime/state/runtime";
 import {
-  integrationCatalogInputs,
-  slackAppManifest,
+  INTEGRATION_CATALOG,
+  integrationCatalogEntry,
   type EnvironmentId,
   type Integration,
+  type IntegrationCatalogAuthKind,
   type IntegrationCatalogEntry,
+  type IntegrationCatalogId,
+  type IntegrationConnectResult,
   type IntegrationId,
   type IntegrationSummary,
   type IntegrationTestResult,
+  type ProjectLabelId,
   type ProjectLabelWithRepositories,
   type VaultItemMetadata,
 } from "@t3tools/contracts";
 import {
   BlocksIcon,
-  ExternalLinkIcon,
   KeyRoundIcon,
   LogInIcon,
   MoreHorizontalIcon,
@@ -29,24 +32,31 @@ import {
   Trash2Icon,
   XIcon,
 } from "lucide-react";
-import { useLayoutEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 import { AnimatedHeight } from "~/components/AnimatedHeight";
-import { INTEGRATION_LOGOS } from "~/components/IntegrationLogos";
-import { CopyButton } from "~/components/ui/copy-button";
 import { OverlayPresence } from "~/components/ui/overlay-presence";
+import { cn } from "~/lib/utils";
 import { requestConfirmDialog } from "../../confirmDialog";
-import { ensureLocalApi } from "../../localApi";
-import { useEnvironmentHttpBaseUrl } from "../../state/environments";
-import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { ProjectLabelChips, ProjectLabelPicker } from "../../projectLabels/ProjectLabelPicker";
 import { useEnvironmentProjectLabels } from "../../projectLabels/useProjectLabels";
 import { integrationsRpc } from "../../rpc/integrations";
 import { vaultRpc } from "../../rpc/vault";
+import { useEnvironmentHttpBaseUrl } from "../../state/environments";
 import { useEnvironmentQuery } from "../../state/query";
+import { useAtomCommand } from "../../state/use-atom-command";
 import { useOrchestrationCommand } from "../../state/use-orchestration-command";
+import { IntegrationSourceIcon } from "../chat/ComposerSourcesPicker";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
+import {
+  Combobox,
+  ComboboxItem,
+  ComboboxList,
+  ComboboxPopup,
+  ComboboxSearchInput,
+  ComboboxTrigger,
+} from "../ui/combobox";
 import {
   Dialog,
   DialogClose,
@@ -57,6 +67,7 @@ import {
   DialogPopup,
   DialogTitle,
 } from "../ui/dialog";
+import { DisclosureChevron, DisclosurePanel } from "../ui/disclosure";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import {
@@ -71,19 +82,31 @@ import {
   MenuSubTrigger,
   MenuTrigger,
 } from "../ui/menu";
+import {
+  SearchListEmpty,
+  SearchListRowBadge,
+  SearchListRowDescription,
+  SearchListRowIcon,
+  SearchListRowLabel,
+  SearchListRowText,
+  SearchListRowTrailing,
+} from "../ui/search-list";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
+import { Spinner } from "../ui/spinner";
 import { Switch } from "../ui/switch";
 import { toastManager } from "../ui/toast";
 import {
-  catalogAction,
-  catalogConnectRequest,
-  catalogDraftSignsIn,
+  accountCounts,
+  accountLabelProblem,
+  accountRowId,
+  addAsksForAccountLabel,
   catalogErrorText,
-  emptyCatalogDraft,
-  groupByCatalog,
-  integrationDocsUrl,
-  type CatalogConnectDraft,
-  type CatalogGroup,
+  isGuidedSetup,
+  orderAccounts,
+  resolveSetupTarget,
+  setupControl,
+  type GuidedSetup,
+  type SetupControl,
 } from "./integrationCatalog.logic";
 import {
   EMPTY_INTEGRATION_DRAFT,
@@ -109,36 +132,18 @@ import {
   type IntegrationDraft,
   type IntegrationTest,
 } from "./integrationServices.logic";
-import { createIntegrationStatusFade } from "./integrationStatusMotion";
+import { IntegrationSetupGuide, openSignInPage } from "./IntegrationSetupGuide";
+import { useStatusFade } from "./integrationStatusMotion";
 import { ScopedSwitch } from "./ScopedSwitch";
 import { useSettingsScope } from "./SettingsScopeContext";
-import { SettingsRow, SettingsSection } from "./settingsLayout";
+import { scrollToSettingsTarget, SettingsRow, SettingsSection } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings";
 
 const EMPTY_SUMMARIES: ReadonlyArray<IntegrationSummary> = [];
 const EMPTY_VAULT_ITEMS: ReadonlyArray<VaultItemMetadata> = [];
-const READ_ONLY_MESSAGE = "This connection cannot change integrations.";
-
-/**
- * Opens the service's sign-in page from a click. A web browser blocks a tab
- * opened after an await, so the tab opens first and follows the link once the
- * server returns it; the desktop app hands the link to the system browser.
- */
-async function openSignInPage(link: () => Promise<string | null>) {
-  const tab = window.desktopBridge ? null : window.open("", "_blank");
-  const url = await link();
-  if (url === null) {
-    tab?.close();
-    return;
-  }
-  if (tab) {
-    tab.opener = null;
-    tab.location.href = url;
-    return;
-  }
-  await ensureLocalApi().shell.openExternal(url);
-}
+const READ_ONLY_MESSAGE = "This connection can't change integrations.";
+const ADD_ROW_ID = searchableSetting("integration-add").id;
 
 /** The value, or null after toasting a failure that was not a cancel. */
 function settled<A, E>(title: string, result: AtomCommandResult<A, E>): A | null {
@@ -153,124 +158,148 @@ function settled<A, E>(title: string, result: AtomCommandResult<A, E>): A | null
   return null;
 }
 
-/** Opens a user guide section: the system browser on desktop, a new tab on the web. */
-function openDocs(anchor: string) {
-  const url = integrationDocsUrl(anchor);
-  if (window.desktopBridge) void ensureLocalApi().shell.openExternal(url);
-  else window.open(url, "_blank", "noopener,noreferrer");
-}
+/** Which editor is open: a catalog account's name and projects, or a custom server's full definition. */
+type EditorTarget =
+  | { readonly kind: "account"; readonly integration: Integration }
+  | { readonly kind: "custom"; readonly integration: Integration | null };
 
 /**
- * Settings → Integrations → Services: the default catalog of services every
- * agent can use through Cogenly, on every provider, with each entry's
- * connected accounts, and custom MCP servers last. Follows the scope
- * sentence's environment.
+ * Settings → Integrations → Services: every connected account, one row each,
+ * then Add for the core catalog or a custom MCP server. Anything an account
+ * or a new service needs first (a sign-in, an app of your own, a key, uv) is
+ * one guided step inline on its row. `setupTarget` is an agent's `?setup=`
+ * link: an account or catalog id whose step opens once the list loads.
+ * Follows the scope sentence's environment.
  */
-export function IntegrationServicesSettings() {
+export function IntegrationServicesSettings(props: {
+  readonly setupTarget?: string | undefined;
+  readonly onSetupHandled?: (() => void) | undefined;
+}) {
   const { environment } = useSettingsScope();
   const environmentId = environment?.environmentId ?? null;
   const query = useEnvironmentQuery(
     environmentId === null ? null : integrationsRpc.list({ environmentId, input: {} }),
   );
   const canWrite =
-    useAtomValue(integrationsRpc.create.permissionAtom(environmentId)) && environmentId !== null;
+    useAtomValue(integrationsRpc.connectFromCatalog.permissionAtom(environmentId)) &&
+    environmentId !== null;
+  const canInstall = useAtomValue(integrationsRpc.installRuntime.permissionAtom(environmentId));
   const { labels } = useEnvironmentProjectLabels(environmentId);
   // Tests from this page; the list only knows tools an agent listed recently.
   const [tests, setTests] = useState<ReadonlyMap<IntegrationId, IntegrationTest>>(() => new Map());
-  const [editor, setEditor] = useState<{ readonly integration: Integration | null } | null>(null);
-  const [connecting, setConnecting] = useState<CatalogGroup | null>(null);
+  const [editor, setEditor] = useState<EditorTarget | null>(null);
+  const [adding, setAdding] = useState<IntegrationCatalogId | null>(null);
+  const [expanded, setExpanded] = useState<ReadonlySet<IntegrationId>>(() => new Set());
+  const [scrollTarget, setScrollTarget] = useState<string | null>(null);
+  const [handledTarget, setHandledTarget] = useState<string | null>(null);
+  const integrations = query.data?.integrations ?? EMPTY_SUMMARIES;
+  const rows = orderAccounts(integrations);
+  const counts = accountCounts(rows);
+
+  // An agent's link opens its step once the list is here, then scrolls to it.
+  const setupTarget = props.setupTarget ?? null;
+  if (setupTarget === null && handledTarget !== null) setHandledTarget(null);
+  if (setupTarget !== null && setupTarget !== handledTarget && query.data !== null) {
+    setHandledTarget(setupTarget);
+    const resolved = resolveSetupTarget(setupTarget, integrations);
+    if (resolved?.kind === "account") {
+      setExpanded((current) => new Set(current).add(resolved.id));
+      setScrollTarget(accountRowId(resolved.id));
+    } else if (resolved?.kind === "catalog" && canWrite) {
+      setAdding(resolved.catalogId);
+      setScrollTarget(ADD_ROW_ID);
+    }
+  }
+  const onSetupHandled = props.onSetupHandled;
+  useEffect(() => {
+    if (setupTarget !== null && setupTarget === handledTarget) onSetupHandled?.();
+  }, [handledTarget, onSetupHandled, setupTarget]);
+  useEffect(() => {
+    if (scrollTarget === null) return;
+    // The row lays out with the list's first render; the next frame has its place.
+    const frame = window.requestAnimationFrame(() => {
+      scrollToSettingsTarget(scrollTarget);
+      setScrollTarget(null);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [scrollTarget]);
+
   const recordTest = (integration: Integration, result: IntegrationTestResult) =>
     setTests((current) =>
       new Map(current).set(integration.id, { updatedAt: integration.updatedAt, result }),
     );
-  const integrations = query.data?.integrations ?? EMPTY_SUMMARIES;
-  const { groups, custom } = groupByCatalog(integrations);
-  const readOnlyTitle = canWrite ? undefined : READ_ONLY_MESSAGE;
-  const accountRows = (accounts: ReadonlyArray<IntegrationSummary>, inCatalog: boolean) =>
-    environmentId === null
-      ? []
-      : accounts.map((summary) => (
-          <IntegrationAccountRow
-            key={summary.integration.id}
-            environmentId={environmentId}
-            summary={summary}
-            inCatalog={inCatalog}
-            labels={labels}
-            canWrite={canWrite}
-            lastTest={tests.get(summary.integration.id)}
-            onTested={recordTest}
-            onEdit={() => setEditor({ integration: summary.integration })}
-          />
-        ));
+  const setRowExpanded = (id: IntegrationId, open: boolean) =>
+    setExpanded((current) => {
+      const next = new Set(current);
+      if (open) next.add(id);
+      else next.delete(id);
+      return next;
+    });
 
   return (
-    <SettingsSection {...searchableSetting("integration-services")} variant="plain">
-      {environmentId === null ? (
-        <SettingsRow title="Choose an environment to see its integrations." />
-      ) : query.error !== null ? (
-        <SettingsRow title="Could not load integrations" description={query.error} />
-      ) : query.data === null ? (
-        <SettingsRow title="Loading integrations…" role="status" />
-      ) : (
-        <div className="grid gap-2 sm:grid-cols-2">
-          {groups.map((group) => {
-            const action = catalogAction(group.entry, group.accounts);
-            return (
-              <CatalogCard
-                key={group.entry.id}
-                icon={INTEGRATION_LOGOS[group.entry.icon]}
-                brand
-                name={group.entry.name}
-                description={group.entry.description}
-                action={
-                  action === "Not available yet" ? (
-                    <Badge size="sm" variant="outline">
-                      {action}
-                    </Badge>
-                  ) : (
-                    <Button
-                      size="xs"
-                      variant="outline"
-                      disabled={!canWrite}
-                      title={readOnlyTitle}
-                      onClick={() => setConnecting(group)}
-                    >
-                      {action === "Add account" ? <PlusIcon className="size-3" /> : null}
-                      {action}
-                    </Button>
+    <>
+      <SettingsSection {...searchableSetting("integration-services")}>
+        {environmentId === null ? (
+          <SettingsRow title="Choose an environment to see its integrations." />
+        ) : query.error !== null && query.data === null ? (
+          <SettingsRow title="Couldn't load integrations" description={query.error} />
+        ) : query.data === null ? (
+          <SettingsRow title="Loading integrations…" role="status" />
+        ) : (
+          <>
+            {rows.map(({ summary, entry }) => (
+              <AccountRow
+                key={summary.integration.id}
+                environmentId={environmentId}
+                summary={summary}
+                entry={entry}
+                labels={labels}
+                canWrite={canWrite}
+                canInstall={canInstall}
+                lastTest={tests.get(summary.integration.id)}
+                expanded={expanded.has(summary.integration.id)}
+                onExpandedChange={(open) => setRowExpanded(summary.integration.id, open)}
+                onTested={recordTest}
+                onEdit={() =>
+                  setEditor(
+                    entry === undefined
+                      ? { kind: "custom", integration: summary.integration }
+                      : { kind: "account", integration: summary.integration },
                   )
                 }
-                note={group.entry.kind === "unavailable" ? group.entry.reason : undefined}
-              >
-                {accountRows(group.accounts, true)}
-              </CatalogCard>
-            );
-          })}
-          <CatalogCard
-            icon={BlocksIcon}
-            name="Custom MCP server"
-            description="Any other remote MCP server, with OAuth sign-in or vault headers."
-            action={
-              <Button
-                size="xs"
-                variant="outline"
-                disabled={!canWrite}
-                title={readOnlyTitle}
-                onClick={() => setEditor({ integration: null })}
-              >
-                <PlusIcon className="size-3" />
-                Add
-              </Button>
-            }
-          >
-            {accountRows(custom, false)}
-          </CatalogCard>
-        </div>
-      )}
-      <ProviderConnectorsSettingRow />
+              />
+            ))}
+            <AddIntegrationRow
+              environmentId={environmentId}
+              counts={counts}
+              empty={rows.length === 0}
+              canWrite={canWrite}
+              adding={adding}
+              onAdd={setAdding}
+              onAddCustom={() => {
+                setAdding(null);
+                setEditor({ kind: "custom", integration: null });
+              }}
+              onClose={() => setAdding(null)}
+              onConnected={(id) => setRowExpanded(id, true)}
+            />
+          </>
+        )}
+      </SettingsSection>
+      <SettingsSection title="Provider connectors" hideTitle>
+        <ProviderConnectorsSettingRow />
+      </SettingsSection>
       <OverlayPresence when={editor !== null && environmentId !== null ? editor : null}>
         {(open) =>
-          environmentId === null ? null : (
+          environmentId === null ? null : open.kind === "account" ? (
+            <AccountEditorDialog
+              environmentId={environmentId}
+              integration={open.integration}
+              labels={labels}
+              onAdvanced={() => setEditor({ kind: "custom", integration: open.integration })}
+              onClose={() => setEditor(null)}
+            />
+          ) : (
             <IntegrationEditorDialog
               environmentId={environmentId}
               integration={open.integration}
@@ -281,25 +310,13 @@ export function IntegrationServicesSettings() {
           )
         }
       </OverlayPresence>
-      <OverlayPresence when={environmentId !== null ? connecting : null}>
-        {(group) =>
-          environmentId === null ? null : (
-            <CatalogConnectDialog
-              environmentId={environmentId}
-              entry={group.entry}
-              existingAccounts={group.accounts.length}
-              onClose={() => setConnecting(null)}
-            />
-          )
-        }
-      </OverlayPresence>
-    </SettingsSection>
+    </>
   );
 }
 
 /**
- * Off by default: the catalog above is the only route agents get to its
- * services, and Claude's and Codex's own connectors for them stay hidden.
+ * Off by default: the catalog is the only route agents get to its services,
+ * and Claude's and Codex's own connectors for them stay hidden.
  */
 function ProviderConnectorsSettingRow() {
   const settings = useScopedSettings();
@@ -308,7 +325,7 @@ function ProviderConnectorsSettingRow() {
     <SettingsRow
       serverScoped
       {...searchableSetting("provider-connectors")}
-      description="Also give agents Claude's and Codex's own connectors for the services above, such as claude.ai Gmail or ChatGPT's Slack app. Off keeps one copy of each service. Applies to new agent sessions."
+      description="Also give agents Claude's and Codex's own connectors for these services, such as claude.ai Gmail or ChatGPT's Slack app. Off keeps one copy of each service. Applies to new agent sessions."
       settingKeys={["useProviderConnectors"]}
       control={
         <ScopedSwitch
@@ -322,62 +339,33 @@ function ProviderConnectorsSettingRow() {
   );
 }
 
-/** One catalog entry: what agents can do with it, its button, and its accounts. */
-function CatalogCard(props: {
-  readonly icon: ComponentType<{ className?: string }>;
-  /** A service's logo, drawn at full strength; a generic glyph stays muted. */
-  readonly brand?: boolean;
-  readonly name: string;
-  readonly description: string;
-  readonly action: ReactNode;
-  /** Shown instead of accounts, e.g. why an entry is not available. */
-  readonly note?: string | undefined;
-  readonly children: ReadonlyArray<ReactNode>;
-}) {
-  const Icon = props.icon;
-  return (
-    <div className="flex flex-col rounded-lg bg-card p-3 ring-1 ring-black/5 dark:bg-white/3 dark:ring-white/5">
-      <div className="flex items-start gap-3">
-        <Icon
-          className={`mt-0.5 size-4 shrink-0 ${props.brand ? "text-foreground" : "text-muted-foreground"}`}
-        />
-        <div className="min-w-0 flex-1">
-          <h3 className="text-sm font-medium text-foreground">{props.name}</h3>
-          <p className="text-xs text-muted-foreground">{props.description}</p>
-          {props.note ? <p className="pt-1 text-xs text-muted-foreground">{props.note}</p> : null}
-        </div>
-        <div className="shrink-0">{props.action}</div>
-      </div>
-      <AnimatedHeight>
-        {props.children.length > 0 ? (
-          <div className="mt-2.5 space-y-2 border-t border-border/50 pt-2.5">{props.children}</div>
-        ) : null}
-      </AnimatedHeight>
-    </div>
-  );
-}
+const STATUS_BADGE = {
+  success: "success",
+  error: "error",
+  warning: "warning",
+  neutral: "outline",
+} as const;
 
-/** One connected account: its status and the actions it offers. */
-function IntegrationAccountRow({
-  environmentId,
-  summary,
-  inCatalog,
-  labels,
-  canWrite,
-  lastTest,
-  onTested,
-  onEdit,
-}: {
+/**
+ * One account: its service and name, its status, and the one thing to do
+ * when it isn't usable. One-click actions run from the row's button; a
+ * setup with steps or a form opens under the row.
+ */
+function AccountRow(props: {
   readonly environmentId: EnvironmentId;
   readonly summary: IntegrationSummary;
-  /** A catalog account is named by its account label; a custom server by its title and host. */
-  readonly inCatalog: boolean;
+  /** The catalog service; none for a custom server. */
+  readonly entry: IntegrationCatalogEntry | undefined;
   readonly labels: ReadonlyArray<ProjectLabelWithRepositories>;
   readonly canWrite: boolean;
+  readonly canInstall: boolean;
   readonly lastTest: IntegrationTest | undefined;
+  readonly expanded: boolean;
+  readonly onExpandedChange: (open: boolean) => void;
   readonly onTested: (integration: Integration, result: IntegrationTestResult) => void;
   readonly onEdit: () => void;
 }) {
+  const { environmentId, summary, entry } = props;
   const { integration } = summary;
   const update = useOrchestrationCommand(integrationsRpc.update, { reportFailure: false });
   const remove = useOrchestrationCommand(integrationsRpc.remove, { reportFailure: false });
@@ -385,56 +373,58 @@ function IntegrationAccountRow({
   const beginSignIn = useOrchestrationCommand(integrationsRpc.beginSignIn, {
     reportFailure: false,
   });
-  const [busy, setBusy] = useState(false);
-  const status = integrationStatus(summary, lastTest);
-  const statusNode = useRef<HTMLDivElement>(null);
-  const statusFade = useRef<ReturnType<typeof createIntegrationStatusFade> | null>(null);
-  useLayoutEffect(() => {
-    if (!statusNode.current) return;
-    const fade = createIntegrationStatusFade(statusNode.current);
-    statusFade.current = fade;
-    return () => fade.dispose();
-  }, []);
-  useLayoutEffect(() => {
-    statusFade.current?.update(status.label);
-  }, [status.label]);
+  const install = useAtomCommand(integrationsRpc.installRuntime, { reportFailure: false });
+  const [busy, setBusy] = useState<SetupControl["kind"] | "remove" | null>(null);
+  // Why Cogenly couldn't install the runtime; shown while that is still the step.
+  const [installFailure, setInstallFailure] = useState<string | null>(null);
+  const status = integrationStatus(summary, props.lastTest);
+  const statusNode = useStatusFade<HTMLDivElement>(status.label);
+  const setup = summary.setup;
+  const control = setup === undefined ? null : setupControl(setup, props.canInstall);
+  const guided = control?.kind === "expand" ? control.action : null;
   const title = integrationTitle(integration);
-  const signIn = signInAction(summary);
-  const label = inCatalog
-    ? integration.accountLabel?.trim() || integration.name
-    : `${title} · ${urlHost(integration.url)}`;
+  const account = integration.accountLabel?.trim();
   const detail =
+    (setup?.type === "install_runtime" ? installFailure : null) ??
+    setup?.message ??
     status.reason ??
     [
-      integration.name,
       toolCountLabel(status.toolCount),
-      integration.scope.type === "all" ? null : scopeLabel(integration.scope, labels),
+      entry === undefined ? urlHost(integration.url) : null,
+      integration.scope.type === "all"
+        ? null
+        : `Only ${scopeLabel(integration.scope, props.labels)}`,
+      summary.syncedFrom ? `From ${summary.syncedFrom.machineLabel}` : null,
+      integration.provenance?.addedByAgent
+        ? `Added by ${integration.provenance.addedByAgent.name}`
+        : null,
     ]
       .filter(Boolean)
       .join(" · ");
-  const run = async (action: () => Promise<unknown>) => {
-    setBusy(true);
+
+  const run = async (kind: NonNullable<typeof busy>, action: () => Promise<unknown>) => {
+    setBusy(kind);
     try {
       await action();
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   };
-  const toggle = (enabled: boolean) =>
-    run(async () => {
+  const setEnabled = (enabled: boolean) =>
+    run("enable", async () => {
       settled(
-        `Could not turn ${title} ${enabled ? "on" : "off"}`,
+        `Couldn't ${enabled ? "enable" : "disable"} ${title}`,
         await update({ environmentId, input: { id: integration.id, enabled } }),
       );
     });
   const testNow = () =>
-    run(async () => {
+    run("test", async () => {
       const result = settled(
-        `Could not test ${title}`,
+        `Couldn't test ${title}`,
         await test({ environmentId, input: { id: integration.id } }),
       );
       if (result === null) return;
-      onTested(integration, result);
+      props.onTested(integration, result);
       toastManager.add(
         result.status === "connected"
           ? {
@@ -444,177 +434,675 @@ function IntegrationAccountRow({
             }
           : {
               type: "error",
-              title: `${title} could not connect`,
+              title: `${title} couldn't connect`,
               description: testResultReason(result) ?? undefined,
             },
       );
     });
   // The row updates itself when the callback lands: the list is live.
   const signInNow = () =>
-    run(() =>
+    run("sign_in", () =>
       openSignInPage(async () => {
         const started = settled(
-          `Could not start sign-in to ${title}`,
+          `Couldn't start sign-in to ${title}`,
           await beginSignIn({ environmentId, input: { id: integration.id } }),
         );
         return started?.authorizationUrl ?? null;
       }),
     );
+  const installNow = () =>
+    run("install", async () => {
+      if (setup?.type !== "install_runtime") return;
+      setInstallFailure(null);
+      const result = settled(
+        `Couldn't install ${setup.runtime}`,
+        await install({ environmentId, input: { runtime: setup.runtime } }),
+      );
+      if (result === null) return;
+      if (result.installed) toastManager.add({ type: "success", title: result.message });
+      else setInstallFailure(result.message);
+    });
   const removeNow = () =>
-    run(async () => {
-      const message = `Remove “${title}”?\nAgents can no longer use it. Vault items it referenced stay in the vault; its sign-in is deleted.`;
+    run("remove", async () => {
+      const message = `Remove “${title}”?\nAgents can no longer use it. Its sign-in is deleted; vault items it used stay in the vault.`;
       const confirmed =
         (await requestConfirmDialog(message, { variant: "destructive" })) ??
         window.confirm(message);
       if (!confirmed) return;
       settled(
-        `Could not remove ${title}`,
+        `Couldn't remove ${title}`,
         await remove({ environmentId, input: { id: integration.id } }),
       );
     });
+  const runControl = (next: SetupControl) => {
+    switch (next.kind) {
+      case "sign_in":
+        return void signInNow();
+      case "test":
+        return void testNow();
+      case "edit":
+        return props.onEdit();
+      case "enable":
+        return void setEnabled(true);
+      case "install":
+        return void installNow();
+      case "expand":
+        return props.onExpandedChange(!props.expanded);
+    }
+  };
 
   return (
-    <div className="flex items-center gap-2">
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-sm text-foreground">{label}</div>
-        <div
-          className={
-            status.reason && status.tone === "error"
-              ? "truncate text-xs text-destructive"
-              : "truncate text-xs text-muted-foreground"
-          }
-        >
-          {detail}
-          {integration.local
-            ? ` · Callback: ${summary.callbackHost ?? urlHost(integration.local.callbackOrigin)}`
-            : ""}
-          {status.checkedAt ? ` · Checked ${formatRelativeTimeLabel(status.checkedAt)}` : ""}
-          {integration.provenance?.addedByAgent
-            ? ` · Added by ${integration.provenance.addedByAgent.name}`
-            : ""}
-          {integration.provenance?.signedInAt
-            ? ` · Signed in ${integration.provenance.signedInViaAgent ? "from an agent link" : "from Settings"}`
-            : ""}
-        </div>
-      </div>
-      <div ref={statusNode} className="flex w-27 shrink-0 justify-end">
-        <Badge size="sm" variant={status.tone === "neutral" ? "outline" : status.tone}>
-          {status.label}
-        </Badge>
-      </div>
-      <div
-        className={`flex w-21 shrink-0 justify-end transition-opacity duration-(--motion-duration-base) ease-out ${signIn === "Sign in" && integration.enabled ? "opacity-100" : "pointer-events-none opacity-0"}`}
-        aria-hidden={signIn !== "Sign in" || !integration.enabled}
-        inert={signIn !== "Sign in" || !integration.enabled}
-      >
-        <Button
-          size="xs"
-          variant="outline"
-          disabled={busy || !canWrite}
-          onClick={() => void signInNow()}
-        >
-          <LogInIcon className="size-3" />
-          Sign in
-        </Button>
-      </div>
-      <Menu>
-        <MenuTrigger
-          render={
+    <SettingsRow
+      id={accountRowId(integration.id)}
+      className="pb-3"
+      title={
+        <span className="inline-flex flex-wrap items-center gap-x-2">
+          <IntegrationSourceIcon
+            icon={entry?.icon ?? null}
+            className={cn("size-4 shrink-0", entry === undefined && "text-muted-foreground")}
+          />
+          <span>{entry?.name ?? integration.displayName}</span>
+          {account ? <span className="font-normal text-muted-foreground">{account}</span> : null}
+        </span>
+      }
+      description={detail === "" ? undefined : detail}
+      control={
+        <>
+          <div ref={statusNode} className="flex">
+            <Badge size="sm" variant={STATUS_BADGE[status.tone]}>
+              {status.label}
+            </Badge>
+          </div>
+          {control === null ? null : (
             <Button
-              size="icon-xs"
-              variant="ghost"
-              disabled={busy || !canWrite}
-              aria-label={`Actions for ${title}`}
+              size="sm"
+              variant="outline"
+              aria-expanded={control.kind === "expand" ? props.expanded : undefined}
+              disabled={control.kind !== "expand" && (!props.canWrite || busy !== null)}
+              onClick={() => runControl(control)}
+            >
+              {busy === control.kind ? <Spinner /> : null}
+              {control.label}
+              {control.kind === "expand" ? <DisclosureChevron open={props.expanded} /> : null}
+            </Button>
+          )}
+          <Menu>
+            <MenuTrigger
+              render={
+                <Button
+                  size="icon-sm"
+                  variant="ghost-muted"
+                  disabled={!props.canWrite || busy !== null}
+                  aria-label={`Actions for ${title}`}
+                />
+              }
+            >
+              <MoreHorizontalIcon />
+            </MenuTrigger>
+            <MenuPopup align="end">
+              {signInAction(summary) === "Reconnect" ? (
+                <MenuItem disabled={!integration.enabled} onClick={() => void signInNow()}>
+                  <LogInIcon />
+                  Sign in again
+                </MenuItem>
+              ) : null}
+              <MenuItem disabled={!integration.enabled} onClick={() => void testNow()}>
+                <PlugZapIcon />
+                Test connection
+              </MenuItem>
+              <MenuItem onClick={props.onEdit}>
+                <PencilIcon />
+                Edit
+              </MenuItem>
+              <MenuItem onClick={() => void setEnabled(!integration.enabled)}>
+                <PowerIcon />
+                {integration.enabled ? "Disable" : "Enable"}
+              </MenuItem>
+              <MenuSeparator />
+              <MenuItem variant="destructive" onClick={() => void removeNow()}>
+                <Trash2Icon />
+                Remove
+              </MenuItem>
+            </MenuPopup>
+          </Menu>
+        </>
+      }
+    >
+      <DisclosurePanel open={props.expanded && guided !== null}>
+        {guided === null ? null : (
+          <div className="pt-3">
+            <IntegrationSetupGuide
+              environmentId={environmentId}
+              action={guided}
+              target={
+                guided.type === "install_runtime" || guided.catalogId === undefined
+                  ? undefined
+                  : { catalogId: guided.catalogId, integrationId: integration.id }
+              }
+              disabled={!props.canWrite}
+              onTest={() => void testNow()}
             />
-          }
-        >
-          <MoreHorizontalIcon className="size-4" />
-        </MenuTrigger>
-        <MenuPopup align="end">
-          {signIn === "Reconnect" ? (
-            <MenuItem disabled={!integration.enabled} onClick={() => void signInNow()}>
-              <LogInIcon />
-              Reconnect
-            </MenuItem>
-          ) : null}
-          <MenuItem disabled={!integration.enabled} onClick={() => void testNow()}>
-            <PlugZapIcon />
-            Test connection
-          </MenuItem>
-          <MenuItem onClick={onEdit}>
-            <PencilIcon />
-            Edit
-          </MenuItem>
-          <MenuItem onClick={() => void toggle(!integration.enabled)}>
-            <PowerIcon />
-            {integration.enabled ? "Turn off" : "Turn on"}
-          </MenuItem>
-          <MenuSeparator />
-          <MenuItem variant="destructive" onClick={() => void removeNow()}>
-            <Trash2Icon />
-            Remove
-          </MenuItem>
-        </MenuPopup>
-      </Menu>
-    </div>
+          </div>
+        )}
+      </DisclosurePanel>
+    </SettingsRow>
   );
 }
 
 /**
- * Connects one catalog entry, asking only for what it needs: an account
- * label, a region, a key or app credentials. Secrets are picked from the
- * vault, never typed here. Opens the sign-in page when the entry has one.
+ * The last row: Add, listing the core catalog and a custom MCP server. A
+ * catalog choice opens its first step under the row; a custom server opens
+ * its editor.
  */
-function CatalogConnectDialog(props: {
+function AddIntegrationRow(props: {
+  readonly environmentId: EnvironmentId;
+  readonly counts: ReadonlyMap<IntegrationCatalogId, number>;
+  readonly empty: boolean;
+  readonly canWrite: boolean;
+  readonly adding: IntegrationCatalogId | null;
+  readonly onAdd: (id: IntegrationCatalogId) => void;
+  readonly onAddCustom: () => void;
+  readonly onClose: () => void;
+  readonly onConnected: (id: IntegrationId) => void;
+}) {
+  const entry = props.adding === null ? undefined : integrationCatalogEntry(props.adding);
+  return (
+    <SettingsRow
+      {...searchableSetting("integration-add")}
+      className="pb-3"
+      description={
+        !props.canWrite
+          ? READ_ONLY_MESSAGE
+          : props.empty
+            ? "Nothing connected yet. Connect a service once and every agent can use it, on Claude and Codex."
+            : "Another service or account, or any remote MCP server."
+      }
+      control={
+        <AddIntegrationPicker
+          counts={props.counts}
+          disabled={!props.canWrite}
+          onAdd={props.onAdd}
+          onAddCustom={props.onAddCustom}
+        />
+      }
+    >
+      <DisclosurePanel open={entry !== undefined}>
+        {entry === undefined ? null : (
+          <AddIntegrationPanel
+            key={entry.id}
+            environmentId={props.environmentId}
+            entry={entry}
+            existingAccounts={props.counts.get(entry.id) ?? 0}
+            canWrite={props.canWrite}
+            onClose={props.onClose}
+            onConnected={props.onConnected}
+          />
+        )}
+      </DisclosurePanel>
+    </SettingsRow>
+  );
+}
+
+type AddOption =
+  | {
+      readonly kind: "catalog";
+      readonly key: IntegrationCatalogId;
+      readonly entry: IntegrationCatalogEntry;
+      readonly accounts: number;
+    }
+  | { readonly kind: "custom"; readonly key: "custom" };
+
+function addOptionText(option: AddOption): string {
+  return option.kind === "custom"
+    ? "Custom MCP server"
+    : `${option.entry.name} ${option.entry.description}`;
+}
+
+/** The shared searchable list, as the composer's Sources picker draws it. */
+function AddIntegrationPicker(props: {
+  readonly counts: ReadonlyMap<IntegrationCatalogId, number>;
+  readonly disabled: boolean;
+  readonly onAdd: (id: IntegrationCatalogId) => void;
+  readonly onAddCustom: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  // A pick moves focus into the step it opens; only a dismissal hands it back here.
+  const pickedRef = useRef(false);
+  const options: AddOption[] = [
+    ...INTEGRATION_CATALOG.map((entry): AddOption => ({
+      kind: "catalog",
+      key: entry.id,
+      entry,
+      accounts: props.counts.get(entry.id) ?? 0,
+    })),
+    { kind: "custom", key: "custom" },
+  ];
+  const needle = query.trim().toLowerCase();
+  const filtered =
+    needle === ""
+      ? options
+      : options.filter((option) => addOptionText(option).toLowerCase().includes(needle));
+
+  return (
+    <Combobox
+      items={options}
+      filteredItems={filtered}
+      autoHighlight
+      value={null}
+      open={open}
+      onOpenChange={(next, details) => {
+        if (!next && details.reason === "item-press") return;
+        if (next) pickedRef.current = false;
+        setOpen(next);
+        if (!next) setQuery("");
+      }}
+      itemToStringLabel={addOptionText}
+      isItemEqualToValue={(left, right) => left.key === right.key}
+      onValueChange={(option) => {
+        if (!option) return;
+        pickedRef.current = true;
+        setOpen(false);
+        setQuery("");
+        if (option.kind === "custom") props.onAddCustom();
+        else props.onAdd(option.entry.id);
+      }}
+    >
+      <ComboboxTrigger
+        disabled={props.disabled}
+        aria-label="Add an integration"
+        render={<Button size="sm" variant="outline" />}
+      >
+        <PlusIcon />
+        Add
+      </ComboboxTrigger>
+      <ComboboxPopup
+        align="end"
+        animateHeight
+        className="w-80"
+        finalFocus={() => !pickedRef.current}
+      >
+        <ComboboxSearchInput
+          aria-label="Find a service"
+          placeholder="Find a service"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+        />
+        {filtered.length === 0 ? (
+          <SearchListEmpty size="popover">No matching service.</SearchListEmpty>
+        ) : null}
+        <ComboboxList>
+          {(option: AddOption) => (
+            <ComboboxItem
+              key={option.key}
+              value={option}
+              hideIndicator
+              tone={option.kind === "custom" ? "action" : "default"}
+              // One hairline sets the custom server apart from the catalog.
+              divider={option.kind === "custom" && filtered.length > 1}
+            >
+              {option.kind === "custom" ? (
+                <>
+                  <SearchListRowIcon>
+                    <BlocksIcon />
+                  </SearchListRowIcon>
+                  <SearchListRowText>
+                    <SearchListRowLabel>Custom MCP server</SearchListRowLabel>
+                  </SearchListRowText>
+                </>
+              ) : (
+                <>
+                  <SearchListRowIcon>
+                    <IntegrationSourceIcon icon={option.entry.icon} className="size-4" />
+                  </SearchListRowIcon>
+                  <SearchListRowText>
+                    <SearchListRowLabel>{option.entry.name}</SearchListRowLabel>
+                    <SearchListRowDescription>{option.entry.description}</SearchListRowDescription>
+                  </SearchListRowText>
+                  {option.accounts > 0 ? (
+                    <SearchListRowTrailing>
+                      <SearchListRowBadge>
+                        {option.accounts === 1 ? "Connected" : `${option.accounts} accounts`}
+                      </SearchListRowBadge>
+                    </SearchListRowTrailing>
+                  ) : null}
+                </>
+              )}
+            </ComboboxItem>
+          )}
+        </ComboboxList>
+      </ComboboxPopup>
+    </Combobox>
+  );
+}
+
+/**
+ * Adding one catalog service: its name when it needs one, how to connect
+ * when it offers more than one way, then the first step. Services that sign
+ * in do so with one button; a key or an app of your own shows the server's
+ * guided step before any account exists. Once the account exists, its row
+ * takes over.
+ */
+function AddIntegrationPanel(props: {
   readonly environmentId: EnvironmentId;
   readonly entry: IntegrationCatalogEntry;
   readonly existingAccounts: number;
+  readonly canWrite: boolean;
   readonly onClose: () => void;
+  /** The new account's row opens any step it still needs. */
+  readonly onConnected: (id: IntegrationId) => void;
 }) {
   const { environmentId, entry } = props;
   const connect = useOrchestrationCommand(integrationsRpc.connectFromCatalog, {
     reportFailure: false,
   });
-  const httpBaseUrl = useEnvironmentHttpBaseUrl(environmentId);
-  const callbackUrl =
-    httpBaseUrl === null ? null : new URL("/oauth/integrations/callback", httpBaseUrl).href;
-  const vault = useEnvironmentQuery(vaultRpc.list({ environmentId, input: {} }));
-  const vaultItems = vault.data?.items ?? EMPTY_VAULT_ITEMS;
-  const vaultLoading = vault.data === null && vault.error === null;
-  const [draft, setDraft] = useState(() => emptyCatalogDraft(entry));
+  const id = useId();
+  const modes = entry.kind === "remote" && entry.auth.length > 1 ? entry.auth : null;
+  const [mode, setMode] = useState<IntegrationCatalogAuthKind | null>(
+    entry.kind === "remote" ? entry.auth[0].kind : null,
+  );
+  const [accountLabel, setAccountLabel] = useState("");
+  const [setup, setSetup] = useState<GuidedSetup | null>(null);
+  const [loading, setLoading] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const needs = integrationCatalogInputs(entry, draft.auth ?? undefined);
-  const signsIn = catalogDraftSignsIn(entry, draft);
-  const edit = (next: Partial<CatalogConnectDraft>) => {
-    setDraft((current) => ({ ...current, ...next }));
-    setError(null);
-  };
-  const googleClientMissing =
-    entry.kind === "local-preset" &&
-    vault.data !== null &&
-    !vaultItems.some((item) => item.name === "google-oauth-client");
+  // Only the latest mode's steps land, however the requests finish.
+  const request = useRef(0);
+  const asksLabel = addAsksForAccountLabel(entry, props.existingAccounts);
+  const validate = () => accountLabelProblem(entry, props.existingAccounts, accountLabel);
 
-  const submit = async () => {
-    const valid = catalogConnectRequest(entry, draft, props.existingAccounts);
-    if ("error" in valid) {
-      setError(valid.error);
+  /** Closes once the account exists or nothing more is needed; otherwise shows what comes first. */
+  const handle = (result: IntegrationConnectResult): string | null => {
+    if (result.integration === undefined && result.setup !== undefined) {
+      if (isGuidedSetup(result.setup)) setSetup(result.setup);
+      else setError(result.setup.message);
+      return null;
+    }
+    if (result.integration !== undefined) props.onConnected(result.integration.id);
+    props.onClose();
+    return result.signIn?.authorizationUrl ?? null;
+  };
+
+  /** A key or your own app: the server's steps, with this Cogenly's redirect address. */
+  const loadSetup = async (next: IntegrationCatalogAuthKind | null) => {
+    const ticket = ++request.current;
+    setSetup(null);
+    setError(null);
+    if (next !== "api_key" && next !== "oauth_app") {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    const result = await connect({
+      environmentId,
+      input: { catalogId: entry.id, inputs: { auth: next } },
+    });
+    if (ticket !== request.current) return;
+    setLoading(false);
+    if (result._tag !== "Success") {
+      if (!isAtomCommandInterrupted(result))
+        setError(catalogErrorText(squashAtomCommandFailure(result)));
+      return;
+    }
+    handle(result.value);
+  };
+  const started = useRef(false);
+  useEffect(() => {
+    if (started.current) return;
+    started.current = true;
+    void loadSetup(mode);
+  });
+
+  const connectNow = async () => {
+    const problem = validate();
+    if (problem !== null) {
+      setError(problem);
+      return;
+    }
+    const label = accountLabel.trim();
+    setError(null);
+    setPending(true);
+    try {
+      await openSignInPage(async () => {
+        const result = await connect({
+          environmentId,
+          input: {
+            catalogId: entry.id,
+            ...(label === "" ? {} : { accountLabel: label }),
+            ...(mode === null ? {} : { inputs: { auth: mode } }),
+          },
+        });
+        if (result._tag !== "Success") {
+          if (!isAtomCommandInterrupted(result))
+            setError(catalogErrorText(squashAtomCommandFailure(result)));
+          return null;
+        }
+        return handle(result.value);
+      });
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const signsIn = setup === null && !loading && (entry.kind === "local-preset" || mode === "oauth");
+
+  return (
+    <div className="space-y-3 pt-3">
+      <div className="flex items-start gap-2.5">
+        <IntegrationSourceIcon icon={entry.icon} className="mt-0.5 size-4 shrink-0" />
+        <div className="min-w-0 flex-1">
+          <h4 className="text-sm font-medium text-foreground">
+            {props.existingAccounts > 0
+              ? `Add another ${entry.name} account`
+              : `Connect ${entry.name}`}
+          </h4>
+          <p className="text-xs leading-normal text-muted-foreground/80">{entry.description}</p>
+        </div>
+        <Button
+          size="icon-xs"
+          variant="ghost-muted"
+          aria-label={`Cancel adding ${entry.name}`}
+          disabled={pending}
+          onClick={props.onClose}
+        >
+          <XIcon />
+        </Button>
+      </div>
+      {asksLabel || modes !== null ? (
+        <div className="grid gap-3 @min-[32rem]/settings-row:grid-cols-2">
+          {asksLabel ? (
+            <div className="min-w-0 space-y-1">
+              <Label htmlFor={`${id}-account`}>Account name</Label>
+              <Input
+                id={`${id}-account`}
+                autoFocus
+                value={accountLabel}
+                maxLength={80}
+                disabled={pending}
+                placeholder={entry.kind === "local-preset" ? "personal" : "Work"}
+                onChange={(event) => {
+                  setAccountLabel(event.currentTarget.value);
+                  setError(null);
+                }}
+              />
+              <p className="text-xs text-muted-foreground">
+                Tells accounts apart, for you and for agents.
+              </p>
+            </div>
+          ) : null}
+          {modes !== null ? (
+            <div className="min-w-0 space-y-1">
+              <Label id={`${id}-mode`}>Connect with</Label>
+              <Select
+                value={mode}
+                onValueChange={(value) => {
+                  const next = modes.find((candidate) => candidate.kind === value);
+                  if (next === undefined || next.kind === mode) return;
+                  setMode(next.kind);
+                  void loadSetup(next.kind);
+                }}
+              >
+                <SelectTrigger className="w-full" aria-labelledby={`${id}-mode`}>
+                  <SelectValue>
+                    {modes.find((candidate) => candidate.kind === mode)?.label}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectPopup alignItemWithTrigger={false}>
+                  {modes.map((candidate) => (
+                    <SelectItem key={candidate.kind} value={candidate.kind}>
+                      {candidate.label}
+                    </SelectItem>
+                  ))}
+                </SelectPopup>
+              </Select>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+      <AnimatedHeight>
+        {setup !== null ? (
+          <IntegrationSetupGuide
+            environmentId={environmentId}
+            action={setup}
+            target={{ catalogId: entry.id, accountLabel }}
+            showMessage
+            disabled={!props.canWrite}
+            validate={validate}
+            onSaved={handle}
+          />
+        ) : loading ? (
+          <p role="status" className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Spinner size="sm" tone="muted" />
+            Getting the steps…
+          </p>
+        ) : signsIn ? (
+          <Button
+            size="xs"
+            autoFocus={!asksLabel}
+            disabled={pending || !props.canWrite}
+            onClick={() => void connectNow()}
+          >
+            {pending ? <Spinner /> : <LogInIcon />}
+            {entry.kind === "local-preset" ? "Continue" : `Sign in to ${entry.name}`}
+          </Button>
+        ) : null}
+      </AnimatedHeight>
+      <AnimatedHeight>
+        {error ? (
+          <p role="alert" className="text-xs text-destructive">
+            {error}
+          </p>
+        ) : null}
+      </AnimatedHeight>
+    </div>
+  );
+}
+
+interface ScopeDraft {
+  readonly scope: "all" | "projects";
+  readonly labelIds: ReadonlyArray<ProjectLabelId>;
+}
+
+/** All projects, or the chosen project folders; both editors use it. */
+function ScopeField(props: {
+  readonly value: ScopeDraft;
+  readonly labels: ReadonlyArray<ProjectLabelWithRepositories>;
+  readonly onChange: (next: ScopeDraft) => void;
+}) {
+  const id = useId();
+  const { value } = props;
+  return (
+    <div className="space-y-1.5">
+      <Label id={`${id}-scope`}>Available in</Label>
+      <Select
+        value={value.scope}
+        onValueChange={(scope) => {
+          if (scope === "all" || scope === "projects") props.onChange({ ...value, scope });
+        }}
+      >
+        <SelectTrigger size="sm" className="w-full sm:w-48" aria-labelledby={`${id}-scope`}>
+          <SelectValue>{value.scope === "all" ? "All projects" : "Chosen projects"}</SelectValue>
+        </SelectTrigger>
+        <SelectPopup alignItemWithTrigger={false}>
+          <SelectItem value="all">All projects</SelectItem>
+          <SelectItem value="projects">Chosen projects</SelectItem>
+        </SelectPopup>
+      </Select>
+      <AnimatedHeight>
+        {value.scope === "projects" ? (
+          <div className="flex flex-wrap items-center gap-1.5 pt-1">
+            <ProjectLabelChips labels={props.labels} ids={value.labelIds} />
+            <ProjectLabelPicker
+              labels={props.labels}
+              selectedIds={value.labelIds}
+              onToggle={(labelId, selected) =>
+                props.onChange({
+                  ...value,
+                  labelIds: selected
+                    ? [...value.labelIds, labelId]
+                    : value.labelIds.filter((other) => other !== labelId),
+                })
+              }
+            />
+          </div>
+        ) : null}
+      </AnimatedHeight>
+    </div>
+  );
+}
+
+/**
+ * A catalog account's name and projects. Its address and sign-in come from
+ * the catalog; Advanced opens the full definition (headers such as
+ * GitHub's `X-MCP-Toolsets`). Google accounts run locally and have none.
+ */
+function AccountEditorDialog(props: {
+  readonly environmentId: EnvironmentId;
+  readonly integration: Integration;
+  readonly labels: ReadonlyArray<ProjectLabelWithRepositories>;
+  readonly onAdvanced: () => void;
+  readonly onClose: () => void;
+}) {
+  const { integration } = props;
+  const update = useOrchestrationCommand(integrationsRpc.update, { reportFailure: false });
+  const id = useId();
+  const [accountLabel, setAccountLabel] = useState(integration.accountLabel ?? "");
+  const [scope, setScope] = useState<ScopeDraft>(() => ({
+    scope: integration.scope.type,
+    labelIds: integration.scope.type === "projects" ? integration.scope.labelIds : [],
+  }));
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const save = async () => {
+    const label = accountLabel.trim();
+    if (integration.transport === "local" && label === "") {
+      setError("Name this Google account, like personal or work.");
+      return;
+    }
+    if (scope.scope === "projects" && scope.labelIds.length === 0) {
+      setError("Choose at least one project, or make it available everywhere.");
       return;
     }
     setPending(true);
-    const send = async () => {
-      const result = await connect({ environmentId, input: valid.request });
-      if (result._tag !== "Success") {
-        if (!isAtomCommandInterrupted(result))
-          setError(catalogErrorText(squashAtomCommandFailure(result)));
-        return null;
-      }
-      props.onClose();
-      return result.value.signIn?.authorizationUrl ?? null;
-    };
     try {
-      if (signsIn) await openSignInPage(send);
-      else await send();
+      const result = await update({
+        environmentId: props.environmentId,
+        input: {
+          id: integration.id,
+          accountLabel: label,
+          scope:
+            scope.scope === "all"
+              ? { type: "all" }
+              : { type: "projects", labelIds: [...scope.labelIds] },
+        },
+      });
+      if (result._tag === "Success") {
+        props.onClose();
+        return;
+      }
+      if (!isAtomCommandInterrupted(result))
+        setError(integrationErrorText(squashAtomCommandFailure(result)));
     } finally {
       setPending(false);
     }
@@ -627,180 +1115,44 @@ function CatalogConnectDialog(props: {
         if (!open && !pending) props.onClose();
       }}
     >
-      <DialogPopup className="max-w-lg">
+      <DialogPopup className="max-w-md">
         <DialogHeader>
-          <DialogTitle>
-            {props.existingAccounts > 0 ? `Add a ${entry.name} account` : `Connect ${entry.name}`}
-          </DialogTitle>
-          <DialogDescription>{entry.description}</DialogDescription>
+          <DialogTitle>Edit {integrationTitle(integration)}</DialogTitle>
+          <DialogDescription>
+            How you and agents tell it apart, and where it's available.
+          </DialogDescription>
         </DialogHeader>
         <DialogPanel>
           <form
-            id="catalog-connect"
+            id={`${id}-form`}
             onSubmit={(event) => {
               event.preventDefault();
-              void submit();
+              void save();
             }}
           >
             <fieldset disabled={pending} className="space-y-5">
-              {entry.kind === "local-preset" ? (
-                <p className="text-xs text-muted-foreground">
-                  Uses your own Google OAuth client, stored in the vault as google-oauth-client, and
-                  uv on the machine running Cogenly.{" "}
-                  {googleClientMissing ? (
-                    <span className="text-destructive">No google-oauth-client item yet. </span>
-                  ) : null}
-                  <Button
-                    type="button"
-                    size="xs"
-                    variant="link"
-                    onClick={() => openDocs(entry.docsAnchor)}
-                  >
-                    Set up Google
-                  </Button>
-                </p>
-              ) : null}
               <div className="space-y-1.5">
-                <Label htmlFor="catalog-account">
-                  {entry.kind === "local-preset" || props.existingAccounts > 0
-                    ? "Account"
-                    : "Account (optional)"}
-                </Label>
+                <Label htmlFor={`${id}-account`}>Account name</Label>
                 <Input
-                  id="catalog-account"
+                  id={`${id}-account`}
                   autoFocus
-                  value={draft.accountLabel}
+                  value={accountLabel}
                   maxLength={80}
-                  placeholder={entry.kind === "local-preset" ? "personal" : "Work"}
-                  onChange={(event) => edit({ accountLabel: event.currentTarget.value })}
+                  placeholder="Work"
+                  onChange={(event) => {
+                    setAccountLabel(event.currentTarget.value);
+                    setError(null);
+                  }}
                 />
-                <p className="text-xs text-muted-foreground">
-                  Tells accounts apart, for you and for agents.
-                </p>
               </div>
-              {entry.kind === "remote" && entry.auth.length > 1 ? (
-                <div className="space-y-1.5">
-                  <div className="text-xs font-medium text-muted-foreground">Connect with</div>
-                  <Select
-                    value={draft.auth ?? entry.auth[0].kind}
-                    onValueChange={(value) => {
-                      const mode = entry.auth.find((auth) => auth.kind === value);
-                      if (mode) edit({ auth: mode.kind });
-                    }}
-                  >
-                    <SelectTrigger size="sm" className="w-full sm:w-56" aria-label="Connect with">
-                      <SelectValue>
-                        {entry.auth.find((auth) => auth.kind === draft.auth)?.label}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectPopup alignItemWithTrigger={false}>
-                      {entry.auth.map((auth) => (
-                        <SelectItem key={auth.kind} value={auth.kind}>
-                          {auth.label}
-                        </SelectItem>
-                      ))}
-                    </SelectPopup>
-                  </Select>
-                </div>
-              ) : null}
-              {entry.kind === "remote" && needs.includes("region") ? (
-                <div className="space-y-1.5">
-                  <div className="text-xs font-medium text-muted-foreground">
-                    Where your workspace is hosted
-                  </div>
-                  <Select
-                    value={draft.region}
-                    onValueChange={(value) => {
-                      if (typeof value === "string") edit({ region: value });
-                    }}
-                  >
-                    <SelectTrigger size="sm" className="w-full sm:w-56" aria-label="Region">
-                      <SelectValue>
-                        {entry.regions.find((region) => region.id === draft.region)?.label ??
-                          "Choose a region"}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectPopup alignItemWithTrigger={false}>
-                      {entry.regions.map((region) => (
-                        <SelectItem key={region.id} value={region.id}>
-                          {region.label}
-                        </SelectItem>
-                      ))}
-                    </SelectPopup>
-                  </Select>
-                </div>
-              ) : null}
-              <AnimatedHeight>
-                {needs.includes("apiKey") ? (
-                  <div className="space-y-1.5">
-                    <Label htmlFor="catalog-api-key">
-                      {entry.kind === "remote"
-                        ? entry.auth.find((auth) => auth.kind === "api_key")?.label
-                        : null}
-                    </Label>
-                    <VaultReferenceField
-                      id="catalog-api-key"
-                      value={draft.apiKey}
-                      placeholder="Pick it from the vault"
-                      items={vaultItems}
-                      loading={vaultLoading}
-                      onChange={(apiKey) => edit({ apiKey })}
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      Store it in the vault first; Cogenly sends it as a bearer token.
-                    </p>
-                  </div>
-                ) : needs.includes("clientId") ? (
-                  <div className="space-y-2">
-                    {entry.id === "slack" ? (
-                      <ol className="list-decimal space-y-1 ps-4 text-xs text-muted-foreground">
-                        <li>
-                          Create a Slack app from this manifest{" "}
-                          {callbackUrl ? (
-                            <CopyButton
-                              size="xs"
-                              variant="outline"
-                              label="Copy the Slack app manifest"
-                              target="Slack app manifest"
-                              value={() => slackAppManifest(callbackUrl)}
-                            >
-                              Copy manifest
-                            </CopyButton>
-                          ) : null}
-                        </li>
-                        <li>
-                          In the app's Agents & AI Apps settings, turn on Model Context Protocol.
-                        </li>
-                        <li>Store its client secret in the vault, allowing slack.com.</li>
-                        <li>Enter its client ID and pick the secret below.</li>
-                      </ol>
-                    ) : (
-                      <p className="text-xs text-muted-foreground">
-                        Create an OAuth app with {entry.name}
-                        {callbackUrl ? ` with ${callbackUrl} as its callback URL` : ""}, store its
-                        client secret in the vault, and enter both here.
-                      </p>
-                    )}
-                    <div className="grid gap-2 sm:grid-cols-2">
-                      <Input
-                        aria-label="Client ID"
-                        value={draft.clientId}
-                        maxLength={500}
-                        placeholder="Client ID"
-                        onChange={(event) => edit({ clientId: event.currentTarget.value })}
-                      />
-                      <VaultReferenceField
-                        aria-label="Client secret"
-                        value={draft.clientSecret}
-                        placeholder="Client secret from the vault"
-                        items={vaultItems}
-                        loading={vaultLoading}
-                        onChange={(clientSecret) => edit({ clientSecret })}
-                      />
-                    </div>
-                  </div>
-                ) : null}
-              </AnimatedHeight>
+              <ScopeField
+                value={scope}
+                labels={props.labels}
+                onChange={(next) => {
+                  setScope(next);
+                  setError(null);
+                }}
+              />
               <AnimatedHeight>
                 {error ? (
                   <p role="alert" className="text-sm text-destructive">
@@ -812,20 +1164,22 @@ function CatalogConnectDialog(props: {
           </form>
         </DialogPanel>
         <DialogFooter>
-          <Button
-            type="button"
-            variant="ghost"
-            className="me-auto"
-            onClick={() => openDocs(entry.docsAnchor)}
-          >
-            <ExternalLinkIcon />
-            Guide
-          </Button>
+          {integration.transport === "local" ? null : (
+            <Button
+              type="button"
+              variant="ghost"
+              className="me-auto"
+              disabled={pending}
+              onClick={props.onAdvanced}
+            >
+              Advanced
+            </Button>
+          )}
           <DialogClose render={<Button variant="ghost" />} disabled={pending}>
             Cancel
           </DialogClose>
-          <Button type="submit" form="catalog-connect" disabled={pending}>
-            {pending ? "Connecting…" : signsIn ? "Connect and sign in" : "Connect"}
+          <Button type="submit" form={`${id}-form`} disabled={pending}>
+            {pending ? "Saving…" : "Save"}
           </Button>
         </DialogFooter>
       </DialogPopup>
@@ -833,33 +1187,7 @@ function CatalogConnectDialog(props: {
   );
 }
 
-/** A `{{credential:…}}` reference picked with the key button (or typed). */
-function VaultReferenceField(props: {
-  readonly id?: string;
-  readonly "aria-label"?: string;
-  readonly value: string;
-  readonly placeholder: string;
-  readonly items: ReadonlyArray<VaultItemMetadata>;
-  readonly loading: boolean;
-  readonly onChange: (value: string) => void;
-}) {
-  return (
-    <div className="flex items-center gap-2">
-      <Input
-        id={props.id}
-        aria-label={props["aria-label"]}
-        className="min-w-0 flex-1"
-        value={props.value}
-        maxLength={500}
-        placeholder={props.placeholder}
-        onChange={(event) => props.onChange(event.currentTarget.value)}
-      />
-      <VaultReferenceMenu items={props.items} loading={props.loading} onPick={props.onChange} />
-    </div>
-  );
-}
-
-/** Add or edit one integration, with a connection test against what was saved. */
+/** Add or edit a custom MCP server, with a connection test against what was saved. */
 function IntegrationEditorDialog(props: {
   readonly environmentId: EnvironmentId;
   readonly integration: Integration | null;
@@ -879,6 +1207,7 @@ function IntegrationEditorDialog(props: {
     httpBaseUrl === null ? null : new URL("/oauth/integrations/callback", httpBaseUrl).href;
   const vault = useEnvironmentQuery(vaultRpc.list({ environmentId, input: {} }));
   const vaultItems = vault.data?.items ?? EMPTY_VAULT_ITEMS;
+  const vaultLoading = vault.data === null && vault.error === null;
   // Becomes the created integration after a first save, so a test then edits it.
   const [stored, setStored] = useState(props.integration);
   const [draft, setDraft] = useState<IntegrationDraft>(() =>
@@ -906,7 +1235,7 @@ function IntegrationEditorDialog(props: {
     }
     if (stored === null) {
       const created = settled(
-        "Could not add the integration",
+        "Couldn't add the integration",
         await create({ environmentId, input: { ...valid.fields, enabled: true } }),
       );
       if (created) setStored(created.integration);
@@ -914,7 +1243,7 @@ function IntegrationEditorDialog(props: {
     }
     if (!draftChanges(stored, valid.fields)) return stored;
     const updated = settled(
-      "Could not save the integration",
+      "Couldn't save the integration",
       await update({ environmentId, input: updateInputFromDraft(stored, valid.fields) }),
     );
     if (updated) setStored(updated.integration);
@@ -935,7 +1264,7 @@ function IntegrationEditorDialog(props: {
       const integration = await persist();
       if (!integration) return;
       const result = settled(
-        "Could not test the integration",
+        "Couldn't test the integration",
         await test({ environmentId, input: { id: integration.id } }),
       );
       if (result === null) return;
@@ -953,7 +1282,7 @@ function IntegrationEditorDialog(props: {
         const integration = await persist();
         if (!integration) return null;
         const started = settled(
-          "Could not start sign-in",
+          "Couldn't start sign-in",
           await beginSignIn({ environmentId, input: { id: integration.id } }),
         );
         return started?.authorizationUrl ?? null;
@@ -978,7 +1307,11 @@ function IntegrationEditorDialog(props: {
     >
       <DialogPopup className="max-w-xl">
         <DialogHeader>
-          <DialogTitle>{props.integration ? "Edit integration" : "Add integration"}</DialogTitle>
+          <DialogTitle>
+            {props.integration
+              ? `Edit ${integrationTitle(props.integration)}`
+              : "Add a custom MCP server"}
+          </DialogTitle>
           <DialogDescription>
             A remote MCP server every agent can use through Cogenly.
           </DialogDescription>
@@ -1000,7 +1333,7 @@ function IntegrationEditorDialog(props: {
                     autoFocus
                     value={draft.displayName}
                     maxLength={200}
-                    placeholder="Gmail"
+                    placeholder="Tracker"
                     onChange={(event) => {
                       const displayName = event.currentTarget.value;
                       setDraft((current) => withDisplayName(current, displayName));
@@ -1014,7 +1347,7 @@ function IntegrationEditorDialog(props: {
                     id="integration-name"
                     value={draft.name}
                     maxLength={64}
-                    placeholder="gmail"
+                    placeholder="tracker"
                     // The name is how agents call it, so it is fixed once saved.
                     disabled={stored !== null}
                     onChange={(event) =>
@@ -1044,7 +1377,7 @@ function IntegrationEditorDialog(props: {
                   onChange={(event) => edit({ accountLabel: event.currentTarget.value })}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Tells two connections to one service apart, like two Slack workspaces.
+                  Tells two connections to one service apart, like two workspaces.
                 </p>
               </div>
               <div className="space-y-1.5">
@@ -1057,8 +1390,8 @@ function IntegrationEditorDialog(props: {
                   />
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Most hosted servers, like Linear, Notion and GitHub, use this. You sign in once in
-                  your browser; agents keep access after that.
+                  Most hosted servers use this. You sign in once in your browser; agents keep access
+                  after that.
                 </p>
                 <AnimatedHeight>
                   {draft.oauth ? (
@@ -1082,16 +1415,15 @@ function IntegrationEditorDialog(props: {
                           />
                           <VaultReferenceMenu
                             items={vaultItems}
-                            loading={vault.data === null && vault.error === null}
+                            loading={vaultLoading}
                             onPick={(reference) => edit({ clientSecret: reference })}
                           />
                         </div>
                       </div>
                       <p className="text-xs text-muted-foreground">
-                        Only for services that don't register Cogenly by themselves, such as Slack:
-                        create an app there
-                        {callbackUrl ? `, add ${callbackUrl} as its redirect URL,` : ""} and enter
-                        its client ID and the vault item holding its secret.
+                        Only for servers that need an app of your own: create one there
+                        {callbackUrl ? `, add ${callbackUrl} as its redirect address,` : ""} and
+                        enter its client ID and the vault item holding its secret.
                       </p>
                     </div>
                   ) : null}
@@ -1121,7 +1453,7 @@ function IntegrationEditorDialog(props: {
                       />
                       <VaultReferenceMenu
                         items={vaultItems}
-                        loading={vault.data === null && vault.error === null}
+                        loading={vaultLoading}
                         onPick={(reference) =>
                           setHeader(index, {
                             value: insertCredentialReference(row.value, reference),
@@ -1179,43 +1511,11 @@ function IntegrationEditorDialog(props: {
                   onChange={(event) => edit({ hint: event.currentTarget.value })}
                 />
               </div>
-              <div className="space-y-1.5">
-                <div className="text-xs font-medium text-muted-foreground">Available in</div>
-                <Select
-                  value={draft.scope}
-                  onValueChange={(value) => {
-                    if (value === "all" || value === "projects") edit({ scope: value });
-                  }}
-                >
-                  <SelectTrigger size="sm" className="w-full sm:w-48" aria-label="Available in">
-                    <SelectValue>
-                      {draft.scope === "all" ? "All projects" : "Chosen projects"}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectPopup alignItemWithTrigger={false}>
-                    <SelectItem value="all">All projects</SelectItem>
-                    <SelectItem value="projects">Chosen projects</SelectItem>
-                  </SelectPopup>
-                </Select>
-                <AnimatedHeight>
-                  {draft.scope === "projects" ? (
-                    <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                      <ProjectLabelChips labels={props.labels} ids={draft.labelIds} />
-                      <ProjectLabelPicker
-                        labels={props.labels}
-                        selectedIds={draft.labelIds}
-                        onToggle={(id, selected) =>
-                          edit({
-                            labelIds: selected
-                              ? [...draft.labelIds, id]
-                              : draft.labelIds.filter((other) => other !== id),
-                          })
-                        }
-                      />
-                    </div>
-                  ) : null}
-                </AnimatedHeight>
-              </div>
+              <ScopeField
+                value={{ scope: draft.scope, labelIds: draft.labelIds }}
+                labels={props.labels}
+                onChange={(next) => edit({ scope: next.scope, labelIds: next.labelIds })}
+              />
               <div className="space-y-1.5">
                 <div className="flex flex-wrap items-center gap-2">
                   {draft.oauth ? (
@@ -1246,7 +1546,7 @@ function IntegrationEditorDialog(props: {
                     </span>
                   ) : !stored.enabled ? (
                     <span className="text-xs text-muted-foreground">
-                      Turn the integration on to test it.
+                      Enable the integration to test it.
                     </span>
                   ) : null}
                 </div>
@@ -1282,7 +1582,7 @@ function IntegrationEditorDialog(props: {
             {stored !== null && props.integration === null ? "Done" : "Cancel"}
           </DialogClose>
           <Button type="submit" form="integration-editor" disabled={pending !== null}>
-            {pending === "save" ? "Saving…" : stored !== null ? "Save" : "Add integration"}
+            {pending === "save" ? "Saving…" : stored !== null ? "Save" : "Add server"}
           </Button>
         </DialogFooter>
       </DialogPopup>
