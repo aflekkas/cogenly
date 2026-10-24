@@ -42,6 +42,7 @@ import * as EventSink from "../orchestration-v2/EventSink.ts";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as Projections from "../orchestration-v2/ProjectionStore.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
+import * as SharedState from "../sync/SharedState.ts";
 import * as ThreadReplication from "./ThreadReplication.ts";
 import * as ThreadRouting from "./ThreadRouting.ts";
 import * as ThreadSync from "./ThreadSync.ts";
@@ -83,6 +84,7 @@ const make = Effect.gen(function* () {
   const projects = yield* ProjectStore.ProjectStoreV2;
   const sink = yield* EventSink.EventSinkV2;
   const scheduler = yield* Scheduler.Scheduler;
+  const shared = yield* SharedState.SharedState;
   const sql = yield* SqlClient.SqlClient;
   const config = yield* ServerConfig.ServerConfig;
   const fileSystem = yield* FileSystem.FileSystem;
@@ -196,20 +198,53 @@ const make = Effect.gen(function* () {
   ) {
     const entry = yield* thread(threadId);
     if (!leaveLocalChanges) yield* localChanges(entry);
-    const agent = yield* sql<{
-      readonly agent_id: string;
-    }>`SELECT agent_id FROM agents WHERE conversation_thread_id = ${threadId} LIMIT 1`.pipe(
-      Effect.orDie,
-    );
-    // An agent's conversation runs where the agent runs; it moves with the agent.
-    if (agent[0] !== undefined)
+    const agent = (yield* agentsConversing([threadId]))[0];
+    if (agent !== undefined && agent.owner !== self)
       return yield* new ThreadRemoteError({
-        reason: "rejected",
-        detail: "This is an agent's conversation. Move the agent to move it.",
+        reason: "not-owner",
+        detail: "This agent runs on another machine; move it from there.",
       });
     const { epoch } = yield* replication.fence(threadId, target);
     yield* settle(threadId, target, epoch);
+    // The agent runs where its conversation runs: it follows, with its schedules.
+    if (agent !== undefined) yield* handOffAgent(agent.agentId, target);
   });
+
+  /** Agents whose conversation is one of `threadIds`, with their owner machine. */
+  const agentsConversing = (threadIds: ReadonlyArray<ThreadId>) =>
+    sql<{
+      readonly agent_id: string;
+      readonly conversation_thread_id: string;
+      readonly owner_machine: string | null;
+    }>`SELECT agent_id, conversation_thread_id, owner_machine FROM agents
+      WHERE conversation_thread_id IN ${sql.in(threadIds)}`.pipe(
+      Effect.map((rows) =>
+        rows.map((row) => ({
+          agentId: row.agent_id,
+          threadId: row.conversation_thread_id as ThreadId,
+          owner: (row.owner_machine ?? self) as EnvironmentId,
+        })),
+      ),
+      Effect.orDie,
+    );
+
+  /**
+   * Give an agent this machine runs to `target`, after its conversation
+   * moved. Only the owner may author this change (SharedState); schedules
+   * bound to the agent move after it, since they must match its owner.
+   */
+  const handOffAgent = Effect.fn("ThreadTransfer.handOffAgent")(function* (
+    agentId: string,
+    target: EnvironmentId,
+  ) {
+    yield* shared.write("agent", agentId, { ownerMachine: target });
+    const schedules = yield* sql<{
+      readonly id: string;
+    }>`SELECT id FROM shared_documents WHERE kind = 'schedule' AND tombstone_json IS NULL
+      AND json_extract(fields_json, '$.agentId') = ${agentId}`;
+    for (const schedule of schedules)
+      yield* shared.write("schedule", schedule.id, { ownerMachine: target });
+  }, Effect.orDie);
 
   /**
    * Move threads. `relay` is true on the hub answering another machine: it
@@ -405,6 +440,13 @@ const make = Effect.gen(function* () {
           }),
         ),
       );
+    // An agent left behind by a crash between its conversation and its profile.
+    const remote = yield* replication.remoteOwners;
+    if (remote.size === 0) return;
+    for (const agent of yield* agentsConversing([...remote.keys()])) {
+      const runner = remote.get(agent.threadId);
+      if (agent.owner === self && runner !== undefined) yield* handOffAgent(agent.agentId, runner);
+    }
   });
   yield* scheduler.register("thread-transfer", resume);
 

@@ -192,6 +192,37 @@ export const ThreadHandoffCommit = makePeerChannel({
   error: ThreadRemoteError,
 });
 
+export const ProjectMoveInput = Schema.Struct({
+  id: ProjectLabelId,
+  /** The paired machine that runs the project's threads and agents from now on. */
+  target: EnvironmentId,
+  leaveLocalChanges: Schema.optional(Schema.Boolean),
+});
+export type ProjectMoveInput = typeof ProjectMoveInput.Type;
+
+export const ProjectMoveRepository = Schema.Struct({
+  remote: Schema.String,
+  /** `cloning` continues on the target after the move answers. */
+  status: Schema.Literals(["present", "cloning", "failed"]),
+  detail: Schema.optional(Schema.String),
+});
+export type ProjectMoveRepository = typeof ProjectMoveRepository.Type;
+
+export const ProjectMoveResult = Schema.Struct({
+  repositories: Schema.Array(ProjectMoveRepository),
+  threads: ThreadMoveResult,
+});
+export type ProjectMoveResult = typeof ProjectMoveResult.Type;
+
+/** Make sure `target` has a checkout of every repository the project links (the hub relays). */
+export const ProjectMovePrepare = makePeerChannel({
+  name: "threads.project.prepare.v1",
+  scope: AuthPeerDelegateScope,
+  payload: Schema.Struct({ id: ProjectLabelId, target: EnvironmentId }),
+  success: Schema.Array(ProjectMoveRepository),
+  error: ThreadRemoteError,
+});
+
 /** Push the sender's next batch; the reply names the cursor the receiver committed. */
 export const ThreadReplicationApply = makePeerChannel({
   name: "sync.threads.apply.v1",

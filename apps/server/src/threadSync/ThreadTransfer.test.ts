@@ -1,5 +1,10 @@
 import { describe, expect, it } from "@effect/vitest";
-import { CommandId, type OrchestrationV2DomainEvent, ProjectId } from "@t3tools/contracts";
+import {
+  CommandId,
+  type OrchestrationV2DomainEvent,
+  ProjectId,
+  ProjectLabelId,
+} from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -127,6 +132,86 @@ describe("moving threads between paired machines", () => {
         });
         expect(busy.skipped[0]?.reason).toBe("busy");
         expect(yield* hub.replication.owner(threadId)).toMatchObject({ local: false });
+      }).pipe(Effect.scoped),
+    30000,
+  );
+
+  it.live(
+    "an agent moves with its conversation, and its schedules follow",
+    () =>
+      Effect.gen(function* () {
+        const { hub, laptop, at } = yield* start("agent");
+        yield* addProject(laptop, "/Users/someone/racing");
+        yield* addProject(hub, "/srv/racing");
+        yield* laptop.sink.write({ events: [threadCreated("event:created", at)] });
+        yield* laptop.sync.sync(hub.environmentId);
+        yield* laptop.sql`INSERT INTO agents(agent_id, conversation_thread_id, payload_json, enabled, daily_run_cap, owner_machine)
+          VALUES ('agent:pit', ${threadId}, '{}', 1, 10, ${laptop.environmentId})`;
+        yield* laptop.shared.write("agent", "agent:pit", { ownerMachine: laptop.environmentId });
+        yield* laptop.shared.write("schedule", "task:pit", {
+          agentId: "agent:pit",
+          title: "Morning check",
+          prompt: "Check",
+          enabled: true,
+          schedule: { type: "interval", everyMs: 60000 },
+          repositoryRemote: null,
+          workspaceStrategy: { type: "root" },
+          modelSelection: { instanceId: "codex", model: "gpt-5" },
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          ownerMachine: laptop.environmentId,
+          createdAt: "2026-10-24T00:00:00.000Z",
+        });
+
+        expect(
+          yield* laptop.transfer.move({ threadIds: [threadId], target: hub.environmentId }),
+        ).toEqual({ moved: [threadId], skipped: [] });
+        expect((yield* laptop.shared.get("agent", "agent:pit"))?.fields.ownerMachine).toBe(
+          hub.environmentId,
+        );
+        expect((yield* laptop.shared.get("schedule", "task:pit"))?.fields.ownerMachine).toBe(
+          hub.environmentId,
+        );
+      }).pipe(Effect.scoped),
+    30000,
+  );
+
+  it.live(
+    "moving a project checks its repositories out on the target, then moves its threads",
+    () =>
+      Effect.gen(function* () {
+        const { hub, laptop, at } = yield* start("project");
+        const fileSystem = yield* hub.run(FileSystem.FileSystem);
+        const path = yield* hub.run(Path.Path);
+        const checkout = yield* fileSystem.makeTempDirectoryScoped();
+        yield* fileSystem.writeFileString(path.join(checkout, "README.md"), "racing");
+        yield* addProject(laptop, "/Users/someone/racing");
+        yield* addProject(hub, checkout);
+        for (const machine of [hub, laptop])
+          yield* machine.sql`INSERT INTO project_labels(label_id, name, created_at, updated_at)
+            VALUES ('label:racing', 'athens-racing', '2026-10-24T00:00:00.000Z', '2026-10-24T00:00:00.000Z')`;
+        yield* hub.sql`INSERT INTO label_repositories(label_id, repository_id, remote) VALUES
+          ('label:racing', ${projectId}, 'github.com/aflekkas/athens-racing'),
+          ('label:racing', 'remote:github.com/aflekkas/pit-wall', 'github.com/aflekkas/pit-wall')`;
+        yield* laptop.sink.write({ events: [threadCreated("event:created", at)] });
+        yield* laptop.sql`INSERT INTO thread_project_labels(thread_id, label_id) VALUES (${threadId}, 'label:racing')`;
+        yield* laptop.sync.sync(hub.environmentId);
+
+        const result = yield* hub.projectMove.move({
+          id: ProjectLabelId.make("label:racing"),
+          target: hub.environmentId,
+        });
+        expect(result.threads).toEqual({ moved: [threadId], skipped: [] });
+        // A repository known only by its remote is cloned; this layer cannot clone.
+        expect(result.repositories).toEqual([
+          { remote: "github.com/aflekkas/athens-racing", status: "present" },
+          {
+            remote: "github.com/aflekkas/pit-wall",
+            status: "failed",
+            detail: "This machine cannot clone repositories.",
+          },
+        ]);
+        expect(yield* hub.replication.owner(threadId)).toMatchObject({ local: true });
       }).pipe(Effect.scoped),
     30000,
   );

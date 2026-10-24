@@ -171,11 +171,13 @@ const make = Effect.gen(function* () {
     const ownerClock = current?.clocks.ownerMachine;
     const incomingOwner = change.fields.ownerMachine;
     // A regular configuration edit is never authority to move autonomous execution.
-    // v1 keeps ownership immutable after creation; handoff of running work is a later protocol.
+    // Only the owner hands it off, after moving the agent's conversation
+    // (ThreadTransfer); the author survives hub relay as `updatedBy`.
     if (
       owner !== undefined &&
       incomingOwner !== undefined &&
       incomingOwner !== owner &&
+      change.updatedBy !== owner &&
       (!ownerClock || compareClock(change.clocks.ownerMachine!, ownerClock) > 0)
     )
       return yield* new SharedStateError({ reason: "owner-change" });

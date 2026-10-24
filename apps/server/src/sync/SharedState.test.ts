@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { EnvironmentId, SharedStateError, type SharedDocumentChange } from "@t3tools/contracts";
+import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -610,6 +611,25 @@ describe("SharedState", () => {
       expect(result._tag).toBe("Failure");
       if (result._tag === "Failure") expect(result.failure).toBeInstanceOf(SharedStateError);
       expect((yield* state.get("agent", "agent:one"))?.fields.ownerMachine).toBe(local);
+    }).pipe(Effect.provide(layer)),
+  );
+  it.effect("lets only the owner hand its agent to another machine", () =>
+    Effect.gen(function* () {
+      const state = yield* SharedState.SharedState;
+      yield* state.write("agent", "agent:moving", { ownerMachine: local });
+      yield* state.write("agent", "agent:moving", { ownerMachine: peer });
+      expect((yield* state.get("agent", "agent:moving"))?.fields.ownerMachine).toBe(peer);
+      const third = EnvironmentId.make("third");
+      const theft = {
+        // A clock newer than the handoff, so only authorship can refuse it.
+        ...change({ ownerMachine: third }, (yield* Clock.currentTimeMillis) + 60_000),
+        kind: "agent" as const,
+        id: "agent:moving",
+        updatedBy: third,
+      };
+      const result = yield* Effect.result(state.receive(batch([theft]), peer, true));
+      expect(result._tag).toBe("Failure");
+      expect((yield* state.get("agent", "agent:moving"))?.fields.ownerMachine).toBe(peer);
     }).pipe(Effect.provide(layer)),
   );
   it.effect(

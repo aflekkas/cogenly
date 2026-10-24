@@ -3,6 +3,8 @@ import {
   MessageId,
   type OrchestrationV2DomainEvent,
   type OrchestrationV2ServerCommand,
+  ProjectId,
+  ProjectLabelError,
   ThreadId,
 } from "@t3tools/contracts";
 import type * as DateTime from "effect/DateTime";
@@ -22,10 +24,13 @@ import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as RemoteThreadCommands from "../orchestration-v2/RemoteThreadCommands.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
+import * as SharedState from "../sync/SharedState.ts";
 import * as ThreadReplication from "./ThreadReplication.ts";
 import * as ThreadRouting from "./ThreadRouting.ts";
 import * as ThreadSync from "./ThreadSync.ts";
 import * as ThreadTransfer from "./ThreadTransfer.ts";
+import * as ProjectMove from "./ProjectMove.ts";
+import * as ProjectLabelService from "../projectLabels/ProjectLabelService.ts";
 
 /**
  * A paired-machine server with thread replication and routing over a real
@@ -69,9 +74,50 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
         Effect.orDie,
       ),
   });
+  // Projects read straight from the tables tests fill; nothing here clones.
+  const labels = Layer.unwrap(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      return Layer.mock(ProjectLabelService.ProjectLabelService)({
+        readActive: (id) =>
+          Effect.gen(function* () {
+            const label = (yield* sql<{
+              readonly name: string;
+            }>`SELECT name FROM project_labels WHERE label_id = ${id}`.pipe(Effect.orDie))[0];
+            if (label === undefined)
+              return yield* new ProjectLabelError({ operation: "readActive", reason: "not_found" });
+            const links = yield* sql<{
+              readonly repository_id: string;
+              readonly remote: string | null;
+            }>`SELECT repository_id, remote FROM label_repositories WHERE label_id = ${id}`.pipe(
+              Effect.orDie,
+            );
+            return {
+              label: {
+                id,
+                name: label.name,
+                instructions: "",
+                createdAt: "2026-10-24T00:00:00.000Z",
+                updatedAt: "2026-10-24T00:00:00.000Z",
+                repositoryIds: links.map((link) => ProjectId.make(link.repository_id)),
+                repositories: links.map((link) => ({
+                  repositoryId: ProjectId.make(link.repository_id),
+                  remote: link.remote,
+                  directoryName: null,
+                })),
+                sourceLinks: [],
+                projectChatThreadId: null,
+                threadCount: 0,
+              },
+            };
+          }),
+      });
+    }),
+  );
   const context = yield* inStores(
     Layer.build(
-      ThreadTransfer.layer.pipe(
+      ProjectMove.layer.pipe(
+        Layer.provideMerge(ThreadTransfer.layer),
         Layer.provideMerge(ThreadRouting.layer),
         Layer.provideMerge(ThreadSync.layer),
         Layer.provideMerge(
@@ -81,6 +127,8 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
           }),
         ),
         Layer.provide(ProjectStore.layer),
+        Layer.provide(labels),
+        Layer.provideMerge(SharedState.layer),
         Layer.provide(
           Layer.succeed(Machines.Machines, { ...machine.machines, subscribe: Stream.never }),
         ),
@@ -92,6 +140,8 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
   const sync = yield* ThreadSync.ThreadSync.pipe(Effect.provideContext(context));
   const routing = yield* ThreadRouting.ThreadRouting.pipe(Effect.provideContext(context));
   const transfer = yield* ThreadTransfer.ThreadTransfer.pipe(Effect.provideContext(context));
+  const shared = yield* SharedState.SharedState.pipe(Effect.provideContext(context));
+  const projectMove = yield* ProjectMove.ProjectMove.pipe(Effect.provideContext(context));
   const remoteCommands = yield* inStores(RemoteThreadCommands.RemoteThreadCommands);
   const projections = yield* inStores(Projections.ProjectionStoreV2);
   const sql = yield* machine.run(SqlClient.SqlClient);
@@ -101,6 +151,8 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
     sync,
     routing,
     transfer,
+    projectMove,
+    shared,
     remoteCommands,
     sink,
     projections,
