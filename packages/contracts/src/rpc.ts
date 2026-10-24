@@ -610,6 +610,9 @@ export const WS_METHODS = {
   vaultUpdate: "vault.update",
   vaultDelete: "vault.delete",
   vaultUsage: "vault.usage",
+  // Sharing this vault with directly paired machines (owner decision, never agents)
+  vaultSetPeerSharing: "vault.setPeerSharing",
+  vaultSharingStatus: "vault.sharingStatus",
   scheduledTasksListWebhookDeliveries: "scheduledTasks.listWebhookDeliveries",
   scheduledTasksGetWebhookDelivery: "scheduledTasks.getWebhookDelivery",
 
@@ -2565,6 +2568,16 @@ const WsVaultUsageRpc = Rpc.make(WS_METHODS.vaultUsage, {
   success: Vault.VaultUsageListResult,
   error: Schema.Union([Vault.VaultError, EnvironmentAuthorizationError]),
 });
+const WsVaultSetPeerSharingRpc = Rpc.make(WS_METHODS.vaultSetPeerSharing, {
+  payload: Vault.VaultSetPeerSharingInput,
+  success: Vault.VaultSharingStatus,
+  error: Schema.Union([Vault.VaultError, EnvironmentAuthorizationError]),
+});
+const WsVaultSharingStatusRpc = Rpc.make(WS_METHODS.vaultSharingStatus, {
+  payload: Schema.Struct({}),
+  success: Vault.VaultSharingStatus,
+  error: Schema.Union([Vault.VaultError, EnvironmentAuthorizationError]),
+});
 
 const WsScheduledTasksListWebhookDeliveriesRpc = Rpc.make(
   WS_METHODS.scheduledTasksListWebhookDeliveries,
@@ -2772,6 +2785,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsVaultUpdateRpc,
   WsVaultDeleteRpc,
   WsVaultUsageRpc,
+  WsVaultSetPeerSharingRpc,
+  WsVaultSharingStatusRpc,
   WsScheduledTasksListWebhookDeliveriesRpc,
   WsScheduledTasksGetWebhookDeliveryRpc,
   WsServerReportClientActivityRpc,

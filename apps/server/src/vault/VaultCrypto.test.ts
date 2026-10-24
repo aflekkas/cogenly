@@ -4,9 +4,17 @@ import {
   decryptBody,
   encryptBody,
   generateKeyPair,
+  isX25519PublicKey,
+  openVaultPayload,
   randomDataKey,
+  sealVaultPayload,
+  sealedDigestOf,
   unwrapDataKey,
+  unwrapVaultDataKey,
   wrapDataKey,
+  wrapVaultDataKey,
+  type VaultSealed,
+  type VaultWrap,
 } from "./VaultCrypto.ts";
 import { evaluateVaultPolicy, hostMatchesDomain } from "./VaultPolicy.ts";
 import { redactShortSecrets, redactShortValue, redactText, redactValue } from "./VaultRedactor.ts";
@@ -81,6 +89,108 @@ describe("vault crypto", () => {
     expect(() =>
       unwrapDataKey({ wrapped: forB, privateKey: a.privateKey, itemId: "vault:1" }),
     ).toThrow();
+  });
+});
+
+describe("synced vault crypto", () => {
+  const author = generateKeyPair();
+  const recipient = generateKeyPair();
+  const relay = generateKeyPair();
+  const clock = { wall: 1_700_000_000_000, logical: 3, node: "env:a" };
+  const seal = (dataKey = randomDataKey()) => ({
+    dataKey,
+    sealed: sealVaultPayload({
+      dataKey,
+      plaintext: '{"secretFields":{"password":"hunter2"}}',
+      itemId: "vault:1",
+      author: "env:a",
+      clock,
+    }),
+  });
+  const wrapFor = (sealed: VaultSealed, dataKey: Uint8Array, by = "env:a", key = author) =>
+    wrapVaultDataKey({
+      dataKey,
+      itemId: "vault:1",
+      sealed,
+      by,
+      senderPrivateKey: key.privateKey,
+      recipient: "env:b",
+      recipientPublicKey: recipient.publicKey,
+    });
+  const unwrap = (wrap: VaultWrap, sealed: VaultSealed, overrides: object = {}) =>
+    unwrapVaultDataKey({
+      wrap,
+      itemId: "vault:1",
+      sealed,
+      recipient: "env:b",
+      recipientPrivateKey: recipient.privateKey,
+      senderPublicKey: author.publicKey,
+      ...overrides,
+    });
+
+  it("round trips a sealed payload through an authenticated wrap", () => {
+    const { dataKey, sealed } = seal();
+    const wrap = wrapFor(sealed, dataKey);
+    expect(wrap.sealedDigest).toBe(sealedDigestOf(sealed));
+    const opened = unwrap(wrap, sealed);
+    expect(opened).toEqual(dataKey);
+    expect(openVaultPayload({ dataKey: opened, sealed, itemId: "vault:1", clock })).toContain(
+      "hunter2",
+    );
+    expect(JSON.stringify({ sealed, wrap })).not.toContain("hunter2");
+  });
+
+  it("refuses tampering, a forged sender, the wrong recipient, another revision and a replayed clock", () => {
+    const { dataKey, sealed } = seal();
+    const wrap = wrapFor(sealed, dataKey);
+    const flip = (text: string) =>
+      Buffer.from(
+        Buffer.from(text, "base64").map((byte, index) => (index === 0 ? byte ^ 1 : byte)),
+      ).toString("base64");
+    // Tampered sealed ciphertext: the wrap no longer matches its digest, and
+    // even with the right data key the body fails authentication.
+    const tampered = { ...sealed, ciphertext: flip(sealed.ciphertext) };
+    expect(() => unwrap(wrap, tampered)).toThrow();
+    expect(() =>
+      openVaultPayload({ dataKey, sealed: tampered, itemId: "vault:1", clock }),
+    ).toThrow();
+    // A relay can encrypt to the recipient but not as the author: its static
+    // key does not match the one the recipient trusts for `by`.
+    const forged = wrapFor(sealed, randomDataKey(), "env:a", relay);
+    expect(() => unwrap(forged, sealed)).toThrow();
+    // Claiming another holder's identity changes the bound info.
+    expect(() => unwrap({ ...wrap, by: "env:c" }, sealed)).toThrow();
+    // Only the named recipient's key opens it, for that recipient id.
+    expect(() => unwrap(wrap, sealed, { recipientPrivateKey: relay.privateKey })).toThrow();
+    expect(() => unwrap(wrap, sealed, { recipient: "env:c" })).toThrow();
+    // A wrap for one revision does not open another.
+    const next = seal();
+    expect(() => unwrap(wrap, next.sealed)).toThrow();
+    expect(() => unwrap({ ...wrap, sealedDigest: sealedDigestOf(next.sealed) }, sealed)).toThrow();
+    // Rollback: the same value under a newer clock fails, as does another item.
+    expect(() =>
+      openVaultPayload({
+        dataKey,
+        sealed,
+        itemId: "vault:1",
+        clock: { ...clock, wall: clock.wall + 1 },
+      }),
+    ).toThrow();
+    expect(() => openVaultPayload({ dataKey, sealed, itemId: "vault:2", clock })).toThrow();
+    expect(() =>
+      openVaultPayload({
+        dataKey,
+        sealed: { ...sealed, author: "env:c" },
+        itemId: "vault:1",
+        clock,
+      }),
+    ).toThrow();
+  });
+
+  it("accepts only X25519 SPKI public keys to pin", () => {
+    expect(isX25519PublicKey(author.publicKey)).toBe(true);
+    expect(isX25519PublicKey(author.privateKey)).toBe(false);
+    expect(isX25519PublicKey("not a key")).toBe(false);
   });
 });
 

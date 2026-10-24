@@ -29,7 +29,13 @@ export const HybridClock = Schema.Struct({
   node: SharedDocumentId,
 });
 export type HybridClock = typeof HybridClock.Type;
-export const SharedDocumentKind = Schema.Literals(["project", "agent", "schedule", "fact"]);
+export const SharedDocumentKind = Schema.Literals([
+  "project",
+  "agent",
+  "schedule",
+  "fact",
+  "vault",
+]);
 export type SharedDocumentKind = typeof SharedDocumentKind.Type;
 /** A delta contains only fields authored by this edit; relay preserves their clocks. */
 export const SharedDocumentChange = Schema.Struct({

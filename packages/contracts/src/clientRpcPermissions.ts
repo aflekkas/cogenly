@@ -1,6 +1,7 @@
 import * as Schema from "effect/Schema";
 import { GitPreparePullRequestThreadInput } from "./git.ts";
 import {
+  AuthAccessReadScope,
   AuthAccessWriteScope,
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
@@ -151,6 +152,10 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.vaultCreate]: AuthOrchestrationOperateScope,
   [WS_METHODS.vaultUpdate]: AuthOrchestrationOperateScope,
   [WS_METHODS.vaultDelete]: AuthOrchestrationOperateScope,
+  // Sharing makes another machine able to decrypt every shared item: access
+  // management, like pairing. Agents have no tool for it.
+  [WS_METHODS.vaultSetPeerSharing]: AuthAccessWriteScope,
+  [WS_METHODS.vaultSharingStatus]: AuthAccessReadScope,
   [ORCHESTRATION_V2_WS_METHODS.stopWorkflow]: AuthOrchestrationOperateScope,
   // Continuing on another provider starts a turn, like sending a message.
   [ORCHESTRATION_V2_WS_METHODS.acceptUsageLimitHandoff]: AuthOrchestrationOperateScope,

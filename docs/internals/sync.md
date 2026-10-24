@@ -110,8 +110,10 @@ local: a peer merge that changes a fact appends a local history entry whose ID
 starts with `sync:`.
 
 Shared repository identity is its remote. Local checkout IDs, absolute paths,
-thread bindings, credentials, run counters and fallback position/reset time do
-not replicate. Peer metadata edits preserve valid local execution bindings;
+thread bindings, run counters and fallback position/reset time do not
+replicate. Vault items replicate encrypted, only between machines the owner
+shares with, and project outside the merge transaction; see
+[vault sync](./vault-sync.md). Peer metadata edits preserve valid local execution bindings;
 checkout resolution only fills a missing binding. Existing-worktree references travel only relative to a
 repository; a worktree outside that repository is represented as root intent.
 A remote-only repository link has no local checkout. Configuration sync never

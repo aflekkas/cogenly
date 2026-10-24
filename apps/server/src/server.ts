@@ -177,6 +177,7 @@ import * as Scheduler from "./scheduling/Scheduler.ts";
 import * as SharedState from "./sync/SharedState.ts";
 import * as SharedSync from "./sync/SharedSync.ts";
 import * as SharedSyncStatus from "./sync/SharedSyncStatus.ts";
+import * as VaultSync from "./vault/VaultSync.ts";
 import * as ThreadReplication from "./threadSync/ThreadReplication.ts";
 import * as ThreadRouting from "./threadSync/ThreadRouting.ts";
 import * as ThreadTransfer from "./threadSync/ThreadTransfer.ts";
@@ -588,6 +589,12 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   Layer.mergeAll(
     SharedSync.layer.pipe(Layer.provide(SharedState.layer)),
     SharedSyncStatus.layer,
+    // Vault items shared with paired machines, end-to-end encrypted over the same documents.
+    VaultSync.layer.pipe(
+      Layer.provide(RuntimeLayer.layerVaultProvided),
+      Layer.provide(RuntimeLayer.layerVaultSyncCapture),
+      Layer.provide(SharedState.layer),
+    ),
     // The orchestrator's own sink, so replicated events reach the same
     // subscribers, and its forwarder registry, so routing sees its commands.
     ProjectMove.layer.pipe(

@@ -47,6 +47,17 @@ export class SharedState extends Context.Service<
       fields: SharedDocumentChange["fields"],
       deleted?: boolean,
     ) => Effect.Effect<void, SharedStateError>;
+    /**
+     * `write` for fields that must bind the clock they are written at (a
+     * synced vault item's sealed payload). Every field gets that clock.
+     */
+    readonly writeBuilt: (
+      kind: SharedDocumentKind,
+      id: string,
+      build: (
+        clock: HybridClock,
+      ) => Effect.Effect<SharedDocumentChange["fields"], SharedStateError>,
+    ) => Effect.Effect<void, SharedStateError>;
     /** Called inside the local domain mutation transaction, before its acknowledgement. */
     readonly capture: (
       kind: SharedDocumentKind,
@@ -248,6 +259,44 @@ const make = Effect.gen(function* () {
     }
     return true;
   });
+  // A newer build's nested fields in the stored value survive this write.
+  const changedFields = (
+    kind: SharedDocumentKind,
+    current: SharedDocumentChange | undefined,
+    fields: SharedDocumentChange["fields"],
+  ) =>
+    Object.fromEntries(
+      Object.entries(fields)
+        .map(
+          ([key, value]) => [key, preserveUnknown(kind, key, value, current?.fields[key])] as const,
+        )
+        .filter(
+          ([key, value]) =>
+            !current ||
+            !Object.hasOwn(current.fields, key) ||
+            encodeJson(value) !== encodeJson(current.fields[key]),
+        ),
+    ) as SharedDocumentChange["fields"];
+  const commit = Effect.fn("SharedState.commit")(function* (
+    kind: SharedDocumentKind,
+    id: string,
+    changed: SharedDocumentChange["fields"],
+    clock: HybridClock,
+    deleted: boolean,
+    project: boolean,
+    preserveLocalBindings: boolean,
+  ) {
+    const change: SharedDocumentChange = {
+      kind,
+      id,
+      fields: changed,
+      clocks: Object.fromEntries(Object.keys(changed).map((key) => [key, clock])),
+      tombstone: deleted ? clock : null,
+      updatedBy: environmentId,
+    };
+    yield* validateChange(change);
+    return yield* persist(change, project, preserveLocalBindings);
+  });
   const writeInternal = Effect.fn("SharedState.writeInternal")(function* (
     kind: SharedDocumentKind,
     id: string,
@@ -261,31 +310,10 @@ const make = Effect.gen(function* () {
       if (deleted) return false;
       return yield* new SharedStateError({ reason: "invalid-document" });
     }
-    // A newer build's nested fields in the stored value survive this write.
-    const changed = Object.fromEntries(
-      Object.entries(fields)
-        .map(
-          ([key, value]) => [key, preserveUnknown(kind, key, value, current?.fields[key])] as const,
-        )
-        .filter(
-          ([key, value]) =>
-            !current ||
-            !Object.hasOwn(current.fields, key) ||
-            encodeJson(value) !== encodeJson(current.fields[key]),
-        ),
-    ) as SharedDocumentChange["fields"];
+    const changed = changedFields(kind, current, fields);
     if (!deleted && Object.keys(changed).length === 0) return false;
     const clock = yield* observe();
-    const change: SharedDocumentChange = {
-      kind,
-      id,
-      fields: changed,
-      clocks: Object.fromEntries(Object.keys(changed).map((key) => [key, clock])),
-      tombstone: deleted ? clock : null,
-      updatedBy: environmentId,
-    };
-    yield* validateChange(change);
-    return yield* persist(change, project, preserveLocalBindings);
+    return yield* commit(kind, id, changed, clock, deleted, project, preserveLocalBindings);
   });
   const write: SharedState["Service"]["write"] = (kind, id, fields, deleted = false) =>
     sql.withTransaction(writeInternal(kind, id, fields, deleted, true)).pipe(
@@ -293,6 +321,24 @@ const make = Effect.gen(function* () {
       Effect.tap((changed) => (changed ? notify : Effect.void)),
       Effect.asVoid,
     );
+  const writeBuilt: SharedState["Service"]["writeBuilt"] = (kind, id, build) =>
+    sql
+      .withTransaction(
+        Effect.gen(function* () {
+          const current = yield* get(kind, id);
+          if (current?.tombstone)
+            return yield* new SharedStateError({ reason: "invalid-document" });
+          const clock = yield* observe();
+          const changed = changedFields(kind, current, yield* build(clock));
+          if (Object.keys(changed).length === 0) return false;
+          return yield* commit(kind, id, changed, clock, false, true, false);
+        }),
+      )
+      .pipe(
+        Effect.mapError(storage),
+        Effect.tap((changed) => (changed ? notify : Effect.void)),
+        Effect.asVoid,
+      );
   const capture: SharedState["Service"]["capture"] = (kind, id, deleted = false) =>
     sql
       .withTransaction(
@@ -526,6 +572,7 @@ const make = Effect.gen(function* () {
     changes: Stream.fromPubSub(signals),
     get,
     write,
+    writeBuilt,
     capture,
     bootstrap,
     cursors,
