@@ -131,6 +131,7 @@ export const layerRuntimePolicyProvided = RuntimePolicy.layerFromProjectStore.pi
       ProjectLabelFolders.layer,
       // Nested: a merge would leave the files layer's folder requirement dangling.
       layerProjectFilesProvided,
+      layerIntegrationsProvided,
     ),
   ),
 );

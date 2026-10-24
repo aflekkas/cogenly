@@ -22,6 +22,7 @@ import * as Integrations from "../integrations/Integrations.ts";
 import { IntegrationEndpointPolicy } from "../integrations/RemoteEndpoint.ts";
 import * as Sqlite from "../persistence/Sqlite.ts";
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import * as RuntimePolicy from "./RuntimePolicy.ts";
 import * as RuntimeLayer from "./runtimeLayer.ts";
 import * as ThreadManagement from "./ThreadManagementService.ts";
@@ -81,6 +82,7 @@ const layerProductionPolicy = Layer.mergeAll(
       subscribeChanges: Effect.never,
     }),
   ),
+  Layer.provideMerge(ServerSettings.layer),
   Layer.provide(
     Layer.mock(ServerSecretStore.ServerSecretStore)({
       get: (name) => Effect.succeed(Option.fromUndefinedOr(storedSecrets.get(name))),
@@ -132,6 +134,8 @@ it.effect("production runtime policy names connected integrations in turn contex
       transport: "http",
       url: "https://mcp.acme.test/mcp",
       headers: {},
+      hint: "",
+      enabled: true,
       scope: { type: "all" },
     });
     const check = yield* integrations.testConnection(integration.id);
@@ -141,5 +145,14 @@ it.effect("production runtime policy names connected integrations in turn contex
     const thread = unfiledThread(yield* DateTime.now);
     const resolved = yield* policy.resolve({ thread, modelSelection: thread.modelSelection });
     expect(resolved.projectManifest).toContain("Connected integrations: acme (Acme Docs).");
+    expect(resolved.projectManifest).toContain("Use integration_tools / integration_call.");
+    expect(resolved.projectManifest).toContain("the provider's own connectors for them");
+    expect(resolved.projectManifest).toContain("are turned off.");
+
+    const settings = yield* ServerSettings.ServerSettingsService;
+    yield* settings.updateSettings({ useProviderConnectors: true });
+    const optedIn = yield* policy.resolve({ thread, modelSelection: thread.modelSelection });
+    expect(optedIn.projectManifest).toContain("Connected integrations: acme (Acme Docs).");
+    expect(optedIn.projectManifest).not.toContain("the provider's own connectors for them");
   }).pipe(Effect.provide(layerProductionPolicy)),
 );

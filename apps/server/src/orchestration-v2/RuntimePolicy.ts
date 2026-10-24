@@ -121,8 +121,9 @@ export const layerFromProjectStore: Layer.Layer<
     // Optional so layers without the project-files service (unit tests over a
     // memory database) still resolve; production always provides it.
     const files = yield* Effect.serviceOption(ProjectFiles.ProjectFiles);
-    // Optional like ProjectFiles: unit layers without the gateway still
-    // resolve, and production always provides it.
+    // Isolated policy tests and lightweight layers can resolve without a
+    // gateway. runtimeLayer provides it explicitly; its production composition
+    // test guards this optional dependency, including the duplicate-connector note.
     const integrationsService = yield* Effect.serviceOption(Integrations.Integrations);
     const serverSettings = yield* Effect.serviceOption(ServerSettings.ServerSettingsService);
     // Unreadable settings keep the default: provider duplicates stay hidden.
