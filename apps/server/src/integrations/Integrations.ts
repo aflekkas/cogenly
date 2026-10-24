@@ -1670,8 +1670,11 @@ const make = (options: IntegrationsOptions = {}) =>
           const nowMs = yield* Clock.currentTimeMillis;
           yield* Ref.update(pendingSignIns, (current) => {
             const next = new Map([...current].filter(([, pending]) => pending.expiresAtMs > nowMs));
-            // The oldest pending sign-ins give way; their links stop working.
-            while (next.size >= MAX_PENDING_SIGN_INS) next.delete(next.keys().next().value!);
+            // Owner and agent requests have separate bounded slots.
+            const peers = [...next].filter(
+              ([, pending]) => pending.fromAgent === (from.fromAgent === true),
+            );
+            while (peers.length >= MAX_PENDING_SIGN_INS) next.delete(peers.shift()![0]);
             return next.set(state, {
               integrationId: integration.id,
               fromAgent: from.fromAgent === true,

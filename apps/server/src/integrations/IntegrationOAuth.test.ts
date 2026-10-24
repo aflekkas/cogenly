@@ -345,6 +345,23 @@ const whoami = (name: string) =>
   });
 
 describe("Integration OAuth sign-in", () => {
+  it.effect("agent sign-in requests cannot evict an owner's pending callback", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* runMigrations();
+        const mock = yield* startMockAuthServer;
+        const integration = yield* addLinear(mock, "linear");
+        const service = yield* Integrations.Integrations;
+        const owner = yield* service.beginSignIn(integration.id, { origin: COGENLY_ORIGIN });
+        const callback = yield* consent(owner.authorizationUrl, "owner");
+        for (let i = 0; i < 65; i++)
+          yield* service.beginSignIn(integration.id, { origin: COGENLY_ORIGIN, fromAgent: true });
+        yield* service.completeSignIn(callback);
+        expect(yield* whoami("linear")).toContain("account=owner");
+      }),
+    ).pipe(Effect.provide(gatewayLayer())),
+  );
+
   it.effect("refuses omitted PKCE metadata before registering a client", () =>
     Effect.scoped(
       Effect.gen(function* () {

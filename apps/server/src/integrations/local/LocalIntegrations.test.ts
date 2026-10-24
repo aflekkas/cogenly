@@ -505,6 +505,44 @@ describe("managed Google integrations", () => {
       }).pipe(Effect.scoped, Effect.provide(testLayer([], missing, "json", false, runtimeMissing))),
   );
 
+  it.live("keeps owner Google sign-in separate and rejects an older agent flow afterward", () =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      const gateway = yield* Integrations.Integrations;
+      const local = yield* Local.LocalIntegrations;
+      const { integration } = yield* gateway.create({
+        preset: "google-workspace",
+        accountLabel: "work",
+        callbackOrigin: "https://cogenly.example.com",
+      });
+      const agent = yield* gateway.beginSignIn(integration.id, {
+        origin: "https://cogenly.example.com",
+        fromAgent: true,
+      });
+      const owner = yield* gateway.beginSignIn(integration.id, {
+        origin: "https://cogenly.example.com",
+      });
+      expect(owner.authorizationUrl).not.toBe(agent.authorizationUrl);
+      const begin = (url: string) => local.authorize(new URL(url).searchParams.get("ticket")!);
+      const agentAuth = yield* begin(agent.authorizationUrl);
+      const ownerAuth = yield* begin(owner.authorizationUrl);
+      expect(ownerAuth.url).not.toBe(agentAuth.url);
+      expect(
+        yield* local.callback(
+          `state=${new URL(ownerAuth.url!).searchParams.get("state")}&code=owner`,
+        ),
+      ).toBe(true);
+      expect(
+        yield* local.callback(
+          `state=${new URL(agentAuth.url!).searchParams.get("state")}&code=agent`,
+        ),
+      ).toBe(false);
+      expect(
+        (yield* gateway.list()).integrations[0]?.integration.provenance?.signedInViaAgent,
+      ).toBe(false);
+    }).pipe(Effect.scoped, Effect.provide(testLayer([]))),
+  );
+
   it.live("does not trust Google consent URLs returned by ordinary tools", () => {
     const callbacks: Array<string> = [];
     return Effect.gen(function* () {

@@ -135,7 +135,12 @@ const make = Effect.gen(function* () {
   >();
   const states = new Map<
     string,
-    { readonly integration: Integration; readonly expires: number; readonly url: string }
+    {
+      readonly integration: Integration;
+      readonly expires: number;
+      readonly url: string;
+      readonly fromAgent: boolean;
+    }
   >();
   const active = new Set<string>();
   // In-flight requests may still hold an old definition after a committed edit or deletion.
@@ -338,7 +343,7 @@ const make = Effect.gen(function* () {
         ),
       ),
     );
-  const rememberAuth = (integration: Integration, result: unknown) =>
+  const rememberAuth = (integration: Integration, result: unknown, fromAgent: boolean) =>
     Effect.gen(function* () {
       if (!isCurrent(integration)) return;
       const decoded = decodeAuthResult(result);
@@ -357,8 +362,14 @@ const make = Effect.gen(function* () {
               `${yield* originFor(integration)}${GOOGLE_CALLBACK_PATH}`
           )
             continue;
-          if (states.size >= 1000) return;
-          states.set(state, { integration, expires: now + AUTH_LIFETIME_MS, url: url.href });
+          if ([...states.values()].filter((entry) => entry.fromAgent === fromAgent).length >= 1000)
+            return;
+          states.set(state, {
+            integration,
+            expires: now + AUTH_LIFETIME_MS,
+            url: url.href,
+            fromAgent,
+          });
         }
       }
     });
@@ -368,6 +379,7 @@ const make = Effect.gen(function* () {
     params: unknown,
     labelId?: ProjectLabelId | null,
     allowSignIn = false,
+    fromAgent = false,
   ) =>
     Effect.gen(function* () {
       const signingIn = method === "tools/call" && isStartGoogleAuth(params);
@@ -394,7 +406,7 @@ const make = Effect.gen(function* () {
           reason: "sign_in_required",
         });
       }
-      if (signingIn && allowSignIn) yield* rememberAuth(integration, result);
+      if (signingIn && allowSignIn) yield* rememberAuth(integration, result, fromAgent);
       return result;
     });
   return LocalIntegrations.of({
@@ -511,8 +523,16 @@ const make = Effect.gen(function* () {
           const now = yield* Clock.currentTimeMillis;
           prune(now);
           for (const [ticket, entry] of tickets)
-            if (entry.integration.id === integration.id) return link(ticket);
-          if (tickets.size >= 1000) return undefined;
+            if (
+              entry.integration.id === integration.id &&
+              entry.fromAgent === (from?.fromAgent === true)
+            )
+              return link(ticket);
+          if (
+            [...tickets.values()].filter((entry) => entry.fromAgent === (from?.fromAgent === true))
+              .length >= 1000
+          )
+            return undefined;
           const ticket = yield* crypto.randomUUIDv4().pipe(Effect.mapError(storageError));
           tickets.set(ticket, {
             integration,
@@ -535,7 +555,8 @@ const make = Effect.gen(function* () {
             });
           if (yield* signedIn(entry.integration.id)) return { connected: true };
           const pending = [...states.values()].find(
-            (state) => state.integration.id === entry.integration.id,
+            (state) =>
+              state.integration.id === entry.integration.id && state.fromAgent === entry.fromAgent,
           );
           if (pending) return { connected: false, url: pending.url };
           yield* rpc(
@@ -547,9 +568,11 @@ const make = Effect.gen(function* () {
             },
             undefined,
             true,
+            entry.fromAgent,
           );
           const auth = [...states.values()].find(
-            (state) => state.integration.id === entry.integration.id,
+            (state) =>
+              state.integration.id === entry.integration.id && state.fromAgent === entry.fromAgent,
           );
           if (!auth)
             return yield* new IntegrationError({
@@ -577,6 +600,12 @@ const make = Effect.gen(function* () {
           params.has("error")
         )
           return false;
+        if (
+          entry.fromAgent &&
+          ((yield* hasCredentials(entry.integration.id)) ||
+            (yield* readBrowserOrigin(entry.integration.id)) !== undefined)
+        )
+          return false;
         // Consume before forwarding: an uncertain exchange is never replayed automatically.
         states.delete(state!);
         const success = yield* runner
@@ -584,12 +613,9 @@ const make = Effect.gen(function* () {
           .pipe(Effect.mapError(mapLocalError));
         const connected = success && (yield* hasCredentials(entry.integration.id));
         if (connected) {
-          const initiated = [...tickets.values()].find(
-            (ticket) => ticket.integration.id === entry.integration.id,
-          );
           const provenance = {
             signedInAt: yield* DateTime.now.pipe(Effect.map(DateTime.formatIso)),
-            signedInViaAgent: initiated?.fromAgent === true,
+            signedInViaAgent: entry.fromAgent,
           };
           yield* fs
             .writeFileString(
