@@ -95,10 +95,17 @@ loopback origin. Cloudflare adds `cf-ray` and client/forwarding headers; any
 `cf-*` header is a denial marker, never an authorization signal. This rejects
 Connect even when a public caller spoofs Tailscale headers. RFC Forwarded, Via,
 and X-Real-IP are refused too. Other X-Forwarded headers are refused unless
-`--tailscale-serve` is enabled, and then must match Serve's overwritten tuple:
-HTTPS, a single numeric tailnet source, and forwarded host. Public addresses,
-chains, and `Tailscale-Funnel-Request` are refused. Identity headers grant no
+Serve mode is on, and then must match Serve's overwritten tuple: HTTPS, a
+single numeric tailnet source, and forwarded host. Public addresses, chains,
+and `Tailscale-Funnel-Request` are refused. Identity headers grant no
 exception; tagged Tailscale nodes need none.
+
+Serve mode is `TailscaleServeMode`: `--tailscale-serve` for one run, otherwise
+`tailscale-serve.json` in the state directory, which machine setup changes
+live. The headers alone never turn it on. A refused forwarded request only
+asks `MachineSetup.adoptServe` to read `tailscale serve status` from the local
+daemon, and Serve mode turns on only when a non-Funnel mapping targets this
+server's loopback port.
 
 This boundary trusts local processes and proxy configuration. A locally
 configured public proxy that deliberately strips every ingress marker is

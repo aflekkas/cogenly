@@ -75,6 +75,7 @@ import {
   ListTodoIcon,
   MessageSquareIcon,
   MonitorIcon,
+  MonitorSmartphoneIcon,
   MoonIcon,
   RotateCcwIcon,
   SettingsIcon,
@@ -2541,6 +2542,17 @@ function OpenCommandPaletteDialog(props: {
     shortcutCommand: "usage.open",
     run: async () => {
       await navigate({ to: "/usage" });
+    },
+  });
+
+  actionItems.push({
+    kind: "action",
+    value: "action:add-machine",
+    searchTerms: ["add machine", "pair", "computer", "laptop", "server", "tailscale", "sync"],
+    title: "Add a machine",
+    icon: <MonitorSmartphoneIcon className={ITEM_ICON_CLASS} />,
+    run: async () => {
+      await navigate({ to: "/settings/machines", search: { add: true } });
     },
   });
 

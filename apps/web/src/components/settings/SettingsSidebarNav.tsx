@@ -24,6 +24,7 @@ import {
   KeyboardIcon,
   KeyRoundIcon,
   Link2Icon,
+  MonitorSmartphoneIcon,
   PaletteIcon,
   Settings2Icon,
 } from "lucide-react";
@@ -77,6 +78,7 @@ const SETTINGS_SECTION_ICONS: Readonly<
   "/settings/data": DatabaseIcon,
   "/settings/import": ImportIcon,
   "/settings/connections": Link2Icon,
+  "/settings/machines": MonitorSmartphoneIcon,
   "/settings/archived": ArchiveIcon,
 };
 
