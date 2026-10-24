@@ -194,6 +194,8 @@ const RPC_AGGREGATES = {
   [WS_METHODS.vaultUpdate]: "vault",
   [WS_METHODS.vaultDelete]: "vault",
   [WS_METHODS.vaultUsage]: "vault",
+  [WS_METHODS.vaultSetPeerSharing]: "vault",
+  [WS_METHODS.vaultSharingStatus]: "vault",
   [WS_METHODS.scheduledTasksListWebhookDeliveries]: "scheduledTasks",
   [WS_METHODS.scheduledTasksGetWebhookDelivery]: "scheduledTasks",
   [WS_METHODS.secretsAnswerRequest]: "secrets",

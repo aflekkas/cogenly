@@ -146,6 +146,7 @@ import * as ThreadMessageIntake from "./orchestration-v2/ThreadMessageIntake.ts"
 import * as ScheduledTasks from "./scheduledTasks/ScheduledTaskService.ts";
 import * as SecretRequests from "./secrets/SecretRequests.ts";
 import * as Vault from "./vault/Vault.ts";
+import * as VaultSync from "./vault/VaultSync.ts";
 import * as Accounts from "./accounts/Accounts.ts";
 import {
   archivedShellStreamItemFromThreadShell,
@@ -1102,6 +1103,7 @@ const makeWsRpcHandlers = (
     const scheduledTasks = yield* ScheduledTasks.ScheduledTaskService;
     const secretRequests = yield* SecretRequests.SecretRequests;
     const vault = yield* Vault.Vault;
+    const vaultSync = yield* VaultSync.VaultSync;
     const accounts = yield* Accounts.Accounts;
     const accountConnections = yield* AccountConnections.AccountConnections;
     const accountAccess = yield* AccountAccess.AccountAccess;
@@ -1808,6 +1810,8 @@ const makeWsRpcHandlers = (
       [WS_METHODS.vaultUpdate]: (input) => vault.update(input),
       [WS_METHODS.vaultDelete]: (input) => vault.delete(input),
       [WS_METHODS.vaultUsage]: (input) => vault.listUsage(input),
+      [WS_METHODS.vaultSetPeerSharing]: (input) => vaultSync.setPeerSharing(input),
+      [WS_METHODS.vaultSharingStatus]: () => vaultSync.sharingStatus,
       [WS_METHODS.secretsAnswerRequest]: (input) =>
         Effect.annotateCurrentSpan({ "orchestration_v2.thread_id": input.threadId }).pipe(
           Effect.andThen(secretRequests.answer(input)),
@@ -2874,6 +2878,7 @@ type WsRequestServices =
   | AccountConnections.AccountConnections
   | Accounts.Accounts
   | Vault.Vault
+  | VaultSync.VaultSync
   | ServerConfig.ServerConfig
   | ServerEnvironment.ServerEnvironment
   | ServerLifecycleEvents.ServerLifecycleEvents

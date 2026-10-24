@@ -1,5 +1,6 @@
 import {
   AccountId,
+  AuthAccessReadScope,
   AuthAccessWriteScope,
   AuthPeerScopes,
   AuthStandardClientScopes,
@@ -115,6 +116,17 @@ describe("RPC authorization scopes", () => {
       expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationOperateScope);
       expect(clientRpcRequiredScopes(method, {})).toEqual([AuthOrchestrationOperateScope]);
     }
+    // Sharing makes another machine a holder of every shared secret: access
+    // management, which standard clients and agents do not have.
+    expect(requiredScopeForRpcMethod(WS_METHODS.vaultSetPeerSharing)).toBe(AuthAccessWriteScope);
+    expect(clientRpcRequiredScopes(WS_METHODS.vaultSetPeerSharing, {})).toEqual([
+      AuthAccessWriteScope,
+    ]);
+    expect(requiredScopeForRpcMethod(WS_METHODS.vaultSharingStatus)).toBe(AuthAccessReadScope);
+    expect(clientRpcRequiredScopes(WS_METHODS.vaultSharingStatus, {})).toEqual([
+      AuthAccessReadScope,
+    ]);
+    expect(AuthStandardClientScopes).not.toContain(AuthAccessWriteScope);
   });
 
   it("keeps machine pairing behind access management, which standard clients lack", () => {
