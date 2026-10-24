@@ -3644,6 +3644,13 @@ export const OrchestrationV2ThreadLaunchInput = Schema.Struct({
       attachments: Schema.Array(ChatAttachment),
     }),
   ),
+  /**
+   * The paired machine that runs the new thread, from its first event. The
+   * server this request reaches launches it there over the machine link;
+   * omitted or this server's own id runs it here. An offline target fails
+   * rather than queueing.
+   */
+  machine: Schema.optional(EnvironmentId),
 });
 export type OrchestrationV2ThreadLaunchInput = typeof OrchestrationV2ThreadLaunchInput.Type;
 
