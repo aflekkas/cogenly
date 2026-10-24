@@ -66,6 +66,7 @@ const OWNER_ONLY_COMMANDS: ReadonlySet<OrchestrationV2ServerCommand["type"]> = n
   "delegated_task.completion-delivery.acknowledge",
   "delegated_task.completion-delivery.dispose",
   "thread.created.record",
+  "secret_request.record",
 ]);
 
 /** Read-state bookkeeping, dropped rather than failed while the owner is offline. */
@@ -186,34 +187,41 @@ const make = Effect.gen(function* () {
 
   // Ids name their files, so an existing file is the same attachment.
   const writeFiles = (files: ReadonlyArray<ThreadAttachmentFile>) =>
-    Effect.forEach(
-      files,
-      (file) =>
-        fileSystem
-          .exists(attachmentPath(file.name))
-          .pipe(
-            Effect.flatMap((exists) =>
-              exists
-                ? Effect.void
-                : fileSystem
-                    .makeDirectory(config.attachmentsDir, { recursive: true })
-                    .pipe(
-                      Effect.andThen(
-                        fileSystem.writeFile(
-                          attachmentPath(file.name),
-                          new Uint8Array(Buffer.from(file.base64, "base64")),
+    Effect.gen(function* () {
+      if (
+        files.reduce((total, file) => total + Buffer.byteLength(file.base64, "base64"), 0) >
+        THREAD_FORWARD_MAX_FILE_BYTES
+      )
+        return yield* new ThreadRemoteError({ reason: "too-large" });
+      yield* Effect.forEach(
+        files,
+        (file) =>
+          fileSystem
+            .exists(attachmentPath(file.name))
+            .pipe(
+              Effect.flatMap((exists) =>
+                exists
+                  ? Effect.void
+                  : fileSystem
+                      .makeDirectory(config.attachmentsDir, { recursive: true })
+                      .pipe(
+                        Effect.andThen(
+                          fileSystem.writeFile(
+                            attachmentPath(file.name),
+                            new Uint8Array(Buffer.from(file.base64, "base64")),
+                          ),
                         ),
                       ),
-                    ),
+              ),
             ),
-          ),
-      { discard: true },
-    ).pipe(
-      Effect.mapError(
-        () =>
-          new ThreadRemoteError({ reason: "rejected", detail: "Could not store an attachment." }),
-      ),
-    );
+        { discard: true },
+      ).pipe(
+        Effect.mapError(
+          () =>
+            new ThreadRemoteError({ reason: "rejected", detail: "Could not store an attachment." }),
+        ),
+      );
+    });
 
   const fromPeer =
     (view: MachineListResult | undefined, owner: EnvironmentId) =>
