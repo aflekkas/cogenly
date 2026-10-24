@@ -221,7 +221,7 @@ function ProjectDetail({
       const result = AsyncResult.failure<void, Error>(
         Cause.fail(
           new Error(
-            `This connection cannot change repositories in ${denied.environmentLabel ?? "this environment"}.`,
+            `This connection cannot change repositories in ${denied.environmentLabel ?? "this machine"}.`,
           ),
         ),
       );
@@ -250,7 +250,7 @@ function ProjectDetail({
       });
       if (unavailable) {
         const error = new Error(
-          `Connect ${unavailable.environmentLabel ?? "the selected environment"} and try again.`,
+          `Connect ${unavailable.environmentLabel ?? "the selected machine"} and try again.`,
         );
         const result: AtomCommandResult<void, unknown> = AsyncResult.failure(Cause.fail(error));
         reportFailure(failureTitle, result);
@@ -271,7 +271,7 @@ function ProjectDetail({
           // write. Name the environment so the user knows where it stopped.
           reportFailure(
             group.memberProjects.length > 1
-              ? `${failureTitle} on ${member.environmentLabel ?? "the current environment"}`
+              ? `${failureTitle} on ${member.environmentLabel ?? "the current machine"}`
               : failureTitle,
             result,
           );
@@ -350,7 +350,7 @@ function ProjectDetail({
               ? [
                   `Path: ${singleMember.workspaceRoot}`,
                   ...(singleMember.environmentLabel
-                    ? [`Environment: ${singleMember.environmentLabel}`]
+                    ? [`Machine: ${singleMember.environmentLabel}`]
                     : []),
                 ]
               : [`This removes ${members.length} grouped repository entries.`]),
@@ -444,7 +444,7 @@ function ProjectDetail({
           return members.map((member) => (
             <SettingsRow
               key={member.physicalProjectKey}
-              title={member.environmentLabel ?? "Environment"}
+              title={member.environmentLabel ?? "Machine"}
               description={member.workspaceRoot}
               control={checkoutRemoveButton(member)}
             />

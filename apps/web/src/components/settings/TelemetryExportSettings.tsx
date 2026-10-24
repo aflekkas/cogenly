@@ -153,7 +153,7 @@ function TelemetryExportForm() {
         {!canEdit && (
           <p className="text-xs text-muted-foreground">
             This connection lacks permission to change settings on{" "}
-            {environment?.label ?? "the selected environment"}.
+            {environment?.label ?? "the selected machine"}.
           </p>
         )}
         {SIGNALS.map(({ key, label, signal }) => {

@@ -1466,7 +1466,7 @@ function savedBackendStatus(environment: EnvironmentPresentation): {
 }
 
 /**
- * One added machine in the Environments list. The switch is the main action;
+ * One added machine in the Connected machines list. The switch is the main action;
  * the update icon appears only when that machine can take an update; the
  * row menu holds the icon override, trace ID, and removal.
  */
@@ -1702,7 +1702,6 @@ function SavedBackendListRow({
           environmentId={environmentId}
           serverLabel={`${environment.label} server`}
           selfUpdate={resolveServerSelfUpdateCapability(environment.serverConfig)}
-          installation={environment.serverConfig?.environment.capabilities.serverInstallation}
           desktopAppUpdate={supportsDesktopAppUpdate(environment.serverConfig)}
           threadContinuation={supportsServerUpdateThreadContinuation(environment.serverConfig)}
           targetVersion={versionMismatch.clientVersion}
@@ -1817,7 +1816,7 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
   const [isUpdatingPreference, setIsUpdatingPreference] = useState(false);
 
   const disabledReason = !isSignedIn
-    ? "Sign in to Cogenly Connect to manage this environment."
+    ? "Sign in to Cogenly Connect to manage this machine."
     : !canManageRelay
       ? "Your session does not have permission to manage Cogenly Connect access."
       : null;
@@ -1842,10 +1841,10 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
             ? "Cogenly Connect tunnel disabled"
             : "Cogenly Connect unlinked",
         description: enabled
-          ? "This environment is available through Cogenly Connect."
+          ? "This machine is available through Cogenly Connect."
           : publishAgentActivity
             ? "The managed tunnel was removed. Agent activity publishing stays on."
-            : "This environment is no longer available through Cogenly Connect.",
+            : "This machine is no longer available through Cogenly Connect.",
       });
     }
     setIsUpdating(false);
@@ -1864,8 +1863,8 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
         type: "success",
         title: enabled ? "Agent activity enabled" : "Agent activity disabled",
         description: enabled
-          ? "This environment publishes agent activity to your mobile clients."
-          : "This environment will stop publishing agent activity.",
+          ? "This machine publishes agent activity to your mobile clients."
+          : "This machine will stop publishing agent activity.",
       });
     }
     setIsUpdatingPreference(false);
@@ -1883,8 +1882,8 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
         type: "success",
         title: enabled ? "Webhooks held while offline" : "Webhooks no longer held",
         description: enabled
-          ? "Cogenly Connect keeps webhook requests for up to 24 hours while this environment is offline."
-          : "Requests to an offline environment now fail. Anything already held is still delivered.",
+          ? "Cogenly Connect keeps webhook requests for up to 24 hours while this machine is offline."
+          : "Requests to an offline machine now fail. Anything already held is still delivered.",
       });
     }
     setIsUpdatingPreference(false);
@@ -1897,12 +1896,12 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
           title={searchableSetting("t3-connect").title}
           description={
             linkRevoked
-              ? "This environment was removed from Cogenly Connect. Turn it on to link it again."
+              ? "This machine was removed from Cogenly Connect. Turn it on to link it again."
               : managedTunnelActive
-                ? "This environment is available to your other devices through Cogenly Connect."
+                ? "This machine is available to your other devices through Cogenly Connect."
                 : managedTunnelOutOfSync
-                  ? "Cogenly Connect is out of sync. This environment is linked only to publish agent activity, so other devices cannot connect. Turn Cogenly Connect on to repair it."
-                  : "Make this environment available to your other devices through Cogenly Connect."
+                  ? "Cogenly Connect is out of sync. This machine is linked only to publish agent activity, so other devices cannot connect. Turn Cogenly Connect on to repair it."
+                  : "Make this machine available to your other devices through Cogenly Connect."
           }
           status={operationError ?? primaryCloudLinkState.error}
           control={
@@ -1923,7 +1922,7 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
       ) : linkRevoked ? (
         <SettingsRow
           title={searchableSetting("t3-connect").title}
-          description="This environment was removed from Cogenly Connect. Run `cogenly connect link` on the host to link it again."
+          description="This machine was removed from Cogenly Connect. Run `cogenly connect link` on the host to link it again."
         />
       ) : null}
       <SettingsRow
@@ -1948,10 +1947,10 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
       {managedTunnelActive ? (
         <SettingsRow
           title={searchableSetting("hold-webhooks-while-offline").title}
-          description="Keep webhook requests for up to 24 hours while this environment is offline, then deliver them. Off: Cogenly Connect only forwards requests and stores nothing."
+          description="Keep webhook requests for up to 24 hours while this machine is offline, then deliver them. Off: Cogenly Connect only forwards requests and stores nothing."
           control={
             <CloudLinkSwitch
-              ariaLabel="Hold webhook requests while this environment is offline"
+              ariaLabel="Hold webhook requests while this machine is offline"
               checked={holdWebhooksWhileOffline}
               disabled={!canManageRelay || !isSignedIn || primaryCloudLinkState.isPending || isBusy}
               disabledReason={disabledReason}
@@ -1990,11 +1989,11 @@ function EmptyRemoteEnvironments({ cloudEnabled = true }: { readonly cloudEnable
         <ChevronsLeftRightEllipsisIcon />
       </EmptyMedia>
       <EmptyHeader>
-        <EmptyTitle>No saved remote environments</EmptyTitle>
+        <EmptyTitle>No other machines connected</EmptyTitle>
         <EmptyDescription>
           {cloudEnabled
-            ? "Click “Add environment” to pair another environment, or connect one from Cogenly Connect."
-            : "Click “Add environment” to pair another environment."}
+            ? "Choose “Connect a machine” to use another Cogenly server from this app, or connect one from Cogenly Connect."
+            : "Choose “Connect a machine” to use another Cogenly server from this app."}
         </EmptyDescription>
       </EmptyHeader>
     </Empty>
@@ -2097,7 +2096,6 @@ export function ConnectionsSettings() {
             environmentId: environment.environmentId,
             serverLabel: environment.label,
             selfUpdate,
-            installation: environment.serverConfig?.environment.capabilities.serverInstallation,
             desktopAppUpdate,
             threadContinuation: supportsServerUpdateThreadContinuation(environment.serverConfig),
             continueThreadsAfterServerUpdate:
@@ -2560,7 +2558,7 @@ export function ConnectionsSettings() {
       setAddBackendDialogOpen(false);
       toastManager.add({
         type: "success",
-        title: routeTarget ? "Route added" : "Environment connected",
+        title: routeTarget ? "Route added" : "Machine connected",
         description: routeTarget
           ? `${routeTarget.label} can now be reached over SSH ${target.alias}.`
           : `${result.value.label} is ready over an SSH-managed tunnel.`,
@@ -2647,7 +2645,7 @@ export function ConnectionsSettings() {
         : {
             type: "success",
             title: "Backend added",
-            description: "The environment is saved and will reconnect on app startup.",
+            description: "The machine is saved and will reconnect on app startup.",
           },
     );
     setIsAddingSavedBackend(false);
@@ -3005,7 +3003,7 @@ export function ConnectionsSettings() {
         onClick={() => void handleAddSavedBackend()}
       >
         <PlusIcon className="size-3.5" />
-        {isAddingSavedBackend ? "Adding…" : routeTarget ? "Add route" : "Add environment"}
+        {isAddingSavedBackend ? "Adding…" : routeTarget ? "Add route" : "Connect machine"}
       </Button>
     </div>
   );
@@ -3126,7 +3124,7 @@ export function ConnectionsSettings() {
           onClick={() => void handleAddSavedBackend()}
         >
           <PlusIcon className="size-3.5" />
-          {isAddingSavedBackend ? "Adding…" : routeTarget ? "Add route" : "Add environment"}
+          {isAddingSavedBackend ? "Adding…" : routeTarget ? "Add route" : "Connect machine"}
         </Button>
       </div>
     </div>
@@ -3607,7 +3605,7 @@ export function ConnectionsSettings() {
           <SettingsSection
             {...searchableSetting("connections-environment")}
             title={
-              primaryEnvironment?.label ?? (desktopBridge ? "This machine" : "Primary environment")
+              primaryEnvironment?.label ?? (desktopBridge ? "This machine" : "Primary machine")
             }
             icon={
               <EnvironmentMachineIcon
@@ -3672,9 +3670,6 @@ export function ConnectionsSettings() {
                         primaryEnvironment ? `${primaryEnvironment.label} server` : "server"
                       }
                       selfUpdate={resolveServerSelfUpdateCapability(primaryServerConfig)}
-                      installation={
-                        primaryServerConfig?.environment.capabilities.serverInstallation
-                      }
                       desktopAppUpdate={supportsDesktopAppUpdate(primaryServerConfig)}
                       threadContinuation={supportsServerUpdateThreadContinuation(
                         primaryServerConfig,
@@ -4039,8 +4034,8 @@ export function ConnectionsSettings() {
       ) : (
         <SettingsSection {...searchableSetting("connections-environment")}>
           <SettingsRow
-            title="No environment selected"
-            description="Connect an environment to view its settings and access."
+            title="No machine selected"
+            description="Connect a machine to view its settings and access."
           />
           {/* A turned-off local environment leaves no primary environment, so its switch lives here too. */}
           <LocalEnvironmentSetting />
@@ -4057,7 +4052,6 @@ export function ConnectionsSettings() {
       {primarySettings}
       <SettingsSection
         {...searchableSetting("remote-environments")}
-        title="Environments"
         headerAction={
           <div className="flex items-center gap-1">
             {savedServerUpdateTargets.length > 0 ? (
@@ -4079,25 +4073,25 @@ export function ConnectionsSettings() {
                   render={
                     <DialogTrigger
                       render={
-                        <Button size="xs" variant="ghost-muted" aria-label="Add environment">
+                        <Button size="xs" variant="ghost-muted" aria-label="Connect a machine">
                           <PlusIcon className="size-3" />
-                          <span>Add environment</span>
+                          <span>Connect a machine</span>
                         </Button>
                       }
                     />
                   }
                 />
-                <TooltipPopup side="top">Add environment</TooltipPopup>
+                <TooltipPopup side="top">Connect this app to another Cogenly server</TooltipPopup>
               </Tooltip>
               <DialogPopup className="max-h-[80dvh] sm:max-w-3xl">
                 <DialogHeader>
                   <DialogTitle>
-                    {routeTarget ? `Add a route to ${routeTarget.label}` : "Add Environment"}
+                    {routeTarget ? `Add a route to ${routeTarget.label}` : "Connect a machine"}
                   </DialogTitle>
                   <DialogDescription>
                     {routeTarget
-                      ? "Pair this machine again over another address, such as its Tailscale name. It joins the existing routes instead of adding a second machine."
-                      : "Pair another environment to this client."}
+                      ? "Connect to this machine again over another address, such as its Tailscale name. It joins the existing routes instead of adding a second machine."
+                      : "Connect this app to another Cogenly server. To link servers to each other, use Settings → Machines."}
                   </DialogDescription>
                 </DialogHeader>
                 <DialogPanel>

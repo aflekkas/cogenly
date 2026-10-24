@@ -56,7 +56,7 @@ them. Sign in to the providers on the VPS first (`claude auth login`,
 `codex login`, `gh auth login`).
 
 **Recommended: desktop SSH.** In the desktop app, open **Settings → Connections
-→ Add environment**, choose **SSH**, and pick the host from your `~/.ssh/config`.
+→ Connect a machine**, choose **SSH**, and pick the host from your `~/.ssh/config`.
 Cogenly connects and pairs without a token to copy. If the VPS has no Cogenly
 yet, it downloads the release that matches your desktop app; if it already runs
 one, it uses that. See [Desktop-managed SSH](./remote-access.md#desktop-managed-ssh).
@@ -73,7 +73,7 @@ cogenly auth pairing create --base-url http://127.0.0.1:14773
 ```
 
 On your Mac, forward that port with `ssh -N -L 14773:127.0.0.1:4773 your-vps`
-and paste the printed pairing URL into **Add environment**. (`cogenly pair`
+and paste the printed pairing URL into **Connect a machine**. (`cogenly pair`
 prints the same kind of link for the server's own address, `127.0.0.1:4773`;
 change its port to `14773` if you use it instead.) The environment connects
 while the tunnel runs.

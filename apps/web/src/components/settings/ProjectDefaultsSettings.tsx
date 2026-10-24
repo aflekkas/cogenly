@@ -212,8 +212,7 @@ export function ProjectDefaultsSettings({
       serverScoped
       settingKeys={["defaultThreadEnvMode"]}
       mixed={mixedWorkspace}
-      id={searchableSetting("new-threads").id}
-      title="Workspace"
+      {...searchableSetting("new-threads")}
       description={
         isProjectScope
           ? "Where new threads in this project start."
@@ -268,7 +267,7 @@ export function ProjectDefaultsSettings({
         category === "general"
           ? "New threads"
           : category === "integrations"
-            ? "Browser"
+            ? "Agent access"
             : "Repositories"
       }
     >
@@ -435,8 +434,7 @@ export function ProjectDefaultsSettings({
             serverScoped
             settingKeys={["enableAgentBrowserAccess"]}
             mixed={mixedBrowser}
-            id={searchableSetting("agent-browser-access").id}
-            title="Agent browser access"
+            {...searchableSetting("agent-browser-access")}
             description={
               isProjectScope
                 ? "Allow agents in this project to use the shared browser. Applies when the agent session next starts."

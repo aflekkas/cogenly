@@ -410,8 +410,8 @@ export function SettingsRow({
                   ? context.connectedEnvironments
                       .filter((target) => !writableIds.has(target.environmentId))
                       .map((target) => target.label)
-                      .join(", ") || "the selected environment"
-                  : (primaryEnvironment?.label ?? "the primary environment")
+                      .join(", ") || "the selected machine"
+                  : (primaryEnvironment?.label ?? "the primary machine")
               }.`
             : context
               ? `Reconnect ${machineName} to change this setting.`

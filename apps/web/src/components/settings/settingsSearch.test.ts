@@ -134,7 +134,7 @@ describe("searchSettings", () => {
     expect(SETTINGS_SEARCH_ITEMS.find((item) => item.id === "update-track")).toMatchObject({
       title: "Update track",
       to: "/settings/general",
-      releaseChannelOnly: true,
+      hostedChannelOnly: true,
     });
   });
 
@@ -298,8 +298,12 @@ describe("searchSettings", () => {
 
   it.each([
     ["default model", "default-model", "/settings/general"],
-    ["new threads", "new-threads", "/settings/general"],
+    ["new threads", "project-defaults", "/settings/general"],
+    ["workspace", "new-threads", "/settings/general"],
     ["agent browser access", "agent-browser-access", "/settings/integrations"],
+    ["connect a machine", "remote-environments", "/settings/connections"],
+    ["private access", "machines", "/settings/machines"],
+    ["orphan folders", "project-folders", "/settings/project-tags"],
     ["automatically pull", "automatic-pull", "/settings/source-control"],
     ["actions", "project-actions", "/settings/general"],
     ["project overview", "project-overview", "/settings/projects"],

@@ -85,7 +85,7 @@ export function VaultSettings() {
     <SettingsPageContainer>
       <SettingsSection id="vault" title="Vault" headerAction={addButton("xs")}>
         {environmentId === null ? (
-          <SettingsRow title="Choose an environment to see its vault." />
+          <SettingsRow title="Choose a machine to see its vault." />
         ) : list.error !== null ? (
           <SettingsRow title="Could not load the vault" description={list.error} />
         ) : !list.isLoaded ? (

@@ -491,7 +491,7 @@ function StageSection({
             <SettingsSection id="t3-import-settings" title="Settings">
               <SettingsRow
                 title="Import keybindings, default models and favorites"
-                description="Untick to leave this environment's settings as they are."
+                description="Untick to leave this machine's settings as they are."
                 control={
                   <Checkbox
                     aria-label="Import keybindings, default models and favorites"

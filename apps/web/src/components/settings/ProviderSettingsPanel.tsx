@@ -425,7 +425,7 @@ function ProviderSettingsPanelContent(target: ProviderSettingsTarget) {
           title={isReady ? "No connected devices" : "Loading devices"}
           description={
             isReady
-              ? "Connect an execution environment before configuring providers."
+              ? "Connect a machine before configuring providers."
               : "Reading connected execution environments."
           }
         />

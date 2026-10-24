@@ -2269,7 +2269,7 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
           description={
             isEnvironmentScope
               ? "Inspect processes, resource use, and logs on this environment."
-              : "Inspect processes, resource use, and logs on one environment at a time."
+              : "Inspect processes, resource use, and logs on one machine at a time."
           }
           control={
             <Button

@@ -57,7 +57,7 @@ If a server is already running, generate a fresh link without restarting it:
 cogenly pair
 ```
 
-Scan the QR code on your phone or paste the pairing URL into **Add environment**
+Scan the QR code on your phone or paste the pairing URL into **Connect a machine**
 in the receiving app. Connection settings are under **Settings → Connections**
 on web and desktop. A loopback address
 such as `127.0.0.1` reaches only the device opening the link.
@@ -152,7 +152,7 @@ If that port is already in use, choose another with
 
 ## Desktop-managed SSH
 
-In the desktop app, open **Settings → Connections → Add environment**, choose
+In the desktop app, open **Settings → Connections → Connect a machine**, choose
 **SSH**, and enter a host or SSH alias such as `user@example.com`. Cogenly starts
 or reuses a server there, opens the port forward, and pairs for you. Projects,
 provider credentials, and agent work stay on the remote machine.
@@ -310,9 +310,9 @@ permissions.
 
 To change an existing client's permissions, create a fresh pairing link with the
 scopes it needs. In a browser opened directly on the environment, open that link
-to replace the browser's current grant. For a saved remote environment
-in web or desktop, use **Add Environment** with the fresh link or code; pairing
-the same environment replaces its saved grant. Reconnecting alone does not change
+to replace the browser's current grant. For a saved remote machine
+in web or desktop, use **Connect a machine** with the fresh link or code;
+connecting the same machine again replaces its saved grant. Reconnecting alone does not change
 permissions.
 
 Grouping checkouts does not combine their permissions. Shared project settings

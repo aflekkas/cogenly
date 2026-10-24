@@ -83,7 +83,7 @@ export function DeviceHostsSettings(props: { environmentId: EnvironmentId | null
       const results = await Promise.allSettled(
         environments.map(async (environment) => {
           if (environment.connection.phase !== "connected" || !environment.serverConfig) {
-            throw new Error("Environment disconnected");
+            throw new Error("Machine disconnected");
           }
           if (!readEnvironmentScope(environment.environmentId, AuthSettingsWriteScope)) {
             throw new Error("This connection cannot change device settings.");

@@ -60,9 +60,9 @@ export interface SettingsSearchItem {
   // Its row only renders on Windows desktop, so other desktop platforms must
   // not expose a result that points to a missing anchor.
   readonly windowsOnly?: boolean;
-  // Its row renders only where the release channel can change: the desktop
-  // app, or a hosted web build deployed with a channel.
-  readonly releaseChannelOnly?: boolean;
+  // Its row renders only in a hosted web build deployed with a release
+  // channel. The desktop app has no channel row, so it never shows this result.
+  readonly hostedChannelOnly?: boolean;
   readonly cloudOnly?: boolean;
   readonly environmentOnly?: boolean;
   readonly providerSettingsOnly?: boolean;
@@ -215,10 +215,12 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "project-defaults",
-    title: "Project defaults and overrides",
+    title: "New threads",
     to: "/settings/general",
     scope: "project-defaults",
-    searchTerms: ["model workspace machines projects repositories inheritance all projects"],
+    searchTerms: [
+      "project defaults overrides model workspace submodules machines projects repositories inheritance all projects",
+    ],
   },
   {
     id: "memory",
@@ -387,7 +389,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "provider-update-checks",
     title: "Provider update checks",
     to: "/settings/general",
-    searchTerms: ["installed cli versions newer available codex claude cursor grok opencode"],
+    searchTerms: ["installed cli versions newer available codex claude muse grok"],
     scope: "environment-defaults",
   },
   {
@@ -410,10 +412,10 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "new-threads",
-    title: "New threads",
+    title: "Workspace",
     to: "/settings/general",
     scope: "project-defaults",
-    searchTerms: ["default workspace mode draft local worktree"],
+    searchTerms: ["new threads default workspace mode draft local worktree"],
   },
   {
     id: "worktree-submodules",
@@ -480,7 +482,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Update track",
     to: "/settings/general",
     searchTerms: ["release channel latest nightly prerelease"],
-    releaseChannelOnly: true,
+    hostedChannelOnly: true,
   },
   {
     id: "cli-command",
@@ -538,7 +540,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Providers",
     to: "/settings/providers",
     searchTerms: [
-      "agents cli codex claude cursor grok opencode antigravity google sign in sign out install subscription instances authentication api key models configuration binary path config directory endpoint arguments environment variables display name accent color custom hidden auto compact",
+      "agents cli codex claude muse grok sign in sign out install subscription instances authentication api key models configuration binary path config directory endpoint arguments environment variables display name accent color custom hidden auto compact",
     ],
   },
   {
@@ -570,7 +572,9 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Agent browser access",
     to: "/settings/integrations",
     scope: "project-defaults",
-    searchTerms: ["allow disable enable open drive preview tools sessions project override"],
+    searchTerms: [
+      "agent access allow disable enable open drive shared browser preview tools sessions project override",
+    ],
   },
   {
     id: "device-hosts",
@@ -746,10 +750,10 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "environment-icon",
-    title: "Environment icon",
+    title: "Machine icon",
     to: "/settings/connections",
     targetId: "connections-environment",
-    searchTerms: ["machine glyph sidebar mac mini studio laptop desktop server cloud vm"],
+    searchTerms: ["environment glyph sidebar mac mini studio laptop desktop server cloud vm"],
   },
   {
     id: "local-environment",
@@ -827,9 +831,12 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "remote-environments",
-    title: "Environments",
+    title: "Connected machines",
     to: "/settings/connections",
-    searchTerms: ["add pair backend host code ssh config agent tunnel saved cogenly connect"],
+    searchTerms: [
+      // No "pair": pairing machines to each other lives on the Machines page.
+      "connect a machine add environments remote server backend host link code url ssh config agent tunnel saved cogenly connect",
+    ],
   },
   {
     id: "load-balancing",
@@ -851,6 +858,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/machines",
     searchTerms: [
       "pair paired pairing unpair hub always-on sync computers laptops servers online offline tailscale",
+      "private access tailscale serve",
     ],
   },
   {
@@ -870,7 +878,10 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "project-folders",
     title: "Projects",
     to: "/settings/project-tags",
-    searchTerms: ["folders new project archive github org sources files agents repositories"],
+    searchTerms: [
+      "folders new project archive github org sources files agents repositories",
+      "orphan folders outside any project adopt as project remove empty projects root",
+    ],
   },
 ] as const satisfies ReadonlyArray<SettingsSearchItem>;
 
@@ -981,7 +992,7 @@ export function searchSettings(
   return items
     .flatMap((item, index) => {
       if (!isElectron && item.desktopOnly === true) return [];
-      if (item.releaseChannelOnly && !isElectron && HOSTED_APP_CHANNEL === null) return [];
+      if (item.hostedChannelOnly && (isElectron || HOSTED_APP_CHANNEL === null)) return [];
       if (item.macOnly && !isMacPlatform(platform)) return [];
       if (item.windowsOnly && !isWindowsPlatform(platform)) return [];
 

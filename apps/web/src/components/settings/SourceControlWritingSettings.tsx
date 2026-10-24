@@ -215,7 +215,7 @@ export function SourceControlWritingSettingsSection() {
                   onChange={(event) => setAllInstructions(event.target.value)}
                   rows={4}
                   aria-label="Custom source control instructions for all selected environments"
-                  placeholder="Write the instructions each selected environment should use."
+                  placeholder="Write the instructions each selected machine should use."
                 />
                 <Button
                   size="sm"

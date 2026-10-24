@@ -139,7 +139,7 @@ export interface DesktopAddEnvironmentDependencies {
 /**
  * Adds an SSH environment for `cogenly environment add`, `environment_add`, or a deep link
  * the user confirmed. It reuses the host's Cogenly, starts its service when stopped, pairs,
- * and saves the environment, the same as Settings → Connections → Add environment → SSH.
+ * and saves the environment, the same as Settings → Connections → Connect a machine → SSH.
  */
 export async function handleDesktopAddEnvironmentRequest(
   request: DesktopAppAddEnvironmentRequest,

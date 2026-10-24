@@ -319,7 +319,7 @@ export function ScheduledTasksSettings(target: {
                 <Clock3Icon />
               </EmptyMedia>
               <EmptyTitle>No environments available</EmptyTitle>
-              <EmptyDescription>Connect an environment to manage scheduled tasks.</EmptyDescription>
+              <EmptyDescription>Connect a machine to manage scheduled tasks.</EmptyDescription>
             </EmptyHeader>
           </Empty>
         ) : environments.length > 1 ? (
@@ -483,7 +483,7 @@ function ScheduledTaskEnvironmentList({
       {populated.length === 0 && loaded.length > 0 ? (
         <SettingsRow
           title="No scheduled tasks"
-          description="No tasks match this environment and repository selection."
+          description="No tasks match this machine and repository selection."
         />
       ) : null}
       {Object.entries(summaries).map(([label, entries]) => {
@@ -556,7 +556,7 @@ function ScheduledTaskEnvironmentSection({
     >
       {!connected ? (
         <SettingsRow
-          title="Environment disconnected"
+          title="Machine disconnected"
           description={`Reconnect ${environment.label} to view its scheduled tasks.`}
         />
       ) : tasksQuery.error ? (
@@ -575,7 +575,7 @@ function ScheduledTaskEnvironmentSection({
           {tasks.length === 0 ? (
             <SettingsRow
               title="No scheduled tasks"
-              description="No tasks match this environment and repository selection."
+              description="No tasks match this machine and repository selection."
             />
           ) : (
             tasks.map((task) => (
@@ -976,8 +976,8 @@ function WebhookDeliveryMode({ environmentId }: { readonly environmentId: Enviro
   return (
     <p className="text-xs text-muted-foreground">
       {cloudLink.data.holdWebhooksWhileOffline
-        ? "Held for up to 24 hours while this environment is offline. "
-        : "Forwarded live. Requests fail while this environment is offline. "}
+        ? "Held for up to 24 hours while this machine is offline. "
+        : "Forwarded live. Requests fail while this machine is offline. "}
       <Link to="/settings/connections" className="link">
         Change in Connections
       </Link>
@@ -1234,7 +1234,7 @@ function ScheduledTaskEditorDialog({
                         kind={resolveEnvironmentMachineKind(environment?.serverConfig ?? null)}
                         className="size-4"
                       />
-                      {environment?.label ?? "Unavailable environment"}
+                      {environment?.label ?? "Unavailable machine"}
                     </span>
                   </SelectValue>
                 </SelectTrigger>
