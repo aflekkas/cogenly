@@ -4727,6 +4727,34 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             cause: "A recovery choice was made for this stop.",
           });
         }
+        // A delegated child's parent hears where its task went, committed with
+        // the handoff so a stop between the two cannot lose the notice.
+        const { lineage } = projection.thread;
+        const target = command.modelSelection ?? projection.thread.modelSelection;
+        if (
+          String(command.commandId).startsWith(LIMIT_HANDOFF_COMMAND_PREFIX) &&
+          lineage.relationshipToParent === "subagent" &&
+          lineage.parentThreadId !== null &&
+          limited?.class === "usage_limit"
+        ) {
+          const key = `${command.threadId}:${source.id}:${target.instanceId}`;
+          const notice: PendingOrchestrationEffectV2 = {
+            id: `effect:delegated-task-recovery:${key}`,
+            commandId: CommandId.make(`command:delegated-task-recovery-effect:${key}`),
+            threadId: lineage.parentThreadId!,
+            request: {
+              type: "delegated-task.recovery-notice",
+              childThreadId: command.threadId,
+              childRunId: source.id,
+              recovery: {
+                type: "handed_off",
+                providerInstanceId: target.instanceId,
+                model: target.model,
+              },
+            },
+          };
+          yield* Ref.update(effects, (existing) => [...existing, notice]);
+        }
       }
       if (command.usageLimitContinuationOfRunId !== undefined) {
         const run = usageLimitBlockedRun(projection.runs, projection.turnItems, null);

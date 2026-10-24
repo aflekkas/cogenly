@@ -291,15 +291,8 @@ const makeSweep = Effect.gen(function* () {
             }),
           ),
         );
-      const handedOff = yield* handOff(thread);
-      if (handedOff !== null) {
-        yield* notify({
-          type: "handed_off",
-          providerInstanceId: handedOff.instanceId,
-          model: handedOff.modelSelection.model,
-        });
-        return;
-      }
+      // The handoff queues its parent notice in the same commit (see Orchestrator).
+      if ((yield* handOff(thread)) !== null) return;
       // Nothing has headroom. A spent quota waits for its reset; a rate limit
       // that outlasted its retries stops, and its parent gets the failure.
       const armId = yield* arm(thread, { runId, resetAt, autoResume: resume });

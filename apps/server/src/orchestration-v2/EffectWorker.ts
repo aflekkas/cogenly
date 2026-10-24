@@ -28,7 +28,10 @@ import * as ThreadTitleRegenerationService from "./ThreadTitleRegenerationServic
 import * as ThreadManagementService from "./ThreadManagementService.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { continueRestartedRun } from "./RestartContinuation.ts";
-import { deliverDelegatedTaskFailureNotice } from "./DelegatedTaskFailureNotice.ts";
+import {
+  deliverDelegatedTaskFailureNotice,
+  deliverDelegatedTaskRecoveryNotice,
+} from "./DelegatedTaskFailureNotice.ts";
 
 export class OrchestrationEffectExecutionError extends Schema.TaggedError<OrchestrationEffectExecutionError>()(
   "OrchestrationEffectExecutionError",
@@ -529,6 +532,22 @@ export const layerExecutor: Layer.Layer<
                     }),
                 ),
               );
+          case "delegated-task.recovery-notice":
+            return deliverDelegatedTaskRecoveryNotice({
+              childThreadId: effect.request.childThreadId,
+              childRunId: effect.request.childRunId,
+              recovery: effect.request.recovery,
+            }).pipe(
+              Effect.provideService(ThreadManagementService.ThreadManagementService, threads),
+              Effect.mapError(
+                (cause) =>
+                  new OrchestrationEffectExecutionError({
+                    effectId: effect.id,
+                    effectType: effect.request.type,
+                    cause,
+                  }),
+              ),
+            );
           case "delegated-task.failure-notice":
             return deliverDelegatedTaskFailureNotice({
               parentThreadId: effect.threadId,

@@ -4,6 +4,7 @@ import {
   CommandId,
   MessageId,
   NodeId,
+  OrchestrationV2DelegatedTaskRecovery,
   ProviderSessionId,
   RunAttemptId,
   ProviderApprovalDecision,
@@ -127,6 +128,13 @@ export const OrchestrationEffectRequestV2 = Schema.Union([
     /** Restart recovery settled the run, so a cut-off run reads as interrupted by the restart. */
     afterRestart: Schema.optional(Schema.Boolean),
   }),
+  /** Queues a notice on the parent (the effect's thread) of how a delegated child's limit stop is recovering. */
+  Schema.Struct({
+    type: Schema.Literal("delegated-task.recovery-notice"),
+    childThreadId: ThreadId,
+    childRunId: RunId,
+    recovery: OrchestrationV2DelegatedTaskRecovery,
+  }),
 ]);
 export type OrchestrationEffectRequestV2 = typeof OrchestrationEffectRequestV2.Type;
 
@@ -141,6 +149,7 @@ export const REPLAY_SAFE_EFFECT_TYPES_AFTER_PROCESS_LOSS = [
   "thread-title.generate",
   "delegated-tasks.stop",
   "delegated-task.failure-notice",
+  "delegated-task.recovery-notice",
 ] as const satisfies ReadonlyArray<OrchestrationEffectRequestV2["type"]>;
 
 export const PROCESS_BOUND_EFFECT_TYPES = [

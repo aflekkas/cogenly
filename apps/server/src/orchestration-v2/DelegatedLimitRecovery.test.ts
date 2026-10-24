@@ -574,6 +574,7 @@ it.effect(
       });
       expect(continuation.delegatedTaskId).toBe(failedRun.delegatedTaskId);
       // The parent hears where its task went, and the task is still running.
+      yield* worker.drain();
       const notified = yield* orchestrator.getThreadProjection(parentId);
       expect(
         notified.messages.find((message) =>
@@ -699,6 +700,35 @@ it.effect(
     }).pipe(Effect.provide(runtime));
   },
 );
+
+it.effect("the parent's handoff notice survives a stop right after the handoff commits", () => {
+  const { provider, runtime } = setupHandoff();
+  return Effect.gen(function* () {
+    const { orchestrator, worker, childId, failedRun } = yield* delegateIntoQuota(provider);
+    // The sweep's handoff commits, then the server stops before it does anything else.
+    const identity = `${childId}:${failedRun.id}:${accountB}`;
+    yield* orchestrator.dispatch({
+      type: "message.dispatch",
+      commandId: CommandId.make(`limit-handoff:${identity}`),
+      messageId: MessageId.make(`limit-handoff:${identity}`),
+      threadId: childId,
+      manualContinuationOfRunId: failedRun.id,
+      modelSelection: { instanceId: accountB, model: "gpt-5" },
+      text: "Continue where you left off.",
+      attachments: [],
+      dispatchMode: { type: "start_immediately" },
+      createdBy: "system",
+      creationSource: "server",
+    });
+    // Back up, the outbox still owes the parent its notice.
+    yield* worker.drain();
+    const parent = yield* orchestrator.getThreadProjection(parentId);
+    expect(
+      parent.messages.find((message) => message.id.startsWith("message:delegated-task-recovery:"))
+        ?.notification?.delegatedFailures?.[0]?.recovery,
+    ).toEqual({ type: "handed_off", providerInstanceId: accountB, model: "gpt-5" });
+  }).pipe(Effect.provide(runtime));
+});
 
 it.effect("a Stop on a delegated child still recovering from a limit ends the recovery", () => {
   const { provider, runtime, sweep } = setupHandoff();
