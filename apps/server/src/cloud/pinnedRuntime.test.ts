@@ -5,15 +5,18 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
-import { FetchHttpClient, HttpClient } from "effect/http";
+import { FetchHttpClient, HttpClient, HttpClientResponse } from "effect/http";
 
 import * as ProcessRunner from "../processRunner.ts";
 import {
   ensurePinnedRuntimeInstalled,
+  PINNED_RUNTIME_ARCHIVE_MISSING_STEP,
   PinnedRuntimeInstallError,
+  pinnedRuntimePaths,
   quoteShellArg,
   renderCheckoutWrapper,
   resolveCheckoutRuntime,
+  resolvePinnedRuntimeEntry,
 } from "./pinnedRuntime.ts";
 
 describe("checkout runtime detection", () => {
@@ -83,12 +86,12 @@ describe("checkout wrapper", () => {
   });
 });
 
-describe("checkout runtime install", () => {
-  const layer = Layer.merge(
-    ProcessRunner.layer.pipe(Layer.provideMerge(NodeServices.layer)),
-    FetchHttpClient.layer,
-  );
+const layer = Layer.merge(
+  ProcessRunner.layer.pipe(Layer.provideMerge(NodeServices.layer)),
+  FetchHttpClient.layer,
+);
 
+describe("checkout runtime install", () => {
   it.effect("pins a wrapper that runs the checkout CLI", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
@@ -168,3 +171,177 @@ describe("checkout runtime install", () => {
     }).pipe(Effect.provide(layer)),
   );
 });
+
+describe("release archive install", () => {
+  const VERSION = "9.9.9";
+  const EXECUTABLE = '#!/bin/sh\necho "cogenly v9.9.9"\n';
+
+  /**
+   * Packs a release archive whose top directory holds `entries`: a string is
+   * a script, `{ link }` a symlink. Returns its bytes and sha256.
+   */
+  const packArchive = Effect.fn(function* (
+    root: string,
+    entries: Record<string, string | { readonly link: string }>,
+  ) {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const runner = yield* ProcessRunner.ProcessRunner;
+    const stage = path.join(root, "stage");
+    const top = path.join(stage, `cogenly-${VERSION}-linux-x64`);
+    yield* fs.makeDirectory(top, { recursive: true });
+    for (const [name, entry] of Object.entries(entries)) {
+      if (typeof entry === "string") {
+        yield* fs.writeFileString(path.join(top, name), entry);
+        yield* fs.chmod(path.join(top, name), 0o755);
+      } else {
+        yield* fs.symlink(entry.link, path.join(top, name));
+      }
+    }
+    const archivePath = path.join(root, "archive.tar.gz");
+    yield* runner.run({
+      command: "tar",
+      args: ["-czf", archivePath, "-C", stage, path.basename(top)],
+      timeout: "30 seconds",
+    });
+    const bytes = yield* fs.readFile(archivePath);
+    const digest = new Uint8Array(
+      yield* Effect.promise(() => crypto.subtle.digest("SHA-256", bytes)),
+    );
+    return { bytes, sha256: Buffer.from(digest).toString("hex") };
+  });
+
+  /** Serves `assets` under one release URL and records what was requested. */
+  const releaseServer = (assets: Record<string, Uint8Array | string>, requested: string[]) =>
+    HttpClient.make((request) =>
+      Effect.sync(() => {
+        requested.push(request.url);
+        const name = request.url.split("/").pop() ?? "";
+        const body = assets[name];
+        return HttpClientResponse.fromWeb(
+          request,
+          body === undefined ? new Response(null, { status: 404 }) : new Response(body),
+        );
+      }),
+    );
+
+  const install = Effect.fn(function* (root: string, httpClient: HttpClient.HttpClient) {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const runner = yield* ProcessRunner.ProcessRunner;
+    return yield* ensurePinnedRuntimeInstalled({
+      baseDir: path.join(root, "home"),
+      version: VERSION,
+      fs,
+      path,
+      runner,
+      platform: "linux",
+      arch: "x64",
+      httpClient,
+      releaseBaseUrl: "https://releases.test/download",
+      validate: (runtime) =>
+        runner.run({ command: runtime.entryPath, args: ["--version"], timeout: "30 seconds" }).pipe(
+          Effect.mapError((cause) => new PinnedRuntimeInstallError({ step: "verifying", cause })),
+          Effect.filterOrFail(
+            (result) => result.code === 0 && result.stdout.includes("v9.9.9"),
+            () => new PinnedRuntimeInstallError({ step: "verifying" }),
+          ),
+        ),
+    });
+  });
+
+  it.effect("downloads the cogenly archive, which still carries a t3 entry", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "cogenly-archive-new-" });
+      const archive = yield* packArchive(root, { cogenly: EXECUTABLE, t3: { link: "cogenly" } });
+      const requested: string[] = [];
+      const paths = yield* install(
+        root,
+        releaseServer(
+          {
+            SHA256SUMS: [
+              `${archive.sha256}  cogenly-${VERSION}-linux-x64.tar.gz`,
+              `${archive.sha256}  t3-${VERSION}-linux-x64.tar.gz`,
+              "",
+            ].join("\n"),
+            [`cogenly-${VERSION}-linux-x64.tar.gz`]: archive.bytes,
+          },
+          requested,
+        ),
+      );
+      expect(path.basename(paths.entryPath)).toBe("cogenly");
+      expect(requested.at(-1)).toBe(
+        `https://releases.test/download/v${VERSION}/cogenly-${VERSION}-linux-x64.tar.gz`,
+      );
+      // An older service launcher runs <version>/t3; it reaches the same file.
+      const legacy = path.join(paths.versionDir, "t3");
+      expect(yield* fs.realPath(legacy)).toBe(yield* fs.realPath(paths.entryPath));
+    }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("falls back to the t3 archive of a release from before the rename", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "cogenly-archive-old-" });
+      const archive = yield* packArchive(root, { t3: EXECUTABLE });
+      const requested: string[] = [];
+      const httpClient = releaseServer(
+        {
+          SHA256SUMS: `${archive.sha256}  t3-${VERSION}-linux-x64.tar.gz\n`,
+          [`t3-${VERSION}-linux-x64.tar.gz`]: archive.bytes,
+        },
+        requested,
+      );
+      const paths = yield* install(root, httpClient);
+      expect(path.basename(paths.entryPath)).toBe("t3");
+      expect(requested.some((url) => url.includes("cogenly-"))).toBe(false);
+      // The install is recognized as complete on the next run.
+      requested.length = 0;
+      expect(yield* install(root, httpClient)).toEqual(paths);
+      expect(requested).toEqual([]);
+    }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("reports a release that lists neither archive name", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "cogenly-archive-none-" });
+      const error = yield* install(root, releaseServer({ SHA256SUMS: "" }, [])).pipe(Effect.flip);
+      expect(error._tag).toBe("PinnedRuntimeInstallError");
+      if (error._tag === "PinnedRuntimeInstallError") {
+        expect(error.step).toContain(PINNED_RUNTIME_ARCHIVE_MISSING_STEP);
+      }
+    }).pipe(Effect.provide(layer)),
+  );
+});
+
+describe("pinned runtime entry", () => {
+  it.effect("prefers cogenly, falls back to t3, and keeps cogenly when neither exists", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "cogenly-entry-" });
+      const resolve = (version: string) =>
+        resolvePinnedRuntimeEntry(
+          fs,
+          path,
+          pinnedRuntimePaths(path, root, version, "linux"),
+          "linux",
+        ).pipe(Effect.map((paths) => path.basename(paths.entryPath)));
+      const versions = path.join(root, "runtime/versions");
+      yield* fs.makeDirectory(path.join(versions, "0.2.2"), { recursive: true });
+      yield* fs.writeFileString(path.join(versions, "0.2.2/t3"), EXECUTABLE_STUB);
+      yield* fs.makeDirectory(path.join(versions, "0.3.0"), { recursive: true });
+      yield* fs.writeFileString(path.join(versions, "0.3.0/cogenly"), EXECUTABLE_STUB);
+      yield* fs.writeFileString(path.join(versions, "0.3.0/t3"), EXECUTABLE_STUB);
+      expect(yield* resolve("0.2.2")).toBe("t3");
+      expect(yield* resolve("0.3.0")).toBe("cogenly");
+      expect(yield* resolve("0.4.0")).toBe("cogenly");
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+});
+
+const EXECUTABLE_STUB = "#!/bin/sh\n";

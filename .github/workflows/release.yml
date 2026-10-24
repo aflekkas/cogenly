@@ -320,11 +320,16 @@ jobs:
           export PATH="$WORKSPACE_NODE_BIN:$PATH"
           node scripts/build-cli-archive.ts --platform linux --arch '${{ matrix.arch }}' \
             --version "$VERSION" --output-dir release-cli --resource-monitor-dir "$RUNNER_TEMP/resource-monitor"
-          archive="t3-$VERSION-linux-${{ matrix.arch }}.tar.gz"
+          archive="cogenly-$VERSION-linux-${{ matrix.arch }}.tar.gz"
+          # The same archive under its pre-rename name, for servers, installers and
+          # launchers from older releases. See "Transition: t3 → cogenly names" in
+          # docs/operations/release.md before dropping it.
+          legacy="t3-$VERSION-linux-${{ matrix.arch }}.tar.gz"
           test -f "release-cli/$archive"
-          # Runs the extracted executable with an empty PATH: --version, then a real serve.
+          cp "release-cli/$archive" "release-cli/$legacy"
+          # Runs the extracted cogenly and its t3 link with an empty PATH: --version, then a real serve.
           node scripts/smoke-cli-archive.ts --archive "release-cli/$archive" --expect-version "$VERSION"
-          (cd release-cli && sha256sum "$archive" > "SHA256SUMS.linux-${{ matrix.arch }}" && sha256sum -c "SHA256SUMS.linux-${{ matrix.arch }}")
+          (cd release-cli && sha256sum "$archive" "$legacy" > "SHA256SUMS.linux-${{ matrix.arch }}" && sha256sum -c "SHA256SUMS.linux-${{ matrix.arch }}")
       - uses: actions/upload-artifact@v4
         with:
           name: cli-linux-${{ matrix.arch }}
@@ -400,7 +405,7 @@ jobs:
             # shellcheck disable=SC2016
             printf 'Main commit `%s` • Signing: **%s**\n' "$SHA" "$mode"
             # shellcheck disable=SC2016
-            printf '\nLinux server: `t3-%s-linux-x64.tar.gz` and `t3-%s-linux-arm64.tar.gz`, checksummed in `SHA256SUMS`.\n' "${TAG#v}" "${TAG#v}"
+            printf '\nLinux server: `cogenly-%s-linux-x64.tar.gz` and `cogenly-%s-linux-arm64.tar.gz`, checksummed in `SHA256SUMS`. The `t3-` files are the same archives for older installs.\n' "${TAG#v}" "${TAG#v}"
             if [[ "$mode" == unsigned ]]; then
               printf '\n**Unsigned macOS build.** Gatekeeper may block the first launch of a browser-downloaded copy. Installed apps update themselves in place.\n'
             fi

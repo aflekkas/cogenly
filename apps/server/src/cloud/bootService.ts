@@ -22,6 +22,7 @@ import {
   pinnedRuntimePaths,
   PinnedRuntimeInstallError,
   resolveCheckoutRuntime,
+  resolvePinnedRuntimeEntry,
 } from "./pinnedRuntime.ts";
 import {
   SERVICE_LAUNCHER_PROTOCOL,
@@ -573,7 +574,7 @@ export class BootServiceDowngradeRefusedError extends Schema.TaggedError<BootSer
   },
 ) {
   override get message(): string {
-    return `Refusing to replace t3@${this.installedVersion} with older t3@${this.targetVersion}. Run the command again with --allow-downgrade to continue.`;
+    return `Refusing to replace cogenly@${this.installedVersion} with older cogenly@${this.targetVersion}. Run the command again with --allow-downgrade to continue.`;
   }
 }
 
@@ -736,10 +737,15 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
     ).pipe(Effect.mapError((cause) => new BootServiceInstallError({ cause })));
   // The executable hosts the launcher as a hidden subcommand of itself, so
   // the unit runs the pinned runtime directly.
-  const planFor = (timeZoneOverride?: string): BootServicePlan => {
+  // `entryPath` is the pinned executable on disk: `cogenly`, or `t3` when the
+  // version predates the rename (see resolvePinnedRuntimeEntry).
+  const planFor = (
+    timeZoneOverride?: string,
+    entryPath: string = runtimePaths.entryPath,
+  ): BootServicePlan => {
     const timeZone = normalizeTimeZoneSetting(timeZoneOverride) ?? configuredTimeZone;
     return {
-      program: [runtimePaths.entryPath, "__service-launcher"],
+      program: [entryPath, "__service-launcher"],
       baseDir: input.baseDir,
       logPath,
       unitPath,
@@ -866,7 +872,6 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
     readonly timeZone?: string;
   }) {
     const manager = yield* requireManager;
-    const plan = planFor(options?.timeZone);
     yield* fs
       .makeDirectory(input.logsDir, { recursive: true })
       .pipe(Effect.mapError((cause) => new BootServiceInstallError({ cause })));
@@ -877,7 +882,7 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
     }
 
     // Prepare every immutable artifact before stopping the installed unit.
-    yield* ensurePinnedRuntimeInstalled({
+    const pinned = yield* ensurePinnedRuntimeInstalled({
       baseDir: input.baseDir,
       version: input.cliVersion,
       fs,
@@ -930,6 +935,7 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
           : new BootServiceInstallError({ cause: error }),
       ),
     );
+    const plan = planFor(options?.timeZone, pinned.entryPath);
     const installed = yield* fs
       .exists(unitPath)
       .pipe(Effect.mapError((cause) => new BootServiceInstallError({ cause })));
@@ -1122,9 +1128,11 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
     if (!(yield* fs.exists(unitPath))) {
       return { supported: true, installed: false, current: false, unitPath, logPath };
     }
+    const runtimeEntry = (yield* resolvePinnedRuntimeEntry(fs, path, runtimePaths, platform))
+      .entryPath;
     const [unit, runtimeEntryExists, runtimeSentinel, stateText] = yield* Effect.all([
       fs.readFileString(unitPath),
-      fs.exists(runtimePaths.entryPath),
+      fs.exists(runtimeEntry),
       fs.readFileString(runtimePaths.sentinelPath).pipe(Effect.option),
       fs.readFileString(statePath).pipe(Effect.option),
     ]);
@@ -1155,7 +1163,10 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
       problems,
       current:
         problems.length === 0 &&
-        normalizeUnit(unit) === normalizeUnit(detectedManager.render(planFor())) &&
+        // A unit that still names `<version>/t3` (written before the rename)
+        // reads as stale, so the next install or update rewrites it.
+        normalizeUnit(unit) ===
+          normalizeUnit(detectedManager.render(planFor(undefined, runtimeEntry))) &&
         runtimeEntryExists &&
         Option.isSome(runtimeSentinel) &&
         runtimeSentinel.value.trim() === input.cliVersion &&

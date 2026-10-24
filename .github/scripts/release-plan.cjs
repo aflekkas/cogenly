@@ -39,6 +39,13 @@ function assertProdVersionAdvances(version, latestTag) {
 const CLI_ARCHIVE_PLATFORMS = ["linux-x64", "linux-arm64"];
 
 function cliArchiveAssets(version) {
+  return CLI_ARCHIVE_PLATFORMS.map((platform) => `cogenly-${version}-${platform}.tar.gz`);
+}
+
+// The same archives under their names from before the rename, which servers,
+// installers, and `t3 update` from older releases download. Remove only as
+// "Transition: t3 → cogenly names" in docs/operations/release.md describes.
+function legacyCliArchiveAssets(version) {
   return CLI_ARCHIVE_PLATFORMS.map((platform) => `t3-${version}-${platform}.tar.gz`);
 }
 
@@ -66,10 +73,24 @@ function mergeChecksums(texts) {
     .join("");
 }
 
+// Every archive under both names, and each legacy name the very same bytes as
+// its cogenly- twin, so an older client gets exactly what a current one does.
 function assertReleaseAssets(checksums, version) {
-  const listed = new Set(checksums.split("\n").map((line) => line.slice(66)));
-  const missing = cliArchiveAssets(version).filter((name) => !listed.has(name));
+  const digests = new Map(
+    checksums
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => [line.slice(66), line.slice(0, 64)]),
+  );
+  const current = cliArchiveAssets(version);
+  const legacy = legacyCliArchiveAssets(version);
+  const missing = [...current, ...legacy].filter((name) => !digests.has(name));
   if (missing.length > 0) throw new Error(`SHA256SUMS lacks ${missing.join(", ")}.`);
+  const differing = legacy.filter(
+    (name, index) => digests.get(name) !== digests.get(current[index]),
+  );
+  if (differing.length > 0)
+    throw new Error(`${differing.join(", ")} must be the same archive as its cogenly- name.`);
 }
 
 // Release notes come from the non-merge commit subjects since the previous
@@ -139,6 +160,7 @@ function renderReleaseNotes(subjects) {
 
 module.exports = {
   cliArchiveAssets,
+  legacyCliArchiveAssets,
   mergeChecksums,
   assertReleaseAssets,
   releasePlan,
