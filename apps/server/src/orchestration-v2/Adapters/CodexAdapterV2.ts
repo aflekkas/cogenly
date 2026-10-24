@@ -102,7 +102,7 @@ import {
   buildCodexAdditionalContext,
   buildCodexDeveloperInstructions,
 } from "../../provider/CodexDeveloperInstructions.ts";
-import { CONVERSATION_MODE_INSTRUCTIONS } from "@t3tools/provider-core/server/runtimeInstructions";
+import { conversationModeInstructions } from "@t3tools/provider-core/server/runtimeInstructions";
 import { toMcpElicitationResponse } from "../../provider/CodexMcpElicitation.ts";
 import {
   materializeCodexShadowHome,
@@ -671,8 +671,9 @@ function codexRuntimeModeTurnDefaults(
   readonly approvalsReviewer: CodexSchema.V2TurnStartParams__ApprovalsReviewer;
   readonly sandboxPolicy: CodexSchema.V2TurnStartParams__SandboxPolicy;
 } {
-  // Chat-surface turns run in Codex's read-only sandbox: no workspace writes
-  // and no exec of mutating commands. Approvals stay off; the sandbox denies.
+  // Chat-surface turns run in Codex's read-only sandbox: no native patches or
+  // writes. Approvals stay off; the sandbox denies. Their commands go through
+  // the Cogenly terminal tools, which run outside this sandbox.
   if (conversationMode) {
     return {
       approvalPolicy: "never",
@@ -703,6 +704,7 @@ export function buildCodexTurnStartParams(input: {
 }) {
   return Effect.gen(function* () {
     const conversationMode = input.runtimePolicy.conversationMode === true;
+    const terminalTools = input.terminalToolsAvailable ?? false;
     const runtimeModeDefaults = codexRuntimeModeTurnDefaults(
       input.runtimePolicy.runtimeMode,
       conversationMode,
@@ -724,7 +726,7 @@ export function buildCodexTurnStartParams(input: {
         ? undefined
         : buildCodexDeveloperInstructions(
             input.runtimePolicy.interactionMode,
-            conversationMode ? { conversationMode } : undefined,
+            conversationMode ? { conversationMode, terminal: terminalTools } : undefined,
           );
     // An app's context is text an MCP server wrote, so it goes in as untrusted
     // context: Codex renders it as quoted user-side input, never as developer
@@ -742,9 +744,7 @@ export function buildCodexTurnStartParams(input: {
             {
               browser: input.browserToolsAvailable ?? true,
               device: input.deviceToolsAvailable ?? false,
-              // Conversation turns have no shell, so they never route
-              // commands through the terminal tools.
-              terminal: conversationMode ? false : (input.terminalToolsAvailable ?? false),
+              terminal: terminalTools,
             },
           )
         : undefined;
@@ -757,7 +757,7 @@ export function buildCodexTurnStartParams(input: {
         : {
             cogenly_conversation: {
               kind: "application" as const,
-              value: CONVERSATION_MODE_INSTRUCTIONS,
+              value: conversationModeInstructions({ terminal: terminalTools }),
             },
           };
     const projectContext =

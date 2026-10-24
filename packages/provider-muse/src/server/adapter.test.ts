@@ -526,9 +526,57 @@ describe("MuseAdapterV2", () => {
       const call = yield* fake.takeCall("turn/start");
       const text = JSON.stringify(call.params.input);
       assert.include(text, "<conversation_mode>");
+      // No MCP credential, so no terminal tools to look things up with.
+      assert.include(text, "you cannot run commands");
       assert.include(text, "Start Work");
       assert.include(text, "image_search");
       assert.include(text, "<how_cogenly_works>");
+      yield* fake.emit("turn/completed", { turnId: call.commandId, terminal: "completed" });
+    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+  );
+
+  it.effect("lets chat-surface turns look things up through the granted terminal tools", () =>
+    Effect.gen(function* () {
+      yield* (yield* McpProviderSessions.McpProviderSessions).set({
+        environmentId: EnvironmentId.make("test-environment"),
+        threadId: THREAD_ID,
+        providerSessionId: "test-session",
+        providerInstanceId: INSTANCE_ID,
+        terminalToolsAvailable: true,
+        endpoint: "http://127.0.0.1:43210/mcp",
+        authorizationHeader: "Bearer conversation-terminal-token",
+        browserToolsAvailable: true,
+      });
+      const policy = ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+        ...runtimePolicy,
+        conversationMode: true,
+      });
+      const fake = yield* makeFakeMuse();
+      fake.host.initializeResult.grantedCapabilities.push("sessionMcp");
+      let readOnly: boolean | undefined;
+      const harness = yield* makeHarness(
+        fake,
+        INSTANCE_ID,
+        undefined,
+        undefined,
+        undefined,
+        policy,
+        {
+          createHost: async (options) => {
+            readOnly = options.readOnly;
+            return fake.host;
+          },
+        },
+      );
+      // The native shell and writes stay off; commands go through the MCP terminal.
+      assert.isTrue(readOnly);
+      yield* harness.runtime.startTurn(yield* turnInput(harness.providerThread, 1, policy));
+      const call = yield* fake.takeCall("turn/start");
+      const text = JSON.stringify(call.params.input);
+      assert.include(text, "Look things up yourself with the cogenly terminal_run tool");
+      assert.include(text, "Use the cogenly MCP terminal_run tool for every shell command");
+      assert.include(text, "work_task");
+      assert.notInclude(text, "you cannot run commands");
       yield* fake.emit("turn/completed", { turnId: call.commandId, terminal: "completed" });
     }).pipe(Effect.scoped, Effect.provide(testLayer)),
   );

@@ -11,7 +11,9 @@ import * as Path from "effect/Path";
 
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as ThreadCommandExecutor from "../orchestration-v2/ThreadCommandExecutor.ts";
+import { worksInProjectFolder } from "../orchestration-v2/RuntimePolicy.ts";
 import * as ProjectService from "../project/ProjectService.ts";
+import * as ProjectFiles from "../projectLabels/ProjectFiles.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
@@ -64,6 +66,7 @@ const make = Effect.gen(function* () {
   const credentials = yield* CliCredentials.CliCredentials;
   const settings = yield* ServerSettings.ServerSettingsService;
   const projects = yield* ProjectService.ProjectService;
+  const files = yield* ProjectFiles.ProjectFiles;
   const executor = yield* ThreadCommandExecutor.ThreadCommandExecutor;
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -105,8 +108,13 @@ const make = Effect.gen(function* () {
               .pipe(Effect.mapError(unavailable));
             if (Option.isNone(project))
               return yield* denied("The thread workspace is unavailable.");
+            // Chats have no worktree: a filed one looks things up from its
+            // project folder, where its provider runs too.
+            const folder = worksInProjectFolder(thread)
+              ? yield* files.folderForThread(threadId).pipe(Effect.mapError(unavailable))
+              : null;
             const root = yield* fs
-              .realPath(thread.worktreePath ?? project.value.workspaceRoot)
+              .realPath(folder?.dir ?? thread.worktreePath ?? project.value.workspaceRoot)
               .pipe(Effect.mapError(unavailable));
             const cwd = yield* fs
               .realPath(path.resolve(root, input.cwd ?? "."))

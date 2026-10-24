@@ -1,7 +1,7 @@
 import * as CliCredentials from "../accounts/CliCredentials.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
-import { EnvironmentId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import { EnvironmentId, ProjectLabelId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -11,6 +11,7 @@ import * as Invocation from "./McpInvocationContext.ts";
 import * as Manager from "../terminal/Manager.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import * as ProjectService from "../project/ProjectService.ts";
+import * as ProjectFiles from "../projectLabels/ProjectFiles.ts";
 import * as ThreadCommandExecutor from "../orchestration-v2/ThreadCommandExecutor.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as ServerSettings from "../serverSettings.ts";
@@ -38,27 +39,32 @@ it.effect(
       const workspace = `${directory}/workspace`;
       yield* fs.makeDirectory(workspace);
       yield* fs.symlink(directory, `${workspace}/escape`);
+      const projectFolder = `${directory}/Spawn Partners`;
+      yield* fs.makeDirectory(projectFolder);
       const inputs: string[] = [];
       const signals: Array<string | undefined> = [];
+      const spawnedIn: string[] = [];
       const manager = yield* Manager.makeWithOptions({
         logsDir: directory,
         processKillGraceMs: 0,
         processTable: Effect.succeed([]),
         resolveProviderInstanceEnvironment: () => Effect.succeed({}),
         ptyAdapter: {
-          spawn: () =>
-            Effect.succeed({
-              pid: 12345,
-              write: (data) => {
-                inputs.push(data);
-              },
-              resize: () => {},
-              kill: (signal) => {
-                signals.push(signal);
-              },
-              onData: () => () => {},
-              onExit: () => () => {},
-            }),
+          spawn: (input) =>
+            Effect.sync(() => spawnedIn.push(input.cwd)).pipe(
+              Effect.as({
+                pid: 12345,
+                write: (data) => {
+                  inputs.push(data);
+                },
+                resize: () => {},
+                kill: (signal) => {
+                  signals.push(signal);
+                },
+                onData: () => () => {},
+                onExit: () => () => {},
+              }),
+            ),
         },
       });
       const project = {
@@ -84,11 +90,27 @@ it.effect(
         Layer.mock(ThreadManagement.ThreadManagementService)({
           getThreadShell: (id) =>
             Effect.succeed(
-              liveThreadShell(id, id === "restricted" ? { runtimeMode: "full-access" } : {}),
+              id === "chat"
+                ? { ...liveThreadShell(id), surface: "chat" as const }
+                : liveThreadShell(id, id === "restricted" ? { runtimeMode: "full-access" } : {}),
             ),
         }),
         Layer.mock(ProjectService.ProjectService)({
           getById: () => Effect.succeed(Option.some(project)),
+        }),
+        Layer.mock(ProjectFiles.ProjectFiles)({
+          folderForThread: (id) =>
+            Effect.succeed(
+              id === "chat"
+                ? {
+                    labelId: ProjectLabelId.make("label:spawn"),
+                    name: "Spawn Partners",
+                    dir: projectFolder,
+                    instructions: "",
+                    projectChatThreadId: null,
+                  }
+                : null,
+            ),
         }),
         ThreadCommandExecutor.layer,
         ServerSettings.layerTest(),
@@ -120,6 +142,16 @@ it.effect(
         yield* as("restricted", tools.kill({ terminalId: permitted.terminalId }));
         yield* as("A", tools.kill({ terminalId: started.terminalId }));
         expect(signals).toContain("SIGKILL");
+        // A filed chat looks things up from its project folder, not the
+        // project's workspace, and cannot start outside it.
+        const realFolder = yield* fs.realPath(projectFolder);
+        spawnedIn.length = 0;
+        yield* as("chat", tools.run({ command: "git log --oneline", background: true }));
+        expect(spawnedIn).toEqual([realFolder]);
+        const escape = yield* as("chat", tools.run({ command: "ls", cwd: workspace })).pipe(
+          Effect.flip,
+        );
+        expect(escape.message).toContain("cwd must be inside");
       }).pipe(Effect.provide(TerminalMcpService.layer.pipe(Layer.provide(dependencies))));
     }).pipe(
       Effect.provide(ProcessRunner.layer.pipe(Layer.provideMerge(NodeServices.layer))),

@@ -108,8 +108,9 @@ The chat keeps a **Work started** line for each session it handed off. The sessi
 header shows the chat or agent it came from and its status, such as **Running**,
 **Needs input**, or **Ready for review**. You don't need to return to the chat.
 
-The chat's agent can also hand work off itself when you ask for something that needs
-commands or files, such as changing a repository or uninstalling an app. It picks a
+The chat's agent can also hand work off itself when you ask for something that changes
+things, such as editing a repository or uninstalling an app, or that runs for a long
+time. Lookups stay in the chat. It picks a
 repository, or **No project** for work on this machine, and shows a task card in the
 chat. A card it only proposes waits for **Approve**; **Edit** lets you change where it
 runs and what it's told first, and **Dismiss** can be undone with **Restore**. When you
@@ -143,8 +144,13 @@ or waiting on you. Older chats load as you scroll, and search covers all of them
 repositories from **Work** or the command palette.
 
 A chat is a conversation; Work is a coding session in a repository. Chats run in
-conversation mode: the agent answers directly and can't edit files or run shell
-commands itself; it hands that work to a task instead. So a chat's
+conversation mode: the agent answers directly and looks things up itself. It can run
+quick read-only commands, such as searching files, reading git history or querying
+`gh`, from the chat's project folder (or its own folder when it has no project), and
+each command shows in the conversation. It doesn't edit repositories, install
+anything or run long builds from a chat; it hands that work to a task instead.
+Chat commands use the same agent terminals as Work, so they need full-access mode and
+the `enableAgentTerminals` preference. So a chat's
 menu has **Start Work…**, rename, **Mark unread**, projects, copy and **Delete**,
 which always asks first, while settling, snoozing, archiving, repository settings
 and the branch and worktree controls, the right panel with its browser and device, and the

@@ -122,8 +122,8 @@ const serverLayer = Layer.mergeAll(
           nextOffset: 0,
           truncated: false,
         }),
-      write: () => neverCall("terminal service"),
-      kill: () => neverCall("terminal service"),
+      write: () => Effect.succeed({}),
+      kill: () => Effect.succeed({}),
     }),
   ),
   Layer.provideMerge(
@@ -303,9 +303,6 @@ const refusalOf = (text: string) =>
 
 describe("conversation-mode MCP boundary", () => {
   it.effect.each([
-    ["terminal_run", { command: "echo chat-probe" }],
-    ["terminal_write", { terminalId: "terminal-probe", input: "x" }],
-    ["terminal_kill", { terminalId: "terminal-probe" }],
     ["worktree_handoff", { branch: "probe/chat" }],
     ["delegate_task", { task: "probe task" }],
     ["create_threads", { threads: [{}] }],
@@ -335,13 +332,24 @@ describe("conversation-mode MCP boundary", () => {
     ),
   );
 
-  it.effect("terminal_run still serves a work-surface caller", () =>
-    callText("terminal_run", workThreadId, { command: "echo work-probe" }).pipe(
+  it.effect.each([chatThreadId, workThreadId])("terminal_run serves %s", (threadId) =>
+    callText("terminal_run", threadId, { command: "git log --oneline -5" }).pipe(
       Effect.map((text) => {
         assert.equal(
           (JSON.parse(text) as { terminalId: string }).terminalId,
           "terminal-conversation",
         );
+      }),
+    ),
+  );
+
+  it.effect.each([
+    ["terminal_write", { terminalId: "terminal-conversation", input: "q" }],
+    ["terminal_kill", { terminalId: "terminal-conversation" }],
+  ] as const)("%s serves a chat-surface caller", ([tool, args]) =>
+    callText(tool, chatThreadId, args).pipe(
+      Effect.map((text) => {
+        assert.deepEqual(JSON.parse(text), {});
       }),
     ),
   );

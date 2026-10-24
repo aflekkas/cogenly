@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 import {
-  CONVERSATION_MODE_INSTRUCTIONS,
   HOW_COGENLY_WORKS_INSTRUCTIONS,
   buildIntegrationsContextLine,
   buildProjectManifest,
   buildRuntimeInstructions,
+  conversationModeInstructions,
 } from "./runtimeInstructions.ts";
 
 describe("buildRuntimeInstructions", () => {
@@ -202,20 +202,43 @@ describe("integrations context line", () => {
   });
 });
 
-describe("CONVERSATION_MODE_INSTRUCTIONS", () => {
-  it("biases visual answers toward inline pictures from real sources", () => {
-    expect(CONVERSATION_MODE_INSTRUCTIONS).toContain("asks for pictures");
-    expect(CONVERSATION_MODE_INSTRUCTIONS).toContain("1-4 relevant images inline");
-    expect(CONVERSATION_MODE_INSTRUCTIONS).toContain("![alt](url)");
-    expect(CONVERSATION_MODE_INSTRUCTIONS).toContain("image_search");
-    expect(CONVERSATION_MODE_INSTRUCTIONS).toContain("never invent URLs");
+describe("conversationModeInstructions", () => {
+  const withTerminal = conversationModeInstructions({ terminal: true });
+  const withoutTerminal = conversationModeInstructions({ terminal: false });
+
+  it.each([withTerminal, withoutTerminal])(
+    "biases visual answers toward inline pictures from real sources",
+    (text) => {
+      expect(text).toContain("asks for pictures");
+      expect(text).toContain("1-4 relevant images inline");
+      expect(text).toContain("![alt](url)");
+      expect(text).toContain("image_search");
+      expect(text).toContain("never invent URLs");
+      expect(text.startsWith("<conversation_mode>")).toBe(true);
+      expect(text.endsWith("</conversation_mode>")).toBe(true);
+    },
+  );
+
+  it.each([withTerminal, withoutTerminal])(
+    "hands changes to a task instead of the user",
+    (text) => {
+      expect(text).toContain("work_task");
+      expect(text).toContain("do not tell the user to do it by hand");
+      expect(text).toContain('mode "propose"');
+      expect(text).toContain("A subagent is different");
+    },
+  );
+
+  it("runs lookups in the chat when the terminal tools are attached", () => {
+    expect(withTerminal).toContain("Look things up yourself with the cogenly terminal_run tool");
+    expect(withTerminal).toContain("never hand a question to a task just to run commands");
+    expect(withTerminal).toContain("long-running work such as builds and test suites");
+    expect(withTerminal).not.toContain("you cannot run commands");
   });
 
-  it("hands tool work to a task instead of the user", () => {
-    expect(CONVERSATION_MODE_INSTRUCTIONS).toContain("work_task");
-    expect(CONVERSATION_MODE_INSTRUCTIONS).toContain("do not tell the user to do it by hand");
-    expect(CONVERSATION_MODE_INSTRUCTIONS).toContain('mode "propose"');
-    expect(CONVERSATION_MODE_INSTRUCTIONS).toContain("A subagent is different");
+  it("says commands are unavailable without the terminal tools", () => {
+    expect(withoutTerminal).toContain("you cannot run commands");
+    expect(withoutTerminal).not.toContain("terminal_run");
   });
 
   it("adds the project's instructions and leaves them out when blank", () => {
