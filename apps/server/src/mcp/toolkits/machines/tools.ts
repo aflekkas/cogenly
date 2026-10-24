@@ -1,4 +1,5 @@
 import {
+  DesktopAppPairedMachine,
   MachineListResult,
   MachineSetupStatus,
   MachineSetupStepId,
@@ -7,6 +8,7 @@ import {
 import * as Schema from "effect/Schema";
 import { Tool, Toolkit } from "effect/ai";
 
+import * as DesktopAppControl from "../../../environment/DesktopAppControl.ts";
 import * as Machines from "../../../machines/Machines.ts";
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as MachineSetup from "../../../tailscale/MachineSetup.ts";
@@ -55,4 +57,48 @@ export const MachinesToolkit = Toolkit.make(
   })
     .annotate(Tool.Readonly, false)
     .annotate(Tool.Destructive, false),
+  Tool.make("machine_pair", {
+    failure: OrchestratorMcpFailure,
+    failureMode: "return",
+    dependencies: [
+      DesktopAppControl.DesktopAppControl,
+      McpInvocationContext.McpInvocationContext,
+      ThreadManagementService.ThreadManagementService,
+    ],
+    parameters: Schema.Struct({
+      hub: Schema.String.annotate({
+        description:
+          "The always-on machine the other one syncs with, usually the server: its connection name in the desktop app (Settings → Connections) or its environment id. A machine already paired as a joining machine can't be a hub; name its hub instead.",
+      }),
+      joining: Schema.String.annotate({
+        description:
+          "The machine that joins the hub, such as the user's laptop: its connection name or environment id.",
+      }),
+    }),
+    success: Schema.Struct({ hub: DesktopAppPairedMachine, joining: DesktopAppPairedMachine }),
+    description:
+      "Pair two of the user's machines so they sync, the same as Settings → Machines → Add a machine. The Cogenly desktop app on this computer runs it, because only an app signed in to both machines can: it checks the hub, mints a one-time join code bound to the joining machine's key, and redeems it, so the code never reaches you. Both machines must be connections in that app, and the hub must be ready: its machine_setup_status (or its checklist in Settings → Machines → Add a machine) shows ready. Only works from an environment on the same computer as the desktop app; elsewhere, ask the user to choose Add a machine in Settings → Machines. Requires a live full-access/default calling thread. machine_unpair undoes it.",
+  })
+    .annotate(Tool.Readonly, false)
+    .annotate(Tool.Destructive, false),
+  Tool.make("machine_unpair", {
+    failure: OrchestratorMcpFailure,
+    failureMode: "return",
+    dependencies: [
+      Machines.Machines,
+      McpInvocationContext.McpInvocationContext,
+      ThreadManagementService.ThreadManagementService,
+    ],
+    parameters: Schema.Struct({
+      machine: Schema.String.annotate({
+        description:
+          "A machine from machines_list paired with this one: its environmentId or name. On the hub, a joining machine; on a joining machine, its hub.",
+      }),
+    }),
+    success: Schema.Struct({ unpaired: Schema.Boolean }),
+    description:
+      "Unpair a machine from this one, like Unpair in Settings → Machines: the two stop syncing, and projects and conversations stay on both. A machine paired with the hub rather than with this one is unpaired on the hub. Requires a live full-access/default calling thread. machine_pair pairs them again.",
+  })
+    .annotate(Tool.Readonly, false)
+    .annotate(Tool.Destructive, true),
 );

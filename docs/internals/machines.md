@@ -22,6 +22,15 @@ key before issuance, and old unbound grants are refused.
 Transfer the code privately. The CLI reads it through a hidden prompt or
 `--code-stdin`, never a positional argument or a suggested command line.
 
+Before pairing, neither server holds a credential for the other, so no server
+can run the exchange alone. Only a client signed in to both with access
+management can. Settings → Machines runs it as one client command
+([pairMachines.ts](../../packages/client-runtime/src/machines/pairMachines.ts)),
+authorizing each request against the machine it goes to. The `machine_pair` MCP
+tool asks the desktop app beside the agent's server to run that same command
+over its control socket. The code never enters an MCP transcript, client state,
+or a URL, and an agent on a machine without the desktop app cannot pair.
+
 The hub issues a one-year DPoP session with subject `peer`, holding
 `sync:replicate` and `peer:delegate`. Neither scope belongs to legacy, standard,
 or administrative client grants. Access-management authority is required to

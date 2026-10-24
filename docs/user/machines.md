@@ -46,9 +46,13 @@ When both checklists are done, choose Pair. The join code passes between the
 machines for you; you never copy it.
 
 The same page lists every paired machine, whether it is online, and an Unpair
-button for each. Agents can check and run the same steps with the
-`machine_setup_status` and `machine_setup_step` tools, and
-`cogenly machines setup` shows the checklist in a terminal.
+button for each. `cogenly machines setup` shows the checklist in a terminal.
+
+You can also ask an agent to do all of this. It checks and runs each machine's
+steps, then pairs the machines through the desktop app the same way Add a
+machine does, so the join code never appears in the conversation. Pairing from
+an agent needs the desktop app on the computer the agent runs on, connected to
+both machines. An agent can unpair machines too.
 
 ## Pair from the terminal
 

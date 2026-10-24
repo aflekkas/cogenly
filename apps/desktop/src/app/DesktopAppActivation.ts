@@ -38,6 +38,8 @@ const MAX_REQUEST_BYTES = 64 * 1024;
 const REQUEST_TIMEOUT_MS = 15_000;
 // Connecting a host can wait on an SSH password prompt and a first-time download.
 const ADD_ENVIRONMENT_TIMEOUT_MS = 10 * 60_000;
+// Pairing checks the hub's Tailscale, then makes three requests across both machines.
+const PAIR_MACHINES_TIMEOUT_MS = 2 * 60_000;
 const isDesktopAppActivationRequest = Schema.is(DesktopAppActivationRequest);
 
 export class DesktopAppActivationStartError extends Schema.TaggedError<DesktopAppActivationStartError>()(
@@ -360,7 +362,11 @@ export const make = Effect.gen(function* () {
 
   const broker = new DesktopAppActivationBroker({
     requestTimeoutMs: (request) =>
-      request.type === "add-environment" ? ADD_ENVIRONMENT_TIMEOUT_MS : REQUEST_TIMEOUT_MS,
+      request.type === "add-environment"
+        ? ADD_ENVIRONMENT_TIMEOUT_MS
+        : request.type === "pair-machines"
+          ? PAIR_MACHINES_TIMEOUT_MS
+          : REQUEST_TIMEOUT_MS,
     activate: () => {
       void runPromise(
         desktopWindow.activate.pipe(

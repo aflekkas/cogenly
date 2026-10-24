@@ -359,7 +359,13 @@ const smokeCases = [
   },
   {
     toolkit: "machines",
-    names: ["machine_setup_status", "machine_setup_step", "machines_list"],
+    names: [
+      "machine_pair",
+      "machine_setup_status",
+      "machine_setup_step",
+      "machine_unpair",
+      "machines_list",
+    ],
     tool: "machines_list",
     args: {},
     expected: { machines: [], link: { _tag: "standalone" } },

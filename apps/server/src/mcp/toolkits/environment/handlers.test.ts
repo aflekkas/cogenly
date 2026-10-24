@@ -76,7 +76,10 @@ const makeServer = (
         Layer.mock(ServerEnvironment.ServerEnvironment)({}),
         Layer.mock(Settings.ServerSettingsService)({}),
         Layer.mock(ThreadCommandExecutor.ThreadCommandExecutor)({}),
-        Layer.succeed(DesktopAppControl.DesktopAppControl, { addEnvironment }),
+        Layer.succeed(DesktopAppControl.DesktopAppControl, {
+          addEnvironment,
+          pairMachines: () => Effect.die("machine_pair is not exercised here"),
+        }),
         Layer.succeed(MachineSecurity.MachineSecurity, {
           status: Effect.die("machine_security_status is not exercised here"),
         }),
