@@ -108,8 +108,16 @@ const make = Effect.gen(function* () {
       const stem = name;
       while ((yield* clashes(name)).length > 0) name = `${stem.slice(0, 58)}-${ordinal++}`;
     }
+    const scopeDoesNotWiden =
+      current?.scope.type === "all" ||
+      (current?.scope.type === "projects" &&
+        fields.scope.type === "projects" &&
+        fields.scope.labelIds.every(
+          (id) => current.scope.type === "projects" && current.scope.labelIds.includes(id),
+        ));
     const sameDestination =
       current !== undefined &&
+      scopeDoesNotWiden &&
       current.url === fields.url &&
       current.auth?.type === fields.auth?.type &&
       current.auth?.scope === fields.auth?.scope;
@@ -118,7 +126,7 @@ const make = Effect.gen(function* () {
     const machineLabel =
       registry.machines.find((machine) => machine.environmentId === origin)?.name ??
       "another machine";
-    // Local secrets and approvals survive cosmetic edits only. A peer cannot
+    // Local secrets and approvals survive cosmetic edits and scope narrowing. A peer cannot
     // retarget any grant, static header, or manually registered OAuth client.
     const local = sameDestination && current ? current : undefined;
     const integration: StoredIntegration = {

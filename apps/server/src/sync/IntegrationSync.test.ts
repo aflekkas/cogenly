@@ -1,5 +1,11 @@
 import { describe, expect, it } from "@effect/vitest";
-import { IntegrationId, IntegrationName, type SharedDocumentChangeWire } from "@t3tools/contracts";
+import {
+  IntegrationId,
+  IntegrationName,
+  ProjectLabelId,
+  type IntegrationScope,
+  type SharedDocumentChangeWire,
+} from "@t3tools/contracts";
 import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -118,6 +124,60 @@ const paired = Effect.gen(function* () {
 });
 
 describe("integration definitions between paired machines", () => {
+  it.live(
+    "scope widening clears local authorization while narrowing preserves it",
+    () =>
+      Effect.gen(function* () {
+        const { hub, spoke } = yield* paired;
+        const projects = (...ids: string[]): IntegrationScope => ({
+          type: "projects",
+          labelIds: ids.map((id) => ProjectLabelId.make(id)),
+        });
+        const cases: ReadonlyArray<{
+          from: IntegrationScope;
+          to: IntegrationScope;
+          keep: boolean;
+        }> = [
+          { from: projects("label:a"), to: { type: "all" }, keep: false },
+          { from: projects("label:a"), to: projects("label:a", "label:b"), keep: false },
+          { from: projects("label:a"), to: projects("label:b"), keep: false },
+          { from: { type: "all" }, to: projects("label:a"), keep: true },
+          { from: projects("label:a", "label:b"), to: projects("label:a"), keep: true },
+          { from: projects("label:a", "label:b"), to: projects("label:b", "label:a"), keep: true },
+        ];
+        for (const [index, scenario] of cases.entries()) {
+          const original = {
+            ...definition(`integration:scope-${index}`, `scope-${index}`),
+            scope: scenario.from,
+          };
+          yield* hub.store(original);
+          yield* exchange(hub, spoke);
+          const credentials = {
+            headers: { authorization: "Bearer local" },
+            approvedCredentialItems: ["local-item"],
+            oauthState: { signedIn: true, tokenItemId: "local-token" },
+            auth: {
+              type: "oauth" as const,
+              clientId: "local-client",
+              clientSecret: "{{credential:local-client.secret}}",
+            },
+          };
+          yield* spoke.store({ ...(yield* spoke.read(original.id))!, ...credentials });
+          yield* hub.integrations.update({ id: original.id, scope: scenario.to });
+          yield* exchange(hub, spoke);
+          const received = (yield* spoke.read(original.id))!;
+          expect(received.scope).toEqual(scenario.to);
+          expect(received.headers).toEqual(scenario.keep ? credentials.headers : {});
+          expect(received.approvedCredentialItems).toEqual(
+            scenario.keep ? credentials.approvedCredentialItems : [],
+          );
+          expect(received.oauthState).toEqual(scenario.keep ? credentials.oauthState : undefined);
+          expect(received.auth).toEqual(scenario.keep ? credentials.auth : { type: "oauth" });
+        }
+      }).pipe(Effect.scoped),
+    20000,
+  );
+
   it.live(
     "web definitions need local sign-in; cosmetic edits preserve the local grant and never send it",
     () =>
