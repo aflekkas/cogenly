@@ -21,7 +21,7 @@ import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
-import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http";
+import { FetchHttpClient, Headers, HttpClient, HttpClientRequest } from "effect/http";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
@@ -1095,7 +1095,14 @@ const make = (options: IntegrationsOptions = {}) =>
         return yield* post(integration, headers, method, params, initialized?.sessionId).pipe(
           Effect.map((response) => response.result),
         );
-      });
+      }).pipe((effect) =>
+        Effect.flatMap(Headers.CurrentRedactedNames, (names) =>
+          Effect.provideService(effect, Headers.CurrentRedactedNames, [
+            ...names,
+            ...Object.keys(integration.headers).map((name) => name.toLowerCase()),
+          ]),
+        ),
+      );
 
     const fetchTools = (integration: StoredIntegration, labelId?: ProjectLabelId | null) =>
       rpc(integration, "tools/list", {}, labelId).pipe(

@@ -5,8 +5,9 @@ import { NodeCrypto } from "@effect/platform-node";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
+import * as Tracer from "effect/Tracer";
 import * as TestClock from "effect/testing/TestClock";
-import { FetchHttpClient } from "effect/http";
+import { FetchHttpClient, HttpClient } from "effect/http";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -683,6 +684,38 @@ describe("Integrations gateway", () => {
         }),
       ).pipe(Effect.provide(layerWith())),
   );
+
+  it.effect("never records custom credential headers in HTTP spans", () => {
+    const spans: Array<Tracer.NativeSpan> = [];
+    const tracer = Tracer.make({
+      span(options) {
+        const span = new Tracer.NativeSpan(options);
+        spans.push(span);
+        return span;
+      },
+    });
+    return Effect.scoped(
+      Effect.gen(function* () {
+        yield* runMigrations();
+        const upstream = yield* fakeUpstream;
+        const service = yield* Integrations.Integrations;
+        const { integration } = yield* service.create({
+          ...createInput(upstream.url),
+          headers: { "X-Auth-Token": "{{credential:gmail.apiKey}}" },
+        });
+        yield* service.listTools(integration.name, null).pipe(
+          Effect.withSpan("integration-test"),
+          Effect.withTracer(tracer),
+          Effect.provideService(HttpClient.TracerHeaderFilter, () => true),
+        );
+        const http = spans.filter((span) => span.attributes.has("http.request.method"));
+        expect(http.length).toBeGreaterThanOrEqual(3);
+        expect(JSON.stringify(http.map((span) => [...span.attributes]))).not.toContain(
+          "SECRET-VALUE-123",
+        );
+      }),
+    ).pipe(Effect.provide(layerWith()));
+  });
 
   it.effect("records agent provenance without accepting it from the integration payload", () =>
     Effect.gen(function* () {
