@@ -573,7 +573,14 @@ const layerProductionBase = Layer.mergeAll(
   layerCliCredentialsProvided,
   layerAccountConnectionsProvided,
   UsageLimitRecoveryWorker.layer.pipe(
-    Layer.provide(Layer.mergeAll(ProjectionStore.layer, layerThreadManagementProvided)),
+    Layer.provide(AgentStore.layer),
+    Layer.provide(
+      Layer.mergeAll(
+        ProjectionStore.layer,
+        layerThreadManagementProvided,
+        UsageLimitHandoff.layer.pipe(Layer.provide(layerThreadManagementProvided)),
+      ),
+    ),
   ),
   UsageLimitHandoff.layer.pipe(Layer.provide(layerThreadManagementProvided)),
   layerProviderContinuationWorkerProvided,

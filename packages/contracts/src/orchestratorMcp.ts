@@ -29,6 +29,7 @@ import { ThreadTitleRegeneration } from "./threadTitle.ts";
 import {
   OrchestrationV2Actor,
   OrchestrationV2CreationSource,
+  OrchestrationV2DelegatedTaskRecovery,
   OrchestrationV2RunStatus,
   OrchestrationV2TurnItemStatus,
 } from "./orchestrationV2.ts";
@@ -227,6 +228,18 @@ export const OrchestratorMcpDelegateTaskResult = Schema.Struct({
     description:
       "True only on that mode=wait call when timeoutMs elapsed. The timeout does not cancel the child. Later task_status reads return false and use status for liveness.",
   }),
+  stoppedOn: Schema.optional(
+    Schema.NullOr(Schema.Literals(["rate_limit", "usage_limit", "restart"])).annotate({
+      description:
+        "Why the child's latest run stopped short: a short-term API rate limit, an exhausted usage window, or a server restart. Null when it did not.",
+    }),
+  ),
+  recovery: Schema.optional(
+    Schema.NullOr(OrchestrationV2DelegatedTaskRecovery).annotate({
+      description:
+        "What Cogenly is doing about that stop on its own: retrying at a time, handed off to another provider instance, or resuming at the limit reset. Null when nothing is scheduled and the task needs a decision.",
+    }),
+  ),
 });
 export type OrchestratorMcpDelegateTaskResult = typeof OrchestratorMcpDelegateTaskResult.Type;
 

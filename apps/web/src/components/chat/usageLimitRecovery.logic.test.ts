@@ -31,6 +31,31 @@ describe("resolveUsageLimitRecovery", () => {
     });
   });
 
+  it("waits out a server retry's backoff and says it is retrying", () => {
+    const rateLimitReset = "2026-10-21T12:01:00.000Z";
+    const retrying = stop({
+      resetAt: rateLimitReset,
+      recovery: {
+        runId,
+        resetAt: rateLimitReset,
+        autoResume: true,
+        retryAttempt: 2,
+        retryAt: "2026-10-21T12:02:00.000Z",
+      },
+    });
+    const now = Date.parse("2026-10-21T12:01:30.000Z");
+    const state = resolveUsageLimitRecovery(retrying, false, now);
+    expect(state).toEqual({
+      kind: "scheduled",
+      resetAt: rateLimitReset,
+      resumesAt: "2026-10-21T12:02:00.000Z",
+      retryAttempt: 2,
+    });
+    expect(usageLimitRecoveryCopy(state, "locale", now).title).toBe(
+      "Retrying automatically in under a minute",
+    );
+  });
+
   it("lets the recorded choice override the default in both directions", () => {
     const optedOut = stop({ recovery: { runId, resetAt, autoResume: false } });
     expect(resolveUsageLimitRecovery(optedOut, true, beforeReset).kind).toBe("cancelled");

@@ -114,9 +114,10 @@ export const layerExecutor: Layer.Layer<
             return continueRestartedRun({ threadId: effect.threadId, sourceRunId }).pipe(
               Effect.provideService(ThreadManagementService.ThreadManagementService, threads),
               Effect.provideService(ServerSettings.ServerSettingsService, settings),
-              // A continuation that will never run still owes a delegated parent a result.
-              Effect.tapError(() =>
-                willRetry
+              // A continuation that will never run still owes a delegated parent a
+              // result, after a defect as much as after a failure.
+              Effect.tapCause((cause) =>
+                willRetry || Cause.hasInterruptsOnly(cause)
                   ? Effect.void
                   : threads.recoverDelegatedTask(effect.threadId, sourceRunId),
               ),
