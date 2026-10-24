@@ -110,6 +110,14 @@ If the service later stops accepting the sign-in (you revoked access, or it
 expired), the integration shows **Needs sign-in**. Choose **Sign in** again;
 **Reconnect** in the menu does the same for a connected one.
 
+When you [share the vault](vault.md#vault-on-several-machines) between paired
+machines, signing in to a web integration on one machine signs it in on the
+others too. One machine renews the sign-in for all of them: your hub when it
+shares the vault with you, otherwise the machine you signed in on. If that
+machine is offline when the sign-in runs out, the others show that they are
+waiting for it; signing in again on any machine also works. Google and other
+local integrations sign in on each machine separately.
+
 Some services don't let Cogenly register itself (Slack: see
 [Connect Slack](#connect-slack)). Create an app with the service, add the
 redirect URL shown in the editor (your Cogenly address followed by
