@@ -109,11 +109,18 @@ function suggestedAction(failure: OrchestrationV2DelegatedTaskFailure): string {
   }
 }
 
+// A follow-up's id is new to the parent, so name the subagent and the task it continued.
+function followUpNote(failure: OrchestrationV2DelegatedTaskFailure): string {
+  return failure.followUpOf === undefined
+    ? ""
+    : ` It was a follow-up of task ${failure.followUpOf}: a later message to subagent "${failure.title}" (thread ${failure.childThreadId}) started it, and the earlier result of ${failure.followUpOf} is unchanged.`;
+}
+
 function failureLine(failure: OrchestrationV2DelegatedTaskFailure): string {
   const partial = failure.partialWork
     ? ` It may have left partial work in thread ${failure.childThreadId}.`
     : "";
-  return `Delegated task ${failure.taskId} ("${failure.title}") stopped: ${KIND_LABEL[failure.kind]}. ${failure.message}${partial} Suggested: ${suggestedAction(failure)}`;
+  return `Delegated task ${failure.taskId} ("${failure.title}") stopped: ${KIND_LABEL[failure.kind]}.${followUpNote(failure)} ${failure.message}${partial} Suggested: ${suggestedAction(failure)}`;
 }
 
 /** The parent's turn input and timeline record for one or more failed child runs. */
@@ -247,7 +254,7 @@ function recoveryLine(
   failure: OrchestrationV2DelegatedTaskFailure,
   recovery: OrchestrationV2DelegatedTaskRecovery,
 ): string {
-  const stop = `Delegated task ${failure.taskId} ("${failure.title}") hit a ${KIND_LABEL[failure.kind]}. ${failure.message}`;
+  const stop = `Delegated task ${failure.taskId} ("${failure.title}") hit a ${KIND_LABEL[failure.kind]}.${followUpNote(failure)} ${failure.message}`;
   switch (recovery.type) {
     case "handed_off":
       return `${stop} Cogenly handed it off to provider instance ${recovery.providerInstanceId} (${recovery.model}) with its context and re-ran the stopped request. It is still running; no action is needed.`;
@@ -332,6 +339,7 @@ export const deliverDelegatedTaskRecoveryNotice = Effect.fn(
     resetAt: failure.resetAt ?? null,
     partialWork: run.startedAt !== null,
     recovery: input.recovery,
+    ...(task.followUpOf === undefined ? {} : { followUpOf: task.followUpOf }),
   });
   const key = `${task.id}:${run.id}:${input.recovery.type}`;
   yield* threads.dispatch({
@@ -410,6 +418,7 @@ export const deliverDelegatedTaskFailureNotice = Effect.fn("DelegatedTaskFailure
       title: reportLabel(task.title?.trim() || task.prompt) ?? "Delegated task",
       ...classified,
       partialWork: run.startedAt !== null,
+      ...(task.followUpOf === undefined ? {} : { followUpOf: task.followUpOf }),
     };
     const key = failureKey(failure);
 

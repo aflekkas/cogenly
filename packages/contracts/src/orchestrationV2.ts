@@ -1331,6 +1331,8 @@ export const OrchestrationV2DelegatedTaskFailure = Schema.Struct({
   partialWork: Schema.Boolean,
   /** Set when the stop is not final: the server is recovering the child on its own. */
   recovery: Schema.optional(OrchestrationV2DelegatedTaskRecovery),
+  /** The earlier task whose subagent a later message continued (see the subagent's `followUpOf`). */
+  followUpOf: Schema.optional(NodeId),
 });
 export type OrchestrationV2DelegatedTaskFailure = typeof OrchestrationV2DelegatedTaskFailure.Type;
 

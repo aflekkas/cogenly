@@ -212,6 +212,7 @@ interface Child {
   readonly title: string;
   readonly run: OrchestrationV2Run;
   readonly turnItems: ReadonlyArray<OrchestrationV2TurnItem>;
+  readonly followUpOf?: NodeId;
 }
 
 const child = (name: string, overrides: Partial<Child> = {}): Child => ({
@@ -236,6 +237,7 @@ const withThreads = (children: ReadonlyArray<Child>) =>
           childThreadId: entry.threadId,
           title: entry.title,
           prompt: entry.title,
+          ...(entry.followUpOf === undefined ? {} : { followUpOf: entry.followUpOf }),
         }) as unknown as OrchestrationV2Subagent,
     );
     const getThreadRecords = ((threadId, fields, filter) => {
@@ -316,6 +318,29 @@ describe("deliverDelegatedTaskFailureNotice", () => {
       expect(queued.status).toBe("queued");
       expect(after.runs.find((run) => run.id === active.id)?.status).toBe(active.status);
       expect(queued.ordinal).toBeGreaterThan(active.ordinal);
+    }).pipe(Effect.provide(runtime)),
+  );
+
+  it.effect("names the subagent and the earlier task when a follow-up fails", () =>
+    Effect.gen(function* () {
+      const followUp = child("followup", {
+        title: "Browser",
+        followUpOf: NodeId.make("task:original"),
+      });
+      const h = yield* withThreads([followUp]);
+      yield* h.orchestrator.dispatch(createParent);
+      yield* h.orchestrator.dispatch(startParentTurn);
+      yield* h.deliver(followUp);
+
+      const notice = (yield* h.parent()).messages.find((message) =>
+        message.id.startsWith("message:delegated-task-failure:"),
+      )!;
+      expect(notice.text).toContain(
+        'Delegated task task:followup ("Browser") stopped: usage limit. It was a follow-up of task task:original: a later message to subagent "Browser" (thread thread:followup) started it, and the earlier result of task:original is unchanged.',
+      );
+      expect(notice.notification?.delegatedFailures).toMatchObject([
+        { taskId: "task:followup", followUpOf: "task:original" },
+      ]);
     }).pipe(Effect.provide(runtime)),
   );
 
