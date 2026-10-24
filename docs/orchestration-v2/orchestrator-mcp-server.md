@@ -214,7 +214,7 @@ or a rate limit that outlasted its retries, hands off to the best-ranked instanc
 available a quota resumes at its reset. The task stays nonterminal throughout, and the
 continuation's result becomes the task's. A handoff or scheduled resume queues one `updated`
 notice on the parent; retries do not. Turning off the child's resume ends the wait, and the limit
-becomes the task's failure.
+becomes the task's failure. `task_cancel`, a parent's Stop, or a Stop on the child does the same.
 
 When a child run fails or is cut off, whatever the wait mode, the parent also gets a queued
 failure notice. This covers a provider error, a limit nothing could recover, a restart that

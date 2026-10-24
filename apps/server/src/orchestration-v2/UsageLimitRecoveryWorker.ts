@@ -131,7 +131,7 @@ export function decideLimitStop(
   const resetAt = thread.usageLimitResetAt!;
   if (thread.limitKind === "rate_limit") {
     const retry = nextRateLimitRetry({
-      previous: thread.limitRecovery,
+      previous: thread.retryChained === false ? null : thread.limitRecovery,
       runId,
       resetAt,
       stoppedAtMs: DateTime.toEpochMillis(thread.latestRunCompletedAt ?? thread.updatedAt),

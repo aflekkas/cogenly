@@ -59,7 +59,7 @@ import {
   type ServerProvider,
   ThreadId,
 } from "@t3tools/contracts";
-import { runRanAfter } from "@t3tools/shared/orchestrationV2ThreadError";
+import { latestExecutedRun, runRanAfter } from "@t3tools/shared/orchestrationV2ThreadError";
 import { applyModelEffortDefaults } from "@t3tools/shared/model";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -85,6 +85,7 @@ import {
 } from "../orchestration-v2/DispatchModeLimit.ts";
 import { runOutcome } from "../orchestration-v2/RestartBackgroundNote.ts";
 import { delegatedTaskStop } from "../orchestration-v2/DelegatedTaskFailureNotice.ts";
+import { limitRecoveryPending } from "../orchestration-v2/UsageLimitStop.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
@@ -2397,9 +2398,21 @@ const make = Effect.gen(function* () {
         // A task waiting on its own delegates has work to stop below it. One with neither
         // a running turn nor delegates (such as one awaiting a restart) keeps its delivery.
         const child = yield* loadProjection(current.childThreadId);
+        // A child stopped on a limit that Cogenly is still recovering has no
+        // live run, but its retry, handoff or resume is work the stop ends.
+        const latestChildRun = latestExecutedRun(child.runs);
+        const recoveringFromLimit =
+          latestChildRun !== null &&
+          limitRecoveryPending({
+            thread: child.thread,
+            runs: child.runs,
+            turnItems: child.turnItems,
+            run: latestChildRun,
+          });
         if (
           current.workState !== "waiting_for_children" &&
-          ThreadManagementService.latestActiveRun(child) === undefined
+          ThreadManagementService.latestActiveRun(child) === undefined &&
+          !recoveringFromLimit
         ) {
           return yield* failure(
             "task_not_cancellable",

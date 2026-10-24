@@ -426,16 +426,14 @@ const setupHandoff = () => {
     }),
     ProjectionStore.layer.pipe(Layer.provide(database)),
   );
-  let sweep: Effect.Effect<void, unknown> | undefined;
-  const scheduler = Layer.succeed(
-    Scheduler.Scheduler,
-    Scheduler.Scheduler.of({
-      register: (_name, runDueWork) =>
-        Effect.sync(() => {
-          sweep = runDueWork as Effect.Effect<void, unknown>;
-        }),
-    }),
-  );
+  let sweep: Effect.Effect<void> | undefined;
+  const scheduler = Layer.succeed(Scheduler.Scheduler, {
+    register: (_name, runDueWork) =>
+      Effect.gen(function* () {
+        const context = yield* Effect.context<Effect.Services<typeof runDueWork>>();
+        sweep = runDueWork.pipe(Effect.provideContext(context), Effect.orDie);
+      }),
+  });
   const threads = Layer.unwrap(
     Effect.gen(function* () {
       const orchestrator = yield* Orchestrator.OrchestratorV2;
@@ -461,92 +459,102 @@ const setupHandoff = () => {
   return {
     provider,
     runtime,
-    sweep: Effect.suspend(() => sweep ?? Effect.die("The recovery sweep was never registered")),
+    sweep: Effect.suspend(
+      (): Effect.Effect<void> => sweep ?? Effect.die("The recovery sweep was never registered"),
+    ),
   };
 };
+
+/**
+ * A parent on account A delegates a task to a child on A, and A's window runs
+ * out under the child: a quota stop, hours from its reset, with the task still
+ * waiting on it.
+ */
+const delegateIntoQuota = (provider: ReturnType<typeof makeControllableProvider>) =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const worker = yield* Worker.OrchestrationEffectWorkerV2;
+    const onA = { instanceId: accountA, model: "gpt-5" };
+    yield* orchestrator.dispatch({
+      type: "thread.create",
+      commandId: CommandId.make("create"),
+      threadId: parentId,
+      projectId: ProjectId.make("project:limits"),
+      title: "Parent",
+      modelSelection: onA,
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdBy: "user",
+      creationSource: "web",
+    });
+    yield* orchestrator.dispatch({
+      type: "message.dispatch",
+      commandId: CommandId.make("send"),
+      threadId: parentId,
+      messageId: MessageId.make("message:parent"),
+      text: "Split the work.",
+      attachments: [],
+      dispatchMode: { type: "start_immediately" },
+      createdBy: "user",
+      creationSource: "web",
+    });
+    yield* worker.drain();
+    yield* waitFor(orchestrator, parentId, (row) => row.event.type === "provider-turn.updated");
+    const parentRun = (yield* orchestrator.getThreadProjection(parentId)).runs[0]!;
+    yield* orchestrator.dispatch({
+      type: "delegated_task.request",
+      commandId: CommandId.make("delegate"),
+      parentThreadId: parentId,
+      parentRunId: parentRun.id,
+      parentNodeId: parentRun.rootNodeId!,
+      task: "Audit the billing module",
+      modelSelection: onA,
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      completionWake: "always",
+      createdBy: "agent",
+      creationSource: "server",
+    });
+    yield* worker.drain();
+    const childInput = provider.turns.find((turn) => turn.threadId !== parentId)!;
+    const childId = childInput.threadId;
+    expect(childInput.providerThread.providerInstanceId).toBe(accountA);
+    yield* waitFor(orchestrator, childId, (row) => row.event.type === "provider-turn.updated");
+    const firstTurn = (yield* orchestrator.getThreadProjection(childId)).providerTurns[0]!;
+    const resetAt = DateTime.formatIso(DateTime.add(yield* DateTime.now, { hours: 3 }));
+    yield* provider.finish(childInput, firstTurn.id, {
+      class: "usage_limit",
+      message: "You've hit your usage limit.",
+      code: "usageLimitExceeded",
+      retryable: true,
+      resetAt,
+      limitKind: "quota",
+    });
+    yield* waitFor(
+      orchestrator,
+      childId,
+      (row) => row.event.type === "run.updated" && row.event.payload.status === "failed",
+    );
+    const failedRun = (yield* orchestrator.getThreadProjection(childId)).runs[0]!;
+    yield* orchestrator.recoverDelegatedTasks;
+    expect((yield* orchestrator.getThreadProjection(parentId)).subagents[0]!.result).toBeNull();
+    return { orchestrator, worker, childInput, childId, failedRun };
+  });
 
 it.effect(
   "hands a delegated child out of quota to an account with headroom, and its result is the task's",
   () => {
     const { provider, runtime, sweep } = setupHandoff();
     return Effect.gen(function* () {
-      const orchestrator = yield* Orchestrator.OrchestratorV2;
-      const worker = yield* Worker.OrchestrationEffectWorkerV2;
-      const onA = { instanceId: accountA, model: "gpt-5" };
+      const { orchestrator, worker, childInput, childId, failedRun } =
+        yield* delegateIntoQuota(provider);
 
-      yield* orchestrator.dispatch({
-        type: "thread.create",
-        commandId: CommandId.make("create"),
-        threadId: parentId,
-        projectId: ProjectId.make("project:limits"),
-        title: "Parent",
-        modelSelection: onA,
-        runtimeMode: "full-access",
-        interactionMode: "default",
-        branch: null,
-        worktreePath: null,
-        createdBy: "user",
-        creationSource: "web",
-      });
-      yield* orchestrator.dispatch({
-        type: "message.dispatch",
-        commandId: CommandId.make("send"),
-        threadId: parentId,
-        messageId: MessageId.make("message:parent"),
-        text: "Split the work.",
-        attachments: [],
-        dispatchMode: { type: "start_immediately" },
-        createdBy: "user",
-        creationSource: "web",
-      });
-      yield* worker.drain();
-      yield* waitFor(orchestrator, parentId, (row) => row.event.type === "provider-turn.updated");
-      const parentRun = (yield* orchestrator.getThreadProjection(parentId)).runs[0]!;
-      yield* orchestrator.dispatch({
-        type: "delegated_task.request",
-        commandId: CommandId.make("delegate"),
-        parentThreadId: parentId,
-        parentRunId: parentRun.id,
-        parentNodeId: parentRun.rootNodeId!,
-        task: "Audit the billing module",
-        modelSelection: onA,
-        runtimeMode: "full-access",
-        interactionMode: "default",
-        completionWake: "always",
-        createdBy: "agent",
-        creationSource: "server",
-      });
-      yield* worker.drain();
-      const childInput = provider.turns.find((turn) => turn.threadId !== parentId)!;
-      const childId = childInput.threadId;
-      expect(childInput.providerThread.providerInstanceId).toBe(accountA);
-      yield* waitFor(orchestrator, childId, (row) => row.event.type === "provider-turn.updated");
-      const firstTurn = (yield* orchestrator.getThreadProjection(childId)).providerTurns[0]!;
-
-      // Account A's window is spent: a quota stop, hours from its reset.
-      const resetAt = DateTime.formatIso(DateTime.add(yield* DateTime.now, { hours: 3 }));
-      yield* provider.finish(childInput, firstTurn.id, {
-        class: "usage_limit",
-        message: "You've hit your usage limit.",
-        code: "usageLimitExceeded",
-        retryable: true,
-        resetAt,
-        limitKind: "quota",
-      });
-      yield* waitFor(
-        orchestrator,
-        childId,
-        (row) => row.event.type === "run.updated" && row.event.payload.status === "failed",
-      );
-      const failedRun = (yield* orchestrator.getThreadProjection(childId)).runs[0]!;
-      yield* orchestrator.recoverDelegatedTasks;
-      const task = () =>
-        orchestrator
-          .getThreadProjection(parentId)
-          .pipe(Effect.map((projection) => projection.subagents[0]!));
-      expect((yield* task()).result).toBeNull();
-
-      // One sweep tick: the child moves to B and re-runs the stopped request there.
+      // The server slept through the stop for days. Its task still waits, so
+      // the sweep still decides it: the child moves to B and re-runs the
+      // stopped request there.
+      yield* TestClock.adjust("2 days");
       yield* sweep;
       const handedOff = yield* orchestrator.getThreadProjection(childId);
       expect(handedOff.thread.modelSelection.instanceId).toBe(accountB);
@@ -637,3 +645,32 @@ it.effect(
     }).pipe(Effect.provide(runtime));
   },
 );
+
+it.effect("a Stop on a delegated child still recovering from a limit ends the recovery", () => {
+  const { provider, runtime, sweep } = setupHandoff();
+  return Effect.gen(function* () {
+    const { orchestrator, worker, childId, failedRun } = yield* delegateIntoQuota(provider);
+
+    // task_cancel and a parent's Stop reach the child as this Stop.
+    yield* orchestrator.dispatch({
+      type: "thread.stop",
+      commandId: CommandId.make("stop-child"),
+      threadId: childId,
+    });
+    const child = yield* orchestrator.getThreadProjection(childId);
+    expect(child.thread.limitRecovery).toMatchObject({ runId: failedRun.id, autoResume: false });
+    // The limit is now the task's result, and nothing hands the child off.
+    const parent = yield* orchestrator.getThreadProjection(parentId);
+    expect(parent.subagents[0]).toMatchObject({ status: "failed" });
+    expect(parent.subagents[0]!.result).toContain("usage limit");
+    yield* sweep;
+    expect((yield* orchestrator.getThreadProjection(childId)).runs).toHaveLength(1);
+    // A deliberate Stop owes the parent no failure notice.
+    yield* worker.drain();
+    expect(
+      (yield* orchestrator.getThreadProjection(parentId)).messages.some((message) =>
+        message.id.startsWith("message:delegated-task-failure:"),
+      ),
+    ).toBe(false);
+  }).pipe(Effect.provide(runtime));
+});

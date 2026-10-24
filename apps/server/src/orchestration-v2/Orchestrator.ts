@@ -10148,6 +10148,15 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           const enqueued = yield* Ref.get(interruptEffects);
           yield* Ref.update(events, (existing) => [...existing, ...written]);
           yield* Ref.update(effects, (existing) => [...existing, ...enqueued]);
+          // A limit stop whose background work was interrupted.
+          if (target.status === "failed") {
+            yield* endLimitRecoveryOnStop({
+              command,
+              events,
+              run: target,
+              now: yield* DateTime.now,
+            });
+          }
           return interrupted.value;
         }
         yield* Effect.logWarning("thread.stop could not interrupt the running turn", {
@@ -10168,7 +10177,63 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         yield* markStoppedRun({ command, events, thread: projection.thread, run, now });
       }
       yield* holdStoppedThread({ command, events, projection, cohortRunIds: [], now });
+      if (executed?.status === "failed") {
+        yield* endLimitRecoveryOnStop({ command, events, run: executed, now });
+      }
       return undefined;
+    });
+
+  /**
+   * Stop on a thread stopped by a limit also ends what the server would do
+   * about it next (a retry, the resume at reset, a delegated child's handoff),
+   * recorded as Don't resume would record it. dispatchWithReceipt then settles
+   * a delegated child's task, as for that choice.
+   */
+  const endLimitRecoveryOnStop = (input: {
+    readonly command: Extract<OrchestrationV2ServerCommand, { readonly type: "thread.stop" }>;
+    readonly events: Ref.Ref<Array<OrchestrationV2DomainEvent>>;
+    readonly run: OrchestrationV2Run;
+    readonly now: DateTime.Utc;
+  }) =>
+    Effect.gen(function* () {
+      const { command, events, run } = input;
+      const { turnItems } = yield* projectionStore
+        .getThreadRecords(command.threadId, ["turnItems"], {
+          turnItemRunIds: [run.id],
+          turnItemTypes: ["error"],
+        })
+        .pipe(
+          Effect.mapError(
+            (cause) => new OrchestratorProjectionError({ threadId: command.threadId, cause }),
+          ),
+        );
+      const failure = latestRootProviderFailure(run, turnItems);
+      if (failure?.class !== "usage_limit" || !failure.resetAt) return;
+      const { thread } = yield* getProjectionWithPendingEvents(command.threadId, events);
+      const recorded =
+        thread.limitRecovery?.runId === run.id && thread.limitRecovery.resetAt === failure.resetAt
+          ? thread.limitRecovery
+          : null;
+      if (recorded !== null && !recorded.autoResume) return;
+      yield* emit(
+        events,
+        command,
+      )({
+        type: "thread.metadata-updated",
+        threadId: command.threadId,
+        occurredAt: input.now,
+        payload: {
+          ...thread,
+          limitRecovery: {
+            ...recorded,
+            runId: run.id,
+            resetAt: failure.resetAt,
+            autoResume: false,
+            snooze: recorded?.snooze ?? false,
+            requestId: command.commandId,
+          },
+        },
+      });
     });
 
   const dispatchCheckpointRollback = (
@@ -11869,6 +11934,19 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       ) {
         const result = yield* dispatch;
         yield* settleChildAfterLimitRecovery(command.threadId);
+        return result;
+      }
+      if (command.type === "thread.stop") {
+        const result = yield* dispatch;
+        // A Stop that ended a limit stop's recovery (see dispatchThreadStop) settles it too.
+        const stopped = yield* Effect.option(projectionStore.getThread(command.threadId));
+        if (
+          Option.isSome(stopped) &&
+          stopped.value.limitRecovery?.requestId === command.commandId &&
+          !stopped.value.limitRecovery.autoResume
+        ) {
+          yield* settleChildAfterLimitRecovery(command.threadId);
+        }
         return result;
       }
       if (

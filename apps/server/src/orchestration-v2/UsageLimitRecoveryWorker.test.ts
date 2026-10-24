@@ -244,6 +244,20 @@ describe("decideLimitStop", () => {
     });
   });
 
+  it("starts a new streak after a run finished, or on the instance a handoff moved to", () => {
+    const exhausted = {
+      runId: RunId.make("run-0"),
+      resetAt: "2026-10-21T11:59:00.000Z",
+      autoResume: true,
+      retryAttempt: MAX_RATE_LIMIT_RETRIES,
+    };
+    expect(
+      decideLimitStop(
+        rateLimited({ limitRecovery: exhausted, retryChained: false, delegated: true }),
+      ),
+    ).toMatchObject({ type: "arm", limitRecovery: { retryAttempt: 1, autoResume: true } });
+  });
+
   it("dispatches a scheduled retry only after its backoff, as a timeline row", () => {
     const thread = rateLimited({
       limitRecovery: {
