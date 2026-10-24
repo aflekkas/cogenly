@@ -96,6 +96,20 @@ const addedByAgent = (fail: (cause: unknown) => OrchestratorMcpFailure) =>
   });
 
 export const layer = McpToolAccess.toLayer(IntegrationsToolkit, {
+  integration_setup_guide: McpToolAccess.reads((input) =>
+    Effect.gen(function* () {
+      return yield* (yield* Integrations.Integrations).setupGuide(input.service);
+    }),
+  ),
+  integration_test: McpToolAccess.writesWithCapability((input) =>
+    Effect.gen(function* () {
+      const scope = yield* Invocation.McpInvocationContext;
+      const integration = yield* byName(input.name, failureAt(scope.httpOrigin));
+      return yield* (yield* Integrations.Integrations)
+        .testConnection(integration.id)
+        .pipe(Effect.mapError(failureAt(scope.httpOrigin)));
+    }),
+  ),
   integrations_list: McpToolAccess.reads(() =>
     Effect.gen(function* () {
       const service = yield* Integrations.Integrations;

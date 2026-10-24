@@ -243,12 +243,9 @@ it.effect("integration_add relays the setup step Settings shows, with a link to 
     });
     const nextStep = (result as { nextStep: string }).nextStep;
     expect(nextStep).toContain("https://github.com/settings/personal-access-tokens/new");
-    expect(nextStep).toContain("https://cogenly.example.com/settings/integrations?setup=github");
-    // The private route names a vault item for this account and the endpoint's host.
-    expect(nextStep).toContain(
-      'request_secret with saveToVault: {name: "github-work-api-key", type: "api_key", domains: ["api.githubcopilot.com"]}',
-    );
-    expect(nextStep).toContain('apiKey: "{{credential:github-work-api-key.value}}"');
+    expect(nextStep).toContain("integration_test");
+    expect(nextStep).toContain("request_secret");
+    expect(nextStep).toContain("apiKey {{credential:<item>.value}}");
   }),
 );
 
@@ -277,11 +274,9 @@ it.effect("integration failures read the same as the setup step Settings shows",
     );
     expect(result).toMatchObject({
       code: "invalid_request",
-      message: expect.stringContaining("uv, a small Python tool runner"),
+      message: expect.stringContaining("Install uv"),
     });
-    expect((result as { message: string }).message).toContain(
-      "https://cogenly.example.com/settings/integrations?setup=google-workspace",
-    );
+    expect((result as { message: string }).message).toContain("request_secret");
   }),
 );
 

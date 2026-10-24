@@ -538,3 +538,9 @@ export type IntegrationUpdateByNameInput = typeof IntegrationUpdateByNameInput.T
 
 export const IntegrationRemoveInput = Schema.Struct({ name: IntegrationName });
 export type IntegrationRemoveInput = typeof IntegrationRemoveInput.Type;
+
+export const IntegrationSetupGuideInput = Schema.Struct({ service: TrimmedNonEmptyString });
+export const IntegrationSetupGuideResult = Schema.Struct({
+  service: Schema.String,
+  instructions: Schema.String,
+});

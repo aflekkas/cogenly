@@ -41,6 +41,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 
+import { integrationSetupGuide } from "./IntegrationSetupGuides.ts";
 import { redactUpstream, toolErrorMessage, upstreamErrorMessage } from "./UpstreamResult.ts";
 import { selectCallbackOrigin, type SignInOrigin } from "./SignInOrigin.ts";
 import { redactValue } from "../vault/VaultRedactor.ts";
@@ -319,6 +320,9 @@ const REFRESH_SKEW_MS = 60_000;
 export class Integrations extends Context.Service<
   Integrations,
   {
+    readonly setupGuide: (
+      service: string,
+    ) => Effect.Effect<ReturnType<typeof integrationSetupGuide>>;
     /** Every live integration, unscoped (settings/client view). */
     readonly list: (options?: {
       readonly includeProcessOutput?: boolean;
@@ -1428,6 +1432,7 @@ const make = (options: IntegrationsOptions = {}) =>
           );
 
     const service: Integrations["Service"] = Integrations.of({
+      setupGuide: (service) => Effect.succeed(integrationSetupGuide(service)),
       list: (options) =>
         rows().pipe(
           Effect.flatMap((all) => summaries(all, options?.includeProcessOutput === true)),

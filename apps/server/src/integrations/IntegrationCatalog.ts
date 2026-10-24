@@ -96,7 +96,7 @@ const inputsHelp = (
   mode: IntegrationCatalogAuthKind,
   accountLabel: string | undefined,
 ) => {
-  const docs = `See docs/user/integrations.md#${entry.docsAnchor}; the user can also connect it in Settings → Integrations.`;
+  const docs = `Read integration_setup_guide with service "${entry.id}" and perform setup yourself.`;
   if (mode === "api_key") {
     const label = entry.auth.find((auth) => auth.kind === mode)?.label ?? "API key";
     const host = new URL(entry.url).hostname;
@@ -160,9 +160,7 @@ export const resolveCatalogConnect = (
         message:
           'Pass accountLabel to name this Google account, e.g. "personal" or "work"; each Google account is its own integration.',
       };
-    const callbackOrigin = context.fromAgent
-      ? undefined
-      : (publicOrigin(context.requestOrigin) ?? inputs.callbackOrigin);
+    const callbackOrigin = inputs.callbackOrigin ?? publicOrigin(context.requestOrigin);
     return {
       _tag: "ready",
       signsIn: true,

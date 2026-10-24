@@ -566,7 +566,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "integration-add",
-    title: "Add an integration",
+    title: "Connect with an agent",
     to: "/settings/integrations",
     searchTerms: [
       "connect new service account custom mcp server setup oauth client id secret api key personal access token slack app manifest google cloud install uv",
@@ -574,7 +574,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "provider-connectors",
-    title: "Use provider connectors too",
+    title: "Use only Cogenly integrations",
     to: "/settings/integrations",
     searchTerms: [
       "claude.ai connectors chatgpt apps codex plugins mcp servers duplicate native gmail slack notion linear",
