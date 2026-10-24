@@ -62,10 +62,12 @@ export const AgentApprovalAction = Schema.Union([
   }),
   Schema.Struct({
     actionKind: Schema.Literal("integration_add"),
+    threadId: Schema.optional(ThreadId),
     payload: IntegrationAddInput,
   }),
   Schema.Struct({
     actionKind: Schema.Literal("integration_update"),
+    threadId: Schema.optional(ThreadId),
     payload: Schema.Struct({
       ...IntegrationUpdateInput.fields,
       // Freeze the entire credential destination the owner reviews. Omitted

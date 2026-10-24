@@ -6,6 +6,7 @@ import {
   IntegrationId,
   IntegrationName,
   ProjectLabelId,
+  ThreadId,
   SLACK_MCP_USER_SCOPES,
   integrationCatalogEntryFor,
   type Integration,
@@ -418,6 +419,70 @@ describe("Integrations gateway", () => {
             ),
             Layer.provide(NodeServices.layer),
           ),
+        ),
+      ),
+    ),
+  );
+
+  it.effect("a thread's executable proposal stays unstartable until approved once", () =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      const service = yield* Integrations.Integrations;
+      const workspace = yield* Workspace.AgentWorkspaceService;
+      const sql = yield* SqlClient.SqlClient;
+      const threadId = ThreadId.make("thread:executable");
+      yield* sql`INSERT INTO orchestration_v2_projection_threads(thread_id, project_id, title, default_provider, runtime_mode, interaction_mode, created_at, updated_at, payload_json) VALUES (${threadId}, 'project:1', 'Thread', 'codex', 'full-access', 'default', '2026-10-01T00:00:00.000Z', '2026-10-01T00:00:00.000Z', '{}')`;
+      const payload = {
+        ...createInput("https://localhost", "worker"),
+        transport: "stdio" as const,
+        headers: {},
+        command: {
+          command: "fixture",
+          args: ["--synthetic"],
+          env: { KEY: "{{credential:fixture.value}}" },
+        },
+      };
+      expect((yield* service.create(payload, { fromAgent: true }).pipe(Effect.flip)).reason).toBe(
+        "approval_required",
+      );
+      const proposal = { actionKind: "integration_add" as const, payload };
+      const { approval } = yield* workspace.requestThreadIntegrationApproval(threadId, proposal);
+      expect(
+        (yield* workspace.requestThreadIntegrationApproval(threadId, proposal)).approval.id,
+      ).toBe(approval.id);
+      expect((yield* workspace.listThreadApprovals(threadId)).approvals).toHaveLength(1);
+      expect((yield* service.list()).integrations).toHaveLength(0);
+      yield* workspace.approve(approval.id);
+      yield* workspace.approve(approval.id);
+      expect((yield* workspace.listThreadApprovals(threadId)).approvals).toHaveLength(0);
+      const [created] = (yield* service.list()).integrations;
+      expect(created?.integration.command).toEqual(payload.command);
+      expect(
+        (yield* service
+          .update(
+            { id: created!.integration.id, command: { ...payload.command, args: ["changed"] } },
+            { fromAgent: true },
+          )
+          .pipe(Effect.flip)).reason,
+      ).toBe("approval_required");
+      // Direct owner edits retain their existing authority.
+      yield* service.update({
+        id: created!.integration.id,
+        command: { ...payload.command, args: ["owner"] },
+      });
+    }).pipe(
+      Effect.provide(
+        Workspace.layer.pipe(
+          Layer.provideMerge(layerWith()),
+          Layer.provide(
+            Layer.mergeAll(
+              Layer.mock(AgentStore.AgentStore)({}),
+              Layer.mock(Agents.AgentService)({}),
+              Layer.mock(Work.WorkHandoffService)({}),
+              Layer.mock(Schedules.ScheduledTaskService)({}),
+            ),
+          ),
+          Layer.provide(NodeServices.layer),
         ),
       ),
     ),

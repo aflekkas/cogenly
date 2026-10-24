@@ -182,6 +182,15 @@ export const integrationDestinationChanged = (
         ([name, value]) => value !== HEADER_MASK && current.headers[name] !== value,
       )));
 
+/** An agent may only change the executable after the owner reviews the whole command. */
+export const integrationExecutableChanged = (
+  current: Integration,
+  input: Pick<IntegrationUpdateInput, "command" | "transport">,
+): boolean =>
+  (input.transport === "stdio" && current.transport !== "stdio") ||
+  (input.command !== undefined &&
+    JSON.stringify(input.command) !== JSON.stringify(current.command));
+
 /** Account labels identify the signed-in account; agents need approval to change them. */
 export const integrationAccountLabelChanged = (
   current: Integration,
@@ -301,6 +310,7 @@ interface CachedTools {
  */
 export interface IntegrationWriteOptions {
   readonly approveCredentials?: boolean;
+  readonly approveExecutable?: boolean;
   readonly fromAgent?: boolean | undefined;
   readonly ownerOrigin?: string | undefined;
   readonly addedByAgent?: { readonly id: string; readonly name: string } | undefined;
@@ -1588,6 +1598,11 @@ const make = (options: IntegrationsOptions = {}) =>
             );
             input = { ...input, local: prepared.local };
           }
+          if (options?.fromAgent && input.transport === "stdio" && !options.approveExecutable)
+            return yield* new IntegrationError({
+              operation: "approve executable integration",
+              reason: "approval_required",
+            });
           yield* validateCommand(input);
           yield* validateUrl(input.url);
           yield* validateAuth(input.auth, "create");
@@ -1662,6 +1677,15 @@ const make = (options: IntegrationsOptions = {}) =>
             return yield* new IntegrationError({
               operation: "update local integration",
               reason: "invalid_request",
+            });
+          if (
+            options?.fromAgent &&
+            integrationExecutableChanged(current, masked) &&
+            !options.approveExecutable
+          )
+            return yield* new IntegrationError({
+              operation: "approve executable integration",
+              reason: "approval_required",
             });
           if (!integrationVisibleTo({ ...current, enabled: true }, options?.callerLabelId))
             return yield* new IntegrationError({ operation: "update", reason: "not_found" });

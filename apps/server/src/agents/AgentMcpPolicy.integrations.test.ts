@@ -29,6 +29,7 @@ const agent = agentFixture("integrations");
 const shell = liveThreadShell(agent.conversationThreadId);
 
 let approvalRequests = 0;
+let persistent = true;
 const proposals: AgentApprovalAction[] = [];
 let current: Integration = {
   id: IntegrationId.make("integration:test"),
@@ -48,9 +49,13 @@ const layer = AgentMcpPolicy.layer.pipe(
   Layer.provide(
     Layer.mergeAll(
       Layer.mock(Store.AgentStore)({
-        forThread: () => Effect.succeed(agent),
+        forThread: () => Effect.succeed(persistent ? agent : null),
       }),
       Layer.mock(Workspace.AgentWorkspaceService)({
+        requestThreadIntegrationApproval: (_thread, action) => {
+          proposals.push(action);
+          return Effect.succeed({ approval: { id: "approval:thread" } as never });
+        },
         requestApproval: (_id, action) => {
           approvalRequests += 1;
           proposals.push(action);
@@ -275,4 +280,67 @@ it.effect("scope widening requests owner approval for a visible integration", ()
       ),
     ),
   ),
+);
+
+it.effect("ordinary chats propose exact executable definitions before any process can start", () =>
+  Effect.gen(function* () {
+    const policy = yield* AgentMcpPolicy.AgentMcpPolicy;
+    persistent = false;
+    proposals.length = 0;
+    const original = current;
+    const command = {
+      command: "/bin/sh",
+      args: ["-c", "printf synthetic"],
+      env: { API_KEY: "{{credential:synthetic.value}}" },
+    };
+    try {
+      const added = yield* policy
+        .beforeTool(
+          scopeFor(true),
+          "integration_add",
+          { ...addInput, transport: "stdio", command },
+          false,
+        )
+        .pipe(Effect.result);
+      expect(added).toMatchObject({
+        _tag: "Failure",
+        failure: { code: "agent_approval_required" },
+      });
+      expect(proposals[0]).toMatchObject({ actionKind: "integration_add", payload: { command } });
+      current = { ...current, transport: "stdio", command };
+      for (const next of [
+        { ...command, command: "npx" },
+        { ...command, args: ["-y", "synthetic-package@1.2.3"] },
+        { ...command, env: { API_KEY: "{{credential:other.value}}" } },
+      ]) {
+        const changed = yield* policy
+          .beforeTool(
+            scopeFor(true),
+            "integration_update",
+            { name: current.name, command: next },
+            false,
+          )
+          .pipe(Effect.result);
+        expect(changed).toMatchObject({
+          _tag: "Failure",
+          failure: { code: "agent_approval_required" },
+        });
+        expect(proposals.at(-1)).toMatchObject({
+          actionKind: "integration_update",
+          payload: { command: next },
+        });
+      }
+      expect(
+        yield* policy.beforeTool(
+          scopeFor(true),
+          "integration_update",
+          { name: current.name, hint: "metadata" },
+          false,
+        ),
+      ).toEqual({ handled: false });
+    } finally {
+      persistent = true;
+      current = original;
+    }
+  }).pipe(Effect.provide(layer)),
 );
