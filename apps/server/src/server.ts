@@ -40,6 +40,8 @@ import * as HubLink from "./machines/HubLink.ts";
 import * as MachineIdentity from "./machines/MachineIdentity.ts";
 import * as Machines from "./machines/Machines.ts";
 import * as MachineSecurity from "./security/MachineSecurity.ts";
+import * as MachineHealth from "./health/MachineHealth.ts";
+import * as HealthAlerts from "./health/HealthAlerts.ts";
 import * as MachineSetup from "./tailscale/MachineSetup.ts";
 import * as TailscaleHost from "./tailscale/TailscaleHost.ts";
 import * as TailscaleServeMode from "./tailscale/TailscaleServeMode.ts";
@@ -581,6 +583,9 @@ const layerProviderInstallationRefresh = Layer.effectDiscard(
 const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   AgentAwarenessRelay.layer,
   MachineSecurity.layer,
+  // TODO(health): move beside Machines once the real layers need its services.
+  MachineHealth.layer,
+  HealthAlerts.layer,
   // One instance for every transport: it remembers sign-ins and approvals in progress.
   MachineSetup.layer.pipe(Layer.provide(TailscaleHost.layer), Layer.provide(MachineIdentity.layer)),
   // Paired machines: shared configuration, then thread logs, over one link.

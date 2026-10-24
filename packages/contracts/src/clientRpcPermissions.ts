@@ -114,6 +114,12 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.machinesSetupSubscribe]: AuthAccessWriteScope,
   [WS_METHODS.machinesSetupRunStep]: AuthAccessWriteScope,
   [WS_METHODS.machinesSetupDisableServe]: AuthAccessWriteScope,
+  [WS_METHODS.machinesHealth]: AuthOrchestrationReadScope,
+  [WS_METHODS.machinesHealthSubscribe]: AuthOrchestrationReadScope,
+  [WS_METHODS.machinesHealthAlertsSubscribe]: AuthOrchestrationReadScope,
+  [WS_METHODS.machinesHealthRetrySync]: AuthOrchestrationOperateScope,
+  // Sends a message from the owner's Slack or Google account.
+  [WS_METHODS.machinesHealthTestAlertChannels]: AuthSettingsWriteScope,
   [WS_METHODS.factsCreate]: AuthOrchestrationOperateScope,
   [WS_METHODS.factsUpdate]: AuthOrchestrationOperateScope,
   [WS_METHODS.factsSupersede]: AuthOrchestrationOperateScope,

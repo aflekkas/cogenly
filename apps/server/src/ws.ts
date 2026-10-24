@@ -13,6 +13,8 @@ import * as Machines from "./machines/Machines.ts";
 import * as ProjectMove from "./threadSync/ProjectMove.ts";
 import * as ThreadTransfer from "./threadSync/ThreadTransfer.ts";
 import * as MachineSecurity from "./security/MachineSecurity.ts";
+import * as MachineHealth from "./health/MachineHealth.ts";
+import * as HealthAlerts from "./health/HealthAlerts.ts";
 import * as MachineSetup from "./tailscale/MachineSetup.ts";
 import * as VisualStates from "./htmlRender/VisualState.ts";
 import * as Retrieval from "./context/ContextRetrievalService.ts";
@@ -1097,6 +1099,8 @@ const makeWsRpcHandlers = (
     const projectMove = yield* ProjectMove.ProjectMove;
     const machineSecurity = yield* MachineSecurity.MachineSecurity;
     const machineSetup = yield* MachineSetup.MachineSetup;
+    const machineHealth = yield* MachineHealth.MachineHealth;
+    const healthAlerts = yield* HealthAlerts.HealthAlerts;
     const visualStates = yield* VisualStates.VisualStateService;
     const retrieval = yield* Retrieval.ContextRetrievalService;
     const scheduledTasks = yield* ScheduledTasks.ScheduledTaskService;
@@ -1737,6 +1741,12 @@ const makeWsRpcHandlers = (
       [WS_METHODS.machinesSetupSubscribe]: () => machineSetup.subscribe,
       [WS_METHODS.machinesSetupRunStep]: (input) => machineSetup.runStep(input.step),
       [WS_METHODS.machinesSetupDisableServe]: () => machineSetup.disableServe,
+      [WS_METHODS.machinesHealth]: (input) => machineHealth.reportFor(input),
+      [WS_METHODS.machinesHealthSubscribe]: (input) => machineHealth.subscribe(input),
+      [WS_METHODS.machinesHealthAlertsSubscribe]: () => healthAlerts.subscribe,
+      [WS_METHODS.machinesHealthRetrySync]: (input) =>
+        machineHealth.retrySync(input).pipe(Effect.as({})),
+      [WS_METHODS.machinesHealthTestAlertChannels]: () => healthAlerts.testChannels,
       [WS_METHODS.factsList]: (input) => facts.list(input),
       [WS_METHODS.factsCreate]: (input) => facts.create(input),
       [WS_METHODS.visualStateGet]: (input) =>
@@ -2829,6 +2839,8 @@ type WsRequestServices =
   | ProjectMove.ProjectMove
   | MachineSecurity.MachineSecurity
   | MachineSetup.MachineSetup
+  | MachineHealth.MachineHealth
+  | HealthAlerts.HealthAlerts
   | FileSystem.FileSystem
   | GitHubRest.GitHubRest
   | GitWorkflowService.GitWorkflowService

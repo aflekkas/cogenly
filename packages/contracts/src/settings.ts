@@ -51,6 +51,7 @@ import {
   ProviderDriverKind,
 } from "./providerInstance.ts";
 import { PullRequestMergeMethod } from "./pullRequest.ts";
+import { MachineHealthSettings, MachineHealthSettingsPatch } from "./machineHealthSettings.ts";
 
 // ── Client Settings (local-only) ───────────────────────────────
 
@@ -916,6 +917,10 @@ export const ServerSettings = Schema.Struct({
   automaticBackups: AutomaticBackupsSettings.pipe(
     Schema.withDecodingDefault(Effect.succeed(Schema.decodeSync(AutomaticBackupsSettings)({}))),
   ),
+  /** Machine health: the optional canary and external alert channels. */
+  health: MachineHealthSettings.pipe(
+    Schema.withDecodingDefault(Effect.succeed(Schema.decodeSync(MachineHealthSettings)({}))),
+  ),
   storageCleanup: StorageCleanupSettings.pipe(
     Schema.withDecodingDefault(Effect.succeed(Schema.decodeSync(StorageCleanupSettings)({}))),
   ),
@@ -1353,6 +1358,7 @@ export const ServerSettingsPatch = Schema.Struct({
       ),
     }),
   ),
+  health: Schema.optionalKey(MachineHealthSettingsPatch),
   storageCleanup: Schema.optionalKey(
     Schema.Struct({
       worktreeKeepWhen: Schema.optionalKey(WorktreeKeepWhen),

@@ -87,6 +87,8 @@ export * from "./integration.ts";
 export * from "./integrationCatalog.ts";
 export * from "./machine.ts";
 export * from "./machineSecurity.ts";
+export * from "./machineHealth.ts";
+export * from "./machineHealthSettings.ts";
 export * from "./machineSetup.ts";
 export * from "./accounts.ts";
 
