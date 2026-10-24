@@ -46,6 +46,10 @@ import { useSelectSidebarMode } from "./modes/useSelectSidebarMode";
 import { settingsReturnHref } from "./modes/spaceRouteMemory";
 import { resolveVerticalTabIndex } from "./navRail.logic";
 import { useNavRailBadgeStore } from "./navRailState";
+import {
+  MACHINE_NEEDS_ATTENTION_LABEL,
+  useMachineHealthAttentionTone,
+} from "../../machines/machineHealthAlertsStore";
 import { decisionsWaitingLabel } from "../../agents/agentWorkspace.logic";
 import {
   listColumnPeekToggleHandlers,
@@ -91,6 +95,8 @@ export function SidebarNavRail({
   const selectSidebarMode = useSelectSidebarMode();
   const decisionsWaiting = useNavRailBadgeStore((store) => store.decisionsWaiting);
   const modesNeedingAttention = useModesNeedingAttention();
+  // An open machine-health alert anywhere; the toast and Settings → Machines carry the details.
+  const machineAttention = useMachineHealthAttentionTone();
   const { open, setOpen, toggleSidebar } = useSidebar();
   const sidebarVisible = useSidebarVisibility();
   const navigate = useNavigate();
@@ -297,10 +303,16 @@ export function SidebarNavRail({
             <ChartNoAxesColumnIcon aria-hidden />
           </button>
         </RailTooltip>
-        <RailTooltip label="Settings">
+        <RailTooltip
+          label={
+            machineAttention === null ? "Settings" : `Settings · ${MACHINE_NEEDS_ATTENTION_LABEL}`
+          }
+        >
           <button
             type="button"
-            aria-label="Settings"
+            aria-label={
+              machineAttention === null ? "Settings" : `Settings, ${MACHINE_NEEDS_ATTENTION_LABEL}`
+            }
             aria-current={onSettings ? "page" : undefined}
             onClick={() => {
               // Settings again, with its column open, goes back to its first page.
@@ -323,6 +335,12 @@ export function SidebarNavRail({
             className={cn(RAIL_BUTTON_CLASS, railButtonTone(onSettings))}
           >
             <SettingsIcon aria-hidden />
+            <BadgeDot
+              tone={machineAttention}
+              size="md"
+              ring="nav-rail"
+              className="absolute top-2 right-2"
+            />
           </button>
         </RailTooltip>
         <NavRailUpdates

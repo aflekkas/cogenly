@@ -859,6 +859,32 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["pair new computer laptop server tailscale sign in https link sync"],
   },
   {
+    id: "machine-health",
+    title: "Machine health",
+    to: "/settings/machines",
+    searchTerms: [
+      "status checks broken failing problems alerts reachable offline disk database providers scheduled tasks stuck runs retry sync",
+    ],
+  },
+  {
+    id: "health-canary",
+    title: "Canary check",
+    to: "/settings/machines",
+    searchTerms: ["health test schedule interval always-on hub end to end monitor"],
+  },
+  {
+    id: "health-slack-alerts",
+    title: "Slack alerts",
+    to: "/settings/machines",
+    searchTerms: ["health alert channels external notify direct message dm member id test alert"],
+  },
+  {
+    id: "health-email-alerts",
+    title: "Email alerts",
+    to: "/settings/machines",
+    searchTerms: ["health alert channels external notify gmail google workspace test alert"],
+  },
+  {
     id: "archive",
     title: "Archived threads",
     to: "/settings/archived",

@@ -49,6 +49,7 @@ import { Spinner } from "../ui/spinner";
 import { Switch } from "../ui/switch";
 import { toastManager } from "../ui/toast";
 import { createIntegrationStatusFade } from "./integrationStatusMotion";
+import { MachineHealthSections } from "./MachineHealthSection";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
@@ -171,6 +172,7 @@ export function MachinesSettingsPanel({
   return (
     <SettingsPageContainer>
       <MachinesSection environment={environment} onAdd={() => setAdding(true)} />
+      <MachineHealthSections environment={environment} />
       <OverlayPresence when={adding ? environment : null}>
         {(viewed) => <AddMachineDialog viewed={viewed} onClose={() => setAdding(false)} />}
       </OverlayPresence>
