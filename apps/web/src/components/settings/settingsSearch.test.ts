@@ -301,7 +301,7 @@ describe("searchSettings", () => {
     ["new threads", "new-threads", "/settings/general"],
     ["agent browser access", "agent-browser-access", "/settings/integrations"],
     ["automatically pull", "automatic-pull", "/settings/source-control"],
-    ["actions", "project-actions", "/settings/projects"],
+    ["actions", "project-actions", "/settings/general"],
     ["project overview", "project-overview", "/settings/projects"],
   ])("routes %s to its owning category", (query, id, to) => {
     expect(searchSettings(query)[0]).toMatchObject({ id, to });
@@ -356,7 +356,7 @@ describe("settings search targets", () => {
     expect(getSettingsSearchTargetScope("missing-setting")).toBeNull();
   });
 
-  it.each(["all", "environment", "project", "checkout"] as const)(
+  it.each(["all", "environment", "project"] as const)(
     "makes browser access editable at the %s scope",
     (kind) => {
       const setting = getSettingsSearchTargetScope("agent-browser-access")!;
@@ -397,10 +397,17 @@ describe("settings search targets", () => {
 });
 
 describe("settings sidebar scope", () => {
-  it("shows Overview only for project and checkout targets", () => {
+  it("shows the Repository page only once a repository is open", () => {
     expect(isSettingsOverviewVisible({})).toBe(false);
     expect(isSettingsOverviewVisible({ machine: "remote" })).toBe(false);
-    expect(isSettingsOverviewVisible({ project: "project" })).toBe(true);
-    expect(isSettingsOverviewVisible({ project: "project", checkout: "checkout" })).toBe(true);
+    expect(isSettingsOverviewVisible({ project: "label:1" })).toBe(false);
+    expect(isSettingsOverviewVisible({ repository: "repo-group" })).toBe(true);
+  });
+
+  it("keeps project actions to a project scope", () => {
+    const actions = getSettingsSearchTargetScope("project-actions")!;
+    expect(isSettingsSearchScopeAvailable(actions.scope, "project")).toBe(true);
+    expect(isSettingsSearchScopeAvailable(actions.scope, "all")).toBe(false);
+    expect(isSettingsSearchScopeAvailable(actions.scope, "environment")).toBe(false);
   });
 });

@@ -21,6 +21,7 @@ import {
   useClientSettings,
   useMigrateModelPreferences,
 } from "../../hooks/useSettings";
+import { useEnvironments } from "../../state/environments";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { toastManager } from "../ui/toast";
@@ -96,8 +97,7 @@ function useRunScopedPlan() {
         if (failedEnvironments.length === 0) return;
         toastManager.add({
           type: "error",
-          title:
-            savedEnvironmentCount > 0 ? "Setting saved on some environments" : "Setting not saved",
+          title: savedEnvironmentCount > 0 ? "Setting saved on some machines" : "Setting not saved",
           description: [
             ...failedEnvironments.map(
               ({ label, message }) => `Could not save on ${label}: ${message}`,
@@ -113,8 +113,10 @@ function useRunScopedPlan() {
   );
 }
 
+/** Universal keys reach every connected machine, so the plan sees all of them. */
 export function useUpdateScopedSettings() {
-  const { scope, environments } = useSettingsScope();
+  const { scope } = useSettingsScope();
+  const { environments } = useEnvironments();
   const run = useRunScopedPlan();
   return useCallback(
     (patch: ScopedSettingsPatch) => run(planScopedSettingsPatch(scope, environments, patch)),
@@ -123,8 +125,8 @@ export function useUpdateScopedSettings() {
 }
 
 /**
- * Drop the project overrides for `keys` so the selected checkouts inherit
- * again. Rows also render outside the settings layout (provider cards,
+ * Drop the project overrides for `keys` so the project's repositories follow
+ * All projects again. Rows also render outside the settings layout (provider cards,
  * dialogs), where there is no scope and nothing to clear.
  */
 export function useClearScopedSettings() {
@@ -139,7 +141,7 @@ export function useClearScopedSettings() {
   );
 }
 
-/** Clear `keys` on specific project entries, from an environment scope's chain popover. */
+/** Clear `keys` on specific repository entries, from the All projects chain popover. */
 export function useClearProjectOverrides() {
   const context = useOptionalSettingsScope();
   const run = useRunScopedPlan();

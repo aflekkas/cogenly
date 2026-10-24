@@ -10,7 +10,7 @@ export const Route = createFileRoute("/projects/$projectKey")({
     }
     throw redirect({
       to: "/settings/projects",
-      search: { project: params.projectKey, machine: undefined },
+      search: { repository: params.projectKey },
       replace: true,
     });
   },

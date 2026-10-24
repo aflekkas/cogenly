@@ -34,16 +34,16 @@ import { SettingsRow, SettingsSection } from "./settingsLayout";
 import { useSettingsScope } from "./SettingsScopeContext";
 
 /**
- * A project's actions on each selected environment. Actions belong to a
- * project, so this only renders at a project scope; the environment's
- * `defaultProjectScripts` is the layer a project without its own list
- * inherits. Shortcuts are environment-wide, so the same action id shares its
- * binding on an environment.
+ * A project's actions, on every repository it holds. Actions belong to a
+ * project, so this only renders at a project scope; `defaultProjectScripts`
+ * for all projects is the layer a project without its own list inherits.
+ * Shortcuts are machine-wide, so the same action id shares its binding on a
+ * machine.
  */
 export function ProjectActionsSettings() {
   const { scope, targets, target } = useSettingsScope();
   const { environments } = useEnvironments();
-  const isProjectScope = scope.kind === "project" || scope.kind === "checkout";
+  const isProjectScope = scope.kind === "project";
   const representativeConfig = target
     ? environments.find((environment) => environment.environmentId === target.environmentId)
         ?.serverConfig
@@ -140,7 +140,7 @@ export function ProjectActionsSettings() {
         settingKeys={["defaultProjectScripts"]}
         mixed={mixed}
         title="Actions"
-        description="Commands that run in this repository's checkout or its worktree, with optional shortcuts."
+        description="Commands that run in this project's repositories or their worktrees, with optional shortcuts."
         onResetOverride={() => void persist(() => null)}
         control={
           <div className="flex flex-wrap items-center gap-1.5">
@@ -199,8 +199,8 @@ export function ProjectActionsSettings() {
       />
       {mixed ? (
         <SettingsRow
-          title="Different actions across environments"
-          description="Choose one environment to edit its list. Adding an action here adds it on every selected environment."
+          title="Different actions between this project's repositories"
+          description="Adding an action here adds it to every repository in this project. Reset the list to start them all from the actions for all projects."
         />
       ) : (
         <ProjectActionsList

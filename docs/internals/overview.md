@@ -43,12 +43,14 @@ See [provider constraints](./providers.md).
 
 ## Settings ownership
 
-Client preferences stay in the current client; environment defaults and project overrides stay
-on their owning server. The web and desktop settings target is URL state, resolved against current
-connections and project membership. An unavailable target must not fall back to another environment.
-**All environments** is an explicit bulk edit of connected, loaded servers, not a durable global
-default or a promise to synchronize offline or future environments. Project-group targets similarly
-select known environment-local checkouts; the group itself does not store inherited defaults.
+Client preferences stay in the current client; server settings and project overrides are stored
+on each server. Universal keys (`isUniversalServerSettingKey` in `packages/contracts`) and project
+overrides replicate between paired machines; every other key is machine-local. The settings client
+writes a universal key to every connected server at once, so they agree before sync runs, and a
+machine-local key only to the machine the page names. Its target is URL state resolved against
+current connections and project folders: a project folder is the same folder id on every machine,
+and its overrides are written to each repository the folder holds there (overrides are stored per
+repository). An unavailable or legacy target must not fall back to a broader one.
 
 ## Durable intent and side effects
 

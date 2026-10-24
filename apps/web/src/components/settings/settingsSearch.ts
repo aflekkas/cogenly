@@ -33,15 +33,16 @@ export type SettingsPath =
 
 /**
  * Where a setting can be edited. Device-local rows have no scope: they render
- * at every selection. `project-defaults` rows accept project overrides, so
- * they are reachable from any server-backed selection.
+ * at every selection. `environment` rows live on a machine page,
+ * `environment-defaults` rows outside a project, and `project` rows only at a
+ * project. `project-defaults` rows accept project overrides, so they are
+ * reachable from any server-backed selection.
  */
 export type SettingsSearchScope =
   | "environment"
   | "environment-defaults"
   | "project-defaults"
   | "project"
-  | "checkout"
   | "connections";
 
 export interface SettingsSearchItem {
@@ -214,10 +215,10 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "project-defaults",
-    title: "Repository defaults and overrides",
+    title: "Project defaults and overrides",
     to: "/settings/general",
     scope: "project-defaults",
-    searchTerms: ["model workspace environments projects repositories inheritance checkout"],
+    searchTerms: ["model workspace machines projects repositories inheritance all projects"],
   },
   {
     id: "memory",
@@ -739,7 +740,8 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "project-actions",
     title: "Actions",
-    to: "/settings/projects",
+    to: "/settings/general",
+    scope: "project",
     searchTerms: ["commands scripts setup run dev server checkout worktree cogenly.json import"],
   },
   {
@@ -878,7 +880,8 @@ const SEARCH_ITEMS_BY_ID = new Map(SETTINGS_SEARCH_ITEMS.map((item) => [item.id,
 
 const SETTINGS_CATEGORY_SCOPES: Readonly<Record<SettingsPath, SettingsSearchScope | null>> = {
   "/settings/diagnostics": "environment",
-  "/settings/projects": "project",
+  // The Repository page follows its own `repository` key.
+  "/settings/projects": null,
   "/settings/general": null,
   "/settings/project-tags": null,
   "/settings/memory": null,
@@ -886,15 +889,14 @@ const SETTINGS_CATEGORY_SCOPES: Readonly<Record<SettingsPath, SettingsSearchScop
   "/settings/data": null,
   "/settings/import": null,
   "/settings/appearance": null,
-  // Keybindings fan out to the selection; Providers shows the representative
-  // environment at any selection. Neither needs a particular scope to render.
+  // Keybindings fan out to every machine; Providers, Machines and Storage
+  // always resolve to one machine. None needs a particular scope to render.
   "/settings/keybindings": null,
   "/settings/providers": null,
   "/settings/integrations": null,
   "/settings/source-control": "environment-defaults",
   "/settings/storage": "project-defaults",
   "/settings/connections": "connections",
-  // One machine at a time, like Providers: any selection resolves to one.
   "/settings/machines": null,
   "/settings/scheduled-tasks": null,
   "/settings/archived": "project-defaults",
@@ -923,32 +925,18 @@ export function isSettingsSearchScopeAvailable(
     case "connections":
       return true;
     case "environment":
-    case "checkout":
-      return requiredScope === scopeKind;
     case "project":
-      return scopeKind === "project" || scopeKind === "checkout";
+      return requiredScope === scopeKind;
     case "environment-defaults":
       return scopeKind === "environment" || scopeKind === "all";
     case "project-defaults":
-      return (
-        scopeKind === "environment" ||
-        scopeKind === "all" ||
-        scopeKind === "project" ||
-        scopeKind === "checkout"
-      );
+      return scopeKind === "environment" || scopeKind === "all" || scopeKind === "project";
   }
 }
 
-function settingsScopeKindFromSearch(search: SettingsScopeSearch): ResolvedSettingsScope["kind"] {
-  const target = validateSettingsScopeSearch({ ...search });
-  if (target.checkout && !target.project) return "unavailable";
-  if (target.project) return target.checkout ? "checkout" : "project";
-  return target.machine ? "environment" : "all";
-}
-
+/** The Repository page joins the sidebar once a repository has been opened. */
 export function isSettingsOverviewVisible(search: SettingsScopeSearch): boolean {
-  const kind = settingsScopeKindFromSearch(search);
-  return kind === "project" || kind === "checkout";
+  return validateSettingsScopeSearch({ ...search }).repository !== undefined;
 }
 
 /**

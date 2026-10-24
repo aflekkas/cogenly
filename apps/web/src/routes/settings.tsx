@@ -30,10 +30,15 @@ import {
   isSettingsSearchScopeAvailable,
 } from "../components/settings/settingsSearch";
 
-/** Pages about one machine's own state: the scope picks exactly one environment. */
-const SINGLE_ENVIRONMENT_SETTINGS_PATHS: ReadonlySet<string> = new Set([
+/**
+ * Pages about one machine's own state, which are mostly machine-local
+ * settings: the scope picks one machine and no project.
+ */
+const MACHINE_SETTINGS_PATHS: ReadonlySet<string> = new Set([
   "/settings/providers",
   "/settings/machines",
+  "/settings/diagnostics",
+  "/settings/storage",
 ]);
 
 function SettingsScopeBoundary({ pathname, children }: { pathname: string; children: ReactNode }) {
@@ -46,9 +51,7 @@ function SettingsScopeBoundary({ pathname, children }: { pathname: string; child
     !isSettingsSearchScopeAvailable(searchTarget.scope, scope.kind)
   ) {
     const target =
-      searchTarget.scope === "environment" ||
-      searchTarget.scope === "project" ||
-      searchTarget.scope === "checkout"
+      searchTarget.scope === "environment" || searchTarget.scope === "project"
         ? searchTarget.scope
         : "all";
     return (
@@ -57,8 +60,8 @@ function SettingsScopeBoundary({ pathname, children }: { pathname: string; child
       </SettingsScopeNotice>
     );
   }
-  // Device-local pages ignore the scope entirely; the project page follows
-  // remembered members while a grouping change replaces its URL key.
+  // Device-local pages ignore the scope entirely; the Repository page follows
+  // its own `repository` key.
   if (SETTINGS_DEVICE_ONLY_PATHS.has(pathname) || pathname === "/settings/projects") {
     return children;
   }
@@ -66,13 +69,13 @@ function SettingsScopeBoundary({ pathname, children }: { pathname: string; child
   if (scope.kind === "unavailable")
     return (
       <SettingsPageContainer>
-        <p className="text-sm text-muted-foreground">{scope.message}</p>
+        <p className="px-3 text-sm text-muted-foreground sm:px-4">{scope.message}</p>
       </SettingsPageContainer>
     );
   if (scope.kind === "environment" && connectedEnvironments.length === 0) {
     return (
       <SettingsPageContainer>
-        <p className="text-sm text-muted-foreground">
+        <p className="px-3 text-sm text-muted-foreground sm:px-4">
           Reconnect {scope.label} to change its settings.
         </p>
       </SettingsPageContainer>
@@ -86,11 +89,9 @@ function SettingsContentLayout() {
   const navigateToMainApp = useNavigateToMainApp();
   useEscapeToGoBack(navigateToMainApp);
   const { search, environment } = useSettingsScope();
-  const contentScopeKey =
-    location.pathname === "/settings/diagnostics" ||
-    SINGLE_ENVIRONMENT_SETTINGS_PATHS.has(location.pathname)
-      ? environment?.environmentId
-      : JSON.stringify(search);
+  const contentScopeKey = MACHINE_SETTINGS_PATHS.has(location.pathname)
+    ? environment?.environmentId
+    : JSON.stringify(search);
   // The section's route, which changes only once its (lazily loaded) page
   // commits; until then the old page stays on screen. Hash and search changes
   // within a section keep it. Its commit is the new frame of the crossfade
@@ -124,15 +125,16 @@ function SettingsRouteLayout() {
   return (
     <SettingsScopeProvider
       search={rawSearch}
-      singleEnvironment={SINGLE_ENVIRONMENT_SETTINGS_PATHS.has(pathname)}
+      machinePage={MACHINE_SETTINGS_PATHS.has(pathname)}
       onChange={(next) => {
-        // Send every axis so the retain middleware sees an explicit target
+        // Send every key so the retain middleware sees an explicit target
         // even when the choice is "all", which is the absence of a key.
         void navigate({
           to: pathname,
           search: () => ({
             project: next.project,
             machine: next.machine,
+            repository: next.repository,
             checkout: next.checkout,
           }),
           hash: "",

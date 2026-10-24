@@ -1,47 +1,53 @@
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId, ProjectLabelWithRepositories } from "@t3tools/contracts";
 
-import type {
-  SidebarProjectGroupMember,
-  SidebarProjectSnapshot,
-} from "../../sidebarProjectGrouping";
+import type { EnvironmentProjectLabel } from "../../projectLabels/projectLabels.logic";
 import type { EnvironmentPresentation } from "../../state/environments";
+import type { Project } from "../../types";
 
 /**
- * Two axes. `machine` narrows the environment axis (absent = all
- * environments); `project` and `checkout` narrow the project axis (absent =
- * environment defaults). Device-local preferences are not a scope: they
- * render regardless of the selection because they never touch a server.
+ * `project` is a project folder id: settings pages apply to all projects or
+ * to one. `machine` picks the machine whose machine-local settings a page
+ * shows and edits (absent = the primary environment). `repository` is the
+ * Repository page's repository group, not a settings scope. `checkout` only
+ * survives from older links, which resolve as unavailable rather than broader.
+ * Device-local preferences are not a scope: they render regardless.
  */
 export interface SettingsScopeSearch {
   project?: string | undefined;
   machine?: string | undefined;
+  repository?: string | undefined;
   checkout?: string | undefined;
+}
+
+/**
+ * A project folder and every repository it holds on each environment. Paired
+ * machines share a folder id, so one folder spans every machine.
+ */
+export interface SettingsProjectFolder {
+  readonly id: string;
+  readonly name: string;
+  readonly color: string | undefined;
+  readonly members: readonly Project[];
 }
 
 type ScopeTargets = {
   label: string;
-  members: readonly SidebarProjectGroupMember[];
+  /** The repositories a project override is written to, on every environment. */
+  members: readonly Project[];
+  /** The environments a universal setting is written to, or the one machine of a machine page. */
   environmentIds: readonly EnvironmentId[];
+  /** The machine machine-local settings and display values come from. */
+  machineId: EnvironmentId | null;
 };
 
 export type ResolvedSettingsScope = ScopeTargets &
   (
     | { kind: "all" }
     | { kind: "environment"; environmentId: EnvironmentId }
-    | {
-        kind: "project";
-        group: SidebarProjectSnapshot;
-        environmentId: EnvironmentId | null;
-      }
-    | {
-        kind: "checkout";
-        group: SidebarProjectSnapshot;
-        checkout: SidebarProjectGroupMember;
-        environmentId: EnvironmentId;
-      }
+    | { kind: "project"; folder: SettingsProjectFolder }
     | {
         kind: "unavailable";
-        reason: "project-required" | "project-missing" | "environment-missing" | "checkout-missing";
+        reason: "project-missing" | "environment-missing" | "legacy-link";
         message: string;
       }
   );
@@ -52,19 +58,69 @@ export function validateSettingsScopeSearch(raw: Record<string, unknown>): Setti
     typeof value === "string" && value.trim().length > 0 ? value : undefined;
   const project = stringValue(raw.project);
   const machine = stringValue(raw.machine);
+  const repository = stringValue(raw.repository);
   const checkout = stringValue(raw.checkout);
   return {
     ...(project === undefined ? {} : { project }),
     ...(machine === undefined ? {} : { machine }),
+    ...(repository === undefined ? {} : { repository }),
     ...(checkout === undefined ? {} : { checkout }),
   };
 }
 
-/** Resolves only existing targets. An unavailable selection never broadens a subsequent write. */
+/**
+ * The picker's project folders: active folders deduped by id across
+ * environments, each with the repositories it holds on every environment. A
+ * folder without a repository cannot hold overrides (they are stored per
+ * repository), so it is left out.
+ */
+export function buildSettingsProjectFolders(
+  labels: readonly (Pick<EnvironmentProjectLabel, "environmentId"> & {
+    readonly label: Pick<ProjectLabelWithRepositories, "id" | "name" | "color" | "repositoryIds">;
+  })[],
+  projects: readonly Project[],
+): SettingsProjectFolder[] {
+  const projectsByKey = new Map(
+    projects.map((project) => [`${project.environmentId}:${project.id}`, project]),
+  );
+  const folders = new Map<
+    string,
+    { name: string; color: string | undefined; members: Project[] }
+  >();
+  for (const { environmentId, label } of labels) {
+    let folder = folders.get(label.id);
+    if (!folder) {
+      folder = { name: label.name, color: label.color, members: [] };
+      folders.set(label.id, folder);
+    }
+    for (const repositoryId of label.repositoryIds) {
+      const project = projectsByKey.get(`${environmentId}:${repositoryId}`);
+      if (project && !folder.members.includes(project)) folder.members.push(project);
+    }
+  }
+  return [...folders]
+    .filter(([, folder]) => folder.members.length > 0)
+    .map(([id, folder]) => ({ id, ...folder }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+type ScopeEnvironment = Pick<EnvironmentPresentation, "environmentId" | "label"> & {
+  readonly connection: Pick<EnvironmentPresentation["connection"], "phase">;
+};
+
+/**
+ * Resolves only existing targets. An unavailable selection never broadens a
+ * subsequent write. Machine pages are about one machine's own state and
+ * ignore the project; every other page ignores nothing but `repository`.
+ */
 export function resolveSettingsScope(
   search: SettingsScopeSearch,
-  groups: readonly SidebarProjectSnapshot[],
-  environments: readonly Pick<EnvironmentPresentation, "environmentId" | "label">[],
+  folders: readonly SettingsProjectFolder[],
+  environments: readonly ScopeEnvironment[],
+  options: {
+    readonly machinePage?: boolean;
+    readonly primaryEnvironmentId?: EnvironmentId | null;
+  } = {},
 ): ResolvedSettingsScope {
   const unavailable = (
     reason: Extract<ResolvedSettingsScope, { kind: "unavailable" }>["reason"],
@@ -76,81 +132,63 @@ export function resolveSettingsScope(
     message,
     members: [],
     environmentIds: [],
+    machineId: null,
   });
 
-  if (search.checkout && !search.project) {
-    return unavailable("project-required", "Select a repository to choose one of its checkouts.");
+  const chosen = environments.find((candidate) => candidate.environmentId === search.machine);
+  if (search.machine && !chosen) {
+    return unavailable("environment-missing", "This machine is no longer available.");
+  }
+  const connected = environments.filter((candidate) => candidate.connection.phase === "connected");
+  const machine =
+    chosen ??
+    connected.find((candidate) => candidate.environmentId === options.primaryEnvironmentId) ??
+    connected[0] ??
+    environments.find((candidate) => candidate.environmentId === options.primaryEnvironmentId) ??
+    environments[0];
+  const machineId = machine?.environmentId ?? null;
+
+  if (options.machinePage) {
+    return machine
+      ? {
+          kind: "environment",
+          environmentId: machine.environmentId,
+          label: machine.label,
+          members: [],
+          environmentIds: [machine.environmentId],
+          machineId,
+        }
+      : { kind: "all", label: "No machines", members: [], environmentIds: [], machineId };
   }
 
-  const environment = environments.find((candidate) => candidate.environmentId === search.machine);
-  if (search.machine && !environment) {
-    return unavailable("environment-missing", "This environment is no longer available.");
-  }
-
-  if (search.project) {
-    const group = groups.find((candidate) => candidate.projectKey === search.project);
-    if (!group) return unavailable("project-missing", "This repository is no longer available.");
-    const members = group.memberProjects.filter(
-      (member) =>
-        (search.machine === undefined || member.environmentId === search.machine) &&
-        (search.checkout === undefined || member.physicalProjectKey === search.checkout),
+  if (search.checkout) {
+    return unavailable(
+      "legacy-link",
+      "This link pointed at one checkout. Settings now apply to a whole project: choose one above.",
     );
-    if (members.length === 0) {
+  }
+  if (search.project) {
+    const folder = folders.find((candidate) => candidate.id === search.project);
+    if (!folder) {
       return unavailable(
-        "checkout-missing",
-        search.checkout
-          ? "This checkout is no longer available in the selected repository and environment."
-          : "This repository has no checkout on this environment.",
+        "project-missing",
+        "This project is no longer available, or has no repositories yet. Choose a project above.",
       );
-    }
-    if (search.checkout) {
-      const checkout = members[0]!;
-      const checkoutEnvironment = environments.find(
-        (candidate) => candidate.environmentId === checkout.environmentId,
-      );
-      if (!checkoutEnvironment) {
-        return unavailable(
-          "environment-missing",
-          "This checkout's environment is no longer available.",
-        );
-      }
-      const sharesEnvironment = group.memberProjects.some(
-        (member) =>
-          member.environmentId === checkout.environmentId &&
-          member.physicalProjectKey !== checkout.physicalProjectKey,
-      );
-      return {
-        kind: "checkout",
-        group,
-        checkout,
-        environmentId: checkout.environmentId,
-        label: `${group.displayName} / ${checkoutEnvironment.label}${sharesEnvironment ? ` · ${checkout.workspaceRoot}` : ""}`,
-        members,
-        environmentIds: [checkout.environmentId],
-      };
     }
     return {
       kind: "project",
-      group,
-      environmentId: environment?.environmentId ?? null,
-      label: `${group.displayName} / ${environment?.label ?? "All checkouts"}`,
-      members,
-      environmentIds: [...new Set(members.map((member) => member.environmentId))],
-    };
-  }
-  if (environment) {
-    return {
-      kind: "environment",
-      environmentId: environment.environmentId,
-      label: environment.label,
-      members: [],
-      environmentIds: [environment.environmentId],
+      folder,
+      label: folder.name,
+      members: folder.members,
+      environmentIds: [...new Set(folder.members.map((member) => member.environmentId))],
+      machineId,
     };
   }
   return {
     kind: "all",
-    label: "All environments",
+    label: "All projects",
     members: [],
     environmentIds: environments.map((candidate) => candidate.environmentId),
+    machineId,
   };
 }

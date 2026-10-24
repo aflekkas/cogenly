@@ -66,6 +66,7 @@ import {
 } from "./useScopedSettings";
 import { useScopedModelDisabledReason } from "./useScopedModelAvailability";
 import { useSettingsScope } from "./SettingsScopeContext";
+import { ProjectActionsSettings } from "./ProjectActionsSettings";
 import { ProjectDefaultsSettings } from "./ProjectDefaultsSettings";
 import { useThreadActions } from "../../hooks/useThreadActions";
 import { useDesktopUpdateState } from "../../state/desktopUpdate";
@@ -1271,12 +1272,11 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
   const updateSettings = useUpdateScopedSettings();
   const navigate = useNavigate();
   const { scope, environment, connectedEnvironments, target } = useSettingsScope();
-  // The representative environment supplies the provider list for pickers;
-  // a fanned-out model choice is validated against every target before it
-  // is written. Per-machine tuning (background activity overrides) still
-  // needs exactly one environment.
+  // The representative environment supplies the provider list for pickers.
+  // It is also the machine machine-local rows (background activity, the
+  // projects folder) apply to, so per-machine tuning edits that machine.
   const environmentId = environment?.environmentId ?? null;
-  const isEnvironmentScope = scope.environmentIds.length === 1 && environmentId !== null;
+  const isEnvironmentScope = scope.kind !== "project" && environmentId !== null;
   const hasServerTargets = connectedEnvironments.length > 0;
   const [backgroundActivityDialogOpen, setBackgroundActivityDialogOpen] = useState(false);
   const mixedResponseStreamingMode = useScopedSettingsMixed(["responseStreamingMode"]);
@@ -1369,6 +1369,7 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
   return (
     <SettingsPageContainer>
       <ProjectDefaultsSettings category="general" />
+      {scope.kind === "project" ? <ProjectActionsSettings /> : null}
       <SettingsSection id="organization" title="Organization">
         <SettingsRow
           {...searchableSetting("project-grouping")}
@@ -2315,7 +2316,7 @@ export function ArchivedThreadsPanel() {
 
   const { groups: archivedGroups, hasMultipleEnvironments } = useMemo(() => {
     const selectedProjectKeys =
-      scope.kind === "project" || scope.kind === "checkout"
+      scope.kind === "project"
         ? new Set(scope.members.map((member) => `${member.environmentId}:${member.id}`))
         : null;
     const projectsByEnvironmentAndId = new Map(

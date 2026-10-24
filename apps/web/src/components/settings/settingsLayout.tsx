@@ -3,7 +3,11 @@ import { AuthSettingsWriteScope } from "@t3tools/contracts";
 import { usePrimaryEnvironmentId, usePrimaryEnvironment } from "../../state/environments";
 import { useEnvironmentScope, useEnvironmentsWithScope } from "../../state/session";
 import { InfoIcon, Undo2Icon } from "lucide-react";
-import { DEFAULT_SERVER_SETTINGS, type ServerSettings } from "@t3tools/contracts";
+import {
+  DEFAULT_SERVER_SETTINGS,
+  isUniversalServerSettingKey,
+  type ServerSettings,
+} from "@t3tools/contracts";
 import * as Equal from "effect/Equal";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import {
@@ -26,8 +30,10 @@ import { PageContent, type PageContentWidth } from "../PageContent";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { useOptionalSettingsScope } from "./SettingsScopeContext";
-import { SettingsScopeSentence } from "./SettingsScopeSentence";
+import { MachineScopeMenu, SettingsScopeSentence } from "./SettingsScopeSentence";
+import { selectProjectScope } from "./settingsScopeAxis";
 import {
+  groupProjectOverridesByFolder,
   isProjectScopedSettingKey,
   listProjectOverrides,
   type ProjectOverrideEntry,
@@ -302,11 +308,12 @@ export function SettingsRow({
     : primaryCanWrite;
   const clearOverrides = useClearScopedSettings();
   const clearProjectOverrides = useClearProjectOverrides();
-  const isProjectScope =
-    context !== null && (context.scope.kind === "project" || context.scope.kind === "checkout");
+  const isProjectScope = context !== null && context.scope.kind === "project";
   const scopedKeys = settingKeys.filter(isProjectScopedSettingKey);
+  const machineLocal =
+    settingKeys.length > 0 && !settingKeys.some((key) => isUniversalServerSettingKey(key));
   // A project scope can only edit keys that support overrides; the rest stay
-  // visible so the user sees the inherited value, but cannot change it here.
+  // visible so the user sees the value for all projects, but cannot change it here.
   const environmentWide = isProjectScope && serverScoped && scopedKeys.length === 0;
   const mixed =
     mixedOverride ?? (context !== null && scopedSettingsAreMixed(context.targets, settingKeys));
@@ -316,12 +323,19 @@ export function SettingsRow({
     serverScoped &&
     (!canWriteSettings ||
       !(context ? context.connectedEnvironments.length > 0 : primarySettingsAvailable));
-  const inheritedFrom =
-    source === "environment" && context?.scope.environmentIds.length === 1
-      ? (context.environments.find(
-          (environment) => environment.environmentId === context.scope.environmentIds[0],
-        )?.label ?? "environment")
-      : "environment";
+  // A machine-local row on a page about every machine names the machine it changes.
+  const machineLabel =
+    context !== null &&
+    serverScoped &&
+    machineLocal &&
+    !context.machinePage &&
+    !isProjectScope &&
+    context.environments.length > 1 ? (
+      <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+        on <MachineScopeMenu />
+      </span>
+    ) : null;
+  const machineName = context?.environment?.label ?? "this machine";
   const environmentSettingsById = useMemo(
     () =>
       new Map(
@@ -333,35 +347,25 @@ export function SettingsRow({
       ),
     [context?.connectedEnvironments],
   );
-  // At environment scope, projects with their own value keep it when the
-  // environment default changes; the chain names them and can reset them.
+  // At All projects, projects with their own value keep it when the value for
+  // all projects changes; the chain names them and can reset them.
   const overridingProjects = useMemo((): SettingOverridingProject[] => {
     if (context === null || isProjectScope || scopedKeys.length === 0) return [];
-    return listProjectOverrides(context.connectedEnvironments, scopedKeys).flatMap((entry) => {
-      const group = context.groups.find((candidate) =>
-        candidate.memberProjects.some(
-          (member) => member.environmentId === entry.environmentId && member.id === entry.projectId,
-        ),
-      );
-      if (!group) return [];
-      return [
-        {
-          ...entry,
-          label: group.displayName,
-          open: () =>
-            context.selectScope({
-              project: group.projectKey,
-              ...(context.search.machine ? { machine: context.search.machine } : {}),
-            }),
-        },
-      ];
-    });
+    return groupProjectOverridesByFolder(
+      listProjectOverrides(context.connectedEnvironments, scopedKeys),
+      context.folders,
+    ).map(({ folder, entries }) => ({
+      id: folder.id,
+      label: folder.name,
+      entries,
+      open: () => context.selectScope(selectProjectScope(context.search, folder.id)),
+    }));
   }, [context, isProjectScope, scopedKeys]);
   const renderedReset = unavailable ? null : isProjectScope && scopedKeys.length > 0 ? (
     source === "project" || source === "mixed" ? (
       <SettingResetButton
         label={typeof title === "string" ? title : "override"}
-        tooltip="Reset to inherited value"
+        tooltip="Reset to All projects"
         onClick={() => (onResetOverride ? onResetOverride() : clearOverrides(scopedKeys))}
       />
     ) : null
@@ -405,11 +409,15 @@ export function SettingsRow({
                   : (primaryEnvironment?.label ?? "the primary environment")
               }.`
             : context
-              ? "Reconnect the selected environment to change this setting."
+              ? `Reconnect ${machineName} to change this setting.`
               : PRIMARY_SETTINGS_UNAVAILABLE_MESSAGE,
         )
       : environmentWide && control
-        ? inertControl("Environment-wide setting. Select an environment to change it.")
+        ? inertControl(
+            machineLocal
+              ? `Applies to every project on ${machineName}. Choose All projects to change it.`
+              : "Applies to all projects. Choose All projects to change it.",
+          )
         : control;
   // Server rows get an indicator beside the title that opens the resolution
   // chain per target at every scope; client rows keep a plain status only.
@@ -425,15 +433,23 @@ export function SettingsRow({
       }),
     );
   const inheritance: { state: SettingInheritanceState; summary: string } = mixed
-    ? { state: "mixed", summary: "Mixed across selected environments" }
+    ? {
+        state: "mixed",
+        summary: isProjectScope
+          ? "Differs between this project's repositories"
+          : "Differs between machines",
+      }
     : source === "project"
-      ? { state: "overridden", summary: "Overridden for this repository" }
+      ? { state: "overridden", summary: "Overrides All projects" }
       : source === "cogenly.json"
-        ? { state: "inherited", summary: "Inherited from the repository's cogenly.json" }
+        ? { state: "inherited", summary: "From the repository's cogenly.json" }
         : source === "environment" && scopedKeys.length > 0
-          ? { state: "inherited", summary: `Inherited from ${inheritedFrom}` }
+          ? { state: "inherited", summary: "Follows All projects" }
           : customized
-            ? { state: "environment", summary: "Set on the environment" }
+            ? {
+                state: "environment",
+                summary: machineLocal ? `Set on ${machineName}` : "Set for all projects",
+              }
             : { state: "default", summary: "Built-in default" };
   const renderedInheritance =
     context && serverScoped && settingKeys.length > 0 ? (
@@ -478,6 +494,7 @@ export function SettingsRow({
             <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center">
               {renderedReset}
             </span>
+            {machineLabel}
           </div>
           {description ? (
             <p className="max-w-xl text-xs leading-normal text-muted-foreground/80">
