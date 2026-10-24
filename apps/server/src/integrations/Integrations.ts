@@ -1462,6 +1462,22 @@ const make = (options: IntegrationsOptions = {}) =>
             (only === undefined || integration.id === only),
         );
         if (remote.length === 0) return;
+        // Upgrade local sign-ins before the vault's first capture. Existing refresh
+        // ownership stays put; pairing must never create a second refresher.
+        for (const integration of remote) {
+          const state = integration.oauthState;
+          if (!state?.signedIn || state.server === undefined || state.tokenItemId === undefined)
+            continue;
+          yield* tokenStore.backfillAttachment(
+            state.tokenItemId,
+            signInAttachment(integration.id, {
+              server: state.server,
+              registration: state.registration,
+              expiresAt: state.expiresAt ?? null,
+              refreshOwner: state.refreshOwner ?? peers.self,
+            }),
+          );
+        }
         const attached = yield* tokenStore.attached;
         const nowMs = yield* Clock.currentTimeMillis;
         let changed = false;

@@ -344,6 +344,7 @@ export class Vault extends Context.Service<
     readonly setSyncAttachment: (
       itemId: VaultItemId,
       attachment: Readonly<Record<string, Schema.Json>> | null,
+      options?: { readonly onlyIfMissing: boolean },
     ) => Effect.Effect<void, VaultError>;
     readonly getSyncAttachment: (
       itemId: VaultItemId,
@@ -1084,12 +1085,15 @@ const make = Effect.gen(function* () {
       Effect.withSpan("Vault.removeSynced", { attributes: { "vault.item_id": itemId } }),
     );
 
-  const setSyncAttachment: Vault["Service"]["setSyncAttachment"] = (itemId, attachment) =>
+  const setSyncAttachment: Vault["Service"]["setSyncAttachment"] = (itemId, attachment, options) =>
     Effect.gen(function* () {
       const at = yield* now;
       const updated =
-        yield* sql`UPDATE vault_items SET sync_attachment_json = ${attachment === null ? null : encodeAttachmentJson(attachment)}, updated_at = ${at} WHERE id = ${itemId} AND deleted_at IS NULL RETURNING id`;
-      if (updated.length === 0) return yield* new VaultError({ reason: "not_found" });
+        yield* sql`UPDATE vault_items SET sync_attachment_json = ${attachment === null ? null : encodeAttachmentJson(attachment)}, updated_at = ${at} WHERE id = ${itemId} AND deleted_at IS NULL ${options?.onlyIfMissing ? sql`AND sync_attachment_json IS NULL` : sql``} RETURNING id`;
+      if (updated.length === 0) {
+        yield* loadRow(itemId);
+        return;
+      }
       yield* captureRow(itemId);
     }).pipe(sql.withTransaction, Effect.mapError(wrap));
 

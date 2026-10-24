@@ -38,9 +38,8 @@ import {
 } from "./oauthServer.testkit.ts";
 
 /** A paired machine with the integrations gateway over its own vault. */
-const startMachine = (network: Network, name: string) =>
+const startGateway = (node: VaultNode) =>
   Effect.gen(function* () {
-    const node = yield* startNode(network, name);
     const layer = Integrations.layer.pipe(
       // The mock servers listen on loopback, which production refuses.
       Layer.provide(Layer.succeed(IntegrationEndpointPolicy, loopbackHttpsPolicy)),
@@ -67,6 +66,8 @@ const startMachine = (network: Network, name: string) =>
       peers,
     };
   });
+const startMachine = (network: Network, name: string) =>
+  startNode(network, name).pipe(Effect.flatMap(startGateway));
 type Machine = Effect.Success<ReturnType<typeof startMachine>>;
 
 /** Two machines that share their vaults with each other. */
@@ -404,6 +405,59 @@ describe("web integration sign-ins across paired machines", () => {
       yield* whoami(hub);
       expect(mock.accessTokens.get(mock.bearers.at(-1)!)).toBe("new-account");
     }).pipe(Effect.scoped, http),
+  );
+
+  it.effect(
+    "upgrading a legacy web sign-in backfills its attachment before capture without moving refresh ownership",
+    () =>
+      Effect.gen(function* () {
+        const network = new Network();
+        const node = yield* startNode(network, "Laptop");
+        const mock = yield* startMockAuthServer;
+        const integration = yield* Effect.scoped(
+          Effect.gen(function* () {
+            const legacy = yield* startGateway(node);
+            const integration = yield* addLinear(legacy, mock);
+            yield* signIn(legacy, integration.id, "legacy-account");
+            const itemId = (yield* oauthStateOf(legacy, integration.id))!.tokenItemId!;
+            // The persisted shape before shared sign-ins: tokens plus local OAuth metadata.
+            yield* node.sql`UPDATE vault_items SET sync_attachment_json = NULL WHERE id = ${itemId}`;
+            yield* node.sql`UPDATE integrations SET payload_json = json_remove(payload_json, '$.oauthState.refreshOwner') WHERE id = ${integration.id}`;
+            return integration;
+          }),
+        );
+        const upgraded = yield* startGateway(node);
+        const state = (yield* oauthStateOf(upgraded, integration.id))!;
+        const itemId = VaultItemId.make(state.tokenItemId!);
+        expect(yield* upgraded.vault.getSyncAttachment(itemId)).toMatchObject({
+          kind: "integration-oauth",
+          integrationId: integration.id,
+          refreshOwner: upgraded.environmentId,
+          registration: { clientId: "client-1" },
+        });
+        const revision = yield* upgraded.vault.credentialRevision(itemId);
+        yield* upgraded.integrations.adoptSyncedSignIns();
+        expect(yield* upgraded.vault.credentialRevision(itemId)).toBe(revision);
+        const hub = yield* startMachine(network, "Server");
+        yield* copyDefinition(upgraded, hub, integration.id);
+        network.pair(hub, upgraded);
+        yield* share(upgraded, hub);
+        yield* share(hub, upgraded);
+        yield* settle(hub, [upgraded]);
+        yield* hub.integrations.adoptSyncedSignIns();
+        expect((yield* oauthStateOf(hub, integration.id))?.refreshOwner).toBe(
+          upgraded.environmentId,
+        );
+        yield* whoami(hub);
+        yield* TestClock.adjust(Duration.minutes(59.5));
+        yield* hub.integrations.refreshSharedSignIns;
+        expect(mock.refreshes).toBe(0);
+        yield* upgraded.integrations.refreshSharedSignIns;
+        expect(mock.refreshes).toBe(1);
+        yield* settle(hub, [upgraded]);
+        yield* whoami(hub);
+        expect(mock.accessTokens.get(mock.bearers.at(-1)!)).toBe("legacy-account");
+      }).pipe(Effect.scoped, http),
   );
 
   it.effect("local integrations sign in per machine: no vault documents, no adoption", () =>

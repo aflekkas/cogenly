@@ -84,6 +84,11 @@ export class IntegrationTokens extends Context.Service<
       readonly tokens: StoredTokens;
       readonly attachment: SignInAttachment;
     }) => Effect.Effect<{ readonly itemId: string; readonly revision: number }, IntegrationError>;
+    /** Adds upgrade metadata only when the item still has no attachment. */
+    readonly backfillAttachment: (
+      itemId: string,
+      attachment: SignInAttachment,
+    ) => Effect.Effect<void, IntegrationError>;
     /**
      * Empties the access and refresh tokens of a grant that no longer works,
      * so every machine sharing the item stops using it; the client secret stays.
@@ -194,6 +199,20 @@ const makeVault = Effect.gen(function* () {
             )
       ).pipe(Effect.mapError(storage("write tokens")));
     },
+    backfillAttachment: (itemId, attachment) =>
+      vault
+        .setSyncAttachment(
+          VaultItemId.make(itemId),
+          encodeAttachment(attachment) as Record<string, Schema.Json>,
+          { onlyIfMissing: true },
+        )
+        .pipe(
+          Effect.catchIf(
+            (error) => error.reason === "not_found",
+            () => Effect.void,
+          ),
+          Effect.mapError(storage("backfill sign-in")),
+        ),
     clearGrant: (itemId) =>
       vault
         .update({ id: VaultItemId.make(itemId), secretFields: { value: "", password: "" } })

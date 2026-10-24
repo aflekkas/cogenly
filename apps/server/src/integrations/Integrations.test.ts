@@ -165,6 +165,7 @@ const fakeUpstream = fakeUpstreamWith();
 
 /** These tests never sign in; OAuth has its own suite over the real vault. */
 const noTokensLayer = Layer.succeed(Tokens.IntegrationTokens, {
+  backfillAttachment: () => Effect.void,
   read: () => Effect.succeed(Option.none()),
   revision: () => Effect.succeed(Option.none()),
   clientSecret: () => Effect.succeed(undefined),

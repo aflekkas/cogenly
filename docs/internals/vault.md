@@ -69,7 +69,9 @@ token fields and their revision from one vault-row snapshot; writes return
 the revision committed with those tokens. A replacement sign-in updates the
 refresher's server and client metadata even while it remains signed in. A client
 authentication mismatch does not revoke the shared grant; only `invalid_grant`
-does, and an obsolete refusal first retries a newer token revision.
+does, and an obsolete refusal first retries a newer token revision. At startup,
+legacy web sign-ins gain their missing attachment from persisted OAuth state
+before vault capture; existing refresh ownership stays on the same machine.
 
 Accounts reference vault items without copying their encrypted identities. The
 legacy backfill reads metadata only and preserves item ids and encrypted
