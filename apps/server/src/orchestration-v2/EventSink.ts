@@ -24,6 +24,7 @@ import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import { replayAndBufferProjectedLiveEvents } from "./LiveStreamBudget.ts";
+import { isReplicaCommandId } from "./ReplayedCommandIds.ts";
 import type { UnsequencedProjectEvent } from "../persistence/OrchestrationEventStore.ts";
 import { projectDomainEventForWire } from "./WireProjection.ts";
 
@@ -62,6 +63,16 @@ export class EventSinkStreamError extends Schema.TaggedError<EventSinkStreamErro
     return this.threadId === undefined
       ? "Failed to stream orchestration V2 events."
       : `Failed to stream orchestration V2 events for thread ${this.threadId}.`;
+  }
+}
+
+/** A local write to a thread that another machine owns or is receiving. */
+export class ThreadOwnedElsewhereError extends Schema.TaggedError<ThreadOwnedElsewhereError>()(
+  "ThreadOwnedElsewhereError",
+  { threadId: ThreadId },
+) {
+  override get message(): string {
+    return `Thread ${this.threadId} runs on another machine.`;
   }
 }
 
@@ -346,6 +357,27 @@ const layerBase: Layer.Layer<
       );
     };
 
+    // One writer per thread: a thread another machine owns, or one being
+    // handed to another machine, takes events only from replication. Checked
+    // inside the write transaction so a handoff fence cannot race a writer.
+    const appendOwned = (input: {
+      readonly commandId?: CommandId;
+      readonly events: ReadonlyArray<OrchestrationV2DomainEvent>;
+    }) =>
+      Effect.gen(function* () {
+        if (input.events.length > 0 && !isReplicaCommandId(input.commandId)) {
+          const threadIds = [...new Set(input.events.map((event) => event.threadId))];
+          const owned = yield* sql<{
+            readonly thread_id: string;
+          }>`SELECT thread_id FROM thread_owners WHERE thread_id IN ${sql.in(threadIds)} AND (local = 0 OR handoff_json IS NOT NULL) LIMIT 1`;
+          if (owned[0] !== undefined)
+            return yield* new ThreadOwnedElsewhereError({
+              threadId: ThreadId.make(owned[0].thread_id),
+            });
+        }
+        return yield* eventStore.append(input);
+      });
+
     const applyStoredEvents = (storedEvents: ReadonlyArray<OrchestrationV2StoredEvent>) =>
       Effect.gen(function* () {
         yield* Effect.forEach(storedEvents, (stored) => projectionStore.apply(stored.event), {
@@ -392,7 +424,7 @@ const layerBase: Layer.Layer<
               ? yield* guardUserInputCancellations(input.events)
               : input.events,
           );
-          const committed = yield* eventStore.append({
+          const committed = yield* appendOwned({
             ...(input.commandId === undefined ? {} : { commandId: input.commandId }),
             events: normalized,
           });
@@ -455,7 +487,7 @@ const layerBase: Layer.Layer<
                 ? yield* guardUserInputCancellations(input.events)
                 : input.events,
             );
-            const storedEvents = yield* eventStore.append({
+            const storedEvents = yield* appendOwned({
               ...(input.commandId === undefined ? {} : { commandId: input.commandId }),
               events: normalized,
             });
@@ -520,7 +552,7 @@ const layerBase: Layer.Layer<
               ? yield* guardUserInputCancellations(input.events)
               : input.events,
           );
-          const storedEvents = yield* eventStore.append({
+          const storedEvents = yield* appendOwned({
             ...(input.commandId === undefined ? {} : { commandId: input.commandId }),
             events: normalized,
           });
@@ -556,7 +588,7 @@ const layerBase: Layer.Layer<
           }
 
           const normalized = yield* normalizeEvents(input.events);
-          const storedEvents = yield* eventStore.append({ events: normalized });
+          const storedEvents = yield* appendOwned({ events: normalized });
           yield* applyStoredEvents(storedEvents);
           return { committed: true as const, storedEvents };
         }),
@@ -599,7 +631,7 @@ const layerBase: Layer.Layer<
           }
 
           const normalized = yield* normalizeEvents(input.events);
-          const storedEvents = yield* eventStore.append({
+          const storedEvents = yield* appendOwned({
             commandId: input.commandId,
             events: normalized,
           });

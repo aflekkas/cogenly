@@ -1888,6 +1888,11 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
 
+    // Recovery, usage-limit resume and pull request polling act only on threads
+    // this machine runs. A replica records another machine's run as it is there.
+    const locallyOwned = (threadId: Statement.Fragment) =>
+      sql`NOT EXISTS (SELECT 1 FROM thread_owners owner WHERE owner.thread_id = ${threadId} AND owner.local = 0)`;
+
     // For run upserts: a snapshot without `path` keeps the value another event recorded there.
     const keepRecordedRunField = (payload: Statement.Fragment, path: string) => sql`
       CASE
@@ -3691,6 +3696,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             LIMIT 1
           )
           WHERE t.deleted_at IS NULL
+            AND ${locallyOwned(sql`t.thread_id`)}
             AND json_extract(t.payload_json, '$.archivedAt') IS NULL
             AND json_extract(t.payload_json, '$.settledOverride') IS NOT 'settled'
             AND json_extract(item.payload_json, '$.failure.class') = 'usage_limit'
@@ -3885,6 +3891,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         const rows = yield* sql<{ readonly thread_id: string }>`
           SELECT thread_id FROM orchestration_v2_projection_threads
           WHERE deleted_at IS NULL
+            AND ${locallyOwned(sql`thread_id`)}
             AND thread_id IN (${candidates})
             ${kind === "queued-runs" ? sql`AND archived_at IS NULL` : sql``}
           ORDER BY updated_at ASC, thread_id ASC
@@ -5724,6 +5731,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           SELECT payload_json
           FROM orchestration_v2_projection_threads
           WHERE deleted_at IS NULL${threadId === undefined ? sql`` : sql` AND thread_id = ${threadId}`}
+            AND ${locallyOwned(sql`thread_id`)}
             AND json_extract(payload_json, '$.archivedAt') IS NULL
             AND json_array_length(payload_json, '$.pullRequests') > 0
           ORDER BY updated_at ASC, thread_id ASC

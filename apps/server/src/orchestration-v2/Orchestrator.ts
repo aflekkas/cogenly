@@ -75,7 +75,7 @@ import {
   derivePendingBackgroundWork,
   pendingBackgroundTurnItems,
 } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
-import { isT3ImportCommandId } from "../t3Import/T3ImportCommandIds.ts";
+import { isReplayedCommandId } from "./ReplayedCommandIds.ts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -11822,8 +11822,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         (stored) =>
           stored.event.type === "run.updated" &&
           !String(stored.commandId).startsWith("command:runtime-reconcile:") &&
-          // Imported T3 history ended long ago; promoting a queue for it would start a run.
-          !isT3ImportCommandId(stored.commandId) &&
+          // Imported or replicated history ran elsewhere; promoting a queue for it would start a run.
+          !isReplayedCommandId(stored.commandId) &&
           (stored.event.payload.status === "completed" ||
             stored.event.payload.status === "interrupted" ||
             stored.event.payload.status === "failed" ||
@@ -12099,8 +12099,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         .pipe(Effect.map((latest) => eventSink.stream({ afterSequence: latest }))),
     ).pipe(
       // Reactors on this stream (settlement, PR sync, delegated questions,
-      // awareness) act on new activity; imported T3 history is not new.
-      Stream.filter((stored) => !isT3ImportCommandId(stored.commandId)),
+      // awareness) act on new activity; imported and replicated history is not new.
+      Stream.filter((stored) => !isReplayedCommandId(stored.commandId)),
       Stream.map((stored) => stored.event),
       Stream.mapError(
         (cause) =>
