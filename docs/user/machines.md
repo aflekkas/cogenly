@@ -21,7 +21,9 @@ a clone. Pick it, and it clones into the project's folder on this machine;
 repository's folder is named after the repository, so it lands in the same
 place everywhere. Removing a repository from one machine frees the disk space
 and keeps it in the project, so you can clone it back later. Settings, resource
-files, vault items, integrations and memory facts do not sync yet. Matching
+files, integrations and memory facts do not sync yet. Vault items sync only
+once you turn on sharing; see
+[Vault on several machines](vault.md#vault-on-several-machines). Matching
 project names are kept separately until you choose how to combine them.
 
 ## Your conversations on every machine

@@ -79,8 +79,10 @@ Legacy URI-encoded MCP schedule IDs remain readable on disk and on the wire to
 preserve task references and webhook URLs; new IDs hash keys that are not portable.
 
 Shared repository identity is its remote. Local checkout IDs, absolute paths,
-thread bindings, credentials, run counters and fallback position/reset time do
-not replicate. Peer metadata edits preserve valid local execution bindings;
+thread bindings, run counters and fallback position/reset time do not
+replicate. Vault items replicate encrypted, only between machines the owner
+shares with, and project outside the merge transaction; see
+[vault sync](./vault-sync.md). Peer metadata edits preserve valid local execution bindings;
 checkout resolution only fills a missing binding. Existing-worktree references travel only relative to a
 repository; a worktree outside that repository is represented as root intent.
 A remote-only repository link has no local checkout. Configuration sync never
