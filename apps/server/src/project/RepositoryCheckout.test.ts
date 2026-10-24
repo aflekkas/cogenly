@@ -47,7 +47,8 @@ function makeBareRemote(): string {
   NodeFS.writeFileSync(NodePath.join(seed, "README.md"), "hello\n");
   git(seed, ["add", "."]);
   git(seed, ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "init"]);
-  const bare = NodePath.join(root, "remote.git");
+  // Named like the repository, so its derived folder is `smile-express`.
+  const bare = NodePath.join(root, "smile-express.git");
   git(root, ["init", "--bare", "--initial-branch=main", bare]);
   git(seed, ["push", bare, "main"]);
   return bare;
@@ -503,7 +504,7 @@ describe("RepositoryCheckout.checkoutRepository", () => {
         { project_id: repositoryId },
       ]);
       yield* waitForCloneToSettle(repositoryId);
-      const destination = NodePath.join(projectDir, "smile-express");
+      const destination = NodePath.join(projectDir, "repos", "smile-express");
       expect(NodeFS.readFileSync(NodePath.join(destination, "README.md"), "utf8")).toBe("hello\n");
       expect((yield* labels.read(label.id)).label.repositories?.[0]?.checkout).toBe("ready");
       // Asking again is a no-op: same record, no second clone.
@@ -523,7 +524,10 @@ describe("RepositoryCheckout.checkoutRepository", () => {
       const checkouts = yield* RepositoryCheckout.RepositoryCheckout;
       yield* checkouts.ensureCheckout(ProjectId.make(`remote:${bare}`));
       expect(
-        NodeFS.readFileSync(NodePath.join(projectDir, "smile-express", "README.md"), "utf8"),
+        NodeFS.readFileSync(
+          NodePath.join(projectDir, "repos", "smile-express", "README.md"),
+          "utf8",
+        ),
       ).toBe("hello\n");
       expect(box.cloneCalls).toBe(1);
     }).pipe(Effect.provide(checkoutHarness(projectDir, box)));
@@ -532,8 +536,8 @@ describe("RepositoryCheckout.checkoutRepository", () => {
   it.effect("adopts a checkout of the same repository already in the folder", () => {
     const bare = makeBareRemote();
     const projectDir = NodePath.join(tempRoot(), "Spawn");
-    NodeFS.mkdirSync(projectDir);
-    git(projectDir, ["clone", bare, "smile-express"]);
+    NodeFS.mkdirSync(NodePath.join(projectDir, "repos"), { recursive: true });
+    git(NodePath.join(projectDir, "repos"), ["clone", bare, "smile-express"]);
     const box = { cloneCalls: 0 };
     return Effect.gen(function* () {
       const label = yield* linkFromElsewhere(bare, "smile-express");
@@ -548,8 +552,11 @@ describe("RepositoryCheckout.checkoutRepository", () => {
   it.effect("refuses to clone over a folder that holds other files", () => {
     const bare = makeBareRemote();
     const projectDir = NodePath.join(tempRoot(), "Spawn");
-    NodeFS.mkdirSync(NodePath.join(projectDir, "smile-express"), { recursive: true });
-    NodeFS.writeFileSync(NodePath.join(projectDir, "smile-express", "notes.txt"), "mine\n");
+    NodeFS.mkdirSync(NodePath.join(projectDir, "repos", "smile-express"), { recursive: true });
+    NodeFS.writeFileSync(
+      NodePath.join(projectDir, "repos", "smile-express", "notes.txt"),
+      "mine\n",
+    );
     const box = { cloneCalls: 0 };
     return Effect.gen(function* () {
       const label = yield* linkFromElsewhere(bare, "smile-express");
@@ -564,7 +571,10 @@ describe("RepositoryCheckout.checkoutRepository", () => {
         { repository_id: `remote:${bare}` },
       ]);
       expect(
-        NodeFS.readFileSync(NodePath.join(projectDir, "smile-express", "notes.txt"), "utf8"),
+        NodeFS.readFileSync(
+          NodePath.join(projectDir, "repos", "smile-express", "notes.txt"),
+          "utf8",
+        ),
       ).toBe("mine\n");
     }).pipe(Effect.provide(checkoutHarness(projectDir, box)));
   });

@@ -13,7 +13,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 
 import * as ServerConfig from "../config.ts";
 import { resolveProjectsRootDirectory } from "../project/ProjectsRoot.ts";
-import { WORKTREES_SEGMENT } from "../worktreesDirectory.ts";
+import { isWorktreesSegment } from "../worktreesDirectory.ts";
 import * as ServerSettings from "../serverSettings.ts";
 
 export const PROJECT_LABEL_ID_FILE = ".cogenly-project.json";
@@ -136,8 +136,8 @@ const make = Effect.gen(function* () {
     );
     const found = new Map<string, string>();
     for (const entry of [...entries].sort()) {
-      // `worktrees/` is a reserved container, never a project folder.
-      if (entry === WORKTREES_SEGMENT) continue;
+      // Worktree containers are reserved, never project folders.
+      if (isWorktreesSegment(entry)) continue;
       const dir = path.join(root, entry);
       if (!(yield* isDirectory(dir))) continue;
       const id = yield* readIdFile(dir);

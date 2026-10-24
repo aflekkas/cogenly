@@ -23,28 +23,37 @@ export function resolveWorktreesDirectory(
   return isFilesystemRoot(resolved, path) ? null : resolved;
 }
 
-/** The reserved folder inside a project (or `Repositories/`) that holds its worktrees. */
-export const WORKTREES_SEGMENT = "worktrees";
-
-const isWithinDirectory = (candidate: string, directory: string, path: Path.Path): boolean => {
-  const relative = path.relative(path.resolve(directory), path.resolve(candidate));
-  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
-};
+/**
+ * The hidden folder inside a project that holds its worktrees, mirroring
+ * `repos/`: `.worktrees/<repo>/<slug>`, or `.worktrees/<owner>/<repo>/<slug>`
+ * for another owner's repository.
+ */
+export const WORKTREES_SEGMENT = ".worktrees";
+/**
+ * Where project worktrees were created before `.worktrees/`. Nothing new
+ * lands there, but worktrees already in it keep working, so every scan that
+ * skips or finds managed worktrees treats it like `.worktrees/`.
+ */
+export const LEGACY_WORKTREES_SEGMENT = "worktrees";
+/** Both worktree containers a project folder can hold. */
+export const isWorktreesSegment = (segment: string): boolean =>
+  segment === WORKTREES_SEGMENT || segment === LEGACY_WORKTREES_SEGMENT;
 
 /**
- * The parent new worktrees are created under, before the
- * `<repo>/<slug>` tail: an explicit `worktreesDirectory` setting wins, then
- * the project folder of a repository that belongs to a project, then the
- * folder containing a repository under the projects root (for example
- * `Repositories/`), then `defaultDir`. Null when an explicit setting is not
- * an absolute path on this machine, mirroring {@link resolveWorktreesDirectory}.
+ * The parent new worktrees are created under, before the `<repo>/<slug>`
+ * tail: an explicit `worktreesDirectory` setting wins, then the project's
+ * `.worktrees/` for a repository that belongs to a project (plus its owner
+ * folder when the repository sits under `repos/<owner>/`), then `defaultDir`
+ * (`<Cogenly home>/worktrees`) for repositories in no project. Null when an
+ * explicit setting is not an absolute path on this machine, mirroring
+ * {@link resolveWorktreesDirectory}.
  */
 export function resolveWorktreeParentDirectory(input: {
   readonly setting: string;
   readonly defaultDir: string;
-  readonly repoCwd: string;
   readonly projectDir: string | null;
-  readonly projectsRoot: string | null;
+  /** The repository's `directoryName` in its project: `<repo>` or `<owner>/<repo>`. */
+  readonly repositoryDirectoryName?: string | null | undefined;
   readonly path: Path.Path;
   readonly home: string;
 }): string | null {
@@ -52,24 +61,26 @@ export function resolveWorktreeParentDirectory(input: {
     return resolveWorktreesDirectory(input.setting, input.defaultDir, input.path, input.home);
   }
   if (input.projectDir !== null) {
-    return input.path.join(input.path.resolve(input.projectDir), WORKTREES_SEGMENT);
-  }
-  if (input.projectsRoot !== null) {
-    const containingDir = input.path.dirname(input.path.resolve(input.repoCwd));
-    if (isWithinDirectory(containingDir, input.projectsRoot, input.path)) {
-      return input.path.join(containingDir, WORKTREES_SEGMENT);
-    }
+    const owner = input.repositoryDirectoryName?.split("/").slice(0, -1) ?? [];
+    return input.path.join(input.path.resolve(input.projectDir), WORKTREES_SEGMENT, ...owner);
   }
   return input.defaultDir;
 }
 
-/** The `<entry>/worktrees` root of every folder directly inside the projects root. */
+/**
+ * The worktree roots of every folder directly inside the projects root: its
+ * `.worktrees/` and the legacy `worktrees/`.
+ */
 export function projectWorktreesDirectories(
   projectsRoot: string,
   entryNames: ReadonlyArray<string>,
   path: Path.Path,
 ): ReadonlyArray<string> {
-  return entryNames.map((entry) => path.join(path.resolve(projectsRoot), entry, WORKTREES_SEGMENT));
+  return entryNames.flatMap((entry) =>
+    [WORKTREES_SEGMENT, LEGACY_WORKTREES_SEGMENT].map((segment) =>
+      path.join(path.resolve(projectsRoot), entry, segment),
+    ),
+  );
 }
 
 /** Callers re-check after resolving symlinks: a link can point at a root. */

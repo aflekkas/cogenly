@@ -21,6 +21,7 @@ import * as Queue from "effect/Queue";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
+import * as GitHubRest from "@t3tools/source-control-github/server/GitHubRest";
 import * as Labels from "./ProjectLabelService.ts";
 import * as ProjectCloneTracker from "../project/ProjectCloneTracker.ts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
@@ -146,7 +147,8 @@ describe("project labels", () => {
         {
           repositoryId: repoB,
           remote: "github.com/spawn/repo-b",
-          directoryName: "repo-b",
+          // No home owner linked: another owner's repository is `<owner>/<repo>`.
+          directoryName: "spawn/repo-b",
           checkout: "missing",
         },
       ]);
@@ -157,12 +159,13 @@ describe("project labels", () => {
         {
           repositoryId: repoB,
           remote: "github.com/spawn/repo-b",
-          directoryName: "repo-b",
+          // No home owner linked: another owner's repository is `<owner>/<repo>`.
+          directoryName: "spawn/repo-b",
           checkout: "missing",
         },
       ]);
       expect(yield* sql`SELECT remote, directory_name FROM label_repositories`).toEqual([
-        { remote: "github.com/spawn/repo-b", directory_name: "repo-b" },
+        { remote: "github.com/spawn/repo-b", directory_name: "spawn/repo-b" },
       ]);
       // A repository whose checkout has no remote stays local-only.
       yield* service.linkRepository({ labelId: label.id, repositoryId: repoA });
@@ -626,6 +629,134 @@ describe("project labels", () => {
       expect((yield* facts.retract(fact.id)).fact.status).toBe("retracted");
     }).pipe(Effect.provide(layer)),
   );
+
+  describe("repository folder names", () => {
+    const remotes: Record<string, string> = {
+      "/checkouts/spawn-platform": "git@github.com:Spawn-Partners/platform.git",
+      "/checkouts/bartr-platform": "https://github.com/bartr-app/platform",
+    };
+    const repos = {
+      spawn: ProjectId.make("spawn-platform"),
+      bartr: ProjectId.make("bartr-platform"),
+      notes: ProjectId.make("notes"),
+    };
+    const naming = (viewer: string | null) =>
+      Labels.layer.pipe(Layer.provide(layerSharedIdentity)).pipe(
+        Layer.provideMerge(
+          Layer.succeed(RepositoryIdentityResolver.RepositoryIdentityResolver, {
+            resolve: (cwd) =>
+              Effect.succeed(
+                remotes[cwd] === undefined
+                  ? null
+                  : {
+                      canonicalKey: cwd,
+                      locator: {
+                        source: "git-remote" as const,
+                        remoteName: "origin",
+                        remoteUrl: remotes[cwd],
+                      },
+                      rootPath: cwd,
+                    },
+              ),
+          }),
+        ),
+        Layer.provideMerge(
+          Layer.mock(GitHubRest.GitHubRest)({
+            rest: () =>
+              Effect.succeed({
+                status: viewer === null ? 401 : 200,
+                headers: {},
+                body: JSON.stringify({ login: viewer }),
+                truncated: false,
+                invalidUtf8: false,
+              }),
+          }),
+        ),
+        Layer.provideMerge(persistence),
+        Layer.provide(NodeServices.layer),
+      );
+    const seedCheckouts = Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      for (const [id, root] of [
+        [repos.spawn, "/checkouts/spawn-platform"],
+        [repos.bartr, "/checkouts/bartr-platform"],
+        [repos.notes, "/checkouts/notes"],
+      ] as const)
+        yield* sql`INSERT INTO projection_projects(project_id, title, workspace_root, scripts_json, created_at, updated_at) VALUES (${id}, ${id}, ${root}, '[]', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`;
+    });
+    const folders = (label: ProjectLabelWithRepositories) =>
+      Object.fromEntries(
+        (label.repositories ?? []).map((link) => [link.repositoryId, link.directoryName]),
+      );
+
+    it.effect(
+      "names repositories after their remote under the home owner, whatever their folder",
+      () =>
+        Effect.gen(function* () {
+          yield* seedCheckouts;
+          const service = yield* Labels.ProjectLabelService;
+          const sql = yield* SqlClient.SqlClient;
+          const { label } = yield* service.create({ name: "Spawn Partners" });
+          yield* service.linkSource({
+            id: label.id,
+            link: { kind: "github-owner", owner: "Spawn-Partners" },
+          });
+          for (const repositoryId of Object.values(repos))
+            yield* service.linkRepository({ labelId: label.id, repositoryId });
+          // Two `platform`s from two owners never collide; the local-only one
+          // keeps its folder name.
+          expect(folders((yield* service.read(label.id)).label)).toEqual({
+            "spawn-platform": "platform",
+            "bartr-platform": "bartr-app/platform",
+            notes: "notes",
+          });
+          // Synced as derived, so every machine clones to the same place.
+          expect(
+            yield* sql`SELECT repository_id, directory_name FROM label_repositories ORDER BY repository_id`,
+          ).toEqual([
+            { repository_id: "bartr-platform", directory_name: "bartr-app/platform" },
+            { repository_id: "notes", directory_name: "notes" },
+            { repository_id: "spawn-platform", directory_name: "platform" },
+          ]);
+          // A stored name that disagrees (an older peer, a hand edit) is corrected on read.
+          yield* sql`UPDATE label_repositories SET directory_name = 'spawn-platform' WHERE repository_id = ${repos.spawn}`;
+          expect(folders((yield* service.read(label.id)).label)["spawn-platform"]).toBe("platform");
+        }).pipe(Effect.provide(naming(null))),
+    );
+
+    it.effect("re-derives every folder when the project's owner changes", () =>
+      Effect.gen(function* () {
+        yield* seedCheckouts;
+        const service = yield* Labels.ProjectLabelService;
+        const { label } = yield* service.create({ name: "Platform" });
+        const owner = (name: string) => ({
+          id: label.id,
+          link: { kind: "github-owner" as const, owner: name },
+        });
+        yield* service.linkSource(owner("Spawn-Partners"));
+        yield* service.linkRepository({ labelId: label.id, repositoryId: repos.spawn });
+        yield* service.linkRepository({ labelId: label.id, repositoryId: repos.bartr });
+        yield* service.unlinkSource(owner("Spawn-Partners"));
+        yield* service.linkSource(owner("bartr-app"));
+        expect(folders((yield* service.read(label.id)).label)).toEqual({
+          "spawn-platform": "spawn-partners/platform",
+          "bartr-platform": "platform",
+        });
+      }).pipe(Effect.provide(naming(null))),
+    );
+
+    it.effect("makes the connected account the home owner of a project that links none", () =>
+      Effect.gen(function* () {
+        yield* seedCheckouts;
+        const service = yield* Labels.ProjectLabelService;
+        const { label } = yield* service.create({ name: "Personal" });
+        yield* service.linkRepository({ labelId: label.id, repositoryId: repos.bartr });
+        const read = (yield* service.read(label.id)).label;
+        expect(read.sourceLinks).toContainEqual({ kind: "github-owner", owner: "bartr-app" });
+        expect(folders(read)).toEqual({ "bartr-platform": "platform" });
+      }).pipe(Effect.provide(naming("bartr-app"))),
+    );
+  });
 
   it.effect("reports each linked repository's checkout state on this machine", () => {
     const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "label-checkout-"));

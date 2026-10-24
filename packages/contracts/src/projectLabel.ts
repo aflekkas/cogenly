@@ -1,5 +1,6 @@
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
+import * as SchemaTransformation from "effect/SchemaTransformation";
 import {
   IsoDateTime,
   PositiveInt,
@@ -106,12 +107,69 @@ export type ProjectLabelRepositoryCheckout = typeof ProjectLabelRepositoryChecko
 export const REMOTE_REPOSITORY_ID_PREFIX = "remote:";
 export const isRemoteRepositoryPlaceholder = (repositoryId: string): boolean =>
   repositoryId.startsWith(REMOTE_REPOSITORY_ID_PREFIX);
+/** The folder inside a project that holds its repository checkouts. */
+export const PROJECT_REPOSITORIES_SEGMENT = "repos";
+/**
+ * The host, owner and repository name of a normalized remote
+ * (`host/owner/repo`; nested groups make the owner `group/sub`). Anything that
+ * is not one (a filesystem path to a local bare repository) has no host or
+ * owner, only the last path segment as its name.
+ */
+export const repositoryRemoteParts = (
+  remote: string,
+): {
+  readonly host: string | null;
+  readonly owner: string | null;
+  readonly name: string;
+} | null => {
+  const trimmed = remote.trim();
+  const segments = trimmed.split(/[/\\]+/).filter((segment) => segment.length > 0);
+  const name = segments.at(-1)?.replace(/\.git$/i, "") ?? "";
+  if (name.length === 0 || name === "." || name === "..") return null;
+  const normalized = /^[a-z0-9][a-z0-9.-]*\.[a-z]+\//.test(trimmed) && segments.length >= 3;
+  return normalized
+    ? { host: segments[0] ?? null, owner: segments.slice(1, -1).join("/"), name }
+    : { host: null, owner: null, name };
+};
+/**
+ * The GitHub owner whose repositories sit directly in a project's `repos/`:
+ * the project's linked GitHub owner (the first by name when it links
+ * several). Synced with the project, so every machine derives the same
+ * folders. Null when the project links no owner.
+ */
+export const projectHomeOwner = (sourceLinks: ReadonlyArray<ProjectSourceLink>): string | null =>
+  sourceLinks
+    .flatMap((link) => (link.kind === "github-owner" ? [link.owner] : []))
+    .sort((left, right) => left.localeCompare(right, "en", { sensitivity: "base" }))[0] ?? null;
+/**
+ * A linked repository's folder under `<project>/repos/`, and the name it is
+ * shown by: `<repo>` for the project's home owner (`Spawn-Partners/platform`
+ * in Spawn Partners is `platform`), `<owner>/<repo>` for any other owner
+ * (`aflekkas/athens-racing`), so same-named repositories never collide.
+ * Derived, never chosen: no caller can pick another name. Null when the
+ * remote names nothing; a repository with no remote keeps its folder name.
+ */
+export const repositoryDirectoryNameFor = (
+  remote: string,
+  homeOwner: string | null,
+): string | null => {
+  const parts = repositoryRemoteParts(remote);
+  if (parts === null) return null;
+  if (parts.owner === null || parts.owner.length === 0) return parts.name;
+  const home =
+    homeOwner !== null &&
+    parts.host === "github.com" &&
+    parts.owner.toLowerCase() === homeOwner.toLowerCase();
+  return home ? parts.name : `${parts.owner}/${parts.name}`;
+};
 /**
  * One repository filed in a project, identified portably by its remote.
  * `remote` is the normalized remote (`host/owner/repo`: lowercase host,
  * ssh/https unified, no `.git` suffix); null marks a local-only repository
- * with no remote. `directoryName` is the repository's directory name under
- * the project folder (where another machine clones it); null until known.
+ * with no remote. `directoryName` is the repository's path under the
+ * project's `repos/` folder (where every machine clones it): derived from the
+ * remote by {@link repositoryDirectoryNameFor} (the project schema below
+ * enforces it), else the checkout's own folder name; null until known.
  */
 export const ProjectLabelRepositoryLink = Schema.Struct({
   repositoryId: ProjectId,
@@ -122,7 +180,7 @@ export const ProjectLabelRepositoryLink = Schema.Struct({
 });
 export type ProjectLabelRepositoryLink = typeof ProjectLabelRepositoryLink.Type;
 
-export const ProjectLabelWithRepositories = Schema.Struct({
+const projectLabelWithRepositoriesFields = {
   ...ProjectLabel.fields,
   repositoryIds: Schema.Array(ProjectId),
   // Older servers (and caches written by them) predate portable repo identity.
@@ -142,7 +200,49 @@ export const ProjectLabelWithRepositories = Schema.Struct({
    * conversations and the project chat.
    */
   threadCount: Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
-});
+};
+type DerivableLabel = {
+  readonly sourceLinks: ReadonlyArray<ProjectSourceLink>;
+  readonly repositories?: ReadonlyArray<ProjectLabelRepositoryLink>;
+};
+const derivedDirectoryName = (link: ProjectLabelRepositoryLink, homeOwner: string | null) =>
+  link.remote === null
+    ? link.directoryName
+    : (repositoryDirectoryNameFor(link.remote, homeOwner) ?? link.directoryName);
+const followsRepositoryNames = Schema.makeFilter(
+  (label: DerivableLabel) => {
+    const homeOwner = projectHomeOwner(label.sourceLinks);
+    return (label.repositories ?? []).every(
+      (link) => link.directoryName === derivedDirectoryName(link, homeOwner),
+    );
+  },
+  { expected: "repository directory names derived from their remotes and the project's owner" },
+);
+/**
+ * A project with its repositories. Every repository's `directoryName` follows
+ * {@link repositoryDirectoryNameFor}: decoding derives it (so a cache written
+ * before the rule reads right), and a project that disagrees cannot be made
+ * or encoded.
+ */
+export const ProjectLabelWithRepositories = Schema.Struct(projectLabelWithRepositoriesFields).pipe(
+  Schema.decodeTo(
+    Schema.toType(Schema.Struct(projectLabelWithRepositoriesFields)).check(followsRepositoryNames),
+    SchemaTransformation.transform({
+      decode: (label) => {
+        if (label.repositories === undefined) return label;
+        const homeOwner = projectHomeOwner(label.sourceLinks);
+        return {
+          ...label,
+          repositories: label.repositories.map((link) => ({
+            ...link,
+            directoryName: derivedDirectoryName(link, homeOwner),
+          })),
+        };
+      },
+      encode: (label) => label,
+    }),
+  ),
+);
 export type ProjectLabelWithRepositories = typeof ProjectLabelWithRepositories.Type;
 export const ProjectLabelRepository = Schema.Struct({
   labelId: ProjectLabelId,

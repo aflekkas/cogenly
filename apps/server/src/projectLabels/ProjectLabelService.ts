@@ -5,6 +5,9 @@ import {
   ProjectLabelWithRepositories,
   ProjectSourceLink,
   REMOTE_REPOSITORY_ID_PREFIX,
+  projectHomeOwner,
+  repositoryDirectoryNameFor,
+  repositoryRemoteParts,
   ThreadProjectLabel,
   type ProjectLabelCreateInput,
   type ProjectLabelRepositoryCheckout,
@@ -25,10 +28,13 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
+import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
+
+import * as GitHubRest from "@t3tools/source-control-github/server/GitHubRest";
 
 import * as SharedState from "../sync/SharedState.ts";
 import * as Events from "../persistence/OrchestrationEventStore.ts";
@@ -101,6 +107,15 @@ export class ProjectLabelService extends Context.Service<
      * synced project data does not change, since it names repositories by
      * remote and directory name.
      */
+    /**
+     * The project's home owner (its linked GitHub owner), recording the
+     * connected account's login as that link when the project has none, so
+     * the folders it derives are the same on every machine. Null when there
+     * is neither.
+     */
+    readonly ensureHomeOwner: (
+      id: ProjectLabelId,
+    ) => Effect.Effect<string | null, ProjectLabelError>;
     readonly bindRepositoryCheckout: (input: {
       readonly labelId: ProjectLabelId;
       readonly remote: string;
@@ -159,6 +174,20 @@ const decodeSourceLinkRows = Schema.decodeUnknownEffect(
 );
 const decodeSourceLink = Schema.decodeUnknownOption(ProjectSourceLink);
 const decodeLabel = Schema.decodeUnknownEffect(ProjectLabelWithRepositories);
+const decodeViewer = Schema.decodeUnknownOption(
+  Schema.fromJsonString(Schema.Struct({ login: Schema.String })),
+);
+/** `repos/` path of a link: derived from its remote, else the checkout's folder name. */
+const repositoryDirectoryNameOf = (
+  remote: string | null,
+  workspaceRoot: string | null,
+  homeOwner: string | null,
+) =>
+  remote !== null
+    ? repositoryDirectoryNameFor(remote, homeOwner)
+    : workspaceRoot === null
+      ? null
+      : repositoryDirectoryName(workspaceRoot);
 const decodeTag = Schema.decodeUnknownEffect(ThreadProjectLabel);
 const encodeAudit = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
 
@@ -193,10 +222,6 @@ const make = Effect.gen(function* () {
         Effect.forEach(rows, (row) =>
           Effect.gen(function* () {
             const repositoryIds = yield* decodeRepositories(row.repositories);
-            const repositoryLinks = yield* backfillRepositoryLinks(
-              yield* decodeRepositoryLinks(row.repositoryLinks),
-            );
-            const checkouts = yield* Effect.forEach(repositoryLinks, checkoutState);
             const sourceLinkRows = yield* decodeSourceLinkRows(row.sources);
             const sourceLinks = sourceLinkRows.flatMap((source) =>
               source.kind === "github-owner"
@@ -209,6 +234,11 @@ const make = Effect.gen(function* () {
                     }),
                   ),
             );
+            const repositoryLinks = yield* backfillRepositoryLinks(
+              yield* decodeRepositoryLinks(row.repositoryLinks),
+              projectHomeOwner(sourceLinks),
+            );
+            const checkouts = yield* Effect.forEach(repositoryLinks, checkoutState);
             return yield* decodeLabel({
               ...row,
               color: row.color ?? undefined,
@@ -382,44 +412,54 @@ const make = Effect.gen(function* () {
           ),
         );
   // Links written before portable identity (or by a link whose checkout had
-  // no readable remote yet) backfill lazily on read: the remote and directory
-  // name come from the checkout's git remote when it can be read. A repo with
-  // no remote stays null (local-only). The resolver caches, so repeat reads
-  // of a local-only repo do not spawn git every time.
-  const backfillRepositoryLinks = (links: ReadonlyArray<StoredRepositoryLink>) =>
-    Option.isNone(identities)
-      ? Effect.succeed(links)
-      : Effect.forEach(links, (link) =>
-          Effect.gen(function* () {
-            if (link.remote !== null && link.directoryName !== null) return link;
-            const workspaceRoot = link.workspaceRoot;
-            if (typeof workspaceRoot !== "string" || workspaceRoot.length === 0) return link;
-            const identity = yield* identities.value.resolve(workspaceRoot);
-            const remote =
-              identity === null ? null : normalizeRepositoryRemote(identity.locator.remoteUrl);
-            const directoryName = repositoryDirectoryName(workspaceRoot) ?? link.directoryName;
-            if (remote !== link.remote || directoryName !== link.directoryName) {
-              yield* sql.withTransaction(
-                Effect.gen(function* () {
-                  yield* sql`UPDATE label_repositories SET remote=${remote},directory_name=${directoryName} WHERE repository_id=${link.repositoryId}`;
-                  const labels = yield* sql<{
-                    label_id: string;
-                  }>`SELECT label_id FROM label_repositories WHERE repository_id=${link.repositoryId}`;
-                  for (const row of labels)
-                    yield* shared.capture("project", row.label_id).pipe(
-                      Effect.catchTags({
-                        SharedStateError: (error) =>
-                          Effect.logWarning("Project repository backfill capture failed", {
-                            reason: error.reason,
-                          }),
+  // no readable remote yet) backfill lazily on read: the remote comes from
+  // the checkout's git remote when it can be read. A repo with no remote
+  // stays null (local-only) and keeps its folder name. The resolver caches,
+  // so repeat reads of a local-only repo do not spawn git every time. The
+  // directory name is re-derived every read (the project's owner may have
+  // changed, or a peer may have sent another), and a stored one that
+  // disagrees is corrected, so the synced shape follows the rule too.
+  const backfillRepositoryLinks = (
+    links: ReadonlyArray<StoredRepositoryLink>,
+    homeOwner: string | null,
+  ) =>
+    Effect.forEach(links, (link) =>
+      Effect.gen(function* () {
+        const workspaceRoot = link.workspaceRoot;
+        const identity =
+          link.remote === null &&
+          Option.isSome(identities) &&
+          typeof workspaceRoot === "string" &&
+          workspaceRoot.length > 0
+            ? yield* identities.value.resolve(workspaceRoot)
+            : null;
+        const remote =
+          link.remote ??
+          (identity === null ? null : normalizeRepositoryRemote(identity.locator.remoteUrl));
+        const directoryName =
+          repositoryDirectoryNameOf(remote, workspaceRoot, homeOwner) ?? link.directoryName;
+        if (remote !== link.remote || directoryName !== link.directoryName) {
+          yield* sql.withTransaction(
+            Effect.gen(function* () {
+              yield* sql`UPDATE label_repositories SET remote=${remote},directory_name=${directoryName} WHERE repository_id=${link.repositoryId}`;
+              const labels = yield* sql<{
+                label_id: string;
+              }>`SELECT label_id FROM label_repositories WHERE repository_id=${link.repositoryId}`;
+              for (const row of labels)
+                yield* shared.capture("project", row.label_id).pipe(
+                  Effect.catchTags({
+                    SharedStateError: (error) =>
+                      Effect.logWarning("Project repository backfill capture failed", {
+                        reason: error.reason,
                       }),
-                    );
-                }),
-              );
-            }
-            return { ...link, remote, directoryName };
-          }),
-        );
+                  }),
+                );
+            }),
+          );
+        }
+        return { ...link, remote, directoryName };
+      }),
+    );
   // Optional like the resolver: memory-database tests have neither disk nor
   // clones, and every linked repository with a record then reads as ready.
   const fileSystem = yield* Effect.serviceOption(FileSystem.FileSystem);
@@ -478,6 +518,38 @@ const make = Effect.gen(function* () {
       yield* sql`INSERT INTO label_source_links(label_id, kind, owner, repo, created_at) VALUES (${labelId}, ${link.kind}, ${link.owner}, ${link.repo}, ${yield* now}) ON CONFLICT(label_id, kind, owner, repo) DO NOTHING`;
     },
   );
+  // The connected GitHub account's login, read once: the home owner of a
+  // project that links no owner. Optional like the resolver; null when
+  // GitHub is not connected or cannot be reached.
+  const github = yield* Effect.serviceOption(GitHubRest.GitHubRest);
+  const viewer = yield* Ref.make<string | null>(null);
+  const viewerLogin: Effect.Effect<string | null> = Effect.gen(function* () {
+    const cached = yield* Ref.get(viewer);
+    if (cached !== null || Option.isNone(github)) return cached;
+    const response = yield* github.value.rest({
+      host: "github.com",
+      operation: "projectHomeOwner",
+      path: "user",
+    });
+    if (response.status !== 200) return null;
+    const login = Option.getOrNull(decodeViewer(response.body))?.login ?? null;
+    if (login !== null) yield* Ref.set(viewer, login);
+    return login;
+  }).pipe(Effect.orElseSucceed(() => null));
+  const ensureHomeOwner = (id: ProjectLabelId) =>
+    Effect.gen(function* () {
+      const { label } = yield* get(id);
+      const current = projectHomeOwner(label.sourceLinks);
+      if (current !== null || label.archivedAt !== undefined) return current;
+      const login = yield* viewerLogin;
+      const link =
+        login === null
+          ? undefined
+          : Option.getOrUndefined(decodeSourceLink({ kind: "github-owner", owner: login }));
+      if (link === undefined) return null;
+      yield* sourceLink({ id, link }, true);
+      return login;
+    });
   const repository = (
     input: ProjectLabelRepository & { readonly remote?: string | null | undefined },
     link: boolean,
@@ -508,8 +580,14 @@ const make = Effect.gen(function* () {
           const remote =
             normalizeRepositoryRemote(input.remote) ??
             (identity === null ? null : normalizeRepositoryRemote(identity.locator.remoteUrl));
-          const directoryName =
-            typeof workspaceRoot === "string" ? repositoryDirectoryName(workspaceRoot) : null;
+          const owners = yield* sql<{
+            owner: string;
+          }>`SELECT owner FROM label_source_links WHERE label_id = ${input.labelId} AND kind = 'github-owner'`;
+          const directoryName = repositoryDirectoryNameOf(
+            remote,
+            typeof workspaceRoot === "string" ? workspaceRoot : null,
+            projectHomeOwner(owners.map((row) => ({ kind: "github-owner", owner: row.owner }))),
+          );
           yield* sql`INSERT INTO label_repositories(label_id, repository_id, remote, directory_name) VALUES (${input.labelId}, ${input.repositoryId}, ${remote}, ${directoryName}) ON CONFLICT(repository_id) DO UPDATE SET label_id = excluded.label_id, remote = COALESCE(excluded.remote, label_repositories.remote), directory_name = COALESCE(excluded.directory_name, label_repositories.directory_name)`;
           yield* autoAddRepositorySourceLink(input.labelId, input.repositoryId);
         } else
@@ -699,7 +777,29 @@ const make = Effect.gen(function* () {
           return yield* get(id);
         }),
       ),
-    linkRepository: (input) => repository(input, true),
+    linkRepository: (input) =>
+      Effect.gen(function* () {
+        // The first GitHub repository of a project with no linked owner
+        // makes the connected account its home owner, so its folder is
+        // `repos/<repo>` on every machine rather than `repos/<owner>/<repo>`.
+        const rows = yield* sql<{
+          workspace_root: string;
+        }>`SELECT workspace_root FROM projection_projects WHERE project_id = ${input.repositoryId} AND deleted_at IS NULL`.pipe(
+          Effect.mapError(failure("linkRepository")),
+        );
+        const workspaceRoot = rows[0]?.workspace_root;
+        const identity =
+          Option.isNone(identities) || typeof workspaceRoot !== "string"
+            ? null
+            : yield* identities.value.resolve(workspaceRoot);
+        const remote =
+          normalizeRepositoryRemote(input.remote) ??
+          (identity === null ? null : normalizeRepositoryRemote(identity.locator.remoteUrl));
+        if (remote !== null && repositoryRemoteParts(remote)?.host === "github.com")
+          yield* ensureHomeOwner(input.labelId).pipe(Effect.ignore);
+        return yield* repository(input, true);
+      }),
+    ensureHomeOwner,
     unlinkRepository: (input) => repository(input, false),
     bindRepositoryCheckout: (input) =>
       mutate(
@@ -709,8 +809,10 @@ const make = Effect.gen(function* () {
           const remote = normalizeRepositoryRemote(input.remote) ?? input.remote;
           const placeholder = `${REMOTE_REPOSITORY_ID_PREFIX}${remote}`;
           const { label } = yield* get(input.labelId);
-          const directoryName =
-            label.repositories?.find((link) => link.remote === remote)?.directoryName ?? null;
+          const directoryName = repositoryDirectoryNameFor(
+            remote,
+            projectHomeOwner(label.sourceLinks),
+          );
           // Drop the placeholder first so the rebind never trips the
           // one-project-per-repository key, then file the checkout under the
           // same remote and directory name.

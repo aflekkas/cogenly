@@ -26,7 +26,7 @@ import * as GitWorkflow from "../git/GitWorkflowService.ts";
 import * as ProjectLabelFolders from "../projectLabels/ProjectLabelFolders.ts";
 import * as ProjectLabelService from "../projectLabels/ProjectLabelService.ts";
 import * as ProjectCloneTracker from "./ProjectCloneTracker.ts";
-import { repositoryDirectoryNameFromRemote, sanitizePathSegment } from "./ProjectsRoot.ts";
+import { projectRepositoryDirectory, repositoryDirectoryNameFromRemote } from "./ProjectsRoot.ts";
 import * as ProjectService from "./ProjectService.ts";
 import * as RepositoryIdentityResolver from "./RepositoryIdentityResolver.ts";
 import { normalizeRepositoryRemote, repositoryDirectoryName } from "./RepositoryRemote.ts";
@@ -319,7 +319,7 @@ const make = Effect.gen(function* () {
         }
 
         const { dir } = yield* folders.ensureForLabel(label).pipe(Effect.mapError(fail));
-        const destination = path.join(dir, sanitizePathSegment(repositoryName, "repository"));
+        const destination = projectRepositoryDirectory(dir, repositoryName, path);
         const createRecord = (repositoryId: ProjectId) =>
           projects
             .create({
