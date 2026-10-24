@@ -20,9 +20,8 @@ Claude resets are not available when the server runs on macOS, where Claude keep
 Keychain. On narrow screens, numbered rows below
 the bar show each account's quota, countdown, and credits. Tap a row to open its details.
 
-Bars show quota remaining and drain as you spend. To see quota used fill up instead, switch
-**Remaining / Used** in the Usage header, or under **Settings → Appearance → Usage meters**. It is
-a per-device choice and applies to the bars, percentages and the notice above the composer. The
+Bars show quota remaining and drain as you spend. To see quota used fill up instead, choose
+**Used** under **Settings → Appearance → Usage meters**. It is a per-device choice and applies to the bars, percentages and the notice above the composer. The
 even-pace line moves with it: it marks time left when bars drain and time elapsed when they fill.
 
 The same account signed in on more than one environment, or reported by a hub as well, counts once.

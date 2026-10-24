@@ -49,7 +49,9 @@ import { Button } from "~/components/ui/button";
 import { useLastPresent } from "~/components/ui/overlay-presence";
 import { Bot, Eye } from "lucide-react";
 import { Input } from "~/components/ui/input";
+import { showCopyFailedToast } from "~/components/ui/copiedToast";
 import { toastManager } from "~/components/ui/toast";
+import { writeTextToClipboard } from "~/hooks/useCopyToClipboard";
 import { cn } from "~/lib/utils";
 import { refreshPreviewStreamAccess, usePreviewStreamAccess } from "~/state/previewStream";
 import { observeResize } from "~/lib/observeResize";
@@ -159,7 +161,7 @@ const pressedButtonOf = (buttons: number): PreviewStreamMouseButton =>
 /** Browsers may refuse a write that arrives after the key press; a toast button is a fresh gesture. */
 async function copyPageText(text: string) {
   try {
-    await navigator.clipboard.writeText(text);
+    await writeTextToClipboard(text, "page text");
   } catch {
     const id = toastManager.add({
       type: "info",
@@ -168,7 +170,9 @@ async function copyPageText(text: string) {
         children: "Copy",
         onClick: () => {
           toastManager.close(id);
-          void navigator.clipboard.writeText(text).catch(() => undefined);
+          void writeTextToClipboard(text, "page text").catch((error: unknown) =>
+            showCopyFailedToast(error instanceof Error ? error : new Error(String(error))),
+          );
         },
       },
     });

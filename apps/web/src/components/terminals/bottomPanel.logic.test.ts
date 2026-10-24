@@ -11,7 +11,10 @@ import {
   findRunForToolCall,
   resolveActiveBottomPanelTab,
   runGroupOpen,
+  runHeaderCommand,
   runListTitle,
+  runLocationLabel,
+  runOutcomeLabel,
   shortenHomePath,
 } from "./bottomPanel.logic";
 
@@ -253,5 +256,58 @@ describe("shortenHomePath", () => {
     expect(shortenHomePath("/home/ada")).toBe("~");
     expect(shortenHomePath("/Users")).toBe("/Users");
     expect(shortenHomePath("/repo")).toBe("/repo");
+  });
+});
+
+describe("runLocationLabel", () => {
+  const root = "/Users/ada/.cogenly/worktrees/app/feature";
+
+  it("says nothing for the thread's own workspace", () => {
+    expect(runLocationLabel(root, root)).toBeNull();
+    expect(runLocationLabel(`${root}/`, root)).toBeNull();
+    expect(runLocationLabel("/private/tmp/repo", "/tmp/repo")).toBeNull();
+  });
+
+  it("names a folder inside the workspace relative to it", () => {
+    expect(runLocationLabel(`${root}/apps/web`, root)).toBe("apps/web");
+    expect(runLocationLabel(`${root}-other`, root)).toBe("~/.cogenly/worktrees/app/feature-other");
+  });
+
+  it("shows the folder when the workspace is unknown", () => {
+    expect(runLocationLabel(root, null)).toBe("~/.cogenly/worktrees/app/feature");
+  });
+});
+
+describe("runHeaderCommand", () => {
+  it("drops leading export steps and keeps the rest of the line", () => {
+    expect(
+      runHeaderCommand(`export PATH="$PWD/node_modules/.bin:$PATH"; vp lint src/a.ts 2>&1 | tail`),
+    ).toEqual({ text: "vp lint src/a.ts 2>&1 | tail", abridged: true });
+    expect(runHeaderCommand("export A=1 B='x y' && export C=2\nvp test run")).toEqual({
+      text: "vp test run",
+      abridged: true,
+    });
+  });
+
+  it("shows the first line of a multi-line command", () => {
+    expect(runHeaderCommand("cd apps/web\nvp run typecheck")).toEqual({
+      text: "cd apps/web",
+      abridged: true,
+    });
+  });
+
+  it("leaves a plain command, and a bare export, as they are", () => {
+    expect(runHeaderCommand("git status")).toEqual({ text: "git status", abridged: false });
+    expect(runHeaderCommand("export A=1;")).toEqual({ text: "export A=1;", abridged: false });
+  });
+});
+
+describe("runOutcomeLabel", () => {
+  it("names only what is worth a word", () => {
+    expect(runOutcomeLabel({ kind: "succeeded" })).toBeNull();
+    expect(runOutcomeLabel({ kind: "ended" })).toBeNull();
+    expect(runOutcomeLabel({ kind: "failed", exitCode: 127 })).toBe("exit 127");
+    expect(runOutcomeLabel({ kind: "killed", signal: 15 })).toBe("SIGTERM");
+    expect(runOutcomeLabel({ kind: "running" })).toBe("Running");
   });
 });

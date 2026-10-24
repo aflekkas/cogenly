@@ -3176,6 +3176,22 @@ export const OrchestrationV2Command = Schema.Union([
     commandId: CommandId,
     threadId: ThreadId,
   }),
+  /** Removes every message the user queued on the thread. Automatic deliveries stay queued. */
+  Schema.Struct({
+    type: Schema.Literal("queue.clear"),
+    commandId: CommandId,
+    threadId: ThreadId,
+  }),
+  /**
+   * Joins every message the user queued, in queue order, into one message and
+   * sends it now: as a steer into the running turn when the provider can take
+   * one, otherwise as the next turn, releasing a held queue.
+   */
+  Schema.Struct({
+    type: Schema.Literal("queue.send-all"),
+    commandId: CommandId,
+    threadId: ThreadId,
+  }),
   Schema.Struct({
     type: Schema.Literal("queued-run.reorder"),
     commandId: CommandId,

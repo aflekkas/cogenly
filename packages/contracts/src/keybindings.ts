@@ -37,6 +37,8 @@ export type ModelPickerJumpKeybindingCommand =
 const THREAD_KEYBINDING_COMMANDS = [
   "thread.stop",
   "thread.steerQueuedMessage",
+  // Unbound by default; users bind it in Settings → Keybindings.
+  "thread.sendAllQueuedMessages",
   "thread.editQueuedMessage",
   "thread.previous",
   "thread.next",

@@ -6315,6 +6315,14 @@ export default function ChatView(props: ChatViewProps) {
         return;
       }
 
+      if (command === "thread.sendAllQueuedMessages") {
+        if (routeKind === "draft") return;
+        if (!queuedRunsControlRef.current?.sendAll(event.repeat)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+
       if (command === "thread.editQueuedMessage") {
         if (routeKind === "draft") return;
         // Anywhere else in the draft the key keeps moving the caret, so a
@@ -8884,6 +8892,10 @@ export default function ChatView(props: ChatViewProps) {
           editShortcutLabel={shortcutLabelForCommand(keybindings, "thread.editQueuedMessage", {
             context: { composerFocus: true },
           })}
+          sendAllShortcutLabel={shortcutLabelForCommand(
+            keybindings,
+            "thread.sendAllQueuedMessages",
+          )}
           environmentId={activeThread.environmentId}
           threadId={activeThread.id}
           optimisticMessages={optimisticUserMessages}

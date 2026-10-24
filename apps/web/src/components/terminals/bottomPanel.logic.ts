@@ -4,7 +4,9 @@ import {
   commandTitle,
   terminalRunState,
   terminalSections,
+  terminalSignalName,
   type AgentTerminalEntry,
+  type TerminalRunState,
 } from "../AgentTerminalsPanel.logic";
 import type { PanelTabStatus } from "../TabStrip.logic";
 
@@ -269,4 +271,74 @@ export function runListTitle(command: string): string {
 /** A path with the user's home folder written as `~`. */
 export function shortenHomePath(path: string): string {
   return path.replace(/^\/(?:Users|home)\/[^/]+(?=\/|$)/, "~");
+}
+
+// macOS resolves `/tmp` and `/var` to `/private/…`; the server reports the resolved cwd.
+const normalizeDirectory = (path: string) =>
+  path.replace(/\/+$/, "").replace(/^\/private(?=\/(?:var|tmp|etc)(?:\/|$))/, "") || "/";
+
+/**
+ * Where a run's header says it ran: nothing in the thread's own workspace, a
+ * relative path inside it, else the folder with `~` for home. An unknown
+ * workspace shows the folder.
+ */
+export function runLocationLabel(cwd: string, workspaceRoot: string | null): string | null {
+  const directory = normalizeDirectory(cwd);
+  if (workspaceRoot !== null) {
+    const root = normalizeDirectory(workspaceRoot);
+    if (directory === root) return null;
+    if (directory.startsWith(`${root}/`)) return directory.slice(root.length + 1);
+  }
+  return shortenHomePath(directory);
+}
+
+const SHELL_VALUE = `(?:'[^']*'|"(?:[^"\\\\]|\\\\.)*"|[^\\s;&|'"])*`;
+const SHELL_ASSIGNMENT = `[A-Za-z_]\\w*=${SHELL_VALUE}`;
+// `export PATH="$PWD/node_modules/.bin:$PATH";` and the like, ahead of the real command.
+const EXPORT_STEP = new RegExp(
+  `^export\\s+${SHELL_ASSIGNMENT}(?:\\s+${SHELL_ASSIGNMENT})*\\s*(?:;|&&|\\n)\\s*`,
+);
+
+/**
+ * The run header's one line: the command past any leading `export X=…` steps,
+ * first line only. `abridged` says the full command has more to show.
+ */
+export function runHeaderCommand(command: string): {
+  readonly text: string;
+  readonly abridged: boolean;
+} {
+  const full = commandDisplayText(command).trim();
+  let text = full;
+  for (let step = EXPORT_STEP.exec(text); step && step[0].length < text.length;) {
+    text = text.slice(step[0].length);
+    step = EXPORT_STEP.exec(text);
+  }
+  const newline = text.indexOf("\n");
+  if (newline !== -1) text = text.slice(0, newline).trimEnd();
+  return { text, abridged: text !== full };
+}
+
+/** How a finished run ended, when that is worth a word; success and a bare exit say nothing. */
+export function runOutcomeLabel(state: TerminalRunState): string | null {
+  switch (state.kind) {
+    case "starting":
+    case "running":
+      return "Running";
+    case "failed":
+      return `exit ${state.exitCode}`;
+    case "killed":
+      return terminalSignalName(state.signal);
+    case "error":
+      return "failed to start";
+    case "succeeded":
+    case "ended":
+      return null;
+  }
+}
+
+/** Runs at least this long show their duration in the list; shorter ones keep it in the tooltip. */
+const LONG_RUN_MS = 10_000;
+
+export function isLongRun(durationMs: number | null): durationMs is number {
+  return durationMs !== null && durationMs >= LONG_RUN_MS;
 }

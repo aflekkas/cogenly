@@ -32,7 +32,7 @@ import {
 import { OverlayPresence } from "../ui/overlay-presence";
 import { ScrollArea } from "../ui/scroll-area";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
-import { WorkspacePageContainer } from "../WorkspacePageContainer";
+import { PageContent } from "../PageContent";
 import { latestProjectActivity, projectPanelSummary } from "./projectPanel.logic";
 import { useProjectFolderMenu } from "./useProjectFolderMenu";
 
@@ -191,7 +191,7 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
   return (
     <>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
-        <WorkspacePageContainer width="expanded" className="pb-0">
+        <PageContent width="wide" className="pb-0">
           <div className="flex w-full min-w-0 items-center gap-3">
             <p className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
               Repositories, chats, Work, files and agents grouped by effort. Agents can change any
@@ -223,11 +223,11 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
               </Button>
             </span>
           </div>
-        </WorkspacePageContainer>
+        </PageContent>
 
         {/* The tiles give keyboard access, so the viewport stays out of the tab order. */}
         <ScrollArea className="min-h-0 flex-1" viewportTabIndex={-1}>
-          <WorkspacePageContainer width="expanded">
+          <PageContent width="wide">
             {directory.labels.length === 0 ? (
               <Empty>
                 <EmptyHeader>
@@ -288,7 +288,7 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
                 })}
               </ul>
             )}
-          </WorkspacePageContainer>
+          </PageContent>
         </ScrollArea>
       </div>
       <OverlayPresence when={renaming}>

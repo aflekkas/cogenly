@@ -9,6 +9,7 @@ import type {
   ThreadId,
 } from "@t3tools/contracts";
 import {
+  ArrowUpIcon,
   Clock3Icon,
   CornerUpRightIcon,
   GripVerticalIcon,
@@ -83,6 +84,7 @@ function prefersReducedMotion() {
 
 export interface QueuedRunsControlHandle {
   steerNext: (repeat: boolean) => boolean;
+  sendAll: (repeat: boolean) => boolean;
   editLatest: (repeat: boolean) => boolean;
 }
 
@@ -93,6 +95,7 @@ export function QueuedRunsControl({
   readonly ref?: Ref<QueuedRunsControlHandle>;
   readonly steerShortcutLabel?: string | null;
   readonly editShortcutLabel?: string | null;
+  readonly sendAllShortcutLabel?: string | null;
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
   readonly optimisticMessages: ReadonlyArray<
@@ -115,6 +118,12 @@ export function QueuedRunsControl({
   const listShown = expanded && !stackFold.folded;
   const queueListId = useId();
   const [busyRunId, setBusyRunId] = useState<RunId | null>(null);
+  const clearQueue = useAtomCommand(threadEnvironment.clearThreadQueue);
+  const sendAllQueued = useAtomCommand(threadEnvironment.sendAllQueuedMessages);
+  const [bulkAction, setBulkAction] = useState<"clear" | "send-all" | null>(null);
+  // Clear all removes the whole queue, so its first press only arms it.
+  const [confirmingClear, setConfirmingClear] = useState(false);
+  const anyBusy = busyRunId !== null || bulkAction !== null;
   // Live drag-reorder state: the dragged run and the queue index the row
   // would be inserted at (0..queued.length) as of the latest dragover.
   const [dragState, setDragState] = useState<{
@@ -317,7 +326,7 @@ export function QueuedRunsControl({
   const completeDrag = (runId: RunId, insertIndex: number | null) => {
     setDragState(null);
     dragArmedRunIdRef.current = null;
-    if (insertIndex === null || busyRunId !== null) return;
+    if (insertIndex === null || anyBusy) return;
     const draggedIndex = queued.findIndex(({ run }) => run.id === runId);
     if (draggedIndex === -1) return;
     // Inserting immediately before or after itself is a no-op.
@@ -341,18 +350,41 @@ export function QueuedRunsControl({
     }
   };
 
+  // Bulk actions wait while a queued message is open in the composer, so the
+  // draft being edited never loses its queue entry underneath it.
+  const canBulkAct = queued.length > 0 && props.editingRunId === null;
+  const bulkInFlightRef = useRef(false);
+  const runBulkAction = async (action: "clear" | "send-all") => {
+    setConfirmingClear(false);
+    if (!canBulkAct || bulkInFlightRef.current) return;
+    bulkInFlightRef.current = true;
+    setBulkAction(action);
+    try {
+      const target = { environmentId: props.environmentId, input: { threadId: props.threadId } };
+      await (action === "clear" ? clearQueue(target) : sendAllQueued(target));
+    } finally {
+      bulkInFlightRef.current = false;
+      setBulkAction(null);
+    }
+  };
+
   useImperativeHandle(ref, () => ({
     steerNext(repeat) {
       const next = queued[0];
       if (!next || !workflow?.canPromoteToSteer) return false;
-      if (!repeat && busyRunId === null) void steer(next.run.id);
+      if (!repeat && !anyBusy) void steer(next.run.id);
+      return true;
+    },
+    sendAll(repeat) {
+      if (!canBulkAct) return false;
+      if (!repeat && !anyBusy) void runBulkAction("send-all");
       return true;
     },
     // Declines while a queued message is already being edited so the key keeps
     // moving the caret inside that draft.
     editLatest(repeat) {
       const latest = queued.at(-1);
-      if (!latest || props.editingRunId !== null || busyRunId !== null) return false;
+      if (!latest || props.editingRunId !== null || anyBusy) return false;
       if (!repeat) {
         setExpanded(true);
         if (stackFold.folded) stackFold.reveal();
@@ -397,16 +429,19 @@ export function QueuedRunsControl({
           data-chat-composer-collapsed-controls="true"
           className="relative z-0"
         >
-          <ComposerBanner.Row
-            render={<button type="button" />}
-            aria-label={listShown ? "Collapse queued messages" : "Expand queued messages"}
-            aria-expanded={listShown}
-            aria-controls={queueListId}
-            onPointerDown={(event) => event.preventDefault()}
-            onClick={() =>
-              expanded && stackFold.folded ? stackFold.reveal() : setExpanded((value) => !value)
-            }
-          >
+          {/* The whole header toggles the list; the bulk actions sit above that toggle. */}
+          <ComposerBanner.Row className="relative" onPointerLeave={() => setConfirmingClear(false)}>
+            <button
+              type="button"
+              aria-label={listShown ? "Collapse queued messages" : "Expand queued messages"}
+              aria-expanded={listShown}
+              aria-controls={queueListId}
+              className="absolute inset-0 cursor-pointer rounded-md focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
+              onPointerDown={(event) => event.preventDefault()}
+              onClick={() =>
+                expanded && stackFold.folded ? stackFold.reveal() : setExpanded((value) => !value)
+              }
+            />
             <ComposerBanner.Icon>
               <ListOrderedIcon />
             </ComposerBanner.Icon>
@@ -414,6 +449,71 @@ export function QueuedRunsControl({
               Queued
             </ComposerBanner.Content>
             <ComposerBanner.Actions>
+              {queued.length > 0 ? (
+                <span
+                  data-active={confirmingClear || bulkAction !== null || undefined}
+                  className={cn(
+                    "relative flex items-center gap-1 opacity-0 transition-opacity duration-150 ease-out",
+                    "group-hover/banner-row:opacity-100 group-focus-within/banner-row:opacity-100 data-active:opacity-100 pointer-coarse:opacity-100",
+                  )}
+                >
+                  <Tooltip>
+                    <TooltipTrigger render={<span className="flex shrink-0" />}>
+                      <Button
+                        size="xs"
+                        variant="ghost-muted"
+                        disabled={!canBulkAct || anyBusy}
+                        onClick={() => void runBulkAction("send-all")}
+                      >
+                        <ArrowUpIcon className="size-3.5" />
+                        Send all
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipPopup>
+                      {props.editingRunId !== null
+                        ? "Finish editing the queued message first"
+                        : `${
+                            workflow?.canPromoteToSteer
+                              ? "Steer every queued message into the running turn as one message"
+                              : "Send every queued message now as one message"
+                          }${props.sendAllShortcutLabel ? ` (${props.sendAllShortcutLabel})` : ""}`}
+                    </TooltipPopup>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger render={<span className="flex shrink-0" />}>
+                      <Button
+                        size="xs"
+                        variant={confirmingClear ? "ghost-destructive" : "ghost-muted"}
+                        aria-label={
+                          confirmingClear
+                            ? `Confirm removing all ${queued.length} queued messages`
+                            : "Remove all queued messages"
+                        }
+                        disabled={!canBulkAct || anyBusy}
+                        onClick={() =>
+                          confirmingClear ? void runBulkAction("clear") : setConfirmingClear(true)
+                        }
+                        onBlur={() => setConfirmingClear(false)}
+                        onKeyDown={(event) => {
+                          if (event.key !== "Escape" || !confirmingClear) return;
+                          event.preventDefault();
+                          event.stopPropagation();
+                          setConfirmingClear(false);
+                        }}
+                      >
+                        {confirmingClear ? `Clear ${queued.length}?` : "Clear all"}
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipPopup>
+                      {props.editingRunId !== null
+                        ? "Finish editing the queued message first"
+                        : confirmingClear
+                          ? "Press again to remove every queued message"
+                          : "Remove every queued message"}
+                    </TooltipPopup>
+                  </Tooltip>
+                </span>
+              ) : null}
               <ComposerBanner.Count>{shownCount}</ComposerBanner.Count>
               <ComposerBanner.ToggleIcon expanded={listShown} />
             </ComposerBanner.Actions>
@@ -441,10 +541,7 @@ export function QueuedRunsControl({
                     const rowServerIndex = item.serverIndex;
                     const isEditing = rowRunId !== null && rowRunId === props.editingRunId;
                     const rowDraggable =
-                      rowRunId !== null &&
-                      rowServerIndex !== null &&
-                      canReorder &&
-                      busyRunId === null;
+                      rowRunId !== null && rowServerIndex !== null && canReorder && !anyBusy;
                     return (
                       <QueuedRowPresence
                         key={slot.key}
@@ -514,12 +611,12 @@ export function QueuedRunsControl({
                                 variant="ghost-muted"
                                 aria-label="Reorder queued message (drag, or press the arrow keys)"
                                 className="cursor-grab active:cursor-grabbing disabled:cursor-default"
-                                disabled={busyRunId !== null}
+                                disabled={anyBusy}
                                 onPointerDown={() => {
                                   dragArmedRunIdRef.current = rowRunId;
                                 }}
                                 onKeyDown={(event) => {
-                                  if (busyRunId !== null) return;
+                                  if (anyBusy) return;
                                   if (event.key === "ArrowUp" && rowServerIndex > 0) {
                                     event.preventDefault();
                                     void move(rowRunId, queued[rowServerIndex - 1]?.run.id ?? null);
@@ -591,7 +688,7 @@ export function QueuedRunsControl({
                                         size="icon-xs"
                                         variant="ghost-muted"
                                         aria-label="Edit queued message"
-                                        disabled={item.runId === null || busyRunId !== null}
+                                        disabled={item.runId === null || anyBusy}
                                         onClick={() => {
                                           if (item.runId !== null && item.messageId !== null) {
                                             props.onEditQueuedRun({
@@ -618,7 +715,7 @@ export function QueuedRunsControl({
                                       variant="ghost-muted"
                                       disabled={
                                         item.runId === null ||
-                                        busyRunId !== null ||
+                                        anyBusy ||
                                         !workflow?.canPromoteToSteer
                                       }
                                       onClick={() => {
@@ -645,7 +742,7 @@ export function QueuedRunsControl({
                                       <ComposerBanner.Dismiss
                                         variant="ghost-muted"
                                         aria-label="Remove queued message"
-                                        disabled={item.runId === null || busyRunId !== null}
+                                        disabled={item.runId === null || anyBusy}
                                         onClick={() => {
                                           if (item.runId !== null) void remove(item.runId);
                                         }}

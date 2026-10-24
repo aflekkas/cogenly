@@ -11,6 +11,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
 import { ModelPickerContent, resolveModelPickerSelectedModel } from "./ModelPickerContent";
 import { ChatGptSharingControl } from "./ChatGptSharingControl";
+import { ProviderIconStack } from "./ProviderIconStack";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
 import {
   ModelEsque,
@@ -200,6 +201,37 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   const triggerTooltipContent = shortcutLabel
     ? `${triggerModelLabel} · ${shortcutLabel}`
     : triggerModelLabel;
+  const selectedStackItems = selectedEntries
+    ? [
+        ...selectedEntries.slice(0, 3).flatMap((selection) =>
+          selection.entry
+            ? [
+                {
+                  key: `${selection.instanceId}:${selection.model}`,
+                  icon: (
+                    <ProviderInstanceIcon
+                      driverKind={selection.entry.driverKind}
+                      displayName={selection.entry.displayName}
+                      accentColor={selection.entry.accentColor}
+                      showBadge={shouldShowInstanceBadge(selection.entry, props.instanceEntries)}
+                      indicatorBackground="var(--provider-stack-ring)"
+                      iconClassName="size-4"
+                    />
+                  ),
+                },
+              ]
+            : [],
+        ),
+        ...(selectedEntries.length > 3
+          ? [
+              {
+                key: "overflow",
+                icon: <span className="text-3xs leading-none">+{selectedEntries.length - 3}</span>,
+              },
+            ]
+          : []),
+      ]
+    : [];
 
   return (
     <Popover
@@ -241,29 +273,10 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
             }
           >
             {selectedEntries && props.triggerLabel === undefined ? (
-              <span className="flex shrink-0 items-center -space-x-1" aria-hidden="true">
-                {selectedEntries
-                  .slice(0, 3)
-                  .map((selection) =>
-                    selection.entry ? (
-                      <ProviderInstanceIcon
-                        key={`${selection.instanceId}:${selection.model}`}
-                        driverKind={selection.entry.driverKind}
-                        displayName={selection.entry.displayName}
-                        accentColor={selection.entry.accentColor}
-                        showBadge={shouldShowInstanceBadge(selection.entry, props.instanceEntries)}
-                        indicatorBackground="var(--chat-composer-glass-surface,var(--background))"
-                        className="size-4 rounded-full bg-(--chat-composer-glass-surface,var(--background)) ring-2 ring-(--chat-composer-glass-surface,var(--background))"
-                        iconClassName="size-4"
-                      />
-                    ) : null,
-                  )}
-                {selectedEntries.length > 3 ? (
-                  <span className="relative z-30 flex size-4 items-center justify-center rounded-full bg-(--chat-composer-glass-surface,var(--background)) text-3xs ring-2 ring-(--chat-composer-glass-surface,var(--background))">
-                    +{selectedEntries.length - 3}
-                  </span>
-                ) : null}
-              </span>
+              <ProviderIconStack
+                className="[--provider-stack-ring:var(--chat-composer-glass-surface,var(--background))]"
+                items={selectedStackItems}
+              />
             ) : activeEntry && props.triggerLabel === undefined ? (
               <ProviderInstanceIcon
                 driverKind={activeEntry.driverKind}

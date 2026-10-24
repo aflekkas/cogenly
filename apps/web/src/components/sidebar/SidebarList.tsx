@@ -13,8 +13,8 @@ import { DisclosureChevron, DisclosurePanel } from "../ui/disclosure";
  * search results) builds its column from these, so spacing, type, hover and
  * selected states, truncation and collapse read the same everywhere:
  *
- * - `SidebarList` — the list itself, stacked up from the bottom against the
- *   search dock when it `grow`s.
+ * - `SidebarList` — the list itself, reading down from the search dock above
+ *   it; it fills the column when it `grow`s.
  * - `SidebarGroupHeader` — a group's heading: optional icon or badge, a label
  *   that truncates, a hairline, and a disclosure chevron when it collapses.
  * - `SidebarFoldRow` — a row under a collapsible heading, which folds with it.
@@ -27,7 +27,7 @@ import { DisclosureChevron, DisclosurePanel } from "../ui/disclosure";
  * - `SidebarListEmptyState` (its own file) — one quiet line for a list with
  *   nothing in it.
  * - `SidebarShelfBar` / `SidebarSegmentBar` (their own file) — the count bar
- *   above the search dock, the same in Work, Agents and Projects.
+ *   under the search dock, the same in Work, Agents and Projects.
  *
  * Spacing comes from three values in index.css: rows sit
  * `--sidebar-row-gap` (4px) apart, cards `--sidebar-card-gap` (8px), and a
@@ -48,7 +48,7 @@ export function SidebarList({
 }: ComponentProps<"ul"> & {
   /** Rows sit --sidebar-row-gap apart; cards carry their own gap (`SidebarCardItem`). */
   density?: "rows" | "cards";
-  /** Fill the column and stack from the bottom, against the search dock. */
+  /** Fill the rest of the column, so an empty state centres in it. */
   grow?: boolean;
 }) {
   return (
@@ -57,7 +57,7 @@ export function SidebarList({
       className={cn(
         "relative flex min-w-0 flex-col",
         density === "rows" && "gap-(--sidebar-row-gap)",
-        grow && "flex-1 justify-end",
+        grow && "flex-1",
         className,
       )}
     />

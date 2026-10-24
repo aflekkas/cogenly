@@ -1,11 +1,8 @@
-import { planPinnedReorder } from "@t3tools/client-runtime/state/thread-sort";
-
 /**
- * Work's cards are drawn top to bottom in reverse of the server's active
- * order: that order puts new, unarranged work first, and the list stacks up
- * from the search dock, so new work lands at the bottom by the dock. The list
- * shows them under project headings (`groupWorkCards`), each group keeping
- * that order. Orders here read top to bottom as drawn.
+ * Work's cards are drawn top to bottom in the server's active order, which
+ * puts new, unarranged work first, just under the search dock. The list shows
+ * them under project headings (`groupWorkCards`), each group keeping that
+ * order. Orders here read top to bottom as drawn.
  */
 
 /**
@@ -125,25 +122,6 @@ export function applyDrawnOrder(drawn: readonly string[], preview: readonly stri
   const present = new Set(drawn);
   const known = new Set(preview);
   return [...preview.filter((key) => present.has(key)), ...drawn.filter((key) => !known.has(key))];
-}
-
-/**
- * The order-key writes that put the cards in `drawnOrder` (top to bottom).
- * Keys run up from the dock, so the drawn order is reversed before planning.
- * One write moves one card between keyed neighbours; next to new, keyless
- * cards the list is keyed once in full. `keysById` should carry every active
- * thread's key, so a new key never repeats one held by a card not drawn.
- */
-export function planWorkCardReorder(input: {
-  readonly drawnOrder: readonly string[];
-  readonly keysById: ReadonlyMap<string, string | null | undefined>;
-  readonly movedId: string;
-}): ReadonlyArray<{ readonly id: string; readonly orderKey: string }> {
-  return planPinnedReorder({
-    orderedIds: input.drawnOrder.toReversed(),
-    keysById: input.keysById,
-    movedId: input.movedId,
-  });
 }
 
 /**

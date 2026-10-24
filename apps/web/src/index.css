@@ -228,8 +228,20 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   /* ease-standard for inline transitions and scripts (the theme token is
      inlined into utilities, so it has no runtime variable). */
   --motion-ease-standard: cubic-bezier(0.32, 0.72, 0, 1);
-  /* The reference column: the composer lands at 853px. */
-  --chat-content-max-width: 53.8125rem;
+  /* The main content column every main-area page shares (PageContent, the
+     chat lane, agents): the composer lands at 853px. --content-wide-max-width
+     is PageContent's `wide` variant for dashboards and tables. */
+  --content-max-width: 53.8125rem;
+  --content-wide-max-width: 72rem;
+  /* The column's side gutter, as a share of its containing block's width so
+     pages need no measuring: mirrors resolveChatLaneGutter (chatCanvasLayout),
+     which ChatCanvas measures for the chat lane. 12px up to about 610px, 48px
+     from 880px. Use only in inline paddings, margins and widths, where %
+     resolves against the containing block's width. */
+  --content-gutter: clamp(12px, 13.3333% - 69.3333px, 48px);
+  /* The chat's lane follows the column unless the Chat width setting widens
+     it (data-chat-width below). */
+  --chat-content-max-width: var(--content-max-width);
   /* Transcript text sits this far inside the lane; the composer and user
      bubbles share the inset so the column has one left and right edge. */
   --chat-content-inset: 0.25rem;
@@ -850,18 +862,6 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
     box-shadow:
       var(--tw-inset-shadow, 0 0 #0000), var(--tw-inset-ring-shadow, 0 0 #0000),
       var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);
-  }
-}
-
-/* Around a menu whose selection fill is one highlight sliding behind its rows
-   (the settings nav): the selected row keeps its selected text, drops its own fill. */
-@utility sliding-selection {
-  & [data-slot="sidebar-menu-button"][data-active="true"] {
-    --state-selected-fill: transparent;
-    --state-selected-sheen-top: transparent;
-    --state-selected-sheen-bottom: transparent;
-    --state-selected-highlight: transparent;
-    --state-selected-shadow: 0 0 #0000;
   }
 }
 
@@ -1825,6 +1825,8 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
     @apply flex h-10 min-h-10 shrink-0 items-center border-b border-border/60 bg-background;
   }
 
+  /* The content column inside the chat canvas, whose lanes already pad by the
+     gutter (ChatCanvas). Pages use PageContent instead. */
   .chat-content-lane {
     margin-inline: auto;
     width: 100%;
@@ -3179,10 +3181,11 @@ code {
   --diff-deletion-foreground: light-dark(var(--color-red-600), var(--color-red-400));
 }
 
-/* Chat width setting. Comfortable keeps the default --chat-content-max-width,
-   which sizes the timeline lane, the composer, and ChatCanvas's width probe. */
+/* Chat width setting. Comfortable keeps --chat-content-max-width on the shared
+   --content-max-width; it sizes the timeline lane, the composer, agent
+   conversations and ChatCanvas's width probe. Pages keep the shared column. */
 :root[data-chat-width="wide"] {
-  --chat-content-max-width: 72rem;
+  --chat-content-max-width: var(--content-wide-max-width);
 }
 
 :root[data-chat-width="full"] {

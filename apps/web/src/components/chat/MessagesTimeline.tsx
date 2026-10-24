@@ -225,7 +225,6 @@ import {
   rememberTimelinePosition,
   timelineContentOverflowsViewport,
 } from "./timelineScrollAnchoring";
-import { showClipboardCopiedToast } from "../ui/copiedToast";
 import { CopyButton } from "../ui/copy-button";
 import { promptLinkFor } from "../promptLinks/copyPromptLink";
 import { PierreEntryIcon } from "./PierreEntryIcon";
@@ -931,19 +930,47 @@ const ConversationTimeline = memo(function ConversationTimeline({
     },
     [beginFoldToggle, expandedRunIds],
   );
+  const workGroupClosingTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  useEffect(() => {
+    const timers = workGroupClosingTimersRef.current;
+    return () => {
+      for (const timer of timers.values()) clearTimeout(timer);
+      timers.clear();
+    };
+  }, []);
+  const onWorkGroupClosed = useCallback((groupId: string) => {
+    const timer = workGroupClosingTimersRef.current.get(groupId);
+    if (timer !== undefined) clearTimeout(timer);
+    workGroupClosingTimersRef.current.delete(groupId);
+    setClosingWorkGroupIds((existing) => {
+      if (!existing.has(groupId)) return existing;
+      const next = new Set(existing);
+      next.delete(groupId);
+      return next;
+    });
+  }, []);
   const onToggleWorkGroup = useCallback(
     (groupId: string, anchorKey: string) => {
       const collapsing = expandedWorkGroupIds.has(groupId);
       suspendEndScrollMaintenanceForDisclosure(anchorKey, collapsing);
       // Collapsing keeps the details row until it animates out; reopening
       // mid-close reuses that row, so only a fresh open plays the enter.
+      const timers = workGroupClosingTimersRef.current;
+      const existingTimer = timers.get(groupId);
+      if (existingTimer !== undefined) clearTimeout(existingTimer);
+      timers.delete(groupId);
       if (collapsing) {
         openingWorkGroupIds.delete(groupId);
+        // A details row scrolled out of the list never reports its exit.
+        timers.set(
+          groupId,
+          setTimeout(() => onWorkGroupClosed(groupId), FOLD_CLOSE_FALLBACK_MS),
+        );
       } else if (!closingWorkGroupIds.has(groupId)) {
         openingWorkGroupIds.add(groupId);
       }
       setClosingWorkGroupIds((existing) => {
-        if (existing.has(groupId) !== collapsing) return existing;
+        if (existing.has(groupId) === collapsing) return existing;
         const next = new Set(existing);
         if (collapsing) next.add(groupId);
         else next.delete(groupId);
@@ -962,18 +989,11 @@ const ConversationTimeline = memo(function ConversationTimeline({
     [
       closingWorkGroupIds,
       expandedWorkGroupIds,
+      onWorkGroupClosed,
       openingWorkGroupIds,
       suspendEndScrollMaintenanceForDisclosure,
     ],
   );
-  const onWorkGroupClosed = useCallback((groupId: string) => {
-    setClosingWorkGroupIds((existing) => {
-      if (!existing.has(groupId)) return existing;
-      const next = new Set(existing);
-      next.delete(groupId);
-      return next;
-    });
-  }, []);
   const onToggleAttemptFold = useCallback(
     (attemptId: RunAttemptId) => {
       beginFoldToggle(attemptFoldRowId(attemptId), expandedAttemptIds.has(attemptId));
@@ -2644,7 +2664,7 @@ function ContextCompactionTimelineRow({
     <div
       role="separator"
       aria-label={row.label}
-      className="mx-auto flex w-full max-w-(--chat-content-max-width) items-center gap-3 py-1 text-muted-foreground text-xs"
+      className="chat-content-lane flex items-center gap-3 py-1 text-muted-foreground text-xs"
     >
       <span className="h-px flex-1 bg-border/70" />
       <span className="flex shrink-0 items-center gap-1.5">
@@ -2678,10 +2698,7 @@ function RestartDividerTimelineRow({
     <div
       role="separator"
       aria-label="Cogenly restarted"
-      className={cn(
-        "mx-auto w-full max-w-(--chat-content-max-width)",
-        entering && ARRIVAL_FADE_CLASS,
-      )}
+      className={cn("chat-content-lane", entering && ARRIVAL_FADE_CLASS)}
     >
       <TimelineSystemDivider
         label="Cogenly restarted"
@@ -3130,7 +3147,6 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
               <CopyButton
                 label="Copy message"
                 target="message"
-                onCopied={showClipboardCopiedToast}
                 // Structured paste needs the canonical links to retain their positions.
                 value={contextClipboardFragment ? resolvedContext.text : plainText}
                 {...(contextClipboardFragment
@@ -3147,7 +3163,6 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
                 value={promptLink}
                 label="Copy prompt link"
                 target="prompt link"
-                onCopied={showClipboardCopiedToast}
                 icon={LinkIcon}
                 size="xs"
                 variant="ghost"
@@ -3600,7 +3615,6 @@ function AssistantCopyButton({
       value={assistantCopyState.text ?? ""}
       label="Copy message"
       target="message"
-      onCopied={showClipboardCopiedToast}
       size="xs"
       variant="ghost"
     />

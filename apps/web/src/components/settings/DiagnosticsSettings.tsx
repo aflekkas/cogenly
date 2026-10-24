@@ -932,7 +932,7 @@ export function DiagnosticsSettingsPanel() {
   }
 
   return (
-    <SettingsPageContainer width="expanded" className="gap-10">
+    <SettingsPageContainer width="wide" className="gap-10">
       <ResourceTelemetryDiagnostics environmentId={environmentId} />
 
       <SettingsSection

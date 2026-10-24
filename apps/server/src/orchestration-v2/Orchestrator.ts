@@ -19,6 +19,9 @@ import {
 import {
   ORCHESTRATION_V2_WORKSPACE_PREPARATION_FAILURE_CODE,
   type ChatAttachment,
+  COMPOSER_CONTEXT_MAX_RECORDS,
+  getProviderAttachmentLimitError,
+  PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
   CommandId,
   ContextHandoffId,
   isProviderNativeSubagentThread,
@@ -128,7 +131,12 @@ import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
 import * as RunExecutionService from "./RunExecutionService.ts";
 import { ProviderSessionManagerV2 } from "./ProviderSessionManager.ts";
 import { ProviderSwitchServiceV2 } from "./ProviderSwitchService.ts";
-import { isAutomaticCompletionRun, queuedRunsInDeliveryOrder } from "./QueuedRunOrder.ts";
+import {
+  combineQueuedMessages,
+  isAutomaticCompletionRun,
+  queuedRunsInDeliveryOrder,
+  userQueuedMessagesInDeliveryOrder,
+} from "./QueuedRunOrder.ts";
 import { RuntimePolicyV2 } from "./RuntimePolicy.ts";
 import {
   endOrphanedNativeSubagent,
@@ -516,6 +524,8 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
     case "run.interrupt":
     case "queued-message.promote-to-steer":
     case "queue.resume":
+    case "queue.clear":
+    case "queue.send-all":
     case "queued-run.reorder":
     case "queued-run.cancel":
     case "queued-run.edit":
@@ -3884,7 +3894,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
   const dispatchSteerIntoRun = (input: {
     readonly command: Extract<
       OrchestrationV2Command,
-      { readonly type: "message.dispatch" | "queued-message.promote-to-steer" }
+      {
+        readonly type: "message.dispatch" | "queued-message.promote-to-steer" | "queue.send-all";
+      }
     >;
     readonly events: Ref.Ref<Array<OrchestrationV2DomainEvent>>;
     readonly effects: Ref.Ref<Array<PendingOrchestrationEffectV2>>;
@@ -4101,9 +4113,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             type: "user_message",
             messageId: input.messageId,
             inputIntent:
-              input.command.type === "queued-message.promote-to-steer"
-                ? "promoted_queued_to_steer"
-                : "steer",
+              input.command.type === "message.dispatch" ? "steer" : "promoted_queued_to_steer",
             text: input.text,
             attachments: input.attachments,
             ...(input.context ? { context: input.context } : {}),
@@ -8249,6 +8259,258 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       }
     });
 
+  const dispatchQueueClear = (
+    command: Extract<OrchestrationV2Command, { readonly type: "queue.clear" }>,
+    events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+  ) =>
+    Effect.gen(function* () {
+      const projection = yield* loadProjectionForCommand(
+        command,
+        ["runs", "messages", "nodes", "attempts"],
+        { messageRoles: ["user"] },
+      );
+      const queued = userQueuedMessagesInDeliveryOrder(projection);
+      if (queued.length === 0) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: "There are no queued messages to clear.",
+        });
+      }
+      const now = yield* DateTime.now;
+      for (const { run } of queued) {
+        yield* emitQueuedRunCancellation({ command, events, projection, run, now });
+      }
+    });
+
+  /**
+   * The running turn a combined queue can steer into, or null when it must wait
+   * for its own turn: nothing is running, the provider cannot steer, the turn
+   * is a native maintenance command, or the thread's selection changed in a way
+   * a steer cannot carry.
+   */
+  const queueSteerTarget = (
+    projection: Pick<
+      OrchestrationV2ThreadProjection,
+      "runs" | "messages" | "providerThreads" | "providerTurns" | "thread"
+    >,
+    message: { readonly text: string; readonly attachments: ReadonlyArray<ChatAttachment> },
+    command: Extract<OrchestrationV2Command, { readonly type: "queue.send-all" }>,
+  ) =>
+    Effect.gen(function* () {
+      const activeRun = projection.runs.findLast(isBlockingRun);
+      if (
+        activeRun === undefined ||
+        activeRun.status !== "running" ||
+        activeRun.rootNodeId === null ||
+        isNativeMaintenanceCommand(message) ||
+        isGoalCommand(message)
+      ) {
+        return null;
+      }
+      const activeMessage = projection.messages.find(
+        (candidate) => candidate.id === activeRun.userMessageId,
+      );
+      if (activeMessage !== undefined && isNativeMaintenanceCommand(activeMessage)) return null;
+      const hasRunningTurn = projection.providerTurns.some(
+        (turn) => turn.runAttemptId === activeRun.activeAttemptId && turn.status === "running",
+      );
+      const providerSessionId = projection.providerThreads.find(
+        (candidate) => candidate.id === activeRun.providerThreadId,
+      )?.providerSessionId;
+      if (!hasRunningTurn || providerSessionId == null) return null;
+      const session = yield* providerSessions
+        .get(providerSessionId)
+        .pipe(Effect.catch(() => Effect.succeed(Option.none())));
+      if (Option.isNone(session)) return null;
+      const capabilities = session.value.providerSession.capabilities;
+      const target = projection.thread.modelSelection;
+      if (!modelSelectionsEqual(activeRun.modelSelection, target)) {
+        if (activeRun.providerInstanceId !== target.instanceId) return null;
+        const transition = yield* providerAdapters.get(activeRun.providerInstanceId).pipe(
+          Effect.flatMap((adapter) =>
+            adapter.planSelectionTransition({
+              current: activeRun.modelSelection,
+              target,
+              sessionCapabilities: capabilities,
+            }),
+          ),
+          Effect.option,
+        );
+        if (Option.isNone(transition) || transition.value.type !== "apply_on_next_turn") {
+          return null;
+        }
+      }
+      const canSteer = yield* commandPolicy
+        .decideSteeringExecution({
+          commandId: command.commandId,
+          threadId: command.threadId,
+          providerInstanceId: activeRun.providerInstanceId,
+          capabilities,
+          forceRestart: false,
+        })
+        .pipe(Effect.isSuccess);
+      return canSteer ? activeRun : null;
+    });
+
+  const dispatchQueueSendAll = (
+    command: Extract<OrchestrationV2Command, { readonly type: "queue.send-all" }>,
+    events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+    effects: Ref.Ref<Array<PendingOrchestrationEffectV2>>,
+  ) =>
+    Effect.gen(function* () {
+      const projection = yield* loadProjectionForCommand(
+        command,
+        [
+          "runs",
+          "nodes",
+          "attempts",
+          "messages",
+          "providerThreads",
+          "providerTurns",
+          "providerSessions",
+          "turnItems",
+          "runtimeRequests",
+          "subagents",
+        ],
+        { turnItemTypes: ["user_message", "error"], messageRoles: ["user"] },
+      );
+      const reject = (cause: string) =>
+        new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause,
+        });
+      if (projection.thread.archivedAt !== null || projection.thread.deletedAt !== null) {
+        return yield* reject(`Thread ${command.threadId} is not active.`);
+      }
+      const queued = userQueuedMessagesInDeliveryOrder(projection);
+      const head = queued[0];
+      if (head === undefined) return yield* reject("There are no queued messages to send.");
+      const combined = combineQueuedMessages(queued.map(({ message }) => message));
+      if (combined.text.length > PROVIDER_SEND_TURN_MAX_INPUT_CHARS) {
+        return yield* reject(
+          "The queued messages are too long to send as one. Send some of them on their own first.",
+        );
+      }
+      const attachmentLimitError = getProviderAttachmentLimitError(combined.attachments);
+      if (attachmentLimitError !== undefined) return yield* reject(attachmentLimitError);
+      if ((combined.context?.records.length ?? 0) > COMPOSER_CONTEXT_MAX_RECORDS) {
+        return yield* reject(
+          "The queued messages reference too much context to send as one. Send some of them on their own first.",
+        );
+      }
+
+      const now = yield* DateTime.now;
+      const emitEvent = emit(events, command);
+      const steerTarget = yield* queueSteerTarget(projection, combined, command);
+      if (steerTarget !== null) {
+        // Like Steer on one row: every queued run ends, and the first message
+        // carries the combined text into the running turn.
+        for (const { run } of queued) {
+          yield* emitQueuedRunCancellation({ command, events, projection, run, now });
+        }
+        yield* dispatchSteerIntoRun({
+          command,
+          events,
+          effects,
+          projection,
+          modelSelection: projection.thread.modelSelection,
+          targetRunId: steerTarget.id,
+          messageId: head.message.id,
+          text: combined.text,
+          attachments: combined.attachments,
+          ...(combined.context ? { context: combined.context } : {}),
+          createdBy: head.message.createdBy,
+          creationSource: head.message.creationSource,
+          ...(head.message.scheduledTaskId === undefined
+            ? {}
+            : { scheduledTaskId: head.message.scheduledTaskId }),
+          ...(head.message.senderThreadId === undefined
+            ? {}
+            : { senderThreadId: head.message.senderThreadId }),
+          forceRestart: false,
+        });
+        return;
+      }
+
+      // No turn to steer: the first queued run carries the combined message and
+      // starts next. Starting it on purpose releases a held queue, as Resume does.
+      if (projection.runs.every((run) => !isBlockingRun(run))) {
+        const sessionError =
+          projection.providerSessions
+            .filter(
+              (session) => session.providerInstanceId === projection.thread.providerInstanceId,
+            )
+            .toSorted(
+              (left, right) =>
+                DateTime.toEpochMillis(right.updatedAt) - DateTime.toEpochMillis(left.updatedAt),
+            )[0]?.lastError ?? null;
+        if (usageLimitBlockedRun(projection.runs, projection.turnItems, sessionError) !== null) {
+          return yield* reject("Continue the limited thread before sending its queue.");
+        }
+      }
+      for (const { run } of queued.slice(1)) {
+        yield* emitQueuedRunCancellation({ command, events, projection, run, now });
+      }
+      if (queued.length > 1) {
+        const runRef = {
+          threadId: command.threadId,
+          runId: head.run.id,
+          ...(head.run.rootNodeId === null ? {} : { nodeId: head.run.rootNodeId }),
+          providerInstanceId: head.run.providerInstanceId,
+          occurredAt: now,
+        };
+        const content = {
+          text: combined.text,
+          attachments: combined.attachments,
+          ...(combined.context ? { context: combined.context } : {}),
+          updatedAt: now,
+        };
+        yield* emitEvent({
+          type: "message.updated",
+          ...runRef,
+          payload: { ...head.message, ...content },
+        });
+        const turnItem = projection.turnItems.find(
+          (candidate) =>
+            candidate.type === "user_message" && candidate.messageId === head.message.id,
+        );
+        if (turnItem?.type === "user_message") {
+          yield* emitEvent({
+            type: "turn-item.updated",
+            ...runRef,
+            payload: { ...turnItem, ...content },
+          });
+        }
+      }
+      const cancelledRunIds = new Set(queued.slice(1).map(({ run }) => run.id));
+      for (const run of projection.runs) {
+        if (run.status !== "queued" || run.queueHeld !== true || cancelledRunIds.has(run.id)) {
+          continue;
+        }
+        yield* emitEvent({
+          type: "run.updated",
+          threadId: command.threadId,
+          runId: run.id,
+          ...(run.rootNodeId === null ? {} : { nodeId: run.rootNodeId }),
+          providerInstanceId: run.providerInstanceId,
+          occurredAt: now,
+          payload: { ...run, queueHeld: false },
+        });
+      }
+      // A single unheld message behind a running turn changes nothing, but the
+      // command still records that it was handled.
+      if ((yield* Ref.get(events)).length === 0) {
+        yield* emitEvent({
+          type: "thread.metadata-updated",
+          threadId: command.threadId,
+          occurredAt: now,
+          payload: projection.thread,
+        });
+      }
+    });
+
   const dispatchQueuedRunEdit = (
     command: Extract<OrchestrationV2Command, { readonly type: "queued-run.edit" }>,
     events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
@@ -11461,6 +11723,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         }
         break;
       }
+      case "queue.clear":
+        yield* dispatchQueueClear(command, events);
+        break;
+      case "queue.send-all":
+        yield* dispatchQueueSendAll(command, events, effects);
+        break;
       case "queued-run.reorder":
         yield* dispatchQueuedRunReorder(command, events);
         break;
@@ -11582,7 +11850,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             }),
         ),
       );
-      if (command.type === "queue.resume") {
+      if (command.type === "queue.resume" || command.type === "queue.send-all") {
         yield* mapDispatchError(command)(startNextQueuedRun(command.threadId));
       }
       return {
@@ -11720,7 +11988,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         detail: committed.receipt.error ?? "Previously rejected.",
       });
     }
-    if (command.type === "queue.resume") {
+    // Send all on an idle thread starts its combined run now, not on the next terminal run.
+    if (command.type === "queue.resume" || command.type === "queue.send-all") {
       yield* mapDispatchError(command)(startNextQueuedRun(command.threadId));
     }
     if (command.type === "notification.delivery.accept") {

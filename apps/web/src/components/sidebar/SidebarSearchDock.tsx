@@ -1,5 +1,5 @@
 /**
- * The sidebar search dock: one boxed row pinned under every tab's list
+ * The sidebar search dock: one boxed row pinned above every tab's list
  * (Chats, Work, Agents, Projects, Settings). Search owns the row's text and
  * spans it; the tab's own primary actions sit as icons at its end, after any
  * mode-specific filter: new chat, new task and add repository, new agent, new
@@ -166,7 +166,7 @@ export function SidebarHeaderIconButton({
           className="pointer-events-none absolute left-1/2 top-1/2 size-[max(100%,3rem)] -translate-1/2 pointer-fine:hidden"
         />
       </TooltipTrigger>
-      <TooltipPopup side="top">{tooltip}</TooltipPopup>
+      <TooltipPopup side="bottom">{tooltip}</TooltipPopup>
     </Tooltip>
   );
 }
