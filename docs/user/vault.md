@@ -61,7 +61,8 @@ With [paired machines](machines.md), you can share the vault between a
 machine and its hub. Turn on **Share vault** for the other machine under
 **Paired machines** in **Settings → Vault**, on both machines: items move only
 when each side has chosen to share with the other. Until the other side does,
-the machine shows **Waiting for (machine) to share back**. Sharing is
+the machine shows **Waiting for (machine) to share back**, and releases no
+keys to that machine. Sharing is
 end-to-end encrypted. The secrets, names, and sites of items are readable only
 on machines you share with. The other machine must be online to turn sharing
 on.
@@ -80,7 +81,9 @@ on.
   sharing back on on both machines.
 - If an arriving item has the same name as one already there, it shows up as
   "Name (from Machine)" on that machine.
-- Deleting an item deletes it on every machine you share with.
+- Deleting an item sends the delete to every machine you share with. The
+  newest change wins, so an edit made elsewhere after a delete brings the
+  item back. It asks for approval again on machines where it was deleted.
 - Turning sharing off or unpairing stops new changes from reaching that
   machine. Items it already has stay on it. If a machine is lost or stolen,
   change the passwords and keys it held.

@@ -9,51 +9,68 @@ guide: [Vault on several machines](../user/vault.md#vault-on-several-machines).
 
 ## Who can read
 
-A **holder** is a machine that can decrypt synced items. Sharing is a local
-owner decision per direct peer, stored in `vault_peer_shares` with that peer's
-vault public key. Only an access-management client can make it
-(`vault.setPeerSharing`). There is deliberately no MCP tool, so an agent cannot
-add a holder.
+A **holder** is a machine that can decrypt synced items. Only an
+access-management client can authorize sharing (`vault.setPeerSharing`);
+there is no agent tool that adds a holder. Each direct peer's X25519 vault key
+is fetched over its authenticated link and pinned to that pairing. Invalid and
+low-order keys are refused. A changed key requires unpairing, pairing again,
+and enabling sharing again.
 
-- The key is fetched with `VaultPeerKey` from that machine itself, over the
-  authenticated direct link, and pinned. A key relayed through the hub would
-  be the hub's word, not the machine's, so a spoke can share only with its hub
-  and a hub only with its own spokes. A later fetch that returns a different
-  key for the same pairing is refused (`key_changed`), never silently
-  re-pinned. The owner turns sharing off and on to trust the new key.
-- Mutual consent: a machine projects only wraps made by itself or by a peer in
-  its own share table. When A shares with the hub but the hub does not share
-  with A, the hub relays A's items and cannot read them.
-- A holder hub forwards: when it can open the current revision and a share
-  peer lacks a wrap for it, the hub writes one. That is the only way spoke B
-  reads spoke A's item. A non-holder hub cannot forward.
+Both sides must opt in before either releases a data key. The peer's
+`VaultPeerKey.sharing` confirmation is stored locally and refreshed on enable,
+on topology changes, and on reconcile for online peers. A false confirmation
+stops future wraps. Offline peers retain their last confirmation. Every use of
+a share also checks the current pairing, including session expiry and
+revocation; the event stream is not the revocation boundary.
 
-## Document format
+A spoke can share only with its hub, and a hub only with its own spokes. A
+holder hub can wrap readable revisions for its other holders. A non-holder hub
+relays ciphertext but cannot read or fan it out. Authorizing a holder trusts
+that machine with the whole shared vault, including permission to edit it and
+share its readable items with its own authorized holders.
 
-`sealed` holds the item payload (name, type, scope, label, domains, secret
-fields, timestamps and an opaque `attachment`) under a fresh data key per
-revision. `wrap:<recipient>` holds that data key for one recipient. Ids,
-timestamps, author and recipient ids are all a non-holder learns.
+## Authenticated revisions
 
-- **One field per recipient.** Fields merge last-writer-wins. A single map of
-  wraps would let two holders adding different recipients at the same time
-  drop one of them.
-- **The field clock is in the sealed AAD.** The hub is a trusted relay for
-  authorship and could re-send an old `sealed` value under a newer clock to
-  roll a secret back. Binding the clock SharedState assigns
-  (`SharedState.writeBuilt`) makes that value fail to open.
-- **Wraps commit to the sealed digest and are authenticated.** The wrap key
-  mixes an ephemeral X25519 exchange with one from the wrapper's static key,
-  and the recipient checks `by` against a key it trusts. A relay can encrypt
-  to a public key but cannot make a wrap that verifies as a holder, so it
-  cannot substitute secrets or allowed domains, or pair a valid wrap with
-  another revision.
-- **Signed values are atomic.** `preserveUnknown` does not carry a newer
-  build's keys into a rewritten `sealed` or wrap, because that would break the
-  digest every wrap commits to. Unknown payload keys survive instead: a reseal
-  starts from the decrypted current payload. Unknown document fields and wrap
-  recipients survive the per-field merge as for any document. A newer `v`
-  fails validation and waits in `shared_deferred_changes`.
+Each author owns `sealed:<author>` and each wrapper owns
+`wrap:<recipient>:<by>`. On receipt, keys naming an author or wrapper other than
+`updatedBy` are dropped, without refusing the batch. An untrusted spoke's
+far-future revision or junk wrap therefore cannot replace a holder's fields.
+Vault SharedState tombstones are also dropped: a delete is an encrypted
+`{ deleted: true }` revision, accepted only through a trusted wrap.
+
+Every new revision has a fresh AES-256-GCM data key. Its versioned ciphertext,
+nonce, and wraps for self and all confirmed holders are written under one HLC
+in one SharedState change and transaction. Additional recipients get separate
+wrap fields bound to that revision's digest; a mismatched wrap never opens a
+body. Recipient wrap failures are skipped with item and machine ids logged,
+so a bad recipient does not prevent saving locally.
+
+The sealed AAD binds the item, author, and exact field clock. Authenticated
+wrap keys mix ephemeral and static X25519 exchanges; HKDF info and GCM AAD bind
+the ephemeral public key, both static public keys, both machine identities,
+the item, and sealed digest. Relabeling a ciphertext, clock, identity or key
+cannot make it authenticate. Plaintexts include their length inside padding
+to the next power of two, at least 512 bytes. Relays see ids, clocks,
+recipient relationships and size buckets, never plaintext lengths or secrets.
+
+The newest revision that authenticates through self or a current holder wins,
+including deletes. A later edit resurrects the same id with default approval
+policy. The last authenticated clock is persisted, so losing a wrap or ending
+a share never rolls a machine back to an older readable revision. Accepted
+revisions also get a self-wrap, retaining access to copies already received.
+Fan-out and status use exact local records of successfully produced wraps for
+the pinned recipient key; a plausible digest or copied ciphertext does not
+prove that recipient can open it. This means "shared" proves a valid wrap was
+produced, not that the other machine has received or projected it.
+
+Unknown document fields survive merge. Sealed values are replaced atomically,
+without grafting unknown keys onto authenticated ciphertext. Unknown decrypted
+payload keys, including nested `secretFields` keys, are kept in a separate
+locally encrypted extras blob and merged back on edit. A newer envelope `v`
+waits in the deferred log rather than stalling sync. A local edit can proceed
+using the last readable local copy; fields present only in an unreadable newer
+revision are then lost. Changes to the encryption format need a coordinated
+upgrade if preserving those fields is required.
 
 ## What stays on each machine
 
@@ -115,13 +132,15 @@ startup. Opening a revision needs this machine's private key, and a revision
 this machine cannot read yet is normal (a wrap may arrive later). Neither may
 refuse a batch, since a refusal that depends on local keys would wedge the
 cursor. The document and cursor still commit together. `vault_sync_applied`
-records the digest last projected, so passes are idempotent and a forward is
-written only when a wrap is missing.
+records the last authenticated digest and clock. Projection re-reads the
+document and updates the local vault row in one transaction with local vault
+mutations, so a stale pass cannot overwrite a committed local edit.
 
-Local writes are captured inside Vault's own transaction, and only while this
-machine shares with someone. Turning sharing on runs a full pass that captures
-existing items. A full pass never reseals over a revision this machine cannot
-read, so an older copy cannot overwrite a newer unreadable edit.
+Local writes are captured inside Vault's own transaction. Once an item has a
+document, capturing continues even with no shares, using a self-wrap only.
+Turning sharing on captures items that have never synced and forwards current
+revisions. It never overwrites an existing unreadable document from an older
+local row.
 
 When an arriving item's name is taken by a different item in the same scope,
 it is stored here as `Name (from Machine)`. `local_name` remembers that, so
@@ -129,15 +148,19 @@ editing it here does not rename it everywhere else.
 
 ## Revocation and residual risk
 
-Unpairing on either side, re-pairing, or a revoked session removes the share
-row when the machine list changes. Each revision has a new data key and is
-wrapped only for current share peers. Revoking is not remote wipe: copies on
-that machine stay readable there. Rotate secrets if a machine is lost.
+Unpairing, re-pairing, or session revocation/expiry invalidates the local share
+before its next use, even if a stale row remains. New revisions use new data
+keys and exclude invalidated shares. Revocation is not remote wipe: previously
+copied ciphertext and keys remain readable, so rotate secrets after losing a
+machine. An offline machine cannot know that its peer revoked the pairing;
+clear the pairing on both sides when either cannot deliver the unpair notice
+(see [machine lifetimes](./machines.md#connection-and-revocation-lifetimes)).
 
-Deletes are SharedState tombstones: permanent, and they win over later edits.
-Agents can delete items (`vault_delete`), and a delete removes the item from
-every holder. A relay can withhold changes or forge a tombstone, which affects
-availability as it does for every synced document, but it cannot read or alter
-content. A holder sees everything shared with it. An item that synced before a
-rule made it machine-only, for example one a local integration starts using
-later, stays on the machines that have it.
+A malicious hub is the trusted relay for authorship. It can withhold changes,
+forge relayed field ownership or clocks, and permanently deny delivery. It
+cannot authenticate substituted content or deletes without a holder's key.
+Previously accepted authenticated clocks prevent rollback of local copies;
+availability and complete delivery through a malicious hub are not guaranteed.
+Untrusted spokes cannot mask a holder's fields, even when their own clocks are
+far in the future. Item ids, topology, timing and padded size buckets are not
+hidden. A compromised holder can read and change everything it holds.

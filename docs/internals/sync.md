@@ -13,6 +13,8 @@ clock skew. Stored and relayed field clocks retain their original identities and
 ordering. Collections are fields, so concurrent replacements of a repo
 list or fallback chain choose one whole value. Tombstones are permanent for an
 ID, including against edits with newer clocks. Recreating means a new ID.
+Vault documents are the exception: they ignore bare tombstones and authenticate
+deletions as sealed revisions (see [vault sync](./vault-sync.md)).
 Local captures preserve the domain's checkout bindings; only peer merges reconcile
 competing project documents. Concurrent moves of one remote choose the greatest repository
 field clock across the competing documents. Every active local clone stays linked
