@@ -7,6 +7,7 @@ import * as ProjectLabels from "./projectLabel.ts";
 import * as Integrations from "./integration.ts";
 import * as Machines from "./machine.ts";
 import * as ThreadReplication from "./threadReplication.ts";
+import * as SharedDocuments from "./sharedDocument.ts";
 import * as MachineSecurity from "./machineSecurity.ts";
 import * as MachineSetup from "./machineSetup.ts";
 import * as Work from "./work.ts";
@@ -634,6 +635,8 @@ export const WS_METHODS = {
   machinesMoveThreads: "machines.moveThreads",
   machinesMoveAllThreads: "machines.moveAllThreads",
   machineSecurityStatus: "machines.securityStatus",
+  // What each paired machine has yet to receive from this one
+  syncStatus: "sync.status",
   // Getting this machine ready to pair (Tailscale and Serve)
   machinesSetupStatus: "machines.setupStatus",
   machinesSetupSubscribe: "machines.setupSubscribe",
@@ -2237,6 +2240,11 @@ const WsMachineSecurityStatusRpc = Rpc.make(WS_METHODS.machineSecurityStatus, {
   success: MachineSecurity.MachineSecurityStatus,
   error: machineErrors,
 });
+const WsSyncStatusRpc = Rpc.make(WS_METHODS.syncStatus, {
+  payload: SharedDocuments.SharedSyncStatusInput,
+  success: SharedDocuments.SharedSyncStatusResult,
+  error: Schema.Union([SharedDocuments.SharedStateError, EnvironmentAuthorizationError]),
+});
 const WsMachinesListRpc = Rpc.make(WS_METHODS.machinesList, {
   payload: Schema.Struct({}),
   success: Machines.MachineListResult,
@@ -2704,6 +2712,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsIntegrationsConnectFromCatalogRpc,
   WsIntegrationsSubscribeRpc,
   WsMachineSecurityStatusRpc,
+  WsSyncStatusRpc,
   WsMachinesListRpc,
   WsMachinesSubscribeRpc,
   WsMachinesUpdateRpc,

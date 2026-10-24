@@ -176,6 +176,7 @@ import * as UsageService from "./usage/UsageService.ts";
 import * as Scheduler from "./scheduling/Scheduler.ts";
 import * as SharedState from "./sync/SharedState.ts";
 import * as SharedSync from "./sync/SharedSync.ts";
+import * as SharedSyncStatus from "./sync/SharedSyncStatus.ts";
 import * as ThreadReplication from "./threadSync/ThreadReplication.ts";
 import * as ThreadRouting from "./threadSync/ThreadRouting.ts";
 import * as ThreadTransfer from "./threadSync/ThreadTransfer.ts";
@@ -586,6 +587,7 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   // Paired machines: shared configuration, then thread logs, over one link.
   Layer.mergeAll(
     SharedSync.layer.pipe(Layer.provide(SharedState.layer)),
+    SharedSyncStatus.layer,
     // The orchestrator's own sink, so replicated events reach the same
     // subscribers, and its forwarder registry, so routing sees its commands.
     ProjectMove.layer.pipe(

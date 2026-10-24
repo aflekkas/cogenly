@@ -10,6 +10,7 @@ import * as GlobalSearch from "./search/GlobalSearch.ts";
 import * as Facts from "./context/FactService.ts";
 import * as Integrations from "./integrations/Integrations.ts";
 import * as Machines from "./machines/Machines.ts";
+import * as SharedSyncStatus from "./sync/SharedSyncStatus.ts";
 import * as ProjectMove from "./threadSync/ProjectMove.ts";
 import * as ThreadTransfer from "./threadSync/ThreadTransfer.ts";
 import * as MachineSecurity from "./security/MachineSecurity.ts";
@@ -1093,6 +1094,7 @@ const makeWsRpcHandlers = (
     const facts = yield* Facts.FactService;
     const integrations = yield* Integrations.Integrations;
     const machines = yield* Machines.Machines;
+    const syncStatus = yield* SharedSyncStatus.SharedSyncStatus;
     const threadTransfer = yield* ThreadTransfer.ThreadTransfer;
     const projectMove = yield* ProjectMove.ProjectMove;
     const machineSecurity = yield* MachineSecurity.MachineSecurity;
@@ -1725,6 +1727,7 @@ const makeWsRpcHandlers = (
       [WS_METHODS.integrationsSubscribe]: () => integrations.subscribe(),
       [WS_METHODS.machineSecurityStatus]: () => machineSecurity.status,
       [WS_METHODS.machinesList]: () => machines.list,
+      [WS_METHODS.syncStatus]: (input) => syncStatus.status(input),
       [WS_METHODS.machinesSubscribe]: () => machines.subscribe,
       [WS_METHODS.machinesUpdate]: (input) => machines.update(input),
       [WS_METHODS.machinesPrepareJoin]: () => machines.prepareJoin,
@@ -2825,6 +2828,7 @@ type WsRequestServices =
   | Facts.FactService
   | Integrations.Integrations
   | Machines.Machines
+  | SharedSyncStatus.SharedSyncStatus
   | ThreadTransfer.ThreadTransfer
   | ProjectMove.ProjectMove
   | MachineSecurity.MachineSecurity
