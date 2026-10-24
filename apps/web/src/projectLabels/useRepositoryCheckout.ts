@@ -200,7 +200,7 @@ export function useRepositoryMachineActions(environmentId: EnvironmentId | null)
       ): Promise<boolean> => {
         const { project, repositoryId } = row;
         if (project === null || repositoryId === null) return false;
-        const message = `Remove ${row.name} from this machine?\nIts folder here is deleted. ${project.label.name} keeps it, and any machine can clone it again.`;
+        const message = `Remove ${row.name} from this machine?\nIts folder here is deleted, along with the saved diffs (checkpoints) of its past threads on this machine. ${project.label.name} keeps it, and any machine can clone it again.`;
         const confirmed =
           (await requestConfirmDialog(message, { variant: "destructive" })) ??
           window.confirm(message);
