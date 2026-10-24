@@ -12,7 +12,7 @@ import * as Migrator from "effect/sql/Migrator";
 import Migration0090 from "./Migrations/090_SharedBootstrap.ts";
 import Migration0091 from "./Migrations/091_RepositoryIconPath.ts";
 import Migration0092 from "./Migrations/092_ThreadReplication.ts";
-import Migration0095 from "./Migrations/095_ScheduledTaskMachine.ts";
+import Migration0097 from "./Migrations/097_ScheduledTaskMachine.ts";
 import Migration0093 from "./Migrations/093_ForwardCompatibleSync.ts";
 import Migration0094 from "./Migrations/094_ReplicaRawFields.ts";
 import * as Effect from "effect/Effect";
@@ -217,7 +217,7 @@ export const migrationEntries = [
   [92, "ThreadReplication", Migration0092],
   [93, "ForwardCompatibleSync", Migration0093],
   [94, "ReplicaRawFields", Migration0094],
-  [95, "ScheduledTaskMachine", Migration0095],
+  [97, "ScheduledTaskMachine", Migration0097],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);
