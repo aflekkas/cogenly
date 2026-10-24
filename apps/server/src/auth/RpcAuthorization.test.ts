@@ -227,14 +227,13 @@ describe("RPC authorization scopes", () => {
     );
   });
 
-  it("requires source control writes to clone a project's linked repository here, on the client too", () => {
-    expect(requiredScopeForRpcMethod(WS_METHODS.projectLabelsCheckoutRepository)).toBe(
-      AuthSourceControlWriteScope,
-    );
-    expect(clientRpcRequiredScopes(WS_METHODS.projectLabelsCheckoutRepository, {})).toEqual([
-      AuthSourceControlWriteScope,
-    ]);
-  });
+  it.each([WS_METHODS.projectLabelsCheckoutRepository, WS_METHODS.projectLabelsRemoveCheckout])(
+    "requires source control writes for %s, on the client too",
+    (method) => {
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthSourceControlWriteScope);
+      expect(clientRpcRequiredScopes(method, {})).toEqual([AuthSourceControlWriteScope]);
+    },
+  );
 
   it("separates viewing pull request file progress from writing it", () => {
     expect(requiredScopeForRpcMethod(WS_METHODS.pullRequestsFilesViewed)).toBe(

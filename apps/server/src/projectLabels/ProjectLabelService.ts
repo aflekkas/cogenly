@@ -62,6 +62,11 @@ export class ProjectLabelService extends Context.Service<
       id: ProjectLabelId,
     ) => Effect.Effect<{ label: ProjectLabelWithRepositories }, ProjectLabelError>;
     readonly subscribeChanges: Effect.Effect<Stream.Stream<void>, never, Scope.Scope>;
+    /**
+     * Re-emits project lists after something only the disk records changed,
+     * such as a checkout removed from this machine (its `checkout` state).
+     */
+    readonly notifyCheckoutChanged: Effect.Effect<void>;
     readonly moveThread: (
       input: MoveThreadProjectFolderInput,
     ) => Effect.Effect<ThreadProjectFolderResult, ProjectLabelError>;
@@ -674,6 +679,7 @@ const make = Effect.gen(function* () {
       ].includes(stored.event.type));
   return ProjectLabelService.of({
     moveThread,
+    notifyCheckoutChanged: PubSub.publish(changes, undefined).pipe(Effect.asVoid),
     subscribeChanges: PubSub.subscribe(changes).pipe(
       Effect.map((subscription) =>
         Stream.merge(Stream.fromSubscription(subscription), shared.changes),

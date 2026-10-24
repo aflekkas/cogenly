@@ -537,6 +537,7 @@ export const WS_METHODS = {
   projectLabelsSearchOwnerRepositories: "projectLabels.searchOwnerRepositories",
   projectLabelsCloneRepository: "projectLabels.cloneRepository",
   projectLabelsCheckoutRepository: "projectLabels.checkoutRepository",
+  projectLabelsRemoveCheckout: "projectLabels.removeCheckout",
   projectLabelsListResources: "projectLabels.listResources",
   projectLabelsSubscribeResources: "projectLabels.subscribeResources",
   projectLabelsAddResource: "projectLabels.addResource",
@@ -2043,6 +2044,12 @@ const WsProjectLabelsCheckoutRepositoryRpc = Rpc.make(WS_METHODS.projectLabelsCh
   success: ProjectLabels.ProjectLabelCheckoutRepositoryResult,
   error: Schema.Union([ProjectLabels.RepositoryCheckoutError, EnvironmentAuthorizationError]),
 });
+// Delete this machine's checkout of a linked repository; the link stays.
+const WsProjectLabelsRemoveCheckoutRpc = Rpc.make(WS_METHODS.projectLabelsRemoveCheckout, {
+  payload: ProjectLabels.ProjectLabelRemoveCheckoutInput,
+  success: ProjectLabels.ProjectLabelRemoveCheckoutResult,
+  error: Schema.Union([ProjectLabels.RepositoryCheckoutError, EnvironmentAuthorizationError]),
+});
 const WsProjectLabelsListResourcesRpc = Rpc.make(WS_METHODS.projectLabelsListResources, {
   payload: ProjectLabels.ProjectLabelKey,
   success: ProjectLabels.ProjectLabelListResourcesResult,
@@ -2584,6 +2591,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectLabelsSearchOwnerRepositoriesRpc,
   WsProjectLabelsCloneRepositoryRpc,
   WsProjectLabelsCheckoutRepositoryRpc,
+  WsProjectLabelsRemoveCheckoutRpc,
   WsProjectLabelsListResourcesRpc,
   WsProjectLabelsSubscribeResourcesRpc,
   WsProjectLabelsAddResourceRpc,

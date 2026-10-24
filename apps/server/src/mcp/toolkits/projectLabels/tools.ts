@@ -5,6 +5,8 @@ import {
   ProjectLabelCloneRepositoryInput,
   ProjectCloneStartResult,
   ProjectLabelCreateInput,
+  ProjectLabelRemoveCheckoutInput,
+  ProjectLabelRemoveCheckoutResult,
   ProjectLabelDeleteResult,
   ProjectLabelListResult,
   ProjectLabelKey,
@@ -166,4 +168,12 @@ export const ProjectLabelsToolkit = Toolkit.make(
   })
     .annotate(Tool.Destructive, true)
     .annotate(Tool.OpenWorld, true),
+  Tool.make("project_label_remove_checkout", {
+    ...shared,
+    parameters: ProjectLabelRemoveCheckoutInput,
+    success: ProjectLabelRemoveCheckoutResult,
+    description:
+      "Delete this machine's checkout of a repository the project links, keeping the link, the repository record and its threads: checkout then reads missing, and project_label_clone_repository with its remote brings it back. Refused for a repository with no remote, while a turn runs in it, or while it holds work found nowhere else (other worktrees, uncommitted or stashed changes, unpushed commits). Confirm with the user first.",
+    dependencies: [...shared.dependencies, Checkout.RepositoryCheckout],
+  }).annotate(Tool.Destructive, true),
 );

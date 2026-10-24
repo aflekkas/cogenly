@@ -347,6 +347,24 @@ export const ProjectLabelCheckoutRepositoryResult = Schema.Struct({
 });
 export type ProjectLabelCheckoutRepositoryResult = typeof ProjectLabelCheckoutRepositoryResult.Type;
 
+/**
+ * Remove a linked repository's checkout from this machine and keep the link:
+ * the folder is deleted, the record and its threads stay, and the link reads
+ * `missing` until it is cloned here again. Refused while the checkout holds
+ * work that exists nowhere else (uncommitted or stashed changes, commits on
+ * no remote, other worktrees) or a turn runs in it.
+ */
+export const ProjectLabelRemoveCheckoutInput = Schema.Struct({
+  labelId: ProjectLabelId,
+  repositoryId: ProjectId,
+});
+export type ProjectLabelRemoveCheckoutInput = typeof ProjectLabelRemoveCheckoutInput.Type;
+export const ProjectLabelRemoveCheckoutResult = Schema.Struct({
+  /** False when there was no checkout here to remove. */
+  removed: Schema.Boolean,
+});
+export type ProjectLabelRemoveCheckoutResult = typeof ProjectLabelRemoveCheckoutResult.Type;
+
 export class RepositoryCheckoutError extends Schema.TaggedError<RepositoryCheckoutError>()(
   "RepositoryCheckoutError",
   {
@@ -358,6 +376,10 @@ export class RepositoryCheckoutError extends Schema.TaggedError<RepositoryChecko
       "no_remote",
       "destination_taken",
       "clone_failed",
+      "has_worktrees",
+      "uncommitted_changes",
+      "unpushed_commits",
+      "thread_active",
       "storage",
     ]),
     detail: Schema.optional(Schema.String),
@@ -376,6 +398,14 @@ export class RepositoryCheckoutError extends Schema.TaggedError<RepositoryChecko
         return `${this.detail ?? "The destination folder"} already holds other files; move them away, then clone ${this.repositoryName} again.`;
       case "clone_failed":
         return `${this.repositoryName} could not be cloned${this.detail ? `: ${this.detail}` : ""}.`;
+      case "has_worktrees":
+        return `${this.repositoryName} has worktrees on this machine; remove them first.`;
+      case "uncommitted_changes":
+        return `${this.repositoryName} has uncommitted or stashed changes on this machine; commit and push them, or discard them, first.`;
+      case "unpushed_commits":
+        return `${this.repositoryName} has commits that are on no remote; push them first.`;
+      case "thread_active":
+        return `A turn is running in ${this.repositoryName}; wait for it to finish.`;
       case "storage":
         return `The checkout for ${this.repositoryName} could not be inspected.`;
     }

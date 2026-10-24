@@ -1202,6 +1202,11 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:projectLabels:checkoutProjectLabelRepository",
       tag: WS_METHODS.projectLabelsCheckoutRepository,
     }),
+    /** Delete this machine's checkout of a linked repository; the link stays. */
+    removeProjectLabelCheckout: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:projectLabels:removeProjectLabelCheckout",
+      tag: WS_METHODS.projectLabelsRemoveCheckout,
+    }),
     moveThreadProjectFolder: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:projectLabels:moveThreadProjectFolder",
       tag: WS_METHODS.projectLabelsMoveThread,

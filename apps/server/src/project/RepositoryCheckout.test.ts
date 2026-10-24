@@ -23,6 +23,7 @@ import * as NodePath from "node:path";
 import * as GitWorkflow from "../git/GitWorkflowService.ts";
 import * as Events from "../persistence/OrchestrationEventStore.ts";
 import * as Sqlite from "../persistence/Sqlite.ts";
+import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import { layerIdentity as layerSharedIdentity } from "../sync/testkit.ts";
 import * as ProjectLabelFolders from "../projectLabels/ProjectLabelFolders.ts";
 import * as ProjectLabelService from "../projectLabels/ProjectLabelService.ts";
@@ -53,6 +54,27 @@ function makeBareRemote(): string {
   git(seed, ["push", bare, "main"]);
   return bare;
 }
+
+/** The driver's `execute`, running real git with the test config. */
+const gitDriver = Layer.mock(GitVcsDriver.GitVcsDriver)({
+  execute: (input) =>
+    Effect.sync(() => {
+      const result = NodeChildProcess.spawnSync("git", [...input.args], {
+        cwd: input.cwd,
+        env: gitEnv,
+        encoding: "utf8",
+      });
+      return {
+        exitCode: (result.status ?? 1) as never,
+        stdout: result.stdout,
+        stderr: result.stderr,
+        stdoutTruncated: false,
+        stderrTruncated: false,
+      };
+    }),
+});
+// Unused by these flows beyond the run guard; a broken database is a test bug.
+const memoryDatabase = Sqlite.layerMemory.pipe(Layer.provide(NodeServices.layer), Layer.orDie);
 
 const tempRoot = () => NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "repository-checkout-"));
 
@@ -130,6 +152,8 @@ function harness(box: Box) {
         }),
         Layer.mock(GitWorkflow.GitWorkflowService)({ isRepository }),
         Layer.mock(ProjectLabelFolders.ProjectLabelFolders)({}),
+        gitDriver,
+        memoryDatabase,
         clones,
         Layer.mock(ProjectLabelService.ProjectLabelService)({
           list: () =>
@@ -216,6 +240,8 @@ const runDuringClone = Effect.gen(function* () {
         }),
         Layer.mock(GitWorkflow.GitWorkflowService)({ isRepository }),
         Layer.mock(ProjectLabelFolders.ProjectLabelFolders)({}),
+        gitDriver,
+        memoryDatabase,
         clones,
         Layer.mock(ProjectLabelService.ProjectLabelService)({
           list: () =>
@@ -443,6 +469,7 @@ function checkoutHarness(projectDir: string, box: Pick<Box, "cloneCalls">) {
       Layer.mergeAll(
         projects,
         Layer.mock(GitWorkflow.GitWorkflowService)({ isRepository }),
+        gitDriver,
         Layer.mock(ProjectLabelFolders.ProjectLabelFolders)({
           ensureForLabel: () =>
             Effect.sync(() => {
@@ -588,6 +615,100 @@ describe("RepositoryCheckout.checkoutRepository", () => {
         checkouts.checkoutRepository({ labelId: label.id, remote: "github.com/org/other" }),
       );
       expect(error.reason).toBe("not_linked");
+    }).pipe(Effect.provide(checkoutHarness(projectDir, { cloneCalls: 0 })));
+  });
+});
+
+describe("RepositoryCheckout.removeCheckout", () => {
+  /** A project linking `bare`, cloned here into its project folder. */
+  const clonedHere = (bare: string) =>
+    Effect.gen(function* () {
+      const label = yield* linkFromElsewhere(bare, "smile-express");
+      const checkouts = yield* RepositoryCheckout.RepositoryCheckout;
+      const { repositoryId } = yield* checkouts.checkoutRepository({
+        labelId: label.id,
+        remote: bare,
+      });
+      yield* waitForCloneToSettle(repositoryId);
+      return { label, repositoryId, checkouts };
+    });
+
+  it.effect("deletes the checkout and keeps the link, which clones back in place", () => {
+    const bare = makeBareRemote();
+    const projectDir = NodePath.join(tempRoot(), "Spawn");
+    const destination = NodePath.join(projectDir, "repos", "smile-express");
+    const box = { cloneCalls: 0 };
+    return Effect.gen(function* () {
+      const { label, repositoryId, checkouts } = yield* clonedHere(bare);
+      const labels = yield* ProjectLabelService.ProjectLabelService;
+      expect(yield* checkouts.removeCheckout({ labelId: label.id, repositoryId })).toEqual({
+        removed: true,
+      });
+      expect(NodeFS.existsSync(destination)).toBe(false);
+      const link = (yield* labels.read(label.id)).label.repositories?.[0];
+      expect(link).toMatchObject({ repositoryId, checkout: "missing" });
+      // Removing again finds nothing to remove; cloning again lands in place.
+      expect(yield* checkouts.removeCheckout({ labelId: label.id, repositoryId })).toEqual({
+        removed: false,
+      });
+      expect(yield* checkouts.checkoutRepository({ labelId: label.id, remote: bare })).toEqual({
+        repositoryId,
+      });
+      yield* waitForCloneToSettle(repositoryId);
+      expect(NodeFS.readFileSync(NodePath.join(destination, "README.md"), "utf8")).toBe("hello\n");
+      expect(box.cloneCalls).toBe(2);
+    }).pipe(Effect.provide(checkoutHarness(projectDir, box)));
+  });
+
+  it.effect("refuses while the checkout holds work found nowhere else", () => {
+    const bare = makeBareRemote();
+    const projectDir = NodePath.join(tempRoot(), "Spawn");
+    const destination = NodePath.join(projectDir, "repos", "smile-express");
+    return Effect.gen(function* () {
+      const { label, repositoryId, checkouts } = yield* clonedHere(bare);
+      const attempt = checkouts.removeCheckout({ labelId: label.id, repositoryId }).pipe(
+        Effect.flip,
+        Effect.map((error) => error.reason),
+      );
+
+      NodeFS.writeFileSync(NodePath.join(destination, "draft.md"), "wip\n");
+      expect(yield* attempt).toBe("uncommitted_changes");
+      git(destination, ["stash", "push", "--include-untracked", "-m", "wip"]);
+      expect(yield* attempt).toBe("uncommitted_changes");
+      git(destination, ["stash", "drop"]);
+
+      git(destination, [
+        "-c",
+        "user.name=T",
+        "-c",
+        "user.email=t@example.com",
+        "commit",
+        "--allow-empty",
+        "-m",
+        "local",
+      ]);
+      expect(yield* attempt).toBe("unpushed_commits");
+      git(destination, ["push", "origin", "HEAD"]);
+
+      git(destination, ["worktree", "add", NodePath.join(tempRoot(), "wt"), "-b", "feature"]);
+      expect(yield* attempt).toBe("has_worktrees");
+
+      expect(NodeFS.existsSync(NodePath.join(destination, "README.md"))).toBe(true);
+    }).pipe(Effect.provide(checkoutHarness(projectDir, { cloneCalls: 0 })));
+  });
+
+  it.effect("refuses while a turn runs in the repository", () => {
+    const bare = makeBareRemote();
+    const projectDir = NodePath.join(tempRoot(), "Spawn");
+    return Effect.gen(function* () {
+      const { label, repositoryId, checkouts } = yield* clonedHere(bare);
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`INSERT INTO orchestration_v2_projection_threads(thread_id, project_id, title, default_provider, runtime_mode, interaction_mode, created_at, updated_at, payload_json) VALUES ('thread:busy', ${repositoryId}, 'Busy', 'codex', 'full-access', 'default', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z', '{}')`;
+      yield* sql`INSERT INTO orchestration_v2_projection_runs(run_id, thread_id, ordinal, provider, status, requested_at, payload_json) VALUES ('run:busy', 'thread:busy', 1, 'codex', 'running', '2026-01-01T00:00:00.000Z', '{}')`;
+      const error = yield* Effect.flip(
+        checkouts.removeCheckout({ labelId: label.id, repositoryId }),
+      );
+      expect(error).toMatchObject({ reason: "thread_active" });
     }).pipe(Effect.provide(checkoutHarness(projectDir, { cloneCalls: 0 })));
   });
 });
