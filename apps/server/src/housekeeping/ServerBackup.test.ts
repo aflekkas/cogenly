@@ -7,7 +7,6 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
-import * as TestClock from "effect/testing/TestClock";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 
@@ -113,7 +112,7 @@ const testLayer = layer.pipe(
 );
 
 describe("ServerBackup.backupNow", () => {
-  it.effect("writes a private, readable backup of db, settings and secrets, then prunes", () =>
+  it.live("writes a private, readable backup of db, settings and secrets, then prunes", () =>
     Effect.gen(function* () {
       const config = yield* ServerConfig.ServerConfig;
       const fs = yield* FileSystem.FileSystem;
@@ -131,9 +130,6 @@ describe("ServerBackup.backupNow", () => {
       }
 
       const backup = yield* ServerBackup;
-      yield* TestClock.setTime(
-        DateTime.toEpochMillis(DateTime.makeUnsafe("2026-10-12T02:00:00.000Z")),
-      );
       const result = yield* backup.backupNow;
 
       expect(result.directory.startsWith(backupsDir)).toBe(true);
@@ -177,15 +173,12 @@ describe("ServerBackup.backupNow", () => {
     }).pipe(Effect.provide(testLayer)),
   );
 
-  it.effect("a failed backup leaves no dated backup folder behind", () =>
+  it.live("a failed backup leaves no dated backup folder behind", () =>
     Effect.gen(function* () {
       const config = yield* ServerConfig.ServerConfig;
       const path = yield* Path.Path;
       // No database seeded: the snapshot step fails.
       const backup = yield* ServerBackup;
-      yield* TestClock.setTime(
-        DateTime.toEpochMillis(DateTime.makeUnsafe("2026-10-12T02:00:00.000Z")),
-      );
       expect(yield* Effect.exit(backup.backupNow)).toMatchObject({ _tag: "Failure" });
       const backupsDir = path.join(config.baseDir, "backups");
       const entries = NodeFS.existsSync(backupsDir) ? NodeFS.readdirSync(backupsDir) : [];
