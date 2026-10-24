@@ -10,6 +10,8 @@ import {
   type DesktopAppActivationRequest,
   type DesktopAppEnvironmentAdded,
   type DesktopAppMachinesPaired,
+  type DesktopCliCommandLocation,
+  type DesktopCliCommandState,
 } from "@cogenly/contracts";
 import { resolveDesktopAppControlAddress } from "@cogenly/shared/desktopAppControl";
 import { parseAddEnvironmentRequest } from "@cogenly/shared/environmentLinks";
@@ -29,6 +31,8 @@ export const DESKTOP_APP_RESPONSE_TIMEOUT_MS = 17_000;
 export const DESKTOP_APP_ADD_ENVIRONMENT_TIMEOUT_MS = 10 * 60_000 + 15_000;
 /** Longer than the desktop's two-minute budget for pairing machines. */
 export const DESKTOP_APP_PAIR_MACHINES_TIMEOUT_MS = 2 * 60_000 + 15_000;
+/** Long enough for the user to answer macOS's admin prompt for a `/usr/local/bin` install. */
+export const DESKTOP_APP_CLI_COMMAND_TIMEOUT_MS = 3 * 60_000;
 const MAX_RESPONSE_BYTES = 64 * 1024;
 const isDesktopAppActivationResponse = Schema.is(DesktopAppActivationResponse);
 
@@ -196,6 +200,14 @@ export class DesktopAppControl extends Context.Service<
       readonly hub: string;
       readonly joining: string;
     }) => Effect.Effect<DesktopAppMachinesPaired, DesktopAppControlError>;
+    /**
+     * Reads, installs, or uninstalls the desktop app's `cogenly` command, as
+     * Settings does. A `system` install shows the user macOS's admin prompt.
+     */
+    readonly cliCommand: (input: {
+      readonly action: "status" | "install" | "uninstall";
+      readonly location?: DesktopCliCommandLocation | undefined;
+    }) => Effect.Effect<DesktopCliCommandState, DesktopAppControlError>;
   }
 >()("cogenly-server/environment/DesktopAppControl") {}
 
@@ -300,7 +312,27 @@ const makeAt = (addresses: DesktopAppControlAddresses) =>
       return response;
     });
 
-    return DesktopAppControl.of({ addEnvironment, pairMachines });
+    const cliCommand = Effect.fn("DesktopAppControl.cliCommand")(function* (input: {
+      readonly action: "status" | "install" | "uninstall";
+      readonly location?: DesktopCliCommandLocation | undefined;
+    }) {
+      const response = yield* send(
+        (requestId) => ({
+          version: DESKTOP_APP_ACTIVATION_PROTOCOL_VERSION,
+          requestId,
+          type: "cli-command",
+          action: input.action,
+          ...(input.location === undefined ? {} : { location: input.location }),
+        }),
+        input.action === "status"
+          ? DESKTOP_APP_RESPONSE_TIMEOUT_MS
+          : DESKTOP_APP_CLI_COMMAND_TIMEOUT_MS,
+      );
+      if (!("cliCommand" in response)) return yield* differentAnswer;
+      return response.cliCommand;
+    });
+
+    return DesktopAppControl.of({ addEnvironment, pairMachines, cliCommand });
   });
 
 /** The desktop app that shares this server's Cogenly home, as the desktop-managed server does. */

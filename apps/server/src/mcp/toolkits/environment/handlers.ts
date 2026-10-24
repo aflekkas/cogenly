@@ -60,7 +60,30 @@ export const addEnvironmentFailure = (error: DesktopAppControl.DesktopAppControl
     message: error.message,
   });
 
+/** How an agent hears why the desktop app did not read or change its `cogenly` command. */
+export const cliCommandFailure = (error: DesktopAppControl.DesktopAppControlError) =>
+  error._tag === "DesktopAppControlUnreachableError"
+    ? new OrchestratorMcpFailure({
+        code: "capability_denied",
+        message:
+          "The cogenly command is installed by the Cogenly desktop app on the computer this agent runs on, and none answered here. Ask the user to open the desktop app and try again, or to use Settings → General → About → cogenly command.",
+      })
+    : addEnvironmentFailure(error);
+
+const cliCommand = (input: {
+  readonly action: "status" | "install" | "uninstall";
+  readonly location?: "user" | "system" | undefined;
+}) =>
+  DesktopAppControl.DesktopAppControl.pipe(
+    Effect.flatMap((control) => control.cliCommand(input)),
+    Effect.mapError(cliCommandFailure),
+  );
+
 export const layer = McpToolAccess.toLayer(EnvironmentToolkit, {
+  cli_command_status: McpToolAccess.reads(() => cliCommand({ action: "status" })),
+  // Writes a launcher into the user's own PATH folder; a /usr/local/bin install also
+  // needs the user to approve macOS's admin prompt. Full-access work callers only.
+  cli_command_change: McpToolAccess.writesEnvironmentAsWork((input) => cliCommand(input)),
   machine_security_status: McpToolAccess.reads(() =>
     MachineSecurity.MachineSecurity.pipe(Effect.flatMap((security) => security.status)),
   ),

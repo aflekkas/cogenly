@@ -80,12 +80,14 @@ import {
   RotateCcwIcon,
   SettingsIcon,
   SquarePenIcon,
+  SquareTerminalIcon,
   SunIcon,
   FolderMinusIcon,
   TextSearchIcon,
   TimerOffIcon,
 } from "lucide-react";
 import { requestThreadFindOpen } from "./chat/threadFindActionBus";
+import { cliCommandDirectory, useDesktopCliCommand } from "../desktopCliCommand";
 import { effectiveSnoozed } from "@cogenly/client-runtime/state/thread-settled";
 import { useThreadActions } from "../hooks/useThreadActions";
 import {
@@ -692,6 +694,7 @@ function OpenCommandPaletteDialog(props: {
   const desktopLocalBootstraps = useDesktopLocalBootstraps();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const availableSettingsSearchItems = useAvailableSettingsSearchItems();
+  const cliCommand = useDesktopCliCommand();
   const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread } =
     useHandleNewThread();
   const paletteRouteTarget = useParams({
@@ -2688,6 +2691,39 @@ function OpenCommandPaletteDialog(props: {
       await navigate({ to: "/settings/machines", search: { add: true } });
     },
   });
+
+  // Desktop only. Installs where Settings recommends: ~/.local/bin, or /usr/local/bin with
+  // an admin prompt when ~/.local/bin is off PATH. Settings offers the other choice.
+  if (cliCommand) {
+    const { state, change } = cliCommand;
+    const cliSearchTerms = ["cogenly", "cli", "command line tool", "terminal", "shell", "path"];
+    if (state.status !== "installed" || !state.upToDate) {
+      const directory = cliCommandDirectory(state, state.recommendedLocation);
+      actionItems.push({
+        kind: "action",
+        value: "action:install-cli-command",
+        searchTerms: ["install", ...cliSearchTerms],
+        title: "Install cogenly command line tool",
+        description:
+          state.recommendedLocation === "system"
+            ? `${directory}, asks for your password`
+            : directory,
+        icon: <SquareTerminalIcon className={ITEM_ICON_CLASS} />,
+        run: () => change("install"),
+      });
+    }
+    if (state.installedPath !== null) {
+      actionItems.push({
+        kind: "action",
+        value: "action:uninstall-cli-command",
+        searchTerms: ["uninstall", "remove", ...cliSearchTerms],
+        title: "Uninstall cogenly command line tool",
+        description: state.installedPath,
+        icon: <SquareTerminalIcon className={ITEM_ICON_CLASS} />,
+        run: () => change("uninstall"),
+      });
+    }
+  }
 
   actionItems.push({
     kind: "action",

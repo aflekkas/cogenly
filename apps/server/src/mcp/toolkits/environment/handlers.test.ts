@@ -70,6 +70,8 @@ const mcpClient = McpSchema.McpServerClient.of({
 /** The environment toolkit on an MCP server whose desktop app records what it was asked. */
 const makeServer = (
   addEnvironment: DesktopAppControl.DesktopAppControl["Service"]["addEnvironment"],
+  cliCommand: DesktopAppControl.DesktopAppControl["Service"]["cliCommand"] = () =>
+    Effect.die("cli_command is not exercised here"),
 ) =>
   McpHttpServer.toolkitRegistration(EnvironmentToolkit, EnvironmentHandlers.layer).pipe(
     Layer.provideMerge(McpServer.McpServer.layer),
@@ -84,6 +86,7 @@ const makeServer = (
         Layer.succeed(DesktopAppControl.DesktopAppControl, {
           addEnvironment,
           pairMachines: () => Effect.die("machine_pair is not exercised here"),
+          cliCommand,
         }),
         Layer.succeed(MachineSecurity.MachineSecurity, {
           status: Effect.die("machine_security_status is not exercised here"),
@@ -194,6 +197,7 @@ it.effect("environment_preferences_update sets the projects root", () =>
           Layer.succeed(DesktopAppControl.DesktopAppControl, {
             addEnvironment: () => Effect.die("unused"),
             pairMachines: () => Effect.die("unused"),
+            cliCommand: () => Effect.die("unused"),
           }),
           Layer.succeed(MachineSecurity.MachineSecurity, { status: Effect.die("unused") }),
           Layer.mock(ChildProcessSpawner.ChildProcessSpawner)({}),
@@ -220,4 +224,104 @@ it.effect("environment_preferences_update sets the projects root", () =>
     expect(patches).toEqual([{ projectsRoot: "~/Work/projects" }]);
     expect(JSON.parse(text)).toMatchObject({ projectsRoot: "~/Work/projects" });
   }),
+);
+
+const installedCliCommand = {
+  supported: true,
+  status: "installed",
+  installedPath: "/usr/local/bin/cogenly",
+  appPath: "/Applications/Cogenly.app",
+  upToDate: true,
+  onPath: true,
+  userDirectory: "/Users/me/.local/bin",
+  userDirectoryOnPath: false,
+  systemDirectory: "/usr/local/bin",
+  recommendedLocation: "system",
+} as const;
+
+const callCliCommand = (
+  scope: McpInvocationContext.McpInvocationScope,
+  name: "cli_command_status" | "cli_command_change",
+  args: Record<string, unknown>,
+) =>
+  McpServer.McpServer.pipe(
+    Effect.flatMap((server) => server.callTool({ name, arguments: args })),
+    Effect.map(({ content }) =>
+      JSON.parse(content.map((part) => (part.type === "text" ? part.text : "")).join("")),
+    ),
+    Effect.provideService(McpInvocationContext.McpInvocationContext, scope),
+    Effect.provideService(McpSchema.McpServerClient, mcpClient),
+  );
+
+it.effect.each([
+  ["a full-access thread", threadCaller(fullAccessThreadId), { status: "installed" }],
+  ["a plan-mode thread", threadCaller(planThreadId), { code: "capability_denied" }],
+  ["a read-only client", readOnlyClient, { code: "capability_denied" }],
+] as const)("cli_command_change from %s", ([, scope, expected]) =>
+  Effect.gen(function* () {
+    const calls: Array<unknown> = [];
+    const outcome = yield* callCliCommand(scope, "cli_command_change", {
+      action: "install",
+      location: "system",
+    }).pipe(
+      Effect.provide(
+        makeServer(
+          () => Effect.die("unused"),
+          (input) =>
+            Effect.sync(() => {
+              calls.push(input);
+              return installedCliCommand;
+            }),
+        ),
+      ),
+    );
+    expect(outcome).toMatchObject(expected);
+    expect(calls).toEqual("status" in expected ? [{ action: "install", location: "system" }] : []);
+  }),
+);
+
+it.effect("cli_command_status is a read, open to read-only clients", () =>
+  callCliCommand(readOnlyClient, "cli_command_status", {}).pipe(
+    Effect.map((outcome) => expect(outcome).toEqual(installedCliCommand)),
+    Effect.provide(
+      makeServer(
+        () => Effect.die("unused"),
+        (input) =>
+          input.action === "status"
+            ? Effect.succeed(installedCliCommand)
+            : Effect.die("cli_command_status must only read"),
+      ),
+    ),
+  ),
+);
+
+it.effect.each([
+  [
+    "no desktop app answers",
+    new DesktopAppControl.DesktopAppControlUnreachableError({
+      candidateAddresses: ["/tmp/missing.sock"],
+      cause: new Error("ENOENT"),
+    }),
+    { code: "capability_denied", message: expect.stringContaining("Cogenly desktop app") },
+  ],
+  [
+    "the desktop app refuses",
+    new DesktopAppControl.DesktopAppControlRequestFailedError({
+      code: "cli-command-failed",
+      detail: "/Users/me/.local/bin/cogenly was not installed by Cogenly, so it was left alone.",
+    }),
+    { code: "orchestration_error", message: expect.stringContaining("left alone") },
+  ],
+] as const)("cli_command_change says when %s", ([, error, expected]) =>
+  callCliCommand(threadCaller(fullAccessThreadId), "cli_command_change", {
+    action: "install",
+  }).pipe(
+    Effect.map((outcome) => expect(outcome).toMatchObject(expected)),
+    Effect.provide(
+      makeServer(
+        () => Effect.die("unused"),
+        () => Effect.fail(error),
+      ),
+    ),
+  ),
 );

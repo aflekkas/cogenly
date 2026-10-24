@@ -22,9 +22,14 @@ import {
 } from "./sitePermissions.ts";
 
 import type {
-  DesktopAppActivationRequest,
   DesktopAppActivationResponse,
+  DesktopAppRendererRequest,
 } from "./desktopAppActivation.ts";
+import type {
+  DesktopCliCommandChangeResult,
+  DesktopCliCommandInstallInput,
+  DesktopCliCommandState,
+} from "./cliCommand.ts";
 
 export interface ContextMenuItem<T extends string = string> {
   id: T;
@@ -196,22 +201,6 @@ export const DesktopUpdateStateSchema = Schema.Struct({
   notAppliedVersion: Schema.optionalKey(Schema.String),
   manualDownloadUrl: Schema.optionalKey(Schema.String),
 });
-
-/** The desktop app's `t3` command on PATH, managed from Settings. */
-export const DesktopCliCommandStateSchema = Schema.Struct({
-  /** Only installed builds have a launcher to put on PATH. */
-  supported: Schema.Boolean,
-  /** The `t3` the app installed, or null when it is not installed. */
-  installedPath: Schema.NullOr(Schema.String),
-  /** Whether a new terminal finds it; false when the folder is not on PATH yet. */
-  onPath: Schema.Boolean,
-  /**
-   * Another `t3` a new terminal runs instead, earlier on PATH. Install refuses
-   * while it is there, since a link behind it would never run.
-   */
-  shadowedBy: Schema.optionalKey(Schema.String),
-});
-export type DesktopCliCommandState = typeof DesktopCliCommandStateSchema.Type;
 
 export interface DesktopUpdateActionResult {
   accepted: boolean;
@@ -1182,11 +1171,11 @@ export interface DesktopBridge {
   downloadUpdate: () => Promise<DesktopUpdateActionResult>;
   installUpdate: () => Promise<DesktopUpdateActionResult>;
   onUpdateState: (listener: (state: DesktopUpdateState) => void) => () => void;
-  /** Settings → `t3` command. Optional: older desktop builds lack it. */
+  /** Settings → `cogenly` command. Optional: older desktop builds lack it. */
   cliCommand?: {
     getState: () => Promise<DesktopCliCommandState>;
-    install: () => Promise<DesktopCliCommandState>;
-    uninstall: () => Promise<DesktopCliCommandState>;
+    install: (input?: DesktopCliCommandInstallInput) => Promise<DesktopCliCommandChangeResult>;
+    uninstall: () => Promise<DesktopCliCommandChangeResult>;
   };
   /** Present when the desktop shell accepts `t3 app` activation requests. */
   /**
@@ -1200,7 +1189,7 @@ export interface DesktopBridge {
   appActivation?: {
     setReady: (ready: boolean) => Promise<void>;
     complete: (response: DesktopAppActivationResponse) => Promise<void>;
-    onRequest: (listener: (request: DesktopAppActivationRequest) => void) => () => void;
+    onRequest: (listener: (request: DesktopAppRendererRequest) => void) => () => void;
   };
   /**
    * Desktop-only preview surface. Present iff the renderer is hosted by the

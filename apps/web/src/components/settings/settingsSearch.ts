@@ -485,7 +485,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "cli-command",
     title: "cogenly command",
     to: "/settings/general",
-    searchTerms: ["cli terminal shell path install command line"],
+    searchTerms: ["cli terminal shell path install uninstall command line tool usr local bin"],
     desktopOnly: true,
   },
   {
