@@ -13,8 +13,12 @@ changed yet. Editing a profile or schedule on another machine updates the
 owner's configuration without starting a second copy. Provider sign-ins and
 an agent's current fallback position stay on the owner.
 
-Repository checkouts and worktrees stay local. Syncing a repository link does
-not clone it on another machine. Settings, conversations, resource files,
+Repository checkouts and worktrees stay local, but every machine lists all of a
+project's repositories. One that is not on this machine yet is marked as needing
+a clone. Pick it, and it clones into the project's folder on this machine. A
+repository's folder is named after the repository, so it lands in the same
+place everywhere. Removing a repository from one machine frees the disk space
+and keeps it in the project, so you can clone it back later. Settings, conversations, resource files,
 vault items, integrations and memory facts do not sync yet. Pairing does not
 enable remote work launches. Matching project names are kept separately until
 you choose how to combine them.
