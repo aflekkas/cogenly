@@ -11,6 +11,7 @@
  */
 import {
   type MachineInfo,
+  type HybridClock,
   type SharedDocumentChange,
   VaultError,
   VaultPeerKey,
@@ -31,6 +32,7 @@ import * as Stream from "effect/Stream";
 import * as Machines from "../machines/Machines.ts";
 import * as PeerChannels from "../machines/PeerChannels.ts";
 import * as SharedState from "../sync/SharedState.ts";
+import { canonicalPeerJson } from "../machines/peerCrypto.ts";
 import * as Vault from "./Vault.ts";
 import * as VaultCrypto from "./VaultCrypto.ts";
 import * as VaultSyncCapture from "./VaultSyncCapture.ts";
@@ -75,6 +77,7 @@ interface AppliedRow {
   readonly sealed_digest: string | null;
   readonly state: "applied" | "waiting" | "deleted";
   readonly local_name: string | null;
+  readonly clock_json: string | null;
 }
 
 const make = Effect.gen(function* () {
@@ -180,8 +183,9 @@ const make = Effect.gen(function* () {
     digest: string | null,
     applied: AppliedRow["state"],
     localName: string | null,
+    clock: HybridClock | null,
   ) =>
-    sql`INSERT INTO vault_sync_applied(item_id, sealed_digest, state, local_name) VALUES (${itemId}, ${digest}, ${applied}, ${localName}) ON CONFLICT(item_id) DO UPDATE SET sealed_digest = excluded.sealed_digest, state = excluded.state, local_name = excluded.local_name`;
+    sql`INSERT INTO vault_sync_applied(item_id, sealed_digest, state, local_name, clock_json) VALUES (${itemId}, ${digest}, ${applied}, ${localName}, ${clock === null ? null : canonicalPeerJson(clock)}) ON CONFLICT(item_id) DO UPDATE SET sealed_digest = excluded.sealed_digest, state = excluded.state, local_name = excluded.local_name, clock_json = excluded.clock_json`;
 
   const vaultDocuments = Effect.gen(function* () {
     const ids = yield* sql<{
@@ -199,12 +203,15 @@ const make = Effect.gen(function* () {
    * Brings the local row to the newest revision this machine can read, edit
    * or delete alike, so every holder ends on the same one.
    */
-  const project = (
-    document: SharedDocumentChange,
-    applied: AppliedRow | undefined,
-    labels: ReadonlyMap<string, string>,
-  ) =>
+  const project = (snapshot: SharedDocumentChange, labels: ReadonlyMap<string, string>) =>
     Effect.gen(function* () {
+      // Read and project in one transaction with local vault mutations. A
+      // local edit committed after a pass began must not be overwritten by
+      // the pass's earlier snapshot.
+      const document = yield* state.get("vault", snapshot.id);
+      if (document === undefined) return;
+      const applied =
+        (yield* sql<AppliedRow>`SELECT * FROM vault_sync_applied WHERE item_id = ${document.id}`)[0];
       const local = (yield* sql<{
         name: string;
         portability: string;
@@ -218,7 +225,7 @@ const make = Effect.gen(function* () {
       if (opened._tag === "waiting") {
         // Nothing here is readable yet. An item already here stays as it is.
         if (applied === undefined || applied.state === "waiting")
-          yield* markApplied(document.id, null, "waiting", applied?.local_name ?? null);
+          yield* markApplied(document.id, null, "waiting", applied?.local_name ?? null, null);
         return;
       }
       const deleted = opened.content._tag === "deleted";
@@ -234,12 +241,13 @@ const make = Effect.gen(function* () {
           opened.digest,
           deleted ? "deleted" : "applied",
           applied?.local_name ?? null,
+          opened.clock,
         );
         return;
       }
       if (opened.content._tag === "deleted") {
         if (local && !local.deleted_at) yield* vault.removeSynced(document.id);
-        yield* markApplied(document.id, opened.digest, "deleted", null);
+        yield* markApplied(document.id, opened.digest, "deleted", null, opened.clock);
       } else {
         const { payload, extras } = opened.content;
         const localName = yield* vault.applySynced({
@@ -253,12 +261,14 @@ const make = Effect.gen(function* () {
           opened.digest,
           "applied",
           localName === payload.name ? null : localName,
+          opened.clock,
         );
       }
       yield* capture.forward(document, opened);
     }).pipe(
+      sql.withTransaction,
       Effect.mapError(storage),
-      Effect.withSpan("VaultSync.project", { attributes: { "vault.item_id": document.id } }),
+      Effect.withSpan("VaultSync.project", { attributes: { "vault.item_id": snapshot.id } }),
     );
 
   const reconcileOnce = (mode: ReconcileMode) =>
@@ -271,10 +281,9 @@ const make = Effect.gen(function* () {
           Effect.orElseSucceed((): ReadonlyArray<MachineInfo> => []),
         )).map((machine) => [machine.environmentId as string, machine.name]),
       );
-      const applied = yield* appliedRows;
       const documents = yield* vaultDocuments;
       for (const document of documents)
-        yield* project(document, applied.get(document.id), labels).pipe(
+        yield* project(document, labels).pipe(
           Effect.catch((error) =>
             Effect.logWarning("Vault sync could not apply an item", {
               itemId: document.id,
@@ -325,35 +334,33 @@ const make = Effect.gen(function* () {
     const itemsWaiting = documents.filter(
       (document) => applied.get(document.id)?.state === "waiting",
     ).length;
-    const entries = peers.map((peer) => {
-      const share = shares.find((row) => row.environmentId === peer.environmentId);
-      const seen = lastSeen.get(peer.environmentId);
-      // Counted only for a holder, and only through wraps it would accept.
-      const itemsShared = share?.peerSharing
-        ? current.filter(({ document, revision }) =>
-            VaultSyncCapture.hasRevision(
-              document,
-              peer.environmentId,
-              revision,
-              capture.environmentId,
-            ),
-          ).length
-        : 0;
-      return {
-        environmentId: peer.environmentId,
-        label: peer.name,
-        online: peer.online,
-        state: !share
-          ? "not_shared"
-          : seen?.keyChanged
-            ? "key_changed"
-            : share.peerSharing
-              ? "shared"
-              : "waiting_for_peer",
-        peerSharing: share ? share.peerSharing : (seen?.sharing ?? null),
-        itemsShared,
-      } satisfies VaultPeerSharing;
-    });
+    const entries = yield* Effect.forEach(peers, (peer) =>
+      Effect.gen(function* () {
+        const share = shares.find((row) => row.environmentId === peer.environmentId);
+        const seen = lastSeen.get(peer.environmentId);
+        // Only a wrap successfully produced here, for this pinned key, proves
+        // that this machine has shared this revision. Digests alone prove nothing.
+        const itemsShared = share?.peerSharing
+          ? (yield* Effect.filter(current, ({ document, revision }) =>
+              capture.hasRevision(document, share, revision.digest),
+            )).length
+          : 0;
+        return {
+          environmentId: peer.environmentId,
+          label: peer.name,
+          online: peer.online,
+          state: !share
+            ? "not_shared"
+            : seen?.keyChanged
+              ? "key_changed"
+              : share.peerSharing
+                ? "shared"
+                : "waiting_for_peer",
+          peerSharing: share ? share.peerSharing : (seen?.sharing ?? null),
+          itemsShared,
+        } satisfies VaultPeerSharing;
+      }),
+    );
     return { peers: entries, itemsShared: current.length, itemsWaiting };
   }).pipe(Effect.mapError(storage), Effect.withSpan("VaultSync.sharingStatus"));
 

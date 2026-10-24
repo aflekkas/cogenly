@@ -38,7 +38,17 @@ export default Effect.gen(function* () {
     item_id TEXT PRIMARY KEY,
     sealed_digest TEXT,
     state TEXT NOT NULL CHECK(state IN ('applied','waiting','deleted')),
-    local_name TEXT
+    local_name TEXT,
+    clock_json TEXT
+  )`;
+  // Exact wraps this machine produced successfully. A copied digest or a
+  // well-shaped ciphertext is not evidence that another recipient can open it.
+  yield* sql`CREATE TABLE vault_sync_wraps (
+    item_id TEXT NOT NULL,
+    recipient TEXT NOT NULL,
+    public_key TEXT NOT NULL,
+    wrap_json TEXT NOT NULL,
+    PRIMARY KEY(item_id, recipient)
   )`;
   yield* sql`ALTER TABLE vault_items ADD COLUMN portability TEXT NOT NULL DEFAULT 'shared' CHECK(portability IN ('shared','machine'))`;
   // Non-secret state other features keep with an item and sync inside its payload.

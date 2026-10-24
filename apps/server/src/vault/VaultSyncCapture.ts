@@ -7,7 +7,7 @@
  */
 import {
   type EnvironmentId,
-  type HybridClock,
+  HybridClock,
   IsoDateTime,
   SharedStateError,
   type SharedDocumentChange,
@@ -115,6 +115,7 @@ export interface OpenedVaultDocument {
   readonly digest: string;
   readonly author: string;
   readonly dataKey: Uint8Array;
+  readonly clock: HybridClock;
   readonly content: VaultRevisionContent;
 }
 
@@ -151,22 +152,6 @@ export const revisionsOf = (document: SharedDocumentChange): ReadonlyArray<Vault
         : [];
     })
     .toSorted((left, right) => compareClock(right.clock, left.clock));
-
-/**
- * Whether `recipient` has a wrap for this revision that it would accept: one
- * made by itself, by `self` (a holder it shares with), or by the revision's
- * author. Wraps from anyone else, junk included, do not count.
- */
-export const hasRevision = (
-  document: SharedDocumentChange,
-  recipient: string,
-  revision: { readonly digest: string; readonly author: string },
-  self: string,
-) =>
-  [recipient, self, revision.author].some((by) => {
-    const wrap = decodeVaultWrap(document.fields[vaultWrapKey(recipient, by)]);
-    return Option.isSome(wrap) && wrap.value.sealedDigest === revision.digest;
-  });
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -250,7 +235,13 @@ export class VaultSyncCapture extends Context.Service<
     readonly capture: (source: VaultSyncSource) => Effect.Effect<void, VaultError>;
     /** The newest revision this machine can open with a wrap from itself or a holder. */
     readonly open: (document: SharedDocumentChange) => Effect.Effect<OpenResult, VaultError>;
-    /** Wraps that revision for every holder that lacks it. */
+    /** Verifies a current wrap against the exact bytes successfully made here for this key. */
+    readonly hasRevision: (
+      document: SharedDocumentChange,
+      recipient: { readonly environmentId: string; readonly publicKey: string },
+      digest: string,
+    ) => Effect.Effect<boolean, VaultError>;
+    /** Wraps that revision for this machine and every holder that lacks it. */
     readonly forward: (
       document: SharedDocumentChange,
       opened: OpenedVaultDocument,
@@ -318,10 +309,11 @@ const make = Effect.gen(function* () {
           recipient: recipient.environmentId,
           recipientPublicKey: recipient.publicKey,
         });
-        if (Option.isSome(wrap))
+        if (Option.isSome(wrap)) {
           fields[vaultWrapKey(recipient.environmentId, environmentId)] =
             wrap.value as unknown as Schema.Json;
-        else failed.push(recipient.environmentId);
+          yield* sql`INSERT INTO vault_sync_wraps(item_id, recipient, public_key, wrap_json) VALUES (${itemId}, ${recipient.environmentId}, ${recipient.publicKey}, ${canonicalPeerJson(wrap.value)}) ON CONFLICT(item_id, recipient) DO UPDATE SET public_key = excluded.public_key, wrap_json = excluded.wrap_json`;
+        } else failed.push(recipient.environmentId);
       }
       for (const peer of failed)
         yield* Effect.logWarning("Vault sync could not wrap an item for a machine", {
@@ -336,12 +328,42 @@ const make = Effect.gen(function* () {
     digest: string,
     applied: "applied" | "deleted",
     localName: string | null,
+    clock: HybridClock,
   ) =>
-    sql`INSERT INTO vault_sync_applied(item_id, sealed_digest, state, local_name) VALUES (${itemId}, ${digest}, ${applied}, ${localName}) ON CONFLICT(item_id) DO UPDATE SET sealed_digest = excluded.sealed_digest, state = excluded.state, local_name = excluded.local_name`;
+    sql`INSERT INTO vault_sync_applied(item_id, sealed_digest, state, local_name, clock_json) VALUES (${itemId}, ${digest}, ${applied}, ${localName}, ${encodeJson(clock)}) ON CONFLICT(item_id) DO UPDATE SET sealed_digest = excluded.sealed_digest, state = excluded.state, local_name = excluded.local_name, clock_json = excluded.clock_json`;
+
+  const hasRevision: VaultSyncCapture["Service"]["hasRevision"] = (document, recipient, digest) =>
+    Effect.gen(function* () {
+      const raw = document.fields[vaultWrapKey(recipient.environmentId, environmentId)];
+      const wrap = Option.getOrUndefined(decodeVaultWrap(raw));
+      if (wrap?.sealedDigest !== digest) return false;
+      const rows = yield* sql<{
+        public_key: string;
+        wrap_json: string;
+      }>`SELECT public_key, wrap_json FROM vault_sync_wraps WHERE item_id = ${document.id} AND recipient = ${recipient.environmentId}`;
+      return (
+        rows[0]?.public_key === recipient.publicKey && rows[0].wrap_json === canonicalPeerJson(raw)
+      );
+    }).pipe(Effect.mapError(vaultError));
 
   const open: VaultSyncCapture["Service"]["open"] = (document) =>
     Effect.gen(function* () {
-      const revisions = revisionsOf(document);
+      const previous = (yield* sql<{
+        clock_json: string | null;
+        sealed_digest: string | null;
+      }>`SELECT clock_json, sealed_digest FROM vault_sync_applied WHERE item_id = ${document.id}`)[0];
+      const previousClock = previous?.clock_json
+        ? yield* Schema.decodeEffect(Schema.fromJsonString(HybridClock))(previous.clock_json).pipe(
+            Effect.mapError(vaultError),
+          )
+        : undefined;
+      // Losing trust in a peer or receiving an incomplete envelope cannot roll
+      // back a revision already projected here, including an authenticated delete.
+      const revisions = revisionsOf(document).filter((revision) => {
+        if (previousClock === undefined) return true;
+        const order = compareClock(revision.clock, previousClock);
+        return order > 0 || (order === 0 && revision.digest === previous?.sealed_digest);
+      });
       if (revisions.length === 0) return { _tag: "missing" } as const;
       const pair = yield* keyPair;
       // Mutual consent: only wraps made here or by a holder this owner shares with.
@@ -384,19 +406,21 @@ const make = Effect.gen(function* () {
             digest: revision.digest,
             author: revision.author,
             dataKey: opened.value.dataKey,
+            clock: revision.clock,
             content,
           } as const;
         }
       return { _tag: "waiting" } as const;
-    });
+    }).pipe(Effect.mapError(vaultError));
 
   const forward: VaultSyncCapture["Service"]["forward"] = (document, opened) =>
     Effect.gen(function* () {
-      const missing = (yield* holders).filter(
-        (holder) => !hasRevision(document, holder.environmentId, opened, environmentId),
+      const pair = yield* keyPair;
+      const recipients = [{ environmentId, publicKey: pair.publicKey }, ...(yield* holders)];
+      const missing = yield* Effect.filter(recipients, (recipient) =>
+        hasRevision(document, recipient, opened.digest).pipe(Effect.map((present) => !present)),
       );
       if (missing.length === 0) return;
-      const pair = yield* keyPair;
       const { fields } = yield* wrapsFor(
         document.id,
         opened.digest,
@@ -407,6 +431,8 @@ const make = Effect.gen(function* () {
       if (Object.keys(fields).length > 0)
         yield* state.write("vault", document.id, fields).pipe(Effect.mapError(vaultError));
     }).pipe(
+      sql.withTransaction,
+      Effect.mapError(vaultError),
       Effect.withSpan("VaultSyncCapture.forward", { attributes: { "vault.item_id": document.id } }),
     );
 
@@ -416,9 +442,11 @@ const make = Effect.gen(function* () {
       const pair = yield* keyPair;
       const recipients = [{ environmentId, publicKey: pair.publicKey }, ...(yield* holders)];
       let digest = "";
+      let revisionClock: HybridClock | undefined;
       yield* state
         .writeBuilt("vault", itemId, (clock) =>
           Effect.gen(function* () {
+            revisionClock = clock;
             // A fresh data key per revision: a revoked machine's old key opens nothing new.
             const dataKey = VaultCrypto.randomDataKey();
             const sealed = yield* Effect.try({
@@ -433,7 +461,13 @@ const make = Effect.gen(function* () {
               catch: (cause) => new SharedStateError({ reason: "invalid-document", cause }),
             });
             digest = VaultCrypto.sealedDigestOf(environmentId, sealed);
-            const wraps = yield* wrapsFor(itemId, digest, dataKey, pair.privateKey, recipients);
+            const wraps = yield* wrapsFor(
+              itemId,
+              digest,
+              dataKey,
+              pair.privateKey,
+              recipients,
+            ).pipe(Effect.mapError((cause) => new SharedStateError({ reason: "storage", cause })));
             if (!wraps.wrappedForSelf)
               return yield* new SharedStateError({ reason: "invalid-document" });
             return {
@@ -443,7 +477,7 @@ const make = Effect.gen(function* () {
           }),
         )
         .pipe(Effect.mapError(vaultError));
-      return digest;
+      return { digest, clock: revisionClock! };
     });
 
   const capture: VaultSyncCapture["Service"]["capture"] = (source) =>
@@ -468,8 +502,8 @@ const make = Effect.gen(function* () {
       if (source.deleted) {
         if (document && opened._tag === "opened" && opened.content._tag === "deleted")
           return yield* forward(document, opened);
-        const digest = yield* writeRevision(source.id, encodeJson(DELETION));
-        yield* recordApplied(source.id, digest, "deleted", null);
+        const revision = yield* writeRevision(source.id, encodeJson(DELETION));
+        yield* recordApplied(source.id, revision.digest, "deleted", null, revision.clock);
         return;
       }
       const applied = yield* sql<{
@@ -492,8 +526,14 @@ const make = Effect.gen(function* () {
         if (contentKey(current.raw) === contentKey(sealedPayload))
           return yield* forward(document, opened);
       }
-      const digest = yield* writeRevision(source.id, encodeJson(sealedPayload));
-      yield* recordApplied(source.id, digest, "applied", keepSyncedName ? localName : null);
+      const revision = yield* writeRevision(source.id, encodeJson(sealedPayload));
+      yield* recordApplied(
+        source.id,
+        revision.digest,
+        "applied",
+        keepSyncedName ? localName : null,
+        revision.clock,
+      );
     }).pipe(
       Effect.mapError(vaultError),
       Effect.withSpan("VaultSyncCapture.capture", { attributes: { "vault.item_id": source.id } }),
@@ -505,6 +545,7 @@ const make = Effect.gen(function* () {
     recordedShares,
     shares,
     holders,
+    hasRevision,
     bindPairings: (current) =>
       Effect.acquireRelease(Ref.set(pairings, current), () => Ref.set(pairings, unbound)),
     capture,

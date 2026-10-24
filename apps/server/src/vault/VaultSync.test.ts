@@ -21,7 +21,7 @@ import * as PeerChannels from "../machines/PeerChannels.ts";
 import * as Sqlite from "../persistence/Sqlite.ts";
 import { compareClock } from "../sync/merge.ts";
 import * as VaultCrypto from "./VaultCrypto.ts";
-import { hasRevision, revisionsOf } from "./VaultSyncCapture.ts";
+import { revisionsOf } from "./VaultSyncCapture.ts";
 import {
   Network,
   type VaultNode as Node,
@@ -903,7 +903,9 @@ describe("machines that do not hold the vault cannot delete, freeze or read item
       yield* settle(hub, [spoke]);
       const document = yield* documentOf(hub, item.id);
       const newest = revisionsOf(document)[0]!;
-      expect(hasRevision(document, hub.environmentId, newest, spoke.environmentId)).toBe(false);
+      expect(
+        yield* spoke.capture.hasRevision(document, yield* recipientOf(hub), newest.digest),
+      ).toBe(false);
       expect(yield* reveal(hub, item.id)).toBe("bank-password-1");
       expect((yield* spoke.sync.sharingStatus).peers[0]?.state).toBe("waiting_for_peer");
     }).pipe(Effect.scoped),
@@ -973,7 +975,9 @@ describe("machines that do not hold the vault cannot delete, freeze or read item
       const document = yield* documentOf(hub, item.id);
       const newest = revisionsOf(document)[0]!;
       expect(newest.author).toBe(hub.environmentId);
-      expect(hasRevision(document, a.environmentId, newest, hub.environmentId)).toBe(false);
+      expect(yield* hub.capture.hasRevision(document, yield* recipientOf(a), newest.digest)).toBe(
+        false,
+      );
 
       // Nor does A take a revision the hub wraps for it under the old share.
       yield* sealAs(hub, item.id, forgedPayload, [yield* recipientOf(a)]);
@@ -1005,6 +1009,98 @@ describe("machines that do not hold the vault cannot delete, freeze or read item
         );
       expect(yield* lengthOf(short.id)).toBe(yield* lengthOf(long.id));
     }).pipe(Effect.scoped),
+  );
+});
+
+describe("authenticated revision continuity", () => {
+  it.effect(
+    "ending sharing keeps the newest copied edit and never resurrects a copied delete",
+    () =>
+      Effect.gen(function* () {
+        const network = new Network();
+        const hub = yield* startNode(network, "Server");
+        const spoke = yield* startNode(network, "Laptop");
+        network.pair(hub, spoke);
+        yield* share(spoke, hub);
+        yield* share(hub, spoke);
+        const { item } = yield* spoke.vault.create(login("Mail", "mail-original"));
+        const removed = (yield* spoke.vault.create(login("Deleted", "delete-original"))).item;
+        yield* settle(hub, [spoke]);
+        yield* hub.vault.update({ id: item.id, secretFields: { password: "mail-newest" } });
+        yield* hub.vault.delete({ id: removed.id });
+        yield* settle(hub, [spoke]);
+        yield* spoke.sync.setPeerSharing({ environmentId: hub.environmentId, enabled: false });
+        yield* settle(hub, [spoke]);
+        expect(yield* reveal(spoke, item.id)).toBe("mail-newest");
+        expect((yield* Effect.flip(reveal(spoke, removed.id))).reason).toBe("not_found");
+        yield* spoke.sync.reconcile("full");
+        expect(yield* reveal(spoke, item.id)).toBe("mail-newest");
+        expect((yield* Effect.flip(reveal(spoke, removed.id))).reason).toBe("not_found");
+      }).pipe(Effect.scoped),
+  );
+
+  it.effect(
+    "status rejects a copied wrap for the wrong recipient and reconcile repairs fan-out",
+    () =>
+      Effect.gen(function* () {
+        const network = new Network();
+        const hub = yield* startNode(network, "Server");
+        const spoke = yield* startNode(network, "Laptop");
+        network.pair(hub, spoke);
+        yield* share(spoke, hub);
+        yield* share(hub, spoke);
+        const { item } = yield* hub.vault.create(login("Mail", "mail-first"));
+        yield* settle(hub, [spoke]);
+        yield* hub.vault.update({ id: item.id, secretFields: { password: "mail-next" } });
+        const document = yield* documentOf(hub, item.id);
+        // This ciphertext is genuine and names the right revision, but opens
+        // only for the hub. Shape and digest checks would count it for the spoke.
+        yield* hub.state.write("vault", item.id, {
+          [`wrap:${spoke.environmentId}:${hub.environmentId}`]:
+            document.fields[`wrap:${hub.environmentId}:${hub.environmentId}`]!,
+        });
+        expect((yield* hub.sync.sharingStatus).peers[0]?.itemsShared).toBe(0);
+        yield* settle(hub, [spoke]);
+        expect(yield* reveal(spoke, item.id)).toBe("mail-next");
+        expect((yield* hub.sync.sharingStatus).peers[0]?.itemsShared).toBe(1);
+      }).pipe(Effect.scoped),
+  );
+
+  it.effect(
+    "each new revision sends its ciphertext, nonce and all holder wraps in one change",
+    () =>
+      Effect.gen(function* () {
+        const network = new Network();
+        const hub = yield* startNode(network, "Server");
+        const a = yield* startNode(network, "Laptop");
+        const b = yield* startNode(network, "Desktop");
+        for (const spoke of [a, b]) {
+          network.pair(hub, spoke);
+          yield* share(spoke, hub);
+          yield* share(hub, spoke);
+        }
+        const { item } = yield* hub.vault.create(login("Mail", "mail-first"));
+        yield* settle(hub, [a, b]);
+        const cursor = (yield* a.state.cursors(hub.environmentId)).received;
+        yield* hub.vault.update({ id: item.id, secretFields: { password: "mail-next" } });
+        const batch = yield* hub.state.readBatch(cursor, a.environmentId, false);
+        const change = batch.changes.find((entry) => entry.fields[`sealed:${hub.environmentId}`])!;
+        const sealed = change.fields[`sealed:${hub.environmentId}`];
+        expect(sealed).toMatchObject({
+          v: 1,
+          nonce: expect.any(String),
+          ciphertext: expect.any(String),
+        });
+        const digest = VaultCrypto.sealedDigestOf(hub.environmentId, sealed);
+        for (const recipient of [hub, a, b]) {
+          const key = `wrap:${recipient.environmentId}:${hub.environmentId}`;
+          expect(change.fields[key]).toMatchObject({ v: 1, sealedDigest: digest });
+          expect(change.clocks[key]).toEqual(change.clocks[`sealed:${hub.environmentId}`]);
+        }
+        yield* a.state.receive(batch, hub.environmentId, true);
+        yield* a.sync.reconcile("incoming");
+        expect(yield* reveal(a, item.id)).toBe("mail-next");
+      }).pipe(Effect.scoped),
   );
 });
 
