@@ -13,9 +13,9 @@ import { useEnvironments, usePrimaryEnvironment } from "../state/environments";
 import {
   clientPreferenceValues,
   clientSettingsPatchFromPreferences,
-  planClientPreferenceSync,
+  planClientPreferenceConnectionSync,
   settleClientPreferenceWrite,
-  type ClientPreferenceSyncBase,
+  type ClientPreferenceConnectionState,
 } from "../sharedClientPreferences";
 
 /** Keep first-paint and imperative client caches in step with universal settings. */
@@ -35,8 +35,9 @@ export function SharedClientPreferencesSync() {
   const hydrated = useClientSettingsHydrated();
   const { preferences } = useAppearancePreferences();
   const { appearanceMode, setAppearanceMode } = useTheme();
-  const base = useRef<{ environmentId: typeof environmentId; values: ClientPreferenceSyncBase }>({
-    environmentId,
+  const base = useRef<ClientPreferenceConnectionState>({
+    environmentId: null,
+    connected: false,
     values: new Map(),
   });
   const destination = useRef(environmentId);
@@ -48,7 +49,7 @@ export function SharedClientPreferencesSync() {
     }
   }, [environmentId]);
   const applyLocal = useCallback(
-    (apply: ReturnType<typeof planClientPreferenceSync>["apply"]) => {
+    (apply: ReturnType<typeof planClientPreferenceConnectionSync>["apply"]) => {
       const localPatch = clientSettingsPatchFromPreferences(apply);
       if (Object.keys(localPatch).length) void persistClientSettingsPatch(localPatch);
       const mode = apply.clientAppearanceMode;
@@ -72,15 +73,15 @@ export function SharedClientPreferencesSync() {
     [setAppearanceMode],
   );
   useEffect(() => {
-    if (base.current.environmentId !== environmentId)
-      base.current = { environmentId, values: new Map() };
-    if (!settings || !hydrated || environmentId === null) return;
-    const plan = planClientPreferenceSync(
+    if (!hydrated) return;
+    const plan = planClientPreferenceConnectionSync(
       clientPreferenceValues(client, preferences, appearanceMode),
       settings,
-      base.current.values,
+      environmentId,
+      base.current,
     );
-    base.current.values = plan.next;
+    base.current = plan.next;
+    if (!settings || environmentId === null) return;
     applyLocal(plan.apply);
     if (Object.keys(plan.patch).length) {
       const generation = destinationGeneration.current;
@@ -95,9 +96,9 @@ export function SharedClientPreferencesSync() {
           base.current.values,
           plan.patch,
           result._tag === "Success" ? result.value : null,
-          plan.next,
+          plan.next.values,
         );
-        base.current.values = settled.next;
+        base.current = { ...base.current, values: settled.next };
         applyLocal(settled.apply);
         if (settled.rejected)
           toastManager.add({

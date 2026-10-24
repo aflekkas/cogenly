@@ -3,6 +3,7 @@ import {
   UNIVERSAL_CLIENT_PREFERENCE_KEYS,
   UNIVERSAL_CLIENT_SETTING_BINDINGS,
   type ClientSettings,
+  type EnvironmentId,
   type ServerSettings,
   type ServerSettingsPatch,
 } from "@t3tools/contracts";
@@ -22,6 +23,7 @@ export type ClientPreferenceSyncBase = ReadonlyMap<
     readonly remote: Schema.Json | null;
     readonly pending?: Schema.Json;
     readonly pendingFrom?: Schema.Json;
+    readonly pendingMigration?: boolean;
     readonly applyingFrom?: Schema.Json;
   }
 >;
@@ -64,6 +66,7 @@ export function planClientPreferenceSync(
   local: PreferenceValues,
   shared: ServerSettings,
   previous: ClientPreferenceSyncBase,
+  retryPending = false,
 ) {
   const apply: Partial<PreferenceValues> = {};
   const publish: Partial<PreferenceValues> = {};
@@ -80,10 +83,15 @@ export function planClientPreferenceSync(
       next.set(key, { local: value, remote, pending: value, pendingFrom: before.local });
     } else if (
       before?.pending !== undefined &&
-      same(remote, before.remote) &&
+      (retryPending || same(remote, before.remote)) &&
+      (!before.pendingMigration || remote === null) &&
       !same(remote, before.pending)
     ) {
-      next.set(key, before);
+      if (retryPending) {
+        if (before.pendingMigration) migrate[key] = before.pending;
+        else publish[key] = before.pending;
+      }
+      next.set(key, retryPending ? { ...before, remote } : before);
     } else if (remote !== null) {
       if (!same(value, remote)) apply[key] = remote;
       next.set(key, {
@@ -93,7 +101,13 @@ export function planClientPreferenceSync(
       });
     } else if (!before && !same(value, defaults[key])) {
       migrate[key] = value;
-      next.set(key, { local: value, remote, pending: value, pendingFrom: value });
+      next.set(key, {
+        local: value,
+        remote,
+        pending: value,
+        pendingFrom: value,
+        pendingMigration: true,
+      });
     } else {
       next.set(key, { local: value, remote });
     }
@@ -103,6 +117,38 @@ export function planClientPreferenceSync(
     ...(Object.keys(migrate).length ? { migrateClientPreferences: migrate } : {}),
   } as ServerSettingsPatch;
   return { apply, patch, next };
+}
+
+export interface ClientPreferenceConnectionState {
+  readonly environmentId: EnvironmentId | null;
+  readonly connected: boolean;
+  readonly values: ClientPreferenceSyncBase;
+}
+
+/** Reconcile client caches with the currently connected destination. */
+export function planClientPreferenceConnectionSync(
+  local: PreferenceValues,
+  shared: ServerSettings | undefined,
+  environmentId: EnvironmentId | null,
+  previous: ClientPreferenceConnectionState,
+) {
+  // A missing destination means a temporary disconnect, not a new account.
+  // Keep both the last agreement and any unacknowledged local write.
+  if (!shared || environmentId === null)
+    return {
+      apply: {} as Partial<PreferenceValues>,
+      patch: {} as ServerSettingsPatch,
+      next: { ...previous, connected: false },
+    };
+  const sameEnvironment = previous.environmentId === environmentId;
+  const values = sameEnvironment ? previous.values : new Map();
+  const plan = planClientPreferenceSync(
+    local,
+    shared,
+    values,
+    sameEnvironment && !previous.connected,
+  );
+  return { ...plan, next: { environmentId, connected: true, values: plan.next } };
 }
 
 /** Convert received shared fields back into the existing local cache's patch. */

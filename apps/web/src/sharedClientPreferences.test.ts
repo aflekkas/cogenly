@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vite-plus/test";
-import { DEFAULT_CLIENT_SETTINGS, DEFAULT_SERVER_SETTINGS } from "@t3tools/contracts";
+import {
+  DEFAULT_CLIENT_SETTINGS,
+  DEFAULT_SERVER_SETTINGS,
+  EnvironmentId,
+} from "@t3tools/contracts";
 import { splitSharedServerPatch } from "@t3tools/client-runtime/state/shared-settings";
 import { DEFAULT_APPEARANCE_PREFERENCES } from "./appearancePreferences";
 import { DEFAULT_APPEARANCE_MODE } from "./theme";
@@ -7,6 +11,7 @@ import {
   clientPreferenceValues,
   clientSettingsPatchFromPreferences,
   planClientPreferenceSync,
+  planClientPreferenceConnectionSync,
   settleClientPreferenceWrite,
 } from "./sharedClientPreferences";
 
@@ -17,6 +22,124 @@ const defaults = clientPreferenceValues(
 );
 
 describe("universal client preferences", () => {
+  it("publishes offline edits on reconnect instead of restoring the stale server value", () => {
+    const environmentId = EnvironmentId.make("machine-a");
+    const shared = { ...DEFAULT_SERVER_SETTINGS, clientAppearanceAccent: "blue" as const };
+    const first = planClientPreferenceConnectionSync(defaults, shared, environmentId, {
+      environmentId: null,
+      connected: false,
+      values: new Map(),
+    });
+    const local = { ...defaults, ...first.apply };
+    const observed = planClientPreferenceConnectionSync(local, shared, environmentId, first.next);
+    const offline = planClientPreferenceConnectionSync(local, undefined, null, observed.next);
+    const edited = { ...local, clientAppearanceAccent: "orange" };
+    const stillOffline = planClientPreferenceConnectionSync(edited, undefined, null, offline.next);
+    const reconnect = planClientPreferenceConnectionSync(
+      edited,
+      shared,
+      environmentId,
+      stillOffline.next,
+    );
+    expect(reconnect.apply).toEqual({});
+    expect(reconnect.patch).toEqual({ clientAppearanceAccent: "orange" });
+  });
+
+  it("retries an unacknowledged preference write after a disconnect", () => {
+    const environmentId = EnvironmentId.make("machine-a");
+    const shared = { ...DEFAULT_SERVER_SETTINGS, clientAppearanceAccent: "blue" as const };
+    const first = planClientPreferenceConnectionSync(defaults, shared, environmentId, {
+      environmentId: null,
+      connected: false,
+      values: new Map(),
+    });
+    const observed = planClientPreferenceConnectionSync(
+      { ...defaults, ...first.apply },
+      shared,
+      environmentId,
+      first.next,
+    );
+    const local = { ...defaults, ...first.apply, clientAppearanceAccent: "orange" };
+    const write = planClientPreferenceConnectionSync(local, shared, environmentId, observed.next);
+    expect(write.patch).toEqual({ clientAppearanceAccent: "orange" });
+    const offline = planClientPreferenceConnectionSync(local, undefined, null, write.next);
+    const reconnect = planClientPreferenceConnectionSync(
+      local,
+      shared,
+      environmentId,
+      offline.next,
+    );
+    expect(reconnect.apply).toEqual({});
+    expect(reconnect.patch).toEqual(write.patch);
+    const acknowledged = planClientPreferenceConnectionSync(
+      local,
+      { ...shared, clientAppearanceAccent: "orange" },
+      environmentId,
+      reconnect.next,
+    );
+    expect(acknowledged.patch).toEqual({});
+    expect(acknowledged.apply).toEqual({});
+    const switched = planClientPreferenceConnectionSync(
+      local,
+      shared,
+      EnvironmentId.make("machine-b"),
+      acknowledged.next,
+    );
+    expect(switched.apply).toEqual({ clientAppearanceAccent: "blue" });
+    expect(switched.patch).toEqual({});
+  });
+
+  it("keeps an interrupted local edit when a peer also edits during the disconnect", () => {
+    const environmentId = EnvironmentId.make("machine-a");
+    const shared = { ...DEFAULT_SERVER_SETTINGS, clientAppearanceAccent: "blue" as const };
+    const first = planClientPreferenceConnectionSync(defaults, shared, environmentId, {
+      environmentId: null,
+      connected: false,
+      values: new Map(),
+    });
+    const applied = { ...defaults, ...first.apply };
+    const observed = planClientPreferenceConnectionSync(applied, shared, environmentId, first.next);
+    const local = { ...applied, clientAppearanceAccent: "orange" };
+    const write = planClientPreferenceConnectionSync(local, shared, environmentId, observed.next);
+    const offline = planClientPreferenceConnectionSync(local, undefined, null, write.next);
+    const peer = { ...shared, clientAppearanceAccent: "green" as const };
+    const reconnect = planClientPreferenceConnectionSync(local, peer, environmentId, offline.next);
+    expect(reconnect.patch).toEqual({ clientAppearanceAccent: "orange" });
+    expect(reconnect.apply).toEqual({});
+    const waiting = planClientPreferenceConnectionSync(local, peer, environmentId, reconnect.next);
+    expect(waiting.apply).toEqual({});
+    expect(waiting.patch).toEqual({});
+  });
+
+  it("keeps migration conditional when retrying after a disconnect", () => {
+    const environmentId = EnvironmentId.make("machine-a");
+    const local = { ...defaults, clientAppearanceAccent: "blue" };
+    const first = planClientPreferenceConnectionSync(
+      local,
+      DEFAULT_SERVER_SETTINGS,
+      environmentId,
+      { environmentId: null, connected: false, values: new Map() },
+    );
+    const offline = planClientPreferenceConnectionSync(local, undefined, null, first.next);
+    const reconnect = planClientPreferenceConnectionSync(
+      local,
+      DEFAULT_SERVER_SETTINGS,
+      environmentId,
+      offline.next,
+    );
+    expect(reconnect.patch).toEqual({
+      migrateClientPreferences: { clientAppearanceAccent: "blue" },
+    });
+    const peer = planClientPreferenceConnectionSync(
+      local,
+      { ...DEFAULT_SERVER_SETTINGS, clientAppearanceAccent: "green" },
+      environmentId,
+      offline.next,
+    );
+    expect(peer.patch).toEqual({});
+    expect(peer.apply).toEqual({ clientAppearanceAccent: "green" });
+  });
+
   it("never publishes a new client's untouched defaults", () => {
     const plan = planClientPreferenceSync(defaults, DEFAULT_SERVER_SETTINGS, new Map());
     expect(plan.patch).toEqual({});
