@@ -27,6 +27,7 @@ type EventQueue = Queue.Queue<
 export const makeControllableProvider = (
   capabilities: OrchestrationV2ProviderCapabilities,
   instanceIds: ReadonlyArray<string> = ["codex"],
+  turnIdPrefix = "turn",
 ) => {
   const driver = ProviderDriverKind.make("codex");
   const defaultInstanceId = ProviderInstanceId.make(instanceIds[0]!);
@@ -45,7 +46,7 @@ export const makeControllableProvider = (
   const begin = (input: ProviderAdapter.ProviderAdapterV2TurnInput) =>
     Effect.gen(function* () {
       turns.push(input);
-      const id = ProviderTurnId.make(`turn:${++ordinal}`);
+      const id = ProviderTurnId.make(`${turnIdPrefix}:${++ordinal}`);
       yield* publishFor(input, {
         type: "provider_turn.updated",
         driver,

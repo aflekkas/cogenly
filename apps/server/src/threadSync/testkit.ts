@@ -18,6 +18,7 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Stream from "effect/Stream";
 
+import * as GitWorkflow from "../git/GitWorkflowService.ts";
 import * as Machines from "../machines/Machines.ts";
 import { startMachine } from "../machines/testkit.ts";
 import { idleThreadProjection, liveThreadShell } from "../mcp/McpToolAccess.testkit.ts";
@@ -45,6 +46,7 @@ import * as ThreadRouting from "./ThreadRouting.ts";
 import * as ThreadSync from "./ThreadSync.ts";
 import * as ThreadTransfer from "./ThreadTransfer.ts";
 import * as ProjectMove from "./ProjectMove.ts";
+import * as ProjectLabelFolders from "../projectLabels/ProjectLabelFolders.ts";
 import * as ProjectLabelService from "../projectLabels/ProjectLabelService.ts";
 import * as RepositoryCheckout from "../project/RepositoryCheckout.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
@@ -62,16 +64,18 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
   dispatch: (
     command: OrchestrationV2ServerCommand,
   ) => ReadonlyArray<OrchestrationV2DomainEvent> = () => [],
+  gitStatus?: GitWorkflow.GitWorkflowService["Service"]["status"],
   execution = false,
 ) {
   const machine = yield* startMachine(name, role);
   const database = Layer.succeed(SqlClient.SqlClient, yield* machine.run(SqlClient.SqlClient));
   const remoteServices = Layer.merge(RemoteThreadCommands.layer, RemoteThreadLaunch.layer);
-  const provider = makeControllableProvider(CodexProviderCapabilitiesV2);
+  const provider = makeControllableProvider(CodexProviderCapabilitiesV2, ["codex"], `${name}:turn`);
   const runtime = execution
     ? layerWithRegistry({ name }, provider.registry, {
         databaseLayer: database,
         runEffectWorker: false,
+        environmentId: machine.environmentId,
         remoteServices,
       })
     : Layer.empty;
@@ -330,6 +334,12 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
         Layer.provide(ProjectStore.layer),
         Layer.provide(Layer.mock(Git.GitVcsDriver)({})),
         Layer.provide(labels),
+        Layer.provide(
+          Layer.mock(ProjectLabelFolders.ProjectLabelFolders)({
+            dirForLabel: (label) =>
+              Effect.succeed({ dir: `/projects/${label.name}`, dirName: label.name }),
+          }),
+        ),
         Layer.provide(repositoryCheckout),
         Layer.provide(identities),
         Layer.provide(folders),
@@ -345,6 +355,11 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
             : Layer.empty,
         ),
         Layer.provide(launches),
+        Layer.provide(
+          gitStatus === undefined
+            ? Layer.empty
+            : Layer.mock(GitWorkflow.GitWorkflowService)({ status: gitStatus }),
+        ),
       ),
     ),
   );

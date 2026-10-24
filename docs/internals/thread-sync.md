@@ -41,10 +41,11 @@ one. A thread with an item the receiver cannot decode is held whole: that item
 and every later one for the thread wait in `thread_replication_deferred`, in
 order, while other threads keep applying and the cursor advances. Startup
 replays a held thread once every item of it decodes, so after an update it
-catches up in its original order. Payload keys an older build does not know
-are dropped from its own copy; it never writes another machine's events back,
-so they are lost only where an older machine passes its copy on: a hub relaying
-to a third machine, or a thread moved to an older machine.
+catches up in its original order. Readable events keep their raw JSON when
+schema decoding drops fields; event data, metadata extensions and command
+receipts survive relaying and later ownership changes. Receipts travel with
+events and remap their result sequence to the receiving log. A projection
+failure refuses the batch without advancing its cursor; it never skips history.
 
 ## Continuing a thread from another machine
 
@@ -67,10 +68,12 @@ A move is a two-phase handoff driven by the current owner S:
 
 1. S checks that the thread is idle (no run, pending request, subagent or
    outbox effect) and fences it in the same transaction (`handoff_json`).
-2. S pushes the thread's events and asks the target T to commit with its last
-   event id and the thread's attachment ids.
-3. T refuses if it is behind or lacks the repository. Otherwise it copies the
-   attachments, takes ownership at epoch + 1, then re-homes the thread: the
+2. S pushes the thread's events and idempotency receipts, then asks the target T
+   to commit with its last event id, event count and attachment ids. Receipt
+   transfer has its own capability check; an older target refuses the move.
+3. T refuses if it has a gap, unreadable events or lacks the repository.
+   Otherwise it copies the attachments and atomically takes ownership at epoch + 1
+   with the thread's new local paths: the
    project maps to T's checkout of the same remote, and a Work worktree path
    moves under T's worktrees directory.
 4. S records T as the owner and drops the fence.
@@ -79,14 +82,24 @@ Only the owner at epoch e can start the handoff to e + 1, so T answers a
 repeated commit for an epoch it already passed as done. If the reply is lost,
 the fence stays, and the scheduler retries the commit until T answers.
 Releasing the fence after an unanswered commit could leave two owners. A
-definite refusal releases it.
+definite refusal releases it. New-owner replication can also complete the
+source's fence before the commit reply arrives; its events must apply in that
+same receive pass. The hub records handoffs it relays and rejects other peers'
+unwitnessed ownership claims, even when the old owner was unpaired.
 
 Provider sessions do not move. The working directory changes, so T's next turn
 takes the existing resume fallback: a fresh native session seeded with the
 thread's portable history. A missing worktree is recreated from the branch at
 turn start, so only pushed commits travel. Uncommitted or unpushed work blocks
 the move unless the caller leaves it behind. Checkpoint refs stay on S;
-pre-move diffs and restores are not available on T.
+pre-move diffs and restores are not available on T. Rollback checks the local
+checkpoint ref and scope cwd before creating a worktree or opening a provider.
+
+Recovery from a permanently lost machine is an explicit local action on the
+hub (or a survivor after unpairing a lost hub), never a peer's ownership claim.
+Only unpaired owners qualify. Busy threads, unreadable history and agent
+conversations are refused: ownership recovery must not restart autonomous or
+unfinished work. A dry-run lists the affected owner ids before recovery.
 
 An agent runs where its conversation runs. After its conversation moves, S
 hands the agent and its schedules to T in shared state, which accepts an
@@ -110,6 +123,8 @@ typed peer channel; transports and schedulers use that same service. Targets
 resolve a project by its shared label and repository remote, adopting a local
 checkout or cloning it with their own credentials. Absolute worktree paths
 cannot be used remotely. Offline targets refuse work instead of queuing it.
+
+Shared provider session ids include their machine identity, since provider instance names are local.
 
 A delegated child and its parent may have different owners. The child owns its
 conversation; task bookkeeping and completion wakes belong to the parent.

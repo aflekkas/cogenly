@@ -259,6 +259,7 @@ const layerRunFinalizationServiceProvided = RunFinalizationService.layer.pipe(
 );
 
 const layerOrchestratorProvided = Orchestrator.layer.pipe(
+  Layer.provide(ServerEnvironment.layerIdentity),
   Layer.provide(
     Layer.mergeAll(
       layerCheckpointServiceProvided,

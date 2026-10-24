@@ -5,6 +5,9 @@ import {
   MessageId,
   type OrchestrationV2ServerCommand,
   ThreadId,
+  ThreadCommandForward,
+  ThreadAttachmentRead,
+  RunId,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -156,3 +159,52 @@ describe("continuing a thread another machine runs", () => {
     30000,
   );
 });
+
+it.live(
+  "receivers reject worker commands and store only the files a forwarded command names",
+  () =>
+    Effect.gen(function* () {
+      const hub = yield* startThreadMachine("input-hub", "cloud-server");
+      let dispatched = 0;
+      const laptop = yield* startThreadMachine("input-laptop", "computer", () => {
+        dispatched++;
+        return [];
+      });
+      yield* pair(hub, laptop);
+      const rejected = yield* Effect.result(
+        hub.machines.call(laptop.environmentId, ThreadCommandForward, {
+          command: {
+            type: "prepared-run.progress",
+            commandId: CommandId.make("command:forge"),
+            threadId,
+            runId: RunId.make("run:forge"),
+            phase: "setup",
+          },
+          files: [],
+        }),
+      );
+      expect(rejected._tag).toBe("Failure");
+      expect(dispatched).toBe(0);
+      yield* hub.machines.call(laptop.environmentId, ThreadCommandForward, {
+        command: send("files", threadId, [attachment]),
+        files: [
+          { name: `${attachment.id}.txt`, base64: Buffer.from("notes").toString("base64") },
+          { name: "unrelated.txt", base64: Buffer.from("planted").toString("base64") },
+        ],
+      });
+      const fs = yield* laptop.run(FileSystem.FileSystem);
+      const path = yield* laptop.run(Path.Path);
+      const dir = (yield* laptop.run(ServerConfig.ServerConfig)).attachmentsDir;
+      expect(yield* fs.readFileString(path.join(dir, `${attachment.id}.txt`))).toBe("notes");
+      expect(yield* fs.exists(path.join(dir, "unrelated.txt"))).toBe(false);
+      // Filename decoding refuses traversal before it can reach the filesystem.
+      expect(
+        (yield* Effect.result(
+          hub.machines.call(laptop.environmentId, ThreadAttachmentRead, {
+            attachmentId: "../outside",
+          }),
+        ))._tag,
+      ).toBe("Failure");
+    }).pipe(Effect.scoped),
+  30000,
+);

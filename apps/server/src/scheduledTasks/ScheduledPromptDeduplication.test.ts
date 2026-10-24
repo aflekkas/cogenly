@@ -13,6 +13,8 @@ import {
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as TestClock from "effect/testing/TestClock";
+import * as SqlClient from "effect/sql/SqlClient";
+import * as RemoteLaunch from "../orchestration-v2/RemoteThreadLaunch.ts";
 import * as NodeAgents from "../agents/AgentService.ts";
 import * as AgentStore from "../agents/AgentStore.ts";
 import * as Worker from "../orchestration-v2/EffectWorker.ts";
@@ -190,9 +192,50 @@ it.effect(
         tasks.upsert({ ...input, threadId: ThreadId.make("bound") }),
       );
       expect(invalid.message).toContain("fresh thread");
+
+      // A local replica forwards edits and manual runs to the timer owner,
+      // which is distinct from the machine selected to execute each run.
+      const sql = yield* SqlClient.SqlClient;
+      const remote = yield* RemoteLaunch.RemoteThreadLaunch;
+      const owner = EnvironmentId.make("machine:timer-owner");
+      yield* sql`UPDATE scheduled_tasks SET owner_machine = ${owner}, run_count = 7 WHERE task_id = ${input.id}`;
+      const edits: Array<EnvironmentId> = [];
+      const runs: Array<EnvironmentId> = [];
+      yield* remote.registerSchedules({
+        upsert: (machine, forwarded) =>
+          Effect.gen(function* () {
+            edits.push(machine);
+            // Stand in for the owner's synced row, which upsert must return.
+            yield* sql`UPDATE scheduled_tasks SET title = ${forwarded.title}, target_machine = ${forwarded.machine ?? null} WHERE task_id = ${forwarded.id!}`;
+            return { task: (yield* tasks.list()).tasks[0]! };
+          }).pipe(Effect.orDie),
+        run: (machine) => {
+          runs.push(machine);
+          return Effect.fail(
+            new ThreadRemoteError({ reason: "offline", detail: "Timer owner is offline." }),
+          );
+        },
+      });
+      const edited = (yield* tasks.upsert({ ...input, title: "Owned elsewhere" })).task;
+      expect(edited).toMatchObject({
+        ownerMachine: owner,
+        machine,
+        runCount: 7,
+        title: "Owned elsewhere",
+      });
+      expect(edits).toEqual([owner]);
+      expect((yield* Effect.flip(tasks.runNow({ id: input.id }))).message).toContain(
+        "Timer owner is offline",
+      );
+      expect(runs).toEqual([owner]);
+      expect(attempted).toHaveLength(1);
+      expect((yield* tasks.list()).tasks[0]?.runCount).toBe(7);
     }).pipe(
+      Effect.scoped,
       Effect.provide(
         Tasks.layer.pipe(
+          Layer.provideMerge(RemoteLaunch.layer),
+          Layer.provideMerge(database),
           Layer.provide(
             Layer.mergeAll(
               database,

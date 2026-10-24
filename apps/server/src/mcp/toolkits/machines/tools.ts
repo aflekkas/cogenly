@@ -57,6 +57,9 @@ export const MachinesToolkit = Toolkit.make(
       target: EnvironmentId.annotate({
         description: "Environment ID of the paired machine that runs them from now on.",
       }),
+      dryRun: Schema.optional(Schema.Boolean).annotate({
+        description: "Preview what would move, skipped reasons and target paths without moving.",
+      }),
       leaveLocalChanges: Schema.optional(Schema.Boolean).annotate({
         description:
           "Also move Work whose worktree has uncommitted or unpushed changes; those changes stay on the old machine. Ask the user first.",

@@ -76,6 +76,10 @@ cogenly machines move --project athens-racing --to 'Cloud server · my-host'
 cogenly machines move --threads <id>,<id> --to 'Cloud server · my-host'
 ```
 
+Add `--dry-run` to preview what would move, what would be skipped and the
+target paths. Nothing moves or clones. Add `--json` for the complete structured
+result.
+
 Agents can do the same with `machines_move_threads` and
 `project_move_to_machine`.
 
@@ -87,6 +91,14 @@ machine links the thread's repository. Move them again to retry, or add
 machine, and the new machine checks out the branch as last pushed. A moved
 thread starts a fresh provider session that continues from its history. Diffs
 and restore points from before the move stay on the old machine.
+
+If a machine is permanently gone, unpair it first. On the hub, run
+`cogenly machines adopt --dry-run` to list lost owner ids, then
+`cogenly machines adopt --from <environment-id> --dry-run` to preview recovery.
+Remove `--dry-run` to run those replicated threads here. Recovery uses the last
+copy this machine received; data that never synced remains on the lost machine.
+Busy threads and agent conversations are skipped. A machine that is merely
+offline keeps ownership until it reconnects.
 
 ## Pair from Settings
 

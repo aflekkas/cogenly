@@ -1,6 +1,9 @@
 import { expect, it } from "@effect/vitest";
 import {
   CommandId,
+  ProviderSessionId,
+  EnvironmentId,
+  ProviderDriverKind,
   EventId,
   MessageId,
   NodeId,
@@ -23,6 +26,7 @@ import * as EffectOutbox from "./EffectOutbox.ts";
 import * as EventSink from "./EventSink.ts";
 import * as EventStore from "./EventStore.ts";
 import * as Projections from "./ProjectionStore.ts";
+import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
 import { REPLICA_COMMAND_PREFIX } from "./ReplayedCommandIds.ts";
 
 const runtime = EventSink.layer.pipe(
@@ -52,7 +56,14 @@ it.effect("a thread owned by another machine takes events only from replication"
     const local = yield* Effect.flip(sink.write({ events: [created("event:local", at)] }));
     expect(local.cause).toBeInstanceOf(EventSink.ThreadOwnedElsewhereError);
 
-    yield* sink.write({
+    const forged = yield* Effect.flip(
+      sink.write({
+        commandId: CommandId.make(`${REPLICA_COMMAND_PREFIX}forged`),
+        events: [created("event:forged", at)],
+      }),
+    );
+    expect(forged.cause).toBeInstanceOf(EventSink.ThreadOwnedElsewhereError);
+    yield* sink.writeReplica({
       commandId: CommandId.make(`${REPLICA_COMMAND_PREFIX}batch`),
       events: [created("event:replica", at)],
     });
@@ -120,5 +131,73 @@ it.effect("a handoff in progress fences the owner's own writes", () =>
     yield* sql`UPDATE thread_owners SET handoff_json = NULL WHERE thread_id = ${threadId}`;
     yield* sink.write({ events: [created("event:after", at)] });
     expect((yield* sql`SELECT event_id FROM orchestration_events`).length).toBe(2);
+  }).pipe(Effect.provide(runtime)),
+);
+
+it.effect(
+  "a session shared by one writer may bind several threads, but another peer cannot claim it",
+  () =>
+    Effect.gen(function* () {
+      const sink = yield* EventSink.EventSinkV2;
+      const sql = yield* SqlClient.SqlClient;
+      const at = yield* DateTime.now;
+      const other = ThreadId.make("thread:shared-session");
+      const attacker = ThreadId.make("thread:session-attacker");
+      for (const id of [threadId, other, attacker])
+        yield* sql`INSERT INTO thread_owners(thread_id, owner_env, local, epoch, updated_at) VALUES (${id}, ${id === attacker ? "env:attacker" : "env:owner"}, 0, 0, ${DateTime.formatIso(at)})`;
+      const session = (id: ThreadId): OrchestrationV2DomainEvent => ({
+        id: EventId.make(`event:session:${id}`),
+        type: "provider-session.attached",
+        threadId: id,
+        occurredAt: at,
+        payload: {
+          id: ProviderSessionId.make("session:shared"),
+          driver: ProviderDriverKind.make("codex"),
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          status: "ready",
+          cwd: "/shared",
+          model: null,
+          capabilities: CodexProviderCapabilitiesV2,
+          createdAt: at,
+          updatedAt: at,
+          lastError: null,
+        },
+      });
+      yield* sink.writeReplica({
+        commandId: CommandId.make("command:replica:shared"),
+        events: [session(threadId), session(other)],
+      });
+      expect(
+        (yield* sql`SELECT * FROM orchestration_v2_projection_provider_session_bindings`).length,
+      ).toBe(2);
+      expect(
+        (yield* Effect.result(
+          sink.writeReplica({
+            commandId: CommandId.make("command:replica:attack"),
+            events: [session(attacker)],
+          }),
+        ))._tag,
+      ).toBe("Failure");
+      expect(
+        (yield* sql`SELECT * FROM orchestration_v2_projection_provider_session_bindings`).length,
+      ).toBe(2);
+    }).pipe(Effect.provide(runtime)),
+);
+
+it.effect("replication rechecks its ownership snapshot inside the event write transaction", () =>
+  Effect.gen(function* () {
+    const sink = yield* EventSink.EventSinkV2;
+    const sql = yield* SqlClient.SqlClient;
+    const at = yield* DateTime.now;
+    yield* sql`INSERT INTO thread_owners(thread_id, owner_env, local, epoch, updated_at) VALUES (${threadId}, 'env:new-owner', 0, 2, ${DateTime.formatIso(at)})`;
+    const rejected = yield* Effect.flip(
+      sink.writeReplica({
+        commandId: CommandId.make("command:replica:stale"),
+        owners: [{ threadId, owner: EnvironmentId.make("env:previous-owner"), epoch: 1 }],
+        events: [created("event:stale", at)],
+      }),
+    );
+    expect(rejected.cause).toBeInstanceOf(EventSink.ThreadOwnedElsewhereError);
+    expect(yield* sql`SELECT event_id FROM orchestration_events`).toEqual([]);
   }).pipe(Effect.provide(runtime)),
 );

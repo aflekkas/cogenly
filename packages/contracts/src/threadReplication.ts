@@ -174,6 +174,8 @@ export const ThreadMoveInput = Schema.Struct({
    * as pushed.
    */
   leaveLocalChanges: Schema.optional(Schema.Boolean),
+  /** Report what would move, what would be skipped and where, without moving anything. */
+  dryRun: Schema.optional(Schema.Boolean),
 });
 export type ThreadMoveInput = typeof ThreadMoveInput.Type;
 
@@ -182,6 +184,7 @@ export const ThreadMoveAllInput = Schema.Struct({
   from: EnvironmentId,
   target: EnvironmentId,
   leaveLocalChanges: Schema.optional(Schema.Boolean),
+  dryRun: Schema.optional(Schema.Boolean),
 });
 export type ThreadMoveAllInput = typeof ThreadMoveAllInput.Type;
 
@@ -192,11 +195,31 @@ export const ThreadMoveSkip = Schema.Struct({
 });
 export type ThreadMoveSkip = typeof ThreadMoveSkip.Type;
 
+/** Where a thread would run on the target, from a dry run. */
+export const ThreadMovePlacement = Schema.Struct({
+  threadId: ThreadId,
+  /** The target's checkout, or what the move does to get one. */
+  project: Schema.String,
+  /** The target's worktree path for Work; the next turn creates it from the branch. */
+  worktreePath: Schema.NullOr(Schema.String),
+});
+export type ThreadMovePlacement = typeof ThreadMovePlacement.Type;
+
+export const ThreadMovePlanned = Schema.Struct({
+  ...ThreadMovePlacement.fields,
+  title: Schema.String,
+  /** The machine that runs it now. */
+  from: EnvironmentId,
+});
+export type ThreadMovePlanned = typeof ThreadMovePlanned.Type;
+
 export const ThreadMoveResult = Schema.Struct({
-  /** Threads the target runs now, including ones it already ran. */
+  /** Threads the target runs now, including ones it already ran. A dry run lists only those. */
   moved: Schema.Array(ThreadId),
   /** Threads left where they were, with the reason. Moving them again retries. */
   skipped: Schema.Array(ThreadMoveSkip),
+  /** Dry run only: the threads that would move, and where. */
+  planned: Schema.optional(Schema.Array(ThreadMovePlanned)),
 });
 export type ThreadMoveResult = typeof ThreadMoveResult.Type;
 
@@ -215,6 +238,31 @@ export const ThreadMoveRequest = makePeerChannel({
  * commit the target already took succeeds, so the owner can retry after a
  * lost reply.
  */
+/** Receipt data is portable; result sequences are remapped to the receiver's log. */
+export const ThreadReplicaCommandReceipt = Schema.Struct({
+  commandId: CommandId,
+  commandType: Schema.String,
+  acceptedAt: Schema.String,
+  status: Schema.Literals(["accepted", "rejected"]),
+  error: Schema.NullOr(Schema.String),
+});
+export type ThreadReplicaCommandReceipt = typeof ThreadReplicaCommandReceipt.Type;
+
+/** Idempotency receipts accompany a move so a retried command cannot start another turn. */
+export const ThreadHandoffReceipts = makePeerChannel({
+  name: "threads.handoff.receipts.v1",
+  scope: AuthPeerDelegateScope,
+  payload: Schema.Struct({
+    threadId: ThreadId,
+    from: EnvironmentId,
+    to: EnvironmentId,
+    epoch: Counter,
+    receipts: Schema.Array(ThreadReplicaCommandReceipt).check(Schema.isMaxLength(128)),
+  }),
+  success: Schema.Struct({}),
+  error: ThreadRemoteError,
+});
+
 export const ThreadHandoffCommit = makePeerChannel({
   name: "threads.handoff.commit.v1",
   scope: AuthPeerDelegateScope,
@@ -225,6 +273,11 @@ export const ThreadHandoffCommit = makePeerChannel({
     epoch: Counter,
     /** The owner's last event for the thread; null for a thread without events. */
     lastEventId: Schema.NullOr(EventId),
+    /**
+     * How many of the thread's events the owner replicates. The target
+     * refuses as behind with fewer, so a gap in its copy never becomes the log.
+     */
+    eventCount: Schema.optional(Counter),
     /** Attachment ids the target copies before it accepts, since the owner may go offline. */
     attachmentIds: Schema.Array(ThreadAttachmentFile.fields.name),
   }),
@@ -232,18 +285,69 @@ export const ThreadHandoffCommit = makePeerChannel({
   error: ThreadRemoteError,
 });
 
+/**
+ * A dry run of moves: the machine that runs the threads checks each as a
+ * move would, without fencing. A separate channel from ThreadMoveRequest, so
+ * an older machine that does not know dry runs refuses instead of moving.
+ */
+export const ThreadMovePreview = makePeerChannel({
+  name: "threads.move.preview.v1",
+  scope: AuthPeerDelegateScope,
+  payload: ThreadMoveInput,
+  success: ThreadMoveResult,
+  error: ThreadRemoteError,
+});
+
+/** Ask the target where it would run threads it has replicas of, as a commit would place them. */
+export const ThreadHandoffPreview = makePeerChannel({
+  name: "threads.handoff.preview.v1",
+  scope: AuthPeerDelegateScope,
+  payload: Schema.Struct({
+    threadIds: Schema.Array(ThreadId).check(Schema.isMaxLength(THREAD_MOVE_MAX_THREADS)),
+    to: EnvironmentId,
+  }),
+  success: Schema.Struct({
+    placed: Schema.Array(ThreadMovePlacement),
+    skipped: Schema.Array(ThreadMoveSkip),
+  }),
+  error: ThreadRemoteError,
+});
+
+/**
+ * Run here the threads a machine that is no longer paired ran, or was
+ * taking in a move that never finished. An explicit recovery: that machine
+ * must be unpaired first, so one that is only offline keeps its threads.
+ */
+export const ThreadAdoptInput = Schema.Struct({
+  /** The lost machine's environment id. Omit it with dryRun to list lost machines. */
+  from: Schema.optional(EnvironmentId),
+  dryRun: Schema.optional(Schema.Boolean),
+});
+export type ThreadAdoptInput = typeof ThreadAdoptInput.Type;
+
+export const ThreadAdoptResult = Schema.Struct({
+  /** Threads that run here now; with dryRun, the ones that would. */
+  adopted: Schema.Array(ThreadId),
+  skipped: Schema.Array(ThreadMoveSkip),
+  /** Machines no longer paired that still own threads here, with how many. */
+  unpaired: Schema.Array(Schema.Struct({ environmentId: EnvironmentId, threads: Counter })),
+});
+export type ThreadAdoptResult = typeof ThreadAdoptResult.Type;
+
 export const ProjectMoveInput = Schema.Struct({
   id: ProjectLabelId,
   /** The paired machine that runs the project's threads and agents from now on. */
   target: EnvironmentId,
   leaveLocalChanges: Schema.optional(Schema.Boolean),
+  /** Report repositories and threads as the move would handle them, without moving. */
+  dryRun: Schema.optional(Schema.Boolean),
 });
 export type ProjectMoveInput = typeof ProjectMoveInput.Type;
 
 export const ProjectMoveRepository = Schema.Struct({
   remote: Schema.String,
-  /** `cloning` continues on the target after the move answers. */
-  status: Schema.Literals(["present", "cloning", "failed"]),
+  /** `cloning` continues on the target after the move answers; `will-clone` is a dry run's. */
+  status: Schema.Literals(["present", "cloning", "will-clone", "failed"]),
   detail: Schema.optional(Schema.String),
 });
 export type ProjectMoveRepository = typeof ProjectMoveRepository.Type;
@@ -328,13 +432,7 @@ export const ThreadLaunchPortable = Schema.Struct({
 });
 export type ThreadLaunchPortable = typeof ThreadLaunchPortable.Type;
 
-/**
- * Start a new thread on `target`, which owns it from its first event and
- * runs its first turn. Sent to the target, or to the hub, which relays it.
- * The same command id (and thread id, when the caller chose one) makes a
- * retry return the thread the first attempt created. The target pushes the
- * new thread's events to the caller before it replies.
- */
+/** Bounded committed Git history for worktree delegation. */
 export const ThreadRepositoryBundle = Schema.Struct({
   revision: Schema.String.check(Schema.isPattern(/^[a-f0-9]{40,64}$/)),
   ref: Schema.String.check(Schema.isPattern(/^refs\/cogenly\/delegate\/[a-zA-Z0-9._-]+$/)),
@@ -342,6 +440,13 @@ export const ThreadRepositoryBundle = Schema.Struct({
 });
 export type ThreadRepositoryBundle = typeof ThreadRepositoryBundle.Type;
 
+/**
+ * Start a new thread on `target`, which owns it from its first event and
+ * runs its first turn. Sent to the target, or to the hub, which relays it.
+ * The same command id (and thread id, when the caller chose one) makes a
+ * retry return the thread the first attempt created. The target pushes the
+ * new thread's events to the caller before it replies.
+ */
 export const ThreadLaunchRemote = makePeerChannel({
   name: "threads.launch.v1",
   scope: AuthPeerDelegateScope,
@@ -360,6 +465,15 @@ export const ThreadLaunchRemote = makePeerChannel({
     resumed: Schema.Boolean,
     eventIds: Schema.Array(EventId),
   }),
+  error: ThreadRemoteError,
+});
+
+/** What ProjectMovePrepare would do on `target`, changing nothing (the hub relays). */
+export const ProjectMovePreview = makePeerChannel({
+  name: "threads.project.preview.v1",
+  scope: AuthPeerDelegateScope,
+  payload: ProjectMovePrepare.payload,
+  success: ProjectMovePrepare.success,
   error: ThreadRemoteError,
 });
 

@@ -43,6 +43,7 @@ export class CheckpointRollbackExecutionError extends Schema.TaggedError<Checkpo
       "provider-turn-unavailable",
       "unexpected-failure",
       "shared-workspace",
+      "checkpoint-unavailable",
     ]),
     threadId: ThreadId,
     providerThreadId: ProviderThreadId,
@@ -58,6 +59,8 @@ export class CheckpointRollbackExecutionError extends Schema.TaggedError<Checkpo
         return `Active provider changed before rollback target ${this.checkpointId} could execute on thread ${this.threadId}.`;
       case "provider-turn-unavailable":
         return `Provider turn for rollback target ${this.checkpointId} is unavailable on provider thread ${this.providerThreadId}.`;
+      case "checkpoint-unavailable":
+        return "This checkpoint is unavailable on this machine. Restore it on the machine where it was captured, or rewind without restoring files.";
       case "shared-workspace":
         return SHARED_WORKSPACE_RESTORE_MESSAGE;
       case "unexpected-failure":
@@ -195,6 +198,25 @@ export const layer: Layer.Layer<
                 providerTurn: targetTurn,
               };
             });
+
+      if (input.restoreFiles !== false) {
+        // Replicated checkpoint scopes still name the old machine's cwd.
+        // Check before creating a worktree, pruning Git state or opening a provider.
+        const unavailable = new CheckpointRollbackExecutionError({
+          reason: "checkpoint-unavailable",
+          threadId: input.threadId,
+          providerThreadId: input.providerThreadId,
+          checkpointId: input.checkpointId,
+        });
+        if (
+          projection.thread.worktreePath !== null &&
+          path.resolve(scope.cwd) !== path.resolve(projection.thread.worktreePath)
+        )
+          return yield* unavailable;
+        yield* checkpoints
+          .assertRestorable({ scope, checkpoint })
+          .pipe(Effect.mapError(() => unavailable));
+      }
 
       const { worktreePath, branch } = projection.thread;
       if (worktreePath != null && branch != null && !(yield* fileSystem.exists(worktreePath))) {

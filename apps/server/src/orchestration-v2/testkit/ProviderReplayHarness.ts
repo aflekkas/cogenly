@@ -1,9 +1,14 @@
 import { layerIdentity as layerSharedIdentity } from "../../sync/testkit.ts";
+import * as ServerEnvironment from "../../environment/ServerEnvironment.ts";
 import * as AgentStore from "../../agents/AgentStore.ts";
 import * as OtelEnvironment from "@t3tools/shared/otelEnvironment";
 import { DEFAULT_SIGNAL_EXPORT } from "@t3tools/shared/observability";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import type { ProviderDriverKind, ProviderReplayTranscript } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  ProviderDriverKind,
+  ProviderReplayTranscript,
+} from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -198,6 +203,7 @@ export function runOrchestratorV2ProviderReplayScenario<
       MigrationError | PlatformError.PlatformError | SqlError
     >;
     readonly runEffectWorker?: boolean;
+    readonly environmentId?: EnvironmentId;
     readonly remoteServices?: Layer.Layer<
       RemoteThreadLaunch.RemoteThreadLaunch | RemoteThreadCommands.RemoteThreadCommands
     >;
@@ -247,6 +253,7 @@ export function layerProviderReplay<Transcript extends ProviderReplayTranscript,
       MigrationError | PlatformError.PlatformError | SqlError
     >;
     readonly runEffectWorker?: boolean;
+    readonly environmentId?: EnvironmentId;
     readonly remoteServices?: Layer.Layer<
       RemoteThreadLaunch.RemoteThreadLaunch | RemoteThreadCommands.RemoteThreadCommands
     >;
@@ -287,6 +294,7 @@ export function layerWithRegistry<Error>(
       MigrationError | PlatformError.PlatformError | SqlError
     >;
     readonly runEffectWorker?: boolean;
+    readonly environmentId?: EnvironmentId;
     readonly remoteServices?: Layer.Layer<
       RemoteThreadLaunch.RemoteThreadLaunch | RemoteThreadCommands.RemoteThreadCommands
     >;
@@ -476,6 +484,13 @@ export function layerWithRegistry<Error>(
     }),
   );
   const layerOrchestratorProvided = Orchestrator.layer.pipe(
+    Layer.provide(
+      options.environmentId === undefined
+        ? Layer.empty
+        : Layer.succeed(ServerEnvironment.ServerEnvironmentIdentity, {
+            getEnvironmentId: Effect.succeed(options.environmentId),
+          }),
+    ),
     Layer.provide(options.remoteServices ?? Layer.empty),
     Layer.provide(
       Layer.mergeAll(

@@ -63,7 +63,7 @@ import {
   ProviderInstanceId,
   ProviderInteractionMode,
   resolveProviderInstanceEnabled,
-  type ProviderSessionId,
+  ProviderSessionId,
   RunId,
   RuntimeMode,
   ThreadLinkedPullRequest,
@@ -83,6 +83,7 @@ import {
 } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 import { isReplicaCommandId, isReplayedCommandId } from "./ReplayedCommandIds.ts";
 import * as RemoteThreadLaunch from "./RemoteThreadLaunch.ts";
+import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as RemoteThreadCommands from "./RemoteThreadCommands.ts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -939,6 +940,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
   // Absent outside the full server: every thread is then local.
   const remoteCommands = yield* Effect.serviceOption(RemoteThreadCommands.RemoteThreadCommands);
   const remoteLaunch = yield* Effect.serviceOption(RemoteThreadLaunch.RemoteThreadLaunch);
+  const identity = yield* Effect.serviceOption(ServerEnvironment.ServerEnvironmentIdentity);
+  const sessionMachine = Option.isSome(identity)
+    ? yield* identity.value.getEnvironmentId
+    : undefined;
 
   const mapDispatchError =
     (command: OrchestrationV2ServerCommand) =>
@@ -975,9 +980,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       Effect.flatMap((capabilities) =>
         capabilities.sessions.supportsMultipleProviderThreadsPerSession
           ? Effect.succeed(
-              idAllocator.derive.providerSession({
-                providerInstanceId: input.providerInstanceId,
-              }),
+              // Shared provider processes are machine-local. Two Codex instances
+              // named "codex" must not claim the same replicated session row.
+              ProviderSessionId.make(
+                `${idAllocator.derive.providerSession({ providerInstanceId: input.providerInstanceId })}${sessionMachine === undefined ? "" : `:machine:${encodeURIComponent(sessionMachine)}`}`,
+              ),
             )
           : idAllocator.allocate.providerSession({
               providerInstanceId: input.providerInstanceId,
@@ -12095,6 +12102,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       "orchestration_v2.thread_id": commandThreadId(command),
     });
 
+    if (isReplicaCommandId(command.commandId))
+      return yield* new OrchestratorCommandRejectedError({
+        commandId: command.commandId,
+        commandType: command.type,
+      });
     const existingReceipt = yield* commandReceipts.getByCommandId(command.commandId).pipe(
       Effect.mapError(
         (cause) =>

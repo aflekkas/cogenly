@@ -1742,6 +1742,13 @@ const makeWsRpcHandlers = (
       [WS_METHODS.machinesUnpair]: (input) => machines.unpair(input),
       [WS_METHODS.machinesMoveThreads]: (input) => threadTransfer.move(input),
       [WS_METHODS.machinesMoveAllThreads]: (input) => threadTransfer.moveAllFrom(input),
+      [WS_METHODS.machinesPreviewMoveThreads]: (input) =>
+        threadTransfer.move({ ...input, dryRun: true }),
+      [WS_METHODS.machinesPreviewMoveAllThreads]: (input) =>
+        threadTransfer.moveAllFrom({ ...input, dryRun: true }),
+      [WS_METHODS.projectLabelsPreviewMoveToMachine]: (input) =>
+        projectMove.move({ ...input, dryRun: true }),
+      [WS_METHODS.machinesAdoptThreads]: (input) => threadTransfer.adoptFrom(input),
       [WS_METHODS.machinesSetupStatus]: () => machineSetup.status,
       [WS_METHODS.machinesSetupSubscribe]: () => machineSetup.subscribe,
       [WS_METHODS.machinesSetupRunStep]: (input) => machineSetup.runStep(input.step),

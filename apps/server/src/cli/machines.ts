@@ -16,6 +16,7 @@ import {
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
   AuthSettingsWriteScope,
+  EnvironmentId,
   type MachineInfo,
   MachineJoinCode,
   MachineRole,
@@ -498,7 +499,17 @@ const SKIPS_SHOWN = 20;
 
 const describeMove = (target: string, result: ThreadMoveResult) =>
   [
-    `${result.moved.length} ${result.moved.length === 1 ? "thread runs" : "threads run"} on ${target} now.`,
+    ...(result.planned === undefined
+      ? [
+          `${result.moved.length} ${result.moved.length === 1 ? "thread runs" : "threads run"} on ${target} now.`,
+        ]
+      : [
+          `Dry run: ${result.planned.length} threads would move to ${target}; ${result.moved.length} already run there.`,
+          ...result.planned.map(
+            (entry) =>
+              `  ${entry.threadId} (${entry.title}): ${entry.worktreePath ?? entry.project}${entry.worktreePath === null ? "" : ` · checkout ${entry.project}`}`,
+          ),
+        ]),
     ...(result.skipped.length === 0
       ? []
       : [
@@ -533,6 +544,10 @@ const moveCommand = Command.make("move", {
     Flag.withDescription("Comma-separated thread ids to move."),
     Flag.optional,
   ),
+  dryRun: Flag.Boolean("dry-run").pipe(
+    Flag.withDescription("List what would move, skipped threads and target paths without moving."),
+    Flag.withDefault(false),
+  ),
   leaveLocalChanges: Flag.Boolean("leave-local-changes").pipe(
     Flag.withDescription(
       "Also move Work with uncommitted or unpushed changes; those changes stay on the old machine.",
@@ -556,7 +571,10 @@ const moveCommand = Command.make("move", {
           Effect.mapError(describe),
         );
         const target = yield* findMachine(machines, flags.to, false);
-        const options = flags.leaveLocalChanges ? { leaveLocalChanges: true } : {};
+        const options = {
+          ...(flags.leaveLocalChanges ? { leaveLocalChanges: true } : {}),
+          ...(flags.dryRun ? { dryRun: true } : {}),
+        };
         const print = (result: unknown, text: string) =>
           (flags.json ? encodeJson(result).pipe(Effect.orDie) : Effect.succeed(text)).pipe(
             Effect.flatMap(Console.log),
@@ -572,7 +590,11 @@ const moveCommand = Command.make("move", {
           );
           if (label === undefined)
             return yield* new MachinesCliError({ reason: `No project is named "${named}".` });
-          const result = yield* client[WS_METHODS.projectLabelsMoveToMachine]({
+          const result = yield* client[
+            flags.dryRun
+              ? WS_METHODS.projectLabelsPreviewMoveToMachine
+              : WS_METHODS.projectLabelsMoveToMachine
+          ]({
             id: label.id,
             target: target.environmentId,
             ...options,
@@ -589,12 +611,18 @@ const moveCommand = Command.make("move", {
           );
         }
         const result = Option.isSome(flags.from)
-          ? yield* client[WS_METHODS.machinesMoveAllThreads]({
+          ? yield* client[
+              flags.dryRun
+                ? WS_METHODS.machinesPreviewMoveAllThreads
+                : WS_METHODS.machinesMoveAllThreads
+            ]({
               from: (yield* findMachine(machines, flags.from.value, true)).environmentId,
               target: target.environmentId,
               ...options,
             }).pipe(Effect.mapError(describe))
-          : yield* client[WS_METHODS.machinesMoveThreads]({
+          : yield* client[
+              flags.dryRun ? WS_METHODS.machinesPreviewMoveThreads : WS_METHODS.machinesMoveThreads
+            ]({
               threadIds: Option.getOrElse(flags.threads, () => "")
                 .split(",")
                 .map((id) => ThreadId.make(id.trim()))
@@ -603,6 +631,47 @@ const moveCommand = Command.make("move", {
               ...options,
             }).pipe(Effect.mapError(describe));
         return yield* print(result, describeMove(target.name, result));
+      }),
+    ),
+  ),
+);
+
+const adoptCommand = Command.make("adopt", {
+  ...projectLocationFlags,
+  from: Flag.String("from").pipe(
+    Flag.withDescription("Environment ID of a permanently lost, already unpaired machine."),
+    Flag.optional,
+  ),
+  dryRun: Flag.Boolean("dry-run").pipe(
+    Flag.withDescription("Preview recovery; omit --from to list lost owners."),
+    Flag.withDefault(false),
+  ),
+  json: jsonFlag,
+}).pipe(
+  Command.withDescription(
+    "Explicitly recover replicated threads from a lost machine on the hub. Unpair it first.",
+  ),
+  Command.withHandler((flags) =>
+    runLive(flags, (client) =>
+      Effect.gen(function* () {
+        if (Option.isNone(flags.from) && !flags.dryRun)
+          return yield* new MachinesCliError({
+            reason: "Give --from <environment-id>, or use --dry-run to list lost owners.",
+          });
+        const result = yield* client[WS_METHODS.machinesAdoptThreads]({
+          ...(Option.isSome(flags.from)
+            ? { from: EnvironmentId.make(flags.from.value.trim()) }
+            : {}),
+          dryRun: flags.dryRun,
+        }).pipe(Effect.mapError(describe));
+        const text = [
+          ...result.unpaired.map((owner) => `${owner.environmentId}: ${owner.threads} threads`),
+          `${flags.dryRun ? "Would recover" : "Recovered"} ${result.adopted.length} threads on this machine.`,
+          ...result.skipped.map((entry) => `${entry.threadId}: ${entry.detail}`),
+        ].join("\n");
+        yield* (flags.json ? encodeJson(result).pipe(Effect.orDie) : Effect.succeed(text)).pipe(
+          Effect.flatMap(Console.log),
+        );
       }),
     ),
   ),
@@ -619,5 +688,6 @@ export const machinesCommand = Command.make("machines").pipe(
     unpairCommand,
     renameCommand,
     moveCommand,
+    adoptCommand,
   ]),
 );

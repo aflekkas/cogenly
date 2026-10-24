@@ -13,8 +13,20 @@ for (const outcome of ["complete", "cancel", "limit"] as const)
     `remote delegation: ${outcome}, owner execution, replicated results, parent wake and idempotent retry`,
     () =>
       Effect.gen(function* () {
-        const hub = yield* startThreadMachine("delegate-hub", "cloud-server", () => [], true);
-        const laptop = yield* startThreadMachine("delegate-laptop", "computer", () => [], true);
+        const hub = yield* startThreadMachine(
+          "delegate-hub",
+          "cloud-server",
+          () => [],
+          undefined,
+          true,
+        );
+        const laptop = yield* startThreadMachine(
+          "delegate-laptop",
+          "computer",
+          () => [],
+          undefined,
+          true,
+        );
         yield* pair(hub, laptop);
         const parent = Option.getOrThrow(hub.engine);
         const childEngine = Option.getOrThrow(laptop.engine);
@@ -94,6 +106,9 @@ for (const outcome of ["complete", "cancel", "limit"] as const)
         expect(laptop.provider.turns).toHaveLength(1);
         expect(laptop.provider.turns[0]?.threadId).toBe(childId);
         const child = yield* childEngine.getThreadProjection(childId);
+        expect(child.providerSessions[0]?.id).not.toBe(
+          (yield* parent.getThreadProjection(parentId)).providerSessions[0]?.id,
+        );
         if (outcome === "limit") {
           const resetAt = DateTime.formatIso(DateTime.add(yield* DateTime.now, { hours: 3 }));
           yield* laptop.provider.finish(laptop.provider.turns[0]!, child.providerTurns[0]!.id, {
