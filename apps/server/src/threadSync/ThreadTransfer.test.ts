@@ -202,16 +202,44 @@ describe("moving threads between paired machines", () => {
           target: hub.environmentId,
         });
         expect(result.threads).toEqual({ moved: [threadId], skipped: [] });
-        // A repository known only by its remote is cloned; this layer cannot clone.
+        // A repository known here only by its remote starts cloning into the project.
         expect(result.repositories).toEqual([
           { remote: "github.com/aflekkas/athens-racing", status: "present" },
-          {
-            remote: "github.com/aflekkas/pit-wall",
-            status: "failed",
-            detail: "This machine cannot clone repositories.",
-          },
+          { remote: "github.com/aflekkas/pit-wall", status: "cloning" },
+        ]);
+        expect(hub.checkouts).toEqual([
+          { labelId: "label:racing", remote: "github.com/aflekkas/pit-wall" },
         ]);
         expect(yield* hub.replication.owner(threadId)).toMatchObject({ local: true });
+      }).pipe(Effect.scoped),
+    30000,
+  );
+
+  it.live(
+    "a thread whose repository the target knows only by its remote starts the clone and moves",
+    () =>
+      Effect.gen(function* () {
+        const { hub, laptop, at } = yield* start("clone");
+        const remote = "github.com/aflekkas/athens-racing";
+        yield* addProject(laptop, "/Users/someone/racing");
+        for (const machine of [hub, laptop])
+          yield* machine.sql`INSERT INTO project_labels(label_id, name, created_at, updated_at)
+            VALUES ('label:racing', 'athens-racing', '2026-10-24T00:00:00.000Z', '2026-10-24T00:00:00.000Z')`;
+        yield* laptop.sql`INSERT INTO label_repositories(label_id, repository_id, remote)
+          VALUES ('label:racing', ${projectId}, ${remote})`;
+        yield* hub.sql`INSERT INTO label_repositories(label_id, repository_id, remote)
+          VALUES ('label:racing', ${`remote:${remote}`}, ${remote})`;
+        yield* laptop.sink.write({ events: [threadCreated("event:created", at)] });
+        yield* laptop.sync.sync(hub.environmentId);
+
+        expect(
+          yield* laptop.transfer.move({ threadIds: [threadId], target: hub.environmentId }),
+        ).toEqual({ moved: [threadId], skipped: [] });
+        expect(hub.checkouts).toEqual([{ labelId: "label:racing", remote }]);
+        // The thread now runs in the hub's checkout of the same remote.
+        expect((yield* hub.projections.getThreadProjection(threadId)).thread.projectId).toBe(
+          `project:clone:${remote}`,
+        );
       }).pipe(Effect.scoped),
     30000,
   );

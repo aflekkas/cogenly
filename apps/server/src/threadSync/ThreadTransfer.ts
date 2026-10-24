@@ -12,6 +12,7 @@ import {
   type EnvironmentId,
   EventId,
   type OrchestrationV2AppThread,
+  ProjectLabelId,
   ThreadHandoffCommit,
   type ThreadId,
   type ThreadMoveInput,
@@ -41,6 +42,7 @@ import * as Machines from "../machines/Machines.ts";
 import * as PeerChannels from "../machines/PeerChannels.ts";
 import * as EventSink from "../orchestration-v2/EventSink.ts";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
+import * as RepositoryCheckout from "../project/RepositoryCheckout.ts";
 import * as Projections from "../orchestration-v2/ProjectionStore.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import * as SharedState from "../sync/SharedState.ts";
@@ -98,6 +100,7 @@ const make = Effect.gen(function* () {
   const path = yield* Path.Path;
   // Absent in unit layers without git: local changes are then not checked.
   const git = yield* Effect.serviceOption(GitWorkflow.GitWorkflowService);
+  const checkout = yield* RepositoryCheckout.RepositoryCheckout;
   const self = replication.environmentId;
 
   const topology = machines.list.pipe(
@@ -375,11 +378,34 @@ const make = Effect.gen(function* () {
     if (Option.isSome(yield* projects.get(entry.projectId).pipe(Effect.orDie))) return;
     const { source, projectId } = yield* replication.sourceProject(threadId);
     if (projectId !== undefined) return;
+    // A project here links that remote without a checkout: start the clone.
+    // The link is rebound to a real record at once; turns wait for the clone.
+    const linked =
+      source?.remote == null
+        ? []
+        : yield* sql<{
+            readonly label_id: string;
+          }>`SELECT label_id FROM label_repositories WHERE remote = ${source.remote} LIMIT 1`.pipe(
+            Effect.orDie,
+          );
+    if (linked[0] !== undefined && source?.remote != null) {
+      yield* checkout
+        .checkoutRepository({
+          labelId: ProjectLabelId.make(linked[0].label_id),
+          remote: source.remote,
+        })
+        .pipe(
+          Effect.mapError(
+            (error) => new ThreadRemoteError({ reason: "needs-repository", detail: error.message }),
+          ),
+        );
+      if ((yield* replication.sourceProject(threadId)).projectId !== undefined) return;
+    }
     return yield* new ThreadRemoteError({
       reason: "needs-repository",
       detail:
         source?.remote != null
-          ? `Clone ${source.remote} on this machine first, or move its whole project.`
+          ? `No project on this machine links ${source.remote}. Move its whole project instead.`
           : "Its repository has no remote this machine could clone.",
     });
   });

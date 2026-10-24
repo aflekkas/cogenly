@@ -31,6 +31,7 @@ import * as ThreadSync from "./ThreadSync.ts";
 import * as ThreadTransfer from "./ThreadTransfer.ts";
 import * as ProjectMove from "./ProjectMove.ts";
 import * as ProjectLabelService from "../projectLabels/ProjectLabelService.ts";
+import * as RepositoryCheckout from "../project/RepositoryCheckout.ts";
 
 /**
  * A paired-machine server with thread replication and routing over a real
@@ -114,6 +115,25 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
       });
     }),
   );
+  // Cloning stands in as binding the link to a new record, as bindRepositoryCheckout does.
+  const checkouts: Array<{ readonly labelId: string; readonly remote: string }> = [];
+  const repositoryCheckout = Layer.unwrap(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      return Layer.mock(RepositoryCheckout.RepositoryCheckout)({
+        checkoutRepository: ({ labelId, remote }) =>
+          Effect.gen(function* () {
+            checkouts.push({ labelId, remote });
+            const repositoryId = ProjectId.make(`project:clone:${remote}`);
+            yield* sql`INSERT OR IGNORE INTO projection_projects(project_id, title, workspace_root, auto_pull, scripts_json, created_at, updated_at)
+              VALUES (${repositoryId}, ${remote}, ${`/clones/${remote}`}, 0, '[]', '2026-10-24T00:00:00.000Z', '2026-10-24T00:00:00.000Z')`;
+            yield* sql`UPDATE label_repositories SET repository_id = ${repositoryId}
+              WHERE label_id = ${labelId} AND remote = ${remote}`;
+            return { repositoryId };
+          }).pipe(Effect.orDie),
+      });
+    }),
+  );
   const context = yield* inStores(
     Layer.build(
       ProjectMove.layer.pipe(
@@ -128,6 +148,7 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
         ),
         Layer.provide(ProjectStore.layer),
         Layer.provide(labels),
+        Layer.provide(repositoryCheckout),
         Layer.provideMerge(SharedState.layer),
         Layer.provide(
           Layer.succeed(Machines.Machines, { ...machine.machines, subscribe: Stream.never }),
@@ -152,6 +173,7 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
     routing,
     transfer,
     projectMove,
+    checkouts,
     shared,
     remoteCommands,
     sink,

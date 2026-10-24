@@ -18,29 +18,18 @@ import {
   type ThreadMoveResult,
   ThreadRemoteError,
 } from "@t3tools/contracts";
-import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Context from "effect/Context";
-import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as Path from "effect/Path";
 import * as SqlClient from "effect/sql/SqlClient";
 
-import * as ServerConfig from "../config.ts";
 import * as Machines from "../machines/Machines.ts";
 import * as PeerChannels from "../machines/PeerChannels.ts";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
-import * as ProjectCloneTracker from "../project/ProjectCloneTracker.ts";
-import * as ProjectService from "../project/ProjectService.ts";
 import * as RepositoryCheckout from "../project/RepositoryCheckout.ts";
-import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
-import { cloneRepositoryIntoLabel } from "../projectLabels/ProjectLabelCloneRepository.ts";
-import * as ProjectLabelFolders from "../projectLabels/ProjectLabelFolders.ts";
 import * as ProjectLabelService from "../projectLabels/ProjectLabelService.ts";
-import * as ServerSettings from "../serverSettings.ts";
-import * as VcsStatusBroadcaster from "../vcs/VcsStatusBroadcaster.ts";
 import * as ThreadReplication from "./ThreadReplication.ts";
 import * as ThreadRouting from "./ThreadRouting.ts";
 import * as ThreadTransfer from "./ThreadTransfer.ts";
@@ -62,20 +51,7 @@ const make = Effect.gen(function* () {
   const projectStore = yield* ProjectStore.ProjectStoreV2;
   const sql = yield* SqlClient.SqlClient;
   const fileSystem = yield* FileSystem.FileSystem;
-  const path = yield* Path.Path;
-  const config = yield* ServerConfig.ServerConfig;
-  // Only the full server clones; a layer without it reports the repository as failed.
-  const cloneDeps = yield* Effect.all({
-    clones: Effect.serviceOption(ProjectCloneTracker.ProjectCloneTracker),
-    projects: Effect.serviceOption(ProjectService.ProjectService),
-    identities: Effect.serviceOption(RepositoryIdentityResolver.RepositoryIdentityResolver),
-    settings: Effect.serviceOption(ServerSettings.ServerSettingsService),
-    folders: Effect.serviceOption(ProjectLabelFolders.ProjectLabelFolders),
-    broadcaster: Effect.serviceOption(VcsStatusBroadcaster.VcsStatusBroadcaster),
-    checkout: Effect.serviceOption(RepositoryCheckout.RepositoryCheckout),
-  });
-  const crypto = yield* Crypto.Crypto;
-  const home = yield* HostProcess.HomeDirectory;
+  const checkout = yield* RepositoryCheckout.RepositoryCheckout;
   const self = replication.environmentId;
 
   /** A repository record whose checkout is on disk with files in it. */
@@ -85,42 +61,10 @@ const make = Effect.gen(function* () {
       Effect.orElseSucceed(() => false),
     );
 
-  const clone = Effect.fn("ProjectMove.clone")(function* (id: ProjectLabelId, remote: string) {
-    const { clones, projects, identities, settings } = cloneDeps;
-    if (
-      Option.isNone(clones) ||
-      Option.isNone(projects) ||
-      Option.isNone(identities) ||
-      Option.isNone(settings)
-    )
-      return yield* Effect.fail("This machine cannot clone repositories.");
-    yield* cloneRepositoryIntoLabel(
-      { id, ...RepositoryCheckout.cloneInputForRemote(remote) },
-      {
-        labels,
-        clones: clones.value,
-        projects: projects.value,
-        identities: identities.value,
-        settings: settings.value,
-        crypto,
-        path,
-        home,
-        cogenlyHome: config.baseDir,
-        ...(Option.isSome(cloneDeps.folders) ? { folders: cloneDeps.folders.value } : {}),
-        refreshGitStatus: (cwd) =>
-          Option.isNone(cloneDeps.broadcaster)
-            ? Effect.void
-            : cloneDeps.broadcaster.value
-                .refreshStatus(cwd)
-                .pipe(Effect.ignoreCause({ log: true }), Effect.forkDetach, Effect.asVoid),
-      },
-    ).pipe(Effect.mapError((error) => error.message));
-  });
-
   /**
-   * On the target: a checkout of each linked repository. A missing checkout
-   * of a known record clones in place; a repository known here only by its
-   * remote is cloned into the project folder. Clones run on after this answers.
+   * On the target: a checkout of each linked repository. checkoutRepository
+   * clones a link known here only by its remote, or one whose checkout is
+   * missing, into the project folder; clones run on after this answers.
    */
   const prepareHere = Effect.fn("ProjectMove.prepareHere")(function* (id: ProjectLabelId) {
     const { label } = yield* labels.readActive(id).pipe(
@@ -137,9 +81,10 @@ const make = Effect.gen(function* () {
     );
     const results: Array<ProjectMoveRepository> = [];
     for (const link of label.repositories ?? []) {
+      const record = yield* projectStore.get(link.repositoryId).pipe(Effect.orDie);
+      const present = Option.isSome(record) && (yield* checkedOut(record.value.workspaceRoot));
       if (link.remote === null) {
-        const record = yield* projectStore.get(link.repositoryId).pipe(Effect.orDie);
-        if (Option.isNone(record) || !(yield* checkedOut(record.value.workspaceRoot)))
+        if (!present)
           results.push({
             remote: link.repositoryId,
             status: "failed",
@@ -147,20 +92,15 @@ const make = Effect.gen(function* () {
           });
         continue;
       }
-      const record = yield* projectStore.get(link.repositoryId).pipe(Effect.orDie);
-      if (Option.isSome(record) && (yield* checkedOut(record.value.workspaceRoot))) {
+      if (present) {
         results.push({ remote: link.remote, status: "present" });
         continue;
       }
-      const started =
-        Option.isSome(record) && Option.isSome(cloneDeps.checkout)
-          ? yield* Effect.result(
-              cloneDeps.checkout.value.ensureCheckout(link.repositoryId).pipe(
-                Effect.mapError((error) => error.message),
-                Effect.forkDetach,
-              ),
-            )
-          : yield* Effect.result(clone(id, link.remote));
+      const started = yield* Effect.result(
+        checkout
+          .checkoutRepository({ labelId: id, remote: link.remote })
+          .pipe(Effect.mapError((error) => error.message)),
+      );
       results.push(
         started._tag === "Success"
           ? { remote: link.remote, status: "cloning" }
