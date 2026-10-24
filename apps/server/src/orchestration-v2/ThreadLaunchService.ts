@@ -80,6 +80,8 @@ export interface ThreadLaunchInitialMessage {
 }
 
 export interface ThreadLaunchInput {
+  readonly repositorySource?: { readonly cwd: string; readonly revision: string };
+  readonly subagent?: import("@t3tools/contracts").ThreadLaunchSubagent;
   readonly surface?: import("@t3tools/contracts").ThreadSurface;
   readonly workOrigin?: import("@t3tools/contracts").WorkOrigin;
   readonly sourceThreadId?: ThreadId;
@@ -105,6 +107,8 @@ export interface ThreadLaunchInput {
    * there once it has turns, which the re-parenting gate refuses.
    */
   readonly projectFolderId?: ProjectLabelId;
+  readonly handoffSummary?: string;
+  readonly handoffContext?: import("@t3tools/contracts").OrchestrationV2WorkHandoffContext;
   readonly initialMessage?: ThreadLaunchInitialMessage;
   readonly importedNativeThread?: {
     readonly ref: {
@@ -211,6 +215,12 @@ export class ThreadLaunchBaseRefError extends Schema.TaggedError<ThreadLaunchBas
 export class ThreadLaunchService extends Context.Service<
   ThreadLaunchService,
   {
+    readonly providers: (
+      machine: EnvironmentId,
+    ) => Effect.Effect<
+      { providers: ReadonlyArray<import("@t3tools/contracts").ServerProvider> },
+      ThreadRemoteError
+    >;
     readonly launch: (
       input: ThreadLaunchInput,
     ) => Effect.Effect<
@@ -1101,6 +1111,7 @@ const make = Effect.gen(function* () {
             })
           : threads.dispatch({
               type: "thread.create",
+              ...(input.subagent === undefined ? {} : { subagent: input.subagent }),
               ...(input.surface === undefined ? {} : { surface: input.surface }),
               ...(input.workOrigin === undefined ? {} : { workOrigin: input.workOrigin }),
               ...(input.sourceThreadId === undefined
@@ -1199,6 +1210,18 @@ const make = Effect.gen(function* () {
         }
       }
 
+      if (input.handoffContext !== undefined && input.sourceThreadId !== undefined) {
+        yield* threads
+          .dispatch({
+            type: "work.handoff.context",
+            commandId: CommandId.make(`${input.commandId}:work-context`),
+            threadId,
+            sourceThreadId: input.sourceThreadId,
+            scopeSummary: input.handoffSummary ?? input.initialMessage?.text ?? input.title,
+            handoffContext: input.handoffContext,
+          })
+          .pipe(Effect.mapError(mapError(input, "dispatch-message", threadId)));
+      }
       const projection = yield* threads
         .getThreadProjection(threadId)
         .pipe(Effect.mapError(mapError(input, "create-thread", threadId)));
@@ -1326,7 +1349,20 @@ const make = Effect.gen(function* () {
     );
   };
 
-  return ThreadLaunchService.of({ launch, checkWorktreeBase, retryPreparation, prepareRun });
+  const providers = Effect.fn("ThreadLaunchService.providers")(function* (machine: EnvironmentId) {
+    if (Option.isNone(remoteLaunch)) return { providers: yield* providerRegistry.getProviders };
+    const remote = yield* remoteLaunch.value.catalog(machine);
+    return {
+      providers: Option.isSome(remote) ? remote.value : yield* providerRegistry.getProviders,
+    };
+  });
+  return ThreadLaunchService.of({
+    providers,
+    launch,
+    checkWorktreeBase,
+    retryPreparation,
+    prepareRun,
+  });
 });
 
 export const layer = Layer.effect(ThreadLaunchService, make);

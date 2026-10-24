@@ -275,6 +275,7 @@ const layerOrchestratorProvided = Orchestrator.layer.pipe(
       ProviderContinuationRequests.layer,
       // Same reference as thread sync's router, which registers the forwarder.
       RemoteThreadCommands.layer,
+      RemoteThreadLaunch.layer,
       layerProviderEventIngestorProvided,
       layerRuntimePolicyProvided,
       layerProviderSessionManagerProvided,
@@ -386,6 +387,7 @@ const layerIntegrationsProvided = Integrations.layer.pipe(
   Layer.provide(layerLocalIntegrationsProvided),
 );
 const layerAgentsProvided = Agents.layer.pipe(
+  Layer.provide(RemoteThreadLaunch.layer),
   Layer.provide(
     Layer.mergeAll(
       AgentStore.layer,
@@ -400,6 +402,7 @@ const layerAgentsProvided = Agents.layer.pipe(
   ),
 );
 const layerScheduledTaskProvided = ScheduledTaskService.layer.pipe(
+  Layer.provide(RemoteThreadLaunch.layer),
   Layer.provide(
     Layer.mergeAll(
       layerThreadLaunchProvided,
@@ -545,6 +548,7 @@ export const layer = Layer.mergeAll(
 );
 
 const layerProductionBase = Layer.mergeAll(
+  RemoteThreadLaunch.layer,
   layerLocalIntegrationsProvided,
   Facts.layer,
   layerIntegrationsProvided,

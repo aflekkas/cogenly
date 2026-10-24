@@ -2919,9 +2919,17 @@ export const OrchestrationV2StoredEventJson = Schema.Struct({
 });
 export type OrchestrationV2StoredEventJson = typeof OrchestrationV2StoredEventJson.Type;
 
+export const ThreadLaunchSubagent = Schema.Struct({
+  parentThreadId: ThreadId,
+  rootThreadId: ThreadId,
+  taskNodeId: NodeId,
+});
+export type ThreadLaunchSubagent = typeof ThreadLaunchSubagent.Type;
+
 export const OrchestrationV2Command = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("thread.create"),
+    subagent: Schema.optional(ThreadLaunchSubagent),
     ...WorkMetadataFields,
     agent: Schema.optional(AgentThreadIdentity),
     ...OrchestrationV2CreationFields,
@@ -3327,6 +3335,7 @@ export const OrchestrationV2Command = Schema.Union([
   }),
   Schema.Struct({
     type: Schema.Literal("delegated_task.request"),
+    machine: Schema.optional(EnvironmentId),
     ...OrchestrationV2CreationFields,
     commandId: CommandId,
     parentThreadId: ThreadId,
@@ -3407,6 +3416,33 @@ export type OrchestrationV2Command = typeof OrchestrationV2Command.Type;
  * send them.
  */
 const OrchestrationV2InternalCommand = Schema.Union([
+  Schema.Struct({
+    type: Schema.Literal("delegated_task.attach"),
+    driver: ProviderDriverKind,
+    ...OrchestrationV2CreationFields,
+    commandId: CommandId,
+    parentThreadId: ThreadId,
+    parentRunId: RunId,
+    parentNodeId: NodeId,
+    task: TrimmedNonEmptyString,
+    title: Schema.optional(TrimmedNonEmptyString),
+    modelSelection: ModelSelection,
+    runtimeMode: RuntimeMode,
+    interactionMode: ProviderInteractionMode,
+    workspaceStrategy: Schema.optional(OrchestrationV2ThreadLaunchWorkspaceStrategy),
+    // Omitted behaves as "settled_only" (no wake while the parent has a live
+    // run); producers that want fire-and-forget wakes must set "always".
+    completionWake: Schema.optional(Schema.Literals(["always", "settled_only"])),
+    createdAt: Schema.optional(Schema.DateTimeUtc),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("work.handoff.context"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    sourceThreadId: ThreadId,
+    scopeSummary: TrimmedNonEmptyString,
+    handoffContext: OrchestrationV2WorkHandoffContext,
+  }),
   Schema.Struct({
     type: Schema.Literal("work.handoff.record"),
     commandId: CommandId,

@@ -624,6 +624,7 @@ export const WS_METHODS = {
 
   // Machines: this server, its hub, and its paired spokes
   machinesList: "machines.list",
+  machinesCatalog: "machines.catalog",
   machinesSubscribe: "machines.subscribe",
   machinesUpdate: "machines.update",
   machinesPrepareJoin: "machines.prepareJoin",
@@ -2237,6 +2238,11 @@ const WsMachineSecurityStatusRpc = Rpc.make(WS_METHODS.machineSecurityStatus, {
   success: MachineSecurity.MachineSecurityStatus,
   error: machineErrors,
 });
+const WsMachinesCatalogRpc = Rpc.make(WS_METHODS.machinesCatalog, {
+  payload: Machines.MachineCatalogInput,
+  success: Machines.MachineCatalogResult,
+  error: Schema.Union([ThreadReplication.ThreadRemoteError, EnvironmentAuthorizationError]),
+});
 const WsMachinesListRpc = Rpc.make(WS_METHODS.machinesList, {
   payload: Schema.Struct({}),
   success: Machines.MachineListResult,
@@ -2705,6 +2711,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsIntegrationsSubscribeRpc,
   WsMachineSecurityStatusRpc,
   WsMachinesListRpc,
+  WsMachinesCatalogRpc,
   WsMachinesSubscribeRpc,
   WsMachinesUpdateRpc,
   WsMachinesPrepareJoinRpc,

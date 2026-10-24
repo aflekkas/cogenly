@@ -1,4 +1,5 @@
 import { MessageId, ThreadId, OrchestratorMcpFailure, ProjectId } from "@t3tools/contracts";
+import { resolveMachine } from "../../../machines/resolveMachine.ts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
@@ -59,6 +60,12 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
         const context = yield* readCaller();
         const { caller } = context;
         yield* McpToolAccess.assertWorkCaller(caller);
+        const machine = yield* resolveMachine(input.machine).pipe(
+          Effect.mapError(
+            (error) =>
+              new OrchestratorMcpFailure({ code: "invalid_request", message: error.message }),
+          ),
+        );
         const commandId = yield* newCommandId();
         const threadId = ThreadId.make(commandId);
         const messageId = MessageId.make(commandId);
@@ -107,7 +114,7 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
         // A launch is accepted before its worktree is provisioned, so a base
         // ref that cannot resolve is refused while the agent can still act on it.
         const strategy = input.workspaceStrategy;
-        if (strategy?.type === "worktree")
+        if (strategy?.type === "worktree" && machine === undefined)
           yield* ThreadLaunch.ThreadLaunchService.pipe(
             Effect.flatMap((launches) =>
               launches.checkWorktreeBase({ projectId, workspaceStrategy: strategy }),
@@ -138,6 +145,7 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
         const result = yield* ThreadMessageIntake.launchThread({
           commandId,
           threadId,
+          ...(machine === undefined ? {} : { machine }),
           projectId,
           title: input.title,
           surface: "work",
@@ -177,7 +185,10 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
                 message: error.message,
               });
             }
-            return unavailable();
+            return new OrchestratorMcpFailure({
+              code: "orchestration_error",
+              message: error.message,
+            });
           }),
         );
         const thread = result.projection.thread;

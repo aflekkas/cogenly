@@ -6,7 +6,7 @@ import * as RpcMiddleware from "effect/rpc/RpcMiddleware";
 import { AuthPeerScope, EnvironmentAuthorizationError } from "./auth.ts";
 import { EnvironmentId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { ExecutionEnvironmentPlatformOs, MachineRole } from "./environment.ts";
-import { ServerProviderAuthStatus } from "./server.ts";
+import { ServerProvider, ServerProviderAuthStatus } from "./server.ts";
 
 /**
  * Machines are the Cogenly servers one user owns, paired so they can share
@@ -84,6 +84,9 @@ export const MachineLinkState = Schema.Union([
   }),
 ]);
 export type MachineLinkState = typeof MachineLinkState.Type;
+
+export const MachineCatalogInput = Schema.Struct({ machine: EnvironmentId });
+export const MachineCatalogResult = Schema.Struct({ providers: Schema.Array(ServerProvider) });
 
 export const MachineListResult = Schema.Struct({
   machines: Schema.Array(MachineInfo),

@@ -12,6 +12,7 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 
+import { resolveMachine } from "../machines/resolveMachine.ts";
 import * as ServerConfig from "../config.ts";
 import { awaitLinkState, pair, startProxy } from "../machines/testkit.ts";
 import * as EventSink from "../orchestration-v2/EventSink.ts";
@@ -77,6 +78,9 @@ describe("launching a thread on another machine", () => {
         const laptop = yield* startThreadMachine("launch-laptop", "computer");
         yield* pair(hub, laptop);
         yield* addScratch(hub);
+        expect(yield* hub.run(resolveMachine("launch-laptop"))).toBe(laptop.environmentId);
+        expect(yield* laptop.run(resolveMachine("this"))).toBe(laptop.environmentId);
+        expect(yield* laptop.run(resolveMachine("auto"))).toBe(hub.environmentId);
 
         const launched = Option.getOrThrow(
           yield* hub.remoteLaunch.launch(laptop.environmentId, launch(scratchId)),

@@ -15,6 +15,7 @@ describe("machine RPC permissions", () => {
 
   it("lets readers see machines and keeps pairing behind access management", () => {
     expect(clientRpcRequiredScopes(WS_METHODS.machinesList, {})).toEqual(["orchestration:read"]);
+    expect(clientRpcRequiredScopes(WS_METHODS.machinesCatalog, {})).toEqual(["orchestration:read"]);
     expect(clientRpcRequiredScopes(WS_METHODS.machinesSubscribe, {})).toEqual([
       "orchestration:read",
     ]);

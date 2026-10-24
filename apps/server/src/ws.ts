@@ -1733,6 +1733,7 @@ const makeWsRpcHandlers = (
       [WS_METHODS.integrationsSubscribe]: () => integrations.subscribe(),
       [WS_METHODS.machineSecurityStatus]: () => machineSecurity.status,
       [WS_METHODS.machinesList]: () => machines.list,
+      [WS_METHODS.machinesCatalog]: (input) => threadLaunch.providers(input.machine),
       [WS_METHODS.machinesSubscribe]: () => machines.subscribe,
       [WS_METHODS.machinesUpdate]: (input) => machines.update(input),
       [WS_METHODS.machinesPrepareJoin]: () => machines.prepareJoin,

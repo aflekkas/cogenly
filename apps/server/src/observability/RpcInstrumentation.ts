@@ -138,6 +138,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.integrationsSubscribe]: "integrations",
   [WS_METHODS.machineSecurityStatus]: "machines",
   [WS_METHODS.machinesList]: "machines",
+  [WS_METHODS.machinesCatalog]: "machines",
   [WS_METHODS.machinesSubscribe]: "machines",
   [WS_METHODS.machinesUpdate]: "machines",
   [WS_METHODS.machinesPrepareJoin]: "machines",

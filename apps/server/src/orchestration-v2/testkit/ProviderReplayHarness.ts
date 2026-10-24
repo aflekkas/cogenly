@@ -34,6 +34,8 @@ import * as EffectWorker from "../EffectWorker.ts";
 import * as EventSink from "../EventSink.ts";
 import * as EventStore from "../EventStore.ts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import type * as RemoteThreadLaunch from "../RemoteThreadLaunch.ts";
+import type * as RemoteThreadCommands from "../RemoteThreadCommands.ts";
 import * as Orchestrator from "../Orchestrator.ts";
 import * as ProjectionStore from "../ProjectionStore.ts";
 import * as ProjectStore from "../ProjectStore.ts";
@@ -196,6 +198,9 @@ export function runOrchestratorV2ProviderReplayScenario<
       MigrationError | PlatformError.PlatformError | SqlError
     >;
     readonly runEffectWorker?: boolean;
+    readonly remoteServices?: Layer.Layer<
+      RemoteThreadLaunch.RemoteThreadLaunch | RemoteThreadCommands.RemoteThreadCommands
+    >;
     // Start continuation runs for provider wake turns, as the live runtime does.
     // Off by default: most fixtures record no wake turn.
     readonly runContinuationWorker?: boolean;
@@ -242,6 +247,9 @@ export function layerProviderReplay<Transcript extends ProviderReplayTranscript,
       MigrationError | PlatformError.PlatformError | SqlError
     >;
     readonly runEffectWorker?: boolean;
+    readonly remoteServices?: Layer.Layer<
+      RemoteThreadLaunch.RemoteThreadLaunch | RemoteThreadCommands.RemoteThreadCommands
+    >;
     // Start continuation runs for provider wake turns, as the live runtime does.
     // Off by default: most fixtures record no wake turn.
     readonly runContinuationWorker?: boolean;
@@ -279,6 +287,9 @@ export function layerWithRegistry<Error>(
       MigrationError | PlatformError.PlatformError | SqlError
     >;
     readonly runEffectWorker?: boolean;
+    readonly remoteServices?: Layer.Layer<
+      RemoteThreadLaunch.RemoteThreadLaunch | RemoteThreadCommands.RemoteThreadCommands
+    >;
     // Start continuation runs for provider wake turns, as the live runtime does.
     // Off by default: most fixtures record no wake turn.
     readonly runContinuationWorker?: boolean;
@@ -465,6 +476,7 @@ export function layerWithRegistry<Error>(
     }),
   );
   const layerOrchestratorProvided = Orchestrator.layer.pipe(
+    Layer.provide(options.remoteServices ?? Layer.empty),
     Layer.provide(
       Layer.mergeAll(
         layerCheckpointServiceProvided,

@@ -139,6 +139,7 @@ export const readConfiguration = Effect.fn("SharedState.readConfiguration")(func
     runtime_mode: string;
     interaction_mode: string;
     owner_machine: string;
+    target_machine: string | null;
     created_at: string;
   }>`SELECT * FROM scheduled_tasks WHERE task_id=${id}`;
   const row = rows[0];
@@ -172,6 +173,7 @@ export const readConfiguration = Effect.fn("SharedState.readConfiguration")(func
     runtimeMode: row.runtime_mode,
     interactionMode: row.interaction_mode,
     ownerMachine: row.owner_machine,
+    machine: row.target_machine ?? null,
     createdAt: row.created_at,
   };
 }, Effect.mapError(storage));
@@ -399,5 +401,5 @@ export const projectDocument = Effect.fn("SharedState.projectDocument")(function
       })
     : null;
   const next = occurrence === null ? null : DateTime.formatIso(occurrence);
-  yield* sql`INSERT INTO scheduled_tasks(task_id,agent_id,title,prompt,enabled,schedule_json,project_id,thread_id,workspace_strategy_json,model_selection_json,runtime_mode,interaction_mode,created_by,creation_source,created_at,updated_at,next_run_at,last_run_status,run_count,owner_machine) VALUES (${id},${f.agentId},${f.title},${f.prompt},${f.enabled ? 1 : 0},${schedule},${projectId},${previous[0]?.thread_id ?? null},${encodeJson(strategy)},${encodeJson(f.modelSelection)},${f.runtimeMode},${f.interactionMode},'user','web',${f.createdAt},${at},${next},'never',0,${f.ownerMachine}) ON CONFLICT(task_id) DO UPDATE SET agent_id=excluded.agent_id,title=excluded.title,prompt=excluded.prompt,enabled=excluded.enabled,schedule_json=excluded.schedule_json,project_id=excluded.project_id,workspace_strategy_json=excluded.workspace_strategy_json,model_selection_json=excluded.model_selection_json,runtime_mode=excluded.runtime_mode,interaction_mode=excluded.interaction_mode,updated_at=excluded.updated_at,owner_machine=excluded.owner_machine,next_run_at=CASE WHEN scheduled_tasks.schedule_json=excluded.schedule_json AND scheduled_tasks.enabled=excluded.enabled THEN scheduled_tasks.next_run_at ELSE excluded.next_run_at END`;
+  yield* sql`INSERT INTO scheduled_tasks(task_id,agent_id,title,prompt,enabled,schedule_json,project_id,thread_id,workspace_strategy_json,model_selection_json,runtime_mode,interaction_mode,created_by,creation_source,created_at,updated_at,next_run_at,last_run_status,run_count,owner_machine,target_machine) VALUES (${id},${f.agentId},${f.title},${f.prompt},${f.enabled ? 1 : 0},${schedule},${projectId},${previous[0]?.thread_id ?? null},${encodeJson(strategy)},${encodeJson(f.modelSelection)},${f.runtimeMode},${f.interactionMode},'user','web',${f.createdAt},${at},${next},'never',0,${f.ownerMachine},${f.machine ?? null}) ON CONFLICT(task_id) DO UPDATE SET agent_id=excluded.agent_id,title=excluded.title,prompt=excluded.prompt,enabled=excluded.enabled,schedule_json=excluded.schedule_json,project_id=excluded.project_id,workspace_strategy_json=excluded.workspace_strategy_json,model_selection_json=excluded.model_selection_json,runtime_mode=excluded.runtime_mode,interaction_mode=excluded.interaction_mode,updated_at=excluded.updated_at,owner_machine=excluded.owner_machine,target_machine=excluded.target_machine,next_run_at=CASE WHEN scheduled_tasks.schedule_json=excluded.schedule_json AND scheduled_tasks.enabled=excluded.enabled THEN scheduled_tasks.next_run_at ELSE excluded.next_run_at END`;
 }, Effect.mapError(storage));

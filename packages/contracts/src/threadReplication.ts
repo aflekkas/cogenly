@@ -1,11 +1,12 @@
 import * as Schema from "effect/Schema";
-import { AgentId } from "./agent.ts";
+import { AgentId, AgentUpsertInput, AgentMutationResult } from "./agent.ts";
 import { AuthPeerDelegateScope, AuthSyncReplicateScope } from "./auth.ts";
 import {
   CommandId,
   EnvironmentId,
   EventId,
   MessageId,
+  NodeId,
   ProjectId,
   ScheduledTaskId,
   ThreadId,
@@ -17,6 +18,8 @@ import { makePeerChannel } from "./machine.ts";
 import { ModelSelection } from "./modelSelection.ts";
 import {
   OrchestrationV2Actor,
+  OrchestrationV2WorkHandoffContext,
+  ThreadLaunchSubagent,
   OrchestrationV2CreationSource,
   OrchestrationV2ServerCommand,
   ThreadSurface,
@@ -24,6 +27,13 @@ import {
 } from "./orchestrationV2.ts";
 import { ProjectLabelId } from "./projectLabel.ts";
 import { ProviderInteractionMode, RuntimeMode } from "./providerPolicy.ts";
+import {
+  ScheduledTaskUpsertInput,
+  ScheduledTaskMutationResult,
+  ScheduledTaskRunNowInput,
+  ScheduledTaskRunNowResult,
+} from "./scheduledTask.ts";
+import { ServerProvider } from "./server.ts";
 import { SharedRepositoryRemote } from "./sharedDocument.ts";
 
 /** One batch: a single larger event still travels alone so it cannot wedge a cursor. */
@@ -274,6 +284,9 @@ export type ThreadLaunchProject = typeof ThreadLaunchProject.Type;
  * workspace is the project root or a new worktree, never an existing one.
  */
 export const ThreadLaunchPortable = Schema.Struct({
+  subagent: Schema.optionalKey(ThreadLaunchSubagent),
+  handoffSummary: Schema.optionalKey(Schema.String),
+  handoffContext: Schema.optionalKey(OrchestrationV2WorkHandoffContext),
   surface: Schema.optionalKey(ThreadSurface),
   workOrigin: Schema.optionalKey(WorkOrigin),
   sourceThreadId: Schema.optionalKey(ThreadId),
@@ -322,6 +335,13 @@ export type ThreadLaunchPortable = typeof ThreadLaunchPortable.Type;
  * retry return the thread the first attempt created. The target pushes the
  * new thread's events to the caller before it replies.
  */
+export const ThreadRepositoryBundle = Schema.Struct({
+  revision: Schema.String.check(Schema.isPattern(/^[a-f0-9]{40,64}$/)),
+  ref: Schema.String.check(Schema.isPattern(/^refs\/cogenly\/delegate\/[a-zA-Z0-9._-]+$/)),
+  base64: Schema.String.check(Schema.isMaxLength(45 * 1024 * 1024)),
+});
+export type ThreadRepositoryBundle = typeof ThreadRepositoryBundle.Type;
+
 export const ThreadLaunchRemote = makePeerChannel({
   name: "threads.launch.v1",
   scope: AuthPeerDelegateScope,
@@ -331,6 +351,7 @@ export const ThreadLaunchRemote = makePeerChannel({
     threadId: Schema.optional(ThreadId),
     project: ThreadLaunchProject,
     launch: ThreadLaunchPortable,
+    bundle: Schema.optional(ThreadRepositoryBundle),
     /** Files of the initial message's attachments, by their names here. */
     files: Schema.Array(ThreadAttachmentFile),
   }),
@@ -349,4 +370,79 @@ export const ThreadReplicationApply = makePeerChannel({
   payload: ThreadReplicationBatch,
   success: Schema.Struct({ acknowledged: ThreadReplicationCursor }),
   error: ThreadReplicationError,
+});
+
+/** The target's own provider catalog; local instance IDs and models differ between machines. */
+export const ThreadMachineCatalog = makePeerChannel({
+  name: "threads.catalog.v1",
+  scope: AuthPeerDelegateScope,
+  payload: Schema.Struct({ target: EnvironmentId }),
+  success: Schema.Struct({ providers: Schema.Array(ServerProvider) }),
+  error: ThreadRemoteError,
+});
+
+/** Result publication waits for the owner's own restart/limit recovery and descendants. */
+export const ThreadTaskProgress = makePeerChannel({
+  name: "threads.task-progress.v1",
+  scope: AuthPeerDelegateScope,
+  payload: Schema.Struct({
+    target: EnvironmentId,
+    threadId: ThreadId,
+    taskId: Schema.optional(NodeId),
+  }),
+  success: Schema.Struct({ pending: Schema.Boolean }),
+  error: ThreadRemoteError,
+});
+
+/** Creation is authored by the target, including its owned conversation and first turn. */
+const {
+  projectId: _agentProjectId,
+  ownerMachine: _agentOwner,
+  id: _agentId,
+  ...PortableAgentFields
+} = AgentUpsertInput.fields;
+export const ThreadAgentCreate = makePeerChannel({
+  name: "threads.agent-create.v1",
+  scope: AuthPeerDelegateScope,
+  payload: Schema.Struct({
+    target: EnvironmentId,
+    agentId: AgentId,
+    project: ThreadLaunchProject,
+    input: Schema.Struct(PortableAgentFields),
+  }),
+  success: AgentMutationResult,
+  error: ThreadRemoteError,
+});
+
+/** Committed task results can return without a push to the repository remote. */
+export const ThreadTaskBranch = makePeerChannel({
+  name: "threads.task-branch.v1",
+  scope: AuthPeerDelegateScope,
+  payload: Schema.Struct({ target: EnvironmentId, threadId: ThreadId }),
+  success: Schema.Struct({ branch: TrimmedNonEmptyString, bundle: ThreadRepositoryBundle }),
+  error: ThreadRemoteError,
+});
+
+const {
+  projectId: _scheduleProjectId,
+  ownerMachine: _scheduleOwner,
+  ...PortableScheduleFields
+} = ScheduledTaskUpsertInput.fields;
+export const ThreadScheduleUpsert = makePeerChannel({
+  name: "threads.schedule-upsert.v1",
+  scope: AuthPeerDelegateScope,
+  payload: Schema.Struct({
+    target: EnvironmentId,
+    project: ThreadLaunchProject,
+    input: Schema.Struct(PortableScheduleFields),
+  }),
+  success: ScheduledTaskMutationResult,
+  error: ThreadRemoteError,
+});
+export const ThreadScheduleRun = makePeerChannel({
+  name: "threads.schedule-run.v1",
+  scope: AuthPeerDelegateScope,
+  payload: Schema.Struct({ target: EnvironmentId, input: ScheduledTaskRunNowInput }),
+  success: ScheduledTaskRunNowResult,
+  error: ThreadRemoteError,
 });

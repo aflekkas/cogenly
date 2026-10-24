@@ -1,4 +1,5 @@
 import {
+  CommandId,
   EventId,
   MessageId,
   type OrchestrationV2DomainEvent,
@@ -22,15 +23,22 @@ import { startMachine } from "../machines/testkit.ts";
 import { idleThreadProjection, liveThreadShell } from "../mcp/McpToolAccess.testkit.ts";
 import * as EffectOutbox from "../orchestration-v2/EffectOutbox.ts";
 import * as EventSink from "../orchestration-v2/EventSink.ts";
+import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
+import * as Worker from "../orchestration-v2/EffectWorker.ts";
+import { makeControllableProvider } from "../orchestration-v2/testkit/ControllableProvider.ts";
+import { CodexProviderCapabilitiesV2 } from "../orchestration-v2/Adapters/CodexAdapterV2.ts";
+import { layerWithRegistry } from "../orchestration-v2/testkit/ProviderReplayHarness.ts";
 import * as EventStore from "../orchestration-v2/EventStore.ts";
 import * as Projections from "../orchestration-v2/ProjectionStore.ts";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as RemoteThreadCommands from "../orchestration-v2/RemoteThreadCommands.ts";
+import * as Git from "../vcs/GitVcsDriver.ts";
 import * as RemoteThreadLaunch from "../orchestration-v2/RemoteThreadLaunch.ts";
 import * as ThreadLaunch from "../orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as ThreadLaunchRouting from "./ThreadLaunchRouting.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
+import * as SharedSync from "../sync/SharedSync.ts";
 import * as SharedState from "../sync/SharedState.ts";
 import * as ThreadReplication from "./ThreadReplication.ts";
 import * as ThreadRouting from "./ThreadRouting.ts";
@@ -54,18 +62,29 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
   dispatch: (
     command: OrchestrationV2ServerCommand,
   ) => ReadonlyArray<OrchestrationV2DomainEvent> = () => [],
+  execution = false,
 ) {
   const machine = yield* startMachine(name, role);
+  const database = Layer.succeed(SqlClient.SqlClient, yield* machine.run(SqlClient.SqlClient));
+  const remoteServices = Layer.merge(RemoteThreadCommands.layer, RemoteThreadLaunch.layer);
+  const provider = makeControllableProvider(CodexProviderCapabilitiesV2);
+  const runtime = execution
+    ? layerWithRegistry({ name }, provider.registry, {
+        databaseLayer: database,
+        runEffectWorker: false,
+        remoteServices,
+      })
+    : Layer.empty;
   const stores = yield* machine.run(
     Layer.build(
       Layer.mergeAll(
+        runtime,
         EventSink.layer.pipe(
           Layer.provideMerge(
             Layer.mergeAll(EventStore.layer, Projections.layer, EffectOutbox.layer),
           ),
         ),
-        RemoteThreadCommands.layer,
-        RemoteThreadLaunch.layer,
+        remoteServices,
       ),
     ),
   );
@@ -73,6 +92,13 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
     machine.run(Effect.provideContext(effect, stores as never));
   const sink = yield* inStores(EventSink.EventSinkV2);
   const projections = yield* inStores(Projections.ProjectionStoreV2);
+  const engine = execution
+    ? Option.some(yield* inStores(Orchestrator.OrchestratorV2))
+    : Option.none<Orchestrator.OrchestratorV2["Service"]>();
+  const worker = execution
+    ? Option.some(yield* inStores(Worker.OrchestrationEffectWorkerV2))
+    : Option.none<Worker.OrchestrationEffectWorkerV2["Service"]>();
+  const launchRegistry = yield* inStores(RemoteThreadLaunch.RemoteThreadLaunch);
   /**
    * Launches this machine ran itself, as its ThreadLaunchService was asked:
    * the thread and its first message are written here, so this machine owns
@@ -82,11 +108,47 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
   const launches = Layer.mock(ThreadLaunch.ThreadLaunchService)({
     launch: (input) =>
       Effect.gen(function* () {
+        if (input.machine !== undefined)
+          return Option.getOrThrow(yield* launchRegistry.launch(input.machine, input));
         launched.push(input);
         const id = input.threadId ?? ThreadId.make(`thread:launched:${input.commandId}`);
         const existing = yield* Effect.option(projections.getThreadProjection(id));
         if (Option.isSome(existing))
           return { threadId: id, projection: existing.value, resumed: true };
+        if (Option.isSome(engine)) {
+          yield* engine.value.dispatch({
+            type: "thread.create",
+            commandId: input.commandId,
+            threadId: id,
+            projectId: input.projectId,
+            title: input.title,
+            modelSelection: input.modelSelection,
+            runtimeMode: input.runtimeMode,
+            interactionMode: input.interactionMode,
+            branch: null,
+            worktreePath: null,
+            subagent: input.subagent,
+            createdBy: input.createdBy,
+            creationSource: input.creationSource,
+          });
+          if (input.initialMessage !== undefined)
+            yield* engine.value.dispatch({
+              type: "message.dispatch",
+              commandId: CommandId.make(`${input.commandId}:message`),
+              threadId: id,
+              messageId: input.initialMessage.messageId ?? MessageId.make(`${id}:message`),
+              text: input.initialMessage.text,
+              attachments: [],
+              dispatchMode: { type: "start_immediately" },
+              createdBy: input.createdBy,
+              creationSource: input.creationSource,
+            });
+          return {
+            threadId: id,
+            projection: yield* projections.getThreadProjection(id),
+            resumed: false,
+          };
+        }
         const at = yield* DateTime.now;
         const thread = idleThreadProjection(liveThreadShell(id)).thread;
         yield* sink.write({
@@ -123,14 +185,29 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
     Effect.provideContext(replicationContext),
   );
   const threads = Layer.mock(ThreadManagement.ThreadManagementService)({
-    dispatch: (command) =>
-      sink.write({ commandId: command.commandId, events: dispatch(command) }).pipe(
-        Effect.map((storedEvents) => ({
-          sequence: storedEvents.at(-1)?.sequence ?? 0,
-          storedEvents,
-        })),
+    delegatedTaskResultPending: (threadId, taskId) =>
+      Option.isSome(engine)
+        ? engine.value.delegatedTaskResultPending(threadId, taskId)
+        : Effect.succeed(false),
+    hasReceipt: (commandId) =>
+      machine.run(SqlClient.SqlClient).pipe(
+        Effect.flatMap(
+          (sql) =>
+            sql`SELECT 1 FROM orchestration_command_receipts WHERE command_id = ${commandId}`,
+        ),
+        Effect.map((rows) => rows.length > 0),
         Effect.orDie,
       ),
+    dispatch: (command) =>
+      Option.isSome(engine)
+        ? engine.value.dispatch(command)
+        : sink.write({ commandId: command.commandId, events: dispatch(command) }).pipe(
+            Effect.map((storedEvents) => ({
+              sequence: storedEvents.at(-1)?.sequence ?? 0,
+              storedEvents,
+            })),
+            Effect.orDie,
+          ),
   });
   // Projects read straight from the tables tests fill; nothing here clones.
   const labels = Layer.unwrap(
@@ -251,16 +328,22 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
           }),
         ),
         Layer.provide(ProjectStore.layer),
+        Layer.provide(Layer.mock(Git.GitVcsDriver)({})),
         Layer.provide(labels),
         Layer.provide(repositoryCheckout),
         Layer.provide(identities),
         Layer.provide(folders),
-        Layer.provideMerge(SharedState.layer),
+        Layer.provideMerge(SharedSync.layer.pipe(Layer.provideMerge(SharedState.layer))),
         Layer.provide(
           Layer.succeed(Machines.Machines, { ...machine.machines, subscribe: Stream.never }),
         ),
         Layer.provide(Layer.succeed(Scheduler.Scheduler, { register: () => Effect.void })),
         Layer.provide(threads),
+        Layer.provide(
+          Option.isSome(engine)
+            ? Layer.succeed(Orchestrator.OrchestratorV2, engine.value)
+            : Layer.empty,
+        ),
         Layer.provide(launches),
       ),
     ),
@@ -279,6 +362,9 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
   );
   return {
     ...machine,
+    engine,
+    worker,
+    provider,
     replication,
     sync,
     routing,

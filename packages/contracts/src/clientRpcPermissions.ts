@@ -100,6 +100,7 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.integrationsConnectFromCatalog]: AuthOrchestrationOperateScope,
   [WS_METHODS.machineSecurityStatus]: AuthOrchestrationReadScope,
   [WS_METHODS.machinesList]: AuthOrchestrationReadScope,
+  [WS_METHODS.machinesCatalog]: AuthOrchestrationReadScope,
   [WS_METHODS.machinesSubscribe]: AuthOrchestrationReadScope,
   [WS_METHODS.machinesUpdate]: AuthSettingsWriteScope,
   // Pairing hands another server a standing credential to this one, or makes

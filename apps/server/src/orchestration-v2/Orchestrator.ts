@@ -82,6 +82,7 @@ import {
   pendingBackgroundTurnItems,
 } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 import { isReplayedCommandId } from "./ReplayedCommandIds.ts";
+import * as RemoteThreadLaunch from "./RemoteThreadLaunch.ts";
 import * as RemoteThreadCommands from "./RemoteThreadCommands.ts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -488,6 +489,7 @@ function upsertWorkTask(
 
 export function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
   switch (command.type) {
+    case "work.handoff.context":
     case "work.handoff.record":
     case "work.task.propose":
     case "work.task.dismiss":
@@ -543,6 +545,7 @@ export function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId
     case "thread.stop":
     case "provider.switch":
       return command.threadId;
+    case "delegated_task.attach":
     case "delegated_task.request":
     case "delegated_task.wake-policy":
     case "delegated_task.completion-delivery.acknowledge":
@@ -935,6 +938,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
   const threadDispatch = yield* ThreadCommandExecutor.ThreadCommandExecutor;
   // Absent outside the full server: every thread is then local.
   const remoteCommands = yield* Effect.serviceOption(RemoteThreadCommands.RemoteThreadCommands);
+  const remoteLaunch = yield* Effect.serviceOption(RemoteThreadLaunch.RemoteThreadLaunch);
 
   const mapDispatchError =
     (command: OrchestrationV2ServerCommand) =>
@@ -2363,12 +2367,22 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       branch: command.branch,
       worktreePath: command.worktreePath,
       activeProviderThreadId: null,
-      lineage: {
-        parentThreadId: null,
-        relationshipToParent: null,
-        rootThreadId: command.threadId,
-      },
-      forkedFrom: null,
+      lineage:
+        command.subagent === undefined
+          ? {
+              parentThreadId: null,
+              relationshipToParent: null,
+              rootThreadId: command.threadId,
+            }
+          : {
+              parentThreadId: command.subagent.parentThreadId,
+              relationshipToParent: "subagent",
+              rootThreadId: command.subagent.rootThreadId,
+            },
+      forkedFrom:
+        command.subagent === undefined
+          ? null
+          : { type: "node", nodeId: command.subagent.taskNodeId },
       createdAt: now,
       updatedAt: now,
       archivedAt: null,
@@ -6780,7 +6794,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
 
   const dispatchDelegatedTaskRequest = Effect.fn("orchestrationV2.dispatch.delegatedTaskRequest")(
     function* (
-      command: Extract<OrchestrationV2Command, { readonly type: "delegated_task.request" }>,
+      command: Extract<
+        OrchestrationV2ServerCommand,
+        { readonly type: "delegated_task.request" | "delegated_task.attach" }
+      >,
       events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
       effects: Ref.Ref<Array<PendingOrchestrationEffectV2>>,
     ) {
@@ -6834,16 +6851,19 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         });
       }
 
-      const targetAdapter = yield* providerAdapters.get(command.modelSelection.instanceId).pipe(
-        Effect.mapError(
-          (cause) =>
-            new OrchestratorProviderAdapterError({
-              commandId: command.commandId,
-              providerInstanceId: command.modelSelection.instanceId,
-              cause,
-            }),
-        ),
-      );
+      const targetAdapter =
+        command.type === "delegated_task.attach"
+          ? { driver: command.driver }
+          : yield* providerAdapters.get(command.modelSelection.instanceId).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new OrchestratorProviderAdapterError({
+                    commandId: command.commandId,
+                    providerInstanceId: command.modelSelection.instanceId,
+                    cause,
+                  }),
+              ),
+            );
 
       const now = command.createdAt ?? (yield* DateTime.now);
       const taskNodeId = idAllocator.derive.delegatedTaskNode({
@@ -6947,14 +6967,15 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       };
       const emitEvent = emit(events, command);
 
-      yield* emitEvent({
-        type: "thread.created",
-        threadId: childThreadId,
-        driver: targetAdapter.driver,
-        providerInstanceId: command.modelSelection.instanceId,
-        occurredAt: now,
-        payload: childThread,
-      });
+      if (command.type !== "delegated_task.attach")
+        yield* emitEvent({
+          type: "thread.created",
+          threadId: childThreadId,
+          driver: targetAdapter.driver,
+          providerInstanceId: command.modelSelection.instanceId,
+          occurredAt: now,
+          payload: childThread,
+        });
       yield* emitEvent({
         type: "node.updated",
         threadId: command.parentThreadId,
@@ -6986,6 +7007,22 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         payload: taskTurnItem,
       });
 
+      if (command.type === "delegated_task.attach") {
+        const child = yield* projectionStore
+          .getThread(childThreadId)
+          .pipe(mapDispatchError(command));
+        if (
+          child.lineage.parentThreadId !== command.parentThreadId ||
+          child.forkedFrom?.type !== "node" ||
+          child.forkedFrom.nodeId !== taskNodeId
+        )
+          return yield* new OrchestratorDispatchError({
+            commandId: command.commandId,
+            commandType: command.type,
+            cause: "Remote child lineage does not match its parent task.",
+          });
+        return;
+      }
       const childMessageCommand = {
         type: "message.dispatch",
         createdBy: command.createdBy,
@@ -7099,6 +7136,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     const parent = yield* projectionStore
       .getThreadRecords(parentThreadId, ["runs", "subagents", "providerTurns", "attempts"])
       .pipe(mapDispatchError(command));
+    if (parent.thread.ownerMachine != null) return;
     const original = parent.subagents.find(
       (task) =>
         task.childThreadId === child.id &&
@@ -7336,6 +7374,66 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     }
   });
 
+  const dispatchWorkHandoffContext = Effect.fn("orchestrationV2.dispatch.workHandoffContext")(
+    function* (
+      command: Extract<OrchestrationV2InternalCommand, { type: "work.handoff.context" }>,
+      events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+    ) {
+      const target = yield* projectionStore
+        .getThreadRecords(command.threadId, ["runs"])
+        .pipe(
+          Effect.mapError(
+            (cause) => new OrchestratorProjectionError({ threadId: command.threadId, cause }),
+          ),
+        );
+      const run = target.runs.find((candidate) => candidate.ordinal === 1);
+      if (run?.providerThreadId == null)
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: "Work has no initial provider thread.",
+        });
+      const source = { id: command.sourceThreadId, activeProviderThreadId: null };
+      const now = yield* DateTime.now;
+      const emitEvent = emit(events, command);
+      // The carried transcript is delivered into the Work thread's first turn by
+      // the usual handoff pipeline, within that turn's own budget and exactly
+      // once per native thread. The summary stays for provenance.
+      const handoffContext = command.handoffContext;
+      yield* emitEvent({
+        type: "context-handoff.updated",
+        threadId: target.thread.id,
+        providerInstanceId: run.providerInstanceId,
+        occurredAt: now,
+        payload: {
+          id: ContextHandoffId.make(`work-handoff:${command.commandId}`),
+          threadId: target.thread.id,
+          sourceThreadId: source.id,
+          ...(handoffContext === undefined
+            ? {}
+            : {
+                sourceThreadTitle: handoffContext.sourceThreadTitle,
+                messagesCarried: handoffContext.messagesCarried,
+                summaryUsed: handoffContext.summaryUsed,
+              }),
+          targetRunId: run.id,
+          fromProviderThreadIds:
+            source.activeProviderThreadId === null ? [] : [source.activeProviderThreadId],
+          toProviderThreadId: run.providerThreadId,
+          coveredRunOrdinals: { from: run.ordinal, to: run.ordinal },
+          strategy: "manual_context",
+          status: handoffContext === undefined ? "superseded" : "ready",
+          summaryMessageId: run.userMessageId,
+          summaryText: command.scopeSummary,
+          ...(handoffContext === undefined ? {} : { history: handoffContext.history }),
+          createdByProviderInstanceId: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+    },
+  );
+
   const dispatchWorkHandoffRecord = Effect.fn("orchestrationV2.dispatch.workHandoffRecord")(
     function* (
       command: Extract<OrchestrationV2InternalCommand, { type: "work.handoff.record" }>,
@@ -7398,41 +7496,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
                   updatedAt: DateTime.formatIso(now),
                 }),
               }),
-        },
-      });
-      // The carried transcript is delivered into the Work thread's first turn by
-      // the usual handoff pipeline, within that turn's own budget and exactly
-      // once per native thread. The summary stays for provenance.
-      const handoffContext = command.handoffContext;
-      yield* emitEvent({
-        type: "context-handoff.updated",
-        threadId: target.thread.id,
-        providerInstanceId: run.providerInstanceId,
-        occurredAt: now,
-        payload: {
-          id: ContextHandoffId.make(`work-handoff:${command.commandId}`),
-          threadId: target.thread.id,
-          sourceThreadId: source.id,
-          ...(handoffContext === undefined
-            ? {}
-            : {
-                sourceThreadTitle: handoffContext.sourceThreadTitle,
-                messagesCarried: handoffContext.messagesCarried,
-                summaryUsed: handoffContext.summaryUsed,
-              }),
-          targetRunId: run.id,
-          fromProviderThreadIds:
-            source.activeProviderThreadId === null ? [] : [source.activeProviderThreadId],
-          toProviderThreadId: run.providerThreadId,
-          coveredRunOrdinals: { from: run.ordinal, to: run.ordinal },
-          strategy: "manual_context",
-          status: handoffContext === undefined ? "superseded" : "ready",
-          summaryMessageId: run.userMessageId,
-          summaryText: command.scopeSummary,
-          ...(handoffContext === undefined ? {} : { history: handoffContext.history }),
-          createdByProviderInstanceId: null,
-          createdAt: now,
-          updatedAt: now,
         },
       });
     },
@@ -11058,6 +11121,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
   ) =>
     Effect.gen(function* () {
       const childThreadId = childControls.thread.id;
+      const parentShell = yield* projectionStore.getThread(
+        childControls.thread.lineage.parentThreadId!,
+      );
+      if (parentShell.ownerMachine != null) return;
       const forkedFrom = childControls.thread.forkedFrom;
       if (
         childControls.thread.lineage.relationshipToParent !== "subagent" ||
@@ -11074,6 +11141,17 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             : undefined
           : taskRuns.toSorted((a, b) => b.ordinal - a.ordinal)[0];
       if (childRun === undefined) return;
+      if (childControls.thread.ownerMachine != null) {
+        const pending = Option.isNone(remoteLaunch)
+          ? true
+          : yield* remoteLaunch.value
+              .resultPending(
+                childThreadId,
+                options.taskId === forkedFrom.nodeId ? undefined : options.taskId,
+              )
+              .pipe(Effect.orElseSucceed(() => true));
+        if (pending !== false) return;
+      }
       const outcome = runOutcome(childRun);
       const terminalStatus = delegatedTaskTerminalStatus(outcome);
       if (terminalStatus === null) {
@@ -11414,7 +11492,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       }
 
       const { resultRun } = progress;
-      if (progress.state !== "result_available" || resultRun === undefined) return;
+      if (
+        progress.state !== "result_available" ||
+        resultRun === undefined ||
+        childControls.thread.ownerMachine != null
+      )
+        return;
       const status = delegatedTaskTerminalStatus(runOutcome(resultRun));
       if (status !== "cancelled" && status !== "interrupted") return;
       if (
@@ -11961,6 +12044,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       case "thread.merge_back":
         yield* dispatchThreadMergeBack(command, events);
         break;
+      case "delegated_task.attach":
       case "delegated_task.request":
         yield* dispatchDelegatedTaskRequest(command, events, effects);
         break;
@@ -11970,6 +12054,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       case "delegated_task.completion-delivery.acknowledge":
       case "delegated_task.completion-delivery.dispose":
         yield* dispatchDelegatedTaskCompletionDeliveryResolution(command, events);
+        break;
+      case "work.handoff.context":
+        yield* dispatchWorkHandoffContext(command, events);
         break;
       case "work.handoff.record":
         yield* dispatchWorkHandoffRecord(command, events);
@@ -12197,6 +12284,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     if (command.type === "notification.delivery.accept") {
       yield* mapDispatchError(command)(offerDelegatedCompletionDeliveries(command.threadId));
     }
+    if (command.type === "delegated_task.attach") {
+      const childThreadId = idAllocator.derive.delegatedTaskThread({
+        commandId: command.commandId,
+      });
+      yield* finalizeAppOwnedSubagent(childThreadId).pipe(mapDispatchError(command));
+    }
     if (command.type === "delegated_task.wake-policy") {
       yield* mapDispatchError(command)(offerDelegatedCompletionDeliveries(command.parentThreadId));
     }
@@ -12234,6 +12327,14 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       if (Option.isSome(remoteCommands)) {
         const forwarded = yield* remoteCommands.value.forward(command);
         if (Option.isSome(forwarded)) return forwarded.value;
+      }
+      if (command.type === "delegated_task.request" && command.machine !== undefined) {
+        if (Option.isNone(remoteLaunch))
+          return yield* new ThreadRemoteError({
+            reason: "offline",
+            detail: "Machine delegation is unavailable. Omit machine to run here.",
+          });
+        return yield* remoteLaunch.value.delegate(command);
       }
       const dispatch = threadDispatch.withLock(
         commandThreadId(command),
@@ -12281,6 +12382,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
   const handleTerminalRun = (stored: OrchestrationV2StoredEvent) =>
     Effect.gen(function* () {
       const threadId = stored.event.threadId;
+      if (isReplayedCommandId(stored.commandId)) {
+        const parentThreadId = yield* appOwnedSubagentParentThreadId(threadId);
+        if (parentThreadId !== undefined)
+          yield* threadDispatch.withLock(parentThreadId, finalizeAppOwnedSubagent(threadId));
+        return;
+      }
       // finalize writes the parent thread and startNextQueuedRun writes this
       // thread, so each takes its own thread's lock, sequentially and never
       // nested: dispatchDelegatedTaskRequest already writes child events
@@ -12343,7 +12450,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           stored.event.type === "run.updated" &&
           !String(stored.commandId).startsWith("command:runtime-reconcile:") &&
           // Imported or replicated history ran elsewhere; promoting a queue for it would start a run.
-          !isReplayedCommandId(stored.commandId) &&
           (stored.event.payload.status === "completed" ||
             stored.event.payload.status === "interrupted" ||
             stored.event.payload.status === "failed" ||
@@ -12351,6 +12457,14 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             stored.event.payload.status === "rolled_back"),
       ),
       Stream.runForEach(handleTerminalRun),
+      Effect.forkDetach,
+    );
+
+  yield* eventSink
+    .stream({ afterSequence: terminalEventsAfterSequence, eventType: "thread.metadata-updated" })
+    .pipe(
+      Stream.filter((stored) => isReplayedCommandId(stored.commandId)),
+      Stream.runForEach((stored) => settleChildAfterLimitRecovery(stored.event.threadId)),
       Effect.forkDetach,
     );
 
@@ -12391,6 +12505,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
   // and its end starts the queue, or recoverDelegatedTask does if it declines.
   const startDelegatedChildQueue = (threadId: ThreadId) =>
     Effect.gen(function* () {
+      if ((yield* projectionStore.getThread(threadId)).ownerMachine != null) return;
       if ((yield* appOwnedSubagentParentThreadId(threadId)) === undefined) return;
       const { runs } = yield* projectionStore.getThreadRecords(threadId, ["runs"]);
       const latest = latestExecutedRun(runs);

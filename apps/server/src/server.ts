@@ -596,6 +596,7 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
     // subscribers, and its forwarder registry, so routing sees its commands.
     // Its launcher registry, so a launch naming another machine reaches it.
     Layer.merge(ProjectMove.layer, ThreadLaunchRouting.layer).pipe(
+      Layer.provide(SharedSync.layer.pipe(Layer.provide(SharedState.layer))),
       Layer.provideMerge(ThreadTransfer.layer),
       Layer.provideMerge(ThreadRouting.layer),
       Layer.provideMerge(ThreadSync.layer),

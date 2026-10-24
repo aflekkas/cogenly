@@ -101,3 +101,26 @@ half-finished worktrees. Then it moves the project's threads.
 A thread whose project is a scratch folder on S (S's "No project", or a T3
 Code scratch folder an older import recorded as a repository) maps to T's
 "No project", which the commit creates if T has none yet.
+
+## Launching on another machine
+
+A new thread is created by its target, which owns its first event and runs its
+first turn. `ThreadLaunchService` routes through the launch registry and the
+typed peer channel; transports and schedulers use that same service. Targets
+resolve a project by its shared label and repository remote, adopting a local
+checkout or cloning it with their own credentials. Absolute worktree paths
+cannot be used remotely. Offline targets refuse work instead of queuing it.
+
+A delegated child and its parent may have different owners. The child owns its
+conversation; task bookkeeping and completion wakes belong to the parent.
+Replicated terminal events settle that local parent without promoting the
+replicated child's queue. Before publishing a result the parent checks the
+child owner's recovery state, since restart continuations and pending effects
+are local, not replicated. The normal recovery pass retries this after a lost
+connection. Worktree delegation transfers the parent's commit in a bounded Git
+bundle before preparation; uncommitted files never travel. Reading a terminal
+task can fetch its committed result branch back without forcing a local ref.
+
+Schedules have a timer owner and an optional run target. Configuration edits
+and manual runs go through the timer owner; each fresh-thread firing goes
+through the launch service and records an offline target as a failed run.
