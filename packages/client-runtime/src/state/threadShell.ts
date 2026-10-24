@@ -7,7 +7,6 @@ import type {
   ScopedThreadRef,
   ThreadId,
 } from "@t3tools/contracts";
-import { isProviderNativeSubagentThread } from "@t3tools/contracts";
 import { Atom } from "effect/reactivity";
 
 import type { EnvironmentThreadShell, PendingSubagentRequest } from "./models.ts";
@@ -48,15 +47,14 @@ const isChildRunLive = (
       thread.status === "running" ||
       thread.status === "waiting";
 
-/** What a subagent's live run waits on the user for. Provider-native
-    subagents ask on their parent, so they are skipped. */
+/** What a subagent's live run waits on the user for. Provider-native work
+    asks on the parent, so a request on such a child is from a run of its own. */
 function subagentRequest(thread: OrchestrationV2ThreadShell): PendingSubagentRequest | null {
   const kind = thread.pendingRuntimeRequest?.kind;
   if (
     kind === undefined ||
     kind === "auth_refresh" ||
     thread.lineage.relationshipToParent !== "subagent" ||
-    isProviderNativeSubagentThread(thread) ||
     !isChildRunLive(thread)
   ) {
     return null;

@@ -127,4 +127,42 @@ describe("deriveProviderSubagentStatus", () => {
     // The run reports its own work; the finished native turn is not work too.
     expect(deriveRunlessWorkStartedAt(following)).toBeNull();
   });
+
+  it("shows native work the parent starts again after the child's own run", () => {
+    const finishedRun = {
+      ...followUp,
+      status: "completed" as const,
+      completedAt: DateTime.makeUnsafe("2026-06-20T00:12:00.000Z"),
+    };
+    const resumedAt = DateTime.makeUnsafe("2026-06-20T00:15:00.000Z");
+    const resumed = {
+      ...nativeChild,
+      runs: [finishedRun],
+      nodes: [
+        { ...nativeRoot, status: "running" as const, startedAt: resumedAt, completedAt: null },
+      ],
+    };
+    expect(deriveProviderSubagentStatus(resumed)).toEqual({
+      status: "running",
+      startedAt: "2026-06-20T00:15:00.000Z",
+      completedAt: null,
+    });
+    const settled = {
+      ...resumed,
+      nodes: [
+        {
+          ...nativeRoot,
+          startedAt: resumedAt,
+          completedAt: DateTime.makeUnsafe("2026-06-20T00:16:00.000Z"),
+        },
+      ],
+    };
+    expect(deriveProviderSubagentStatus(settled)?.completedAt).toBe("2026-06-20T00:16:00.000Z");
+    // Without a later native start, the child's own run stays the latest work.
+    expect(deriveProviderSubagentStatus({ ...nativeChild, runs: [finishedRun] })).toEqual({
+      status: "completed",
+      startedAt: "2026-06-20T00:10:00.000Z",
+      completedAt: "2026-06-20T00:12:00.000Z",
+    });
+  });
 });

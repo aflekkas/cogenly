@@ -2470,7 +2470,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         (candidate) =>
           candidate.source !== "stack-dismissed" && threadPullRequestKeysEqual(candidate, key),
       );
-      // Same rule as a direct message.dispatch: a provider-native subagent takes no messages.
+      // A provider-native subagent never watches pull requests (see the watch guard).
       const inactive =
         thread.archivedAt !== null ||
         thread.settledOverride === "settled" ||
