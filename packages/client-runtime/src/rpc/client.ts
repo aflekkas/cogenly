@@ -66,6 +66,7 @@ export type EnvironmentSubscriptionRpcTag =
   | typeof WS_METHODS.threadApprovalsSubscribe
   | typeof WS_METHODS.integrationsSubscribe
   | typeof WS_METHODS.scheduledTasksSubscribe
+  | typeof WS_METHODS.machinesSubscribe
   | typeof WS_METHODS.serverGetStorageCleanupReport
   | typeof WS_METHODS.serverGetDatabaseStorage
   | typeof WS_METHODS.t3ImportStatus

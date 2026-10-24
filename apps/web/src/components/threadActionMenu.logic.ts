@@ -16,6 +16,8 @@ export type ThreadActionMenuId =
   | `move-folder:${string}`
   | "remove-folder"
   | "new-folder"
+  | "move-machine"
+  | `move-machine:${string}`
   | "pin"
   | "unpin"
   | "settle"
@@ -130,6 +132,50 @@ export interface ThreadActionMenuState {
   readonly limitResume?: "scheduled" | "cancelled" | null;
   /** The thread's project folder and where it can move; omitted where folders are unknown. */
   readonly folder?: ThreadActionMenuFolder;
+  /** Paired machines the thread can move to; omitted or empty on a standalone machine. */
+  readonly machines?: ThreadActionMenuMachines;
+}
+
+export interface ThreadActionMenuMachines {
+  /** Excludes the machine that runs the thread now. */
+  readonly targets: ReadonlyArray<{
+    readonly environmentId: string;
+    readonly name: string;
+    readonly online: boolean;
+  }>;
+  /** The move command's permission on the thread's environment. */
+  readonly canMove: boolean;
+}
+
+/**
+ * "Move to <machine>" for the one paired machine, or a "Move to Machine"
+ * submenu with one item per machine. Offline machines show but stay disabled.
+ * `countSuffix` labels a bulk move, such as " (12)".
+ */
+export function machineMenuItems(
+  machines: ThreadActionMenuMachines | undefined,
+  countSuffix = "",
+): ReadonlyArray<ContextMenuItem<ThreadActionMenuId>> {
+  if (machines === undefined || machines.targets.length === 0) return [];
+  const item = (target: ThreadActionMenuMachines["targets"][number], label: string) => ({
+    id: `move-machine:${target.environmentId}` as const,
+    label: target.online ? label : `${label} (Offline)`,
+    icon: "server",
+    disabled: !machines.canMove || !target.online,
+  });
+  const [only] = machines.targets;
+  if (machines.targets.length === 1 && only !== undefined) {
+    return [item(only, `Move to ${only.name}${countSuffix}`)];
+  }
+  return [
+    {
+      id: "move-machine",
+      label: `Move to Machine${countSuffix}`,
+      icon: "server",
+      disabled: !machines.canMove,
+      children: machines.targets.map((target) => item(target, target.name)),
+    },
+  ];
 }
 
 export interface ThreadActionMenuFolder {
@@ -297,6 +343,7 @@ export function buildThreadActionMenuItems(state: ThreadActionMenuState): MenuIt
         ]
       : []),
     ...(can.projectFolder ? folderMenuItems(state.folder) : []),
+    ...machineMenuItems(state.machines),
     ...(copyChildren.length > 0
       ? [{ id: "copy" as const, label: "Copy", icon: "copy", children: copyChildren }]
       : []),

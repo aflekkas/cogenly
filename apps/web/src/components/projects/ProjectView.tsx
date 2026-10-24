@@ -14,6 +14,7 @@ import {
   MoreHorizontalIcon,
   PaletteIcon,
   PencilIcon,
+  ServerIcon,
   Settings2Icon,
   SquarePenIcon,
   TrashIcon,
@@ -21,6 +22,10 @@ import {
 import { useMemo, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 
 import { useScratchProject } from "../../hooks/useScratchProject";
+import { machineMoveTargets, type MachineMoveTarget } from "../../machines/machines.logic";
+import { useEnvironmentMachineList } from "../../machines/useMachines";
+import { useMoveProjectToMachine } from "../../machines/useMoveToMachine";
+import { EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
 import { useSidebarProjectGroups } from "../../hooks/useSidebarProjectGroups";
 import { useClientSettings } from "../../hooks/useSettings";
 import { selectProjectGroupingSettings } from "../../logicalProject";
@@ -141,17 +146,50 @@ function ProjectNameEditor(props: {
   );
 }
 
-/** The header's ⋯ menu: a new chat in the project, rename, color, details, archive, delete. */
+/** "Move project to <machine>…", or a submenu of paired machines; nothing when standalone. */
+function ProjectMachineMenuItems(props: {
+  readonly targets: ReadonlyArray<MachineMoveTarget>;
+  readonly canMove: boolean;
+  readonly onMove: (target: MachineMoveTarget) => void;
+}) {
+  const [only] = props.targets;
+  if (only === undefined) return null;
+  const item = (target: MachineMoveTarget, label: string) => (
+    <MenuItem
+      key={target.environmentId}
+      disabled={!props.canMove || !target.online}
+      onClick={() => props.onMove(target)}
+    >
+      <EnvironmentMachineIcon aria-hidden kind={target.icon} />
+      {target.online ? label : `${label} (offline)`}
+    </MenuItem>
+  );
+  if (props.targets.length === 1) return item(only, `Move project to ${only.name}…`);
+  return (
+    <MenuSub>
+      <MenuSubTrigger disabled={!props.canMove}>
+        <ServerIcon />
+        Move project to machine
+      </MenuSubTrigger>
+      <MenuSubPopup>{props.targets.map((target) => item(target, `${target.name}…`))}</MenuSubPopup>
+    </MenuSub>
+  );
+}
+
+/** The header's ⋯ menu: a new chat in the project, rename, color, details, move, archive, delete. */
 function ProjectHeaderMenu(props: {
   readonly label: ProjectLabelWithRepositories;
   readonly canEdit: boolean;
   readonly canDelete: boolean;
   readonly archived: boolean;
   readonly canArchive: boolean;
+  readonly machineTargets: ReadonlyArray<MachineMoveTarget>;
+  readonly canMoveToMachine: boolean;
   readonly onNewChat: () => void;
   readonly onRename: () => void;
   readonly onRecolor: (color: string) => void;
   readonly onEditDetails: () => void;
+  readonly onMoveToMachine: (target: MachineMoveTarget) => void;
   readonly onToggleArchived: () => void;
   readonly onDelete: () => void;
 }) {
@@ -199,6 +237,11 @@ function ProjectHeaderMenu(props: {
           <Settings2Icon />
           Edit details…
         </MenuItem>
+        <ProjectMachineMenuItems
+          targets={props.machineTargets}
+          canMove={props.canMoveToMachine}
+          onMove={props.onMoveToMachine}
+        />
         <MenuSeparator />
         <MenuItem disabled={!props.canArchive} onClick={props.onToggleArchived}>
           {props.archived ? <ArchiveRestoreIcon /> : <ArchiveIcon />}
@@ -264,6 +307,12 @@ function ProjectPage(props: {
   });
   const deleteFolder = useDeleteProjectFolder();
   const archive = useProjectArchive(environmentId, label);
+  const machineList = useEnvironmentMachineList(environmentId);
+  const machineTargets = machineMoveTargets(machineList, undefined, true);
+  const canMoveToMachine = useAtomValue(
+    serverEnvironment.moveProjectToMachine.permissionAtom(environmentId),
+  );
+  const moveProjectToMachine = useMoveProjectToMachine();
   const { startScratchThread } = useScratchProject();
   const [renaming, setRenaming] = useState(false);
   const [editingDetails, setEditingDetails] = useState(false);
@@ -401,6 +450,17 @@ function ProjectPage(props: {
                 canDelete={canDelete}
                 archived={archive.archived}
                 canArchive={archive.canArchive}
+                machineTargets={machineTargets}
+                canMoveToMachine={canMoveToMachine}
+                onMoveToMachine={(target) =>
+                  void moveProjectToMachine({
+                    environmentId,
+                    project: { id: label.id, name: label.name },
+                    target,
+                    // Its threads can run on several machines.
+                    fromName: null,
+                  })
+                }
                 onNewChat={() =>
                   void startScratchThread(environmentId, {
                     surface: "chat",

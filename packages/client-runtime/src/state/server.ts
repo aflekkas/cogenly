@@ -1206,6 +1206,11 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:projectLabels:moveProjectToMachine",
       tag: WS_METHODS.projectLabelsMoveToMachine,
     }),
+    /** The machines this environment is paired with, live: a fresh list after every change. */
+    machinesLive: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+      label: "environment-data:machines:live",
+      tag: WS_METHODS.machinesSubscribe,
+    }),
     /** Hand threads to another paired machine; answers once it runs them, with skips. */
     moveThreadsToMachine: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:machines:moveThreadsToMachine",
