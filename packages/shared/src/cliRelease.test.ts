@@ -4,20 +4,51 @@ import {
   cliArchiveFileName,
   cliArchivePlatformKey,
   cliArchiveTarCommand,
+  cliExecutableFileName,
   cliReleaseDownloadBaseUrl,
   cliReleaseChannelOf,
   cliReleaseIndexPageUrl,
+  LEGACY_CLI_EXECUTABLE_NAME,
+  legacyCliArchiveFileName,
   newestCliReleaseVersion,
   parseChecksums,
+  selectCliArchive,
 } from "./cliRelease.ts";
 
 describe("cliRelease", () => {
   it("names archives by version and platform", () => {
     // The release workflow, the SSH runner, and install.sh spell the same name.
-    expect(cliArchiveFileName("1.2.3", "linux-x64")).toBe("t3-1.2.3-linux-x64.tar.gz");
+    expect(cliArchiveFileName("1.2.3", "linux-x64")).toBe("cogenly-1.2.3-linux-x64.tar.gz");
     expect(cliArchiveFileName("1.2.3-staging.20260911.4", "linux-arm64")).toBe(
-      "t3-1.2.3-staging.20260911.4-linux-arm64.tar.gz",
+      "cogenly-1.2.3-staging.20260911.4-linux-arm64.tar.gz",
     );
+    // What servers and installers from before the rename download.
+    expect(legacyCliArchiveFileName("1.2.3", "linux-x64")).toBe("t3-1.2.3-linux-x64.tar.gz");
+  });
+
+  it("names the executable, with .exe on Windows", () => {
+    expect(cliExecutableFileName("linux")).toBe("cogenly");
+    expect(cliExecutableFileName("win32")).toBe("cogenly.exe");
+    expect(cliExecutableFileName("linux", LEGACY_CLI_EXECUTABLE_NAME)).toBe("t3");
+  });
+
+  it("downloads the cogenly archive and falls back to t3 for releases before the rename", () => {
+    const both = parseChecksums(
+      [
+        `${"a".repeat(64)}  cogenly-1.2.3-linux-x64.tar.gz`,
+        `${"a".repeat(64)}  t3-1.2.3-linux-x64.tar.gz`,
+        `${"b".repeat(64)}  t3-1.2.3-linux-arm64.tar.gz`,
+      ].join("\n"),
+    );
+    expect(selectCliArchive(both, "1.2.3", "linux-x64")).toEqual({
+      fileName: "cogenly-1.2.3-linux-x64.tar.gz",
+      sha256: "a".repeat(64),
+    });
+    expect(selectCliArchive(both, "1.2.3", "linux-arm64")).toEqual({
+      fileName: "t3-1.2.3-linux-arm64.tar.gz",
+      sha256: "b".repeat(64),
+    });
+    expect(selectCliArchive(both, "1.2.4", "linux-x64")).toBeUndefined();
   });
 
   it("only maps platforms and architectures that have a release archive", () => {

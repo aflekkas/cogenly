@@ -23,10 +23,13 @@ import packageJson from "../../package.json" with { type: "json" };
 import * as BootService from "../cloud/bootService.ts";
 import {
   ensurePinnedRuntimeInstalled,
+  PINNED_RUNTIME_ARCHIVE_MISSING_STEP,
+  PINNED_RUNTIME_CHECKSUMS_STEP,
   pinnedRuntimeCommand,
   PinnedRuntimeInstallError,
   pinnedRuntimePaths,
   type PinnedRuntimePaths,
+  resolvePinnedRuntimeEntry,
 } from "../cloud/pinnedRuntime.ts";
 import { compareExactServiceVersions, isExactServiceVersion } from "../cloud/serviceProtocol.ts";
 import * as ProcessRunner from "../processRunner.ts";
@@ -530,7 +533,16 @@ export const runUpdate = Effect.fn("cli.update.run")(function* (input: {
     // Already current is not a reason to skip the launchers: a machine
     // whose only command is still `t3` gets its `cogenly` here.
     const launchedAs = (yield* HostProcess.IsExecutable) ? yield* resolveLauncherPath : undefined;
-    const targetPaths = pinnedRuntimePaths(path, input.baseDir, targetVersion, platform);
+    const targetPaths = yield* resolvePinnedRuntimeEntry(
+      fs,
+      path,
+      pinnedRuntimePaths(path, input.baseDir, targetVersion, platform),
+      platform,
+    ).pipe(
+      Effect.mapError(
+        () => new CliUpdateError({ reason: `Could not inspect cogenly@${targetVersion}.` }),
+      ),
+    );
     // The running executable being current does not mean this home has
     // that runtime pinned (it may only hold an older one). Install it
     // before touching any launcher, so `cogenly` never replaces `t3`
@@ -639,9 +651,9 @@ export const runUpdate = Effect.fn("cli.update.run")(function* (input: {
       // Releases before the Linux archives shipped have a SHA256SUMS without them.
       (error): error is PinnedRuntimeInstallError =>
         error._tag === "PinnedRuntimeInstallError" &&
-        ((error.step.startsWith("downloading the t3 release checksums") &&
+        ((error.step.startsWith(PINNED_RUNTIME_CHECKSUMS_STEP) &&
           String(error.cause).includes("404")) ||
-          error.step.startsWith("finding t3-")),
+          error.step.startsWith(PINNED_RUNTIME_ARCHIVE_MISSING_STEP)),
       () =>
         Effect.fail(
           new CliUpdateError({

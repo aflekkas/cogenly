@@ -473,8 +473,14 @@ fi
 COGENLY_RELEASE_BASE_URL=@@COGENLY_RELEASE_BASE_URL@@
 T3_VERSIONS_DIR="$HOME/.cogenly/runtime/versions"
 T3_RUNTIME_DIR="$T3_VERSIONS_DIR/$T3_ARCHIVE_VERSION"
+# The executable is \`cogenly\`, or \`t3\` in a runtime unpacked from an archive
+# older than the rename. Drop the t3 fallback only as "Transition: t3 → cogenly
+# names" in docs/operations/release.md describes.
+t3_runtime_entry() {
+  if [ -x "$1/cogenly" ] || [ ! -x "$1/t3" ]; then printf '%s\\n' "$1/cogenly"; else printf '%s\\n' "$1/t3"; fi
+}
 t3_runtime_ready() {
-  [ -x "$T3_RUNTIME_DIR/t3" ] && [ "$(cat "$T3_RUNTIME_DIR/.install-complete" 2>/dev/null)" = "$T3_ARCHIVE_VERSION" ]
+  [ -x "$(t3_runtime_entry "$T3_RUNTIME_DIR")" ] && [ "$(cat "$T3_RUNTIME_DIR/.install-complete" 2>/dev/null)" = "$T3_ARCHIVE_VERSION" ]
 }
 # A Cogenly the host already has: a \`cogenly\` command (install.sh, a
 # checkout wrapper), else the newest complete pinned runtime (the service's).
@@ -486,11 +492,11 @@ t3_existing_install() {
   esac
   T3_NEWEST="$(for T3_CANDIDATE in "$T3_VERSIONS_DIR"/*; do
     T3_CANDIDATE_VERSION="\${T3_CANDIDATE##*/}"
-    if [ -x "$T3_CANDIDATE/t3" ] && [ "$(cat "$T3_CANDIDATE/.install-complete" 2>/dev/null)" = "$T3_CANDIDATE_VERSION" ]; then
+    if [ -x "$(t3_runtime_entry "$T3_CANDIDATE")" ] && [ "$(cat "$T3_CANDIDATE/.install-complete" 2>/dev/null)" = "$T3_CANDIDATE_VERSION" ]; then
       printf '%s\n' "$T3_CANDIDATE_VERSION"
     fi
   done | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1)"
-  if [ -n "$T3_NEWEST" ]; then printf '%s\n' "$T3_VERSIONS_DIR/$T3_NEWEST/t3"; return 0; fi
+  if [ -n "$T3_NEWEST" ]; then t3_runtime_entry "$T3_VERSIONS_DIR/$T3_NEWEST"; return 0; fi
   return 1
 }
 if ! t3_runtime_ready; then
@@ -553,7 +559,7 @@ if ! t3_runtime_ready; then
     x86_64 | amd64) T3_ARCH="x64" ;;
     *) printf 'Cogenly releases have no server archive for %s hosts. Install Cogenly there from source.\\n' "$(uname -m)" >&2; exit 1 ;;
   esac
-  T3_ARCHIVE="t3-$T3_ARCHIVE_VERSION-$T3_PLATFORM-$T3_ARCH.tar.gz"
+  T3_ARCHIVE="cogenly-$T3_ARCHIVE_VERSION-$T3_PLATFORM-$T3_ARCH.tar.gz"
   T3_STAGING="$(mktemp -d "$HOME/.cogenly/runtime/versions/.staging-XXXXXX")"
   trap 'rm -rf "$T3_STAGING" "$T3_LOCK"' EXIT
   t3_fetch() {
@@ -567,6 +573,12 @@ if ! t3_runtime_ready; then
   }
   t3_fetch "$COGENLY_RELEASE_BASE_URL/v$T3_ARCHIVE_VERSION/SHA256SUMS" "$T3_STAGING/SHA256SUMS" @@T3_ARCHIVE_CHECKSUMS_SECONDS@@ || t3_fetch_failed
   T3_EXPECTED="$(grep " \\*\\{0,1\\}$T3_ARCHIVE$" "$T3_STAGING/SHA256SUMS" | cut -d' ' -f1 || true)"
+  if [ -z "$T3_EXPECTED" ]; then
+    # A release from before the rename lists only the t3- archive.
+    T3_LEGACY_ARCHIVE="t3-$T3_ARCHIVE_VERSION-$T3_PLATFORM-$T3_ARCH.tar.gz"
+    T3_EXPECTED="$(grep " \\*\\{0,1\\}$T3_LEGACY_ARCHIVE$" "$T3_STAGING/SHA256SUMS" | cut -d' ' -f1 || true)"
+    if [ -n "$T3_EXPECTED" ]; then T3_ARCHIVE="$T3_LEGACY_ARCHIVE"; fi
+  fi
   if [ -z "$T3_EXPECTED" ]; then t3_fetch_failed; fi
   t3_fetch "$COGENLY_RELEASE_BASE_URL/v$T3_ARCHIVE_VERSION/$T3_ARCHIVE" "$T3_STAGING/$T3_ARCHIVE" @@T3_ARCHIVE_DOWNLOAD_SECONDS@@ || t3_fetch_failed
   if command -v sha256sum >/dev/null 2>&1; then
@@ -581,7 +593,7 @@ if ! t3_runtime_ready; then
   rm -f "$T3_STAGING/$T3_ARCHIVE" "$T3_STAGING/SHA256SUMS"
   # Prove the binary runs here (libc, arch) before marking it ready, or every
   # later launch would exec a broken install instead of retrying.
-  if ! "$T3_STAGING/t3" --version >/dev/null 2>&1; then
+  if ! "$(t3_runtime_entry "$T3_STAGING")" --version >/dev/null 2>&1; then
     printf 'The Cogenly %s executable does not run on this host.\\n' "$T3_ARCHIVE_VERSION" >&2; exit 1
   fi
   printf '%s\\n' "$T3_ARCHIVE_VERSION" > "$T3_STAGING/.install-complete"
@@ -592,7 +604,7 @@ if [ -n "\${T3_LOCK:-}" ]; then
   rm -rf "$T3_LOCK"
   trap - EXIT
 fi
-exec "$T3_RUNTIME_DIR/t3" "$@"
+exec "$(t3_runtime_entry "$T3_RUNTIME_DIR")" "$@"
 `;
 
 const REMOTE_LAUNCH_SCRIPT = `set -eu

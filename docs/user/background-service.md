@@ -90,8 +90,8 @@ that session open.
 
 On macOS, check **System Settings → General → Login Items** if the service no
 longer starts at login. If agent work cannot access Desktop, Documents, or
-Downloads, it may need Full Disk Access for the `t3` executable listed in
-`ProgramArguments` in
+Downloads, it may need Full Disk Access for the `cogenly` executable (`t3` in
+a service set up by an older version) listed in `ProgramArguments` in
 `~/Library/LaunchAgents/com.cogenly.app.service.plist`.
 
 ## Reclaim database space
