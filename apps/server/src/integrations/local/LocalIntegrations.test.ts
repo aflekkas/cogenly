@@ -3,7 +3,7 @@ import { loopbackHttpsPolicy } from "../https.testkit.ts";
 import { describe, expect, it } from "@effect/vitest";
 import { NodeCrypto, NodeHttpServer } from "@effect/platform-node";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { EnvironmentId, IntegrationName } from "@t3tools/contracts";
+import { EnvironmentId, IntegrationName, ProjectLabelId } from "@t3tools/contracts";
 import * as ConfigProvider from "effect/ConfigProvider";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -44,11 +44,11 @@ import * as Handlers from "../../mcp/toolkits/integrations/handlers.ts";
 import { IntegrationsToolkit } from "../../mcp/toolkits/integrations/tools.ts";
 
 const fixture = new URL("./fixtures/fake-mcp.mjs", import.meta.url).pathname;
-const credentials = (missing = false, format: "json" | "login" = "json") =>
+const credentials = (missing = false, format: "json" | "login" = "json", project?: string) =>
   Layer.succeed(Credentials.IntegrationCredentials, {
-    resolve: (ref) =>
+    resolve: (ref, destination) =>
       Effect.succeed(
-        missing
+        missing || (project !== undefined && destination.scopeProjectId !== project)
           ? Option.none<string>()
           : format === "json"
             ? ref.endsWith("value")
@@ -74,6 +74,7 @@ const testLayer = (
   diagnostics?: { readonly state: "running" | "failed"; readonly tail: string },
   callbacks?: Array<string>,
   installer?: Layer.Layer<Installer.RuntimeInstaller>,
+  credentialProject?: string,
 ) => {
   const grants = new Map<string, GoogleTokens.GoogleGrant>();
   const grant: GoogleTokens.GoogleGrant = {
@@ -151,7 +152,7 @@ const testLayer = (
     NodeServices.layer,
     NodeCrypto.layer,
     FetchHttpClient.layer,
-    credentials(missing, format),
+    credentials(missing, format, credentialProject),
     // Remote OAuth tokens are only read once a remote sign-in completes, which no test here does.
     Layer.mock(Tokens.IntegrationTokens)({}),
     Sqlite.layerMemory.pipe(Layer.provide(NodeServices.layer)),
@@ -1025,4 +1026,42 @@ it.live("authorizes the Google vault bridge per process and retires it on discon
       (yield* local.credentialRequest(capability, { operation: "read" }).pipe(Effect.result))._tag,
     ).toBe("Failure");
   }).pipe(Effect.scoped, Effect.provide(testLayer(specs)));
+});
+
+it.live("connection tests cannot reuse another project's credentialed stdio process", () => {
+  const specs: Array<Runner.LocalMcpSpec> = [];
+  const a = ProjectLabelId.make("project:a");
+  const b = ProjectLabelId.make("project:b");
+  return Effect.gen(function* () {
+    yield* runMigrations();
+    const gateway = yield* Integrations.Integrations;
+    const { integration } = yield* gateway.create({
+      name: IntegrationName.make("scoped-worker"),
+      displayName: "Scoped worker",
+      transport: "stdio",
+      url: "https://localhost",
+      headers: {},
+      scope: { type: "all" },
+      hint: "",
+      command: {
+        command: "fixture",
+        args: [],
+        env: { FIXTURE_CUSTOM_KEY: "{{credential:custom.value}}" },
+      },
+    });
+    expect(yield* gateway.testConnection(integration.id, b)).toMatchObject({
+      reason: "credential_unresolved",
+    });
+    expect(specs).toHaveLength(0);
+    expect(yield* gateway.testConnection(integration.id, a)).toMatchObject({ status: "connected" });
+    expect(yield* gateway.testConnection(integration.id, b)).toMatchObject({
+      reason: "credential_unresolved",
+    });
+    expect(specs).toHaveLength(1);
+  }).pipe(
+    Effect.scoped,
+    Effect.provide(
+      testLayer(specs, false, "json", false, false, undefined, undefined, undefined, a),
+    ),
+  );
 });

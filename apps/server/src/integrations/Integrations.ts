@@ -366,6 +366,7 @@ export class Integrations extends Context.Service<
     ) => Effect.Effect<{ deleted: boolean }, IntegrationError>;
     readonly testConnection: (
       id: IntegrationId,
+      labelId?: ProjectLabelId | null,
     ) => Effect.Effect<IntegrationTestResult, IntegrationError>;
     readonly listTools: (
       name: IntegrationName,
@@ -1819,7 +1820,7 @@ const make = (options: IntegrationsOptions = {}) =>
           yield* notify;
           return { deleted: true };
         }).pipe(integrationLock(id).withPermits(1), Effect.mapError(failure("delete", "storage"))),
-      testConnection: (id) =>
+      testConnection: (id, labelId) =>
         Effect.gen(function* () {
           const integration = yield* getById(id);
           if (!integration.enabled) {
@@ -1828,12 +1829,17 @@ const make = (options: IntegrationsOptions = {}) =>
               reason: "disabled",
             });
           }
+          if (!integrationVisibleTo(integration, labelId))
+            return yield* new IntegrationError({
+              operation: "test connection",
+              reason: "not_found",
+            });
           const checkedAt = yield* now;
-          const result = yield* fetchTools(integration).pipe(
+          const result = yield* fetchTools(integration, labelId).pipe(
             // A passing test is a fresh tool list, so the list view shows it.
             Effect.tap((tools) =>
               Effect.gen(function* () {
-                const key = `${integration.id}:${integration.updatedAt}`;
+                const key = `${integration.id}:${integration.updatedAt}${labelId === undefined ? "" : labelId === null ? ":unfiled" : `:project:${labelId}`}`;
                 const at = yield* Clock.currentTimeMillis;
                 yield* Ref.update(cache, (entries) =>
                   new Map(entries).set(key, { key, atMs: at, result: tools }),

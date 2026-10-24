@@ -1332,12 +1332,19 @@ describe("Integration credential destinations", () => {
             allowedDomains: ["127.0.0.1"],
             secretFields: { value: "scoped-credential" },
           });
-          yield* service.create({ ...createInput(upstream.url), headers: tokenHeaders });
+          const { integration } = yield* service.create({
+            ...createInput(upstream.url),
+            headers: tokenHeaders,
+          });
           expect((yield* service.listTools(IntegrationName.make("gmail"), a)).tools).toHaveLength(
             1,
           );
           const calls = upstream.seen.length;
           for (const scope of [b, null]) {
+            expect(yield* service.testConnection(integration.id, scope)).toMatchObject({
+              status: "disconnected",
+              reason: "credential_unresolved",
+            });
             for (const operation of [
               service.listTools(IntegrationName.make("gmail"), scope).pipe(Effect.asVoid),
               service

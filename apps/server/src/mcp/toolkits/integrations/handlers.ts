@@ -122,7 +122,7 @@ export const layer = McpToolAccess.toLayer(IntegrationsToolkit, {
       const scope = yield* Invocation.McpInvocationContext;
       const integration = yield* byName(input.name, failureAt(scope.httpOrigin));
       return yield* (yield* Integrations.Integrations)
-        .testConnection(integration.id)
+        .testConnection(integration.id, yield* callerLabel)
         .pipe(Effect.mapError(failureAt(scope.httpOrigin)));
     }),
   ),

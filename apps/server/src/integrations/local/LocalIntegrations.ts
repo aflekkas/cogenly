@@ -190,7 +190,7 @@ const make = Effect.gen(function* () {
       readonly fromAgent: boolean;
     }
   >();
-  const active = new Set<string>();
+  const active = new Map<string, ProjectLabelId | null | undefined>();
   // In-flight requests may still hold an old definition after a committed edit or deletion.
   // Only the replacement supplied by that mutation may start the account again.
   const replacements = new Map<string, string | null>();
@@ -342,7 +342,14 @@ const make = Effect.gen(function* () {
           });
         if (active.has(integration.id)) {
           const state = (yield* runner.status(integration.id))?.state;
-          if (state === "running" || state === "starting" || state === "failed") return;
+          if (
+            active.get(integration.id) === labelId &&
+            (state === "running" || state === "starting" || state === "failed")
+          )
+            return;
+          // A process holds the credentials resolved for its starting project.
+          // Never reuse them for a different caller, including the owner view.
+          yield* runner.stop(integration.id);
           active.delete(integration.id);
         }
         if (integration.transport === "stdio") {
@@ -399,7 +406,7 @@ const make = Effect.gen(function* () {
               idleTimeoutMs: 5 * 60_000,
             })
             .pipe(Effect.mapError(mapLocalError));
-          active.add(integration.id);
+          active.set(integration.id, labelId);
           return;
         }
         const secrets = yield* client(labelId);
@@ -443,7 +450,7 @@ const make = Effect.gen(function* () {
         yield* runner
           .start({ ...spec, secrets: processSecrets })
           .pipe(Effect.mapError(mapLocalError));
-        active.add(integration.id);
+        active.set(integration.id, labelId);
         if (failures.delete(integration.id)) yield* changed;
       }).pipe(
         Effect.tapError((error) =>
