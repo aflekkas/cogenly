@@ -88,6 +88,7 @@ import { type EnvironmentConnectionPresentation } from "@t3tools/client-runtime/
 import {
   wasBootstrapThreadDeleted,
   wasBootstrapThreadNotCreated,
+  wasLaunchMachineOffline,
 } from "@t3tools/client-runtime/errors";
 import { readPastedComposerContext } from "./composerInlineTokenPaste";
 import { isPasteAsTextShortcut } from "@t3tools/client-runtime/text-paste";
@@ -283,6 +284,13 @@ import { BranchToolbar, type BranchToolbarHandle } from "./BranchToolbar";
 import { makeWorkspaceFileDropHandlers } from "./chat/workspaceFileDrop";
 import { ThreadHeaderTitle } from "./chat/ThreadLineageBreadcrumb";
 import { ThreadOwnerBadge } from "../machines/ThreadOwnerBadge";
+import {
+  describeOfflineLaunch,
+  mergeRunOnOptions,
+  resolveDraftLaunchTarget,
+  resolveRunOnPick,
+} from "../machines/launchMachine.logic";
+import { useEnvironmentMachineList } from "../machines/useMachines";
 import { resolveThreadOrigin } from "./chat/threadLineage.logic";
 import { isEditableFocused } from "../lib/editableFocus";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
@@ -2218,13 +2226,29 @@ export default function ChatView(props: ChatViewProps) {
   // Auto balance retargets to an existing project; a machine's "No project"
   // folder may not exist until it is picked.
   const canAutoBalanceEnvironments = hasMultipleEnvironments && !activeProjectIsScratch;
+  // "Run on" also offers the draft environment's paired machines. A draft
+  // shows its pick; a started thread shows the machine that runs it.
+  const pickedRunOnMachine =
+    (isServerThread ? activeThreadShell?.source.ownerMachine : draftThread?.launchMachine) ?? null;
+  const runOnMachineList = useEnvironmentMachineList(activeThread?.environmentId ?? null);
+  const runOnOptions = useMemo(
+    () =>
+      activeProject
+        ? mergeRunOnOptions({
+            environments: logicalProjectEnvironments,
+            machines: runOnMachineList,
+            pickedMachine: pickedRunOnMachine,
+          })
+        : logicalProjectEnvironments,
+    [activeProject, logicalProjectEnvironments, runOnMachineList, pickedRunOnMachine],
+  );
+  const canPickRunOn = runOnOptions.length > 1;
+  const runOnEnvironmentId = pickedRunOnMachine ?? activeThread?.environmentId ?? null;
   const activeEnvironmentOption =
-    logicalProjectEnvironments.find(
-      (environment) => environment.environmentId === activeThread?.environmentId,
-    ) ?? null;
+    runOnOptions.find((environment) => environment.environmentId === runOnEnvironmentId) ?? null;
   const showComposerEnvironmentIndicator = shouldShowEnvironmentIndicator({
     activeEnvironment: activeEnvironmentOption,
-    canPickEnvironment: hasMultipleEnvironments,
+    canPickEnvironment: canPickRunOn,
   });
 
   const openOrReuseProjectDraftThread = async (input: {
@@ -3759,6 +3783,7 @@ export default function ChatView(props: ChatViewProps) {
     setDraftThreadContext(draftId, {
       environmentSelection: "auto",
       loadBalancedEnvironmentId: null,
+      launchMachine: null,
       branch: null,
       worktreePath: null,
     });
@@ -3788,10 +3813,22 @@ export default function ChatView(props: ChatViewProps) {
     if (envLocked || !draftId || sendInFlightRef.current) return;
     const originalDraft = getDraftSession(draftId);
     if (!originalDraft || originalDraft.promotedTo) return;
-    const target = logicalProjectEnvironments.find(
-      (env) => env.environmentId === nextEnvironmentId,
-    );
-    if (!target) return;
+    const pick = resolveRunOnPick(runOnOptions, nextEnvironmentId);
+    if (!pick) return;
+    if (pick.kind === "machine") {
+      // The draft stays on its environment, which launches it on the machine.
+      // An existing worktree's path is this machine's; the branch carries over.
+      environmentChangeRef.current = null;
+      setIsEnvironmentChanging(false);
+      setDraftThreadContext(draftId, {
+        launchMachine: pick.environmentId,
+        environmentSelection: "manual",
+        loadBalancedEnvironmentId: null,
+        worktreePath: null,
+      });
+      return;
+    }
+    const target = pick.option;
     const request = { environmentId: target.environmentId };
     environmentChangeRef.current = request;
     setIsEnvironmentChanging(false);
@@ -3813,13 +3850,14 @@ export default function ChatView(props: ChatViewProps) {
           deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings),
           projectRef,
           draftId,
-          { environmentSelection: "manual", loadBalancedEnvironmentId: null },
+          { environmentSelection: "manual", loadBalancedEnvironmentId: null, launchMachine: null },
         );
       } else {
         setDraftThreadContext(draftId, {
           projectRef,
           environmentSelection: "manual",
           loadBalancedEnvironmentId: null,
+          launchMachine: null,
         });
       }
     };
@@ -6324,16 +6362,15 @@ export default function ChatView(props: ChatViewProps) {
       }
 
       if (command === "composer.cycleHost") {
-        if (envLocked || !draftId || !hasMultipleEnvironments) return;
+        if (envLocked || !draftId || !canPickRunOn) return;
         event.preventDefault();
         event.stopPropagation();
         if (event.repeat) return;
         // Step from where a pending switch is heading, so repeated presses keep advancing.
-        const currentId = environmentChangeRef.current?.environmentId ?? environmentId;
-        const index = logicalProjectEnvironments.findIndex(
-          (env) => env.environmentId === currentId,
-        );
-        const next = logicalProjectEnvironments[(index + 1) % logicalProjectEnvironments.length];
+        const currentId =
+          environmentChangeRef.current?.environmentId ?? runOnEnvironmentId ?? environmentId;
+        const index = runOnOptions.findIndex((env) => env.environmentId === currentId);
+        const next = runOnOptions[(index + 1) % runOnOptions.length];
         if (next) onEnvironmentChangeStable(next.environmentId);
         return;
       }
@@ -6446,8 +6483,9 @@ export default function ChatView(props: ChatViewProps) {
     draftId,
     environmentId,
     envLocked,
-    hasMultipleEnvironments,
-    logicalProjectEnvironments,
+    canPickRunOn,
+    runOnEnvironmentId,
+    runOnOptions,
     onEnvironmentChangeStable,
   ]);
 
@@ -6827,6 +6865,38 @@ export default function ChatView(props: ChatViewProps) {
   useLayoutEffect(() => {
     onResumeNowRef.current = onResume;
   });
+
+  // A launch an offline paired machine refused created nothing, and the send's
+  // failure path restores the draft. The toast's one action clears the pick
+  // and sends the same draft from this machine.
+  const resendRef = useRef<() => void>(() => undefined);
+  const offlineLaunchToast = (machine: EnvironmentId, sendRouteThreadKey: string) => {
+    const copy = describeOfflineLaunch({
+      machineName:
+        runOnOptions.find((option) => option.environmentId === machine)?.label ?? "That machine",
+      hereName:
+        runOnOptions.find((option) => option.environmentId === environmentId)?.label ??
+        "this machine",
+    });
+    return {
+      title: copy.title,
+      description: copy.description,
+      actionProps: {
+        children: copy.actionLabel,
+        onClick: () => {
+          setDraftThreadContext(draftId ?? routeThreadRef, {
+            launchMachine: null,
+            environmentSelection: "manual",
+          });
+          if (currentRouteThreadKeyRef.current === sendRouteThreadKey) {
+            resendRef.current();
+          } else if (draftId) {
+            void navigate({ to: "/draft/$draftId", params: { draftId } });
+          }
+        },
+      },
+    };
+  };
 
   const onSend = async (
     e?: { preventDefault: () => void },
@@ -7589,6 +7659,19 @@ export default function ChatView(props: ChatViewProps) {
         };
       }),
     );
+    // A new thread launches on the paired machine picked in "Run on", read
+    // now so a pick made while uploads ran still applies.
+    const launchMachineForSend = isLocalDraftThread
+      ? resolveDraftLaunchTarget({
+          draftEnvironmentId: environmentId,
+          launchMachine: (draftId
+            ? useComposerDraftStore.getState().getDraftSession(draftId)
+            : useComposerDraftStore.getState().getDraftSessionByRef(routeThreadRef)
+          )?.launchMachine,
+        }).machine
+      : undefined;
+    const launchMachineFields =
+      launchMachineForSend === undefined ? {} : { machine: launchMachineForSend };
     if (multipleModelSelections !== null) {
       const failedSelections: ModelSelection[] = [];
       let clearedDraft = false;
@@ -7685,6 +7768,7 @@ export default function ChatView(props: ChatViewProps) {
                           ...(draftProjectFolderId === null
                             ? {}
                             : { projectFolderId: draftProjectFolderId }),
+                          ...launchMachineFields,
                         },
                         prepareWorktree: {
                           projectCwd: activeProject.workspaceRoot,
@@ -7699,7 +7783,11 @@ export default function ChatView(props: ChatViewProps) {
                   });
                   if (result._tag === "Failure") {
                     const error = squashAtomCommandFailure(result);
-                    if (wasBootstrapThreadDeleted(error) || wasBootstrapThreadNotCreated(error)) {
+                    if (
+                      wasBootstrapThreadDeleted(error) ||
+                      wasBootstrapThreadNotCreated(error) ||
+                      wasLaunchMachineOffline(error)
+                    ) {
                       requestMayHaveStarted = false;
                     }
                     throw error;
@@ -7715,6 +7803,17 @@ export default function ChatView(props: ChatViewProps) {
                   }
                   failedSelections.push(target.selection);
                   const retainedThreadId = uncertainMultipleSubmissionsRef.current.get(retryKey);
+                  if (launchMachineForSend !== undefined && wasLaunchMachineOffline(error)) {
+                    // One toast for every model the offline machine refused.
+                    toastManager.add({
+                      ...stackedThreadToast({
+                        type: "error",
+                        ...offlineLaunchToast(launchMachineForSend, routeThreadKey),
+                      }),
+                      id: `offline-launch:${routeThreadKey}`,
+                    });
+                    return;
+                  }
                   const failureToastId = toastManager.add(
                     stackedThreadToast({
                       type: "error",
@@ -8030,11 +8129,14 @@ export default function ChatView(props: ChatViewProps) {
                       runtimeMode,
                       interactionMode: sendInteractionMode,
                       branch: activeThreadBranch,
-                      worktreePath: activeThread.worktreePath,
+                      // A worktree path is this machine's; another machine starts from the branch.
+                      worktreePath:
+                        launchMachineForSend === undefined ? activeThread.worktreePath : null,
                       createdAt: activeThread.createdAt,
                       ...(draftProjectFolderId === null
                         ? {}
                         : { projectFolderId: draftProjectFolderId }),
+                      ...launchMachineFields,
                     },
                   }
                 : {}),
@@ -8234,7 +8336,15 @@ export default function ChatView(props: ChatViewProps) {
           threadIdForSend,
           error instanceof Error ? error.message : "Failed to send message.",
         );
-        if (backgroundDraftOpened && draftId) {
+        if (launchMachineForSend !== undefined && wasLaunchMachineOffline(error)) {
+          toastManager.add({
+            ...stackedThreadToast({
+              type: "error",
+              ...offlineLaunchToast(launchMachineForSend, routeThreadKey),
+            }),
+            id: `offline-launch:${routeThreadKey}`,
+          });
+        } else if (backgroundDraftOpened && draftId) {
           toastManager.add(
             stackedThreadToast({
               type: "error",
@@ -8920,6 +9030,9 @@ export default function ChatView(props: ChatViewProps) {
   };
   const onWorktreeSetupWorkLocallyStable = useStableCallback(onWorktreeSetupWorkLocally);
   const onComposerSendStable = useStableCallback(onSend);
+  useLayoutEffect(() => {
+    resendRef.current = () => void onComposerSendStable();
+  }, [onComposerSendStable]);
   const onComposerResumeStable = useStableCallback(onResume);
   const onComposerCompactContextStable = useStableCallback(onCompactContext);
   const addWorkspaceDroppedFilesStable = useStableCallback((files: File[]) =>
@@ -9876,7 +9989,7 @@ export default function ChatView(props: ChatViewProps) {
                                 envLocked={envLocked}
                                 onComposerFocusRequest={scheduleComposerFocusStable}
 
-                                {...(hasMultipleEnvironments
+                                {...(canPickRunOn
                                   ? { onEnvironmentChange: onEnvironmentChangeStable }
                                   : {})}
                                 autoEnvironmentLabel={autoEnvironmentLabel}
@@ -9888,7 +10001,8 @@ export default function ChatView(props: ChatViewProps) {
                                     ? onAutoEnvironmentStable
                                     : undefined
                                 }
-                                availableEnvironments={logicalProjectEnvironments}
+                                availableEnvironments={runOnOptions}
+                                {...(runOnEnvironmentId ? { runOnEnvironmentId } : {})}
                                 composerControlsHostRef={setRestingComposerControlsHost}
                                 contextStripVisible={showComposerContextStrip}
                               />

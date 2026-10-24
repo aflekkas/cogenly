@@ -58,6 +58,13 @@ export function resolveEnvironmentOptionLabel(input: {
   return runtimeLabel ?? savedLabel ?? input.environmentId;
 }
 
+/** A "Run on" choice's tooltip: its label, and whether a paired machine is offline. */
+export function resolveEnvironmentOptionTitle(
+  option: Pick<EnvironmentOption, "label" | "pairedMachine">,
+): string {
+  return option.pairedMachine?.online === false ? `${option.label} (offline)` : option.label;
+}
+
 // A remote (non-primary) environment is always surfaced, even when it is the
 // only environment available: with a single connected machine there is nothing
 // to pick, but the user still needs to see where the project runs.

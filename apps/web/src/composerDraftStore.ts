@@ -314,6 +314,7 @@ const PersistedDraftThreadState = Schema.Struct({
   environmentSelection: Schema.optionalKey(Schema.Literals(["auto", "manual"])),
   surface: Schema.optionalKey(ThreadSurface),
   loadBalancedEnvironmentId: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  launchMachine: Schema.optionalKey(Schema.NullOr(Schema.String)),
   createdAt: Schema.String,
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
@@ -448,6 +449,12 @@ export interface DraftSessionState {
   /** Chats or Work, fixed when the draft is made; sent when it becomes a thread. */
   surface?: ThreadSurface;
   loadBalancedEnvironmentId?: EnvironmentId | null;
+  /**
+   * The paired machine the user picked to run this draft, reached through
+   * `environmentId`'s pairing. Absent or null runs it on `environmentId`.
+   * Only an explicit pick sets or clears it; a project pick keeps it.
+   */
+  launchMachine?: EnvironmentId | null;
   createdAt: string;
   runtimeMode: RuntimeMode;
   interactionMode: ProviderInteractionMode;
@@ -538,6 +545,7 @@ interface ComposerDraftStoreState {
       environmentSelection?: "auto" | "manual";
       surface?: ThreadSurface;
       loadBalancedEnvironmentId?: EnvironmentId | null;
+      launchMachine?: EnvironmentId | null;
     },
   ) => void;
   /** Creates or updates the draft session tracked for a concrete project ref. */
@@ -556,6 +564,7 @@ interface ComposerDraftStoreState {
       environmentSelection?: "auto" | "manual";
       surface?: ThreadSurface;
       loadBalancedEnvironmentId?: EnvironmentId | null;
+      launchMachine?: EnvironmentId | null;
     },
   ) => void;
   /** Updates mutable draft-session metadata without touching composer content. */
@@ -573,6 +582,7 @@ interface ComposerDraftStoreState {
       environmentSelection?: "auto" | "manual";
       surface?: ThreadSurface;
       loadBalancedEnvironmentId?: EnvironmentId | null;
+      launchMachine?: EnvironmentId | null;
     },
   ) => void;
   clearProjectDraftThreadId: (projectRef: ScopedProjectRef) => void;
@@ -1591,6 +1601,7 @@ function createDraftThreadState(
     environmentSelection?: "auto" | "manual";
     surface?: ThreadSurface;
     loadBalancedEnvironmentId?: EnvironmentId | null;
+    launchMachine?: EnvironmentId | null;
   },
 ): DraftThreadState {
   // A project change (including switching environments within a logical
@@ -1621,6 +1632,9 @@ function createDraftThreadState(
     options?.environmentSelection ?? existingThread?.environmentSelection;
   // Switching a draft's project never changes the surface it was started from.
   const surface = options?.surface ?? existingThread?.surface;
+  // The machine pick is the user's alone: a project change keeps it.
+  const launchMachine =
+    options?.launchMachine === undefined ? existingThread?.launchMachine : options.launchMachine;
   return {
     threadId,
     environmentId: projectRef.environmentId,
@@ -1637,6 +1651,7 @@ function createDraftThreadState(
               : existingThread.loadBalancedEnvironmentId,
           }
         : {}),
+    ...(launchMachine ? { launchMachine } : {}),
     createdAt: options?.createdAt ?? existingThread?.createdAt ?? new Date().toISOString(),
     runtimeMode: options?.runtimeMode ?? existingThread?.runtimeMode ?? DEFAULT_RUNTIME_MODE,
     interactionMode:
@@ -1674,6 +1689,7 @@ function draftThreadsEqual(left: DraftThreadState | undefined, right: DraftThrea
     left.environmentSelection === right.environmentSelection &&
     left.surface === right.surface &&
     left.loadBalancedEnvironmentId === right.loadBalancedEnvironmentId &&
+    (left.launchMachine ?? null) === (right.launchMachine ?? null) &&
     left.createdAt === right.createdAt &&
     left.runtimeMode === right.runtimeMode &&
     left.interactionMode === right.interactionMode &&
@@ -1842,6 +1858,10 @@ function normalizePersistedDraftThreads(
           : candidateDraftThread.loadBalancedEnvironmentId === null
             ? { loadBalancedEnvironmentId: null }
             : {}),
+        ...(typeof candidateDraftThread.launchMachine === "string" &&
+        candidateDraftThread.launchMachine.length > 0
+          ? { launchMachine: candidateDraftThread.launchMachine as EnvironmentId }
+          : {}),
         promotedTo,
       };
     }
@@ -2604,6 +2624,9 @@ function toHydratedDraftThreadState(
             persistedDraftThread.loadBalancedEnvironmentId as EnvironmentId | null,
         }
       : {}),
+    ...(persistedDraftThread.launchMachine
+      ? { launchMachine: persistedDraftThread.launchMachine as EnvironmentId }
+      : {}),
     promotedTo: persistedDraftThread.promotedTo
       ? scopeThreadRef(
           persistedDraftThread.promotedTo.environmentId as EnvironmentId,
@@ -2877,6 +2900,9 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               (options.branch != null || options.worktreePath != null
                 ? "manual"
                 : existing.environmentSelection);
+            // Only an explicit pick changes the machine; a project change keeps it.
+            const nextLaunchMachine =
+              options.launchMachine === undefined ? existing.launchMachine : options.launchMachine;
             const nextDraftThread: DraftThreadState = {
               threadId: existing.threadId,
               environmentId: nextProjectRef.environmentId,
@@ -2892,6 +2918,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
                     ? null
                     : (existing.loadBalancedEnvironmentId ?? null)
                   : options.loadBalancedEnvironmentId,
+              ...(nextLaunchMachine ? { launchMachine: nextLaunchMachine } : {}),
               createdAt:
                 options.createdAt === undefined
                   ? existing.createdAt
@@ -2912,6 +2939,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               nextDraftThread.environmentSelection === existing.environmentSelection &&
               nextDraftThread.surface === existing.surface &&
               nextDraftThread.loadBalancedEnvironmentId === existing.loadBalancedEnvironmentId &&
+              (nextDraftThread.launchMachine ?? null) === (existing.launchMachine ?? null) &&
               nextDraftThread.createdAt === existing.createdAt &&
               nextDraftThread.runtimeMode === existing.runtimeMode &&
               nextDraftThread.interactionMode === existing.interactionMode &&
