@@ -3,6 +3,7 @@
  */
 export const googleStdioLauncher = String.raw`
 import os
+from urllib.parse import urlencode
 from starlette.responses import PlainTextResponse
 from auth.oauth_callback_server import MinimalOAuthServer
 
@@ -16,6 +17,11 @@ def _callback_only(self, *args, **kwargs):
             or not request.query_params.get("state")
             or request.headers.get("host") != os.environ["WORKSPACE_MCP_ALLOWED_HOSTS"]):
             return PlainTextResponse("Invalid OAuth callback", status_code=400)
+        allowed = {"code", "state", "scope", "error"}
+        items = [(key, value) for key, value in request.query_params.multi_items() if key in allowed]
+        if len({key for key, _ in items}) != len(items):
+            return PlainTextResponse("Duplicate OAuth parameter", status_code=400)
+        request.scope["query_string"] = urlencode(items).encode("ascii")
         return await call_next(request)
 MinimalOAuthServer.__init__ = _callback_only
 

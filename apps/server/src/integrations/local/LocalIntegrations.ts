@@ -547,7 +547,13 @@ const make = Effect.gen(function* () {
       ),
     callback: (query) =>
       Effect.gen(function* () {
-        const params = new URLSearchParams(query);
+        const received = new URLSearchParams(query);
+        const params = new URLSearchParams();
+        for (const key of ["code", "state", "scope", "error"]) {
+          const values = received.getAll(key);
+          if (values.length > 1) return false;
+          if (values[0] !== undefined) params.set(key, values[0]);
+        }
         const state = params.get("state");
         const entry = state ? states.get(state) : undefined;
         if (

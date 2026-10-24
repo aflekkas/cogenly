@@ -69,6 +69,7 @@ const testLayer = (
   allowLoopback = false,
   runtimeMissing = false,
   diagnostics?: { readonly state: "running" | "failed"; readonly tail: string },
+  callbacks?: Array<string>,
 ) => {
   // Replace the external package at the process boundary; exercise the real supervisor and gateway.
   const runner = Layer.effect(
@@ -77,6 +78,10 @@ const testLayer = (
       const actual = yield* Runner.LocalMcpRunner;
       return Runner.LocalMcpRunner.of({
         ...actual,
+        callback: (id, query) => {
+          callbacks?.push(query);
+          return actual.callback(id, query);
+        },
         status:
           diagnostics === undefined
             ? actual.status
@@ -499,6 +504,39 @@ describe("managed Google integrations", () => {
         }
       }).pipe(Effect.scoped, Effect.provide(testLayer([], missing, "json", false, runtimeMissing))),
   );
+
+  it.live("forwards only allowlisted Google callback parameters and rejects duplicates", () => {
+    const callbacks: Array<string> = [];
+    return Effect.gen(function* () {
+      yield* runMigrations();
+      const gateway = yield* Integrations.Integrations;
+      const local = yield* Local.LocalIntegrations;
+      const { integration } = yield* gateway.create({
+        preset: "google-workspace",
+        accountLabel: "work",
+        callbackOrigin: "https://cogenly.example.com",
+      });
+      const link = yield* gateway.beginSignIn(integration.id, {
+        origin: "https://cogenly.example.com",
+      });
+      const auth = yield* local.authorize(
+        new URL(link.authorizationUrl).searchParams.get("ticket")!,
+      );
+      const state = new URL(auth.url!).searchParams.get("state")!;
+      expect(yield* local.callback(`state=${state}&state=other&code=fake`)).toBe(false);
+      expect(callbacks).toHaveLength(0);
+      expect(
+        yield* local.callback(
+          `state=${state}&code=fake&scope=read&redirect_uri=https://attacker.example&user=other`,
+        ),
+      ).toBe(true);
+      const params = new URLSearchParams(callbacks[0]);
+      expect([...params.keys()].sort()).toEqual(["code", "scope", "state"]);
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(testLayer([], false, "json", false, false, undefined, callbacks)),
+    );
+  });
 
   it.live.each(["running", "failed"] as const)(
     "keeps %s process output out of agent lists and pushes",
