@@ -87,6 +87,8 @@ export interface RepositoryListRow<Local extends RepositoryListLocal = Repositor
   readonly remote: string | null;
   /** The project's folder name for it under `repos/`, when the project links it. */
   readonly directoryName: string | null;
+  /** The icon file a machine with a checkout recorded on the link, for its icon anywhere. */
+  readonly iconPath: string | null;
   /** What the row reads: the folder name, never renamed. */
   readonly name: string;
   /** Secondary text, only where another row in the list would read the same. */
@@ -148,6 +150,7 @@ function rowFromLink<Local extends RepositoryListLocal>(
     linkId: link.repositoryId,
     remote,
     directoryName: link.directoryName,
+    iconPath: link.iconPath ?? null,
     name:
       link.directoryName ??
       local?.title ??
@@ -247,6 +250,7 @@ export function machineRepositoryRows<Local extends RepositoryListLocal>(input: 
         linkId: null,
         remote: null,
         directoryName: null,
+        iconPath: null,
         name: local.title,
         detail: null,
         checkout: "ready",
@@ -255,6 +259,24 @@ export function machineRepositoryRows<Local extends RepositoryListLocal>(input: 
       };
     }),
     input.leadRepositoryId,
+  );
+}
+
+/**
+ * Every repository the given projects link that picking would clone onto
+ * its project's machine (not cloned there, gone, or failed), as the
+ * pickers list them. Archived projects offer none. For surfaces outside a
+ * project, such as the command palette's "Clone to set up" rows.
+ */
+export function cloneableRepositoryRows(
+  projects: ReadonlyArray<EnvironmentProjectLabel>,
+): RepositoryListRow[] {
+  return projects.flatMap((project) =>
+    project.label.archivedAt === undefined
+      ? linkedRepositoryRows({ project, localById: new Map() }).filter(
+          (row) => repositoryRowAction(row) === "checkout",
+        )
+      : [],
   );
 }
 

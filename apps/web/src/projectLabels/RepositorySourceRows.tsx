@@ -1,4 +1,4 @@
-import type { ProjectLabelOwnerRepository } from "@t3tools/contracts";
+import type { EnvironmentId, ProjectLabelOwnerRepository } from "@t3tools/contracts";
 import {
   ChevronDownIcon,
   FolderGit2Icon,
@@ -13,7 +13,11 @@ import {
 import type { ReactNode } from "react";
 
 import { GitHubIcon } from "~/components/Icons";
-import { ProjectFavicon, type ProjectFaviconProject } from "~/components/ProjectFavicon";
+import {
+  ProjectFavicon,
+  RepositoryRemoteIcon,
+  type ProjectFaviconProject,
+} from "~/components/ProjectFavicon";
 import { cn } from "~/lib/utils";
 import { Button } from "~/components/ui/button";
 import { ComboboxItem, ComboboxItemIcon } from "~/components/ui/combobox";
@@ -33,29 +37,42 @@ import type { RemoteCloneView, useRemoteRepositoryClone } from "./useRemoteRepos
  */
 
 /**
- * A repository's icon: its own (picked in settings, else its favicon, through
- * the shared project icon resolver) when it has a checkout here, else GitHub's
- * mark for a GitHub remote, else the repository glyph.
+ * A repository's icon, the same on every surface: its own (picked in
+ * settings, else its favicon) when it has a checkout here, else the icon its
+ * remote resolves to on `environmentId` (a checkout's favicon recorded by
+ * any machine, else its owner's GitHub avatar), else GitHub's mark for a
+ * GitHub remote, else the repository glyph.
  */
 export function RepositoryRowIcon(props: {
   readonly local: ProjectFaviconProject | null;
   readonly remote: string | null;
+  /** The machine to resolve a remote's icon on; null skips that step. */
+  readonly environmentId: EnvironmentId | null;
+  readonly iconPath?: string | null;
   readonly className?: string;
 }) {
   const className = props.className ?? "size-4";
-  if (props.local !== null) {
-    return (
-      <ProjectFavicon
-        project={props.local}
+  const mark = props.remote?.toLowerCase().startsWith("github.com/") ? (
+    <GitHubIcon aria-hidden className="size-3.5" />
+  ) : (
+    <FolderGit2Icon className={className} />
+  );
+  const remoteIcon =
+    props.remote !== null && props.environmentId !== null ? (
+      <RepositoryRemoteIcon
+        environmentId={props.environmentId}
+        remote={props.remote}
+        iconPath={props.iconPath ?? null}
         className={className}
-        fallback={<FolderGit2Icon className={className} />}
+        fallback={mark}
       />
+    ) : (
+      mark
     );
+  if (props.local !== null) {
+    return <ProjectFavicon project={props.local} className={className} fallback={remoteIcon} />;
   }
-  if (props.remote?.toLowerCase().startsWith("github.com/")) {
-    return <GitHubIcon aria-hidden className="size-3.5" />;
-  }
-  return <FolderGit2Icon className={className} />;
+  return remoteIcon;
 }
 
 /** The text a row's state reads as at its end. */
@@ -285,6 +302,8 @@ export function GitHubRepositoryRow<Item>(props: {
   readonly clone: ReturnType<typeof useRemoteRepositoryClone>;
   /** This row's clone, when the followed clone is this repository's. */
   readonly view: RemoteCloneView | null;
+  /** The machine it would clone onto, which resolves its icon. */
+  readonly environmentId: EnvironmentId | null;
 }) {
   const { repository, view, clone } = props;
   const busy = view?.phase === "starting" || view?.phase === "running";
@@ -292,7 +311,15 @@ export function GitHubRepositoryRow<Item>(props: {
     <RepositoryPickerRow
       item={props.item}
       icon={
-        busy ? <Spinner size="xs" tone="muted" /> : <GitHubIcon aria-hidden className="size-3.5" />
+        busy ? (
+          <Spinner size="xs" tone="muted" />
+        ) : (
+          <RepositoryRowIcon
+            local={null}
+            remote={`github.com/${repository.nameWithOwner}`}
+            environmentId={props.environmentId}
+          />
+        )
       }
       name={props.name}
       tooltip={`Clone ${repository.nameWithOwner} into this project`}

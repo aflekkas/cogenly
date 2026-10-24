@@ -41,6 +41,7 @@ import * as AgentSessionScanner from "../project/AgentSessionScanner.ts";
 import * as T3Import from "../t3Import/T3ImportService.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as RepositoryCheckout from "../project/RepositoryCheckout.ts";
+import * as RepositoryIconResolver from "../project/RepositoryIconResolver.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
 import * as CheckpointCaptureService from "./CheckpointCaptureService.ts";
@@ -544,6 +545,7 @@ const layerProductionBase = Layer.mergeAll(
   layerManagedProjectFoldersProvided,
   layerThreadLaunchProvided,
   layerRepositoryCheckoutProvided,
+  RepositoryIconResolver.layer,
   RepositoryCheckout.layerRelocation.pipe(
     Layer.provide(Layer.mergeAll(layerRepositoryCheckoutProvided, layerProjectLabelsProvided)),
   ),

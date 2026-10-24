@@ -17,6 +17,7 @@ import * as Exports from "./export/ExportService.ts";
 import * as ProjectLabels from "./projectLabels/ProjectLabelService.ts";
 import * as ProjectLabelClone from "./projectLabels/ProjectLabelCloneRepository.ts";
 import * as RepositoryCheckout from "./project/RepositoryCheckout.ts";
+import * as RepositoryIconResolver from "./project/RepositoryIconResolver.ts";
 import { resolveProjectsRootDirectory } from "./project/ProjectsRoot.ts";
 import * as ProjectLabelFolders from "./projectLabels/ProjectLabelFolders.ts";
 import * as ProjectLabelFork from "./projectLabels/ProjectLabelForkToProject.ts";
@@ -1125,6 +1126,7 @@ const makeWsRpcHandlers = (
     const worktreeSetupTracker = yield* WorktreeSetupTracker.WorktreeSetupTracker;
     const projectCloneTracker = yield* ProjectCloneTracker.ProjectCloneTracker;
     const repositoryCheckout = yield* RepositoryCheckout.RepositoryCheckout;
+    const repositoryIcons = yield* RepositoryIconResolver.RepositoryIconResolver;
     const repositoryIdentityResolver = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
     const agentSessionScanner = yield* AgentSessionScanner.AgentSessionScanner;
     const agentSessionImporter = yield* AgentSessionImporter.AgentSessionImporter;
@@ -2363,6 +2365,12 @@ const makeWsRpcHandlers = (
               workspaceRoot: input.resource.cwd,
             });
           }
+          if (input.resource._tag === "repository-icon") {
+            return yield* issueAssetUrl({
+              resource: input.resource,
+              repositoryIcon: yield* repositoryIcons.resolve(input.resource.remote),
+            });
+          }
           if (input.resource._tag === "project-favicon") {
             const project = yield* projectStore.findActiveByWorkspaceRoot(input.resource.cwd).pipe(
               Effect.mapError(
@@ -2828,6 +2836,7 @@ type WsRequestServices =
   | ProjectService.ProjectService
   | ProjectStore.ProjectStoreV2
   | RepositoryCheckout.RepositoryCheckout
+  | RepositoryIconResolver.RepositoryIconResolver
   | ProviderAuthService.ProviderAuthService
   | ProviderInstanceRegistry.ProviderInstanceRegistry
   | ProviderLatestVersions.ProviderLatestVersions

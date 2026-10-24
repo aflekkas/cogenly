@@ -137,7 +137,13 @@ export function RepositoriesCard(props: {
     true,
   );
   const rowIcon = (row: RepositoryRow) => (
-    <RepositoryRowIcon local={row.local} remote={row.remote} className="size-3.5" />
+    <RepositoryRowIcon
+      local={row.local}
+      remote={row.remote}
+      environmentId={environmentId}
+      iconPath={row.iconPath}
+      className="size-3.5"
+    />
   );
   return (
     <ProjectCard

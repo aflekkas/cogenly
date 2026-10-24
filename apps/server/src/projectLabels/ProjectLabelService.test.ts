@@ -25,6 +25,9 @@ import * as GitHubRest from "@t3tools/source-control-github/server/GitHubRest";
 import * as Labels from "./ProjectLabelService.ts";
 import * as ProjectCloneTracker from "../project/ProjectCloneTracker.ts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
+import * as ProjectConfigFileLoader from "../project/ProjectConfigFileLoader.ts";
+import * as ProjectFaviconResolver from "../project/ProjectFaviconResolver.ts";
+import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 import * as Events from "../persistence/OrchestrationEventStore.ts";
 import * as Sqlite from "../persistence/Sqlite.ts";
 const database = Sqlite.layerMemory.pipe(Layer.provide(NodeServices.layer));
@@ -756,6 +759,58 @@ describe("project labels", () => {
         expect(folders(read)).toEqual({ "bartr-platform": "platform" });
       }).pipe(Effect.provide(naming("bartr-app"))),
     );
+  });
+
+  it.effect("records a checkout's icon on its link, so the project syncs it", () => {
+    const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "label-icon-"));
+    NodeFS.mkdirSync(NodePath.join(root, ".git"));
+    NodeFS.mkdirSync(NodePath.join(root, "public"));
+    NodeFS.writeFileSync(NodePath.join(root, "public", "favicon.svg"), "<svg/>");
+    const withIcons = Labels.layer.pipe(Layer.provide(layerSharedIdentity)).pipe(
+      Layer.provideMerge(
+        Layer.succeed(RepositoryIdentityResolver.RepositoryIdentityResolver, {
+          resolve: (cwd) =>
+            Effect.succeed({
+              canonicalKey: cwd,
+              locator: {
+                source: "git-remote" as const,
+                remoteName: "origin",
+                remoteUrl: "https://github.com/spawn-partners/platform.git",
+              },
+              rootPath: cwd,
+            }),
+        }),
+      ),
+      Layer.provideMerge(
+        ProjectFaviconResolver.layer.pipe(
+          Layer.provide(WorkspacePaths.layer),
+          Layer.provide(ProjectConfigFileLoader.layer),
+        ),
+      ),
+      Layer.provideMerge(persistence),
+      Layer.provide(NodeServices.layer),
+    );
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const service = yield* Labels.ProjectLabelService;
+      const repositoryId = ProjectId.make("platform");
+      yield* sql`INSERT INTO projection_projects(project_id, title, workspace_root, scripts_json, created_at, updated_at) VALUES (${repositoryId}, 'platform', ${root}, '[]', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`;
+      const { label } = yield* service.create({ name: "Spawn" });
+      yield* service.linkRepository({ labelId: label.id, repositoryId });
+      const link = (yield* service.read(label.id)).label.repositories?.[0];
+      expect(link?.iconPath).toBe("public/favicon.svg");
+      const [document] = yield* sql<{
+        repositories: string;
+      }>`SELECT json_extract(fields_json, '$.repositories') AS repositories FROM shared_documents WHERE kind = 'project' AND id = ${label.id}`;
+      expect(JSON.parse(document?.repositories ?? "[]")).toEqual([
+        {
+          remote: "github.com/spawn-partners/platform",
+          // No owner linked and no GitHub account connected here.
+          directoryName: "spawn-partners/platform",
+          iconPath: "public/favicon.svg",
+        },
+      ]);
+    }).pipe(Effect.provide(withIcons));
   });
 
   it.effect("reports each linked repository's checkout state on this machine", () => {

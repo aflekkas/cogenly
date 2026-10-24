@@ -59,6 +59,14 @@ export const AssetResource = Schema.Union([
   Schema.TaggedStruct("native-app-icon", {
     app: ToolActivityNativeAppReference,
   }),
+  // A linked repository's icon by its normalized remote, whether or not it is
+  // cloned on this server: its checkout's favicon, else the icon file a
+  // machine with a checkout recorded, else its owner's GitHub avatar.
+  Schema.TaggedStruct("repository-icon", {
+    remote: TrimmedNonEmptyString.check(Schema.isMaxLength(ASSET_PATH_MAX_LENGTH)),
+    // A cache-key hint only: the recorded icon path, so a new one asks again.
+    path: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(ASSET_PATH_MAX_LENGTH))),
+  }),
   // An upload a pull request body points at on GitHub. A private repository serves these only
   // to a request that carries a credential, which the client has none of, so the server fetches
   // them with the `gh` credential the repository at `cwd` authenticates with.

@@ -540,7 +540,9 @@ it.effect(
           WS_METHODS.projectLabelsAdoptOrphanFolder,
           WS_METHODS.projectLabelsRemoveOrphanFolder,
         ].map((method) => createCommandPermissions(runtime, method));
-        const holding = (scope: typeof AuthOrchestrationOperateScope) =>
+        const holding = (
+          scope: typeof AuthOrchestrationOperateScope | typeof AuthSourceControlWriteScope,
+        ) =>
           registry.set(
             sessions(env),
             AsyncResult.success({ ...grant(false), scopes: [scope], permissions: [scope] }),

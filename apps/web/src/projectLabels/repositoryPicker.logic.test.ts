@@ -15,6 +15,7 @@ import {
   addRepositoryOptions,
   canMoveIntoProjectFolder,
   canRemoveCheckout,
+  cloneableRepositoryRows,
   describeCloneFailure,
   gitHubRepositoryKeys,
   gitHubRepositoryOf,
@@ -273,6 +274,20 @@ describe("linkedRepositoryRows", () => {
       ["platform", "No remote"],
       ["platform", "Spawn-Partners"],
     ]);
+  });
+});
+
+describe("cloneableRepositoryRows", () => {
+  it("offers what picking would clone, never a cloned, cloning or archived one", () => {
+    expect(cloneableRepositoryRows([spawn]).map((row) => [row.name, row.checkout])).toEqual([
+      ["aflekkas/athens-racing", "not_cloned"],
+      ["finance", "missing"],
+    ]);
+    const archived = {
+      ...spawn,
+      label: { ...spawn.label, archivedAt: "2026-01-01T00:00:00.000Z" },
+    };
+    expect(cloneableRepositoryRows([archived])).toEqual([]);
   });
 });
 

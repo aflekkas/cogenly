@@ -103,7 +103,12 @@ import {
   threadFolderState,
   threadForksIntoProjects,
 } from "../projectLabels/projectLabels.logic";
-import { useMoveThreadToFolder } from "../projectLabels/useMoveThreadToFolder";
+import { cloneableRepositoryRows } from "../projectLabels/repositoryPicker.logic";
+import { RepositoryRowIcon } from "../projectLabels/RepositorySourceRows";
+import {
+  reportProjectFolderFailure,
+  useMoveThreadToFolder,
+} from "../projectLabels/useMoveThreadToFolder";
 import {
   useEnvironmentProjectLabels,
   useProjectLabelDirectory,
@@ -216,6 +221,7 @@ import {
   enumerateCommandPaletteItems,
   findHighlightedCommandPaletteItem,
   type CommandPaletteActionItem,
+  type CommandPaletteGroup,
   type CommandPaletteOpenIntent,
   type CommandPaletteProject,
   type CommandPaletteSubmenuItem,
@@ -250,6 +256,7 @@ import {
 } from "./ThreadCommandSubtitle";
 import { ThreadRowLeadingStatus, ThreadRowTrailingStatus } from "./ThreadStatusIndicators";
 import { primaryServerKeybindingsAtom, primaryServerProvidersAtom } from "../state/server";
+import { Atom } from "effect/reactivity";
 import {
   applyProviderInstanceSettings,
   deriveProviderInstanceEntries,
@@ -1451,6 +1458,92 @@ function OpenCommandPaletteDialog(props: {
     startScratchThread,
   ]);
 
+  // Repositories a project links that are not cloned on their project's
+  // machine: picking one clones it there, like "Clone to set up" in the
+  // repository pickers. Shown only where this connection may clone.
+  const cloneEnvironmentIds = useMemo(
+    () => environments.map((environment) => environment.environmentId),
+    [environments],
+  );
+  const repositoryDirectory = useProjectLabelDirectory(cloneEnvironmentIds);
+  const cloneableEnvironmentIds = useAtomValue(
+    useMemo(
+      () =>
+        Atom.make(
+          (get) =>
+            new Set(
+              cloneEnvironmentIds.filter((environmentId) =>
+                get(serverEnvironment.checkoutProjectLabelRepository.permissionAtom(environmentId)),
+              ),
+            ),
+        ),
+      [cloneEnvironmentIds],
+    ),
+  );
+  const checkoutRepository = useAtomCommand(serverEnvironment.checkoutProjectLabelRepository, {
+    label: "clone repository to this machine",
+    reportFailure: false,
+  });
+  const repositoryCloneItems = useMemo(
+    (): CommandPaletteActionItem[] =>
+      cloneableRepositoryRows(
+        repositoryDirectory.active.filter((project) =>
+          cloneableEnvironmentIds.has(project.environmentId),
+        ),
+      ).flatMap((row) => {
+        const { project, remote } = row;
+        if (project === null || remote === null) return [];
+        const location = projectEnvironmentLocationById.get(project.environmentId);
+        return [
+          {
+            kind: "action" as const,
+            value: `clone-repository:${project.key}:${row.key}`,
+            searchTerms: [row.name, remote, project.label.name, "clone", "set up"],
+            title: row.name,
+            description: [
+              "Clone to set up",
+              project.label.name,
+              ...(location?.kind === "remote" ? [location.label] : []),
+            ].join(" · "),
+            icon: (
+              <RepositoryRowIcon
+                local={null}
+                remote={remote}
+                environmentId={project.environmentId}
+                iconPath={row.iconPath}
+                className={ITEM_ICON_CLASS}
+              />
+            ),
+            // The clone's progress, and its failure, show in the clone toast.
+            run: async () => {
+              const result = await checkoutRepository({
+                environmentId: project.environmentId,
+                input: { labelId: project.label.id, remote },
+              });
+              if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+                reportProjectFolderFailure(`Could not clone ${row.name}`, result);
+              }
+            },
+          },
+        ];
+      }),
+    [
+      checkoutRepository,
+      cloneableEnvironmentIds,
+      projectEnvironmentLocationById,
+      repositoryDirectory.active,
+    ],
+  );
+  const newThreadInGroups = useMemo(
+    (): CommandPaletteGroup[] => [
+      { value: "projects", label: "Repositories", items: projectThreadItems },
+      ...(repositoryCloneItems.length > 0
+        ? [{ value: "clone", label: "Not cloned here", items: repositoryCloneItems }]
+        : []),
+    ],
+    [projectThreadItems, repositoryCloneItems],
+  );
+
   const allThreadItems = useMemo(
     () =>
       buildThreadActionItems({
@@ -1932,9 +2025,16 @@ function OpenCommandPaletteDialog(props: {
     // projectThreadItems already lists the current project first.
     pushPaletteView({
       addonIcon: <SquarePenIcon className={ADDON_ICON_CLASS} />,
-      groups: [{ value: "projects", label: "Repositories", items: projectThreadItems }],
+      groups: newThreadInGroups,
     });
-  }, [clearOpenIntent, browseNavigation, openIntent, projectThreadItems, pushPaletteView]);
+  }, [
+    clearOpenIntent,
+    browseNavigation,
+    newThreadInGroups,
+    openIntent,
+    projectThreadItems,
+    pushPaletteView,
+  ]);
 
   useLayoutEffect(() => {
     if (openIntent?.kind !== "start-work") return;
@@ -2037,7 +2137,7 @@ function OpenCommandPaletteDialog(props: {
       title: "New thread in...",
       icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
       addonIcon: <SquarePenIcon className={ADDON_ICON_CLASS} />,
-      groups: [{ value: "projects", label: "Repositories", items: projectThreadItems }],
+      groups: newThreadInGroups,
     });
   }
 

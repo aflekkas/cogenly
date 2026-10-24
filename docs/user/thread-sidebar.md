@@ -328,7 +328,10 @@ project's most recently used repository, or to the project's folder when it has 
 The repository menu lists every repository in the project, on the machine the task runs on
 (with **No project**, that machine's repositories). A repository the project has but this
 machine doesn't reads **Clone to set up**: pick it to clone it here, and the task moves to it
-once the clone lands. A repository's **⋯** menu can remove it from this machine (the project
+once the clone lands. The command palette's **New thread in...** lists the same repositories
+under **Not cloned here**; picking one clones it. A repository not cloned here still shows
+its icon once any machine with a checkout has found it, or its owner's GitHub avatar until
+then. A repository's **⋯** menu can remove it from this machine (the project
 keeps it, so you can clone it again here or on another machine), move its folder into the
 project's folder, or take it out of the project. **Add repository…** lists this machine's
 other repositories and the project's GitHub repositories to clone in. **No repository

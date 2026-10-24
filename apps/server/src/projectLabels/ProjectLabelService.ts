@@ -30,6 +30,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
@@ -42,6 +43,7 @@ import * as GitHubRest from "@t3tools/source-control-github/server/GitHubRest";
 import * as SharedState from "../sync/SharedState.ts";
 import * as Events from "../persistence/OrchestrationEventStore.ts";
 import * as ProjectCloneTracker from "../project/ProjectCloneTracker.ts";
+import * as ProjectFaviconResolver from "../project/ProjectFaviconResolver.ts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
 import { normalizeRepositoryRemote, repositoryDirectoryName } from "../project/RepositoryRemote.ts";
 import * as ProjectLabelFolders from "./ProjectLabelFolders.ts";
@@ -174,6 +176,8 @@ const decodeRepositoryLinks = Schema.decodeUnknownEffect(
         remote: Schema.NullOr(Schema.String),
         directoryName: Schema.NullOr(Schema.String),
         workspaceRoot: Schema.NullOr(Schema.String),
+        faviconPath: Schema.NullOr(Schema.String),
+        iconPath: Schema.NullOr(Schema.String),
       }),
     ),
   ),
@@ -184,6 +188,10 @@ type StoredRepositoryLink = {
   readonly directoryName: string | null;
   /** This machine's checkout path; null for a `remote:` placeholder. */
   readonly workspaceRoot: string | null;
+  /** The record's own favicon choice, which the recorded icon follows. */
+  readonly faviconPath: string | null;
+  /** The synced icon file, relative to the repository root. */
+  readonly iconPath: string | null;
 };
 const decodeSourceLinkRows = Schema.decodeUnknownEffect(
   Schema.fromJsonString(
@@ -224,7 +232,7 @@ const make = Effect.gen(function* () {
   const readLabels = (id?: ProjectLabelId) =>
     sql`SELECT label_id AS id, name, color, description, instructions, project_chat_thread_id AS projectChatThreadId, archived_at AS archivedAt, created_at AS createdAt, updated_at AS updatedAt,
     (SELECT json_group_array(repository_id) FROM (SELECT repository_id FROM label_repositories r WHERE r.label_id = l.label_id ORDER BY repository_id)) AS repositories
-    , (SELECT json_group_array(json(link)) FROM (SELECT json_object('repositoryId', repository_id, 'remote', remote, 'directoryName', directory_name, 'workspaceRoot', (SELECT p.workspace_root FROM projection_projects p WHERE p.project_id = r.repository_id AND p.deleted_at IS NULL)) AS link FROM label_repositories r WHERE r.label_id = l.label_id ORDER BY repository_id)) AS repositoryLinks
+    , (SELECT json_group_array(json(link)) FROM (SELECT json_object('repositoryId', repository_id, 'remote', remote, 'directoryName', directory_name, 'workspaceRoot', (SELECT p.workspace_root FROM projection_projects p WHERE p.project_id = r.repository_id AND p.deleted_at IS NULL), 'faviconPath', (SELECT p.favicon_path FROM projection_projects p WHERE p.project_id = r.repository_id AND p.deleted_at IS NULL), 'iconPath', icon_path) AS link FROM label_repositories r WHERE r.label_id = l.label_id ORDER BY repository_id)) AS repositoryLinks
     , (SELECT json_group_array(json(source)) FROM (SELECT json_object('kind', kind, 'owner', owner, 'repo', repo) AS source FROM label_source_links s WHERE s.label_id = l.label_id ORDER BY kind, owner, repo)) AS sources
     , (SELECT count(*) FROM effective_thread_project_folders f
       JOIN orchestration_v2_projection_threads t ON t.thread_id = f.thread_id
@@ -257,6 +265,9 @@ const make = Effect.gen(function* () {
               projectHomeOwner(sourceLinks),
             );
             const checkouts = yield* Effect.forEach(repositoryLinks, checkoutState);
+            const icons = yield* Effect.forEach(repositoryLinks, (link, index) =>
+              checkouts[index] === "ready" ? recordIcon(link) : Effect.succeed(link.iconPath),
+            );
             return yield* decodeLabel({
               ...row,
               color: row.color ?? undefined,
@@ -264,12 +275,16 @@ const make = Effect.gen(function* () {
               archivedAt: row.archivedAt ?? undefined,
               instructions: row.instructions ?? "",
               repositoryIds,
-              repositories: repositoryLinks.map((link, index) => ({
-                repositoryId: link.repositoryId,
-                remote: link.remote || null,
-                directoryName: link.directoryName || null,
-                checkout: checkouts[index],
-              })),
+              repositories: repositoryLinks.map((link, index) => {
+                const iconPath = icons[index];
+                return {
+                  repositoryId: link.repositoryId,
+                  remote: link.remote || null,
+                  directoryName: link.directoryName || null,
+                  checkout: checkouts[index],
+                  ...(iconPath ? { iconPath } : {}),
+                };
+              }),
               sourceLinks,
             });
           }),
@@ -501,6 +516,70 @@ const make = Effect.gen(function* () {
         .readDirectory(link.workspaceRoot)
         .pipe(Effect.orElseSucceed((): ReadonlyArray<string> => []));
       return entries.length > 0 ? "ready" : "missing";
+    });
+  const faviconResolver = yield* Effect.serviceOption(
+    ProjectFaviconResolver.ProjectFaviconResolver,
+  );
+  const paths = yield* Effect.serviceOption(Path.Path);
+  /**
+   * The icon a checkout here resolves (the record's chosen favicon, else the
+   * one the resolver finds), recorded on the link relative to the
+   * repository root so it syncs to machines without a checkout. A recorded
+   * icon that this checkout also has is kept, so two machines never trade
+   * paths back and forth; an external favicon outside the repository is
+   * not recorded, since no other machine could read it.
+   */
+  const recordIcon = (link: StoredRepositoryLink): Effect.Effect<string | null> =>
+    Effect.gen(function* () {
+      const root = link.workspaceRoot;
+      if (
+        root === null ||
+        link.remote === null ||
+        Option.isNone(faviconResolver) ||
+        Option.isNone(paths) ||
+        Option.isNone(fileSystem)
+      )
+        return link.iconPath;
+      const path = paths.value;
+      if (
+        link.iconPath !== null &&
+        (yield* fileSystem.value
+          .exists(path.join(root, link.iconPath))
+          .pipe(Effect.orElseSucceed(() => false)))
+      )
+        return link.iconPath;
+      const found = yield* faviconResolver.value
+        .resolvePath(root, link.faviconPath ?? undefined)
+        .pipe(Effect.orElseSucceed(() => null));
+      const relative = found === null ? null : path.relative(root, found).split(path.sep).join("/");
+      if (
+        relative === null ||
+        relative.length === 0 ||
+        relative.startsWith("..") ||
+        path.isAbsolute(relative) ||
+        relative === link.iconPath
+      )
+        return link.iconPath;
+      yield* sql
+        .withTransaction(
+          Effect.gen(function* () {
+            yield* sql`UPDATE label_repositories SET icon_path=${relative} WHERE repository_id=${link.repositoryId}`;
+            const labels = yield* sql<{
+              label_id: string;
+            }>`SELECT label_id FROM label_repositories WHERE repository_id=${link.repositoryId}`;
+            for (const row of labels)
+              yield* shared.capture("project", row.label_id).pipe(
+                Effect.catchTags({
+                  SharedStateError: (error) =>
+                    Effect.logWarning("Project repository icon capture failed", {
+                      reason: error.reason,
+                    }),
+                }),
+              );
+          }),
+        )
+        .pipe(Effect.ignoreCause({ log: true }));
+      return relative;
     });
   // Clone phases change what `checkout` reads; progress ticks do not.
   const clonePhaseChanges: Stream.Stream<void> = Option.isNone(clones)
@@ -900,9 +979,13 @@ const make = Effect.gen(function* () {
           );
           // Drop the placeholder first so the rebind never trips the
           // one-project-per-repository key, then file the checkout under the
-          // same remote and directory name.
+          // same remote, directory name and synced icon.
+          const icon = yield* sql<{
+            icon_path: string | null;
+          }>`SELECT icon_path FROM label_repositories WHERE label_id = ${input.labelId} AND repository_id = ${placeholder}`;
+          const iconPath = icon[0]?.icon_path ?? null;
           yield* sql`DELETE FROM label_repositories WHERE label_id = ${input.labelId} AND repository_id = ${placeholder}`;
-          yield* sql`INSERT INTO label_repositories(label_id, repository_id, remote, directory_name) VALUES (${input.labelId}, ${input.repositoryId}, ${remote}, ${directoryName}) ON CONFLICT(repository_id) DO UPDATE SET label_id = excluded.label_id, remote = excluded.remote, directory_name = COALESCE(excluded.directory_name, label_repositories.directory_name)`;
+          yield* sql`INSERT INTO label_repositories(label_id, repository_id, remote, directory_name, icon_path) VALUES (${input.labelId}, ${input.repositoryId}, ${remote}, ${directoryName}, ${iconPath}) ON CONFLICT(repository_id) DO UPDATE SET label_id = excluded.label_id, remote = excluded.remote, directory_name = COALESCE(excluded.directory_name, label_repositories.directory_name), icon_path = COALESCE(label_repositories.icon_path, excluded.icon_path)`;
           yield* sql`INSERT INTO shared_repository_checkouts(remote, repository_id, directory_name) VALUES (${remote}, ${input.repositoryId}, ${directoryName}) ON CONFLICT(remote) DO UPDATE SET repository_id = excluded.repository_id, directory_name = excluded.directory_name`;
           yield* sql`UPDATE scheduled_tasks SET project_id = ${input.repositoryId} WHERE project_id = ${placeholder}`;
           return yield* get(input.labelId);

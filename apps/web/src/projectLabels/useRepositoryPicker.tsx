@@ -466,7 +466,14 @@ export function useRepositoryPicker(input: {
           <RepositoryPickerRow
             key={item.value}
             item={item}
-            icon={<RepositoryRowIcon local={row.local} remote={row.remote} />}
+            icon={
+              <RepositoryRowIcon
+                local={row.local}
+                remote={row.remote}
+                environmentId={row.project?.environmentId ?? environmentId}
+                iconPath={row.iconPath}
+              />
+            }
             name={row.name}
             tooltip={row.remote ?? row.name}
             detail={row.detail}
@@ -519,7 +526,7 @@ export function useRepositoryPicker(input: {
             <RepositoryPickerRow
               key={item.value}
               item={item}
-              icon={<RepositoryRowIcon local={option.local} remote={null} />}
+              icon={<RepositoryRowIcon local={option.local} remote={null} environmentId={null} />}
               name={option.name}
               tooltip={
                 project
@@ -539,6 +546,7 @@ export function useRepositoryPicker(input: {
             name={option.name}
             clone={remoteClone}
             view={target && remoteClone.isFor(target) ? remoteClone.view : null}
+            environmentId={project?.environmentId ?? null}
           />
         );
       }

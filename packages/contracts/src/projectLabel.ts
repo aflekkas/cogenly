@@ -177,6 +177,12 @@ export const ProjectLabelRepositoryLink = Schema.Struct({
   directoryName: Schema.NullOr(TrimmedNonEmptyString),
   // Older servers (and caches written by them) predate per-machine state.
   checkout: Schema.optionalKey(ProjectLabelRepositoryCheckout),
+  /**
+   * The repository's icon file, relative to its root, as a machine with a
+   * checkout found it. Synced, so a machine without one can show the same
+   * icon; absent until some machine has looked.
+   */
+  iconPath: Schema.optionalKey(TrimmedNonEmptyString),
 });
 export type ProjectLabelRepositoryLink = typeof ProjectLabelRepositoryLink.Type;
 
