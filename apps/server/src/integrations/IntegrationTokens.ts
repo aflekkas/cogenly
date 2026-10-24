@@ -129,18 +129,17 @@ const makeVault = Effect.gen(function* () {
   return IntegrationTokens.of({
     read: (itemId) =>
       Effect.gen(function* () {
-        const before = yield* revision(itemId);
-        if (Option.isNone(before)) return Option.none();
-        const accessToken = yield* field(itemId, "value");
+        const snapshot = yield* vault.readCredential(VaultItemId.make(itemId));
+        const accessToken = snapshot.secretFields.value;
         if (accessToken === undefined) return Option.none();
         return Option.some({
           tokens: {
             accessToken,
-            refreshToken: yield* field(itemId, "password"),
-            clientSecret: yield* field(itemId, "username"),
+            refreshToken: snapshot.secretFields.password,
+            clientSecret: snapshot.secretFields.username,
           },
-          revision: before.value,
-          attachment: attachmentOf(yield* vault.getSyncAttachment(VaultItemId.make(itemId))),
+          revision: snapshot.revision,
+          attachment: attachmentOf(snapshot.attachment),
         });
       }).pipe(
         Effect.catchIf(
@@ -181,26 +180,19 @@ const makeVault = Effect.gen(function* () {
           },
           options,
         )
-        .pipe(Effect.map(({ item }) => item.id as string));
+        .pipe(Effect.map(({ item, revision }) => ({ itemId: item.id as string, revision })));
       return (
         input.itemId === undefined
           ? create
           : vault.update({ id: VaultItemId.make(input.itemId), secretFields }, options).pipe(
-              Effect.map(({ item }) => item.id as string),
+              Effect.map(({ item, revision }) => ({ itemId: item.id as string, revision })),
               // The owner deleted the item from the vault: start a new one.
               Effect.catchIf(
                 (error) => error.reason === "not_found",
                 () => create,
               ),
             )
-      ).pipe(
-        Effect.flatMap((itemId) =>
-          vault
-            .credentialRevision(VaultItemId.make(itemId))
-            .pipe(Effect.map((revision) => ({ itemId, revision }))),
-        ),
-        Effect.mapError(storage("write tokens")),
-      );
+      ).pipe(Effect.mapError(storage("write tokens")));
     },
     clearGrant: (itemId) =>
       vault

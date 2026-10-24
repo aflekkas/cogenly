@@ -287,11 +287,11 @@ export class Vault extends Context.Service<
     readonly create: (
       input: VaultCreateInput,
       options?: VaultWriteOptions,
-    ) => Effect.Effect<{ item: VaultItemMetadata }, VaultError>;
+    ) => Effect.Effect<{ item: VaultItemMetadata; revision: number }, VaultError>;
     readonly update: (
       input: VaultUpdateInput,
       options?: VaultWriteOptions,
-    ) => Effect.Effect<{ item: VaultItemMetadata }, VaultError>;
+    ) => Effect.Effect<{ item: VaultItemMetadata; revision: number }, VaultError>;
     readonly delete: (
       input: VaultDeleteInput,
       threadId?: ThreadId,
@@ -355,6 +355,15 @@ export class Vault extends Context.Service<
      * here or through sync, so a cache of decrypted values knows when to drop.
      */
     readonly credentialRevision: (itemId: VaultItemId) => Effect.Effect<number, VaultError>;
+    /** Server-internal: secrets and their sign-in metadata from one row snapshot. */
+    readonly readCredential: (itemId: VaultItemId) => Effect.Effect<
+      {
+        readonly secretFields: VaultSecretFields;
+        readonly revision: number;
+        readonly attachment: Readonly<Record<string, Schema.Json>> | undefined;
+      },
+      VaultError
+    >;
     /** Items a peer's sync applied or removed here, after the write. */
     readonly syncedChanges: Stream.Stream<VaultSyncedChange>;
     /** VaultSync only: bring this item's synced document up to date with its row. */
@@ -783,20 +792,23 @@ const make = Effect.gen(function* () {
       const encrypted = yield* encryptStored(id, stored);
       const at = yield* now;
       const policy = input.policy ?? defaultVaultPolicy;
-      yield* Effect.gen(function* () {
-        yield* sql`INSERT INTO vault_items(id, name, type, scope_project_id, metadata_json, policy_json, allowed_domains_json, ciphertext, wrapped_keys_json, created_at, updated_at, portability, sync_attachment_json) VALUES (${id}, ${input.name}, ${input.type}, ${input.scopeProjectId ?? null}, ${encodeMetadataJson({ ...(input.label ? { label: input.label } : {}), fields: fieldsOf(stored), ...(cardLast4Of(stored) ? { cardLast4: cardLast4Of(stored) } : {}) })}, ${encodePolicyJson(policy)}, ${encodeDomainsJson(input.allowedDomains ?? [])}, ${encrypted.ciphertext}, ${encrypted.wrappedKeys}, ${at}, ${at}, ${input.portability ?? "shared"}, ${encodeAttachment(options?.syncAttachment ?? null)})`.pipe(
-          Effect.mapError((cause) =>
-            String(cause).includes("UNIQUE")
-              ? new VaultError({ reason: "name_conflict", cause })
-              : wrap(cause),
-          ),
-        );
-        yield* captureRow(id);
-      }).pipe(sql.withTransaction);
-      yield* invalidateScrubCache;
+
+      yield* sql`INSERT INTO vault_items(id, name, type, scope_project_id, metadata_json, policy_json, allowed_domains_json, ciphertext, wrapped_keys_json, created_at, updated_at, portability, sync_attachment_json) VALUES (${id}, ${input.name}, ${input.type}, ${input.scopeProjectId ?? null}, ${encodeMetadataJson({ ...(input.label ? { label: input.label } : {}), fields: fieldsOf(stored), ...(cardLast4Of(stored) ? { cardLast4: cardLast4Of(stored) } : {}) })}, ${encodePolicyJson(policy)}, ${encodeDomainsJson(input.allowedDomains ?? [])}, ${encrypted.ciphertext}, ${encrypted.wrappedKeys}, ${at}, ${at}, ${input.portability ?? "shared"}, ${encodeAttachment(options?.syncAttachment ?? null)})`.pipe(
+        Effect.mapError((cause) =>
+          String(cause).includes("UNIQUE")
+            ? new VaultError({ reason: "name_conflict", cause })
+            : wrap(cause),
+        ),
+      );
+      yield* captureRow(id);
+
       const row = yield* loadRow(id);
-      return { item: metadataOf(row, yield* rules, stored) };
-    }).pipe(Effect.mapError(wrap));
+      return { item: metadataOf(row, yield* rules, stored), revision: row.credential_revision };
+    }).pipe(
+      sql.withTransaction,
+      Effect.tap(() => invalidateScrubCache),
+      Effect.mapError(wrap),
+    );
 
   const list: Vault["Service"]["list"] = (input, threadId) =>
     Effect.gen(function* () {
@@ -857,7 +869,11 @@ const make = Effect.gen(function* () {
         ),
       );
       if (synced) yield* captureRow(row.id);
-      return { item: metadataOf(yield* loadRow(row.id), yield* rules, stored) };
+      const updated = yield* loadRow(row.id);
+      return {
+        item: metadataOf(updated, yield* rules, stored),
+        revision: updated.credential_revision,
+      };
     }).pipe(
       sql.withTransaction,
       Effect.tap(() => invalidateScrubCache),
@@ -1078,6 +1094,14 @@ const make = Effect.gen(function* () {
     }).pipe(sql.withTransaction, Effect.mapError(wrap));
 
   return Vault.of({
+    readCredential: (itemId) =>
+      Effect.gen(function* () {
+        const row = yield* loadRow(itemId);
+        const secretFields = yield* decryptStored(row);
+        yield* registerDelivered(Object.values(secretFields));
+        yield* audit({ itemId, action: "resolve", outcome: "allowed" });
+        return { secretFields, revision: row.credential_revision, attachment: attachmentOf(row) };
+      }).pipe(Effect.mapError(wrap)),
     setSyncAttachment,
     getSyncAttachment: (itemId) =>
       loadRow(itemId).pipe(Effect.map(attachmentOf), Effect.mapError(wrap)),
