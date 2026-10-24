@@ -10,6 +10,9 @@ import {
   repositoryRemoteParts,
   ThreadProjectLabel,
   type ProjectLabelCreateInput,
+  type ProjectOrphanFolderInput,
+  type ProjectOrphanFolderRemoveResult,
+  type ProjectOrphanFoldersResult,
   type ProjectLabelRepositoryCheckout,
   type ProjectLabelUpdateInput,
   type ProjectLabelRepository,
@@ -79,6 +82,16 @@ export class ProjectLabelService extends Context.Service<
       input: ProjectLabelUpdateInput,
     ) => Effect.Effect<{ label: ProjectLabelWithRepositories }, ProjectLabelError>;
     readonly delete: (id: ProjectLabelId) => Effect.Effect<{ deleted: boolean }, ProjectLabelError>;
+    /** Project folders no project claims (see ProjectLabelFolders.listOrphans). */
+    readonly listOrphanFolders: () => Effect.Effect<ProjectOrphanFoldersResult, ProjectLabelError>;
+    /** Makes an orphan folder a project of the same name, keeping everything in it. */
+    readonly adoptOrphanFolder: (
+      input: ProjectOrphanFolderInput,
+    ) => Effect.Effect<{ label: ProjectLabelWithRepositories }, ProjectLabelError>;
+    /** Deletes an orphan folder that is only an empty skeleton; false otherwise. */
+    readonly removeOrphanFolder: (
+      input: ProjectOrphanFolderInput,
+    ) => Effect.Effect<ProjectOrphanFolderRemoveResult, ProjectLabelError>;
     /**
      * Archives the project: it leaves pickers but keeps its threads, chat,
      * repositories and filing, and refuses new threads and repositories until
@@ -749,19 +762,85 @@ const make = Effect.gen(function* () {
             return yield* get(input.id);
           }),
         );
-        yield* syncFolder(result.label, input.name !== undefined && input.name !== previous);
+        const renamed = input.name !== undefined && input.name !== previous;
+        yield* syncFolder(result.label, renamed);
+        // The folder moved on disk after the commit: say so again, so what
+        // follows the folder (checkout states, records relocated into it)
+        // sees the new path rather than the old one.
+        if (renamed) yield* PubSub.publish(changes, undefined);
         return result;
       }),
     delete: (id) =>
-      mutate(
-        "delete",
-        { id },
-        Effect.gen(function* () {
-          const rows = yield* sql`SELECT label_id FROM project_labels WHERE label_id=${id}`;
-          yield* shared.write("project", id, {}, true);
-          return { deleted: rows.length > 0 };
-        }),
-      ),
+      Effect.gen(function* () {
+        const before = yield* readLabels(id);
+        const result = yield* mutate(
+          "delete",
+          { id },
+          Effect.gen(function* () {
+            const rows = yield* sql`SELECT label_id FROM project_labels WHERE label_id=${id}`;
+            yield* shared.write("project", id, {}, true);
+            return { deleted: rows.length > 0 };
+          }),
+        );
+        // An unused folder (only the skeleton Cogenly made) goes with its
+        // project; one holding anything stays, listed as an orphan.
+        const label = before.labels[0];
+        if (result.deleted && label !== undefined && Option.isSome(folders))
+          yield* folders.value
+            .removeSkeleton(label)
+            .pipe(
+              Effect.catch((cause) =>
+                Effect.logWarning("Deleted project's folder could not be removed.", { cause }).pipe(
+                  Effect.as(false),
+                ),
+              ),
+            );
+        return result;
+      }),
+    listOrphanFolders: () =>
+      Option.isNone(folders)
+        ? Effect.succeed({ folders: [] })
+        : folders.value.listOrphans.pipe(
+            Effect.map((found) => ({ folders: found })),
+            Effect.mapError(failure("listOrphanFolders")),
+          ),
+    adoptOrphanFolder: (input) =>
+      Effect.gen(function* () {
+        if (Option.isNone(folders)) return yield* missing("adoptOrphanFolder");
+        const orphan = (yield* folders.value.listOrphans.pipe(
+          Effect.mapError(failure("adoptOrphanFolder")),
+        )).find((candidate) => candidate.dirName === input.dirName);
+        if (orphan === undefined) return yield* missing("adoptOrphanFolder");
+        const created = yield* mutate(
+          "create",
+          input,
+          Effect.gen(function* () {
+            const id = ProjectLabelId.make(`label:${yield* crypto.randomUUIDv4()}`);
+            const at = yield* now;
+            yield* sql`INSERT INTO project_labels(label_id, name, color, description, instructions, created_at, updated_at) VALUES (${id}, ${orphan.dirName.slice(0, 200)}, NULL, NULL, '', ${at}, ${at})`;
+            return yield* get(id);
+          }),
+        );
+        return yield* folders.value.claimForLabel(created.label, orphan.dirName).pipe(
+          Effect.as(created),
+          // A claim that fails must not leave a project with no folder of its own.
+          Effect.tapError(() =>
+            mutate(
+              "delete",
+              { id: created.label.id },
+              shared.write("project", created.label.id, {}, true),
+            ).pipe(Effect.ignore),
+          ),
+          Effect.mapError(failure("adoptOrphanFolder")),
+        );
+      }),
+    removeOrphanFolder: (input) =>
+      Option.isNone(folders)
+        ? Effect.succeed({ removed: false })
+        : folders.value.removeOrphan(input.dirName).pipe(
+            Effect.map((removed) => ({ removed })),
+            Effect.mapError(failure("removeOrphanFolder")),
+          ),
     archive: (id) =>
       mutate(
         "archive",

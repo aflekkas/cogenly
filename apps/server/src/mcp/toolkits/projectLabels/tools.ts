@@ -5,6 +5,8 @@ import {
   ProjectLabelCloneRepositoryInput,
   ProjectCloneStartResult,
   ProjectLabelCreateInput,
+  ProjectFoldersReconcileInput,
+  ProjectFoldersReconcileResult,
   ProjectLabelAdoptRepositoryInput,
   ProjectLabelAdoptRepositoryResult,
   ProjectLabelRemoveCheckoutInput,
@@ -186,4 +188,11 @@ export const ProjectLabelsToolkit = Toolkit.make(
       "Move a linked repository's checkout on this machine into its place in the project folder, <project>/repos/<directoryName> (repos/<repo> for the project's own GitHub owner, repos/<owner>/<repo> for any other), renaming a checkout kept elsewhere under another folder name. Its worktrees are repaired and its record and threads follow. Refused while a turn runs in it or a worktree lives inside it; returns moved:false when it is already in place.",
     dependencies: [...shared.dependencies, Checkout.RepositoryCheckout],
   }).annotate(Tool.Destructive, false),
+  Tool.make("project_folders_reconcile", {
+    ...shared,
+    parameters: ProjectFoldersReconcileInput,
+    success: ProjectFoldersReconcileResult,
+    description:
+      "Find and settle folders under the projects root that no project claims (left by a deleted project, or made by hand). action 'list' returns them; 'adopt' with dirName makes the folder a project of the same name, keeping everything in it; 'remove' with dirName deletes it only when it holds nothing but the empty skeleton Cogenly made (removed:false otherwise). Every action returns the orphans that remain. Confirm adopt and remove with the user first.",
+  }).annotate(Tool.Destructive, true),
 );

@@ -824,7 +824,52 @@ const make = Effect.gen(function* () {
             const project = Option.getOrUndefined(
               yield* projects.getById(link.repositoryId).pipe(Effect.orElseSucceed(Option.none)),
             );
-            if (project === undefined || !isInside(project.workspaceRoot, repos)) continue;
+            if (project === undefined) continue;
+            // The project folder was renamed (here, in Finder, or by a peer's
+            // rename), taking the checkout with it: point the record at where
+            // the checkout went, the derived place or the same spot in the
+            // renamed folder.
+            if (
+              !(yield* fileSystem
+                .exists(project.workspaceRoot)
+                .pipe(Effect.orElseSucceed(() => true)))
+            ) {
+              const root = yield* folders.projectsRoot.pipe(Effect.orElseSucceed(() => null));
+              const relative = root === null ? null : path.relative(root, project.workspaceRoot);
+              const tail =
+                relative === null || relative.startsWith("..") || path.isAbsolute(relative)
+                  ? []
+                  : relative.split(path.sep).slice(1);
+              const candidates = [
+                projectRepositoryDirectory(dir, link.directoryName, path),
+                ...(tail.length > 0 ? [path.join(dir, ...tail)] : []),
+              ];
+              for (const candidate of candidates) {
+                if (!(yield* hasOwnCheckout(candidate))) continue;
+                const suffix = yield* crypto
+                  .randomUUIDv4()
+                  .pipe(Effect.orElseSucceed(() => "repoint"));
+                const repointed = yield* projects
+                  .update({
+                    commandId: CommandId.make(`repository-repoint:${link.repositoryId}:${suffix}`),
+                    projectId: link.repositoryId,
+                    workspaceRoot: candidate,
+                  })
+                  .pipe(
+                    Effect.as(true),
+                    Effect.catch((cause) =>
+                      Effect.logWarning("Project repository could not follow its renamed folder", {
+                        repositoryId: link.repositoryId,
+                        cause,
+                      }).pipe(Effect.as(false)),
+                    ),
+                  );
+                if (repointed) moved.push(link.repositoryId);
+                break;
+              }
+              continue;
+            }
+            if (!isInside(project.workspaceRoot, repos)) continue;
             const result = yield* adoptLink(label, link.repositoryId).pipe(
               Effect.tapError((error) =>
                 Effect.logWarning("Project repository could not follow its new folder name", {

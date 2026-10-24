@@ -539,6 +539,9 @@ export const WS_METHODS = {
   projectLabelsCheckoutRepository: "projectLabels.checkoutRepository",
   projectLabelsRemoveCheckout: "projectLabels.removeCheckout",
   projectLabelsAdoptRepository: "projectLabels.adoptRepository",
+  projectLabelsListOrphanFolders: "projectLabels.listOrphanFolders",
+  projectLabelsAdoptOrphanFolder: "projectLabels.adoptOrphanFolder",
+  projectLabelsRemoveOrphanFolder: "projectLabels.removeOrphanFolder",
   projectLabelsListResources: "projectLabels.listResources",
   projectLabelsSubscribeResources: "projectLabels.subscribeResources",
   projectLabelsAddResource: "projectLabels.addResource",
@@ -2057,6 +2060,22 @@ const WsProjectLabelsAdoptRepositoryRpc = Rpc.make(WS_METHODS.projectLabelsAdopt
   success: ProjectLabels.ProjectLabelAdoptRepositoryResult,
   error: Schema.Union([ProjectLabels.RepositoryCheckoutError, EnvironmentAuthorizationError]),
 });
+// Folders under the projects root that no project claims, and what to do with them.
+const WsProjectLabelsListOrphanFoldersRpc = Rpc.make(WS_METHODS.projectLabelsListOrphanFolders, {
+  payload: Schema.Struct({}),
+  success: ProjectLabels.ProjectOrphanFoldersResult,
+  error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
+});
+const WsProjectLabelsAdoptOrphanFolderRpc = Rpc.make(WS_METHODS.projectLabelsAdoptOrphanFolder, {
+  payload: ProjectLabels.ProjectOrphanFolderInput,
+  success: ProjectLabels.ProjectLabelMutationResult,
+  error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
+});
+const WsProjectLabelsRemoveOrphanFolderRpc = Rpc.make(WS_METHODS.projectLabelsRemoveOrphanFolder, {
+  payload: ProjectLabels.ProjectOrphanFolderInput,
+  success: ProjectLabels.ProjectOrphanFolderRemoveResult,
+  error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
+});
 const WsProjectLabelsListResourcesRpc = Rpc.make(WS_METHODS.projectLabelsListResources, {
   payload: ProjectLabels.ProjectLabelKey,
   success: ProjectLabels.ProjectLabelListResourcesResult,
@@ -2600,6 +2619,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectLabelsCheckoutRepositoryRpc,
   WsProjectLabelsRemoveCheckoutRpc,
   WsProjectLabelsAdoptRepositoryRpc,
+  WsProjectLabelsListOrphanFoldersRpc,
+  WsProjectLabelsAdoptOrphanFolderRpc,
+  WsProjectLabelsRemoveOrphanFolderRpc,
   WsProjectLabelsListResourcesRpc,
   WsProjectLabelsSubscribeResourcesRpc,
   WsProjectLabelsAddResourceRpc,

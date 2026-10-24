@@ -1,6 +1,10 @@
-import { ProjectLabelId } from "@t3tools/contracts";
+import {
+  PROJECT_REPOSITORIES_SEGMENT,
+  ProjectLabelId,
+  type ProjectOrphanFolder,
+} from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
-import { sanitizePathSegment } from "@t3tools/shared/path";
+import { UNFILED_REPOSITORIES_SEGMENT, sanitizePathSegment } from "@t3tools/shared/path";
 import * as Effect from "effect/Effect";
 import * as Context from "effect/Context";
 import * as FileSystem from "effect/FileSystem";
@@ -72,6 +76,33 @@ export class ProjectLabelFolders extends Context.Service<
     readonly renameForLabel: (
       label: ProjectLabelRef,
     ) => Effect.Effect<ProjectLabelFolder, ProjectLabelFolderError>;
+    /**
+     * Claims an existing folder under the projects root for the label (an
+     * orphan the user adopts): writes its id file, keeps everything in it.
+     */
+    readonly claimForLabel: (
+      label: ProjectLabelRef,
+      dirName: string,
+    ) => Effect.Effect<ProjectLabelFolder, ProjectLabelFolderError>;
+    /**
+     * Removes the label's folder when it is only the skeleton Cogenly made
+     * (id file, empty `Resources/`, empty repository and worktree folders).
+     * Anything else stays; returns whether the folder went.
+     */
+    readonly removeSkeleton: (
+      label: ProjectLabelRef,
+    ) => Effect.Effect<boolean, ProjectLabelFolderError>;
+    /**
+     * Folders directly under the projects root that no project claims: no id
+     * file, or one naming a project that no longer exists. `Repositories/`
+     * and worktree folders are never orphans.
+     */
+    readonly listOrphans: Effect.Effect<
+      ReadonlyArray<ProjectOrphanFolder>,
+      ProjectLabelFolderError
+    >;
+    /** Deletes an orphan that is only a skeleton; false when it holds anything else. */
+    readonly removeOrphan: (dirName: string) => Effect.Effect<boolean, ProjectLabelFolderError>;
     /**
      * Startup pass: folders whose id file matches a label become that
      * label's folder even after a Finder rename, and labels without a
@@ -202,6 +233,41 @@ const make = Effect.gen(function* () {
     )(`Every folder name for "${base}" is taken.`);
   });
 
+  // A marker left by a project that is gone: deleted here, or deleted on
+  // another machine. A project still syncing in keeps its claim.
+  const isAbandonedMarker = (id: ProjectLabelId) =>
+    sql<{ readonly live: number; readonly synced: number }>`
+      SELECT
+        (SELECT count(*) FROM project_labels WHERE label_id = ${id}) AS live,
+        (SELECT count(*) FROM shared_documents WHERE kind = 'project' AND id = ${id} AND tombstone_json IS NULL) AS synced
+    `.pipe(
+      Effect.map((rows) => (rows[0]?.live ?? 0) === 0 && (rows[0]?.synced ?? 0) === 0),
+      Effect.mapError(fail("scan")),
+    );
+
+  // Only what Cogenly made: the id file, and empty Resources/, repos/ and worktree folders.
+  const isSkeleton = (dir: string) =>
+    Effect.gen(function* () {
+      const entries = yield* fileSystem
+        .readDirectory(dir)
+        .pipe(Effect.mapError(fail("scan", undefined, dir)));
+      for (const entry of entries) {
+        if (entry === PROJECT_LABEL_ID_FILE) continue;
+        const reserved =
+          entry === PROJECT_LABEL_RESOURCES_SEGMENT ||
+          entry === PROJECT_REPOSITORIES_SEGMENT ||
+          isWorktreesSegment(entry);
+        if (!reserved) return false;
+        const full = path.join(dir, entry);
+        if (!(yield* isDirectory(full))) return false;
+        const inside = yield* fileSystem
+          .readDirectory(full)
+          .pipe(Effect.orElseSucceed(() => ["?"]));
+        if (inside.some((name) => name !== ".DS_Store")) return false;
+      }
+      return true;
+    });
+
   const ensureForLabel: ProjectLabelFolders["Service"]["ensureForLabel"] = Effect.fn(
     "ProjectLabelFolders.ensureForLabel",
   )(function* (label) {
@@ -223,7 +289,13 @@ const make = Effect.gen(function* () {
       const entries = yield* fileSystem
         .readDirectory(dir)
         .pipe(Effect.mapError(fail("create", label, dir)));
-      if (entries.length === 0 && Option.isNone(id)) {
+      // Empty and unclaimed, or claimed by a project that is gone (the
+      // marker a deleted project left behind): adopt it rather than making
+      // "Name (2)" beside it.
+      if (
+        (entries.length === 0 && Option.isNone(id)) ||
+        (Option.isSome(id) && (yield* isAbandonedMarker(id.value)))
+      ) {
         yield* writeIdFile(label, dir);
         yield* ensureResources(label, dir);
         yield* recordFolder(label, dirName);
@@ -292,7 +364,86 @@ const make = Effect.gen(function* () {
     return { labels: labels.length, folders: foldersCount };
   });
 
+  const claimForLabel: ProjectLabelFolders["Service"]["claimForLabel"] = Effect.fn(
+    "ProjectLabelFolders.claimForLabel",
+  )(function* (label, dirName) {
+    const dir = path.join(yield* projectsRoot, dirName);
+    if (!(yield* isDirectory(dir))) return yield* fail("adopt", label, dir)("Not a folder.");
+    const id = yield* readIdFile(dir);
+    if (Option.isSome(id) && id.value !== label.id && !(yield* isAbandonedMarker(id.value)))
+      return yield* fail("adopt", label, dir)("Another project owns this folder.");
+    yield* writeIdFile(label, dir);
+    yield* ensureResources(label, dir);
+    yield* recordFolder(label, dirName);
+    return { dir, dirName };
+  });
+
+  const removeSkeleton: ProjectLabelFolders["Service"]["removeSkeleton"] = Effect.fn(
+    "ProjectLabelFolders.removeSkeleton",
+  )(function* (label) {
+    const { dir } = yield* dirForLabel(label);
+    if (!(yield* isDirectory(dir))) return false;
+    const id = yield* readIdFile(dir);
+    if (Option.isSome(id) && id.value !== label.id) return false;
+    if (!(yield* isSkeleton(dir))) return false;
+    yield* fileSystem
+      .remove(dir, { recursive: true })
+      .pipe(Effect.mapError(fail("remove", label, dir)));
+    yield* Ref.update(folders, (all) => {
+      const next = new Map(all);
+      next.delete(label.id);
+      return next;
+    });
+    return true;
+  });
+
+  const listOrphans: ProjectLabelFolders["Service"]["listOrphans"] = Effect.gen(function* () {
+    const root = yield* projectsRoot;
+    const entries = yield* fileSystem.readDirectory(root).pipe(
+      Effect.catchIf(
+        (error) => error.reason._tag === "NotFound",
+        () => Effect.succeed([]),
+      ),
+      Effect.mapError(fail("scan", undefined, root)),
+    );
+    const orphans: Array<ProjectOrphanFolder> = [];
+    for (const entry of [...entries].sort()) {
+      if (
+        entry.startsWith(".") ||
+        isWorktreesSegment(entry) ||
+        entry === UNFILED_REPOSITORIES_SEGMENT
+      )
+        continue;
+      const dir = path.join(root, entry);
+      if (!(yield* isDirectory(dir))) continue;
+      const id = yield* readIdFile(dir);
+      if (Option.isSome(id) && !(yield* isAbandonedMarker(id.value))) continue;
+      orphans.push({
+        dirName: entry,
+        path: dir,
+        reason: Option.isSome(id) ? "deleted_project" : "no_marker",
+        empty: yield* isSkeleton(dir),
+      });
+    }
+    return orphans;
+  });
+
+  const removeOrphan: ProjectLabelFolders["Service"]["removeOrphan"] = Effect.fn(
+    "ProjectLabelFolders.removeOrphan",
+  )(function* (dirName) {
+    const orphan = (yield* listOrphans).find((candidate) => candidate.dirName === dirName);
+    if (orphan === undefined || !orphan.empty) return false;
+    yield* fileSystem
+      .remove(orphan.path, { recursive: true })
+      .pipe(Effect.mapError(fail("remove", undefined, orphan.path)));
+    return true;
+  });
+
   return ProjectLabelFolders.of({
+    claimForLabel,
+    removeSkeleton,
+    listOrphans,
+    removeOrphan,
     projectsRoot,
     dirForLabel,
     dirNameForLabel,

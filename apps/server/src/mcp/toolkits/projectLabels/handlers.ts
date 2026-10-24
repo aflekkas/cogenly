@@ -56,6 +56,33 @@ const cloneFailure = (
         message: error._tag === "SourceControlRepositoryError" ? error.detail : error.message,
       });
 export const layer = McpToolAccess.toLayer(ProjectLabelsToolkit, {
+  project_folders_reconcile: McpToolAccess.writesEnvironment((input) =>
+    Effect.gen(function* () {
+      const labels = yield* Labels.ProjectLabelService;
+      const name = input.dirName;
+      if (input.action !== "list" && name === undefined)
+        return yield* new OrchestratorMcpFailure({
+          code: "invalid_request",
+          message: `Pass dirName to ${input.action} an orphan folder; list them with action 'list'.`,
+        });
+      const adopted =
+        input.action === "adopt" && name !== undefined
+          ? (yield* labels.adoptOrphanFolder({ dirName: name }).pipe(Effect.mapError(failure)))
+              .label
+          : undefined;
+      const removed =
+        input.action === "remove" && name !== undefined
+          ? (yield* labels.removeOrphanFolder({ dirName: name }).pipe(Effect.mapError(failure)))
+              .removed
+          : undefined;
+      const { folders } = yield* labels.listOrphanFolders().pipe(Effect.mapError(failure));
+      return {
+        folders,
+        ...(adopted === undefined ? {} : { adopted }),
+        ...(removed === undefined ? {} : { removed }),
+      };
+    }),
+  ),
   project_label_move_repository: McpToolAccess.writesEnvironment((input) =>
     Effect.gen(function* () {
       const checkouts = yield* Checkout.RepositoryCheckout;

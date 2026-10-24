@@ -227,6 +227,17 @@ describe("RPC authorization scopes", () => {
     );
   });
 
+  it.each([WS_METHODS.projectLabelsAdoptOrphanFolder, WS_METHODS.projectLabelsRemoveOrphanFolder])(
+    "requires operate access for %s, on the client too, while listing orphans is a read",
+    (method) => {
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationOperateScope);
+      expect(clientRpcRequiredScopes(method, {})).toEqual([AuthOrchestrationOperateScope]);
+      expect(requiredScopeForRpcMethod(WS_METHODS.projectLabelsListOrphanFolders)).toBe(
+        AuthOrchestrationReadScope,
+      );
+    },
+  );
+
   it.each([
     WS_METHODS.projectLabelsCheckoutRepository,
     WS_METHODS.projectLabelsRemoveCheckout,

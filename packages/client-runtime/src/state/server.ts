@@ -1212,6 +1212,21 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:projectLabels:adoptProjectLabelRepository",
       tag: WS_METHODS.projectLabelsAdoptRepository,
     }),
+    /** Project folders no project claims; refresh after adopting or removing one. */
+    projectOrphanFolders: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:projectLabels:orphanFolders",
+      tag: WS_METHODS.projectLabelsListOrphanFolders,
+    }),
+    /** Make an orphan folder a project of the same name, keeping its contents. */
+    adoptProjectOrphanFolder: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:projectLabels:adoptProjectOrphanFolder",
+      tag: WS_METHODS.projectLabelsAdoptOrphanFolder,
+    }),
+    /** Delete an orphan folder that holds only an empty skeleton. */
+    removeProjectOrphanFolder: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:projectLabels:removeProjectOrphanFolder",
+      tag: WS_METHODS.projectLabelsRemoveOrphanFolder,
+    }),
     moveThreadProjectFolder: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:projectLabels:moveThreadProjectFolder",
       tag: WS_METHODS.projectLabelsMoveThread,

@@ -1682,6 +1682,11 @@ const makeWsRpcHandlers = (
       [WS_METHODS.projectLabelsRemoveCheckout]: (input) => repositoryCheckout.removeCheckout(input),
       [WS_METHODS.projectLabelsAdoptRepository]: (input) =>
         repositoryCheckout.adoptRepository(input),
+      [WS_METHODS.projectLabelsListOrphanFolders]: () => projectLabels.listOrphanFolders(),
+      [WS_METHODS.projectLabelsAdoptOrphanFolder]: (input) =>
+        projectLabels.adoptOrphanFolder(input),
+      [WS_METHODS.projectLabelsRemoveOrphanFolder]: (input) =>
+        projectLabels.removeOrphanFolder(input),
       [WS_METHODS.workStart]: (input) => workHandoff.start(input),
       [WS_METHODS.agentsApprovalsList]: (input) => agentWorkspace.listApprovals(input),
       [WS_METHODS.agentsRequestApproval]: (input) =>

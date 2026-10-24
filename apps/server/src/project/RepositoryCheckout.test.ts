@@ -496,6 +496,7 @@ function checkoutHarness(
             }),
           dirForLabel: () =>
             Effect.succeed({ dir: projectDir, dirName: NodePath.basename(projectDir) }),
+          projectsRoot: Effect.succeed(NodePath.dirname(projectDir)),
         }),
       ),
     ),
@@ -877,5 +878,32 @@ describe("RepositoryCheckout.relocateProjectRepositories", () => {
         ),
       ),
     );
+  });
+});
+
+describe("RepositoryCheckout relocation after a project folder rename", () => {
+  it.effect("points the record at the checkout's place in the renamed folder", () => {
+    const parent = tempRoot();
+    const projectDir = NodePath.join(parent, "Spawned");
+    return Effect.gen(function* () {
+      const labels = yield* ProjectLabelService.ProjectLabelService;
+      const sql = yield* SqlClient.SqlClient;
+      const checkouts = yield* RepositoryCheckout.RepositoryCheckout;
+      // Before the rename the project folder was `Spawn`, now it is `Spawned`.
+      const before = NodePath.join(parent, "Spawn", "repos", "platform");
+      const after = NodePath.join(projectDir, "repos", "platform");
+      NodeFS.mkdirSync(after, { recursive: true });
+      git(after, ["init", "--initial-branch=main"]);
+      const repositoryId = ProjectId.make("repo:platform");
+      yield* sql`INSERT INTO projection_projects(project_id, title, workspace_root, scripts_json, created_at, updated_at) VALUES (${repositoryId}, 'platform', ${before}, '[]', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`;
+      const { label } = yield* labels.create({ name: "Spawned" });
+      yield* sql`INSERT INTO label_repositories(label_id, repository_id, remote, directory_name) VALUES (${label.id}, ${repositoryId}, NULL, 'platform')`;
+      expect(yield* checkouts.relocateProjectRepositories(label.id)).toEqual({
+        moved: [repositoryId],
+      });
+      expect(yield* sql`SELECT workspace_root FROM projection_projects`).toEqual([
+        { workspace_root: after },
+      ]);
+    }).pipe(Effect.provide(checkoutHarness(projectDir, { cloneCalls: 0 })));
   });
 });
