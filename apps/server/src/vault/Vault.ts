@@ -849,19 +849,20 @@ const make = Effect.gen(function* () {
         options?.syncAttachment === undefined
           ? row.sync_attachment_json
           : encodeAttachment(options.syncAttachment);
-      yield* Effect.gen(function* () {
-        yield* sql`UPDATE vault_items SET name = ${input.name ?? row.name}, type = ${input.type ?? row.type}, scope_project_id = ${input.scopeProjectId === undefined ? row.scope_project_id : input.scopeProjectId}, metadata_json = ${encodeMetadataJson({ ...(label ? { label } : {}), fields: fieldsOf(stored), ...(cardLast4Of(stored) ? { cardLast4: cardLast4Of(stored) } : {}) })}, policy_json = ${encodePolicyJson(policy)}, allowed_domains_json = ${encodeDomainsJson(input.allowedDomains ?? parseDomains(row.allowed_domains_json))}, ciphertext = ${ciphertext}, wrapped_keys_json = ${wrappedKeys}, credential_revision = ${row.credential_revision + (input.secretFields ? 1 : 0)}, portability = ${input.portability ?? row.portability}, sync_attachment_json = ${attachment}, updated_at = ${at} WHERE id = ${row.id}`.pipe(
-          Effect.mapError((cause) =>
-            String(cause).includes("UNIQUE")
-              ? new VaultError({ reason: "name_conflict", cause })
-              : wrap(cause),
-          ),
-        );
-        if (synced) yield* captureRow(row.id);
-      }).pipe(sql.withTransaction);
-      yield* invalidateScrubCache;
+      yield* sql`UPDATE vault_items SET name = ${input.name ?? row.name}, type = ${input.type ?? row.type}, scope_project_id = ${input.scopeProjectId === undefined ? row.scope_project_id : input.scopeProjectId}, metadata_json = ${encodeMetadataJson({ ...(label ? { label } : {}), fields: fieldsOf(stored), ...(cardLast4Of(stored) ? { cardLast4: cardLast4Of(stored) } : {}) })}, policy_json = ${encodePolicyJson(policy)}, allowed_domains_json = ${encodeDomainsJson(input.allowedDomains ?? parseDomains(row.allowed_domains_json))}, ${input.secretFields ? sql`ciphertext = ${ciphertext}, wrapped_keys_json = ${wrappedKeys}, credential_revision = credential_revision + 1,` : sql``} portability = ${input.portability ?? row.portability}, sync_attachment_json = ${attachment}, updated_at = ${at} WHERE id = ${row.id}`.pipe(
+        Effect.mapError((cause) =>
+          String(cause).includes("UNIQUE")
+            ? new VaultError({ reason: "name_conflict", cause })
+            : wrap(cause),
+        ),
+      );
+      if (synced) yield* captureRow(row.id);
       return { item: metadataOf(yield* loadRow(row.id), yield* rules, stored) };
-    }).pipe(Effect.mapError(wrap));
+    }).pipe(
+      sql.withTransaction,
+      Effect.tap(() => invalidateScrubCache),
+      Effect.mapError(wrap),
+    );
 
   const fieldValue = (
     stored: StoredFields,
