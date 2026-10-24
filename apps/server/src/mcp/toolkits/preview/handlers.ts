@@ -19,7 +19,7 @@ import {
   type PreviewAutomationStatus,
   type PreviewTabId,
   type SitePermissionsState,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 
 import {
   parseAttachmentUuid,
@@ -59,7 +59,7 @@ const invoke = Effect.fn("PreviewToolkit.invoke")(function* <A>(
   tabId?: PreviewTabId,
 ): Effect.fn.Return<
   { result: A; toolIcon?: ToolActivityIcon },
-  import("@t3tools/contracts").PreviewAutomationError,
+  import("@cogenly/contracts").PreviewAutomationError,
   McpInvocationContext.McpInvocationContext | PreviewAutomationBroker.PreviewAutomationBroker
 > {
   const scope = yield* McpInvocationContext.requireThreadMcpCapability("preview");

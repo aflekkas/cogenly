@@ -14,7 +14,7 @@ import {
   type IntegrationToolsResult,
   type IntegrationUpdateInput,
   type ProjectLabelId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";

@@ -2,8 +2,8 @@ import {
   GROK_DEFAULT_MODEL,
   type ModelCapabilities,
   type ServerProviderModel,
-} from "@t3tools/contracts";
-import { createModelCapabilities, getProviderOptionDescriptors } from "@t3tools/shared/model";
+} from "@cogenly/contracts";
+import { createModelCapabilities, getProviderOptionDescriptors } from "@cogenly/shared/model";
 
 import type { GrokModel, GrokModelState, GrokReasoningEffort } from "./protocol.ts";
 

@@ -14,7 +14,7 @@ import {
   ThreadId,
   type OrchestrationV2Run,
   type OrchestrationV2ThreadProjection,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as DateTime from "effect/DateTime";
 import { deriveWorkStatus } from "./workStatus.ts";
 

@@ -1,4 +1,4 @@
-import type { ContextMenuItem } from "@t3tools/contracts";
+import type { ContextMenuItem } from "@cogenly/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import { threadCapabilities, type ThreadKind } from "../threadCapabilities";

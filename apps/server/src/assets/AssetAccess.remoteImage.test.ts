@@ -1,4 +1,4 @@
-import { AssetRemoteImageUrlValidationError } from "@t3tools/contracts";
+import { AssetRemoteImageUrlValidationError } from "@cogenly/contracts";
 import { assert, describe, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Clock from "effect/Clock";

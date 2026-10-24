@@ -5,7 +5,7 @@ import {
   type Integration,
   type IntegrationCatalogEntry,
   type IntegrationSummary,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {

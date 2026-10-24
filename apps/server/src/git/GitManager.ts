@@ -1,4 +1,4 @@
-import { SourceControlProviderKind } from "@t3tools/contracts";
+import { SourceControlProviderKind } from "@cogenly/contracts";
 import * as Arr from "effect/Array";
 import * as Cache from "effect/Cache";
 import * as Clock from "effect/Clock";
@@ -44,11 +44,11 @@ import {
   type ThreadPullRequestKey,
   type VcsCreateWorktreeInput,
   type VcsCreateWorktreeResult,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import {
   hasProjectSettingsOverrides,
   resolveProjectSettings,
-} from "@t3tools/shared/projectSettings";
+} from "@cogenly/shared/projectSettings";
 import {
   detectSourceControlProviderFromGitRemoteUrl,
   mergeGitStatusParts,
@@ -56,21 +56,21 @@ import {
   resolveAutoFeatureBranchName,
   sanitizeBranchFragment,
   sanitizeFeatureBranchName,
-} from "@t3tools/shared/git";
+} from "@cogenly/shared/git";
 import {
   canonicalRepositoryKey,
   getChangeRequestTerminologyForKind,
   isSshRemoteUrl,
   type ChangeRequestTerminology,
-} from "@t3tools/shared/sourceControl";
-import { parseChangeRequestUrl } from "@t3tools/shared/changeRequestUrl";
+} from "@cogenly/shared/sourceControl";
+import { parseChangeRequestUrl } from "@cogenly/shared/changeRequestUrl";
 import {
   normalizeThreadPullRequestKey,
   threadPullRequestKeyOf,
-} from "@t3tools/shared/threadPullRequests";
+} from "@cogenly/shared/threadPullRequests";
 
-import { GitManagerError, GitPullRequestMaterializationError } from "@t3tools/contracts";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import { GitManagerError, GitPullRequestMaterializationError } from "@cogenly/contracts";
+import * as HostProcess from "@cogenly/shared/HostProcess";
 
 import * as ServerConfig from "../config.ts";
 import * as ProjectLabelFolders from "../projectLabels/ProjectLabelFolders.ts";
@@ -89,11 +89,11 @@ import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import { extractBranchNameFromRemoteRef } from "./remoteRefs.ts";
 import { detachStackFrame } from "./detachStackFrame.ts";
 import * as ServerSettings from "../serverSettings.ts";
-import type { GitManagerServiceError } from "@t3tools/contracts";
+import type { GitManagerServiceError } from "@cogenly/contracts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
-import * as SourceControlProvider from "@t3tools/source-control-core/server/SourceControlProvider";
+import * as SourceControlProvider from "@cogenly/source-control-core/server/SourceControlProvider";
 import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
-import type { ChangeRequest } from "@t3tools/contracts";
+import type { ChangeRequest } from "@cogenly/contracts";
 
 export interface GitActionProgressReporter {
   readonly publish: (event: GitActionProgressEvent) => Effect.Effect<void, never>;

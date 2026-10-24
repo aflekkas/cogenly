@@ -1,5 +1,5 @@
-import type { EnvironmentProject } from "@t3tools/client-runtime/state/models";
-import { EnvironmentId, MessageId, ProjectId, RunId, ThreadId } from "@t3tools/contracts";
+import type { EnvironmentProject } from "@cogenly/client-runtime/state/models";
+import { EnvironmentId, MessageId, ProjectId, RunId, ThreadId } from "@cogenly/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {

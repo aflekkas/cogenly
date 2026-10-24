@@ -1,6 +1,6 @@
-import { isCommandMissingCause } from "@t3tools/provider-core/server/snapshotProbe";
+import { isCommandMissingCause } from "@cogenly/provider-core/server/snapshotProbe";
 import { processOutputRedactor } from "../vault/VaultRedactor.ts";
-import { AccountError, AccountId, CredentialId, AccountMachineStatus } from "@t3tools/contracts";
+import { AccountError, AccountId, CredentialId, AccountMachineStatus } from "@cogenly/contracts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -8,7 +8,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as HostProcess from "@cogenly/shared/HostProcess";
 import * as ProcessRunner from "../processRunner.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as Vault from "../vault/Vault.ts";

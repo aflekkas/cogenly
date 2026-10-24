@@ -9,8 +9,8 @@ import type {
   MachineSetupStatus,
   MachineSetupStep,
   MachineSetupStepId,
-} from "@t3tools/contracts";
-import { buildTailscaleHttpsBaseUrl } from "@t3tools/tailscale";
+} from "@cogenly/contracts";
+import { buildTailscaleHttpsBaseUrl } from "@cogenly/tailscale";
 
 import {
   chooseServePort,

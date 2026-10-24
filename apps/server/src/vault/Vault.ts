@@ -25,7 +25,7 @@ import {
   type VaultSecretFields,
   type VaultUpdateInput,
   type VaultUsageListInput,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
@@ -256,7 +256,7 @@ export class Vault extends Context.Service<
     readonly listUsage: (
       input: VaultUsageListInput,
     ) => Effect.Effect<
-      { usage: ReadonlyArray<import("@t3tools/contracts").VaultUsageEntry> },
+      { usage: ReadonlyArray<import("@cogenly/contracts").VaultUsageEntry> },
       VaultError
     >;
     /** Decrypts one field for a caller, after policy (and domain) checks, and audits it. */

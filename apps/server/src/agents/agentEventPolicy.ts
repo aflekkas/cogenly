@@ -1,5 +1,5 @@
 import type { ResolvedAgentAccess } from "./AgentAccessScope.ts";
-import type { AgentEventContext, ScheduledTask } from "@t3tools/contracts";
+import type { AgentEventContext, ScheduledTask } from "@cogenly/contracts";
 
 /** Relevance filters never add authority: repository access remains explicit. */
 export function canReceiveAgentEvent(

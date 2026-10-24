@@ -21,7 +21,7 @@ import {
   type CommitmentListInput,
   type CommitmentStatusInput,
   type CommitmentRef,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";

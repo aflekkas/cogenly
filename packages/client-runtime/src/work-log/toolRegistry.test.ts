@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest";
 
-import type { OrchestrationV2TurnItem } from "@t3tools/contracts";
+import type { OrchestrationV2TurnItem } from "@cogenly/contracts";
 
 import {
   normalizeWorkLogToolKey,

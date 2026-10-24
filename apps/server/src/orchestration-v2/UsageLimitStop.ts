@@ -11,11 +11,11 @@ import {
   type OrchestrationV2Run,
   type OrchestrationV2ThreadShell,
   type OrchestrationV2TurnItem,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import {
   latestExecutedRun,
   latestRootProviderFailure,
-} from "@t3tools/shared/orchestrationV2ThreadError";
+} from "@cogenly/shared/orchestrationV2ThreadError";
 import * as DateTime from "effect/DateTime";
 
 /**

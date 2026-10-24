@@ -1,10 +1,10 @@
-import type { ProviderDriverKind } from "@t3tools/contracts";
+import type { ProviderDriverKind } from "@cogenly/contracts";
 import {
   ClaudeAdapterV2Driver,
   type ClaudeAdapterV2DriverEnv,
 } from "./Adapters/ClaudeAdapterV2.ts";
 import { CodexAdapterV2Driver, type CodexAdapterV2DriverEnv } from "./Adapters/CodexAdapterV2.ts";
-import type { AnyProviderAdapterDriver } from "@t3tools/provider-core/server/adapterDriver";
+import type { AnyProviderAdapterDriver } from "@cogenly/provider-core/server/adapterDriver";
 export type BuiltInProviderAdapterDriversV2Env = ClaudeAdapterV2DriverEnv | CodexAdapterV2DriverEnv;
 const BUILT_IN_PROVIDER_ADAPTER_DRIVERS_V2: ReadonlyArray<
   AnyProviderAdapterDriver<BuiltInProviderAdapterDriversV2Env>

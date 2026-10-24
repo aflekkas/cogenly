@@ -21,7 +21,7 @@ import {
   type T3ImportScanInput,
   type T3ImportStatus,
   WS_METHODS,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";

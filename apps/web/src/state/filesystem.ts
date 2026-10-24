@@ -1,8 +1,8 @@
 import {
   createFilesystemEnvironmentAtoms,
   resolveFilesystemReadAccess,
-} from "@t3tools/client-runtime/state/filesystem";
-import type { EnvironmentId } from "@t3tools/contracts";
+} from "@cogenly/client-runtime/state/filesystem";
+import type { EnvironmentId } from "@cogenly/contracts";
 
 import { connectionAtomRuntime } from "../connection/runtime";
 import { useEnvironmentPresentation } from "./presentation";

@@ -1,4 +1,4 @@
-import { type TimestampFormat } from "@t3tools/contracts/settings";
+import { type TimestampFormat } from "@cogenly/contracts/settings";
 
 function getTimestampFormatOptions(
   timestampFormat: TimestampFormat,

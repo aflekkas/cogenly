@@ -1,4 +1,4 @@
-import { OrchestratorMcpFailure, type ServerSettings } from "@t3tools/contracts";
+import { OrchestratorMcpFailure, type ServerSettings } from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
 import * as DesktopAppControl from "../../../environment/DesktopAppControl.ts";
 import * as Environment from "../../../environment/ServerEnvironment.ts";

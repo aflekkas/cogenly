@@ -1,6 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import { CopyButton } from "../ui/copy-button";
-import { shouldRecommendDatabaseCompaction, type EnvironmentId } from "@t3tools/contracts";
+import { shouldRecommendDatabaseCompaction, type EnvironmentId } from "@cogenly/contracts";
 import * as Schema from "effect/Schema";
 
 import { useLocalStorage } from "../../hooks/useLocalStorage";

@@ -5,7 +5,7 @@ import {
   type PickedElementPayload,
   type PickedElementStackFrame,
   type PreviewAnnotationPayload,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 
 const ELEMENT_CONTEXT_HTML_PREVIEW_LIMIT = 4000;
 const ELEMENT_CONTEXT_STYLES_LIMIT = 4000;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest";
-import { ProjectId, RunId, ThreadId, WorkTaskId, type WorkTask } from "@t3tools/contracts";
+import { ProjectId, RunId, ThreadId, WorkTaskId, type WorkTask } from "@cogenly/contracts";
 
 import { workTaskReportFor } from "./WorkTaskReportReactor.ts";
 

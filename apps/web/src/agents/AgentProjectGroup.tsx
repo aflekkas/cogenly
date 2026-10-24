@@ -1,4 +1,4 @@
-import type { ContextMenuItem } from "@t3tools/contracts";
+import type { ContextMenuItem } from "@cogenly/contracts";
 import { FolderMinusIcon } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 

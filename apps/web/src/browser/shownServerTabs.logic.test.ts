@@ -1,4 +1,4 @@
-import { ThreadId } from "@t3tools/contracts";
+import { ThreadId } from "@cogenly/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import { shownNativeServerTabs } from "./shownServerTabs.logic";

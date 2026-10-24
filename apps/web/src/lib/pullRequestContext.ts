@@ -2,7 +2,7 @@ import {
   type PullRequestContextMetadata,
   type PullRequestMergeMethod,
   type PullRequestState,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 
 import { type ReviewCommentContext } from "~/reviewCommentContext";
 

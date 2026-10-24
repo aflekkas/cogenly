@@ -1,4 +1,4 @@
-import type { ServerProviderModel, ServerProviderUsageLimits } from "@t3tools/contracts";
+import type { ServerProviderModel, ServerProviderUsageLimits } from "@cogenly/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Ref from "effect/Ref";

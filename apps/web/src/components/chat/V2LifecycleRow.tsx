@@ -1,12 +1,12 @@
 import { ThreadHoverCardPopup } from "../ThreadHoverCard";
 import { AgentElapsed } from "./AgentElapsed";
-import { projectedSubagentsToRuntime } from "@t3tools/client-runtime/state/subagentRuntime";
-import { notificationChildThreadId } from "@t3tools/client-runtime/state/thread-execution";
+import { projectedSubagentsToRuntime } from "@cogenly/client-runtime/state/subagentRuntime";
+import { notificationChildThreadId } from "@cogenly/client-runtime/state/thread-execution";
 import { createContext, use, useMemo, useState, type ReactNode } from "react";
 import { useThreadShell, useProject } from "../../state/entities";
 import { SubagentTooltipContent } from "./SubagentTooltipContent";
 import { useAtomValue } from "@effect/atom-react";
-import { scopeThreadRef, scopeProjectRef } from "@t3tools/client-runtime/environment";
+import { scopeThreadRef, scopeProjectRef } from "@cogenly/client-runtime/environment";
 import { environmentThreadDetails } from "../../state/threads";
 import * as DateTime from "effect/DateTime";
 import { WorkLogRow } from "./WorkLog";
@@ -26,8 +26,8 @@ import {
   resolveHandoffEndpoints,
   type HandoffEndpoints,
   type HandoffTimelineRun,
-} from "@t3tools/client-runtime/handoff";
-import { formatSubagentDisplayTitle } from "@t3tools/client-runtime/state/subagent-display";
+} from "@cogenly/client-runtime/handoff";
+import { formatSubagentDisplayTitle } from "@cogenly/client-runtime/state/subagent-display";
 import {
   ProviderDriverKind,
   type OrchestrationV2Notification,
@@ -40,8 +40,8 @@ import {
   type NodeId,
   type OrchestrationV2DelegatedTaskFailure,
   type ScopedThreadRef,
-} from "@t3tools/contracts";
-import type { TimestampFormat } from "@t3tools/contracts/settings";
+} from "@cogenly/contracts";
+import type { TimestampFormat } from "@cogenly/contracts/settings";
 import {
   ArrowRightLeftIcon,
   ArrowRightIcon,
@@ -84,7 +84,7 @@ export function isV2LifecycleItem(item: OrchestrationV2TurnItem): boolean {
   return LIFECYCLE_TYPES.has(item.type);
 }
 
-export type { HandoffTimelineRun } from "@t3tools/client-runtime/handoff";
+export type { HandoffTimelineRun } from "@cogenly/client-runtime/handoff";
 
 export function V2LifecycleRow(props: {
   readonly item: OrchestrationV2TurnItem;

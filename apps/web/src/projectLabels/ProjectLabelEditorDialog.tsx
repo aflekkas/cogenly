@@ -1,13 +1,13 @@
-import { isScratchProject } from "@t3tools/client-runtime/state/projects";
+import { isScratchProject } from "@cogenly/client-runtime/state/projects";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@cogenly/client-runtime/state/runtime";
 import type {
   EnvironmentId,
   ProjectLabelId,
   ProjectLabelWithRepositories,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import type * as Cause from "effect/Cause";
 import { useCallback, useMemo, useState } from "react";
 

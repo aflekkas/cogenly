@@ -3,7 +3,7 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
   type AtomCommandResult,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@cogenly/client-runtime/state/runtime";
 import {
   integrationCatalogInputs,
   slackAppManifest,
@@ -15,7 +15,7 @@ import {
   type IntegrationTestResult,
   type ProjectLabelWithRepositories,
   type VaultItemMetadata,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import {
   BlocksIcon,
   ExternalLinkIcon,

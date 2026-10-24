@@ -2,7 +2,7 @@ import {
   createAssetEnvironmentAtoms,
   createProjectFaviconUrlAtomFamily,
   createRepositoryIconUrlAtomFamily,
-} from "@t3tools/client-runtime/state/assets";
+} from "@cogenly/client-runtime/state/assets";
 import { Atom } from "effect/reactivity";
 
 import { connectionAtomRuntime } from "../connection/runtime";

@@ -5,8 +5,8 @@ import {
   isUnconfiguredDefaultInstanceEnabled,
   PROVIDER_DISPLAY_NAMES,
   ProviderDriverKind,
-} from "@t3tools/contracts";
-import { primaryOnboardingDriverKinds } from "@t3tools/provider-core/client";
+} from "@cogenly/contracts";
+import { primaryOnboardingDriverKinds } from "@cogenly/provider-core/client";
 import { describe, expect, it } from "vite-plus/test";
 
 import { providerClients } from "./providerDriverMeta";

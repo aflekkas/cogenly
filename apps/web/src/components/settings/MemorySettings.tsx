@@ -1,5 +1,5 @@
 import { OverlayPresence } from "~/components/ui/overlay-presence";
-import type { AgentId, ProjectLabelId } from "@t3tools/contracts";
+import type { AgentId, ProjectLabelId } from "@cogenly/contracts";
 import { BrainIcon, PlusIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 

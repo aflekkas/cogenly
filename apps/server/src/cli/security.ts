@@ -6,7 +6,7 @@ import {
   AuthOrchestrationReadScope,
   WS_METHODS,
   type MachineSecurityStatus,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Console from "effect/Console";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";

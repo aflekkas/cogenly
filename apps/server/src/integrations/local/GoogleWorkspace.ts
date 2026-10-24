@@ -2,7 +2,7 @@ import {
   IntegrationName,
   type GoogleWorkspaceAddInput,
   type IntegrationCreateInput,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { type LocalMcpSpec } from "./LocalMcpRunner.ts";
 import * as Schema from "effect/Schema";
 import * as Option from "effect/Option";

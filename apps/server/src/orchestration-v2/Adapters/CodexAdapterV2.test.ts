@@ -16,14 +16,14 @@ import {
   ProviderTurnId,
   RunAttemptId,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { assert, describe, it } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import { TestClock } from "effect/testing";
-import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
+import * as ProviderAdapter from "@cogenly/provider-core/server/ProviderAdapter";
 import * as CodexAdapterV2 from "./CodexAdapterV2.ts";
 
 const decodeRuntimeMode = Schema.decodeUnknownSync(RuntimeMode);
@@ -1299,7 +1299,7 @@ describe("CodexAdapterV2 background command detail", () => {
 
 describe("Codex terminal routing", () => {
   const session = {
-    environmentId: "env" as import("@t3tools/contracts").EnvironmentId,
+    environmentId: "env" as import("@cogenly/contracts").EnvironmentId,
     threadId: ThreadId.make("terminal-test"),
     providerSessionId: "mcp-test",
     providerInstanceId: ProviderInstanceId.make("codex"),

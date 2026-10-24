@@ -3,7 +3,7 @@ import { CopyButton } from "../ui/copy-button";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@cogenly/client-runtime/state/runtime";
 import {
   T3_IMPORT_RUNNING_NOTE,
   type EnvironmentId,
@@ -11,7 +11,7 @@ import {
   type T3ImportResult,
   type T3ImportSourceProject,
   type T3ImportStatus,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { CircleCheckIcon, CircleAlertIcon, InfoIcon } from "lucide-react";
 import { useState, type ReactNode } from "react";
 

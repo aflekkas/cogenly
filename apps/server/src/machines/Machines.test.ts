@@ -13,7 +13,7 @@ import {
   PeerAuthenticatedFrame,
   isAuthPeerScope,
   makePeerChannel,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";

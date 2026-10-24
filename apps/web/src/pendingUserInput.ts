@@ -1,6 +1,6 @@
-import type { LinkContextRecord, UserInputQuestion } from "@t3tools/contracts";
-import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
-import { formatThreadLink } from "@t3tools/shared/threadLinks";
+import type { LinkContextRecord, UserInputQuestion } from "@cogenly/contracts";
+import { replaceComposerContextReferences } from "@cogenly/shared/composerContextReferences";
+import { formatThreadLink } from "@cogenly/shared/threadLinks";
 
 /**
  * Question responses carry text, so thread and agent chips become thread links with the actual

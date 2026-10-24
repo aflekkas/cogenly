@@ -1,7 +1,7 @@
 import { cn } from "~/lib/utils";
 import { ChevronDownIcon, GaugeIcon, type LucideIcon } from "lucide-react";
 import { useState, type ComponentProps, type KeyboardEvent, type ReactNode } from "react";
-import type { ProjectId, ProjectLabelWithRepositories } from "@t3tools/contracts";
+import type { ProjectId, ProjectLabelWithRepositories } from "@cogenly/contracts";
 import { triggerErrorMessage } from "./agentWorkspace.logic";
 import { ThreadDetailsControl } from "~/components/chat/ThreadDetailsControl";
 import {

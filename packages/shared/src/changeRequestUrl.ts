@@ -1,4 +1,4 @@
-import type { RepositoryIdentity, ThreadLinkedPullRequest } from "@t3tools/contracts";
+import type { RepositoryIdentity, ThreadLinkedPullRequest } from "@cogenly/contracts";
 
 /**
  * A change request named the way a thread link names one: the host below which the repository

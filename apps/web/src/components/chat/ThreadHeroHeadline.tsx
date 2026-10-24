@@ -1,7 +1,7 @@
 import type {
   EnvironmentProject,
   EnvironmentThreadShell,
-} from "@t3tools/client-runtime/state/shell";
+} from "@cogenly/client-runtime/state/shell";
 import { useMemo, useRef, useState } from "react";
 
 import { ComposerProjectPicker } from "~/projectLabels/ComposerProjectPicker";

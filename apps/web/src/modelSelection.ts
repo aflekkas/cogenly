@@ -6,15 +6,15 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   type ServerProvider,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import {
   type CustomModelDefinition,
   createModelSelection,
   readCustomModelEntries,
   resolveSelectableModel,
-} from "@t3tools/shared/model";
+} from "@cogenly/shared/model";
 import { getComposerProviderState } from "./components/chat/composerProviderState";
-import { UnifiedSettings } from "@t3tools/contracts/settings";
+import { UnifiedSettings } from "@cogenly/contracts/settings";
 import * as Arr from "effect/Array";
 import * as Result from "effect/Result";
 import {

@@ -7,7 +7,7 @@ import {
   ProviderInstanceId,
   type ProviderApprovalDecision,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { assert, describe, it } from "@effect/vitest";
 import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
@@ -15,7 +15,7 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Schema from "effect/Schema";
 import { Tool } from "effect/ai";
-import * as McpProviderSession from "@t3tools/provider-core/server/mcpSession";
+import * as McpProviderSession from "@cogenly/provider-core/server/mcpSession";
 import { PreviewControlsToolkit } from "../../mcp/toolkits/previewControls/tools.ts";
 import { HtmlToolkit } from "../../mcp/toolkits/html/tools.ts";
 import { ImageToolkit } from "../../mcp/toolkits/images/tools.ts";
@@ -27,7 +27,7 @@ import { WorktreeToolkit } from "../../mcp/toolkits/worktree/tools.ts";
 import { TerminalToolkit } from "../../mcp/toolkits/terminal/tools.ts";
 import { ThreadToolkit } from "../../mcp/toolkits/thread/tools.ts";
 import { OrchestratorToolkit } from "../../mcp/toolkits/orchestrator/tools.ts";
-import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
+import * as ProviderAdapter from "@cogenly/provider-core/server/ProviderAdapter";
 import * as ClaudeAdapterV2 from "./ClaudeAdapterV2.ts";
 
 const decodeRuntimeMode = Schema.decodeUnknownSync(RuntimeMode);

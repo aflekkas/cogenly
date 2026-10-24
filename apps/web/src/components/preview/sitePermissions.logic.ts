@@ -3,7 +3,7 @@ import type {
   SitePermissionEntry,
   SitePermissionPrompt,
   SitePermissionSetting,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 
 /** The name a permission goes by in the site settings menu. */
 export const SITE_PERMISSION_LABELS: Readonly<Record<SitePermission, string>> = {

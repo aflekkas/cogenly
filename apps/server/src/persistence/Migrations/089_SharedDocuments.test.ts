@@ -3,7 +3,7 @@ import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/sql/SqlClient";
-import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
+import * as NodeSqliteClient from "@cogenly/shared/nodeSqliteClient";
 import { migrationManifest, runMigrations } from "../Migrations.ts";
 
 const layer = NodeSqliteClient.layer({ filename: ":memory:" }).pipe(

@@ -22,7 +22,7 @@ import {
   MoveThreadProjectFolderInput,
   ThreadProjectFolderResult,
   ThreadProjectLabelsResult,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Path from "effect/Path";
 import { Tool, Toolkit } from "effect/ai";

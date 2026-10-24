@@ -1,4 +1,4 @@
-import { formatThreadLink } from "@t3tools/shared/threadLinks";
+import { formatThreadLink } from "@cogenly/shared/threadLinks";
 import { describe, expect, it } from "vite-plus/test";
 
 import { describeCopiedToast, plainToastLabel } from "./copiedToast.logic";

@@ -1,5 +1,5 @@
 import { assert, it } from "@effect/vitest";
-import { PEER_IDENTITY_PATH, PEER_JOIN_PATH, PEER_TICKET_PATH } from "@t3tools/contracts";
+import { PEER_IDENTITY_PATH, PEER_JOIN_PATH, PEER_TICKET_PATH } from "@cogenly/contracts";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";

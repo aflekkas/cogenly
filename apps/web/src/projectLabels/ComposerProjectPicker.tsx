@@ -1,6 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import type { EnvironmentId, ProjectLabelId, ThreadId } from "@t3tools/contracts";
+import { scopeThreadRef } from "@cogenly/client-runtime/environment";
+import type { EnvironmentId, ProjectLabelId, ThreadId } from "@cogenly/contracts";
 import { CheckIcon, FolderIcon, FolderMinusIcon, PlusIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 

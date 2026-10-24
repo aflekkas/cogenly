@@ -1,12 +1,12 @@
-import { grokClient } from "@t3tools/provider-grok/client";
-import { museClient } from "@t3tools/provider-muse/client";
+import { grokClient } from "@cogenly/provider-grok/client";
+import { museClient } from "@cogenly/provider-muse/client";
 import {
   ClaudeSettings,
   CodexSettings,
   ProviderDriverKind,
   UsageProviderKind,
-} from "@t3tools/contracts";
-import { defineProviderClient, makeProviderClientRegistry } from "@t3tools/provider-core/client";
+} from "@cogenly/contracts";
+import { defineProviderClient, makeProviderClientRegistry } from "@cogenly/provider-core/client";
 
 /**
  * Codex's client definition: settings form, label, glyph, usage colours,

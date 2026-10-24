@@ -3,7 +3,7 @@ import {
   VaultError,
   VaultItemId,
   type PreviewAutomationStatus,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 

@@ -22,15 +22,15 @@ import {
   OrchestrationV2AppThreadJson,
   ProviderDriverKind,
   type OrchestrationV2ThreadProjection,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Deferred from "effect/Deferred";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
-import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
-import * as Ids from "@t3tools/provider-core/server/IdAllocator";
+import * as ProviderAdapter from "@cogenly/provider-core/server/ProviderAdapter";
+import * as Ids from "@cogenly/provider-core/server/IdAllocator";
 import * as AgentStore from "../agents/AgentStore.ts";
 import * as Work from "./WorkHandoffService.ts";
 import { workTaskReportFor } from "./WorkTaskReportReactor.ts";

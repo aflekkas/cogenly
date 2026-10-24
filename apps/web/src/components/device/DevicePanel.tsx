@@ -1,11 +1,11 @@
 import { DeviceHostUpdates } from "./DeviceHostUpdates";
-import { AuthSettingsWriteScope } from "@t3tools/contracts";
+import { AuthSettingsWriteScope } from "@cogenly/contracts";
 import type {
   DevicePlatform,
   DeviceServiceState,
   DeviceSummary,
   ScopedThreadRef,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { Smartphone, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 

@@ -1,4 +1,4 @@
-import { AgentBuilderProposal, OrchestratorMcpFailure } from "@t3tools/contracts";
+import { AgentBuilderProposal, OrchestratorMcpFailure } from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
 import { Tool, Toolkit } from "effect/ai";
 import * as Access from "../mcp/McpToolAccess.ts";

@@ -10,8 +10,8 @@ import {
   type IntegrationCatalogConnectInput,
   type IntegrationCatalogEntry,
   type IntegrationCatalogId,
-} from "@t3tools/contracts";
-import { isLoopbackHost } from "@t3tools/shared/preview";
+} from "@cogenly/contracts";
+import { isLoopbackHost } from "@cogenly/shared/preview";
 
 import { parseCredentialRef } from "./IntegrationCredentials.ts";
 

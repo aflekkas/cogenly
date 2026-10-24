@@ -1,4 +1,4 @@
-import { ThreadId, type AgentRunAction } from "@t3tools/contracts";
+import { ThreadId, type AgentRunAction } from "@cogenly/contracts";
 import {
   ArrowUpRightIcon,
   CircleCheckIcon,

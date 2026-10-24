@@ -7,9 +7,9 @@
  *
  * @module sourceControl/sourceControlHostSecrets
  */
-import { secretSettingsFields } from "@t3tools/contracts";
-import type { SourceControlClientDefinition } from "@t3tools/source-control-core/client/definition";
-import * as GitHub from "@t3tools/source-control-github/client/definition";
+import { secretSettingsFields } from "@cogenly/contracts";
+import type { SourceControlClientDefinition } from "@cogenly/source-control-core/client/definition";
+import * as GitHub from "@cogenly/source-control-github/client/definition";
 
 const definitions: ReadonlyArray<SourceControlClientDefinition> = [GitHub.definition];
 

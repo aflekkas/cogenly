@@ -20,8 +20,8 @@ import {
   ProjectId,
   ProviderInstanceId,
   UsageLimitHandoffRecommendation,
-} from "@t3tools/contracts";
-import { SNOOZE_PRESET_KEYS } from "@t3tools/shared/snooze";
+} from "@cogenly/contracts";
+import { SNOOZE_PRESET_KEYS } from "@cogenly/shared/snooze";
 import * as Crypto from "effect/Crypto";
 import * as Schema from "effect/Schema";
 import { Tool, Toolkit } from "effect/ai";

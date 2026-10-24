@@ -2,7 +2,7 @@ import type {
   AgentContextRecord,
   ProjectFolderContextRecord,
   ThreadContextRecord,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { Link } from "@tanstack/react-router";
 import { BotIcon, MessagesSquareIcon } from "lucide-react";
 

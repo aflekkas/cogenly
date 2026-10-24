@@ -1,6 +1,6 @@
 "use client";
 
-import { AuthPreviewOperateScope, type EnvironmentId } from "@t3tools/contracts";
+import { AuthPreviewOperateScope, type EnvironmentId } from "@cogenly/contracts";
 import { useEffect, useEffectEvent, useMemo } from "react";
 
 import { previewEnvironment } from "~/state/preview";

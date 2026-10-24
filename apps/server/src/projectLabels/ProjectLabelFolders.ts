@@ -2,9 +2,9 @@ import {
   PROJECT_REPOSITORIES_SEGMENT,
   ProjectLabelId,
   type ProjectOrphanFolder,
-} from "@t3tools/contracts";
-import * as HostProcess from "@t3tools/shared/HostProcess";
-import { UNFILED_REPOSITORIES_SEGMENT, sanitizePathSegment } from "@t3tools/shared/path";
+} from "@cogenly/contracts";
+import * as HostProcess from "@cogenly/shared/HostProcess";
+import { UNFILED_REPOSITORIES_SEGMENT, sanitizePathSegment } from "@cogenly/shared/path";
 import * as Effect from "effect/Effect";
 import * as Context from "effect/Context";
 import * as FileSystem from "effect/FileSystem";

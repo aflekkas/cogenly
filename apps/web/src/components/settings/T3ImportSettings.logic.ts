@@ -10,7 +10,7 @@ import type {
   T3ImportSource,
   T3ImportSourceProject,
   T3ImportStatus,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 
 /** The user guide, linked from Settings → Import and from onboarding. */
 export const T3_IMPORT_DOCS_URL =

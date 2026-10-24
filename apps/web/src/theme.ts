@@ -1,4 +1,4 @@
-export type { ThemeAppearance } from "@t3tools/shared/themePalettes";
+export type { ThemeAppearance } from "@cogenly/shared/themePalettes";
 export type AppearanceMode = "light" | "dark" | "system";
 export const THEME_APPEARANCE_MODE_STORAGE_KEY = "cogenly:theme-appearance-mode";
 // Without a stored choice Cogenly starts dark. index.html's boot script mirrors this.

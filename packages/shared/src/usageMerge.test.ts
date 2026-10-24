@@ -6,7 +6,7 @@ import {
   type UsageDay,
   UsageProviderKind,
   UsageSummary,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { describe, expect, it } from "vite-plus/test";
 import * as Schema from "effect/Schema";
 

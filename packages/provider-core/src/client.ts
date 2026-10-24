@@ -11,7 +11,7 @@
  *
  * @module provider-core/client
  */
-import type { ProviderDriverKind, UsageProviderKind } from "@t3tools/contracts";
+import type { ProviderDriverKind, UsageProviderKind } from "@cogenly/contracts";
 import type * as Schema from "effect/Schema";
 
 /**

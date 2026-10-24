@@ -1,9 +1,9 @@
-import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
-import type { EnvironmentId, ProjectIconColor } from "@t3tools/contracts";
+import type { EnvironmentProject } from "@cogenly/client-runtime/state/shell";
+import type { EnvironmentId, ProjectIconColor } from "@cogenly/contracts";
 import {
   getProjectFaviconResourceKey,
   isProjectFaviconFallbackUrl,
-} from "@t3tools/shared/projectFavicon";
+} from "@cogenly/shared/projectFavicon";
 import {
   BoxesIcon,
   BoxIcon,

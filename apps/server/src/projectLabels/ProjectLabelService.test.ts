@@ -11,7 +11,7 @@ import {
   ThreadId,
   type ProjectCloneSnapshot,
   type ProjectLabelWithRepositories,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -21,7 +21,7 @@ import * as Queue from "effect/Queue";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
-import * as GitHubRest from "@t3tools/source-control-github/server/GitHubRest";
+import * as GitHubRest from "@cogenly/source-control-github/server/GitHubRest";
 import * as Labels from "./ProjectLabelService.ts";
 import * as ProjectCloneTracker from "../project/ProjectCloneTracker.ts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";

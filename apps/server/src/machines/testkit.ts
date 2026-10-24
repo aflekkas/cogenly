@@ -6,7 +6,7 @@ import * as NodeNet from "node:net";
 import { NodeHttpServer } from "@effect/platform-node";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 
-import { type MachineRole, type MachineSelfReport } from "@t3tools/contracts";
+import { type MachineRole, type MachineSelfReport } from "@cogenly/contracts";
 import type * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Crypto from "effect/Crypto";

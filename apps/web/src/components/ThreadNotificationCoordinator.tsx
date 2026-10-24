@@ -1,11 +1,11 @@
 import {
   type PendingSubagentRequest,
   presentThreadShell,
-} from "@t3tools/client-runtime/state/models";
-import { pendingSubagentRequestsByThread } from "@t3tools/client-runtime/state/threads";
+} from "@cogenly/client-runtime/state/models";
+import { pendingSubagentRequestsByThread } from "@cogenly/client-runtime/state/threads";
 import { useAtomValue } from "@effect/atom-react";
 import { useNavigate, useParams } from "@tanstack/react-router";
-import type { EnvironmentId, OrchestrationV2ThreadShell, ThreadId } from "@t3tools/contracts";
+import type { EnvironmentId, OrchestrationV2ThreadShell, ThreadId } from "@cogenly/contracts";
 import * as Option from "effect/Option";
 import { MessageCircleQuestionIcon, ShieldQuestionIcon } from "lucide-react";
 import { useCallback, useEffect, useRef } from "react";

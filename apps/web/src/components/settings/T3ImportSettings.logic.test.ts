@@ -6,7 +6,7 @@ import type {
   T3ImportSource,
   T3ImportSourceProject,
   T3ImportStatus,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 
 import {
   defaultT3ImportSelection,

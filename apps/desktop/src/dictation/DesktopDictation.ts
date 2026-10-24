@@ -3,8 +3,8 @@ import type {
   DesktopDictationResult,
   DesktopDictationStreamInput,
   DesktopMicrophoneAccess,
-} from "@t3tools/contracts";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+} from "@cogenly/contracts";
+import * as HostProcess from "@cogenly/shared/HostProcess";
 import type * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
@@ -110,7 +110,7 @@ export class DesktopDictation extends Context.Service<
     /** Stops the named run; its pending call resolves as `cancelled`. */
     readonly cancel: (requestId: string) => Effect.Effect<void>;
   }
->()("@t3tools/desktop/dictation/DesktopDictation") {}
+>()("@cogenly/desktop/dictation/DesktopDictation") {}
 
 export const layer = Layer.effect(
   DesktopDictation,

@@ -1,7 +1,7 @@
 import type { LegendListRef } from "@legendapp/list/react";
 import { useAtomValue } from "@effect/atom-react";
-import type { ScopedThreadRef, VisualState } from "@t3tools/contracts";
-import type { readVisualSubmitMessage } from "@t3tools/shared/htmlRender";
+import type { ScopedThreadRef, VisualState } from "@cogenly/contracts";
+import type { readVisualSubmitMessage } from "@cogenly/shared/htmlRender";
 import { Atom } from "effect/reactivity";
 import { CheckIcon, ChevronDownIcon } from "lucide-react";
 import { useState } from "react";

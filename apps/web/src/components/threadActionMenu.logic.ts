@@ -1,5 +1,5 @@
-import type { ContextMenuItem } from "@t3tools/contracts";
-import type { SnoozePreset } from "@t3tools/client-runtime/state/thread-settled";
+import type { ContextMenuItem } from "@cogenly/contracts";
+import type { SnoozePreset } from "@cogenly/client-runtime/state/thread-settled";
 
 import { projectLabelColorValue } from "../projectLabels/projectLabels.logic";
 import type { ThreadCapabilities } from "../threadCapabilities";

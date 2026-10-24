@@ -1,5 +1,5 @@
-import type { EnvironmentId } from "@t3tools/contracts";
-import { ENVIRONMENT_NAME_MAX_LENGTH } from "@t3tools/shared/environmentLinks";
+import type { EnvironmentId } from "@cogenly/contracts";
+import { ENVIRONMENT_NAME_MAX_LENGTH } from "@cogenly/shared/environmentLinks";
 import { useState, type FormEvent } from "react";
 
 import { environmentCatalog } from "~/connection/catalog";

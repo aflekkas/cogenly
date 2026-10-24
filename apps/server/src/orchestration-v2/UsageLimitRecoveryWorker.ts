@@ -9,8 +9,8 @@ import {
   type ProviderInstanceId,
   type ThreadId,
   type UsageLimitHandoffCandidate,
-} from "@t3tools/contracts";
-import { runRanAfter } from "@t3tools/shared/orchestrationV2ThreadError";
+} from "@cogenly/contracts";
+import { runRanAfter } from "@cogenly/shared/orchestrationV2ThreadError";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";

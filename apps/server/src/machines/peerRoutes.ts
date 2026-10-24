@@ -1,4 +1,4 @@
-import { isLocalLoopbackHost } from "@t3tools/shared/hostClassification";
+import { isLocalLoopbackHost } from "@cogenly/shared/hostClassification";
 
 /** Network peer traffic requires TLS. Plaintext is only for a local SSH forward. */
 export const normalizePeerRoute = (route: string): string => {

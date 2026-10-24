@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import type { EnvironmentId, ProjectLabelId } from "@t3tools/contracts";
+import type { EnvironmentId, ProjectLabelId } from "@cogenly/contracts";
 
 interface AgentCreationRequest {
   readonly environmentId: EnvironmentId | null;

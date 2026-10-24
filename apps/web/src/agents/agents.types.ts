@@ -11,7 +11,7 @@ import type {
   RunId,
   ScheduledTaskSchedule,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import type { AgentFaceState } from "~/components/agents/face";
 import type { ChatAttachment } from "~/types";
 
@@ -19,8 +19,8 @@ export type {
   AgentUpsertInput as AgentDraft,
   AgentMemoryNote as AgentMemory,
   AgentWorkRun as AgentActivity,
-} from "@t3tools/contracts";
-import type { AgentMemoryNote, AgentWorkRun } from "@t3tools/contracts";
+} from "@cogenly/contracts";
+import type { AgentMemoryNote, AgentWorkRun } from "@cogenly/contracts";
 export interface AgentTrigger {
   id: string;
   title: string;
@@ -68,7 +68,7 @@ export interface AgentRequest {
   }>;
   choices?: ReadonlyArray<{
     label: string;
-    decision: import("@t3tools/contracts").ProviderApprovalDecision;
+    decision: import("@cogenly/contracts").ProviderApprovalDecision;
   }>;
 }
 export interface AgentContact extends AgentListItem {

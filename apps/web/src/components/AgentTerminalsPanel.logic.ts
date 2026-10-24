@@ -1,7 +1,7 @@
-import type { KnownTerminalSession } from "@t3tools/client-runtime/state/terminal";
-import type { TerminalSessionStatus, TerminalSummary } from "@t3tools/contracts";
-import { commandDisplayText } from "@t3tools/client-runtime/work-log/command-label";
-import { resolveTerminalSessionLabel } from "@t3tools/shared/terminalLabels";
+import type { KnownTerminalSession } from "@cogenly/client-runtime/state/terminal";
+import type { TerminalSessionStatus, TerminalSummary } from "@cogenly/contracts";
+import { commandDisplayText } from "@cogenly/client-runtime/work-log/command-label";
+import { resolveTerminalSessionLabel } from "@cogenly/shared/terminalLabels";
 
 import type { ScopeAccess } from "../state/scopeAccess";
 

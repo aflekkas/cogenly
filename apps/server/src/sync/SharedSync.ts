@@ -4,7 +4,7 @@ import {
   SharedStateError,
   type EnvironmentId,
   type SharedChangeBatch,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Schema from "effect/Schema";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";

@@ -8,7 +8,7 @@ import {
   type AgentApproval,
   type Commitment,
   type ScheduledTaskUpsertSchedule,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { describe, expect, it } from "vite-plus/test";
 import {
   agentAttentionCount,

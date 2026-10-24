@@ -1,8 +1,8 @@
 // The timeline subagent row's decisions, after T3 Code (MIT,
 // https://github.com/pingdotgg/t3code) apps/web/src/components/chat/V2LifecycleRow.tsx
 // and V2LifecycleRow.logic.ts.
-import type { OrchestrationV2TurnItemStatus } from "@t3tools/contracts";
-import { markdownPreviewText } from "@t3tools/client-runtime/work-log/reasoning-text";
+import type { OrchestrationV2TurnItemStatus } from "@cogenly/contracts";
+import { markdownPreviewText } from "@cogenly/client-runtime/work-log/reasoning-text";
 
 import type { BadgeDotTone } from "../ui/badge-dot";
 

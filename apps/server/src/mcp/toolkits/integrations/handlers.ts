@@ -4,7 +4,7 @@ import {
   OrchestratorMcpFailure,
   type Integration,
   type ProjectLabelId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";

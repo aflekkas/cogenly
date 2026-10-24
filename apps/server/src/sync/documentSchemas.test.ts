@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest";
-import { EnvironmentId, type SharedDocumentChange } from "@t3tools/contracts";
+import { EnvironmentId, type SharedDocumentChange } from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
 import { normalizeRepositoryRemote } from "../project/RepositoryRemote.ts";
 import { validateChange } from "./documentSchemas.ts";

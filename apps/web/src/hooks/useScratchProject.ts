@@ -1,11 +1,11 @@
-import { scopeProjectRef } from "@t3tools/client-runtime/environment";
-import { availableScratchWorkspaceRoot } from "@t3tools/client-runtime/operations/projects";
+import { scopeProjectRef } from "@cogenly/client-runtime/environment";
+import { availableScratchWorkspaceRoot } from "@cogenly/client-runtime/operations/projects";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
-import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
-import { ProjectLabelId, type EnvironmentId, type ThreadSurface } from "@t3tools/contracts";
+} from "@cogenly/client-runtime/state/runtime";
+import type { EnvironmentProject } from "@cogenly/client-runtime/state/shell";
+import { ProjectLabelId, type EnvironmentId, type ThreadSurface } from "@cogenly/contracts";
 import { useRouter } from "@tanstack/react-router";
 import { useCallback } from "react";
 

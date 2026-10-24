@@ -9,7 +9,7 @@ import {
   defaultAgentPermissions,
   type AgentBuilderProposal,
   type OrchestrationV2TurnItem,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import {
   canCreateProposal,
   parseProposal,

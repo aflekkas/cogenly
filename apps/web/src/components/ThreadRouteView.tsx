@@ -1,7 +1,7 @@
 import { AgentConversation } from "../agents/AgentConversation";
 import { useAgents, useAgentConversation } from "../agents/agentsClient";
-import { scopedThreadKey } from "@t3tools/client-runtime/environment";
-import type { ScopedThreadRef } from "@t3tools/contracts";
+import { scopedThreadKey } from "@cogenly/client-runtime/environment";
+import type { ScopedThreadRef } from "@cogenly/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useLayoutEffect, useState } from "react";
 

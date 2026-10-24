@@ -8,7 +8,7 @@ import {
   type OrchestrationV2Command,
   type OrchestrationV2DomainEvent,
   type OrchestrationV2ProviderCapabilities,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
 import * as Stream from "effect/Stream";
 

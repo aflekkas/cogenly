@@ -6,11 +6,11 @@ import type {
   ThreadEnvMode,
   WorkHandoffError,
   WorkHandoffLink,
-} from "@t3tools/contracts";
-import type { ProjectSettingSource } from "@t3tools/shared/projectSettings";
-import type { EnvironmentProject } from "@t3tools/client-runtime/state/models";
+} from "@cogenly/contracts";
+import type { ProjectSettingSource } from "@cogenly/shared/projectSettings";
+import type { EnvironmentProject } from "@cogenly/client-runtime/state/models";
 import { isPickableRepository } from "~/projectLabels/projectMeta.logic";
-import type { WorkStatus } from "@t3tools/client-runtime/state/work-status";
+import type { WorkStatus } from "@cogenly/client-runtime/state/work-status";
 
 /** The picker's "No repository" choice: Work runs in the environment's scratch project. */
 export const NO_REPOSITORY = "no-repository";

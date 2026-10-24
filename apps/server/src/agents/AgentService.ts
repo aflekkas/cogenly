@@ -26,7 +26,7 @@ import {
   type AgentSendInput,
   type AgentWorkRun,
   type ScheduledTask,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Schema from "effect/Schema";
 import * as SharedState from "../sync/SharedState.ts";
@@ -90,7 +90,7 @@ export class AgentService extends Context.Service<
     readonly send: (input: AgentSendInput) => Effect.Effect<
       {
         threadId: ThreadId;
-        runId: import("@t3tools/contracts").RunId;
+        runId: import("@cogenly/contracts").RunId;
         delivery: Threads.ThreadManagementSendResult["delivery"];
       },
       AgentError

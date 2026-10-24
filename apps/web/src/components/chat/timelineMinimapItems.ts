@@ -1,5 +1,5 @@
-import { resolveUserMessagePresentation } from "@t3tools/client-runtime/user-message";
-import { markdownPreviewText } from "@t3tools/client-runtime/work-log/reasoning-text";
+import { resolveUserMessagePresentation } from "@cogenly/client-runtime/user-message";
+import { markdownPreviewText } from "@cogenly/client-runtime/work-log/reasoning-text";
 import type { MessagesTimelineRow } from "./MessagesTimeline.logic";
 
 export interface TimelineMinimapItem {

@@ -1,4 +1,4 @@
-import type { EnvironmentMachineKind } from "@t3tools/contracts";
+import type { EnvironmentMachineKind } from "@cogenly/contracts";
 
 export interface PreviewMachineEnvironment {
   readonly label: string;

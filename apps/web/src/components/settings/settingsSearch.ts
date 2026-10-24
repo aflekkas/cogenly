@@ -1,9 +1,9 @@
 import { HOSTED_APP_CHANNEL } from "~/branding";
 import { isElectron } from "~/env";
 import { isMacPlatform, isWindowsPlatform, normalizeSearchText } from "~/lib/utils";
-import { STATIC_KEYBINDING_COMMANDS, type KeybindingCommand } from "@t3tools/contracts";
-import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
-import { DEFAULT_KEYBINDINGS } from "@t3tools/shared/keybindings";
+import { STATIC_KEYBINDING_COMMANDS, type KeybindingCommand } from "@cogenly/contracts";
+import { sourceControlClients } from "@cogenly/client-runtime/source-control-clients";
+import { DEFAULT_KEYBINDINGS } from "@cogenly/shared/keybindings";
 import { commandLabel, RETIRED_KEYBINDING_COMMANDS } from "./KeybindingsSettings.logic";
 import {
   validateSettingsScopeSearch,

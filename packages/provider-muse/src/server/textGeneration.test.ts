@@ -5,9 +5,9 @@ import {
   MUSE_DEFAULT_MODEL,
   ProviderInstanceId,
   type ServerProviderModel,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { MuseSettings } from "../settings.ts";
-import { createModelSelection } from "@t3tools/shared/model";
+import { createModelSelection } from "@cogenly/shared/model";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Schema from "effect/Schema";

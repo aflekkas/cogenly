@@ -1,7 +1,7 @@
 import { useAtomValue } from "@effect/atom-react";
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
-import type { ThreadId } from "@t3tools/contracts";
+import { scopeThreadRef } from "@cogenly/client-runtime/environment";
+import type { EnvironmentThreadShell } from "@cogenly/client-runtime/state/models";
+import type { ThreadId } from "@cogenly/contracts";
 import { ChevronLeftIcon, EllipsisIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 

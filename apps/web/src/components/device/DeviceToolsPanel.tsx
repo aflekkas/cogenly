@@ -1,5 +1,5 @@
-import type { DeviceHubAccess } from "@t3tools/client-runtime/state/deviceHubAccess";
-import type { DevicePermission, DeviceSummary, DeviceTextSize } from "@t3tools/contracts";
+import type { DeviceHubAccess } from "@cogenly/client-runtime/state/deviceHubAccess";
+import type { DevicePermission, DeviceSummary, DeviceTextSize } from "@cogenly/contracts";
 import { X } from "lucide-react";
 import { useEffect, useState } from "react";
 

@@ -1,5 +1,5 @@
-import type { DeviceServiceState, DeviceSummary, ScopedThreadRef } from "@t3tools/contracts";
-import { isAtomCommandInterrupted } from "@t3tools/client-runtime/state/runtime";
+import type { DeviceServiceState, DeviceSummary, ScopedThreadRef } from "@cogenly/contracts";
+import { isAtomCommandInterrupted } from "@cogenly/client-runtime/state/runtime";
 import { useMemo } from "react";
 import { create } from "zustand";
 

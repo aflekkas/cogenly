@@ -1,6 +1,6 @@
 import { useState } from "react";
 import * as Option from "effect/Option";
-import type { SshDeviceHostConfig } from "@t3tools/contracts";
+import type { SshDeviceHostConfig } from "@cogenly/contracts";
 import { CheckIcon, MonitorIcon, XIcon } from "lucide-react";
 import { Button, InlineButton } from "../ui/button";
 import { DisclosureChevron } from "../ui/disclosure";

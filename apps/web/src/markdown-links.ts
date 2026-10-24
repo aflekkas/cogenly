@@ -1,11 +1,11 @@
-import { fileBasename, workspaceRelativeFilePath } from "@t3tools/shared/path";
+import { fileBasename, workspaceRelativeFilePath } from "@cogenly/shared/path";
 import {
   inlineCodeFilePathCandidate,
   isRelativeFilePath,
   normalizeMarkdownLinkDestination,
   resolveMarkdownFileLinkTarget,
-} from "@t3tools/shared/markdownLinks";
-import { parseFileUrlHref, splitFilePathPosition } from "@t3tools/shared/fileLinks";
+} from "@cogenly/shared/markdownLinks";
+import { parseFileUrlHref, splitFilePathPosition } from "@cogenly/shared/fileLinks";
 
 import { formatWorkspaceRelativePath } from "./filePathDisplay";
 

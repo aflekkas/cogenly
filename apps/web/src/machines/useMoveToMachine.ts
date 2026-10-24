@@ -2,8 +2,8 @@ import {
   isAtomCommandInterrupted,
   settlePromise,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
-import type { EnvironmentId, ProjectLabelId, ThreadId, ThreadMoveResult } from "@t3tools/contracts";
+} from "@cogenly/client-runtime/state/runtime";
+import type { EnvironmentId, ProjectLabelId, ThreadId, ThreadMoveResult } from "@cogenly/contracts";
 import { useCallback } from "react";
 
 import { toastManager } from "../components/ui/toast";

@@ -1,4 +1,4 @@
-import type { VaultPolicy } from "@t3tools/contracts";
+import type { VaultPolicy } from "@cogenly/contracts";
 
 /** Normalizes a page host: lowercase, no port, no trailing dot. Empty for unparsable input. */
 export const normalizeHost = (hostOrUrl: string): string => {

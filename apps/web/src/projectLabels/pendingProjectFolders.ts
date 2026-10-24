@@ -1,4 +1,4 @@
-import type { EnvironmentId, ProjectLabelId, ThreadId } from "@t3tools/contracts";
+import type { EnvironmentId, ProjectLabelId, ThreadId } from "@cogenly/contracts";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 

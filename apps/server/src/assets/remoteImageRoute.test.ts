@@ -11,7 +11,7 @@ import {
   HttpServerResponse,
 } from "effect/http";
 
-import * as GitHubCredentials from "@t3tools/source-control-github/server/GitHubCredentials";
+import * as GitHubCredentials from "@cogenly/source-control-github/server/GitHubCredentials";
 
 import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";

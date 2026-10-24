@@ -18,7 +18,7 @@ import * as Path from "effect/Path";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 
-import { DEFAULT_TAILSCALE_SERVE_PORT } from "@t3tools/tailscale";
+import { DEFAULT_TAILSCALE_SERVE_PORT } from "@cogenly/tailscale";
 
 import * as ServerConfig from "../config.ts";
 

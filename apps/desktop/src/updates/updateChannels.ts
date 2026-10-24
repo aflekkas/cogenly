@@ -1,4 +1,4 @@
-import type { DesktopUpdateChannel } from "@t3tools/contracts";
+import type { DesktopUpdateChannel } from "@cogenly/contracts";
 
 const STAGING_VERSION_PATTERN = /^[^-+]+-staging\.\d{8}\.\d+$/;
 

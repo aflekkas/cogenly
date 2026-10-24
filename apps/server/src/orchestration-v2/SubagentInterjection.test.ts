@@ -15,12 +15,12 @@ import {
   type OrchestrationV2Run,
   type OrchestrationV2StoredEvent,
   type OrchestrationV2Subagent,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import {
   makeSubagentChildThread,
   makeSubagentConversationArtifacts,
-} from "@t3tools/provider-core/server/subagentProjection";
-import { ProviderAdapterTurnStartError } from "@t3tools/provider-core/server/ProviderAdapter";
+} from "@cogenly/provider-core/server/subagentProjection";
+import { ProviderAdapterTurnStartError } from "@cogenly/provider-core/server/ProviderAdapter";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Stream from "effect/Stream";

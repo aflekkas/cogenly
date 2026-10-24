@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
-import { ExecutionEnvironmentDescriptor, ServerProvider } from "@t3tools/contracts";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import { ExecutionEnvironmentDescriptor, ServerProvider } from "@cogenly/contracts";
+import * as HostProcess from "@cogenly/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as Context from "effect/Context";
 import * as FileSystem from "effect/FileSystem";

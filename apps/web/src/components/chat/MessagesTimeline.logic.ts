@@ -1,15 +1,15 @@
-import { worktreeSetupAgentStarted } from "@t3tools/client-runtime/worktree-setup";
-export { worktreeSetupAgentStarted } from "@t3tools/client-runtime/worktree-setup";
-import { isLiveSubagentTurnItem } from "@t3tools/client-runtime/state/subagentRuntime";
+import { worktreeSetupAgentStarted } from "@cogenly/client-runtime/worktree-setup";
+export { worktreeSetupAgentStarted } from "@cogenly/client-runtime/worktree-setup";
+import { isLiveSubagentTurnItem } from "@cogenly/client-runtime/state/subagentRuntime";
 import * as DateTime from "effect/DateTime";
 import * as Equal from "effect/Equal";
 import {
   assistantCitationLabel,
   collectAssistantCitations,
-} from "@t3tools/shared/assistantCitations";
+} from "@cogenly/shared/assistantCitations";
 import { shallow } from "zustand/vanilla/shallow";
-import { renderCodexDirectivesForCopy } from "@t3tools/shared/codexMarkdownDirectives";
-import { reasoningPlainText } from "@t3tools/client-runtime/work-log/reasoning-text";
+import { renderCodexDirectivesForCopy } from "@cogenly/shared/codexMarkdownDirectives";
+import { reasoningPlainText } from "@cogenly/client-runtime/work-log/reasoning-text";
 import {
   resolveWorkLogNotice,
   readToolRecord,
@@ -17,14 +17,14 @@ import {
   workLogToolGroupLabel,
   type WorkLogToolCallInput,
   type WorkLogToolIcon,
-} from "@t3tools/client-runtime/work-log/tool-registry";
+} from "@cogenly/client-runtime/work-log/tool-registry";
 import {
   liveActivityToolStatus,
   resolveWorkEntryTool,
   toolGroupIcon,
   workEntryToolCall,
   summarizeToolGroup,
-} from "@t3tools/client-runtime/work-log/presentation";
+} from "@cogenly/client-runtime/work-log/presentation";
 import {
   deriveRevertTurnCountByUserMessageId,
   formatDuration,
@@ -53,18 +53,18 @@ import {
   RunId,
   type ThreadId,
   type TurnItemId,
-} from "@t3tools/contracts";
-import type { ThreadRunSummary } from "@t3tools/client-runtime/state/shell";
+} from "@cogenly/contracts";
+import type { ThreadRunSummary } from "@cogenly/client-runtime/state/shell";
 import {
   resolveT3McpToolDefinition,
   resolveT3McpToolPresentation,
   type T3McpToolPresentation,
-} from "@t3tools/shared/t3McpToolPresentation";
-import { compactDynamicToolOutput } from "@t3tools/shared/toolOutput";
-import { htmlRenderReferencesEqual, type HtmlRenderReference } from "@t3tools/shared/htmlRender";
-import { mcpAppReferencesEqual, type McpAppReference } from "@t3tools/shared/mcpApp";
-import { collectToolFilePaths } from "@t3tools/shared/toolActivity";
-import { isWindowsAbsolutePath } from "@t3tools/shared/path";
+} from "@cogenly/shared/t3McpToolPresentation";
+import { compactDynamicToolOutput } from "@cogenly/shared/toolOutput";
+import { htmlRenderReferencesEqual, type HtmlRenderReference } from "@cogenly/shared/htmlRender";
+import { mcpAppReferencesEqual, type McpAppReference } from "@cogenly/shared/mcpApp";
+import { collectToolFilePaths } from "@cogenly/shared/toolActivity";
+import { isWindowsAbsolutePath } from "@cogenly/shared/path";
 
 function timelineEntryRunId(entry: TimelineEntry): RunId | null {
   if (entry.kind === "message") {

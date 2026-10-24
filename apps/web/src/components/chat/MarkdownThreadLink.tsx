@@ -1,8 +1,8 @@
 import { useAtomValue } from "@effect/atom-react";
-import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { isScratchProject } from "@t3tools/client-runtime/state/projects";
-import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
-import { formatThreadLink, percentDecodedThreadLinkId } from "@t3tools/shared/threadLinks";
+import { scopeProjectRef, scopeThreadRef } from "@cogenly/client-runtime/environment";
+import { isScratchProject } from "@cogenly/client-runtime/state/projects";
+import type { EnvironmentId, ThreadId } from "@cogenly/contracts";
+import { formatThreadLink, percentDecodedThreadLinkId } from "@cogenly/shared/threadLinks";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { ClockIcon, MessageSquareTextIcon } from "lucide-react";
 import type { ReactNode } from "react";

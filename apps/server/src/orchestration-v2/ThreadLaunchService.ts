@@ -1,6 +1,6 @@
 import * as WorktreeSetupTracker from "../project/WorktreeSetupTracker.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
-import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+import { resolveProjectSettings } from "@cogenly/shared/projectSettings";
 import {
   isRemoteRepositoryPlaceholder,
   CommandId,
@@ -19,7 +19,7 @@ import {
   type RuntimeMode,
   type ScheduledTaskId,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -36,7 +36,7 @@ import {
   isTemporaryWorktreeBranch,
   WORKTREE_BRANCH_PREFIX,
   worktreeFolderSlug,
-} from "@t3tools/shared/git";
+} from "@cogenly/shared/git";
 
 import * as GitWorkflow from "../git/GitWorkflowService.ts";
 import * as ProjectService from "../project/ProjectService.ts";
@@ -48,9 +48,9 @@ import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import * as CommandReceiptStore from "./CommandReceiptStore.ts";
-import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import * as IdAllocator from "@cogenly/provider-core/server/IdAllocator";
 import type * as Orchestrator from "./Orchestrator.ts";
-import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
+import { makeProviderFailure } from "@cogenly/provider-core/server/failure";
 import * as ThreadManagement from "./ThreadManagementService.ts";
 
 export type ThreadLaunchWorkspaceStrategy =
@@ -73,17 +73,17 @@ export interface ThreadLaunchInitialMessage {
   readonly senderThreadId?: ThreadId;
   readonly text: string;
   readonly attachments: ReadonlyArray<ChatAttachment>;
-  readonly context?: import("@t3tools/contracts").OrchestrationMessageContext | undefined;
+  readonly context?: import("@cogenly/contracts").OrchestrationMessageContext | undefined;
 }
 
 export interface ThreadLaunchInput {
-  readonly surface?: import("@t3tools/contracts").ThreadSurface;
-  readonly workOrigin?: import("@t3tools/contracts").WorkOrigin;
+  readonly surface?: import("@cogenly/contracts").ThreadSurface;
+  readonly workOrigin?: import("@cogenly/contracts").WorkOrigin;
   readonly sourceThreadId?: ThreadId;
-  readonly sourceAgentId?: import("@t3tools/contracts").AgentId;
+  readonly sourceAgentId?: import("@cogenly/contracts").AgentId;
   readonly sourceAgentRunId?: string;
   readonly agent?: {
-    readonly id: import("@t3tools/contracts").AgentId;
+    readonly id: import("@cogenly/contracts").AgentId;
     readonly role: "conversation" | "work";
   };
   readonly commandId: CommandId;

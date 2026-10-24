@@ -1,5 +1,5 @@
-import { scopeProjectRef } from "@t3tools/client-runtime/environment";
-import type { ScopedThreadRef } from "@t3tools/contracts";
+import { scopeProjectRef } from "@cogenly/client-runtime/environment";
+import type { ScopedThreadRef } from "@cogenly/contracts";
 import { Bot, ChevronDown, ExternalLink, SquareTerminal } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 

@@ -19,7 +19,7 @@ import {
   type ProjectLabelId,
   type ScheduledTaskSchedule,
   type ScheduledTaskUpsertSchedule,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { EXPRESSIONS as AGENT_FACE_EXPRESSIONS } from "~/components/agents/face/engine/expressions";
 import {
   COLORS as AGENT_FACE_COLORS,

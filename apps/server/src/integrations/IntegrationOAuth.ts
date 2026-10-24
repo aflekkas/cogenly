@@ -1,4 +1,4 @@
-import { IntegrationError } from "@t3tools/contracts";
+import { IntegrationError } from "@cogenly/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";

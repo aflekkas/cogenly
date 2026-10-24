@@ -18,7 +18,7 @@ import {
   cliArchiveTarCommand,
   cliReleaseDownloadBaseUrl,
   parseChecksums,
-} from "@t3tools/shared/cliRelease";
+} from "@cogenly/shared/cliRelease";
 
 import * as ProcessRunner from "../processRunner.ts";
 

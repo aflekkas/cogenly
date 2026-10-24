@@ -9,7 +9,7 @@ import {
   type ProviderSettingsFormControl,
   type ProviderSettingsFormOption,
   type ProviderSettingsFormSchemaAnnotation,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 
 import { cn } from "../../lib/utils";
 import { DraftInput } from "../ui/draft-input";
@@ -18,7 +18,7 @@ import { SecretInput } from "./SecretInput";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
 import { Textarea } from "../ui/textarea";
-import type { ProviderClientDefinition } from "@t3tools/provider-core/client";
+import type { ProviderClientDefinition } from "@cogenly/provider-core/client";
 
 /** What the form reads from a definition: an agent provider's, or a source control host's. */
 export type SettingsFormDefinition = Pick<ProviderClientDefinition, "settingsSchema"> & {

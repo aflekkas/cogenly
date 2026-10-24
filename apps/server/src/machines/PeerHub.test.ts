@@ -4,7 +4,7 @@ import {
   AuthSyncReplicateScope,
   makePeerChannel,
   PEER_PROTOCOL_VERSION,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";

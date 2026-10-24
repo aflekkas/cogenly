@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest";
-import { ProjectId, ProjectLabelId, type ProjectLabelWithRepositories } from "@t3tools/contracts";
+import { ProjectId, ProjectLabelId, type ProjectLabelWithRepositories } from "@cogenly/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
 import * as Path from "effect/Path";

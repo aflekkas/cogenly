@@ -5,7 +5,7 @@ import {
   SharedStateError,
   type SharedDocumentChange,
   type SharedDocumentChangeWire,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";

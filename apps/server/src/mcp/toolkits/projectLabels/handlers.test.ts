@@ -6,7 +6,7 @@ import {
   ThreadId,
   type OrchestrationV2AppThread,
   type OrchestrationV2Run,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";

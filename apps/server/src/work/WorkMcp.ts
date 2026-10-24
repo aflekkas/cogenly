@@ -11,7 +11,7 @@ import {
   WorkHandoffDraft,
   WorkScopeSummary,
   WorkTitle,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { Tool, Toolkit } from "effect/ai";

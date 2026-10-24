@@ -9,12 +9,12 @@ import type {
   ScopedProjectRef,
   ServerConfig,
   ServerProvider,
-} from "@t3tools/contracts";
-import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
+} from "@cogenly/contracts";
+import { scopeProjectRef, scopeThreadRef } from "@cogenly/client-runtime/environment";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@cogenly/client-runtime/state/runtime";
 import {
   AuthTerminalOperateScope,
   CommandId,
@@ -22,7 +22,7 @@ import {
   AuthOrchestrationOperateScope,
   ProviderDriverKind,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import {
   ArrowRightIcon,
   CheckIcon,
@@ -86,7 +86,7 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { connectPairing } from "../../connection/onboarding";
 import { getProviderSummary } from "../settings/providerStatus";
 import { providerClients } from "../settings/providerDriverMeta";
-import { primaryOnboardingDriverKinds } from "@t3tools/provider-core/client";
+import { primaryOnboardingDriverKinds } from "@cogenly/provider-core/client";
 import { ChatGptWelcomeCoordinator } from "../settings/ChatGptWelcomeCoordinator";
 import { AddManagedCodexAccountDialog, CodexSetupSection } from "../settings/CodexSetupSection";
 import { readCodexSetupMode } from "../settings/CodexSetupSection.logic";

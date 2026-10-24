@@ -1,4 +1,4 @@
-import type { PreviewNavStatus } from "@t3tools/contracts";
+import type { PreviewNavStatus } from "@cogenly/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {

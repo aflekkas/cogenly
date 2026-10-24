@@ -21,7 +21,7 @@ export type DesktopAppOpenWorkspaceRequest = typeof DesktopAppOpenWorkspaceReque
  * `cogenly environment add`, `environment_add`, or a confirmed
  * `cogenly://environments/add` link: connect an SSH host and save it. The
  * desktop checks `ssh` and `name` with `parseAddEnvironmentRequest` from
- * `@t3tools/shared/environmentLinks`.
+ * `@cogenly/shared/environmentLinks`.
  */
 export const DesktopAppAddEnvironmentRequest = Schema.Struct({
   version: Schema.Literal(DESKTOP_APP_ACTIVATION_PROTOCOL_VERSION),

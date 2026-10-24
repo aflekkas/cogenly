@@ -8,8 +8,8 @@ import type {
   MachineSecurityListeningSocket,
   MachineSecurityState,
   MachineSecurityStatus,
-} from "@t3tools/contracts";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+} from "@cogenly/contracts";
+import * as HostProcess from "@cogenly/shared/HostProcess";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";

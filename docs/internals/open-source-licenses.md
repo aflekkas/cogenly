@@ -10,7 +10,7 @@ License notices are generated independently for the client that ships them:
 ## What the build collects
 
 The generator follows installed production and optional dependencies, including dependencies of
-workspace packages, and omits first-party `@t3tools/*` packages. The web manifest starts from the
+workspace packages, and omits first-party `@cogenly/*` packages. The web manifest starts from the
 web, server, and desktop package manifests. During the web bundle, the generator also checks emitted module ids to catch a bundled
 npm import missing from a package manifest.
 

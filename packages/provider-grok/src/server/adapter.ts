@@ -1,4 +1,4 @@
-import type { ServerProviderUsageLimits } from "@t3tools/contracts";
+import type { ServerProviderUsageLimits } from "@cogenly/contracts";
 import {
   ProviderDriverKind,
   type ModelSelection,
@@ -16,10 +16,10 @@ import {
   type ProviderInstanceId,
   type RuntimeRequestId,
   type ServerProviderModel,
-} from "@t3tools/contracts";
-import { COGENLY_ORCHESTRATION_INSTRUCTIONS } from "@t3tools/provider-core/server/orchestrationInstructions";
-import { AgentScope } from "@t3tools/shared/AgentScope";
-import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
+} from "@cogenly/contracts";
+import { COGENLY_ORCHESTRATION_INSTRUCTIONS } from "@cogenly/provider-core/server/orchestrationInstructions";
+import { AgentScope } from "@cogenly/shared/AgentScope";
+import { getModelSelectionStringOptionValue } from "@cogenly/shared/model";
 import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
@@ -31,22 +31,22 @@ import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 
-import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
-import * as McpProviderSession from "@t3tools/provider-core/server/mcpSession";
-import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
-import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
-import type * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
-import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
+import * as IdAllocator from "@cogenly/provider-core/server/IdAllocator";
+import * as McpProviderSession from "@cogenly/provider-core/server/mcpSession";
+import * as McpProviderSessions from "@cogenly/provider-core/server/McpProviderSessions";
+import * as ProviderAdapter from "@cogenly/provider-core/server/ProviderAdapter";
+import type * as ProviderEventLoggers from "@cogenly/provider-core/server/ProviderEventLoggers";
+import * as ProviderHost from "@cogenly/provider-core/server/ProviderHost";
 import {
   isProviderNativeImageAttachment,
   providerMessageTextWithAttachmentPaths,
-} from "@t3tools/provider-core/server/attachmentPrompt";
-import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
+} from "@cogenly/provider-core/server/attachmentPrompt";
+import { makeProviderFailure } from "@cogenly/provider-core/server/failure";
 import {
   CONVERSATION_MODE_INSTRUCTIONS,
   buildRuntimeInstructions,
-} from "@t3tools/provider-core/server/runtimeInstructions";
-import { turnScopedSelectionTransition } from "@t3tools/provider-core/server/selectionTransition";
+} from "@cogenly/provider-core/server/runtimeInstructions";
+import { turnScopedSelectionTransition } from "@cogenly/provider-core/server/selectionTransition";
 
 import type { GrokSettings } from "../settings.ts";
 import {

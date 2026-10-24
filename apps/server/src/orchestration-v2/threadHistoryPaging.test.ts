@@ -1,4 +1,4 @@
-import { ThreadId, TurnItemId } from "@t3tools/contracts";
+import { ThreadId, TurnItemId } from "@cogenly/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {

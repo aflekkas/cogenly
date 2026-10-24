@@ -2,7 +2,7 @@ import {
   type ChatAttachment,
   isProviderSendTurnSupportedImageMimeType,
   PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 
 export function isProviderNativeImageAttachment(attachment: ChatAttachment): boolean {
   return (

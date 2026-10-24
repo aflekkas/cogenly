@@ -5,14 +5,14 @@ import type {
   AssetResource,
   EnvironmentId,
   ScopedThreadRef,
-} from "@t3tools/contracts";
-import { videoMimeType } from "@t3tools/shared/video";
-import { resolveMediaSource } from "@t3tools/client-runtime/media-source";
-import { resolveAssetUrl } from "@t3tools/client-runtime/state/assets";
+} from "@cogenly/contracts";
+import { videoMimeType } from "@cogenly/shared/video";
+import { resolveMediaSource } from "@cogenly/client-runtime/media-source";
+import { resolveAssetUrl } from "@cogenly/client-runtime/state/assets";
 import {
   squashAtomCommandFailure,
   type AtomCommandResult,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@cogenly/client-runtime/state/runtime";
 import { resolveExternalWebLinkHost } from "./externalLinkContextMenu";
 import type { MediaActionSource } from "../media/MediaActions";
 import { resolveProtocolRelativeMediaUrl } from "../media/mediaContent";

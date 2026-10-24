@@ -6,7 +6,7 @@ import type {
   DesktopPreviewRecordingFrame,
   DesktopPreviewSitePermissionPromptEvent,
   DesktopPreviewTabState,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { exposeClerkBridge } from "@clerk/electron/preload";
 import { contextBridge, ipcRenderer, webFrame, webUtils } from "electron";
 

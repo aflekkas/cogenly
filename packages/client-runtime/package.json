@@ -1,5 +1,5 @@
 {
-  "name": "@t3tools/client-runtime",
+  "name": "@cogenly/client-runtime",
   "private": true,
   "type": "module",
   "exports": {
@@ -453,10 +453,10 @@
     "test": "vp test run"
   },
   "dependencies": {
-    "@t3tools/contracts": "workspace:*",
-    "@t3tools/shared": "workspace:*",
-    "@t3tools/source-control-core": "workspace:*",
-    "@t3tools/source-control-github": "workspace:*",
+    "@cogenly/contracts": "workspace:*",
+    "@cogenly/shared": "workspace:*",
+    "@cogenly/source-control-core": "workspace:*",
+    "@cogenly/source-control-github": "workspace:*",
     "effect": "catalog:",
     "three": "0.180.0"
   },

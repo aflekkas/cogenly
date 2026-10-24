@@ -4,7 +4,7 @@
  * One pill slides between equal-width segments, so the control never reflows
  * when a badge appears. Arrow keys move between segments, as in any tablist.
  */
-import type { ResolvedKeybindingsConfig } from "@t3tools/contracts";
+import type { ResolvedKeybindingsConfig } from "@cogenly/contracts";
 import { BotIcon, HammerIcon, type LucideIcon, MessageCircleIcon } from "lucide-react";
 import { type KeyboardEvent as ReactKeyboardEvent, useRef } from "react";
 

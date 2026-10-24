@@ -1,4 +1,4 @@
-import { ProviderInstanceId, type Agent, type ModelSelection } from "@t3tools/contracts";
+import { ProviderInstanceId, type Agent, type ModelSelection } from "@cogenly/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import {
   advanceFallback,

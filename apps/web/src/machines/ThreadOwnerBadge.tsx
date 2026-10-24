@@ -1,4 +1,4 @@
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId } from "@cogenly/contracts";
 
 import { EnvironmentMachineIcon } from "../components/EnvironmentMachineIcon";
 import { Badge } from "../components/ui/badge";

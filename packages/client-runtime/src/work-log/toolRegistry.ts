@@ -13,23 +13,23 @@
  * named after the tool. System and lifecycle rows are `WORK_LOG_NOTICES`;
  * reasoning is `WORK_LOG_THOUGHT`.
  */
-import type { OrchestrationV2TurnItem } from "@t3tools/contracts";
-import { parseChangeRequestUrl } from "@t3tools/shared/changeRequestUrl";
-import { formatSnoozeTime, localTimeZone } from "@t3tools/shared/snooze";
+import type { OrchestrationV2TurnItem } from "@cogenly/contracts";
+import { parseChangeRequestUrl } from "@cogenly/shared/changeRequestUrl";
+import { formatSnoozeTime, localTimeZone } from "@cogenly/shared/snooze";
 import {
   resolveT3McpToolDefinition,
   resolveT3McpToolId,
   type T3McpToolDefinition,
   type T3McpToolSummaryAction,
   withoutLegacyToolPrefix,
-} from "@t3tools/shared/t3McpToolPresentation";
+} from "@cogenly/shared/t3McpToolPresentation";
 import {
   claudeSkillInvocation,
   collectToolFilePaths,
   dynamicToolSurface,
   dynamicToolTitle,
   isJavaScriptReplTool,
-} from "@t3tools/shared/toolActivity";
+} from "@cogenly/shared/toolActivity";
 
 import { summarizeT3ToolCalls } from "../t3ToolSummary.ts";
 import { commandDisplayText } from "./commandLabel.ts";

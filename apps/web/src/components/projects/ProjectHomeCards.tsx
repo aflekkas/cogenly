@@ -1,7 +1,7 @@
 import { useAtomValue } from "@effect/atom-react";
-import { isAtomCommandInterrupted } from "@t3tools/client-runtime/state/runtime";
-import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
-import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
+import { isAtomCommandInterrupted } from "@cogenly/client-runtime/state/runtime";
+import { scopeThreadRef, scopedThreadKey } from "@cogenly/client-runtime/environment";
+import type { EnvironmentThreadShell } from "@cogenly/client-runtime/state/shell";
 import type {
   ChatAttachmentId,
   EnvironmentId,
@@ -9,7 +9,7 @@ import type {
   ProjectLabelWithRepositories,
   ProjectResource,
   ProjectSourceLink,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import {
   BotIcon,

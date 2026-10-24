@@ -1,17 +1,17 @@
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { scopeThreadRef } from "@cogenly/client-runtime/environment";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
-import { deriveThreadQueueWorkflowState } from "@t3tools/client-runtime/state/thread-workflows";
-import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
+} from "@cogenly/client-runtime/state/runtime";
+import { deriveThreadQueueWorkflowState } from "@cogenly/client-runtime/state/thread-workflows";
+import { replaceComposerContextReferences } from "@cogenly/shared/composerContextReferences";
 import type {
   ChatAttachment as ContractChatAttachment,
   EnvironmentId,
   MessageId,
   RunId,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import {
   ArrowUpIcon,
   Clock3Icon,

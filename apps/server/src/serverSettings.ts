@@ -28,7 +28,7 @@ import {
   ServerSettings,
   ServerSettingsError,
   type ServerSettingsPatch,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Cache from "effect/Cache";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
@@ -49,17 +49,17 @@ import * as Semaphore from "effect/Semaphore";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
-import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
-import { resolveSymlinkTarget } from "@t3tools/shared/symlink";
+import { writeFileStringAtomically } from "@cogenly/shared/atomicWrite";
+import { resolveSymlinkTarget } from "@cogenly/shared/symlink";
 import * as ServerConfig from "./config.ts";
-import { type DeepPartial, deepMerge } from "@t3tools/shared/Struct";
-import { fromJsonStringPretty, fromLenientJson } from "@t3tools/shared/schemaJson";
+import { type DeepPartial, deepMerge } from "@cogenly/shared/Struct";
+import { fromJsonStringPretty, fromLenientJson } from "@cogenly/shared/schemaJson";
 import {
   applyServerSettingsPatch,
   deriveLegacyProjectOverrides,
   fallbackTextGenerationModelSelection,
   isModelSelectionProviderEnabled,
-} from "@t3tools/shared/serverSettings";
+} from "@cogenly/shared/serverSettings";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import { BUILT_IN_DRIVERS } from "./provider/builtInDrivers.ts";
 import {
@@ -67,7 +67,7 @@ import {
   defaultTextGenerationModelForDriver,
   isRegisteredDriverKind,
   textGenerationFallbackDriverKinds,
-} from "@t3tools/provider-core/server/driver";
+} from "@cogenly/provider-core/server/driver";
 import {
   readSecretFieldValues,
   sourceControlHostSecretName,
@@ -78,7 +78,7 @@ import { mapSettingsSecrets, SECRET_REDACTED, type SettingsSecret } from "./sett
 export {
   resolveReviewGuideModelSelection,
   resolveSourceControlWriterModelSelection,
-} from "@t3tools/shared/serverSettings";
+} from "@cogenly/shared/serverSettings";
 
 const encodeServerSettings = Schema.encodeEffect(ServerSettings);
 const encodeServerSettingsJson = Schema.encodeUnknownEffect(fromJsonStringPretty(ServerSettings));

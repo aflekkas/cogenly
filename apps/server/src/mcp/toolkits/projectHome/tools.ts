@@ -9,7 +9,7 @@ import {
   ProjectRepositoryChangeInput,
   ProjectSourceChangeInput,
   ProjectTargetInput,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { Tool, Toolkit } from "effect/ai";
 
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";

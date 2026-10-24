@@ -4,8 +4,8 @@
  * image is held back until its markdown is complete.
  */
 
-import type { AssetUrlState } from "@t3tools/client-runtime/state/assets";
-import type { AssetResource } from "@t3tools/contracts";
+import type { AssetUrlState } from "@cogenly/client-runtime/state/assets";
+import type { AssetResource } from "@cogenly/contracts";
 
 /** The slice of a hast node these helpers read and build. */
 export interface InlineImageHastNode {

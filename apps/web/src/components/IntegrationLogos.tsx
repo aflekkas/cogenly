@@ -1,4 +1,4 @@
-import type { IntegrationCatalogId } from "@t3tools/contracts";
+import type { IntegrationCatalogId } from "@cogenly/contracts";
 
 import { GitHubIcon, type Icon } from "./Icons";
 

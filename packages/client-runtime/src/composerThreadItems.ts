@@ -1,4 +1,4 @@
-import type { EnvironmentId, ScopedThreadRef, ThreadId } from "@t3tools/contracts";
+import type { EnvironmentId, ScopedThreadRef, ThreadId } from "@cogenly/contracts";
 
 /** Per section with a query; bare `@` shows fewer, as a hint of what it can find. */
 const MENTION_RESULT_LIMIT = 4;

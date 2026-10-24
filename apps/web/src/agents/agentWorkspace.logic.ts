@@ -17,7 +17,7 @@ import type {
   ProjectLabelId,
   ScheduledTaskUpsertSchedule,
   VaultField,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 
 type CommitmentStatus = Commitment["status"];
 

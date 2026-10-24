@@ -1,5 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
-import type { AgentApproval, EnvironmentId, ThreadId } from "@t3tools/contracts";
+import type { AgentApproval, EnvironmentId, ThreadId } from "@cogenly/contracts";
 import { Atom } from "effect/reactivity";
 import { KeyRoundIcon } from "lucide-react";
 import { useMemo, useState } from "react";

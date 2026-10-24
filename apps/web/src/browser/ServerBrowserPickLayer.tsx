@@ -1,6 +1,6 @@
 "use client";
 
-import type { PreviewAnnotationPayload, PreviewAnnotationRect } from "@t3tools/contracts";
+import type { PreviewAnnotationPayload, PreviewAnnotationRect } from "@cogenly/contracts";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Button } from "~/components/ui/button";

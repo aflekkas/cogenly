@@ -1,4 +1,4 @@
-import type { EnvironmentId, ProjectSourceLink } from "@t3tools/contracts";
+import type { EnvironmentId, ProjectSourceLink } from "@cogenly/contracts";
 import { FolderIcon } from "lucide-react";
 import type { CSSProperties } from "react";
 

@@ -21,7 +21,7 @@ import {
   type BrowserAppearanceSetting,
   type PreviewAppearancePreference,
   type PreviewViewportSetting,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 
 import {
   ensureClientSettingsHydrated,

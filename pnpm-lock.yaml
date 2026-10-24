@@ -186,19 +186,19 @@ importers:
       '@napi-rs/keyring':
         specifier: ^1.3.0
         version: 1.3.0
-      '@t3tools/client-runtime':
+      '@cogenly/client-runtime':
         specifier: workspace:*
         version: link:../../packages/client-runtime
-      '@t3tools/contracts':
+      '@cogenly/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
-      '@t3tools/shared':
+      '@cogenly/shared':
         specifier: workspace:*
         version: link:../../packages/shared
-      '@t3tools/ssh':
+      '@cogenly/ssh':
         specifier: workspace:*
         version: link:../../packages/ssh
-      '@t3tools/tailscale':
+      '@cogenly/tailscale':
         specifier: workspace:*
         version: link:../../packages/tailscale
       dbus-next:
@@ -253,7 +253,7 @@ importers:
 
   apps/marketing:
     dependencies:
-      '@t3tools/shared':
+      '@cogenly/shared':
         specifier: workspace:*
         version: link:../../packages/shared
       astro:
@@ -290,19 +290,19 @@ importers:
       '@napi-rs/keyring':
         specifier: ^1.3.0
         version: 1.3.0
-      '@t3tools/provider-core':
+      '@cogenly/provider-core':
         specifier: workspace:*
         version: link:../../packages/provider-core
-      '@t3tools/provider-grok':
+      '@cogenly/provider-grok':
         specifier: workspace:*
         version: link:../../packages/provider-grok
-      '@t3tools/provider-muse':
+      '@cogenly/provider-muse':
         specifier: workspace:*
         version: link:../../packages/provider-muse
-      '@t3tools/source-control-core':
+      '@cogenly/source-control-core':
         specifier: workspace:*
         version: link:../../packages/source-control-core
-      '@t3tools/source-control-github':
+      '@cogenly/source-control-github':
         specifier: workspace:*
         version: link:../../packages/source-control-github
       effect:
@@ -339,22 +339,22 @@ importers:
       '@effect/vitest':
         specifier: 4.0.5
         version: 4.0.5(patch_hash=2731c9c3761c595f25ddc625a7d61ca376b389d5b3049ecb837c8940f21cfa02)(@types/node@24.12.4)(@vitest/ui@5.0.1(vitest@5.0.1))(bufferutil@4.1.0)(effect@4.0.5)(esbuild@0.28.2)(jiti@2.7.0)(jsdom@30.1.0(@noble/hashes@1.8.0))(msw@2.12.11(@types/node@24.12.4)(typescript@7.0.2))(terser@5.48.0)(typescript@7.0.2)(unrun@0.2.39)(utf-8-validate@6.0.6)(yaml@2.9.0)
-      '@t3tools/contracts':
+      '@cogenly/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
-      '@t3tools/provider-testing':
+      '@cogenly/provider-testing':
         specifier: workspace:*
         version: link:../../packages/provider-testing
-      '@t3tools/shared':
+      '@cogenly/shared':
         specifier: workspace:*
         version: link:../../packages/shared
-      '@t3tools/ssh':
+      '@cogenly/ssh':
         specifier: workspace:*
         version: link:../../packages/ssh
-      '@t3tools/tailscale':
+      '@cogenly/tailscale':
         specifier: workspace:*
         version: link:../../packages/tailscale
-      '@t3tools/web':
+      '@cogenly/web':
         specifier: workspace:*
         version: link:../web
       '@types/node':
@@ -420,22 +420,22 @@ importers:
       '@pierre/trees':
         specifier: 1.0.0-beta.6
         version: 1.0.0-beta.6(@pierre/theme@2.0.0)(@shikijs/themes@4.3.0)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(shiki@4.2.0)
-      '@t3tools/client-runtime':
+      '@cogenly/client-runtime':
         specifier: workspace:*
         version: link:../../packages/client-runtime
-      '@t3tools/contracts':
+      '@cogenly/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
-      '@t3tools/provider-core':
+      '@cogenly/provider-core':
         specifier: workspace:*
         version: link:../../packages/provider-core
-      '@t3tools/provider-grok':
+      '@cogenly/provider-grok':
         specifier: workspace:*
         version: link:../../packages/provider-grok
-      '@t3tools/provider-muse':
+      '@cogenly/provider-muse':
         specifier: workspace:*
         version: link:../../packages/provider-muse
-      '@t3tools/shared':
+      '@cogenly/shared':
         specifier: workspace:*
         version: link:../../packages/shared
       '@tanstack/react-pacer':
@@ -589,16 +589,16 @@ importers:
 
   packages/client-runtime:
     dependencies:
-      '@t3tools/contracts':
+      '@cogenly/contracts':
         specifier: workspace:*
         version: link:../contracts
-      '@t3tools/shared':
+      '@cogenly/shared':
         specifier: workspace:*
         version: link:../shared
-      '@t3tools/source-control-core':
+      '@cogenly/source-control-core':
         specifier: workspace:*
         version: link:../source-control-core
-      '@t3tools/source-control-github':
+      '@cogenly/source-control-github':
         specifier: workspace:*
         version: link:../source-control-github
       effect:
@@ -655,10 +655,10 @@ importers:
 
   packages/provider-core:
     dependencies:
-      '@t3tools/contracts':
+      '@cogenly/contracts':
         specifier: workspace:*
         version: link:../contracts
-      '@t3tools/shared':
+      '@cogenly/shared':
         specifier: workspace:*
         version: link:../shared
       effect:
@@ -680,13 +680,13 @@ importers:
 
   packages/provider-grok:
     dependencies:
-      '@t3tools/contracts':
+      '@cogenly/contracts':
         specifier: workspace:*
         version: link:../contracts
-      '@t3tools/provider-core':
+      '@cogenly/provider-core':
         specifier: workspace:*
         version: link:../provider-core
-      '@t3tools/shared':
+      '@cogenly/shared':
         specifier: workspace:*
         version: link:../shared
       effect:
@@ -711,13 +711,13 @@ importers:
       '@muse-code/sdk':
         specifier: 1.4.6
         version: 1.4.6(@types/node@24.12.4)
-      '@t3tools/contracts':
+      '@cogenly/contracts':
         specifier: workspace:*
         version: link:../contracts
-      '@t3tools/provider-core':
+      '@cogenly/provider-core':
         specifier: workspace:*
         version: link:../provider-core
-      '@t3tools/shared':
+      '@cogenly/shared':
         specifier: workspace:*
         version: link:../shared
       effect:
@@ -730,7 +730,7 @@ importers:
       '@effect/vitest':
         specifier: 4.0.5
         version: 4.0.5(patch_hash=2731c9c3761c595f25ddc625a7d61ca376b389d5b3049ecb837c8940f21cfa02)(@types/node@24.12.4)(@vitest/ui@5.0.1(vitest@5.0.1))(bufferutil@4.1.0)(effect@4.0.5)(esbuild@0.28.2)(jiti@2.7.0)(jsdom@30.1.0(@noble/hashes@1.8.0))(msw@2.12.11(@types/node@24.12.4)(typescript@7.0.2))(terser@5.48.0)(typescript@7.0.2)(unrun@0.2.39)(utf-8-validate@6.0.6)(yaml@2.9.0)
-      '@t3tools/provider-testing':
+      '@cogenly/provider-testing':
         specifier: workspace:*
         version: link:../provider-testing
       '@types/node':
@@ -745,13 +745,13 @@ importers:
       '@effect/platform-node':
         specifier: 4.0.5
         version: 4.0.5(bufferutil@4.1.0)(effect@4.0.5)(redis@6.2.1)(utf-8-validate@6.0.6)
-      '@t3tools/contracts':
+      '@cogenly/contracts':
         specifier: workspace:*
         version: link:../contracts
-      '@t3tools/provider-core':
+      '@cogenly/provider-core':
         specifier: workspace:*
         version: link:../provider-core
-      '@t3tools/shared':
+      '@cogenly/shared':
         specifier: workspace:*
         version: link:../shared
       effect:
@@ -776,7 +776,7 @@ importers:
       '@noble/hashes':
         specifier: 'catalog:'
         version: 1.8.0
-      '@t3tools/contracts':
+      '@cogenly/contracts':
         specifier: workspace:*
         version: link:../contracts
       effect:
@@ -837,10 +837,10 @@ importers:
 
   packages/source-control-core:
     dependencies:
-      '@t3tools/contracts':
+      '@cogenly/contracts':
         specifier: workspace:*
         version: link:../contracts
-      '@t3tools/shared':
+      '@cogenly/shared':
         specifier: workspace:*
         version: link:../shared
       effect:
@@ -859,16 +859,16 @@ importers:
 
   packages/source-control-github:
     dependencies:
-      '@t3tools/contracts':
+      '@cogenly/contracts':
         specifier: workspace:*
         version: link:../contracts
-      '@t3tools/provider-core':
+      '@cogenly/provider-core':
         specifier: workspace:*
         version: link:../provider-core
-      '@t3tools/shared':
+      '@cogenly/shared':
         specifier: workspace:*
         version: link:../shared
-      '@t3tools/source-control-core':
+      '@cogenly/source-control-core':
         specifier: workspace:*
         version: link:../source-control-core
       effect:
@@ -884,7 +884,7 @@ importers:
       '@effect/vitest':
         specifier: 4.0.5
         version: 4.0.5(patch_hash=2731c9c3761c595f25ddc625a7d61ca376b389d5b3049ecb837c8940f21cfa02)(@types/node@24.12.4)(@vitest/ui@5.0.1(vitest@5.0.1))(bufferutil@4.1.0)(effect@4.0.5)(esbuild@0.28.2)(jiti@2.7.0)(jsdom@30.1.0(@noble/hashes@1.8.0))(msw@2.12.11(@types/node@24.12.4)(typescript@7.0.2))(terser@5.48.0)(typescript@7.0.2)(unrun@0.2.39)(utf-8-validate@6.0.6)(yaml@2.9.0)
-      '@t3tools/source-control-testing':
+      '@cogenly/source-control-testing':
         specifier: workspace:*
         version: link:../source-control-testing
       '@types/node':
@@ -896,13 +896,13 @@ importers:
 
   packages/source-control-testing:
     dependencies:
-      '@t3tools/contracts':
+      '@cogenly/contracts':
         specifier: workspace:*
         version: link:../contracts
-      '@t3tools/shared':
+      '@cogenly/shared':
         specifier: workspace:*
         version: link:../shared
-      '@t3tools/source-control-core':
+      '@cogenly/source-control-core':
         specifier: workspace:*
         version: link:../source-control-core
       effect:
@@ -915,10 +915,10 @@ importers:
 
   packages/ssh:
     dependencies:
-      '@t3tools/contracts':
+      '@cogenly/contracts':
         specifier: workspace:*
         version: link:../contracts
-      '@t3tools/shared':
+      '@cogenly/shared':
         specifier: workspace:*
         version: link:../shared
       effect:
@@ -940,7 +940,7 @@ importers:
 
   packages/tailscale:
     dependencies:
-      '@t3tools/shared':
+      '@cogenly/shared':
         specifier: workspace:*
         version: link:../shared
       effect:
@@ -968,10 +968,10 @@ importers:
       '@electron/osx-sign':
         specifier: 2.7.0
         version: 2.7.0
-      '@t3tools/shared':
+      '@cogenly/shared':
         specifier: workspace:*
         version: link:../packages/shared
-      '@t3tools/tailscale':
+      '@cogenly/tailscale':
         specifier: workspace:*
         version: link:../packages/tailscale
       effect:

@@ -6,7 +6,7 @@ import type {
   ProjectLabelId,
   ProjectLabelWithRepositories,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import {
   ArrowUpRightIcon,
   CheckIcon,

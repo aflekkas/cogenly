@@ -4,7 +4,7 @@ import {
   EMPTY_TERMINAL_SESSION_STATE,
   type KnownTerminalSession,
   type TerminalSessionState,
-} from "@t3tools/client-runtime/state/terminal";
+} from "@cogenly/client-runtime/state/terminal";
 import {
   ThreadId,
   AuthTerminalReadScope,
@@ -12,7 +12,7 @@ import {
   type EnvironmentId,
   type TerminalAttachInput,
   type TerminalSummary,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Predicate from "effect/Predicate";
 import { useMemo } from "react";
 

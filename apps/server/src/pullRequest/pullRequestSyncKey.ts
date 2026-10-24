@@ -4,8 +4,8 @@ import {
   type RepositoryIdentity,
   SourceControlProviderKind,
   type ThreadPullRequestKey,
-} from "@t3tools/contracts";
-import { normalizeThreadPullRequestKey } from "@t3tools/shared/threadPullRequests";
+} from "@cogenly/contracts";
+import { normalizeThreadPullRequestKey } from "@cogenly/shared/threadPullRequests";
 
 /** Convert checkout-scoped references to the host-level identity used by linked threads. */
 export function pullRequestSyncKey(

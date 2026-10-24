@@ -1,6 +1,6 @@
-import type { ServerUpdateState } from "@t3tools/client-runtime/state/server";
-import type { EnvironmentId, ServerConfig } from "@t3tools/contracts";
-import { cliReleaseChannelOf } from "@t3tools/shared/cliRelease";
+import type { ServerUpdateState } from "@cogenly/client-runtime/state/server";
+import type { EnvironmentId, ServerConfig } from "@cogenly/contracts";
+import { cliReleaseChannelOf } from "@cogenly/shared/cliRelease";
 
 import {
   resolveServerSelfUpdateCapability,

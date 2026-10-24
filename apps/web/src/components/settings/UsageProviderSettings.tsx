@@ -1,5 +1,5 @@
 import { OverlayPresence } from "~/components/ui/overlay-presence";
-import type { EnvironmentId, UnifiedSettings } from "@t3tools/contracts";
+import type { EnvironmentId, UnifiedSettings } from "@cogenly/contracts";
 import { PlusIcon } from "lucide-react";
 import { useState } from "react";
 

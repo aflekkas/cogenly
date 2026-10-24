@@ -3,7 +3,7 @@ import type {
   ProjectLabelId,
   PullRequestLinkedThreadsResult,
   ScopedThreadRef,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 
 export interface CommandPaletteLinkedThreads {
   readonly environmentId: EnvironmentId;

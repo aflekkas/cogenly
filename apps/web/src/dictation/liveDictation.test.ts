@@ -2,7 +2,7 @@ import type {
   DesktopDictationBridge,
   DesktopDictationResult,
   DesktopDictationStreamEvent,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import type { DictationCaptureHandlers, DictationMicrophone } from "./browserDictationMicrophone";

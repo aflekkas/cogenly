@@ -1,4 +1,4 @@
-import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
+import type { EnvironmentThreadShell } from "@cogenly/client-runtime/state/models";
 import { CircleSlashIcon, PauseIcon } from "lucide-react";
 
 import { deriveWorkRowStatus } from "./work.logic";

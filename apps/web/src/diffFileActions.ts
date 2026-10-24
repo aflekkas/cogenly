@@ -1,5 +1,5 @@
-import type { ScopedThreadRef } from "@t3tools/contracts";
-import { isWindowsAbsolutePath, normalizeProjectPathForComparison } from "@t3tools/shared/path";
+import type { ScopedThreadRef } from "@cogenly/contracts";
+import { isWindowsAbsolutePath, normalizeProjectPathForComparison } from "@cogenly/shared/path";
 
 import { useRightPanelStore } from "./rightPanelStore";
 

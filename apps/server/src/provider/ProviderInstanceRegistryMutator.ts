@@ -28,7 +28,7 @@
  *
  * @module provider/ProviderInstanceRegistryMutator
  */
-import type { ProviderInstanceConfigMap } from "@t3tools/contracts";
+import type { ProviderInstanceConfigMap } from "@cogenly/contracts";
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
 

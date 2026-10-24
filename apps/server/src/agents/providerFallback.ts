@@ -3,7 +3,7 @@ import type {
   AgentFallbackReason,
   ModelSelection,
   OrchestrationV2ProviderFailure,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as DateTime from "effect/DateTime";
 
 /**

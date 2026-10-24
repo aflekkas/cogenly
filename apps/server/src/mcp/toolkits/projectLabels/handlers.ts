@@ -4,8 +4,8 @@ import {
   type ProjectLabelError,
   type RepositoryCheckoutError,
   type SourceControlRepositoryError,
-} from "@t3tools/contracts";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+} from "@cogenly/contracts";
+import * as HostProcess from "@cogenly/shared/HostProcess";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";

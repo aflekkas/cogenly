@@ -1,4 +1,4 @@
-import { ChatAttachmentId, ChatFileAttachment, ChatImageAttachment } from "@t3tools/contracts";
+import { ChatAttachmentId, ChatFileAttachment, ChatImageAttachment } from "@cogenly/contracts";
 import { assert, describe, it } from "@effect/vitest";
 
 import {

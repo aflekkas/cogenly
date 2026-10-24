@@ -4,7 +4,7 @@ import {
   ProviderInstanceId,
   ProviderThreadId,
   type OrchestrationV2Run,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as DateTime from "effect/DateTime";
 
 import { type PendingHandoffProjection, resolvePendingHandoff } from "./handoff.ts";

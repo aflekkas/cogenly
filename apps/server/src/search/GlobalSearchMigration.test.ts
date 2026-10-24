@@ -1,7 +1,7 @@
 import { layerIdentity as layerSharedIdentity } from "../sync/testkit.ts";
 import { expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import * as NodeSqlite from "@t3tools/shared/nodeSqliteClient";
+import * as NodeSqlite from "@cogenly/shared/nodeSqliteClient";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";

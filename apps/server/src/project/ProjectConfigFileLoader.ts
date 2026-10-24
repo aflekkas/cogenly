@@ -18,8 +18,8 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 
-import { PROJECT_CONFIG_FILE_NAMES, type T3ProjectFile } from "@t3tools/contracts";
-import { T3ProjectFileFromJson } from "@t3tools/shared/t3ProjectFile";
+import { PROJECT_CONFIG_FILE_NAMES, type T3ProjectFile } from "@cogenly/contracts";
+import { T3ProjectFileFromJson } from "@cogenly/shared/t3ProjectFile";
 
 const decodeProjectConfigFileJson = Schema.decodeEffect(T3ProjectFileFromJson);
 

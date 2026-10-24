@@ -1,20 +1,20 @@
-import { resolveThreadWorkingStartedAt } from "@t3tools/client-runtime/state/models";
-import { backgroundWorkHoldsCompletion } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
-import { threadPullRequestSearchTerms } from "@t3tools/shared/threadPullRequests";
+import { resolveThreadWorkingStartedAt } from "@cogenly/client-runtime/state/models";
+import { backgroundWorkHoldsCompletion } from "@cogenly/shared/orchestrationV2PendingBackgroundWork";
+import { threadPullRequestSearchTerms } from "@cogenly/shared/threadPullRequests";
 import * as React from "react";
 import {
   isAtomCommandInterrupted,
   type AtomCommandResult,
-} from "@t3tools/client-runtime/state/runtime";
-import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
-import type { ContextMenuItem, EnvironmentId, ThreadId } from "@t3tools/contracts";
-import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@t3tools/contracts/settings";
+} from "@cogenly/client-runtime/state/runtime";
+import { threadSearchMatchKey } from "@cogenly/client-runtime/state/thread-search";
+import type { ContextMenuItem, EnvironmentId, ThreadId } from "@cogenly/contracts";
+import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@cogenly/contracts/settings";
 import type { AsyncResult } from "effect/reactivity";
-import { sortActiveThreadsByOrderKey } from "@t3tools/client-runtime/state/thread-sort";
+import { sortActiveThreadsByOrderKey } from "@cogenly/client-runtime/state/thread-sort";
 import {
   effectiveSnoozed,
   type ThreadSnoozeShell,
-} from "@t3tools/client-runtime/state/thread-settled";
+} from "@cogenly/client-runtime/state/thread-settled";
 import {
   getThreadSortTimestamp,
   sortThreads,
@@ -818,7 +818,7 @@ export {
   isThreadWorking as isSidebarThreadWorking,
   sortInboxThreadsByReturn,
   sortWorkingThreadsBySend,
-} from "@t3tools/client-runtime/state/thread-inbox";
+} from "@cogenly/client-runtime/state/thread-inbox";
 
 const EMPTY_CONTENT_MATCH_KEYS: ReadonlySet<string> = new Set<string>();
 

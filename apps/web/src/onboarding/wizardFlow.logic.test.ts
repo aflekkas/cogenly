@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { EnvironmentId, type T3ImportStatus } from "@t3tools/contracts";
+import { EnvironmentId, type T3ImportStatus } from "@cogenly/contracts";
 
 import {
   detectT3ImportForOnboarding,

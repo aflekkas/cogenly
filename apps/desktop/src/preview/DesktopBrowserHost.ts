@@ -16,7 +16,7 @@ import {
   type DesktopBrowserEvent as DesktopBrowserEventType,
   type DesktopBrowserPointerBox,
   type SitePermissionChangeResult,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Context from "effect/Context";
 import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
@@ -105,7 +105,7 @@ export class DesktopBrowserHost extends Context.Service<
     /** The agent's cursor positions for attached tabs, keyed by their server tab. */
     readonly pointers: Stream.Stream<DesktopAgentPointer>;
   }
->()("@t3tools/desktop/preview/DesktopBrowserHost") {}
+>()("@cogenly/desktop/preview/DesktopBrowserHost") {}
 
 export const make = Effect.gen(function* () {
   const browserSession = yield* BrowserSession.BrowserSession;

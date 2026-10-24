@@ -3,12 +3,12 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
   type AtomCommandResult,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@cogenly/client-runtime/state/runtime";
 import type {
   EnvironmentId,
   ProjectOrphanFolder,
   ProjectOrphanFoldersResult,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { useState } from "react";
 
 import { requestConfirmDialog } from "../../confirmDialog";

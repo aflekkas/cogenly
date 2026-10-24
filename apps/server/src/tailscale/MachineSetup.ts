@@ -14,7 +14,7 @@ import {
   MachineSetupError,
   type MachineSetupStatus,
   type MachineSetupStepId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";

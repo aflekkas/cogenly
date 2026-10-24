@@ -5,7 +5,7 @@ import {
   type ModelSelection,
   type ServerProvider,
   type ServerProviderUsageLimits,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as DateTime from "effect/DateTime";
 
 import {

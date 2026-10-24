@@ -2,15 +2,15 @@
  * The source control drivers this build ships with. Both registries, repository operations and
  * pull requests, iterate this list; a host with no driver here shows up as unsupported.
  *
- * Adding a host means writing its `@t3tools/source-control-<host>` package, adding its driver
+ * Adding a host means writing its `@cogenly/source-control-<host>` package, adding its driver
  * here, and providing its services' layers in `layer` below.
  *
  * @module sourceControl/builtInDrivers
  */
-import * as GitHubRest from "@t3tools/source-control-github/server/GitHubRest";
-import * as GitHubPullRequestApi from "@t3tools/source-control-github/server/GitHubPullRequestApi";
-import * as GitHubDriver from "@t3tools/source-control-github/server/driver";
-import type { SourceControlDriver } from "@t3tools/source-control-core/server/driver";
+import * as GitHubRest from "@cogenly/source-control-github/server/GitHubRest";
+import * as GitHubPullRequestApi from "@cogenly/source-control-github/server/GitHubPullRequestApi";
+import * as GitHubDriver from "@cogenly/source-control-github/server/driver";
+import type { SourceControlDriver } from "@cogenly/source-control-core/server/driver";
 import * as Layer from "effect/Layer";
 
 import * as ServerSourceControlHost from "./ServerSourceControlHost.ts";

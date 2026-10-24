@@ -7,7 +7,7 @@
  *
  * @module provider-grok/server/billing
  */
-import type { ServerProviderUsageLimits, ServerProviderUsageWindow } from "@t3tools/contracts";
+import type { ServerProviderUsageLimits, ServerProviderUsageWindow } from "@cogenly/contracts";
 import * as DateTime from "effect/DateTime";
 
 const asRecord = (value: unknown): Record<string, unknown> | undefined =>

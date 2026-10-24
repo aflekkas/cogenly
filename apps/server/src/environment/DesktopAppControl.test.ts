@@ -10,7 +10,7 @@ import {
   type DesktopAppActivationRequest,
   type DesktopAppActivationResponse,
   EnvironmentId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
 
 import * as DesktopAppControl from "./DesktopAppControl.ts";

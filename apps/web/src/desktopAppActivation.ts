@@ -11,8 +11,8 @@ import type {
   ProjectId,
   ScopedProjectRef,
   ThreadId,
-} from "@t3tools/contracts";
-import { parseAddEnvironmentRequest } from "@t3tools/shared/environmentLinks";
+} from "@cogenly/contracts";
+import { parseAddEnvironmentRequest } from "@cogenly/shared/environmentLinks";
 
 export interface DesktopAppActivationProject {
   readonly id: ProjectId;

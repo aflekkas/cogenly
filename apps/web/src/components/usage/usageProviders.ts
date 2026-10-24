@@ -1,5 +1,5 @@
-import type { ProviderDriverKind, UsageProviderKind } from "@t3tools/contracts";
-import { usagePresentationForKind } from "@t3tools/provider-core/client";
+import type { ProviderDriverKind, UsageProviderKind } from "@cogenly/contracts";
+import { usagePresentationForKind } from "@cogenly/provider-core/client";
 
 import { providerClients } from "../settings/providerDriverMeta";
 

@@ -3,7 +3,7 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
   type AtomCommandResult,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@cogenly/client-runtime/state/runtime";
 import type {
   EnvironmentId,
   VaultCreateInput,
@@ -11,7 +11,7 @@ import type {
   VaultItemMetadata,
   VaultUpdateInput,
   VaultUsageEntry,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 
 import { toastManager } from "../components/ui/toast";
 import { vaultRpc } from "../rpc/vault";

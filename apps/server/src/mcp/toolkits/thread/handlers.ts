@@ -7,12 +7,12 @@ import {
   OrchestratorMcpFailure,
   type OrchestrationV2Command,
   UsageLimitHandoffError,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
-import { modelSelectionCommandType } from "@t3tools/shared/model";
-import { formatSnoozeTime, resolveSnoozeUntil } from "@t3tools/shared/snooze";
-import { formatThreadLink } from "@t3tools/shared/threadLinks";
+import { modelSelectionCommandType } from "@cogenly/shared/model";
+import { formatSnoozeTime, resolveSnoozeUntil } from "@cogenly/shared/snooze";
+import { formatThreadLink } from "@cogenly/shared/threadLinks";
 
 import * as ServerConfig from "../../../config.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";

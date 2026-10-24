@@ -1,4 +1,4 @@
-import type { EnvironmentId, ProjectLabelOwnerRepository } from "@t3tools/contracts";
+import type { EnvironmentId, ProjectLabelOwnerRepository } from "@cogenly/contracts";
 import {
   ChevronDownIcon,
   FolderGit2Icon,

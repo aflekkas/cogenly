@@ -4,7 +4,7 @@ import {
   ProviderInstanceId,
   type DesktopUpdateState,
   type ServerProvider,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 
 import {
   collectProviderUpdateRows,

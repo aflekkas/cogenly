@@ -1,11 +1,11 @@
 import { useScopedSettingsWriteAllowed } from "./useScopedSettings";
-import { AuthSettingsWriteScope } from "@t3tools/contracts";
-import { EnvironmentId, type T3ProjectFileScript } from "@t3tools/contracts";
+import { AuthSettingsWriteScope } from "@cogenly/contracts";
+import { EnvironmentId, type T3ProjectFileScript } from "@cogenly/contracts";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
-import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
+} from "@cogenly/client-runtime/state/runtime";
+import { DEFAULT_RESOLVED_KEYBINDINGS } from "@cogenly/shared/keybindings";
 import { ChevronDownIcon, PlusIcon } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { useProjectConfigFileState } from "../../hooks/useProjectConfigFile";

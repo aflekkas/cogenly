@@ -1,5 +1,5 @@
 /** Authenticate the whole RPC envelope before it reaches the RPC state machine. */
-import { PEER_METHODS, PeerAuthenticatedFrame } from "@t3tools/contracts";
+import { PEER_METHODS, PeerAuthenticatedFrame } from "@cogenly/contracts";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";

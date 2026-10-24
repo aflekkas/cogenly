@@ -1019,7 +1019,7 @@ export const DesktopPreviewRecordingSaveInputSchema = Schema.Struct({
 export const SystemSettingsPaneSchema = Schema.Literals(["full-disk-access", "microphone"]);
 export type SystemSettingsPane = typeof SystemSettingsPaneSchema.Type;
 
-/** Mirrors VoiceTranscriptionErrorCode in @t3tools/client-runtime/voice-input. */
+/** Mirrors VoiceTranscriptionErrorCode in @cogenly/client-runtime/voice-input. */
 export const DesktopDictationErrorCodeSchema = Schema.Literals([
   "unavailable",
   "unsupported-locale",

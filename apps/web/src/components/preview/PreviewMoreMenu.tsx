@@ -7,7 +7,7 @@ import {
   type SitePermission,
   type SitePermissionSetting,
   type SitePermissionsState,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { Minus, MoreVertical, Plus as PlusIcon, RotateCcw } from "lucide-react";
 import { useState } from "react";
 

@@ -1,24 +1,24 @@
 import { shellEnvironment } from "../../state/shell";
 import { CopyButton } from "../ui/copy-button";
 import { ProcessSignalActions } from "./ProcessSignalActions";
-import { resolveUsageAccess } from "@t3tools/client-runtime/state/usage-access";
+import { resolveUsageAccess } from "@cogenly/client-runtime/state/usage-access";
 import { environmentSession } from "../../state/session";
-import { AuthOrchestrationOperateScope } from "@t3tools/contracts";
+import { AuthOrchestrationOperateScope } from "@cogenly/contracts";
 import { readEnvironmentScope, useEnvironmentScope } from "../../state/session";
-import { AuthEnvironmentMaintainScope } from "@t3tools/contracts";
+import { AuthEnvironmentMaintainScope } from "@cogenly/contracts";
 import { RefreshIcon } from "~/components/ui/refresh-icon";
 import { AlertTriangleIcon, FolderOpenIcon, InfoIcon } from "lucide-react";
 import { ChevronDown, ChevronRight } from "lucide";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@cogenly/client-runtime/state/runtime";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type {
   ServerProcessDiagnosticsEntry,
   ServerProcessResourceHistorySummary,
   ServerProcessSignal,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 

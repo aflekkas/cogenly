@@ -15,13 +15,13 @@ import { useAtomValue } from "@effect/atom-react";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
-import type { ServerUpdateState } from "@t3tools/client-runtime/state/server";
+} from "@cogenly/client-runtime/state/runtime";
+import type { ServerUpdateState } from "@cogenly/client-runtime/state/server";
 import {
   AuthOrchestrationReadScope,
   AuthProvidersManageScope,
   type EnvironmentId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { Atom } from "effect/reactivity";
 import { CheckIcon, DownloadIcon, LaptopMinimalIcon } from "lucide-react";

@@ -1,1 +1,1 @@
-export { deriveWorkStatus, type WorkStatus } from "@t3tools/shared/workStatus";
+export { deriveWorkStatus, type WorkStatus } from "@cogenly/shared/workStatus";

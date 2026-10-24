@@ -9,7 +9,7 @@ import {
   type OrchestrationV2ExecutionNode,
   type OrchestrationV2Run,
   type OrchestrationV2ThreadProjection,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as DateTime from "effect/DateTime";
 import { deriveProviderSubagentStatus, deriveRunlessWorkStartedAt } from "./threadExecution.ts";
 

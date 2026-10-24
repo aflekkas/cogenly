@@ -1,4 +1,4 @@
-import type { AgentId, EnvironmentId, VaultItemMetadata } from "@t3tools/contracts";
+import type { AgentId, EnvironmentId, VaultItemMetadata } from "@cogenly/contracts";
 import { HistoryIcon, KeyRoundIcon, PencilIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 

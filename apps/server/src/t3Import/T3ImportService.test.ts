@@ -5,14 +5,14 @@ import * as NodePath from "node:path";
 
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as HostProcess from "@cogenly/shared/HostProcess";
 import {
   ProjectId,
   T3_IMPORT_RUNNING_NOTE,
   T3_IMPORT_STATUS_HEARTBEAT_MS,
   type T3ImportJob,
   type T3ImportStatus,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Clock from "effect/Clock";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";

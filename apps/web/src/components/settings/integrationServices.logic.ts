@@ -10,7 +10,7 @@ import {
   type ProjectLabelId,
   type VaultField,
   type VaultItemMetadata,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 
 const NAME_MAX_LENGTH = 64;
 const NAME_PATTERN = /^[a-z0-9][a-z0-9-_]*$/;

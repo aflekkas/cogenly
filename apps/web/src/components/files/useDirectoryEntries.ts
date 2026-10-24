@@ -1,5 +1,5 @@
-import type { EnvironmentId, ProjectEntry } from "@t3tools/contracts";
-import { executeAtomQuery } from "@t3tools/client-runtime/state/runtime";
+import type { EnvironmentId, ProjectEntry } from "@cogenly/contracts";
+import { executeAtomQuery } from "@cogenly/client-runtime/state/runtime";
 import * as Cause from "effect/Cause";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 

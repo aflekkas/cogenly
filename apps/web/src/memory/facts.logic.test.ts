@@ -1,4 +1,4 @@
-import { FactId, type Fact } from "@t3tools/contracts";
+import { FactId, type Fact } from "@cogenly/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import { filterFacts, principalLabel, resolveFactRefs } from "./facts.logic";

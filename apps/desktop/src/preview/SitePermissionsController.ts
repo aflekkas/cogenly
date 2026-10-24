@@ -12,7 +12,7 @@ import type {
   SitePermissionPromptAnswer,
   SitePermissionSetting,
   SitePermissionsState,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 
 import {
   permissionOriginOf,

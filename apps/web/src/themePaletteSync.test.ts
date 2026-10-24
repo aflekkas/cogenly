@@ -8,7 +8,7 @@ import {
   T3_CODE_LIGHT_THEME_COLORS,
   THEME_COLOR_ROLES,
   type ThemeColors,
-} from "@t3tools/shared/themePalettes";
+} from "@cogenly/shared/themePalettes";
 
 // Source text, not bundled output: the test pins the palettes to what the
 // stylesheet says.

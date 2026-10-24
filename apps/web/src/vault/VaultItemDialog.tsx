@@ -4,7 +4,7 @@ import type {
   ProjectLabelWithRepositories,
   VaultItemMetadata,
   VaultItemType,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { useId, useState } from "react";
 
 import { SecretInput } from "../components/settings/SecretInput";

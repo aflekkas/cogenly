@@ -1,10 +1,10 @@
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { scopeThreadRef } from "@cogenly/client-runtime/environment";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
-import { threadRuntimeIsActive } from "@t3tools/client-runtime/state/models";
-import type { EnvironmentId, ProjectLabelId, ThreadId } from "@t3tools/contracts";
+} from "@cogenly/client-runtime/state/runtime";
+import { threadRuntimeIsActive } from "@cogenly/client-runtime/state/models";
+import type { EnvironmentId, ProjectLabelId, ThreadId } from "@cogenly/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import type * as Cause from "effect/Cause";
 import { useCallback } from "react";

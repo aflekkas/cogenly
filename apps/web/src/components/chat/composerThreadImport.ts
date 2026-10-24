@@ -1,4 +1,4 @@
-import { PROVIDER_SEND_TURN_MAX_ATTACHMENTS } from "@t3tools/contracts";
+import { PROVIDER_SEND_TURN_MAX_ATTACHMENTS } from "@cogenly/contracts";
 
 export async function importComposerThreadAttachment(input: {
   readonly targetKey: string;

@@ -7,7 +7,7 @@ import {
   type IntegrationCatalogConnectInput,
   type IntegrationCatalogEntry,
   type IntegrationSummary,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 
 import { credentialReferencesIn, integrationErrorText } from "./integrationServices.logic";
 

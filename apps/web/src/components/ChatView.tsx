@@ -13,7 +13,7 @@ import {
 } from "./ChatView.logic";
 import * as DateTime from "effect/DateTime";
 import { restorePlanFollowUpComposer } from "./ChatView.logic";
-import { assistantCitationsToPlainText } from "@t3tools/shared/assistantCitations";
+import { assistantCitationsToPlainText } from "@cogenly/shared/assistantCitations";
 import { prepareQueuedEditAttachments, recoverQueuedMessageEdit } from "./chat/queuedMessageEdit";
 import {
   isPaintOnlyThreadTimeline,
@@ -31,17 +31,17 @@ import { useDelayedStatus } from "../hooks/useDelayedStatus";
 import { useElementState } from "../hooks/useElementState";
 import { useStableCallback } from "../hooks/useStableCallback";
 import { agentViewKey, requestAgentView } from "../agents/agentViewIntent";
-import { isScratchProject } from "@t3tools/client-runtime/state/projects";
+import { isScratchProject } from "@cogenly/client-runtime/state/projects";
 import {
   latestExecutedRun,
   latestRootProviderFailure,
-} from "@t3tools/shared/orchestrationV2ThreadError";
-import type { UsageLimitSourceSnapshots } from "@t3tools/contracts";
+} from "@cogenly/shared/orchestrationV2ThreadError";
+import type { UsageLimitSourceSnapshots } from "@cogenly/contracts";
 import {
   collectProviderUsageLimits,
   hasProviderUsageLimits,
   isUsageLimitsCommand,
-} from "@t3tools/shared/usageLimits";
+} from "@cogenly/shared/usageLimits";
 import { feedbackBannerItem } from "./chat/ComposerFeedback";
 import { usageLimitsBannerItem } from "./chat/ComposerUsageLimits";
 import * as Schema from "effect/Schema";
@@ -83,16 +83,16 @@ import {
   resolveProjectProviderInstanceEnabled,
   RuntimeMode,
   type WorktreeSetupSnapshot,
-} from "@t3tools/contracts";
-import { type EnvironmentConnectionPresentation } from "@t3tools/client-runtime/connection";
+} from "@cogenly/contracts";
+import { type EnvironmentConnectionPresentation } from "@cogenly/client-runtime/connection";
 import {
   wasBootstrapThreadDeleted,
   wasBootstrapThreadNotCreated,
-} from "@t3tools/client-runtime/errors";
+} from "@cogenly/client-runtime/errors";
 import { readPastedComposerContext } from "./composerInlineTokenPaste";
-import { isPasteAsTextShortcut } from "@t3tools/client-runtime/text-paste";
-import { effectiveSnoozed, threadWokeAt } from "@t3tools/client-runtime/state/thread-settled";
-import { childThreadInputsTitle } from "@t3tools/client-runtime/state/threads";
+import { isPasteAsTextShortcut } from "@cogenly/client-runtime/text-paste";
+import { effectiveSnoozed, threadWokeAt } from "@cogenly/client-runtime/state/thread-settled";
+import { childThreadInputsTitle } from "@cogenly/client-runtime/state/threads";
 import { useAcknowledgeThreadWoke, useThreadActions } from "../hooks/useThreadActions";
 import {
   deriveProviderSubagentStatus,
@@ -104,12 +104,12 @@ import {
   deriveThreadRuntime,
   presentPendingBackgroundWork,
   presentProviderGoal,
-} from "@t3tools/client-runtime/state/thread-execution";
+} from "@cogenly/client-runtime/state/thread-execution";
 import {
   activeRunRefusesSteering,
   threadSupportsProviderHandoff,
-} from "@t3tools/client-runtime/state/thread-workflows";
-import { resolvePendingHandoff } from "@t3tools/client-runtime/handoff";
+} from "@cogenly/client-runtime/state/thread-workflows";
+import { resolvePendingHandoff } from "@cogenly/client-runtime/handoff";
 import { HandoffRow } from "./chat/V2LifecycleRow";
 import {
   codexFeedbackMessage,
@@ -118,32 +118,32 @@ import {
   shouldShowLoadEarlierControl,
   submitCodexFeedback,
   type CodexFeedbackSubmission,
-} from "@t3tools/client-runtime/state/threads";
+} from "@cogenly/client-runtime/state/threads";
 import { resolveThreadLastVisitedAt } from "./Sidebar.logic";
-import { derivePendingThreadRequests } from "@t3tools/client-runtime/state/thread-requests";
+import { derivePendingThreadRequests } from "@cogenly/client-runtime/state/thread-requests";
 import {
   parseScopedThreadKey,
   scopedThreadKey,
   scopeProjectRef,
   scopeThreadRef,
-} from "@t3tools/client-runtime/environment";
+} from "@cogenly/client-runtime/environment";
 import {
   applyClaudePromptEffortPrefix,
   createModelSelection,
   formatModelSlugName,
   resolvePromptInjectedEffort,
   resolveSelectableModel,
-} from "@t3tools/shared/model";
-import { projectScriptCwd, resolveProjectScripts } from "@t3tools/shared/projectScripts";
-import { derivePendingBackgroundWork } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
+} from "@cogenly/shared/model";
+import { projectScriptCwd, resolveProjectScripts } from "@cogenly/shared/projectScripts";
+import { derivePendingBackgroundWork } from "@cogenly/shared/orchestrationV2PendingBackgroundWork";
 import {
   latestUnheldRun,
   usageLimitRunPresentedAsLatest,
-} from "@t3tools/shared/orchestrationV2ThreadError";
-import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
-import { sourceControlRepositorySelector } from "@t3tools/shared/sourceControl";
-import { truncate } from "@t3tools/shared/String";
-import { resolveThreadReferenceCopyTarget } from "@t3tools/shared/threadReference";
+} from "@cogenly/shared/orchestrationV2ThreadError";
+import { resolveProjectSettings } from "@cogenly/shared/projectSettings";
+import { sourceControlRepositorySelector } from "@cogenly/shared/sourceControl";
+import { truncate } from "@cogenly/shared/String";
+import { resolveThreadReferenceCopyTarget } from "@cogenly/shared/threadReference";
 import {
   BottomTerminalPanel,
   type BottomPanelMotionTarget,
@@ -182,7 +182,7 @@ import {
   settlePromise,
   squashAtomCommandFailure,
   type AtomCommandResult,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@cogenly/client-runtime/state/runtime";
 import { AsyncResult } from "effect/reactivity";
 import { isElectron } from "../env";
 import { readLocalApi } from "../localApi";
@@ -226,7 +226,7 @@ import {
   togglePendingUserInputOptionSelection,
   type PendingUserInputDraftAnswer,
 } from "../pendingUserInput";
-import { seedUserInputDraftAnswers } from "@t3tools/client-runtime/state/thread-requests";
+import { seedUserInputDraftAnswers } from "@cogenly/client-runtime/state/thread-requests";
 import { useUiStateStore } from "../uiStateStore";
 import { useWorkspaceMutationRefresh } from "../hooks/useWorkspaceMutationRefresh";
 import {
@@ -285,7 +285,7 @@ import { ThreadHeaderTitle } from "./chat/ThreadLineageBreadcrumb";
 import { ThreadOwnerBadge } from "../machines/ThreadOwnerBadge";
 import { resolveThreadOrigin } from "./chat/threadLineage.logic";
 import { isEditableFocused } from "../lib/editableFocus";
-import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
+import { DEFAULT_RESOLVED_KEYBINDINGS } from "@cogenly/shared/keybindings";
 import { resolveChatShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import {
   AlarmClockIcon,
@@ -368,7 +368,7 @@ import {
   removeInlineContextReference,
   stripInlineContextReferences,
 } from "../lib/composerContextReferences";
-import { serializeLegacyContextMessage } from "@t3tools/shared/composerContextLegacySend";
+import { serializeLegacyContextMessage } from "@cogenly/shared/composerContextLegacySend";
 import {
   buildMessageContext,
   previewAnnotationContextLabel,
@@ -389,12 +389,12 @@ import {
 } from "../state/server";
 import { terminalEnvironment } from "../state/terminal";
 import { threadEnvironment } from "../state/threads";
-import { workspacePreparationRetryRunIds } from "@t3tools/client-runtime/state/turn-item-presentation";
-import { resolveProviderSkillsForCwd } from "@t3tools/client-runtime/providerSkills";
+import { workspacePreparationRetryRunIds } from "@cogenly/client-runtime/state/turn-item-presentation";
+import { resolveProviderSkillsForCwd } from "@cogenly/client-runtime/providerSkills";
 import { vcsEnvironment } from "../state/vcs";
 import { sourceControlEnvironment } from "../state/sourceControl";
 import { useProjectClone } from "../state/projectClones";
-import { projectCloneDisplayName, projectCloneProgressSummary } from "@t3tools/contracts";
+import { projectCloneDisplayName, projectCloneProgressSummary } from "@cogenly/contracts";
 import { useEnvironments, usePrimaryEnvironment } from "../state/environments";
 import {
   resolveThreadDetailRef,
@@ -489,7 +489,7 @@ import {
   DRAFT_HERO_TRANSITION_EASING,
   runMobileComposerTransition,
 } from "./chat/draftHeroTransition";
-import type { ComposerDispatchMode } from "@t3tools/client-runtime/state/composer-dispatch";
+import type { ComposerDispatchMode } from "@cogenly/client-runtime/state/composer-dispatch";
 import {
   agentControlledBrowserCloseConfirmation,
   branchMismatchKey,
@@ -537,7 +537,7 @@ import {
 import { sanitizeThreadErrorMessage } from "~/rpc/transportError";
 import { RightPanelSheet } from "./RightPanelSheet";
 import { previewEnvironment } from "../state/preview";
-import { clampFileAttachmentUploadBytes } from "@t3tools/client-runtime/state/attachments";
+import { clampFileAttachmentUploadBytes } from "@cogenly/client-runtime/state/attachments";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { fileAttachmentCapabilityBlockReason } from "./chat/composerAttachmentFiles";
 import { assetEnvironment } from "../state/assets";
@@ -575,14 +575,14 @@ import {
   supportsServerUpdateThreadContinuation,
 } from "../versionSkew";
 import { useAssetUrls } from "../assets/assetUrls";
-import { ATTACHMENT_ONLY_BOOTSTRAP_PROMPT } from "@t3tools/shared/composerContextReferences";
+import { ATTACHMENT_ONLY_BOOTSTRAP_PROMPT } from "@cogenly/shared/composerContextReferences";
 import { recallableComposerPrompt } from "./chat/composerPromptHistory";
 import { observeResize } from "~/lib/observeResize";
 import {
   beginPendingProjectFolderLaunch,
   readPendingProjectFolderId,
 } from "../projectLabels/pendingProjectFolders";
-import type { CodexArtifactTemplate } from "@t3tools/shared/codexArtifactTemplates";
+import type { CodexArtifactTemplate } from "@cogenly/shared/codexArtifactTemplates";
 
 const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_PROVIDER_MODELS: ServerProvider["models"] = [];
@@ -1225,7 +1225,7 @@ export default function ChatView(props: ChatViewProps) {
     readonly messageId: MessageId;
     readonly originalText: string;
     readonly existingAttachments: ReadonlyArray<ContractChatAttachment>;
-    readonly context?: import("@t3tools/contracts").OrchestrationMessageContext | undefined;
+    readonly context?: import("@cogenly/contracts").OrchestrationMessageContext | undefined;
   } | null>(null);
   const queuedEditDraftTargetFor = useMemo(
     () => makeQueuedEditDraftTarget(routeThreadRef),
@@ -8308,7 +8308,7 @@ export default function ChatView(props: ChatViewProps) {
     if (userInputResponsesInFlight.current.has(responseKey)) return;
     const attachmentsByQuestionId = new Map<
       string,
-      import("@t3tools/contracts").UserInputAttachments[string]
+      import("@cogenly/contracts").UserInputAttachments[string]
     >();
     const providerAnswers = { ...answers };
     for (const question of pendingInput.questions) {
@@ -8336,7 +8336,7 @@ export default function ChatView(props: ChatViewProps) {
       }
       attachmentsByQuestionId.set(
         question.id,
-        uploaded as import("@t3tools/contracts").UserInputAttachments[string],
+        uploaded as import("@cogenly/contracts").UserInputAttachments[string],
       );
     }
     userInputResponsesInFlight.current.add(responseKey);

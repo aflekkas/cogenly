@@ -2,9 +2,9 @@ import {
   createEnvironmentRpcCommand,
   createEnvironmentRpcQueryAtomFamily,
   createEnvironmentRpcSubscriptionAtomFamily,
-} from "@t3tools/client-runtime/state/runtime";
-import { createAgentWorkspaceAtoms } from "@t3tools/client-runtime/state/agents";
-import { type AgentId, type EnvironmentId } from "@t3tools/contracts";
+} from "@cogenly/client-runtime/state/runtime";
+import { createAgentWorkspaceAtoms } from "@cogenly/client-runtime/state/agents";
+import { type AgentId, type EnvironmentId } from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
 import type { AtomRegistry } from "effect/reactivity";
 import { connectionAtomRuntime } from "../connection/runtime";

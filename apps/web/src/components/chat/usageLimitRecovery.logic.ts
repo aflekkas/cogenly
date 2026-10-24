@@ -4,9 +4,9 @@ import {
   type OrchestrationV2LimitRecovery,
   type OrchestrationV2LimitRecoveryUpdate,
   type RunId,
-} from "@t3tools/contracts";
-import type { TimestampFormat } from "@t3tools/contracts/settings";
-import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
+} from "@cogenly/contracts";
+import type { TimestampFormat } from "@cogenly/contracts/settings";
+import type { EnvironmentThreadShell } from "@cogenly/client-runtime/state/models";
 
 import { formatUpcomingTimestamp } from "../../timestampFormat";
 

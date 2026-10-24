@@ -6,7 +6,7 @@ import {
   type IntegrationCreateInput,
   type IntegrationSignIn,
   type ProjectLabelId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Clock from "effect/Clock";
 import * as Config from "effect/Config";
 import * as Context from "effect/Context";
@@ -23,7 +23,7 @@ import * as Stream from "effect/Stream";
 import * as ServerConfig from "../../config.ts";
 import * as Credentials from "../IntegrationCredentials.ts";
 import { selectCallbackOrigin, type SignInOrigin } from "../SignInOrigin.ts";
-import { isLoopbackHost } from "@t3tools/shared/preview";
+import { isLoopbackHost } from "@cogenly/shared/preview";
 import { isGrantRejection } from "./GrantRejection.ts";
 import * as Runner from "./LocalMcpRunner.ts";
 import {

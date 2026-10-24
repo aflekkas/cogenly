@@ -1,7 +1,7 @@
 import * as CliCredentials from "../accounts/CliCredentials.ts";
-import { AccountError } from "@t3tools/contracts";
+import { AccountError } from "@cogenly/contracts";
 import * as Schema from "effect/Schema";
-import { OrchestratorMcpFailure } from "@t3tools/contracts";
+import { OrchestratorMcpFailure } from "@cogenly/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -52,7 +52,7 @@ export class TerminalMcpService extends Context.Service<
       input: Identity,
     ) => Effect.Effect<{}, OrchestratorMcpFailure, McpInvocationContext.McpInvocationContext>;
     readonly list: () => Effect.Effect<
-      ReadonlyArray<import("@t3tools/contracts").TerminalSummary>,
+      ReadonlyArray<import("@cogenly/contracts").TerminalSummary>,
       OrchestratorMcpFailure,
       McpInvocationContext.McpInvocationContext
     >;

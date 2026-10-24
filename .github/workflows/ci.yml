@@ -104,7 +104,7 @@ jobs:
         run: |
           echo "$GITHUB_WORKSPACE/node_modules/.bin" >> "$GITHUB_PATH"
           PATH="$GITHUB_WORKSPACE/node_modules/.bin:$PATH" pnpm install --frozen-lockfile
-      - run: vp run --filter @t3tools/desktop ensure:electron
+      - run: vp run --filter @cogenly/desktop ensure:electron
       - run: vp run typecheck
 
   test:
@@ -149,7 +149,7 @@ jobs:
         run: |
           echo "$GITHUB_WORKSPACE/node_modules/.bin" >> "$GITHUB_PATH"
           PATH="$GITHUB_WORKSPACE/node_modules/.bin:$PATH" pnpm install --frozen-lockfile
-      - run: vp run --filter @t3tools/desktop ensure:electron
+      - run: vp run --filter @cogenly/desktop ensure:electron
       - name: Install native test prerequisites
         run: |
           sudo apt-get update
@@ -158,4 +158,4 @@ jobs:
       - name: Test release plan
         run: node --test .github/scripts/release-plan.test.cjs
       - name: Test workspaces
-        run: vp run --filter '!@t3tools/monorepo' --concurrency-limit 2 test
+        run: vp run --filter '!@cogenly/monorepo' --concurrency-limit 2 test

@@ -14,8 +14,8 @@
  * opening one from anywhere (search, a notification, a link) can switch the
  * sidebar to the mode that lists it.
  */
-import { sortPinnedThreadsByOrderKey } from "@t3tools/client-runtime/state/thread-sort";
-import type { EnvironmentId, ThreadId, ThreadSurface } from "@t3tools/contracts";
+import { sortPinnedThreadsByOrderKey } from "@cogenly/client-runtime/state/thread-sort";
+import type { EnvironmentId, ThreadId, ThreadSurface } from "@cogenly/contracts";
 
 export type SidebarMode = "chats" | "tasks" | "agents";
 

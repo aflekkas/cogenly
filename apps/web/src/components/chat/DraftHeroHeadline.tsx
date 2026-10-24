@@ -5,9 +5,9 @@ import {
   type ScopedProjectRef,
   type ThreadId,
   type ThreadSurface,
-} from "@t3tools/contracts";
-import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
-import { isScratchProject } from "@t3tools/client-runtime/state/projects";
+} from "@cogenly/contracts";
+import { scopedProjectKey, scopeProjectRef } from "@cogenly/client-runtime/environment";
+import { isScratchProject } from "@cogenly/client-runtime/state/projects";
 import { useNavigate } from "@tanstack/react-router";
 import { CheckIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -81,7 +81,7 @@ import {
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { InlineButton } from "../ui/button";
 import { RepositoryBadge } from "../sidebar/modes/RepositoryBadge";
-import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+import { resolveProjectSettings } from "@cogenly/shared/projectSettings";
 
 /** The draft heading's FadeSwap slot, which a replacing draft's heading picks up from. */
 const DRAFT_HEADING_GROUP = "draft-heading";

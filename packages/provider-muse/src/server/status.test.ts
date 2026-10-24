@@ -8,9 +8,9 @@ import * as Schema from "effect/Schema";
 import * as TestClock from "effect/testing/TestClock";
 import { vi } from "vite-plus/test";
 
-import { writeFakeCli } from "@t3tools/provider-testing/fakeCli";
+import { writeFakeCli } from "@cogenly/provider-testing/fakeCli";
 import type { MuseSdkHost, MuseSdkHostOptions } from "./sdk.ts";
-import { COMPACT_SLASH_COMMAND } from "@t3tools/provider-core/server/snapshotProbe";
+import { COMPACT_SLASH_COMMAND } from "@cogenly/provider-core/server/snapshotProbe";
 import { makeMuseLimitsBumpController } from "./limitsBump.ts";
 import { checkMuseProviderStatus } from "./status.ts";
 import { parseMuseUsageLimits } from "./usageLimits.ts";

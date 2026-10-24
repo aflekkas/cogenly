@@ -10,7 +10,7 @@ import {
   IntegrationToolsResult,
   IntegrationUpdateByNameInput,
   OrchestratorMcpFailure,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { Tool, Toolkit } from "effect/ai";
 
 import * as Integrations from "../../../integrations/Integrations.ts";

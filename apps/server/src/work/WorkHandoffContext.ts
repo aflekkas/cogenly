@@ -5,11 +5,11 @@ import {
   type OrchestrationV2HistoricalMessage,
   type OrchestrationV2TurnItem,
   type ThreadId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import {
   DEFAULT_HANDOFF_TOKEN_CAP,
   selectHistory,
-} from "@t3tools/provider-core/server/handoffBudget";
+} from "@cogenly/provider-core/server/handoffBudget";
 
 /**
  * How much of the source chat a Work handoff carries. The most recent turns

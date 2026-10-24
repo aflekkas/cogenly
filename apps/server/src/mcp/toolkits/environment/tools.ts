@@ -5,11 +5,11 @@ import {
   OrchestratorMcpFailure,
   ServerSettings,
   ServerSettingsPatch,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Schema from "effect/Schema";
 import { Tool, Toolkit } from "effect/ai";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
-import { MachineSecurityStatus } from "@t3tools/contracts";
+import { MachineSecurityStatus } from "@cogenly/contracts";
 import * as DesktopAppControl from "../../../environment/DesktopAppControl.ts";
 import * as ServerEnvironment from "../../../environment/ServerEnvironment.ts";
 import * as MachineSecurity from "../../../security/MachineSecurity.ts";

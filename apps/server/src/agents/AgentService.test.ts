@@ -19,7 +19,7 @@ import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import * as Settings from "../serverSettings.ts";
 import * as Workspace from "./AgentWorkspaceService.ts";
 import * as Policy from "./AgentMcpPolicy.ts";
-import { defaultAgentPermissions, EnvironmentId, ProviderInstanceId } from "@t3tools/contracts";
+import { defaultAgentPermissions, EnvironmentId, ProviderInstanceId } from "@cogenly/contracts";
 import type { McpInvocationScope } from "../mcp/McpInvocationContext.ts";
 import * as Schema from "effect/Schema";
 import { describe, expect, it } from "@effect/vitest";
@@ -44,7 +44,7 @@ import {
   type OrchestrationV2Run,
   type OrchestrationV2ThreadProjection,
   type ScheduledTaskUpsertInput,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as DateTime from "effect/DateTime";
@@ -76,7 +76,7 @@ const makeHarness = Effect.sync(() => {
   const conversation = idleThreadProjection(liveThreadShell(fixture.conversationThreadId));
   projections.set(fixture.conversationThreadId, conversation);
   const calls: Threads.ThreadManagementSendInput[] = [];
-  const commands: import("@t3tools/contracts").OrchestrationV2ServerCommand[] = [];
+  const commands: import("@cogenly/contracts").OrchestrationV2ServerCommand[] = [];
   const runFor = (
     threadId: ThreadId,
     status: OrchestrationV2Run["status"] = "completed",

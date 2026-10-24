@@ -19,7 +19,7 @@ describe("findCreateRequiredPackages", () => {
       // Code generation strings and unrelated functions are not loads.
       const code = \`require("ajv/dist/runtime/validation_error")\`;
       requireCapability("preview");
-      requirePty.resolve("@t3tools/shared/fonts/inter.woff2");
+      requirePty.resolve("@cogenly/shared/fonts/inter.woff2");
     `;
     expect(findCreateRequiredPackages(bundle)).toEqual(["@ff-labs/fff-node", "node-pty", "undici"]);
   });
