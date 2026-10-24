@@ -35,6 +35,7 @@ import * as ServerSettings from "../serverSettings.ts";
 import * as ThreadManagement from "./ThreadManagementService.ts";
 import {
   LIMIT_HANDOFF_CANCEL_COMMAND_PREFIX,
+  LIMIT_HANDOFF_COMMAND_PREFIX,
   limitAutoResumeUpdate,
   limitRecoveryStatus,
 } from "./UsageLimitStop.ts";
@@ -363,8 +364,8 @@ const make = Effect.gen(function* () {
       const result = yield* threads
         .dispatch({
           type: "message.dispatch",
-          commandId: CommandId.make(`limit-handoff:${handoffIdentity}`),
-          messageId: MessageId.make(`limit-handoff:${handoffIdentity}`),
+          commandId: CommandId.make(`${LIMIT_HANDOFF_COMMAND_PREFIX}${handoffIdentity}`),
+          messageId: MessageId.make(`${LIMIT_HANDOFF_COMMAND_PREFIX}${handoffIdentity}`),
           threadId,
           manualContinuationOfRunId: input.runId,
           modelSelection,

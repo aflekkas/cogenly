@@ -25,6 +25,12 @@ import * as DateTime from "effect/DateTime";
  */
 export const LIMIT_HANDOFF_CANCEL_COMMAND_PREFIX = "limit-handoff-cancel:";
 
+/** Prefix of the message a handoff continues a stopped thread on another instance with. */
+export const LIMIT_HANDOFF_COMMAND_PREFIX = "limit-handoff:";
+
+/** Prefix of the command the recovery sweep arms a stop with, before any choice for it. */
+export const LIMIT_ARM_COMMAND_PREFIX = "limit-arm:";
+
 export { MAX_RATE_LIMIT_RETRIES };
 /** Retries further apart than this start a new chain. */
 const RATE_LIMIT_RETRY_CHAIN_MS = 30 * 60_000;

@@ -415,8 +415,12 @@ const account = (instanceId: ProviderInstanceId, usedPercent: number, now: DateT
  * its scheduler registration so the test runs each tick by hand. Account A is
  * spent; B has headroom.
  */
-const setupHandoff = () => {
+const setupHandoff = (options?: {
+  /** Runs once, mid-sweep, after the sweep read its candidates and before it hands off. */
+  readonly midSweep?: (orchestrator: Orchestrator.OrchestratorV2["Service"]) => Effect.Effect<void>;
+}) => {
   const provider = makeControllableProvider(CodexProviderCapabilitiesV2, [accountA, accountB]);
+  let midSweep = options?.midSweep;
   const database = Sqlite.layerMemory;
   const base = Layer.mergeAll(
     database,
@@ -439,7 +443,12 @@ const setupHandoff = () => {
       const orchestrator = yield* Orchestrator.OrchestratorV2;
       return Layer.mock(ThreadManagementService.ThreadManagementService)({
         dispatch: orchestrator.dispatch,
-        getThreadRecords: orchestrator.getThreadRecords,
+        getThreadRecords: (...args) =>
+          Effect.suspend(() => {
+            const hook = midSweep;
+            midSweep = undefined;
+            return hook === undefined ? Effect.void : hook(orchestrator);
+          }).pipe(Effect.andThen(orchestrator.getThreadRecords(...args))),
         getThreadShell: orchestrator.getThreadShell,
       });
     }),
@@ -641,6 +650,51 @@ it.effect(
       });
       expect(
         parent.messages.some((message) => message.id.startsWith("message:delegated-task-failure:")),
+      ).toBe(false);
+    }).pipe(Effect.provide(runtime));
+  },
+);
+
+it.effect(
+  "a Don't resume that lands mid-sweep is not overwritten by the sweep's stale read",
+  () => {
+    let childId: ThreadId | undefined;
+    let stoppedRunId: string | undefined;
+    let resetAt: string | undefined;
+    const { provider, runtime, sweep } = setupHandoff({
+      midSweep: (orchestrator) =>
+        orchestrator
+          .dispatch({
+            type: "thread.metadata.update",
+            commandId: CommandId.make("no-resume"),
+            threadId: childId!,
+            limitRecovery: { runId: stoppedRunId as never, resetAt: resetAt!, autoResume: false },
+          })
+          .pipe(Effect.orDie, Effect.asVoid),
+    });
+    return Effect.gen(function* () {
+      const stopped = yield* delegateIntoQuota(provider);
+      childId = stopped.childId;
+      stoppedRunId = stopped.failedRun.id;
+      resetAt = (yield* stopped.orchestrator.getThreadShell(stopped.childId))!.usageLimitResetAt!;
+      const { orchestrator, worker } = stopped;
+
+      // The sweep read the stop as unrecorded; the choice arrives before it acts.
+      yield* sweep;
+      const child = yield* orchestrator.getThreadProjection(stopped.childId);
+      expect(child.runs).toHaveLength(1);
+      expect(child.thread.limitRecovery).toMatchObject({
+        autoResume: false,
+        requestId: "no-resume",
+      });
+      // The parent has the limit as its result, and no notice that it moved or will resume.
+      yield* worker.drain();
+      const parent = yield* orchestrator.getThreadProjection(parentId);
+      expect(parent.subagents[0]).toMatchObject({ status: "failed" });
+      expect(
+        parent.messages.some((message) =>
+          message.id.startsWith("message:delegated-task-recovery:"),
+        ),
       ).toBe(false);
     }).pipe(Effect.provide(runtime));
   },
