@@ -89,6 +89,17 @@ test("release notes group user-facing commits and drop build noise", () => {
   );
 });
 
+test("a big release lists the newest entries per group and counts the rest", () => {
+  const fixes = Array.from({ length: 20 }, (_, index) => `fix(web): repair ${index + 1}`);
+  const notes = renderReleaseNotes(["feat: one thing", ...fixes]);
+  const bullets = notes.split("## Fixes")[1].trim().split("\n");
+  assert.equal(bullets.length, 16);
+  assert.equal(bullets[0], "- Repair 1");
+  assert.equal(bullets[14], "- Repair 15");
+  assert.equal(bullets[15], "- And 5 more fixes");
+  assert.match(notes, /^## New\n\n- One thing\n/);
+});
+
 test("every release names the Linux server archives the installers download", () => {
   assert.deepEqual(cliArchiveAssets("1.2.3"), [
     "t3-1.2.3-linux-x64.tar.gz",
