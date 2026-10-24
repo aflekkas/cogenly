@@ -68,6 +68,7 @@ const testLayer = (
   /** Lets a remote integration reach a mock server on loopback, as production never does. */
   allowLoopback = false,
   runtimeMissing = false,
+  diagnostics?: { readonly state: "running" | "failed"; readonly tail: string },
 ) => {
   // Replace the external package at the process boundary; exercise the real supervisor and gateway.
   const runner = Layer.effect(
@@ -76,6 +77,15 @@ const testLayer = (
       const actual = yield* Runner.LocalMcpRunner;
       return Runner.LocalMcpRunner.of({
         ...actual,
+        status:
+          diagnostics === undefined
+            ? actual.status
+            : () =>
+                Effect.succeed({
+                  state: diagnostics.state,
+                  version: "test",
+                  stderrTail: diagnostics.tail,
+                }),
         start: (spec) => {
           specs.push(spec);
           return actual.start({
@@ -488,6 +498,36 @@ describe("managed Google integrations", () => {
           });
         }
       }).pipe(Effect.scoped, Effect.provide(testLayer([], missing, "json", false, runtimeMissing))),
+  );
+
+  it.live.each(["running", "failed"] as const)(
+    "keeps %s process output out of agent lists and pushes",
+    (state) =>
+      Effect.gen(function* () {
+        yield* runMigrations();
+        const gateway = yield* Integrations.Integrations;
+        yield* gateway.create({
+          preset: "google-workspace",
+          accountLabel: "work",
+          callbackOrigin: "https://cogenly.example.com",
+        });
+        expect(JSON.stringify(yield* gateway.list())).not.toContain("private-process-output");
+        expect(JSON.stringify(yield* gateway.listForProject(null))).not.toContain(
+          "private-process-output",
+        );
+        expect(
+          JSON.stringify(yield* gateway.subscribe().pipe(Stream.take(1), Stream.runCollect)),
+        ).not.toContain("private-process-output");
+        const owner = yield* gateway.list({ includeProcessOutput: true });
+        expect(owner.integrations[0]?.managed?.stderrTail).toBe(
+          state === "failed" ? "private-process-output" : undefined,
+        );
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          testLayer([], false, "json", false, false, { state, tail: "private-process-output" }),
+        ),
+      ),
   );
 
   it.live("reports a redacted local tool error in Settings and agent status", () => {

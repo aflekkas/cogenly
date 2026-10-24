@@ -86,7 +86,7 @@ describe("LocalMcpRunner", () => {
           Stream.take(1),
           Stream.runCollect,
         );
-        expect(failed[0]?.stderrTail).toContain("[redacted]");
+        expect(failed[0]?.stderrTail).toBe("");
         expect(failed[0]?.stderrTail).not.toContain("private-client-secret");
         yield* Stream.fromQueue(changes).pipe(
           Stream.filter((status) => status.state === "running"),

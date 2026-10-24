@@ -599,8 +599,16 @@ const make = (
           );
         }),
       stop,
-      status: (id) => Effect.sync(() => accounts.get(id)?.status),
-      changes: Stream.fromPubSub(updates),
+      status: (id) =>
+        Effect.sync(() => {
+          const status = accounts.get(id)?.status;
+          return status === undefined || status.state === "failed"
+            ? status
+            : { ...status, stderrTail: "" };
+        }),
+      changes: Stream.fromPubSub(updates).pipe(
+        Stream.map(({ id, status }) => ({ id, status: { ...status, stderrTail: "" } })),
+      ),
       callback: (id, query) =>
         Effect.gen(function* () {
           const account = accounts.get(id);

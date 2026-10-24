@@ -228,7 +228,8 @@ export const IntegrationSummary = Schema.Struct({
     Schema.Struct({
       state: Schema.Literals(["starting", "running", "failed", "missing_runtime", "stopped"]),
       version: Schema.String,
-      stderrTail: Schema.String,
+      /** Failed-process diagnostics, returned only by an explicit owner Settings read. */
+      stderrTail: Schema.optional(Schema.String),
       message: Schema.optional(Schema.String),
     }),
   ),

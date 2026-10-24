@@ -301,7 +301,9 @@ export class Integrations extends Context.Service<
   Integrations,
   {
     /** Every live integration, unscoped (settings/client view). */
-    readonly list: () => Effect.Effect<IntegrationListResult, IntegrationError>;
+    readonly list: (options?: {
+      readonly includeProcessOutput?: boolean;
+    }) => Effect.Effect<IntegrationListResult, IntegrationError>;
     /** Live integrations usable from one project (null = no project). */
     readonly listForProject: (
       labelId: ProjectLabelId | null,
@@ -581,7 +583,10 @@ const make = (options: IntegrationsOptions = {}) =>
         return { process, status };
       });
 
-    const summaries = (integrations: ReadonlyArray<StoredIntegration>) =>
+    const summaries = (
+      integrations: ReadonlyArray<StoredIntegration>,
+      includeProcessOutput = false,
+    ) =>
       Effect.gen(function* () {
         const entries = yield* Ref.get(cache);
         const checked = yield* Ref.get(checks);
@@ -624,7 +629,22 @@ const make = (options: IntegrationsOptions = {}) =>
                 toolCount: status === "connected" && cached ? cached.result.tools.length : null,
                 ...(message === undefined ? {} : { message }),
                 ...(current === undefined ? {} : { checkedAt: current.checkedAt as never }),
-                ...(managed === undefined ? {} : { managed: managed.process }),
+                ...(managed === undefined
+                  ? {}
+                  : {
+                      managed: {
+                        state: managed.process.state,
+                        version: managed.process.version,
+                        ...(managed.process.message === undefined
+                          ? {}
+                          : { message: managed.process.message }),
+                        ...(includeProcessOutput &&
+                        managed.process.state === "failed" &&
+                        managed.process.stderrTail
+                          ? { stderrTail: managed.process.stderrTail }
+                          : {}),
+                      },
+                    }),
                 ...(integration.transport === "local" && Option.isSome(local)
                   ? { callbackHost: yield* local.value.callbackHost(integration) }
                   : {}),
@@ -1235,7 +1255,10 @@ const make = (options: IntegrationsOptions = {}) =>
     }
 
     const service: Integrations["Service"] = Integrations.of({
-      list: () => rows().pipe(Effect.flatMap(summaries)),
+      list: (options) =>
+        rows().pipe(
+          Effect.flatMap((all) => summaries(all, options?.includeProcessOutput === true)),
+        ),
       listForProject: (labelId) =>
         rows().pipe(
           Effect.map((all) =>
