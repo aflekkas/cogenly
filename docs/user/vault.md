@@ -58,19 +58,26 @@ shows each item's uses and all activity across the vault.
 ## Vault on several machines
 
 With [paired machines](machines.md), you can share the vault between a
-machine and its hub. Turn it on in **Settings → Vault** on both machines:
-items move only when each side has chosen to share with the other. Sharing is
+machine and its hub. Turn on **Share vault** for the other machine under
+**Paired machines** in **Settings → Vault**, on both machines: items move only
+when each side has chosen to share with the other. Until the other side does,
+the machine shows **Waiting for (machine) to share back**. Sharing is
 end-to-end encrypted. The secrets, names, and sites of items are readable only
-on machines you share with.
+on machines you share with. The other machine must be online to turn sharing
+on.
 
 - A hub you have not shared with still passes items between your other
   machines, but cannot read them. For one laptop's items to reach another
   laptop, share both laptops with the hub, and the hub with both.
 - Approvals stay on each machine. An item arriving on a machine asks before any
   agent there uses it, even if you allowed that agent elsewhere.
-- To keep an item on one machine, set it to stay on this machine. Credentials
-  that a local integration runs with, such as the Google OAuth client, always
-  stay on their machine.
+- To keep an item on one machine, edit it and choose **Keep on this machine
+  only**. Credentials that a local integration runs with, such as the Google
+  OAuth client, always stay on their machine. Either way the item shows
+  **This machine only**.
+- If a machine shows **Key changed**, it now presents a different vault key
+  than the one this machine trusted. Unpair it and pair again, then turn
+  sharing back on on both machines.
 - If an arriving item has the same name as one already there, it shows up as
   "Name (from Machine)" on that machine.
 - Deleting an item deletes it on every machine you share with.

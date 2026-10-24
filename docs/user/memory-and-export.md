@@ -18,7 +18,8 @@ Agents propose facts as they work. A proposal is never used until you choose **C
 Memory follows you across [paired machines](./machines.md): a fact added, confirmed, corrected or
 forgotten on one machine changes on all of them, including while one was offline. If two machines
 learn the same fact, you see it once. A fact's history lists changes made on this machine and
-notes when one arrived from another.
+notes when one arrived from another. **Paired machines** in Settings → Memory shows whether each
+machine is synced, still has changes on the way, or is offline.
 
 ## Project context in chats
 
