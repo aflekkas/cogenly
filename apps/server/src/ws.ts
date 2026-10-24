@@ -12,6 +12,7 @@ import * as Integrations from "./integrations/Integrations.ts";
 import * as Machines from "./machines/Machines.ts";
 import * as ProjectMove from "./threadSync/ProjectMove.ts";
 import * as ThreadTransfer from "./threadSync/ThreadTransfer.ts";
+import * as ThreadFork from "./threadSync/ThreadFork.ts";
 import * as MachineSecurity from "./security/MachineSecurity.ts";
 import * as MachineSetup from "./tailscale/MachineSetup.ts";
 import * as VisualStates from "./htmlRender/VisualState.ts";
@@ -1095,6 +1096,7 @@ const makeWsRpcHandlers = (
     const integrations = yield* Integrations.Integrations;
     const machines = yield* Machines.Machines;
     const threadTransfer = yield* ThreadTransfer.ThreadTransfer;
+    const threadFork = yield* ThreadFork.ThreadFork;
     const projectMove = yield* ProjectMove.ProjectMove;
     const machineSecurity = yield* MachineSecurity.MachineSecurity;
     const machineSetup = yield* MachineSetup.MachineSetup;
@@ -1740,6 +1742,7 @@ const makeWsRpcHandlers = (
       [WS_METHODS.machinesCreatePeerGrant]: (input) => machines.createPeerGrant(input),
       [WS_METHODS.machinesJoinHub]: (input) => machines.joinHub(input),
       [WS_METHODS.machinesUnpair]: (input) => machines.unpair(input),
+      [WS_METHODS.machinesForkThread]: (input) => threadFork.fork(input),
       [WS_METHODS.machinesMoveThreads]: (input) => threadTransfer.move(input),
       [WS_METHODS.machinesMoveAllThreads]: (input) => threadTransfer.moveAllFrom(input),
       [WS_METHODS.machinesPreviewMoveThreads]: (input) =>
@@ -2841,6 +2844,7 @@ type WsRequestServices =
   | Facts.FactService
   | Integrations.Integrations
   | Machines.Machines
+  | ThreadFork.ThreadFork
   | ThreadTransfer.ThreadTransfer
   | ProjectMove.ProjectMove
   | MachineSecurity.MachineSecurity

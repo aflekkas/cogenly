@@ -1245,6 +1245,11 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:machines:live",
       tag: WS_METHODS.machinesSubscribe,
     }),
+    /** Copy the conversation to a paired machine in the same repository. */
+    forkThreadToMachine: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:machines:forkThreadToMachine",
+      tag: WS_METHODS.machinesForkThread,
+    }),
     /** Hand threads to another paired machine; answers once it runs them, with skips. */
     moveThreadsToMachine: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:machines:moveThreadsToMachine",

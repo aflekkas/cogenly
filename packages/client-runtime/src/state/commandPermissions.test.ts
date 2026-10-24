@@ -66,6 +66,23 @@ const setup = Effect.gen(function* () {
 });
 
 describe("command permissions", () => {
+  it.effect("forks on a paired machine only with the request environment's operate grant", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const registry = yield* setup;
+        const fork = createCommandPermissions(runtime, WS_METHODS.machinesForkThread);
+        registry.set(sessions(env), AsyncResult.success(grant(false)));
+        registry.set(sessions(other), AsyncResult.success(grant(true)));
+        expect(registry.get(fork.permissionAtom(env))).toBe(false);
+        expect(yield* fork.authorize(registry, env).pipe(Effect.flip)).toMatchObject({
+          requiredScope: AuthOrchestrationOperateScope,
+        });
+        registry.set(sessions(env), AsyncResult.success(grant(true)));
+        expect(registry.get(fork.permissionAtom(env))).toBe(true);
+        yield* fork.authorize(registry, env);
+      }),
+    ),
+  );
   it.effect("executes guarded read queries only with the destination read grant", () =>
     Effect.scoped(
       Effect.gen(function* () {

@@ -80,6 +80,7 @@ export interface ThreadLaunchInitialMessage {
 }
 
 export interface ThreadLaunchInput {
+  readonly fork?: import("@t3tools/contracts").ThreadLaunchFork;
   readonly repositorySource?: { readonly cwd: string; readonly revision: string };
   readonly subagent?: import("@t3tools/contracts").ThreadLaunchSubagent;
   readonly surface?: import("@t3tools/contracts").ThreadSurface;
@@ -1079,25 +1080,42 @@ const make = Effect.gen(function* () {
       // A Scratch thread launched at the project root runs in a folder of its
       // own, or in its project's folder when it is filed in one. Only the
       // first attempt claims one; a retry replays its create.
+      const forkWorkspace =
+        input.fork?.repository === undefined || Option.isSome(launchReceipt)
+          ? undefined
+          : yield* Effect.gen(function* () {
+              if (Option.isSome(repositoryCheckout))
+                yield* repositoryCheckout.value.ensureCheckout(input.projectId);
+              return yield* git.forkCheckout({
+                cwd: project.workspaceRoot,
+                ...input.fork!.repository!,
+              });
+            }).pipe(Effect.mapError(mapError(input, "provision-worktree", candidateThreadId)));
       const workspaceStrategy: ThreadLaunchWorkspaceStrategy =
-        input.workspaceStrategy.type === "root" && Option.isNone(launchReceipt)
-          ? Option.match(
-              yield* managedFolders
-                .folderForThread({
-                  projectId: input.projectId,
-                  threadId: candidateThreadId,
-                  text: input.initialMessage?.text ?? input.title,
-                  ...(input.projectFolderId === undefined
-                    ? {}
-                    : { labelId: input.projectFolderId }),
-                })
-                .pipe(Effect.mapError(mapError(input, "provision-worktree", candidateThreadId))),
-              {
-                onNone: () => input.workspaceStrategy,
-                onSome: (worktreePath) => ({ type: "existing_worktree", worktreePath }),
-              },
-            )
-          : input.workspaceStrategy;
+        forkWorkspace !== undefined
+          ? {
+              type: "existing_worktree",
+              ...forkWorkspace,
+              ...(forkWorkspace.branch === null ? { branch: undefined } : {}),
+            }
+          : input.workspaceStrategy.type === "root" && Option.isNone(launchReceipt)
+            ? Option.match(
+                yield* managedFolders
+                  .folderForThread({
+                    projectId: input.projectId,
+                    threadId: candidateThreadId,
+                    text: input.initialMessage?.text ?? input.title,
+                    ...(input.projectFolderId === undefined
+                      ? {}
+                      : { labelId: input.projectFolderId }),
+                  })
+                  .pipe(Effect.mapError(mapError(input, "provision-worktree", candidateThreadId))),
+                {
+                  onNone: () => input.workspaceStrategy,
+                  onSome: (worktreePath) => ({ type: "existing_worktree", worktreePath }),
+                },
+              )
+            : input.workspaceStrategy;
       const initialBranch = workspaceStrategy.branch ?? null;
       const initialWorktreePath =
         workspaceStrategy.type === "existing_worktree" ? workspaceStrategy.worktreePath : null;
@@ -1111,6 +1129,7 @@ const make = Effect.gen(function* () {
             })
           : threads.dispatch({
               type: "thread.create",
+              ...(input.fork === undefined ? {} : { fork: input.fork }),
               ...(input.subagent === undefined ? {} : { subagent: input.subagent }),
               ...(input.surface === undefined ? {} : { surface: input.surface }),
               ...(input.workOrigin === undefined ? {} : { workOrigin: input.workOrigin }),

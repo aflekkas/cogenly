@@ -633,6 +633,7 @@ export const WS_METHODS = {
   machinesUnpair: "machines.unpair",
   // Hand threads to another paired machine, which runs them from then on.
   machinesMoveThreads: "machines.moveThreads",
+  machinesForkThread: "machines.forkThread",
   machinesMoveAllThreads: "machines.moveAllThreads",
   machinesPreviewMoveThreads: "machines.previewMoveThreads",
   machinesPreviewMoveAllThreads: "machines.previewMoveAllThreads",
@@ -2000,6 +2001,12 @@ const WsProjectLabelsSubscribeConfirmedThreadLabelsRpc = Rpc.make(
     stream: true,
   },
 );
+// Machine forks preserve the source and select a pushed repository snapshot.
+const WsMachinesForkThreadRpc = Rpc.make(WS_METHODS.machinesForkThread, {
+  payload: ThreadReplication.ThreadForkMachineInput,
+  success: ThreadReplication.ThreadForkMachineResult,
+  error: Schema.Union([ThreadReplication.ThreadRemoteError, EnvironmentAuthorizationError]),
+});
 // Moves are answered once the target runs the threads; skipped threads say why.
 const WsMachinesMoveThreadsRpc = Rpc.make(WS_METHODS.machinesMoveThreads, {
   payload: ThreadReplication.ThreadMoveInput,
@@ -2702,6 +2709,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectLabelsMoveToMachineRpc,
   WsProjectLabelsPreviewMoveToMachineRpc,
   WsMachinesMoveThreadsRpc,
+  WsMachinesForkThreadRpc,
   WsMachinesPreviewMoveThreadsRpc,
   WsMachinesMoveAllThreadsRpc,
   WsMachinesPreviewMoveAllThreadsRpc,

@@ -169,7 +169,17 @@ export const OrchestrationV2ContextTransferResolution = Schema.Union([
 export type OrchestrationV2ContextTransferResolution =
   typeof OrchestrationV2ContextTransferResolution.Type;
 
+/** The pushed repository snapshot explicitly selected for a machine fork. */
+export const ThreadForkRepository = Schema.Struct({
+  remote: TrimmedNonEmptyString,
+  branch: Schema.NullOr(TrimmedNonEmptyString),
+  commit: TrimmedNonEmptyString,
+  usedLastPushed: Schema.Boolean,
+});
+export type ThreadForkRepository = typeof ThreadForkRepository.Type;
+
 export const OrchestrationV2ContextTransfer = Schema.Struct({
+  repository: Schema.optional(ThreadForkRepository),
   id: ContextTransferId,
   type: OrchestrationV2ContextTransferType,
   sourceThreadId: ThreadId,
@@ -2919,6 +2929,14 @@ export const OrchestrationV2StoredEventJson = Schema.Struct({
 });
 export type OrchestrationV2StoredEventJson = typeof OrchestrationV2StoredEventJson.Type;
 
+/** A portable fork seeded from replicated conversation history. */
+export const ThreadLaunchFork = Schema.Struct({
+  sourceThreadId: ThreadId,
+  sourcePoint: OrchestrationV2ThreadForkSourcePoint,
+  repository: Schema.optional(ThreadForkRepository),
+});
+export type ThreadLaunchFork = typeof ThreadLaunchFork.Type;
+
 export const ThreadLaunchSubagent = Schema.Struct({
   parentThreadId: ThreadId,
   rootThreadId: ThreadId,
@@ -2930,6 +2948,7 @@ export const OrchestrationV2Command = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("thread.create"),
     subagent: Schema.optional(ThreadLaunchSubagent),
+    fork: Schema.optional(ThreadLaunchFork),
     ...WorkMetadataFields,
     agent: Schema.optional(AgentThreadIdentity),
     ...OrchestrationV2CreationFields,

@@ -20,6 +20,8 @@ import {
   OrchestrationV2Actor,
   OrchestrationV2WorkHandoffContext,
   ThreadLaunchSubagent,
+  ThreadLaunchFork,
+  OrchestrationV2ThreadForkSourcePoint,
   OrchestrationV2CreationSource,
   OrchestrationV2ServerCommand,
   ThreadSurface,
@@ -389,6 +391,7 @@ export type ThreadLaunchProject = typeof ThreadLaunchProject.Type;
  */
 export const ThreadLaunchPortable = Schema.Struct({
   subagent: Schema.optionalKey(ThreadLaunchSubagent),
+  fork: Schema.optionalKey(ThreadLaunchFork),
   handoffSummary: Schema.optionalKey(Schema.String),
   handoffContext: Schema.optionalKey(OrchestrationV2WorkHandoffContext),
   surface: Schema.optionalKey(ThreadSurface),
@@ -558,5 +561,37 @@ export const ThreadScheduleRun = makePeerChannel({
   scope: AuthPeerDelegateScope,
   payload: Schema.Struct({ target: EnvironmentId, input: ScheduledTaskRunNowInput }),
   success: ScheduledTaskRunNowResult,
+  error: ThreadRemoteError,
+});
+
+/** Fork through the source owner, preserving the repo and its pushed revision. */
+export const ThreadForkMachineInput = Schema.Struct({
+  commandId: CommandId,
+  sourceThreadId: ThreadId,
+  targetThreadId: ThreadId,
+  machine: EnvironmentId,
+  sourcePoint: Schema.optional(OrchestrationV2ThreadForkSourcePoint),
+  title: Schema.optional(TrimmedNonEmptyString),
+  allowLastPushed: Schema.optional(Schema.Boolean),
+});
+export type ThreadForkMachineInput = typeof ThreadForkMachineInput.Type;
+export const ThreadForkMachineResult = Schema.Struct({
+  targetThreadId: ThreadId,
+  sequence: Schema.Number,
+  branch: Schema.NullOr(Schema.String),
+  commit: Schema.NullOr(Schema.String),
+  usedLastPushed: Schema.Boolean,
+});
+export type ThreadForkMachineResult = typeof ThreadForkMachineResult.Type;
+export const ThreadForkRequest = makePeerChannel({
+  name: "threads.fork.v1",
+  scope: AuthPeerDelegateScope,
+  payload: Schema.Struct({
+    owner: EnvironmentId,
+    input: ThreadForkMachineInput,
+    createdBy: OrchestrationV2Actor,
+    creationSource: OrchestrationV2CreationSource,
+  }),
+  success: ThreadForkMachineResult,
   error: ThreadRemoteError,
 });

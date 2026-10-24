@@ -179,6 +179,7 @@ import * as SharedSync from "./sync/SharedSync.ts";
 import * as ThreadReplication from "./threadSync/ThreadReplication.ts";
 import * as ThreadRouting from "./threadSync/ThreadRouting.ts";
 import * as ThreadTransfer from "./threadSync/ThreadTransfer.ts";
+import * as ThreadFork from "./threadSync/ThreadFork.ts";
 import * as ProjectMove from "./threadSync/ProjectMove.ts";
 import * as RemoteThreadCommands from "./orchestration-v2/RemoteThreadCommands.ts";
 import * as RemoteThreadLaunch from "./orchestration-v2/RemoteThreadLaunch.ts";
@@ -595,7 +596,7 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
     // The orchestrator's own sink, so replicated events reach the same
     // subscribers, and its forwarder registry, so routing sees its commands.
     // Its launcher registry, so a launch naming another machine reaches it.
-    Layer.merge(ProjectMove.layer, ThreadLaunchRouting.layer).pipe(
+    Layer.mergeAll(ProjectMove.layer, ThreadLaunchRouting.layer, ThreadFork.layer).pipe(
       Layer.provide(SharedSync.layer.pipe(Layer.provide(SharedState.layer))),
       Layer.provideMerge(ThreadTransfer.layer),
       Layer.provideMerge(ThreadRouting.layer),

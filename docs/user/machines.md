@@ -54,6 +54,20 @@ parent's committed code to the target. Its committed result branch can come
 back when the parent reads the task result, without a push; uncommitted changes
 stay on their original machine.
 
+## Fork a thread to another machine
+
+Choose **Fork to** in a thread's menu, or **Fork to <machine>** in the command
+palette, to continue a copy on another machine. The fork stays in the same
+project and repository, cloned on the target if needed, at the source's pushed
+branch and commit. Its conversation becomes context for a fresh provider
+session; the original thread stays where it is and keeps all its work.
+
+If the source has unpushed commits or uncommitted changes, Cogenly asks you to
+commit and push them or explicitly **Start from last pushed commit**. Local
+work stays on the source machine. Conflicting target commits or edits must be
+resolved before the fork can start; they are never overwritten. Agents use
+`thread_fork` with `machine`, and keep the same `clientRequestId` when retrying.
+
 ## Move threads and projects
 
 Move threads to the machine you want them to run on, for example everything

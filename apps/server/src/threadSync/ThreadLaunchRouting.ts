@@ -315,6 +315,7 @@ const make = Effect.gen(function* () {
   ) =>
     withoutUndefined<ThreadLaunchPortable>({
       subagent: input.subagent,
+      fork: input.fork,
       handoffSummary: input.handoffSummary,
       handoffContext: input.handoffContext,
       surface: input.surface,
@@ -362,7 +363,7 @@ const make = Effect.gen(function* () {
       const files = yield* readAttachmentFiles(input.initialMessage?.attachments ?? []).pipe(
         Effect.provideContext(context),
       );
-      if (input.subagent !== undefined)
+      if (input.subagent !== undefined || input.fork !== undefined)
         yield* threadSync.sync(yield* nextHop(view, machine)).pipe(
           Effect.mapError(
             () =>
@@ -723,7 +724,7 @@ const make = Effect.gen(function* () {
         // Only the hub relays, and never back to the machine that asked.
         if (view.link._tag !== "hub" || payload.target === caller.environmentId)
           return yield* new ThreadRemoteError({ reason: "not-owner" });
-        if (payload.launch.subagent !== undefined)
+        if (payload.launch.subagent !== undefined || payload.launch.fork !== undefined)
           yield* threadSync
             .sync(payload.target)
             .pipe(Effect.mapError(() => new ThreadRemoteError({ reason: "behind" })));

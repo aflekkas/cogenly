@@ -2347,6 +2347,22 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       "orchestration_v2.driver": command.modelSelection.instanceId,
     });
 
+    if (command.fork !== undefined) {
+      return yield* dispatchThreadFork(
+        {
+          type: "thread.fork",
+          commandId: command.commandId,
+          sourceThreadId: command.fork.sourceThreadId,
+          targetThreadId: command.threadId,
+          sourcePoint: command.fork.sourcePoint,
+          title: command.title,
+          createdBy: command.createdBy,
+          creationSource: command.creationSource,
+        },
+        events,
+        command,
+      );
+    }
     const now = yield* DateTime.now;
     const emitEvent = emit(events, command);
     const thread: OrchestrationV2AppThread = {
@@ -3732,6 +3748,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
   const dispatchThreadFork = Effect.fn("orchestrationV2.dispatch.threadFork")(function* (
     command: Extract<OrchestrationV2Command, { readonly type: "thread.fork" }>,
     events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+    placement?: Extract<OrchestrationV2Command, { readonly type: "thread.create" }>,
   ) {
     yield* Effect.annotateCurrentSpan({
       "orchestration_v2.command_id": command.commandId,
@@ -3789,7 +3806,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         type: "fork",
       }),
     );
-    const { targetThread, transfer } = yield* threadForkService
+    const { targetThread: plannedThread, transfer } = yield* threadForkService
       .plan({
         sourceProjection,
         sourceRun,
@@ -3804,6 +3821,23 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       })
       .pipe(mapDispatchError(command));
 
+    const targetThread =
+      placement === undefined
+        ? plannedThread
+        : {
+            ...plannedThread,
+            projectId: placement.projectId,
+            branch: placement.branch,
+            worktreePath: placement.worktreePath,
+            modelSelection: placement.modelSelection,
+            providerInstanceId: placement.modelSelection.instanceId,
+            runtimeMode: placement.runtimeMode,
+            interactionMode: placement.interactionMode,
+            ownerMachine: null,
+            agent: undefined,
+            limitRecovery: undefined,
+            pinnedAt: null,
+          };
     yield* emitEvent({
       type: "thread.created",
       threadId: command.targetThreadId,
@@ -3816,7 +3850,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       threadId: command.targetThreadId,
       providerInstanceId: sourceRun.providerInstanceId,
       occurredAt: now,
-      payload: transfer,
+      payload: {
+        ...transfer,
+        ...(placement?.fork?.repository === undefined
+          ? {}
+          : { repository: placement.fork.repository }),
+      },
     });
   });
 
@@ -5973,6 +6012,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
                 providerInstanceId: modelSelection.instanceId,
                 capabilities,
                 sameProvider:
+                  sourceProjection?.thread.ownerMachine == null &&
                   pendingForkTransfer.sourceProviderInstanceId === modelSelection.instanceId,
                 hasStrongNativeSource: sourceProviderThread?.nativeThreadRef?.strength === "strong",
                 sourceRunStatus: sourceRun.status,

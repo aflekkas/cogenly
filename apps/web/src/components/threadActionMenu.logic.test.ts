@@ -368,3 +368,26 @@ describe("Move to Machine", () => {
     expect(items.find((item) => item.id === "move-machine:vps")?.disabled).toBe(true);
   });
 });
+
+describe("Fork to Machine", () => {
+  const targets = [
+    { environmentId: "vps", name: "VPS", online: true },
+    { environmentId: "mini", name: "Mac mini", online: false },
+  ];
+  it("offers the same destinations as Move, preserving offline and permission states", () => {
+    const menu = (canFork: boolean, canOperate = true) =>
+      buildThreadActionMenuItems(
+        stateFor("work", { canOperate, machines: { targets, canMove: true, canFork } }),
+      ).find((item) => item.id === "fork-machine");
+    expect(menu(true)?.children?.map((item) => [item.label, item.disabled])).toEqual([
+      ["VPS", false],
+      ["Mac mini (Offline)", true],
+    ]);
+    expect(menu(false)?.disabled).toBe(true);
+    expect(menu(true, false)?.disabled).toBe(true);
+    const direct = buildThreadActionMenuItems(
+      stateFor("chat", { machines: { targets: [targets[0]!], canMove: true, canFork: true } }),
+    ).find((item) => item.id === "fork-machine:vps");
+    expect(direct?.label).toBe("Fork to VPS");
+  });
+});

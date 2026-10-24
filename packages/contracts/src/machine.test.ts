@@ -19,6 +19,9 @@ describe("machine RPC permissions", () => {
     expect(clientRpcRequiredScopes(WS_METHODS.machinesSubscribe, {})).toEqual([
       "orchestration:read",
     ]);
+    expect(clientRpcRequiredScopes(WS_METHODS.machinesForkThread, {})).toEqual([
+      "orchestration:operate",
+    ]);
     expect(clientRpcRequiredScopes(WS_METHODS.machinesUpdate, {})).toEqual(["settings:write"]);
     for (const method of [
       WS_METHODS.machinesPrepareJoin,

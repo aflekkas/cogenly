@@ -1,5 +1,5 @@
 import {
-  type CommandId,
+  CommandId,
   type RuntimeRequestId,
   ThreadId,
   type OrchestrationV2ThreadProjection,
@@ -9,11 +9,15 @@ import {
   UsageLimitHandoffError,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
+import * as Option from "effect/Option";
+import * as MachineFork from "../../../threadSync/ThreadFork.ts";
+import { resolveMachine } from "../../../machines/resolveMachine.ts";
 import * as Effect from "effect/Effect";
 import { modelSelectionCommandType } from "@t3tools/shared/model";
 import { formatSnoozeTime, resolveSnoozeUntil } from "@t3tools/shared/snooze";
 import { formatThreadLink } from "@t3tools/shared/threadLinks";
 
+import * as Invocation from "../../McpInvocationContext.ts";
 import * as ServerConfig from "../../../config.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
 import {
@@ -132,15 +136,46 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
   thread_fork: writesThread((input) =>
     Effect.gen(function* () {
       const { threads, projection } = yield* readThread(input.threadId);
-      const commandId = yield* newCommandId();
+      const scope = yield* Invocation.McpInvocationContext;
+      const commandId =
+        input.clientRequestId === undefined
+          ? yield* newCommandId()
+          : CommandId.make(
+              `command:mcp:${encodeURIComponent(scope.requestNamespace)}:thread-fork:${encodeURIComponent(input.clientRequestId)}`,
+            );
       const targetThreadId = ThreadId.make(`${commandId}:fork`);
+      const machine = yield* resolveMachine(input.machine).pipe(Effect.mapError(unavailable));
+      if (machine !== undefined) {
+        const forks = yield* Effect.serviceOption(MachineFork.ThreadFork);
+        if (Option.isNone(forks))
+          return yield* new OrchestratorMcpFailure({
+            code: "invalid_request",
+            message: "Machine forks are unavailable on this server.",
+          });
+        return yield* forks.value
+          .fork(
+            {
+              commandId,
+              sourceThreadId: projection.thread.id,
+              targetThreadId,
+              machine,
+              ...(input.sourcePoint === undefined ? {} : { sourcePoint: input.sourcePoint }),
+              ...(input.title === undefined ? {} : { title: input.title }),
+              ...(input.allowLastPushed === undefined
+                ? {}
+                : { allowLastPushed: input.allowLastPushed }),
+            },
+            { createdBy: "agent", creationSource: "mcp" },
+          )
+          .pipe(Effect.mapError(unavailable));
+      }
       const result = yield* threads
         .dispatch({
           type: "thread.fork",
           commandId,
           sourceThreadId: projection.thread.id,
           targetThreadId,
-          sourcePoint: input.sourcePoint,
+          sourcePoint: input.sourcePoint ?? { type: "latest_stable" },
           ...(input.title === undefined ? {} : { title: input.title }),
           createdBy: "agent",
           creationSource: "mcp",

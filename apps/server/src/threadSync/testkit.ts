@@ -8,7 +8,9 @@ import {
   ProjectId,
   ProjectLabelError,
   ThreadId,
+  type ServerProvider,
 } from "@t3tools/contracts";
+import * as Deferred from "effect/Deferred";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -18,6 +20,16 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Stream from "effect/Stream";
 
+import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import * as CommandReceipts from "../orchestration-v2/CommandReceiptStore.ts";
+import * as ProjectService from "../project/ProjectService.ts";
+import * as SetupTracker from "../project/WorktreeSetupTracker.ts";
+import * as SetupScripts from "../project/ProjectSetupScriptRunner.ts";
+import * as TerminalManager from "../terminal/Manager.ts";
+import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
+import * as ServerSettings from "../serverSettings.ts";
+import * as TextGeneration from "../textGeneration/TextGeneration.ts";
+import * as ThreadFork from "./ThreadFork.ts";
 import * as GitWorkflow from "../git/GitWorkflowService.ts";
 import * as Machines from "../machines/Machines.ts";
 import { startMachine } from "../machines/testkit.ts";
@@ -66,6 +78,11 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
   ) => ReadonlyArray<OrchestrationV2DomainEvent> = () => [],
   gitStatus?: GitWorkflow.GitWorkflowService["Service"]["status"],
   execution = false,
+  forkOptions?: {
+    readonly git: Pick<GitWorkflow.GitWorkflowService["Service"], "forkSource" | "forkCheckout">;
+    readonly providers: ReadonlyArray<ServerProvider>;
+    readonly clone?: (remote: string) => Effect.Effect<string>;
+  },
 ) {
   const machine = yield* startMachine(name, role);
   const database = Layer.succeed(SqlClient.SqlClient, yield* machine.run(SqlClient.SqlClient));
@@ -189,6 +206,8 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
     Effect.provideContext(replicationContext),
   );
   const threads = Layer.mock(ThreadManagement.ThreadManagementService)({
+    assertProviderInstanceEnabled: () => Effect.void,
+    getThreadProjection: (id) => projections.getThreadProjection(id).pipe(Effect.orDie),
     delegatedTaskResultPending: (threadId, taskId) =>
       Option.isSome(engine)
         ? engine.value.delegatedTaskResultPending(threadId, taskId)
@@ -218,6 +237,13 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
       return Layer.mock(ProjectLabelService.ProjectLabelService)({
+        list: () => Effect.succeed({ labels: [] }),
+        moveThread: ({ threadId, folderId }) =>
+          Effect.gen(function* () {
+            if (folderId !== null)
+              yield* sql`INSERT OR IGNORE INTO thread_project_labels(thread_id, label_id) VALUES (${threadId}, ${folderId})`;
+            return { threadId, projectFolderId: folderId };
+          }).pipe(Effect.orDie),
         // Swaps the remote-only placeholder for the record, as the service does.
         bindRepositoryCheckout: ({ labelId, remote, repositoryId }) =>
           Effect.gen(function* () {
@@ -306,12 +332,17 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
       return Layer.mock(RepositoryCheckout.RepositoryCheckout)({
+        ensureCheckout: () => Effect.void,
         checkoutRepository: ({ labelId, remote }) =>
           Effect.gen(function* () {
             checkouts.push({ labelId, remote });
+            const root =
+              forkOptions?.clone === undefined
+                ? `/clones/${remote}`
+                : yield* forkOptions.clone(remote);
             const repositoryId = ProjectId.make(`project:clone:${remote}`);
             yield* sql`INSERT OR IGNORE INTO projection_projects(project_id, title, workspace_root, auto_pull, scripts_json, created_at, updated_at)
-              VALUES (${repositoryId}, ${remote}, ${`/clones/${remote}`}, 0, '[]', '2026-10-24T00:00:00.000Z', '2026-10-24T00:00:00.000Z')`;
+              VALUES (${repositoryId}, ${remote}, ${root}, 0, '[]', '2026-10-24T00:00:00.000Z', '2026-10-24T00:00:00.000Z')`;
             yield* sql`UPDATE label_repositories SET repository_id = ${repositoryId}
               WHERE label_id = ${labelId} AND remote = ${remote}`;
             return { repositoryId };
@@ -319,9 +350,67 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
       });
     }),
   );
+  // Fork tests run the real launcher and orchestrator; only external providers,
+  // cloning and unrelated preparation services are replaced.
+  const providerCatalog =
+    forkOptions === undefined
+      ? Layer.empty
+      : Layer.mock(ProviderRegistry.ProviderRegistry)({
+          getProviders: Effect.succeed(forkOptions.providers),
+        });
+  const preparationFinished = yield* Deferred.make<void>();
+  const forkLaunches =
+    forkOptions === undefined
+      ? launches
+      : ThreadLaunch.layer.pipe(
+          Layer.provide(
+            Layer.mergeAll(
+              Layer.unwrap(
+                Effect.gen(function* () {
+                  const store = yield* ProjectStore.ProjectStoreV2;
+                  return Layer.mock(ProjectService.ProjectService)({
+                    getById: (id) =>
+                      store.get(id).pipe(
+                        Effect.map(
+                          Option.map((project) => ({
+                            ...project,
+                            id: project.projectId,
+                            repositoryIdentity: null,
+                          })),
+                        ),
+                        Effect.orDie,
+                      ),
+                  });
+                }),
+              ),
+              Layer.mock(SetupTracker.WorktreeSetupTracker)({
+                stageStatus: () => Effect.void,
+                markUncancellable: () => Effect.void,
+                finish: () =>
+                  Deferred.succeed(preparationFinished, undefined).pipe(Effect.as(null)),
+              }),
+              Layer.mock(TerminalManager.TerminalManager)({}),
+              Layer.mock(SetupScripts.ProjectSetupScriptRunner)({
+                runForThread: () => Effect.succeed({ status: "no-script" }),
+              }),
+              providerCatalog,
+              Layer.mock(ServerSettings.ServerSettingsService)({}),
+              Layer.mock(TextGeneration.TextGeneration)({}),
+              CommandReceipts.layer,
+              IdAllocator.layer,
+              Layer.succeed(RemoteThreadLaunch.RemoteThreadLaunch, launchRegistry),
+            ),
+          ),
+        );
   const context = yield* inStores(
     Layer.build(
-      Layer.merge(ProjectMove.layer, ThreadLaunchRouting.layer).pipe(
+      Layer.mergeAll(
+        ProjectMove.layer,
+        ThreadLaunchRouting.layer,
+        forkOptions === undefined ? Layer.empty : ThreadFork.layer,
+      ).pipe(
+        Layer.provideMerge(forkLaunches),
+        Layer.provide(providerCatalog),
         Layer.provideMerge(ThreadTransfer.layer),
         Layer.provideMerge(ThreadRouting.layer),
         Layer.provideMerge(ThreadSync.layer),
@@ -354,11 +443,14 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
             ? Layer.succeed(Orchestrator.OrchestratorV2, engine.value)
             : Layer.empty,
         ),
-        Layer.provide(launches),
+
         Layer.provide(
-          gitStatus === undefined
+          gitStatus === undefined && forkOptions === undefined
             ? Layer.empty
-            : Layer.mock(GitWorkflow.GitWorkflowService)({ status: gitStatus }),
+            : Layer.mock(GitWorkflow.GitWorkflowService)({
+                ...(gitStatus === undefined ? {} : { status: gitStatus }),
+                ...forkOptions?.git,
+              }),
         ),
       ),
     ),
@@ -378,6 +470,11 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
   return {
     ...machine,
     engine,
+    preparationFinished: Deferred.await(preparationFinished),
+    forks:
+      forkOptions === undefined
+        ? undefined
+        : yield* ThreadFork.ThreadFork.pipe(Effect.provideContext(context)),
     worker,
     provider,
     replication,

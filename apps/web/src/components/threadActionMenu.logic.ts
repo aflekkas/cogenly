@@ -16,6 +16,8 @@ export type ThreadActionMenuId =
   | `move-folder:${string}`
   | "remove-folder"
   | "new-folder"
+  | "fork-machine"
+  | `fork-machine:${string}`
   | "move-machine"
   | `move-machine:${string}`
   | "pin"
@@ -145,6 +147,7 @@ export interface ThreadActionMenuMachines {
   }>;
   /** The move command's permission on the thread's environment. */
   readonly canMove: boolean;
+  readonly canFork?: boolean;
 }
 
 /**
@@ -176,6 +179,31 @@ export function machineMenuItems(
       children: machines.targets.map((target) => item(target, target.name)),
     },
   ];
+}
+
+/** A conversation copy beside Move, using the same paired-machine targets. */
+function forkMachineMenuItems(
+  machines: ThreadActionMenuMachines | undefined,
+): ReadonlyArray<ContextMenuItem<ThreadActionMenuId>> {
+  if (machines?.canFork === undefined || machines.targets.length === 0) return [];
+  const item = (target: ThreadActionMenuMachines["targets"][number], label: string) => ({
+    id: `fork-machine:${target.environmentId}` as const,
+    label: target.online ? label : `${label} (Offline)`,
+    icon: "git-branch",
+    disabled: !machines.canFork || !target.online,
+  });
+  const only = machines.targets[0]!;
+  return machines.targets.length === 1
+    ? [item(only, `Fork to ${only.name}`)]
+    : [
+        {
+          id: "fork-machine",
+          label: "Fork to Machine",
+          icon: "git-branch",
+          disabled: !machines.canFork,
+          children: machines.targets.map((target) => item(target, target.name)),
+        },
+      ];
 }
 
 export interface ThreadActionMenuFolder {
@@ -344,6 +372,7 @@ export function buildThreadActionMenuItems(state: ThreadActionMenuState): MenuIt
       : []),
     ...(can.projectFolder ? folderMenuItems(state.folder) : []),
     ...machineMenuItems(state.machines),
+    ...forkMachineMenuItems(state.machines),
     ...(copyChildren.length > 0
       ? [{ id: "copy" as const, label: "Copy", icon: "copy", children: copyChildren }]
       : []),

@@ -271,6 +271,7 @@ import {
 } from "../machines/machines.logic";
 import { useMachineDirectory } from "../machines/useMachines";
 import { useMoveThreadsToMachine } from "../machines/useMoveToMachine";
+import { useForkToMachine } from "../machines/useForkToMachine";
 import {
   SidebarChatProjectLine,
   useChatProjectMetaAnimates,
@@ -2647,6 +2648,7 @@ export default function Sidebar() {
   // Paired machines per environment: where a replica runs, and where threads can move.
   const machineDirectory = useMachineDirectory(labelEnvironmentIds);
   const moveThreadsToMachine = useMoveThreadsToMachine();
+  const forkToMachine = useForkToMachine();
   // The machine a row names: the paired machine that runs a replica, else its environment.
   const runsOnFor = (thread: Pick<EnvironmentThreadShell, "environmentId" | "source">) => {
     const owner = threadOwnerMachine(
@@ -4797,6 +4799,9 @@ export default function Sidebar() {
               },
               machines: {
                 targets: machineTargets,
+                canFork: appAtomRegistry.get(
+                  serverEnvironment.forkThreadToMachine.permissionAtom(thread.environmentId),
+                ),
                 canMove: appAtomRegistry.get(
                   serverEnvironment.moveThreadsToMachine.permissionAtom(thread.environmentId),
                 ),
@@ -4841,6 +4846,18 @@ export default function Sidebar() {
           return;
         }
         if (threadActionRequiresOperate(clicked.value) && !checkThreadOperations([thread])) return;
+        if (clickedId.startsWith("fork-machine:")) {
+          const target = machineTargets.find(
+            (candidate) => `fork-machine:${candidate.environmentId}` === clickedId,
+          );
+          if (target)
+            await forkToMachine({
+              environmentId: thread.environmentId,
+              sourceThreadId: thread.id,
+              target,
+            });
+          return;
+        }
         if (clickedId.startsWith("move-machine:")) {
           const target = machineTargets.find(
             (candidate) => `move-machine:${candidate.environmentId}` === clickedId,

@@ -150,6 +150,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.machinesSetupRunStep]: "machines",
   [WS_METHODS.machinesSetupDisableServe]: "machines",
   [WS_METHODS.machinesMoveThreads]: "machines",
+  [WS_METHODS.machinesForkThread]: "machines",
   [WS_METHODS.machinesMoveAllThreads]: "machines",
   [WS_METHODS.machinesAdoptThreads]: "machines",
   [WS_METHODS.machinesPreviewMoveThreads]: "machines",
