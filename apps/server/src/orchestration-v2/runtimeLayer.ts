@@ -85,6 +85,8 @@ import * as TurnItemPositionStore from "./TurnItemPositionStore.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
 import * as SecretRequests from "../secrets/SecretRequests.ts";
 import * as Vault from "../vault/Vault.ts";
+import * as VaultSyncCapture from "../vault/VaultSyncCapture.ts";
+import * as SharedState from "../sync/SharedState.ts";
 import * as Accounts from "../accounts/Accounts.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 
@@ -362,7 +364,13 @@ const layerSecretRequestsProvided = SecretRequests.layer.pipe(
 );
 // One signal shared by every writer of agent_approvals and both approval streams.
 const layerApprovalChanges = ApprovalChanges.layer;
+// Shared with VaultSync, so captures and projection use one SharedState.
+export const layerVaultSyncCapture = VaultSyncCapture.layer.pipe(
+  Layer.provide(SharedState.layer),
+  Layer.provide(ServerEnvironment.layerIdentity),
+);
 export const layerVaultProvided = Vault.layer.pipe(
+  Layer.provide(layerVaultSyncCapture),
   Layer.provide(ServerEnvironment.layerIdentity),
   Layer.provide(layerProjectFilesProvided),
   Layer.provide(layerApprovalChanges),

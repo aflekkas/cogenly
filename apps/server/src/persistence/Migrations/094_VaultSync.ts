@@ -3,6 +3,22 @@ import * as SqlClient from "effect/sql/SqlClient";
 
 export default Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  // Document kinds are validated in code, and unknown ones wait for a newer
+  // build, so the table must accept any kind. A no-op where another migration
+  // already dropped the original CHECK.
+  const table = yield* sql<{
+    sql: string;
+  }>`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'shared_documents'`;
+  if (table[0]?.sql.includes("CHECK(kind")) {
+    yield* sql`CREATE TABLE shared_documents_unchecked (
+      kind TEXT NOT NULL, id TEXT NOT NULL,
+      fields_json TEXT NOT NULL, clocks_json TEXT NOT NULL, tombstone_json TEXT,
+      updated_by_env TEXT NOT NULL, PRIMARY KEY(kind,id)
+    )`;
+    yield* sql`INSERT INTO shared_documents_unchecked SELECT kind, id, fields_json, clocks_json, tombstone_json, updated_by_env FROM shared_documents`;
+    yield* sql`DROP TABLE shared_documents`;
+    yield* sql`ALTER TABLE shared_documents_unchecked RENAME TO shared_documents`;
+  }
   // The owner's decision to share this vault with one directly paired machine,
   // and that machine's vault key as it presented it over the link. The
   // pairing key ties the decision to one pairing; re-pairing drops it.
