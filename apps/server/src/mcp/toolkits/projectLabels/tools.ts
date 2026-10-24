@@ -44,7 +44,7 @@ export const ProjectLabelsToolkit = Toolkit.make(
     parameters: Tool.EmptyParams,
     success: ProjectLabelListResult,
     description:
-      "List project folders, their repositories (each with its normalized remote in repositories[].remote, null for a local-only repository, and its directoryName under the project folder), project chat (projectChatThreadId) and effective thread counts. Archived folders carry archivedAt. Folders provide context only and never grant access.",
+      "List project folders, their repositories (each with its normalized remote in repositories[].remote, null for a local-only repository, its directoryName under the project folder, and checkout: ready, not_cloned, missing, cloning or failed on this machine), project chat (projectChatThreadId) and effective thread counts. Archived folders carry archivedAt. Folders provide context only and never grant access.",
   })
     .annotate(Tool.Readonly, true)
     .annotate(Tool.Destructive, false),
@@ -53,7 +53,7 @@ export const ProjectLabelsToolkit = Toolkit.make(
     parameters: ProjectLabelKey,
     success: ProjectLabelMutationResult,
     description:
-      "Read one project folder and its repositories. This does not authorize reading any repository or thread.",
+      "Read one project folder and its repositories. Each repository carries checkout: its state on this machine (ready, not_cloned for one linked from another machine, missing, cloning, failed). This does not authorize reading any repository or thread.",
   })
     .annotate(Tool.Readonly, true)
     .annotate(Tool.Destructive, false),

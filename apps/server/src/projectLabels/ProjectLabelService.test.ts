@@ -1,15 +1,28 @@
+// @effect-diagnostics nodeBuiltinImport:off - the checkout-state test reads real folders on disk.
 import { layerIdentity as layerSharedIdentity } from "../sync/testkit.ts";
 import * as Projections from "../orchestration-v2/ProjectionStore.ts";
 import * as Facts from "../context/FactService.ts";
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { EventId, ProjectId, ProjectLabelId, ThreadId } from "@t3tools/contracts";
+import {
+  EventId,
+  ProjectId,
+  ProjectLabelId,
+  ThreadId,
+  type ProjectCloneSnapshot,
+  type ProjectLabelWithRepositories,
+} from "@t3tools/contracts";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Stream from "effect/Stream";
 import * as Queue from "effect/Queue";
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
 import * as Labels from "./ProjectLabelService.ts";
+import * as ProjectCloneTracker from "../project/ProjectCloneTracker.ts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
 import * as Events from "../persistence/OrchestrationEventStore.ts";
 import * as Sqlite from "../persistence/Sqlite.ts";
@@ -113,7 +126,7 @@ describe("project labels", () => {
       // No identity resolver in this layer: the directory name still lands,
       // and the remote stays null (local-only) instead of guessing.
       expect((yield* service.read(label.id)).label.repositories).toEqual([
-        { repositoryId: repoA, remote: null, directoryName: "repo-a" },
+        { repositoryId: repoA, remote: null, directoryName: "repo-a", checkout: "missing" },
       ]);
       const sql = yield* SqlClient.SqlClient;
       expect(yield* sql`SELECT remote, directory_name FROM label_repositories`).toEqual([
@@ -130,13 +143,23 @@ describe("project labels", () => {
       const { label } = yield* service.create({ name: "Spawn" });
       yield* service.linkRepository({ labelId: label.id, repositoryId: repoB });
       expect((yield* service.read(label.id)).label.repositories).toEqual([
-        { repositoryId: repoB, remote: "github.com/spawn/repo-b", directoryName: "repo-b" },
+        {
+          repositoryId: repoB,
+          remote: "github.com/spawn/repo-b",
+          directoryName: "repo-b",
+          checkout: "missing",
+        },
       ]);
       // A link written before portable identity backfills from the remote
       // on read, and the backfill is stored.
       yield* sql`UPDATE label_repositories SET remote = NULL, directory_name = NULL WHERE repository_id = ${repoB}`;
       expect((yield* service.read(label.id)).label.repositories).toEqual([
-        { repositoryId: repoB, remote: "github.com/spawn/repo-b", directoryName: "repo-b" },
+        {
+          repositoryId: repoB,
+          remote: "github.com/spawn/repo-b",
+          directoryName: "repo-b",
+          checkout: "missing",
+        },
       ]);
       expect(yield* sql`SELECT remote, directory_name FROM label_repositories`).toEqual([
         { remote: "github.com/spawn/repo-b", directory_name: "repo-b" },
@@ -147,7 +170,12 @@ describe("project labels", () => {
         (yield* service.read(label.id)).label.repositories?.find(
           (link) => link.repositoryId === repoA,
         ),
-      ).toEqual({ repositoryId: repoA, remote: null, directoryName: "repo-a" });
+      ).toEqual({
+        repositoryId: repoA,
+        remote: null,
+        directoryName: "repo-a",
+        checkout: "missing",
+      });
     }).pipe(
       Effect.provide(
         Labels.layer.pipe(Layer.provide(layerSharedIdentity)).pipe(
@@ -598,4 +626,107 @@ describe("project labels", () => {
       expect((yield* facts.retract(fact.id)).fact.status).toBe("retracted");
     }).pipe(Effect.provide(layer)),
   );
+
+  it.effect("reports each linked repository's checkout state on this machine", () => {
+    const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "label-checkout-"));
+    const clones = new Map<ProjectId, ProjectCloneSnapshot>();
+    // The fake tracker's subscriber, handed over once the label stream listens.
+    const listening = Deferred.makeUnsafe<(clones: ReadonlyArray<ProjectCloneSnapshot>) => void>();
+    const snapshot = (projectId: ProjectId, phase: ProjectCloneSnapshot["phase"]) => ({
+      projectId,
+      remoteUrl: "https://github.com/org/repo.git",
+      destinationPath: NodePath.join(root, projectId),
+      repository: null,
+      phase,
+      stage: "receiving" as const,
+      percent: null,
+      detail: null,
+      error: null,
+      startedAt: "2026-01-01T00:00:00.000Z",
+      endedAt: null,
+      sequence: 0,
+    });
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const service = yield* Labels.ProjectLabelService;
+      const repos = {
+        ready: ProjectId.make("ready"),
+        plain: ProjectId.make("plain"),
+        missing: ProjectId.make("missing"),
+        cloning: ProjectId.make("cloning"),
+        failed: ProjectId.make("failed"),
+      };
+      NodeFS.mkdirSync(NodePath.join(root, "ready", ".git"), { recursive: true });
+      // A plain folder with files launches as it is, so it counts as ready.
+      NodeFS.mkdirSync(NodePath.join(root, "plain"));
+      NodeFS.writeFileSync(NodePath.join(root, "plain", "README.md"), "hi");
+      for (const repo of Object.values(repos))
+        yield* sql`INSERT INTO projection_projects(project_id, title, workspace_root, scripts_json, created_at, updated_at) VALUES (${repo}, ${repo}, ${NodePath.join(root, repo)}, '[]', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`;
+      const { label } = yield* service.create({ name: "Spawn" });
+      for (const repo of Object.values(repos))
+        yield* service.linkRepository({ labelId: label.id, repositoryId: repo });
+      // Linked from another machine and never cloned here.
+      yield* sql`INSERT INTO label_repositories(label_id, repository_id, remote, directory_name) VALUES (${label.id}, 'remote:github.com/org/elsewhere', 'github.com/org/elsewhere', 'elsewhere')`;
+      clones.set(repos.cloning, snapshot(repos.cloning, "running"));
+      clones.set(repos.failed, snapshot(repos.failed, "failed"));
+      const states = (labels: ReadonlyArray<ProjectLabelWithRepositories>) =>
+        Object.fromEntries(
+          (labels[0]?.repositories ?? []).map((link) => [link.repositoryId, link.checkout]),
+        );
+      expect(states((yield* service.list()).labels)).toEqual({
+        ready: "ready",
+        plain: "ready",
+        missing: "missing",
+        cloning: "cloning",
+        failed: "failed",
+        "remote:github.com/org/elsewhere": "not_cloned",
+      });
+
+      // A clone changing phase re-emits the list; progress ticks do not.
+      const updates = yield* Queue.unbounded<ReadonlyArray<ProjectLabelWithRepositories>>();
+      yield* service.subscribe().pipe(
+        Stream.runForEach((value) => Queue.offer(updates, value.labels)),
+        Effect.forkScoped,
+      );
+      yield* Queue.take(updates);
+      const emit = yield* Deferred.await(listening);
+      emit([...clones.values()]);
+      NodeFS.mkdirSync(NodePath.join(root, "cloning", ".git"), { recursive: true });
+      clones.delete(repos.cloning);
+      emit([...clones.values()]);
+      expect(states(yield* Queue.take(updates)).cloning).toBe("ready");
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        Labels.layer.pipe(Layer.provide(layerSharedIdentity)).pipe(
+          Layer.provideMerge(
+            Layer.succeed(
+              ProjectCloneTracker.ProjectCloneTracker,
+              ProjectCloneTracker.ProjectCloneTracker.of({
+                start: () => Effect.die("unused"),
+                cancel: () => Effect.succeed(false),
+                retry: () => Effect.succeed(false),
+                discard: () => Effect.void,
+                get: (projectId) => Effect.succeed(clones.get(projectId) ?? null),
+                stream: Stream.callback<ReadonlyArray<ProjectCloneSnapshot>>((mailbox) =>
+                  Effect.sync(() => {
+                    Queue.offerUnsafe(mailbox, [...clones.values()]);
+                  }).pipe(
+                    Effect.andThen(
+                      Deferred.succeed(listening, (next) => {
+                        Queue.offerUnsafe(mailbox, next);
+                      }),
+                    ),
+                  ),
+                ),
+              }),
+            ),
+          ),
+          Layer.provideMerge(persistence),
+          Layer.provide(NodeServices.layer),
+        ),
+      ),
+      Effect.ensuring(Effect.sync(() => NodeFS.rmSync(root, { recursive: true, force: true }))),
+    );
+  });
 });

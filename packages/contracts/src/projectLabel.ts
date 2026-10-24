@@ -86,6 +86,27 @@ export const ProjectSourceLink = Schema.Union([
 export type ProjectSourceLink = typeof ProjectSourceLink.Type;
 
 /**
+ * Where a linked repository stands on the machine serving the list:
+ * `ready` has a checkout, `not_cloned` is linked (from another machine) but
+ * was never cloned here, `missing` has a record here whose folder is gone or
+ * empty, and `cloning` / `failed` follow the tracked clone.
+ */
+export const ProjectLabelRepositoryCheckout = Schema.Literals([
+  "ready",
+  "missing",
+  "not_cloned",
+  "cloning",
+  "failed",
+]);
+export type ProjectLabelRepositoryCheckout = typeof ProjectLabelRepositoryCheckout.Type;
+/**
+ * Id prefix of a linked repository with no checkout record on this machine:
+ * `remote:<host/owner/repo>`. Cloning it here replaces the id with a real one.
+ */
+export const REMOTE_REPOSITORY_ID_PREFIX = "remote:";
+export const isRemoteRepositoryPlaceholder = (repositoryId: string): boolean =>
+  repositoryId.startsWith(REMOTE_REPOSITORY_ID_PREFIX);
+/**
  * One repository filed in a project, identified portably by its remote.
  * `remote` is the normalized remote (`host/owner/repo`: lowercase host,
  * ssh/https unified, no `.git` suffix); null marks a local-only repository
@@ -96,6 +117,8 @@ export const ProjectLabelRepositoryLink = Schema.Struct({
   repositoryId: ProjectId,
   remote: Schema.NullOr(TrimmedNonEmptyString),
   directoryName: Schema.NullOr(TrimmedNonEmptyString),
+  // Older servers (and caches written by them) predate per-machine state.
+  checkout: Schema.optionalKey(ProjectLabelRepositoryCheckout),
 });
 export type ProjectLabelRepositoryLink = typeof ProjectLabelRepositoryLink.Type;
 
@@ -535,6 +558,8 @@ export const ProjectOverviewResult = Schema.Struct({
       remote: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
       /** Directory name under the project folder; absent until known. */
       directoryName: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+      /** Checkout state on this machine; `not_cloned` repositories clone with project_label_clone_repository. */
+      checkout: Schema.optional(ProjectLabelRepositoryCheckout),
     }),
   ),
   sourceLinks: Schema.Array(ProjectSourceLink),

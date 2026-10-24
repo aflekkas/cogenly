@@ -1,5 +1,9 @@
 import { useAtomValue } from "@effect/atom-react";
-import type { EnvironmentId, ProjectLabelId } from "@t3tools/contracts";
+import {
+  isRemoteRepositoryPlaceholder,
+  type EnvironmentId,
+  type ProjectLabelId,
+} from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { FolderIcon, FolderPlusIcon, LaptopMinimalIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -266,7 +270,9 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
                       entry={entry}
                       summary={
                         projectPanelSummary({
-                          repositories: entry.label.repositoryIds.length,
+                          repositories: entry.label.repositoryIds.filter(
+                            (id) => !isRemoteRepositoryPlaceholder(id),
+                          ).length,
                           chats: contents?.chats.length ?? 0,
                           work: contents?.work.length ?? 0,
                           files: 0,
