@@ -1,5 +1,5 @@
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
-import type { DesktopAppActivationRequest } from "@t3tools/contracts";
+import type { DesktopAppRendererRequest } from "@t3tools/contracts";
 import { useEffect, useEffectEvent, useRef } from "react";
 
 import { formatDesktopSshConnectionError } from "../../connection/sshConnectionError";
@@ -44,7 +44,7 @@ export function DesktopAppActivationCoordinator() {
   // `cogenly environment add`, `environment_add`, and confirmed deep links: one toast
   // that goes from "Connecting…" to "Connected" (or the failure) without blocking anything.
   const addEnvironment = useEffectEvent(
-    (request: Extract<DesktopAppActivationRequest, { type: "add-environment" }>) => {
+    (request: Extract<DesktopAppRendererRequest, { type: "add-environment" }>) => {
       let toastId: ReturnType<typeof toastManager.add> | null = null;
       const show = (options: Parameters<typeof toastManager.add>[0]) => {
         if (toastId === null) toastId = toastManager.add(options);
@@ -95,7 +95,7 @@ export function DesktopAppActivationCoordinator() {
   // `machine_pair`: the same command as Settings → Machines → Add a machine, so
   // the join code stays inside it. The agent hears the outcome; the user gets a toast.
   const pairRequested = useEffectEvent(
-    (request: Extract<DesktopAppActivationRequest, { type: "pair-machines" }>) =>
+    (request: Extract<DesktopAppRendererRequest, { type: "pair-machines" }>) =>
       handleDesktopPairMachinesRequest(request, {
         machines: environments.map((environment) => ({
           environmentId: environment.environmentId,
@@ -117,7 +117,7 @@ export function DesktopAppActivationCoordinator() {
       }),
   );
 
-  const processRequest = useEffectEvent(async (request: DesktopAppActivationRequest) =>
+  const processRequest = useEffectEvent(async (request: DesktopAppRendererRequest) =>
     request.type === "add-environment"
       ? addEnvironment(request)
       : request.type === "pair-machines"

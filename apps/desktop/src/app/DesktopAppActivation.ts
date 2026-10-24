@@ -10,6 +10,7 @@ import {
   DESKTOP_APP_ACTIVATION_PROTOCOL_VERSION,
   DesktopAppActivationRequest,
   type DesktopAppActivationResponse,
+  type DesktopAppCliCommandRequest,
 } from "@t3tools/contracts";
 import { resolveDesktopAppControlAddress } from "@t3tools/shared/desktopAppControl";
 import type { AddEnvironmentRequest } from "@t3tools/shared/environmentLinks";
@@ -31,6 +32,7 @@ import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import { DESKTOP_APP_ACTIVATION_REQUEST_CHANNEL } from "../ipc/channels.ts";
 import * as DesktopWindow from "../window/DesktopWindow.ts";
 import { DesktopAppActivationBroker } from "./DesktopAppActivationBroker.ts";
+import * as DesktopCliCommand from "./DesktopCliCommand.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import { makeComponentLogger } from "./DesktopObservability.ts";
 
@@ -349,6 +351,7 @@ export const make = Effect.gen(function* () {
   const electronWindow = yield* ElectronWindow.ElectronWindow;
   const path = yield* Path.Path;
   const userId = yield* HostProcess.UserId;
+  const cliCommand = yield* DesktopCliCommand.DesktopCliCommand;
   const runPromise = Effect.runPromiseWith(yield* Effect.context<never>());
   const address = resolveDesktopAppControlAddress({
     stateDir: path.resolve(desktopEnvironment.stateDir),
@@ -376,6 +379,32 @@ export const make = Effect.gen(function* () {
     },
   });
 
+  /** The main process answers `cli-command` itself: it needs no window, and focusing one would only interrupt. */
+  const answerCliCommand = (request: DesktopAppCliCommandRequest) =>
+    (request.action === "install"
+      ? cliCommand.install(request.location === undefined ? {} : { location: request.location })
+      : request.action === "uninstall"
+        ? cliCommand.uninstall
+        : cliCommand.state
+    ).pipe(
+      Effect.map((state): DesktopAppActivationResponse => ({
+        version: DESKTOP_APP_ACTIVATION_PROTOCOL_VERSION,
+        requestId: request.requestId,
+        ok: true,
+        cliCommand: state,
+      })),
+      Effect.catchTags({
+        DesktopCliCommandError: (error) =>
+          Effect.succeed<DesktopAppActivationResponse>({
+            version: DESKTOP_APP_ACTIVATION_PROTOCOL_VERSION,
+            requestId: request.requestId,
+            ok: false,
+            code: "cli-command-failed",
+            message: error.message,
+          }),
+      }),
+    );
+
   const clearRegisteredRenderer = () => {
     detachRendererListeners?.();
     detachRendererListeners = null;
@@ -390,7 +419,10 @@ export const make = Effect.gen(function* () {
           startDesktopAppControlServer({
             ...address,
             userId,
-            handle: (request) => broker.request(request),
+            handle: (request) =>
+              request.type === "cli-command"
+                ? runPromise(answerCliCommand(request))
+                : broker.request(request),
             cancel: (requestId) => broker.cancel(requestId),
             onReclaimError: (cause) =>
               void runPromise(

@@ -2,18 +2,18 @@
 import {
   DESKTOP_APP_ACTIVATION_PROTOCOL_VERSION,
   type DesktopAppActivationFailure,
-  type DesktopAppActivationRequest,
+  type DesktopAppRendererRequest,
   type DesktopAppActivationResponse,
 } from "@t3tools/contracts";
 
 interface PendingActivation {
-  readonly request: DesktopAppActivationRequest;
+  readonly request: DesktopAppRendererRequest;
   readonly resolve: (response: DesktopAppActivationResponse) => void;
   readonly timeout: ReturnType<typeof setTimeout>;
   dispatched: boolean;
 }
 
-type RendererSender = (request: DesktopAppActivationRequest) => void;
+type RendererSender = (request: DesktopAppRendererRequest) => void;
 
 function failure(
   requestId: string,
@@ -32,21 +32,21 @@ function failure(
 /** Holds CLI requests until the real desktop renderer is ready to handle them. */
 export class DesktopAppActivationBroker {
   readonly #pending = new Map<string, PendingActivation>();
-  readonly #requestTimeoutMs: (request: DesktopAppActivationRequest) => number;
+  readonly #requestTimeoutMs: (request: DesktopAppRendererRequest) => number;
   readonly #activate: () => void;
   #renderer: RendererSender | null = null;
   #closed = false;
 
   constructor(input: {
     /** How long the renderer gets for a request; adding an environment can take minutes. */
-    readonly requestTimeoutMs: (request: DesktopAppActivationRequest) => number;
+    readonly requestTimeoutMs: (request: DesktopAppRendererRequest) => number;
     readonly activate: () => void;
   }) {
     this.#requestTimeoutMs = input.requestTimeoutMs;
     this.#activate = input.activate;
   }
 
-  request(request: DesktopAppActivationRequest): Promise<DesktopAppActivationResponse> {
+  request(request: DesktopAppRendererRequest): Promise<DesktopAppActivationResponse> {
     if (this.#closed) {
       return Promise.resolve(
         failure(request.requestId, "renderer-unavailable", "Cogenly is shutting down."),
