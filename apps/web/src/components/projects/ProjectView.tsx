@@ -404,7 +404,7 @@ function ProjectPage(props: {
               <ChevronLeftIcon />
               Projects
             </Button>
-            <ProjectFolderIcon color={label.color} className="size-4 shrink-0" />
+            <ProjectFolderIcon project={{ environmentId, label }} className="size-4 shrink-0" />
             <ProjectNameEditor
               key={label.name}
               name={label.name}

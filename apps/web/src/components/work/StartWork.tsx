@@ -513,7 +513,7 @@ export function StartWorkPicker(props: {
           >
             <ComboboxItemIcon>
               {item.kind === "project" ? (
-                <ProjectFolderIcon color={item.group.project?.label.color} className="size-4" />
+                <ProjectFolderIcon project={item.group.project} className="size-4" />
               ) : item.kind === "all-projects" ? (
                 <ChevronLeftIcon className="size-4" />
               ) : (

@@ -120,4 +120,17 @@ describe("RepositoryIconResolver", () => {
       }).pipe(Effect.provide(harness(calls, {})));
     },
   );
+
+  it.effect("serves an owner's avatar for a project linked to that owner", () => {
+    const calls = { count: 0 };
+    return Effect.gen(function* () {
+      const icons = yield* RepositoryIconResolver.RepositoryIconResolver;
+      expect(yield* icons.resolve("github.com/Spawn-Partners")).toEqual({
+        kind: "avatar",
+        url: "https://github.com/Spawn-Partners.png?size=96",
+      });
+      expect(calls.count).toBe(0);
+      expect(yield* icons.resolve("gitlab.com/acme")).toBeNull();
+    }).pipe(Effect.provide(harness(calls, {})));
+  });
 });

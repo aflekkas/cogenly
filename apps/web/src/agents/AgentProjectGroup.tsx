@@ -64,7 +64,7 @@ export function AgentProjectGroup(props: {
           data-agent-flip={`group:${props.groupKey}`}
           icon={
             props.folder ? (
-              <ProjectFolderIcon color={props.folder.label.color} className="size-3.5" />
+              <ProjectFolderIcon project={props.folder} className="size-3.5" />
             ) : (
               // The composer's project picker marks "No project" the same way.
               <FolderMinusIcon aria-hidden className="size-3.5 shrink-0" />

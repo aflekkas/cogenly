@@ -2237,7 +2237,7 @@ function OpenCommandPaletteDialog(props: {
               value: `move-folder:${entry.key}`,
               searchTerms: [entry.label.name],
               title: entry.label.name,
-              icon: <ProjectFolderIcon color={entry.label.color} className="size-4" />,
+              icon: <ProjectFolderIcon project={entry} className="size-4" />,
               disabled: entry.key === folderState.current?.key,
               ...(entry.key === folderState.current?.key
                 ? {

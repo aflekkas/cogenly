@@ -166,7 +166,7 @@ export function ThreadFolderPicker(props: {
       >
         {current ? (
           <>
-            <ProjectFolderIcon color={current.label.color} className="size-3.5" />
+            <ProjectFolderIcon project={current} className="size-3.5" />
             <span className="min-w-0 truncate">{current.label.name}</span>
           </>
         ) : (
@@ -197,7 +197,7 @@ export function ThreadFolderPicker(props: {
               {option.kind === "folder" ? (
                 <>
                   <ProjectFolderIcon
-                    color={state.options.find((entry) => entry.key === option.key)?.label.color}
+                    project={state.options.find((entry) => entry.key === option.key)}
                     className="size-4"
                   />
                   <span className="min-w-0 flex-1 truncate">{option.name}</span>

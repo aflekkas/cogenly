@@ -116,7 +116,7 @@ function ProjectTile(props: {
         className="project-tile flex-1"
       >
         <span className="flex min-w-0 items-center gap-2">
-          <ProjectFolderIcon color={label.color} className="size-4.5 shrink-0" />
+          <ProjectFolderIcon project={props.entry} className="size-4.5 shrink-0" />
           <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
             {label.name}
           </span>

@@ -107,7 +107,7 @@ export function ProjectFolderContextChip(props: {
             data-markdown-copy={props.copyMarkdown}
             className="no-underline"
           >
-            <ProjectFolderIcon color={label?.color} />
+            <ProjectFolderIcon project={label ? { environmentId, label } : null} />
             <ContextChipLabel>{name}</ContextChipLabel>
           </ContextChip>
         }
