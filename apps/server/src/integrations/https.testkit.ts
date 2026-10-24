@@ -7,6 +7,7 @@ export const loopbackHttpsFetch: typeof globalThis.fetch = (input, init) => {
   );
   if (url.protocol === "https:" && ["127.0.0.1", "localhost"].includes(url.hostname))
     url.protocol = "http:";
+  // @effect-diagnostics-next-line globalFetch:off -- This test-only FetchHttpClient boundary maps virtual HTTPS to in-process HTTP fixtures.
   return globalThis.fetch(input instanceof Request ? new Request(url, input) : url, init);
 };
 
