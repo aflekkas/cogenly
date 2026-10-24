@@ -91,26 +91,57 @@ export const ScheduleFields = Schema.Struct({
   ownerMachine: PortableId,
   createdAt: Agent.fields.createdAt,
 });
+const Base64 = Schema.String.check(
+  Schema.isMaxLength(4 * 1024 * 1024),
+  Schema.isPattern(/^[A-Za-z0-9+/_-]*={0,2}$/),
+);
+/** An item payload sealed under one revision's data key; see vault/VaultCrypto.ts. */
+export const VaultSealedField = Schema.Struct({
+  v: Schema.Literal(1),
+  author: PortableId,
+  nonce: Base64,
+  ciphertext: Base64,
+});
+/** That data key for one recipient (`wrap:<recipient environment id>`). */
+export const VaultWrapField = Schema.Struct({
+  v: Schema.Literal(1),
+  by: PortableId,
+  sealedDigest: Base64,
+  ephemeralPublicKey: Base64,
+  nonce: Base64,
+  ciphertext: Base64,
+});
+export const VAULT_WRAP_PREFIX = "wrap:";
 type FieldCodec = {
   readonly decode: (value: unknown) => Option.Option<unknown>;
   readonly encode: (value: unknown) => Option.Option<unknown>;
 };
+type FieldCodecs = {
+  readonly get: (key: string) => FieldCodec | undefined;
+  readonly has: (key: string) => boolean;
+};
+const codec = (schema: Schema.Struct.Fields[string]): FieldCodec => ({
+  // Nested keys this build does not know are ignored when reading.
+  decode: Schema.decodeUnknownOption(schema as Schema.Codec<unknown>),
+  encode: Schema.encodeUnknownOption(schema as Schema.Codec<unknown>),
+});
 const codecs = (fields: Schema.Struct.Fields): ReadonlyMap<string, FieldCodec> =>
-  new Map(
-    Object.entries(fields).map(([key, schema]) => [
-      key,
-      {
-        // Nested keys this build does not know are ignored when reading.
-        decode: Schema.decodeUnknownOption(schema as Schema.Codec<unknown>),
-        encode: Schema.encodeUnknownOption(schema as Schema.Codec<unknown>),
-      },
-    ]),
-  );
+  new Map(Object.entries(fields).map(([key, schema]) => [key, codec(schema)]));
+const sealedCodec = codec(VaultSealedField);
+const wrapCodec = codec(VaultWrapField);
+// One field per recipient, so concurrent recipient additions never clobber each other.
+const vaultCodecFor = (key: string) =>
+  key === "sealed"
+    ? sealedCodec
+    : key.startsWith(VAULT_WRAP_PREFIX) && isPortableId(key.slice(VAULT_WRAP_PREFIX.length))
+      ? wrapCodec
+      : undefined;
 /** What this build reads of each document kind; any other key is a newer build's. */
-const FIELD_CODECS: Readonly<Record<SharedDocumentKind, ReadonlyMap<string, FieldCodec>>> = {
+const FIELD_CODECS: Readonly<Record<SharedDocumentKind, FieldCodecs>> = {
   project: codecs(ProjectFields.fields),
   agent: codecs(AgentFields.fields),
   schedule: codecs(ScheduleFields.fields),
+  vault: { get: vaultCodecFor, has: (key) => vaultCodecFor(key) !== undefined },
 };
 const isKnownKind = Schema.is(SharedDocumentKind);
 const invalid = (cause?: unknown) => new SharedStateError({ reason: "invalid-document", cause });
@@ -151,8 +182,8 @@ export const splitChange = (
   if (!isKnownKind(change.kind)) return { accepted: null, deferred: true };
   const known = FIELD_CODECS[change.kind];
   const keep = Object.keys(change.fields).filter((key) => {
-    const codec = known.get(key);
-    return codec === undefined || Option.isSome(codec.decode(change.fields[key]));
+    const fieldCodec = known.get(key);
+    return fieldCodec === undefined || Option.isSome(fieldCodec.decode(change.fields[key]));
   });
   const deferred = keep.length !== Object.keys(change.fields).length;
   const fields = Object.fromEntries(keep.map((key) => [key, change.fields[key]!]));
@@ -222,11 +253,16 @@ export const preserveUnknown = (
   value: unknown,
   stored: unknown,
 ): unknown => {
-  const codec = FIELD_CODECS[kind].get(key);
-  if (codec === undefined || stored === undefined) return value;
-  const known = codec.decode(stored).pipe(Option.flatMap(codec.encode));
+  // Sealed values and wraps are signed whole; carrying a newer build's keys
+  // into a rewritten one would break the digest every wrap commits to.
+  if (kind === "vault") return value;
+  const fieldCodec = FIELD_CODECS[kind].get(key);
+  if (fieldCodec === undefined || stored === undefined) return value;
+  const known = fieldCodec.decode(stored).pipe(Option.flatMap(fieldCodec.encode));
   return Option.isNone(known) ? value : carry(value, stored, known.value);
 };
 export const decodeProject = Schema.decodeUnknownEffect(ProjectFields);
 export const decodeAgent = Schema.decodeUnknownEffect(AgentFields);
 export const decodeSchedule = Schema.decodeUnknownEffect(ScheduleFields);
+export const decodeVaultSealed = Schema.decodeUnknownOption(VaultSealedField);
+export const decodeVaultWrap = Schema.decodeUnknownOption(VaultWrapField);

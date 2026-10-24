@@ -267,6 +267,9 @@ export const projectDocument = Effect.fn("SharedState.projectDocument")(function
   preserveLocalBindings = false,
   changedFields?: ReadonlyArray<string>,
 ) {
+  // Vault documents project asynchronously through VaultSync, which needs
+  // this machine's keys; see docs/internals/vault-sync.md.
+  if (document.kind === "vault") return;
   const sql = yield* SqlClient.SqlClient;
   const { kind, id, fields } = document;
   const at = DateTime.formatIso(yield* DateTime.now);
