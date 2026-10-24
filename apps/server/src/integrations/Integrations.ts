@@ -1693,14 +1693,17 @@ const make = (options: IntegrationsOptions = {}) =>
                           ),
                   ).pipe(Effect.map(Object.fromEntries<string>)),
                 };
-          if (options?.holdStoredSecrets && integrationAccountLabelChanged(current, input))
+          if (
+            (options?.holdStoredSecrets || options?.fromAgent) &&
+            integrationAccountLabelChanged(current, input)
+          )
             return yield* new IntegrationError({
               operation: "change account label",
               reason: "approval_required",
             });
           const auth = input.auth === undefined ? current.auth : (input.auth ?? undefined);
           if (
-            options?.holdStoredSecrets &&
+            (options?.holdStoredSecrets || options?.fromAgent) &&
             integrationDestinationChanged(current, input) &&
             (current.oauthState?.tokenItemId !== undefined ||
               headersKeepStoredSecrets(current, input.headers ?? current.headers) ||

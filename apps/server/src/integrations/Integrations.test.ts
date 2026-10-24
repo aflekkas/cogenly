@@ -320,7 +320,7 @@ describe("Integrations gateway", () => {
           { ...createInput(original.url), headers: { authorization: "Bearer LITERAL-TOKEN" } },
           { approveCredentials: true },
         );
-        const hold = { holdStoredSecrets: true };
+        const hold = { fromAgent: true };
         for (const change of [
           { url: other.url },
           { url: other.url, headers: { authorization: Integrations.HEADER_MASK } },

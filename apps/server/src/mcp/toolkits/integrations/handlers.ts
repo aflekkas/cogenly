@@ -245,9 +245,8 @@ export const layer = McpToolAccess.toLayer(IntegrationsToolkit, {
           },
           {
             preserveCredentialDestination: agent !== null,
-            // Persistent agents use the owner-approval path; the owner's chat
-            // can configure its own connections, still subject to vault domains.
-            holdStoredSecrets: agent !== null,
+            fromAgent: true,
+            holdStoredSecrets: true,
             callerLabelId: label,
             preserveScope: agent !== null,
           },
