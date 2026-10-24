@@ -25,10 +25,23 @@ export const adoptLocalCheckout = Effect.fn("localCheckout.adopt")(function* (
   labelId: ProjectLabelId,
   remote: string,
 ) {
+  const labels = yield* ProjectLabelService.ProjectLabelService;
+  const found = yield* findLocalCheckout(labelId, remote);
+  if (Option.isSome(found))
+    yield* labels
+      .bindRepositoryCheckout({ labelId, remote, repositoryId: found.value.repositoryId })
+      .pipe(Effect.orDie);
+  return found;
+});
+
+/** The checkout adoptLocalCheckout would file, without filing it: for a dry run. */
+export const findLocalCheckout = Effect.fn("localCheckout.find")(function* (
+  labelId: ProjectLabelId,
+  remote: string,
+) {
   const sql = yield* SqlClient.SqlClient;
   const fileSystem = yield* FileSystem.FileSystem;
   const identities = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
-  const labels = yield* ProjectLabelService.ProjectLabelService;
   const candidates = yield* sql<{
     readonly project_id: string;
     readonly workspace_root: string;
@@ -44,9 +57,10 @@ export const adoptLocalCheckout = Effect.fn("localCheckout.adopt")(function* (
       continue;
     const identity = yield* identities.resolve(candidate.workspace_root);
     if (normalizeRepositoryRemote(identity?.locator.remoteUrl) !== remote) continue;
-    const repositoryId = candidate.project_id as ProjectId;
-    yield* labels.bindRepositoryCheckout({ labelId, remote, repositoryId }).pipe(Effect.orDie);
-    return Option.some({ repositoryId, workspaceRoot: candidate.workspace_root });
+    return Option.some({
+      repositoryId: candidate.project_id as ProjectId,
+      workspaceRoot: candidate.workspace_root,
+    });
   }
   return Option.none<{ readonly repositoryId: ProjectId; readonly workspaceRoot: string }>();
 });

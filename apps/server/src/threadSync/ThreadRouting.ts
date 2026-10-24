@@ -304,10 +304,23 @@ const make = Effect.gen(function* () {
 
   yield* channels.register(ThreadCommandForward, ({ command, files }, caller) =>
     Effect.gen(function* () {
+      // A peer never speaks for this machine's own workers.
+      if (OWNER_ONLY_COMMANDS.has(command.type))
+        return yield* new ThreadRemoteError({
+          reason: "not-owner",
+          detail: `${command.type} runs only on the machine that runs the thread.`,
+        });
       const threadId = commandThreadId(command);
       const owner = yield* replication.owner(threadId);
       if (owner === undefined || (owner.local && owner.handoff === null)) {
-        yield* writeFiles(files);
+        // Only the files the command names, so a peer cannot plant others here.
+        const named = new Set(
+          commandAttachments(command).flatMap((attachment) => {
+            const name = attachmentRelativePath(attachment);
+            return name === null ? [] : [name];
+          }),
+        );
+        yield* writeFiles(files.filter((file) => named.has(file.name)));
         const result = yield* threads
           .dispatch(command)
           .pipe(
