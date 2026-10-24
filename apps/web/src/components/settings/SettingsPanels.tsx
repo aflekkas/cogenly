@@ -1063,7 +1063,7 @@ export function AppearanceSettingsPanel() {
         />
         <SettingsRow
           {...searchableSetting("font-size")}
-          description="Scales text and spacing across the app on this device."
+          description="Scales text and spacing across the app."
           resetAction={
             preferences.fontSize !== DEFAULT_APPEARANCE_PREFERENCES.fontSize ? (
               <SettingResetButton
@@ -1084,7 +1084,7 @@ export function AppearanceSettingsPanel() {
         />
         <SettingsRow
           {...searchableSetting("usage-meters")}
-          description="Whether usage limit bars show quota remaining (draining) or quota used (filling up) on this device."
+          description="Whether usage limit bars show quota remaining (draining) or quota used (filling up)."
           resetAction={
             preferences.usageMeter !== DEFAULT_APPEARANCE_PREFERENCES.usageMeter ? (
               <SettingResetButton
@@ -1114,8 +1114,8 @@ export function AppearanceSettingsPanel() {
             />
           }
         />
-        {/* Browser tabs follow this theme by default; the row is the same one
-            Integrations shows among the browser defaults. */}
+      </SettingsSection>
+      <SettingsSection id="browser-appearance" title="Browser on this device">
         <BrowserAppearanceSettingRow disabled={false} />
       </SettingsSection>
     </SettingsPageContainer>
@@ -1722,7 +1722,7 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
           {...searchableSetting("continue-threads-after-server-update")}
           serverScoped
           settingKeys={["continueThreadsAfterServerUpdate"]}
-          description="Automatically resume interrupted threads after an update, crash, or machine restart on the selected environments."
+          description="Automatically resume interrupted threads after an update, crash, or machine restart across your machines."
           status={
             !supportsRestartContinuation
               ? "All selected connected environments must support restart continuation."

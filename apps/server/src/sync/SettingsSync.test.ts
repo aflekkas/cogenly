@@ -73,12 +73,20 @@ describe("settings sync between paired machines", () => {
 
         yield* hub.settings.updateSettings({
           branchNamePrefix: "feat",
+          clientAppearanceAccent: "blue",
+          clientFollowUpBehavior: "queue",
+          sharedKeybindings: [{ key: "mod+shift+k", command: "settings.open" }],
           projectsRoot: "/srv/projects",
           projectSettingsOverrides: { [hubRepository]: { defaultAutoPull: true } },
         });
         yield* exchange;
         const onSpoke = yield* spoke.settings.getSettings;
         expect(onSpoke.branchNamePrefix).toBe("feat");
+        expect(onSpoke.clientAppearanceAccent).toBe("blue");
+        expect(onSpoke.clientFollowUpBehavior).toBe("queue");
+        expect(onSpoke.sharedKeybindings).toEqual([
+          { key: "mod+shift+k", command: "settings.open" },
+        ]);
         expect(onSpoke.projectsRoot).toBe("");
         expect(onSpoke.projectSettingsOverrides[spokeRepository]).toEqual({
           defaultAutoPull: true,
@@ -87,11 +95,16 @@ describe("settings sync between paired machines", () => {
         // The way back: an edit and a reset on the spoke reach the hub.
         yield* spoke.settings.updateSettings({
           branchNamePrefix: "fix",
+          clientAppearanceAccent: "orange",
+          sharedKeybindings: [],
           projectSettingsOverrides: { [spokeRepository]: null },
         });
         yield* exchange;
         const onHub = yield* hub.settings.getSettings;
         expect(onHub.branchNamePrefix).toBe("fix");
+        expect(onHub.clientAppearanceAccent).toBe("orange");
+        expect(onHub.clientFollowUpBehavior).toBe("queue");
+        expect(onHub.sharedKeybindings).toEqual([]);
         expect(onHub.projectsRoot).toBe("/srv/projects");
         expect(onHub.projectSettingsOverrides[hubRepository]).toBeUndefined();
 

@@ -25,7 +25,7 @@ import {
   ThreadEnvMode,
   WorktreeSubmodules,
 } from "./environment.ts";
-import { KeybindingShortcut } from "./keybindings.ts";
+import { KeybindingsConfig } from "./keybindings.ts";
 import {
   CustomModelSetting,
   DEFAULT_TEXT_GENERATION_MODEL,
@@ -375,6 +375,347 @@ export const ClientSettingsSchema = Schema.Struct({
 export type ClientSettings = typeof ClientSettingsSchema.Type;
 
 export const DEFAULT_CLIENT_SETTINGS: ClientSettings = Schema.decodeSync(ClientSettingsSchema)({});
+
+/** Portable client preferences keep a local cache, but each has its own shared field. */
+export const UNIVERSAL_CLIENT_SETTING_BINDINGS = {
+  notificationMode: "clientNotificationMode",
+  inAppNotificationsEnabled: "clientInAppNotificationsEnabled",
+  diffColorScheme: "clientDiffColorScheme",
+  chatWidth: "clientChatWidth",
+  confirmQuit: "clientConfirmQuit",
+  confirmThreadArchive: "clientConfirmThreadArchive",
+  confirmThreadDelete: "clientConfirmThreadDelete",
+  confirmThreadUnpin: "clientConfirmThreadUnpin",
+  diffFilesCollapsed: "clientDiffFilesCollapsed",
+  diffIgnoreWhitespace: "clientDiffIgnoreWhitespace",
+  diffLayout: "clientDiffLayout",
+  environmentIdentificationMode: "clientEnvironmentIdentificationMode",
+  fontSizeInterface: "clientFontSizeInterface",
+  fontSizePrompt: "clientFontSizePrompt",
+  fontSizeCode: "clientFontSizeCode",
+  fontSizeTerminal: "clientFontSizeTerminal",
+  fontSmoothing: "clientFontSmoothing",
+  persistComposerContextStrip: "clientPersistComposerContextStrip",
+  planModeEnabled: "clientPlanModeEnabled",
+  contextWindowMeterEnabled: "clientContextWindowMeterEnabled",
+  composerRichTextEnabled: "clientComposerRichTextEnabled",
+  dictationEnabled: "clientDictationEnabled",
+  sendShortcut: "clientSendShortcut",
+  followUpBehavior: "clientFollowUpBehavior",
+  proactivePanelsEnabled: "clientProactivePanelsEnabled",
+  showSkillsInSlashMenu: "clientShowSkillsInSlashMenu",
+  legacySidebarEnabled: "clientLegacySidebarEnabled",
+  sidebarWorkingShelfEnabled: "clientSidebarWorkingShelfEnabled",
+  sidebarProjectGroupingMode: "clientSidebarProjectGroupingMode",
+  sidebarProjectSortOrder: "clientSidebarProjectSortOrder",
+  sidebarThreadSortOrder: "clientSidebarThreadSortOrder",
+  sidebarThreadPreviewCount: "clientSidebarThreadPreviewCount",
+  timestampFormat: "clientTimestampFormat",
+  wordWrap: "clientWordWrap",
+} as const;
+
+export const UniversalClientPreferenceValues = Schema.Struct({
+  clientAppearanceMode: Schema.NullOr(Schema.Literals(["light", "dark", "system"])),
+  clientAppearanceAccent: Schema.NullOr(
+    Schema.Literals(["orange", "blue", "violet", "green", "pink", "teal", "amber", "red"]),
+  ),
+  clientAppearanceFontSize: Schema.NullOr(Schema.Literals(["small", "default", "large"])),
+  clientAppearanceMotion: Schema.NullOr(Schema.Literals(["system", "reduce"])),
+  clientAppearanceUsageMeter: Schema.NullOr(Schema.Literals(["remaining", "used"])),
+  clientNotificationMode: Schema.NullOr(ClientSettingsSchema.fields.notificationMode),
+  clientInAppNotificationsEnabled: Schema.NullOr(
+    ClientSettingsSchema.fields.inAppNotificationsEnabled,
+  ),
+  clientDiffColorScheme: Schema.NullOr(ClientSettingsSchema.fields.diffColorScheme),
+  clientChatWidth: Schema.NullOr(ClientSettingsSchema.fields.chatWidth),
+  clientConfirmQuit: Schema.NullOr(ClientSettingsSchema.fields.confirmQuit),
+  clientConfirmThreadArchive: Schema.NullOr(ClientSettingsSchema.fields.confirmThreadArchive),
+  clientConfirmThreadDelete: Schema.NullOr(ClientSettingsSchema.fields.confirmThreadDelete),
+  clientConfirmThreadUnpin: Schema.NullOr(ClientSettingsSchema.fields.confirmThreadUnpin),
+  clientDiffFilesCollapsed: Schema.NullOr(ClientSettingsSchema.fields.diffFilesCollapsed),
+  clientDiffIgnoreWhitespace: Schema.NullOr(ClientSettingsSchema.fields.diffIgnoreWhitespace),
+  clientDiffLayout: Schema.NullOr(ClientSettingsSchema.fields.diffLayout),
+  clientEnvironmentIdentificationMode: Schema.NullOr(
+    ClientSettingsSchema.fields.environmentIdentificationMode,
+  ),
+  clientFontSizeInterface: Schema.NullOr(ClientSettingsSchema.fields.fontSizeInterface),
+  clientFontSizePrompt: Schema.NullOr(ClientSettingsSchema.fields.fontSizePrompt),
+  clientFontSizeCode: Schema.NullOr(ClientSettingsSchema.fields.fontSizeCode),
+  clientFontSizeTerminal: Schema.NullOr(ClientSettingsSchema.fields.fontSizeTerminal),
+  clientFontSmoothing: Schema.NullOr(ClientSettingsSchema.fields.fontSmoothing),
+  clientPersistComposerContextStrip: Schema.NullOr(
+    ClientSettingsSchema.fields.persistComposerContextStrip,
+  ),
+  clientPlanModeEnabled: Schema.NullOr(ClientSettingsSchema.fields.planModeEnabled),
+  clientContextWindowMeterEnabled: Schema.NullOr(
+    ClientSettingsSchema.fields.contextWindowMeterEnabled,
+  ),
+  clientComposerRichTextEnabled: Schema.NullOr(ClientSettingsSchema.fields.composerRichTextEnabled),
+  clientDictationEnabled: Schema.NullOr(ClientSettingsSchema.fields.dictationEnabled),
+  clientSendShortcut: Schema.NullOr(ClientSettingsSchema.fields.sendShortcut),
+  clientFollowUpBehavior: Schema.NullOr(ClientSettingsSchema.fields.followUpBehavior),
+  clientProactivePanelsEnabled: Schema.NullOr(ClientSettingsSchema.fields.proactivePanelsEnabled),
+  clientShowSkillsInSlashMenu: Schema.NullOr(ClientSettingsSchema.fields.showSkillsInSlashMenu),
+  clientLegacySidebarEnabled: Schema.NullOr(ClientSettingsSchema.fields.legacySidebarEnabled),
+  clientSidebarWorkingShelfEnabled: Schema.NullOr(
+    ClientSettingsSchema.fields.sidebarWorkingShelfEnabled,
+  ),
+  clientSidebarProjectGroupingMode: Schema.NullOr(
+    ClientSettingsSchema.fields.sidebarProjectGroupingMode,
+  ),
+  clientSidebarProjectSortOrder: Schema.NullOr(ClientSettingsSchema.fields.sidebarProjectSortOrder),
+  clientSidebarThreadSortOrder: Schema.NullOr(ClientSettingsSchema.fields.sidebarThreadSortOrder),
+  clientSidebarThreadPreviewCount: Schema.NullOr(
+    ClientSettingsSchema.fields.sidebarThreadPreviewCount,
+  ),
+  clientTimestampFormat: Schema.NullOr(ClientSettingsSchema.fields.timestampFormat),
+  clientWordWrap: Schema.NullOr(ClientSettingsSchema.fields.wordWrap),
+});
+export const UNIVERSAL_CLIENT_PREFERENCE_KEYS = Object.keys(
+  UniversalClientPreferenceValues.fields,
+) as Array<keyof typeof UniversalClientPreferenceValues.fields>;
+const UniversalClientPreferenceDefaults = {
+  clientAppearanceMode: UniversalClientPreferenceValues.fields.clientAppearanceMode.pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  clientAppearanceAccent: UniversalClientPreferenceValues.fields.clientAppearanceAccent.pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  clientAppearanceFontSize: UniversalClientPreferenceValues.fields.clientAppearanceFontSize.pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  clientAppearanceMotion: UniversalClientPreferenceValues.fields.clientAppearanceMotion.pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  clientAppearanceUsageMeter:
+    UniversalClientPreferenceValues.fields.clientAppearanceUsageMeter.pipe(
+      Schema.withDecodingDefault(Effect.succeed(null)),
+    ),
+  clientNotificationMode: UniversalClientPreferenceValues.fields.clientNotificationMode.pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  clientInAppNotificationsEnabled:
+    UniversalClientPreferenceValues.fields.clientInAppNotificationsEnabled.pipe(
+      Schema.withDecodingDefault(Effect.succeed(null)),
+    ),
+  clientDiffColorScheme: UniversalClientPreferenceValues.fields.clientDiffColorScheme.pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  clientChatWidth: UniversalClientPreferenceValues.fields.clientChatWidth.pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  clientConfirmQuit: UniversalClientPreferenceValues.fields.clientConfirmQuit.pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  clientConfirmThreadArchive:
+    UniversalClientPreferenceValues.fields.clientConfirmThreadArchive.pipe(
+      Schema.withDecodingDefault(Effect.succeed(null)),
+    ),
+  clientConfirmThreadDelete: UniversalClientPreferenceValues.fields.clientConfirmThreadDelete.pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  clientConfirmThreadUnpin: UniversalClientPreferenceValues.fields.clientConfirmThreadUnpin.pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  clientDiffFilesCollapsed: UniversalClientPreferenceValues.fields.clientDiffFilesCollapsed.pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  clientDiffIgnoreWhitespace:
+    UniversalClientPreferenceValues.fields.clientDiffIgnoreWhitespace.pipe(
+      Schema.withDecodingDefault(Effect.succeed(null)),
+    ),
+  clientDiffLayout: UniversalClientPreferenceValues.fields.clientDiffLayout.pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  clientEnvironmentIdentificationMode:
+    UniversalClientPreferenceValues.fields.clientEnvironmentIdentificationMode.pipe(
+      Schema.withDecodingDefault(Effect.succeed(null)),
+    ),
+  clientFontSizeInterface: UniversalClientPreferenceValues.fields.clientFontSizeInterface.pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  clientFontSizePrompt: UniversalClientPreferenceValues.fields.clientFontSizePrompt.pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  clientFontSizeCode: UniversalClientPreferenceValues.fields.clientFontSizeCode.pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  clientFontSizeTerminal: UniversalClientPreferenceValues.fields.clientFontSizeTerminal.pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  clientFontSmoothing: UniversalClientPreferenceValues.fields.clientFontSmoothing.pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  clientPersistComposerContextStrip:
+    UniversalClientPreferenceValues.fields.clientPersistComposerContextStrip.pipe(
+      Schema.withDecodingDefault(Effect.succeed(null)),
+    ),
+  clientPlanModeEnabled: UniversalClientPreferenceValues.fields.clientPlanModeEnabled.pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  clientContextWindowMeterEnabled:
+    UniversalClientPreferenceValues.fields.clientContextWindowMeterEnabled.pipe(
+      Schema.withDecodingDefault(Effect.succeed(null)),
+    ),
+  clientComposerRichTextEnabled:
+    UniversalClientPreferenceValues.fields.clientComposerRichTextEnabled.pipe(
+      Schema.withDecodingDefault(Effect.succeed(null)),
+    ),
+  clientDictationEnabled: UniversalClientPreferenceValues.fields.clientDictationEnabled.pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  clientSendShortcut: UniversalClientPreferenceValues.fields.clientSendShortcut.pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  clientFollowUpBehavior: UniversalClientPreferenceValues.fields.clientFollowUpBehavior.pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  clientProactivePanelsEnabled:
+    UniversalClientPreferenceValues.fields.clientProactivePanelsEnabled.pipe(
+      Schema.withDecodingDefault(Effect.succeed(null)),
+    ),
+  clientShowSkillsInSlashMenu:
+    UniversalClientPreferenceValues.fields.clientShowSkillsInSlashMenu.pipe(
+      Schema.withDecodingDefault(Effect.succeed(null)),
+    ),
+  clientLegacySidebarEnabled:
+    UniversalClientPreferenceValues.fields.clientLegacySidebarEnabled.pipe(
+      Schema.withDecodingDefault(Effect.succeed(null)),
+    ),
+  clientSidebarWorkingShelfEnabled:
+    UniversalClientPreferenceValues.fields.clientSidebarWorkingShelfEnabled.pipe(
+      Schema.withDecodingDefault(Effect.succeed(null)),
+    ),
+  clientSidebarProjectGroupingMode:
+    UniversalClientPreferenceValues.fields.clientSidebarProjectGroupingMode.pipe(
+      Schema.withDecodingDefault(Effect.succeed(null)),
+    ),
+  clientSidebarProjectSortOrder:
+    UniversalClientPreferenceValues.fields.clientSidebarProjectSortOrder.pipe(
+      Schema.withDecodingDefault(Effect.succeed(null)),
+    ),
+  clientSidebarThreadSortOrder:
+    UniversalClientPreferenceValues.fields.clientSidebarThreadSortOrder.pipe(
+      Schema.withDecodingDefault(Effect.succeed(null)),
+    ),
+  clientSidebarThreadPreviewCount:
+    UniversalClientPreferenceValues.fields.clientSidebarThreadPreviewCount.pipe(
+      Schema.withDecodingDefault(Effect.succeed(null)),
+    ),
+  clientTimestampFormat: UniversalClientPreferenceValues.fields.clientTimestampFormat.pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  clientWordWrap: UniversalClientPreferenceValues.fields.clientWordWrap.pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+};
+export const UniversalClientPreferencePatch = Schema.Struct({
+  clientAppearanceMode: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientAppearanceMode,
+  ),
+  clientAppearanceAccent: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientAppearanceAccent,
+  ),
+  clientAppearanceFontSize: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientAppearanceFontSize,
+  ),
+  clientAppearanceMotion: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientAppearanceMotion,
+  ),
+  clientAppearanceUsageMeter: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientAppearanceUsageMeter,
+  ),
+  clientNotificationMode: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientNotificationMode,
+  ),
+  clientInAppNotificationsEnabled: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientInAppNotificationsEnabled,
+  ),
+  clientDiffColorScheme: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientDiffColorScheme,
+  ),
+  clientChatWidth: Schema.optionalKey(UniversalClientPreferenceValues.fields.clientChatWidth),
+  clientConfirmQuit: Schema.optionalKey(UniversalClientPreferenceValues.fields.clientConfirmQuit),
+  clientConfirmThreadArchive: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientConfirmThreadArchive,
+  ),
+  clientConfirmThreadDelete: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientConfirmThreadDelete,
+  ),
+  clientConfirmThreadUnpin: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientConfirmThreadUnpin,
+  ),
+  clientDiffFilesCollapsed: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientDiffFilesCollapsed,
+  ),
+  clientDiffIgnoreWhitespace: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientDiffIgnoreWhitespace,
+  ),
+  clientDiffLayout: Schema.optionalKey(UniversalClientPreferenceValues.fields.clientDiffLayout),
+  clientEnvironmentIdentificationMode: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientEnvironmentIdentificationMode,
+  ),
+  clientFontSizeInterface: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientFontSizeInterface,
+  ),
+  clientFontSizePrompt: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientFontSizePrompt,
+  ),
+  clientFontSizeCode: Schema.optionalKey(UniversalClientPreferenceValues.fields.clientFontSizeCode),
+  clientFontSizeTerminal: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientFontSizeTerminal,
+  ),
+  clientFontSmoothing: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientFontSmoothing,
+  ),
+  clientPersistComposerContextStrip: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientPersistComposerContextStrip,
+  ),
+  clientPlanModeEnabled: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientPlanModeEnabled,
+  ),
+  clientContextWindowMeterEnabled: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientContextWindowMeterEnabled,
+  ),
+  clientComposerRichTextEnabled: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientComposerRichTextEnabled,
+  ),
+  clientDictationEnabled: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientDictationEnabled,
+  ),
+  clientSendShortcut: Schema.optionalKey(UniversalClientPreferenceValues.fields.clientSendShortcut),
+  clientFollowUpBehavior: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientFollowUpBehavior,
+  ),
+  clientProactivePanelsEnabled: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientProactivePanelsEnabled,
+  ),
+  clientShowSkillsInSlashMenu: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientShowSkillsInSlashMenu,
+  ),
+  clientLegacySidebarEnabled: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientLegacySidebarEnabled,
+  ),
+  clientSidebarWorkingShelfEnabled: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientSidebarWorkingShelfEnabled,
+  ),
+  clientSidebarProjectGroupingMode: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientSidebarProjectGroupingMode,
+  ),
+  clientSidebarProjectSortOrder: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientSidebarProjectSortOrder,
+  ),
+  clientSidebarThreadSortOrder: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientSidebarThreadSortOrder,
+  ),
+  clientSidebarThreadPreviewCount: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientSidebarThreadPreviewCount,
+  ),
+  clientTimestampFormat: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientTimestampFormat,
+  ),
+  clientWordWrap: Schema.optionalKey(UniversalClientPreferenceValues.fields.clientWordWrap),
+});
 
 // ── Server Settings (server-authoritative) ────────────────────
 
@@ -905,6 +1246,10 @@ export const StorageCleanupSettings = Schema.Struct({
 export type StorageCleanupSettings = typeof StorageCleanupSettings.Type;
 
 export const ServerSettings = Schema.Struct({
+  ...UniversalClientPreferenceDefaults,
+  sharedKeybindings: Schema.NullOr(KeybindingsConfig).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
   // Null means no client has migrated this preference yet; an empty value is
   // authoritative so another device cannot resurrect cleared preferences.
   favorites: Schema.NullOr(ModelFavorites).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
@@ -1172,6 +1517,8 @@ export const DEFAULT_SERVER_SETTINGS: ServerSettings = Schema.decodeSync(ServerS
  * they reach. Every other `ServerSettings` key is machine-local.
  */
 export const UNIVERSAL_SERVER_SETTING_KEYS = [
+  ...UNIVERSAL_CLIENT_PREFERENCE_KEYS,
+  "sharedKeybindings",
   "favorites",
   "providerModelPreferences",
   "modelEffortDefaults",
@@ -1354,6 +1701,10 @@ const ModelSelectionPatch = Schema.Struct({
 });
 
 export const ServerSettingsPatch = Schema.Struct({
+  ...UniversalClientPreferencePatch.fields,
+  sharedKeybindings: Schema.optionalKey(Schema.NullOr(KeybindingsConfig)),
+  /** Seeds legacy browser preferences only while each destination field is still unset. */
+  migrateClientPreferences: Schema.optionalKey(UniversalClientPreferencePatch),
   setModelFavorites: Schema.optionalKey(
     Schema.Array(Schema.Struct({ ...ModelFavorite.fields, favorite: Schema.Boolean })),
   ),

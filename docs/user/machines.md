@@ -5,7 +5,8 @@ machine as the hub; your other computers connect out to it. Each machine can
 join one hub. Paired machines sync project names, instructions, archive state,
 repository remotes and source links, agent profiles, fallback chains and
 scheduled-task configuration, and every conversation. They also sync your
-settings and each project's own settings. Settings that describe one machine
+settings and each project's own settings, including appearance, keybindings,
+notification preferences and composer behavior. Settings that describe one machine
 stay on it: provider setup and sign-ins, folders such as the projects root,
 storage and backups, background activity, and devices. Changes made while a
 machine is offline catch up when it reconnects. A machine on an older version

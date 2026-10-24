@@ -36,6 +36,7 @@ import { isElectron } from "../../env";
 import { formatShortcutLabel } from "../../keybindings";
 import { cn } from "../../lib/utils";
 import { serverEnvironment } from "../../state/server";
+import { useEnvironments } from "../../state/environments";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -1272,10 +1273,12 @@ function BrowserKeybindingNotice() {
 }
 
 export function KeybindingsSettingsPanel() {
-  // The representative environment supplies the displayed bindings; edits
-  // fan out to every connected environment in the selection, so one
-  // shortcut change reaches each machine the user runs T3 Code on.
-  const { environment: primaryEnvironment, connectedEnvironments } = useSettingsScope();
+  // Keybindings are universal even when this page retains a project deep link.
+  const { environment: primaryEnvironment } = useSettingsScope();
+  const { environments } = useEnvironments();
+  const connectedEnvironments = environments.filter(
+    (target) => target.connection.phase === "connected" && target.serverConfig !== null,
+  );
   const writableIds = useEnvironmentsWithScope(connectedEnvironments, AuthSettingsWriteScope);
   const canWriteSettings =
     connectedEnvironments.length > 0 &&

@@ -35,9 +35,10 @@ import {
   settingsScopeEnvironmentLabels,
 } from "./settingsScopeAxis";
 
-/** Pages whose every row is saved on this client; they have no scope to pick. */
-export const SETTINGS_DEVICE_ONLY_PATHS: ReadonlySet<string> = new Set([
+/** Pages with their own targeting, rather than a project scope. */
+export const SETTINGS_SCOPELESS_PATHS: ReadonlySet<string> = new Set([
   "/settings/appearance",
+  "/settings/keybindings",
   "/settings/connections",
   // Projects span every connected machine; the page names each project's own.
   "/settings/project-tags",
@@ -52,7 +53,11 @@ export const SETTINGS_DEVICE_ONLY_PATHS: ReadonlySet<string> = new Set([
 export function SettingsScopeSentence() {
   const scope = useOptionalSettingsScope();
   const pathname = useLocation({ select: (location) => location.pathname });
-  if (scope === null || SETTINGS_DEVICE_ONLY_PATHS.has(pathname)) return null;
+  if (pathname === "/settings/appearance" || pathname === "/settings/keybindings")
+    return (
+      <p className="px-3 text-sm text-muted-foreground sm:px-4">Shared across your machines</p>
+    );
+  if (scope === null || SETTINGS_SCOPELESS_PATHS.has(pathname)) return null;
   if (pathname === "/settings/projects") return null;
   return (
     <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 px-3 text-base text-muted-foreground sm:px-4">

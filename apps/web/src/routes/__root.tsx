@@ -1,3 +1,4 @@
+import { SharedClientPreferencesSync } from "../components/SharedClientPreferencesSync";
 import { LiveAgentsProvider } from "../agents/agentsClient";
 import { AgentsCreateHost } from "../agents/AgentsCreateHost";
 import { CreateProjectDialogHost } from "../projectLabels/CreateProjectDialogHost";
@@ -209,6 +210,7 @@ function RootRouteView() {
 
       <ProviderAuthCallbackCoordinator />
       <ChatGptWelcomeCoordinator />
+      <SharedClientPreferencesSync />
       <FirstRunGate
         enabled={primaryEnvironmentAuthenticated}
         hostedStatic={authGateState.status === "hosted-static"}

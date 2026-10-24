@@ -697,8 +697,13 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   Layer.provideMerge(Layer.mergeAll(layerTerminal, layerPreview, layerDevice)),
   Layer.provideMerge(layerPersistence),
   // Both read a user-owned file out of the state directory and stream changes
-  // to clients; neither depends on the other.
-  Layer.provideMerge(Layer.mergeAll(Keybindings.layer, UsageLimitSources.layer)),
+  // to clients. Keybindings mirrors its portable list through server settings.
+  Layer.provideMerge(
+    Layer.mergeAll(
+      Keybindings.layer.pipe(Layer.provide(layerServerSettings)),
+      UsageLimitSources.layer,
+    ),
+  ),
   Layer.provideMerge(ProviderRegistry.layer),
   // The instance registry is the new routing keystone — text generation,
   // adapter lookup, and runtime ingestion all resolve `ProviderInstanceId`

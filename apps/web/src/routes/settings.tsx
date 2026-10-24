@@ -19,7 +19,7 @@ import {
   useSettingsScope,
 } from "../components/settings/SettingsScopeContext";
 import { SettingsScopeNotice } from "../components/settings/SettingsScopeNotice";
-import { SETTINGS_DEVICE_ONLY_PATHS } from "../components/settings/SettingsScopeSentence";
+import { SETTINGS_SCOPELESS_PATHS } from "../components/settings/SettingsScopeSentence";
 import { SettingsPageContainer } from "../components/settings/settingsLayout";
 import {
   retainSettingsScope,
@@ -60,9 +60,9 @@ function SettingsScopeBoundary({ pathname, children }: { pathname: string; child
       </SettingsScopeNotice>
     );
   }
-  // Device-local pages ignore the scope entirely; the Repository page follows
+  // Unscoped pages handle their own targets; the Repository page follows
   // its own `repository` key.
-  if (SETTINGS_DEVICE_ONLY_PATHS.has(pathname) || pathname === "/settings/projects") {
+  if (SETTINGS_SCOPELESS_PATHS.has(pathname) || pathname === "/settings/projects") {
     return children;
   }
   // Keep the scope sentence on screen so the selection can be changed back.

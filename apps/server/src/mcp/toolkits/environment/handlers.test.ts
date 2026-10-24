@@ -163,7 +163,7 @@ it.effect("environment_add says when no desktop app runs beside this environment
   ),
 );
 
-it.effect("environment_preferences_update sets the projects root", () =>
+it.effect("environment_preferences_update saves local and shared settings", () =>
   Effect.gen(function* () {
     const patches: Array<unknown> = [];
     const server = McpHttpServer.toolkitRegistration(
@@ -204,7 +204,12 @@ it.effect("environment_preferences_update sets the projects root", () =>
       Effect.flatMap((mcp) =>
         mcp.callTool({
           name: "environment_preferences_update",
-          arguments: { projectsRoot: "~/Work/projects" },
+          arguments: {
+            projectsRoot: "~/Work/projects",
+            clientAppearanceMode: "light",
+            clientFollowUpBehavior: "queue",
+            sharedKeybindings: [{ key: "mod+k", command: "settings.open" }],
+          },
         }),
       ),
       Effect.map(({ content }) =>
@@ -217,7 +222,19 @@ it.effect("environment_preferences_update sets the projects root", () =>
       Effect.provideService(McpSchema.McpServerClient, mcpClient),
       Effect.provide(server),
     );
-    expect(patches).toEqual([{ projectsRoot: "~/Work/projects" }]);
-    expect(JSON.parse(text)).toMatchObject({ projectsRoot: "~/Work/projects" });
+    expect(patches).toEqual([
+      {
+        projectsRoot: "~/Work/projects",
+        clientAppearanceMode: "light",
+        clientFollowUpBehavior: "queue",
+        sharedKeybindings: [{ key: "mod+k", command: "settings.open" }],
+      },
+    ]);
+    expect(JSON.parse(text)).toMatchObject({
+      projectsRoot: "~/Work/projects",
+      clientAppearanceMode: "light",
+      clientFollowUpBehavior: "queue",
+      sharedKeybindings: [{ key: "mod+k", command: "settings.open" }],
+    });
   }),
 );
