@@ -4,8 +4,12 @@ Pair your Cogenly servers to see which machines are online and establish a link
 between them. Choose an always-on machine as the hub; your other computers
 connect out to it. Each machine can join one hub. Paired machines sync project
 names, instructions, archive state, repository remotes and source links, plus
-agent profiles, fallback chains and scheduled-task configuration. Changes made
-while a machine is offline catch up when it reconnects.
+agent profiles, fallback chains and scheduled-task configuration. They also sync
+your settings and each project's own settings. Settings that describe one
+machine stay on it: provider setup and sign-ins, folders such as the projects
+root, storage and backups, background activity, and devices. Changes made while
+a machine is offline catch up when it reconnects. Update every machine to the
+same version; a machine on an older version pauses syncing until it updates.
 
 Agents and schedules run only on their owner machine. New ones default to the
 hub; existing ones keep the machine they were created on. Ownership cannot be
@@ -18,7 +22,7 @@ project's repositories. One that is not on this machine yet is marked as needing
 a clone. Pick it, and it clones into the project's folder on this machine. A
 repository's folder is named after the repository, so it lands in the same
 place everywhere. Removing a repository from one machine frees the disk space
-and keeps it in the project, so you can clone it back later. Settings, conversations, resource files,
+and keeps it in the project, so you can clone it back later. Conversations, resource files,
 vault items, integrations and memory facts do not sync yet. Pairing does not
 enable remote work launches. Matching project names are kept separately until
 you choose how to combine them.

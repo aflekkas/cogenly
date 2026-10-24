@@ -1,7 +1,7 @@
 # Shared state invariants
 
 [SharedState](../../apps/server/src/sync/SharedState.ts) owns portable project,
-agent and schedule configuration. Domain mutations record their field deltas in
+agent, schedule and settings configuration. Domain mutations record their field deltas in
 the same transaction as their existing read models. Peer merges commit the
 merged document, projection, relay log and received cursor together. A socket
 reply means that transaction committed; sending bytes does not acknowledge it.
@@ -28,7 +28,7 @@ are not interchangeable with orchestration event sequences, thread
 and cursors together across recovery. There is no log compaction or cursor
 reset protocol yet.
 
-Only the three declared document kinds cross these channels. The receiver
+Only the four declared document kinds cross these channels. The receiver
 rejects unknown fields, malformed values, oversized multi-document batches, cursor
 gaps, forged authorship and ownership changes. A rejected batch fails whole and its
 cursor does not advance, so adding a synced field (even an optional, nested one such
@@ -65,6 +65,20 @@ repository; a worktree outside that repository is represented as root intent.
 A remote-only repository link has no local checkout. Configuration sync never
 clones it. Provider instances referenced by model selections still need to be
 configured and signed in on the owner.
+
+Settings documents are the exception to the shared transaction: settings.json
+is the store, so [SettingsSync](../../apps/server/src/sync/SettingsSync.ts)
+reconciles the file with the documents after the fact. It keeps the last agreed
+value per key, so a changed local value is an edit to publish and a changed
+shared value is a peer edit to apply. Before the first agreement, a key still at
+its default adopts the peer's value instead of publishing the default. Only
+`UNIVERSAL_SERVER_SETTING_KEYS` and project overrides travel. Paths, provider
+instances, resource limits, machine identity and credentials stay local by
+omission. Adding a key to the universal list is a sync format change like
+any other synced field. Project overrides are stored per local repository
+because every resolver reads them that way. Their document is keyed by the
+project folder ID, and every repository in that folder carries the same
+entry.
 
 Thread replication is separate and must remain single-writer. Agent
 conversations are created lazily only on their owner. Project chat IDs and
