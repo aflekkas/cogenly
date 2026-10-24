@@ -1735,6 +1735,7 @@ function EventScheduleFields({
       ) : null}
       <EventTriggerFields
         value={draft.event}
+        environmentId={environmentId}
         {...choices}
         Field={Field}
         onChange={(event) => onChange({ event })}

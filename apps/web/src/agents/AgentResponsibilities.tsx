@@ -177,6 +177,7 @@ export function AgentResponsibilities({
   // Event triggers can name only what the agent can read, as the server enforces.
   const triggerFormProps = {
     ...eventFilterChoices(agent, workspace.labels, workspace.repositories),
+    environmentId: agent.environmentId,
     onManageProjects: client.openProjectSettings,
   };
   const saveTrigger = async (value: Parameters<typeof client.saveTrigger>[1]) => {

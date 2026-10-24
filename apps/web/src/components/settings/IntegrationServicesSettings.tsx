@@ -1174,6 +1174,7 @@ function IntegrationEditorDialog(props: {
                     <div className="flex flex-wrap items-center gap-1.5 pt-1">
                       <ProjectLabelChips labels={props.labels} ids={draft.labelIds} />
                       <ProjectLabelPicker
+                        environmentId={environmentId}
                         labels={props.labels}
                         selectedIds={draft.labelIds}
                         onToggle={(id, selected) =>
