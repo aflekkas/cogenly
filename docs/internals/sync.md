@@ -81,7 +81,9 @@ Legacy URI-encoded MCP schedule IDs remain readable on disk and on the wire to
 preserve task references and webhook URLs; new IDs hash keys that are not portable.
 Legacy memory fact IDs (`legacy-memory:[agent,note]`) are not portable either: their
 document ID is a hash and the document carries the original as `factId`, so every
-machine projects the same fact and memory note IDs.
+machine projects the same fact and memory note IDs. `factId` is immutable and
+must map back to its document ID; an alias cannot overwrite or delete another
+fact. This identity check also applies to tombstones.
 
 ## Memory facts
 

@@ -21,7 +21,9 @@ type Placement = {
   readonly duplicateOf: FactId | null;
 };
 
-const storage = (cause: unknown) => new SharedStateError({ reason: "storage", cause });
+const isSharedStateError = Schema.is(SharedStateError);
+const storage = (cause: unknown) =>
+  isSharedStateError(cause) ? cause : new SharedStateError({ reason: "storage", cause });
 const decodeFactJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Fact));
 const encodeFactJson = Schema.encodeEffect(Schema.fromJsonString(Fact));
 const encodeHistory = Schema.encodeEffect(Schema.fromJsonString(FactHistoryEntry));
@@ -216,6 +218,8 @@ export const projectFact = Effect.fn("FactProjection.projectFact")(function* (
   const factId = FactId.make(
     typeof document.fields.factId === "string" ? document.fields.factId : document.id,
   );
+  if (factDocumentId(factId) !== document.id)
+    return yield* new SharedStateError({ reason: "invalid-document" });
   const previous = (yield* sql<{
     dedupe_key: string | null;
   }>`SELECT dedupe_key FROM facts WHERE id=${factId}`)[0]?.dedupe_key;

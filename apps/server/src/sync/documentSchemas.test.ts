@@ -2,7 +2,7 @@ import { describe, expect, it } from "@effect/vitest";
 import { EnvironmentId, type SharedDocumentChange } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import { normalizeRepositoryRemote } from "../project/RepositoryRemote.ts";
-import { validateChange } from "./documentSchemas.ts";
+import { checkIntegrity, factDocumentId, validateChange } from "./documentSchemas.ts";
 
 const node = EnvironmentId.make("local");
 const change = (kind: SharedDocumentChange["kind"], fields: SharedDocumentChange["fields"]) => ({
@@ -48,6 +48,20 @@ describe("shared configuration schemas", () => {
           (yield* Effect.result(validateChange({ ...change("project", { name: "P" }), id })))._tag,
         ).toBe("Failure");
       }),
+  );
+  it.effect("peer fact identities must name their own document, including tombstones", () =>
+    Effect.gen(function* () {
+      const legacy = 'legacy-memory:["agent","note"]';
+      yield* checkIntegrity({ ...change("fact", { factId: legacy }), id: factDocumentId(legacy) });
+      for (const tombstone of [null, { wall: 1, logical: 0, node }])
+        expect(
+          (yield* checkIntegrity({
+            ...change("fact", { factId: "fact:original" }),
+            id: "fact:alias",
+            tombstone,
+          }).pipe(Effect.result))._tag,
+        ).toBe("Failure");
+    }),
   );
   it.effect("accepts domain schedule text, long fallback chains and documents above 96 KiB", () =>
     Effect.gen(function* () {

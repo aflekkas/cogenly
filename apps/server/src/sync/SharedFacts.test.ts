@@ -196,6 +196,82 @@ describe("memory facts across paired machines", () => {
       }).pipe(Effect.scoped),
   );
 
+  it.effect.each([false, true])(
+    "rejects a peer fact alias targeting another fact (delete=%s)",
+    (deleted) =>
+      Effect.gen(function* () {
+        const { a, b } = yield* paired;
+        const original = (yield* a.facts.create(note("Original fact"))).fact;
+        yield* exchange(a, b);
+        const document = (yield* a.state.get("fact", factDocumentId(original.id)))!;
+        const fields = { ...document.fields, factId: original.id, text: "Forged replacement" };
+        const clock = { ...document.clocks.text!, logical: document.clocks.text!.logical + 1 };
+        const after = (yield* b.state.cursors(a.environmentId)).received;
+        const before = yield* placements(b);
+        const result = yield* b.state
+          .receive(
+            {
+              after,
+              cursor: after + 1,
+              changes: [
+                {
+                  ...document,
+                  id: "fact:alias",
+                  fields,
+                  clocks: Object.fromEntries(Object.keys(fields).map((key) => [key, clock])),
+                  tombstone: deleted ? clock : null,
+                },
+              ],
+            },
+            a.environmentId,
+            false,
+          )
+          .pipe(Effect.result);
+        expect(result).toMatchObject({ _tag: "Failure", failure: { reason: "invalid-document" } });
+        expect(yield* placements(b)).toEqual(before);
+        expect(yield* b.state.get("fact", "fact:alias")).toBeUndefined();
+        expect((yield* b.state.cursors(a.environmentId)).received).toBe(after);
+      }).pipe(Effect.scoped),
+  );
+
+  it.effect("a legacy fact's raw identity cannot change to its portable document id", () =>
+    Effect.gen(function* () {
+      const { a, b } = yield* paired;
+      const original = (yield* a.facts.create(note("Legacy contents"))).fact;
+      const rawId = `legacy-memory:${JSON.stringify([agent.id, "old-note"])}`;
+      const id = factDocumentId(rawId);
+      const fields = { ...(yield* a.state.get("fact", original.id))!.fields, factId: rawId };
+      yield* a.state.write("fact", id, fields);
+      yield* exchange(a, b);
+      const document = (yield* a.state.get("fact", id))!;
+      const after = (yield* b.state.cursors(a.environmentId)).received;
+      const result = yield* b.state
+        .receive(
+          {
+            after,
+            cursor: after + 1,
+            changes: [
+              {
+                ...document,
+                fields: { factId: id },
+                clocks: {
+                  factId: {
+                    ...document.clocks.factId!,
+                    logical: document.clocks.factId!.logical + 1,
+                  },
+                },
+              },
+            ],
+          },
+          a.environmentId,
+          false,
+        )
+        .pipe(Effect.result);
+      expect(result).toMatchObject({ _tag: "Failure", failure: { reason: "invalid-document" } });
+      expect((yield* b.state.get("fact", id))!.fields.factId).toBe(rawId);
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("a fact that arrives before its agent is placed when the agent arrives", () =>
     Effect.gen(function* () {
       const a = yield* machine("machine-a");

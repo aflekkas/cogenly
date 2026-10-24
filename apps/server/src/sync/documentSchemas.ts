@@ -263,6 +263,13 @@ export const checkIntegrity = (change: SharedDocumentChangeWire) =>
   Effect.gen(function* () {
     yield* decodeWire(change).pipe(Effect.mapError(invalid));
     if (change.kind !== "schedule" && !isPortableId(change.id)) return yield* invalid();
+    if (
+      change.kind === "fact" &&
+      Object.hasOwn(change.fields, "factId") &&
+      (typeof change.fields.factId !== "string" ||
+        factDocumentId(change.fields.factId) !== change.id)
+    )
+      return yield* invalid();
     const keys = Object.keys(change.fields);
     if (
       keys.length !== Object.keys(change.clocks).length ||

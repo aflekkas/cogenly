@@ -190,6 +190,13 @@ const make = Effect.gen(function* () {
       )
         return yield* new SharedStateError({ reason: "invalid-document" });
     }
+    if (
+      current &&
+      change.kind === "fact" &&
+      change.fields.factId !== undefined &&
+      change.fields.factId !== (current.fields.factId ?? current.id)
+    )
+      return yield* new SharedStateError({ reason: "invalid-document" });
     const owner = current?.fields.ownerMachine;
     const ownerClock = current?.clocks.ownerMachine;
     const incomingOwner = change.fields.ownerMachine;
