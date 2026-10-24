@@ -600,6 +600,11 @@ export const ServerConfig = Schema.Struct({
   directEndpoints: Schema.optionalKey(ForwardCompatibleArray(ServerDirectEndpoint)),
   observability: ServerObservability,
   settings: ServerSettings,
+  /**
+   * Where project folders live when the `projectsRoot` setting is blank:
+   * `<Cogenly home>/projects` on this server. Absent on older servers.
+   */
+  defaultProjectsRoot: Schema.optionalKey(TrimmedNonEmptyString),
   /** Whether shell subscriptions can emit an opt-in catch-up completion marker. */
   shellResumeCompletionMarker: Schema.optionalKey(Schema.Boolean),
   /** Whether this environment can reveal files in its file manager. */

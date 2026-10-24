@@ -17,6 +17,7 @@ import * as Exports from "./export/ExportService.ts";
 import * as ProjectLabels from "./projectLabels/ProjectLabelService.ts";
 import * as ProjectLabelClone from "./projectLabels/ProjectLabelCloneRepository.ts";
 import * as RepositoryCheckout from "./project/RepositoryCheckout.ts";
+import { resolveProjectsRootDirectory } from "./project/ProjectsRoot.ts";
 import * as ProjectLabelFolders from "./projectLabels/ProjectLabelFolders.ts";
 import * as ProjectLabelFork from "./projectLabels/ProjectLabelForkToProject.ts";
 import * as ProjectFiles from "./projectLabels/ProjectFiles.ts";
@@ -1268,6 +1269,7 @@ const makeWsRpcHandlers = (
             otlpLogsEnabled: config.otlpLogsUrl !== undefined,
           },
           settings,
+          defaultProjectsRoot: resolveProjectsRootDirectory("", home, config.baseDir, path),
           shellResumeCompletionMarker: true,
           threadResumeCompletionMarker: true,
           threadSnapshotPagination: true,
