@@ -163,15 +163,10 @@ export const startNode = Effect.fn("startVaultNode")(function* (network: Network
       getEnvironmentId: Effect.succeed(environmentId),
     }),
   );
-  // Explicit reconcile passes in tests, never a background stream.
-  const quietState = Layer.effect(
-    SharedState.SharedState,
-    SharedState.SharedState.pipe(Effect.map((state) => ({ ...state, changes: Stream.never }))),
-  ).pipe(Layer.provide(SharedState.layer));
   const layer = VaultSync.layer.pipe(
     Layer.provideMerge(Vault.layer),
     Layer.provideMerge(VaultSyncCapture.layer),
-    Layer.provideMerge(quietState),
+    Layer.provideMerge(SharedState.layer),
     Layer.provideMerge(PeerChannels.layer),
     Layer.provideMerge(Layer.succeed(Machines.Machines, network.machines(environmentId))),
     Layer.provideMerge(base),

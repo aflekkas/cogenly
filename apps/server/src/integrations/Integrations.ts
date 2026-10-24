@@ -60,6 +60,7 @@ const OAuthState = Schema.Struct({
   refreshOwner: Schema.optional(Schema.String),
 });
 type OAuthState = typeof OAuthState.Type;
+const oauthStateKey = Schema.encodeSync(Schema.fromJsonString(OAuthState));
 
 const StoredIntegration = Schema.Struct({
   ...Integration.fields,
@@ -577,6 +578,8 @@ const make = (options: IntegrationsOptions = {}) =>
         readonly revision: number;
         readonly expiresAt: number | null;
         readonly refreshOwner: string;
+        readonly server: OAuth.OAuthServer | undefined;
+        readonly registration: OAuth.OAuthClientRegistration | undefined;
       }
     >();
     /** One adoption pass at a time; each is idempotent. */
@@ -857,6 +860,8 @@ const make = (options: IntegrationsOptions = {}) =>
           ...stored.value.tokens,
           itemId: state.tokenItemId,
           revision: stored.value.revision,
+          server: attachment?.server ?? state.server,
+          registration: attachment === undefined ? state.registration : attachment.registration,
           expiresAt: attachment === undefined ? (state.expiresAt ?? null) : attachment.expiresAt,
           refreshOwner: attachment?.refreshOwner ?? state.refreshOwner ?? peers.self,
         };
@@ -909,13 +914,17 @@ const make = (options: IntegrationsOptions = {}) =>
      * refresher would sign the owner out everywhere; any other machine uses
      * the synced token while it is valid, then waits for the owner's next one.
      */
-    const accessToken = (id: IntegrationId, rejected?: string) =>
+    const accessToken = (
+      id: IntegrationId,
+      rejected?: string,
+      repair = true,
+    ): Effect.Effect<string, IntegrationError> =>
       Effect.gen(function* () {
         const integration = yield* getById(id);
-        const state = integration.oauthState;
         const live = yield* loadTokens(integration);
-        if (state?.server === undefined || live === undefined) {
-          if (state?.signedIn) yield* markNeedsSignIn(integration, "Sign in again.");
+        if (live?.server === undefined) {
+          if (integration.oauthState?.signedIn)
+            yield* markNeedsSignIn(integration, "Sign in again.");
           return yield* signInRequired("authorize");
         }
         const nowMs = yield* Clock.currentTimeMillis;
@@ -938,19 +947,26 @@ const make = (options: IntegrationsOptions = {}) =>
         }
         const oauth = yield* oauthClient(
           integration,
-          state.server,
-          state.registration,
+          live.server,
+          live.registration,
           live.clientSecret,
         );
         const refreshed = yield* protocol
           .refresh({
-            server: state.server,
+            server: live.server,
             client: oauth,
             refreshToken: live.refreshToken,
             nowMs,
           })
           .pipe(Effect.result);
         if (refreshed._tag === "Failure") {
+          // A peer can replace this grant while the token request is in flight.
+          // Retry once with that row's client; an old refusal cannot revoke its replacement.
+          const revision = yield* tokenStore.revision(live.itemId);
+          if (repair && Option.isSome(revision) && revision.value !== live.revision) {
+            liveTokens.delete(id);
+            return yield* accessToken(id, rejected, false);
+          }
           if (refreshed.failure.revoked) {
             yield* retireGrant(integration, "The sign-in was revoked or expired. Sign in again.");
             return yield* signInRequired("refresh");
@@ -970,8 +986,8 @@ const make = (options: IntegrationsOptions = {}) =>
           host: new URL(integration.url).hostname,
           tokens: { ...tokens, clientSecret: live.clientSecret },
           attachment: signInAttachment(id, {
-            server: state.server,
-            registration: state.registration,
+            server: live.server,
+            registration: live.registration,
             expiresAt: tokens.expiresAt,
             refreshOwner: live.refreshOwner,
           }),
@@ -981,6 +997,8 @@ const make = (options: IntegrationsOptions = {}) =>
           clientSecret: live.clientSecret,
           itemId: written.itemId,
           revision: written.revision,
+          server: live.server,
+          registration: live.registration,
           expiresAt: tokens.expiresAt,
           refreshOwner: live.refreshOwner,
         });
@@ -1002,11 +1020,11 @@ const make = (options: IntegrationsOptions = {}) =>
      */
     const refreshDetached = (signIn: Tokens.AttachedSignIn) =>
       Effect.gen(function* () {
-        const registration = signIn.attachment.registration;
-        if (registration === undefined) return;
         const stored = yield* tokenStore.read(signIn.item.id);
         if (Option.isNone(stored)) return;
         const { tokens: current, attachment } = stored.value;
+        const registration = attachment?.registration;
+        if (registration === undefined) return;
         const nowMs = yield* Clock.currentTimeMillis;
         if (
           attachment === undefined ||
@@ -1451,24 +1469,26 @@ const make = (options: IntegrationsOptions = {}) =>
           const adopted = yield* Effect.gen(function* () {
             const integration = yield* getById(id);
             const state = integration.oauthState;
-            if (state?.signedIn && state.tokenItemId !== undefined) {
-              const pointed = attached.find((signIn) => signIn.item.id === state.tokenItemId);
-              // An item from before sign-ins synced has no attachment; it only has to exist.
-              const usable =
-                pointed !== undefined
-                  ? pointed.hasAccessToken
-                  : Option.isSome(yield* tokenStore.revision(state.tokenItemId));
-              if (usable) return false;
-            }
-            const next = attached.find((signIn) => adoptable(integration, signIn, nowMs));
+            const pointed = attached.find((signIn) => signIn.item.id === state?.tokenItemId);
+            // Legacy items remain usable until their attachment is backfilled.
+            if (
+              state?.signedIn &&
+              state.tokenItemId !== undefined &&
+              pointed === undefined &&
+              Option.isSome(yield* tokenStore.revision(state.tokenItemId))
+            )
+              return false;
+            const next =
+              pointed !== undefined && adoptable(integration, pointed, nowMs)
+                ? pointed
+                : attached.find((signIn) => adoptable(integration, signIn, nowMs));
             if (next === undefined) {
               // Signed out elsewhere, or the item was deleted: only a new sign-in helps.
               if (state?.signedIn)
                 yield* markNeedsSignIn(integration, "The sign-in was removed. Sign in again.");
               return false;
             }
-            liveTokens.delete(id);
-            yield* persistState(id, () => ({
+            const nextState = {
               signedIn: true,
               server: next.attachment.server,
               ...(next.attachment.registration === undefined
@@ -1477,7 +1497,11 @@ const make = (options: IntegrationsOptions = {}) =>
               tokenItemId: next.item.id,
               expiresAt: next.attachment.expiresAt,
               refreshOwner: next.attachment.refreshOwner,
-            }));
+            };
+            if (state !== undefined && oauthStateKey(state) === oauthStateKey(nextState))
+              return false;
+            liveTokens.delete(id);
+            yield* persistState(id, () => nextState);
             yield* Ref.update(checks, (current) => {
               const updated = new Map(current);
               updated.delete(id);
@@ -2142,6 +2166,8 @@ const make = (options: IntegrationsOptions = {}) =>
                 revision,
                 expiresAt: tokens.expiresAt,
                 refreshOwner,
+                server: pending.server,
+                registration: pending.registration,
               });
               yield* persistState(
                 integration.id,

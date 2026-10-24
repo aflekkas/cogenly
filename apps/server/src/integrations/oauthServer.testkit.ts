@@ -76,12 +76,14 @@ export const startMockAuthServer = Effect.gen(function* () {
     issued: [],
   };
   let issued = 0;
-  const issue = (account: string) => {
+  const refreshClients = new Map<string, string>();
+  const issue = (account: string, clientId: string) => {
     issued += 1;
     const accessToken = `access-${account}-${issued}-secretvalue`;
     const refreshToken = `refresh-${account}-${issued}-secretvalue`;
     mock.accessTokens.set(accessToken, account);
     mock.refreshTokens.set(refreshToken, account);
+    refreshClients.set(refreshToken, clientId);
     mock.issued.push(accessToken, refreshToken);
     return {
       access_token: accessToken,
@@ -170,14 +172,14 @@ export const startMockAuthServer = Effect.gen(function* () {
     ),
     HttpRouter.add("POST", "/auth/token", (request) =>
       form(request).pipe(
-        Effect.tap(() =>
-          mock.tokenGate === undefined
+        Effect.tap(() => {
+          const gate = mock.tokenGate;
+          return gate === undefined
             ? Effect.void
-            : Effect.gen(function* () {
-                yield* Deferred.succeed(mock.tokenGate!.entered, undefined);
-                yield* Deferred.await(mock.tokenGate!.resume);
-              }),
-        ),
+            : Deferred.succeed(gate.entered, undefined).pipe(
+                Effect.andThen(Deferred.await(gate.resume)),
+              );
+        }),
         Effect.map((params) => {
           if (params.get("resource") !== `${mock.base}/mcp`)
             return reply({ error: "invalid_target" }, 400);
@@ -194,15 +196,19 @@ export const startMockAuthServer = Effect.gen(function* () {
               grant.resource !== `${mock.base}/mcp`
             )
               return reply({ error: "invalid_grant" }, 400);
-            return reply(issue(grant.account));
+            return reply(issue(grant.account, grant.clientId));
           }
           if (params.get("grant_type") === "refresh_token") {
             mock.refreshes += 1;
-            const account = mock.refreshTokens.get(params.get("refresh_token") ?? "");
+            const refreshToken = params.get("refresh_token") ?? "";
+            const clientId = params.get("client_id") ?? "";
+            if (!mock.clients.has(clientId) || refreshClients.get(refreshToken) !== clientId)
+              return reply({ error: "invalid_client" }, 401);
+            const account = mock.refreshTokens.get(refreshToken);
             if (mock.revoked || account === undefined)
               return reply({ error: "invalid_grant" }, 400);
             mock.refreshTokens.delete(params.get("refresh_token") ?? "");
-            return reply(issue(account));
+            return reply(issue(account, clientId));
           }
           return reply({ error: "unsupported_grant_type" }, 400);
         }),
@@ -276,7 +282,7 @@ export const linearInput = (mock: MockAuthServer, name: string, accountLabel?: s
 });
 
 /** Plays the browser: opens the link, consents as `account`, and returns the callback query. */
-export const consent = (authorizationUrl: string, account: string) =>
+export const consent = (authorizationUrl: string, account: string, origin = COGENLY_ORIGIN) =>
   Effect.gen(function* () {
     const client = yield* HttpClient.HttpClient;
     const url = new URL(authorizationUrl);
@@ -289,7 +295,7 @@ export const consent = (authorizationUrl: string, account: string) =>
       );
     expect(response.status).toBe(302);
     const back = new URL(response.headers.location!);
-    expect(`${back.origin}${back.pathname}`).toBe(`${COGENLY_ORIGIN}${CALLBACK_PATH}`);
+    expect(`${back.origin}${back.pathname}`).toBe(`${origin}${CALLBACK_PATH}`);
     return {
       state: back.searchParams.get("state") ?? undefined,
       code: back.searchParams.get("code") ?? undefined,

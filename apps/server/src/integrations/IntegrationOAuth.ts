@@ -70,8 +70,8 @@ export interface TokenSet {
 }
 
 /**
- * A token endpoint refusal. `revoked` means the grant is gone (invalid_grant
- * and friends): only a new browser sign-in helps, so callers must not retry.
+ * A token endpoint refusal. Only `invalid_grant` establishes that the grant
+ * is gone. Client authentication failures may reflect stale client metadata.
  */
 export class OAuthTokenError extends Schema.TaggedError<OAuthTokenError>()("OAuthTokenError", {
   revoked: Schema.Boolean,
@@ -436,7 +436,7 @@ export const make = Effect.gen(function* () {
         revoked:
           (response.status === 400 || response.status === 401) &&
           Option.isSome(code) &&
-          ["invalid_grant", "invalid_client", "unauthorized_client"].includes(code.value),
+          code.value === "invalid_grant",
         ...(Option.isSome(code) ? { code: code.value } : {}),
       });
     });

@@ -2,6 +2,8 @@ import { loopbackHttpsPolicy } from "./https.testkit.ts";
 import { describe, expect, it } from "@effect/vitest";
 import { IntegrationName, VaultItemId, type IntegrationId } from "@t3tools/contracts";
 import * as Context from "effect/Context";
+import * as Deferred from "effect/Deferred";
+import * as Option from "effect/Option";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -103,12 +105,14 @@ const addLinear = (machine: Machine, mock: MockAuthServer) =>
     .create(linearInput(mock, "linear"))
     .pipe(Effect.map(({ integration }) => integration));
 
-const signIn = (machine: Machine, id: IntegrationId, account: string) =>
+const signIn = (machine: Machine, id: IntegrationId, account: string, origin = COGENLY_ORIGIN) =>
   Effect.gen(function* () {
     const { authorizationUrl } = yield* machine.integrations.beginSignIn(id, {
-      origin: COGENLY_ORIGIN,
+      origin,
     });
-    return yield* machine.integrations.completeSignIn(yield* consent(authorizationUrl, account));
+    return yield* machine.integrations.completeSignIn(
+      yield* consent(authorizationUrl, account, origin),
+    );
   });
 
 const whoami = (machine: Machine) =>
@@ -131,7 +135,12 @@ const oauthStateOf = (machine: Machine, id: IntegrationId) =>
       ([row]) =>
         (
           JSON.parse(row!.payload_json) as {
-            oauthState?: { signedIn: boolean; tokenItemId?: string; refreshOwner?: string };
+            oauthState?: {
+              signedIn: boolean;
+              tokenItemId?: string;
+              refreshOwner?: string;
+              registration?: { clientId: string };
+            };
           }
         ).oauthState,
     ),
@@ -336,6 +345,64 @@ describe("web integration sign-ins across paired machines", () => {
       yield* settle(hub, [spoke]);
       yield* Fiber.join(droppedOnHub);
       expect((yield* oauthStateOf(hub, integration.id))?.signedIn).toBe(false);
+    }).pipe(Effect.scoped, http),
+  );
+
+  it.effect("re-signing in with a new client updates an already signed-in refresh owner", () =>
+    Effect.gen(function* () {
+      const { hub, spoke } = yield* sharedPair;
+      const mock = yield* startMockAuthServer;
+      const integration = yield* addLinear(spoke, mock);
+      yield* copyDefinition(spoke, hub, integration.id);
+      yield* signIn(spoke, integration.id, "old-account");
+      yield* settle(hub, [spoke]);
+      yield* hub.integrations.adoptSyncedSignIns();
+      yield* whoami(hub);
+      yield* signIn(spoke, integration.id, "new-account", "https://other.cogenly.example");
+      yield* settle(hub, [spoke]);
+      yield* hub.integrations.adoptSyncedSignIns();
+      expect(mock.registrations).toBe(2);
+      expect((yield* oauthStateOf(hub, integration.id))?.registration?.clientId).toBe("client-2");
+      yield* TestClock.adjust(Duration.minutes(59.5));
+      yield* hub.integrations.refreshSharedSignIns;
+      expect(mock.refreshes).toBe(1);
+      expect((yield* oauthStateOf(hub, integration.id))?.signedIn).toBe(true);
+      yield* settle(hub, [spoke]);
+      yield* whoami(hub);
+      yield* whoami(spoke);
+      expect(mock.accessTokens.get(mock.bearers.at(-1)!)).toBe("new-account");
+    }).pipe(Effect.scoped, http),
+  );
+
+  it.effect("repairs invalid_client when a re-sign-in lands during an old client's refresh", () =>
+    Effect.gen(function* () {
+      const { hub, spoke } = yield* sharedPair;
+      const mock = yield* startMockAuthServer;
+      const integration = yield* addLinear(spoke, mock);
+      yield* copyDefinition(spoke, hub, integration.id);
+      yield* signIn(spoke, integration.id, "old-account");
+      yield* settle(hub, [spoke]);
+      yield* hub.integrations.adoptSyncedSignIns();
+      const itemId = (yield* oauthStateOf(hub, integration.id))!.tokenItemId!;
+      yield* TestClock.adjust(Duration.minutes(59.5));
+      const gate = { entered: yield* Deferred.make<void>(), resume: yield* Deferred.make<void>() };
+      mock.tokenGate = gate;
+      const refreshing = yield* hub.integrations.refreshSharedSignIns.pipe(Effect.forkScoped);
+      yield* Deferred.await(gate.entered);
+      delete mock.tokenGate;
+      yield* signIn(spoke, integration.id, "new-account", "https://other.cogenly.example");
+      yield* settle(hub, [spoke]);
+      const replacement = Option.getOrThrow(yield* hub.tokens.read(itemId));
+      expect(replacement.attachment?.registration?.clientId).toBe("client-2");
+      mock.clients.delete("client-1");
+      yield* Deferred.succeed(gate.resume, undefined);
+      yield* Fiber.join(refreshing);
+      const current = yield* hub.tokens.read(itemId);
+      expect(Option.getOrThrow(current)).toEqual(replacement);
+      expect((yield* oauthStateOf(hub, integration.id))?.signedIn).toBe(true);
+      yield* hub.integrations.adoptSyncedSignIns();
+      yield* whoami(hub);
+      expect(mock.accessTokens.get(mock.bearers.at(-1)!)).toBe("new-account");
     }).pipe(Effect.scoped, http),
   );
 

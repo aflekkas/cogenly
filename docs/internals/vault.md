@@ -66,7 +66,10 @@ exact field values: a JSON blob in one field would leave the tokens inside it
 unscrubbed. Expiry, server metadata, client registration and refresh ownership
 travel in the item's sealed sync attachment. The gateway reads them with all
 token fields and their revision from one vault-row snapshot; writes return
-the revision committed with those tokens.
+the revision committed with those tokens. A replacement sign-in updates the
+refresher's server and client metadata even while it remains signed in. A client
+authentication mismatch does not revoke the shared grant; only `invalid_grant`
+does, and an obsolete refusal first retries a newer token revision.
 
 Accounts reference vault items without copying their encrypted identities. The
 legacy backfill reads metadata only and preserves item ids and encrypted
