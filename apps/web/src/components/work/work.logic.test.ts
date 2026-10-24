@@ -13,6 +13,7 @@ import {
   listWorkPickerChoices,
   listWorkRepositories,
   openWorkWhenArrived,
+  workNotificationStatus,
   workPrefersNewWorktree,
   workStatusPresentation,
 } from "./work.logic";
@@ -275,6 +276,16 @@ describe("anchorWorkHandoffs", () => {
     const anchors = anchorWorkHandoffs([link("w1", "2026-09-01T00:00:00Z")], messages);
     expect(anchors.byMessageId.size).toBe(0);
     expect(anchors.unanchored.map((l) => l.threadId)).toEqual(["w1"]);
+  });
+});
+
+describe("workNotificationStatus", () => {
+  it("reads the status a Work session reported back with", () => {
+    expect(workNotificationStatus("completed")).toBe("done");
+    expect(workNotificationStatus("unknown")).toBe("done");
+    expect(workNotificationStatus("failed")).toBe("failed");
+    expect(workNotificationStatus("cancelled")).toBe("stopped");
+    expect(workNotificationStatus("updated")).toBe("waiting");
   });
 });
 

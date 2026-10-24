@@ -9,7 +9,7 @@ import type {
   WorkTask,
 } from "@t3tools/contracts";
 import { ChevronRightIcon, GitBranchIcon, HammerIcon } from "lucide-react";
-import { createContext, use, useMemo, type ReactNode } from "react";
+import { createContext, use, useMemo, useState, type ReactNode } from "react";
 
 import { cn } from "~/lib/utils";
 import { useProjects, useServerConfigs, useThreadShell } from "~/state/entities";
@@ -20,6 +20,7 @@ import { BadgeDot, type BadgeDotTone } from "../ui/badge-dot";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
   deriveWorkHandoffStatus,
+  workNotificationStatus,
   type WorkHandoffAnchors,
   type WorkHandoffStatus,
 } from "./work.logic";
@@ -188,20 +189,42 @@ export function isWorkHandoffThread(source: Parameters<typeof resolveThreadOrigi
   return origin?.kind === "chat" || origin?.kind === "agent-conversation";
 }
 
-const NOTIFICATION_OUTCOME_VERB: Record<OrchestrationV2Notification["outcome"], string> = {
-  completed: "finished",
-  failed: "failed",
-  cancelled: "stopped",
-  updated: "updated",
-  unknown: "finished",
-};
+/** Report ids already shown, so history and virtualized remounts never replay the fade. */
+const shownWorkReportIds = new Set<string>();
+const WORK_REPORT_ENTER_WINDOW_MS = 10_000;
 
-/** The chat's note that a Work session it handed off reported back, e.g. `Work "X" finished`. */
-export function workNotificationLabel(
-  title: string,
-  outcome: OrchestrationV2Notification["outcome"],
-): string {
-  return `Work "${title}" ${NOTIFICATION_OUTCOME_VERB[outcome]}`;
+/**
+ * A Work session this chat handed off reporting back, drawn as the handoff
+ * card's final state: "Work reported back" with the status it reported then
+ * and the session's title. The task or handoff card higher up keeps the live
+ * state and the repository, so this card leaves them out. The whole card opens
+ * the session. Only a report that just arrived fades in.
+ */
+export function WorkReportCard(props: {
+  readonly entryId: string;
+  readonly createdAt: string;
+  readonly threadId: ThreadId;
+  readonly title: string;
+  readonly outcome: OrchestrationV2Notification["outcome"];
+  readonly onOpenThread: (threadId: ThreadId) => void;
+}) {
+  const [entering] = useState(() => {
+    if (shownWorkReportIds.has(props.entryId)) return false;
+    shownWorkReportIds.add(props.entryId);
+    return Date.now() - Date.parse(props.createdAt) < WORK_REPORT_ENTER_WINDOW_MS;
+  });
+  const status = workNotificationStatus(props.outcome);
+  return (
+    <WorkHandoffCardFrame
+      threadId={props.threadId}
+      title={props.title}
+      status={status}
+      onOpenThread={props.onOpenThread}
+      className={entering ? "swap-motion" : undefined}
+    >
+      <WorkHandoffCardContent heading="Work reported back" status={status} title={props.title} />
+    </WorkHandoffCardFrame>
+  );
 }
 
 /**
@@ -233,11 +256,40 @@ function WorkHandoffMarker(props: {
       ? null
       : project;
   const status = thread ? deriveWorkHandoffStatus(thread) : null;
-  const visual = status ? STATUS_VISUAL[status] : null;
   const title = thread?.title || link.title;
-  const repositoryLabel = repository?.title ?? "No repository";
   const branch = repository ? thread?.branch : null;
 
+  return (
+    <WorkHandoffCardFrame
+      threadId={link.threadId}
+      title={title}
+      status={status}
+      onOpenThread={props.onOpenThread}
+    >
+      <WorkHandoffCardContent
+        heading="Handed off to Work"
+        status={status}
+        title={title}
+        location={{
+          repository,
+          label: repository?.title ?? "No repository",
+          branch: branch ?? null,
+        }}
+      />
+    </WorkHandoffCardFrame>
+  );
+}
+
+/** The handoff card's frame: the whole card is the button that opens the Work session. */
+function WorkHandoffCardFrame(props: {
+  readonly threadId: ThreadId;
+  readonly title: string;
+  readonly status: WorkHandoffStatus | null;
+  readonly onOpenThread: (threadId: ThreadId) => void;
+  readonly className?: string | undefined;
+  readonly children: ReactNode;
+}) {
+  const { threadId, title, status } = props;
   return (
     <Tooltip>
       <TooltipTrigger
@@ -247,19 +299,16 @@ function WorkHandoffMarker(props: {
             type="button"
             data-work-handoff=""
             aria-label={`Open Work: ${title}`}
-            aria-description={visual?.label}
-            onClick={() => props.onOpenThread(link.threadId)}
-            className="group/work-handoff flex w-full min-w-0 cursor-pointer items-center gap-2.5 rounded-xl border border-border bg-background px-3 py-2 text-left state-hover state-fade focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
+            aria-description={status ? STATUS_VISUAL[status].label : undefined}
+            onClick={() => props.onOpenThread(threadId)}
+            className={cn(
+              "group/work-handoff flex w-full min-w-0 cursor-pointer items-center gap-2.5 rounded-xl border border-border bg-background px-3 py-2 text-left state-hover state-fade focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70",
+              props.className,
+            )}
           />
         }
       >
-        <WorkHandoffCardContent
-          status={status}
-          title={title}
-          repository={repository}
-          repositoryLabel={repositoryLabel}
-          branch={branch ?? null}
-        />
+        {props.children}
       </TooltipTrigger>
       <TooltipPopup side="top">{title}</TooltipPopup>
     </Tooltip>
@@ -267,13 +316,17 @@ function WorkHandoffMarker(props: {
 }
 
 function WorkHandoffCardContent(props: {
+  readonly heading: string;
   readonly status: WorkHandoffStatus | null;
   readonly title: string;
-  readonly repository: Parameters<typeof ProjectFavicon>[0]["project"] | null;
-  readonly repositoryLabel: string;
-  readonly branch: string | null;
+  /** The repository and branch line; left out where a card above already shows it. */
+  readonly location?: {
+    readonly repository: Parameters<typeof ProjectFavicon>[0]["project"] | null;
+    readonly label: string;
+    readonly branch: string | null;
+  };
 }) {
-  const { status, title, repository, repositoryLabel, branch } = props;
+  const { status, title, location } = props;
   const statusChanged = useChangedSinceMount(status);
   const visual = status ? STATUS_VISUAL[status] : null;
   return (
@@ -281,7 +334,7 @@ function WorkHandoffCardContent(props: {
       <WorkAvatar status={status} />
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="flex min-w-0 items-center gap-1.5 text-2xs text-muted-foreground">
-          <span className="shrink-0">Handed off to Work</span>
+          <span className="shrink-0">{props.heading}</span>
           {visual ? (
             <>
               <span aria-hidden className="shrink-0">
@@ -298,16 +351,20 @@ function WorkHandoffCardContent(props: {
           ) : null}
         </span>
         <span className="min-w-0 truncate text-sm font-medium text-foreground">{title}</span>
-        <span className="flex min-w-0 items-center gap-1 text-2xs text-muted-foreground">
-          {repository ? <ProjectFavicon project={repository} className="size-3 shrink-0" /> : null}
-          <span className="min-w-0 truncate">{repositoryLabel}</span>
-          {branch ? (
-            <>
-              <GitBranchIcon aria-hidden className="ms-1 size-3 shrink-0" />
-              <span className="min-w-0 shrink-[2] truncate">{branch}</span>
-            </>
-          ) : null}
-        </span>
+        {location ? (
+          <span className="flex min-w-0 items-center gap-1 text-2xs text-muted-foreground">
+            {location.repository ? (
+              <ProjectFavicon project={location.repository} className="size-3 shrink-0" />
+            ) : null}
+            <span className="min-w-0 truncate">{location.label}</span>
+            {location.branch ? (
+              <>
+                <GitBranchIcon aria-hidden className="ms-1 size-3 shrink-0" />
+                <span className="min-w-0 shrink-[2] truncate">{location.branch}</span>
+              </>
+            ) : null}
+          </span>
+        ) : null}
       </span>
       <span
         aria-hidden

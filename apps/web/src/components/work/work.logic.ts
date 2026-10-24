@@ -1,6 +1,7 @@
 import type {
   EnvironmentId,
   MessageId,
+  OrchestrationV2Notification,
   ProjectId,
   RunId,
   ThreadEnvMode,
@@ -363,5 +364,26 @@ export function deriveWorkHandoffStatus(thread: {
       return "stopped";
     default:
       return "running";
+  }
+}
+
+/**
+ * The status a Work session reported back to its chat with, as that chat's
+ * notification card shows it: the state then, not now. A delegated session
+ * reports `updated` when it has a question for the user.
+ */
+export function workNotificationStatus(
+  outcome: OrchestrationV2Notification["outcome"],
+): WorkHandoffStatus {
+  switch (outcome) {
+    case "failed":
+      return "failed";
+    case "cancelled":
+      return "stopped";
+    case "updated":
+      return "waiting";
+    case "completed":
+    case "unknown":
+      return "done";
   }
 }
