@@ -21,7 +21,9 @@ Some settings belong to one machine, such as where its projects folder is, its b
 or its device hub. On a page with other settings these rows say which machine they change, such
 as "on MacBook", and you can switch the machine there. Pages about one machine's own state,
 Providers, Machines, Storage and Diagnostics, ask for a machine instead of a project: they show
-your primary machine until you pick another.
+your primary machine until you pick another. If projects still have their own provider switch or
+worktree cleanup, a layers icon beside the provider's switch or the Worktrees heading lists them,
+and **Reset all** returns them to the machine's setting.
 
 ## Worktree branch names
 
