@@ -1723,6 +1723,13 @@ const makeWsRpcHandlers = (
           origin: { origin: requestOrigin },
         }),
       [WS_METHODS.integrationsSubscribe]: () => integrations.subscribe(),
+      [WS_METHODS.integrationsSaveOAuthClient]: (input) =>
+        integrations.saveOAuthClient(input, { origin: { origin: requestOrigin } }),
+      [WS_METHODS.integrationsSaveApiKey]: (input) =>
+        integrations.saveApiKey(input, { origin: { origin: requestOrigin } }),
+      [WS_METHODS.integrationsInstallRuntime]: (input) =>
+        integrations.installRuntime(input.runtime),
+      [WS_METHODS.integrationsSubscribeSources]: () => integrations.subscribeSources(),
       [WS_METHODS.machineSecurityStatus]: () => machineSecurity.status,
       [WS_METHODS.machinesList]: () => machines.list,
       [WS_METHODS.machinesSubscribe]: () => machines.subscribe,

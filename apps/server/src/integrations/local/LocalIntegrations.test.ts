@@ -32,6 +32,7 @@ import * as Tokens from "../IntegrationTokens.ts";
 import { IntegrationEndpointPolicy } from "../RemoteEndpoint.ts";
 import * as Local from "./LocalIntegrations.ts";
 import * as Runner from "./LocalMcpRunner.ts";
+import * as Installer from "./RuntimeInstaller.ts";
 import * as LocalHttp from "./LocalIntegrationHttp.ts";
 import { GOOGLE_CALLBACK_PATH, GOOGLE_WORKSPACE_VERSION } from "./GoogleWorkspace.ts";
 import * as AgentStore from "../../agents/AgentStore.ts";
@@ -67,10 +68,13 @@ const testLayer = (
   format: "json" | "login" = "json",
   /** Lets a remote integration reach a mock server on loopback, as production never does. */
   allowLoopback = false,
-  runtimeMissing = false,
+  /** Fixed, or a switch a test flips (an install). */
+  runtime: boolean | { missing: boolean } = false,
   diagnostics?: { readonly state: "running" | "failed"; readonly tail: string },
   callbacks?: Array<string>,
+  installer?: Layer.Layer<Installer.RuntimeInstaller>,
 ) => {
+  const runtimeIsMissing = () => (typeof runtime === "boolean" ? runtime : runtime.missing);
   // Replace the external package at the process boundary; exercise the real supervisor and gateway.
   const runner = Layer.effect(
     Runner.LocalMcpRunner,
@@ -93,9 +97,10 @@ const testLayer = (
                 }),
         start: (spec) => {
           specs.push(spec);
+          const missing = runtimeIsMissing();
           return actual.start({
             ...spec,
-            runtime: runtimeMissing ? "uvx" : process.execPath,
+            runtime: missing ? "uvx" : process.execPath,
             args: [fixture],
             portEnvironment: { ...spec.portEnvironment, FIXTURE_PORT: "{port}" },
             env: {
@@ -103,7 +108,7 @@ const testLayer = (
               FIXTURE_TRANSPORT: spec.transport,
               FIXTURE_PORT: String(spec.port),
               FIXTURE_SECRET: "fake-client-secret",
-              ...(runtimeMissing ? { PATH: spec.directory } : {}),
+              ...(missing ? { PATH: spec.directory } : {}),
             },
           });
         },
@@ -127,6 +132,7 @@ const testLayer = (
     Layer.provide(
       allowLoopback ? Layer.succeed(IntegrationEndpointPolicy, loopbackHttpsPolicy) : Layer.empty,
     ),
+    Layer.provide(installer ?? Layer.empty),
     Layer.provideMerge(local),
   );
 };
@@ -482,25 +488,32 @@ describe("managed Google integrations", () => {
             callbackOrigin: "https://cogenly.example.com",
           })
           .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(dependencies));
+        const reply = replies.at(-1)?.result as {
+          integration?: unknown;
+          setup?: { type: string };
+          nextStep?: string;
+          settingsUrl?: string;
+        };
         if (missing) {
-          // The agent collects the client privately, points to the docs, then retries.
-          const reply = replies.at(-1)?.result as { code: string; message: string };
-          expect(reply.code).toBe("invalid_request");
-          expect(reply.message).toContain(
+          // Nothing is created; the agent relays Settings' guided steps or collects the client privately.
+          expect(reply.integration).toBeUndefined();
+          expect(reply.setup?.type).toBe("oauth_client");
+          expect(reply.settingsUrl).toBe("/settings/integrations?setup=google-workspace");
+          expect(reply.nextStep).toContain(
             'request_secret with saveToVault: {name: "google-oauth-client"',
           );
-          expect(reply.message).toContain("docs/user/integrations.md#connect-google");
-          expect(reply.message).toContain("call integration_add again");
+          expect(reply.nextStep).toContain("docs/user/integrations.md#connect-google");
+          expect(reply.nextStep).toContain("call integration_add again");
         } else if (runtimeMissing) {
-          expect(replies.at(-1)?.result).toMatchObject({
-            code: "invalid_request",
-            message: expect.stringContaining("Install uv"),
-          });
+          // The account is saved; installing uv is the step before sign-in.
+          expect(reply.integration).toBeDefined();
+          expect(reply.setup?.type).toBe("install_runtime");
+          expect(reply.nextStep).toContain("brew install uv");
         } else {
-          expect(replies.at(-1)?.result).toMatchObject({
-            code: "invalid_request",
-            message: expect.stringContaining("Settings"),
-          });
+          // A loopback agent request can't pick the browser's address, so the owner signs in.
+          expect(reply.integration).toBeDefined();
+          expect(reply.setup).toBeDefined();
+          expect(reply.nextStep).toContain("/settings/integrations?setup=integration%3A");
         }
       }).pipe(Effect.scoped, Effect.provide(testLayer([], missing, "json", false, runtimeMissing))),
   );
@@ -719,6 +732,76 @@ describe("managed Google integrations", () => {
       expect((yield* gateway.list()).integrations).toHaveLength(0);
     }).pipe(Effect.scoped, Effect.provide(testLayer([], true))),
   );
+
+  it.live("connecting Google without its client returns the guided steps instead of failing", () =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      const gateway = yield* Integrations.Integrations;
+      const result = yield* gateway.connectFromCatalog(
+        { catalogId: "google-workspace", accountLabel: "personal" },
+        { approveCredentials: true, origin: { origin: "https://cogenly.example.com" } },
+      );
+      expect(result.integration).toBeUndefined();
+      expect(result.setup?.type).toBe("oauth_client");
+      const steps = result.setup?.type === "oauth_client" ? result.setup.steps : [];
+      // The exact redirect URI this server will use, ready to paste into Google Cloud.
+      expect(steps.map((step) => step.copy?.value)).toContain(
+        `https://cogenly.example.com${GOOGLE_CALLBACK_PATH}`,
+      );
+      expect(steps.some((step) => step.text.includes("In production"))).toBe(true);
+      expect((yield* gateway.list()).integrations).toHaveLength(0);
+    }).pipe(Effect.scoped, Effect.provide(testLayer([], true))),
+  );
+
+  it.live("installing uv from Settings lets a waiting account start without a restart", () => {
+    const runtime = { missing: true };
+    const ran: Array<ReadonlyArray<string>> = [];
+    // The installer's process boundary: nothing is installed, the switch flips instead.
+    const installer = Layer.effect(
+      Installer.RuntimeInstaller,
+      Installer.make({
+        platform: "darwin",
+        runner: {
+          exists: (path) => Effect.succeed(path === "/opt/homebrew/bin/brew"),
+          run: (program, args) =>
+            Effect.sync(() => {
+              ran.push([program, ...args]);
+              runtime.missing = false;
+              return { exitCode: 0, output: "" };
+            }),
+        },
+      }),
+    );
+    return Effect.gen(function* () {
+      yield* runMigrations();
+      const gateway = yield* Integrations.Integrations;
+      const { integration } = yield* gateway.create({
+        preset: "google-workspace",
+        accountLabel: "work",
+        callbackOrigin: "https://cogenly.example.com",
+      });
+      const before = (yield* gateway.list()).integrations[0];
+      expect(before?.status).toBe("error");
+      expect(before?.setup).toMatchObject({
+        type: "install_runtime",
+        integrationId: integration.id,
+        runtime: "uv",
+        canInstall: true,
+        command: "brew install uv",
+      });
+      expect(yield* gateway.installRuntime("uv")).toEqual({
+        installed: true,
+        message: "uv is installed.",
+      });
+      expect(ran).toEqual([["/opt/homebrew/bin/brew", "install", "uv"]]);
+      const after = (yield* gateway.list()).integrations[0];
+      expect(after?.status).toBe("needs_sign_in");
+      expect(after?.setup).toMatchObject({ type: "sign_in", integrationId: integration.id });
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(testLayer([], false, "json", false, runtime, undefined, undefined, installer)),
+    );
+  });
 
   it.live("rejects user-entered remote loopback URLs without sending credentials", () =>
     Effect.gen(function* () {

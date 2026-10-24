@@ -20,8 +20,8 @@ import {
 
 /**
  * The names providers give each catalog service. Typed over every catalog id
- * so a new entry needs a decision here. `figma` is empty: Cogenly can't
- * connect it yet, so the provider's own Figma connector stays the only route.
+ * so a new entry needs a decision here. Services the catalog does not list
+ * (Figma, Atlassian, Intercom, ...) keep their provider connectors.
  */
 const PROVIDER_SERVICE_NAMES = {
   "google-workspace": [
@@ -32,29 +32,24 @@ const PROVIDER_SERVICE_NAMES = {
     "Google Sheets",
     "Google Slides",
   ],
+  slack: ["Slack"],
+  github: ["GitHub"],
   linear: ["Linear"],
   notion: ["Notion"],
-  github: ["GitHub"],
-  atlassian: ["Atlassian", "Atlassian Rovo", "Jira", "Confluence"],
-  intercom: ["Intercom"],
   "wispr-flow": ["Wispr Flow"],
-  slack: ["Slack"],
   fathom: ["Fathom"],
-  figma: [],
 } as const satisfies Record<IntegrationCatalogId, ReadonlyArray<string>>;
 
-const covered = (entry: IntegrationCatalogEntry) => entry.kind !== "unavailable";
-
 /** Service names, e.g. "Gmail", whose provider connector duplicates a catalog entry. */
-export const DUPLICATE_SERVICE_NAMES: ReadonlyArray<string> = INTEGRATION_CATALOG.filter(
-  covered,
-).flatMap((entry) => PROVIDER_SERVICE_NAMES[entry.id]);
+export const DUPLICATE_SERVICE_NAMES: ReadonlyArray<string> = INTEGRATION_CATALOG.flatMap(
+  (entry) => PROVIDER_SERVICE_NAMES[entry.id],
+);
 
 /** Origins of the catalog's remote MCP endpoints, e.g. `https://mcp.linear.app`. */
 export const DUPLICATE_SERVER_ORIGINS: ReadonlyArray<string> = Array.from(
   new Set(
-    INTEGRATION_CATALOG.filter(covered).flatMap((entry) =>
-      entry.kind === "remote" ? entry.regions.map((region) => new URL(region.url).origin) : [],
+    INTEGRATION_CATALOG.flatMap((entry: IntegrationCatalogEntry) =>
+      entry.kind === "remote" ? [new URL(entry.url).origin] : [],
     ),
   ),
 );

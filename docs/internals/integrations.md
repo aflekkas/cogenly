@@ -53,6 +53,29 @@ this version failed, and `needs_sign_in` for an OAuth integration without a
 usable grant. A passing `testConnection` refills that cache; Settings also
 keeps its last test result per integration version to show the failure reason.
 `integrations.subscribe` pushes the list after every change and status flip.
+`integrations.subscribeSources` is the same feed cut down for the composer's
+Sources picker (no headers or OAuth state), at `orchestration:read` because the
+composer runs on every paired client; it pushes only when a source changes.
+
+## Setup actions
+
+Every account that isn't usable carries one `IntegrationSetupAction`
+(`sign_in`, `oauth_client`, `api_key`, `install_runtime`, `retry`, `fix`),
+computed by the pure `setupActionFor` in
+[IntegrationSetup.ts](../../apps/server/src/integrations/IntegrationSetup.ts)
+from the catalog entry, the status, and the last failure's reason. Settings
+renders it on the row; agents get the same action rendered as `nextStep` plus a
+`settingsUrl` (`/settings/integrations?setup=<integration or catalog id>`), and
+tool failures are worded through the same mapping, so the two surfaces can't
+disagree. Add a failure reason there, not as a message in a handler.
+
+A missing key, app or Google client is a setup action, not an error:
+`connectFromCatalog` creates nothing and returns the action. The owner's
+secret forms (`saveOAuthClient`, `saveApiKey`) write the vault through
+`IntegrationSecrets`, never the integration payload: Google's shared client is
+the `google-oauth-client` login item allowing `accounts.google.com`, any other
+secret `<integration name>-client-secret` or `-api-key` allowing its token or
+endpoint host, so accounts of one service never share an item by accident.
 
 ## OAuth sign-in
 
@@ -107,19 +130,27 @@ reauthorization. Any committed edit retires the running definition (a stale
 in-flight request cannot restart it); an empty update changes nothing, so
 asking for a fresh link does not kill a pending sign-in.
 
+`integrations.installRuntime` installs uv with a fixed command (Homebrew when
+present, else Astral's installer) behind `RuntimeInstaller`, never a command
+from the caller. Managed processes also search uv's install directories, and a
+failed start is retried on every list, so an install takes effect without a
+restart.
+
 Clients have no RPC for an integration's tool list; only agents see tools,
 through `integration_tools`.
 
 ## Default catalog
 
 The catalog ([integrationCatalog.ts](../../packages/contracts/src/integrationCatalog.ts))
-is static data shared by the server, Settings and the context line. Connecting
-an entry resolves it, in one pure function
+is static data shared by the server, Settings and the context line, kept to the
+core services: Google Workspace, Slack, GitHub, Linear, Notion, Wispr Flow and
+Fathom, one endpoint each. Connecting an entry resolves it, in one pure function
 ([IntegrationCatalog.ts](../../apps/server/src/integrations/IntegrationCatalog.ts)),
 into an ordinary integration definition; nothing records which entry it came
 from. Settings groups accounts by matching the endpoint (or the local preset),
-so hand-added integrations for a catalog URL group too, and a persistent
-agent's catalog request is proposed as the resolved definition, so the owner
-approves exactly what gets created. A request that lacks an input fails
-`invalid_request` with the agent's next step as its cause, so agents learn
-what to collect without a new error reason per service.
+so hand-added integrations for a catalog URL group too, and accounts of a
+service the catalog later drops simply group as custom and keep working. A
+persistent agent's catalog request is proposed as the resolved definition, so
+the owner approves exactly what gets created. Every catalog id also needs a
+decision in
+[ProviderConnectorDuplicates.ts](../../apps/server/src/integrations/ProviderConnectorDuplicates.ts).

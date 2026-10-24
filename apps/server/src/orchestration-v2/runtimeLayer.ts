@@ -8,6 +8,7 @@ import * as Facts from "../context/FactService.ts";
 import * as Integrations from "../integrations/Integrations.ts";
 import * as LocalIntegrations from "../integrations/local/LocalIntegrations.ts";
 import * as LocalMcpRunner from "../integrations/local/LocalMcpRunner.ts";
+import * as RuntimeInstaller from "../integrations/local/RuntimeInstaller.ts";
 import * as IntegrationCredentials from "../integrations/IntegrationCredentials.ts";
 import * as IntegrationTokens from "../integrations/IntegrationTokens.ts";
 import * as Retrieval from "../context/ContextRetrievalService.ts";
@@ -378,6 +379,9 @@ const layerIntegrationsProvided = Integrations.layer.pipe(
   Layer.provide(layerIntegrationCredentials),
   Layer.provide(IntegrationTokens.layer.pipe(Layer.provide(layerVaultProvided))),
   Layer.provide(layerLocalIntegrationsProvided),
+  // Settings' secret forms and the uv installer.
+  Layer.provide(IntegrationCredentials.secretsLayer.pipe(Layer.provide(layerVaultProvided))),
+  Layer.provide(RuntimeInstaller.layer),
 );
 const layerAgentsProvided = Agents.layer.pipe(
   Layer.provide(

@@ -2,7 +2,6 @@ import {
   IntegrationAddInput,
   IntegrationError,
   OrchestratorMcpFailure,
-  type Integration,
   type ProjectLabelId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -15,59 +14,41 @@ import * as ProjectFiles from "../../../projectLabels/ProjectFiles.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
 import * as Invocation from "../../McpInvocationContext.ts";
 import { catalogRequest } from "../../../integrations/IntegrationCatalog.ts";
-import { GOOGLE_CLIENT_HELP } from "../../../integrations/local/GoogleWorkspace.ts";
+import {
+  agentFailureMessage,
+  agentSummary,
+  withAgentNextStep,
+} from "../../../integrations/IntegrationSetup.ts";
 import { IntegrationsToolkit } from "./tools.ts";
 
 const isIntegrationError = Schema.is(IntegrationError);
 const decodeAdd = Schema.decodeUnknownEffect(IntegrationAddInput);
 
-/** What an agent can act on, per reason; anything else is a server-side fault. */
-const AGENT_MESSAGES: Partial<Record<IntegrationError["reason"], string>> = {
-  approval_required:
-    "This integration change needs owner approval: it widens access, or moves stored credentials to a new destination. Ask the owner to make it in Settings → Integrations.",
-  sign_in_required:
-    "This integration needs the user to sign in (again). The owner must reconnect this account from Settings → Integrations. Agents can obtain links only for accounts that have never signed in.",
-  client_id_required:
-    "This server does not register clients automatically. The user must create an OAuth app with the provider, store its client secret in the vault, and set auth.clientId and auth.clientSecret ({{credential:<item>.<field>}}), e.g. in Settings → Integrations.",
-  credential_unresolved:
-    "An integration credential could not be resolved. Ask the owner to check the vault item named in its headers or client secret.",
-  credential_not_allowed:
-    "A vault item in this integration's headers isn't allowed for its server. Ask the owner to add the server to the item's allowed domains, or to save the integration in Settings → Integrations to approve it.",
-  not_found: "No connected integration with that name is available in this project.",
-  disabled: "That integration is disabled.",
-  google_client_missing: `Google needs the user's own OAuth client before an account can connect. Point the user to docs/user/integrations.md#connect-google to create one (a Web application client in Google Cloud). ${GOOGLE_CLIENT_HELP} Then call integration_add again.`,
-  local_runtime_missing:
-    "uvx is missing. Install uv with brew install uv (macOS) or https://docs.astral.sh/uv/getting-started/installation/ (Linux), then call integration_update with the saved account name to retry sign-in.",
-};
-const SERVER_MESSAGES: Partial<Record<IntegrationError["reason"], string>> = {
-  upstream_timeout:
-    "The integration did not answer in time. Try again, or ask the owner to check it in Settings.",
-  upstream_unreachable:
-    "The integration could not be reached. Ask the owner to check it in Settings.",
-  conflict: "An integration with that name already exists.",
-};
-
-const failure = (cause: unknown): OrchestratorMcpFailure => {
-  if (!isIntegrationError(cause))
+/** A failure in the same words Settings uses for it, with a link there. */
+const failureAt =
+  (origin: string | undefined) =>
+  (cause: unknown): OrchestratorMcpFailure => {
+    if (!isIntegrationError(cause))
+      return new OrchestratorMcpFailure({
+        code: "orchestration_error",
+        message: "The integration request could not be completed.",
+      });
+    const { message, transient } = agentFailureMessage(cause, origin);
     return new OrchestratorMcpFailure({
-      code: "orchestration_error",
-      message: "The integration request could not be completed.",
+      code: transient ? "orchestration_error" : "invalid_request",
+      message,
     });
-  const agentMessage = AGENT_MESSAGES[cause.reason];
-  return new OrchestratorMcpFailure({
-    code: agentMessage === undefined ? "orchestration_error" : "invalid_request",
-    message:
-      agentMessage ??
-      SERVER_MESSAGES[cause.reason] ??
-      "The integration request could not be completed.",
-  });
-};
+  };
 
-/** A catalog request's next step (a region, a vault reference) is the agent's message. */
-const catalogFailure = (cause: unknown): OrchestratorMcpFailure =>
-  isIntegrationError(cause) && cause.reason === "invalid_request" && typeof cause.cause === "string"
-    ? new OrchestratorMcpFailure({ code: "invalid_request", message: cause.cause })
-    : failure(cause);
+/** A catalog request's next step (an account label, a vault reference) is the agent's message. */
+const catalogFailureAt =
+  (origin: string | undefined) =>
+  (cause: unknown): OrchestratorMcpFailure =>
+    isIntegrationError(cause) &&
+    cause.reason === "invalid_request" &&
+    typeof cause.cause === "string"
+      ? new OrchestratorMcpFailure({ code: "invalid_request", message: cause.cause })
+      : failureAt(origin)(cause);
 
 /**
  * The caller's project scope: a thread caller sees integrations for its
@@ -85,10 +66,10 @@ const callerLabel = Effect.gen(function* () {
   return (folder?.labelId ?? null) as ProjectLabelId | null;
 });
 
-const byName = (name: string) =>
+const byName = (name: string, fail: (cause: unknown) => OrchestratorMcpFailure) =>
   Effect.gen(function* () {
     const service = yield* Integrations.Integrations;
-    const { integrations } = yield* service.list().pipe(Effect.mapError(failure));
+    const { integrations } = yield* service.list().pipe(Effect.mapError(fail));
     const label = yield* callerLabel;
     const found = integrations.find(
       (summary) =>
@@ -104,59 +85,28 @@ const byName = (name: string) =>
     return found.integration;
   });
 
-/**
- * The integration, plus a sign-in link when it signs in (remote OAuth or a
- * managed local account) and has no usable grant yet. A remote link returns
- * to the origin this MCP request reached; a local one to its callback origin.
- */
-const addedByAgent = Effect.gen(function* () {
-  const scope = yield* Invocation.McpInvocationContext;
-  if (scope.thread === undefined)
-    return { id: scope.requestNamespace, name: scope.client?.label ?? "MCP agent" };
-  const agents = yield* AgentStore.AgentStore;
-  const agent = yield* agents.forThread(scope.thread.threadId).pipe(Effect.mapError(failure));
-  return { id: agent?.id ?? scope.thread.threadId, name: agent?.name ?? "Coding agent" };
-});
-
-const withSignIn = (integration: Integration, callbackOrigin?: string) =>
+const addedByAgent = (fail: (cause: unknown) => OrchestratorMcpFailure) =>
   Effect.gen(function* () {
-    if (integration.auth?.type !== "oauth" && integration.transport !== "local")
-      return { integration };
-    const service = yield* Integrations.Integrations;
-    const { integrations } = yield* service.list().pipe(Effect.mapError(failure));
-    const summary = integrations.find((entry) => entry.integration.id === integration.id);
-    if (summary?.managed?.state === "missing_runtime")
-      return yield* failure(
-        new IntegrationError({
-          operation: "connect local account",
-          reason: "local_runtime_missing",
-        }),
-      );
-    if (summary?.status !== "needs_sign_in" || integration.provenance?.signedInAt !== undefined)
-      return { integration };
     const scope = yield* Invocation.McpInvocationContext;
-    const signIn = yield* service
-      .beginSignIn(integration.id, { origin: scope.httpOrigin, fromAgent: true, callbackOrigin })
-      .pipe(
-        Effect.mapError((cause) => {
-          const reason = catalogFailure(cause).message;
-          return new OrchestratorMcpFailure({
-            code: "invalid_request",
-            message: `${integration.name} is saved, but sign-in could not start. ${reason}`,
-          });
-        }),
-      );
-    return { integration, signIn };
+    if (scope.thread === undefined)
+      return { id: scope.requestNamespace, name: scope.client?.label ?? "MCP agent" };
+    const agents = yield* AgentStore.AgentStore;
+    const agent = yield* agents.forThread(scope.thread.threadId).pipe(Effect.mapError(fail));
+    return { id: agent?.id ?? scope.thread.threadId, name: agent?.name ?? "Coding agent" };
   });
 
 export const layer = McpToolAccess.toLayer(IntegrationsToolkit, {
   integrations_list: McpToolAccess.reads(() =>
     Effect.gen(function* () {
       const service = yield* Integrations.Integrations;
+      const scope = yield* Invocation.McpInvocationContext;
       const label = yield* callerLabel;
-      return yield* (label === undefined ? service.list() : service.listForProject(label)).pipe(
-        Effect.mapError(failure),
-      );
+      const { integrations } = yield* (
+        label === undefined ? service.list() : service.listForProject(label)
+      ).pipe(Effect.mapError(failureAt(scope.httpOrigin)));
+      return {
+        integrations: integrations.map((summary) => agentSummary(summary, scope.httpOrigin)),
+      };
     }),
   ),
   // Listing tools changes nothing, but it can send the integration's credentials
@@ -164,64 +114,91 @@ export const layer = McpToolAccess.toLayer(IntegrationsToolkit, {
   integration_tools: McpToolAccess.writesWithCapability((input) =>
     Effect.gen(function* () {
       const service = yield* Integrations.Integrations;
+      const scope = yield* Invocation.McpInvocationContext;
       const label = yield* callerLabel;
-      return yield* service.listTools(input.name, label).pipe(Effect.mapError(failure));
+      return yield* service
+        .listTools(input.name, label)
+        .pipe(Effect.mapError(failureAt(scope.httpOrigin)));
     }),
   ),
   integration_call: McpToolAccess.writesWithCapability((input) =>
     Effect.gen(function* () {
       const service = yield* Integrations.Integrations;
+      const scope = yield* Invocation.McpInvocationContext;
       const label = yield* callerLabel;
       return yield* service
         .callTool(input.name, input.tool, input.arguments, label)
-        .pipe(Effect.mapError(failure));
+        .pipe(Effect.mapError(failureAt(scope.httpOrigin)));
     }),
   ),
+  // The result is the account plus its sign-in link, or the step that comes first.
   integration_add: McpToolAccess.writesEnvironment((input) =>
     Effect.gen(function* () {
       const service = yield* Integrations.Integrations;
       const scope = yield* Invocation.McpInvocationContext;
-      if (input.catalogId !== undefined) {
+      const fail = failureAt(scope.httpOrigin);
+      const context = { origin: scope.httpOrigin, accountLabel: input.accountLabel };
+      const decoded =
+        input.catalogId === undefined
+          ? yield* decodeAdd(input).pipe(
+              Effect.mapError(
+                () =>
+                  new OrchestratorMcpFailure({
+                    code: "invalid_request",
+                    message:
+                      "Pass either catalogId for a default service, or a remote server (name, displayName, transport, url, headers, scope and hint).",
+                  }),
+              ),
+            )
+          : undefined;
+      // The Google preset is the catalog entry, so it gets the same guided steps.
+      const request =
+        input.catalogId !== undefined
+          ? catalogRequest({ ...input, catalogId: input.catalogId })
+          : decoded !== undefined && "preset" in decoded
+            ? catalogRequest({ ...input, catalogId: "google-workspace" })
+            : undefined;
+      if (request !== undefined) {
         const connected = yield* service
-          .connectFromCatalog(catalogRequest({ ...input, catalogId: input.catalogId }), {
+          .connectFromCatalog(request, {
             origin: { origin: scope.httpOrigin, fromAgent: true },
-            addedByAgent: yield* addedByAgent,
+            addedByAgent: yield* addedByAgent(fail),
             fromAgent: true,
           })
-          .pipe(Effect.mapError(catalogFailure));
-        // No link: its sign-in could not start, so ask again for the reason.
-        return connected.signIn === undefined
-          ? yield* withSignIn(connected.integration, input.callbackOrigin)
-          : connected;
+          .pipe(Effect.mapError(catalogFailureAt(scope.httpOrigin)));
+        return withAgentNextStep(connected, context);
       }
-      const decoded = yield* decodeAdd(input).pipe(
-        Effect.mapError(
-          () =>
-            new OrchestratorMcpFailure({
-              code: "invalid_request",
-              message:
-                "Pass either a remote server (name, displayName, transport, url, headers, scope, hint) or a managed Google account (preset: google-workspace, accountLabel).",
-            }),
-        ),
-      );
+      if (decoded === undefined || "preset" in decoded)
+        return yield* new OrchestratorMcpFailure({
+          code: "invalid_request",
+          message: "Pass catalogId, or a remote server's name, url and headers.",
+        });
       const { integration } = yield* service
-        .create(decoded, { addedByAgent: yield* addedByAgent, fromAgent: true })
-        .pipe(Effect.mapError(failure));
-      return yield* withSignIn(integration, input.callbackOrigin);
+        .create(decoded, { addedByAgent: yield* addedByAgent(fail), fromAgent: true })
+        .pipe(Effect.mapError(fail));
+      const prepared = yield* service
+        .prepareSignIn(integration.id, {
+          origin: scope.httpOrigin,
+          fromAgent: true,
+          callbackOrigin: input.callbackOrigin,
+        })
+        .pipe(Effect.mapError(fail));
+      return withAgentNextStep(prepared, context);
     }),
   ),
   integration_update: McpToolAccess.writesEnvironment((input) =>
     Effect.gen(function* () {
       const service = yield* Integrations.Integrations;
-      const current = yield* byName(input.name);
-      const label = yield* callerLabel;
       const scope = yield* Invocation.McpInvocationContext;
+      const fail = failureAt(scope.httpOrigin);
+      const current = yield* byName(input.name, fail);
+      const label = yield* callerLabel;
       const agents = yield* AgentStore.AgentStore;
       const agent =
         scope.thread === undefined
           ? null
-          : yield* agents.forThread(scope.thread.threadId).pipe(Effect.mapError(failure));
-      return yield* service
+          : yield* agents.forThread(scope.thread.threadId).pipe(Effect.mapError(fail));
+      const { integration } = yield* service
         .update(
           {
             id: current.id,
@@ -244,21 +221,30 @@ export const layer = McpToolAccess.toLayer(IntegrationsToolkit, {
             preserveScope: true,
           },
         )
-        .pipe(
-          Effect.mapError(failure),
-          Effect.flatMap(({ integration }) => withSignIn(integration, input.callbackOrigin)),
-        );
+        .pipe(Effect.mapError(fail));
+      const prepared = yield* service
+        .prepareSignIn(integration.id, {
+          origin: scope.httpOrigin,
+          fromAgent: true,
+          callbackOrigin: input.callbackOrigin,
+        })
+        .pipe(Effect.mapError(fail));
+      return withAgentNextStep(prepared, { origin: scope.httpOrigin });
     }),
   ),
   integration_remove: McpToolAccess.writesEnvironment((input) =>
     Effect.gen(function* () {
       const service = yield* Integrations.Integrations;
-      const current = yield* byName(input.name).pipe(Effect.catch(() => Effect.succeed(undefined)));
+      const scope = yield* Invocation.McpInvocationContext;
+      const fail = failureAt(scope.httpOrigin);
+      const current = yield* byName(input.name, fail).pipe(
+        Effect.catch(() => Effect.succeed(undefined)),
+      );
       if (current === undefined) return { deleted: false };
       const label = yield* callerLabel;
       return yield* service
         .remove(current.id, { callerLabelId: label })
-        .pipe(Effect.mapError(failure));
+        .pipe(Effect.mapError(fail));
     }),
   ),
 });

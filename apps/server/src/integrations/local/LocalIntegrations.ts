@@ -24,11 +24,12 @@ import * as ServerConfig from "../../config.ts";
 import * as Credentials from "../IntegrationCredentials.ts";
 import { selectCallbackOrigin, type SignInOrigin } from "../SignInOrigin.ts";
 import { isLoopbackHost } from "@t3tools/shared/preview";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import { isGrantRejection } from "./GrantRejection.ts";
+import { runtimeSearchDirectories } from "./RuntimeInstaller.ts";
 import * as Runner from "./LocalMcpRunner.ts";
 import {
   GOOGLE_CALLBACK_PATH,
-  GOOGLE_CLIENT_HELP,
   GOOGLE_SIGN_IN_PATH,
   GOOGLE_WORKSPACE_VERSION,
   googleWorkspaceInput,
@@ -54,7 +55,16 @@ export class LocalIntegrations extends Context.Service<
       labelId?: ProjectLabelId | null,
     ) => Effect.Effect<unknown, IntegrationError>;
     readonly stop: (id: string, replacement?: Integration) => Effect.Effect<void, IntegrationError>;
-    readonly status: (id: string) => Effect.Effect<Runner.LocalMcpStatus | undefined>;
+    /** The process, or why it could not start (`reason`, e.g. no Google client yet). */
+    readonly status: (id: string) => Effect.Effect<LocalStatus | undefined>;
+    /**
+     * The redirect URI Google must list for an account, or for one connected
+     * now from `source` (an owner's browser origin, or an agent).
+     */
+    readonly redirectUri: (
+      integration: Integration | undefined,
+      source?: { readonly fromAgent?: boolean | undefined; readonly origin?: string | undefined },
+    ) => Effect.Effect<string>;
     /** Whether the account's process holds a Google grant. */
     readonly signedIn: (id: string) => Effect.Effect<boolean, IntegrationError>;
     readonly callbackHost: (integration: Integration) => Effect.Effect<string, IntegrationError>;
@@ -75,6 +85,14 @@ export class LocalIntegrations extends Context.Service<
     readonly callback: (query: string) => Effect.Effect<boolean, IntegrationError>;
   }
 >()("cogenly-server/integrations/local/LocalIntegrations") {}
+
+export type LocalStatus = Runner.LocalMcpStatus & {
+  readonly reason?: IntegrationError["reason"] | undefined;
+};
+
+/** What a managed account's row says while it has no Google client to start with. */
+export const GOOGLE_CLIENT_MISSING_MESSAGE =
+  "Google needs your own OAuth client before this account can start.";
 
 const AuthResult = Schema.Struct({
   content: Schema.Array(Schema.Struct({ text: Schema.optional(Schema.String) })),
@@ -116,19 +134,33 @@ const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const lock = yield* Semaphore.make(1);
   const authLock = yield* Semaphore.make(1);
-  const failures = new Map<string, Runner.LocalMcpStatus>();
+  const failures = new Map<string, LocalStatus>();
   const ownChanges = yield* PubSub.unbounded<void>();
   const changed = PubSub.publish(ownChanges, undefined).pipe(Effect.asVoid);
   const configuredOrigin = yield* Config.String("COGENLY_GOOGLE_CALLBACK_ORIGIN").pipe(
     Config.withDefault(""),
     Effect.orDie,
   );
-  const environment = yield* Config.all({
+  const ambient = yield* Config.all({
     PATH: Config.String("PATH").pipe(Config.withDefault("")),
     HOME: Config.String("HOME").pipe(Config.withDefault("")),
     TMPDIR: Config.String("TMPDIR").pipe(Config.withDefault("/tmp")),
     SYSTEMROOT: Config.String("SYSTEMROOT").pipe(Config.withDefault("")),
   }).pipe(Effect.orDie);
+  const platform = yield* HostProcess.Platform;
+  const delimiter = platform === "win32" ? ";" : ":";
+  // uv's install directories too, so installing it from Settings works without a restart.
+  const environment = {
+    ...ambient,
+    PATH: [
+      ...new Set(
+        [
+          ...ambient.PATH.split(delimiter),
+          ...(ambient.HOME === "" ? [] : runtimeSearchDirectories(platform, ambient.HOME)),
+        ].filter((directory) => directory !== ""),
+      ),
+    ].join(delimiter),
+  };
   const tickets = new Map<
     string,
     { readonly integration: Integration; readonly expires: number; readonly fromAgent: boolean }
@@ -329,14 +361,17 @@ const make = Effect.gen(function* () {
           Effect.gen(function* () {
             if (!isCurrent(integration)) return;
             const message =
-              error.reason === "google_client_missing" ? GOOGLE_CLIENT_HELP : error.message;
+              error.reason === "google_client_missing"
+                ? GOOGLE_CLIENT_MISSING_MESSAGE
+                : error.message;
             // Lists retry the start; only a new reason is news, or listeners would loop.
             const unchanged = failures.get(integration.id)?.message === message;
             failures.set(integration.id, {
-              state: "failed",
+              state: error.reason === "local_runtime_missing" ? "missing_runtime" : "failed",
               version: integration.local?.version ?? GOOGLE_WORKSPACE_VERSION,
               stderrTail: "",
               message,
+              reason: error.reason,
             });
             if (!unchanged) yield* changed;
           }),
@@ -444,7 +479,23 @@ const make = Effect.gen(function* () {
           }),
         ),
       ),
-    status: (id) => runner.status(id).pipe(Effect.map((status) => status ?? failures.get(id))),
+    status: (id) =>
+      runner
+        .status(id)
+        .pipe(Effect.map((status): LocalStatus | undefined => status ?? failures.get(id))),
+    redirectUri: (integration, source) =>
+      Effect.gen(function* () {
+        const origin =
+          integration === undefined
+            ? configuredOrigin ||
+              (source?.fromAgent
+                ? `http://localhost:${config.port}`
+                : (source?.origin ?? `http://localhost:${config.port}`))
+            : yield* originFor(integration).pipe(
+                Effect.orElseSucceed(() => integration.local?.callbackOrigin ?? ""),
+              );
+        return `${URL.parse(origin)?.origin ?? origin}${GOOGLE_CALLBACK_PATH}`;
+      }),
     signedIn,
     signInProvenance,
     callbackHost: (integration) =>

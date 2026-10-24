@@ -304,15 +304,22 @@ describe("ClaudeAdapterV2 provider connector duplicates", () => {
       { serverName: "claude.ai Fathom" },
       { serverUrl: "https://mcp.linear.app/*" },
       { serverUrl: "https://mcp.slack.com/*" },
-      { serverUrl: "https://mcp.atlassian.com/*" },
+      { serverUrl: "https://api.fathom.ai/*" },
     ]) {
       assert.deepInclude(denied, entry);
     }
-    // Services Cogenly can't connect, or doesn't cover, keep their connectors.
-    for (const kept of ["claude.ai Figma", "claude.ai Claude Docs", "claude.ai Spawn Partners"]) {
+    // Services the catalog doesn't cover keep their connectors.
+    for (const kept of [
+      "claude.ai Figma",
+      "claude.ai Atlassian",
+      "claude.ai Intercom",
+      "claude.ai Claude Docs",
+      "claude.ai Spawn Partners",
+    ]) {
       assert.notDeepInclude(denied, { serverName: kept });
     }
     assert.notDeepInclude(denied, { serverUrl: "https://mcp.figma.com/*" });
+    assert.notDeepInclude(denied, { serverUrl: "https://mcp.atlassian.com/*" });
     // The denylist joins the session's other flag settings instead of replacing them.
     assert.equal(settings.autoCompactWindow, 300_000);
     assert.equal(settings.showThinkingSummaries, true);

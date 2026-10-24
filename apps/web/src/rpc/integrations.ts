@@ -36,9 +36,32 @@ export const integrationsRpc = {
     label: "integrations:beginSignIn",
     tag: "integrations.beginSignIn",
   }),
-  /** Connects a default catalog entry; its sign-in link comes back like beginSignIn's. */
+  /**
+   * Connects a default catalog entry; its sign-in link comes back like
+   * beginSignIn's, or the setup step to show when something comes first.
+   */
   connectFromCatalog: createEnvironmentRpcCommand(connectionAtomRuntime, {
     label: "integrations:connectFromCatalog",
     tag: "integrations.connectFromCatalog",
+  }),
+  /** An app's client id and secret from the setup form; the secret goes to the vault. */
+  saveOAuthClient: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "integrations:saveOAuthClient",
+    tag: "integrations.saveOAuthClient",
+  }),
+  /** An API key from the setup form; it goes to the vault. */
+  saveApiKey: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "integrations:saveApiKey",
+    tag: "integrations.saveApiKey",
+  }),
+  /** Installs uv for the Google account's managed server. */
+  installRuntime: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "integrations:installRuntime",
+    tag: "integrations.installRuntime",
+  }),
+  /** Connected accounts for the composer's Sources picker, pushed on every change. */
+  sources: createEnvironmentRpcSubscriptionAtomFamily(connectionAtomRuntime, {
+    label: "integrations:sources",
+    tag: "integrations.subscribeSources",
   }),
 };
