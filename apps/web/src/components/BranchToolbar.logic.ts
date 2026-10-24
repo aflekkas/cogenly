@@ -21,6 +21,11 @@ export interface EnvironmentOption {
   label: string;
   isPrimary: boolean;
   machine: EnvironmentMachineKind;
+  /**
+   * Set for a machine reached only through the draft environment's pairing:
+   * the launch goes to that environment, naming this machine to run it.
+   */
+  pairedMachine?: { readonly online: boolean };
 }
 
 export const EnvMode = Schema.Literals(["local", "worktree"]);

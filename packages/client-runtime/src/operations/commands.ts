@@ -8,6 +8,7 @@ import {
   OrchestrationV2CheckpointUnavailableError,
   WS_METHODS,
   type ChatAttachment,
+  type EnvironmentId,
   type MessageId,
   type ModelSelection,
   type NodeId,
@@ -168,6 +169,11 @@ interface StartThreadBootstrap {
     readonly createdAt: string;
     /** The project picked for the draft: the chat is created filed in it. */
     readonly projectFolderId?: ProjectLabelId;
+    /**
+     * A paired machine of the environment this request reaches that runs the
+     * new thread. Omitted runs it on that environment itself.
+     */
+    readonly machine?: EnvironmentId;
   };
   readonly prepareWorktree?: {
     /** V2 worktree launches always fail rather than falling back to the project checkout. */
@@ -701,6 +707,7 @@ export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(
       ...(bootstrap?.projectFolderId === undefined
         ? {}
         : { projectFolderId: bootstrap.projectFolderId }),
+      ...(bootstrap?.machine === undefined ? {} : { machine: bootstrap.machine }),
       initialMessage: {
         messageId: input.message.messageId,
         text: input.message.text,
