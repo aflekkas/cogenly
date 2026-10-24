@@ -1,5 +1,8 @@
+import { integrationSourceNotice } from "@t3tools/client-runtime/composerThreadItems";
 import type {
   AgentContextRecord,
+  EnvironmentId,
+  IntegrationCatalogId,
   ProjectFolderContextRecord,
   ThreadContextRecord,
 } from "@t3tools/contracts";
@@ -7,10 +10,12 @@ import { Link } from "@tanstack/react-router";
 import { BotIcon, MessagesSquareIcon } from "lucide-react";
 
 import { useAgents } from "~/agents/agentsClient";
+import { IntegrationSourceIcon, useComposerSources } from "./chat/ComposerSourcesPicker";
 import { ProjectFolderIcon } from "~/projectLabels/ProjectFolderMark";
 import { useEnvironmentProjectLabels } from "~/projectLabels/useProjectLabels";
 import { useThreadShell } from "~/state/entities";
 import { ContextChip, ContextChipLabel } from "./ContextChip";
+import { ContextChipShell } from "./contextChipParts";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 
 /**
@@ -79,6 +84,38 @@ export function AgentContextChip(props: {
       />
       <TooltipPopup side="top">{agent ? "Open agent" : "Agent no longer available"}</TooltipPopup>
     </Tooltip>
+  );
+}
+
+/**
+ * Inline chip for a source (a connected integration) the agent should use. Pass the
+ * composer's environment to watch the account live: a source that needs sign-in, is
+ * failing or was removed turns to a warning with the reason in its tooltip. Sent
+ * messages pass null and show the snapshot.
+ */
+export function IntegrationContextChip(props: {
+  record: { integrationId: string; label: string; icon: IntegrationCatalogId | null };
+  environmentId: EnvironmentId | null;
+  copyMarkdown?: string;
+}) {
+  const { all, isLoaded } = useComposerSources(props.environmentId, null);
+  const live = all.find((source) => source.id === props.record.integrationId);
+  const watching = props.environmentId !== null && isLoaded;
+  const notice = !watching
+    ? null
+    : live === undefined
+      ? { detail: "This source is no longer connected. Reconnect it in Settings → Integrations." }
+      : integrationSourceNotice(live);
+  return (
+    <ContextChipShell
+      kind="integration"
+      {...(notice ? { state: "warning" as const } : {})}
+      icon={<IntegrationSourceIcon icon={live?.icon ?? props.record.icon} />}
+      label={props.record.label}
+      aria-label={`Source, ${props.record.label}${notice ? `. ${notice.detail}` : ""}`}
+      data-markdown-copy={props.copyMarkdown}
+      tooltip={notice ? notice.detail : "The agent uses this account"}
+    />
   );
 }
 

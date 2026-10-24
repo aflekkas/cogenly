@@ -51,7 +51,7 @@ export function composerMenuEmptyText(input: {
     case "skill":
       return "No skills found. Try / to browse provider commands.";
     case "path":
-      return "No matching tasks, chats, agents, projects or files.";
+      return "No matching tasks, chats, agents, projects, sources or files.";
     default:
       return "No matching command.";
   }

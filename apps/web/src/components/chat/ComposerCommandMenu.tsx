@@ -22,6 +22,7 @@ import {
   HammerIcon,
   MessageCircleIcon,
   PackageIcon,
+  PlugIcon,
   SettingsIcon,
   UserRoundIcon,
   type LucideIcon,
@@ -41,6 +42,7 @@ import {
   SearchListRowTrailing,
 } from "../ui/search-list";
 import { PierreEntryIcon } from "./PierreEntryIcon";
+import { IntegrationSourceRowContent } from "./ComposerSourcesPicker";
 import { ComposerBanner } from "./ComposerBanner";
 import { composerMenuEmptyText, composerMenuSections } from "./ComposerCommandMenu.logic";
 
@@ -97,6 +99,7 @@ const MENU_GROUP_PRESENTATION: Record<ComposerMenuGroup, { label: string; icon: 
   chats: { label: "Chats", icon: MessageCircleIcon },
   agents: { label: "Agents", icon: BotIcon },
   projects: { label: "Projects", icon: FolderIcon },
+  sources: { label: "Sources", icon: PlugIcon },
   files: { label: "Files and folders", icon: FileIcon },
 };
 
@@ -229,6 +232,9 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
         props.onSelect(props.item);
       }}
     >
+      {props.item.type === "integration" ? (
+        <IntegrationSourceRowContent source={props.item.source} />
+      ) : null}
       {props.item.type === "path" ? (
         <SearchListRowIcon>
           <PierreEntryIcon
@@ -245,21 +251,23 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
           <MentionItemIcon group={props.item.group} />
         </SearchListRowIcon>
       ) : null}
-      <SearchListRowText layout="inline">
-        <SearchListRowLabel>
-          {isSlashSkill ? (
-            <>
-              <span className="text-muted-foreground">/skill:</span>
-              {formatProviderSkillDisplayName(isSlashSkill)}
-            </>
-          ) : (
-            props.item.label
-          )}
-        </SearchListRowLabel>
-        {props.item.description ? (
-          <SearchListRowDescription>{props.item.description}</SearchListRowDescription>
-        ) : null}
-      </SearchListRowText>
+      {props.item.type === "integration" ? null : (
+        <SearchListRowText layout="inline">
+          <SearchListRowLabel>
+            {isSlashSkill ? (
+              <>
+                <span className="text-muted-foreground">/skill:</span>
+                {formatProviderSkillDisplayName(isSlashSkill)}
+              </>
+            ) : (
+              props.item.label
+            )}
+          </SearchListRowLabel>
+          {props.item.description ? (
+            <SearchListRowDescription>{props.item.description}</SearchListRowDescription>
+          ) : null}
+        </SearchListRowText>
+      )}
       {skillSourceKind ? (
         <SearchListRowTrailing>
           <SkillSourceBadge
@@ -283,7 +291,7 @@ export function composerSuggestionOptionId(listId: string, itemId: string): stri
 }
 
 const LISTBOX_LABEL_BY_TRIGGER: Record<ComposerTriggerKind, string> = {
-  path: "Tasks, chats, agents, projects and files",
+  path: "Tasks, chats, agents, projects, sources and files",
   "pull-request": "Pull requests",
   "slash-command": "Commands",
   skill: "Skills",

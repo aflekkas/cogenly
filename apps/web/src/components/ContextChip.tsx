@@ -46,12 +46,17 @@ const contextChipVariants = cva(
         thread: "[--context-chip-accent:oklch(0.62_0.12_190)]",
         agent: "[--context-chip-accent:oklch(0.62_0.15_350)]",
         "project-folder": "[--context-chip-accent:oklch(0.62_0.12_100)]",
+        // Its account can lapse while it sits in a draft, so its warning fades in and out.
+        integration:
+          "transition-colors duration-(--motion-duration-fast) ease-out motion-reduce:transition-none [--context-chip-accent:oklch(0.62_0.12_140)]",
         citation: "[--context-chip-accent:oklch(0.62_0.16_259)]",
       },
       // Colors live in compoundVariants below so they come after the kind colors.
       state: {
         unresolved: "border-dashed",
         invalid: "",
+        /** Still usable once fixed, such as a source that needs sign-in. */
+        warning: "",
       },
     },
     compoundVariants: [
@@ -74,6 +79,7 @@ const contextChipVariants = cva(
           "thread",
           "agent",
           "project-folder",
+          "integration",
           "citation",
         ],
         className:
@@ -82,6 +88,10 @@ const contextChipVariants = cva(
       // State colors win over any kind.
       { state: "unresolved", className: "text-foreground" },
       { state: "invalid", className: "border-destructive/35 bg-destructive/8 text-destructive" },
+      {
+        state: "warning",
+        className: "border-warning/40 bg-warning/8 text-warning-foreground dark:bg-warning/16",
+      },
     ],
   },
 );
@@ -90,7 +100,7 @@ type ContextChipKind = NonNullable<VariantProps<typeof contextChipVariants>["kin
 
 interface ContextChipProps extends useRender.ComponentProps<"span"> {
   kind?: ContextChipKind;
-  state?: "unresolved" | "invalid";
+  state?: "unresolved" | "invalid" | "warning";
 }
 
 function ContextChip({ className, kind, state, render, ...props }: ContextChipProps) {

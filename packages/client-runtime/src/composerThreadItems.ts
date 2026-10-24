@@ -1,11 +1,17 @@
-import type { EnvironmentId, ScopedThreadRef, ThreadId } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  IntegrationSource,
+  ProjectLabelId,
+  ScopedThreadRef,
+  ThreadId,
+} from "@t3tools/contracts";
 
 /** Per section with a query; bare `@` shows fewer, as a hint of what it can find. */
 const MENTION_RESULT_LIMIT = 4;
 const MENTION_RECENT_LIMIT = 2;
 
 /** The `@` sections in display order, before ranking moves the closest match up. */
-export const COMPOSER_MENTION_GROUPS = ["tasks", "chats", "agents", "projects"] as const;
+export const COMPOSER_MENTION_GROUPS = ["tasks", "chats", "agents", "projects", "sources"] as const;
 export type ComposerMentionGroup = (typeof COMPOSER_MENTION_GROUPS)[number];
 
 export interface ComposerThreadCandidate {
@@ -62,10 +68,96 @@ export interface ComposerProjectFolderItem {
   readonly description: string;
 }
 
+/** A connected integration; its row names the service and the account, like the Sources picker. */
+export interface ComposerSourceItem {
+  readonly id: string;
+  readonly type: "integration";
+  readonly group: "sources";
+  readonly source: IntegrationSource;
+  readonly label: string;
+  readonly description: string;
+}
+
 export type ComposerMentionItem =
   | ComposerThreadItem
   | ComposerAgentItem
-  | ComposerProjectFolderItem;
+  | ComposerProjectFolderItem
+  | ComposerSourceItem;
+
+/**
+ * The sources a thread in `projectLabelId` can use, as the server decides it
+ * (`integrationVisibleTo`): every all-project integration, plus those scoped to
+ * this project. A thread in no project gets only the all-project ones.
+ */
+export function integrationSourcesForProject(
+  sources: ReadonlyArray<IntegrationSource>,
+  projectLabelId: ProjectLabelId | null,
+): IntegrationSource[] {
+  return sources.filter(
+    (source) =>
+      source.scope.type === "all" ||
+      (projectLabelId !== null && source.scope.labelIds.includes(projectLabelId)),
+  );
+}
+
+/** A source's row: the service, then which account (or the integration's own name). */
+export function integrationSourceRowText(
+  source: Pick<IntegrationSource, "serviceName" | "displayName" | "accountLabel">,
+): { readonly label: string; readonly description: string } {
+  const account = source.accountLabel?.trim();
+  if (account) return { label: source.serviceName, description: account };
+  const displayName = source.displayName.trim();
+  return {
+    label: source.serviceName,
+    description: displayName !== source.serviceName ? displayName : "",
+  };
+}
+
+/** A source's chip text: "Gmail · work", or the service alone when it names no account. */
+export function integrationSourceChipLabel(
+  source: Pick<IntegrationSource, "serviceName" | "displayName" | "accountLabel">,
+): string {
+  const { label, description } = integrationSourceRowText(source);
+  return description ? `${label} · ${description}` : label;
+}
+
+export interface IntegrationSourceNotice {
+  /** The short badge on its row. */
+  readonly badge: string;
+  readonly tone: "warning" | "error";
+  /** What is wrong and what to do, for a chip's tooltip. */
+  readonly detail: string;
+}
+
+/** What a source's row badge and chip warning say; null when it is ready to use. */
+export function integrationSourceNotice(
+  source: Pick<IntegrationSource, "status" | "message" | "syncedFrom">,
+): IntegrationSourceNotice | null {
+  const message = source.message?.trim();
+  switch (source.status) {
+    case "connected":
+      return null;
+    case "needs_sign_in":
+      return source.syncedFrom
+        ? {
+            badge: "Sign in on this machine",
+            tone: "warning",
+            detail: `Connected on ${source.syncedFrom.machineLabel}. Sign in on this machine in Settings → Integrations before the agent can use it.`,
+          }
+        : {
+            badge: "Needs sign-in",
+            tone: "warning",
+            detail:
+              message || "Sign in again in Settings → Integrations before the agent can use it.",
+          };
+    case "error":
+      return {
+        badge: "Error",
+        tone: "error",
+        detail: message || "This source is not working. Check it in Settings → Integrations.",
+      };
+  }
+}
 
 /**
  * How closely `name` matches `query`, lower is closer: exact, prefix, word prefix, then
@@ -105,6 +197,8 @@ export function matchComposerMentionItems(input: {
   threads: ReadonlyArray<ComposerThreadCandidate>;
   agents: ReadonlyArray<ComposerAgentCandidate>;
   projectFolders: ReadonlyArray<ComposerProjectFolderCandidate>;
+  /** This environment's sources, already kept to the thread's project. */
+  sources?: ReadonlyArray<IntegrationSource>;
   environmentId: EnvironmentId;
   excludeThreadId: ThreadId | null;
   query: string;
@@ -187,11 +281,39 @@ export function matchComposerMentionItems(input: {
     limit,
   );
 
+  // Sources have no recency, so equally close matches keep the server's order.
+  const sources = rank(
+    (input.sources ?? []).flatMap((source): Ranked<ComposerSourceItem>[] => {
+      const { label, description } = integrationSourceRowText(source);
+      const scores = [label, description, source.displayName, source.name].flatMap((text) => {
+        const score = text ? mentionMatchScore(text, query) : null;
+        return score === null ? [] : [score];
+      });
+      if (scores.length === 0) return [];
+      return [
+        {
+          score: Math.min(...scores),
+          at: "",
+          item: {
+            id: `integration:${source.id}`,
+            type: "integration",
+            group: "sources",
+            source,
+            label,
+            description,
+          },
+        },
+      ];
+    }),
+    limit,
+  );
+
   const sections: ReadonlyArray<ReadonlyArray<Ranked<ComposerMentionItem>>> = [
     threadsOf("work", "tasks"),
     threadsOf("chat", "chats"),
     agents,
     projectFolders,
+    sources,
   ];
   return sections
     .map((entries, order) => ({ entries, order, best: entries[0]?.score ?? Infinity }))
