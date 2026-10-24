@@ -23,7 +23,6 @@ const EMPTY_DEVICE_STATE: DeviceServiceState = {
   hostStatuses: {},
   devices: [],
   sessions: [],
-  onboardingCompleted: false,
   agentAccessEnabled: false,
   hubBasePath: "/api/device-hub",
   revision: 0,

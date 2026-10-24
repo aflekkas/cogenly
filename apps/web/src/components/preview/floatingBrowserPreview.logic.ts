@@ -7,8 +7,11 @@ export const FLOATING_PREVIEW_CAPTURE_INTERVAL_MS = 2_000;
 /** The card's size in CSS px: the page fills it edge to edge at 16:10. */
 export const FLOATING_PREVIEW_CARD_WIDTH = 248;
 export const FLOATING_PREVIEW_CARD_HEIGHT = 155;
-/** Space between the card and whatever edge or obstacle it docks against. */
-const FLOATING_PREVIEW_MARGIN = 16;
+/**
+ * Space between the card and whatever edge or obstacle it docks against. Matches
+ * the docked details card's inset from the canvas (right-3, top-3).
+ */
+const FLOATING_PREVIEW_MARGIN = 12;
 /** A pane narrower than this keeps the chat to itself. */
 export const FLOATING_PREVIEW_MIN_PANE_WIDTH = 560;
 /** A press that moves less than this is a click, not a drag. */
@@ -59,12 +62,17 @@ export function shouldShowFloatingPreview(input: {
 
 export type FloatingPreviewCorner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
 
+/** Where the card rests until the user positions it: under the header, at the canvas's right edge. */
+export const DEFAULT_FLOATING_PREVIEW_CORNER: FloatingPreviewCorner = "top-right";
+
 interface FloatingPreviewInsets {
   readonly top: number;
-  /** Includes the docked composer, so bottom corners sit above it. */
+  /** Includes the docked composer, so every corner sits above it. */
   readonly bottom: number;
   /** Keeps right corners clear of the timeline minimap strip. */
   readonly right?: number;
+  /** The docked details card, in pane coordinates; right corners step left of it. */
+  readonly detailsCard?: { readonly left: number; readonly bottom: number } | null;
 }
 
 export interface FloatingPreviewPoint {
@@ -85,17 +93,36 @@ export function floatingPreviewCornerPosition(
   insets: FloatingPreviewInsets,
 ): FloatingPreviewPoint {
   const left = FLOATING_PREVIEW_MARGIN;
-  const right = Math.max(
+  const rightEdge = Math.max(
     left,
     pane.width - (insets.right ?? 0) - card.width - FLOATING_PREVIEW_MARGIN,
   );
   const top = insets.top + FLOATING_PREVIEW_MARGIN;
-  // A short pane keeps the card under the top inset rather than behind the composer.
+  // Above the composer; a pane too short for that keeps the card under the top
+  // inset, and floatingPreviewPaneFits hides it instead.
   const bottom = Math.max(top, pane.height - insets.bottom - card.height - FLOATING_PREVIEW_MARGIN);
-  return {
-    x: corner.endsWith("left") ? left : right,
-    y: corner.startsWith("top") ? top : bottom,
-  };
+  const y = corner.startsWith("top") ? top : bottom;
+  // An open details card holds the top-right; a right corner beside it slides
+  // left of it instead of covering it.
+  const details = insets.detailsCard;
+  const x = corner.endsWith("left")
+    ? left
+    : details && y < details.bottom + FLOATING_PREVIEW_MARGIN
+      ? Math.max(left, Math.min(rightEdge, details.left - FLOATING_PREVIEW_MARGIN - card.width))
+      : rightEdge;
+  return { x, y };
+}
+
+/** Whether the chat pane has room to float a card without covering the composer. */
+export function floatingPreviewPaneFits(
+  pane: FloatingPreviewSize,
+  card: FloatingPreviewSize,
+  bottomInset: number,
+): boolean {
+  return (
+    pane.width >= FLOATING_PREVIEW_MIN_PANE_WIDTH &&
+    pane.height >= card.height + FLOATING_PREVIEW_MARGIN * 2 + bottomInset
+  );
 }
 
 /** The corner a card dropped at `position` snaps to: whichever its center is nearest. */
@@ -109,6 +136,29 @@ export function nearestFloatingPreviewCorner(
   const vertical = centerY < pane.height / 2 ? "top" : "bottom";
   const horizontal = centerX < pane.width / 2 ? "left" : "right";
   return `${vertical}-${horizontal}`;
+}
+
+interface PersistedFloatingPosition {
+  readonly corner: FloatingPreviewCorner | null;
+  readonly freePosition: FloatingPreviewPoint | null;
+}
+
+/**
+ * Version 1 always stored a corner, "bottom-right" until the card was moved, so
+ * that corner with no free position is indistinguishable from the old default.
+ * It resets to the new default; every other saved position is one the user chose.
+ */
+export function migratePersistedPosition(
+  persisted: unknown,
+  version: number,
+): PersistedFloatingPosition {
+  const saved = (persisted ?? {}) as Partial<PersistedFloatingPosition>;
+  const freePosition = saved.freePosition ?? null;
+  const corner = saved.corner ?? null;
+  if (version < 2 && freePosition === null && corner === "bottom-right") {
+    return { corner: null, freePosition };
+  }
+  return { corner, freePosition };
 }
 
 /** A drop within this distance of a docked corner snaps to it; farther, the card stays put. */

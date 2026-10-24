@@ -124,6 +124,37 @@ describe("decideFallback / advanceFallback", () => {
     expect(decideFallback(exhausted, NOW + FALLBACK_COOLDOWN_MS).restored).toBe(true);
   });
 
+  it("keeps the return-to-primary time set by the primary failure when a fallback fails", () => {
+    const primaryUntil = "2026-01-01T10:00:00.000Z";
+    // A fallback failing much later, with its own later reset, must not
+    // push out when the primary is retried.
+    const advance = advanceFallback({
+      chainLength: 3,
+      failedIndex: 1,
+      reason: "usage_limit",
+      resetAt: "2026-01-05T10:00:00.000Z",
+      nowMs: Date.parse("2026-01-03T00:00:00.000Z"),
+      existingUntil: primaryUntil,
+    });
+    expect(advance).toEqual({
+      index: 2,
+      reason: "usage_limit",
+      until: primaryUntil,
+      resetAt: null,
+    });
+    // And without a known reset it must not start a fresh cooldown either.
+    expect(
+      advanceFallback({
+        chainLength: 3,
+        failedIndex: 2,
+        reason: "auth",
+        resetAt: null,
+        nowMs: Date.parse("2026-01-03T00:00:00.000Z"),
+        existingUntil: primaryUntil,
+      })!.until,
+    ).toBe(primaryUntil);
+  });
+
   it("finds the used entry in the chain", () => {
     expect(chainIndexOf([primary, second, third], third)).toBe(2);
     expect(chainIndexOf([primary, second], undefined)).toBe(0);

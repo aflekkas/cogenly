@@ -12,8 +12,10 @@
 import {
   DesktopBrowserCommand,
   DesktopBrowserEvent,
+  type DesktopBrowserCommand as DesktopBrowserCommandType,
   type DesktopBrowserEvent as DesktopBrowserEventType,
   type DesktopBrowserPointerBox,
+  type SitePermissionChangeResult,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as NodePath from "node:path";
@@ -24,8 +26,11 @@ import * as PubSub from "effect/PubSub";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
+import * as BrowserSession from "./BrowserSession.ts";
 import { createCdpRelayConnection, type CdpRelayConnection } from "./CdpRelay.ts";
 import { sendPageCommand } from "./GuestInput.ts";
+import * as SitePermissions from "./SitePermissions.ts";
+import { permissionOriginOf } from "./SitePermissionStore.ts";
 
 const encodeEvent = Schema.encodeSync(Schema.fromJsonString(DesktopBrowserEvent));
 const decodeCommand = Schema.decodeUnknownOption(Schema.fromJsonString(DesktopBrowserCommand));
@@ -103,6 +108,8 @@ export class DesktopBrowserHost extends Context.Service<
 >()("@t3tools/desktop/preview/DesktopBrowserHost") {}
 
 export const make = Effect.gen(function* () {
+  const browserSession = yield* BrowserSession.BrowserSession;
+  const { controller: sitePermissions } = yield* SitePermissions.SitePermissions;
   const outbox = yield* PubSub.unbounded<DesktopBrowserEventType>();
   const pointers = yield* PubSub.sliding<DesktopAgentPointer>(16);
   const runFork = Effect.runForkWith(yield* Effect.context<never>());
@@ -188,11 +195,62 @@ export const make = Effect.gen(function* () {
     emit({ type: "attached", ...key });
   };
 
+  /**
+   * An agent reads or changes the site permissions of a tab it drives. It
+   * decides as an agent, so it can answer a waiting prompt or set what the
+   * person has not decided, but never lift a Block the person chose.
+   */
+  const answerPermissionCommand = (
+    tab: AttachedTab | undefined,
+    change: Extract<DesktopBrowserCommandType, { type: "permission" }>["change"],
+  ): SitePermissionChangeResult => {
+    const guest = tab?.debuggee.webContents;
+    const partition =
+      guest === undefined || guest.isDestroyed()
+        ? undefined
+        : browserSession.partitionOf(guest.session);
+    if (guest === undefined || partition === undefined) {
+      return { ok: false, reason: "unknown-tab", state: null };
+    }
+    const tabUrl = guest.getURL();
+    if (change === null)
+      return { ok: true, state: sitePermissions.state(partition, guest.id, tabUrl) };
+    const origin = permissionOriginOf(change.origin ?? tabUrl);
+    if (origin === null) {
+      return {
+        ok: false,
+        reason: "no-origin",
+        state: sitePermissions.state(partition, guest.id, tabUrl),
+      };
+    }
+    const applied = sitePermissions.change(
+      partition,
+      origin,
+      change.permission,
+      change.setting,
+      "agent",
+    );
+    const state = sitePermissions.state(partition, guest.id, origin);
+    return applied.ok ? { ok: true, state } : { ok: false, reason: applied.reason, state };
+  };
+
   const handleCommandLine = (line: string) =>
     Effect.sync(() => {
       const command = decodeCommand(line);
       if (Option.isNone(command)) return;
       const tab = tabs.get(keyOf(command.value));
+      if (command.value.type === "permission") {
+        const { threadId, tabId, requestId, change } = command.value;
+        // Answered even for a tab that is gone, so the server never waits on a timeout.
+        emit({
+          type: "permission",
+          threadId,
+          tabId,
+          requestId,
+          result: answerPermissionCommand(tab, change),
+        });
+        return;
+      }
       if (!tab) return;
       if (command.value.type === "pointer") {
         const { threadId, tabId, phase, x, y, box } = command.value;

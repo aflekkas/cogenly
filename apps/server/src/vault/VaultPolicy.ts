@@ -28,27 +28,31 @@ export const hostMatchesAnyDomain = (
 export type VaultUseCaller =
   | { readonly kind: "human" }
   | { readonly kind: "server" }
-  | { readonly kind: "agent"; readonly agentId: string };
+  | { readonly kind: "agent"; readonly agentId: string }
+  | { readonly kind: "thread"; readonly threadId: string };
 
 export type VaultPolicyDecision = "allow" | "ask" | "deny";
 
 /**
- * Owner/human-initiated turns and server-internal callers are allowed. An
- * agent is allowed only when the item policy says `allow` for that agent
- * (an empty agent list means any agent) and, when the policy lists domains,
- * for this domain. Everything else asks the owner.
+ * Human and server-internal callers are allowed. MCP threads and persistent
+ * agents require `allow` for their identity and the destination domain. Empty
+ * identity lists mean any thread or agent; everything else asks the owner.
  */
 export const evaluateVaultPolicy = (input: {
   readonly policy: VaultPolicy;
   readonly caller: VaultUseCaller;
   readonly domain?: string | null | undefined;
 }): VaultPolicyDecision => {
-  if (input.caller.kind !== "agent") return "allow";
-  const agentId = input.caller.agentId;
+  if (input.caller.kind === "human" || input.caller.kind === "server") return "allow";
   if (input.policy.mode !== "allow") return "ask";
+  const caller = input.caller;
+  const threads = input.policy.allowedThreadIds ?? [];
+  const restricted = input.policy.allowedAgentIds.length > 0 || threads.length > 0;
   if (
-    input.policy.allowedAgentIds.length > 0 &&
-    !input.policy.allowedAgentIds.some((id) => id === agentId)
+    restricted &&
+    (caller.kind === "agent"
+      ? !input.policy.allowedAgentIds.some((id) => id === caller.agentId)
+      : !threads.some((id) => id === caller.threadId))
   )
     return "ask";
   if (input.policy.allowedDomains.length > 0) {

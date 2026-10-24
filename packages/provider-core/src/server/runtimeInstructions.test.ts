@@ -99,6 +99,17 @@ describe("buildProjectManifest", () => {
     expect(manifest).toContain("project_file_read");
   });
 
+  it("tells agents to add repositories with the project clone tool, not git clone", () => {
+    const manifest = buildProjectManifest({
+      name: "Spawn Partners",
+      directory: "/projects/Spawn Partners",
+      resources: [],
+      total: 0,
+    });
+    expect(manifest).toContain("project_label_clone_repository");
+    expect(manifest).toContain("do not git clone by hand");
+  });
+
   it("says when the project has no files yet", () => {
     const manifest = buildProjectManifest({
       name: "Empty",
@@ -112,23 +123,79 @@ describe("buildProjectManifest", () => {
 });
 
 describe("integrations context line", () => {
+  it("names only working accounts as connected and labels sign-in and error states", () => {
+    const line = buildIntegrationsContextLine([
+      { name: "working", displayName: "Linear", status: "connected" },
+      { name: "sign-in", displayName: "Google", status: "needs_sign_in" },
+      { name: "broken", displayName: "Notion", status: "error" },
+      { name: "off", displayName: "Slack", status: "disabled" },
+    ]);
+    expect(line).toContain("Connected integrations: working (Linear).");
+    expect(line).toContain("sign-in (Google): needs sign-in");
+    expect(line).toContain("broken (Notion): error");
+    expect(line).toContain("off (Slack): disabled");
+  });
+
   it("names connected integrations with hints and stays empty when none", () => {
     expect(buildIntegrationsContextLine([])).toBe("");
     expect(
       buildIntegrationsContextLine([
-        { name: "gmail", displayName: "Gmail", hint: "Gmail, aflekkas@example.com" },
-        { name: "linear", displayName: "Linear" },
+        {
+          name: "gmail",
+          displayName: "Gmail",
+          status: "connected",
+          hint: "Gmail, aflekkas@example.com",
+        },
+        { name: "linear", displayName: "Linear", status: "connected" },
       ]),
     ).toBe(
       "Connected integrations: gmail (Gmail, aflekkas@example.com), linear (Linear). Use integration_tools / integration_call.",
     );
   });
 
+  it("names the account of each connection so agents can pick one", () => {
+    expect(
+      buildIntegrationsContextLine([
+        {
+          name: "linear-spawn",
+          displayName: "Linear",
+          status: "connected",
+          accountLabel: "Spawn Partners",
+        },
+        {
+          name: "linear-personal",
+          status: "connected",
+          displayName: "Linear",
+          accountLabel: "personal",
+          hint: "side projects",
+        },
+      ]),
+    ).toBe(
+      "Connected integrations: linear-spawn (Linear · Spawn Partners), linear-personal (Linear · personal, side projects). Use integration_tools / integration_call.",
+    );
+  });
+
+  it("names what is still available to connect on the same line", () => {
+    expect(
+      buildIntegrationsContextLine([], ["google-workspace (Gmail, Calendar, Drive)", "slack"]),
+    ).toBe(
+      "Integrations available to connect with integration_add catalogId: google-workspace (Gmail, Calendar, Drive), slack.",
+    );
+    const line = buildIntegrationsContextLine(
+      [{ name: "linear", displayName: "Linear", status: "connected" }],
+      ["notion"],
+    );
+    expect(line).toBe(
+      "Connected integrations: linear (Linear). Use integration_tools / integration_call. Also available to connect with integration_add catalogId: notion.",
+    );
+    expect(line).not.toContain("\n");
+  });
+
   it("adds exactly one line to the project manifest", () => {
     const base = { name: "P", directory: "/projects/P", resources: [], total: 0 };
     const withIntegrations = buildProjectManifest({
       ...base,
-      integrations: [{ name: "gmail", displayName: "Gmail", hint: "" }],
+      integrations: [{ name: "gmail", displayName: "Gmail", status: "connected", hint: "" }],
     });
     expect(withIntegrations).toContain("Connected integrations: gmail (Gmail).");
     expect(buildProjectManifest(base)).not.toContain("Connected integrations:");

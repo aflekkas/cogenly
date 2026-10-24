@@ -1001,16 +1001,20 @@ export const ServerSettings = Schema.Struct({
    * MCP tools and the preconfigured `agent-device` CLI the same way
    * `enableAgentBrowserAccess` gates the browser: server-authoritative, applied
    * when the provider session is prepared. The user's own Device panel is
-   * unaffected.
+   * unaffected. On by default; helpers only install when a device is first needed.
    */
-  enableAgentDeviceAccess: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  enableAgentDeviceAccess: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   /**
-   * Whether this server may install and run T3's device helper processes.
-   * Kept separate from agent access so enabling the user's Device panel does
-   * not also grant providers control of simulators and emulators.
+   * Whether this server may install and run Cogenly's device helper processes.
+   * Kept separate from agent access so a user can turn off agent control and
+   * keep their own Device panel. On by default.
    */
-  enableDeviceSupport: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
-  /** Whether the server-local Device panel setup flow has been completed. */
+  enableDeviceSupport: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  /**
+   * Retired: the setup wizard no longer gates devices. Only read to carry an
+   * older install's opt-outs over when the two defaults above flipped to on;
+   * the server clears it on load (see `foldLegacyDeviceOnboarding`).
+   */
   deviceOnboardingCompleted: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   deviceHosts: SshDeviceHostConfigs.pipe(Schema.withDecodingDefault(Effect.succeed([]))),
   snoozeLimitedThreads: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),

@@ -143,6 +143,21 @@ describe("resolveT3McpToolPresentation", () => {
     expect(resolveT3McpToolPresentation("cogenly-thread_opencode2-adapter_not_a_tool")).toBeNull();
   });
 
+  it("pretty prints terminal T3 MCP tool names", () => {
+    expect(resolveT3McpToolPresentation("mcp__cogenly__terminal_run")).toEqual({
+      displayName: "Run command",
+      logo: "t3-code",
+    });
+    expect(resolveT3McpToolPresentation("t3-code.terminal_read")).toEqual({
+      displayName: "Read terminal output",
+      logo: "t3-code",
+    });
+    expect(resolveT3McpToolPresentation("mcp__cogenly__terminal_kill")).toEqual({
+      displayName: "Stop the terminal",
+      logo: "t3-code",
+    });
+  });
+
   it("keeps unknown MCP tools on the generic renderer path", () => {
     expect(resolveT3McpToolPresentation("mcp__github__search_issues")).toBeNull();
     expect(resolveT3McpToolPresentation("t3-code.not_a_real_tool")).toBeNull();

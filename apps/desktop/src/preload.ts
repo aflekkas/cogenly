@@ -4,6 +4,7 @@ import type {
   DesktopPreviewPointerEvent,
   DesktopPreviewRecordingInputEvent,
   DesktopPreviewRecordingFrame,
+  DesktopPreviewSitePermissionPromptEvent,
   DesktopPreviewTabState,
 } from "@t3tools/contracts";
 import { exposeClerkBridge } from "@clerk/electron/preload";
@@ -59,7 +60,10 @@ function unwrapEnsureSshEnvironmentResult(result: unknown) {
   return result as Awaited<ReturnType<DesktopBridge["ensureSshEnvironment"]>>;
 }
 
-contextBridge.exposeInMainWorld("desktopBridge", {
+// Only the main frame gets the bridge: a subframe must never reach desktop IPC.
+const isMainFrame = (process as NodeJS.Process & { isMainFrame?: boolean }).isMainFrame === true;
+
+const desktopBridge = {
   getAppBranding: () => {
     const result = ipcRenderer.sendSync(IpcChannels.GET_APP_BRANDING_CHANNEL);
     if (typeof result !== "object" || result === null) {
@@ -329,6 +333,34 @@ contextBridge.exposeInMainWorld("desktopBridge", {
       ipcRenderer.invoke(IpcChannels.PREVIEW_SET_AUDIO_MUTED_CHANNEL, { tabId, audioMuted }),
     openDevTools: (tabId) =>
       ipcRenderer.invoke(IpcChannels.PREVIEW_OPEN_DEVTOOLS_CHANNEL, { tabId }),
+    sitePermissions: {
+      get: (tabId) =>
+        ipcRenderer.invoke(IpcChannels.PREVIEW_GET_SITE_PERMISSIONS_CHANNEL, { tabId }),
+      set: (tabId, permission, setting) =>
+        ipcRenderer.invoke(IpcChannels.PREVIEW_SET_SITE_PERMISSION_CHANNEL, {
+          tabId,
+          permission,
+          setting,
+        }),
+      answer: (tabId, promptId, answer) =>
+        ipcRenderer.invoke(IpcChannels.PREVIEW_ANSWER_SITE_PERMISSION_PROMPT_CHANNEL, {
+          tabId,
+          promptId,
+          answer,
+        }),
+      onPromptChange: (listener) => {
+        const wrappedListener = (_event: Electron.IpcRendererEvent, promptEvent: unknown) => {
+          if (typeof promptEvent !== "object" || promptEvent === null) return;
+          listener(promptEvent as DesktopPreviewSitePermissionPromptEvent);
+        };
+        ipcRenderer.on(IpcChannels.PREVIEW_SITE_PERMISSION_PROMPT_CHANNEL, wrappedListener);
+        return () =>
+          ipcRenderer.removeListener(
+            IpcChannels.PREVIEW_SITE_PERMISSION_PROMPT_CHANNEL,
+            wrappedListener,
+          );
+      },
+    },
     listBrowserImportSources: () => ipcRenderer.invoke(IpcChannels.PREVIEW_IMPORT_SOURCES_CHANNEL),
     importBrowserCookies: (input) =>
       ipcRenderer.invoke(IpcChannels.PREVIEW_IMPORT_COOKIES_CHANNEL, input),
@@ -420,4 +452,8 @@ contextBridge.exposeInMainWorld("desktopBridge", {
         ipcRenderer.removeListener(IpcChannels.PREVIEW_OPEN_LINK_CHANNEL, wrappedListener);
     },
   },
-} satisfies DesktopBridge);
+} satisfies DesktopBridge;
+
+if (isMainFrame) {
+  contextBridge.exposeInMainWorld("desktopBridge", desktopBridge);
+}

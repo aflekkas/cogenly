@@ -77,7 +77,12 @@ export type T3McpToolSummaryAction =
   | "image-search"
   | "project-files-list"
   | "project-file-read"
-  | "project-recall";
+  | "project-recall"
+  | "terminal-run"
+  | "terminal-read"
+  | "terminal-write"
+  | "terminal-kill"
+  | "terminal-list";
 
 export interface T3McpToolDefinition {
   readonly displayName: string;
@@ -261,6 +266,11 @@ const T3_MCP_TOOLS: Readonly<Record<string, T3McpToolDefinition>> = {
     "browser",
     "browser",
   ),
+  preview_permission: tool(
+    ["Set", "Setting", "Set", "a site permission in the preview browser"],
+    "browser",
+    "browser",
+  ),
   preview_recording_start: tool(
     ["Start", "Starting", "Started", "recording the preview browser"],
     "browser",
@@ -272,6 +282,8 @@ const T3_MCP_TOOLS: Readonly<Record<string, T3McpToolDefinition>> = {
     "browser",
   ),
   device_list: tool(["List", "Listing", "Listed", "simulators and emulators"], "device", "device"),
+  device_setup_status: tool(["Check", "Checking", "Checked", "device setup"], "device", "device"),
+  device_setup: tool(["Set up", "Setting up", "Set up", "devices"], "device", "device"),
   device_open: tool(
     ["Open", "Opening", "Opened", "a device in the Device panel"],
     "device",
@@ -423,6 +435,11 @@ const T3_MCP_TOOLS: Readonly<Record<string, T3McpToolDefinition>> = {
   project_files_list: tool(["List", "Listing", "Listed", "project files"], "project-files-list"),
   project_file_read: tool(["Read", "Reading", "Read", "a project file"], "project-file-read"),
   project_recall: tool(["Search", "Searching", "Searched", "project files"], "project-recall"),
+  terminal_run: tool(["Run", "Running", "Ran", "command"], "terminal-run"),
+  terminal_read: tool(["Read", "Reading", "Read", "terminal output"], "terminal-read"),
+  terminal_write: tool(["Write", "Writing", "Wrote", "to the terminal"], "terminal-write"),
+  terminal_kill: tool(["Stop", "Stopping", "Stopped", "the terminal"], "terminal-kill"),
+  terminal_list: tool(["List", "Listing", "Listed", "terminals"], "terminal-list"),
 };
 
 /**

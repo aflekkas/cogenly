@@ -117,6 +117,7 @@ export function ChatCanvas({
         maxChatWidth: measurements.maxChatWidth,
         detailsCard,
       }),
+      detailsCard,
       registerTimeline,
       reportDetailsCard,
     };

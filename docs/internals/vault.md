@@ -46,17 +46,26 @@ for one field, and every outcome is appended to `vault_usage`. Process delivery
 adds the credential revision, machine, project, provider instance, terminal id
 and delivery method. This records delivery, not every downstream API action.
 
-For browser fill, humans (owner-initiated turns) and server-internal callers
-are allowed.
-Agents default to `ask`: the first use inserts a pending row in the existing
+MCP browser fills identify a thread or its persistent agent, never a human.
+Both default to `ask`: the first use inserts a pending row in the existing
 `agent_approvals` table with action kind `vault_use` and the tool returns a
 clear "waiting on you" result — no hang. Approving (existing agents RPCs)
-grants that item's policy to that agent, and to the approved domain when one
+grants that item's policy to that thread or agent, and to the approved domain when one
 was involved, so a retry succeeds. Rejecting leaves the policy untouched.
 
 `resolveSecretByName` is the server-internal API for other server features
 (e.g. the integrations gateway): it returns a decrypted field by name and is
-never exposed through MCP or RPC.
+never exposed through MCP or RPC. It takes the destination host and refuses
+items whose allowed domains miss it unless the caller says the owner approved
+the item there; integrations record those approvals per credential origin.
+
+Integration OAuth tokens are vault items too, one per integration account,
+written and read only by the gateway ([IntegrationTokens.ts](../../apps/server/src/integrations/IntegrationTokens.ts)).
+Each secret gets its own field (access token `value`, refresh token
+`password`, a registered client's secret `username`) because scrubbing matches
+exact field values: a JSON blob in one field would leave the tokens inside it
+unscrubbed. Expiry and the client registration are not secret and stay with the
+integration.
 
 Accounts reference vault items without copying their encrypted identities. The
 legacy backfill reads metadata only and preserves item ids and encrypted
@@ -80,7 +89,8 @@ provider-native credential files are neither imported nor cloned.
 
 ## Scrubbing and the preview_evaluate trap
 
-Exact stored secret values (length ≥ 6) are scrubbed from tool results.
+Stored and delivered secret values are scrubbed from tool results; values shorter
+than six characters use whole-token matching.
 This is an output guard, not a boundary against an agent already authorized
 to read a process token. All vault field values are cached in memory only (loaded lazily,
 invalidated on writes) and `McpToolAccess` redacts every MCP tool result
@@ -98,12 +108,17 @@ never logged; lengths and names are the most telemetry may carry. Card values
 are also scrubbed in the shapes a page echoes them: the number digits-only or
 grouped in fours, and the expiry as `MM/YYYY`; the CVC and `MM/YY` expiry are
 below the length floor, so they are scrubbed as whole tokens only (never
-inside a longer number).
+inside a longer number). TOTP codes for the current 30-second window and its
+neighbours take the same whole-token pass; delivered codes remain registered
+after their window expires.
+Scrubbing fails closed: when the secrets cannot be loaded, every string in the
+result is replaced by a withheld notice and the error is logged.
 
-Delivered process values and their base64, URL-encoded and JSON-escaped forms
-stay registered for the server lifetime, including old revisions after
-replacement/deletion. This deliberately outlives a PTY: descendants and retained
-output may outlive it. Account terminals also redact across PTY chunk boundaries
+Delivered values stay registered for the server lifetime, including old revisions
+after replacement/deletion; process values also register base64, URL-encoded and
+JSON-escaped forms. The registry is bounded and refuses new deliveries when full
+rather than forgetting values that may still appear in retained output. This deliberately outlives a PTY: descendants and retained
+output may outlive it. All terminals also redact against the vault across PTY chunk boundaries
 before output enters events or persisted history. Tokens are resolved after
 provider environment configuration and overlay only the selected terminal's
 environment; they never enter settings or launch arguments. Provider-native

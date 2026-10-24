@@ -66,12 +66,18 @@ interface PieceSnapshot {
 
 type Pieces = ReadonlyMap<string, PieceSnapshot>;
 
+/** How far each piece's running fade-in had played, in ms, by piece name. */
+type Fades = ReadonlyMap<string, number>;
+
+const NO_FADES: Fades = new Map();
+
 /**
  * The Work sentence a draft heading showed as it unmounted, for the heading
  * that replaces it in the same commit (picking a repository opens a new
  * draft). Anything left after that task was not replaced.
  */
-let handoff: { readonly group: string; readonly pieces: Pieces } | null = null;
+let handoff: { readonly group: string; readonly pieces: Pieces; readonly fades: Fades } | null =
+  null;
 
 /** Where an element's bottom centre sits from the heading's, which is where the heading is anchored. */
 function offsetWithin(element: HTMLElement, heading: HTMLElement): Offset {
@@ -113,6 +119,28 @@ function playFromNextFrame(animation: Animation) {
   requestAnimationFrame(() => {
     if (animation.playState === "paused") animation.play();
   });
+}
+
+/**
+ * The pieces still fading in, and how far along, so a heading that takes over
+ * mid-fade (a picked project's name, then the new draft its pick opens)
+ * finishes the fade instead of snapping the name to full strength.
+ */
+function runningFades(elements: readonly HTMLElement[]): Fades {
+  const fades = new Map<string, number>();
+  for (const element of elements) {
+    const name = element.dataset.heroPiece;
+    if (!name) continue;
+    for (const animation of element.getAnimations()) {
+      if (animation.id !== PIECE_ANIMATION_ID || animation.playState === "finished") continue;
+      const effect = animation.effect;
+      if (!(effect instanceof KeyframeEffect)) continue;
+      if (!effect.getKeyframes().some((keyframe) => keyframe.opacity !== undefined)) continue;
+      const time = animation.currentTime;
+      fades.set(name, typeof time === "number" ? time : 0);
+    }
+  }
+  return fades;
 }
 
 function cancelAnimations(element: Element, id: string) {
@@ -171,7 +199,8 @@ function frozenCopy(element: HTMLElement) {
  *   back, every piece glides from where it was drawn to its new place, and a
  *   changed name crossfades: the old one fades out where it stood. A heading
  *   that replaces another (`handoff`, the FadeSwap group it shares) picks up
- *   from the one it replaced instead of crossfading the whole sentence.
+ *   from the one it replaced instead of crossfading the whole sentence, and
+ *   finishes any name fade the replaced one was still playing.
  *
  * Layout is read in a resize observer and on `contentKey` changes, after
  * layout and before paint, so no frame shows the wrong size or layout.
@@ -198,8 +227,10 @@ export function useHeroHeadlineMotion(
 
     let pieces: Pieces | null = null;
     let piecesFromHandoff = false;
+    let handoffFades = NO_FADES;
     if (handoffGroup !== undefined && handoff?.group === handoffGroup) {
       pieces = handoff.pieces;
+      handoffFades = handoff.fades;
       piecesFromHandoff = true;
       handoff = null;
     }
@@ -321,9 +352,10 @@ export function useHeroHeadlineMotion(
 
     /**
      * Glides each Work piece from where it was drawn to where it now sits, and
-     * crossfades a piece whose content changed.
+     * crossfades a piece whose content changed. `fades` are the fades the
+     * replaced heading was still playing, which an unchanged piece finishes.
      */
-    const animatePieces = (before: Pieces, elements: readonly HTMLElement[]) => {
+    const animatePieces = (before: Pieces, elements: readonly HTMLElement[], fades: Fades) => {
       const scale = drawnScale(heading);
       const frame = heading.getBoundingClientRect();
       const glide = !reduced();
@@ -341,8 +373,16 @@ export function useHeroHeadlineMotion(
         const dy = (fromTop - (box.top - shift.y)) / scale;
         const travels = glide && (Math.abs(dx) >= 0.5 || Math.abs(dy) >= 0.5);
         const changed = was.key !== pieceKey(element);
-        if (!travels && !changed) continue;
+        const fadedFor = changed ? undefined : fades.get(name);
+        if (!travels && !changed && fadedFor === undefined) continue;
         cancelAnimations(element, PIECE_ANIMATION_ID);
+        if (fadedFor !== undefined) {
+          const fade = element.animate([{ opacity: 0 }, { opacity: 1 }], timing);
+          fade.id = PIECE_ANIMATION_ID;
+          fade.currentTime = fadedFor;
+          playFromNextFrame(fade);
+          if (!travels) continue;
+        }
         if (changed && was.copy) {
           Object.assign(was.copy.style, {
             left: `${fromLeft}px`,
@@ -380,11 +420,12 @@ export function useHeroHeadlineMotion(
       }
       const before = pieces;
       if (before !== null) {
-        animatePieces(before, elements);
+        animatePieces(before, elements, handoffFades);
         // This heading took over from the one it replaced: its pieces carry the
         // change, so the whole sentence does not crossfade as well.
         if (piecesFromHandoff && handoffGroup !== undefined) settleFadeSwap(handoffGroup);
         piecesFromHandoff = false;
+        handoffFades = NO_FADES;
       }
       // Copies are taken fresh each time, so one already used is never reused.
       pieces = snapshotPieces(elements);
@@ -449,7 +490,7 @@ export function useHeroHeadlineMotion(
       stopObserving();
       document.fonts.removeEventListener("loadingdone", update);
       if (handoffGroup !== undefined && pieces !== null) {
-        const entry = { group: handoffGroup, pieces };
+        const entry = { group: handoffGroup, pieces, fades: runningFades(livePieces()) };
         handoff = entry;
         setTimeout(() => {
           if (handoff === entry) handoff = null;

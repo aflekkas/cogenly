@@ -23,6 +23,11 @@ import {
   INCOGNITO_BROWSER_PROFILE_ID,
   PreviewForwardedShortcut,
   MAX_KEYBINDINGS_COUNT,
+  DesktopPreviewAnswerSitePermissionPromptInputSchema,
+  DesktopPreviewSetSitePermissionInputSchema,
+  SITE_PERMISSIONS,
+  SitePermissionChangeResult,
+  SitePermissionsState,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -31,7 +36,10 @@ import * as NodeURL from "node:url";
 
 import * as ElectronWindow from "../../electron/ElectronWindow.ts";
 import * as BrowserImport from "../../preview/BrowserImport/BrowserImport.ts";
+import * as BrowserSession from "../../preview/BrowserSession.ts";
 import * as PreviewManager from "../../preview/Manager.ts";
+import * as SitePermissions from "../../preview/SitePermissions.ts";
+import { permissionOriginOf } from "../../preview/SitePermissionStore.ts";
 import * as DesktopClientSettings from "../../settings/DesktopClientSettings.ts";
 import { PREVIEW_WEBVIEW_PREFERENCES } from "../../preview/WebviewPreferences.ts";
 import * as IpcChannels from "../channels.ts";
@@ -56,6 +64,28 @@ export const installPreviewEventForwarding = Effect.fn(
   );
   yield* manager.subscribeOpenLinks((event) =>
     electronWindow.sendAll(IpcChannels.PREVIEW_OPEN_LINK_CHANNEL, event),
+  );
+  // A permission prompt belongs to the tab whose page asked.
+  const { controller } = yield* SitePermissions.SitePermissions;
+  const runFork = Effect.runForkWith(yield* Effect.context<never>());
+  yield* Effect.acquireRelease(
+    Effect.sync(() =>
+      controller.onPromptChange(({ webContentsId, prompt }) =>
+        runFork(
+          manager.tabIdForWebContents(webContentsId).pipe(
+            Effect.flatMap((tabId) =>
+              tabId === null
+                ? Effect.void
+                : electronWindow.sendAll(IpcChannels.PREVIEW_SITE_PERMISSION_PROMPT_CHANNEL, {
+                    tabId,
+                    prompt,
+                  }),
+            ),
+          ),
+        ),
+      ),
+    ),
+    (unsubscribe) => Effect.sync(unsubscribe),
   );
 });
 
@@ -358,6 +388,82 @@ export const importBrowserCookies = DesktopIpc.makeIpcMethod({
       persistent,
       ...(namespace === undefined ? {} : { namespace }),
     });
+  }),
+});
+
+/**
+ * The tab's page and the permission desk for its browser profile. Registered
+ * separately from `methods` for the same reason as the import handlers: their
+ * context carries the session and permission services.
+ */
+const withSiteContext = Effect.fn("desktop.ipc.preview.withSiteContext")(function* (tabId: string) {
+  const manager = yield* PreviewManager.PreviewManager;
+  const browserSession = yield* BrowserSession.BrowserSession;
+  const { controller } = yield* SitePermissions.SitePermissions;
+  const guest = yield* manager.requireWebContents(tabId);
+  return { controller, guest, partition: browserSession.partitionOf(guest.session) };
+});
+
+const noSitePermissions = {
+  origin: null,
+  entries: SITE_PERMISSIONS.map((permission) => ({ permission, setting: "ask" as const })),
+  prompt: null,
+};
+
+export const getSitePermissions = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_GET_SITE_PERMISSIONS_CHANNEL,
+  payload: DesktopPreviewTabInputSchema,
+  result: SitePermissionsState,
+  handler: Effect.fn("desktop.ipc.preview.getSitePermissions")(function* ({ tabId }) {
+    return yield* withSiteContext(tabId).pipe(
+      Effect.map(({ controller, guest, partition }) =>
+        partition === undefined
+          ? noSitePermissions
+          : controller.state(partition, guest.id, guest.getURL()),
+      ),
+      // A tab whose page is not attached yet has no site to decide for.
+      Effect.orElseSucceed(() => noSitePermissions),
+    );
+  }),
+});
+
+export const setSitePermission = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_SET_SITE_PERMISSION_CHANNEL,
+  payload: DesktopPreviewSetSitePermissionInputSchema,
+  result: SitePermissionChangeResult,
+  handler: Effect.fn("desktop.ipc.preview.setSitePermission")(function* ({
+    tabId,
+    permission,
+    setting,
+  }) {
+    const { controller, guest, partition } = yield* withSiteContext(tabId);
+    if (partition === undefined) {
+      return { ok: false as const, reason: "unknown-tab" as const, state: null };
+    }
+    const origin = permissionOriginOf(guest.getURL());
+    const stateOf = () => controller.state(partition, guest.id, guest.getURL());
+    if (origin === null) {
+      return { ok: false as const, reason: "no-origin" as const, state: stateOf() };
+    }
+    // The person's own choice, so it replaces whatever an agent decided.
+    const change = controller.change(partition, origin, permission, setting, "user");
+    return change.ok
+      ? { ok: true as const, state: stateOf() }
+      : { ok: false as const, reason: change.reason, state: stateOf() };
+  }),
+});
+
+export const answerSitePermissionPrompt = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_ANSWER_SITE_PERMISSION_PROMPT_CHANNEL,
+  payload: DesktopPreviewAnswerSitePermissionPromptInputSchema,
+  result: Schema.Void,
+  handler: Effect.fn("desktop.ipc.preview.answerSitePermissionPrompt")(function* ({
+    tabId,
+    promptId,
+    answer,
+  }) {
+    const { controller, guest } = yield* withSiteContext(tabId);
+    controller.answer(guest.id, promptId, answer);
   }),
 });
 

@@ -559,6 +559,7 @@ export const WS_METHODS = {
   agentsRequestApproval: "agents.requestApproval",
   agentsApprove: "agents.approve",
   agentsReject: "agents.reject",
+  threadApprovalsSubscribe: "threadApprovals.subscribe",
   agentsStartWork: "agents.startWork",
   agentsActivity: "agents.activity",
   factsList: "facts.list",
@@ -607,6 +608,9 @@ export const WS_METHODS = {
   integrationsUpdate: "integrations.update",
   integrationsDelete: "integrations.delete",
   integrationsTestConnection: "integrations.testConnection",
+  integrationsBeginSignIn: "integrations.beginSignIn",
+  integrationsConnectFromCatalog: "integrations.connectFromCatalog",
+  integrationsSubscribe: "integrations.subscribe",
 
   // Machines: this server, its hub, and its paired spokes
   machinesList: "machines.list",
@@ -2092,6 +2096,17 @@ const WsAgentsRejectRpc = Rpc.make(WS_METHODS.agentsReject, {
   success: AgentWorkspace.AgentApprovalResult,
   error: Schema.Union([Agents.AgentError, EnvironmentAuthorizationError]),
 });
+/**
+ * Pending owner approvals raised by ordinary threads (no persistent agent),
+ * such as a vault fill or a CLI token exposure. Re-sent whole on every change;
+ * decide each through `agents.approve` / `agents.reject`.
+ */
+const WsThreadApprovalsSubscribeRpc = Rpc.make(WS_METHODS.threadApprovalsSubscribe, {
+  payload: Schema.Struct({}),
+  success: AgentWorkspace.AgentApprovalListResult,
+  error: Schema.Union([Agents.AgentError, EnvironmentAuthorizationError]),
+  stream: true,
+});
 const WsAgentsStartWorkRpc = Rpc.make(WS_METHODS.agentsStartWork, {
   payload: AgentWorkspace.AgentStartWorkInput,
   success: AgentWorkspace.AgentStartWorkResult,
@@ -2126,6 +2141,24 @@ const WsIntegrationsTestConnectionRpc = Rpc.make(WS_METHODS.integrationsTestConn
   payload: Integrations.IntegrationKey,
   success: Integrations.IntegrationTestResult,
   error: Schema.Union([Integrations.IntegrationError, EnvironmentAuthorizationError]),
+});
+const WsIntegrationsBeginSignInRpc = Rpc.make(WS_METHODS.integrationsBeginSignIn, {
+  payload: Integrations.IntegrationKey,
+  success: Integrations.IntegrationSignIn,
+  error: Schema.Union([Integrations.IntegrationError, EnvironmentAuthorizationError]),
+});
+/** Connects a default catalog entry; returns the sign-in link when it needs one. */
+const WsIntegrationsConnectFromCatalogRpc = Rpc.make(WS_METHODS.integrationsConnectFromCatalog, {
+  payload: Integrations.IntegrationCatalogConnectInput,
+  success: Integrations.IntegrationMutationResult,
+  error: Schema.Union([Integrations.IntegrationError, EnvironmentAuthorizationError]),
+});
+/** The list, then again after every change (including a finished sign-in). */
+const WsIntegrationsSubscribeRpc = Rpc.make(WS_METHODS.integrationsSubscribe, {
+  payload: Schema.Struct({}),
+  success: Integrations.IntegrationListResult,
+  error: Schema.Union([Integrations.IntegrationError, EnvironmentAuthorizationError]),
+  stream: true,
 });
 
 const machineErrors = Schema.Union([Machines.MachineError, EnvironmentAuthorizationError]);
@@ -2552,6 +2585,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsAgentsRequestApprovalRpc,
   WsAgentsApproveRpc,
   WsAgentsRejectRpc,
+  WsThreadApprovalsSubscribeRpc,
   WsAgentsStartWorkRpc,
   WsAgentsActivityRpc,
   WsIntegrationsListRpc,
@@ -2559,6 +2593,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsIntegrationsUpdateRpc,
   WsIntegrationsDeleteRpc,
   WsIntegrationsTestConnectionRpc,
+  WsIntegrationsBeginSignInRpc,
+  WsIntegrationsConnectFromCatalogRpc,
+  WsIntegrationsSubscribeRpc,
   WsMachineSecurityStatusRpc,
   WsMachinesListRpc,
   WsMachinesSubscribeRpc,

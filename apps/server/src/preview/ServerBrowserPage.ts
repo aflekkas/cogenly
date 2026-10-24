@@ -290,6 +290,52 @@ export const type = async (
   const locator = targetLocator(page, input);
   // Typing into the focused field has no target to point at.
   if (locator !== null) await pointer(await targetPoint(page, locator, {}, timeout), "move");
+  if (input.expectedOrigin !== undefined) {
+    const target = locator ?? page.locator("*:focus").last();
+    const delivered = await target.evaluate(
+      (element, { origin, text }) => {
+        const view = element.ownerDocument.defaultView;
+        try {
+          if (!view || view.location.origin !== origin || view.top?.location.origin !== origin)
+            return "origin";
+        } catch {
+          return "origin";
+        }
+        const control = element as unknown as {
+          readonly disabled?: boolean;
+          readonly readOnly?: boolean;
+          readonly isContentEditable?: boolean;
+          focus?: () => void;
+          textContent: string | null;
+        };
+        if (control.disabled || control.readOnly) return "target";
+        const prototype =
+          element.tagName === "INPUT"
+            ? view.HTMLInputElement.prototype
+            : element.tagName === "TEXTAREA"
+              ? view.HTMLTextAreaElement.prototype
+              : null;
+        const setter = prototype && Object.getOwnPropertyDescriptor(prototype, "value")?.set;
+        if (!setter && !control.isContentEditable) return "target";
+        control.focus?.();
+        if (setter) setter.call(element, text);
+        else control.textContent = text;
+        element.dispatchEvent(new view.Event("input", { bubbles: true }));
+        element.dispatchEvent(new view.Event("change", { bubbles: true }));
+        return "filled";
+      },
+      { origin: input.expectedOrigin, text: input.text },
+      { timeout },
+    );
+    if (delivered !== "filled")
+      throw new ServerBrowserOperationError(
+        "PreviewAutomationVaultSafetyError",
+        delivered === "origin"
+          ? "The page origin changed before vault delivery; no text was typed."
+          : "The vault target is not an enabled text field; no text was typed.",
+      );
+    return;
+  }
   if (locator !== null && input.clear) {
     await locator.fill(input.text, { timeout });
     return;

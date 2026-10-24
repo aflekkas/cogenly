@@ -4077,9 +4077,27 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               SELECT payload_json FROM orchestration_v2_projection_run_attempts
               WHERE thread_id = ${threadId} ORDER BY run_id ASC, attempt_ordinal ASC
             `.pipe(Effect.flatMap(decodeRows(decodeRunAttemptPayload, threadId)));
+            // The current run's root node, plus the previous started run's:
+            // turn start compares the previous run's checkpoint scope cwd
+            // with the new cwd to detect a re-homed thread. Runs are in
+            // ordinal order, so the last match is the previous started run
+            // on this run's provider thread.
+            const currentRun = runs.find((run) => run.id === runId);
+            const previousStartedRun =
+              currentRun === undefined
+                ? undefined
+                : runs.findLast(
+                    (run) =>
+                      run.ordinal < currentRun.ordinal &&
+                      run.startedAt !== null &&
+                      run.providerThreadId === currentRun.providerThreadId,
+                  );
+            const rootNodeIds = [currentRun, previousStartedRun].flatMap((run) =>
+              run?.rootNodeId == null ? [] : [run.rootNodeId],
+            );
             const nodes = yield* sql<PayloadRow>`
               SELECT payload_json FROM orchestration_v2_projection_nodes
-              WHERE thread_id = ${threadId} AND node_id IN (SELECT json_extract(payload_json, '$.rootNodeId') FROM orchestration_v2_projection_runs WHERE thread_id = ${threadId} AND run_id = ${runId}) ORDER BY node_id ASC
+              WHERE thread_id = ${threadId} AND node_id IN ${sql.in(rootNodeIds)} ORDER BY node_id ASC
             `.pipe(Effect.flatMap(decodeRows(decodeNodePayload, threadId)));
             const subagents = yield* sql<PayloadRow>`
               SELECT payload_json FROM orchestration_v2_projection_subagents

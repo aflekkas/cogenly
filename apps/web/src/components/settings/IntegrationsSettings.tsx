@@ -701,7 +701,7 @@ function DeviceIntegrationControls({
           }
           return configure({
             environmentId: environment.environmentId,
-            input: { ...input, ...(input.enabled ? { onboardingCompleted: true } : {}) },
+            input,
           });
         }),
       );
@@ -808,10 +808,9 @@ function DeviceIntegrationControls({
               }
               aria-label="Device hub"
               onCheckedChange={(checked) =>
-                void update("hub", {
-                  enabled: Boolean(checked),
-                  ...(checked ? {} : { agentAccessEnabled: false }),
-                })
+                // Agent access stays as set: the server already refuses agents
+                // while the hub is off, so turning the hub back on restores it.
+                void update("hub", { enabled: Boolean(checked) })
               }
             />
           </>

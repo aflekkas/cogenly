@@ -7,6 +7,7 @@ import {
   formatGeneratedBranchName,
   buildWorktreeBranchName,
   flattenTemporaryWorktreeBranchName,
+  freeWorktreeFolderSlug,
   isTemporaryWorktreeBranch,
   normalizeGitRemoteUrl,
   parseGitHubRepositoryNameWithOwnerFromRemoteUrl,
@@ -167,6 +168,15 @@ describe("parseGitHubRepositoryNameWithOwnerFromRemoteUrl", () => {
     expect(
       parseGitHubRepositoryNameWithOwnerFromRemoteUrl("ssh://github.com/T3Tools/T3Code.git"),
     ).toBe("T3Tools/T3Code");
+  });
+});
+
+describe("freeWorktreeFolderSlug", () => {
+  it("keeps the slug when free and suffixes -2, -3, ... when taken", () => {
+    expect(freeWorktreeFolderSlug("fix-login", [])).toBe("fix-login");
+    expect(freeWorktreeFolderSlug("fix-login", ["fix-login"])).toBe("fix-login-2");
+    expect(freeWorktreeFolderSlug("fix-login", ["fix-login", "fix-login-2"])).toBe("fix-login-3");
+    expect(freeWorktreeFolderSlug("update", ["update", "update-2", "update-3"])).toBe("update-4");
   });
 });
 

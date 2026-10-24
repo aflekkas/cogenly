@@ -7,6 +7,7 @@ import {
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Semaphore from "effect/Semaphore";
@@ -44,18 +45,8 @@ const make = Effect.gen(function* () {
   ) {
     const view = yield* topology;
     const trustedRelay = view.link._tag === "spoke" && view.link.hubEnvironmentId === source;
-    if (!trustedRelay) {
-      const known = new Set(view.machines.map((machine) => machine.environmentId as string));
-      for (const change of batch.changes)
-        if (
-          typeof change.fields.ownerMachine === "string" &&
-          !known.has(change.fields.ownerMachine)
-        ) {
-          const current = yield* state.get(change.kind, change.id);
-          if (current?.fields.ownerMachine !== change.fields.ownerMachine)
-            return yield* new SharedStateError({ reason: "owner-change" });
-        }
-    }
+    // Former hubs may still own documents after re-pairing. Execution paths
+    // require the local machine to be the owner even when it is no longer paired.
     return yield* state.receive(batch, source, trustedRelay);
   });
   yield* channels.register(SharedChangesApply, (batch, caller) =>
@@ -76,7 +67,10 @@ const make = Effect.gen(function* () {
       )
         return;
       yield* state.setHub(spoke && view.link._tag === "spoke" ? view.link.hubEnvironmentId : null);
-      yield* state.bootstrap;
+      const paired = view.machines.find((machine) => machine.environmentId === peer);
+      yield* state.bootstrap(
+        `${peer}:${paired?.pairedAt ? DateTime.toEpochMillis(paired.pairedAt) : 0}`,
+      );
       // A busy link yields after 64 bounded batches; its durable cursor resumes next tick.
       for (let count = 0; count < 64; count++) {
         const cursors = yield* state.cursors(peer);
@@ -110,7 +104,15 @@ const make = Effect.gen(function* () {
     yield* state.setHub(view.link._tag === "spoke" ? view.link.hubEnvironmentId : null);
     for (const machine of view.machines)
       if (machine.online && (machine.relation === "hub" || machine.relation === "spoke"))
-        yield* sync(machine.environmentId);
+        yield* sync(machine.environmentId).pipe(
+          Effect.catchTags({
+            SharedStateError: (error) =>
+              Effect.logWarning("Shared document peer catch-up deferred", {
+                peer: machine.environmentId,
+                reason: error.reason,
+              }),
+          }),
+        );
   });
   const safeCatchUp = catchUp.pipe(
     Effect.catchTags({

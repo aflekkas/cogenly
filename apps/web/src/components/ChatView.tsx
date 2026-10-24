@@ -274,6 +274,7 @@ import { subscribePreviewAction } from "./preview/previewActionBus";
 import { getConfiguredPreviewUrls } from "./preview/previewEmptyStateLogic";
 import { RightPanelTabs, type RightPanelAddOption } from "./RightPanelTabs";
 import { useDeviceState } from "~/state/device";
+import { useDeviceTabActions } from "./device/useDeviceTabActions";
 import { DeviceSetup } from "./device/DeviceSetup";
 import { Dialog } from "./ui/dialog";
 import { WizardPopup } from "./ui/wizard";
@@ -458,6 +459,7 @@ import type {
   ComposerBannerStackItem,
 } from "./chat/ComposerBannerStack";
 import { BackgroundWorkBanner } from "./chat/BackgroundWorkBanner";
+import { useThreadApprovalBannerItems } from "./chat/useThreadApprovalBannerItems";
 import { ThreadStatusLine } from "./chat/ThreadStatusLine";
 import { classifyThreadKind, hasRightPanel, threadCapabilities } from "../threadCapabilities";
 import {
@@ -1344,12 +1346,22 @@ export default function ChatView(props: ChatViewProps) {
   const composerActiveProvider = useComposerDraftStore(
     (store) => store.getComposerDraft(composerDraftTarget)?.activeProvider ?? null,
   );
-  const composerSelectedModelSelection = useComposerDraftStore((store) => {
-    const draft = store.getComposerDraft(composerDraftTarget);
-    return draft?.activeProvider
-      ? (draft.modelSelectionByProvider[draft.activeProvider] ?? null)
-      : null;
-  });
+  // What the composer would send, reported by it. The pending-handoff preview
+  // reads this rather than the raw draft, which the composer may override
+  // (an unavailable instance, a normalized model).
+  const [composerSendModelSelection, setComposerSendModelSelection] = useState<Pick<
+    ModelSelection,
+    "instanceId" | "model"
+  > | null>(null);
+  const onComposerSendModelSelectionChange = useCallback((selection: ModelSelection | null) => {
+    setComposerSendModelSelection((current) =>
+      current?.instanceId === selection?.instanceId && current?.model === selection?.model
+        ? current
+        : selection === null
+          ? null
+          : { instanceId: selection.instanceId, model: selection.model },
+    );
+  }, []);
   const composerHasAttachments = useComposerDraftStore((store) => {
     const draft = store.getComposerDraft(composerDraftTarget);
     return (draft?.images.length ?? 0) > 0 || (draft?.files.length ?? 0) > 0;
@@ -4118,21 +4130,26 @@ export default function ChatView(props: ChatViewProps) {
     activeThreadRef?.environmentId ?? null,
   );
   const [deviceSetupThread, setDeviceSetupThread] = useState<ScopedThreadRef | null>(null);
+  const deviceAddMenu = useDeviceTabActions({
+    threadRef: activeThreadRef,
+    state: deviceState,
+    surfaces: rightPanelState.surfaces,
+  });
   const addDeviceSurface = () => {
     if (!activeThreadRef || !activeThreadCapabilities.device) return;
-    if (!deviceState.onboardingCompleted || deviceState.hostStatus === "disabled") {
-      setDeviceSetupThread(activeThreadRef);
-      return;
-    }
     useRightPanelStore.getState().open(activeThreadRef, "device");
   };
   // A device the agent opens floats over chat like an agent-driven browser,
   // or becomes a panel tab when floating previews are off. Sessions opened by
-  // another client arrive the same way; sheet layouts get neither. The first
-  // snapshot is a baseline: persisted tabs restore themselves, and existing
-  // sessions must not resurrect closed tabs. A session whose device summary
-  // has not arrived yet stays out of the baseline so a later snapshot opens it.
-  const previousDeviceSessions = useRef(new Map<string, Set<string>>());
+  // another client arrive the same way; sheet layouts get neither. Every
+  // session with a known device and no tab gets one, including those opened
+  // while another thread was showing: this thread's first snapshot is not a
+  // baseline to skip, because a tab the user closed is remembered as dismissed
+  // by the store and automatic opens leave it closed. A session that is opened
+  // again (new `openedAt`) is an explicit request, so it brings back a tab the
+  // user had closed. A session whose device summary has not arrived yet stays
+  // out of the snapshot so a later one opens it.
+  const previousDeviceSessions = useRef(new Map<string, Map<string, string>>());
   useEffect(() => {
     if (!activeThreadRef || !deviceStateLoaded) return;
     const threadKey = `${activeThreadRef.environmentId}:${activeThreadRef.threadId}`;
@@ -4147,11 +4164,17 @@ export default function ChatView(props: ChatViewProps) {
     const previous = previousDeviceSessions.current.get(threadKey);
     previousDeviceSessions.current.set(
       threadKey,
-      new Set(sessions.filter((session) => deviceFor(session) !== undefined).map(key)),
+      new Map(
+        sessions
+          .filter((session) => deviceFor(session) !== undefined)
+          .map((session) => [key(session), session.openedAt]),
+      ),
     );
-    if (!previous || shouldUsePlanSidebarSheet) return;
+    if (shouldUsePlanSidebarSheet) return;
     for (const session of sessions) {
-      if (previous.has(key(session))) continue;
+      const previousOpenedAt = previous?.get(key(session));
+      if (previousOpenedAt === session.openedAt) continue;
+      const reopened = previousOpenedAt !== undefined;
       const device = deviceFor(session);
       if (!device) continue;
       const target = {
@@ -4169,7 +4192,7 @@ export default function ChatView(props: ChatViewProps) {
             surface.target.deviceId === session.deviceId,
         );
       if (existing) continue;
-      useRightPanelStore.getState().openDevice(activeThreadRef, target, true);
+      useRightPanelStore.getState().openDevice(activeThreadRef, target, !reopened);
     }
   }, [
     activeThreadRef,
@@ -5490,6 +5513,10 @@ export default function ChatView(props: ChatViewProps) {
   };
   const onOpenRelatedThreadStable = useStableCallback(onOpenRelatedThread);
   const childThreadInputs = useChildThreadInputs(activeThreadRef);
+  const threadApprovalBannerItems = useThreadApprovalBannerItems(
+    environmentId,
+    activeThreadShell?.id ?? null,
+  );
   const childInputBannerItem = useMemo<ComposerBannerStackItem | null>(() => {
     const first = childThreadInputs[0];
     const parentAwaitingUser =
@@ -5774,18 +5801,8 @@ export default function ChatView(props: ChatViewProps) {
       (item.text.trim().toLowerCase() !== "/compact" || item.attachments.length > 0),
   );
   const pendingHandoff = useMemo(
-    () =>
-      resolvePendingHandoff(
-        serverProjection,
-        composerSelectedModelSelection ?? activeThread?.modelSelection,
-        providerStatuses,
-      ),
-    [
-      serverProjection,
-      composerSelectedModelSelection,
-      activeThread?.modelSelection,
-      providerStatuses,
-    ],
+    () => resolvePendingHandoff(serverProjection, composerSendModelSelection, providerStatuses),
+    [serverProjection, composerSendModelSelection, providerStatuses],
   );
   const compactThreadUnavailable =
     !canOperateThread ||
@@ -5884,7 +5901,16 @@ export default function ChatView(props: ChatViewProps) {
     environmentId,
     threadId: activeThreadShell?.id ?? null,
     runId: stoppedOnUsageLimit ? (activeThreadShell?.latestRun?.runId ?? null) : null,
-    onAccepted: () => {
+    onAccepted: (modelSelection) => {
+      // The continuation moved the thread; the composer follows, or its own
+      // pick would send the next turn back to the limited instance.
+      if (activeThreadShell) {
+        setComposerDraftModelSelection(
+          scopeThreadRef(environmentId, activeThreadShell.id),
+          modelSelection,
+          { explicit: true, replaceOptions: true },
+        );
+      }
       clearUsageLimitsFor(routeThreadKey);
       scrollToEnd();
     },
@@ -5929,6 +5955,7 @@ export default function ChatView(props: ChatViewProps) {
     const projectCloneItems = projectCloneBannerItem === null ? [] : [projectCloneBannerItem];
     if (!localCheckoutBranchMismatch || !showBranchMismatchBanner || !activeBranchMismatchKey) {
       return [
+        ...threadApprovalBannerItems,
         ...feedbackBannerItems,
         ...limitRecoveryItems,
         ...usageLimitsItems,
@@ -5938,6 +5965,7 @@ export default function ChatView(props: ChatViewProps) {
       ];
     }
     return [
+      ...threadApprovalBannerItems,
       ...feedbackBannerItems,
       ...limitRecoveryItems,
       ...usageLimitsItems,
@@ -6000,6 +6028,7 @@ export default function ChatView(props: ChatViewProps) {
     projectCloneBannerItem,
     showBranchMismatchBanner,
     systemComposerBannerItems,
+    threadApprovalBannerItems,
     usageLimitsBanner,
   ]);
 
@@ -9008,10 +9037,7 @@ export default function ChatView(props: ChatViewProps) {
           key={renderedRightPanelSurface.id}
           surface={renderedRightPanelSurface}
           visible={rightPanelOpen}
-          onDismissSetup={() => {
-            closeRightPanelSurface(renderedRightPanelSurface);
-            useRightPanelStore.getState().show(activeThreadRef);
-          }}
+          onOpenSetup={() => setDeviceSetupThread(activeThreadRef)}
         />
       </Suspense>
     ) : (renderedRightPanelSurface?.kind === "files" ||
@@ -9092,6 +9118,10 @@ export default function ChatView(props: ChatViewProps) {
       unavailableLabel: "Devices are only available from a thread.",
       shortcutLabel: null,
       onSelect: addDeviceSurface,
+      deviceMenu: {
+        ...deviceAddMenu,
+        onSetup: () => setDeviceSetupThread(activeThreadRef),
+      },
     },
     {
       offered: activeThreadCapabilities.files,
@@ -9199,14 +9229,7 @@ export default function ChatView(props: ChatViewProps) {
       >
         <WizardPopup>
           {activeThreadRef ? (
-            <DeviceSetup
-              environmentId={activeThreadRef.environmentId}
-              state={deviceState}
-              onComplete={() => {
-                useRightPanelStore.getState().open(activeThreadRef, "device");
-                setDeviceSetupThread(null);
-              }}
-            />
+            <DeviceSetup environmentId={activeThreadRef.environmentId} state={deviceState} />
           ) : null}
         </WizardPopup>
       </Dialog>
@@ -9703,6 +9726,7 @@ export default function ChatView(props: ChatViewProps) {
                                 activeProjectDefaultModelSelection
                               }
                               activeThreadModelSelection={activeThread?.modelSelection}
+                              onSendModelSelectionChange={onComposerSendModelSelectionChange}
                               activeProjectId={activeProject?.id ?? null}
                               activeContextWindow={activeContextWindow}
                               activeTasksProgress={activeComposerTasksProgress}

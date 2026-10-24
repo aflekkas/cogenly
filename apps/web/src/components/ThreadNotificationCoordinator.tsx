@@ -11,6 +11,7 @@ import { MessageCircleQuestionIcon, ShieldQuestionIcon } from "lucide-react";
 import { useCallback, useEffect, useRef } from "react";
 
 import { getClientSettings, useClientSettings } from "../hooks/useSettings";
+import { threadApprovals } from "../rpc/threadApprovals";
 import { useEnvironmentIds } from "../state/environments";
 import { environmentShell } from "../state/shell";
 import {
@@ -93,6 +94,7 @@ const HISTORY_GRACE_MS = 60_000;
 interface NotificationState {
   readonly raw: OrchestrationV2ThreadShell;
   readonly subagentRequest: PendingSubagentRequest | null;
+  readonly ownerApproval: boolean;
   readonly attention: string | null;
   readonly completion: number | null;
 }
@@ -109,6 +111,8 @@ function EnvironmentNotifications({
   // stable, so this only rescans when a thread actually changed.
   const threads =
     shell.status === "live" && Option.isSome(shell.snapshot) ? shell.snapshot.value.threads : null;
+  // A vault fill or token exposure a thread waits on lives outside its shell.
+  const ownerApprovals = useAtomValue(threadApprovals.threadIdsAtom(environmentId));
   const mode = useClientSettings((settings) => settings.notificationMode);
   const inAppNotificationsEnabled = useClientSettings(
     (settings) => settings.inAppNotificationsEnabled,
@@ -136,12 +140,17 @@ function EnvironmentNotifications({
       if (rawThread.lineage.relationshipToParent === "subagent") continue;
       const prior = previous.current.get(rawThread.id);
       const subagentRequest = subagentRequests.get(rawThread.id) ?? null;
+      const ownerApproval = ownerApprovals.has(rawThread.id);
       // The same object cannot produce a new notification.
-      if (prior?.raw === rawThread && prior.subagentRequest === subagentRequest) {
+      if (
+        prior?.raw === rawThread &&
+        prior.subagentRequest === subagentRequest &&
+        prior.ownerApproval === ownerApproval
+      ) {
         next.set(rawThread.id, prior);
         continue;
       }
-      const thread = presentThreadShell(environmentId, rawThread, subagentRequest);
+      const thread = presentThreadShell(environmentId, rawThread, subagentRequest, ownerApproval);
       let status = resolveSidebarThreadStatus(thread);
       if (status === "ready" && thread.latestRun?.status === "failed") status = "failed";
       const attention =
@@ -156,7 +165,13 @@ function EnvironmentNotifications({
         Number.isFinite(completedAt)
           ? completedAt
           : (prior?.completion ?? null);
-      next.set(thread.id, { raw: rawThread, subagentRequest, attention, completion });
+      next.set(thread.id, {
+        raw: rawThread,
+        subagentRequest,
+        ownerApproval,
+        attention,
+        completion,
+      });
       if (!prior || thread.archivedAt !== null) continue;
       if (completedAt < since - HISTORY_GRACE_MS) continue;
       const kind =
@@ -254,6 +269,7 @@ function EnvironmentNotifications({
     mode,
     navigate,
     onNotification,
+    ownerApprovals,
     threads,
   ]);
 

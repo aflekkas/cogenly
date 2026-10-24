@@ -3,9 +3,14 @@ import { describe, expect, it } from "@effect/vitest";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 
-import { retireLegacyLauncher } from "./update.ts";
+import { FetchHttpClient } from "effect/http";
+
+import * as BootService from "../cloud/bootService.ts";
+import * as ProcessRunner from "../processRunner.ts";
+import { retireLegacyLauncher, runUpdate } from "./update.ts";
 
 /** A home with two downloaded versions and an empty bin directory on PATH. */
 const setup = Effect.gen(function* () {
@@ -19,6 +24,10 @@ const setup = Effect.gen(function* () {
   for (const entry of [oldEntry, newEntry]) {
     yield* fs.makeDirectory(path.dirname(entry), { recursive: true });
     yield* fs.writeFileString(entry, "");
+    yield* fs.writeFileString(
+      path.join(path.dirname(entry), ".install-complete"),
+      `${path.basename(path.dirname(entry))}\n`,
+    );
   }
   yield* fs.makeDirectory(bin, { recursive: true });
   return { fs, path, root, versionsDir, oldEntry, newEntry, bin };
@@ -30,7 +39,126 @@ const retire = (input: { launchedAs: string; versionsDir: string; targetEntryPat
     Effect.provideService(HostProcess.Environment, { PATH: "" }),
   );
 
+describe("runUpdate when already current", () => {
+  it.effect("still replaces a legacy t3 launcher with cogenly", () =>
+    Effect.gen(function* () {
+      const { fs, path, oldEntry, bin } = yield* setup;
+      const legacy = path.join(bin, "t3");
+      yield* fs.symlink(oldEntry, legacy);
+      yield* runUpdate({
+        baseDir: path.join(bin, "..", "home"),
+        logsDir: path.join(bin, "..", "home", "logs"),
+        serverRuntimeStatePath: path.join(bin, "..", "home", "runtime-state.json"),
+        channel: undefined,
+        requestedVersion: "0.1.0",
+        allowDowngrade: false,
+        assumeYes: true,
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            Layer.mock(BootService.BootService)({
+              status: Effect.succeed({
+                supported: false,
+                installed: false,
+                current: false,
+                unitPath: "",
+                logPath: "",
+              }),
+            }),
+            Layer.succeed(HostProcess.Platform, "linux" as const),
+            Layer.succeed(HostProcess.Architecture, "arm64" as const),
+            Layer.succeed(HostProcess.IsExecutable, true),
+            Layer.succeed(HostProcess.InvokedAs, legacy),
+            Layer.succeed(HostProcess.WorkingDirectory, bin),
+            Layer.succeed(HostProcess.Environment, {
+              PATH: bin,
+              COGENLY_RELEASE_BASE_URL: "https://example.invalid/releases",
+            }),
+            ProcessRunner.layer,
+            FetchHttpClient.layer,
+          ),
+        ),
+      );
+      expect(yield* fs.exists(legacy)).toBe(false);
+      expect(yield* fs.readLink(path.join(bin, "cogenly"))).toBe(oldEntry);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+});
+
+describe("runUpdate when already current but the target runtime is absent", () => {
+  it.effect("fails without removing the only working t3 launcher", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "cogenly-update-missing-" });
+      const home = path.join(root, "home");
+      const olderEntry = path.join(home, "runtime/versions/0.0.9/t3");
+      yield* fs.makeDirectory(path.dirname(olderEntry), { recursive: true });
+      yield* fs.writeFileString(olderEntry, "");
+      const bin = path.join(root, "bin");
+      yield* fs.makeDirectory(bin, { recursive: true });
+      const legacy = path.join(bin, "t3");
+      yield* fs.symlink(olderEntry, legacy);
+      const error = yield* Effect.flip(
+        runUpdate({
+          baseDir: home,
+          logsDir: path.join(home, "logs"),
+          serverRuntimeStatePath: path.join(home, "runtime-state.json"),
+          channel: undefined,
+          requestedVersion: "0.1.0",
+          allowDowngrade: false,
+          assumeYes: true,
+        }).pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              Layer.mock(BootService.BootService)({
+                status: Effect.succeed({
+                  supported: false,
+                  installed: false,
+                  current: false,
+                  unitPath: "",
+                  logPath: "",
+                }),
+              }),
+              Layer.succeed(HostProcess.Platform, "linux" as const),
+              Layer.succeed(HostProcess.Architecture, "arm64" as const),
+              Layer.succeed(HostProcess.IsExecutable, true),
+              Layer.succeed(HostProcess.InvokedAs, legacy),
+              Layer.succeed(HostProcess.WorkingDirectory, bin),
+              Layer.succeed(HostProcess.Environment, {
+                PATH: bin,
+                COGENLY_RELEASE_BASE_URL: "https://example.invalid/releases",
+              }),
+              ProcessRunner.layer,
+              FetchHttpClient.layer,
+            ),
+          ),
+        ),
+      );
+      expect(error).toBeDefined();
+      expect(yield* fs.readLink(legacy)).toBe(olderEntry);
+      expect(yield* fs.exists(path.join(bin, "cogenly"))).toBe(false);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+});
+
 describe("retireLegacyLauncher", () => {
+  it.effect("keeps t3 when the target runtime does not exist", () =>
+    Effect.gen(function* () {
+      const { fs, path, versionsDir, oldEntry, bin } = yield* setup;
+      const legacy = path.join(bin, "t3");
+      yield* fs.symlink(oldEntry, legacy);
+      const replaced = yield* retire({
+        launchedAs: legacy,
+        versionsDir,
+        targetEntryPath: path.join(versionsDir, "9.9.9/t3"),
+      });
+      expect(replaced).toEqual([]);
+      expect(yield* fs.readLink(legacy)).toBe(oldEntry);
+      expect(yield* fs.exists(path.join(bin, "cogenly"))).toBe(false);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("replaces our t3 launcher with a cogenly one pointing at the new version", () =>
     Effect.gen(function* () {
       const { fs, path, versionsDir, oldEntry, newEntry, bin } = yield* setup;

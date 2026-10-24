@@ -4,30 +4,51 @@ import {
   squashAtomCommandFailure,
   type AtomCommandResult,
 } from "@t3tools/client-runtime/state/runtime";
-import type {
-  EnvironmentId,
-  Integration,
-  IntegrationId,
-  IntegrationSummary,
-  IntegrationTestResult,
-  ProjectLabelWithRepositories,
-  VaultItemMetadata,
+import {
+  integrationCatalogInputs,
+  slackAppManifest,
+  type EnvironmentId,
+  type Integration,
+  type IntegrationCatalogEntry,
+  type IntegrationCatalogId,
+  type IntegrationId,
+  type IntegrationSummary,
+  type IntegrationTestResult,
+  type ProjectLabelWithRepositories,
+  type VaultItemMetadata,
 } from "@t3tools/contracts";
 import {
   BlocksIcon,
+  ExternalLinkIcon,
+  HashIcon,
+  KanbanIcon,
   KeyRoundIcon,
+  ListTodoIcon,
+  LogInIcon,
+  MailIcon,
+  MessagesSquareIcon,
+  MicIcon,
   MoreHorizontalIcon,
+  NotebookTextIcon,
   PencilIcon,
+  PenToolIcon,
   PlugZapIcon,
   PlusIcon,
+  PowerIcon,
   Trash2Icon,
+  VideoIcon,
   XIcon,
 } from "lucide-react";
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
 
 import { AnimatedHeight } from "~/components/AnimatedHeight";
+import { GitHubIcon } from "~/components/Icons";
+import { CopyButton } from "~/components/ui/copy-button";
 import { OverlayPresence } from "~/components/ui/overlay-presence";
 import { requestConfirmDialog } from "../../confirmDialog";
+import { ensureLocalApi } from "../../localApi";
+import { useEnvironmentHttpBaseUrl } from "../../state/environments";
+import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { ProjectLabelChips, ProjectLabelPicker } from "../../projectLabels/ProjectLabelPicker";
 import { useEnvironmentProjectLabels } from "../../projectLabels/useProjectLabels";
 import { integrationsRpc } from "../../rpc/integrations";
@@ -46,14 +67,6 @@ import {
   DialogPopup,
   DialogTitle,
 } from "../ui/dialog";
-import {
-  Empty,
-  EmptyContent,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "../ui/empty";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import {
@@ -72,6 +85,17 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { Switch } from "../ui/switch";
 import { toastManager } from "../ui/toast";
 import {
+  catalogAction,
+  catalogConnectRequest,
+  catalogDraftSignsIn,
+  catalogErrorText,
+  emptyCatalogDraft,
+  groupByCatalog,
+  integrationDocsUrl,
+  type CatalogConnectDraft,
+  type CatalogGroup,
+} from "./integrationCatalog.logic";
+import {
   EMPTY_INTEGRATION_DRAFT,
   VAULT_FIELD_LABEL,
   credentialReference,
@@ -80,9 +104,11 @@ import {
   insertCredentialReference,
   integrationErrorText,
   integrationStatus,
+  integrationTitle,
   referenceableVaultItems,
   rowsToHeaders,
   scopeLabel,
+  signInAction,
   testResultReason,
   toolCountLabel,
   unresolvedCredentialReferences,
@@ -93,6 +119,7 @@ import {
   type IntegrationDraft,
   type IntegrationTest,
 } from "./integrationServices.logic";
+import { createIntegrationStatusFade } from "./integrationStatusMotion";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { SettingsRow, SettingsSection } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
@@ -100,6 +127,26 @@ import { searchableSetting } from "./settingsSearch";
 const EMPTY_SUMMARIES: ReadonlyArray<IntegrationSummary> = [];
 const EMPTY_VAULT_ITEMS: ReadonlyArray<VaultItemMetadata> = [];
 const READ_ONLY_MESSAGE = "This connection cannot change integrations.";
+
+/**
+ * Opens the service's sign-in page from a click. A web browser blocks a tab
+ * opened after an await, so the tab opens first and follows the link once the
+ * server returns it; the desktop app hands the link to the system browser.
+ */
+async function openSignInPage(link: () => Promise<string | null>) {
+  const tab = window.desktopBridge ? null : window.open("", "_blank");
+  const url = await link();
+  if (url === null) {
+    tab?.close();
+    return;
+  }
+  if (tab) {
+    tab.opener = null;
+    tab.location.href = url;
+    return;
+  }
+  await ensureLocalApi().shell.openExternal(url);
+}
 
 /** The value, or null after toasting a failure that was not a cancel. */
 function settled<A, E>(title: string, result: AtomCommandResult<A, E>): A | null {
@@ -114,9 +161,33 @@ function settled<A, E>(title: string, result: AtomCommandResult<A, E>): A | null
   return null;
 }
 
+/** Which glyph each catalog entry shows; brand marks only where the app already has one. */
+const CATALOG_ICONS: Readonly<Record<IntegrationCatalogId, ComponentType<{ className?: string }>>> =
+  {
+    "google-workspace": MailIcon,
+    linear: ListTodoIcon,
+    notion: NotebookTextIcon,
+    github: GitHubIcon,
+    atlassian: KanbanIcon,
+    intercom: MessagesSquareIcon,
+    "wispr-flow": MicIcon,
+    slack: HashIcon,
+    fathom: VideoIcon,
+    figma: PenToolIcon,
+  };
+
+/** Opens a user guide section: the system browser on desktop, a new tab on the web. */
+function openDocs(anchor: string) {
+  const url = integrationDocsUrl(anchor);
+  if (window.desktopBridge) void ensureLocalApi().shell.openExternal(url);
+  else window.open(url, "_blank", "noopener,noreferrer");
+}
+
 /**
- * Settings → Integrations → Services: remote MCP servers every agent reaches
- * through Cogenly, on every provider. Follows the scope sentence's environment.
+ * Settings → Integrations → Services: the default catalog of services every
+ * agent can use through Cogenly, on every provider, with each entry's
+ * connected accounts, and custom MCP servers last. Follows the scope
+ * sentence's environment.
  */
 export function IntegrationServicesSettings() {
   const { environment } = useSettingsScope();
@@ -130,73 +201,93 @@ export function IntegrationServicesSettings() {
   // Tests from this page; the list only knows tools an agent listed recently.
   const [tests, setTests] = useState<ReadonlyMap<IntegrationId, IntegrationTest>>(() => new Map());
   const [editor, setEditor] = useState<{ readonly integration: Integration | null } | null>(null);
+  const [connecting, setConnecting] = useState<CatalogGroup | null>(null);
   const recordTest = (integration: Integration, result: IntegrationTestResult) =>
     setTests((current) =>
       new Map(current).set(integration.id, { updatedAt: integration.updatedAt, result }),
     );
   const integrations = query.data?.integrations ?? EMPTY_SUMMARIES;
-  const add = () => setEditor({ integration: null });
-
-  return (
-    <SettingsSection
-      {...searchableSetting("integration-services")}
-      headerAction={
-        integrations.length > 0 ? (
-          <Button
-            size="xs"
-            variant="ghost-muted"
-            disabled={!canWrite}
-            title={canWrite ? undefined : READ_ONLY_MESSAGE}
-            onClick={add}
-          >
-            <PlusIcon className="size-3" />
-            Add integration
-          </Button>
-        ) : null
-      }
-    >
-      {environmentId === null ? (
-        <SettingsRow title="Choose an environment to see its integrations." />
-      ) : query.error !== null ? (
-        <SettingsRow title="Could not load integrations" description={query.error} />
-      ) : query.data === null ? (
-        <SettingsRow title="Loading integrations…" role="status" />
-      ) : integrations.length === 0 ? (
-        <Empty>
-          <EmptyHeader>
-            <EmptyMedia>
-              <BlocksIcon />
-            </EmptyMedia>
-            <EmptyTitle>No integrations yet</EmptyTitle>
-            <EmptyDescription>
-              Connect remote MCP servers once; every agent can use them, on Claude, Codex and Muse.
-            </EmptyDescription>
-          </EmptyHeader>
-          <EmptyContent>
-            <Button
-              size="sm"
-              disabled={!canWrite}
-              title={canWrite ? undefined : READ_ONLY_MESSAGE}
-              onClick={add}
-            >
-              <PlusIcon />
-              Add integration
-            </Button>
-          </EmptyContent>
-        </Empty>
-      ) : (
-        integrations.map((summary) => (
-          <IntegrationRow
+  const { groups, custom } = groupByCatalog(integrations);
+  const readOnlyTitle = canWrite ? undefined : READ_ONLY_MESSAGE;
+  const accountRows = (accounts: ReadonlyArray<IntegrationSummary>, inCatalog: boolean) =>
+    environmentId === null
+      ? []
+      : accounts.map((summary) => (
+          <IntegrationAccountRow
             key={summary.integration.id}
             environmentId={environmentId}
             summary={summary}
+            inCatalog={inCatalog}
             labels={labels}
             canWrite={canWrite}
             lastTest={tests.get(summary.integration.id)}
             onTested={recordTest}
             onEdit={() => setEditor({ integration: summary.integration })}
           />
-        ))
+        ));
+
+  return (
+    <SettingsSection {...searchableSetting("integration-services")} variant="plain">
+      {environmentId === null ? (
+        <SettingsRow title="Choose an environment to see its integrations." />
+      ) : query.error !== null ? (
+        <SettingsRow title="Could not load integrations" description={query.error} />
+      ) : query.data === null ? (
+        <SettingsRow title="Loading integrations…" role="status" />
+      ) : (
+        <div className="grid gap-2 sm:grid-cols-2">
+          {groups.map((group) => {
+            const action = catalogAction(group.entry, group.accounts);
+            return (
+              <CatalogCard
+                key={group.entry.id}
+                icon={CATALOG_ICONS[group.entry.icon]}
+                name={group.entry.name}
+                description={group.entry.description}
+                action={
+                  action === "Not available yet" ? (
+                    <Badge size="sm" variant="outline">
+                      {action}
+                    </Badge>
+                  ) : (
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      disabled={!canWrite}
+                      title={readOnlyTitle}
+                      onClick={() => setConnecting(group)}
+                    >
+                      {action === "Add account" ? <PlusIcon className="size-3" /> : null}
+                      {action}
+                    </Button>
+                  )
+                }
+                note={group.entry.kind === "unavailable" ? group.entry.reason : undefined}
+              >
+                {accountRows(group.accounts, true)}
+              </CatalogCard>
+            );
+          })}
+          <CatalogCard
+            icon={BlocksIcon}
+            name="Custom MCP server"
+            description="Any other remote MCP server, with OAuth sign-in or vault headers."
+            action={
+              <Button
+                size="xs"
+                variant="outline"
+                disabled={!canWrite}
+                title={readOnlyTitle}
+                onClick={() => setEditor({ integration: null })}
+              >
+                <PlusIcon className="size-3" />
+                Add
+              </Button>
+            }
+          >
+            {accountRows(custom, false)}
+          </CatalogCard>
+        </div>
       )}
       <OverlayPresence when={editor !== null && environmentId !== null ? editor : null}>
         {(open) =>
@@ -211,13 +302,58 @@ export function IntegrationServicesSettings() {
           )
         }
       </OverlayPresence>
+      <OverlayPresence when={environmentId !== null ? connecting : null}>
+        {(group) =>
+          environmentId === null ? null : (
+            <CatalogConnectDialog
+              environmentId={environmentId}
+              entry={group.entry}
+              existingAccounts={group.accounts.length}
+              onClose={() => setConnecting(null)}
+            />
+          )
+        }
+      </OverlayPresence>
     </SettingsSection>
   );
 }
 
-function IntegrationRow({
+/** One catalog entry: what agents can do with it, its button, and its accounts. */
+function CatalogCard(props: {
+  readonly icon: ComponentType<{ className?: string }>;
+  readonly name: string;
+  readonly description: string;
+  readonly action: ReactNode;
+  /** Shown instead of accounts, e.g. why an entry is not available. */
+  readonly note?: string | undefined;
+  readonly children: ReadonlyArray<ReactNode>;
+}) {
+  const Icon = props.icon;
+  return (
+    <div className="flex flex-col rounded-lg bg-card p-3 ring-1 ring-black/5 dark:bg-white/3 dark:ring-white/5">
+      <div className="flex items-start gap-3">
+        <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+        <div className="min-w-0 flex-1">
+          <h3 className="text-sm font-medium text-foreground">{props.name}</h3>
+          <p className="text-xs text-muted-foreground">{props.description}</p>
+          {props.note ? <p className="pt-1 text-xs text-muted-foreground">{props.note}</p> : null}
+        </div>
+        <div className="shrink-0">{props.action}</div>
+      </div>
+      <AnimatedHeight>
+        {props.children.length > 0 ? (
+          <div className="mt-2.5 space-y-2 border-t border-border/50 pt-2.5">{props.children}</div>
+        ) : null}
+      </AnimatedHeight>
+    </div>
+  );
+}
+
+/** One connected account: its status and the actions it offers. */
+function IntegrationAccountRow({
   environmentId,
   summary,
+  inCatalog,
   labels,
   canWrite,
   lastTest,
@@ -226,6 +362,8 @@ function IntegrationRow({
 }: {
   readonly environmentId: EnvironmentId;
   readonly summary: IntegrationSummary;
+  /** A catalog account is named by its account label; a custom server by its title and host. */
+  readonly inCatalog: boolean;
   readonly labels: ReadonlyArray<ProjectLabelWithRepositories>;
   readonly canWrite: boolean;
   readonly lastTest: IntegrationTest | undefined;
@@ -236,9 +374,36 @@ function IntegrationRow({
   const update = useOrchestrationCommand(integrationsRpc.update, { reportFailure: false });
   const remove = useOrchestrationCommand(integrationsRpc.remove, { reportFailure: false });
   const test = useOrchestrationCommand(integrationsRpc.testConnection, { reportFailure: false });
+  const beginSignIn = useOrchestrationCommand(integrationsRpc.beginSignIn, {
+    reportFailure: false,
+  });
   const [busy, setBusy] = useState(false);
   const status = integrationStatus(summary, lastTest);
-  const tools = toolCountLabel(status.toolCount);
+  const statusNode = useRef<HTMLDivElement>(null);
+  const statusFade = useRef<ReturnType<typeof createIntegrationStatusFade> | null>(null);
+  useLayoutEffect(() => {
+    if (!statusNode.current) return;
+    const fade = createIntegrationStatusFade(statusNode.current);
+    statusFade.current = fade;
+    return () => fade.dispose();
+  }, []);
+  useLayoutEffect(() => {
+    statusFade.current?.update(status.label);
+  }, [status.label]);
+  const title = integrationTitle(integration);
+  const signIn = signInAction(summary);
+  const label = inCatalog
+    ? integration.accountLabel?.trim() || integration.name
+    : `${title} · ${urlHost(integration.url)}`;
+  const detail =
+    status.reason ??
+    [
+      integration.name,
+      toolCountLabel(status.toolCount),
+      integration.scope.type === "all" ? null : scopeLabel(integration.scope, labels),
+    ]
+      .filter(Boolean)
+      .join(" · ");
   const run = async (action: () => Promise<unknown>) => {
     setBusy(true);
     try {
@@ -250,14 +415,14 @@ function IntegrationRow({
   const toggle = (enabled: boolean) =>
     run(async () => {
       settled(
-        `Could not turn ${integration.displayName} ${enabled ? "on" : "off"}`,
+        `Could not turn ${title} ${enabled ? "on" : "off"}`,
         await update({ environmentId, input: { id: integration.id, enabled } }),
       );
     });
   const testNow = () =>
     run(async () => {
       const result = settled(
-        `Could not test ${integration.displayName}`,
+        `Could not test ${title}`,
         await test({ environmentId, input: { id: integration.id } }),
       );
       if (result === null) return;
@@ -266,87 +431,423 @@ function IntegrationRow({
         result.status === "connected"
           ? {
               type: "success",
-              title: `${integration.displayName} is connected`,
+              title: `${title} is connected`,
               description: toolCountLabel(result.toolCount) ?? undefined,
             }
           : {
               type: "error",
-              title: `${integration.displayName} could not connect`,
+              title: `${title} could not connect`,
               description: testResultReason(result) ?? undefined,
             },
       );
     });
+  // The row updates itself when the callback lands: the list is live.
+  const signInNow = () =>
+    run(() =>
+      openSignInPage(async () => {
+        const started = settled(
+          `Could not start sign-in to ${title}`,
+          await beginSignIn({ environmentId, input: { id: integration.id } }),
+        );
+        return started?.authorizationUrl ?? null;
+      }),
+    );
   const removeNow = () =>
     run(async () => {
-      const message = `Remove “${integration.displayName}”?\nAgents can no longer use it. Vault items it referenced stay in the vault.`;
+      const message = `Remove “${title}”?\nAgents can no longer use it. Vault items it referenced stay in the vault; its sign-in is deleted.`;
       const confirmed =
         (await requestConfirmDialog(message, { variant: "destructive" })) ??
         window.confirm(message);
       if (!confirmed) return;
       settled(
-        `Could not remove ${integration.displayName}`,
+        `Could not remove ${title}`,
         await remove({ environmentId, input: { id: integration.id } }),
       );
     });
 
   return (
-    <SettingsRow
-      title={integration.displayName}
-      description={`${integration.name} · ${urlHost(integration.url)} · ${scopeLabel(integration.scope, labels)}`}
-      status={
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge
-            size="sm"
-            variant={
-              status.tone === "success" ? "success" : status.tone === "error" ? "error" : "outline"
-            }
+    <div className="flex items-center gap-2">
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm text-foreground">{label}</div>
+        <div
+          className={
+            status.reason && status.tone === "error"
+              ? "truncate text-xs text-destructive"
+              : "truncate text-xs text-muted-foreground"
+          }
+        >
+          {detail}
+          {integration.local
+            ? ` · Callback: ${summary.callbackHost ?? urlHost(integration.local.callbackOrigin)}`
+            : ""}
+          {status.checkedAt ? ` · Checked ${formatRelativeTimeLabel(status.checkedAt)}` : ""}
+          {integration.provenance?.addedByAgent
+            ? ` · Added by ${integration.provenance.addedByAgent.name}`
+            : ""}
+          {integration.provenance?.signedInAt
+            ? ` · Signed in ${integration.provenance.signedInViaAgent ? "from an agent link" : "from Settings"}`
+            : ""}
+        </div>
+      </div>
+      <div ref={statusNode} className="flex w-27 shrink-0 justify-end">
+        <Badge size="sm" variant={status.tone === "neutral" ? "outline" : status.tone}>
+          {status.label}
+        </Badge>
+      </div>
+      <div
+        className={`flex w-21 shrink-0 justify-end transition-opacity duration-(--motion-duration-base) ease-out ${signIn === "Sign in" && integration.enabled ? "opacity-100" : "pointer-events-none opacity-0"}`}
+        aria-hidden={signIn !== "Sign in" || !integration.enabled}
+        inert={signIn !== "Sign in" || !integration.enabled}
+      >
+        <Button
+          size="xs"
+          variant="outline"
+          disabled={busy || !canWrite}
+          onClick={() => void signInNow()}
+        >
+          <LogInIcon className="size-3" />
+          Sign in
+        </Button>
+      </div>
+      <Menu>
+        <MenuTrigger
+          render={
+            <Button
+              size="icon-xs"
+              variant="ghost"
+              disabled={busy || !canWrite}
+              aria-label={`Actions for ${title}`}
+            />
+          }
+        >
+          <MoreHorizontalIcon className="size-4" />
+        </MenuTrigger>
+        <MenuPopup align="end">
+          {signIn === "Reconnect" ? (
+            <MenuItem disabled={!integration.enabled} onClick={() => void signInNow()}>
+              <LogInIcon />
+              Reconnect
+            </MenuItem>
+          ) : null}
+          <MenuItem disabled={!integration.enabled} onClick={() => void testNow()}>
+            <PlugZapIcon />
+            Test connection
+          </MenuItem>
+          <MenuItem onClick={onEdit}>
+            <PencilIcon />
+            Edit
+          </MenuItem>
+          <MenuItem onClick={() => void toggle(!integration.enabled)}>
+            <PowerIcon />
+            {integration.enabled ? "Turn off" : "Turn on"}
+          </MenuItem>
+          <MenuSeparator />
+          <MenuItem variant="destructive" onClick={() => void removeNow()}>
+            <Trash2Icon />
+            Remove
+          </MenuItem>
+        </MenuPopup>
+      </Menu>
+    </div>
+  );
+}
+
+/**
+ * Connects one catalog entry, asking only for what it needs: an account
+ * label, a region, a key or app credentials. Secrets are picked from the
+ * vault, never typed here. Opens the sign-in page when the entry has one.
+ */
+function CatalogConnectDialog(props: {
+  readonly environmentId: EnvironmentId;
+  readonly entry: IntegrationCatalogEntry;
+  readonly existingAccounts: number;
+  readonly onClose: () => void;
+}) {
+  const { environmentId, entry } = props;
+  const connect = useOrchestrationCommand(integrationsRpc.connectFromCatalog, {
+    reportFailure: false,
+  });
+  const httpBaseUrl = useEnvironmentHttpBaseUrl(environmentId);
+  const callbackUrl =
+    httpBaseUrl === null ? null : new URL("/oauth/integrations/callback", httpBaseUrl).href;
+  const vault = useEnvironmentQuery(vaultRpc.list({ environmentId, input: {} }));
+  const vaultItems = vault.data?.items ?? EMPTY_VAULT_ITEMS;
+  const vaultLoading = vault.data === null && vault.error === null;
+  const [draft, setDraft] = useState(() => emptyCatalogDraft(entry));
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const needs = integrationCatalogInputs(entry, draft.auth ?? undefined);
+  const signsIn = catalogDraftSignsIn(entry, draft);
+  const edit = (next: Partial<CatalogConnectDraft>) => {
+    setDraft((current) => ({ ...current, ...next }));
+    setError(null);
+  };
+  const googleClientMissing =
+    entry.kind === "local-preset" &&
+    vault.data !== null &&
+    !vaultItems.some((item) => item.name === "google-oauth-client");
+
+  const submit = async () => {
+    const valid = catalogConnectRequest(entry, draft, props.existingAccounts);
+    if ("error" in valid) {
+      setError(valid.error);
+      return;
+    }
+    setPending(true);
+    const send = async () => {
+      const result = await connect({ environmentId, input: valid.request });
+      if (result._tag !== "Success") {
+        if (!isAtomCommandInterrupted(result))
+          setError(catalogErrorText(squashAtomCommandFailure(result)));
+        return null;
+      }
+      props.onClose();
+      return result.value.signIn?.authorizationUrl ?? null;
+    };
+    try {
+      if (signsIn) await openSignInPage(send);
+      else await send();
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open && !pending) props.onClose();
+      }}
+    >
+      <DialogPopup className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>
+            {props.existingAccounts > 0 ? `Add a ${entry.name} account` : `Connect ${entry.name}`}
+          </DialogTitle>
+          <DialogDescription>{entry.description}</DialogDescription>
+        </DialogHeader>
+        <DialogPanel>
+          <form
+            id="catalog-connect"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void submit();
+            }}
           >
-            {status.label}
-          </Badge>
-          {tools ? <span>{tools}</span> : null}
-          {status.reason ? <span className="text-destructive">{status.reason}</span> : null}
-        </div>
-      }
-      control={
-        <div className="flex items-center gap-2">
-          <Switch
-            checked={integration.enabled}
-            disabled={busy || !canWrite}
-            aria-label={`Use ${integration.displayName}`}
-            onCheckedChange={(checked) => void toggle(Boolean(checked))}
-          />
-          <Menu>
-            <MenuTrigger
-              render={
-                <Button
-                  size="icon-sm"
-                  variant="ghost"
-                  disabled={busy || !canWrite}
-                  aria-label={`Actions for ${integration.displayName}`}
+            <fieldset disabled={pending} className="space-y-5">
+              {entry.kind === "local-preset" ? (
+                <p className="text-xs text-muted-foreground">
+                  Uses your own Google OAuth client, stored in the vault as google-oauth-client, and
+                  uv on the machine running Cogenly.{" "}
+                  {googleClientMissing ? (
+                    <span className="text-destructive">No google-oauth-client item yet. </span>
+                  ) : null}
+                  <Button
+                    type="button"
+                    size="xs"
+                    variant="link"
+                    onClick={() => openDocs(entry.docsAnchor)}
+                  >
+                    Set up Google
+                  </Button>
+                </p>
+              ) : null}
+              <div className="space-y-1.5">
+                <Label htmlFor="catalog-account">
+                  {entry.kind === "local-preset" || props.existingAccounts > 0
+                    ? "Account"
+                    : "Account (optional)"}
+                </Label>
+                <Input
+                  id="catalog-account"
+                  autoFocus
+                  value={draft.accountLabel}
+                  maxLength={80}
+                  placeholder={entry.kind === "local-preset" ? "personal" : "Work"}
+                  onChange={(event) => edit({ accountLabel: event.currentTarget.value })}
                 />
-              }
-            >
-              <MoreHorizontalIcon className="size-4" />
-            </MenuTrigger>
-            <MenuPopup align="end">
-              <MenuItem onClick={onEdit}>
-                <PencilIcon />
-                Edit
-              </MenuItem>
-              <MenuItem disabled={!integration.enabled} onClick={() => void testNow()}>
-                <PlugZapIcon />
-                Test connection
-              </MenuItem>
-              <MenuSeparator />
-              <MenuItem variant="destructive" onClick={() => void removeNow()}>
-                <Trash2Icon />
-                Remove
-              </MenuItem>
-            </MenuPopup>
-          </Menu>
-        </div>
-      }
-    />
+                <p className="text-xs text-muted-foreground">
+                  Tells accounts apart, for you and for agents.
+                </p>
+              </div>
+              {entry.kind === "remote" && entry.auth.length > 1 ? (
+                <div className="space-y-1.5">
+                  <div className="text-xs font-medium text-muted-foreground">Connect with</div>
+                  <Select
+                    value={draft.auth ?? entry.auth[0].kind}
+                    onValueChange={(value) => {
+                      const mode = entry.auth.find((auth) => auth.kind === value);
+                      if (mode) edit({ auth: mode.kind });
+                    }}
+                  >
+                    <SelectTrigger size="sm" className="w-full sm:w-56" aria-label="Connect with">
+                      <SelectValue>
+                        {entry.auth.find((auth) => auth.kind === draft.auth)?.label}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectPopup alignItemWithTrigger={false}>
+                      {entry.auth.map((auth) => (
+                        <SelectItem key={auth.kind} value={auth.kind}>
+                          {auth.label}
+                        </SelectItem>
+                      ))}
+                    </SelectPopup>
+                  </Select>
+                </div>
+              ) : null}
+              {entry.kind === "remote" && needs.includes("region") ? (
+                <div className="space-y-1.5">
+                  <div className="text-xs font-medium text-muted-foreground">
+                    Where your workspace is hosted
+                  </div>
+                  <Select
+                    value={draft.region}
+                    onValueChange={(value) => {
+                      if (typeof value === "string") edit({ region: value });
+                    }}
+                  >
+                    <SelectTrigger size="sm" className="w-full sm:w-56" aria-label="Region">
+                      <SelectValue>
+                        {entry.regions.find((region) => region.id === draft.region)?.label ??
+                          "Choose a region"}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectPopup alignItemWithTrigger={false}>
+                      {entry.regions.map((region) => (
+                        <SelectItem key={region.id} value={region.id}>
+                          {region.label}
+                        </SelectItem>
+                      ))}
+                    </SelectPopup>
+                  </Select>
+                </div>
+              ) : null}
+              <AnimatedHeight>
+                {needs.includes("apiKey") ? (
+                  <div className="space-y-1.5">
+                    <Label htmlFor="catalog-api-key">
+                      {entry.kind === "remote"
+                        ? entry.auth.find((auth) => auth.kind === "api_key")?.label
+                        : null}
+                    </Label>
+                    <VaultReferenceField
+                      id="catalog-api-key"
+                      value={draft.apiKey}
+                      placeholder="Pick it from the vault"
+                      items={vaultItems}
+                      loading={vaultLoading}
+                      onChange={(apiKey) => edit({ apiKey })}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Store it in the vault first; Cogenly sends it as a bearer token.
+                    </p>
+                  </div>
+                ) : needs.includes("clientId") ? (
+                  <div className="space-y-2">
+                    {entry.id === "slack" ? (
+                      <ol className="list-decimal space-y-1 ps-4 text-xs text-muted-foreground">
+                        <li>
+                          Create a Slack app from this manifest{" "}
+                          {callbackUrl ? (
+                            <CopyButton
+                              size="xs"
+                              variant="outline"
+                              label="Copy the Slack app manifest"
+                              target="Slack app manifest"
+                              value={() => slackAppManifest(callbackUrl)}
+                            >
+                              Copy manifest
+                            </CopyButton>
+                          ) : null}
+                        </li>
+                        <li>
+                          In the app's Agents & AI Apps settings, turn on Model Context Protocol.
+                        </li>
+                        <li>Store its client secret in the vault, allowing slack.com.</li>
+                        <li>Enter its client ID and pick the secret below.</li>
+                      </ol>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">
+                        Create an OAuth app with {entry.name}
+                        {callbackUrl ? ` with ${callbackUrl} as its callback URL` : ""}, store its
+                        client secret in the vault, and enter both here.
+                      </p>
+                    )}
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <Input
+                        aria-label="Client ID"
+                        value={draft.clientId}
+                        maxLength={500}
+                        placeholder="Client ID"
+                        onChange={(event) => edit({ clientId: event.currentTarget.value })}
+                      />
+                      <VaultReferenceField
+                        aria-label="Client secret"
+                        value={draft.clientSecret}
+                        placeholder="Client secret from the vault"
+                        items={vaultItems}
+                        loading={vaultLoading}
+                        onChange={(clientSecret) => edit({ clientSecret })}
+                      />
+                    </div>
+                  </div>
+                ) : null}
+              </AnimatedHeight>
+              <AnimatedHeight>
+                {error ? (
+                  <p role="alert" className="text-sm text-destructive">
+                    {error}
+                  </p>
+                ) : null}
+              </AnimatedHeight>
+            </fieldset>
+          </form>
+        </DialogPanel>
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="ghost"
+            className="me-auto"
+            onClick={() => openDocs(entry.docsAnchor)}
+          >
+            <ExternalLinkIcon />
+            Guide
+          </Button>
+          <DialogClose render={<Button variant="ghost" />} disabled={pending}>
+            Cancel
+          </DialogClose>
+          <Button type="submit" form="catalog-connect" disabled={pending}>
+            {pending ? "Connecting…" : signsIn ? "Connect and sign in" : "Connect"}
+          </Button>
+        </DialogFooter>
+      </DialogPopup>
+    </Dialog>
+  );
+}
+
+/** A `{{credential:…}}` reference picked with the key button (or typed). */
+function VaultReferenceField(props: {
+  readonly id?: string;
+  readonly "aria-label"?: string;
+  readonly value: string;
+  readonly placeholder: string;
+  readonly items: ReadonlyArray<VaultItemMetadata>;
+  readonly loading: boolean;
+  readonly onChange: (value: string) => void;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <Input
+        id={props.id}
+        aria-label={props["aria-label"]}
+        className="min-w-0 flex-1"
+        value={props.value}
+        maxLength={500}
+        placeholder={props.placeholder}
+        onChange={(event) => props.onChange(event.currentTarget.value)}
+      />
+      <VaultReferenceMenu items={props.items} loading={props.loading} onPick={props.onChange} />
+    </div>
   );
 }
 
@@ -362,6 +863,12 @@ function IntegrationEditorDialog(props: {
   const create = useOrchestrationCommand(integrationsRpc.create, { reportFailure: false });
   const update = useOrchestrationCommand(integrationsRpc.update, { reportFailure: false });
   const test = useOrchestrationCommand(integrationsRpc.testConnection, { reportFailure: false });
+  const beginSignIn = useOrchestrationCommand(integrationsRpc.beginSignIn, {
+    reportFailure: false,
+  });
+  const httpBaseUrl = useEnvironmentHttpBaseUrl(environmentId);
+  const callbackUrl =
+    httpBaseUrl === null ? null : new URL("/oauth/integrations/callback", httpBaseUrl).href;
   const vault = useEnvironmentQuery(vaultRpc.list({ environmentId, input: {} }));
   const vaultItems = vault.data?.items ?? EMPTY_VAULT_ITEMS;
   // Becomes the created integration after a first save, so a test then edits it.
@@ -369,7 +876,7 @@ function IntegrationEditorDialog(props: {
   const [draft, setDraft] = useState<IntegrationDraft>(() =>
     props.integration ? draftFromIntegration(props.integration) : EMPTY_INTEGRATION_DRAFT,
   );
-  const [pending, setPending] = useState<"save" | "test" | null>(null);
+  const [pending, setPending] = useState<"save" | "test" | "sign-in" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<IntegrationTestResult | null>(null);
   const edit = (next: Partial<IntegrationDraft>) => {
@@ -426,6 +933,23 @@ function IntegrationEditorDialog(props: {
       if (result === null) return;
       setTestResult(result);
       props.onTested(integration, result);
+    } finally {
+      setPending(null);
+    }
+  };
+  /** Saves, then opens the service's sign-in page; the row turns connected when it lands. */
+  const signIn = async () => {
+    setPending("sign-in");
+    try {
+      await openSignInPage(async () => {
+        const integration = await persist();
+        if (!integration) return null;
+        const started = settled(
+          "Could not start sign-in",
+          await beginSignIn({ environmentId, input: { id: integration.id } }),
+        );
+        return started?.authorizationUrl ?? null;
+      });
     } finally {
       setPending(null);
     }
@@ -501,6 +1025,69 @@ function IntegrationEditorDialog(props: {
                   placeholder="https://example.com/mcp"
                   onChange={(event) => edit({ url: event.currentTarget.value })}
                 />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="integration-account">Account (optional)</Label>
+                <Input
+                  id="integration-account"
+                  value={draft.accountLabel}
+                  maxLength={200}
+                  placeholder="Work"
+                  onChange={(event) => edit({ accountLabel: event.currentTarget.value })}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Tells two connections to one service apart, like two Slack workspaces.
+                </p>
+              </div>
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between gap-3">
+                  <Label htmlFor="integration-oauth">Sign in with OAuth</Label>
+                  <Switch
+                    id="integration-oauth"
+                    checked={draft.oauth}
+                    onCheckedChange={(checked) => edit({ oauth: Boolean(checked) })}
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Most hosted servers, like Linear, Notion and GitHub, use this. You sign in once in
+                  your browser; agents keep access after that.
+                </p>
+                <AnimatedHeight>
+                  {draft.oauth ? (
+                    <div className="space-y-2 pt-1">
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        <Input
+                          aria-label="Client ID"
+                          value={draft.clientId}
+                          maxLength={500}
+                          placeholder="Client ID"
+                          onChange={(event) => edit({ clientId: event.currentTarget.value })}
+                        />
+                        <div className="flex items-center gap-2">
+                          <Input
+                            className="min-w-0 flex-1"
+                            aria-label="Client secret"
+                            value={draft.clientSecret}
+                            maxLength={500}
+                            placeholder="Client secret from the vault"
+                            onChange={(event) => edit({ clientSecret: event.currentTarget.value })}
+                          />
+                          <VaultReferenceMenu
+                            items={vaultItems}
+                            loading={vault.data === null && vault.error === null}
+                            onPick={(reference) => edit({ clientSecret: reference })}
+                          />
+                        </div>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Only for services that don't register Cogenly by themselves, such as Slack:
+                        create an app there
+                        {callbackUrl ? `, add ${callbackUrl} as its redirect URL,` : ""} and enter
+                        its client ID and the vault item holding its secret.
+                      </p>
+                    </div>
+                  ) : null}
+                </AnimatedHeight>
               </div>
               <div className="space-y-1.5">
                 <div className="text-xs font-medium text-muted-foreground">Headers</div>
@@ -623,6 +1210,18 @@ function IntegrationEditorDialog(props: {
               </div>
               <div className="space-y-1.5">
                 <div className="flex flex-wrap items-center gap-2">
+                  {draft.oauth ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={stored !== null && !stored.enabled}
+                      onClick={() => void signIn()}
+                    >
+                      <LogInIcon />
+                      {pending === "sign-in" ? "Opening…" : "Sign in"}
+                    </Button>
+                  ) : null}
                   <Button
                     type="button"
                     size="sm"
@@ -635,7 +1234,7 @@ function IntegrationEditorDialog(props: {
                   </Button>
                   {stored === null ? (
                     <span className="text-xs text-muted-foreground">
-                      Testing adds the integration first.
+                      {draft.oauth ? "Either adds" : "Testing adds"} the integration first.
                     </span>
                   ) : !stored.enabled ? (
                     <span className="text-xs text-muted-foreground">

@@ -1,3 +1,4 @@
+import * as Vault from "../vault/Vault.ts";
 import type { CredentialDelivery } from "../accounts/CliCredentials.ts";
 import type { AccountError } from "@t3tools/contracts";
 /**
@@ -316,7 +317,12 @@ export interface AgentTerminalResult {
   readonly output: string;
   readonly nextOffset: number;
   readonly truncated: boolean;
+  readonly notice?: string;
 }
+
+/** Shown when a foreground wait times out and the command is killed. */
+export const AGENT_TERMINAL_TIMEOUT_NOTICE =
+  "Command timed out and was killed. It may have been waiting for input (for example a login prompt). Re-run it with background=true, then poll with terminal_read and answer prompts with terminal_write so the wait does not block the turn.";
 
 interface AgentTerminalOpenInput extends TerminalOpenInput {
   readonly redactOutput?: CredentialDelivery["redactOutput"];
@@ -339,9 +345,12 @@ interface TerminalSessionState {
   pid: number | null;
   history: BoundedTerminalHistory;
   pendingHistoryControlSequence: string;
+  redactVaultOutput?: ((chunk: string, final?: boolean) => Effect.Effect<string>) | undefined;
   pendingProcessEvents: Array<PendingProcessEvent>;
   pendingProcessEventIndex: number;
   processEventDrainRunning: boolean;
+  /** The forked drain, so a stop can await the ordered flush it queued. */
+  processEventDrainFiber: Fiber.Fiber<void, never> | null;
   exitCode: number | null;
   exitSignal: number | null;
   updatedAt: string;
@@ -365,10 +374,11 @@ interface PersistHistoryRequest {
 }
 
 type PendingProcessEvent =
-  | { type: "output"; data: string }
+  | { type: "output"; data: string; final?: boolean }
   | { type: "exit"; event: PtyAdapter.PtyExitEvent };
 
 type DrainProcessEventAction =
+  | { readonly type: "skip" }
   | { type: "idle" }
   | {
       type: "output";
@@ -1495,6 +1505,7 @@ export const resolveProviderInstanceTerminalEnvironment = Effect.fn(
 
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.fn("TerminalManager.make")(function* () {
+  yield* Vault.Vault;
   const { terminalLogsDir } = yield* ServerConfig.ServerConfig;
   const ptyAdapter = yield* PtyAdapter.PtyAdapter;
   const portDiscovery = yield* PortScanner.PortDiscovery;
@@ -1528,6 +1539,7 @@ export const make = Effect.fn("TerminalManager.make")(function* () {
 export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(function* (
   options: TerminalManagerOptions,
 ) {
+  const vault = yield* Effect.serviceOption(Vault.Vault);
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const crypto = yield* Crypto.Crypto;
@@ -1758,7 +1770,11 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     threadId: string,
     terminalId: string,
   ) {
-    const fiber = yield* runKillEscalation(process, threadId, terminalId).pipe(
+    // Uninterruptible: once SIGTERM is sent, the SIGKILL after the grace
+    // period must land even if the caller that started the kill is cancelled.
+    const fiber = yield* Effect.uninterruptible(
+      runKillEscalation(process, threadId, terminalId),
+    ).pipe(
       Effect.ensuring(
         modifyManagerState((state) => {
           if (!state.killFibers.has(process)) {
@@ -1773,6 +1789,21 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     );
 
     yield* registerKillFiber(process, fiber);
+  });
+
+  /** Bounded wait for a started kill escalation; the escalation itself keeps running past the bound. */
+  const awaitKillEscalation = Effect.fn("terminal.awaitKillEscalation")(function* (
+    process: PtyAdapter.PtyProcess,
+  ) {
+    const fiber: Option.Option<Fiber.Fiber<void, never>> = yield* modifyManagerState<
+      Option.Option<Fiber.Fiber<void, never>>
+    >((state) => [Option.fromNullishOr(state.killFibers.get(process)), state] as const);
+    if (Option.isSome(fiber)) {
+      yield* Fiber.await(fiber.value).pipe(
+        Effect.timeoutOption(processKillGraceMs + 5_000),
+        Effect.asVoid,
+      );
+    }
   });
 
   const persistWorker = yield* makeKeyedCoalescingWorker<
@@ -2117,12 +2148,12 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     expectedPid: number,
   ) {
     while (true) {
-      const action: DrainProcessEventAction = yield* Effect.sync(() => {
+      const queued = yield* Effect.sync(() => {
         if (session.pid !== expectedPid || !session.process || session.status !== "running") {
           session.pendingProcessEvents = [];
           session.pendingProcessEventIndex = 0;
           session.processEventDrainRunning = false;
-          return { type: "idle" } as const;
+          return undefined;
         }
 
         const nextEvent = session.pendingProcessEvents[session.pendingProcessEventIndex];
@@ -2130,7 +2161,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
           session.pendingProcessEvents = [];
           session.pendingProcessEventIndex = 0;
           session.processEventDrainRunning = false;
-          return { type: "idle" } as const;
+          return undefined;
         }
 
         session.pendingProcessEventIndex += 1;
@@ -2139,7 +2170,21 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
           session.pendingProcessEventIndex = 0;
         }
 
+        return nextEvent;
+      });
+      if (queued === undefined) return;
+      const data =
+        queued.type === "output" && session.redactVaultOutput
+          ? yield* session.redactVaultOutput(queued.data, queued.final)
+          : queued.type === "output"
+            ? queued.data
+            : "";
+      const nextEvent = queued.type === "output" ? { ...queued, data } : queued;
+      const action: DrainProcessEventAction = yield* Effect.sync(() => {
+        if (session.pid !== expectedPid || !session.process || session.status !== "running")
+          return { type: "idle" } as const;
         if (nextEvent.type === "output") {
+          if (!nextEvent.data) return { type: "skip" } as const;
           const sanitized = sanitizeTerminalHistoryChunk(
             session.pendingHistoryControlSequence,
             nextEvent.data,
@@ -2191,6 +2236,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         } as const;
       });
 
+      if (action.type === "skip") continue;
       if (action.type === "idle") {
         return;
       }
@@ -2232,9 +2278,83 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     }
   });
 
+  /**
+   * Writes a session's final history now, bypassing the debounced persist
+   * worker: a stop must not wait out a debounce (which, under a test
+   * clock, may never elapse), and the worker's pending write holds the
+   * same history object, so it can only rewrite this same content.
+   */
+  const writeHistoryNow = Effect.fn("terminal.writeHistoryNow")(function* (
+    session: TerminalSessionState,
+  ) {
+    yield* fileSystem
+      .writeFileString(historyPath(session.threadId, session.terminalId), session.history.value())
+      .pipe(
+        Effect.catch((error) =>
+          Effect.logWarning("failed to persist terminal history", {
+            threadId: session.threadId,
+            terminalId: session.terminalId,
+            error,
+          }),
+        ),
+      );
+  });
+
+  /** Forks the ordered output drain and remembers it so a stop can await it. */
+  const forkProcessEventDrain = (session: TerminalSessionState, expectedPid: number) => {
+    const holder: { fiber?: Fiber.Fiber<void, never> } = {};
+    holder.fiber = runFork(
+      drainProcessEvents(session, expectedPid).pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            if (session.processEventDrainFiber === holder.fiber) {
+              session.processEventDrainFiber = null;
+            }
+          }),
+        ),
+      ),
+    );
+    session.processEventDrainFiber = holder.fiber;
+  };
+
   const stopProcess = Effect.fn("terminal.stopProcess")(function* (session: TerminalSessionState) {
     const process = session.process;
     if (!process) return;
+
+    const expectedPid = session.pid;
+    if (expectedPid !== null) {
+      // Flush both redactors through the ordered drain before anything is
+      // detached or cleared: each redactor holds back a tail that could
+      // still become a secret, and only its final flush releases that
+      // tail — redacted, or as the non-secret text it turned out to be.
+      // Dropping the queue here would silently lose that text.
+      let shouldFork = false;
+      const tail = session.agent?.redactOutput?.("", true);
+      if (tail) {
+        shouldFork =
+          enqueueProcessEvent(session, expectedPid, { type: "output", data: tail }) || shouldFork;
+      }
+      shouldFork =
+        enqueueProcessEvent(session, expectedPid, { type: "output", data: "", final: true }) ||
+        shouldFork;
+      if (
+        shouldFork ||
+        (session.processEventDrainRunning && session.processEventDrainFiber === null)
+      ) {
+        forkProcessEventDrain(session, expectedPid);
+      }
+      // Bounded: the drain publishes to event listeners, and one that stops
+      // consuming must not keep the process from being killed. Past the bound
+      // the held tail is dropped rather than the stop.
+      const drainFiber = session.processEventDrainFiber;
+      if (drainFiber) yield* Fiber.await(drainFiber).pipe(Effect.timeoutOption("2 seconds"));
+      if (session.process !== process) {
+        // The drain met a queued natural exit and already tore the
+        // process down; only the final history is left to persist.
+        yield* writeHistoryNow(session);
+        return;
+      }
+    }
 
     const updatedAt = yield* nowIso;
     yield* modifyManagerState((state) => {
@@ -2252,6 +2372,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       return [undefined, state] as const;
     });
 
+    yield* writeHistoryNow(session);
     yield* clearKillFiber(process);
     yield* unregisterTerminal({
       threadId: session.threadId,
@@ -2354,6 +2475,10 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       return [undefined, state] as const;
     });
 
+    session.redactVaultOutput = Option.isSome(vault)
+      ? yield* vault.value.makeOutputRedactor()
+      : undefined;
+
     let ptyProcess: PtyAdapter.PtyProcess | null = null;
     let startedShell: string | null = null;
 
@@ -2400,15 +2525,22 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
                 if (!enqueueProcessEvent(session, processPid, { type: "output", data })) {
                   return;
                 }
-                if (eventsActivated) runFork(drainProcessEvents(session, processPid));
+                if (eventsActivated) forkProcessEventDrain(session, processPid);
               });
               session.unsubscribeExit = spawnResult.process.onExit((event) => {
                 const tail = session.agent?.redactOutput?.("", true);
-                if (tail) enqueueProcessEvent(session, processPid, { type: "output", data: tail });
-                if (!enqueueProcessEvent(session, processPid, { type: "exit", event })) {
-                  return;
-                }
-                if (eventsActivated) runFork(drainProcessEvents(session, processPid));
+                let shouldDrain = tail
+                  ? enqueueProcessEvent(session, processPid, { type: "output", data: tail })
+                  : false;
+                shouldDrain =
+                  enqueueProcessEvent(session, processPid, {
+                    type: "output",
+                    data: "",
+                    final: true,
+                  }) || shouldDrain;
+                shouldDrain =
+                  enqueueProcessEvent(session, processPid, { type: "exit", event }) || shouldDrain;
+                if (eventsActivated && shouldDrain) forkProcessEventDrain(session, processPid);
               });
               eventStamp = advanceEventSequence(session);
               return [undefined, state] as const;
@@ -2423,7 +2555,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
             });
             // Publish startup before draining any events replayed during subscription.
             eventsActivated = true;
-            if (session.processEventDrainRunning) runFork(drainProcessEvents(session, processPid));
+            if (session.processEventDrainRunning) forkProcessEventDrain(session, processPid);
           }),
         ),
       ),
@@ -2724,6 +2856,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         pendingProcessEvents: [],
         pendingProcessEventIndex: 0,
         processEventDrainRunning: false,
+        processEventDrainFiber: null,
         exitCode: null,
         exitSignal: null,
         updatedAt: yield* nowIso,
@@ -3168,6 +3301,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
           pendingProcessEvents: [],
           pendingProcessEventIndex: 0,
           processEventDrainRunning: false,
+          processEventDrainFiber: null,
           exitCode: null,
           exitSignal: null,
           updatedAt: yield* nowIso,
@@ -3312,6 +3446,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       status: session.status,
       exitCode: session.exitCode,
       timedOut: session.agent.timedOut,
+      ...(session.agent.timedOut ? { notice: AGENT_TERMINAL_TIMEOUT_NOTICE } : {}),
       ...session.agent.output.read(input.sinceOffset),
     };
   });
@@ -3324,9 +3459,11 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         if (!session.agent) return yield* new TerminalSessionLookupError(input);
         const process = session.process;
         yield* stopProcess(session);
+        // stopProcess already started the SIGTERM → SIGKILL escalation in the
+        // worker scope; await it (bounded) instead of interrupting and
+        // re-running it inline, which delayed the SIGKILL by a second grace.
         if (process) {
-          yield* clearKillFiber(process);
-          yield* runKillEscalation(process, input.threadId, input.terminalId);
+          yield* awaitKillEscalation(process);
         }
         yield* publishEvent({
           type: "exited",
@@ -3378,7 +3515,14 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         if (Option.isNone(completed)) {
           const session = yield* requireSession(input.threadId, input.terminalId);
           if (session.agent) session.agent.timedOut = true;
-          yield* killAgent(input);
+          // The deadline must end the call, not just the wait: cap the kill
+          // at the kill grace plus a small allowance. The escalation keeps
+          // running in the worker scope past the cap, so the process group
+          // still receives its SIGKILL even when this returns first.
+          yield* killAgent(input).pipe(
+            Effect.timeoutOption(processKillGraceMs + 5_000),
+            Effect.asVoid,
+          );
         }
       }
       return yield* readAgent(input);

@@ -289,6 +289,29 @@ const makeHarness = Effect.sync(() => {
 });
 
 describe("agent execution", () => {
+  it.effect("schedule command ids stay portable and idempotent for arbitrary request keys", () =>
+    Effect.gen(function* () {
+      const h = yield* makeHarness;
+      yield* Effect.gen(function* () {
+        const store = yield* Store.AgentStore;
+        yield* store.save(h.fixture);
+        const schedules = yield* Schedules.ScheduledTaskService;
+        for (const key of ["nightly%20digest", "nightly%3Adigest", "x".repeat(300)]) {
+          const input = {
+            ...h.triggerInput,
+            commandId: CommandId.make(`command:mcp:session:schedule-task:${key}`),
+          };
+          const first = (yield* schedules.upsert(input)).task;
+          expect(first.id).toMatch(/^[a-zA-Z0-9][a-zA-Z0-9:._-]{0,199}$/);
+          expect((yield* schedules.upsert(input)).task.id).toBe(first.id);
+        }
+        const valid = CommandId.make("command:mcp:session:schedule-task:valid-key");
+        expect((yield* schedules.upsert({ ...h.triggerInput, commandId: valid })).task.id).toBe(
+          `scheduled-task:${valid}`,
+        );
+      }).pipe(Effect.provide(h.layer));
+    }).pipe(Effect.scoped),
+  );
   it.effect.each(["starting", "running", "completed", "failed"] as const)(
     "restart recovery leaves another machine's %s run untouched",
     (status) =>
@@ -842,6 +865,49 @@ it.effect("creates a conversation without a provider turn and edits the agent in
         "thread.runtime-mode.set",
         "thread.metadata.update",
       ]);
+    }).pipe(Effect.provide(h.layer));
+  }),
+);
+
+it.effect("editing an agent without its fallback chain keeps the fallback position", () =>
+  Effect.gen(function* () {
+    const h = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const store = yield* Store.AgentStore;
+      const agents = yield* Agents.AgentService;
+      const { name, avatar, instructions, modelSelection, runtimeMode, projectId, dailyRunCap } =
+        h.fixture;
+      const fallback = { instanceId: ProviderInstanceId.make("claude-backup"), model: "opus" };
+      const created = yield* agents.upsert({
+        name,
+        avatar,
+        instructions,
+        modelSelection,
+        runtimeMode,
+        projectId,
+        dailyRunCap,
+        fallbackChain: [fallback],
+      });
+      yield* store.setFallback(created.agent.id, {
+        index: 1,
+        reason: "usage_limit",
+        until: "2099-01-01T00:00:00.000Z",
+      });
+      // A profile edit that does not carry the chain must not restart it.
+      const edited = yield* agents.upsert({
+        avatar,
+        instructions,
+        modelSelection,
+        runtimeMode,
+        projectId,
+        dailyRunCap,
+        id: created.agent.id,
+        name: "Pine",
+      });
+      expect(edited.agent.fallbackChain).toEqual([fallback]);
+      expect(edited.agent.fallbackIndex).toBe(1);
+      expect(edited.agent.fallbackReason).toBe("usage_limit");
+      expect(edited.agent.fallbackUntil).toBe("2099-01-01T00:00:00.000Z");
     }).pipe(Effect.provide(h.layer));
   }),
 );

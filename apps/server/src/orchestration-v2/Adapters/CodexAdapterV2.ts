@@ -1,6 +1,9 @@
 import { revertCodexThread } from "../../provider/CodexThreadRevert.ts";
 import { historyResponseItems } from "@t3tools/provider-core/server/handoffBudget";
-import { makeProviderTextDeltaCoalescer } from "./ProviderTextDeltaCoalescer.ts";
+import {
+  makeProviderTextDeltaCoalescer,
+  type ProviderTextDeltaUpdate,
+} from "./ProviderTextDeltaCoalescer.ts";
 import {
   mcpToolPresentation,
   type McpToolPresentation,
@@ -149,6 +152,22 @@ import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter"
 const CODEX_PROVIDER = ProviderDriverKind.make("codex");
 export const CODEX_DRIVER_KIND = CODEX_PROVIDER;
 export const CODEX_DEFAULT_INSTANCE_ID = defaultInstanceIdForDriver(CODEX_DRIVER_KIND);
+
+/**
+ * How a streamed agent message update lands. An item Codex never completed
+ * (a steer restarted sampling mid-stream, or the turn ended) is gone from
+ * Codex's own history, so its buffered text is a fragment. It closes as
+ * interrupted rather than as the turn's answer, and stays in the transcript
+ * only when the turn itself was cut short and the fragment is what the user saw.
+ */
+export function codexAgentMessageClosing(
+  update: Pick<ProviderTextDeltaUpdate, "completed" | "cutOff">,
+  turnEndedEarly: boolean,
+): { readonly status: "running" | "completed" | "interrupted"; readonly recordMessage: boolean } {
+  if (!update.completed) return { status: "running", recordMessage: false };
+  if (update.cutOff === true) return { status: "interrupted", recordMessage: turnEndedEarly };
+  return { status: "completed", recordMessage: true };
+}
 
 /** Describe approval scope even when Codex omits or blanks the optional reason. */
 export function codexFileChangeApprovalPrompt(input: {
@@ -3416,15 +3435,18 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                 { id: update.itemId, text: update.text },
                 update.completed,
               );
+              const closing = codexAgentMessageClosing(
+                update,
+                (yield* Ref.get(terminalizedNonCompletedNativeTurns)).has(update.turnId),
+              );
               yield* emitProviderEvent({
                 type: "node.updated",
                 driver: CODEX_PROVIDER,
-                node: artifacts.node,
+                node: { ...artifacts.node, status: closing.status },
               });
               // Clients render streaming text from the turn item, so the
-              // message only carries the final text. flushTurn completes every
-              // buffered item when a turn ends, interrupted or not.
-              if (update.completed) {
+              // message only carries the final text.
+              if (closing.recordMessage) {
                 yield* emitProviderEvent({
                   type: "message.updated",
                   driver: CODEX_PROVIDER,
@@ -3434,9 +3456,9 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               yield* emitProviderEvent({
                 type: "turn_item.updated",
                 driver: CODEX_PROVIDER,
-                turnItem: artifacts.turnItem,
+                turnItem: { ...artifacts.turnItem, status: closing.status },
               });
-              if (finalAnswerItem && update.completed) {
+              if (finalAnswerItem && closing.status === "completed") {
                 yield* Ref.update(completedFinalAnswerTextsByTurn, (current) => {
                   const updated = new Map(current);
                   const texts = new Set(updated.get(update.turnId) ?? []);

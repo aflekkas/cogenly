@@ -1,5 +1,5 @@
 import type { Session, WebContents } from "electron";
-import { BrowserWindow, session } from "electron";
+import { BrowserWindow, session, systemPreferences } from "electron";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -9,7 +9,12 @@ import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 import * as SynchronizedRef from "effect/SynchronizedRef";
 
+import * as HostProcess from "@t3tools/shared/HostProcess";
+
 import * as ElectronDialog from "../electron/ElectronDialog.ts";
+import * as SitePermissions from "./SitePermissions.ts";
+import { permissionOriginOf, sitePermissionsForRequest } from "./SitePermissionStore.ts";
+import type { SitePermission } from "@t3tools/contracts";
 
 const PREVIEW_PARTITION_PREFIX = "persist:cogenly-preview-";
 /**
@@ -23,27 +28,49 @@ const PROFILE_PARTITION_MARKER = "profile-";
 
 export type BrowserSessionPartitionNamespace = "profile";
 
-// Permissions granted to preview web content. `clipboard-sanitized-write` is the
-// Electron permission behind `navigator.clipboard.writeText()` — note it is NOT
-// `clipboard-write`, which is not a valid Electron permission name. Async
+// Permissions every preview page gets without asking. `clipboard-sanitized-write`
+// is the Electron permission behind `navigator.clipboard.writeText()` — note it
+// is NOT `clipboard-write`, which is not a valid Electron permission name. Async
 // clipboard writes are gated by the permission *check* handler (not only the
 // request handler), so both handlers must allow it; otherwise built-in "Copy"
 // buttons — e.g. the Next.js / Vercel error overlay — fail with
 // `Failed to execute 'writeText' on 'Clipboard': Write permission denied`.
-const ALLOWED_PREVIEW_PERMISSIONS: ReadonlySet<string> = new Set([
-  "clipboard-read",
+//
+// Camera, microphone, location, notifications, clipboard reads and MIDI are not
+// here: the person decides those per site (see `SitePermissions`). Anything else
+// stays denied. Deliberately NOT local-fonts: preview sessions run untrusted web
+// content, and silently granting it would hand every page the user's
+// installed-font fingerprint (and font file bytes via FontData.blob()). The
+// app's own font picker runs in the main window session, which is unaffected.
+const ALWAYS_ALLOWED_PREVIEW_PERMISSIONS: ReadonlySet<string> = new Set([
   "clipboard-sanitized-write",
-  "notifications",
-  "geolocation",
   // The Fullscreen API. `DesktopWindow` disables HTML fullscreen window resizing
   // for the app window and every preview guest, so a page that goes fullscreen
   // fills its own webview instead of taking over the whole T3 window.
   "fullscreen",
-  // Deliberately NOT local-fonts: preview sessions run untrusted web content,
-  // and silently granting it would hand every page the user's installed-font
-  // fingerprint (and font file bytes via FontData.blob()). The app's own font
-  // picker runs in the main window session, which is unaffected by this list.
 ]);
+
+/**
+ * macOS asks the person for the camera and microphone itself, and refuses the
+ * page when the app was denied there. Only reached once the person allowed the
+ * site; other platforms leave it to Chromium.
+ */
+const ensureSystemMediaAccess = async (
+  platform: NodeJS.Platform,
+  wanted: ReadonlyArray<SitePermission>,
+): Promise<boolean> => {
+  if (platform !== "darwin") return true;
+  for (const permission of wanted) {
+    const kind =
+      permission === "camera" ? "camera" : permission === "microphone" ? "microphone" : null;
+    if (kind === null) continue;
+    const status = systemPreferences.getMediaAccessStatus(kind);
+    if (status === "granted") continue;
+    if (status === "not-determined" && (await systemPreferences.askForMediaAccess(kind))) continue;
+    return false;
+  }
+  return true;
+};
 
 /**
  * Schemes a preview page may never hand to the OS, even with the user's
@@ -152,6 +179,8 @@ export class BrowserSession extends Context.Service<
       namespace?: BrowserSessionPartitionNamespace,
     ) => Effect.Effect<string, BrowserSessionPartitionDerivationError>;
     readonly isPartition: (partition: string) => boolean;
+    /** The partition a session this service created belongs to, which is the browser profile. */
+    readonly partitionOf: (browserSession: Session) => string | undefined;
     readonly getSession: (
       scope?: string,
       persistent?: boolean,
@@ -215,7 +244,22 @@ const previewHostWindow = (guest: WebContents | null): BrowserWindow | undefined
 export const make = Effect.gen(function* BrowserSessionMake() {
   const crypto = yield* Crypto.Crypto;
   const electronDialog = yield* ElectronDialog.ElectronDialog;
+  const { controller: sitePermissions } = yield* SitePermissions.SitePermissions;
+  const platform = yield* HostProcess.Platform;
   const runFork = Effect.runForkWith(yield* Effect.context<never>());
+  const partitions = new WeakMap<Session, string>();
+  // A page waiting on a prompt is denied when its tab closes or leaves the
+  // origin that asked, so no stale prompt answers a page that has moved on.
+  const watchedTabs = new WeakSet<WebContents>();
+  const watchTab = (tab: WebContents): void => {
+    if (watchedTabs.has(tab)) return;
+    watchedTabs.add(tab);
+    const id = tab.id;
+    tab.once("destroyed", () => sitePermissions.cancel(id));
+    tab.on("did-navigate", (_event, url) =>
+      sitePermissions.cancel(id, permissionOriginOf(url) ?? undefined),
+    );
+  };
   // One prompt at a time, so a page cannot stack dialogs by looping a deep link.
   let externalPromptOpen = false;
   /**
@@ -313,12 +357,61 @@ export const make = Effect.gen(function* BrowserSessionMake() {
                 );
                 return;
               }
-              callback(ALLOWED_PREVIEW_PERMISSIONS.has(permission));
+              if (ALWAYS_ALLOWED_PREVIEW_PERMISSIONS.has(permission)) {
+                callback(true);
+                return;
+              }
+              const wanted = sitePermissionsForRequest(
+                permission,
+                "mediaTypes" in details ? details.mediaTypes : undefined,
+              );
+              // A subframe asks on behalf of the page that embeds it.
+              const origin = permissionOriginOf(
+                details.isMainFrame ? details.requestingUrl : webContents.getURL(),
+              );
+              if (wanted === null || origin === null) {
+                callback(false);
+                return;
+              }
+              watchTab(webContents);
+              sitePermissions.request({
+                partition,
+                origin,
+                permissions: wanted,
+                webContentsId: webContents.id,
+                respond: (granted) => {
+                  if (!granted || permission !== "media") {
+                    callback(granted);
+                    return;
+                  }
+                  void ensureSystemMediaAccess(platform, wanted).then(callback, () =>
+                    callback(false),
+                  );
+                },
+              });
             },
           );
-          browserSession.setPermissionCheckHandler((_webContents, permission) =>
-            ALLOWED_PREVIEW_PERMISSIONS.has(permission),
+          // Chromium's synchronous probes (`Notification.permission`, device
+          // labels) cannot wait for a prompt, so they only see what is allowed.
+          browserSession.setPermissionCheckHandler(
+            (_webContents, permission, requestingOrigin, details) => {
+              if (ALWAYS_ALLOWED_PREVIEW_PERMISSIONS.has(permission)) return true;
+              const mediaType = details.mediaType === "unknown" ? undefined : details.mediaType;
+              const wanted = sitePermissionsForRequest(
+                permission,
+                mediaType === undefined ? undefined : [mediaType],
+              );
+              const origin = permissionOriginOf(details.embeddingOrigin ?? requestingOrigin);
+              if (wanted === null || origin === null) return false;
+              return sitePermissions.check(
+                partition,
+                origin,
+                wanted,
+                permission === "media" && mediaType === undefined ? "any" : "all",
+              );
+            },
           );
+          partitions.set(browserSession, partition);
           const next = new Map(sessions);
           next.set(partition, browserSession);
           return [browserSession, next] as const;
@@ -338,6 +431,7 @@ export const make = Effect.gen(function* BrowserSessionMake() {
     isPartition: (partition) =>
       partition.startsWith(PREVIEW_PARTITION_PREFIX) ||
       partition.startsWith(PREVIEW_EPHEMERAL_PARTITION_PREFIX),
+    partitionOf: (browserSession) => partitions.get(browserSession),
     getSession,
     clearCookies: Effect.fn("BrowserSession.clearCookies")(function* (partitions?) {
       const sessions = yield* SynchronizedRef.get(sessionsRef);

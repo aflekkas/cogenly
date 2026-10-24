@@ -1224,7 +1224,7 @@ export function makeClaudeQueryOptions(input: {
         // commands through the terminal tools.
         (input.conversationMode === true || !input.disallowedTools?.includes("Bash")
           ? ""
-          : "\nUse mcp__cogenly__terminal_run for every shell command so the owner sees it live. Use background=true for servers, terminal_read for output, terminal_write for stdin, and terminal_kill to stop. Terminals and their children are killed when this thread settles."),
+          : "\nUse mcp__cogenly__terminal_run for every shell command so the owner sees it live. Use background=true for servers, terminal_read for output, terminal_write for stdin, and terminal_kill to stop. A command that may take more than about a minute, or may prompt (logins, cloud CLIs, installs, builds, test suites), runs with background=true and is polled with terminal_read, so the user's messages aren't blocked while it runs. Terminals and their children are killed when this thread settles."),
     },
     ...(Object.keys(extraArgs).length === 0 ? {} : { extraArgs }),
   };
@@ -1270,6 +1270,7 @@ export const CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS: ReadonlyArray<string> = [
   "mcp__cogenly__project_files_list",
   "mcp__cogenly__project_file_read",
   "mcp__cogenly__project_recall",
+  "mcp__cogenly__device_setup_status",
 ];
 
 // Chat-surface turns get the read-only tools plus the handoff draft, the
@@ -2811,11 +2812,14 @@ function providerFailureFromResult(
     }
   }
   const failureClass =
-    message.terminal_reason === "blocking_limit" ||
-    (message.subtype === "success" && message.api_error_status === 429) ||
-    usageLimited
-      ? "usage_limit"
-      : "provider_error";
+    message.terminal_reason === "prompt_too_long" ||
+    message.terminal_reason === "rapid_refill_breaker"
+      ? "context_overflow"
+      : message.terminal_reason === "blocking_limit" ||
+          (message.subtype === "success" && message.api_error_status === 429) ||
+          usageLimited
+        ? "usage_limit"
+        : "provider_error";
   const listedError = resultUserFacingError(message);
   const structuredError = isOverloadedResult(message)
     ? "Claude API is overloaded (529). Try again shortly."

@@ -9,6 +9,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { type MachineRole, type MachineSelfReport } from "@t3tools/contracts";
 import type * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as Crypto from "effect/Crypto";
 
 import * as Duration from "effect/Duration";
 
@@ -33,6 +34,17 @@ import * as Machines from "./Machines.ts";
 import * as PeerChannels from "./PeerChannels.ts";
 import * as PeerHttp from "./peerHttp.ts";
 import * as PeerHub from "./PeerHub.ts";
+
+interface MachineOverrides {
+  readonly secrets?: (
+    secrets: ServerSecretStore.ServerSecretStore["Service"],
+  ) => ServerSecretStore.ServerSecretStore["Service"];
+  readonly fetch?: typeof globalThis.fetch;
+  readonly crypto?: (crypto: Crypto.Crypto) => Crypto.Crypto;
+  readonly auth?: (
+    auth: EnvironmentAuth.EnvironmentAuth["Service"],
+  ) => EnvironmentAuth.EnvironmentAuth["Service"];
+}
 
 const layerIdentity = (name: string, role: MachineRole) =>
   Layer.effect(
@@ -66,10 +78,17 @@ const machineLayer = (
   name: string,
   role: MachineRole,
   socketConstructor?: Socket.WebSocketConstructor["Service"],
+  overrides: MachineOverrides = {},
 ) => {
   const infra = Layer.mergeAll(
     SqlitePersistence.layerMemory,
-    ServerSecretStore.layer,
+    Layer.effect(
+      ServerSecretStore.ServerSecretStore,
+      Effect.gen(function* () {
+        const secrets = yield* ServerSecretStore.ServerSecretStore;
+        return overrides.secrets?.(secrets) ?? secrets;
+      }),
+    ).pipe(Layer.provide(ServerSecretStore.layer)),
     ServerEnvironment.layerIdentity,
   ).pipe(
     Layer.provideMerge(
@@ -81,12 +100,30 @@ const machineLayer = (
     Layer.provideMerge(PeerHub.layer),
     Layer.provideMerge(PeerChannels.layer),
     Layer.provideMerge(layerIdentity(name, role)),
-    Layer.provideMerge(EnvironmentAuth.layer),
+    Layer.provideMerge(
+      Layer.effect(
+        EnvironmentAuth.EnvironmentAuth,
+        Effect.gen(function* () {
+          const auth = yield* EnvironmentAuth.EnvironmentAuth;
+          return overrides.auth?.(auth) ?? auth;
+        }),
+      ).pipe(Layer.provideMerge(EnvironmentAuth.layer)),
+    ),
     Layer.provideMerge(infra),
     Layer.provide(
       Layer.mock(DirectEndpoints.DirectEndpoints)({ resolve: () => Effect.succeed([]) }),
     ),
     Layer.provide(FetchHttpClient.layer),
+    Layer.provide(Layer.succeed(FetchHttpClient.Fetch, overrides.fetch ?? globalThis.fetch)),
+    Layer.provide(
+      Layer.effect(
+        Crypto.Crypto,
+        Effect.gen(function* () {
+          const crypto = yield* Crypto.Crypto;
+          return overrides.crypto?.(crypto) ?? crypto;
+        }),
+      ),
+    ),
     Layer.provide(
       socketConstructor === undefined
         ? Socket.layerWebSocketConstructorGlobal
@@ -115,8 +152,9 @@ export const startMachine = Effect.fn("startMachine")(function* (
   name: string,
   role: MachineRole,
   socketConstructor?: Socket.WebSocketConstructor["Service"],
+  overrides: MachineOverrides = {},
 ) {
-  const context = yield* Layer.build(machineLayer(name, role, socketConstructor));
+  const context = yield* Layer.build(machineLayer(name, role, socketConstructor, overrides));
   const run = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     Effect.provideContext(effect, context as Context.Context<MachineContext>);
   const server = yield* run(HttpServer.HttpServer);

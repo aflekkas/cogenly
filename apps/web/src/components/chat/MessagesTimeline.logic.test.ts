@@ -18,6 +18,7 @@ import {
   collapseRestartMarkers,
   collapseWorkEntryRuns,
   deriveMessagesTimelineRows,
+  deriveTerminalAssistantMessageIds,
   turnFoldRowId,
   type MessagesTimelineRow,
   type TimelineLatestRun,
@@ -425,5 +426,104 @@ describe("collapseRestartMarkers", () => {
       summary: "Background task finished",
     });
     expect(shape(collapseRestartMarkers([other]))).toEqual(["work:n1"]);
+  });
+});
+
+describe("a cut-off fragment never replaces the turn's answer", () => {
+  const assistant = (
+    id: string,
+    second: number,
+    text: string,
+    status: "completed" | "interrupted",
+  ): TimelineEntry => {
+    const at = DateTime.makeUnsafe(Date.UTC(2026, 0, 1, 0, 0, second));
+    const createdAt = DateTime.formatIso(at);
+    const item: OrchestrationV2TurnItem = {
+      id: TurnItemId.make(id),
+      threadId: ThreadId.make("thread-1"),
+      runId,
+      nodeId: null,
+      providerThreadId: null,
+      providerTurnId: null,
+      nativeItemRef: null,
+      parentItemId: null,
+      ordinal: second,
+      title: null,
+      startedAt: at,
+      completedAt: at,
+      updatedAt: at,
+      type: "assistant_message",
+      status,
+      messageId: MessageId.make(id),
+      text,
+      streaming: false,
+    };
+    return {
+      id,
+      kind: "message",
+      createdAt,
+      message: {
+        id: MessageId.make(id),
+        role: "assistant",
+        text,
+        runId,
+        streaming: false,
+        createdAt,
+        updatedAt: createdAt,
+      },
+      projectedItem: {
+        position: second,
+        visibility: "local",
+        sourceThreadId: item.threadId,
+        sourceItemId: item.id,
+        item,
+      },
+    };
+  };
+  const tool: TimelineEntry = {
+    id: "tool-1",
+    kind: "work",
+    createdAt: "2026-01-01T00:00:02.000Z",
+    entry: {
+      id: "tool-1",
+      createdAt: "2026-01-01T00:00:02.000Z",
+      label: "Deleted a Slack message",
+      tone: "tool",
+      itemType: "dynamic_tool",
+      runId,
+      toolLifecycleStatus: "completed",
+    },
+  };
+  const entries = [
+    messageEntry("user-1", "user", { at: 0 }),
+    assistant("commentary", 1, "I'll remove the two updates.", "completed"),
+    tool,
+    assistant("answer", 3, "Deleted both Slack updates.", "completed"),
+    assistant("fragment", 4, "I'll combine the booking", "interrupted"),
+  ];
+  const visible = (rows: MessagesTimelineRow[]) =>
+    rows.map((row) =>
+      row.kind === "message" ? `${row.id}${row.showAssistantMeta ? "+meta" : ""}` : row.kind,
+    );
+
+  it("picks the last whole message as the answer", () => {
+    expect([...deriveTerminalAssistantMessageIds(entries, new Set())]).toEqual(["answer"]);
+  });
+
+  it("shows the answer below the fold and folds the fragment away with the work", () => {
+    expect(visible(rowsFor(entries, false))).toEqual(["user-1", "turn-fold", "answer+meta"]);
+  });
+
+  it("keeps the last words of a turn the user stopped, partial or not", () => {
+    expect([...deriveTerminalAssistantMessageIds(entries, new Set([runId]))]).toEqual(["fragment"]);
+  });
+
+  it("falls back to the fragment when the turn has no whole message", () => {
+    expect([
+      ...deriveTerminalAssistantMessageIds(
+        [entries[0]!, assistant("fragment", 1, "I'll combine", "interrupted")],
+        new Set(),
+      ),
+    ]).toEqual(["fragment"]);
   });
 });

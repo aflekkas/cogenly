@@ -30,6 +30,8 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as SqlClient from "effect/sql/SqlClient";
+import * as Stream from "effect/Stream";
+import * as ApprovalChanges from "./ApprovalChanges.ts";
 import * as Store from "./AgentStore.ts";
 import * as Agents from "./AgentService.ts";
 import * as Work from "../work/WorkHandoffService.ts";
@@ -54,6 +56,7 @@ const decodeVaultPolicy = Schema.decodeUnknownEffect(
     Schema.Struct({
       mode: Schema.Literals(["ask", "allow"]),
       allowedAgentIds: Schema.Array(Schema.String),
+      allowedThreadIds: Schema.optional(Schema.Array(Schema.String)),
       allowedDomains: Schema.Array(Schema.String),
     }),
   ),
@@ -63,6 +66,7 @@ const encodeVaultPolicy = Schema.encodeEffect(
     Schema.Struct({
       mode: Schema.Literals(["ask", "allow"]),
       allowedAgentIds: Schema.Array(Schema.String),
+      allowedThreadIds: Schema.optional(Schema.Array(Schema.String)),
       allowedDomains: Schema.Array(Schema.String),
     }),
   ),
@@ -115,6 +119,19 @@ export class AgentWorkspaceService extends Context.Service<
     readonly listApprovals: (
       input: typeof AgentApprovalListInput.Type,
     ) => Effect.Effect<{ approvals: ReadonlyArray<AgentApproval> }, AgentError>;
+    /**
+     * Pending approvals raised by ordinary threads (no persistent agent): vault
+     * fills and CLI token exposure, keyed by the thread in their payload. A
+     * deleted, archived or settled thread's approvals are left out.
+     */
+    readonly listThreadApprovals: (
+      threadId?: ThreadId,
+    ) => Effect.Effect<{ approvals: ReadonlyArray<AgentApproval> }, AgentError>;
+    /** Every thread's `listThreadApprovals`, now and again after each approval change. */
+    readonly subscribeThreadApprovals: Stream.Stream<
+      { approvals: ReadonlyArray<AgentApproval> },
+      AgentError
+    >;
     readonly approve: (
       id: string,
       accountScope?: "thread" | "agent_project",
@@ -158,6 +175,8 @@ const make = Effect.gen(function* () {
   // Optional so workspaces built without the gateway (unit tests) still
   // approve other actions; an integration approval then fails clearly.
   const integrations = yield* Effect.serviceOption(Integrations.Integrations);
+  const approvalChanges = yield* ApprovalChanges.optional;
+  const notifyApprovals = approvalChanges.notify;
   const lock = yield* Semaphore.make(1);
   const now = DateTime.now.pipe(Effect.map(DateTime.formatIso));
   const uuid = (prefix: string) =>
@@ -274,10 +293,11 @@ const make = Effect.gen(function* () {
         now.pipe(
           Effect.flatMap(
             (at) =>
-              sql`UPDATE agent_approvals SET status = 'expired', decided_at = ${at}, decided_by = 'system' WHERE status = 'pending' AND requested_at < ${before}`,
+              sql`UPDATE agent_approvals SET status = 'expired', decided_at = ${at}, decided_by = 'system' WHERE status = 'pending' AND requested_at < ${before} RETURNING id`,
           ),
         ),
       ),
+      Effect.tap((expired) => (expired.length > 0 ? notifyApprovals : Effect.void)),
     );
   const getApproval = (id: string) =>
     Effect.gen(function* () {
@@ -324,6 +344,7 @@ const make = Effect.gen(function* () {
           if (actor) yield* logAction({ ...actor, agent }, "approval_requested", id);
         }),
       );
+      yield* notifyApprovals;
       return { approval: yield* getApproval(id) };
     }).pipe(Effect.mapError(wrap));
   const executeWork = (
@@ -409,8 +430,33 @@ const make = Effect.gen(function* () {
         ORDER BY c.updated_at DESC, c.id LIMIT 500`;
       return { commitments: yield* Effect.forEach(rows, (r) => getCommitment(r.id)) };
     }).pipe(Effect.mapError(wrap));
+  // Both the vault and the accounts kind carry the calling thread in payload.threadId.
+  const listThreadApprovals = (threadId?: ThreadId) =>
+    expireApprovals().pipe(
+      Effect.andThen(
+        sql`SELECT a.* FROM agent_approvals a JOIN orchestration_v2_projection_threads t ON t.thread_id = json_extract(a.action_json, '$.payload.threadId')
+          WHERE a.status = 'pending' AND a.agent_id IS NULL AND json_extract(a.action_json, '$.actionKind') = 'vault_use'
+            AND (${threadId ?? null} IS NULL OR t.thread_id = ${threadId ?? null})
+            AND t.deleted_at IS NULL AND t.archived_at IS NULL AND json_extract(t.payload_json, '$.settledOverride') IS NOT 'settled'
+          ORDER BY a.requested_at, a.id LIMIT 200`,
+      ),
+      Effect.flatMap((rows) => Effect.forEach(rows, approvalFromRow)),
+      Effect.map((approvals) => ({ approvals })),
+      Effect.mapError(wrap),
+    );
+  const subscribeThreadApprovals = Stream.unwrap(
+    Effect.gen(function* () {
+      const changes = yield* approvalChanges.subscribe;
+      return Stream.concat(
+        Stream.fromEffect(listThreadApprovals()),
+        changes.pipe(Stream.mapEffect(() => listThreadApprovals())),
+      );
+    }),
+  );
   return AgentWorkspaceService.of({
     logAction,
+    listThreadApprovals,
+    subscribeThreadApprovals,
     requestApproval,
     startWork,
     listCommitments,
@@ -520,6 +566,46 @@ const make = Effect.gen(function* () {
               );
               return { approval: yield* getApproval(id) };
             }
+            if (approval.action.actionKind === "vault_use") {
+              const { payload } = approval.action;
+              if (approval.agentId === null && payload.threadId === null)
+                return yield* fail("A vault approval needs a calling thread or agent.");
+              yield* sql.withTransaction(
+                Effect.gen(function* () {
+                  const rows = yield* sql<{
+                    policy_json: string;
+                  }>`SELECT policy_json FROM vault_items WHERE id = ${payload.vaultItemId} AND deleted_at IS NULL`;
+                  if (!rows[0]) return yield* fail("Vault item not found.");
+                  const decoded = yield* decodeVaultPolicy(rows[0].policy_json);
+                  const policy = {
+                    mode: "allow" as const,
+                    allowedAgentIds: [
+                      ...new Set([
+                        ...decoded.allowedAgentIds,
+                        ...(approval.agentId ? [approval.agentId] : []),
+                      ]),
+                    ],
+                    allowedThreadIds: [
+                      ...new Set([
+                        ...(decoded.allowedThreadIds ?? []),
+                        ...(approval.agentId === null && payload.threadId
+                          ? [payload.threadId]
+                          : []),
+                      ]),
+                    ],
+                    allowedDomains: [
+                      ...new Set([
+                        ...decoded.allowedDomains,
+                        ...(payload.domain ? [payload.domain] : []),
+                      ]),
+                    ],
+                  };
+                  yield* sql`UPDATE vault_items SET policy_json = ${yield* encodeVaultPolicy(policy)}, updated_at = ${yield* now} WHERE id = ${payload.vaultItemId}`;
+                  yield* sql`UPDATE agent_approvals SET status = 'approved', decided_at = ${yield* now}, decided_by = 'user' WHERE id = ${id} AND status = 'pending'`;
+                }),
+              );
+              return { approval: yield* getApproval(id) };
+            }
             if (approval.agentId === null) return yield* fail("An agent approval needs an agent.");
             const agent = yield* store.get(approval.agentId);
             let resultThreadId: ThreadId | null = null;
@@ -544,34 +630,16 @@ const make = Effect.gen(function* () {
               case "change_permissions":
                 yield* agents.upsert({ ...agent, ...action.payload });
                 break;
-              case "vault_use": {
-                // Approving a vault use grants this agent that item (on the
-                // approved domain, when one was involved) so a retry succeeds.
-                const rows = yield* sql<{
-                  policy_json: string;
-                }>`SELECT policy_json FROM vault_items WHERE id = ${action.payload.vaultItemId} AND deleted_at IS NULL`;
-                if (rows[0]) {
-                  const decoded = yield* decodeVaultPolicy(rows[0].policy_json);
-                  const policy = {
-                    mode: "allow" as const,
-                    allowedAgentIds: decoded.allowedAgentIds.includes(agent.id)
-                      ? [...decoded.allowedAgentIds]
-                      : [...decoded.allowedAgentIds, agent.id],
-                    allowedDomains:
-                      action.payload.domain &&
-                      !decoded.allowedDomains.includes(action.payload.domain)
-                        ? [...decoded.allowedDomains, action.payload.domain]
-                        : [...decoded.allowedDomains],
-                  };
-                  yield* sql`UPDATE vault_items SET policy_json = ${yield* encodeVaultPolicy(policy)}, updated_at = ${yield* now} WHERE id = ${action.payload.vaultItemId}`;
-                }
-                break;
-              }
               case "integration_add": {
                 if (integrations._tag === "None")
                   return yield* fail("Integrations are unavailable on this server.");
+                // The owner reviewed these headers, so their vault items are approved.
                 yield* integrations.value
-                  .create(action.payload)
+                  .create(action.payload, {
+                    approveCredentials: true,
+                    fromAgent: true,
+                    addedByAgent: { id: agent.id, name: agent.name },
+                  })
                   .pipe(Effect.mapError((cause) => fail(cause.message)));
                 break;
               }
@@ -579,7 +647,7 @@ const make = Effect.gen(function* () {
                 if (integrations._tag === "None")
                   return yield* fail("Integrations are unavailable on this server.");
                 yield* integrations.value
-                  .update(action.payload)
+                  .update(action.payload, { approveCredentials: true })
                   .pipe(Effect.mapError((cause) => fail(cause.message)));
                 break;
               }
@@ -593,7 +661,10 @@ const make = Effect.gen(function* () {
             return { approval: yield* getApproval(id) };
           }),
         )
-        .pipe(Effect.mapError(wrap)),
+        .pipe(
+          Effect.tap(() => notifyApprovals),
+          Effect.mapError(wrap),
+        ),
     reject: (id) =>
       lock
         .withPermits(1)(
@@ -605,7 +676,10 @@ const make = Effect.gen(function* () {
             return { approval: yield* getApproval(id) };
           }),
         )
-        .pipe(Effect.mapError(wrap)),
+        .pipe(
+          Effect.tap(() => notifyApprovals),
+          Effect.mapError(wrap),
+        ),
     activity: (agentId) =>
       Effect.gen(function* () {
         const agent = yield* store.get(agentId);

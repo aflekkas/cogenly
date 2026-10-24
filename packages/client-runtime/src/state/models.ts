@@ -215,6 +215,8 @@ export function presentThreadShell(
   environmentId: EnvironmentId,
   thread: OrchestrationV2ThreadShell,
   pendingSubagentRequest: PendingSubagentRequest | null = null,
+  /** An owner approval the thread raised outside its provider run, such as a vault fill. */
+  hasOwnerApproval = false,
 ): EnvironmentThreadShell {
   const updatedAt = iso(thread.updatedAt);
   const latestRun =
@@ -260,9 +262,11 @@ export function presentThreadShell(
       ? {}
       : { latestUserAuthoredMessageAt: nullableIso(thread.latestUserAuthoredMessageAt) }),
     hasPendingApprovals:
-      thread.pendingRuntimeRequest !== null &&
-      thread.pendingRuntimeRequest.kind !== "user_input" &&
-      thread.pendingRuntimeRequest.kind !== "auth_refresh",
+      (thread.pendingRuntimeRequest !== null &&
+        thread.pendingRuntimeRequest.kind !== "user_input" &&
+        thread.pendingRuntimeRequest.kind !== "auth_refresh") ||
+      // A settled or archived thread waits on nobody, though its approval may not have expired yet.
+      (hasOwnerApproval && thread.settledOverride !== "settled" && thread.archivedAt === null),
     hasPendingUserInput: thread.pendingRuntimeRequest?.kind === "user_input",
     pendingSubagentRequest,
     hasActionableProposedPlan: thread.hasActionableProposedPlan,

@@ -18,6 +18,23 @@ const json = Schema.decodeUnknownEffect(
   Schema.fromJsonString(Schema.Record(Schema.String, Schema.Json)),
 );
 const storage = (cause: unknown) => new SharedStateError({ reason: "storage", cause });
+/** Keep an active binding to this remote before choosing a default local clone. */
+const executionCheckout = Effect.fn("SharedState.executionCheckout")(function* (
+  remote: string | null,
+  previousId: string | null,
+) {
+  const sql = yield* SqlClient.SqlClient;
+  const previous = yield* sql<{
+    project_id: string;
+    workspace_root: string;
+  }>`SELECT p.project_id,p.workspace_root FROM projection_projects p WHERE p.project_id=${previousId} AND p.deleted_at IS NULL AND (${remote} IS NULL OR EXISTS (SELECT 1 FROM label_repositories r WHERE r.repository_id=p.project_id AND r.remote=${remote}) OR EXISTS (SELECT 1 FROM shared_repository_checkouts r WHERE r.repository_id=p.project_id AND r.remote=${remote}))`;
+  if (previous[0] || remote === null) return previous[0];
+  const mapped = yield* sql<{
+    project_id: string;
+    workspace_root: string;
+  }>`SELECT p.project_id,p.workspace_root FROM projection_projects p JOIN shared_repository_checkouts r ON r.repository_id=p.project_id WHERE r.remote=${remote} AND p.deleted_at IS NULL LIMIT 1`;
+  return mapped[0];
+});
 const repository = Effect.fn("SharedState.repository")(function* (
   id: string | null,
   kind: SharedDocumentKind,
@@ -190,8 +207,18 @@ const reconcileRepositories = Effect.fn("SharedState.reconcileRepositories")(fun
     remote: string;
     repository_id: string;
     directory_name: string | null;
-  }>`SELECT c.* FROM shared_repository_checkouts c JOIN projection_projects p ON p.project_id=c.repository_id WHERE p.deleted_at IS NULL`;
-  const localByRemote = new Map(checkouts.map((row) => [row.remote, row]));
+  }>`SELECT c.remote,c.repository_id,c.directory_name FROM shared_repository_checkouts c JOIN projection_projects p ON p.project_id=c.repository_id WHERE p.deleted_at IS NULL UNION ALL SELECT r.remote,r.repository_id,r.directory_name FROM label_repositories r JOIN projection_projects p ON p.project_id=r.repository_id WHERE r.remote IS NOT NULL AND p.deleted_at IS NULL`;
+  // The checkout map chooses a default clone for new execution bindings; it is
+  // not an exhaustive inventory. Existing links may contain several local clones.
+  const localByRemote = new Map<string, Map<string, (typeof checkouts)[number]>>();
+  for (const checkout of checkouts) {
+    let clones = localByRemote.get(checkout.remote);
+    if (!clones) {
+      clones = new Map();
+      localByRemote.set(checkout.remote, clones);
+    }
+    clones.set(checkout.repository_id, checkout);
+  }
   const links = yield* sql<{
     label_id: string;
     repository_id: string;
@@ -201,15 +228,19 @@ const reconcileRepositories = Effect.fn("SharedState.reconcileRepositories")(fun
     const winner = winners.get(link.remote);
     if (
       winner?.id !== link.label_id ||
-      link.repository_id !==
-        (localByRemote.get(link.remote)?.repository_id ?? `remote:${link.remote}`)
+      !(
+        localByRemote.get(link.remote)?.has(link.repository_id) ??
+        link.repository_id === `remote:${link.remote}`
+      )
     )
       yield* sql`DELETE FROM label_repositories WHERE repository_id=${link.repository_id} AND EXISTS (SELECT 1 FROM shared_documents WHERE kind='project' AND id=${link.label_id})`;
   }
   for (const [remote, winner] of winners) {
-    const local = localByRemote.get(remote);
-    const repositoryId = local?.repository_id ?? `remote:${remote}`;
-    yield* sql`INSERT INTO label_repositories(label_id,repository_id,remote,directory_name) VALUES (${winner.id},${repositoryId},${remote},${local?.directory_name ?? winner.directoryName}) ON CONFLICT(repository_id) DO UPDATE SET label_id=excluded.label_id,remote=excluded.remote,directory_name=excluded.directory_name`;
+    const clones = localByRemote.get(remote)?.values() ?? [
+      { repository_id: `remote:${remote}`, directory_name: winner.directoryName },
+    ];
+    for (const clone of clones)
+      yield* sql`INSERT INTO label_repositories(label_id,repository_id,remote,directory_name) VALUES (${winner.id},${clone.repository_id},${remote},${clone.directory_name ?? winner.directoryName}) ON CONFLICT(repository_id) DO UPDATE SET label_id=excluded.label_id,remote=excluded.remote,directory_name=excluded.directory_name`;
   }
 });
 
@@ -230,8 +261,9 @@ export const projectDocument = Effect.fn("SharedState.projectDocument")(function
       yield* sql`DELETE FROM commitment_labels WHERE label_id=${id}`;
       yield* sql`UPDATE facts SET updated_at=${at},payload_json=json_set(payload_json,'$.updatedAt',${at},'$.labelIds',json((SELECT json_group_array(l.value) FROM json_each(facts.payload_json,'$.labelIds') l WHERE l.value<>${id}))) WHERE id IN (SELECT fact_id FROM fact_labels WHERE label_id=${id})`;
       yield* sql`INSERT INTO fact_history(fact_id,payload_json) SELECT f.id,json_object('id',${`sync-delete:${id}:${at}:`} || f.id,'factId',f.id,'who','user','at',${at},'fact',json(f.payload_json)) FROM facts f WHERE f.id IN (SELECT fact_id FROM fact_labels WHERE label_id=${id})`;
+      // Transfer all surviving clones before label deletion cascades their links.
+      if (!preserveLocalBindings) yield* reconcileRepositories();
       yield* sql`DELETE FROM project_labels WHERE label_id=${id}`;
-      yield* reconcileRepositories();
     }
     if (kind === "agent") {
       // Keep the row and run ledger until AgentService uses its normal stop/delete path.
@@ -254,19 +286,17 @@ export const projectDocument = Effect.fn("SharedState.projectDocument")(function
     yield* sql`DELETE FROM label_source_links WHERE label_id=${id}`;
     for (const source of f.sourceLinks)
       yield* sql`INSERT INTO label_source_links(label_id,kind,owner,repo,created_at) VALUES (${id},${source.kind},${source.owner},${source.kind === "github-owner" ? "" : source.repo},${at})`;
-    if (changedFields === undefined || changedFields.includes("repositories"))
+    // Domain mutations already updated the local links. Other documents may still be
+    // awaiting capture in the same transaction (for example the destination of a move).
+    if (
+      !preserveLocalBindings &&
+      (changedFields === undefined || changedFields.includes("repositories"))
+    )
       yield* reconcileRepositories();
     yield* sql`INSERT OR IGNORE INTO shared_possible_duplicates(kind,first_id,second_id) SELECT 'project',min(label_id,${id}),max(label_id,${id}) FROM project_labels WHERE lower(trim(name))=lower(trim(${f.name})) AND label_id<>${id}`;
     return;
   }
   const remote = typeof fields.repositoryRemote === "string" ? fields.repositoryRemote : null;
-  const locals =
-    remote === null
-      ? []
-      : yield* sql<{
-          project_id: string;
-          workspace_root: string;
-        }>`SELECT p.project_id,p.workspace_root FROM projection_projects p JOIN shared_repository_checkouts r ON r.repository_id=p.project_id WHERE r.remote=${remote} AND p.deleted_at IS NULL LIMIT 1`;
   if (kind === "agent") {
     const decoded = yield* Effect.result(decodeAgent(fields));
     if (decoded._tag === "Failure") return;
@@ -275,6 +305,10 @@ export const projectDocument = Effect.fn("SharedState.projectDocument")(function
       payload_json: string;
     }>`SELECT payload_json FROM agents WHERE agent_id=${id}`;
     const previous = existing[0] ? yield* json(existing[0].payload_json) : {};
+    const checkout = yield* executionCheckout(
+      remote,
+      typeof previous.projectId === "string" ? previous.projectId : null,
+    );
     const { repositoryRemote: _, ...profile } = f;
     const chainChanged =
       encodeJson(previous.modelSelection ?? null) !== encodeJson(f.modelSelection) ||
@@ -283,7 +317,10 @@ export const projectDocument = Effect.fn("SharedState.projectDocument")(function
       ...previous,
       ...profile,
       id,
-      projectId: locals[0]?.project_id ?? previous.projectId ?? null,
+      projectId:
+        preserveLocalBindings && previous.projectId !== undefined
+          ? previous.projectId
+          : (checkout?.project_id ?? previous.projectId ?? null),
       conversationThreadId: previous.conversationThreadId ?? `agent-conversation:${id}`,
       projectFolderId: null,
       updatedAt: at,
@@ -314,21 +351,30 @@ export const projectDocument = Effect.fn("SharedState.projectDocument")(function
     thread_id: string | null;
     workspace_strategy_json: string;
   }>`SELECT project_id,thread_id,workspace_strategy_json FROM scheduled_tasks WHERE task_id=${id}`;
+  const checkout = yield* executionCheckout(remote, previous[0]?.project_id ?? null);
+  const keepStrategy =
+    previous[0] &&
+    (preserveLocalBindings ||
+      (checkout?.project_id === previous[0].project_id &&
+        !changedFields?.includes("workspaceStrategy")));
   const strategy =
-    preserveLocalBindings && previous[0]
+    keepStrategy && previous[0]
       ? yield* json(previous[0].workspace_strategy_json)
       : f.workspaceStrategy.type === "existing_worktree"
-        ? locals[0]
+        ? checkout
           ? {
               type: "existing_worktree",
-              worktreePath: `${locals[0].workspace_root}/${f.workspaceStrategy.relativePath}`,
+              worktreePath: `${checkout.workspace_root}/${f.workspaceStrategy.relativePath}`,
               ...(f.workspaceStrategy.branch ? { branch: f.workspaceStrategy.branch } : {}),
             }
           : previous[0]
             ? yield* json(previous[0].workspace_strategy_json)
             : { type: "root" }
         : f.workspaceStrategy;
-  const projectId = locals[0]?.project_id ?? previous[0]?.project_id ?? `remote:${remote ?? id}`;
+  const projectId =
+    preserveLocalBindings && previous[0]
+      ? previous[0].project_id
+      : (checkout?.project_id ?? previous[0]?.project_id ?? `remote:${remote ?? id}`);
   const schedule = encodeJson(f.schedule);
   const occurrence = f.enabled
     ? nextScheduledRunAt(f.schedule, yield* DateTime.now, {

@@ -120,15 +120,24 @@ export const VAULT_FIELD_LABEL: Readonly<Record<VaultField, string>> = {
 };
 
 const REASON_TEXT: Readonly<Record<IntegrationError["reason"], string>> = {
+  google_client_missing:
+    "Store your Google OAuth client JSON in vault item google-oauth-client and allow accounts.google.com.",
+  local_runtime_missing: "Install uv (brew install uv on macOS), then try connecting again.",
   storage: "Cogenly could not read or save this integration.",
   not_found: "This integration no longer exists.",
   conflict: "Another integration already uses this name.",
   disabled: "Turn the integration on to test it.",
   credential_unresolved: "A vault reference in the headers does not match a vault item.",
+  credential_not_allowed:
+    "A vault item in the headers doesn't allow this server. Save the integration to approve it, or add the server to the item's allowed domains.",
   upstream_unreachable: "The server could not be reached.",
   upstream_timeout: "The server took too long to answer.",
   upstream_error: "The server answered with an error.",
   invalid_request: "The server rejected the request.",
+  approval_required: "Widening project access needs owner approval.",
+  sign_in_required: "Sign in to this service to use it.",
+  client_id_required:
+    "This service does not register apps automatically. Create an OAuth app with it and enter its client ID and secret.",
 };
 
 export function integrationReasonText(reason: IntegrationError["reason"]): string {
@@ -158,10 +167,33 @@ export function toolCountLabel(count: number | null): string | null {
 }
 
 export interface IntegrationStatusView {
-  readonly tone: "success" | "error" | "neutral";
+  readonly tone: "success" | "error" | "warning" | "neutral";
   readonly label: string;
   readonly reason: string | null;
   readonly toolCount: number | null;
+  /** When the server last heard from the upstream, if it has. */
+  readonly checkedAt?: string;
+}
+
+/** "Linear · Spawn Partners": how two accounts of one service read apart. */
+export function integrationTitle(integration: Integration): string {
+  const account = integration.accountLabel?.trim();
+  return account ? `${integration.displayName} · ${account}` : integration.displayName;
+}
+
+/**
+ * The sign-in action an integration offers, including explicit replacement
+ * of a managed account's existing grant.
+ */
+export function signInAction(summary: IntegrationSummary): "Sign in" | "Reconnect" | null {
+  if (summary.status === "needs_sign_in") {
+    return summary.integration.auth?.type === "oauth" || summary.integration.transport === "local"
+      ? "Sign in"
+      : null;
+  }
+  return summary.integration.auth?.type === "oauth" || summary.integration.transport === "local"
+    ? "Reconnect"
+    : null;
 }
 
 /** A test from this page, tied to the integration version it ran against. */
@@ -171,9 +203,9 @@ export interface IntegrationTest {
 }
 
 /**
- * What a row shows. The list only reports tools an agent listed recently, and
- * a test does not fill that cache, so the latest test of the current version
- * wins; an edit makes it stale.
+ * What a row shows. Tests belong to one integration version and expire when
+ * a subscription reports a newer server outcome. Both timestamps use the
+ * server clock, so a client's clock cannot keep an old result alive.
  */
 export function integrationStatus(
   summary: IntegrationSummary,
@@ -182,14 +214,59 @@ export function integrationStatus(
   if (!summary.integration.enabled) {
     return { tone: "neutral", label: "Off", reason: null, toolCount: null };
   }
-  const test = lastTest?.updatedAt === summary.integration.updatedAt ? lastTest.result : undefined;
+  const checked = summary.checkedAt === undefined ? {} : { checkedAt: summary.checkedAt };
+  // A failed managed process says more than any test of it.
+  const managed = summary.managed;
+  if (managed?.state === "failed" || managed?.state === "missing_runtime") {
+    return {
+      tone: "error",
+      label: managed.state === "missing_runtime" ? "Missing runtime" : "Failed",
+      reason: summary.message ?? managed.message ?? (managed.stderrTail || null),
+      toolCount: null,
+    };
+  }
+  // The server knows a sign-in is missing better than any earlier test does.
+  if (summary.status === "needs_sign_in") {
+    return {
+      tone: "warning",
+      label: "Needs sign-in",
+      reason: summary.message ?? null,
+      toolCount: null,
+      ...checked,
+    };
+  }
+  if (managed?.state === "starting" || managed?.state === "stopped") {
+    const label = managed.state === "starting" ? "Starting" : "Stopped";
+    return { tone: "neutral", label, reason: null, toolCount: null };
+  }
+  const test =
+    lastTest?.updatedAt === summary.integration.updatedAt &&
+    (summary.checkedAt === undefined ||
+      (lastTest.result.checkedAt !== undefined && lastTest.result.checkedAt > summary.checkedAt))
+      ? lastTest.result
+      : undefined;
   if (test !== undefined) {
     return test.status === "connected"
       ? { tone: "success", label: "Connected", reason: null, toolCount: test.toolCount }
       : { tone: "error", label: "Error", reason: testResultReason(test), toolCount: null };
   }
+  if (summary.status === "error") {
+    return {
+      tone: "error",
+      label: "Error",
+      reason: summary.message ?? null,
+      toolCount: null,
+      ...checked,
+    };
+  }
   if (summary.status === "connected") {
-    return { tone: "success", label: "Connected", reason: null, toolCount: summary.toolCount };
+    return {
+      tone: "success",
+      label: "Connected",
+      reason: null,
+      toolCount: summary.toolCount,
+      ...checked,
+    };
   }
   return { tone: "neutral", label: "Not checked", reason: null, toolCount: null };
 }
@@ -225,6 +302,13 @@ export interface IntegrationDraft {
   readonly hint: string;
   readonly scope: "all" | "projects";
   readonly labelIds: ReadonlyArray<ProjectLabelId>;
+  readonly accountLabel: string;
+  /** Sign in with OAuth instead of (or besides) header credentials. */
+  readonly oauth: boolean;
+  /** For servers without automatic client registration, e.g. a Slack app. */
+  readonly clientId: string;
+  /** A `{{credential:item.field}}` reference to the client secret. */
+  readonly clientSecret: string;
 }
 
 export const EMPTY_INTEGRATION_DRAFT: IntegrationDraft = {
@@ -236,6 +320,10 @@ export const EMPTY_INTEGRATION_DRAFT: IntegrationDraft = {
   hint: "",
   scope: "all",
   labelIds: [],
+  accountLabel: "",
+  oauth: false,
+  clientId: "",
+  clientSecret: "",
 };
 
 export function draftFromIntegration(integration: Integration): IntegrationDraft {
@@ -248,6 +336,10 @@ export function draftFromIntegration(integration: Integration): IntegrationDraft
     hint: integration.hint,
     scope: integration.scope.type,
     labelIds: integration.scope.type === "projects" ? integration.scope.labelIds : [],
+    accountLabel: integration.accountLabel ?? "",
+    oauth: integration.auth?.type === "oauth",
+    clientId: integration.auth?.clientId ?? "",
+    clientSecret: integration.auth?.clientSecret ?? "",
   };
 }
 
@@ -291,6 +383,19 @@ export function validateIntegrationDraft(
   }
   const scope: IntegrationScope =
     draft.scope === "all" ? { type: "all" } : { type: "projects", labelIds: [...draft.labelIds] };
+  const clientId = draft.clientId.trim();
+  const clientSecret = draft.clientSecret.trim();
+  if (draft.oauth && clientSecret !== "") {
+    const refs = credentialReferencesIn(clientSecret);
+    if (
+      refs.length !== 1 ||
+      refs[0]!.field === "" ||
+      !/^\{\{credential:[^}]*\}\}$/.test(clientSecret)
+    )
+      return { error: "Pick the client secret from the vault with the key button." };
+    if (clientId === "") return { error: "A client secret needs its client ID." };
+  }
+  const accountLabel = draft.accountLabel.trim();
   return {
     fields: {
       name,
@@ -300,6 +405,16 @@ export function validateIntegrationDraft(
       headers: headers.headers,
       scope,
       hint: draft.hint.trim(),
+      ...(accountLabel === "" ? {} : { accountLabel }),
+      ...(draft.oauth
+        ? {
+            auth: {
+              type: "oauth" as const,
+              ...(clientId === "" ? {} : { clientId }),
+              ...(clientSecret === "" ? {} : { clientSecret }),
+            },
+          }
+        : {}),
     },
   };
 }
@@ -308,14 +423,25 @@ export function updateInputFromDraft(
   integration: Integration,
   fields: ValidDraft,
 ): IntegrationUpdateInput {
+  // Scopes are not edited here, so a stored choice survives the save.
+  const auth =
+    fields.auth === undefined
+      ? integration.auth === undefined
+        ? undefined
+        : null
+      : integration.auth?.scope === undefined
+        ? fields.auth
+        : { ...fields.auth, scope: integration.auth.scope };
   return {
     id: integration.id,
     displayName: fields.displayName,
-    transport: fields.transport,
+    transport: integration.transport,
     url: fields.url,
     headers: fields.headers,
     scope: fields.scope,
     hint: fields.hint,
+    accountLabel: fields.accountLabel ?? "",
+    ...(auth === undefined ? {} : { auth }),
   };
 }
 

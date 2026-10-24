@@ -9,6 +9,11 @@ export interface ProviderTextDeltaUpdate {
   readonly itemId: string;
   readonly text: string;
   readonly completed: boolean;
+  /**
+   * The turn ended before the provider completed this item, so `flushTurn`
+   * closed it. Its text may stop mid-sentence.
+   */
+  readonly cutOff?: true;
 }
 
 export interface ProviderTextDeltaCoalescer {
@@ -66,6 +71,7 @@ export const makeProviderTextDeltaCoalescer = Effect.fn("makeProviderTextDeltaCo
               itemId: message.itemId,
               text: message.text,
               completed: options.completed,
+              ...(options.completed ? { cutOff: true as const } : {}),
             });
           }
           const emitUpdates = Effect.forEach(updates, input.emit, { discard: true });

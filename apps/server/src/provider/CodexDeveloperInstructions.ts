@@ -12,7 +12,7 @@ import {
 
 const COGENLY_DEVICE_TOOL_INSTRUCTIONS = `## Cogenly devices
 
-The \`cogenly\` MCP server also exposes \`device_*\` tools for iOS Simulators and Android Emulators on this environment. For mobile verification, call \`device_list\`, then \`device_open\` so the user can watch the device in their Device panel; its result explains how to drive the device. Driving happens through the \`agent-device\` CLI, using the exact launcher path returned by \`device_open\`. Keep the host config and session flags returned by \`device_open\` on every command so concurrent devices stay independent: prefer \`agent-device snapshot -i\` refs over coordinates, and use \`device_screenshot\` when you need to see the screen. Prefer these tools and \`agent-device\` for opening and driving devices. Platform tools such as \`xcrun simctl\` and \`adb\` remain available for anything they do not cover, such as builds, logs, or port forwarding. If \`device_list\` reports a platform as unavailable, say so.`;
+The \`cogenly\` MCP server also exposes \`device_*\` tools for iOS Simulators and Android Emulators on this environment. For mobile verification, call \`device_list\`, then \`device_open\` so the user can watch the device in their Device panel; its result explains how to drive the device. Driving happens through the \`agent-device\` CLI, using the exact launcher path returned by \`device_open\`. Keep the host config and session flags returned by \`device_open\` on every command so concurrent devices stay independent: prefer \`agent-device snapshot -i\` refs over coordinates, and use \`device_screenshot\` when you need to see the screen. Prefer these tools and \`agent-device\` for opening and driving devices. Platform tools such as \`xcrun simctl\` and \`adb\` remain available for anything they do not cover, such as builds, logs, or port forwarding. If \`device_list\` fails, comes back empty, or reports a platform as unavailable, call \`device_setup_status\` and fix what it reports with \`device_setup\` or the terminal tool before telling the user devices do not work; relay the steps that need them, such as installing Xcode or the Android SDK.`;
 
 export interface T3CodeToolAvailability {
   readonly browser: boolean;
@@ -38,7 +38,7 @@ const toolInstructions = (availability: boolean | T3CodeToolAvailability): strin
     tools.browser ? COGENLY_BROWSER_TOOL_INSTRUCTIONS : "",
     tools.device ? COGENLY_DEVICE_TOOL_INSTRUCTIONS : "",
     tools.terminal
-      ? "Use the cogenly MCP terminal_run tool for every shell command so the owner sees it live. Native shell tools are disabled. Use background=true for servers, terminal_read for output, terminal_write for stdin, and terminal_kill to stop. Thread settlement kills these terminals and their children."
+      ? "Use the cogenly MCP terminal_run tool for every shell command so the owner sees it live. Native shell tools are disabled. Use background=true for servers, terminal_read for output, terminal_write for stdin, and terminal_kill to stop. A command that may take more than about a minute, or may prompt (logins, cloud CLIs, installs, builds, test suites), runs with background=true and is polled with terminal_read, so the user's messages aren't blocked while it runs. Thread settlement kills these terminals and their children."
       : "",
   ]
     .filter(Boolean)

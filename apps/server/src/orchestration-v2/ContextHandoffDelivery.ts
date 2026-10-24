@@ -1,6 +1,8 @@
 import type {
   OrchestrationV2ContextHandoff,
   OrchestrationV2ProviderThread,
+  OrchestrationV2Run,
+  OrchestrationV2ThreadProjection,
 } from "@t3tools/contracts";
 import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import { ContextHandoffBudgetError } from "@t3tools/provider-core/server/failure";
@@ -11,6 +13,41 @@ import {
   renderHistory,
   selectHistory,
 } from "@t3tools/provider-core/server/handoffBudget";
+
+/**
+ * The handoffs a run's provider turn must deliver: its own, plus those prepared
+ * for an earlier run on the same provider thread that ended before its turn
+ * finished. Dispatch already moved the thread to that provider thread, so the
+ * next send there prepares no handoff of its own; a run stopped, failed, or
+ * cancelled by a server restart would otherwise strand the context it carried.
+ * Delivery skips what already reached the current native thread.
+ */
+export function handoffsAwaitingRun(
+  projection: Pick<OrchestrationV2ThreadProjection, "contextHandoffs" | "runs" | "messages">,
+  run: Pick<OrchestrationV2Run, "id" | "providerThreadId">,
+): ReadonlyArray<OrchestrationV2ContextHandoff> {
+  return projection.contextHandoffs.filter(
+    (handoff) =>
+      handoff.status === "ready" &&
+      (handoff.targetRunId === run.id ||
+        (handoff.toProviderThreadId === run.providerThreadId &&
+          projection.runs.some(
+            (source) =>
+              source.id === handoff.targetRunId &&
+              (source.status === "failed" ||
+                source.status === "interrupted" ||
+                source.status === "cancelled" ||
+                (source.status === "completed" &&
+                  handoff.delivery === undefined &&
+                  projection.messages.some(
+                    (message) =>
+                      message.id === source.userMessageId &&
+                      message.attachments.length === 0 &&
+                      message.text.trim().toLowerCase() === "/compact",
+                  ))),
+          ))),
+  );
+}
 
 /**
  * Persist before/after injection: an ambiguous pending delivery requires a fresh native thread.

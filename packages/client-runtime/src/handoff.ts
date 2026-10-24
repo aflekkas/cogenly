@@ -19,18 +19,34 @@ export type HandoffTimelineRun = Pick<
 
 export type HandoffEndpoints = ReturnType<typeof resolveHandoffEndpoints>;
 
-/** Preview the next send's handoff without adding anything to durable history. */
+/** The projection fields the pending-handoff preview reads. */
+export interface PendingHandoffProjection {
+  readonly thread: Pick<OrchestrationV2ThreadProjection["thread"], "activeProviderThreadId">;
+  readonly runs: ReadonlyArray<
+    Pick<OrchestrationV2Run, "providerThreadId" | "status" | "startedAt" | "modelSelection">
+  >;
+  readonly visibleTurnItems: ReadonlyArray<unknown>;
+}
+
+/**
+ * Preview the next send's handoff without adding anything to durable history.
+ * `selection` must be the selection the composer will actually send, so the
+ * preview and the composer never name different providers.
+ */
 export function resolvePendingHandoff(
-  projection: OrchestrationV2ThreadProjection | null | undefined,
-  selection: ModelSelection | null | undefined,
-  providers: ReadonlyArray<ServerProvider>,
+  projection: PendingHandoffProjection | null | undefined,
+  selection: Pick<ModelSelection, "instanceId" | "model"> | null | undefined,
+  providers: ReadonlyArray<
+    Pick<
+      ServerProvider,
+      "instanceId" | "driver" | "continuation" | "requiresNewThreadForModelChange"
+    >
+  >,
 ): HandoffEndpoints | null {
   // A thread with an empty timeline has nothing to hand off. Any loaded row
   // counts: paging can leave a window of only tool rows.
   if (!projection?.visibleTurnItems.length) return null;
-  const from = projection.runs.findLast(
-    (run) => run.startedAt !== null && run.status !== "rolled_back",
-  )?.modelSelection;
+  const from = conversationModelSelection(projection);
   if (from === undefined || selection == null) return null;
   const source = providers.find((provider) => provider.instanceId === from.instanceId);
   const target = providers.find((provider) => provider.instanceId === selection.instanceId);
@@ -41,7 +57,36 @@ export function resolvePendingHandoff(
         source?.continuation?.groupKey === undefined ||
         source.driver !== target?.driver ||
         source.continuation.groupKey !== target.continuation?.groupKey;
-  return needsHandoff ? { from: [from], to: selection } : null;
+  return needsHandoff
+    ? { from: [from], to: { instanceId: selection.instanceId, model: selection.model } }
+    : null;
+}
+
+/**
+ * The selection the conversation currently sits with, as the server decides
+ * the next handoff. A send moves the thread to its provider thread at
+ * dispatch, before the provider turn starts and stamps `startedAt`, so a run
+ * stopped or failed before it started still counts. Queued runs and runs
+ * cancelled before they started never moved it.
+ */
+function conversationModelSelection(
+  projection: Pick<PendingHandoffProjection, "thread" | "runs">,
+): ModelSelection | undefined {
+  const activeProviderThreadId = projection.thread.activeProviderThreadId;
+  const dispatched =
+    activeProviderThreadId === null
+      ? undefined
+      : projection.runs.findLast(
+          (run) =>
+            run.providerThreadId === activeProviderThreadId &&
+            run.status !== "queued" &&
+            run.status !== "rolled_back" &&
+            !(run.status === "cancelled" && run.startedAt === null),
+        );
+  return (
+    dispatched ??
+    projection.runs.findLast((run) => run.startedAt !== null && run.status !== "rolled_back")
+  )?.modelSelection;
 }
 
 export function resolveHandoffEndpoints(

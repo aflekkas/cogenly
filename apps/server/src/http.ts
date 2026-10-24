@@ -30,6 +30,8 @@ import { OtlpTracer, OtlpSerialization } from "effect/observability";
 
 import * as ServerConfig from "./config.ts";
 import { HEALTH_PATH } from "./health.ts";
+import { CALLBACK_PATH as INTEGRATION_OAUTH_CALLBACK_PATH } from "./integrations/IntegrationOAuth.ts";
+import { GOOGLE_CALLBACK_PATH, GOOGLE_SIGN_IN_PATH } from "./integrations/local/GoogleWorkspace.ts";
 import { ASSET_ROUTE_PREFIX, readMcpAppHtml, resolveAsset } from "./assets/AssetAccess.ts";
 import { githubMediaResponse } from "./assets/GitHubMediaFetch.ts";
 import { IMAGE_PROXY_PATH, imageProxyResponse } from "./assets/ImageProxyFetch.ts";
@@ -404,6 +406,10 @@ const UNTRACED_REQUEST_PATHS: ReadonlySet<string> = new Set([
   OTLP_TRACES_PROXY_PATH,
   // Supervisors poll this; its spans would drown the trace file.
   HEALTH_PATH,
+  // Integration sign-in queries carry authorization codes, states and capability tickets.
+  INTEGRATION_OAUTH_CALLBACK_PATH,
+  GOOGLE_SIGN_IN_PATH,
+  GOOGLE_CALLBACK_PATH,
 ]);
 
 // Skips the HTTP server span for UNTRACED_REQUEST_PATHS. That span starts
@@ -463,6 +469,10 @@ export const layerAssetRoute = HttpRouter.add(
         ),
       );
     }
+    if (asset.kind === "remote-image") {
+      // The signature stands in for a session: an `<img>` cannot send a bearer token.
+      return yield* imageProxyResponse(asset.url);
+    }
     return yield* assetFileResponse(
       asset,
       request.method === "GET" ? request.headers.range : undefined,
@@ -515,7 +525,10 @@ export const layerAttachmentUploadRoute = HttpRouter.add(
 
 // Serves third-party chat images through this origin so the web client never
 // hotlinks: `GET /api/image-proxy?url=<https-image-url>`. Https targets only,
-// images only, bounded in size and time; see ImageProxyFetch.
+// images only, bounded in size and time; see ImageProxyFetch. This route needs a
+// session cookie, which a desktop or bearer client cannot attach to an `<img>`;
+// current clients load a signed `remote-image` asset URL instead, and only fall
+// back here against a server too old to sign one.
 export const layerImageProxyRoute = HttpRouter.add(
   "GET",
   IMAGE_PROXY_PATH,

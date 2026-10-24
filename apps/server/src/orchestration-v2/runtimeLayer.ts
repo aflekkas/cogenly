@@ -6,7 +6,10 @@ import * as VisualStates from "../htmlRender/VisualState.ts";
 import * as GlobalSearch from "../search/GlobalSearch.ts";
 import * as Facts from "../context/FactService.ts";
 import * as Integrations from "../integrations/Integrations.ts";
+import * as LocalIntegrations from "../integrations/local/LocalIntegrations.ts";
+import * as LocalMcpRunner from "../integrations/local/LocalMcpRunner.ts";
 import * as IntegrationCredentials from "../integrations/IntegrationCredentials.ts";
+import * as IntegrationTokens from "../integrations/IntegrationTokens.ts";
 import * as Retrieval from "../context/ContextRetrievalService.ts";
 import * as Exports from "../export/ExportService.ts";
 import * as AgentEvents from "../agents/AgentEventBus.ts";
@@ -17,6 +20,7 @@ import * as ProjectHome from "../projectLabels/ProjectHome.ts";
 import * as ProjectFiles from "../projectLabels/ProjectFiles.ts";
 import * as WorkHandoff from "../work/WorkHandoffService.ts";
 import * as AgentWorkspace from "../agents/AgentWorkspaceService.ts";
+import * as ApprovalChanges from "../agents/ApprovalChanges.ts";
 import * as AgentMcpPolicy from "../agents/AgentMcpPolicy.ts";
 import * as AgentStore from "../agents/AgentStore.ts";
 import * as Agents from "../agents/AgentService.ts";
@@ -36,6 +40,7 @@ import * as AgentSessionImporter from "../project/AgentSessionImporter.ts";
 import * as AgentSessionScanner from "../project/AgentSessionScanner.ts";
 import * as T3Import from "../t3Import/T3ImportService.ts";
 import * as ProjectService from "../project/ProjectService.ts";
+import * as RepositoryCheckout from "../project/RepositoryCheckout.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
 import * as CheckpointCaptureService from "./CheckpointCaptureService.ts";
@@ -315,6 +320,9 @@ const layerT3ImportProvided = T3Import.layer.pipe(
     Layer.mergeAll(layerProjectService, layerEventSinkProvided, layerManagedProjectFoldersProvided),
   ),
 );
+const layerRepositoryCheckoutProvided = RepositoryCheckout.layer.pipe(
+  Layer.provide(Layer.mergeAll(layerProjectService, layerProjectLabelsProvided)),
+);
 const layerThreadLaunchProvided = ThreadLaunchService.layer.pipe(
   Layer.provide(
     Layer.mergeAll(
@@ -322,6 +330,7 @@ const layerThreadLaunchProvided = ThreadLaunchService.layer.pipe(
       layerProjectSetupScriptRunner,
       layerManagedProjectFoldersProvided,
       layerProjectLabelsProvided,
+      layerRepositoryCheckoutProvided,
       layerThreadManagementProvided,
       layerCommandReceiptStoreProvided,
       IdAllocator.layer,
@@ -345,9 +354,24 @@ const layerThreadLifecycleProvided = ThreadLifecycleService.layer.pipe(
 const layerSecretRequestsProvided = SecretRequests.layer.pipe(
   Layer.provide(layerThreadManagementProvided),
 );
-const layerVaultProvided = Vault.layer.pipe(Layer.provide(ServerEnvironment.layerIdentity));
+// One signal shared by every writer of agent_approvals and both approval streams.
+const layerApprovalChanges = ApprovalChanges.layer;
+export const layerVaultProvided = Vault.layer.pipe(
+  Layer.provide(ServerEnvironment.layerIdentity),
+  Layer.provide(layerProjectFilesProvided),
+  Layer.provide(layerApprovalChanges),
+);
+const layerIntegrationCredentials = IntegrationCredentials.layer.pipe(
+  Layer.provide(layerVaultProvided),
+);
+const layerLocalIntegrationsProvided = LocalIntegrations.layer.pipe(
+  Layer.provide(LocalMcpRunner.layer),
+  Layer.provide(layerIntegrationCredentials),
+);
 const layerIntegrationsProvided = Integrations.layer.pipe(
-  Layer.provide(IntegrationCredentials.layer.pipe(Layer.provide(layerVaultProvided))),
+  Layer.provide(layerIntegrationCredentials),
+  Layer.provide(IntegrationTokens.layer.pipe(Layer.provide(layerVaultProvided))),
+  Layer.provide(layerLocalIntegrationsProvided),
 );
 const layerAgentsProvided = Agents.layer.pipe(
   Layer.provide(
@@ -359,6 +383,7 @@ const layerAgentsProvided = Agents.layer.pipe(
       layerThreadManagementProvided,
       ProjectionStore.layer,
       layerEventSinkProvided,
+      layerApprovalChanges,
     ),
   ),
 );
@@ -394,6 +419,7 @@ const layerAccountAccessProvided = AccountAccess.layer.pipe(
       AgentStore.layer,
       layerThreadManagementProvided,
       layerProjectFilesProvided,
+      layerApprovalChanges,
     ).pipe(Layer.provideMerge(ServerEnvironment.layerIdentity)),
   ),
 );
@@ -424,6 +450,7 @@ const layerAgentWorkspaceProvided = AgentWorkspace.layer.pipe(
       layerAccountAccessProvided,
       layerScheduledTaskProvided,
       layerIntegrationsProvided,
+      layerApprovalChanges,
     ),
   ),
 );
@@ -431,6 +458,7 @@ const layerAgentMcpPolicyProvided = AgentMcpPolicy.layer.pipe(
   Layer.provide(
     Layer.mergeAll(
       AgentStore.layer,
+      layerProjectFilesProvided,
       layerAgentWorkspaceProvided,
       layerThreadManagementProvided,
       layerIntegrationsProvided,
@@ -505,6 +533,7 @@ export const layer = Layer.mergeAll(
 );
 
 const layerProductionBase = Layer.mergeAll(
+  layerLocalIntegrationsProvided,
   Facts.layer,
   layerIntegrationsProvided,
   Retrieval.layer,

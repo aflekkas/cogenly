@@ -32,13 +32,16 @@ import { MorphIcon } from "../MorphIcon";
 import { NavRailUpdates } from "./NavRailUpdates";
 import { primaryServerKeybindingsAtom } from "../../state/server";
 import { useUiStateStore } from "../../uiStateStore";
+import { BadgeDot } from "../ui/badge-dot";
 import { useSidebar, useSidebarVisibility } from "../ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { isSidebarUtilityPage } from "./mainAppLocation";
 import { routeHidesListColumn, SIDEBAR_TOGGLE_DISABLED_LABEL } from "./listColumnRoutes";
 import { SIDEBAR_MODE_ICONS } from "./modes/SidebarModeSwitcher";
+import { modeNeedsYouLabel } from "./modes/modeAttention.logic";
 import { SIDEBAR_MODE_LABELS, SIDEBAR_MODES, type SidebarMode } from "./modes/sidebarModes.logic";
 import { crossfadeModeSwitch } from "./modes/modeSwitchMotion";
+import { useModesNeedingAttention } from "./modes/useModesNeedingAttention";
 import { useSelectSidebarMode } from "./modes/useSelectSidebarMode";
 import { settingsReturnHref } from "./modes/spaceRouteMemory";
 import { resolveVerticalTabIndex } from "./navRail.logic";
@@ -87,6 +90,7 @@ export function SidebarNavRail({
   const mode = useUiStateStore((store) => store.sidebarMode);
   const selectSidebarMode = useSelectSidebarMode();
   const decisionsWaiting = useNavRailBadgeStore((store) => store.decisionsWaiting);
+  const modesNeedingAttention = useModesNeedingAttention();
   const { open, setOpen, toggleSidebar } = useSidebar();
   const sidebarVisible = useSidebarVisibility();
   const navigate = useNavigate();
@@ -206,12 +210,17 @@ export function SidebarNavRail({
           const Icon = SIDEBAR_MODE_ICONS[segment];
           const shortcut = shortcutLabelForCommand(keybindings, `sidebar.mode.${segment}`);
           const badge = segment === "agents" && decisionsWaiting > 0 ? decisionsWaiting : null;
+          // Agents' amber count already says it, so the dot stands in only where
+          // there is no count. It shows on the open mode too: opening a list
+          // does not answer what is waiting in it.
+          const needsYou = modesNeedingAttention.has(segment) && badge === null;
           return (
             <RailTooltip
               key={segment}
               label={[
                 shortcut ? `${label} (${shortcut})` : label,
                 badge !== null ? decisionsWaitingLabel(badge) : null,
+                needsYou ? "Needs you" : null,
               ]
                 .filter(Boolean)
                 .join(" · ")}
@@ -223,7 +232,13 @@ export function SidebarNavRail({
                 type="button"
                 role="tab"
                 id={`sidebar-mode-tab-${segment}`}
-                aria-label={badge !== null ? `${label}, ${decisionsWaitingLabel(badge)}` : label}
+                aria-label={
+                  badge !== null
+                    ? `${label}, ${decisionsWaitingLabel(badge)}`
+                    : needsYou
+                      ? modeNeedsYouLabel(label)
+                      : label
+                }
                 aria-selected={selected}
                 tabIndex={segment === mode ? 0 : -1}
                 data-testid={`sidebar-mode-${segment}`}
@@ -244,6 +259,12 @@ export function SidebarNavRail({
                     {badge > 9 ? "9+" : badge}
                   </span>
                 ) : null}
+                <BadgeDot
+                  tone={needsYou && "info"}
+                  size="md"
+                  ring="nav-rail"
+                  className="absolute top-2 right-2"
+                />
               </button>
             </RailTooltip>
           );

@@ -1032,6 +1032,8 @@ const makeWsRpcHandlers = (
   clientAnalyticsProps: Readonly<Record<string, unknown>>,
   previewAutomationBroker: PreviewAutomationBroker.PreviewAutomationBroker["Service"],
   serverBrowser: ServerBrowser.ServerBrowser["Service"],
+  /** The origin this socket's upgrade reached; integration sign-in returns there. */
+  requestOrigin: string | undefined,
 ) =>
   Effect.gen(function* () {
     const currentSessionId = currentSession.sessionId;
@@ -1679,13 +1681,25 @@ const makeWsRpcHandlers = (
         agentWorkspace.requestApproval(input.agentId, input.action),
       [WS_METHODS.agentsApprove]: (input) => agentWorkspace.approve(input.id, input.accountScope),
       [WS_METHODS.agentsReject]: (input) => agentWorkspace.reject(input.id),
+      [WS_METHODS.threadApprovalsSubscribe]: () => agentWorkspace.subscribeThreadApprovals,
       [WS_METHODS.agentsStartWork]: (input) => agentWorkspace.startWork(input),
       [WS_METHODS.agentsActivity]: (input) => agentWorkspace.activity(input.agentId),
-      [WS_METHODS.integrationsList]: () => integrations.list(),
-      [WS_METHODS.integrationsCreate]: (input) => integrations.create(input),
-      [WS_METHODS.integrationsUpdate]: (input) => integrations.update(input),
+      [WS_METHODS.integrationsList]: () => integrations.list({ includeProcessOutput: true }),
+      // The owner's own Settings writes approve the vault items their headers reference.
+      [WS_METHODS.integrationsCreate]: (input) =>
+        integrations.create(input, { approveCredentials: true, ownerOrigin: requestOrigin }),
+      [WS_METHODS.integrationsUpdate]: (input) =>
+        integrations.update(input, { approveCredentials: true }),
       [WS_METHODS.integrationsDelete]: (input) => integrations.remove(input.id),
       [WS_METHODS.integrationsTestConnection]: (input) => integrations.testConnection(input.id),
+      [WS_METHODS.integrationsBeginSignIn]: (input) =>
+        integrations.beginSignIn(input.id, { origin: requestOrigin }),
+      [WS_METHODS.integrationsConnectFromCatalog]: (input) =>
+        integrations.connectFromCatalog(input, {
+          approveCredentials: true,
+          origin: { origin: requestOrigin },
+        }),
+      [WS_METHODS.integrationsSubscribe]: () => integrations.subscribe(),
       [WS_METHODS.machineSecurityStatus]: () => machineSecurity.status,
       [WS_METHODS.machinesList]: () => machines.list,
       [WS_METHODS.machinesSubscribe]: () => machines.subscribe,
@@ -2322,6 +2336,7 @@ const makeWsRpcHandlers = (
             input.resource._tag === "tool-output-image" ||
             // GitHub media names the repository it authenticates through itself.
             input.resource._tag === "github-media" ||
+            input.resource._tag === "remote-image" ||
             (input.resource._tag === "media-file" && path.isAbsolute(input.resource.path))
           ) {
             return yield* issueAssetUrl({ resource: input.resource });
@@ -2910,6 +2925,7 @@ export const layer: Layer.Layer<never, never, WsLayerServices> = Layer.unwrap(
               clientAnalyticsProps,
               previewAutomationBroker,
               serverBrowser,
+              Option.getOrUndefined(Option.map(requestUrl, (url) => url.origin)),
             ).pipe(
               Layer.provideMerge(RpcSerialization.layerJson),
               // Request fibers run in the handlers' context, so this reporter sees

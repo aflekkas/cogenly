@@ -270,7 +270,23 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
   ),
   pending_request_respond: writesThread((input) =>
     Effect.gen(function* () {
-      const { threads, projection } = yield* readQuestion(input);
+      const { threads, projection, caller } = yield* readQuestion(input);
+      // A question is for the user, or for the thread that delegated the task.
+      // A thread agent may not answer its own, or a sibling's or stranger's.
+      // A client outside a thread acts for the user who approved it.
+      if (caller !== undefined) {
+        const { lineage } = projection.thread;
+        if (projection.thread.id === caller.id)
+          return yield* new OrchestratorMcpFailure({
+            code: "capability_denied",
+            message: "A thread cannot answer its own question. The user answers it.",
+          });
+        if (lineage.parentThreadId !== caller.id || lineage.relationshipToParent !== "subagent")
+          return yield* new OrchestratorMcpFailure({
+            code: "capability_denied",
+            message: "Only the thread that delegated this task can answer its questions.",
+          });
+      }
       const result = yield* threads
         .dispatch({
           type: "runtime-request.respond",

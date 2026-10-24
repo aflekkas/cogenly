@@ -15,12 +15,15 @@ import {
   insertCredentialReference,
   integrationErrorText,
   integrationStatus,
+  integrationTitle,
   referenceableVaultItems,
   rowsToHeaders,
   scopeLabel,
+  signInAction,
   slugifyIntegrationName,
   testResultReason,
   unresolvedCredentialReferences,
+  updateInputFromDraft,
   urlHost,
   validateIntegrationDraft,
   withDisplayName,
@@ -126,6 +129,32 @@ describe("headers", () => {
 });
 
 describe("integrationStatus", () => {
+  it.each(["connected", "error"] as const)(
+    "expires an old test when the server reports %s later",
+    (status) => {
+      const view = integrationStatus(
+        summary({
+          status,
+          toolCount: 7,
+          message: "Latest server failure",
+          checkedAt: "2026-10-01T00:00:02.000Z",
+        }),
+        {
+          updatedAt: integration.updatedAt,
+          result: {
+            status: status === "connected" ? "disconnected" : "connected",
+            toolCount: 2,
+            message: "Old test",
+            checkedAt: "2026-10-01T00:00:01.000Z",
+          },
+        },
+      );
+      expect(view.label).toBe(status === "connected" ? "Connected" : "Error");
+      expect(view.toolCount).toBe(status === "connected" ? 7 : null);
+      expect(view.reason).toBe(status === "error" ? "Latest server failure" : null);
+    },
+  );
+
   const failed = {
     updatedAt: integration.updatedAt,
     result: {
@@ -157,6 +186,39 @@ describe("integrationStatus", () => {
     expect(integrationStatus(summary(), undefined)).toMatchObject({ label: "Not checked" });
   });
 
+  it("shows a missing sign-in over any test, and the server's error with when it checked", () => {
+    const oauth = { ...integration, auth: { type: "oauth" as const } };
+    const needs = summary({
+      integration: oauth,
+      status: "needs_sign_in",
+      message: "The sign-in was revoked or expired. Sign in again.",
+    });
+    expect(integrationStatus(needs, failed)).toMatchObject({
+      tone: "warning",
+      label: "Needs sign-in",
+      reason: "The sign-in was revoked or expired. Sign in again.",
+    });
+    expect(signInAction(needs)).toBe("Sign in");
+    expect(signInAction(summary({ integration: oauth, status: "connected" }))).toBe("Reconnect");
+    expect(signInAction(summary({ status: "connected" }))).toBeNull();
+    expect(
+      integrationStatus(
+        summary({
+          status: "error",
+          message: "The server could not be reached.",
+          checkedAt: "2026-10-01T00:00:00.000Z" as IntegrationSummary["checkedAt"] & string,
+        }),
+        undefined,
+      ),
+    ).toEqual({
+      tone: "error",
+      label: "Error",
+      reason: "The server could not be reached.",
+      toolCount: null,
+      checkedAt: "2026-10-01T00:00:00.000Z",
+    });
+  });
+
   it("drops a test once the integration changes", () => {
     expect(
       integrationStatus(summary(), { ...failed, updatedAt: "2026-09-01T00:00:00.000Z" }),
@@ -179,6 +241,33 @@ describe("integrationStatus", () => {
 });
 
 describe("display helpers", () => {
+  it("shows current process health ahead of a stale successful connection test", () => {
+    const runningTest = {
+      updatedAt: integration.updatedAt,
+      result: { status: "connected" as const, toolCount: 1, message: "" },
+    };
+    expect(
+      integrationStatus(
+        summary({ managed: { state: "failed", version: "2.1.2", stderrTail: "Process exited" } }),
+        runningTest,
+      ),
+    ).toMatchObject({ label: "Failed", tone: "error", reason: "Process exited" });
+    expect(
+      integrationStatus(
+        summary({ managed: { state: "starting", version: "2.1.2", stderrTail: "" } }),
+        undefined,
+      ),
+    ).toMatchObject({ label: "Starting" });
+    // A managed Google account without a grant signs in like a remote OAuth one.
+    const google = summary({
+      integration: { ...integration, transport: "local", headers: {} },
+      status: "needs_sign_in",
+      managed: { state: "running", version: "2.1.2", stderrTail: "" },
+    });
+    expect(integrationStatus(google, runningTest)).toMatchObject({ label: "Needs sign-in" });
+    expect(signInAction(google)).toBe("Sign in");
+    expect(signInAction({ ...google, status: "connected" })).toBe("Reconnect");
+  });
   it("shows a host and a scope", () => {
     expect(urlHost("https://mcp.example.com:8443/x")).toBe("mcp.example.com:8443");
     expect(urlHost("not a url")).toBe("not a url");
@@ -194,6 +283,18 @@ describe("display helpers", () => {
 });
 
 describe("drafts", () => {
+  it("keeps a managed account local when editing its display name", () => {
+    const local = { ...integration, transport: "local" as const, headers: {} };
+    const fields = validateIntegrationDraft({
+      ...draftFromIntegration(local),
+      displayName: "Google · work",
+    });
+    if ("error" in fields) throw new Error(fields.error);
+    expect(updateInputFromDraft(local, fields.fields)).toMatchObject({
+      transport: "local",
+      displayName: "Google · work",
+    });
+  });
   it("follows the display name until the name is edited", () => {
     const named = withDisplayName(EMPTY_INTEGRATION_DRAFT, "My Linear");
     expect(named.name).toBe("my-linear");
@@ -221,6 +322,41 @@ describe("drafts", () => {
     expect(validateIntegrationDraft({ ...draft, url: "ftp://x" })).toHaveProperty("error");
     expect(validateIntegrationDraft({ ...draft, name: "Bad" })).toHaveProperty("error");
     expect(validateIntegrationDraft({ ...draft, scope: "projects" })).toHaveProperty("error");
+  });
+
+  it("carries the account label and OAuth settings, and turns OAuth off explicitly", () => {
+    const stored = {
+      ...integration,
+      headers: {},
+      accountLabel: "Spawn Partners",
+      auth: {
+        type: "oauth" as const,
+        clientId: "slack-app",
+        clientSecret: "{{credential:slack-app.password}}",
+        scope: "chat:write",
+      },
+    } as Integration;
+    expect(integrationTitle(stored)).toBe("Gmail · Spawn Partners");
+    const draft = draftFromIntegration(stored);
+    const result = validateIntegrationDraft(draft);
+    if ("error" in result) throw new Error(result.error);
+    expect(draftChanges(stored, result.fields)).toBe(false);
+    // The scope is not edited in Settings, so a save keeps it.
+    expect(updateInputFromDraft(stored, result.fields)).toMatchObject({
+      accountLabel: "Spawn Partners",
+      auth: { ...stored.auth },
+    });
+    const off = validateIntegrationDraft({ ...draft, oauth: false, accountLabel: " " });
+    if ("error" in off) throw new Error(off.error);
+    expect(updateInputFromDraft(stored, off.fields)).toMatchObject({
+      auth: null,
+      accountLabel: "",
+    });
+
+    expect(validateIntegrationDraft({ ...draft, clientSecret: "pasted-secret" })).toHaveProperty(
+      "error",
+    );
+    expect(validateIntegrationDraft({ ...draft, clientId: "" })).toHaveProperty("error");
   });
 
   it("round-trips a stored integration without reporting a change", () => {

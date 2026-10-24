@@ -76,6 +76,8 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.agentsRequestApproval]: AuthOrchestrationOperateScope,
   [WS_METHODS.agentsApprove]: AuthOrchestrationOperateScope,
   [WS_METHODS.agentsReject]: AuthOrchestrationOperateScope,
+  // Seeing what a thread waits on is a read; deciding it is agents.approve / agents.reject.
+  [WS_METHODS.threadApprovalsSubscribe]: AuthOrchestrationReadScope,
   [WS_METHODS.agentsStartWork]: AuthOrchestrationOperateScope,
   [WS_METHODS.integrationsList]: AuthOrchestrationReadScope,
   // Creating or changing an integration hands agents a new credentialed
@@ -84,6 +86,10 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.integrationsUpdate]: AuthOrchestrationOperateScope,
   [WS_METHODS.integrationsDelete]: AuthOrchestrationOperateScope,
   [WS_METHODS.integrationsTestConnection]: AuthOrchestrationOperateScope,
+  [WS_METHODS.integrationsSubscribe]: AuthOrchestrationReadScope,
+  // Signing in grants agents a new upstream account.
+  [WS_METHODS.integrationsBeginSignIn]: AuthOrchestrationOperateScope,
+  [WS_METHODS.integrationsConnectFromCatalog]: AuthOrchestrationOperateScope,
   [WS_METHODS.machineSecurityStatus]: AuthOrchestrationReadScope,
   [WS_METHODS.machinesList]: AuthOrchestrationReadScope,
   [WS_METHODS.machinesSubscribe]: AuthOrchestrationReadScope,

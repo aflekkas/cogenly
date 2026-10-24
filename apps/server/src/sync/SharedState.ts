@@ -45,7 +45,7 @@ export class SharedState extends Context.Service<
       id: string,
       deleted?: boolean,
     ) => Effect.Effect<void, SharedStateError>;
-    readonly bootstrap: Effect.Effect<void, SharedStateError>;
+    readonly bootstrap: (pairingKey?: string) => Effect.Effect<void, SharedStateError>;
     readonly readBatch: (
       after: number,
       target: EnvironmentId,
@@ -66,6 +66,36 @@ export class SharedState extends Context.Service<
     ) => Effect.Effect<void, SharedStateError>;
   }
 >()("cogenly-server/sync/SharedState") {}
+
+/**
+ * Fields a machine may change on an agent or schedule it does not own.
+ * Everything else — permissions, instructions, prompt, provider/model,
+ * runtime mode and trigger fields — is owner-only, so a paired machine
+ * cannot rewrite another machine's autonomous work.
+ */
+const NON_OWNER_EDITABLE_FIELDS: Readonly<Record<"agent" | "schedule", ReadonlySet<string>>> = {
+  agent: new Set(["name"]),
+  schedule: new Set(["title", "enabled"]),
+};
+
+/** Maximum future wall time observed by the local hybrid clock. */
+export const MAX_CLOCK_SKEW_MS = 5 * 60_000;
+const MAX_LOGICAL_CLOCK = 1_000_000_000;
+
+/**
+ * Bounds local observation only. Stored and relayed clocks retain their original
+ * identity: clamping those could collapse distinct edits or change replay order.
+ */
+function clampClock(
+  clock: HybridClock,
+  now: number,
+): { readonly clock: HybridClock; readonly clamped: boolean } {
+  const wall = Math.min(clock.wall, now + MAX_CLOCK_SKEW_MS);
+  const logical = Math.min(clock.logical, MAX_LOGICAL_CLOCK);
+  return wall === clock.wall && logical === clock.logical
+    ? { clock, clamped: false }
+    : { clock: { ...clock, wall, logical }, clamped: true };
+}
 
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const storage = (cause: unknown) =>
@@ -90,21 +120,36 @@ const make = Effect.gen(function* () {
     }>`SELECT * FROM shared_documents WHERE kind=${kind} AND id=${id}`;
     const row = rows[0];
     if (!row) return undefined;
-    return yield* Schema.decodeUnknownEffect(SharedDocumentChange)({
-      kind,
-      id,
-      fields: yield* decodeJson(row.fields_json),
-      clocks: yield* decodeJson(row.clocks_json),
-      tombstone: row.tombstone_json ? yield* decodeClock(row.tombstone_json) : null,
-      updatedBy: row.updated_by_env,
-    });
+    return yield* Effect.gen(function* () {
+      return yield* Schema.decodeUnknownEffect(SharedDocumentChange)({
+        kind,
+        id,
+        fields: yield* decodeJson(row.fields_json),
+        clocks: yield* decodeJson(row.clocks_json),
+        tombstone: row.tombstone_json ? yield* decodeClock(row.tombstone_json) : null,
+        updatedBy: row.updated_by_env,
+      });
+    }).pipe(
+      Effect.catchTags({
+        SchemaError: () =>
+          Effect.logWarning("Skipping undecodable shared document", { kind }).pipe(
+            Effect.as(undefined),
+          ),
+      }),
+    );
   }, Effect.mapError(storage));
   const observe = Effect.fn("SharedState.observe")(function* (received?: HybridClock) {
     const rows = yield* sql<{
       clock_json: string;
     }>`SELECT clock_json FROM shared_clock WHERE singleton=1`;
     const local = rows[0] ? yield* decodeClock(rows[0].clock_json) : undefined;
-    const next = tickClock(environmentId, yield* Clock.currentTimeMillis, local, received);
+    const now = yield* Clock.currentTimeMillis;
+    const observed = received ? clampClock(received, now) : undefined;
+    if (observed?.clamped)
+      yield* Effect.logWarning("Bounded local observation of a shared change clock", {
+        source: received!.node,
+      });
+    const next = tickClock(environmentId, now, local, observed?.clock);
     yield* sql`INSERT INTO shared_clock(singleton,clock_json) VALUES (1,${encodeJson(next)}) ON CONFLICT(singleton) DO UPDATE SET clock_json=excluded.clock_json`;
     return next;
   });
@@ -134,6 +179,28 @@ const make = Effect.gen(function* () {
       (!ownerClock || compareClock(change.clocks.ownerMachine!, ownerClock) > 0)
     )
       return yield* new SharedStateError({ reason: "owner-change" });
+    // An existing agent or schedule may only be rewritten by its owner
+    // machine. The author is `updatedBy`, which a hub relay preserves, so a
+    // relayed change is still checked against its original author. Creation
+    // (no current document) is exempt: a spoke may create a hub-owned agent.
+    if (
+      current &&
+      (change.kind === "agent" || change.kind === "schedule") &&
+      typeof owner === "string" &&
+      owner !== change.updatedBy
+    ) {
+      const editable = NON_OWNER_EDITABLE_FIELDS[change.kind];
+      // Re-pairing replays original creation records through a new peer cursor.
+      // Only fields that would advance the document require edit authority.
+      if (
+        Object.entries(change.clocks).some(
+          ([key, clock]) =>
+            !editable.has(key) &&
+            (!current.clocks[key] || compareClock(clock, current.clocks[key]) > 0),
+        )
+      )
+        return yield* new SharedStateError({ reason: "owner-change" });
+    }
     const merged = mergeDocument(current, change);
     if (merged.kind === "schedule" && typeof merged.fields.agentId === "string") {
       const agent = yield* get("agent", merged.fields.agentId);
@@ -160,7 +227,9 @@ const make = Effect.gen(function* () {
       for (const row of pending) {
         const document = yield* get("schedule", row.id);
         if (document)
-          yield* projectDocument(document).pipe(Effect.provideService(SqlClient.SqlClient, sql));
+          yield* projectDocument(document, preserveLocalBindings).pipe(
+            Effect.provideService(SqlClient.SqlClient, sql),
+          );
       }
     }
     return true;
@@ -175,7 +244,7 @@ const make = Effect.gen(function* () {
   ) {
     const current = yield* get(kind, id);
     if (current?.tombstone) {
-      if (deleted) return;
+      if (deleted) return false;
       return yield* new SharedStateError({ reason: "invalid-document" });
     }
     const changed = Object.fromEntries(
@@ -186,7 +255,7 @@ const make = Effect.gen(function* () {
           encodeJson(value) !== encodeJson(current.fields[key]),
       ),
     );
-    if (!deleted && Object.keys(changed).length === 0) return;
+    if (!deleted && Object.keys(changed).length === 0) return false;
     const clock = yield* observe();
     const change: SharedDocumentChange = {
       kind,
@@ -197,12 +266,14 @@ const make = Effect.gen(function* () {
       updatedBy: environmentId,
     };
     yield* validateChange(change);
-    yield* persist(change, project, preserveLocalBindings);
+    return yield* persist(change, project, preserveLocalBindings);
   });
   const write: SharedState["Service"]["write"] = (kind, id, fields, deleted = false) =>
-    sql
-      .withTransaction(writeInternal(kind, id, fields, deleted, true))
-      .pipe(Effect.mapError(storage), Effect.andThen(notify));
+    sql.withTransaction(writeInternal(kind, id, fields, deleted, true)).pipe(
+      Effect.mapError(storage),
+      Effect.tap((changed) => (changed ? notify : Effect.void)),
+      Effect.asVoid,
+    );
   const capture: SharedState["Service"]["capture"] = (kind, id, deleted = false) =>
     sql
       .withTransaction(
@@ -212,14 +283,18 @@ const make = Effect.gen(function* () {
             : yield* readConfiguration(kind, id).pipe(
                 Effect.provideService(SqlClient.SqlClient, sql),
               );
-          if (configuration === null) return;
+          if (configuration === null) return false;
           const fields = yield* Schema.decodeUnknownEffect(
             Schema.Record(Schema.String, Schema.Json),
           )(configuration);
-          yield* writeInternal(kind, id, fields, deleted, true, true);
+          return yield* writeInternal(kind, id, fields, deleted, true, true);
         }),
       )
-      .pipe(Effect.mapError(storage), Effect.andThen(notify));
+      .pipe(
+        Effect.mapError(storage),
+        Effect.tap((changed) => (changed ? notify : Effect.void)),
+        Effect.asVoid,
+      );
   const cursors = Effect.fn("SharedState.cursors")(function* (peer: EnvironmentId) {
     const rows = yield* sql<{
       received: number;
@@ -245,10 +320,23 @@ const make = Effect.gen(function* () {
     let cursor = after,
       bytes = 0;
     for (const row of rows) {
-      const change = yield* decodeChange(row.change_json);
+      const change = yield* decodeChange(row.change_json).pipe(
+        Effect.catchTags({
+          SchemaError: () =>
+            Effect.logWarning("Skipping undecodable shared change", { cursor: row.cursor }).pipe(
+              Effect.as(undefined),
+            ),
+        }),
+      );
+      if (!change) {
+        cursor = row.cursor;
+        continue;
+      }
       if (change.updatedBy !== target && (!localOnly || change.updatedBy === environmentId)) {
         const size = new TextEncoder().encode(row.change_json).length;
-        if (bytes + size > SHARED_BATCH_BYTES - 1024) break;
+        // Domain text has no aggregate byte limit. Send a large document alone so
+        // it cannot wedge the cursor, while keeping ordinary coalesced batches small.
+        if (changes.length > 0 && bytes + size > SHARED_BATCH_BYTES - 1024) break;
         changes.push(change);
         bytes += size;
       }
@@ -264,32 +352,26 @@ const make = Effect.gen(function* () {
             onExcessProperty: "error",
           });
           if (
-            new TextEncoder().encode(encodeJson(batch)).length > SHARED_BATCH_BYTES ||
+            (batch.changes.length > 1 &&
+              new TextEncoder().encode(encodeJson(batch)).length > SHARED_BATCH_BYTES) ||
             batch.cursor < batch.after ||
             batch.cursor - batch.after > SHARED_BATCH_LIMIT ||
             batch.changes.length > batch.cursor - batch.after ||
             (batch.cursor === batch.after && batch.changes.length > 0)
           )
             return yield* new SharedStateError({ reason: "invalid-cursor" });
-          const now = yield* Clock.currentTimeMillis;
           for (const change of batch.changes) {
             yield* validateChange(change);
             if (!trustedRelay && change.updatedBy !== source)
               return yield* new SharedStateError({ reason: "invalid-document" });
-            if (
-              [
-                ...Object.values(change.clocks),
-                ...(change.tombstone ? [change.tombstone] : []),
-              ].some((clock) => clock.wall > now + 5 * 60_000 || clock.logical > 1_000_000_000)
-            )
-              return yield* new SharedStateError({ reason: "invalid-document" });
           }
           const previous = (yield* cursors(source)).received;
-          if (batch.cursor <= previous) return { acknowledged: previous };
+          if (batch.cursor <= previous) return { acknowledged: previous, changed: false };
           if (batch.after > previous)
             return yield* new SharedStateError({ reason: "invalid-cursor" });
+          let changed = false;
           for (const change of batch.changes) {
-            yield* persist(change, true);
+            changed = (yield* persist(change, true)) || changed;
             const latest = [
               ...Object.values(change.clocks),
               ...(change.tombstone ? [change.tombstone] : []),
@@ -299,10 +381,14 @@ const make = Effect.gen(function* () {
             if (latest) yield* observe(latest);
           }
           yield* sql`INSERT INTO shared_peer_cursors(environment_id,received) VALUES (${source},${batch.cursor}) ON CONFLICT(environment_id) DO UPDATE SET received=excluded.received`;
-          return { acknowledged: batch.cursor };
+          return { acknowledged: batch.cursor, changed };
         }),
       )
-      .pipe(Effect.mapError(storage), Effect.tap(notify));
+      .pipe(
+        Effect.mapError(storage),
+        Effect.tap((result) => (result.changed ? notify : Effect.void)),
+        Effect.map(({ acknowledged }) => ({ acknowledged })),
+      );
   const acknowledge = Effect.fn("SharedState.acknowledge")(function* (
     peer: EnvironmentId,
     cursor: number,
@@ -323,21 +409,42 @@ const make = Effect.gen(function* () {
       }),
     )
     .pipe(Effect.mapError(storage));
-  const bootstrap = sql
-    .withTransaction(
-      Effect.gen(function* () {
-        for (const [kind, rows] of [
-          ["project", yield* sql<{ id: string }>`SELECT label_id AS id FROM project_labels`],
-          ["agent", yield* sql<{ id: string }>`SELECT agent_id AS id FROM agents`],
-          ["schedule", yield* sql<{ id: string }>`SELECT task_id AS id FROM scheduled_tasks`],
-        ] as const)
-          for (const row of rows) if (!(yield* get(kind, row.id))) yield* capture(kind, row.id);
-      }),
-    )
-    .pipe(Effect.mapError(storage));
+  const bootstrap: SharedState["Service"]["bootstrap"] = Effect.fn("SharedState.bootstrap")(
+    function* (pairingKey) {
+      const key = pairingKey ?? (yield* Ref.get(hub)) ?? "standalone";
+      // The common scheduler path is a read; only the first pass acquires a write transaction.
+      if ((yield* sql`SELECT 1 FROM shared_bootstrap WHERE pairing_key=${key}`).length > 0) return;
+      yield* sql
+        .withTransaction(
+          Effect.gen(function* () {
+            if ((yield* sql`SELECT 1 FROM shared_bootstrap WHERE pairing_key=${key}`).length > 0)
+              return;
+            for (const [kind, rows] of [
+              ["project", yield* sql<{ id: string }>`SELECT label_id AS id FROM project_labels`],
+              ["agent", yield* sql<{ id: string }>`SELECT agent_id AS id FROM agents`],
+              ["schedule", yield* sql<{ id: string }>`SELECT task_id AS id FROM scheduled_tasks`],
+            ] as const)
+              for (const row of rows)
+                yield* Effect.gen(function* () {
+                  if (!(yield* get(kind, row.id))) yield* capture(kind, row.id);
+                }).pipe(
+                  Effect.catch((error) =>
+                    Effect.logWarning("Skipping invalid shared configuration during bootstrap", {
+                      kind,
+                      reason: storage(error).reason,
+                    }),
+                  ),
+                );
+            yield* sql`INSERT INTO shared_bootstrap(pairing_key) VALUES (${key})`;
+          }),
+        )
+        .pipe(Effect.mapError(storage));
+    },
+    Effect.mapError(storage),
+  );
   return SharedState.of({
     environmentId,
-    defaultOwner: Ref.get(hub).pipe(Effect.map((value) => value ?? environmentId)),
+    defaultOwner: Effect.succeed(environmentId),
     setHub: (value) => Ref.set(hub, value),
     changes: Stream.fromPubSub(signals),
     get,

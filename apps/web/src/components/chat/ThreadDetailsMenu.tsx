@@ -1,4 +1,4 @@
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
   NodeId,
   resolveEnvironmentMachineKind,
@@ -54,7 +54,7 @@ import { AgentElapsed } from "./AgentElapsed";
 import { useChatCanvas } from "./ChatCanvasContext";
 import type { ChatCanvasDetailsCard } from "./chatCanvasLayout";
 import { canDockThreadDetails } from "./threadDetailsDock.logic";
-import { useThreadDetailsDockStore } from "./threadDetailsDockStore";
+import { selectThreadDetailsDocked, useThreadDetailsDockStore } from "./threadDetailsDockStore";
 import { resolveProviderInstanceAccentColors } from "../../providerInstances";
 import { ThreadDetailsControl } from "./ThreadDetailsControl";
 import { DisclosurePanel, DisclosureTrigger } from "../ui/disclosure";
@@ -146,7 +146,7 @@ function useThreadDetailsModel(props: {
   const canDetach = projection === null ? false : canDetachThreadProviderSession(projection);
   const label =
     summary.running > 0 ? `Thread details, ${summary.running} running` : "Thread details";
-  return { shell, summary, canDetach, label };
+  return { ref, shell, summary, canDetach, label };
 }
 
 /**
@@ -161,9 +161,18 @@ export function ThreadDetailsMenu(props: {
   readonly threadId: ThreadId;
 }) {
   const [popoverOpen, setPopoverOpen] = useState(false);
-  const { shell, summary, canDetach, label } = useThreadDetailsModel(props);
+  const { ref, shell, summary, canDetach, label } = useThreadDetailsModel(props);
+  // A popover left open does not follow the user to another thread.
+  const threadKey = scopedThreadKey(ref);
+  const [seenThreadKey, setSeenThreadKey] = useState(threadKey);
+  if (seenThreadKey !== threadKey) {
+    setSeenThreadKey(threadKey);
+    setPopoverOpen(false);
+  }
   const dockAvailable = useThreadDetailsDockStore((state) => state.available);
-  const docked = useThreadDetailsDockStore((state) => state.docked && state.available);
+  const docked = useThreadDetailsDockStore(
+    (state) => selectThreadDetailsDocked(state, ref) && state.available,
+  );
   // The card takes over from a popover left open when room for it appears.
   const open = popoverOpen && !docked;
   const tooltip = dockAvailable ? `${docked ? "Hide" : "Show"} ${label.toLowerCase()}` : label;
@@ -193,7 +202,7 @@ export function ThreadDetailsMenu(props: {
                 aria-pressed={docked}
                 onClick={() => {
                   setPopoverOpen(false);
-                  useThreadDetailsDockStore.getState().setDocked(!docked);
+                  useThreadDetailsDockStore.getState().setDocked(ref, !docked);
                 }}
               />
             ) : (
@@ -243,13 +252,21 @@ export function ThreadDetailsDock(props: {
   const setAvailable = useThreadDetailsDockStore((state) => state.setAvailable);
   useLayoutEffect(() => setAvailable(available), [available, setAvailable]);
   useLayoutEffect(() => () => setAvailable(false), [setAvailable]);
-  const docked = useThreadDetailsDockStore((state) => state.docked);
+  const ref = scopeThreadRef(props.environmentId, props.threadId);
+  const docked = useThreadDetailsDockStore((state) => selectThreadDetailsDocked(state, ref));
   const open = available && docked;
   // Stays mounted while it fades out after closing. Only a card the user
-  // opens here fades in; one already open when the chat loads just shows.
+  // opens here fades in; one already open when the chat loads, or in the
+  // thread the user switched to, just shows, and a switch away just hides it.
   const [present, setPresent] = useState(open);
   const [fadeIn, setFadeIn] = useState(false);
-  if (open && !present) {
+  const threadKey = scopedThreadKey(ref);
+  const [seenThreadKey, setSeenThreadKey] = useState(threadKey);
+  if (seenThreadKey !== threadKey) {
+    setSeenThreadKey(threadKey);
+    setPresent(open);
+    setFadeIn(false);
+  } else if (open && !present) {
     setPresent(true);
     setFadeIn(true);
   }
@@ -274,7 +291,7 @@ function ThreadDetailsDockCard(props: {
   readonly onClosed: () => void;
   readonly reportDetailsCard: ((card: ChatCanvasDetailsCard | null) => void) | null;
 }) {
-  const { shell, summary, canDetach } = useThreadDetailsModel(props);
+  const { ref, shell, summary, canDetach } = useThreadDetailsModel(props);
   const cardRef = useRef<HTMLElement | null>(null);
   const { open, reportDetailsCard } = props;
   // Reported only while open, so the chat glides back as the card fades out.
@@ -310,7 +327,7 @@ function ThreadDetailsDockCard(props: {
       onKeyDown={(event) => {
         if (event.key !== "Escape") return;
         event.stopPropagation();
-        useThreadDetailsDockStore.getState().setDocked(false);
+        useThreadDetailsDockStore.getState().setDocked(ref, false);
         document.querySelector<HTMLElement>("[data-thread-details-trigger]")?.focus();
       }}
       onTransitionEnd={(event) => {

@@ -26,6 +26,7 @@ import {
   pinnedRuntimeCommand,
   PinnedRuntimeInstallError,
   pinnedRuntimePaths,
+  type PinnedRuntimePaths,
 } from "../cloud/pinnedRuntime.ts";
 import { compareExactServiceVersions, isExactServiceVersion } from "../cloud/serviceProtocol.ts";
 import * as ProcessRunner from "../processRunner.ts";
@@ -164,6 +165,12 @@ export const repointLauncher = Effect.fn("cli.update.repoint_launcher")(function
   readonly targetEntryPath: string;
 }) {
   if (input.launchedAs === undefined) return Option.none<string>();
+  const fs = yield* FileSystem.FileSystem;
+  // Never point a launcher at a runtime that is not on disk: the symlink
+  // would replace a working command with a dangling one.
+  if (!(yield* fs.exists(input.targetEntryPath).pipe(Effect.orElseSucceed(() => false)))) {
+    return Option.none<string>();
+  }
   // On Windows the shim runs the executable by absolute path, so the
   // executable sees itself as argv0. Find the shim by searching the
   // directories that would resolve `cogenly` on this shell's PATH.
@@ -223,6 +230,11 @@ export const retireLegacyLauncher = Effect.fn("cli.update.retire_legacy_launcher
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const windows = (yield* HostProcess.Platform) === "win32";
+    // Removing `t3` is only safe once `cogenly` will resolve to a runtime
+    // that exists; otherwise the machine loses its only working command.
+    if (!(yield* fs.exists(input.targetEntryPath).pipe(Effect.orElseSucceed(() => false)))) {
+      return [];
+    }
     const replaced: Array<string> = [];
     for (const legacy of yield* findLegacyLaunchers(input)) {
       const launcher = path.join(path.dirname(legacy), windows ? "cogenly.cmd" : "cogenly");
@@ -412,7 +424,7 @@ const belongsToBootService = Effect.fn("cli.update.belongs_to_boot_service")(fun
   return false;
 });
 
-const runUpdate = Effect.fn("cli.update.run")(function* (input: {
+export const runUpdate = Effect.fn("cli.update.run")(function* (input: {
   readonly baseDir: string;
   readonly logsDir: string;
   readonly serverRuntimeStatePath: string;
@@ -490,12 +502,77 @@ const runUpdate = Effect.fn("cli.update.run")(function* (input: {
       ? serviceVersion
       : currentVersion;
 
+  const validateRuntime = (paths: PinnedRuntimePaths) =>
+    runner
+      .run({
+        command: pinnedRuntimeCommand(paths).command,
+        args: [...pinnedRuntimeCommand(paths).args, "--version"],
+        timeout: Duration.seconds(30),
+      })
+      .pipe(
+        Effect.mapError(
+          (cause) =>
+            new PinnedRuntimeInstallError({ step: "verifying the downloaded cogenly", cause }),
+        ),
+        Effect.flatMap((result) =>
+          result.code === 0 && /\bv(\S+)\s*$/.exec(result.stdout)?.[1] === targetVersion
+            ? Effect.void
+            : Effect.fail(
+                new PinnedRuntimeInstallError({
+                  step: "verifying the downloaded cogenly",
+                  exitCode: Number(result.code),
+                }),
+              ),
+        ),
+      );
+
   if (executableCurrent && serviceCurrent) {
+    // Already current is not a reason to skip the launchers: a machine
+    // whose only command is still `t3` gets its `cogenly` here.
+    const launchedAs = (yield* HostProcess.IsExecutable) ? yield* resolveLauncherPath : undefined;
+    const targetPaths = pinnedRuntimePaths(path, input.baseDir, targetVersion, platform);
+    // The running executable being current does not mean this home has
+    // that runtime pinned (it may only hold an older one). Install it
+    // before touching any launcher, so `cogenly` never replaces `t3`
+    // with a pointer at a runtime that is not there.
+    const sentinelMatches = yield* fs.readFileString(targetPaths.sentinelPath).pipe(
+      Effect.map((sentinel) => sentinel.trim() === targetVersion),
+      Effect.orElseSucceed(() => false),
+    );
+    const entryExists = yield* fs
+      .exists(targetPaths.entryPath)
+      .pipe(Effect.orElseSucceed(() => false));
+    const targetInstalled = sentinelMatches && entryExists;
+    const runtimePaths = targetInstalled
+      ? targetPaths
+      : yield* ensurePinnedRuntimeInstalled({
+          onProgress: progress.report,
+          baseDir: input.baseDir,
+          version: targetVersion,
+          fs,
+          path,
+          runner,
+          httpClient,
+          platform,
+          arch,
+          releaseBaseUrl: environment[CLI_RELEASE_BASE_URL_ENV]?.trim() || undefined,
+          validate: validateRuntime,
+        }).pipe(Effect.ensuring(Effect.sync(progress.finish)));
+    const launcherInput = {
+      launchedAs,
+      versionsDir: path.dirname(runtimePaths.versionDir),
+      targetEntryPath: runtimePaths.entryPath,
+    };
+    yield* repointLauncher(launcherInput);
+    const retired = yield* retireLegacyLauncher(launcherInput);
     yield* Console.log(
       serviceVersion !== undefined
         ? `cogenly and its background service are already on ${targetVersion} (${targetChannel}).`
         : `cogenly is already on ${targetVersion} (${targetChannel}).`,
     );
+    for (const launcher of retired) {
+      yield* Console.log(`  The t3 command is now cogenly (${launcher}).`);
+    }
     return;
   }
   if (!input.allowDowngrade && compareExactServiceVersions(targetVersion, newestInstalled) < 0) {
@@ -555,29 +632,7 @@ const runUpdate = Effect.fn("cli.update.run")(function* (input: {
     platform,
     arch,
     releaseBaseUrl: environment[CLI_RELEASE_BASE_URL_ENV]?.trim() || undefined,
-    validate: (paths) =>
-      runner
-        .run({
-          command: pinnedRuntimeCommand(paths).command,
-          args: [...pinnedRuntimeCommand(paths).args, "--version"],
-          timeout: Duration.seconds(30),
-        })
-        .pipe(
-          Effect.mapError(
-            (cause) =>
-              new PinnedRuntimeInstallError({ step: "verifying the downloaded cogenly", cause }),
-          ),
-          Effect.flatMap((result) =>
-            result.code === 0 && /\bv(\S+)\s*$/.exec(result.stdout)?.[1] === targetVersion
-              ? Effect.void
-              : Effect.fail(
-                  new PinnedRuntimeInstallError({
-                    step: "verifying the downloaded cogenly",
-                    exitCode: Number(result.code),
-                  }),
-                ),
-          ),
-        ),
+    validate: validateRuntime,
   }).pipe(
     Effect.ensuring(Effect.sync(progress.finish)),
     Effect.catchIf(

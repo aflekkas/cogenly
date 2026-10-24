@@ -10,6 +10,8 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 
+import { probeImageUrl } from "../assets/ImageProxyFetch.ts";
+
 /**
  * A source of web images behind the `image_search` tool. Wikimedia Commons
  * ships as the default backend (no key needed); add others by implementing
@@ -123,6 +125,21 @@ export const makeWikimediaBackend = (
 
 const failed = (cause: unknown) => new ImageSearchError({ operation: "search", cause });
 
+/**
+ * Drops results whose image URL does not answer as an image, so agents embed fewer dead
+ * pictures. The probes run in parallel (at most the search limit of ten), each bounded by the
+ * probe's own timeout, so the extra latency is one slow host, not the sum of all of them.
+ */
+export const keepReachableImages = <E, R>(
+  result: ImageSearchResult,
+  probe: (url: string) => Effect.Effect<boolean, E, R>,
+): Effect.Effect<ImageSearchResult, E, R> =>
+  Effect.forEach(result.results, (item) => probe(item.url), { concurrency: "unbounded" }).pipe(
+    Effect.map((reachable) => ({
+      results: result.results.filter((_, index) => reachable[index] === true),
+    })),
+  );
+
 export const layer: Layer.Layer<ImageSearchService, never, HttpClient.HttpClient> = Layer.effect(
   ImageSearchService,
   Effect.gen(function* () {
@@ -143,7 +160,16 @@ export const layer: Layer.Layer<ImageSearchService, never, HttpClient.HttpClient
         ),
     );
     return ImageSearchService.of({
-      search: (input) => backend.search(input.query.trim(), input.limit ?? DEFAULT_LIMIT),
+      search: (input) =>
+        backend
+          .search(input.query.trim(), input.limit ?? DEFAULT_LIMIT)
+          .pipe(
+            Effect.flatMap((result) =>
+              keepReachableImages(result, (url) =>
+                probeImageUrl(url).pipe(Effect.provideService(HttpClient.HttpClient, client)),
+              ),
+            ),
+          ),
     });
   }),
 );

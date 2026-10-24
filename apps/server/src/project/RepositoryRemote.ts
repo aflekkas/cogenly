@@ -1,4 +1,8 @@
 import { normalizeGitRemoteUrl } from "@t3tools/shared/git";
+import { SharedRepositoryRemote } from "@t3tools/contracts";
+import * as Schema from "effect/Schema";
+
+const isSharedRemote = Schema.is(SharedRepositoryRemote);
 
 /**
  * The portable identity of a repository: its remote normalized to
@@ -18,7 +22,7 @@ export function normalizeRepositoryRemote(remoteUrl: string | null | undefined):
   const [host, ...rest] = normalized.split("/");
   if (host === undefined || host.length === 0 || rest.length === 0) return null;
   if (rest.some((segment) => segment.length === 0)) return null;
-  return normalized;
+  return isSharedRemote(normalized) ? normalized : null;
 }
 
 /** The directory name a repository lives in, from its workspace root. */

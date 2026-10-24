@@ -48,10 +48,78 @@ context line is built in `RuntimePolicy` through `buildProjectManifest`, so
 all three adapters carry it with no per-provider code.
 
 `integrations.list` reports `connected` only while the tool cache holds the
-current version. A passing `testConnection` refills that cache; a failing one
-leaves it alone, so Settings also keeps its last test result per integration
-version to show the failure reason.
+current version, `error` with a message when the last upstream round trip for
+this version failed, and `needs_sign_in` for an OAuth integration without a
+usable grant. A passing `testConnection` refills that cache; Settings also
+keeps its last test result per integration version to show the failure reason.
+`integrations.subscribe` pushes the list after every change and status flip.
 
-Deferred: upstream OAuth (tokens will be vault items) and `stdio` transport
-(the transport union is designed to admit it). Clients have no RPC for an
-integration's tool list; only agents see tools, through `integration_tools`.
+## OAuth sign-in
+
+An integration with `auth: { type: "oauth" }` signs in per the MCP
+authorization spec ([IntegrationOAuth.ts](../../apps/server/src/integrations/IntegrationOAuth.ts)).
+Constraints that are not obvious from the code:
+
+- The redirect URI is `<origin>/oauth/integrations/callback` on the origin the
+  request that started sign-in reached (the WebSocket upgrade for Settings, the
+  MCP request for agents), like `/oauth/mcp`. A browser elsewhere cannot open a
+  loopback origin, so an agent's loopback request uses that account's last
+  successful browser origin, persisted as server-only state (in the account
+  directory for Google). A first-time loopback request needs an explicit
+  `callbackOrigin`, or a sign-in through Settings on the reachable address.
+  Dynamic registrations record their redirect URIs and are reused only for the
+  same one.
+- The callback is unauthenticated: the browser that consents need not hold a
+  Cogenly session. The single-use `state`, bound in memory to the PKCE verifier
+  and to the integration's URL at the time, is the authority; pending sign-ins
+  do not survive a restart. Its path is untraced because the query carries the
+  code.
+- Non-secret OAuth state (endpoints, client registration, expiry, signed-in) is
+  persisted inside the integration payload but never leaves the service; tokens
+  are a vault item ([vault](./vault.md)). A new URL or client id drops both.
+- One refresh per account at a time: waiters re-read the token under the lock
+  and use what the refresh produced. A token-endpoint refusal of the grant marks
+  the integration `needs_sign_in`, and later calls fail before any request, so
+  a revoked grant never loops.
+
+## Managed local servers
+
+A `local` integration is a fixed preset (today only Google Workspace,
+[local/](../../apps/server/src/integrations/local/)), never a command from
+Settings or MCP: Cogenly pins the package, runs one process per account over stdio, and passes the OAuth client through
+the environment, never argv. Only its state-bearing OAuth callback listener uses a runner-allocated loopback
+port. MCP has no HTTP listener, and the pinned launcher removes the package's
+attachment routes and missing-state callback fallback. Remote URLs,
+including OAuth discovery and token endpoints, go through
+[RemoteEndpoint.ts](../../apps/server/src/integrations/RemoteEndpoint.ts),
+which refuses non-public addresses and pins the connection to the checked DNS
+answers.
+
+There is one sign-in entry point: `beginSignIn` returns an `IntegrationSignIn`
+for both kinds, and `needs_sign_in` means the same thing for both. A local
+link is a ten-minute capability ticket on the account's fixed callback origin
+(Google needs that exact redirect URI registered), which asks the process for
+its consent URL; the callback is routed to the process by the OAuth `state` it
+issued. The process keeps the Google grant on disk, so Cogenly does not hold
+those tokens. A rejected grant is tracked separately from its credential file;
+only an explicit sign-in moves that file aside and restarts the process for
+reauthorization. Any committed edit retires the running definition (a stale
+in-flight request cannot restart it); an empty update changes nothing, so
+asking for a fresh link does not kill a pending sign-in.
+
+Clients have no RPC for an integration's tool list; only agents see tools,
+through `integration_tools`.
+
+## Default catalog
+
+The catalog ([integrationCatalog.ts](../../packages/contracts/src/integrationCatalog.ts))
+is static data shared by the server, Settings and the context line. Connecting
+an entry resolves it, in one pure function
+([IntegrationCatalog.ts](../../apps/server/src/integrations/IntegrationCatalog.ts)),
+into an ordinary integration definition; nothing records which entry it came
+from. Settings groups accounts by matching the endpoint (or the local preset),
+so hand-added integrations for a catalog URL group too, and a persistent
+agent's catalog request is proposed as the resolved definition, so the owner
+approves exactly what gets created. A request that lacks an input fails
+`invalid_request` with the agent's next step as its cause, so agents learn
+what to collect without a new error reason per service.

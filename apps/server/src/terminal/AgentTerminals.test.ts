@@ -1,3 +1,9 @@
+import { EnvironmentId } from "@t3tools/contracts";
+import * as Vault from "../vault/Vault.ts";
+import * as Sqlite from "../persistence/Sqlite.ts";
+import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
+import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
+import * as Option from "effect/Option";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -11,6 +17,7 @@ import * as Queue from "effect/Queue";
 import { TestClock } from "effect/testing";
 import type { PtyProcess, PtyExitEvent } from "@t3tools/shared/PtyAdapter";
 import * as ProcessRunner from "../processRunner.ts";
+import { processOutputRedactor } from "../vault/VaultRedactor.ts";
 import * as Manager from "./Manager.ts";
 import * as NodePtyAdapter from "./NodePtyAdapter.ts";
 import * as PtyAdapter from "@t3tools/shared/PtyAdapter";
@@ -65,6 +72,21 @@ const provide = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     Effect.provide(ProcessRunner.layer.pipe(Layer.provideMerge(NodeServices.layer))),
     Effect.scoped,
   );
+
+const vaultTestLayer = Vault.layer.pipe(
+  Layer.provideMerge(Sqlite.layerMemory),
+  Layer.provide(
+    Layer.mock(ServerSecretStore.ServerSecretStore)({
+      get: () => Effect.succeed(Option.none()),
+      create: () => Effect.void,
+    }),
+  ),
+  Layer.provide(
+    Layer.succeed(ServerEnvironment.ServerEnvironmentIdentity, {
+      getEnvironmentId: Effect.succeed(EnvironmentId.make("test")),
+    }),
+  ),
+);
 
 it.effect(
   "background run streams output, reads incremental output, writes input and kills only its owner",
@@ -187,6 +209,179 @@ it.live("settle cleanup kills both sleeps in an owned PTY process group", () =>
       const pids = yield* Deferred.await(children);
       for (const pid of pids) expect(() => process.kill(pid, 0)).not.toThrow();
       yield* manager.stopAgents("A");
+      for (const pid of pids) expect(() => process.kill(pid, 0)).toThrow();
+    }).pipe(Effect.provide(NodePtyAdapter.layer)),
+  ),
+);
+
+it.effect("explicit kill flushes the vault redactor's held tail into history and disk", () =>
+  provide(
+    Effect.gen(function* () {
+      const { cwd, process, manager } = yield* make;
+      const vault = yield* Vault.Vault;
+      const fs = yield* FileSystem.FileSystem;
+      let events = "";
+      yield* manager.subscribe((event) => {
+        if (event.type === "output") events += event.data;
+        return Effect.void;
+      });
+      const started = yield* manager.runAgent({
+        threadId: "A",
+        command: "echo",
+        cwd,
+        background: true,
+      });
+      yield* vault.create({
+        name: "kill-secret",
+        type: "login",
+        secretFields: { password: "secret-999" },
+      });
+      // "sec" could still become the secret, so the redactor holds it
+      // back; a kill must release it (it is not the secret) rather than
+      // drop it with the queued events.
+      process.output("visible sec");
+      yield* manager.killAgent({ threadId: "A", terminalId: started.terminalId });
+      const result = yield* manager.readAgent({ threadId: "A", terminalId: started.terminalId });
+      expect(result.status).toBe("exited");
+      expect(result.output).toBe("visible sec");
+      expect(events).toBe("visible sec");
+      const logs = yield* fs.readDirectory(cwd);
+      const disk = yield* Effect.forEach(
+        logs.filter((name) => name.endsWith(".log")),
+        (name) => fs.readFileString(`${cwd}/${name}`),
+      );
+      expect(disk.join("")).toBe("visible sec");
+    }).pipe(Effect.provide(vaultTestLayer)),
+  ),
+);
+
+it.effect("foreground timeout flushes the vault redactor's held tail", () =>
+  provide(
+    Effect.gen(function* () {
+      const { cwd, process, manager } = yield* make;
+      const vault = yield* Vault.Vault;
+      const started = yield* Deferred.make<void>();
+      yield* manager.subscribe((event) =>
+        event.type === "started"
+          ? Deferred.succeed(started, undefined).pipe(Effect.asVoid)
+          : Effect.void,
+      );
+      const result = yield* manager
+        .runAgent({ threadId: "A", command: "sleep 1000", cwd, timeoutMs: 50 })
+        .pipe(Effect.forkChild);
+      yield* Deferred.await(started);
+      yield* vault.create({
+        name: "timeout-secret",
+        type: "login",
+        secretFields: { password: "secret-999" },
+      });
+      process.output("visible sec");
+      yield* TestClock.adjust(50);
+      const ended = yield* Fiber.join(result);
+      expect(ended.timedOut).toBe(true);
+      expect(ended.status).toBe("exited");
+      expect(ended.output).toBe("visible sec");
+    }).pipe(Effect.provide(vaultTestLayer)),
+  ),
+);
+
+it.effect("explicit kill flushes the credential redactor's held tail, redacted", () =>
+  provide(
+    Effect.gen(function* () {
+      const { cwd, process, manager } = yield* make;
+      const started = yield* manager.runAgent({
+        threadId: "A",
+        command: "echo",
+        cwd,
+        background: true,
+        prepareCredentials: () =>
+          Effect.succeed({
+            env: {},
+            redactOutput: processOutputRedactor(["s3cr3"]),
+            complete: () => Effect.void,
+          }),
+      });
+      // A whole short secret at the end of a chunk is held back until
+      // the redactor knows what follows it; a kill must flush it, and
+      // the flush must stay redacted.
+      process.output("token s3cr3");
+      yield* manager.killAgent({ threadId: "A", terminalId: started.terminalId });
+      const result = yield* manager.readAgent({ threadId: "A", terminalId: started.terminalId });
+      expect(result.output).toBe("token [redacted vault secret]");
+      expect(result.output).not.toContain("s3cr3");
+    }),
+  ),
+);
+
+it.effect("foreground timeout returns even when an exited listener never completes", () =>
+  provide(
+    Effect.gen(function* () {
+      const { cwd, manager } = yield* make;
+      const started = yield* Deferred.make<void>();
+      const never = yield* Deferred.make<void>();
+      yield* manager.subscribe((event) =>
+        event.type === "started"
+          ? Deferred.succeed(started, undefined).pipe(Effect.asVoid)
+          : event.type === "exited"
+            ? Deferred.await(never).pipe(Effect.asVoid)
+            : Effect.void,
+      );
+      const result = yield* manager
+        .runAgent({ threadId: "A", command: "sleep 1000", cwd, timeoutMs: 50 })
+        .pipe(Effect.forkChild);
+      yield* Deferred.await(started);
+      yield* TestClock.adjust(50);
+      // Covers the kill grace cap as well; the call must still return.
+      yield* TestClock.adjust(10_000);
+      const ended = result.pollUnsafe();
+      expect(ended?._tag).toBe("Success");
+      if (ended?._tag === "Success") {
+        expect(ended.value.timedOut).toBe(true);
+        expect(ended.value.status).toBe("exited");
+        expect(ended.value.notice).toContain("background=true");
+      }
+    }),
+  ),
+);
+
+it.live("foreground timeout kills a SIGTERM-ignoring command and its child", () =>
+  provide(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const cwd = yield* fs.makeTempDirectoryScoped({ prefix: "cogenly-terminal-term-" });
+      const adapter = yield* PtyAdapter.PtyAdapter;
+      const manager = yield* Manager.makeWithOptions({
+        logsDir: cwd,
+        ptyAdapter: adapter,
+        processKillGraceMs: 50,
+        processTable: Effect.succeed([]),
+      });
+      const children = yield* Deferred.make<ReadonlyArray<number>>();
+      let text = "";
+      yield* manager.subscribe((event) =>
+        Effect.gen(function* () {
+          if (event.type !== "output") return;
+          text += event.data;
+          const match = /CHILD:(\d+)/u.exec(text);
+          if (match) yield* Deferred.succeed(children, [Number(match[1])]);
+        }),
+      );
+      // @effect-diagnostics-next-line globalDateInEffect:off - Live test: wall-clock bound, not TestClock.
+      const startedAt = Date.now();
+      const result = yield* manager.runAgent({
+        threadId: "A",
+        command: "trap '' TERM; sleep 1000 & echo CHILD:$!; wait",
+        cwd,
+        timeoutMs: 300,
+      });
+      // @effect-diagnostics-next-line globalDateInEffect:off - Live test: wall-clock bound, not TestClock.
+      const elapsed = Date.now() - startedAt;
+      expect(result.timedOut).toBe(true);
+      expect(result.status).toBe("exited");
+      expect(result.notice).toContain("background=true");
+      expect(elapsed).toBeLessThan(5_000);
+      const pids = yield* Deferred.await(children);
+      yield* Effect.sleep(200);
       for (const pid of pids) expect(() => process.kill(pid, 0)).toThrow();
     }).pipe(Effect.provide(NodePtyAdapter.layer)),
   ),
@@ -322,5 +517,65 @@ it.effect("an evicted finished run replays its persisted log on attach without s
           .pipe(Effect.flip))._tag,
       ).toBe("TerminalSessionLookupError");
     }),
+  ),
+);
+
+it.effect("vault redaction precedes terminal events, history and disk across chunks", () =>
+  provide(
+    Effect.gen(function* () {
+      const { cwd, process, manager } = yield* make;
+      const vault = yield* Vault.Vault;
+      const fs = yield* FileSystem.FileSystem;
+      const exited = yield* Deferred.make<void>();
+      let events = "";
+      yield* manager.subscribe((event) => {
+        if (event.type === "output") events += event.data;
+        return event.type === "exited"
+          ? Deferred.succeed(exited, undefined).pipe(Effect.asVoid)
+          : Effect.void;
+      });
+      const started = yield* manager.runAgent({
+        threadId: "A",
+        command: "echo",
+        cwd,
+        background: true,
+      });
+      yield* vault.create({
+        name: "after-start",
+        type: "login",
+        secretFields: { password: "vault-secret-123" },
+      });
+      process.output("before vault-sec");
+      process.output("ret-123 after");
+      process.finish(0);
+      yield* Deferred.await(exited);
+      const result = yield* manager.readAgent({ threadId: "A", terminalId: started.terminalId });
+      expect(result.output).toBe("before [redacted vault secret] after");
+      expect(events).toBe(result.output);
+      yield* manager.close({ threadId: "A", terminalId: started.terminalId });
+      const logs = yield* fs.readDirectory(cwd);
+      const disk = yield* Effect.forEach(
+        logs.filter((name) => name.endsWith(".log")),
+        (name) => fs.readFileString(`${cwd}/${name}`),
+      );
+      expect(disk.join("")).toBe(result.output);
+    }).pipe(
+      Effect.provide(
+        Vault.layer.pipe(
+          Layer.provideMerge(Sqlite.layerMemory),
+          Layer.provide(
+            Layer.mock(ServerSecretStore.ServerSecretStore)({
+              get: () => Effect.succeed(Option.none()),
+              create: () => Effect.void,
+            }),
+          ),
+          Layer.provide(
+            Layer.succeed(ServerEnvironment.ServerEnvironmentIdentity, {
+              getEnvironmentId: Effect.succeed(EnvironmentId.make("test")),
+            }),
+          ),
+        ),
+      ),
+    ),
   ),
 );

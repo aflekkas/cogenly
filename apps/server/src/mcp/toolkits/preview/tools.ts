@@ -10,6 +10,7 @@ import {
   PreviewAutomationHoverInput,
   PreviewAutomationNavigateInput,
   PreviewAutomationOpenInput,
+  PreviewAutomationPermissionInput,
   PreviewAutomationPressInput,
   PreviewAutomationRecordingArtifact,
   PreviewAutomationRecordingStatus,
@@ -27,6 +28,7 @@ import {
   PreviewAutomationTypeInput,
   PreviewAutomationUploadInput,
   PreviewAutomationWaitForInput,
+  SitePermissionsState,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import * as FileSystem from "effect/FileSystem";
@@ -70,7 +72,7 @@ const readonlyBrowserTool = <T extends Tool.Any>(tool: T): T =>
 
 const PreviewStatusTool = Tool.make("preview_status", {
   description:
-    "Report whether a collaborative browser tab is automation-capable, including its control owner, pending dialog, URL, title, profile, visibility, loading state, viewport mode, and measured CSS-pixel size. Visibility is advisory: never stop or ask the user to bring the panel into view because a tab reports visible=false. A notice or sessionMismatch=true means the tab is not the page the user sees or does not share their logins; read it before reporting what the page shows. Pass tabId to inspect a specific tab; omit it to use this agent session's current tab, or the tab the user is viewing when you have none. Server hosts also list every tab in the thread (tabs) with its owner, including tabs the user opened, and the browser profiles preview_open accepts. You can read any listed tab. You can act on your own tabs and on tabs the user opened; acting on a tab whose owner is human takes control from the user, so read their tab first and act on it only when the task calls for it.",
+    "Report whether a collaborative browser tab is automation-capable, including its control owner, pending dialog, URL, title, profile, visibility, loading state, viewport mode, and measured CSS-pixel size. Visibility is advisory: never stop or ask the user to bring the panel into view because a tab reports visible=false. A notice or sessionMismatch=true means the tab is not the page the user sees or does not share their logins; read it before reporting what the page shows. Pass tabId to inspect a specific tab; omit it to use this agent session's current tab, or the tab the user is viewing when you have none. In the desktop app, sitePermissions lists the page's site permissions and a prompt waiting on the user (use preview_permission or ask the user to click Allow). Server hosts also list every tab in the thread (tabs) with its owner, including tabs the user opened, and the browser profiles preview_open accepts. You can read any listed tab. You can act on your own tabs and on tabs the user opened; acting on a tab whose owner is human takes control from the user, so read their tab first and act on it only when the task calls for it.",
   parameters: PreviewAutomationTabTargetInput,
   success: PreviewAutomationStatus,
   failure: PreviewToolFailure,
@@ -175,6 +177,19 @@ const PreviewSetAppearanceTool = safeBrowserTool(
     dependencies,
   })
     .annotate(Tool.Title, "Set preview appearance")
+    .annotate(Tool.Idempotent, true),
+);
+
+const PreviewPermissionTool = safeBrowserTool(
+  Tool.make("preview_permission", {
+    description:
+      "Allow, block, or reset (ask) one site permission for a site in a collaborative browser tab, optionally selected by tabId, so a page that needs the camera, microphone, location, notifications, clipboard read, or MIDI works without waiting for the user to click Allow. Camera and microphone are separate permissions. Use it when preview_status or preview_snapshot reports a page waiting on a permission prompt, or when a page reports permission denied. Omit origin to decide for the origin the tab shows. You can decide for a site the user has not decided on, and your allow answers a prompt that is waiting; you cannot override a site the user explicitly blocked, and the call says so. In the headless server browser a site you allow gets a synthetic camera and microphone, and block behaves like ask (the page is denied). Returns the site's permissions afterward.",
+    parameters: PreviewAutomationPermissionInput,
+    success: Schema.Struct({ ...SitePermissionsState.fields, ...presentationFields }),
+    failure: PreviewToolFailure,
+    dependencies,
+  })
+    .annotate(Tool.Title, "Set site permission")
     .annotate(Tool.Idempotent, true),
 );
 
@@ -358,6 +373,7 @@ export const PreviewToolkit = Toolkit.make(
   PreviewNavigateTool,
   PreviewResizeTool,
   PreviewSetAppearanceTool,
+  PreviewPermissionTool,
   PreviewSnapshotTool,
   PreviewClickTool,
   PreviewTypeTool,
@@ -380,6 +396,7 @@ export const PreviewStandardToolkit = Toolkit.make(
   PreviewNavigateTool,
   PreviewResizeTool,
   PreviewSetAppearanceTool,
+  PreviewPermissionTool,
   PreviewClickTool,
   PreviewTypeTool,
   PreviewHoverTool,

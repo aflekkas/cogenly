@@ -1358,10 +1358,13 @@ export function resolveMacWebAuthnEntitlements(
   };
 }
 
-// The hardened runtime blocks microphone capture (dictation) without this.
+// The hardened runtime blocks microphone capture (dictation, and pages in the
+// in-app browser that ask for the mic) without this.
 export const MAC_AUDIO_INPUT_ENTITLEMENT = "com.apple.security.device.audio-input";
-// electron-builder's default entitlements plus audio input, for signed builds
-// without a passkey provisioning profile.
+// The same, for the camera: pages in the in-app browser that ask for it.
+export const MAC_CAMERA_ENTITLEMENT = "com.apple.security.device.camera";
+// electron-builder's default entitlements plus audio input and camera, for
+// signed builds without a passkey provisioning profile.
 export const MAC_DEFAULT_ENTITLEMENTS_PATH = "apps/desktop/entitlements.mac.plist";
 
 export function renderMacPasskeyEntitlements(
@@ -1403,6 +1406,8 @@ ${associatedDomains}
     <key>com.apple.security.cs.disable-library-validation</key>
     <true/>
     <key>${MAC_AUDIO_INPUT_ENTITLEMENT}</key>
+    <true/>
+    <key>${MAC_CAMERA_ENTITLEMENT}</key>
     <true/>
   </dict>
 </plist>
@@ -2745,7 +2750,12 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
         // Composer dictation. Transcription runs on device (SpeechTranscriber), which
         // needs no Speech Recognition permission.
         NSMicrophoneUsageDescription:
-          "Cogenly uses the microphone for dictation. Speech is transcribed on this Mac and never leaves it.",
+          "Cogenly uses the microphone for dictation, and for sites in the browser panel that you allow to use it. Dictation is transcribed on this Mac and never leaves it.",
+        // macOS refuses the camera to an app without this, so a page in the
+        // browser panel that asks for it is denied before any prompt. Sites are
+        // only given it after the person allows them in the panel.
+        NSCameraUsageDescription:
+          "Cogenly gives the camera to sites in the browser panel that you allow to use it.",
         // macOS lists an app under Default web browser only when it opens web
         // pages as documents as well as http and https links (see protocols).
         CFBundleDocumentTypes: [

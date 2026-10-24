@@ -3,7 +3,9 @@ import {
   groupInlineImageGalleries,
   imageProxyUrl,
   inlineImageAspectRatio,
+  remoteImageAssetResource,
   resolveInlineImageSource,
+  resolveRemoteImageSrc,
   withoutPartialTrailingImage,
   type InlineImageHastNode,
 } from "./markdownInlineImages";
@@ -146,6 +148,7 @@ describe("resolveInlineImageSource", () => {
       kind: "remote",
       url: "https://cdn.test/a.png",
       src: "https://app.test/api/image-proxy?url=https%3A%2F%2Fcdn.test%2Fa.png",
+      proxied: true,
     });
     expect(resolveInlineImageSource("//cdn.test/a.png", { proxyEndpoint })).toMatchObject({
       url: "https://cdn.test/a.png",
@@ -172,6 +175,59 @@ describe("resolveInlineImageSource", () => {
     });
     expect(resolveInlineImageSource("data:image/png;base64,AAAA", { proxyEndpoint })).toBeNull();
     expect(resolveInlineImageSource("./a.png", { proxyEndpoint })).toBeNull();
+  });
+});
+
+describe("remote image signing", () => {
+  const proxyEndpoint = "https://app.test/api/image-proxy";
+  const remote = (
+    src: string,
+    options: Parameters<typeof resolveInlineImageSource>[1] = { proxyEndpoint },
+  ) => {
+    const source = resolveInlineImageSource(src, options);
+    if (source?.kind !== "remote") throw new Error("expected a remote image");
+    return source;
+  };
+
+  it("asks the server to sign a proxied image by its authored URL", () => {
+    expect(remoteImageAssetResource(remote("//cdn.test/a.png"))).toEqual({
+      _tag: "remote-image",
+      url: "https://cdn.test/a.png",
+    });
+  });
+
+  it("signs nothing that loads as authored, blocked, or unknown", () => {
+    expect(remoteImageAssetResource(remote("https://cdn.test/a.png", {}))).toBeNull();
+    expect(
+      remoteImageAssetResource(
+        remote("https://app.test/a.png", {
+          proxyEndpoint,
+          firstPartyOrigins: ["https://app.test"],
+        }),
+      ),
+    ).toBeNull();
+    expect(
+      remoteImageAssetResource(
+        resolveInlineImageSource("http://cdn.test/a.png", { proxyEndpoint }),
+      ),
+    ).toBeNull();
+    expect(remoteImageAssetResource(null)).toBeNull();
+  });
+
+  it("loads the signed URL, waits while it is minted, and falls back to the proxy on failure", () => {
+    const source = remote("https://cdn.test/a.png");
+    const signed = "https://app.test/api/assets/token.sig/a.png";
+    expect(
+      resolveRemoteImageSrc(source, { _tag: "Success", url: signed, expiresAt: Date.now() }),
+    ).toBe(signed);
+    expect(resolveRemoteImageSrc(source, { _tag: "Loading" })).toBeNull();
+    expect(resolveRemoteImageSrc(source, { _tag: "Failure" })).toBe(source.src);
+  });
+
+  it("loads an unproxied image as authored without waiting for a signature", () => {
+    const direct = remote("https://cdn.test/a.png", {});
+    expect(resolveRemoteImageSrc(direct, { _tag: "Loading" })).toBe("https://cdn.test/a.png");
+    expect(resolveRemoteImageSrc(direct, null)).toBe("https://cdn.test/a.png");
   });
 });
 

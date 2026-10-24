@@ -5,6 +5,7 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import type {
   EnvironmentId,
+  ModelSelection,
   RunId,
   ThreadId,
   UsageLimitHandoffCandidate,
@@ -12,11 +13,13 @@ import type {
 import { ArrowRightLeftIcon, ChevronDownIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import { type UsageMeterMode, useAppearancePreferences } from "~/appearancePreferences";
 import { useServerConfigs } from "~/state/entities";
 import { orchestrationEnvironment } from "~/state/orchestration";
 import { useEnvironmentQuery } from "~/state/query";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { Button } from "../ui/button";
+import { headroomLabel } from "../usage/usageMeter.logic";
 import {
   Menu,
   MenuGroup,
@@ -50,7 +53,8 @@ export function useUsageLimitHandoff(input: {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId | null;
   readonly runId: RunId | null;
-  readonly onAccepted: () => void;
+  /** Receives the selection the continuation started on. */
+  readonly onAccepted: (modelSelection: ModelSelection) => void;
 }): UsageLimitHandoffOffer | null {
   const { environmentId, threadId, runId } = input;
   const active = threadId !== null && runId !== null;
@@ -118,7 +122,7 @@ export function useUsageLimitHandoff(input: {
         inFlight.current = false;
         setPendingKey(null);
         if (result._tag === "Success") {
-          input.onAccepted();
+          input.onAccepted(result.value.modelSelection);
           return;
         }
         if (isAtomCommandInterrupted(result)) return;
@@ -137,11 +141,11 @@ function candidateName(candidate: UsageLimitHandoffCandidate): string {
   return candidate.displayName ?? candidate.instanceId;
 }
 
-/** "62% left", "usage unknown"; an old reading says so. */
-function usageLabel(candidate: UsageLimitHandoffCandidate): string {
+/** "62% left" or "38% used" per the usage meter preference, "usage unknown"; an old reading says so. */
+function usageLabel(candidate: UsageLimitHandoffCandidate, mode: UsageMeterMode): string {
   const { usage } = candidate;
-  if (usage.remainingPercent === null) return "Usage unknown";
-  return `${usage.remainingPercent}% left${usage.stale ? " (last checked a while ago)" : ""}`;
+  if (usage.remainingPercent === null) return headroomLabel(null, mode);
+  return `${headroomLabel(usage.remainingPercent, mode)}${usage.stale ? " (last checked a while ago)" : ""}`;
 }
 
 /**
@@ -150,6 +154,8 @@ function usageLabel(candidate: UsageLimitHandoffCandidate): string {
  * choice can still be taken back.
  */
 export function UsageLimitHandoffActions({ offer }: { offer: UsageLimitHandoffOffer }) {
+  const { preferences } = useAppearancePreferences();
+  const mode = preferences.usageMeter;
   const [top] = offer.candidates;
   if (top === undefined) return null;
   return (
@@ -159,7 +165,7 @@ export function UsageLimitHandoffActions({ offer }: { offer: UsageLimitHandoffOf
           size="xs"
           variant="outline"
           disabled={offer.pending}
-          title={`Hands the conversation to ${candidateName(top)} (${top.modelLabel ?? top.modelSelection.model}) and re-runs your last request. ${usageLabel(top)}.`}
+          title={`Hands the conversation to ${candidateName(top)} (${top.modelLabel ?? top.modelSelection.model}) and re-runs your last request. ${usageLabel(top, mode)}.`}
           onClick={() => offer.accept(top)}
         >
           <ArrowRightLeftIcon aria-hidden="true" />
@@ -192,7 +198,9 @@ export function UsageLimitHandoffActions({ offer }: { offer: UsageLimitHandoffOf
                     {candidateName(candidate)} ·{" "}
                     {candidate.modelLabel ?? candidate.modelSelection.model}
                   </span>
-                  <span className="text-muted-foreground text-xs">{usageLabel(candidate)}</span>
+                  <span className="text-muted-foreground text-xs">
+                    {usageLabel(candidate, mode)}
+                  </span>
                 </span>
               </MenuItem>
             ))}

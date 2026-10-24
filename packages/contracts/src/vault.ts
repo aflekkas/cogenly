@@ -51,11 +51,12 @@ export type VaultSecretFields = typeof VaultSecretFields.Type;
 /**
  * Who may use an item without asking. `ask` (the default) makes an agent's
  * first use create an owner approval; approving records an `allow` for that
- * agent (and the approved domain, when one was involved).
+ * thread or persistent agent (and the approved domain, when one was involved).
  */
 export const VaultPolicy = Schema.Struct({
   mode: Schema.Literals(["ask", "allow"]),
   allowedAgentIds: Schema.Array(AgentId),
+  allowedThreadIds: Schema.optional(Schema.Array(ThreadId)),
   allowedDomains: Schema.Array(TrimmedNonEmptyString.check(Schema.isMaxLength(253))),
 });
 export type VaultPolicy = typeof VaultPolicy.Type;

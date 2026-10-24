@@ -23,7 +23,7 @@ import * as Schema from "effect/Schema";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import type * as Types from "effect/Types";
-import { AiError, McpProtocol, McpSchema, McpServer, Tool, type Toolkit } from "effect/ai";
+import { AiError, McpProtocol, McpSchema, McpServer, Tool, Toolkit } from "effect/ai";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 import { OrchestratorMcpFailure, PreviewAutomationError } from "@t3tools/contracts";
 
@@ -867,6 +867,22 @@ const registerHtmlPreview = Effect.fn("McpHttpServer.registerHtmlPreview")(funct
 });
 
 /**
+ * Every result reaches the client as `CallToolResult.structuredContent`,
+ * which must be a JSON value. A result with an absent optional field or a
+ * `DateTime` would fail that check after the handler had already applied its
+ * change, so each tool encodes its result through the schema's JSON codec.
+ */
+const withJsonResults = <Tools extends Record<string, Tool.Any>>(
+  toolkit: Toolkit.Toolkit<Tools>,
+): Toolkit.Toolkit<Tools> =>
+  // Same tools, names and handlers; only the result codec changes.
+  Toolkit.make(
+    ...Object.values(toolkit.tools).map((tool) =>
+      tool.setSuccess(Schema.toCodecJson(tool.successSchema)),
+    ),
+  ) as unknown as Toolkit.Toolkit<Tools>;
+
+/**
  * `McpServer.toolkit` for handlers that declared their access (see
  * `McpToolAccess`). Every toolkit on `/mcp` registers through this.
  *
@@ -881,7 +897,7 @@ export const toolkitRegistration = <Tools extends Record<string, Tool.Any>, EX, 
 ) => {
   for (const tool of Object.values(toolkit.tools))
     agentToolReads.set(tool.name, Context.get(tool.annotations, Tool.Readonly));
-  const registration = McpServer.toolkit(toolkit);
+  const registration = McpServer.toolkit(withJsonResults(toolkit));
   // @effect-diagnostics-next-line unsafeEffectTypeAssertion:off - the auth middleware provides it per request.
   const registered = registration as Layer.Layer<
     never,

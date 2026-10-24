@@ -1981,25 +1981,16 @@ const make = Effect.gen(function* () {
           };
         }
         if (input.saveToVault) {
-          // The private answer lands as a vault item instead of a one-use
-          // ref: consume the ref server-side and store the value encrypted.
-          const value = yield* secretRequests
-            .consume({ ref: secretRef.value, projectId: parent.thread.projectId })
-            .pipe(
-              Effect.mapError((error) =>
-                failure(
-                  "orchestration_error",
-                  `Could not store the secret in the vault: ${error.message}`,
-                ),
-              ),
-            );
-          const { item } = yield* vault
-            .saveSecretValue({
-              name: input.saveToVault.name,
-              type: input.saveToVault.type,
-              domains: input.saveToVault.domains ?? [],
-              value,
-            })
+          const target = input.saveToVault;
+          const { item } = yield* secretRequests
+            .adopt({ ref: secretRef.value, projectId: parent.thread.projectId }, (value) =>
+              vault.saveSecretValue({
+                name: target.name,
+                type: target.type,
+                domains: target.domains ?? [],
+                value,
+              }),
+            )
             .pipe(
               Effect.mapError((error) =>
                 failure(

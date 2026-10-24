@@ -25,6 +25,7 @@ import {
   type PreviewAutomationNavigateInput,
   type PreviewAutomationNetworkEntry,
   type PreviewAutomationOpenInput,
+  type PreviewAutomationPermissionInput,
   type PreviewAutomationPressInput,
   type PreviewAutomationRequest,
   type PreviewAutomationResizeInput,
@@ -44,6 +45,7 @@ import {
   ThreadId,
   SERVER_BROWSER_AUTOMATION_CLIENT_ID,
   type PreviewAppearancePreference,
+  type SitePermissionsState,
 } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { normalizePreviewUrl } from "@t3tools/shared/preview";
@@ -85,6 +87,12 @@ import * as ServerBrowserPick from "./ServerBrowserPick.ts";
 import * as PreviewBrowser from "./PreviewBrowser.ts";
 import * as PreviewBrowserHost from "./PreviewBrowserHost.ts";
 import { presentAsChrome, ServerBrowserContexts } from "./ServerBrowserContexts.ts";
+import {
+  HeadlessSitePermissions,
+  permissionPromptNotice,
+  permissionRefusalMessage,
+  siteOrigin,
+} from "./SitePermissionAgent.ts";
 import { BrowserControlInterrupted, SessionControl } from "./SessionControl.ts";
 import * as Targeting from "./serverBrowserTargeting.ts";
 
@@ -390,13 +398,21 @@ interface ServerDownload {
 /**
  * Operations an agent may run on any tab in its thread, even while a human
  * drives it. Evaluate is not one: page script can change anything, so it needs
- * the same control as clicking.
+ * the same control as clicking. Site permissions are: they never touch the
+ * page's input, so deciding one must not interrupt a person typing in it.
  */
 const READ_OPERATIONS: ReadonlySet<PreviewAutomationRequest["operation"]> = new Set([
   "status",
   "snapshot",
   "waitFor",
+  "permission",
 ]);
+
+/** How long the desktop gets to answer a site-permission read before the agent goes on without it. */
+const DESKTOP_PERMISSION_READ_TIMEOUT_MS = 1_000;
+/** A desktop that stayed silent (an older app) is not asked again for a while. */
+const DESKTOP_PERMISSION_BACKOFF_MS = 60_000;
+const DESKTOP_PERMISSION_CHANGE_TIMEOUT_MS = 5_000;
 
 const AGENT_TAB_LIMIT = 8;
 const SERVER_TAB_LIMIT = 32;
@@ -1261,6 +1277,96 @@ const make = Effect.gen(function* () {
     await context.grantPermissions(["clipboard-write"]);
   };
 
+  /**
+   * What the desktop says about a tab's site permissions, or undefined for a
+   * tab it does not render or an app too old to answer. A silent desktop is
+   * not asked again for a minute, so a status never waits on it twice.
+   */
+  let desktopPermissionsSilentUntil = 0;
+  const askDesktopPermissions = async (
+    tab: ServerTab,
+    change: DesktopBrowserChannel.DesktopPermissionChange | null,
+  ) => {
+    if (tab.desktop === null) return undefined;
+    if (change === null && Date.now() < desktopPermissionsSilentUntil) return undefined;
+    const answer = await Effect.runPromise(
+      desktopChannel.permission(
+        { threadId: tab.threadId, tabId: tab.tabId },
+        change,
+        change === null ? DESKTOP_PERMISSION_READ_TIMEOUT_MS : DESKTOP_PERMISSION_CHANGE_TIMEOUT_MS,
+      ),
+    );
+    if (Option.isNone(answer)) {
+      if (change === null)
+        desktopPermissionsSilentUntil = Date.now() + DESKTOP_PERMISSION_BACKOFF_MS;
+      return undefined;
+    }
+    return answer.value;
+  };
+
+  /** The site permissions of a tab the desktop renders, with the page waiting on the user if any. */
+  const desktopSitePermissions = async (
+    tab: ServerTab,
+  ): Promise<SitePermissionsState | undefined> => {
+    const answer = await askDesktopPermissions(tab, null);
+    return answer?.ok === true ? answer.state : undefined;
+  };
+
+  const headlessPermissions = new WeakMap<BrowserContext, HeadlessSitePermissions>();
+  /** Grants a headless context exactly what its decisions allow; Playwright can only clear and re-grant. */
+  const applyHeadlessPermissions = async (
+    context: BrowserContext,
+    decisions: HeadlessSitePermissions,
+  ) => {
+    await context.clearPermissions();
+    await context.grantPermissions(["clipboard-write"]);
+    for (const { origin, permissions } of decisions.grants()) {
+      await context.grantPermissions([...permissions], { origin });
+    }
+  };
+
+  /** `preview_permission`: decides one permission for a site, in the desktop or the headless browser. */
+  const decideSitePermission = async (
+    tab: ServerTab,
+    input: PreviewAutomationPermissionInput,
+  ): Promise<SitePermissionsState> => {
+    const requestedOrigin = input.origin === undefined ? undefined : siteOrigin(input.origin);
+    if (input.origin !== undefined && requestedOrigin === null) {
+      throw new ServerBrowserPage.ServerBrowserOperationError(
+        "PreviewAutomationExecutionError",
+        "origin must be an http or https URL such as https://app.example.com.",
+      );
+    }
+    const refuse = (reason: "user-blocked" | "no-origin" | "unknown-tab", origin: string | null) =>
+      new ServerBrowserPage.ServerBrowserOperationError(
+        "PreviewAutomationExecutionError",
+        permissionRefusalMessage(reason, input.permission, origin),
+      );
+    if (tab.desktop !== null) {
+      const answer = await askDesktopPermissions(tab, {
+        permission: input.permission,
+        setting: input.decision,
+        ...(requestedOrigin ? { origin: requestedOrigin } : {}),
+      });
+      if (answer === undefined) {
+        throw new ServerBrowserPage.ServerBrowserOperationError(
+          "PreviewAutomationExecutionError",
+          "The desktop app did not answer. Ask the user to click Allow in the browser toolbar, and update the desktop app if this keeps happening.",
+        );
+      }
+      if (!answer.ok) throw refuse(answer.reason, answer.state?.origin ?? requestedOrigin ?? null);
+      return answer.state;
+    }
+    const origin = requestedOrigin ?? siteOrigin(tab.page.url());
+    if (origin === null) throw refuse("no-origin", null);
+    const context = tab.page.context();
+    const decisions = headlessPermissions.get(context) ?? new HeadlessSitePermissions();
+    headlessPermissions.set(context, decisions);
+    decisions.set(origin, input.permission, input.decision);
+    await applyHeadlessPermissions(context, decisions);
+    return decisions.state(origin);
+  };
+
   /** Records the copies made in each frame a session reaches. */
   const recordCopies = async (cdp: CDPSession) => {
     // Scripts for new documents run only while this session's Page domain is on.
@@ -1475,6 +1581,19 @@ const make = Effect.gen(function* () {
     };
   };
 
+  /** Adds what the user's waiting prompt means to the tab's notice, so an agent sees it and says so. */
+  const withPermissionNotice = (
+    summary: PreviewAutomationTabSummary,
+    permissions: SitePermissionsState | undefined,
+  ): PreviewAutomationTabSummary => {
+    const prompt = permissions === undefined ? undefined : permissionPromptNotice(permissions);
+    if (prompt === undefined) return summary;
+    return {
+      ...summary,
+      notice: summary.notice === undefined ? prompt : `${summary.notice} ${prompt}`,
+    };
+  };
+
   /** Adds the tab an action ran on to its result; `evaluate` returns the page's own value. */
   const withTabSummary = (operation: string, result: unknown, tab: ServerTab): unknown => {
     if (operation === "evaluate") return result;
@@ -1558,7 +1677,8 @@ const make = Effect.gen(function* () {
     }
     const url = tab.page.url();
     const viewport = tab.page.viewportSize();
-    const summary = tabSummary(tab);
+    const sitePermissions = await desktopSitePermissions(tab);
+    const summary = withPermissionNotice(tabSummary(tab), sitePermissions);
     const status = {
       available: true,
       visible: summary.visible,
@@ -1576,6 +1696,7 @@ const make = Effect.gen(function* () {
         generation: tab.control.generation,
       },
       dialog: dialogStatus(tab),
+      ...(sitePermissions === undefined ? {} : { sitePermissions }),
       fileChooser: tab.fileChooser
         ? { multiple: tab.fileChooser.chooser.isMultiple(), accept: tab.fileChooser.accept }
         : null,
@@ -2103,7 +2224,16 @@ const make = Effect.gen(function* () {
     }
     const agentSessionId = request.agentSessionId!;
     const result = await runOnTab(tab, request, agentSessionId);
-    return withTabSummary(request.operation, result, tab);
+    const summarized = withTabSummary(request.operation, result, tab);
+    // A snapshot is where an agent looks at what the page is stuck on.
+    if (request.operation !== "snapshot" || typeof summarized !== "object" || summarized === null) {
+      return summarized;
+    }
+    const permissions = await desktopSitePermissions(tab);
+    const withTab = summarized as { readonly tab?: PreviewAutomationTabSummary };
+    return withTab.tab === undefined
+      ? summarized
+      : { ...summarized, tab: withPermissionNotice(withTab.tab, permissions) };
   };
 
   const runOnTab = async (
@@ -2171,6 +2301,8 @@ const make = Effect.gen(function* () {
           viewport: tab.page.viewportSize() ?? UNATTACHED_FILL_VIEWPORT,
         };
       }
+      case "permission":
+        return decideSitePermission(tab, input as PreviewAutomationPermissionInput);
       case "setColorScheme": {
         const { colorScheme } = input as PreviewAutomationSetColorSchemeInput;
         const snapshot = await Effect.runPromise(

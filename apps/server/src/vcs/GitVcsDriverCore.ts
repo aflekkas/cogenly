@@ -31,6 +31,7 @@ import {
 } from "@t3tools/contracts";
 import {
   dedupeRemoteBranchesWithLocalMatches,
+  freeWorktreeFolderSlug,
   normalizeGitRemoteUrl,
   worktreeFolderSlug,
 } from "@t3tools/shared/git";
@@ -340,6 +341,25 @@ export function splitNullSeparatedGitStdoutPaths(
 ): string[] {
   return splitNullSeparatedPaths(result.stdout, result.stdoutTruncated);
 }
+
+/** A ref name git would parse as a command-line option, never a branch. */
+export const isOptionLikeRefName = (refName: string): boolean => refName.startsWith("-");
+
+const rejectOptionLikeRefName = (
+  operation: string,
+  cwd: string,
+  refName: string,
+): Effect.Effect<void, GitCommandError> =>
+  isOptionLikeRefName(refName)
+    ? Effect.fail(
+        new GitCommandError({
+          operation,
+          command: "git",
+          cwd,
+          detail: `Ref name "${refName}" must not start with "-".`,
+        }),
+      )
+    : Effect.void;
 
 function sanitizeRemoteName(value: string): string {
   const sanitized = value
@@ -3483,7 +3503,14 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
           detail: `The worktree location "${options?.worktreesDirectory}" must be an absolute folder on this machine, not a drive root. Change it in Settings → Storage.`,
         });
       }
-      worktreePath = path.join(parentDir, repoName, sanitizedBranch);
+      // Slugs collide across repositories sharing this parent (same repo
+      // folder name, or `fix-login` beside `c/fix-login`): pick the first
+      // folder name the directory does not already hold.
+      const repoDir = path.join(parentDir, repoName);
+      const existingFolders = yield* fileSystem
+        .readDirectory(repoDir)
+        .pipe(Effect.catch(() => Effect.succeed([] as ReadonlyArray<string>)));
+      worktreePath = path.join(repoDir, freeWorktreeFolderSlug(sanitizedBranch, existingFolders));
     }
     const args = input.newRefName
       ? ["worktree", "add", "-b", input.newRefName, worktreePath, input.refName]
@@ -3965,6 +3992,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
 
   const switchRef: GitVcsDriver.GitVcsDriver["Service"]["switchRef"] = Effect.fn("switchRef")(
     function* (input) {
+      yield* rejectOptionLikeRefName("GitVcsDriver.switchRef", input.cwd, input.refName);
       const [localInputExists, remoteExists] = yield* Effect.all(
         [
           executeGit(
@@ -4048,6 +4076,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
 
   const createRef: GitVcsDriver.GitVcsDriver["Service"]["createRef"] = Effect.fn("createRef")(
     function* (input) {
+      yield* rejectOptionLikeRefName("GitVcsDriver.createRef", input.cwd, input.refName);
       yield* executeGit("GitVcsDriver.createRef", input.cwd, ["branch", input.refName], {
         timeoutMs: 10_000,
         fallbackErrorDetail: "git branch create failed",

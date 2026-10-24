@@ -77,7 +77,14 @@ export class ProjectLabelService extends Context.Service<
       id: ProjectLabelId,
     ) => Effect.Effect<{ label: ProjectLabelWithRepositories }, ProjectLabelError>;
     readonly linkRepository: (
-      input: ProjectLabelRepository,
+      input: ProjectLabelRepository & {
+        /**
+         * The repository's remote as known by the caller (a clone that has
+         * not landed yet cannot be read from disk). Stored normalized at
+         * link time so a failed clone still leaves a recoverable remote.
+         */
+        readonly remote?: string | null | undefined;
+      },
     ) => Effect.Effect<{ label: ProjectLabelWithRepositories }, ProjectLabelError>;
     readonly unlinkRepository: (
       input: ProjectLabelRepository,
@@ -377,7 +384,15 @@ const make = Effect.gen(function* () {
                   const labels = yield* sql<{
                     label_id: string;
                   }>`SELECT label_id FROM label_repositories WHERE repository_id=${link.repositoryId}`;
-                  for (const row of labels) yield* shared.capture("project", row.label_id);
+                  for (const row of labels)
+                    yield* shared.capture("project", row.label_id).pipe(
+                      Effect.catchTags({
+                        SharedStateError: (error) =>
+                          Effect.logWarning("Project repository backfill capture failed", {
+                            reason: error.reason,
+                          }),
+                      }),
+                    );
                 }),
               );
             }
@@ -404,7 +419,10 @@ const make = Effect.gen(function* () {
       yield* sql`INSERT INTO label_source_links(label_id, kind, owner, repo, created_at) VALUES (${labelId}, ${link.kind}, ${link.owner}, ${link.repo}, ${yield* now}) ON CONFLICT(label_id, kind, owner, repo) DO NOTHING`;
     },
   );
-  const repository = (input: ProjectLabelRepository, link: boolean) =>
+  const repository = (
+    input: ProjectLabelRepository & { readonly remote?: string | null | undefined },
+    link: boolean,
+  ) =>
     mutate(
       link ? "linkRepository" : "unlinkRepository",
       input,
@@ -429,7 +447,8 @@ const make = Effect.gen(function* () {
               ? null
               : yield* identities.value.resolve(workspaceRoot);
           const remote =
-            identity === null ? null : normalizeRepositoryRemote(identity.locator.remoteUrl);
+            normalizeRepositoryRemote(input.remote) ??
+            (identity === null ? null : normalizeRepositoryRemote(identity.locator.remoteUrl));
           const directoryName =
             typeof workspaceRoot === "string" ? repositoryDirectoryName(workspaceRoot) : null;
           yield* sql`INSERT INTO label_repositories(label_id, repository_id, remote, directory_name) VALUES (${input.labelId}, ${input.repositoryId}, ${remote}, ${directoryName}) ON CONFLICT(repository_id) DO UPDATE SET label_id = excluded.label_id, remote = COALESCE(excluded.remote, label_repositories.remote), directory_name = COALESCE(excluded.directory_name, label_repositories.directory_name)`;
@@ -550,6 +569,34 @@ const make = Effect.gen(function* () {
     update: (input) =>
       Effect.gen(function* () {
         const previous = (yield* get(input.id)).label.name;
+        // Renaming moves the project folder on disk. A live thread whose
+        // worktree lives inside it would keep the old path, and its next
+        // turn would recreate a ghost worktree there, stranding the old
+        // one's uncommitted changes. Refuse until those worktrees are gone:
+        // rewriting stored worktree paths and repairing every repository's
+        // worktree registrations is a larger change than this guard.
+        if (input.name !== undefined && input.name !== previous && Option.isSome(folders)) {
+          const folder = yield* folders.value
+            .dirForLabel({ id: input.id, name: previous })
+            .pipe(Effect.mapError(failure("update")));
+          const rows = yield* sql<{ readonly worktree_path: string }>`
+            SELECT json_extract(payload_json, '$.worktreePath') AS worktree_path
+            FROM orchestration_v2_projection_threads
+            WHERE deleted_at IS NULL
+              AND json_extract(payload_json, '$.worktreePath') IS NOT NULL
+          `.pipe(Effect.mapError(failure("update")));
+          const inside = `${folder.dir}/`;
+          if (
+            rows.some(
+              (row) => row.worktree_path === folder.dir || row.worktree_path.startsWith(inside),
+            )
+          )
+            return yield* new ProjectLabelError({
+              operation: "update",
+              reason: "worktrees_inside",
+              projectName: previous,
+            });
+        }
         const result = yield* mutate(
           "update",
           input,

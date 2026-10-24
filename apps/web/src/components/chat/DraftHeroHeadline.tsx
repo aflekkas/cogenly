@@ -570,6 +570,18 @@ export function DraftHeroHeadline({
   useEffect(() => {
     latestTargetRef.current = { draftId, activeProjectKey, scratchTargetEnvironmentId };
   }, [activeProjectKey, scratchTargetEnvironmentId, draftId]);
+  // The empty draft a pick leaves behind keeps no project, but only once it is
+  // off screen. The router commits the new draft in a transition, after the
+  // pick's navigation resolves; clearing it then would flash this heading back
+  // to its repository's own project just before the new draft replaces it.
+  const releaseFolderOnLeaveRef = useRef<ThreadId | null>(null);
+  useEffect(
+    () => () => {
+      const threadId = releaseFolderOnLeaveRef.current;
+      if (threadId !== null) setPendingProjectFolder(threadId, null);
+    },
+    [],
+  );
   // With a prompt typed, project selection changes the target of the open
   // draft in place, so the prompt stays in the same composer session. An empty
   // draft instead opens the chosen project's own draft, like starting a new
@@ -608,9 +620,10 @@ export function DraftHeroHeadline({
         surface ? { surface } : {},
       ).then((started) => {
         if (!started || isChatDraft) return;
-        // The project moves with the pick; the empty draft left behind keeps none.
+        // The project moves with the pick; the empty draft left behind keeps
+        // none once it unmounts.
         if (leavingThreadId !== null && leavingThreadId !== started.threadId) {
-          setPendingProjectFolder(leavingThreadId, null);
+          releaseFolderOnLeaveRef.current = leavingThreadId;
         }
         fileDraft(started.threadId);
       });

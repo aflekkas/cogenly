@@ -5,7 +5,8 @@ import {
   AgentApprovalAction,
   OrchestratorMcpFailure,
   OrchestratorMcpScheduleTaskInput,
-  IntegrationCreateInput,
+  IntegrationAddInput,
+  IntegrationAddToolInput,
   IntegrationUpdateByNameInput,
   type AgentPermissions,
 } from "@t3tools/contracts";
@@ -20,12 +21,16 @@ import { McpInvocationContext, type McpInvocationScope } from "../mcp/McpInvocat
 import * as Threads from "../orchestration-v2/ThreadManagementService.ts";
 import { readCaller, assertLiveCaller } from "../mcp/threadAccess.ts";
 import { resolveRuntimeMode } from "../mcp/OrchestratorMcpService.ts";
+import * as ProjectFiles from "../projectLabels/ProjectFiles.ts";
+import * as Option from "effect/Option";
 import * as Integrations from "../integrations/Integrations.ts";
+import { catalogRequest, resolveCatalogConnect } from "../integrations/IntegrationCatalog.ts";
 
 const decodeWorkStart = Schema.decodeUnknownEffect(WorkStartInput);
 const decodeStartWork = Schema.decodeUnknownEffect(AgentStartWorkInput);
 const decodeSchedule = Schema.decodeUnknownEffect(OrchestratorMcpScheduleTaskInput);
-const decodeIntegrationAdd = Schema.decodeUnknownEffect(IntegrationCreateInput);
+const decodeIntegrationAdd = Schema.decodeUnknownEffect(IntegrationAddInput);
+const decodeIntegrationAddTool = Schema.decodeUnknownEffect(IntegrationAddToolInput);
 const decodeIntegrationUpdate = Schema.decodeUnknownEffect(IntegrationUpdateByNameInput);
 const decodeAction = Schema.decodeUnknownEffect(AgentApprovalAction);
 const isMcpFailure = Schema.is(OrchestratorMcpFailure);
@@ -215,7 +220,26 @@ const make = Effect.gen(function* () {
         // (approving creates it). The owner's own turns are not agents here:
         // actor is null for them and they fall through to the tool.
         if (name === "integration_add") {
-          const payload = yield* decodeIntegrationAdd(input);
+          // A catalog entry is proposed as the definition it resolves to, so
+          // the owner reviews (and approving creates) exactly that.
+          const tool = yield* decodeIntegrationAddTool(input);
+          const catalog =
+            tool.catalogId === undefined
+              ? undefined
+              : resolveCatalogConnect(catalogRequest({ ...tool, catalogId: tool.catalogId }), {
+                  existingNames: new Set(
+                    integrations._tag === "None"
+                      ? []
+                      : (yield* integrations.value.list()).integrations.map(
+                          ({ integration }) => integration.name,
+                        ),
+                  ),
+                  requestOrigin: undefined,
+                  fromAgent: true,
+                });
+          if (catalog?._tag === "needs") return yield* denied(catalog.message, "invalid_request");
+          const payload =
+            catalog === undefined ? yield* decodeIntegrationAdd(input) : catalog.input;
           const action = yield* decodeAction({
             actionKind: "integration_add",
             payload,
@@ -234,7 +258,18 @@ const make = Effect.gen(function* () {
           const current = listed.integrations.find(
             ({ integration }) => integration.name === update.name,
           )?.integration;
-          if (current === undefined)
+          const files = yield* Effect.serviceOption(ProjectFiles.ProjectFiles);
+          const folder =
+            scope.thread && Option.isSome(files)
+              ? yield* files.value.folderForThread(scope.thread.threadId)
+              : null;
+          if (
+            current === undefined ||
+            !Integrations.integrationVisibleTo(
+              { ...current, enabled: true },
+              folder?.labelId ?? null,
+            )
+          )
             return yield* denied(
               "No connected integration with that name exists.",
               "invalid_request",
@@ -245,8 +280,14 @@ const make = Effect.gen(function* () {
             url: update.url ?? current.url,
             transport: update.transport ?? current.transport,
             headers: update.headers ?? current.headers,
+            // A client secret reference is part of the destination too.
+            auth: update.auth === undefined ? (current.auth ?? null) : update.auth,
           };
-          if (Integrations.integrationDestinationChanged(current, payload)) {
+          if (
+            Integrations.integrationAccountLabelChanged(current, payload) ||
+            Integrations.integrationDestinationChanged(current, payload) ||
+            Integrations.integrationScopeWidened(current, payload)
+          ) {
             const action = yield* decodeAction({ actionKind: "integration_update", payload });
             const { approval } = yield* workspace.requestApproval(agent.id, action, actor);
             return yield* denied(
@@ -311,7 +352,9 @@ const make = Effect.gen(function* () {
         // They cannot safely be reduced to an execute grant by parsing model text.
         // Adding a project (create or clone) is ordinary execute work for an agent.
         if (
-          /^(terminal_|preview_(?!close$|list$)|device_|project_(?:update|delete)$)/.test(name) &&
+          /^(terminal_|preview_(?!close$|list$)|device_(?!setup_status$)|project_(?:update|delete)$)/.test(
+            name,
+          ) &&
           !["send", "create_pr", "merge", "deploy", "delete"].every(
             (key) => agent.permissions[key as keyof AgentPermissions],
           )

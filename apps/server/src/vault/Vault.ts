@@ -26,6 +26,7 @@ import {
   type VaultUpdateInput,
   type VaultUsageListInput,
 } from "@t3tools/contracts";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
@@ -36,11 +37,21 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 
+import * as ApprovalChanges from "../agents/ApprovalChanges.ts";
+import * as ProjectFiles from "../projectLabels/ProjectFiles.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as VaultCrypto from "./VaultCrypto.ts";
 import { evaluateVaultPolicy, hostMatchesAnyDomain, type VaultUseCaller } from "./VaultPolicy.ts";
-import { redactShortSecrets, redactShortValue, redactText, redactValue } from "./VaultRedactor.ts";
+import {
+  VAULT_WITHHELD,
+  processOutputRedactor,
+  redactShortSecrets,
+  redactShortValue,
+  redactText,
+  redactValue,
+  withholdValue,
+} from "./VaultRedactor.ts";
 import { totp } from "./VaultTotp.ts";
 
 export interface VaultUseInput {
@@ -229,6 +240,7 @@ export class Vault extends Context.Service<
   {
     readonly list: (
       input: VaultListInput,
+      threadId?: ThreadId,
     ) => Effect.Effect<{ items: ReadonlyArray<VaultItemMetadata> }, VaultError>;
     readonly getMetadata: (itemId: VaultItemId) => Effect.Effect<VaultItemMetadata, VaultError>;
     readonly create: (
@@ -239,6 +251,7 @@ export class Vault extends Context.Service<
     ) => Effect.Effect<{ item: VaultItemMetadata }, VaultError>;
     readonly delete: (
       input: VaultDeleteInput,
+      threadId?: ThreadId,
     ) => Effect.Effect<{ id: VaultItemId; deleted: boolean }, VaultError>;
     readonly listUsage: (
       input: VaultUsageListInput,
@@ -250,14 +263,19 @@ export class Vault extends Context.Service<
     readonly use: (input: VaultUseInput) => Effect.Effect<VaultUseResult, VaultError>;
     /**
      * Server-internal only (integrations gateway, 2B): resolves a secret by
-     * item name for server code. Never expose this through MCP or RPC; agents
-     * use `use` via vault_fill so values stay out of model context.
+     * item name for server code sending it to `destinationHost`. The item's
+     * allowed domains must include that host unless the owner `approved` this
+     * item for it; otherwise it fails with `domain_not_allowed`. Never expose
+     * this through MCP or RPC; agents use `use` via vault_fill so values stay
+     * out of model context.
      */
     readonly resolveSecretByName: (input: {
       readonly name: string;
       readonly field?: VaultField | undefined;
       readonly scopeProjectId?: string | null | undefined;
       readonly threadId?: ThreadId | undefined;
+      readonly destinationHost: string;
+      readonly approved: boolean;
     }) => Effect.Effect<{ item: VaultItemMetadata; field: VaultField; value: string }, VaultError>;
     /** Stores a privately-entered value (request_secret saveToVault) as an item. */
     readonly saveSecretValue: (input: {
@@ -268,27 +286,85 @@ export class Vault extends Context.Service<
       readonly scopeProjectId?: string | null | undefined;
     }) => Effect.Effect<{ item: VaultItemMetadata }, VaultError>;
     /** Retained through server lifetime: descendants and retained output may outlive a PTY. */
-    readonly registerProcessSecrets: (values: ReadonlyArray<string>) => Effect.Effect<void>;
+    readonly registerProcessSecrets: (
+      values: ReadonlyArray<string>,
+    ) => Effect.Effect<void, VaultError>;
+    readonly makeOutputRedactor: () => Effect.Effect<
+      (chunk: string, final?: boolean) => Effect.Effect<string>
+    >;
     readonly scrubText: (text: string) => Effect.Effect<string>;
     readonly scrubValue: <A>(value: A) => Effect.Effect<A>;
   }
 >()("cogenly-server/vault/Vault") {}
 
+const MAX_DELIVERED_SECRET_COUNT = 16_384;
+const MAX_DELIVERED_SECRET_BYTES = 4 * 1024 * 1024;
+
 const KEY_PAIR_STORE_NAME = "vault-x25519-key-pair";
+
+interface ScrubCache {
+  readonly version: number;
+  readonly loaded: boolean;
+  readonly secrets: Set<string>;
+  readonly shortSecrets: Set<string>;
+  readonly totpSecrets: ReadonlyArray<string>;
+}
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const store = yield* ServerSecretStore.ServerSecretStore;
   const identity = yield* ServerEnvironment.ServerEnvironmentIdentity;
   const crypto = yield* Crypto.Crypto;
+  const notifyApprovals = (yield* ApprovalChanges.optional).notify;
   const now = DateTime.now.pipe(Effect.map(DateTime.formatIso));
-  const scrubCache = yield* Ref.make<{
-    loaded: boolean;
-    secrets: Set<string>;
-    shortSecrets: Set<string>;
-  }>({ loaded: false, secrets: new Set<string>(), shortSecrets: new Set<string>() });
+  const scrubCache = yield* Ref.make<ScrubCache>({
+    version: 0,
+    loaded: false,
+    secrets: new Set(),
+    shortSecrets: new Set(),
+    totpSecrets: [],
+  });
 
-  const processSecrets = yield* Ref.make(new Set<string>());
+  const deliveredSecrets = yield* Ref.make({
+    secrets: new Set<string>(),
+    shortSecrets: new Set<string>(),
+    bytes: 0,
+  });
+  const registerDelivered = (values: ReadonlyArray<string>, wholeToken = false) =>
+    Ref.modify(deliveredSecrets, (current) => {
+      const secrets = new Set(current.secrets),
+        shortSecrets = new Set(current.shortSecrets);
+      let bytes = current.bytes;
+      for (const value of values) {
+        if (!value) continue;
+        const target = wholeToken || value.length < 6 ? shortSecrets : secrets;
+        if (target.has(value)) continue;
+        bytes += Buffer.byteLength(value);
+        target.add(value);
+        if (
+          secrets.size + shortSecrets.size > MAX_DELIVERED_SECRET_COUNT ||
+          bytes > MAX_DELIVERED_SECRET_BYTES
+        )
+          return [false, current] as const;
+      }
+      return [true, { secrets, shortSecrets, bytes }] as const;
+    }).pipe(
+      Effect.flatMap((registered) =>
+        registered ? Effect.void : Effect.fail(new VaultError({ reason: "storage" })),
+      ),
+    );
+
+  const projectFiles = yield* Effect.serviceOption(ProjectFiles.ProjectFiles);
+  const projectForThread = (threadId: ThreadId | undefined) =>
+    threadId === undefined || Option.isNone(projectFiles)
+      ? Effect.succeed(null)
+      : projectFiles.value.folderForThread(threadId).pipe(
+          Effect.map((folder) => folder?.labelId ?? null),
+          Effect.mapError(wrap),
+        );
+  const visibleIn = (row: VaultRow, scope: string | null | undefined) =>
+    scope === undefined || row.scope_project_id === null || row.scope_project_id === scope;
+
   const environmentId = yield* identity.getEnvironmentId;
 
   // VaultMachineKeyStore (file-backed today; Keychain replaces this on macOS).
@@ -365,16 +441,17 @@ const make = Effect.gen(function* () {
     scopeProjectId?: string | null | undefined;
   }) =>
     Effect.gen(function* () {
-      if (input.itemId) return yield* loadRow(input.itemId);
+      if (input.itemId) {
+        const row = yield* loadRow(input.itemId);
+        if (!visibleIn(row, input.scopeProjectId))
+          return yield* new VaultError({ reason: "not_found" });
+        return row;
+      }
       if (!input.name) return yield* new VaultError({ reason: "invalid_input" });
       const rows =
         yield* sql<VaultRow>`SELECT vault_items.*, (SELECT c.account_id FROM account_credentials c JOIN accounts a ON a.id = c.account_id AND a.deleted_at IS NULL WHERE c.vault_item_id = vault_items.id) AS account_id, (SELECT c.id FROM account_credentials c JOIN accounts a ON a.id = c.account_id AND a.deleted_at IS NULL WHERE c.vault_item_id = vault_items.id) AS credential_id FROM vault_items WHERE name = ${input.name} AND deleted_at IS NULL ORDER BY updated_at DESC`;
-      if (rows.length === 0) return yield* new VaultError({ reason: "not_found" });
-      if (rows.length === 1) return rows[0]!;
-      const scoped = rows.filter(
-        (row) =>
-          row.scope_project_id === (input.scopeProjectId ?? null) || row.scope_project_id === null,
-      );
+      const scoped = rows.filter((row) => visibleIn(row, input.scopeProjectId));
+      if (scoped.length === 0) return yield* new VaultError({ reason: "not_found" });
       if (scoped.length === 1) return scoped[0]!;
       return yield* new VaultError({ reason: "ambiguous_name" });
     });
@@ -441,13 +518,15 @@ const make = Effect.gen(function* () {
       yield* sql`INSERT INTO vault_usage(id, item_id, thread_id, agent_id, action, domain, at, outcome) VALUES (${`usage:${id}`}, ${input.itemId}, ${input.threadId ?? null}, ${input.agentId ?? null}, ${input.action}, ${input.domain ?? null}, ${at}, ${input.outcome})`;
     }).pipe(Effect.mapError(wrap), Effect.ignore);
 
-  const invalidateScrubCache = Ref.set(scrubCache, {
+  const invalidateScrubCache = Ref.update(scrubCache, (cache) => ({
+    version: cache.version + 1,
     loaded: false,
     secrets: new Set<string>(),
     shortSecrets: new Set<string>(),
-  });
+    totpSecrets: [],
+  }));
 
-  const ensureScrubSecrets = Effect.gen(function* () {
+  const ensureScrubSecrets: Effect.Effect<ScrubCache, VaultError> = Effect.gen(function* () {
     const cache = yield* Ref.get(scrubCache);
     if (cache.loaded) return cache;
     const rows =
@@ -456,32 +535,79 @@ const make = Effect.gen(function* () {
       );
     const secrets = new Set<string>();
     const shortSecrets = new Set<string>();
+    const totpSecrets: Array<string> = [];
     for (const row of rows) {
-      const stored = yield* decryptStored(row).pipe(Effect.option);
-      if (Option.isNone(stored)) continue;
-      for (const value of Object.values(stored.value))
-        if (typeof value === "string" && value.length > 0) secrets.add(value);
+      // A peer's item not wrapped for this machine holds nothing this machine
+      // could deliver, so it is skipped. Failing to read a local item fails the
+      // whole load, and scrubbing withholds output rather than miss its secret.
+      const wrapped = decodeWrappedKeysOption(row.wrapped_keys_json);
+      if (
+        Option.isSome(wrapped) &&
+        wrapped.value.length > 0 &&
+        !wrapped.value.some((entry) => entry.environmentId === environmentId)
+      ) {
+        continue;
+      }
+      const stored = yield* decryptStored(row);
+      for (const value of Object.values(stored))
+        if (typeof value === "string" && value.length > 0)
+          (value.length < 6 ? shortSecrets : secrets).add(value);
       // Card values echo back in shapes other than the stored one: a page may
       // return the number digits-only or grouped, and the expiry as MM/YYYY.
       // The CVC and MM/YY are too short for the general pass, so they go to
       // the whole-token short pass instead.
-      const digits = cardDigits(stored.value);
+      const digits = cardDigits(stored);
       if (digits.length > 0) {
         secrets.add(digits);
         secrets.add(digits.replace(/(\d{4})(?=\d)/g, "$1 "));
       }
-      const expiry = cardExpiryOf(stored.value);
+      const expiry = cardExpiryOf(stored);
       if (expiry !== undefined) {
         shortSecrets.add(expiry);
-        const year = (stored.value.cardExpiryYear ?? "").trim();
+        const year = (stored.cardExpiryYear ?? "").trim();
         if (year.length === 4) secrets.add(`${expiry.slice(0, 3)}${year}`);
       }
-      if (stored.value.cardCvc) shortSecrets.add(stored.value.cardCvc);
+      if (stored.cardCvc) shortSecrets.add(stored.cardCvc);
+      if (stored.totpSecret) totpSecrets.push(stored.totpSecret);
     }
-    const loaded = { loaded: true, secrets, shortSecrets };
-    yield* Ref.set(scrubCache, loaded);
-    return loaded;
+    const loaded = { version: cache.version, loaded: true, secrets, shortSecrets, totpSecrets };
+    const committed = yield* Ref.modify(scrubCache, (current) =>
+      current.version === cache.version ? ([true, loaded] as const) : ([false, current] as const),
+    );
+    return committed ? loaded : yield* ensureScrubSecrets;
   });
+
+  /**
+   * The cached scrub set plus the TOTP codes valid now: a filled code can echo
+   * back in page text, and codes change every 30 seconds, so they are computed
+   * per scrub for the current window and its neighbours. Six digits is short
+   * enough to collide with ordinary numbers, so they take the whole-token pass.
+   */
+  const scrubSets = Effect.gen(function* () {
+    const cached = yield* ensureScrubSecrets;
+    const delivered = yield* Ref.get(deliveredSecrets);
+    const secrets = new Set([...cached.secrets, ...delivered.secrets]);
+    const shortSecrets = new Set([...cached.shortSecrets, ...delivered.shortSecrets]);
+    const { totpSecrets } = cached;
+    if (totpSecrets.length === 0) return { secrets, shortSecrets };
+    const nowMs = yield* Clock.currentTimeMillis;
+    const withCodes = new Set(shortSecrets);
+    for (const secret of totpSecrets)
+      for (const offset of [-30_000, 0, 30_000]) {
+        const code = Option.liftThrowable(totp)(secret, { atMs: nowMs + offset });
+        if (Option.isSome(code)) withCodes.add(code.value);
+      }
+    return { secrets, shortSecrets: withCodes };
+  });
+
+  /** Unscrubbed text never leaves: a scrub set that cannot load withholds the result. */
+  const withheldOnFailure = <A>(withheld: () => A) =>
+    Effect.catch((error: VaultError) =>
+      Effect.logError(
+        "Vault secrets could not be loaded for scrubbing; output withheld.",
+        error,
+      ).pipe(Effect.andThen(Effect.sync(withheld))),
+    );
 
   const cleanStored = (fields: VaultSecretFields): StoredFields => {
     const stored: StoredFields = {};
@@ -516,13 +642,15 @@ const make = Effect.gen(function* () {
       return { item: metadataOf(row, stored) };
     }).pipe(Effect.mapError(wrap));
 
-  const list: Vault["Service"]["list"] = (input) =>
+  const list: Vault["Service"]["list"] = (input, threadId) =>
     Effect.gen(function* () {
+      const scope =
+        threadId === undefined ? input.scopeProjectId : yield* projectForThread(threadId);
       const rows =
-        yield* sql<VaultRow>`SELECT vault_items.*, (SELECT c.account_id FROM account_credentials c JOIN accounts a ON a.id = c.account_id AND a.deleted_at IS NULL WHERE c.vault_item_id = vault_items.id) AS account_id, (SELECT c.id FROM account_credentials c JOIN accounts a ON a.id = c.account_id AND a.deleted_at IS NULL WHERE c.vault_item_id = vault_items.id) AS credential_id FROM vault_items WHERE deleted_at IS NULL AND (${input.scopeProjectId ?? null} IS NULL OR scope_project_id IS NULL OR scope_project_id = ${input.scopeProjectId ?? null}) ORDER BY name`.pipe(
+        yield* sql<VaultRow>`SELECT vault_items.*, (SELECT c.account_id FROM account_credentials c JOIN accounts a ON a.id = c.account_id AND a.deleted_at IS NULL WHERE c.vault_item_id = vault_items.id) AS account_id, (SELECT c.id FROM account_credentials c JOIN accounts a ON a.id = c.account_id AND a.deleted_at IS NULL WHERE c.vault_item_id = vault_items.id) AS credential_id FROM vault_items WHERE deleted_at IS NULL ORDER BY name`.pipe(
           Effect.mapError(wrap),
         );
-      return { items: rows.map((row) => metadataOf(row)) };
+      return { items: rows.filter((row) => visibleIn(row, scope)).map((row) => metadataOf(row)) };
     });
 
   const update: Vault["Service"]["update"] = (input) =>
@@ -557,8 +685,12 @@ const make = Effect.gen(function* () {
       return { item: metadataOf(yield* loadRow(row.id), stored) };
     }).pipe(Effect.mapError(wrap));
 
-  const fieldValue = (stored: StoredFields, field: VaultField): string | undefined => {
-    if (field === "totp") return stored.totpSecret ? totp(stored.totpSecret) : undefined;
+  const fieldValue = (
+    stored: StoredFields,
+    field: VaultField,
+    atMs: number,
+  ): string | undefined => {
+    if (field === "totp") return stored.totpSecret ? totp(stored.totpSecret, { atMs }) : undefined;
     if (field === "cardExpiry") return cardExpiryOf(stored);
     const key = storedKeyForField(field);
     const value = key === null ? undefined : stored[key];
@@ -567,10 +699,20 @@ const make = Effect.gen(function* () {
 
   const use: Vault["Service"]["use"] = (input) =>
     Effect.gen(function* () {
+      const callingThreadId =
+        input.caller.kind === "thread" ? ThreadId.make(input.caller.threadId) : input.threadId;
+      const scope =
+        input.caller.kind === "agent" || input.caller.kind === "thread"
+          ? yield* projectForThread(
+              input.caller.kind === "thread"
+                ? ThreadId.make(input.caller.threadId)
+                : input.threadId,
+            )
+          : input.scopeProjectId;
       const row = yield* findRow({
         itemId: input.itemId,
         name: input.name,
-        scopeProjectId: input.scopeProjectId,
+        scopeProjectId: scope,
       });
       if (
         input.expectedRevision !== undefined &&
@@ -583,7 +725,7 @@ const make = Effect.gen(function* () {
       const record = (outcome: string) =>
         audit({
           itemId: row.id,
-          threadId: input.threadId,
+          threadId: callingThreadId,
           agentId,
           action,
           domain: input.domain,
@@ -612,8 +754,10 @@ const make = Effect.gen(function* () {
         // AgentWorkspaceService.approve's vault_use case, which grants the
         // item policy so a retry succeeds).
         let approvalId: string | null = null;
-        if (input.caller.kind === "agent") {
-          approvalId = `approval:vault:${row.id}:${input.caller.agentId}:${input.field}:${input.domain ?? ""}`;
+        let declinedBefore = false;
+        if (input.caller.kind === "agent" || input.caller.kind === "thread") {
+          const callerKey =
+            input.caller.kind === "agent" ? input.caller.agentId : input.caller.threadId;
           const actionJson = encodeApprovalActionJson({
             actionKind: "vault_use",
             payload: {
@@ -621,21 +765,45 @@ const make = Effect.gen(function* () {
               vaultItemName: row.name as never,
               field: input.field,
               domain: input.domain ?? null,
-              threadId: input.threadId ?? null,
+              threadId: callingThreadId ?? null,
             },
           });
-          yield* sql`INSERT OR IGNORE INTO agent_approvals(id, agent_id, action_json, status, requested_at, source_run_id) VALUES (${approvalId}, ${input.caller.agentId}, ${actionJson}, 'pending', ${yield* now}, ${null})`.pipe(
-            Effect.mapError(wrap),
-          );
+          const requested = yield* Effect.gen(function* () {
+            const latest = yield* sql<{
+              id: string;
+              status: string;
+              decided_by: string | null;
+            }>`SELECT id, status, decided_by FROM agent_approvals WHERE agent_id IS ${agentId} AND action_json = ${actionJson} ORDER BY requested_at DESC, rowid DESC LIMIT 1`;
+            if (latest[0]?.status === "pending")
+              return { id: latest[0].id, created: false, declinedBefore: false };
+            const id = `approval:vault:${row.id}:${callerKey}:${yield* crypto.randomUUIDv4()}`;
+            yield* sql`INSERT INTO agent_approvals(id, agent_id, action_json, status, requested_at, source_run_id) VALUES (${id}, ${agentId}, ${actionJson}, 'pending', ${yield* now}, ${null})`;
+            return {
+              id,
+              created: true,
+              declinedBefore: latest[0]?.status === "rejected" && latest[0].decided_by === "user",
+            };
+          }).pipe(sql.withTransaction, Effect.mapError(wrap));
+          approvalId = requested.id;
+          declinedBefore = requested.declinedBefore;
+          if (requested.created) yield* notifyApprovals;
         }
         yield* record("approval_required");
+        // A thread's approval shows as a card in that thread; an agent's in its workspace.
+        const where =
+          input.caller.kind === "thread"
+            ? "The user sees an approval card in this thread."
+            : "The owner sees it in this agent's open items.";
         return {
           status: "approval_required",
           item,
           field: input.field,
           approvalId,
-          message:
-            "Waiting on you: this vault use needs owner approval. Ask again after it is approved.",
+          message: `Waiting on the user: this vault use needs their approval. ${where} ${
+            declinedBefore
+              ? "They declined the last request for this; don't retry unless they ask you to."
+              : "Wait for them to decide, then call again; it succeeds once they allow it."
+          }`,
         } as const;
       }
       if (decision === "deny") {
@@ -643,11 +811,13 @@ const make = Effect.gen(function* () {
         return { status: "denied", item, field: input.field, reason: "policy" } as const;
       }
       const stored = yield* decryptStored(row);
-      const value = fieldValue(stored, input.field);
+      const value = fieldValue(stored, input.field, yield* Clock.currentTimeMillis);
       if (value === undefined) {
         yield* record("field_missing");
         return yield* new VaultError({ reason: "field_missing" });
       }
+      // Never deliver a value we cannot keep scrubbing for this process's lifetime.
+      yield* registerDelivered([value], input.field === "totp");
       yield* record("allowed");
       return { status: "allowed", item, field: input.field, value } as const;
     }).pipe(Effect.mapError(wrap));
@@ -661,15 +831,17 @@ const make = Effect.gen(function* () {
       ),
     create,
     update,
-    delete: (input) =>
+    delete: (input, threadId) =>
       Effect.gen(function* () {
+        if (threadId !== undefined)
+          yield* findRow({ itemId: input.id, scopeProjectId: yield* projectForThread(threadId) });
         const rows =
           yield* sql`UPDATE vault_items SET deleted_at = ${yield* now}, ciphertext = '', wrapped_keys_json = '[]', updated_at = ${yield* now} WHERE id = ${input.id} AND deleted_at IS NULL RETURNING id`.pipe(
             Effect.mapError(wrap),
           );
         yield* invalidateScrubCache;
         return { id: input.id, deleted: rows.length > 0 };
-      }),
+      }).pipe(Effect.mapError(wrap)),
     listUsage: (input) =>
       Effect.gen(function* () {
         const rows = yield* sql<{
@@ -720,8 +892,12 @@ const make = Effect.gen(function* () {
           field: input.field ?? "value",
           caller: { kind: "server" },
           threadId: input.threadId,
+          domain: input.destinationHost,
+          enforceAllowedDomains: !input.approved,
           action: "resolve",
         });
+        if (result.status === "denied" && result.reason === "domain_not_allowed")
+          return yield* new VaultError({ reason: "domain_not_allowed" });
         if (result.status !== "allowed")
           return yield* new VaultError({ reason: "approval_required" });
         return { item: result.item, field: result.field, value: result.value };
@@ -735,35 +911,52 @@ const make = Effect.gen(function* () {
         secretFields: input.type === "login" ? { password: input.value } : { value: input.value },
       }),
     registerProcessSecrets: (values) =>
-      Ref.update(processSecrets, (current) => {
-        const next = new Set(current);
-        for (const value of values) {
-          next.add(value);
-          next.add(Buffer.from(value).toString("base64"));
-          next.add(encodeURIComponent(value));
-          next.add(JSON.stringify(value).slice(1, -1));
-        }
-        return next;
+      registerDelivered(
+        values.flatMap((value) => [
+          value,
+          Buffer.from(value).toString("base64"),
+          encodeURIComponent(value),
+          JSON.stringify(value).slice(1, -1),
+        ]),
+      ),
+    makeOutputRedactor: () =>
+      Effect.sync(() => {
+        let values: Array<string> = [];
+        let shortValues: Array<string> = [];
+        let redact = processOutputRedactor(
+          () => values,
+          () => shortValues,
+        );
+        return (chunk, final = false) =>
+          Effect.gen(function* () {
+            const { secrets, shortSecrets } = yield* scrubSets;
+            values = [...secrets];
+            shortValues = [...shortSecrets];
+            return redact(chunk, final);
+          }).pipe(
+            withheldOnFailure(() => {
+              // Discard any held prefix too: it cannot be released unchecked.
+              redact = processOutputRedactor(
+                () => values,
+                () => shortValues,
+              );
+              return VAULT_WITHHELD;
+            }),
+          );
       }),
     scrubText: (text) =>
-      ensureScrubSecrets.pipe(
+      scrubSets.pipe(
         Effect.map(({ secrets, shortSecrets }) =>
           redactShortSecrets(redactText(text, secrets), shortSecrets),
         ),
-        Effect.orElseSucceed(() => text),
-        Effect.flatMap((scrubbed) =>
-          Ref.get(processSecrets).pipe(Effect.map((secrets) => redactText(scrubbed, secrets))),
-        ),
+        withheldOnFailure(() => VAULT_WITHHELD),
       ),
     scrubValue: (value) =>
-      ensureScrubSecrets.pipe(
+      scrubSets.pipe(
         Effect.map(({ secrets, shortSecrets }) =>
           redactShortValue(redactValue(value, secrets), shortSecrets),
         ),
-        Effect.orElseSucceed(() => value),
-        Effect.flatMap((scrubbed) =>
-          Ref.get(processSecrets).pipe(Effect.map((secrets) => redactValue(scrubbed, secrets))),
-        ),
+        withheldOnFailure(() => withholdValue(value)),
       ),
   });
 });

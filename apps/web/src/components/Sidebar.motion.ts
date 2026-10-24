@@ -1,3 +1,5 @@
+import { findRowWipe, rowWipeKeyframes, type RowWipe } from "./Sidebar.motion.logic";
+
 // Matches --motion-duration-base and ease-standard in index.css.
 const motionTiming = { duration: 220, easing: "cubic-bezier(0.32, 0.72, 0, 1)" };
 // A project filter change or a bulk snooze swaps a large part of the list at
@@ -20,7 +22,12 @@ function progress(animation: Animation) {
 }
 
 /** Animate rows between their layout positions. The list must be
- * positioned so every direct child's offsetTop has the same origin. */
+ * positioned so every direct child's offsetTop has the same origin.
+ *
+ * A row that leaves or joins fades where it stands and never travels; a clip
+ * closes or opens its space from the side the neighbours move into
+ * (Sidebar.motion.logic.ts), so the rows beside it slide once and nothing
+ * crosses the rows that stay. */
 export function createSidebarListMotion(parent: HTMLUListElement) {
   let positions: Map<HTMLElement, RowPosition> | null = null;
   // Window y of the parent's offset origin, read once per update.
@@ -30,24 +37,33 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
     "(prefers-reduced-motion: reduce)",
   );
   const running = new Map<HTMLElement, { animation: Animation; offset: number }>();
-  const entering = new Map<HTMLElement, { animation: Animation; travel: number }>();
+  // `clip` is the entering row's wipe, which ends with the fade.
+  const entering = new Map<HTMLElement, { animation: Animation; clip: Animation | null }>();
   const exiting = new Map<HTMLElement, Animation>();
 
   const remainingOffset = (node: HTMLElement) => {
     const current = running.get(node);
-    const run = current ? current.offset * (1 - progress(current.animation)) : 0;
+    return current ? current.offset * (1 - progress(current.animation)) : 0;
+  };
+  const endEntry = (node: HTMLElement) => {
     const entry = entering.get(node);
-    const enter = entry ? entry.travel * (1 - progress(entry.animation)) : 0;
-    return run + enter;
+    if (!entry) return;
+    entry.animation.cancel();
+    entry.clip?.cancel();
+    entering.delete(node);
   };
   const clearFades = () => {
-    for (const entry of entering.values()) entry.animation.cancel();
+    for (const node of entering.keys()) endEntry(node);
     for (const animation of exiting.values()) animation.cancel();
     for (const node of exiting.keys()) node.remove();
-    entering.clear();
     exiting.clear();
   };
-  const fadeOut = (node: HTMLElement, position: RowPosition, travel: number, origin: number) => {
+  const fadeOut = (
+    node: HTMLElement,
+    position: RowPosition,
+    wipe: RowWipe | null,
+    origin: number,
+  ) => {
     if (position.height === 0) return;
     // React owns the removed row; only a noninteractive copy stays for the fade.
     const clone = node.cloneNode(true) as HTMLElement;
@@ -82,19 +98,28 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
     parent.append(clone);
     const entry = entering.get(node);
     const entryProgress = entry ? progress(entry.animation) : 1;
-    const animation = clone.animate(
-      [
-        { opacity: entryProgress, transform: "translateY(0px)" },
-        { opacity: 0, transform: `translateY(${travel}px)` },
-      ],
-      motionTiming,
-    );
+    const animation = clone.animate([{ opacity: entryProgress }, { opacity: 0 }], motionTiming);
+    const clip = wipe && rowWipeKeyframes(wipe, position.height, "out");
+    if (clip) clone.animate(clip, motionTiming);
     exiting.set(clone, animation);
     animation.addEventListener(
       "finish",
       () => {
         clone.remove();
         exiting.delete(clone);
+      },
+      { once: true },
+    );
+  };
+  const fadeIn = (node: HTMLElement, position: RowPosition, wipe: RowWipe | null) => {
+    const animation = node.animate([{ opacity: 0 }, { opacity: 1 }], motionTiming);
+    const keyframes = wipe && rowWipeKeyframes(wipe, position.height, "in");
+    const clip = keyframes ? node.animate(keyframes, motionTiming) : null;
+    entering.set(node, { animation, clip });
+    animation.addEventListener(
+      "finish",
+      () => {
+        if (entering.get(node)?.animation === animation) entering.delete(node);
       },
       { once: true },
     );
@@ -111,10 +136,7 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
   };
   const move = (node: HTMLElement, offset: number) => {
     cancel(node);
-    const entry = entering.get(node);
-    // The newer transform supersedes entry travel; its original opacity keeps fading.
-    if (entry) entry.travel = 0;
-    if (offset === 0 && !entry) return;
+    if (offset === 0) return;
     const animation = node.animate(
       [{ transform: `translateY(${offset}px)` }, { transform: "translateY(0px)" }],
       motionTiming,
@@ -162,51 +184,41 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
           if (!positions.has(node) && position.height > 0) fadeCount++;
         }
       }
-      // Reduced motion keeps the fades and drops every translate; so does a reveal.
+      // Reduced motion keeps the fades and drops every translate and clip; so does a reveal.
       const reduced = reducedMotion?.matches === true || inPlace;
       const shouldAnimate =
         animate && positions !== null && (inPlace || fadeCount <= MAX_FADED_ROWS_PER_UPDATE);
       const movedDelta = new Map<HTMLElement, number>();
       const nextOrder = [...next.keys()];
       const oldOrder = positions === null ? [] : [...positions.keys()];
-      const ridingDelta = (
-        order: readonly HTMLElement[],
-        index: number,
-        retained: (node: HTMLElement) => boolean,
-      ) => {
-        for (let cursor = index - 1; cursor >= 0; cursor--) {
-          const node = order[cursor]!;
-          const delta = movedDelta.get(node);
-          if (delta !== undefined) return delta;
-          if (retained(node)) return remainingOffset(node);
-        }
-        return undefined;
-      };
+      const displacement = (node: HTMLElement) => movedDelta.get(node) ?? remainingOffset(node);
       if (!shouldAnimate) clearFades();
       else {
-        // A shelf that opens above its collapsed anchor shifts every retained
-        // row by the same amount. Entering rows take that same displacement so
-        // the shelf arrives as one moving block instead of rows popping into
-        // their final slots; exiting rows leave by it.
+        // The rows that stay and moved, by how far they have to travel from
+        // where they were drawn.
         for (const [node, position] of next) {
           const previousTop = positions!.get(node)?.top;
           if (previousTop === undefined || previousTop === position.top) continue;
           movedDelta.set(node, previousTop + remainingOffset(node) - position.top);
         }
-        for (const [node, position] of positions!) {
+        for (const [index, node] of oldOrder.entries()) {
           if (next.has(node)) continue;
-          const delta = ridingDelta(oldOrder, oldOrder.indexOf(node), (n) => next.has(n));
-          // A leaving row fades where it stands, riding its neighbour above
-          // when that neighbour moves (so they never overlap); it never slides
-          // on its own.
-          fadeOut(node, position, reduced || delta === undefined ? 0 : -delta, origin);
+          // A leaving row fades where it stands while a clip closes its space
+          // from the side its neighbours move into; it never slides itself.
+          const wipe = reduced
+            ? null
+            : findRowWipe({
+                order: oldOrder,
+                index,
+                geometry: (other) => positions!.get(other),
+                isNeighbour: (other) => next.has(other),
+                displacement,
+              });
+          fadeOut(node, positions!.get(node)!, wipe, origin);
         }
       }
-      for (const [node, entry] of entering) {
-        if (!next.has(node)) {
-          entry.animation.cancel();
-          entering.delete(node);
-        }
+      for (const node of entering.keys()) {
+        if (!next.has(node)) endEntry(node);
       }
       for (const node of running.keys()) {
         if (!shouldAnimate || !next.has(node)) cancel(node);
@@ -217,25 +229,18 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
           const previousTop = positions!.get(node)?.top;
           if (previousTop === undefined) {
             if (position.height > 0) {
-              const delta = ridingDelta(nextOrder, index, (n) => positions!.has(n));
-              // An arriving row fades in where it lands, or rides the block it
-              // arrives with; it never rises on its own.
-              const travel = reduced || delta === undefined ? 0 : delta;
-              const animation = node.animate(
-                [
-                  { opacity: 0, transform: `translateY(${travel}px)` },
-                  { opacity: 1, transform: "translateY(0px)" },
-                ],
-                motionTiming,
-              );
-              entering.set(node, { animation, travel });
-              animation.addEventListener(
-                "finish",
-                () => {
-                  if (entering.get(node)?.animation === animation) entering.delete(node);
-                },
-                { once: true },
-              );
+              // An arriving row fades in where it lands, its space opening from
+              // the side its neighbours move away from.
+              const wipe = reduced
+                ? null
+                : findRowWipe({
+                    order: nextOrder,
+                    index,
+                    geometry: (other) => next.get(other),
+                    isNeighbour: (other) => positions!.has(other),
+                    displacement,
+                  });
+              fadeIn(node, position, wipe);
             }
             continue;
           }

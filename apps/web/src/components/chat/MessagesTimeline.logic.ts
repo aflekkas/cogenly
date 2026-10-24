@@ -665,8 +665,44 @@ export function resolveAssistantMessageCopyState({
   };
 }
 
-function deriveTerminalAssistantMessageIds(timelineEntries: ReadonlyArray<TimelineEntry>) {
+/**
+ * An assistant message the provider never finished: the server closes a
+ * stream the provider dropped (a steer restarting it mid-sentence) as
+ * interrupted, so its text may be a fragment.
+ */
+function isCutOffAssistantMessage(entry: TimelineEntry) {
+  const item = entry.kind === "message" ? entry.projectedItem?.item : undefined;
+  return item?.type === "assistant_message" && item.status === "interrupted";
+}
+
+/** Runs the user stopped. Nothing in them folds, and their last words stand. */
+function interruptedTimelineRunIds(entries: ReadonlyArray<TimelineEntry>) {
+  const interrupted = new Set<RunId>();
+  for (const entry of entries) {
+    if (
+      entry.kind === "event" &&
+      entry.projectedItem.item.runId !== null &&
+      (entry.projectedItem.item.type === "run_interrupt_request" ||
+        entry.projectedItem.item.type === "run_interrupt_result")
+    ) {
+      interrupted.add(entry.projectedItem.item.runId);
+    }
+  }
+  return interrupted;
+}
+
+/**
+ * Each response's answer: its last assistant message. A cut-off fragment
+ * never displaces a whole message in a run that went on to finish, so the
+ * real answer stays visible and the fragment folds away with the work. A run
+ * that was itself stopped or failed keeps its last message, partial or not.
+ */
+export function deriveTerminalAssistantMessageIds(
+  timelineEntries: ReadonlyArray<TimelineEntry>,
+  cutShortRunIds: ReadonlySet<RunId>,
+) {
   const lastAssistantMessageIdByResponseKey = new Map<string, string>();
+  const wholeAnswerResponseKeys = new Set<string>();
   let nullTurnResponseIndex = 0;
 
   for (const timelineEntry of timelineEntries) {
@@ -685,6 +721,12 @@ function deriveTerminalAssistantMessageIds(timelineEntries: ReadonlyArray<Timeli
     const responseKey = message.runId
       ? `turn:${message.runId}`
       : `unkeyed:${nullTurnResponseIndex}`;
+    if (isCutOffAssistantMessage(timelineEntry)) {
+      const runCutShort = message.runId != null && cutShortRunIds.has(message.runId);
+      if (!runCutShort && wholeAnswerResponseKeys.has(responseKey)) continue;
+    } else {
+      wholeAnswerResponseKeys.add(responseKey);
+    }
     lastAssistantMessageIdByResponseKey.set(responseKey, message.id);
   }
 
@@ -975,20 +1017,12 @@ function deriveTurnFolds(input: {
   /** Finished replies a steer superseded; they answer their prompt, so they stay out. */
   completeSupersededReplyEntryIds: ReadonlySet<string>;
 }): ReadonlyMap<string, TurnFold> {
-  const interruptedRunIds = new Set<RunId>();
+  const interruptedRunIds = interruptedTimelineRunIds(input.timelineEntries);
   const promptIndexByRunId = new Map<RunId, number>();
   for (const [index, entry] of input.timelineEntries.entries()) {
     if (timelineEntryStartsResponse(entry)) {
       const runId = responseBoundaryRunId(entry);
       if (runId !== null && !promptIndexByRunId.has(runId)) promptIndexByRunId.set(runId, index);
-    }
-    if (
-      entry.kind === "event" &&
-      entry.projectedItem.item.runId !== null &&
-      (entry.projectedItem.item.type === "run_interrupt_request" ||
-        entry.projectedItem.item.type === "run_interrupt_result")
-    ) {
-      interruptedRunIds.add(entry.projectedItem.item.runId);
     }
   }
 
@@ -1089,9 +1123,10 @@ function deriveTurnFolds(input: {
       const isCompaction =
         entry.kind === "work" && entry.entry.sourceActivityKind === "context-compaction";
       const isFoldableTrailingActivity =
-        entry.kind === "work" &&
-        entry.entry.toolLifecycleStatus !== "inProgress" &&
-        !workEntryDisplayIndicatesToolFailure(entry.entry);
+        (entry.kind === "work" &&
+          entry.entry.toolLifecycleStatus !== "inProgress" &&
+          !workEntryDisplayIndicatesToolFailure(entry.entry)) ||
+        isCutOffAssistantMessage(entry);
       if (!isCompaction && index > terminalEntryIndex && !isFoldableTrailingActivity) {
         continue;
       }
@@ -1396,7 +1431,10 @@ function deriveTimelineTurnFolds(
   });
   return deriveTurnFolds({
     timelineEntries,
-    terminalAssistantMessageIds: deriveTerminalAssistantMessageIds(timelineEntries),
+    terminalAssistantMessageIds: deriveTerminalAssistantMessageIds(
+      timelineEntries,
+      new Set([...interruptedTimelineRunIds(timelineEntries), ...failedRunIds]),
+    ),
     latestRun: input.latestRun ?? null,
     unfoldedRunIds: new Set([...activeVisualResponseRunIds, ...failedRunIds]),
     runlessWorkActive: input.isWorking && input.runlessWorkActive === true,
@@ -1458,9 +1496,12 @@ export function deriveMessagesTimelineRows(input: {
   const durationStartByMessageId = computeMessageDurationStart(
     timelineEntries.flatMap((entry) => (entry.kind === "message" ? [entry.message] : [])),
   );
-  const terminalAssistantMessageIds = deriveTerminalAssistantMessageIds(timelineEntries);
   const unsettledRunId = deriveUnsettledRunId(input.latestRun ?? null, input.runningRunId ?? null);
   const failedRunIds = failedTimelineRunIds(timelineEntries, input.latestRun ?? null);
+  const terminalAssistantMessageIds = deriveTerminalAssistantMessageIds(
+    timelineEntries,
+    new Set([...interruptedTimelineRunIds(timelineEntries), ...failedRunIds]),
+  );
   const liveSubagentEntryIds = liveSubagentCardEntryIds(timelineEntries);
   const completeSupersededReplyIds = completeSupersededReplyEntryIds(timelineEntries);
   const supersededFoldsByAnchorEntryId = deriveSupersededAttemptFolds(

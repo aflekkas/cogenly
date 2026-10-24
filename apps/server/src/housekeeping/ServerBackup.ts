@@ -18,6 +18,7 @@ import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Random from "effect/Random";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
@@ -61,21 +62,32 @@ export const backupDirectoryName = (now: DateTime.Utc): string =>
   DateTime.formatIso(now).replaceAll(":", "-");
 
 /**
- * Pure retention plan: of the given entry names in the backups directory,
- * which backup directories to keep and which to remove so only the newest
- * `keep` remain. Entries that do not look like backup directories are always
- * kept and never counted.
+ * Pure retention plan: of the given entries in the backups directory, which
+ * backup directories to keep and which to remove so only the newest `keep`
+ * complete backups remain. Only a dated folder holding a `statev2.sqlite`
+ * snapshot counts as a backup; a dated folder without one is the remains of
+ * a failed backup and is removed, and entries that do not look like backup
+ * directories are always kept and never counted.
  */
 export const planBackupRetention = (
-  names: ReadonlyArray<string>,
+  entries: ReadonlyArray<{ readonly name: string; readonly hasSnapshot: boolean }>,
   keep: number,
 ): { readonly keep: ReadonlyArray<string>; readonly remove: ReadonlyArray<string> } => {
-  const backups = names.filter((name) => BACKUP_DIRECTORY_PATTERN.test(name)).toSorted();
-  const other = names.filter((name) => !BACKUP_DIRECTORY_PATTERN.test(name));
+  const backups = entries
+    .filter((entry) => entry.hasSnapshot && BACKUP_DIRECTORY_PATTERN.test(entry.name))
+    .map((entry) => entry.name)
+    .toSorted();
+  const incomplete = entries
+    .filter((entry) => !entry.hasSnapshot && BACKUP_DIRECTORY_PATTERN.test(entry.name))
+    .map((entry) => entry.name)
+    .toSorted();
+  const other = entries
+    .filter((entry) => !BACKUP_DIRECTORY_PATTERN.test(entry.name))
+    .map((entry) => entry.name);
   const removeCount = Math.max(0, backups.length - Math.max(0, keep));
   return {
     keep: [...other, ...backups.slice(removeCount)],
-    remove: backups.slice(0, removeCount),
+    remove: [...backups.slice(0, removeCount), ...incomplete],
   };
 };
 
@@ -163,7 +175,13 @@ const make = Effect.gen(function* () {
           (cause) => new ServerBackupError({ operation: "list", path: backupsDirectory, cause }),
         ),
       );
-    const plan = planBackupRetention(names, keep);
+    const entries = yield* Effect.forEach(names, (name) =>
+      fs.exists(path.join(backupsDirectory, name, "statev2.sqlite")).pipe(
+        Effect.map((hasSnapshot) => ({ name, hasSnapshot })),
+        Effect.orElseSucceed(() => ({ name, hasSnapshot: false })),
+      ),
+    );
+    const plan = planBackupRetention(entries, keep);
     for (const name of plan.remove) {
       yield* fs.remove(path.join(backupsDirectory, name), { recursive: true }).pipe(
         Effect.mapError(
@@ -186,50 +204,79 @@ const make = Effect.gen(function* () {
       ),
     );
     const directory = path.join(backupsDirectory, backupDirectoryName(yield* DateTime.now));
+    // Write under a temp name and rename on success: a failed backup must
+    // not leave an empty dated folder that counts as the newest backup.
+    // The leading dot keeps the temp name out of the dated-folder pattern.
+    const tempDirectory = path.join(
+      backupsDirectory,
+      `.tmp-${backupDirectoryName(yield* DateTime.now)}-${(yield* Random.nextInt).toString(36)}`,
+    );
     yield* fs
-      .makeDirectory(directory, { recursive: true, mode: 0o700 })
+      .makeDirectory(backupsDirectory, { recursive: true, mode: 0o700 })
       .pipe(
         Effect.mapError(
-          (cause) => new ServerBackupError({ operation: "copy", path: directory, cause }),
+          (cause) => new ServerBackupError({ operation: "copy", path: backupsDirectory, cause }),
         ),
       );
-    yield* fs.chmod(directory, 0o700).pipe(Effect.orElseSucceed(() => undefined));
+    yield* fs
+      .makeDirectory(tempDirectory, { recursive: true, mode: 0o700 })
+      .pipe(
+        Effect.mapError(
+          (cause) => new ServerBackupError({ operation: "copy", path: tempDirectory, cause }),
+        ),
+      );
+    yield* fs.chmod(tempDirectory, 0o700).pipe(Effect.orElseSucceed(() => undefined));
 
-    const snapshotPath = path.join(directory, "statev2.sqlite");
-    yield* backupDatabase({ dbPath: config.dbPath, outPath: snapshotPath }).pipe(
-      Effect.mapError(
-        (cause) => new ServerBackupError({ operation: "snapshot", path: snapshotPath, cause }),
-      ),
-    );
-    yield* fs.chmod(snapshotPath, 0o600).pipe(Effect.orElseSucceed(() => undefined));
+    const writeBackup = Effect.gen(function* () {
+      const snapshotPath = path.join(tempDirectory, "statev2.sqlite");
+      yield* backupDatabase({ dbPath: config.dbPath, outPath: snapshotPath }).pipe(
+        Effect.mapError(
+          (cause) => new ServerBackupError({ operation: "snapshot", path: snapshotPath, cause }),
+        ),
+      );
+      yield* fs.chmod(snapshotPath, 0o600).pipe(Effect.orElseSucceed(() => undefined));
 
-    if (yield* fs.exists(config.settingsPath).pipe(Effect.orElseSucceed(() => false))) {
-      const settingsCopy = path.join(directory, "settings.json");
-      const bytes = yield* fs
-        .readFile(config.settingsPath)
-        .pipe(
-          Effect.mapError(
-            (cause) =>
-              new ServerBackupError({ operation: "copy", path: config.settingsPath, cause }),
-          ),
-        );
+      if (yield* fs.exists(config.settingsPath).pipe(Effect.orElseSucceed(() => false))) {
+        const settingsCopy = path.join(tempDirectory, "settings.json");
+        const bytes = yield* fs
+          .readFile(config.settingsPath)
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new ServerBackupError({ operation: "copy", path: config.settingsPath, cause }),
+            ),
+          );
+        yield* fs
+          .writeFile(settingsCopy, bytes)
+          .pipe(
+            Effect.mapError(
+              (cause) => new ServerBackupError({ operation: "copy", path: settingsCopy, cause }),
+            ),
+          );
+        yield* fs.chmod(settingsCopy, 0o600).pipe(Effect.orElseSucceed(() => undefined));
+      }
+
+      if (yield* fs.exists(config.secretsDir).pipe(Effect.orElseSucceed(() => false))) {
+        yield* copyTreePrivate(config.secretsDir, path.join(tempDirectory, "secrets"));
+      }
+
       yield* fs
-        .writeFile(settingsCopy, bytes)
+        .rename(tempDirectory, directory)
         .pipe(
           Effect.mapError(
-            (cause) => new ServerBackupError({ operation: "copy", path: settingsCopy, cause }),
+            (cause) => new ServerBackupError({ operation: "copy", path: directory, cause }),
           ),
         );
-      yield* fs.chmod(settingsCopy, 0o600).pipe(Effect.orElseSucceed(() => undefined));
-    }
 
-    if (yield* fs.exists(config.secretsDir).pipe(Effect.orElseSucceed(() => false))) {
-      yield* copyTreePrivate(config.secretsDir, path.join(directory, "secrets"));
-    }
-
-    const pruned = yield* pruneOldBackups(settings.automaticBackups.retentionCount);
-    yield* Effect.logInfo("Server backup written", { directory, pruned: pruned.length });
-    return { directory, pruned } satisfies BackupRunResult;
+      const pruned = yield* pruneOldBackups(settings.automaticBackups.retentionCount);
+      yield* Effect.logInfo("Server backup written", { directory, pruned: pruned.length });
+      return { directory, pruned } satisfies BackupRunResult;
+    });
+    // A failed backup removes its temp folder; the rename above already
+    // moved a successful one, so this only ever deletes a partial write.
+    return yield* writeBackup.pipe(
+      Effect.onError(() => fs.remove(tempDirectory, { recursive: true }).pipe(Effect.ignore)),
+    );
   });
 
   // `backupDatabase` reads FileSystem/Path from the environment; bind the
@@ -242,11 +289,15 @@ const make = Effect.gen(function* () {
   const latestBackupAt = Effect.gen(function* () {
     if (!(yield* fs.exists(backupsDirectory))) return null;
     const names = yield* fs.readDirectory(backupsDirectory);
+    // Only a folder holding a snapshot counts; a failed backup's remains
+    // must not make the nightly backup look fresh.
     const backups = names.filter((name) => BACKUP_DIRECTORY_PATTERN.test(name)).toSorted();
-    const latest = backups.at(-1);
-    if (latest === undefined) return null;
-    const stat = yield* fs.stat(path.join(backupsDirectory, latest));
-    return stat.mtime._tag === "Some" ? stat.mtime.value.getTime() : null;
+    for (const name of backups.toReversed()) {
+      if (!(yield* fs.exists(path.join(backupsDirectory, name, "statev2.sqlite")))) continue;
+      const stat = yield* fs.stat(path.join(backupsDirectory, name));
+      return stat.mtime._tag === "Some" ? stat.mtime.value.getTime() : null;
+    }
+    return null;
   }).pipe(Effect.orElseSucceed(() => null));
 
   const backupIfDue = Effect.gen(function* () {

@@ -326,6 +326,7 @@ const ServerSettingsJson = fromLenientJson(
   }),
 );
 const decodeServerSettingsJsonExit = Schema.decodeUnknownExit(ServerSettingsJson);
+const decodeStoredSettingsExit = Schema.decodeUnknownExit(Schema.fromJsonString(Schema.Unknown));
 /**
  * The retired `providers.<kind>` map, read without its old schemas. Before
  * `providerInstances` existed each built-in driver had one blob there; it
@@ -622,6 +623,33 @@ function foldLegacyProjectSettings(
   };
 }
 
+/**
+ * Device support and agent device access used to default to off behind a setup
+ * wizard, and an off value equal to the default was never written to the file.
+ * Both now default to on, so an install that finished the wizard and ended up
+ * with a switch off would silently turn it on. The wizard's completion flag is
+ * the one trace of that choice: with it set, a switch missing from the file was
+ * left off on purpose, so it is written out as an explicit `false`. The flag is
+ * cleared so this runs once; a switch the user turns on later is not undone.
+ * An install that never finished the wizard has no flag and takes the defaults.
+ */
+export function foldLegacyDeviceOnboarding(
+  settings: ServerSettings,
+  stored: unknown,
+): ServerSettings {
+  if (!settings.deviceOnboardingCompleted) return settings;
+  const has = (key: string) =>
+    typeof stored === "object" && stored !== null && Object.hasOwn(stored, key);
+  return {
+    ...settings,
+    enableDeviceSupport: has("enableDeviceSupport") ? settings.enableDeviceSupport : false,
+    enableAgentDeviceAccess: has("enableAgentDeviceAccess")
+      ? settings.enableAgentDeviceAccess
+      : false,
+    deviceOnboardingCompleted: false,
+  };
+}
+
 const make = Effect.gen(function* () {
   const { settingsPath } = yield* ServerConfig.ServerConfig;
   const fs = yield* FileSystem.FileSystem;
@@ -725,9 +753,14 @@ const make = Effect.gen(function* () {
     // A file that failed to decode must stay on disk for the user to repair;
     // the fold below only writes when it started from the file's real contents.
     let settingsFileTrusted = true;
+    // The file's own keys, for migrations that must tell "unset" from "set to the default".
+    let storedSettings: unknown;
 
     if (yield* readConfigExists) {
       const raw = yield* readRawConfig;
+      // A file that does not parse is also untrusted below and stays as it is.
+      const stored = decodeStoredSettingsExit(raw);
+      storedSettings = stored._tag === "Success" ? stored.value : undefined;
       const decoded = decodeServerSettingsJsonExit(raw);
       const legacySettings = decodeLegacyProviderSettingsJsonExit(raw);
       if (legacySettings._tag === "Success") {
@@ -807,8 +840,11 @@ const make = Effect.gen(function* () {
         ? settings
         : migrateLegacyProviderSettings(settings, legacyProviders, providerHistory),
     );
+    const deviceFolded = settingsFileTrusted
+      ? foldLegacyDeviceOnboarding(loaded, storedSettings)
+      : loaded;
     const folded = settingsFileTrusted
-      ? foldLegacyProjectSettings(loaded, legacyProjectRows)
+      ? foldLegacyProjectSettings(deviceFolded, legacyProjectRows)
       : loaded;
     // Copied, not moved: the old entry is removed only after the new file is written. A token
     // that cannot be read or copied leaves the retired keys in place, so the migration runs again

@@ -75,6 +75,7 @@ const make = Effect.gen(function* () {
         if (item.account.serviceId === "cloudflare" && result.item.fields.includes("username")) {
           const account = yield* vault.use({
             itemId: item.credential.vaultItemId,
+            scopeProjectId: authorized.caller.scopeProjectId,
             caller: { kind: "server" },
             field: "username",
             expectedRevision: item.revision,

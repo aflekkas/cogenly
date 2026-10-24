@@ -1,7 +1,15 @@
 "use client";
 
-import type { BrowserAppearanceSetting, DesktopPreviewColorScheme } from "@t3tools/contracts";
+import {
+  SITE_PERMISSIONS,
+  type BrowserAppearanceSetting,
+  type DesktopPreviewColorScheme,
+  type SitePermission,
+  type SitePermissionSetting,
+  type SitePermissionsState,
+} from "@t3tools/contracts";
 import { Minus, MoreVertical, Plus as PlusIcon, RotateCcw } from "lucide-react";
+import { useState } from "react";
 
 import { Button } from "~/components/ui/button";
 import {
@@ -19,6 +27,15 @@ import {
   MenuTrigger,
 } from "~/components/ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
+
+import {
+  SITE_PERMISSION_LABELS,
+  SITE_PERMISSION_SETTING_LABELS,
+  siteHost,
+  siteSettingSummary,
+} from "./sitePermissions.logic";
+
+const SITE_PERMISSION_SETTINGS: ReadonlyArray<SitePermissionSetting> = ["allow", "ask", "block"];
 
 const COLOR_SCHEME_OPTIONS: ReadonlyArray<{
   value: BrowserAppearanceSetting;
@@ -47,6 +64,15 @@ export interface PreviewMoreMenuActions {
   readonly openDevTools?: () => void;
   /** Absent where the tab cannot get its own window. */
   readonly toggleNativePictureInPicture?: () => void;
+  /** Absent where the page is not the desktop's own, such as a streamed server tab. */
+  readonly sitePermissions?: {
+    readonly read: () => Promise<SitePermissionsState>;
+    /** Resolves to the site's permissions afterward, or null when nothing could be changed. */
+    readonly change: (
+      permission: SitePermission,
+      setting: SitePermissionSetting,
+    ) => Promise<SitePermissionsState | null>;
+  };
 }
 
 interface Props {
@@ -85,6 +111,61 @@ const MenuTriggerButton = () => (
   </Tooltip>
 );
 
+/**
+ * What the current site may use, one row per permission with its setting at the
+ * right; each row opens Allow, Ask and Block, so every change is reversible.
+ */
+function SitePermissionsSubmenu(props: {
+  readonly disabled: boolean;
+  readonly state: SitePermissionsState | null;
+  readonly onChange: (permission: SitePermission, setting: SitePermissionSetting) => void;
+}) {
+  const host = siteHost(props.state?.origin ?? null);
+  const entries = new Map(props.state?.entries.map((entry) => [entry.permission, entry]));
+  return (
+    <MenuSub>
+      <MenuSubTrigger disabled={props.disabled || host === null}>Site permissions</MenuSubTrigger>
+      <MenuSubPopup>
+        <MenuGroup>
+          <MenuGroupLabel className="max-w-72">
+            <span className="block truncate">{host}</span>
+          </MenuGroupLabel>
+          {SITE_PERMISSIONS.map((permission) => {
+            const entry = entries.get(permission);
+            const setting = entry?.setting ?? "ask";
+            return (
+              <MenuSub key={permission}>
+                <MenuSubTrigger>
+                  <span className="flex w-full items-center justify-between gap-6">
+                    <span>{SITE_PERMISSION_LABELS[permission]}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {entry ? siteSettingSummary(entry) : SITE_PERMISSION_SETTING_LABELS.ask}
+                    </span>
+                  </span>
+                </MenuSubTrigger>
+                <MenuSubPopup>
+                  <MenuRadioGroup
+                    value={setting}
+                    onValueChange={(value) =>
+                      props.onChange(permission, value as SitePermissionSetting)
+                    }
+                  >
+                    {SITE_PERMISSION_SETTINGS.map((option) => (
+                      <MenuRadioItem key={option} value={option}>
+                        {SITE_PERMISSION_SETTING_LABELS[option]}
+                      </MenuRadioItem>
+                    ))}
+                  </MenuRadioGroup>
+                </MenuSubPopup>
+              </MenuSub>
+            );
+          })}
+        </MenuGroup>
+      </MenuSubPopup>
+    </MenuSub>
+  );
+}
+
 /** Three-dot menu in the chrome row; the same items for every kind of tab. */
 export function PreviewMoreMenu({
   enabled,
@@ -100,8 +181,16 @@ export function PreviewMoreMenu({
 }: Props) {
   const zoomLabel = `${Math.round(zoomFactor * 100)}%`;
   const disabled = !enabled;
+  const sitePermissions = actions.sitePermissions;
+  // Read when the menu opens, so it shows decisions an agent made since.
+  const [siteState, setSiteState] = useState<SitePermissionsState | null>(null);
   return (
-    <Menu>
+    <Menu
+      onOpenChange={(open) => {
+        if (!open || !sitePermissions) return;
+        void sitePermissions.read().then(setSiteState, () => setSiteState(null));
+      }}
+    >
       <MenuTriggerButton />
       <MenuPopup align="end" sideOffset={6}>
         <MenuItem onClick={actions.hardReload} disabled={disabled}>
@@ -138,6 +227,20 @@ export function PreviewMoreMenu({
             </MenuRadioGroup>
           </MenuSubPopup>
         </MenuSub>
+        {sitePermissions ? (
+          <SitePermissionsSubmenu
+            disabled={disabled}
+            state={siteState}
+            onChange={(permission, setting) =>
+              void sitePermissions.change(permission, setting).then(
+                (next) => {
+                  if (next) setSiteState(next);
+                },
+                () => undefined,
+              )
+            }
+          />
+        ) : null}
         <MenuSeparator />
         {/*
           Zoom row: label + inline control cluster. `closeOnClick=false`

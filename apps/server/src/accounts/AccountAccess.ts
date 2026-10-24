@@ -23,6 +23,7 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as AgentStore from "../agents/AgentStore.ts";
+import * as ApprovalChanges from "../agents/ApprovalChanges.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as Threads from "../orchestration-v2/ThreadManagementService.ts";
 import * as ProjectFiles from "../projectLabels/ProjectFiles.ts";
@@ -100,6 +101,7 @@ const make = Effect.gen(function* () {
   const projects = yield* ProjectFiles.ProjectFiles;
   const identity = yield* ServerEnvironment.ServerEnvironmentIdentity;
   const crypto = yield* Crypto.Crypto;
+  const notifyApprovals = (yield* ApprovalChanges.optional).notify;
   const now = DateTime.now.pipe(Effect.map(DateTime.formatIso));
   const caller: AccountAccess["Service"]["caller"] = Effect.fnUntraced(function* (input) {
     const thread = yield* threads.getThreadShell(input.threadId);
@@ -236,6 +238,7 @@ const make = Effect.gen(function* () {
     }>`SELECT id FROM agent_approvals WHERE status = 'pending' AND action_json = ${actionJson} AND agent_id IS ${context.agentId}`;
     if (existing[0]) return existing[0].id;
     yield* sql`INSERT INTO agent_approvals(id, agent_id, action_json, status, requested_at) VALUES (${id}, ${context.agentId}, ${actionJson}, 'pending', ${yield* now})`;
+    yield* notifyApprovals;
     return id;
   });
   const audit: AccountAccess["Service"]["audit"] = Effect.fnUntraced(function* (input) {
@@ -258,6 +261,7 @@ const make = Effect.gen(function* () {
         yield* sql`DELETE FROM account_thread_bindings WHERE thread_id = ${context.threadId} AND credential_id = ${input.credentialId} AND account_id = ${input.accountId}`;
         yield* sql`DELETE FROM account_process_grants WHERE credential_id = ${input.credentialId} AND subject_type = 'thread' AND subject_id = ${context.threadId}`;
         yield* sql`UPDATE agent_approvals SET status = 'rejected', decided_at = ${yield* now} WHERE status = 'pending' AND json_extract(action_json, '$.payload.processExposure') IS NOT NULL AND json_extract(action_json, '$.payload.threadId') = ${context.threadId} AND json_extract(action_json, '$.payload.processExposure.credentialId') = ${input.credentialId}`;
+        yield* notifyApprovals;
         return { status: "detached" as const };
       }
       const item = yield* load(context, input.accountId, input.credentialId);
@@ -390,6 +394,7 @@ const make = Effect.gen(function* () {
           yield* sql`UPDATE agent_approvals SET status = 'rejected', decided_at = ${yield* now} WHERE status = 'pending' AND json_extract(action_json, '$.payload.processExposure') IS NOT NULL AND json_extract(action_json, '$.payload.processExposure.credentialId') = ${input.credentialId}`;
         }),
       );
+      yield* notifyApprovals;
       return {
         removed: true,
         affectedThreadIds: rows.map((r) => r.thread_id),

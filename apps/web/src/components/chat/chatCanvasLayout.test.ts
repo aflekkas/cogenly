@@ -16,15 +16,12 @@ describe("resolveChatCanvasLayout", () => {
     expect(chat.left).toBe((1511 - 853) / 2);
   });
 
-  it("centers chat in the space left of an open details card", () => {
-    // The reference at 2000px: pane 1511 wide, card at 1173, composer at 112.
-    const { chat } = resolveChatCanvasLayout({
-      ...base,
-      container,
-      detailsCard: { left: 1173, right: 1498, bottom: 265 },
-    });
+  it("centers chat in the space left of an open details card, equal gaps on both sides", () => {
+    const card = { left: 1173, right: 1498, bottom: 265 };
+    const { chat } = resolveChatCanvasLayout({ ...base, container, detailsCard: card });
     expect(chat.width).toBe(853);
-    expect(chat.left).toBe(112);
+    expect(chat.left).toBe(160);
+    expect(card.left - (chat.left + chat.width)).toBe(chat.left);
   });
 
   it("keeps the clearance from the card, then narrows at the left padding", () => {

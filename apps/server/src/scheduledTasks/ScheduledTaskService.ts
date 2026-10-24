@@ -13,6 +13,7 @@ import {
   ScheduledTask,
   ScheduledTaskError,
   ScheduledTaskId,
+  SharedDocumentId,
   ThreadId,
   ScheduledTaskWebhookDeliveryId,
   type ScheduledTaskDeleteInput,
@@ -36,6 +37,7 @@ import * as Crypto from "effect/Crypto";
 import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Duration from "effect/Duration";
 import * as Metric from "effect/Metric";
 import * as Layer from "effect/Layer";
@@ -84,6 +86,7 @@ interface WebhookOrigin {
 }
 
 const ENDPOINT_KEY = /^[0-9a-f]{16}$/;
+const isSharedDocumentId = Schema.is(SharedDocumentId);
 
 /**
  * The relay's hook URL prefix for this environment. The relay finds the
@@ -705,7 +708,7 @@ export const layer = Layer.effect(
       readonly id: ScheduledTaskId;
       readonly completedAtIso: string;
       readonly nextRunAtIso: string | null;
-      readonly status: "succeeded" | "failed";
+      readonly status: "succeeded" | "failed" | "skipped_already_queued";
       readonly error: string | null;
       readonly startedAtIso: string;
     }) =>
@@ -855,11 +858,34 @@ export const layer = Layer.effect(
         // from the row when the request arrived.
         const prompt = webhook?.prompt ?? active.prompt;
 
+        // runTask's task-id reservation serializes these checks with all
+        // other firings of this task, including manual and webhook runs.
+        const alreadyQueued =
+          active.agentId == null && active.threadId !== null
+            ? yield* threadManagement
+                .getThreadRecords(active.threadId, ["runs", "messages"])
+                .pipe(
+                  Effect.map((projection) =>
+                    projection.runs.some(
+                      (run) =>
+                        run.status === "queued" &&
+                        projection.messages.some(
+                          (message) =>
+                            message.id === run.userMessageId &&
+                            message.scheduledTaskId === active.id &&
+                            message.text === prompt,
+                        ),
+                    ),
+                  ),
+                )
+            : false;
+
         // Effect.exit (not Effect.result) so defects and interruptions in the
         // dispatch are also captured and recorded as a failed run instead of
         // aborting before markCompleted.
-        const result =
-          active.agentId != null
+        const result = alreadyQueued
+          ? Exit.succeed(undefined)
+          : active.agentId != null
             ? yield* Effect.exit(agents.trigger(active, fireKey, prompt))
             : active.threadId === null
               ? yield* Effect.exit(
@@ -900,7 +926,11 @@ export const layer = Layer.effect(
 
         const completedAt = yield* localNow;
         const runSucceeded = result._tag === "Success";
-        const lastRunStatus = runSucceeded ? ("succeeded" as const) : ("failed" as const);
+        const lastRunStatus = alreadyQueued
+          ? ("skipped_already_queued" as const)
+          : runSucceeded
+            ? ("succeeded" as const)
+            : ("failed" as const);
         const lastRunError = runSucceeded ? null : errorMessage(result.cause);
         // Re-read the task so the next run is computed from the schedule as it
         // is *now* (the user may have edited or deleted it while we ran).
@@ -1085,11 +1115,26 @@ export const layer = Layer.effect(
                   ),
                 )
             : null;
+        const legacyId = ScheduledTaskId.make(
+          input.commandId ? `scheduled-task:${input.commandId}` : `scheduled-task:${uuid}`,
+        );
         const id =
           input.id ??
-          ScheduledTaskId.make(
-            input.commandId ? `scheduled-task:${input.commandId}` : `scheduled-task:${uuid}`,
-          );
+          (yield* Effect.gen(function* () {
+            if (isSharedDocumentId(legacyId) || (yield* findTask(legacyId))) return legacyId;
+            const digest = yield* crypto
+              .digest("SHA-256", new TextEncoder().encode(input.commandId!))
+              .pipe(
+                Effect.mapError((cause) =>
+                  taskError("Could not generate schedule task id.", { cause }),
+                ),
+              );
+            const hash = Array.from(new Uint8Array(digest))
+              .slice(0, 16)
+              .map((byte) => byte.toString(16).padStart(2, "0"))
+              .join("");
+            return ScheduledTaskId.make(`scheduled-task:command:${hash}`);
+          }));
         // Look up by the *resolved* id so idempotent creates (commandId replays)
         // keep their run history, and so real load failures propagate instead
         // of silently resetting an existing row.
@@ -1824,7 +1869,9 @@ export const layer = Layer.effect(
                   ? runOutcome("failed").pipe(
                       Effect.andThen(markDeliveryFailed(deliveryId, "The run failed to start.")),
                     )
-                  : runOutcome("started"),
+                  : runOutcome(
+                      completed.lastRunStatus === "skipped_already_queued" ? "skipped" : "started",
+                    ),
               ),
               Effect.catchTags({
                 WebhookDeliverySkipped: (skipped) =>

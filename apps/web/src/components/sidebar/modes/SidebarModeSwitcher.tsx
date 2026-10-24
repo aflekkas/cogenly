@@ -10,9 +10,11 @@ import { type KeyboardEvent as ReactKeyboardEvent, useRef } from "react";
 
 import { cn } from "~/lib/utils";
 import { shortcutLabelForCommand } from "../../../keybindings";
+import { BadgeDot } from "../../ui/badge-dot";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../../ui/tooltip";
 import { decisionsWaitingLabel } from "../../../agents/agentWorkspace.logic";
 import { SIDEBAR_MODE_LABELS, SIDEBAR_MODES, type SidebarMode } from "./sidebarModes.logic";
+import { useModesNeedingAttention } from "./useModesNeedingAttention";
 
 export const SIDEBAR_MODE_ICONS: Record<SidebarMode, LucideIcon> = {
   chats: MessageCircleIcon,
@@ -29,6 +31,7 @@ export function SidebarModeSwitcher(props: {
   className?: string;
 }) {
   const { mode, onModeChange, decisionsWaiting, keybindings } = props;
+  const modesNeedingAttention = useModesNeedingAttention();
   const index = SIDEBAR_MODES.indexOf(mode);
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
@@ -72,6 +75,8 @@ export function SidebarModeSwitcher(props: {
         const Icon = SIDEBAR_MODE_ICONS[segment];
         const shortcut = shortcutLabelForCommand(keybindings, `sidebar.mode.${segment}`);
         const badge = segment === "agents" && decisionsWaiting > 0 ? decisionsWaiting : null;
+        // As on the rail: a dot where Agents has no count, on the open mode too.
+        const needsYou = modesNeedingAttention.has(segment) && badge === null;
         return (
           <Tooltip key={segment}>
             <TooltipTrigger
@@ -119,10 +124,13 @@ export function SidebarModeSwitcher(props: {
                   <span className="sr-only">, {decisionsWaitingLabel(badge)}</span>
                 </>
               ) : null}
+              <BadgeDot tone={needsYou && "info"} size="md" className="absolute top-1 right-1.5" />
+              {needsYou ? <span className="sr-only">, needs you</span> : null}
             </TooltipTrigger>
             <TooltipPopup side="bottom">
               {shortcut ? `${label} (${shortcut})` : label}
               {badge !== null ? ` · ${decisionsWaitingLabel(badge)}` : null}
+              {needsYou ? " · Needs you" : null}
             </TooltipPopup>
           </Tooltip>
         );

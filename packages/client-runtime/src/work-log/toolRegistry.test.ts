@@ -146,8 +146,25 @@ describe("resolveWorkLogTool", () => {
     ).toMatchObject({ label: "Create issue", icon: "wrench", source: "generic" });
     expect(
       resolveWorkLogTool({ toolName: "cogenly.terminal_read", status: "completed" }),
-    ).toMatchObject({ label: "Terminal read", icon: "wrench", source: "generic" });
+    ).toMatchObject({ label: "Read terminal output", icon: "terminal", source: "registry" });
     expect(resolveWorkLogTool({ toolName: undefined, status: "completed" })).toBeNull();
+  });
+
+  it("shows Cogenly terminal tools as commands, not as an integration", () => {
+    const run = resolveWorkLogTool({
+      toolName: "mcp__cogenly__terminal_run",
+      input: { command: "vp test run apps/server" },
+      status: "completed",
+    });
+    expect(run).toMatchObject({ icon: "terminal", source: "registry" });
+    expect(run?.label).toContain("Ran");
+    expect(run?.label).toContain("vp test run apps/server");
+    expect(
+      resolveWorkLogTool({ toolName: "mcp__cogenly__terminal_kill", status: "completed" })?.label,
+    ).toBe("Stopped the terminal");
+    expect(
+      resolveWorkLogTool({ toolName: "mcp__cogenly__terminal_list", status: "completed" })?.label,
+    ).toBe("Listed terminals");
   });
 
   it("gives every registry entry a label for each status", () => {

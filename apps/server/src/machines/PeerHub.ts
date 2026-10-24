@@ -38,6 +38,7 @@ import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
 import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
 import type * as Scope from "effect/Scope";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Stream from "effect/Stream";
@@ -160,6 +161,7 @@ interface SpokeRow {
 }
 
 interface LiveConnection {
+  readonly sessionId: AuthSessionId;
   readonly id: number;
   readonly environmentId: EnvironmentId;
   readonly outbox: Queue.Queue<PeerPush, Cause.Done>;
@@ -187,6 +189,24 @@ const make = Effect.gen(function* () {
   const changed = yield* PubSub.unbounded<void>();
   const live = new Map<EnvironmentId, LiveConnection>();
   let nextConnectionId = 0;
+  const pairingLocks = new Map<EnvironmentId, { semaphore: Semaphore.Semaphore; users: number }>();
+  const withPairingLock = <A, E, R>(environmentId: EnvironmentId, effect: Effect.Effect<A, E, R>) =>
+    Effect.suspend(() => {
+      let lock = pairingLocks.get(environmentId);
+      if (lock === undefined) {
+        lock = { semaphore: Semaphore.makeUnsafe(1), users: 0 };
+        pairingLocks.set(environmentId, lock);
+      }
+      const entry = lock;
+      entry.users++;
+      return entry.semaphore.withPermit(effect).pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            if (--entry.users === 0) pairingLocks.delete(environmentId);
+          }),
+        ),
+      );
+    });
 
   const withSecrets = <A, E>(effect: Effect.Effect<A, E, ServerSecretStore.ServerSecretStore>) =>
     Effect.provideService(effect, ServerSecretStore.ServerSecretStore, secrets);
@@ -310,93 +330,96 @@ const make = Effect.gen(function* () {
     Effect.forkScoped,
   );
 
-  const redeem: PeerHub["Service"]["redeem"] = Effect.fn("PeerHub.redeem")(function* (input) {
-    const joinedHub = yield* withSecrets(readHubLink).pipe(Effect.mapError(storage("join")));
-    if (Option.isSome(joinedHub)) {
-      return yield* new PeerJoinRefusedError({ reason: "hub-is-spoke" });
-    }
-    const self = yield* identity.self;
-    if (input.spoke.environmentId === self.environmentId) {
-      return yield* new PeerJoinRefusedError({ reason: "grant-rejected" });
-    }
-    const publicKey = yield* withSecrets(hubPublicKey).pipe(Effect.mapError(storage("join")));
-    if (
-      !verifyPeerProof(
-        input.proofKey,
-        input.proofKeyThumbprint,
-        peerJoinProofTranscript({
-          hubPublicKey: publicKey,
-          hubEnvironmentId: self.environmentId,
-          spokeKeyThumbprint: input.proofKeyThumbprint,
-          spoke: input.spoke,
-          nonce: input.nonce,
-          grantHash: peerDigest(input.grant),
-        }),
-        input.proof,
+  const redeem: PeerHub["Service"]["redeem"] = Effect.fn("PeerHub.redeem")(
+    function* (input) {
+      const joinedHub = yield* withSecrets(readHubLink).pipe(Effect.mapError(storage("join")));
+      if (Option.isSome(joinedHub)) {
+        return yield* new PeerJoinRefusedError({ reason: "hub-is-spoke" });
+      }
+      const self = yield* identity.self;
+      if (input.spoke.environmentId === self.environmentId) {
+        return yield* new PeerJoinRefusedError({ reason: "grant-rejected" });
+      }
+      const publicKey = yield* withSecrets(hubPublicKey).pipe(Effect.mapError(storage("join")));
+      if (
+        !verifyPeerProof(
+          input.proofKey,
+          input.proofKeyThumbprint,
+          peerJoinProofTranscript({
+            hubPublicKey: publicKey,
+            hubEnvironmentId: self.environmentId,
+            spokeKeyThumbprint: input.proofKeyThumbprint,
+            spoke: input.spoke,
+            nonce: input.nonce,
+            grantHash: peerDigest(input.grant),
+          }),
+          input.proof,
+        )
       )
-    )
-      return yield* new PeerJoinRefusedError({ reason: "grant-rejected" });
-    const issued = yield* auth
-      .redeemPeerGrant({
-        credential: input.grant,
-        proofKeyThumbprint: input.proofKeyThumbprint,
-        client: { ...input.client, label: input.spoke.name },
-      })
-      .pipe(
-        Effect.catchTags({
-          ServerAuthInvalidCredentialError: (cause) =>
-            Effect.fail(new PeerJoinRefusedError({ reason: "grant-rejected", cause })),
-        }),
-        Effect.mapError((cause) =>
-          cause._tag === "PeerJoinRefusedError" ? cause : storage("join")(cause),
-        ),
+        return yield* new PeerJoinRefusedError({ reason: "grant-rejected" });
+      const issued = yield* auth
+        .redeemPeerGrant({
+          credential: input.grant,
+          proofKeyThumbprint: input.proofKeyThumbprint,
+          client: { ...input.client, label: input.spoke.name },
+        })
+        .pipe(
+          Effect.catchTags({
+            ServerAuthInvalidCredentialError: (cause) =>
+              Effect.fail(new PeerJoinRefusedError({ reason: "grant-rejected", cause })),
+          }),
+          Effect.mapError((cause) =>
+            cause._tag === "PeerJoinRefusedError" ? cause : storage("join")(cause),
+          ),
+        );
+      const existing = yield* readRows.pipe(
+        Effect.map((rows) => rows.find((row) => row.environmentId === input.spoke.environmentId)),
+        Effect.mapError(storage("join")),
       );
-    const existing = yield* readRows.pipe(
-      Effect.map((rows) => rows.find((row) => row.environmentId === input.spoke.environmentId)),
-      Effect.mapError(storage("join")),
-    );
-    // Re-pairing the same machine replaces its old credential and socket.
-    if (existing !== undefined) {
-      const connection = live.get(existing.environmentId);
-      if (connection !== undefined) yield* drop(connection);
-      yield* auth.revokeSession(existing.sessionId).pipe(Effect.mapError(storage("join")));
-    }
-    const now = DateTime.formatIso(yield* DateTime.now);
-    const report = yield* encodeReport(input.spoke).pipe(Effect.mapError(storage("join")));
-    yield* sql`INSERT INTO machine_peers (environment_id, session_id, report_json, paired_at, last_seen_at)
+      // Re-pairing the same machine replaces its old credential and socket.
+      if (existing !== undefined) {
+        const connection = live.get(existing.environmentId);
+        if (connection?.sessionId === existing.sessionId) yield* drop(connection);
+        yield* auth.revokeSession(existing.sessionId).pipe(Effect.mapError(storage("join")));
+      }
+      const now = DateTime.formatIso(yield* DateTime.now);
+      const report = yield* encodeReport(input.spoke).pipe(Effect.mapError(storage("join")));
+      yield* sql`INSERT INTO machine_peers (environment_id, session_id, report_json, paired_at, last_seen_at)
       VALUES (${input.spoke.environmentId}, ${issued.session.sessionId}, ${report}, ${now}, ${now})
       ON CONFLICT (environment_id) DO UPDATE SET
         session_id = excluded.session_id,
         report_json = excluded.report_json,
         paired_at = excluded.paired_at,
         last_seen_at = excluded.last_seen_at`.pipe(Effect.mapError(storage("join")));
-    yield* publishChange;
-    const grantedScopes = issued.session.scopes.filter(isAuthPeerScope);
-    const signature = yield* withSecrets(
-      signPeerTranscript(
-        peerJoinTranscript({
-          hubPublicKey: publicKey,
-          hubEnvironmentId: self.environmentId,
-          spokeKeyThumbprint: input.proofKeyThumbprint,
-          spoke: input.spoke,
-          nonce: input.nonce,
-          grantHash: peerDigest(input.grant),
-          accessTokenHash: peerDigest(issued.token),
-          expiresAt: DateTime.formatIso(issued.expiresAt),
-          scopes: grantedScopes,
-          hub: self,
-        }),
-      ),
-    ).pipe(Effect.mapError(storage("join")));
-    return {
-      accessToken: issued.token,
-      expiresAt: issued.expiresAt,
-      hubEnvironmentId: self.environmentId,
-      scopes: grantedScopes,
-      signature,
-      hub: self,
-    } satisfies PeerJoinResult;
-  });
+      yield* publishChange;
+      const grantedScopes = issued.session.scopes.filter(isAuthPeerScope);
+      const signature = yield* withSecrets(
+        signPeerTranscript(
+          peerJoinTranscript({
+            hubPublicKey: publicKey,
+            hubEnvironmentId: self.environmentId,
+            spokeKeyThumbprint: input.proofKeyThumbprint,
+            spoke: input.spoke,
+            nonce: input.nonce,
+            grantHash: peerDigest(input.grant),
+            accessTokenHash: peerDigest(issued.token),
+            expiresAt: DateTime.formatIso(issued.expiresAt),
+            scopes: grantedScopes,
+            hub: self,
+          }),
+        ),
+      ).pipe(Effect.mapError(storage("join")));
+      return {
+        accessToken: issued.token,
+        expiresAt: issued.expiresAt,
+        hubEnvironmentId: self.environmentId,
+        scopes: grantedScopes,
+        signature,
+        hub: self,
+      } satisfies PeerJoinResult;
+    },
+    (effect, input) => withPairingLock(input.spoke.environmentId, effect),
+  );
 
   const issueTicket: PeerHub["Service"]["issueTicket"] = Effect.fn("PeerHub.issueTicket")(
     function* (session) {
@@ -410,13 +433,13 @@ const make = Effect.gen(function* () {
   const unpairRow = (row: SpokeRow) =>
     Effect.gen(function* () {
       const connection = live.get(row.environmentId);
-      if (connection !== undefined) {
+      if (connection?.sessionId === row.sessionId) {
         // Tell the spoke before its socket closes, so it forgets the credential.
         yield* Queue.offer(connection.outbox, { _tag: "Unpaired" });
         yield* drop(connection);
       }
       yield* auth.revokeSession(row.sessionId).pipe(Effect.mapError(storage("unpair")));
-      yield* sql`DELETE FROM machine_peers WHERE environment_id = ${row.environmentId}`.pipe(
+      yield* sql`DELETE FROM machine_peers WHERE environment_id = ${row.environmentId} AND session_id = ${row.sessionId}`.pipe(
         Effect.mapError(storage("unpair")),
       );
       yield* publishChange;
@@ -432,6 +455,7 @@ const make = Effect.gen(function* () {
       yield* unpairRow(row);
       return true;
     },
+    (effect, environmentId) => withPairingLock(environmentId, effect),
   );
 
   const callSpoke: PeerHub["Service"]["callSpoke"] = (environmentId, channel, payload) =>
@@ -443,20 +467,30 @@ const make = Effect.gen(function* () {
       const encoded = yield* encodePeerPayload(channel, payload);
       const id = yield* crypto.randomUUIDv4().pipe(Effect.orDie);
       const reply = yield* Deferred.make<Schema.Json, PeerCallError>();
-      connection.pending.set(id, reply);
-      yield* Queue.offer(connection.outbox, {
-        _tag: "Request",
-        id,
-        channel: channel.name,
-        payload: encoded,
-      });
-      const value = yield* Deferred.await(reply).pipe(
+      const disconnected = new PeerCallError({ channel: channel.name, reason: "disconnected" });
+      const value = yield* Effect.acquireUseRelease(
+        Effect.sync(() => connection.pending.set(id, reply)),
+        () =>
+          Effect.gen(function* () {
+            const offered = yield* Queue.offer(connection.outbox, {
+              _tag: "Request",
+              id,
+              channel: channel.name,
+              payload: encoded,
+            });
+            if (!offered) return yield* disconnected;
+            return yield* Effect.raceFirst(
+              Deferred.await(reply),
+              Deferred.await(connection.closed).pipe(Effect.andThen(Effect.fail(disconnected))),
+            );
+          }),
+        () => Effect.sync(() => connection.pending.delete(id)),
+      ).pipe(
         Effect.mapError((error) =>
           error.channel === ""
             ? new PeerCallError({ channel: channel.name, reason: error.reason })
             : error,
         ),
-        Effect.ensuring(Effect.sync(() => connection.pending.delete(id))),
       );
       return yield* decodePeerResult(channel, value);
     }).pipe(Effect.withSpan("PeerHub.callSpoke", { attributes: { channel: channel.name } }));
@@ -577,6 +611,7 @@ const make = Effect.gen(function* () {
           if (current === undefined) {
             const connection: LiveConnection = {
               id: nextConnectionId++,
+              sessionId: session.sessionId,
               environmentId: row.environmentId,
               outbox: yield* Queue.unbounded<PeerPush, Cause.Done>(),
               pending: new Map(),
@@ -604,7 +639,10 @@ const make = Effect.gen(function* () {
           yield* touch(row.environmentId, input.spoke);
           yield* publishChange;
           return { hubEnvironmentId: self.environmentId, signature, hub: self, scopes, expiresAt };
-        }).pipe(Effect.withSpan("PeerHub.hello"));
+        }).pipe(
+          (effect) => withPairingLock(input.spoke.environmentId, effect),
+          Effect.withSpan("PeerHub.hello"),
+        );
 
       const ping: PeerHubConnection["ping"] = (input) =>
         requireHello.pipe(
@@ -651,7 +689,9 @@ const make = Effect.gen(function* () {
               Effect.flatMap((row) =>
                 row === undefined
                   ? drop(current!)
-                  : unpairRow(row).pipe(Effect.ignore({ log: true })),
+                  : withPairingLock(row.environmentId, unpairRow(row)).pipe(
+                      Effect.ignore({ log: true }),
+                    ),
               ),
             )
           : Deferred.succeed(closed, undefined),
@@ -684,7 +724,9 @@ const make = Effect.gen(function* () {
       const leave: PeerHubConnection["leave"] = requireHello.pipe(
         Effect.andThen(rowForSession(session.sessionId)),
         Effect.flatMap((row) =>
-          row === undefined ? Effect.void : unpairRow(row).pipe(Effect.ignore({ log: true })),
+          row === undefined
+            ? Effect.void
+            : withPairingLock(row.environmentId, unpairRow(row)).pipe(Effect.ignore({ log: true })),
         ),
         Effect.as({}),
       );

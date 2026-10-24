@@ -6,7 +6,8 @@
  * own its durable resource state. Browser surfaces point at preview tab ids,
  * file surfaces point at workspace paths, and files/device remain
  * singleton surfaces. Agent terminals live in the bottom panel
- * (bottomPanelStore), not here.
+ * (bottomPanelStore), not here. The most recently changed threads are kept
+ * (recentThreadEntries).
  */
 import { parseScopedThreadKey, scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { type ScopedThreadRef } from "@t3tools/contracts";
@@ -14,6 +15,7 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
 import { useClosedViewStore } from "./closedViewStore";
+import { setRecentThreadEntry, withoutThreadEntry } from "./lib/recentThreadEntries";
 import { resolveStorage } from "./lib/storage";
 import type { ChatFileAttachment } from "./types";
 
@@ -226,12 +228,10 @@ const updateThreadStateMap = (
     next.surfaces.length === 0 &&
     !next.dismissedDeviceSurfaceIds?.length
   ) {
-    if (!(threadKey in byThreadKey)) return byThreadKey;
-    const { [threadKey]: _removed, ...rest } = byThreadKey;
-    return rest;
+    return withoutThreadEntry(byThreadKey, threadKey);
   }
   if (next === current) return byThreadKey;
-  return { ...byThreadKey, [threadKey]: next };
+  return setRecentThreadEntry(byThreadKey, threadKey, next);
 };
 
 /**

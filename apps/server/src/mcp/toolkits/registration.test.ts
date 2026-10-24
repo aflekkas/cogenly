@@ -128,7 +128,29 @@ const layerStubServices = Layer.mergeAll(
     launch: () => Effect.succeed({ env: {}, complete: () => Effect.void }),
   }),
   Layer.mock(GlobalSearch.GlobalSearch)({ query: () => Effect.succeed({ results: [] }) }),
-  Layer.mock(ProjectLabels.ProjectLabelService)({ list: () => Effect.succeed({ labels: [] }) }),
+  // Shaped like the real service's rows: unset optional fields are present as
+  // `undefined`, which a tool result must still encode to JSON.
+  Layer.mock(ProjectLabels.ProjectLabelService)({
+    list: () =>
+      Effect.succeed({
+        labels: [
+          {
+            id: ProjectLabelId.make("label:smoke"),
+            name: "MCP smoke",
+            color: undefined,
+            description: undefined,
+            archivedAt: undefined,
+            instructions: "",
+            createdAt: "2026-01-01T00:00:00.000Z",
+            updatedAt: "2026-01-01T00:00:00.000Z",
+            repositoryIds: [],
+            sourceLinks: [],
+            projectChatThreadId: null,
+            threadCount: 0,
+          },
+        ],
+      } as never),
+  }),
   Layer.mock(ProjectFiles.ProjectFiles)({
     folderForThread: () =>
       Effect.succeed({
@@ -201,7 +223,6 @@ const layerStubServices = Layer.mergeAll(
       hosts: [],
       devices: [],
       sessions: [],
-      onboardingCompleted: true,
       agentAccessEnabled: true,
       hubBasePath: "/api/devices/hub",
       revision: 0,
@@ -540,7 +561,7 @@ const smokeCases = [
     ],
     tool: "project_label_list",
     args: {},
-    expected: { labels: [] },
+    expected: { labels: [{ id: "label:smoke", name: "MCP smoke" }] },
   },
   {
     toolkit: "project",
@@ -599,6 +620,7 @@ const smokeCases = [
       "preview_hover",
       "preview_navigate",
       "preview_open",
+      "preview_permission",
       "preview_press",
       "preview_recording_start",
       "preview_recording_stop",
@@ -621,7 +643,14 @@ const smokeCases = [
   },
   {
     toolkit: "device",
-    names: ["device_close", "device_list", "device_open", "device_screenshot"],
+    names: [
+      "device_close",
+      "device_list",
+      "device_open",
+      "device_screenshot",
+      "device_setup",
+      "device_setup_status",
+    ],
     tool: "device_list",
     args: {},
     expected: {

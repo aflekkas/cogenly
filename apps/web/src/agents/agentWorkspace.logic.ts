@@ -16,6 +16,7 @@ import type {
   ProjectId,
   ProjectLabelId,
   ScheduledTaskUpsertSchedule,
+  VaultField,
 } from "@t3tools/contracts";
 
 type CommitmentStatus = Commitment["status"];
@@ -306,10 +307,20 @@ export function describeApproval(
         ],
       };
     case "integration_add":
-      return {
-        title: `Connect ${action.payload.displayName} (${action.payload.name})`,
-        details: [action.payload.url],
-      };
+      return "preset" in action.payload
+        ? {
+            title: `Connect Google · ${action.payload.accountLabel}`,
+            details: [
+              "Gmail, Calendar, Drive, Docs and Sheets, run by Cogenly",
+              ...(action.payload.callbackOrigin === undefined
+                ? []
+                : [`Sign-in returns to ${action.payload.callbackOrigin}`]),
+            ],
+          }
+        : {
+            title: `Connect ${action.payload.displayName} (${action.payload.name})`,
+            details: [action.payload.url],
+          };
     case "integration_update":
       return {
         title: `Change integration ${action.payload.id}`,
@@ -322,6 +333,46 @@ export function describeApproval(
         ],
       };
   }
+}
+
+const VAULT_FIELD_LABEL: Record<VaultField, string> = {
+  username: "username",
+  password: "password",
+  totp: "one-time code",
+  value: "secret",
+  cardNumber: "card number",
+  cardExpiry: "card expiry",
+  cardCvc: "card security code",
+  cardholderName: "cardholder name",
+};
+
+/**
+ * The question an ordinary thread's approval card asks. Allowing one grants
+ * that thread alone (`AgentWorkspaceService.approve`), so the copy says so.
+ * Null for kinds a thread cannot raise.
+ */
+export function describeThreadApproval(
+  approval: Pick<AgentApproval, "action">,
+): ApprovalDescription | null {
+  const action = approval.action;
+  if (action.actionKind !== "vault_use") return null;
+  const { vaultItemName, field, domain, processExposure } = action.payload;
+  if (processExposure !== undefined) {
+    // Accounts write the exposure warning into the item name too; show it once.
+    const name = vaultItemName.replace(processExposure.message, "").trim().replace(/\.$/, "");
+    return {
+      title: `Let this thread use “${name}”?`,
+      details: [processExposure.message],
+    };
+  }
+  const what = `your ${VAULT_FIELD_LABEL[field]}`;
+  return {
+    title:
+      domain === null
+        ? `Use ${what} from “${vaultItemName}”?`
+        : `Fill ${what} for ${domain} from “${vaultItemName}”?`,
+    details: ["Allowing lets this thread use the item from now on."],
+  };
 }
 
 /** Each change as "+ Grant" or "− Grant". */

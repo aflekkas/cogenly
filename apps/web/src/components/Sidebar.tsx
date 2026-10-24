@@ -16,11 +16,7 @@ import { WorkRowStatusMarker } from "./work/WorkRowStatusMarker";
 import { useAtomValue } from "@effect/atom-react";
 import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
 import * as Schema from "effect/Schema";
-import {
-  canSnooze,
-  effectiveSnoozed,
-  threadWokeAt,
-} from "@t3tools/client-runtime/state/thread-settled";
+import { canSnooze, threadWokeAt } from "@t3tools/client-runtime/state/thread-settled";
 import { createInboxReturnTracker } from "@t3tools/client-runtime/state/thread-inbox";
 import { formatDiffCount } from "@t3tools/client-runtime/diff-count";
 import {
@@ -190,10 +186,10 @@ import {
   isTrailingDoubleClick,
   resolveAdjacentThreadId,
   resolveSidebarSweepKeys,
-  resolveSidebarThreadSection,
   resolveSidebarRowAccessibility,
   resolveSidebarThreadStatus,
   resolveThreadLastVisitedAt,
+  resolveThreadListSection,
   searchSidebarThreads,
   shouldNavigateAfterThreadPark,
   shouldRecedeSidebarThread,
@@ -219,6 +215,7 @@ import { resolveSnoozePresets, snoozeWakeLabel, type SnoozePreset } from "./Side
 import { ProjectFavicon, type ProjectFaviconProject } from "./ProjectFavicon";
 import { ThreadSearchMatchExcerpt } from "./ThreadSearchMatch";
 import { makeWorkspaceFileDropHandlers } from "./chat/workspaceFileDrop";
+import { ProviderIconStack } from "./chat/ProviderIconStack";
 import { ProviderInstanceIcon } from "./chat/ProviderInstanceIcon";
 import {
   usageLimitAutoResumeUpdate,
@@ -453,9 +450,13 @@ function WorkingDuration(props: { startedAt: string | null }) {
   return <span className="tabular-nums">{formatWorkingDurationLabel(Date.now() - startedMs)}</span>;
 }
 
+// The stack's chips take the card's fill so the overlap reads as a cut: the
+// resting card (no fill in light themes, so the column), the hover fill, or the
+// selected fill, which wins over hover.
 function SidebarProviderStack(props: {
   thread: SidebarThreadSummary;
   providerEntryByInstanceId: ReadonlyMap<string, ProviderInstanceEntry>;
+  selected: boolean;
 }) {
   const stack = resolveThreadProviderStack(props.thread);
   const currentInstanceId = stack[stack.length - 1]!;
@@ -473,27 +474,39 @@ function SidebarProviderStack(props: {
       showBadge={showInstanceBadge}
       // Glyph dims, the instance dot stays saturated.
       iconClassName="size-3.5 opacity-60"
+      indicatorBackground="var(--provider-stack-ring)"
     />
   );
+  const ringClassName = props.selected
+    ? "[--provider-stack-ring:var(--state-selected-fill)]"
+    : "[--provider-stack-ring:var(--sidebar-card,var(--sidebar))] group-any-hover/sidebar-row:[--provider-stack-ring:var(--state-hover-fill)]";
   if (stack.length === 1) {
-    return <span className="inline-flex shrink-0 items-center">{current}</span>;
+    return (
+      <span className={cn("inline-flex shrink-0 items-center", ringClassName)}>{current}</span>
+    );
   }
-  return (
-    <span className="inline-flex shrink-0 items-center gap-1.5">
-      {stack.slice(0, -1).map((instanceId) => {
-        const entry = props.providerEntryByInstanceId.get(instanceId);
-        if (entry === undefined) return null;
-        return (
+  const earlier = stack.slice(0, -1).flatMap((instanceId) => {
+    const entry = props.providerEntryByInstanceId.get(instanceId);
+    if (entry === undefined) return [];
+    return [
+      {
+        key: instanceId,
+        icon: (
           <ProviderInstanceIcon
-            key={instanceId}
             driverKind={entry.driverKind}
             displayName={entry.displayName}
             iconClassName="size-3 opacity-35 grayscale"
           />
-        );
-      })}
-      <span className="relative z-10 inline-flex items-center">{current}</span>
-    </span>
+        ),
+      },
+    ];
+  });
+  // Oldest first, the current provider last and on top.
+  return (
+    <ProviderIconStack
+      className={ringClassName}
+      items={[...earlier, { key: currentInstanceId, icon: current }]}
+    />
   );
 }
 
@@ -1721,6 +1734,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   // like elevated cards while settled threads were plain rows, leaving neither
   // a useful hierarchy nor a reliable hover cue. Status now lives in the row
   // content; surface is reserved for interaction (hover, multi-select, route).
+  const isCardSelected =
+    props.isActive || isSelected || isContextMenuOpen || props.sweepAction !== null;
   const rowSurfaceClassName = cn(
     // The selected card is the same plain lighter surface as a selected chat
     // row. sidebar-row-motion fades the state change and fades the title out
@@ -1730,7 +1745,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     variantAction === "unsettle" &&
       !hasUnsentDraft &&
       "[&:not(:hover):not(:focus-within)_*]:text-secondary-label/70",
-    props.isActive || isSelected || isContextMenuOpen || props.sweepAction !== null
+    isCardSelected
       ? "state-selected"
       : cn(
           SIDEBAR_CARD_REST_CLASS_NAME,
@@ -2293,6 +2308,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                   <SidebarProviderStack
                     thread={thread}
                     providerEntryByInstanceId={props.providerEntryByInstanceId}
+                    selected={isCardSelected}
                   />
                 </TooltipTrigger>
                 <TooltipPopup side="top">{providerModelLabel}</TooltipPopup>
@@ -2846,16 +2862,10 @@ export default function Sidebar() {
           active.push(thread);
           continue;
         }
-        const capabilities = serverConfigs.get(thread.environmentId)?.environment.capabilities;
-        // Threads on servers without the settlement capability (old server,
-        // or descriptor not loaded yet) never classify as settled: the user
-        // could not un-settle them, so auto-settling them would strand rows in
-        // a tail with no working affordances.
-        const supportsSettlement = capabilities?.threadSettlement === true;
-        const supportsSnooze = capabilities?.threadSnooze === true;
-        const section = resolveSidebarThreadSection({
-          snoozed: supportsSnooze && effectiveSnoozed(thread, { now: preciseNow }),
-          settled: supportsSettlement && thread.settledOverride === "settled",
+        const section = resolveThreadListSection(thread, {
+          chatsMode: false,
+          capabilities: serverConfigs.get(thread.environmentId)?.environment.capabilities,
+          now: preciseNow,
         });
         (section === "snoozed" ? snoozed : section === "settled" ? settled : inbox(thread)).push(
           thread,

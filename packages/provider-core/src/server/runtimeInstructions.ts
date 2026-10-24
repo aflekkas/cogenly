@@ -1,3 +1,5 @@
+import type { IntegrationConnectionStatus } from "@t3tools/contracts";
+
 const PULL_REQUEST_LINKING_INSTRUCTIONS = `<pull_request_linking>
 When the cogenly MCP server exposes link_pull_request, you must use it to register every pull request you create or work on for this thread. Call link_pull_request with the full PR URL immediately after creating a PR or starting work on an existing PR. For a stack, call it for every layer, not just the current branch or the top PR. This applies when creating or updating PRs through gh, gh stack, another CLI, or the host API: those operations do not register the PRs with this thread. Linking an already-linked PR is safe. Before finishing PR work, call list_thread_pull_requests and link any PR from your work that is missing. Do not link unrelated PRs mentioned only as background. If a linking call fails, report that failure instead of claiming the PR is linked. When asked to monitor, watch, or babysit a PR and watch_pull_request is available, call it and end your turn: Cogenly wakes you when checks finish, someone else comments, or the branch conflicts, so do not poll or run your own watcher. When you hand the work back to the user, call unwatch_pull_request first so the thread returns to their inbox.
 </pull_request_linking>`;
@@ -39,35 +41,58 @@ function toSingleLine(value: string): string {
 /** Resource paths listed in the project manifest before `+N more`. */
 export const PROJECT_MANIFEST_MAX_RESOURCES = 30;
 
-/** One connected integration as the context line names it. */
+/** One configured integration and its current health, as the context line names it. */
 export interface IntegrationContextEntry {
+  readonly status: IntegrationConnectionStatus | "disabled";
   readonly name: string;
   readonly displayName: string;
   readonly hint?: string | undefined;
+  /** Which account of the service, e.g. "Spawn Partners". */
+  readonly accountLabel?: string | undefined;
 }
 
 /**
- * The one line every provider turn gets about connected integrations, e.g.
- * "Connected integrations: gmail (Gmail, aflekkas@…), linear. Use
- * integration_tools / integration_call." Empty when none are connected.
+ * The one line every provider turn gets about integrations, e.g.
+ * "Connected integrations: gmail (Gmail, aflekkas@…), linear-spawn (Linear ·
+ * Spawn Partners). Use integration_tools / integration_call. Also available
+ * to connect with integration_add catalogId: notion, slack." `available` are
+ * catalog ids not connected yet. Empty when there is neither.
  */
 export function buildIntegrationsContextLine(
   integrations: ReadonlyArray<IntegrationContextEntry>,
+  available: ReadonlyArray<string> = [],
 ): string {
-  if (integrations.length === 0) return "";
-  const names = integrations.map((integration) => {
+  const availableText =
+    available.length === 0
+      ? ""
+      : `${integrations.length === 0 ? "Integrations available" : "Also available"} to connect with integration_add catalogId: ${available.map(toSingleLine).join(", ")}.`;
+  if (integrations.length === 0) return availableText;
+  const nameOf = (integration: IntegrationContextEntry) => {
     const hint = integration.hint?.trim() ?? "";
+    const account = integration.accountLabel?.trim() ?? "";
     const label =
-      hint.length > 0
-        ? hint
-        : integration.displayName !== integration.name
-          ? integration.displayName
-          : "";
+      account.length > 0
+        ? [`${integration.displayName} · ${account}`, hint].filter(Boolean).join(", ")
+        : hint.length > 0
+          ? hint
+          : integration.displayName !== integration.name
+            ? integration.displayName
+            : "";
     return label.length > 0
       ? `${toSingleLine(integration.name)} (${toSingleLine(label)})`
       : toSingleLine(integration.name);
-  });
-  return `Connected integrations: ${names.join(", ")}. Use integration_tools / integration_call.`;
+  };
+  const working = integrations.filter((entry) => entry.status === "connected");
+  const remaining = integrations.filter((entry) => entry.status !== "connected");
+  const connected =
+    working.length === 0
+      ? ""
+      : `Connected integrations: ${working.map(nameOf).join(", ")}. Use integration_tools / integration_call.`;
+  const other =
+    remaining.length === 0
+      ? ""
+      : `Other integrations: ${remaining.map((entry) => `${nameOf(entry)}: ${entry.status === "needs_sign_in" ? "needs sign-in" : entry.status === "unknown" ? "not checked" : entry.status}`).join(", ")}.`;
+  return [connected, other, availableText].filter(Boolean).join(" ");
 }
 
 /**
@@ -86,6 +111,8 @@ export function buildProjectManifest(input: {
   readonly projectChat?: boolean | undefined;
   /** Connected integrations visible from this project; adds one tiny line. */
   readonly integrations?: ReadonlyArray<IntegrationContextEntry> | undefined;
+  /** Catalog ids not connected yet, named on the same line. */
+  readonly availableIntegrations?: ReadonlyArray<string> | undefined;
 }): string {
   const shown = input.resources.slice(0, PROJECT_MANIFEST_MAX_RESOURCES);
   const files =
@@ -93,9 +120,12 @@ export function buildProjectManifest(input: {
       ? "(no project files yet)"
       : shown.map((resource) => `- ${toSingleLine(resource)}`).join("\n");
   const more = input.total - shown.length;
-  const manifest = `<project_manifest>The thread's project folder is "${toSingleLine(input.name)}" at ${toSingleLine(input.directory)}. Project files:\n${files}${more > 0 ? `\n+${more} more` : ""}\nUse project_recall to search these files and project_file_read to read one.</project_manifest>`;
+  const manifest = `<project_manifest>The thread's project folder is "${toSingleLine(input.name)}" at ${toSingleLine(input.directory)}. Project files:\n${files}${more > 0 ? `\n+${more} more` : ""}\nUse project_recall to search these files and project_file_read to read one. To add a repository to a project, use project_label_clone_repository (it clones into the project folder and registers it); do not git clone by hand.</project_manifest>`;
   const instructions = input.instructions?.trim() ?? "";
-  const integrationsLine = buildIntegrationsContextLine(input.integrations ?? []);
+  const integrationsLine = buildIntegrationsContextLine(
+    input.integrations ?? [],
+    input.availableIntegrations,
+  );
   return [
     manifest,
     ...(integrationsLine.length === 0 ? [] : [integrationsLine]),

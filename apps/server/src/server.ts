@@ -131,6 +131,8 @@ import * as RelayDeliveryProof from "./scheduledTasks/RelayDeliveryProof.ts";
 import * as HeldHooksWaker from "./relay/HeldHooksWaker.ts";
 import * as McpOAuth from "./auth/McpOAuth.ts";
 import * as McpOAuthHttp from "./auth/mcpOAuthHttp.ts";
+import * as IntegrationOAuthHttp from "./integrations/integrationOAuthHttp.ts";
+import * as LocalIntegrationHttp from "./integrations/local/LocalIntegrationHttp.ts";
 import {
   relayHookBaseUrl,
   ScheduledTaskTimeZone,
@@ -414,6 +416,7 @@ const layerCheckpointStore = CheckpointStore.layer.pipe(Layer.provide(layerVcsDr
 const layerPortScanner = PortScanner.layer.pipe(Layer.provide(ProcessRunner.layer));
 
 const layerTerminal = TerminalManager.layer.pipe(
+  Layer.provide(RuntimeLayer.layerVaultProvided),
   Layer.provide(layerPtyAdapter),
   Layer.provide(layerPortScanner),
   Layer.provide(layerNativeTelemetry),
@@ -740,6 +743,8 @@ const layerMakeRoutes = Layer.mergeAll(
     ServerHttp.layerAttachmentUploadRoute,
     ServerHttp.layerImageProxyRoute,
     Health.layerHealthRoute,
+    IntegrationOAuthHttp.layer,
+    LocalIntegrationHttp.layer,
     DeviceHubProxy.layer,
     PeerHttp.layer,
     ServerBrowserStream.routeLayer,

@@ -37,6 +37,7 @@ import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
+import * as ApprovalChanges from "./ApprovalChanges.ts";
 import * as Store from "./AgentStore.ts";
 import * as Folders from "../project/ManagedProjectFolders.ts";
 import * as Labels from "../projectLabels/ProjectLabelService.ts";
@@ -124,6 +125,8 @@ const make = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const changes = yield* PubSub.sliding<void>(1);
   const changed = PubSub.publish(changes, undefined).pipe(Effect.asVoid);
+  // Clients re-read an agent's pending approvals when this list ticks.
+  const approvalChanges = yield* ApprovalChanges.optional;
   const list = () => store.list().pipe(Effect.map((agents) => ({ agents })));
   // The conversation's folder membership is the agent's project, so it also
   // decides the conversation's cwd and project manifest. Like every thread
@@ -353,6 +356,7 @@ const make = Effect.gen(function* () {
                   reason: classifyProviderFailure(failureItem.failure),
                   resetAt: failureItem.failure.resetAt,
                   nowMs: DateTime.toEpochMillis(yield* DateTime.now),
+                  existingUntil: agent.fallbackUntil ?? null,
                 })
               : null;
           const updated = yield* sql.withTransaction(
@@ -421,6 +425,7 @@ const make = Effect.gen(function* () {
           // Filing changes from any surface (a thread move, a deleted folder)
           // change an agent's project.
           const folderChanges = yield* labels.subscribeChanges;
+          const approvals = yield* approvalChanges.subscribe;
           const afterSequence = yield* events.latestSequence().pipe(Effect.mapError(failure));
           const messages = events
             .stream({ afterSequence, eventType: "message.updated", bounded: true })
@@ -445,7 +450,13 @@ const make = Effect.gen(function* () {
           return Stream.concat(
             Stream.fromEffect(list()),
             Stream.mergeAll(
-              [Stream.fromSubscription(subscription), shared.changes, folderChanges, messages],
+              [
+                Stream.fromSubscription(subscription),
+                shared.changes,
+                folderChanges,
+                approvals,
+                messages,
+              ],
               {
                 concurrency: "unbounded",
               },
@@ -503,17 +514,20 @@ const make = Effect.gen(function* () {
             aOptions.every(([key, value]) => bOptions.get(key) === value)
           );
         };
+        // An edit that omits the chain keeps the stored one; only a chain
+        // that actually differs (or a new primary) restarts fallback.
+        const nextChain = input.fallbackChain ?? existing?.fallbackChain ?? [];
         const chainChanged =
           existing !== null &&
           (!sameSelection(input.modelSelection, existing.modelSelection) ||
-            (input.fallbackChain ?? []).length !== (existing.fallbackChain ?? []).length ||
-            (input.fallbackChain ?? []).some(
+            nextChain.length !== (existing.fallbackChain ?? []).length ||
+            nextChain.some(
               (entry, index) => !sameSelection(entry, (existing.fallbackChain ?? [])[index]!),
             ));
         const agent = yield* store.save({
           ...profile,
           ownerMachine,
-          fallbackChain: input.fallbackChain ?? existing?.fallbackChain ?? [],
+          fallbackChain: nextChain,
           projectFolderId: null,
           responsibility: input.responsibility ?? existing?.responsibility ?? "",
           permissions: input.permissions ?? existing?.permissions ?? defaultAgentPermissions,

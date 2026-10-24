@@ -41,6 +41,110 @@ const HANDOFF_DELAY_MS = 2_000;
  */
 export const PREPARED_TIMEOUT_MS = 30 * 60_000;
 const TERMINATE_GRACE_MS = 5_000;
+
+/**
+ * The boot unit is `Type=notify` with `WatchdogSec=60` and
+ * `TimeoutStartSec=180` (see `renderBootServiceUnit`). Only the launcher is
+ * alive in every phase — idle with no child, the update handoff, the
+ * pre-trial database backup, and a trial child's synchronous migrations —
+ * so the launcher owns sd_notify and the server child's own watchdog is a
+ * second, redundant pinger (`NotifyAccess=all` allows both).
+ */
+/** Ping at a third of `WatchdogSec=60` so two lost pings still land in time. */
+export const WATCHDOG_PING_INTERVAL_MS = 20_000;
+/** Two minutes per extension: a backup or migration re-extends on every tick. */
+export const EXTEND_TIMEOUT_USEC = 120_000_000;
+
+export type LauncherNotifyPhase = "starting" | "running" | "idle" | "long-operation";
+
+/** Pure notify decision for one tick: which sd_notify messages to send. */
+export function launcherNotifyMessages(
+  phase: LauncherNotifyPhase,
+  readySent: boolean,
+): ReadonlyArray<string> {
+  switch (phase) {
+    case "starting":
+      // Extend the start timeout and feed the watchdog. A normal child
+      // sends READY itself, so the launcher may never learn readiness
+      // happened (`readySent` stays false), yet systemd still expects
+      // WATCHDOG pings after READY: a first-update migration longer
+      // than WatchdogSec would otherwise be killed mid-flight.
+      return [`EXTEND_TIMEOUT_USEC=${EXTEND_TIMEOUT_USEC}`, "WATCHDOG=1"];
+    case "running":
+      return ["WATCHDOG=1"];
+    case "idle":
+      // No child will ever send READY in this phase, so the launcher does.
+      return readySent ? ["WATCHDOG=1"] : ["READY=1", "WATCHDOG=1"];
+    case "long-operation":
+      return [`EXTEND_TIMEOUT_USEC=${EXTEND_TIMEOUT_USEC}`, "WATCHDOG=1"];
+  }
+}
+
+export function launcherNotifyEnabled(platform: string, notifySocket: string | undefined): boolean {
+  return platform === "linux" && notifySocket !== undefined && notifySocket.length > 0;
+}
+
+function sendSystemdNotify(messages: ReadonlyArray<string>): void {
+  // systemd supplies this sd_notify wrapper; Node has no built-in Unix
+  // datagram transport. Fire-and-forget: a lost ping is retried next tick.
+  NodeChildProcess.execFile(
+    "systemd-notify",
+    [...messages],
+    { env: { NOTIFY_SOCKET: process.env.NOTIFY_SOCKET } },
+    () => undefined,
+  );
+}
+
+/** Owns the launcher's sd_notify state: current phase and whether READY went out. */
+export class LauncherNotifier {
+  #phase: LauncherNotifyPhase = "starting";
+  #readySent = false;
+  #timer: NodeJS.Timeout | undefined;
+  readonly #send: (messages: ReadonlyArray<string>) => void;
+  readonly #enabled: boolean;
+
+  constructor(
+    options: {
+      readonly send?: (messages: ReadonlyArray<string>) => void;
+      readonly enabled?: boolean;
+    } = {},
+  ) {
+    this.#send = options.send ?? sendSystemdNotify;
+    this.#enabled =
+      options.enabled ??
+      // oxlint-disable-next-line t3code/no-global-process-runtime -- Standalone launcher has no Effect runtime.
+      launcherNotifyEnabled(process.platform, process.env.NOTIFY_SOCKET);
+  }
+
+  setPhase(phase: LauncherNotifyPhase): void {
+    this.#phase = phase;
+  }
+
+  /** Sends READY exactly once (a trial child reported prepared); later calls only ping. */
+  markChildReady(): void {
+    this.#phase = "running";
+    if (this.#readySent) return;
+    this.#readySent = true;
+    if (this.#enabled) this.#send(["READY=1", "WATCHDOG=1"]);
+  }
+
+  tick(): void {
+    if (!this.#enabled) return;
+    const messages = launcherNotifyMessages(this.#phase, this.#readySent);
+    if (messages.includes("READY=1")) this.#readySent = true;
+    this.#send(messages);
+  }
+
+  start(): void {
+    if (!this.#enabled || this.#timer !== undefined) return;
+    this.#timer = setInterval(() => this.tick(), WATCHDOG_PING_INTERVAL_MS);
+  }
+
+  stop(): void {
+    clearInterval(this.#timer);
+    this.#timer = undefined;
+  }
+}
 // Matches SERVER_EXIT_CODE_STATE_DIR_OWNED in contracts. The standalone
 // launcher stays independent of the Effect-backed contracts package.
 const STATE_DIR_OWNED_EXIT_CODE = 78;
@@ -474,6 +578,7 @@ export class Launcher {
   #done = false;
   readonly #completion = Promise.withResolvers<void>();
   readonly #backupSpaceProbe: Partial<BackupSpaceProbe> | undefined;
+  readonly #notifier = new LauncherNotifier();
 
   constructor(
     baseDir: string,
@@ -491,10 +596,12 @@ export class Launcher {
     const onSigint = () => void this.stop("SIGINT");
     process.once("SIGTERM", onSigterm);
     process.once("SIGINT", onSigint);
+    this.#notifier.start();
     try {
       this.#enqueue(() => this.#recover());
       await this.#completion.promise;
     } finally {
+      this.#notifier.stop();
       process.off("SIGTERM", onSigterm);
       process.off("SIGINT", onSigint);
     }
@@ -590,6 +697,9 @@ export class Launcher {
   }
 
   async #startTrial(pending: PendingServiceUpdate): Promise<void> {
+    // The backup (and the trial's migrations after it) can outlast the
+    // watchdog window with no child able to ping: extend and ping here.
+    this.#notifier.setPhase("long-operation");
     // The previous child is dead here, so all three SQLite files are quiescent.
     try {
       await backupDatabaseOnce(this.#baseDir, pending);
@@ -605,6 +715,9 @@ export class Launcher {
   }
 
   async #startChild(version: string, role: ChildRole, update?: ServiceUpdateRecord): Promise<void> {
+    // A starting child cannot ping yet (migrations run synchronously on its
+    // main thread): extend the start timeout until it can.
+    this.#notifier.setPhase("starting");
     if (this.#stopping) return;
     if (!(await runtimeExists(this.#baseDir, version))) {
       throw new Error(`Selected t3@${version} runtime is missing or incomplete.`);
@@ -739,6 +852,8 @@ export class Launcher {
     }
     this.#timer = undefined;
     this.#child = null;
+    // The handoff gap has no live child to ping the watchdog.
+    this.#notifier.setPhase("long-operation");
     await terminateChild(child.process);
     await this.#startTrial(pending);
   }
@@ -758,6 +873,8 @@ export class Launcher {
       throw new Error("Trial child reported prepared for an unexpected update.");
     }
     this.#clearTimer();
+    // The trial child is ready: the launcher sends READY for it.
+    this.#notifier.markChildReady();
     const committed = terminalUpdate({ pending, status: "committed" });
     const next: ServiceState = {
       ...this.#state,
@@ -822,6 +939,8 @@ export class Launcher {
    */
   async #idleWhileStateDirOwned(): Promise<void> {
     this.#clearTimer();
+    // No child exists in this phase; the launcher keeps the unit alive.
+    this.#notifier.setPhase("idle");
     const pending = this.#state.update;
     if (pending?.status === "pending") {
       const next: ServiceState = {
