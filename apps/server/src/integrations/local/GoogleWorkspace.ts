@@ -132,7 +132,6 @@ export const googleWorkspaceSpec = (input: {
     WORKSPACE_MCP_DISABLE_LOCAL_FILES: "true",
   },
   secrets: [
-    input.clientId,
     input.clientSecret,
     ...(input.credentialBridge ? [input.credentialBridge.capability] : []),
   ],

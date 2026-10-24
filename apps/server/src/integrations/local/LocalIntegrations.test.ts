@@ -272,6 +272,7 @@ describe("managed Google integrations", () => {
         expect(concurrentAuth.url).toBe(auth.url);
         expect(auth.connected).toBe(false);
         expect(new URL(auth.url!).hostname).toBe("accounts.google.com");
+        expect(new URL(auth.url!).searchParams.get("client_id")).toBe("fake-client-id");
         // Reopening the link reuses the outstanding consent flow rather than minting another refresh token.
         expect((yield* local.authorize(ticket)).url).toBe(auth.url);
         const signInResponse = yield* get(signIn.authorizationUrl);
