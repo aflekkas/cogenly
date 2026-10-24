@@ -1,9 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
-import {
-  isRemoteRepositoryPlaceholder,
-  type EnvironmentId,
-  type ProjectLabelId,
-} from "@t3tools/contracts";
+import type { EnvironmentId, ProjectLabelId } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { FolderIcon, FolderPlusIcon, LaptopMinimalIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -18,6 +14,7 @@ import {
   type EnvironmentProjectLabel,
   type ProjectLabelKey,
 } from "../../projectLabels/projectLabels.logic";
+import { projectRepositoryLinks } from "../../projectLabels/repositoryPicker.logic";
 import { useProjectContents } from "../../projectLabels/useProjectContents";
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import { environmentPresentations } from "../../state/presentation";
@@ -270,9 +267,8 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
                       entry={entry}
                       summary={
                         projectPanelSummary({
-                          repositories: entry.label.repositoryIds.filter(
-                            (id) => !isRemoteRepositoryPlaceholder(id),
-                          ).length,
+                          // Every linked repository, as the project page lists them.
+                          repositories: projectRepositoryLinks(entry.label).length,
                           chats: contents?.chats.length ?? 0,
                           work: contents?.work.length ?? 0,
                           files: 0,

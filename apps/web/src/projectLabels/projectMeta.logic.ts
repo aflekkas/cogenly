@@ -8,7 +8,6 @@ import { normalizeProjectPathForComparison } from "@t3tools/shared/path";
 
 import {
   projectLabelKey,
-  scopedRepositoryKey,
   threadProjectFolderId,
   type EnvironmentProjectLabel,
   type ProjectLabelKey,
@@ -195,21 +194,6 @@ export function isPickableRepository(
 }
 
 /**
- * The repositories the Work hero's repository picker lists: the ones
- * `project` holds (on its machine), or without a project the ones no project
- * holds. Picking a repository never changes the project. Order is kept.
- */
-export function repositoriesInProject<Item>(input: {
-  readonly items: ReadonlyArray<Item>;
-  readonly refsOf: (item: Item) => ReadonlyArray<RepositoryRef>;
-  readonly project: EnvironmentProjectLabel | null;
-  /** Every known project, to tell which repositories are in none. */
-  readonly projects: ReadonlyArray<EnvironmentProjectLabel>;
-}): Item[] {
-  return input.items.filter((item) => belongsTo(input.project, input.projects, input.refsOf(item)));
-}
-
-/**
  * The repository a Work draft moves to when its project is picked: the
  * current one while it belongs to the project, else the project's most
  * recently active one (the first on a tie). A null project ("No project")
@@ -243,20 +227,25 @@ export function projectDefaultRepository<Item>(input: {
 
 /**
  * The project a Work draft records for its thread once it targets
- * `repository`: none when that is the repository's own project, which Work
- * follows anyway, else `project` while it is on the repository's machine.
+ * `repository`: the draft's project, kept explicitly (also when it is the
+ * repository's own, so a repository cloned or linked a moment ago, or filed
+ * in another project later, never drops the pick). Projects sync across
+ * machines, so a repository on another machine keeps the project when that
+ * machine has it too. Null without a project, or when the repository's
+ * machine does not have it.
  */
 export function workDraftFolderId(input: {
   readonly repository: RepositoryRef;
   readonly project: EnvironmentProjectLabel | null;
-  readonly folderByRepository: ReadonlyMap<string, EnvironmentProjectLabel>;
+  /** Every known project, by key, to find `project` on the repository's machine. */
+  readonly byKey: ReadonlyMap<ProjectLabelKey, EnvironmentProjectLabel>;
 }): ProjectLabelId | null {
   const { project, repository } = input;
-  if (project === null || project.environmentId !== repository.environmentId) return null;
-  const own = input.folderByRepository.get(
-    scopedRepositoryKey(repository.environmentId, repository.projectId),
-  );
-  return own?.key === project.key ? null : project.label.id;
+  if (project === null) return null;
+  if (project.environmentId === repository.environmentId) return project.label.id;
+  return input.byKey.has(projectLabelKey(repository.environmentId, project.label.id))
+    ? project.label.id
+    : null;
 }
 
 /** The collapsed groups after toggling `groupKey`. */

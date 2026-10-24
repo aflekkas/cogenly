@@ -22,7 +22,7 @@ import {
   PlusIcon,
   SquarePenIcon,
 } from "lucide-react";
-import { useMemo, useRef, useState, type DragEvent as ReactDragEvent } from "react";
+import { Fragment, useMemo, useRef, useState, type DragEvent as ReactDragEvent } from "react";
 
 import { useAgents, useAgentsClient } from "../../agents/agentsClient";
 import type { AgentContact } from "../../agents/agents.types";
@@ -38,7 +38,6 @@ import {
 import { formatBytes } from "../../lib/formatBytes";
 import { randomUUID } from "../../lib/utils";
 import type { EnvironmentProjectLabel } from "../../projectLabels/projectLabels.logic";
-import type { useEnvironmentRepositories } from "../../projectLabels/ProjectLabelEditorDialog";
 import { ProjectRepositoryPicker } from "../../projectLabels/ProjectRepositoryPicker";
 import { ProjectSourceLinkField } from "../../projectLabels/ProjectSourceLinks";
 import {
@@ -48,12 +47,22 @@ import {
   projectSourceLinkLabel,
   sortProjectSourceLinks,
 } from "../../projectLabels/projectSourceLinks.logic";
-import { gitHubRepositoryOf } from "../../projectLabels/repositoryPicker.logic";
+import {
+  gitHubRepositoryOf,
+  repositoryRowAction,
+} from "../../projectLabels/repositoryPicker.logic";
+import {
+  RepositoryRowError,
+  RepositoryRowIcon,
+  RepositoryRowMenu,
+  RepositoryRowStatus,
+} from "../../projectLabels/RepositorySourceRows";
 import { reportProjectFolderFailure } from "../../projectLabels/useMoveThreadToFolder";
 import {
-  useCanRemoveRepositoryFromProject,
-  useRemoveRepositoryFromProject,
-} from "../../projectLabels/useRemoveRepositoryFromProject";
+  useRepositoryCheckouts,
+  useRepositoryRowActions,
+} from "../../projectLabels/useRepositoryCheckout";
+import type { RepositoryRow } from "../../projectLabels/useRepositoryPicker";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { buildThreadRouteParams } from "../../threadRoutes";
@@ -62,7 +71,6 @@ import { AnimatedHeight } from "../AnimatedHeight";
 import { avatarFaceProps } from "../agents/face/agentAvatar.logic";
 import { AgentFace } from "../agents/face";
 import { GitHubIcon } from "../Icons";
-import { ProjectFavicon } from "../ProjectFavicon";
 import { resolveSidebarThreadStatus } from "../Sidebar.logic";
 import { chatActivityAt } from "../sidebar/modes/sidebarModes.logic";
 import { Button } from "../ui/button";
@@ -79,8 +87,6 @@ import { mixProjectRecent, projectRecentPip, type ProjectRecentPip } from "./pro
 import { sortRecentFirst } from "./projectPanel.logic";
 
 const NO_PERMISSION = "You don't have permission to change projects here.";
-
-type Repositories = ReturnType<typeof useEnvironmentRepositories>;
 
 /** Removals in flight, so their rows fade while the server drops them. */
 function useRemoving() {
@@ -106,64 +112,88 @@ async function confirmRemoval(message: string): Promise<boolean> {
   );
 }
 
+/**
+ * Every repository the project links, as the pickers list it, with its state
+ * on this page's machine: one not cloned here reads "Clone to set up" and
+ * clicking it clones it; a cloned one opens its settings. Its ⋯ menu moves
+ * it into the project folder, removes it from this machine, or takes it out
+ * of the project.
+ */
 export function RepositoriesCard(props: {
   readonly environmentId: EnvironmentId;
-  readonly label: ProjectLabelWithRepositories;
   readonly folder: EnvironmentProjectLabel;
-  readonly repositories: Repositories;
-  readonly linkedRepositories: Repositories;
-  readonly folderByRepository: ReadonlyMap<string, EnvironmentProjectLabel>;
+  /** `linkedRepositoryRows` for the project on this machine. */
+  readonly rows: ReadonlyArray<RepositoryRow>;
   readonly onOpenRepository: (repositoryId: ProjectId) => void;
 }) {
-  const { environmentId, label } = props;
+  const { environmentId, rows } = props;
   const canLink = useAtomValue(
     serverEnvironment.linkProjectLabelRepository.permissionAtom(environmentId),
   );
-  const canUnlink = useCanRemoveRepositoryFromProject(environmentId);
-  const removeFromProject = useRemoveRepositoryFromProject();
-  const { removing, run } = useRemoving();
+  const checkouts = useRepositoryCheckouts(environmentId);
+  const rowActions = useRepositoryRowActions(environmentId);
   const arrived = useArrivedKeys(
-    props.linkedRepositories.map((repository) => repository.id),
+    rows.map((row) => row.key),
     true,
   );
-  const remove = (repositoryId: ProjectId, title: string) =>
-    run(repositoryId, async () => {
-      await removeFromProject({ project: props.folder, repositoryId, title });
-    });
+  const rowIcon = (row: RepositoryRow) => (
+    <RepositoryRowIcon local={row.local} remote={row.remote} className="size-3.5" />
+  );
   return (
     <ProjectCard
       icon={<FolderGit2Icon />}
       title="Repositories"
-      count={props.linkedRepositories.length}
+      count={rows.length}
       add={
         <ProjectRepositoryPicker
           folder={props.folder}
-          repositories={props.repositories}
-          folderByRepository={props.folderByRepository}
           disabled={!canLink}
           triggerLabel="Add repository"
           iconOnly
         />
       }
-      isEmpty={props.linkedRepositories.length === 0}
-      empty="No repositories yet. Add one from this machine, and its Work files here too."
+      isEmpty={rows.length === 0}
+      empty="No repositories yet. Add one from this machine or GitHub, and its Work files here too."
     >
-      {props.linkedRepositories.map((repository) => (
-        <ProjectCardRow
-          key={repository.id}
-          icon={<ProjectFavicon project={repository} />}
-          title={repository.title}
-          // The GitHub repository it was cloned from, as the pickers mark it.
-          meta={gitHubRepositoryOf(repository.repositoryIdentity) ?? undefined}
-          arrived={arrived.has(repository.id)}
-          removing={removing.has(repository.id)}
-          onOpen={() => props.onOpenRepository(repository.id)}
-          ariaLabel={`Repository settings for ${repository.title}`}
-          onRemove={() => void remove(repository.id, repository.title)}
-          removeLabel={`Remove ${repository.title} from ${label.name}`}
-          removeDisabledReason={canUnlink ? null : NO_PERMISSION}
-        />
-      ))}
+      {rows.map((row) => {
+        const view = checkouts.viewOf(row);
+        const action = repositoryRowAction(row);
+        const { project, repositoryId } = row;
+        const onOpen =
+          action === "select" && repositoryId !== null
+            ? () => props.onOpenRepository(repositoryId)
+            : action === "checkout" &&
+                project !== null &&
+                checkouts.canCheckout &&
+                view.kind !== "starting"
+              ? () => void checkouts.start({ ...row, project })
+              : undefined;
+        return (
+          <Fragment key={row.key}>
+            <ProjectCardRow
+              icon={rowIcon(row)}
+              title={row.name}
+              meta={
+                // Once cloned, the GitHub repository it came from, as before.
+                view.kind === "ready" ? (
+                  (row.detail ?? gitHubRepositoryOf(row.local?.repositoryIdentity) ?? undefined)
+                ) : (
+                  <RepositoryRowStatus view={view} />
+                )
+              }
+              arrived={arrived.has(row.key)}
+              {...(onOpen ? { onOpen } : {})}
+              ariaLabel={
+                action === "checkout"
+                  ? `Clone ${row.name} to this machine`
+                  : `Repository settings for ${row.name}`
+              }
+              menu={<RepositoryRowMenu label={`${row.name} actions`} actions={rowActions(row)} />}
+            />
+            <RepositoryRowError view={view} name={row.name} className="ps-7" />
+          </Fragment>
+        );
+      })}
     </ProjectCard>
   );
 }

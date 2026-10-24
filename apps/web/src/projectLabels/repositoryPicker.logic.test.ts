@@ -1,14 +1,31 @@
-import type { ProjectLabelOwnerRepository, RepositoryIdentity } from "@t3tools/contracts";
+import {
+  type EnvironmentId,
+  ProjectId,
+  ProjectLabelId,
+  type ProjectLabelOwnerRepository,
+  type ProjectLabelRepositoryLink,
+  type ProjectLabelWithRepositories,
+  type ProjectSourceLink,
+  type RepositoryIdentity,
+} from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
+import { projectLabelKey, type EnvironmentProjectLabel } from "./projectLabels.logic";
 import {
+  addRepositoryOptions,
+  canMoveIntoProjectFolder,
+  canRemoveCheckout,
   describeCloneFailure,
   gitHubRepositoryKeys,
   gitHubRepositoryOf,
-  groupRepositoriesByMachine,
+  linkedRepositoryRows,
+  machineRepositoryRows,
+  projectRepositoryLinks,
   REMOTE_ROWS_PREVIEW_LIMIT,
   remoteRowsOutsideProject,
-  remoteSectionRows,
+  repositoryRowAction,
+  repositoryRowView,
+  type RepositoryListLocal,
 } from "./repositoryPicker.logic";
 
 function identity(canonicalKey: string, origin?: string): RepositoryIdentity {
@@ -99,69 +116,340 @@ describe("any GitHub remote", () => {
   });
 });
 
-describe("remoteSectionRows", () => {
+const mac = "mac" as EnvironmentId;
+
+function link(
+  repositoryId: string,
+  remote: string | null,
+  directoryName: string | null,
+  checkout?: ProjectLabelRepositoryLink["checkout"],
+): ProjectLabelRepositoryLink {
+  return {
+    repositoryId: ProjectId.make(repositoryId),
+    remote,
+    directoryName,
+    ...(checkout ? { checkout } : {}),
+  };
+}
+
+function project(
+  id: string,
+  name: string,
+  links: ReadonlyArray<ProjectLabelRepositoryLink> | undefined,
+  sourceLinks: ReadonlyArray<ProjectSourceLink> = [],
+  repositoryIds: ReadonlyArray<string> = links?.map((entry) => entry.repositoryId) ?? [],
+): EnvironmentProjectLabel {
+  const label: ProjectLabelWithRepositories = {
+    id: ProjectLabelId.make(id),
+    name,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    repositoryIds: repositoryIds.map((repositoryId) => ProjectId.make(repositoryId)),
+    ...(links ? { repositories: links } : {}),
+    sourceLinks,
+    threadCount: 0,
+    instructions: "",
+    projectChatThreadId: null,
+  };
+  return { key: projectLabelKey(mac, id), environmentId: mac, label };
+}
+
+function local(
+  id: string,
+  title: string,
+  workspaceRoot: string,
+  canonicalKey?: string,
+): RepositoryListLocal {
+  return {
+    id: ProjectId.make(id),
+    title,
+    workspaceRoot,
+    ...(canonicalKey ? { repositoryIdentity: identity(canonicalKey) } : {}),
+  };
+}
+
+const spawnOwner: ProjectSourceLink = { kind: "github-owner", owner: "Spawn-Partners" };
+const spawn = project(
+  "spawn",
+  "Spawn Partners",
+  [
+    link("platform-id", "github.com/Spawn-Partners/platform", "platform", "ready"),
+    link(
+      "remote:github.com/aflekkas/athens-racing",
+      "github.com/aflekkas/athens-racing",
+      "aflekkas/athens-racing",
+      "not_cloned",
+    ),
+    link("finance-id", "github.com/Spawn-Partners/finance", "finance", "missing"),
+    link("cloning-id", "github.com/Spawn-Partners/site", "site", "cloning"),
+    link("notes-id", null, "notes"),
+  ],
+  [spawnOwner],
+);
+const bartr = project(
+  "bartr",
+  "Bartr",
+  [link("bartr-platform-id", "github.com/bartr-app/platform", "platform", "ready")],
+  [{ kind: "github-owner", owner: "bartr-app" }],
+);
+const platformCheckout = local(
+  "platform-id",
+  "platform",
+  "/Users/me/Projects/Spawn Partners/repos/platform",
+  "github.com/Spawn-Partners/platform",
+);
+const bartrCheckout = local(
+  "bartr-platform-id",
+  "Bartr Platform",
+  "/Users/me/Code/bartr-platform",
+  "github.com/bartr-app/platform",
+);
+const notesCheckout = local("notes-id", "notes", "/Users/me/Projects/Spawn Partners/repos/notes");
+const looseCheckout = local("loose-id", "loose", "/Users/me/Code/loose");
+const byId = (locals: ReadonlyArray<RepositoryListLocal>) =>
+  new Map(locals.map((entry) => [entry.id as string, entry] as const));
+
+describe("linkedRepositoryRows", () => {
+  const rows = linkedRepositoryRows({
+    project: spawn,
+    localById: byId([platformCheckout, notesCheckout]),
+  });
+
+  it("lists every linked repository once, flat and by name, whatever its state here", () => {
+    expect(rows.map((row) => [row.name, row.checkout])).toEqual([
+      ["aflekkas/athens-racing", "not_cloned"],
+      ["finance", "missing"],
+      ["notes", "ready"],
+      ["platform", "ready"],
+      ["site", "cloning"],
+    ]);
+    // The overview's count is this list's length.
+    expect(projectRepositoryLinks(spawn.label)).toHaveLength(rows.length);
+  });
+
+  it("names each by its folder under repos/ and keeps another machine's link record-free", () => {
+    const athens = rows.find((row) => row.name === "aflekkas/athens-racing");
+    expect(athens).toMatchObject({
+      repositoryId: null,
+      local: null,
+      remote: "github.com/aflekkas/athens-racing",
+      detail: null,
+      key: "remote:github.com/aflekkas/athens-racing",
+    });
+    expect(rows.find((row) => row.name === "platform")?.local).toBe(platformCheckout);
+  });
+
+  it("leads with the draft's repository", () => {
+    const led = linkedRepositoryRows({
+      project: spawn,
+      localById: byId([platformCheckout]),
+      leadRepositoryId: ProjectId.make("platform-id"),
+    });
+    expect(led[0]?.name).toBe("platform");
+  });
+
+  it("reads an older server's ids as links: a record is cloned, a placeholder is not", () => {
+    const old = project("old", "Old", undefined, [], ["platform-id", "remote:github.com/spawn/x"]);
+    const oldRows = linkedRepositoryRows({ project: old, localById: byId([platformCheckout]) });
+    expect(oldRows.map((row) => [row.name, row.checkout, row.remote])).toEqual([
+      ["platform", "ready", null],
+      // Its remote comes from the placeholder id, so it can still be cloned here.
+      ["x", "not_cloned", "github.com/spawn/x"],
+    ]);
+  });
+
+  it("tells same-named repositories apart by owner, never by renaming", () => {
+    const mixed = project(
+      "mixed",
+      "Mixed",
+      [link("a", "github.com/Spawn-Partners/platform", "platform"), link("b", null, "platform")],
+      [spawnOwner],
+    );
+    const named = linkedRepositoryRows({ project: mixed, localById: new Map() });
+    expect(named.map((row) => [row.name, row.detail])).toEqual([
+      ["platform", "No remote"],
+      ["platform", "Spawn-Partners"],
+    ]);
+  });
+});
+
+describe("machineRepositoryRows", () => {
+  const rows = machineRepositoryRows({
+    locals: [bartrCheckout, platformCheckout, looseCheckout],
+    projects: [bartr, spawn],
+  });
+
+  it("lists the machine's repositories, a linked one named and stated as its project has it", () => {
+    expect(rows.map((row) => row.name)).toEqual(["loose", "platform", "platform"]);
+    expect(rows.find((row) => row.local === looseCheckout)).toMatchObject({
+      project: null,
+      checkout: "ready",
+      detail: null,
+    });
+  });
+
+  it("tells two projects' platform apart by project", () => {
+    expect(
+      rows.filter((row) => row.name === "platform").map((row) => [row.detail, row.local?.id]),
+    ).toEqual([
+      ["Bartr", "bartr-platform-id"],
+      ["Spawn Partners", "platform-id"],
+    ]);
+  });
+});
+
+describe("row actions", () => {
+  const rows = linkedRepositoryRows({
+    project: spawn,
+    localById: byId([platformCheckout]),
+  });
+  const named = (name: string) => rows.find((row) => row.name === name)!;
+
+  it("picks a cloned repository, clones one that is not here, waits on one cloning", () => {
+    expect(repositoryRowAction(named("platform"))).toBe("select");
+    expect(repositoryRowAction(named("aflekkas/athens-racing"))).toBe("checkout");
+    expect(repositoryRowAction(named("finance"))).toBe("checkout");
+    expect(repositoryRowAction(named("site"))).toBe("wait");
+    // Linked and cloned, but its record has not reached this window yet.
+    expect(repositoryRowAction(named("notes"))).toBe("wait");
+  });
+
+  it("offers Remove from this machine only for a cloned repository with a remote", () => {
+    expect(canRemoveCheckout(named("platform"))).toBe(true);
+    expect(canRemoveCheckout(named("aflekkas/athens-racing"))).toBe(false);
+    expect(canRemoveCheckout({ ...named("notes"), local: notesCheckout })).toBe(false);
+  });
+
+  it("offers Move into project folder only for a checkout outside repos/<name>", () => {
+    expect(canMoveIntoProjectFolder(named("platform"))).toBe(false);
+    const elsewhere = { ...named("platform"), local: bartrCheckout };
+    expect(canMoveIntoProjectFolder(elsewhere)).toBe(true);
+    expect(canMoveIntoProjectFolder(named("aflekkas/athens-racing"))).toBe(false);
+    expect(
+      canMoveIntoProjectFolder({
+        ...named("platform"),
+        local: local("platform-id", "platform", "C:\\Projects\\Spawn\\repos\\platform\\"),
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("repositoryRowView", () => {
+  const clone = (
+    phase: "running" | "failed" | "done",
+    sequence: number,
+    error: string | null = null,
+  ) => ({ phase, stage: "receiving" as const, percent: 42, detail: null, error, sequence });
+
+  it("reads the link's state when nothing was asked here", () => {
+    expect(repositoryRowView({ checkout: "ready" }, null, null)).toEqual({ kind: "ready" });
+    expect(repositoryRowView({ checkout: "not_cloned" }, null, null)).toEqual({
+      kind: "needs-clone",
+    });
+    expect(repositoryRowView({ checkout: "missing" }, null, null)).toEqual({
+      kind: "needs-clone",
+    });
+    expect(repositoryRowView({ checkout: "failed" }, null, clone("failed", 3, "boom"))).toEqual({
+      kind: "failed",
+      message: "boom",
+    });
+  });
+
+  it("shows git's own progress while the clone runs, and no number it does not have", () => {
+    const running = repositoryRowView({ checkout: "cloning" }, null, clone("running", 1));
+    expect(running.kind).toBe("cloning");
+    expect(running.kind === "cloning" ? running.progress : null).toContain("42%");
+    expect(repositoryRowView({ checkout: "cloning" }, null, null)).toEqual({
+      kind: "cloning",
+      progress: null,
+    });
+  });
+
+  it("starts, then follows the server, never mistaking the older failure for the retry", () => {
+    const repositoryId = ProjectId.make("finance-id");
+    expect(repositoryRowView({ checkout: "failed" }, { phase: "starting" }, null)).toEqual({
+      kind: "starting",
+    });
+    const started = { phase: "started" as const, repositoryId, baselineSequence: 3 };
+    expect(repositoryRowView({ checkout: "failed" }, started, clone("failed", 3, "old"))).toEqual({
+      kind: "starting",
+    });
+    expect(repositoryRowView({ checkout: "failed" }, started, clone("failed", 7, "new"))).toEqual({
+      kind: "failed",
+      message: "new",
+    });
+    expect(repositoryRowView({ checkout: "ready" }, started, null)).toEqual({ kind: "ready" });
+  });
+
+  it("shows a refused clone with the server's words", () => {
+    expect(
+      repositoryRowView(
+        { checkout: "not_cloned" },
+        { phase: "error", message: "No access." },
+        null,
+      ),
+    ).toEqual({ kind: "failed", message: "No access." });
+  });
+});
+
+describe("addRepositoryOptions", () => {
   const many = Array.from({ length: REMOTE_ROWS_PREVIEW_LIMIT + 3 }, (_, index) =>
-    repo(`spawn/repo-${index}`),
+    repo(`Spawn-Partners/repo-${index}`),
   );
 
-  it("names a result by owner when a local checkout answers to a same-named repository", () => {
-    // bartr-platform is bartr-app/platform; another owner's "platform" must not read as it.
-    const { rows } = remoteSectionRows({
-      repositories: [repo("mediamaxxing/platform"), repo("aflekkas/pane-browser")],
-      local: [identity("github.com/bartr-app/platform")],
+  it("offers this machine's other repositories, then GitHub's, named as they will be", () => {
+    const { options } = addRepositoryOptions({
+      project: spawn,
+      locals: [platformCheckout, bartrCheckout, looseCheckout],
+      folderOf: (candidate) => (candidate.id === bartrCheckout.id ? bartr : null),
+      gitHub: [
+        repo("Spawn-Partners/platform"),
+        repo("aflekkas/athens-racing"),
+        repo("Spawn-Partners/billing"),
+        repo("mediamaxxing/billing"),
+      ],
       searching: false,
       expanded: false,
     });
-    expect(rows.map((row) => row.label)).toEqual(["mediamaxxing/platform", "pane-browser"]);
+    expect(
+      options.map((option) => [
+        option.kind,
+        option.name,
+        option.kind === "local" ? (option.from?.label.name ?? null) : null,
+      ]),
+    ).toEqual([
+      ["local", "Bartr Platform", "Bartr"],
+      ["local", "loose", null],
+      ["github", "billing", null],
+      ["github", "mediamaxxing/billing", null],
+    ]);
   });
 
-  it("names results by owner when two share a name", () => {
-    const { rows } = remoteSectionRows({
-      repositories: [repo("spawn/finance"), repo("other/finance")],
-      local: [],
+  it("previews a few GitHub results until expanded or searched", () => {
+    const preview = addRepositoryOptions({
+      project: spawn,
+      locals: [],
+      folderOf: () => null,
+      gitHub: many,
       searching: false,
       expanded: false,
     });
-    expect(rows.map((row) => row.label)).toEqual(["spawn/finance", "other/finance"]);
-  });
-
-  it("previews a few results until expanded or searched", () => {
-    const preview = remoteSectionRows({
-      repositories: many,
-      local: [],
-      searching: false,
-      expanded: false,
-    });
-    expect(preview.rows).toHaveLength(REMOTE_ROWS_PREVIEW_LIMIT);
+    expect(preview.options).toHaveLength(REMOTE_ROWS_PREVIEW_LIMIT);
     expect(preview.hidden).toBe(3);
     for (const mode of [
       { searching: true, expanded: false },
       { searching: false, expanded: true },
     ]) {
-      const all = remoteSectionRows({ repositories: many, local: [], ...mode });
-      expect(all.rows).toHaveLength(many.length);
+      const all = addRepositoryOptions({
+        project: spawn,
+        locals: [],
+        folderOf: () => null,
+        gitHub: many,
+        ...mode,
+      });
+      expect(all.options).toHaveLength(many.length);
       expect(all.hidden).toBe(0);
     }
-  });
-});
-
-describe("groupRepositoriesByMachine", () => {
-  it("puts each repository under its own machine, the primary first", () => {
-    const sections = groupRepositoriesByMachine(
-      [
-        { name: "spawn-platform", environmentId: "vps" },
-        { name: "smile-express", environmentId: "mac" },
-        { name: "finance", environmentId: "vps" },
-      ],
-      (item) => item.environmentId,
-      "mac",
-    );
-    expect(
-      sections.map((section) => [section.environmentId, section.items.map((item) => item.name)]),
-    ).toEqual([
-      ["mac", ["smile-express"]],
-      ["vps", ["spawn-platform", "finance"]],
-    ]);
   });
 });
 
