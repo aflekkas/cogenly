@@ -40,6 +40,39 @@ describe("shared configuration schemas", () => {
         ).toBe("Failure");
     }),
   );
+  it.effect("settings documents carry only universal keys and project overrides", () =>
+    Effect.gen(function* () {
+      const settings = (id: string, fields: SharedDocumentChange["fields"]) =>
+        Effect.result(validateChange({ ...change("settings", fields), id }));
+      expect((yield* settings("universal", { branchNamePrefix: "feat" }))._tag).toBe("Success");
+      expect(
+        (yield* settings("project:label-one", {
+          defaultAutoPull: { value: true },
+          branchNamePrefix: null,
+        }))._tag,
+      ).toBe("Success");
+      for (const [id, fields] of [
+        // Machine-local keys never travel.
+        ["universal", { projectsRoot: "/srv/projects" }],
+        ["project:label-one", { projectsRoot: { value: "/srv" } }],
+        // Overrides are `null` or `{ value }`, with values the schema accepts.
+        ["project:label-one", { defaultAutoPull: true }],
+        ["project:label-one", { defaultAutoPull: { value: "yes" } }],
+        ["project:", { defaultAutoPull: { value: true } }],
+        ["somewhere-else", { branchNamePrefix: "feat" }],
+      ] as const)
+        expect((yield* settings(id, fields))._tag).toBe("Failure");
+      expect(
+        (yield* Effect.result(
+          validateChange({
+            ...change("settings", {}),
+            id: "universal",
+            tombstone: { wall: 1, logical: 0, node },
+          }),
+        ))._tag,
+      ).toBe("Failure");
+    }),
+  );
   it.effect.each(["bad%id", "has space", "x".repeat(201)])(
     "rejects invalid new document id %s",
     (id) =>
