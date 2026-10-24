@@ -97,6 +97,17 @@ const definitionKey = Schema.encodeSync(Schema.fromJsonString(Integration));
 
 const usesOAuth = (integration: Integration) => integration.auth?.type === "oauth";
 
+/** The grant's destination and local authorization; cosmetic peer edits keep it. */
+const grantKey = (integration: StoredIntegration) =>
+  JSON.stringify({
+    url: integration.url,
+    auth: integration.auth,
+    headers: integration.headers,
+    credentialOrigin: integration.credentialOrigin,
+    approvedCredentialItems: integration.approvedCredentialItems,
+    oauthState: integration.oauthState,
+  });
+
 /** "Linear · Spawn Partners": how people and agents tell two accounts of one service apart. */
 export const integrationTitle = (integration: Integration): string =>
   integration.accountLabel?.trim()
@@ -682,7 +693,13 @@ const make = (options: IntegrationsOptions = {}) =>
       });
 
     const localSignIn = (integration: StoredIntegration): StoredIntegration => {
-      if (!integration.oauthState?.signedIn && Object.keys(integration.headers).length === 0)
+      const entry = integrationCatalogEntryFor(integration);
+      const needsCredentials = usesOAuth(integration) || entry?.kind === "remote";
+      if (
+        needsCredentials &&
+        !integration.oauthState?.signedIn &&
+        Object.keys(integration.headers).length === 0
+      )
         return integration;
       const { syncedFrom: _, ...rest } = integration;
       return rest;
@@ -804,12 +821,21 @@ const make = (options: IntegrationsOptions = {}) =>
 
     const persistState = (
       id: IntegrationId,
+      expected: StoredIntegration,
       update: (state: OAuthState | undefined) => OAuthState,
       browserOrigin?: string,
       signIn?: { readonly signedInAt: string; readonly signedInViaAgent: boolean },
     ) =>
       Effect.gen(function* () {
         const current = yield* getById(id);
+        // Peer materialization does not take this service's lock. Check and
+        // commit in one SQL transaction so an in-flight refresh or sign-in
+        // cannot reattach its grant to a changed or deleted definition.
+        if (grantKey(current) !== grantKey(expected))
+          return yield* new IntegrationError({
+            operation: "commit sign in",
+            reason: "invalid_request",
+          });
         // Sign-in state is not an edit: updatedAt, and so the tool cache, stay put.
         yield* persist({
           ...current,
@@ -817,13 +843,17 @@ const make = (options: IntegrationsOptions = {}) =>
           ...(signIn === undefined ? {} : { provenance: { ...current.provenance, ...signIn } }),
           ...(browserOrigin === undefined ? {} : { browserOrigin }),
         });
+        return current;
       }).pipe(sql.withTransaction, Effect.mapError(failure("sign in", "storage")));
 
     /** The grant is gone; only a new browser sign-in helps, so nothing retries it. */
     const markNeedsSignIn = (integration: StoredIntegration, message: string) =>
       Effect.gen(function* () {
         liveTokens.delete(integration.id);
-        yield* persistState(integration.id, (state) => ({ ...state, signedIn: false }));
+        yield* persistState(integration.id, integration, (state) => ({
+          ...state,
+          signedIn: false,
+        }));
         const checkedAt = yield* now;
         yield* Ref.update(checks, (current) =>
           new Map(current).set(integration.id, {
@@ -960,18 +990,24 @@ const make = (options: IntegrationsOptions = {}) =>
           host: new URL(integration.url).hostname,
           tokens: { ...tokens, clientSecret: live.clientSecret },
         });
+        const committed = yield* persistState(id, integration, (current) => ({
+          ...current,
+          signedIn: true,
+          tokenItemId: itemId,
+          expiresAt: tokens.expiresAt,
+        })).pipe(
+          Effect.tapError(() =>
+            dropTokens({ ...integration, oauthState: { ...state, tokenItemId: itemId } }),
+          ),
+        );
         liveTokens.set(id, {
           ...tokens,
           clientSecret: live.clientSecret,
           itemId,
           expiresAt: tokens.expiresAt,
         });
-        yield* persistState(id, (current) => ({
-          ...current,
-          signedIn: true,
-          tokenItemId: itemId,
-          expiresAt: tokens.expiresAt,
-        }));
+        if (!committed.enabled)
+          return yield* new IntegrationError({ operation: "authorize", reason: "disabled" });
         return tokens.accessToken;
       });
 
@@ -1991,6 +2027,7 @@ const make = (options: IntegrationsOptions = {}) =>
               });
               yield* persistState(
                 integration.id,
+                integration,
                 () => ({
                   signedIn: true,
                   server: pending.server,
@@ -2020,18 +2057,19 @@ const make = (options: IntegrationsOptions = {}) =>
           });
           // A first tool listing makes the row read "Connected" with its tool count.
           const signedIn = yield* getById(integration.id);
-          yield* fetchTools(signedIn).pipe(
-            Effect.tap((tools) =>
-              Effect.gen(function* () {
-                const key = `${signedIn.id}:${signedIn.updatedAt}`;
-                const at = yield* Clock.currentTimeMillis;
-                yield* Ref.update(cache, (entries) =>
-                  new Map(entries).set(key, { key, atMs: at, result: tools }),
-                );
-              }),
-            ),
-            Effect.ignore,
-          );
+          if (signedIn.enabled)
+            yield* fetchTools(signedIn).pipe(
+              Effect.tap((tools) =>
+                Effect.gen(function* () {
+                  const key = `${signedIn.id}:${signedIn.updatedAt}`;
+                  const at = yield* Clock.currentTimeMillis;
+                  yield* Ref.update(cache, (entries) =>
+                    new Map(entries).set(key, { key, atMs: at, result: tools }),
+                  );
+                }),
+              ),
+              Effect.ignore,
+            );
           yield* notify;
           return { integration: redactIntegration(signedIn) };
         }).pipe(

@@ -176,6 +176,22 @@ describe("integration definitions between paired machines", () => {
   );
 
   it.live(
+    "a public HTTP endpoint has no local sign-in to complete",
+    () =>
+      Effect.gen(function* () {
+        const { hub, spoke } = yield* paired;
+        const { auth: _, ...publicEndpoint } = definition("integration:public", "public");
+        yield* hub.store({ ...publicEndpoint, url: "https://public.example/mcp" });
+        yield* exchange(hub, spoke);
+        const summary = (yield* spoke.integrations.list()).integrations[0]!;
+        expect(summary.status).toBe("unknown");
+        expect(summary.syncedFrom).toBeUndefined();
+        expect(summary.setup).toBeUndefined();
+      }).pipe(Effect.scoped),
+    20000,
+  );
+
+  it.live(
     "command runners never sync, and forged headers, approvals and local transports never execute",
     () =>
       Effect.gen(function* () {
