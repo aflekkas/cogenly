@@ -376,14 +376,6 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --color-update-surface: var(--update-surface);
   --color-success-foreground: var(--success-foreground);
   --color-success: var(--success);
-  /* The send button: the accent, run as the logo's ember gradient from the
-     top-left to the bottom-right. While nothing can be sent it is a flat
-     grey (89,92,93) with a dark arrow, as in the reference. */
-  --color-send-top: var(--brand-accent-fill);
-  --color-send-bottom: var(--brand-accent-fill-deep);
-  --color-send-top-hover: var(--brand-accent-fill-hover);
-  --color-send-bottom-hover: var(--brand-accent-fill);
-  --color-send-foreground: var(--brand-accent-fill-foreground);
   /* The brand orange as a colour utility, for the few deliberate uses. */
   --color-brand-accent: var(--brand-accent-fill);
   --color-brand-accent-foreground: var(--brand-accent-fill-foreground);
