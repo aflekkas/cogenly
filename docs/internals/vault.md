@@ -3,7 +3,9 @@
 Encrypted credential storage. Browser fill keeps values out of model context;
 Accounts can separately authorize portable token exposure to agent terminals.
 Items replicate to machines the owner shares with; see
-[vault sync](./vault-sync.md). User guide:
+[vault sync](./vault-sync.md). Disabling sharing clears authorization but keeps
+the peer key pinned until unpairing; toggling sharing cannot accept a changed key.
+User guide:
 [docs/user/vault.md](../user/vault.md).
 
 ## Key hierarchy

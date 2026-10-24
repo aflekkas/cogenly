@@ -368,7 +368,7 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       yield* revokeStale;
       if (!input.enabled) {
-        yield* sql`DELETE FROM vault_peer_shares WHERE environment_id = ${input.environmentId}`;
+        yield* sql`UPDATE vault_peer_shares SET sharing_enabled = 0, peer_sharing = 0 WHERE environment_id = ${input.environmentId}`;
         return yield* sharingStatus;
       }
       const peer = (yield* directPeers).find(
@@ -386,7 +386,7 @@ const make = Effect.gen(function* () {
         (share) => share.environmentId === peer.environmentId,
       );
       if (existing) {
-        // A pinned key never changes silently; the owner turns sharing off and on.
+        // The pin belongs to the pairing, independently of sharing authorization.
         if (existing.publicKey !== reply.publicKey) {
           lastSeen.set(peer.environmentId, { sharing: reply.sharing, keyChanged: true });
           yield* Effect.logWarning("A paired machine presented a different vault key", {
@@ -394,6 +394,7 @@ const make = Effect.gen(function* () {
           });
           return yield* new VaultError({ reason: "peer_key_changed" });
         }
+        yield* sql`UPDATE vault_peer_shares SET sharing_enabled = 1 WHERE environment_id = ${input.environmentId}`;
         yield* ask(peer, existing);
         yield* reconcile("full");
         return yield* sharingStatus;

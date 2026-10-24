@@ -94,6 +94,8 @@ export interface VaultShare {
   readonly environmentId: EnvironmentId;
   readonly publicKey: string;
   readonly pairingKey: string;
+  /** Local authorization; the pinned key survives when sharing is disabled. */
+  readonly sharingEnabled: boolean;
   /**
    * The peer said over the direct link that it shares back. Only then is a
    * revision wrapped for it or a wrap it made accepted here.
@@ -212,9 +214,9 @@ export class VaultSyncCapture extends Context.Service<
   {
     readonly environmentId: EnvironmentId;
     readonly keyPair: Effect.Effect<VaultCrypto.VaultKeyPair, VaultError>;
-    /** Every share the owner recorded, whether or not its pairing is still current. */
+    /** Every recorded pin, including disabled sharing and pairings no longer current. */
     readonly recordedShares: Effect.Effect<ReadonlyArray<VaultShare>, VaultError>;
-    /** Shares whose peer is still paired under the pairing the owner shared with. */
+    /** Enabled shares whose peer is still paired under the original pairing. */
     readonly shares: Effect.Effect<ReadonlyArray<VaultShare>, VaultError>;
     /** Honored shares whose peer shares back: the machines that hold this vault with this one. */
     readonly holders: Effect.Effect<ReadonlyArray<VaultShare>, VaultError>;
@@ -265,12 +267,14 @@ const make = Effect.gen(function* () {
     public_key: string;
     pairing_key: string;
     peer_sharing: number;
-  }>`SELECT environment_id, public_key, pairing_key, peer_sharing FROM vault_peer_shares ORDER BY environment_id`.pipe(
+    sharing_enabled: number;
+  }>`SELECT environment_id, public_key, pairing_key, peer_sharing, sharing_enabled FROM vault_peer_shares ORDER BY environment_id`.pipe(
     Effect.map((rows) =>
       rows.map((row): VaultShare => ({
         environmentId: row.environment_id as EnvironmentId,
         publicKey: row.public_key,
         pairingKey: row.pairing_key,
+        sharingEnabled: row.sharing_enabled === 1,
         peerSharing: row.peer_sharing === 1,
       })),
     ),
@@ -280,7 +284,7 @@ const make = Effect.gen(function* () {
   // Checked on every read, not only when the machine list changes: an expired
   // or revoked pairing ends sharing before anything notices it.
   const shares = Effect.gen(function* () {
-    const rows = yield* recordedShares;
+    const rows = (yield* recordedShares).filter((row) => row.sharingEnabled);
     if (rows.length === 0) return rows;
     const current = yield* (yield* Ref.get(pairings)).pipe(
       Effect.orElseSucceed((): ReadonlyMap<string, string> => new Map()),

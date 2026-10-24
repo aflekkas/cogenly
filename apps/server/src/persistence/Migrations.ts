@@ -15,6 +15,7 @@ import Migration0092 from "./Migrations/092_ThreadReplication.ts";
 import Migration0093 from "./Migrations/093_ForwardCompatibleSync.ts";
 import Migration0094 from "./Migrations/094_SharedFacts.ts";
 import Migration0095 from "./Migrations/095_VaultSync.ts";
+import Migration0096 from "./Migrations/096_VaultSharingAuthorization.ts";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import { reconcileV2PreviewMigration } from "./reconcileV2PreviewMigration.ts";
@@ -218,6 +219,7 @@ export const migrationEntries = [
   [93, "ForwardCompatibleSync", Migration0093],
   [94, "SharedFacts", Migration0094],
   [95, "VaultSync", Migration0095],
+  [96, "VaultSharingAuthorization", Migration0096],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

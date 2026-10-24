@@ -8,6 +8,7 @@ import {
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Context from "effect/Context";
+import * as NodeSqlite from "@t3tools/shared/nodeSqliteClient";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -19,6 +20,7 @@ import * as Tracer from "effect/Tracer";
 
 import * as PeerChannels from "../machines/PeerChannels.ts";
 import * as Sqlite from "../persistence/Sqlite.ts";
+import { runMigrations } from "../persistence/Migrations.ts";
 import { compareClock } from "../sync/merge.ts";
 import * as VaultCrypto from "./VaultCrypto.ts";
 import { revisionsOf } from "./VaultSyncCapture.ts";
@@ -583,6 +585,23 @@ describe("vault sync between paired machines", () => {
       }).pipe(Effect.scoped),
   );
 
+  it.effect("upgrading preserves existing pinned keys and sharing authorization", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* runMigrations({ toMigrationInclusive: 95 });
+      const key = VaultCrypto.generateKeyPair().publicKey;
+      yield* sql`INSERT INTO vault_peer_shares(environment_id, public_key, pairing_key, authorized_at, peer_sharing) VALUES ('env-peer', ${key}, 'pairing', '2026-10-01T00:00:00.000Z', 1)`;
+      yield* runMigrations();
+      expect(
+        yield* sql`SELECT public_key, pairing_key, peer_sharing, sharing_enabled FROM vault_peer_shares`,
+      ).toEqual([{ public_key: key, pairing_key: "pairing", peer_sharing: 1, sharing_enabled: 1 }]);
+    }).pipe(
+      Effect.provide(
+        NodeSqlite.layer({ filename: ":memory:" }).pipe(Layer.provideMerge(NodeServices.layer)),
+      ),
+    ),
+  );
+
   it.effect("enabling needs a direct online peer and refuses a changed or low-order key", () =>
     Effect.gen(function* () {
       const network = new Network();
@@ -609,6 +628,16 @@ describe("vault sync between paired machines", () => {
         .call(hub.environmentId, VaultPeerKey, {});
       expect(VaultCrypto.isX25519PublicKey(reply.publicKey)).toBe(true);
       yield* a.sync.setPeerSharing({ environmentId: hub.environmentId, enabled: false });
+      expect(yield* a.capture.shares).toEqual([]);
+      // Opting out ends authorization, not the key pin for this pairing.
+      expect(yield* share(a, hub).pipe(Effect.result)).toMatchObject({
+        _tag: "Failure",
+        failure: { reason: "peer_key_changed" },
+      });
+      network.unpair(a);
+      yield* a.sync.revokeStale;
+      expect(yield* a.capture.recordedShares).toEqual([]);
+      network.pair(hub, a);
       yield* share(a, hub);
       expect((yield* a.capture.shares)[0]?.publicKey).toBe(reply.publicKey);
 
