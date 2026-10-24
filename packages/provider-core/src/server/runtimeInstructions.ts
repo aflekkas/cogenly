@@ -57,10 +57,26 @@ export interface IntegrationContextEntry {
  * Spawn Partners). Use integration_tools / integration_call. Also available
  * to connect with integration_add catalogId: notion, slack." `available` are
  * catalog ids not connected yet. Empty when there is neither.
+ * `providerConnectorsHidden` adds that the provider's own connectors for these
+ * services are off, so the agent does not go looking for them.
  */
 export function buildIntegrationsContextLine(
   integrations: ReadonlyArray<IntegrationContextEntry>,
   available: ReadonlyArray<string> = [],
+  providerConnectorsHidden = false,
+): string {
+  const line = integrationsLine(integrations, available);
+  return line.length > 0 && providerConnectorsHidden
+    ? `${line} ${PROVIDER_CONNECTORS_HIDDEN_TEXT}`
+    : line;
+}
+
+const PROVIDER_CONNECTORS_HIDDEN_TEXT =
+  "In Cogenly these services come only through Cogenly integrations; the provider's own connectors for them (claude.ai connectors, ChatGPT apps, plugin MCP servers) are turned off.";
+
+function integrationsLine(
+  integrations: ReadonlyArray<IntegrationContextEntry>,
+  available: ReadonlyArray<string>,
 ): string {
   const availableText =
     available.length === 0
@@ -113,6 +129,8 @@ export function buildProjectManifest(input: {
   readonly integrations?: ReadonlyArray<IntegrationContextEntry> | undefined;
   /** Catalog ids not connected yet, named on the same line. */
   readonly availableIntegrations?: ReadonlyArray<string> | undefined;
+  /** See `buildIntegrationsContextLine`. */
+  readonly providerConnectorsHidden?: boolean | undefined;
 }): string {
   const shown = input.resources.slice(0, PROJECT_MANIFEST_MAX_RESOURCES);
   const files =
@@ -125,6 +143,7 @@ export function buildProjectManifest(input: {
   const integrationsLine = buildIntegrationsContextLine(
     input.integrations ?? [],
     input.availableIntegrations,
+    input.providerConnectorsHidden === true,
   );
   return [
     manifest,
