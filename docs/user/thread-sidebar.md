@@ -116,7 +116,9 @@ chat. A card it only proposes waits for **Approve**; **Edit** lets you change wh
 runs and what it's told first, and **Dismiss** can be undone with **Restore**. When you
 clearly asked for the action, the agent may start the task right away. Either way the
 card follows the task, has **Stop** while it runs, and when the task ends the chat's
-agent tells you how it went.
+agent tells you how it went. For a task whose result is all you need, the agent can ask
+for its Work thread to settle once it completes, so it doesn't linger in your list; a
+task that fails stays active. Un-settle the thread to continue there.
 
 ## Start a thread
 

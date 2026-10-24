@@ -226,6 +226,7 @@ describe("conversationModeInstructions", () => {
       expect(text).toContain("do not tell the user to do it by hand");
       expect(text).toContain('mode "propose"');
       expect(text).toContain("A subagent is different");
+      expect(text).toContain("settleWhenDone=true");
     },
   );
 

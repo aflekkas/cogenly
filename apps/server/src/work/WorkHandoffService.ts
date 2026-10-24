@@ -62,6 +62,8 @@ export interface WorkTaskHandoffInput {
   readonly modelSelection?: ModelSelection | undefined;
   /** The chat run asking, so the card sits after its turn. */
   readonly runId?: RunId | undefined;
+  /** Settle the Work thread once the task completes; a failed one stays. */
+  readonly settleWhenDone?: boolean | undefined;
 }
 
 /** The card brief: the scope, cut to what a card carries. */
@@ -621,6 +623,7 @@ const make = Effect.gen(function* () {
       ...(input.workspace === undefined ? {} : { workspace: input.workspace }),
       ...(input.modelSelection === undefined ? {} : { modelSelection: input.modelSelection }),
       ...(input.runId === undefined ? {} : { runId: input.runId }),
+      ...(input.settleWhenDone === true ? { settleWhenDone: true } : {}),
       createdAt: now,
       updatedAt: now,
     };

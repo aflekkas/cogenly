@@ -1033,6 +1033,7 @@ it.effect("proposes a task card that waits, dismisses and restores, then starts 
           title: "Fix audit",
           brief: "Implement booking-audit validation with focused tests.",
           targetProjectId: targetId,
+          settleWhenDone: true,
         },
         { origin: "chat", createdByAgent: true },
       );
@@ -1044,6 +1045,7 @@ it.effect("proposes a task card that waits, dismisses and restores, then starts 
         status: "proposed",
         requestedMode: "propose",
         targetProjectId: targetId,
+        settleWhenDone: true,
       });
 
       const dismiss = (dismissed: boolean, id: string) =>
@@ -1079,6 +1081,8 @@ it.effect("proposes a task card that waits, dismisses and restores, then starts 
         threadId: started.threadId,
         brief: approve.scopeSummary,
         title: "Fix audit",
+        // The user's approval keeps the agent's request to settle when done.
+        settleWhenDone: true,
       });
       const work = yield* h.orchestrator.getThreadProjection(started.threadId);
       expect(work.thread.title).toBe("Fix audit");

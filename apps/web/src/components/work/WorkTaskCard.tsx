@@ -293,6 +293,12 @@ export function WorkTaskCard(props: {
               <span className="min-w-0 truncate">{task.modelSelection.model}</span>
             </>
           )}
+          {task.settleWhenDone === true ? (
+            <>
+              <span aria-hidden>·</span>
+              <span className="shrink-0">Settles when done</span>
+            </>
+          ) : null}
         </div>
         {task.outcome?.summary && (state === "done" || state === "failed") ? (
           <p

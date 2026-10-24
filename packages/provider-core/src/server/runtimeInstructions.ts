@@ -175,6 +175,7 @@ export const conversationModeInstructions = (options: {
 - mode "start" when the user explicitly asked for this action and it is unambiguous and low-risk, or when they clearly instructed destructive work themselves (for example "uninstall those two apps"). Otherwise mode "propose": the user gets a card to approve, edit or dismiss. Err toward propose for anything destructive (deleting files, uninstalling, resetting) that the user did not clearly ask for.
 - Pick the target: one of the user's projects (see project_list) when the work belongs to it, or no targetProjectId for work on this machine itself, which runs in No project.
 - Write the brief as complete instructions for the task agent: goal, steps or constraints, and what done looks like.
+- Pass settleWhenDone=true when the reported result is all the user needs (no pull request or diff to review), so the task's Work thread settles itself once it completes instead of lingering.
 - In your reply, say in a sentence what the task will do and where, and whether it started or waits for approval.
 If work_task is unavailable, explain what you would do and suggest Start Work (the hammer on a message).
 
