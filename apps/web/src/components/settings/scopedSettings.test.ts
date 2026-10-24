@@ -3,6 +3,7 @@ import {
   EnvironmentId,
   ProjectId,
   ProjectLabelId,
+  ProviderInstanceId,
   type ServerSettings,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
@@ -11,6 +12,8 @@ import type { Project } from "../../types";
 import {
   groupProjectOverridesByFolder,
   listProjectOverrides,
+  listProviderInstanceOverrides,
+  planProviderInstanceOverridesClear,
   planScopedSettingsClear,
   planScopedSettingsPatch,
   resolveScopedSettingsTargets,
@@ -19,6 +22,7 @@ import { buildSettingsProjectFolders, resolveSettingsScope } from "./settingsSco
 
 const macId = EnvironmentId.make("mac");
 const vpsId = EnvironmentId.make("vps");
+const codex = ProviderInstanceId.make("codex");
 
 function environment(
   environmentId: EnvironmentId,
@@ -187,7 +191,7 @@ describe("scoped settings reads", () => {
     ).toEqual([appMac.id, appVps.id]);
   });
 
-  it("names overriding projects by folder and leaves out repositories outside every folder", () => {
+  it("names overriding projects by folder and still counts repositories in no folder", () => {
     const overridden = [
       environment(macId, "MacBook", {
         projectSettingsOverrides: {
@@ -211,6 +215,70 @@ describe("scoped settings reads", () => {
           { environmentId: vpsId, projectId: appVps.id },
         ],
       },
+      { folder: null, entries: [{ environmentId: macId, projectId: loose.id }] },
+    ]);
+  });
+});
+
+describe("overrides edited outside a project scope", () => {
+  const overridden = [
+    environment(macId, "MacBook", {
+      projectSettingsOverrides: {
+        [appMac.id]: {
+          defaultAutoPull: false,
+          providerInstances: { [codex]: { enabled: false } },
+        },
+        [loose.id]: { providerInstances: { [codex]: { enabled: true } } },
+      },
+    }),
+    environment(vpsId, "VPS", {
+      projectSettingsOverrides: {
+        [appVps.id]: {
+          providerInstances: { [codex]: { enabled: false } },
+          worktreeCleanup: { mode: "off" },
+        },
+      },
+    }),
+  ];
+
+  it("lists a provider's project overrides on every machine", () => {
+    expect(listProviderInstanceOverrides(overridden, codex)).toEqual([
+      { environmentId: macId, projectId: appMac.id },
+      { environmentId: macId, projectId: loose.id },
+      { environmentId: vpsId, projectId: appVps.id },
+    ]);
+  });
+
+  it("resets a provider's project overrides on each machine holding one, keeping other overrides", () => {
+    const plan = planProviderInstanceOverridesClear(
+      overridden,
+      listProviderInstanceOverrides(overridden, codex),
+      codex,
+    );
+    expect(writtenTo(plan)).toEqual([
+      [
+        macId,
+        {
+          projectSettingsOverrides: {
+            [appMac.id]: { defaultAutoPull: false, providerInstances: {} },
+            [loose.id]: null,
+          },
+        },
+      ],
+      [
+        vpsId,
+        {
+          projectSettingsOverrides: {
+            [appVps.id]: { worktreeCleanup: { mode: "off" }, providerInstances: {} },
+          },
+        },
+      ],
+    ]);
+  });
+
+  it("lists worktree cleanup overrides so a machine page can reset them", () => {
+    expect(listProjectOverrides(overridden, ["worktreeCleanup"])).toEqual([
+      { environmentId: vpsId, projectId: appVps.id },
     ]);
   });
 });

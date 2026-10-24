@@ -159,13 +159,13 @@ export type SettingInheritanceState =
  * narrowing to a project does not add a caption line to every row.
  */
 export interface SettingOverridingProject {
-  /** The project folder id. */
+  /** The project folder id, or a fixed id for repositories in no project. */
   readonly id: string;
   readonly label: string;
   /** The folder's repository entries holding the override, on every environment. */
   readonly entries: readonly ProjectOverrideEntry[];
-  /** Selects this project so its override can be edited. */
-  readonly open: () => void;
+  /** Selects this project so its override can be edited; absent where it cannot be. */
+  readonly open?: (() => void) | undefined;
 }
 
 export function SettingInheritance({
@@ -199,7 +199,7 @@ export function SettingInheritance({
   const showsMachine = !isUniversalServerSettingKey(key) || targets[0]?.projectId != null;
   const overrideSummary =
     overridingProjects.length > 0
-      ? `${summary} · ${overridingProjects.length} ${overridingProjects.length === 1 ? "project overrides" : "projects override"} this`
+      ? `${summary} · ${projectOverridesSummary(overridingProjects)}`
       : summary;
   const overrideValue = (project: SettingOverridingProject) => {
     if (!isProjectScopedSettingKey(key)) return null;
@@ -404,51 +404,122 @@ export function SettingInheritance({
             );
           })}
           {overridingProjects.length > 0 ? (
-            <section className="px-3 py-2.5">
-              <Collapsible defaultOpen={overridingProjects.length <= 3}>
-                <div className="flex items-center justify-between gap-3 px-2 text-xs text-muted-foreground">
-                  {overridingProjects.length > 3 ? (
-                    <CollapsibleTrigger render={<InlineButton tone="muted" />}>
-                      <DisclosureChevron />
-                      Overridden by
-                    </CollapsibleTrigger>
-                  ) : (
-                    <span>Overridden by</span>
-                  )}
-                  {onClearOverrides ? (
-                    <InlineButton
-                      onClick={() =>
-                        onClearOverrides(overridingProjects.flatMap((project) => project.entries))
-                      }
-                    >
-                      Reset {overridingProjects.length === 1 ? "it" : "all"}
-                    </InlineButton>
-                  ) : null}
-                </div>
-                <CollapsiblePanel>
-                  <ul role="list" className="scroll-fade-y mt-0.5 max-h-48 overflow-y-auto text-sm">
-                    {overridingProjects.map((project) => (
-                      <li
-                        key={project.id}
-                        className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 px-2 py-1"
-                      >
-                        <InlineButton
-                          className="min-w-0 max-w-full justify-start"
-                          onClick={project.open}
-                        >
-                          <span className="truncate">{project.label}</span>
-                        </InlineButton>
-                        <span className="max-w-32 truncate text-muted-foreground tabular-nums">
-                          {overrideValue(project)}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                </CollapsiblePanel>
-              </Collapsible>
-            </section>
+            <ProjectOverridesList
+              projects={overridingProjects}
+              valueFor={overrideValue}
+              {...(onClearOverrides ? { onClear: onClearOverrides } : {})}
+            />
           ) : null}
         </div>
+      </PopoverPopup>
+    </Popover>
+  );
+}
+
+/** "N projects override this", for a tooltip or label. */
+export function projectOverridesSummary(projects: readonly SettingOverridingProject[]) {
+  return `${projects.length} ${projects.length === 1 ? "project overrides" : "projects override"} this`;
+}
+
+/**
+ * The projects whose own value replaces the one being edited, each with its
+ * value, and a reset that clears them on every machine holding them.
+ */
+function ProjectOverridesList({
+  projects,
+  valueFor,
+  onClear,
+}: {
+  projects: readonly SettingOverridingProject[];
+  valueFor: (project: SettingOverridingProject) => string | null;
+  onClear?: (entries: readonly ProjectOverrideEntry[]) => void;
+}) {
+  return (
+    <section className="px-3 py-2.5">
+      <Collapsible defaultOpen={projects.length <= 3}>
+        <div className="flex items-center justify-between gap-3 px-2 text-xs text-muted-foreground">
+          {projects.length > 3 ? (
+            <CollapsibleTrigger render={<InlineButton tone="muted" />}>
+              <DisclosureChevron />
+              Overridden by
+            </CollapsibleTrigger>
+          ) : (
+            <span>Overridden by</span>
+          )}
+          {onClear ? (
+            <InlineButton onClick={() => onClear(projects.flatMap((project) => project.entries))}>
+              Reset {projects.length === 1 ? "it" : "all"}
+            </InlineButton>
+          ) : null}
+        </div>
+        <CollapsiblePanel>
+          <ul role="list" className="scroll-fade-y mt-0.5 max-h-48 overflow-y-auto text-sm">
+            {projects.map((project) => (
+              <li
+                key={project.id}
+                className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 px-2 py-1"
+              >
+                {project.open ? (
+                  <InlineButton className="min-w-0 max-w-full justify-start" onClick={project.open}>
+                    <span className="truncate">{project.label}</span>
+                  </InlineButton>
+                ) : (
+                  <span className="min-w-0 truncate">{project.label}</span>
+                )}
+                <span className="max-w-32 truncate text-muted-foreground tabular-nums">
+                  {valueFor(project)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </CollapsiblePanel>
+      </Collapsible>
+    </section>
+  );
+}
+
+/**
+ * The project overrides of a setting edited outside the settings rows (a
+ * provider's switch, worktree cleanup on Storage): the same layers indicator,
+ * opening only the list of overriding projects. Renders nothing without one.
+ */
+export function ProjectOverridesPopover({
+  projects,
+  valueFor,
+  onClear,
+}: {
+  projects: readonly SettingOverridingProject[];
+  valueFor: (project: SettingOverridingProject) => string | null;
+  onClear?: (entries: readonly ProjectOverrideEntry[]) => void;
+}) {
+  if (projects.length === 0) return null;
+  const summary = projectOverridesSummary(projects);
+  return (
+    <Popover>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <PopoverTrigger
+              render={
+                <Button
+                  size="icon-micro"
+                  variant="ghost-muted"
+                  aria-label={`${summary}. Show the projects`}
+                />
+              }
+            />
+          }
+        >
+          <LayersIcon className="size-3" />
+        </TooltipTrigger>
+        <TooltipPopup side="top">{summary}</TooltipPopup>
+      </Tooltip>
+      <PopoverPopup align="start" width="md" padding="none">
+        <ProjectOverridesList
+          projects={projects}
+          valueFor={valueFor}
+          {...(onClear ? { onClear } : {})}
+        />
       </PopoverPopup>
     </Popover>
   );

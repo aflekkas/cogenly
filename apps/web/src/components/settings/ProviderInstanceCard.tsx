@@ -512,7 +512,7 @@ function ProjectOverrideInheritance({
   readonly deviceEnabled: boolean;
 }) {
   const layers = [
-    { key: "project", label: "Repository", enabled: projectEnabled, effective: true },
+    { key: "project", label: "Project", enabled: projectEnabled, effective: true },
     { key: "device", label: "Device", enabled: deviceEnabled, effective: false },
   ];
   return (
@@ -525,7 +525,7 @@ function ProjectOverrideInheritance({
                 <Button
                   size="icon-micro"
                   variant="ghost-muted"
-                  aria-label="Overridden for this repository. Show where this value comes from"
+                  aria-label="Overridden for this project. Show where this value comes from"
                 />
               }
             />
@@ -533,7 +533,7 @@ function ProjectOverrideInheritance({
         >
           <LayersIcon className="size-3 text-primary" />
         </TooltipTrigger>
-        <TooltipPopup side="top">Overridden for this repository</TooltipPopup>
+        <TooltipPopup side="top">Overridden for this project</TooltipPopup>
       </Tooltip>
       <PopoverPopup align="end" width="md" padding="none">
         <ol role="list" className="px-3 py-2.5 text-sm">
@@ -632,6 +632,8 @@ interface ProviderInstanceCardProps {
   readonly environmentId?: EnvironmentId | undefined;
   /** Omit this prop entirely for environment-wide editing. */
   readonly projectOverride?: ProjectOverrideControl | undefined;
+  /** Machine-wide editing: the projects that override the switch, beside it. */
+  readonly projectOverrides?: ReactNode;
 }
 
 /**
@@ -682,6 +684,7 @@ export function ProviderInstanceCard({
   onInstallRecommended,
   isUpdating = false,
   projectOverride,
+  projectOverrides,
 }: ProviderInstanceCardProps) {
   const enabled = projectOverride?.effectiveEnabled ?? resolveProviderInstanceEnabled(instance);
   const compatibility = enabled ? liveProvider?.compatibilityAdvisory : undefined;
@@ -1062,6 +1065,8 @@ export function ProviderInstanceCard({
                 onClick={projectOverride.onReset}
               />
             </span>
+          ) : projectOverride === undefined ? (
+            projectOverrides
           ) : null}
           <Switch
             checked={enabled}

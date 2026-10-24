@@ -45,7 +45,9 @@ import {
   useScopedSettings,
   useScopedSettingsMixed,
   useUpdateScopedSettings,
+  useWorktreeCleanupOverrides,
 } from "./useScopedSettings";
+import { ProjectOverridesPopover } from "./SettingInheritance";
 import { settingsScopeEnvironmentLabel } from "./settingsScopeAxis";
 
 function WorktreesDirectoryRow() {
@@ -422,6 +424,7 @@ export function StorageSettingsPanel() {
     ...resolveWorktreeCleanup(scopedSettings, null),
   };
   const updateSettings = useUpdateScopedSettings();
+  const worktreeCleanupOverrides = useWorktreeCleanupOverrides();
   const update = (patch: Partial<StorageCleanupSettings>) =>
     updateSettings({ storageCleanup: patch });
 
@@ -459,7 +462,12 @@ export function StorageSettingsPanel() {
             label={environment.label}
           />
         ))}
-      <SettingsSection id="storage-worktrees" title="Worktrees">
+      <SettingsSection
+        id="storage-worktrees"
+        title="Worktrees"
+        // Projects with their own cleanup ignore these rules on every machine.
+        titleAction={<ProjectOverridesPopover {...worktreeCleanupOverrides} />}
+      >
         <WorktreesDirectoryRow />
         <SettingsRow
           title="Delete worktrees with deleted threads"

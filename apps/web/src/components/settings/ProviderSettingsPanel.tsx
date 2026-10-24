@@ -90,6 +90,8 @@ import { stackedThreadToast, toastManager } from "../ui/toast";
 import { AddProviderInstanceDialog } from "./AddProviderInstanceDialog";
 import { ExpandableText } from "./ExpandableText";
 import { ProviderInstanceCard } from "./ProviderInstanceCard";
+import { ProjectOverridesPopover } from "./SettingInheritance";
+import { useProviderInstanceOverrides } from "./useScopedSettings";
 import { UsageProviderSettings } from "./UsageProviderSettings";
 import { ProviderAuthenticationSection } from "./ProviderAuthenticationSection";
 import { CodexSetupSection, CodexManagedRuntimeFields } from "./CodexSetupSection";
@@ -261,6 +263,21 @@ function EnvironmentUnavailablePlaceholder({
       ) : null}
     </ProviderSettingsPlaceholder>
   );
+}
+
+/**
+ * The projects that turn one provider on or off for themselves, beside its
+ * machine-wide switch, with a reset that clears them on every machine.
+ */
+function ProviderInstanceProjectOverrides({
+  instanceId,
+  canClear,
+}: {
+  instanceId: ProviderInstanceId;
+  canClear: boolean;
+}) {
+  const { onClear, ...overrides } = useProviderInstanceOverrides(instanceId);
+  return <ProjectOverridesPopover {...overrides} {...(canClear ? { onClear } : {})} />;
 }
 
 interface ProviderSettingsTarget {
@@ -869,6 +886,14 @@ export function EnvironmentProviderSettings({
         key={row.instanceId}
         environmentId={environmentId}
         projectOverride={projectOverride}
+        projectOverrides={
+          projectOverride === undefined && supportsProjectProviderOverrides ? (
+            <ProviderInstanceProjectOverrides
+              instanceId={row.instanceId}
+              canClear={!readOnly && canWriteSettings}
+            />
+          ) : undefined
+        }
         instanceId={row.instanceId}
         instance={row.instance}
         driverOption={driverOption}

@@ -40,7 +40,11 @@ import {
   scopedSettingsAreMixed,
   scopedSettingsSource,
 } from "./scopedSettings";
-import { useClearProjectOverrides, useClearScopedSettings } from "./useScopedSettings";
+import {
+  overridingProjectsFrom,
+  useClearProjectOverrides,
+  useClearScopedSettings,
+} from "./useScopedSettings";
 import {
   SettingInheritance,
   type SettingInheritanceState,
@@ -351,15 +355,16 @@ export function SettingsRow({
   // all projects changes; the chain names them and can reset them.
   const overridingProjects = useMemo((): SettingOverridingProject[] => {
     if (context === null || isProjectScope || scopedKeys.length === 0) return [];
-    return groupProjectOverridesByFolder(
-      listProjectOverrides(context.connectedEnvironments, scopedKeys),
-      context.folders,
-    ).map(({ folder, entries }) => ({
-      id: folder.id,
-      label: folder.name,
-      entries,
-      open: () => context.selectScope(selectProjectScope(context.search, folder.id)),
-    }));
+    return overridingProjectsFrom(
+      groupProjectOverridesByFolder(
+        listProjectOverrides(context.connectedEnvironments, scopedKeys),
+        context.folders,
+      ),
+      // A machine page has no project picker to open one with.
+      context.machinePage
+        ? undefined
+        : (folderId) => context.selectScope(selectProjectScope(context.search, folderId)),
+    );
   }, [context, isProjectScope, scopedKeys]);
   const renderedReset = unavailable ? null : isProjectScope && scopedKeys.length > 0 ? (
     source === "project" || source === "mixed" ? (

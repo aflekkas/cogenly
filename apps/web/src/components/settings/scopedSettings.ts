@@ -8,6 +8,7 @@ import {
   type ProjectId,
   type ProjectScopedServerSettingKey,
   type ProjectSettingsOverrides,
+  type ProviderInstanceId,
   ServerSettings,
   type T3ProjectFile,
   type ServerSettingsPatch,
@@ -23,6 +24,7 @@ import * as Equal from "effect/Equal";
 import * as Cause from "effect/Cause";
 
 import type { Project } from "../../types";
+import { buildProviderInstanceOverridePatch } from "./ProviderSettingsPanel.logic";
 import type { ResolvedSettingsScope, SettingsProjectFolder } from "./settingsScope";
 
 export type ScopedSettingsPatch = ServerSettingsPatch & ClientSettingsPatch;
@@ -407,21 +409,82 @@ export function listProjectOverrides(
 
 /**
  * Override entries grouped by the project folder holding the repository, in
- * folder order. A repository outside every folder is not a project the
- * picker can open, so its entry is left out.
+ * folder order. Repositories outside every folder come last as one group
+ * with no folder: the picker cannot open them, but they still count and can
+ * be reset.
  */
 export function groupProjectOverridesByFolder(
   entries: readonly ProjectOverrideEntry[],
   folders: readonly SettingsProjectFolder[],
-): readonly { folder: SettingsProjectFolder; entries: readonly ProjectOverrideEntry[] }[] {
-  return folders.flatMap((folder) => {
-    const held = entries.filter((entry) =>
-      folder.members.some(
-        (member) => member.environmentId === entry.environmentId && member.id === entry.projectId,
-      ),
+): readonly {
+  folder: SettingsProjectFolder | null;
+  entries: readonly ProjectOverrideEntry[];
+}[] {
+  const holds = (folder: SettingsProjectFolder, entry: ProjectOverrideEntry) =>
+    folder.members.some(
+      (member) => member.environmentId === entry.environmentId && member.id === entry.projectId,
     );
+  const grouped = folders.flatMap((folder) => {
+    const held = entries.filter((entry) => holds(folder, entry));
     return held.length > 0 ? [{ folder, entries: held }] : [];
   });
+  const loose = entries.filter((entry) => !folders.some((folder) => holds(folder, entry)));
+  return loose.length > 0 ? [...grouped, { folder: null, entries: loose }] : grouped;
+}
+
+/** Repository entries that override whether `instanceId` is enabled. */
+export function listProviderInstanceOverrides(
+  environments: readonly ScopedSettingsEnvironment[],
+  instanceId: ProviderInstanceId,
+): readonly ProjectOverrideEntry[] {
+  return environments.flatMap((environment) =>
+    Object.entries(environment.serverConfig?.settings.projectSettingsOverrides ?? {}).flatMap(
+      ([projectId, entry]) =>
+        entry.providerInstances?.[instanceId]?.enabled === undefined
+          ? []
+          : [{ environmentId: environment.environmentId, projectId: projectId as ProjectId }],
+    ),
+  );
+}
+
+/**
+ * Drop the named repositories' `enabled` override of `instanceId`, on every
+ * connected machine holding one, so they follow the machine again.
+ */
+export function planProviderInstanceOverridesClear(
+  environments: readonly ScopedSettingsEnvironment[],
+  entries: readonly ProjectOverrideEntry[],
+  instanceId: ProviderInstanceId,
+) {
+  const serverWrites = environments.filter(isConnected).flatMap((environment) => {
+    const settings = environment.serverConfig?.settings;
+    const projectIds = entries
+      .filter((entry) => entry.environmentId === environment.environmentId)
+      .map((entry) => entry.projectId);
+    if (!settings || projectIds.length === 0) return [];
+    return [
+      {
+        environmentId: environment.environmentId,
+        label: environment.label,
+        previous: settings,
+        patch: {
+          projectSettingsOverrides: buildProviderInstanceOverridePatch(
+            settings,
+            projectIds,
+            instanceId,
+            undefined,
+          ),
+        },
+      },
+    ];
+  });
+  return {
+    clientPatch: {} as ClientSettingsPatch,
+    hasClientWrite: false,
+    serverWrites,
+    unavailableReason:
+      serverWrites.length > 0 ? null : "Connect the machines to reset these overrides.",
+  };
 }
 
 /** Drop `keys` from the named repository entries so they follow All projects again. */
