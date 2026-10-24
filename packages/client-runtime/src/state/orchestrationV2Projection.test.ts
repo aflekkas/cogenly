@@ -2,12 +2,16 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   type ThreadPullRequestLink,
   type OrchestrationV2DomainEvent,
+  type OrchestrationV2ProviderThread,
   type OrchestrationV2Run,
   type OrchestrationV2ThreadProjection,
   type OrchestrationV2TurnItem,
   MessageId,
+  ContextHandoffId,
+  EventId,
   ProjectId,
   ProviderInstanceId,
+  ProviderDriverKind,
   NodeId,
   ProviderThreadId,
   ProviderTurnId,
@@ -18,6 +22,7 @@ import {
 import * as DateTime from "effect/DateTime";
 
 import { applyOrchestrationV2ProjectionEvent } from "./orchestrationV2Projection.ts";
+import { resolvePendingHandoff } from "../handoff.ts";
 
 const now = DateTime.makeUnsafe("2026-06-20T00:00:00.000Z");
 const threadId = ThreadId.make("thread-reducer");
@@ -107,6 +112,151 @@ const emptyProjection = {
 } as OrchestrationV2ThreadProjection;
 
 describe("applyOrchestrationV2ProjectionEvent", () => {
+  it.each(["completed", "failed", "interrupted", "cancelled"] as const)(
+    "clears the handoff preview after a rate-limit continuation that %s",
+    (status) => {
+      const personal = {
+        instanceId: ProviderInstanceId.make("claude-personal"),
+        model: "claude-opus-5-5",
+      };
+      const replacement = { ...personal, instanceId: ProviderInstanceId.make("claudeAgent") };
+      const oldThreadId = ProviderThreadId.make("provider-thread:limited");
+      const newThreadId = ProviderThreadId.make("provider-thread:continuation");
+      const failedRun = {
+        ...run,
+        providerInstanceId: personal.instanceId,
+        modelSelection: personal,
+        providerThreadId: oldThreadId,
+        status: "failed" as const,
+      };
+      const continuation = {
+        ...run,
+        id: RunId.make("run:continuation"),
+        ordinal: 2,
+        providerInstanceId: replacement.instanceId,
+        modelSelection: replacement,
+        providerThreadId: newThreadId,
+        status: "starting" as const,
+        startedAt: null,
+        completedAt: null,
+      };
+      const providerThread = {
+        id: newThreadId,
+        driver: ProviderDriverKind.make("claudeAgent"),
+        providerInstanceId: replacement.instanceId,
+        providerSessionId: null,
+        appThreadId: threadId,
+        ownerNodeId: null,
+        nativeThreadRef: null,
+        nativeConversationHeadRef: null,
+        status: "not_loaded",
+        firstRunOrdinal: 2,
+        lastRunOrdinal: 2,
+        handoffIds: [],
+        forkedFrom: null,
+        createdAt: now,
+        updatedAt: now,
+      } satisfies OrchestrationV2ProviderThread;
+      const providers = [personal, replacement].map(({ instanceId }) => ({
+        instanceId,
+        driver: providerThread.driver,
+      }));
+      let projection: OrchestrationV2ThreadProjection = {
+        ...emptyProjection,
+        thread: { ...emptyProjection.thread, activeProviderThreadId: oldThreadId },
+        runs: [failedRun],
+        turnItems: [commandItem("existing-history")],
+        visibleTurnItems: [
+          {
+            position: 0,
+            visibility: "local",
+            sourceThreadId: threadId,
+            sourceItemId: TurnItemId.make("existing-history"),
+            item: commandItem("existing-history"),
+          },
+        ],
+      };
+      const apply = (event: OrchestrationV2DomainEvent) => {
+        projection = applyOrchestrationV2ProjectionEvent(projection, event)!;
+      };
+      expect(resolvePendingHandoff(projection, replacement, providers)).not.toBeNull();
+      // Model selection is emitted before provider-thread activation, so its
+      // thread payload still points at the limited account's provider thread.
+      apply({
+        id: EventId.make("selection"),
+        type: "thread.provider-switched",
+        threadId,
+        occurredAt: now,
+        payload: {
+          ...projection.thread,
+          providerInstanceId: replacement.instanceId,
+          modelSelection: replacement,
+        },
+      });
+      apply({
+        id: EventId.make("activation"),
+        type: "provider-thread.updated",
+        threadId,
+        occurredAt: now,
+        payload: providerThread,
+      });
+      apply({
+        id: EventId.make("continuation-run"),
+        type: "run.created",
+        threadId,
+        occurredAt: now,
+        payload: continuation,
+      });
+      apply({
+        id: EventId.make("handoff"),
+        type: "turn-item.updated",
+        threadId,
+        occurredAt: now,
+        payload: {
+          ...commandItem("completed-handoff", "", 2),
+          type: "handoff",
+          runId: continuation.id,
+          providerThreadId: newThreadId,
+          contextHandoffId: ContextHandoffId.make("handoff:continuation"),
+          fromProviderThreadIds: [oldThreadId],
+          toProviderThreadId: newThreadId,
+          fromProviderInstanceIds: [personal.instanceId],
+          toProviderInstanceId: replacement.instanceId,
+          strategy: "full_thread_summary",
+          summary: "Continue where you left off.",
+        },
+      });
+      expect(resolvePendingHandoff(projection, replacement, providers)).toBeNull();
+      apply({
+        id: EventId.make("terminal"),
+        type: "run.updated",
+        threadId,
+        occurredAt: now,
+        payload: { ...continuation, status, startedAt: now, completedAt: now },
+      });
+      expect(resolvePendingHandoff(projection, replacement, providers)).toBeNull();
+      expect(resolvePendingHandoff(projection, personal, providers)).toEqual({
+        from: [replacement],
+        to: personal,
+      });
+      // Reserving a future provider or updating a child provider thread must
+      // leave the conversation on the account that received the handoff.
+      for (const payload of [
+        { ...providerThread, id: oldThreadId, firstRunOrdinal: null, lastRunOrdinal: null },
+        { ...providerThread, id: oldThreadId, appThreadId: ThreadId.make("child-thread") },
+      ]) {
+        apply({
+          id: EventId.make(`unrelated-provider:${payload.appThreadId}`),
+          type: "provider-thread.updated",
+          threadId,
+          occurredAt: now,
+          payload,
+        });
+        expect(resolvePendingHandoff(projection, replacement, providers)).toBeNull();
+      }
+    },
+  );
+
   it("applies a compact PR sync without replacing other links or thread metadata", () => {
     const link = (number: number): ThreadPullRequestLink => ({
       host: "github.com",

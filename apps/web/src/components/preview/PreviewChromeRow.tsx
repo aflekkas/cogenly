@@ -1,6 +1,13 @@
-import { CaptureIcon, PickElementIcon } from "~/components/ui/animated-icons";
 import { RefreshIcon } from "~/components/ui/refresh-icon";
-import { ArrowLeft, ArrowRight, Bot, ExternalLink, Globe, Lock } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  Bot,
+  ExternalLink,
+  Globe,
+  Lock,
+  MousePointerClick,
+} from "lucide-react";
 import {
   type FormEvent,
   type KeyboardEvent,
@@ -150,9 +157,6 @@ interface Props {
   onSubmit: (url: string) => void;
   /** When provided, renders an "Open in browser" affordance to the right. */
   onOpenInBrowser?: (() => void) | undefined;
-  onCapture?: ((record: boolean) => void) | undefined;
-  captureDisabled?: boolean | undefined;
-  recording?: boolean | undefined;
   /**
    * When provided, renders an annotation-mode toggle button to the right of
    * the URL input. Pressed while annotation mode is active (button shows in `pressed`
@@ -236,9 +240,6 @@ export function PreviewChromeRow({
   onRefresh,
   onSubmit,
   onOpenInBrowser,
-  onCapture,
-  captureDisabled,
-  recording,
   onPickElement,
   pickActive,
   pickDisabled,
@@ -252,8 +253,6 @@ export function PreviewChromeRow({
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [draft, setDraft] = useState(url);
   const [inputFocused, setInputFocused] = useState(false);
-  // Screenshots taken from the camera button; each one plays CaptureIcon's shutter.
-  const [shots, setShots] = useState(0);
   const address = url.length > 0 ? parseAddress(url) : null;
   // At rest the field holds nothing and the display beside it shows the URL;
   // the input's own text appears when it is being edited.
@@ -408,36 +407,15 @@ export function PreviewChromeRow({
               disabled={pickDisabled}
               pressed={pickActive ?? false}
             >
-              <PickElementIcon active={pickActive ?? false} />
-            </ToolbarButton>
-          ) : null}
-          {onCapture ? (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    variant={recording ? "secondary" : "ghost"}
-                    size="icon-sm"
-                    onClick={(event) => {
-                      // Only a screenshot fires the shutter, not starting or stopping a recording.
-                      if (!recording && !event.shiftKey) setShots((count) => count + 1);
-                      onCapture(event.shiftKey);
-                    }}
-                    aria-label={recording ? "Stop recording" : "Capture screenshot"}
-                    type="button"
-                    disabled={captureDisabled}
-                  />
-                }
+              <span
+                className={cn(
+                  "contents transition-colors duration-(--motion-duration-base) ease-out",
+                  pickActive && "text-info-foreground",
+                )}
               >
-                <CaptureIcon shot={shots} recording={recording ?? false} />
-                {recording ? (
-                  <span className="absolute top-1 right-1 size-1.5 animate-status-pulse rounded-full bg-destructive" />
-                ) : null}
-              </TooltipTrigger>
-              <TooltipPopup>
-                {recording ? "Stop recording" : "Screenshot · Shift-click to record"}
-              </TooltipPopup>
-            </Tooltip>
+                <MousePointerClick />
+              </span>
+            </ToolbarButton>
           ) : null}
           {trailingActions}
         </div>

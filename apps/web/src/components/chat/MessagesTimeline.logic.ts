@@ -1481,14 +1481,20 @@ function subagentEntryMembers(
 
 const supersededReasoningEntries = new WeakMap<TimelineEntry, TimelineEntry>();
 
-/** A steer or subsequent activity ends thinking even if the provider omits its completion. */
-function settleSupersededReasoning(entries: ReadonlyArray<TimelineEntry>) {
+/** A settled run, steer or later activity ends thinking even without its final item event. */
+function settleSupersededReasoning(
+  entries: ReadonlyArray<TimelineEntry>,
+  activeRunId: RunId | null,
+  runlessWorkActive: boolean,
+) {
   return entries.map((entry, index) => {
     if (
-      index === entries.length - 1 ||
       entry.kind !== "work" ||
       entry.entry.itemType !== "reasoning" ||
-      entry.entry.toolLifecycleStatus !== "inProgress"
+      entry.entry.toolLifecycleStatus !== "inProgress" ||
+      (index === entries.length - 1 &&
+        entry.attempt?.status !== "superseded" &&
+        (entry.entry.runId == null ? runlessWorkActive : entry.entry.runId === activeRunId))
     ) {
       return entry;
     }
@@ -1501,9 +1507,22 @@ function settleSupersededReasoning(entries: ReadonlyArray<TimelineEntry>) {
   });
 }
 
-function timelineRowEntries(entries: ReadonlyArray<TimelineEntry>) {
+function timelineRowEntries(
+  input: Pick<
+    MessagesTimelineRowsInput,
+    "timelineEntries" | "latestRun" | "runningRunId" | "isWorking" | "runlessWorkActive"
+  >,
+) {
   return withTurnSubagentsGrouped(
-    withoutSubagentDelegationRows(settleSupersededReasoning(entries)),
+    withoutSubagentDelegationRows(
+      settleSupersededReasoning(
+        input.timelineEntries,
+        input.isWorking
+          ? deriveUnsettledRunId(input.latestRun ?? null, input.runningRunId ?? null)
+          : null,
+        input.isWorking && input.runlessWorkActive === true,
+      ),
+    ),
   );
 }
 
@@ -1514,7 +1533,7 @@ function deriveTimelineTurnFolds(
     "timelineEntries" | "latestRun" | "isWorking" | "runlessWorkActive" | "runningRunId"
   >,
 ) {
-  const timelineEntries = timelineRowEntries(input.timelineEntries);
+  const timelineEntries = timelineRowEntries(input);
   const unsettledRunId = deriveUnsettledRunId(input.latestRun ?? null, input.runningRunId ?? null);
   const failedRunIds = failedTimelineRunIds(timelineEntries, input.latestRun ?? null);
   const activeVisualResponseRunIds = deriveActiveVisualResponseRunIds({
@@ -1567,7 +1586,7 @@ export function deriveMessagesTimelineRows(input: {
   /** Live bootstrap progress. Renders a stage card under the first user message. */
   worktreeSetup?: WorktreeSetupSnapshot | null;
 }): MessagesTimelineRow[] {
-  const timelineEntries = timelineRowEntries(input.timelineEntries);
+  const timelineEntries = timelineRowEntries(input);
   const workGroupDisclosure = (groupId: string) => {
     const expanded = input.expandedWorkGroupIds?.has(groupId) ?? false;
     const closing = !expanded && (input.closingWorkGroupIds?.has(groupId) ?? false);
