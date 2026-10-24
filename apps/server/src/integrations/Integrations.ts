@@ -1268,9 +1268,34 @@ const make = (options: IntegrationsOptions = {}) =>
         ),
         Effect.ignore,
       );
+      // A failed check outlives a process that crashed and came back: once it
+      // runs again, probe it, so its status is not `error` until the next call.
+      const probing = new Set<IntegrationId>();
+      const reprobe = Effect.gen(function* () {
+        const checked = yield* Ref.get(checks);
+        for (const integration of yield* rows()) {
+          const check = checked.get(integration.id);
+          if (
+            integration.transport !== "local" ||
+            !integration.enabled ||
+            check === undefined ||
+            check.ok ||
+            check.updatedAt !== integration.updatedAt ||
+            probing.has(integration.id) ||
+            (yield* local.value.status(integration.id))?.state !== "running"
+          )
+            continue;
+          probing.add(integration.id);
+          yield* fetchTools(integration).pipe(
+            Effect.ignore,
+            Effect.ensuring(Effect.sync(() => probing.delete(integration.id))),
+            Effect.forkScoped,
+          );
+        }
+      }).pipe(Effect.ignore);
       // Process restarts and finished Google sign-ins reach Settings like any other change.
       yield* local.value.changes.pipe(
-        Stream.runForEach(() => notify),
+        Stream.runForEach(() => notify.pipe(Effect.andThen(reprobe))),
         Effect.forkScoped,
       );
     }
