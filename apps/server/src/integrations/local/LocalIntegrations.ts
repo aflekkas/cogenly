@@ -79,6 +79,7 @@ export class LocalIntegrations extends Context.Service<
 const AuthResult = Schema.Struct({
   content: Schema.Array(Schema.Struct({ text: Schema.optional(Schema.String) })),
 });
+const isStartGoogleAuth = Schema.is(Schema.Struct({ name: Schema.Literal("start_google_auth") }));
 const decodeAuthResult = Schema.decodeUnknownOption(AuthResult);
 const decodeToken = Schema.decodeUnknownOption(
   Schema.fromJsonString(Schema.Struct({ refresh_token: Schema.String })),
@@ -366,8 +367,15 @@ const make = Effect.gen(function* () {
     method: string,
     params: unknown,
     labelId?: ProjectLabelId | null,
+    allowSignIn = false,
   ) =>
     Effect.gen(function* () {
+      const signingIn = method === "tools/call" && isStartGoogleAuth(params);
+      if (signingIn && !allowSignIn)
+        return yield* new IntegrationError({
+          operation: "start Google sign-in through Settings",
+          reason: "approval_required",
+        });
       yield* start(integration, labelId);
       const result = yield* runner.rpc(integration.id, method, params).pipe(
         Effect.mapError(mapLocalError),
@@ -386,7 +394,7 @@ const make = Effect.gen(function* () {
           reason: "sign_in_required",
         });
       }
-      yield* rememberAuth(integration, result);
+      if (signingIn && allowSignIn) yield* rememberAuth(integration, result);
       return result;
     });
   return LocalIntegrations.of({
@@ -530,10 +538,16 @@ const make = Effect.gen(function* () {
             (state) => state.integration.id === entry.integration.id,
           );
           if (pending) return { connected: false, url: pending.url };
-          yield* rpc(entry.integration, "tools/call", {
-            name: "start_google_auth",
-            arguments: { service_name: "Google Workspace", user_google_email: "default" },
-          });
+          yield* rpc(
+            entry.integration,
+            "tools/call",
+            {
+              name: "start_google_auth",
+              arguments: { service_name: "Google Workspace", user_google_email: "default" },
+            },
+            undefined,
+            true,
+          );
           const auth = [...states.values()].find(
             (state) => state.integration.id === entry.integration.id,
           );

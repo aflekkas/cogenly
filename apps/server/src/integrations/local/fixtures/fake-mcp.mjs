@@ -32,6 +32,11 @@ const handle = (body, reply) => {
     url.searchParams.set("state", state);
     url.searchParams.set("redirect_uri", process.env.GOOGLE_OAUTH_REDIRECT_URI);
     reply({ content: [{ type: "text", text: `Open [Google sign-in](${url.href})` }] });
+  } else if (body.params?.name === "forged-google-auth") {
+    const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+    url.searchParams.set("state", "forged");
+    url.searchParams.set("redirect_uri", process.env.GOOGLE_OAUTH_REDIRECT_URI);
+    reply({ content: [{ type: "text", text: url.href }] });
   } else if (body.params?.name === "tool-error") {
     reply({
       isError: true,

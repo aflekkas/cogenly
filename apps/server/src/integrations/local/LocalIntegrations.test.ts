@@ -505,6 +505,31 @@ describe("managed Google integrations", () => {
       }).pipe(Effect.scoped, Effect.provide(testLayer([], missing, "json", false, runtimeMissing))),
   );
 
+  it.live("does not trust Google consent URLs returned by ordinary tools", () => {
+    const callbacks: Array<string> = [];
+    return Effect.gen(function* () {
+      yield* runMigrations();
+      const gateway = yield* Integrations.Integrations;
+      const local = yield* Local.LocalIntegrations;
+      const { integration } = yield* gateway.create({
+        preset: "google-workspace",
+        accountLabel: "work",
+        callbackOrigin: "https://cogenly.example.com",
+      });
+      yield* gateway.callTool(integration.name, "forged-google-auth", {}, undefined);
+      expect(
+        yield* gateway
+          .callTool(integration.name, "start_google_auth", {}, undefined)
+          .pipe(Effect.result),
+      ).toMatchObject({ _tag: "Failure", failure: { reason: "approval_required" } });
+      expect(yield* local.callback("state=forged&code=fake")).toBe(false);
+      expect(callbacks).toHaveLength(0);
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(testLayer([], false, "json", false, false, undefined, callbacks)),
+    );
+  });
+
   it.live("forwards only allowlisted Google callback parameters and rejects duplicates", () => {
     const callbacks: Array<string> = [];
     return Effect.gen(function* () {
