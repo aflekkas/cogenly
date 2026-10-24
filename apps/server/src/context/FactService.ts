@@ -267,6 +267,7 @@ const make = Effect.gen(function* () {
             if (old.status === "superseded" || old.status === "retracted")
               return yield* new FactError({ operation: "supersede", reason: "invalid_state" });
             yield* authorizeWrite(old, principal);
+            const twins = yield* twinsOf(old.id);
             const result = yield* create(input.replacement, principal);
             // A proposed correction cannot erase confirmed knowledge. Confirmation atomically
             // activates the replacement and links the old fact; superseded proposals retain their chain.
@@ -274,7 +275,6 @@ const make = Effect.gen(function* () {
               old.status === "proposed" && old.supersedes !== undefined ? old.supersedes : old.id;
             yield* persist({ ...result.fact, supersedes }, principal);
             if (old.status !== "confirmed" || result.fact.status === "confirmed") {
-              const twins = yield* twinsOf(old.id);
               yield* persist(
                 {
                   ...old,
@@ -285,7 +285,7 @@ const make = Effect.gen(function* () {
                 principal,
               );
               yield* retire(
-                twins,
+                twins.filter((twin) => twin.id !== result.fact.id),
                 (twin) => ({ ...twin, status: "superseded", supersededBy: result.fact.id }),
                 principal,
               );

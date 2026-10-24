@@ -3,7 +3,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   EnvironmentId,
   type FactCreateInput,
-  type FactId,
+  FactId,
   type SharedDocumentChange,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
@@ -147,6 +147,53 @@ describe("memory facts across paired machines", () => {
       expect(yield* placements(a)).toEqual(yield* placements(b));
       expect((yield* placements(a)).map((fact) => fact.status)).toEqual(["retracted", "retracted"]);
     }).pipe(Effect.scoped),
+  );
+
+  it.effect(
+    "superseding a normalized duplicate keeps its replacement active on both machines",
+    () =>
+      Effect.gen(function* () {
+        const { a, b } = yield* paired;
+        const id = FactId.make("fact:0");
+        const at = "2026-01-01T00:00:00.000Z";
+        // This portable id sorts before every newly generated fact UUID, so the
+        // replacement deterministically starts hidden behind the original.
+        yield* a.state.write("fact", id, {
+          factId: id,
+          ...note("Ships on Fridays"),
+          agentId: agent.id,
+          predicate: null,
+          validFrom: null,
+          supersedes: null,
+          createdBy: "user",
+          createdAt: at,
+          legacyNoteId: null,
+          legacySource: null,
+          confirmedAt: at,
+          supersededBy: null,
+          retractedAt: null,
+        });
+        // A pre-existing hidden copy must retire with the original.
+        const twin = (yield* a.facts.create(note("ships on fridays"))).fact;
+        const replacement = (yield* a.facts.supersede({
+          id,
+          replacement: note("SHIPS  on Fridays"),
+        })).fact;
+        expect(replacement).toMatchObject({ status: "confirmed", supersedes: id });
+        expect(replacement.supersededBy).toBeUndefined();
+        yield* exchange(a, b);
+        for (const m of [a, b]) {
+          expect((yield* m.facts.list({ status: "confirmed" })).facts.map((f) => f.id)).toEqual([
+            replacement.id,
+          ]);
+          const all = yield* placements(m);
+          for (const retired of [id, twin.id])
+            expect(all.find((f) => f.id === retired)).toMatchObject({
+              status: "superseded",
+              supersededBy: replacement.id,
+            });
+        }
+      }).pipe(Effect.scoped),
   );
 
   it.effect("a fact that arrives before its agent is placed when the agent arrives", () =>
