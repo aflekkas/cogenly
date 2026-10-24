@@ -245,6 +245,7 @@ function FactRow({ fact, context }: { fact: Fact; context: FactListContext }) {
           <FactEditorDialog
             title="Correct this fact"
             description="Saving keeps the old wording in history and uses the correction from now on."
+            environmentId={context.environmentId}
             labels={context.labels}
             initial={fact}
             saveLabel="Save correction"
@@ -302,6 +303,7 @@ export interface FactDraft {
 export function FactEditorDialog(props: {
   title: string;
   description: string;
+  environmentId: EnvironmentId;
   labels: ReadonlyArray<ProjectLabelWithRepositories>;
   initial: FactDraft | null;
   saveLabel: string;
@@ -371,6 +373,7 @@ export function FactEditorDialog(props: {
                 <div className="flex flex-wrap items-center gap-1.5">
                   <ProjectLabelChips labels={props.labels} ids={labelIds} />
                   <ProjectLabelPicker
+                    environmentId={props.environmentId}
                     labels={props.labels}
                     selectedIds={labelIds}
                     onToggle={(id, selected) =>

@@ -75,6 +75,7 @@ export function AgentFactsSection(props: {
           <FactEditorDialog
             title={`Remember for ${agent.name}`}
             description={`Saved as confirmed and owned by ${agent.name}. Untagged facts stay private to you and ${agent.name}.`}
+            environmentId={agent.environmentId}
             labels={props.labels}
             initial={null}
             saveLabel="Remember"

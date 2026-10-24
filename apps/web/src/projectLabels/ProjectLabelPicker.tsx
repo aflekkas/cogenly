@@ -1,4 +1,8 @@
-import type { ProjectLabelId, ProjectLabelWithRepositories } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  ProjectLabelId,
+  ProjectLabelWithRepositories,
+} from "@t3tools/contracts";
 import { CheckIcon, PlusIcon, Settings2Icon } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 
@@ -22,6 +26,8 @@ import { ProjectTag } from "./ProjectTag";
  * new open item's projects) and saves it however that record saves.
  */
 export function ProjectLabelPicker(props: {
+  /** The environment `labels` belong to, which resolves their icons. */
+  environmentId: EnvironmentId;
   labels: ReadonlyArray<ProjectLabelWithRepositories>;
   selectedIds: ReadonlyArray<ProjectLabelId>;
   onToggle: (labelId: ProjectLabelId, selected: boolean) => void;
@@ -88,7 +94,10 @@ export function ProjectLabelPicker(props: {
         <ComboboxList>
           {(label: ProjectLabelWithRepositories) => (
             <ComboboxItem key={label.id} value={label}>
-              <ProjectFolderIcon color={label.color} className="size-4" />
+              <ProjectFolderIcon
+                project={{ environmentId: props.environmentId, label }}
+                className="size-4"
+              />
               <span className="min-w-0 flex-1 truncate">{label.name}</span>
               {selected.has(label.id) ? <CheckIcon className="ml-auto" /> : null}
             </ComboboxItem>
