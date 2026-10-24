@@ -3,7 +3,12 @@
  * `machine-links` check, the synthesized report for an unreachable machine,
  * and health alerts ("Contabo VPS hasn't been reachable for 10 minutes").
  */
-import type { EnvironmentId, MachineHealthItem, MachineInfo } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  MachineHealthItem,
+  MachineHealthReport,
+  MachineInfo,
+} from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 
@@ -71,8 +76,38 @@ export function peerReachabilityItem(input: {
     status: failed ? "fail" : "warn",
     title: `${input.name} hasn't been reachable for ${formatAgo(offlineMs)}`,
     detail: `Last seen ${DateTime.formatIso(input.lastSeenAt)}.`,
+    // When it went quiet, kept across the warn-to-fail step so it reads as one outage.
     since: input.lastSeenAt,
     target,
     fix: null,
+  };
+}
+
+/**
+ * A paired machine's report when it could not be read from the machine
+ * itself: one `machine-links` check holding what this side knows.
+ */
+export function unreachableReport(input: {
+  readonly environmentId: EnvironmentId;
+  readonly name: string;
+  readonly item: MachineHealthItem;
+  readonly now: DateTime.Utc;
+}): MachineHealthReport {
+  return {
+    environmentId: input.environmentId,
+    machineName: input.name,
+    status: input.item.status,
+    observedAt: input.now,
+    serverVersion: "unknown",
+    uptimeSeconds: 0,
+    reachable: false,
+    checks: [
+      {
+        id: "machine-links",
+        status: input.item.status,
+        summary: input.item.title,
+        items: [input.item],
+      },
+    ],
   };
 }

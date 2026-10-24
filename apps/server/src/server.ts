@@ -41,6 +41,7 @@ import * as MachineIdentity from "./machines/MachineIdentity.ts";
 import * as Machines from "./machines/Machines.ts";
 import * as MachineSecurity from "./security/MachineSecurity.ts";
 import * as MachineHealth from "./health/MachineHealth.ts";
+import * as HealthCanary from "./health/HealthCanary.ts";
 import * as HealthAlerts from "./health/HealthAlerts.ts";
 import * as HealthAlertsState from "./health/HealthAlertsState.ts";
 import * as MachineSetup from "./tailscale/MachineSetup.ts";
@@ -581,45 +582,59 @@ const layerProviderInstallationRefresh = Layer.effectDiscard(
   }),
 );
 
+// One instance for every transport: it remembers sign-ins and approvals in progress.
+const layerMachineSetup = MachineSetup.layer.pipe(
+  Layer.provide(TailscaleHost.layer),
+  Layer.provide(MachineIdentity.layer),
+);
+
+// Paired machines: shared configuration, then thread logs, over one link.
+const layerPairedMachines = Layer.mergeAll(
+  SharedSync.layer.pipe(Layer.provide(SharedState.layer)),
+  // The orchestrator's own sink, so replicated events reach the same
+  // subscribers, and its forwarder registry, so routing sees its commands.
+  ProjectMove.layer.pipe(
+    Layer.provideMerge(ThreadTransfer.layer),
+    Layer.provideMerge(ThreadRouting.layer),
+    Layer.provideMerge(ThreadSync.layer),
+    Layer.provide(ThreadReplication.layer),
+    Layer.provide(RemoteThreadCommands.layer),
+    // Agents follow their conversation; the same layer as SharedSync's.
+    Layer.provide(SharedState.layer),
+    Layer.provide(
+      Layer.mergeAll(
+        RuntimeLayer.layerEventSink,
+        EventStoreV2.layerFromOrchestrationEventStore,
+        ProjectionStoreV2.layer,
+        ProjectStore.layer,
+      ),
+    ),
+  ),
+).pipe(
+  Layer.provideMerge(layerMachines),
+  Layer.provide(ServerEnvironment.layerIdentity),
+  Layer.provide(Scheduler.layer),
+);
+
+// Machine health reports on the paired machines and their sync, so it sits
+// above that group. Alerts read paired machines' alerts over the link; their
+// state layer is the same reference turn context reads in the orchestration
+// runtime. Scheduler and identity are the same references the group uses.
+const layerMachineHealth = HealthAlerts.layer.pipe(
+  Layer.provide(HealthAlertsState.layer),
+  Layer.provideMerge(MachineHealth.layer),
+  Layer.provide(HealthCanary.layer),
+  Layer.provide(layerMachineSetup),
+  Layer.provide(Scheduler.layer),
+  Layer.provide(ServerEnvironment.layerIdentity),
+  Layer.provideMerge(layerPairedMachines),
+);
+
 const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   AgentAwarenessRelay.layer,
   MachineSecurity.layer,
-  // TODO(health): move beside Machines once the real layers need its services.
-  MachineHealth.layer,
-  // One instance for every transport: it remembers sign-ins and approvals in progress.
-  MachineSetup.layer.pipe(Layer.provide(TailscaleHost.layer), Layer.provide(MachineIdentity.layer)),
-  // Paired machines: shared configuration, then thread logs, over one link.
-  Layer.mergeAll(
-    SharedSync.layer.pipe(Layer.provide(SharedState.layer)),
-    // Reads paired machines' alerts over the link. The state layer is the
-    // same reference turn context reads in the orchestration runtime.
-    HealthAlerts.layer.pipe(
-      Layer.provide(Layer.merge(MachineHealth.layer, HealthAlertsState.layer)),
-    ),
-    // The orchestrator's own sink, so replicated events reach the same
-    // subscribers, and its forwarder registry, so routing sees its commands.
-    ProjectMove.layer.pipe(
-      Layer.provideMerge(ThreadTransfer.layer),
-      Layer.provideMerge(ThreadRouting.layer),
-      Layer.provideMerge(ThreadSync.layer),
-      Layer.provide(ThreadReplication.layer),
-      Layer.provide(RemoteThreadCommands.layer),
-      // Agents follow their conversation; the same layer as SharedSync's.
-      Layer.provide(SharedState.layer),
-      Layer.provide(
-        Layer.mergeAll(
-          RuntimeLayer.layerEventSink,
-          EventStoreV2.layerFromOrchestrationEventStore,
-          ProjectionStoreV2.layer,
-          ProjectStore.layer,
-        ),
-      ),
-    ),
-  ).pipe(
-    Layer.provideMerge(layerMachines),
-    Layer.provide(ServerEnvironment.layerIdentity),
-    Layer.provide(Scheduler.layer),
-  ),
+  layerMachineSetup,
+  layerMachineHealth,
   // Asks Cogenly Connect to deliver webhooks it held while this environment was offline.
   HeldHooksWaker.layer,
   layerThreadSettlementWorker,

@@ -1,7 +1,12 @@
-import { OrchestratorMcpFailure, type ServerSettings } from "@t3tools/contracts";
+import {
+  type MachineHealthError,
+  OrchestratorMcpFailure,
+  type ServerSettings,
+} from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as DesktopAppControl from "../../../environment/DesktopAppControl.ts";
 import * as Environment from "../../../environment/ServerEnvironment.ts";
+import * as MachineHealth from "../../../health/MachineHealth.ts";
 import * as ThreadCommandExecutor from "../../../orchestration-v2/ThreadCommandExecutor.ts";
 import * as Settings from "../../../serverSettings.ts";
 import * as MachineSecurity from "../../../security/MachineSecurity.ts";
@@ -60,9 +65,24 @@ export const addEnvironmentFailure = (error: DesktopAppControl.DesktopAppControl
     message: error.message,
   });
 
+const healthFailure = (error: MachineHealthError) =>
+  new OrchestratorMcpFailure({
+    code: error.reason === "not-paired" ? "invalid_request" : "orchestration_error",
+    message:
+      error.reason === "not-paired"
+        ? `${error.message} machines_list shows the paired machines.`
+        : error.message,
+  });
+
 export const layer = McpToolAccess.toLayer(EnvironmentToolkit, {
   machine_security_status: McpToolAccess.reads(() =>
     MachineSecurity.MachineSecurity.pipe(Effect.flatMap((security) => security.status)),
+  ),
+  machine_health: McpToolAccess.reads((input) =>
+    MachineHealth.MachineHealth.pipe(
+      Effect.flatMap((health) => health.reportFor(input)),
+      Effect.mapError(healthFailure),
+    ),
   ),
   environment_read: McpToolAccess.reads(() =>
     Effect.gen(function* () {

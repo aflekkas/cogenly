@@ -9,9 +9,10 @@ import {
 import * as Schema from "effect/Schema";
 import { Tool, Toolkit } from "effect/ai";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
-import { MachineSecurityStatus } from "@t3tools/contracts";
+import { EnvironmentId, MachineHealthReport, MachineSecurityStatus } from "@t3tools/contracts";
 import * as DesktopAppControl from "../../../environment/DesktopAppControl.ts";
 import * as ServerEnvironment from "../../../environment/ServerEnvironment.ts";
+import * as MachineHealth from "../../../health/MachineHealth.ts";
 import * as MachineSecurity from "../../../security/MachineSecurity.ts";
 import * as ThreadCommandExecutor from "../../../orchestration-v2/ThreadCommandExecutor.ts";
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
@@ -110,9 +111,26 @@ const MachineSecurityStatusTool = Tool.make("machine_security_status", {
 })
   .annotate(Tool.Readonly, true)
   .annotate(Tool.Destructive, false);
+const MachineHealthTool = Tool.make("machine_health", {
+  ...shared,
+  dependencies: [...shared.dependencies, MachineHealth.MachineHealth],
+  description:
+    "Health of a Cogenly machine: server, database, disk, provider sign-ins, links to paired machines, sync, integrations, scheduled tasks, stuck runs, boot service, Tailscale Serve and the canary. Each check has a status (ok, warn, fail, unknown when it could not run), a summary and the items worth attention, with a suggested fix where there is one. Omit environmentId for this machine; give a paired machine's (from machines_list) to read its report over the peer link. reachable false means that machine did not answer and the report describes what this one saw.",
+  parameters: Schema.Struct({
+    environmentId: Schema.optionalKey(
+      EnvironmentId.annotate({
+        description: "A paired machine's environment ID from machines_list. Omit for this machine.",
+      }),
+    ),
+  }),
+  success: MachineHealthReport,
+})
+  .annotate(Tool.Readonly, true)
+  .annotate(Tool.Destructive, false);
 export const EnvironmentToolkit = Toolkit.make(
   EnvironmentReadTool,
   EnvironmentPreferencesTool,
   EnvironmentAddTool,
   MachineSecurityStatusTool,
+  MachineHealthTool,
 );

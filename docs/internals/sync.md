@@ -66,6 +66,13 @@ and reconciliation enforce ownership. Being offline does not grant another
 machine permission to take over.
 Documents owned by machines outside the current pairing remain stored and inert;
 re-pairing does not transfer their execution to the new hub.
+A schedule a server keeps in step with one of its own settings, such as the
+[health canary](../../apps/server/src/health/HealthCanary.ts), still replicates
+like any other. Its ID carries the owner's environment ID, so paired machines
+never reconcile each other's, and it gets a fresh ID each time it is created
+again, because a deleted schedule's tombstone refuses later writes to that ID.
+The setting on the owner stays the source of truth: a peer may pause the copy,
+and the owner's next reconcile restores it.
 
 Sync uses the domain's text and collection limits. A document exceeding the normal
 batch byte budget travels alone, so a valid configuration cannot wedge a cursor.
