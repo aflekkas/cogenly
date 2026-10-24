@@ -73,8 +73,9 @@ Sync uses the domain's text and collection limits. A document exceeding the norm
 batch byte budget travels alone, so a valid configuration cannot wedge a cursor.
 Legacy rows that cannot be captured are logged and skipped during bootstrap;
 capture failure during repository backfill never fails a project read.
-Bootstrap completion is durable per peer pairing; reconnects and scheduler ticks
-do not rescan the domain tables. No-op edits and replayed merges do not invalidate
+Bootstrap completion is durable per peer pairing and the set of captured document
+kinds. Adding a kind reruns capture for missing documents on existing pairings;
+reconnects and scheduler ticks with the same kinds do not rescan the domain tables. No-op edits and replayed merges do not invalidate
 client streams.
 Undecodable stored changes are logged and skipped while advancing their cursor.
 Legacy URI-encoded MCP schedule IDs remain readable on disk and on the wire to

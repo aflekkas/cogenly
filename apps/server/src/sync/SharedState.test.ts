@@ -100,6 +100,35 @@ describe("SharedState", () => {
       expect((yield* restarted.get("project", "label:late"))?.fields.name).toBe("Late");
     }).pipe(Effect.scoped, Effect.provide(layer)),
   );
+  it.effect.each([
+    "existing-pair",
+    JSON.stringify({ pairing: "existing-pair", kinds: ["agent", "project", "schedule"] }),
+  ])("bootstraps new document kinds despite an older completion marker %s", (marker) =>
+    Effect.gen(function* () {
+      const state = yield* SharedState.SharedState;
+      const sql = yield* SqlClient.SqlClient;
+      const id = "fact:legacy";
+      const fact = {
+        id,
+        subject: "Preference",
+        text: "Existing fact",
+        labelIds: [],
+        visibility: "user",
+        status: "confirmed",
+        sourceRefs: [],
+        createdBy: "user",
+        createdAt: project.createdAt,
+        updatedAt: project.createdAt,
+      };
+      yield* sql`INSERT INTO facts(id,status,payload_json,updated_at) VALUES (${id},'confirmed',${JSON.stringify(fact)},${project.createdAt})`;
+      yield* sql`INSERT INTO shared_bootstrap(pairing_key) VALUES (${marker})`;
+      yield* state.bootstrap("existing-pair");
+      expect((yield* state.get("fact", id))?.fields.text).toBe(fact.text);
+      const log = yield* sql`SELECT * FROM shared_changes`;
+      yield* state.bootstrap("existing-pair");
+      expect(yield* sql`SELECT * FROM shared_changes`).toEqual(log);
+    }).pipe(Effect.provide(layer)),
+  );
   it.effect("pairing never changes the default execution owner from the creating machine", () =>
     Effect.gen(function* () {
       const state = yield* SharedState.SharedState;

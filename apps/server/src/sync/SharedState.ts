@@ -532,9 +532,22 @@ const make = Effect.gen(function* () {
     )
     .pipe(Effect.mapError(storage));
   yield* applyDeferred;
+  const bootstrapSources = {
+    project: sql<{ id: string }>`SELECT label_id AS id FROM project_labels`,
+    agent: sql<{ id: string }>`SELECT agent_id AS id FROM agents`,
+    schedule: sql<{ id: string }>`SELECT task_id AS id FROM scheduled_tasks`,
+    // After agents, so a peer receives a fact's agent before the fact.
+    fact: sql<{ id: string }>`SELECT id FROM facts ORDER BY rowid`.pipe(
+      Effect.map((rows) => rows.map((row) => ({ id: factDocumentId(row.id) }))),
+    ),
+  };
+  const bootstrapKinds = Object.keys(bootstrapSources) as Array<keyof typeof bootstrapSources>;
   const bootstrap: SharedState["Service"]["bootstrap"] = Effect.fn("SharedState.bootstrap")(
     function* (pairingKey) {
-      const key = pairingKey ?? (yield* Ref.get(hub)) ?? "standalone";
+      const key = encodeJson({
+        pairing: pairingKey ?? (yield* Ref.get(hub)) ?? "standalone",
+        kinds: [...bootstrapKinds].sort(),
+      });
       // The common scheduler path is a read; only the first pass acquires a write transaction.
       if ((yield* sql`SELECT 1 FROM shared_bootstrap WHERE pairing_key=${key}`).length > 0) return;
       yield* sql
@@ -542,19 +555,8 @@ const make = Effect.gen(function* () {
           Effect.gen(function* () {
             if ((yield* sql`SELECT 1 FROM shared_bootstrap WHERE pairing_key=${key}`).length > 0)
               return;
-            for (const [kind, rows] of [
-              ["project", yield* sql<{ id: string }>`SELECT label_id AS id FROM project_labels`],
-              ["agent", yield* sql<{ id: string }>`SELECT agent_id AS id FROM agents`],
-              ["schedule", yield* sql<{ id: string }>`SELECT task_id AS id FROM scheduled_tasks`],
-              // After agents, so a peer receives a fact's agent before the fact.
-              [
-                "fact",
-                (yield* sql<{ id: string }>`SELECT id FROM facts ORDER BY rowid`).map((row) => ({
-                  id: factDocumentId(row.id),
-                })),
-              ],
-            ] as const)
-              for (const row of rows)
+            for (const kind of bootstrapKinds) {
+              for (const row of yield* bootstrapSources[kind])
                 yield* Effect.gen(function* () {
                   if (!(yield* get(kind, row.id))) yield* capture(kind, row.id);
                 }).pipe(
@@ -565,6 +567,7 @@ const make = Effect.gen(function* () {
                     }),
                   ),
                 );
+            }
             yield* sql`INSERT INTO shared_bootstrap(pairing_key) VALUES (${key})`;
           }),
         )
