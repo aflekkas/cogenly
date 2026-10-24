@@ -45,7 +45,6 @@ import { useEnvironmentSupportsServerBrowser } from "~/state/entities";
 import {
   useEnvironment,
   useEnvironmentHttpBaseUrl,
-  useEnvironmentMachines,
   usePrimaryEnvironmentId,
 } from "~/state/environments";
 import { previewEnvironment } from "~/state/preview";
@@ -62,8 +61,6 @@ import { showPreviewPopup } from "./showPreviewPopup";
 import { PreviewChromeRow } from "./PreviewChromeRow";
 import { PreviewEmptyState } from "./PreviewEmptyState";
 import { PreviewMoreMenu, type PreviewMoreMenuActions } from "./PreviewMoreMenu";
-import { PreviewMachineChip } from "./PreviewMachineChip";
-import { resolvePreviewMachine } from "./previewMachine";
 import {
   commitBrowserViewportChange,
   subscribeBrowserViewportChange,
@@ -76,7 +73,6 @@ import { BROWSER_DEVICE_TOOLBAR_HEIGHT } from "~/browser/browserViewportLayout";
 import { previewRuntimeTabId } from "~/browser/previewRuntimeTabId";
 import { BrowserSettingsReadError } from "~/browser/openFileInPreview";
 import { PreviewFileNotShown, PreviewUnreachable } from "./PreviewUnreachable";
-import { revealInFileExplorerLabel } from "./fileExplorerLabel";
 import { shouldShowPreviewEmptyState } from "./previewEmptyStateLogic";
 import { Badge } from "~/components/ui/badge";
 import { BrowserSurfaceSlot } from "~/browser/BrowserSurfaceSlot";
@@ -96,17 +92,9 @@ import { useSitePermissions } from "./useSitePermissions";
 import { PreviewPermissionPrompt } from "./PreviewPermissionPrompt";
 import { ZoomIndicator } from "./ZoomIndicator";
 import { AgentBrowserCursor } from "./AgentBrowserCursor";
-import {
-  findActiveBrowserRecordingRuntimeTabId,
-  isBrowserRecordingStartCancelledError,
-  startBrowserRecording,
-  stopBrowserRecording,
-  useActiveBrowserRecordingTabIds,
-} from "~/browser/browserRecording";
+import { useActiveBrowserRecordingTabIds } from "~/browser/browserRecording";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
-import { COPY_FEEDBACK_MS, createCopyFeedback } from "~/hooks/copyFeedback.logic";
-import { writeTextToClipboard } from "~/hooks/useCopyToClipboard";
 import { observeResize } from "~/lib/observeResize";
 
 interface Props {
@@ -128,16 +116,6 @@ function previewProfileName(
 }
 
 const localApi = typeof window === "undefined" ? null : ensureLocalApi();
-
-/** The "Screenshot saved" toast still on screen, so back-to-back captures share it. */
-let openScreenshotToast: {
-  readonly id: ReturnType<typeof toastManager.add>;
-  count: number;
-} | null = null;
-
-function screenshotToastTitle(count: number): string {
-  return count > 1 ? `${count} screenshots saved` : "Screenshot saved";
-}
 
 /** Resolves stream access only while a server tab shows a file it downloaded. */
 function ServerTabFileNotShown(props: {
@@ -203,8 +181,6 @@ export function PreviewView({
   const threadEnvironment = useEnvironment(threadRef.environmentId);
   const environmentLabel = threadEnvironment?.label ?? "the environment";
   const primaryEnvironmentId = usePrimaryEnvironmentId();
-  const primaryEnvironment = useEnvironment(primaryEnvironmentId);
-  const environmentMachines = useEnvironmentMachines();
   const serverBrowser = useEnvironmentSupportsServerBrowser(threadRef.environmentId);
   const resize = useAtomCommand(previewEnvironment.resize, "preview viewport resize");
   const adjust = useAtomCommand(previewEnvironment.adjust, "preview appearance or zoom");
@@ -222,12 +198,6 @@ export function PreviewView({
   const runtimeTabId = tabId
     ? previewRuntimeTabId(threadRef, previewState.serverEpoch, tabId)
     : null;
-  const recordingRuntimeTabId =
-    tabId && runtimeTabId
-      ? activeRecordingTabIds.has(runtimeTabId)
-        ? runtimeTabId
-        : findActiveBrowserRecordingRuntimeTabId(threadRef, tabId)
-      : null;
   const snapshot = tabId ? (previewState.sessions[tabId] ?? null) : null;
   // Server tabs run in the environment's browser and stream to any client, except the
   // desktop app's own server's tabs, which render here natively while the server drives them.
@@ -235,26 +205,6 @@ export function PreviewView({
   const isServerTab = snapshot?.runtime === "server" && !nativeServerTab;
   /** The server owns this tab's appearance, zoom, and size, whoever renders it. */
   const serverOwnsRendering = snapshot?.runtime === "server";
-  const previewMachine = resolvePreviewMachine({
-    // Tabs from before server tabs carry no runtime; they are desktop tabs.
-    runtime: snapshot ? (snapshot.runtime ?? "desktop") : undefined,
-    threadEnvironment: threadEnvironment
-      ? {
-          label: threadEnvironment.label,
-          machine: environmentMachines.get(threadRef.environmentId) ?? "server",
-        }
-      : null,
-    threadIsPrimary: threadRef.environmentId === primaryEnvironmentId,
-    primaryEnvironment:
-      primaryEnvironment && primaryEnvironmentId
-        ? {
-            label: primaryEnvironment.label,
-            machine: environmentMachines.get(primaryEnvironmentId) ?? "laptop",
-          }
-        : null,
-    rendersDesktopTabs: previewBridge !== null,
-    environmentCount: environmentMachines.size,
-  });
   const serverSurfaceRef = useRef<ServerBrowserHandle | null>(null);
   const [serverAspectRatioLocked, setServerAspectRatioLocked] = useState(false);
   const serverBodyRef = useRef<HTMLDivElement | null>(null);
@@ -705,178 +655,6 @@ export function PreviewView({
     });
   }, [desktopOverlay?.pictureInPicture, runtimeTabId]);
 
-  const handleCapture = useCallback(
-    (record: boolean) => {
-      if (!previewBridge || !runtimeTabId || !tabId) return;
-      const bridge = previewBridge;
-      if (recordingRuntimeTabId) {
-        void stopBrowserRecording(recordingRuntimeTabId).then(
-          (artifact) => {
-            if (!artifact) return;
-            let pathCopied = false;
-            let toastId: ReturnType<typeof toastManager.add>;
-
-            // The toast's action label follows the same copied-then-revert feedback as copy buttons.
-            const pathFeedback = createCopyFeedback({
-              resetMs: COPY_FEEDBACK_MS,
-              onStatus: (status) => {
-                pathCopied = status === "copied";
-                updateRecordingToast();
-              },
-            });
-            const copyPath = () => {
-              void pathFeedback
-                .run(() => writeTextToClipboard(artifact.path, "recording path"))
-                .then((outcome) => {
-                  if (outcome.kind !== "failed") return;
-                  toastManager.update(
-                    toastId,
-                    stackedThreadToast({
-                      type: "error",
-                      title: "Unable to copy recording path",
-                      description: outcome.error.message,
-                      actionProps: revealAction,
-                    }),
-                  );
-                });
-            };
-
-            const revealAction = {
-              children: revealInFileExplorerLabel(navigator.platform),
-              onClick: () => void bridge.revealArtifact(artifact.path),
-            };
-            const updateRecordingToast = () => {
-              toastManager.update(
-                toastId,
-                stackedThreadToast({
-                  type: "success",
-                  title: "Recording saved",
-                  actionProps: revealAction,
-                  data: {
-                    secondaryActionProps: {
-                      children: pathCopied ? "Copied" : "Copy path",
-                      disabled: pathCopied,
-                      onClick: copyPath,
-                    },
-                    secondaryActionVariant: "outline",
-                  },
-                }),
-              );
-            };
-
-            toastId = toastManager.add(
-              stackedThreadToast({
-                type: "success",
-                title: "Recording saved",
-                actionProps: revealAction,
-                data: {
-                  secondaryActionProps: {
-                    children: "Copy path",
-                    onClick: copyPath,
-                  },
-                  secondaryActionVariant: "outline",
-                },
-              }),
-            );
-          },
-          (error) => {
-            toastManager.add({
-              type: "error",
-              title: "Unable to stop recording",
-              description: error instanceof Error ? error.message : "An error occurred.",
-            });
-          },
-        );
-        return;
-      }
-      if (record) {
-        void startBrowserRecording(runtimeTabId, threadRef, tabId).catch((error) => {
-          const description = error instanceof Error ? error.message : "An error occurred.";
-          if (isBrowserRecordingStartCancelledError(error)) return;
-          toastManager.add({
-            type: "error",
-            title: "Unable to start recording",
-            description,
-          });
-        });
-        return;
-      }
-      void bridge.captureScreenshot(runtimeTabId).then(
-        (artifact) => {
-          const revealAction = {
-            children: revealInFileExplorerLabel(navigator.platform),
-            onClick: () => void bridge.revealArtifact(artifact.path),
-          };
-          // Captures taken while the last one's toast is still up update it
-          // with a count; its actions act on the newest screenshot.
-          const count = (openScreenshotToast?.count ?? 0) + 1;
-          let pathCopied = false;
-          let toastId: ReturnType<typeof toastManager.add>;
-
-          const screenshotToast = (
-            type: "success" | "error" = "success",
-            title = screenshotToastTitle(count),
-            description?: string,
-          ) =>
-            stackedThreadToast({
-              type,
-              title,
-              description,
-              actionProps: revealAction,
-              data: {
-                secondaryActionProps: {
-                  children: pathCopied ? "Copied" : "Copy path",
-                  disabled: pathCopied,
-                  onClick: copyPath,
-                },
-                secondaryActionVariant: "outline",
-              },
-            });
-
-          const pathFeedback = createCopyFeedback({
-            resetMs: COPY_FEEDBACK_MS,
-            onStatus: (status) => {
-              pathCopied = status === "copied";
-              toastManager.update(toastId, screenshotToast());
-            },
-          });
-          const copyPath = () => {
-            void pathFeedback
-              .run(() => writeTextToClipboard(artifact.path, "screenshot path"))
-              .then((outcome) => {
-                if (outcome.kind !== "failed") return;
-                toastManager.update(
-                  toastId,
-                  screenshotToast("error", "Unable to copy screenshot path", outcome.error.message),
-                );
-              });
-          };
-
-          if (openScreenshotToast) {
-            toastId = openScreenshotToast.id;
-            toastManager.update(toastId, screenshotToast());
-          } else {
-            toastId = toastManager.add({
-              ...screenshotToast(),
-              onRemove: () => {
-                if (openScreenshotToast?.id === toastId) openScreenshotToast = null;
-              },
-            });
-          }
-          openScreenshotToast = { id: toastId, count };
-        },
-        (error) => {
-          toastManager.add({
-            type: "error",
-            title: "Unable to capture screenshot",
-            description: error instanceof Error ? error.message : "An error occurred.",
-          });
-        },
-      );
-    },
-    [recordingRuntimeTabId, runtimeTabId, tabId, threadRef],
-  );
-
   /**
    * Puts a finished annotation in the composer as context, with its crop as an
    * image, and sends it now when the picker asked to. Desktop and server picks
@@ -1071,11 +849,6 @@ export function PreviewView({
         onRefresh={handleRefresh}
         onSubmit={(next) => void handleSubmitUrl(next)}
         onOpenInBrowser={tabId ? handleOpenInBrowser : undefined}
-        // Capture drives the desktop webview, so server tabs leave it out.
-        // Annotation works for both.
-        onCapture={previewBridge && tabId && !isServerTab ? handleCapture : undefined}
-        captureDisabled={!desktopOverlay || isUnreachable}
-        recording={recordingRuntimeTabId !== null}
         onPickElement={
           tabId && isServerTab
             ? () => setServerPickTabId(serverPickActive ? null : runtimeTabId)
@@ -1108,7 +881,6 @@ export function PreviewView({
         agentUsingTab={nativeServerTab && snapshot?.agentDriving === true}
         leadingActions={
           <>
-            {previewMachine ? <PreviewMachineChip machine={previewMachine} /> : null}
             {/* Only when it differs from the default: labelling every tab
                 "Default" would be noise on the common case, while a tab in
                 another profile is exactly what needs calling out. */}

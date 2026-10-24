@@ -121,14 +121,14 @@ export function ServerBrowserPickLayer(props: {
       {placedMarkers.map(({ marker, box: markerBox }) => (
         <div
           key={marker.id}
-          className="reveal-motion absolute top-0 left-0 rounded-sm border border-brand-accent/70 ring-1 ring-background/60"
+          className="reveal-motion absolute top-0 left-0 rounded-sm border border-info/70 ring-1 ring-background/60"
           style={boxStyle(markerBox)}
           data-pick-marker={marker.number}
         />
       ))}
       {hoverBox && shown ? (
         <div
-          className="pick-glide absolute top-0 left-0 rounded-sm border border-brand-accent bg-brand-accent/10 ring-1 ring-background/60"
+          className="pick-glide absolute top-0 left-0 rounded-sm border border-info bg-info/10 ring-1 ring-background/60"
           data-glide={shown.glide ? "" : undefined}
           data-pick-hover
           style={{
@@ -139,7 +139,7 @@ export function ServerBrowserPickLayer(props: {
           {shown.label ? (
             <span
               className={cn(
-                "absolute left-0 max-w-64 truncate rounded-sm bg-brand-accent px-1.5 py-0.5 text-xs font-medium text-brand-accent-foreground shadow-sm ring-1 ring-background/60",
+                "absolute left-0 max-w-64 truncate rounded-sm bg-info px-1.5 py-0.5 text-xs font-medium text-white shadow-sm ring-1 ring-background/60",
                 shown.rect.y < LABEL_CHIP_ROOM_PX ? "top-0.5 left-0.5" : "bottom-full mb-1",
               )}
             >
@@ -150,7 +150,7 @@ export function ServerBrowserPickLayer(props: {
       ) : null}
       {marqueeBox ? (
         <div
-          className="absolute top-0 left-0 rounded-sm border border-dashed border-brand-accent bg-brand-accent/10"
+          className="absolute top-0 left-0 rounded-sm border border-dashed border-info bg-info/10"
           data-pick-marquee
           style={boxStyle(marqueeBox)}
         />
@@ -158,7 +158,7 @@ export function ServerBrowserPickLayer(props: {
       {targetBox ? (
         <div
           ref={targetRef}
-          className="pick-glide absolute top-0 left-0 rounded-sm border-2 border-brand-accent bg-brand-accent/10 ring-1 ring-background/60"
+          className="pick-glide absolute top-0 left-0 rounded-sm border-2 border-info bg-info/10 ring-1 ring-background/60"
           style={{ ...boxStyle(targetBox), opacity: targetRect ? 1 : 0 }}
           data-pick-target
         />
@@ -170,7 +170,7 @@ export function ServerBrowserPickLayer(props: {
           style={{
             translate: `calc(${markerBox.left}px - 0.625rem + ${marker.stack * 1.5}rem) calc(${markerBox.top}px - 0.625rem)`,
           }}
-          className="reveal-motion absolute top-0 left-0 flex size-5 items-center justify-center rounded-full bg-brand-accent text-xs font-semibold text-brand-accent-foreground tabular-nums shadow-sm ring-1 ring-background/60"
+          className="reveal-motion absolute top-0 left-0 flex size-5 items-center justify-center rounded-full bg-info text-xs font-semibold text-white tabular-nums shadow-sm ring-1 ring-background/60"
         >
           {marker.number}
         </span>

@@ -14,6 +14,7 @@ import type {
   PreviewAnnotationSubmission,
 } from "@t3tools/contracts";
 
+import { annotationBoxInsets } from "./AnnotationLayout.ts";
 import { resolveAnnotationSubmission } from "./AnnotationKeyboard.ts";
 import { previewAnnotationStyles } from "./AnnotationStyles.generated.ts";
 import { installRecordingCursor } from "./RecordingCursor.ts";
@@ -316,14 +317,12 @@ function createBox(color: string, fill: string): HTMLDivElement {
 }
 
 function positionBox(node: HTMLElement, rect: PreviewAnnotationRect): void {
-  if (rect.width <= 0 || rect.height <= 0) {
-    node.style.display = "none";
-    return;
-  }
-  node.style.display = "block";
-  node.style.transform = `translate(${rect.x}px, ${rect.y}px)`;
-  node.style.width = `${rect.width}px`;
-  node.style.height = `${rect.height}px`;
+  const insets = annotationBoxInsets(rect, {
+    width: document.documentElement.clientWidth,
+    height: document.documentElement.clientHeight,
+  });
+  node.style.display = insets ? "block" : "none";
+  if (insets) node.style.inset = insets;
 }
 
 /** Clamps a box to the viewport and clipping ancestors, so its border is never painted off-screen. */
@@ -617,8 +616,8 @@ function startAnnotation(sendEnabled: boolean): void {
   const root = document.createElement("div");
   root.setAttribute(OVERLAY_ATTRIBUTE, "");
   root.setAttribute("dir", "ltr");
-  root.className = "fixed inset-0 font-sans text-foreground";
-  root.style.cssText = "pointer-events:none";
+  root.className = "absolute inset-0 font-sans text-foreground";
+  root.style.cssText = "pointer-events:none;box-sizing:border-box";
   const cursorStyle = document.createElement("style");
   cursorStyle.setAttribute(OVERLAY_ATTRIBUTE, "");
   cursorStyle.textContent = `html[data-cogenly-annotation-tool] body, html[data-cogenly-annotation-tool] body * { cursor: crosshair !important; } [${OVERLAY_ATTRIBUTE}], [${OVERLAY_ATTRIBUTE}] * { cursor: default !important; } [${OVERLAY_ATTRIBUTE}] input[type=number]::-webkit-inner-spin-button, [${OVERLAY_ATTRIBUTE}] input[type=number]::-webkit-outer-spin-button { appearance:none; margin:0; }`;
@@ -641,7 +640,9 @@ function startAnnotation(sendEnabled: boolean): void {
   const toolbar = document.createElement("div");
   toolbar.setAttribute(OVERLAY_ATTRIBUTE, "");
   toolbar.className =
-    "pointer-events-auto fixed top-2.5 left-1/2 flex -translate-x-1/2 gap-0.5 rounded-lg border border-border bg-popover/95 p-1 text-popover-foreground shadow-lg backdrop-blur-xl";
+    "pointer-events-auto absolute flex gap-0.5 rounded-lg border border-border bg-popover/95 p-1 text-popover-foreground shadow-lg backdrop-blur-xl";
+  toolbar.style.cssText =
+    "top:10px;inset-inline:8px;width:max-content;max-width:calc(100% - 16px);margin-inline:auto;overflow-x:auto;box-sizing:border-box";
   toolbar.style.zIndex = String(CHROME_LAYER_Z_INDEX);
   root.appendChild(toolbar);
 

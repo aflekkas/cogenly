@@ -1,7 +1,6 @@
 import { ThreadHoverCardPopup } from "../ThreadHoverCard";
 import { AgentElapsed } from "./AgentElapsed";
 import { projectedSubagentsToRuntime } from "@t3tools/client-runtime/state/subagentRuntime";
-import { notificationChildThreadId } from "@t3tools/client-runtime/state/thread-execution";
 import { createContext, use, useMemo, useState, type ReactNode } from "react";
 import { useThreadShell, useProject } from "../../state/entities";
 import { SubagentTooltipContent } from "./SubagentTooltipContent";
@@ -20,6 +19,7 @@ import {
 } from "./subagentRow.logic";
 import {
   pendingSubagentCompletions,
+  notifiedSubagentCompletionTimes,
   type PendingCompletionOutcome,
 } from "./pendingSubagentCompletions.logic";
 import {
@@ -422,26 +422,28 @@ export function PendingSubagentCompletions(props: {
       }
     }
     if (seen.size > 0) backgroundChildrenByParent.set(parentKey, seen);
-    const notifiedAtMsByChild = new Map<string, number>();
-    const noteNotified = (childThreadId: string | undefined, atMs: number) => {
-      if (childThreadId === undefined) return;
-      const previous = notifiedAtMsByChild.get(childThreadId);
-      if (previous === undefined || atMs > previous) notifiedAtMsByChild.set(childThreadId, atMs);
-    };
-    for (const item of projection.turnItems) {
-      if (item.type !== "notification") continue;
-      noteNotified(
-        notificationChildThreadId(item.source),
-        DateTime.toEpochMillis(item.startedAt ?? item.updatedAt),
-      );
-    }
-    for (const message of projection.messages) {
-      if (message.notification === undefined) continue;
-      noteNotified(
-        notificationChildThreadId(message.notification.source),
-        DateTime.toEpochMillis(message.createdAt),
-      );
-    }
+    const notified = notifiedSubagentCompletionTimes([
+      ...projection.turnItems.flatMap((item) =>
+        item.type === "notification"
+          ? [
+              {
+                source: item.source,
+                atMs: DateTime.toEpochMillis(item.startedAt ?? item.updatedAt),
+              },
+            ]
+          : [],
+      ),
+      ...projection.messages.flatMap((message) =>
+        message.notification === undefined
+          ? []
+          : [
+              {
+                source: message.notification.source,
+                atMs: DateTime.toEpochMillis(message.createdAt),
+              },
+            ],
+      ),
+    ]);
     const pending = pendingSubagentCompletions({
       threadId: props.parentRef.threadId,
       subagents: projection.subagents.map((subagent) => ({
@@ -450,12 +452,19 @@ export function PendingSubagentCompletions(props: {
         origin: subagent.origin,
         childThreadId: subagent.childThreadId,
         status: subagent.status,
+        startedAtMs: DateTime.toEpochMillis(subagent.startedAt ?? subagent.updatedAt),
         completedAtMs:
           subagent.completedAt === null ? null : DateTime.toEpochMillis(subagent.completedAt),
         completionDelivery: subagent.completionDelivery,
       })),
-      notifiedAtMsByChild,
+      notifiedAtMsByChild: notified.byChild,
+      notifiedAtMsByTask: notified.byTask,
       backgroundChildren: seen,
+      latestParentRunAtMs: projection.runs.reduce<number | null>((latest, run) => {
+        if (run.status === "queued" || run.status === "rolled_back") return latest;
+        const at = DateTime.toEpochMillis(run.startedAt ?? run.requestedAt);
+        return latest === null || at > latest ? at : latest;
+      }, null),
     });
     return pending.flatMap((completion) => {
       const agent = projection.subagents.find((subagent) => subagent.id === completion.subagentId);

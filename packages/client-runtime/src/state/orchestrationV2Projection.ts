@@ -271,8 +271,23 @@ export function applyOrchestrationV2ProjectionEvent(
           (session) => session.id !== event.payload.providerSessionId,
         ),
       };
-    case "provider-thread.updated":
-      return { ...base, providerThreads: upsertEntity(base.providerThreads, event.payload) };
+    case "provider-thread.updated": {
+      // Match the server projection: dispatch activates the provider thread
+      // before a provider turn starts. Queued reservations do not move it.
+      const queuedPlaceholder =
+        event.payload.status === "not_loaded" &&
+        event.payload.firstRunOrdinal === null &&
+        event.payload.nativeThreadRef === null &&
+        event.payload.providerSessionId === null;
+      return {
+        ...base,
+        thread:
+          event.payload.appThreadId === base.thread.id && !queuedPlaceholder
+            ? { ...base.thread, activeProviderThreadId: event.payload.id }
+            : base.thread,
+        providerThreads: upsertEntity(base.providerThreads, event.payload),
+      };
+    }
     case "provider-turn.updated":
       return {
         ...base,
