@@ -20,8 +20,9 @@ a clone. Pick it, and it clones into the project's folder on this machine;
 [moving a project](#move-threads-and-projects) clones all of them there. A
 repository's folder is named after the repository, so it lands in the same
 place everywhere. Removing a repository from one machine frees the disk space
-and keeps it in the project, so you can clone it back later. Settings, resource
-files, vault items, integrations and memory facts do not sync yet. Matching
+and keeps it in the project, so you can clone it back later. Memory follows you
+to every paired machine too (see [Memory](./memory-and-export.md#memory)).
+Settings, resource files, vault items and integrations do not sync yet. Matching
 project names are kept separately until you choose how to combine them.
 
 ## Your conversations on every machine

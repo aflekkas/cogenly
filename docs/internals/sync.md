@@ -1,7 +1,7 @@
 # Shared state invariants
 
 [SharedState](../../apps/server/src/sync/SharedState.ts) owns portable project,
-agent and schedule configuration. Domain mutations record their field deltas in
+agent and schedule configuration and memory facts. Domain mutations record their field deltas in
 the same transaction as their existing read models. Peer merges commit the
 merged document, projection, relay log and received cursor together. A socket
 reply means that transaction committed; sending bytes does not acknowledge it.
@@ -77,6 +77,37 @@ client streams.
 Undecodable stored changes are logged and skipped while advancing their cursor.
 Legacy URI-encoded MCP schedule IDs remain readable on disk and on the wire to
 preserve task references and webhook URLs; new IDs hash keys that are not portable.
+Legacy memory fact IDs (`legacy-memory:[agent,note]`) are not portable either: their
+document ID is a hash and the document carries the original as `factId`, so every
+machine projects the same fact and memory note IDs.
+
+## Memory facts
+
+A fact's content is immutable; a correction is a new fact. Its status is not a
+field, because last-writer-wins on a status would let a confirm on one machine
+undo a concurrent supersede on another. Each transition sets its own marker
+(`confirmedAt`, `supersededBy`, `retractedAt`) and the
+[projection](../../apps/server/src/sync/FactProjection.ts) ranks them retracted >
+superseded > confirmed > proposed. Only `confirmedAt` is ever cleared, by an
+explicit demotion to a proposal, which ranks below every other marker.
+
+Copies of one normalized fact (same agent, visibility, tags, subject, predicate
+and whitespace- and case-folded text) created on different machines, or proposed
+again on one, would otherwise both be active. Placement keeps one: the confirmed
+copy with the lowest ID, else the lowest-ID proposal. The others project as
+superseded by it, and `facts.duplicate_of` records that the status is placed,
+not their own, so a later local capture never writes it back as a marker. The
+rule reads only replicated documents, so machines agree without writing
+anything. Retracting or superseding the kept copy applies the same transition
+to the copies hidden behind it, so they do not resurface.
+
+A fact whose agent has not arrived stays unprojected until the agent projection
+places it. Tags whose project has not arrived link when it does; a deleted
+project's tag stays in the document and is dropped from the projection. An
+agent tombstone leaves its facts to the agent row's `ON DELETE CASCADE` when
+AgentService deletes it. `fact_history`, `updated_at` and the dedupe columns are
+local: a peer merge that changes a fact appends a local history entry whose ID
+starts with `sync:`.
 
 Shared repository identity is its remote. Local checkout IDs, absolute paths,
 thread bindings, credentials, run counters and fallback position/reset time do
