@@ -5,6 +5,7 @@ import { FolderIcon, FolderPlusIcon, LaptopMinimalIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useAgents } from "../../agents/agentsClient";
+import { cn } from "../../lib/utils";
 import { openCreateProjectDialog } from "../../projectLabels/CreateProjectDialogHost";
 import { ProjectFolderIcon } from "../../projectLabels/ProjectFolderMark";
 import { ProjectLabelEditorDialog } from "../../projectLabels/ProjectLabelEditorDialog";
@@ -156,6 +157,8 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
   const { agents } = useAgents();
   const presentations = useAtomValue(environmentPresentations.presentationsAtom);
   const [filter, setFilter] = useState<ProjectsFilter>("active");
+  // Only a filter the user picked fades the grid; opening the page shows it at once.
+  const [filterPicked, setFilterPicked] = useState(false);
   const [renaming, setRenaming] = useState<EnvironmentProjectLabel | null>(null);
   const [linking, setLinking] = useState<EnvironmentProjectLabel | null>(null);
 
@@ -205,7 +208,10 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
                   value={[shownFilter]}
                   onValueChange={(next) => {
                     const value = next[0];
-                    if (value === "active" || value === "archived") setFilter(value);
+                    if (value === "active" || value === "archived") {
+                      setFilter(value);
+                      setFilterPicked(true);
+                    }
                   }}
                 >
                   <Toggle value="active">Active</Toggle>
@@ -256,7 +262,10 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
               <ul
                 key={shownFilter}
                 aria-label={shownFilter === "archived" ? "Archived projects" : "Projects"}
-                className="swap-motion grid grid-cols-[repeat(auto-fill,minmax(16rem,1fr))] gap-3"
+                className={cn(
+                  filterPicked && "swap-motion",
+                  "grid grid-cols-[repeat(auto-fill,minmax(16rem,1fr))] gap-3",
+                )}
               >
                 {shown.map((entry) => {
                   const contents = byProject.get(entry.key);

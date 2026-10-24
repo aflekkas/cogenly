@@ -328,7 +328,7 @@ function ProjectPage(props: {
             ];
     return (
       <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
-        <PageContent width="wide" className="swap-motion gap-1">
+        <PageContent width="wide" className="gap-1">
           <h1 className="truncate text-xl font-semibold tracking-tight">{title}</h1>
           {description ? <p className="text-sm text-muted-foreground">{description}</p> : null}
         </PageContent>
@@ -340,7 +340,7 @@ function ProjectPage(props: {
   const showSources = org === null || projectExtraSourceLinks(label.sourceLinks).length > 0;
 
   return (
-    <div className="swap-motion flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
       {/* The cards give keyboard access, so the viewport stays out of the tab order. */}
       <ScrollArea className="min-h-0 flex-1" viewportTabIndex={-1}>
         <PageContent width="wide">

@@ -500,11 +500,6 @@ const FIRST_LAYOUT_HOLD_STYLE = { opacity: 0 } as const;
 const FOLD_OPEN_WINDOW_MS = 400;
 /** A closing fold drops its rows after this even if none reported the exit. */
 const FOLD_CLOSE_FALLBACK_MS = 600;
-// The opened thread's one fade in, once its first layout has settled. Opacity
-// only, so it stays under reduced motion.
-const FIRST_LAYOUT_REVEAL_STYLE = {
-  transition: "opacity var(--motion-duration-base) var(--ease-standard)",
-} as const;
 /**
  * A just-sent message, the live activity under it and a fresh restart divider
  * all arrive the same way: one short opacity fade, together, with no travel.
@@ -1925,10 +1920,10 @@ const ConversationTimeline = memo(function ConversationTimeline({
               <TooltipScrollDismissArea
                 ref={setTimelineViewportElement}
                 className="relative h-full min-h-0"
-                // Held at opacity 0 while the opened thread settles, then one
-                // fade in. Entering the hold drops it at once: a thread switch
-                // never fades the previous thread out.
-                style={holdingFirstLayout ? FIRST_LAYOUT_HOLD_STYLE : FIRST_LAYOUT_REVEAL_STYLE}
+                // Held at opacity 0 while the opened thread settles, then shown
+                // at once. Opening a thread is history, not an arrival, so
+                // neither side of a thread switch fades.
+                style={holdingFirstLayout ? FIRST_LAYOUT_HOLD_STYLE : undefined}
                 data-assistant-citation-viewport="true"
                 data-timeline-hold={holdingFirstLayout ? "true" : undefined}
               >
