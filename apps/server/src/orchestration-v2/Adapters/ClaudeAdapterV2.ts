@@ -1129,6 +1129,7 @@ export function makeClaudeQueryOptions(input: {
   readonly disallowedTools?: ReadonlyArray<string>;
   /** Chat-surface turns: appends the conversation-mode instructions. */
   readonly conversationMode?: boolean;
+  readonly builderMode?: boolean;
   /**
    * The turn's MCP credential grants the Cogenly terminal tools, so shell
    * commands go through terminal_run. Absent: inferred from a disallowed Bash.
@@ -1161,8 +1162,9 @@ export function makeClaudeQueryOptions(input: {
   // Conversation turns lose Bash whatever the credential grants, so only
   // the credential says whether they have terminal_run.
   const terminalTools =
-    input.terminalToolsAvailable ??
-    (input.conversationMode !== true && input.disallowedTools?.includes("Bash") === true);
+    input.builderMode !== true &&
+    (input.terminalToolsAvailable ??
+      (input.conversationMode !== true && input.disallowedTools?.includes("Bash") === true));
   const selectionSettings =
     Object.keys(compiledSelection.settings).length === 0
       ? undefined
@@ -1225,7 +1227,7 @@ export function makeClaudeQueryOptions(input: {
       append:
         buildRuntimeInstructions({ harness: "Claude Code" }) +
         (input.conversationMode === true
-          ? `\n${conversationModeInstructions({ terminal: terminalTools })}`
+          ? `\n${conversationModeInstructions({ terminal: terminalTools, builder: input.builderMode })}`
           : "") +
         (input.projectManifest === undefined ? "" : `\n${input.projectManifest}`) +
         (input.mcpServers === undefined ? "" : COGENLY_ORCHESTRATION_INSTRUCTIONS) +
@@ -8570,6 +8572,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             environment: adapterOptions.environment,
             tools: queryPolicy.tools ?? CLAUDE_CODE_PRESET_TOOLS,
             ...(conversationMode ? { conversationMode } : {}),
+            builderMode: turnInput.runtimePolicy.builderMode === true,
             terminalToolsAvailable: McpProviderSession.terminalToolsAvailable(mcpSession),
             ...(turnInput.runtimePolicy.projectManifest === undefined
               ? {}

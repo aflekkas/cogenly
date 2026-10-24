@@ -83,6 +83,8 @@ const make = Effect.gen(function* () {
   const writable = Effect.gen(function* () {
     const context = yield* access;
     yield* assertLiveCaller(context.caller);
+    if (context.caller.caller?.surface === "builder")
+      return yield* denied("Builder threads cannot run commands.");
     // These PTYs run on the host. Do not let an MCP call bypass a provider sandbox or approval.
     yield* assertFullAccess(
       context.caller,

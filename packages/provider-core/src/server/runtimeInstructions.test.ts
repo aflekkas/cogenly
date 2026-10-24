@@ -203,6 +203,14 @@ describe("integrations context line", () => {
 });
 
 describe("conversationModeInstructions", () => {
+  it("gives builders setup instructions without terminal or task handoffs", () => {
+    const text = conversationModeInstructions({ terminal: true, builder: true });
+    expect(text).toContain("<builder_mode>");
+    expect(text).toContain("propose_agent");
+    expect(text).not.toContain("terminal_run");
+    expect(text).not.toContain("work_task");
+  });
+
   const withTerminal = conversationModeInstructions({ terminal: true });
   const withoutTerminal = conversationModeInstructions({ terminal: false });
 

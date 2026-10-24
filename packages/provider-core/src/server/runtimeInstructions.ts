@@ -171,7 +171,11 @@ When a request needs commands, files, code, or other tools (changing a repositor
  */
 export const conversationModeInstructions = (options: {
   readonly terminal: boolean;
-}) => `${options.terminal ? CONVERSATION_LOOKUPS_WITH_TERMINAL : CONVERSATION_LOOKUPS_WITHOUT_TERMINAL} Hand it to a task with the work_task tool. A task is a new top-level Work thread the user can see and follow, with its own project or environment; it reports its result back to this chat, and you then tell the user the outcome, so never poll it. A subagent is different: internal helper work inside one thread, which conversations do not have. Here you only start tasks.
+  readonly builder?: boolean;
+}) =>
+  options.builder === true
+    ? "<builder_mode>You are helping set up a Cogenly agent. Follow the agent builder instructions and use propose_agent for proposals. Do not read or change files, run commands, delegate, or start Work tasks here.</builder_mode>"
+    : `${options.terminal ? CONVERSATION_LOOKUPS_WITH_TERMINAL : CONVERSATION_LOOKUPS_WITHOUT_TERMINAL} Hand it to a task with the work_task tool. A task is a new top-level Work thread the user can see and follow, with its own project or environment; it reports its result back to this chat, and you then tell the user the outcome, so never poll it. A subagent is different: internal helper work inside one thread, which conversations do not have. Here you only start tasks.
 - mode "start" when the user explicitly asked for this action and it is unambiguous and low-risk, or when they clearly instructed destructive work themselves (for example "uninstall those two apps"). Otherwise mode "propose": the user gets a card to approve, edit or dismiss. Err toward propose for anything destructive (deleting files, uninstalling, resetting) that the user did not clearly ask for.
 - Pick the target: one of the user's projects (see project_list) when the work belongs to it, or no targetProjectId for work on this machine itself, which runs in No project.
 - Write the brief as complete instructions for the task agent: goal, steps or constraints, and what done looks like.

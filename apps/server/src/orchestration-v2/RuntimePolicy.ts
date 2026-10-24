@@ -68,14 +68,16 @@ export class RuntimePolicyV2 extends Context.Service<RuntimePolicyV2, RuntimePol
  */
 /**
  * Chat-surface threads run in conversation mode: adapters drop native file
- * writes and the native shell, keep the Cogenly terminal tools for lookups,
- * and add a conversational system prompt. Builder threads are conversations
- * too. Every other thread keeps the full work toolset.
+ * writes, shell and delegation, and add a conversational system prompt.
+ * Builders share those native restrictions but get setup instructions and
+ * cannot run terminal commands. Every other thread keeps the work toolset.
  */
 const conversationModeFor = (
   thread: OrchestrationV2AppThread,
-): Pick<ProviderAdapter.ProviderAdapterV2RuntimePolicy, "conversationMode"> =>
-  thread.surface === "chat" || thread.surface === "builder" ? { conversationMode: true } : {};
+): Pick<ProviderAdapter.ProviderAdapterV2RuntimePolicy, "conversationMode" | "builderMode"> =>
+  thread.surface === "chat" || thread.surface === "builder"
+    ? { conversationMode: true, ...(thread.surface === "builder" ? { builderMode: true } : {}) }
+    : {};
 
 /**
  * A chat or an agent's conversation filed in a project works in the project

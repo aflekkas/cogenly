@@ -197,7 +197,11 @@ export interface CodexRuntimeInfo {
 /** Mode prompt for `turn/start.collaborationMode.settings.developer_instructions`. */
 export function buildCodexDeveloperInstructions(
   interactionMode: ProviderInteractionMode,
-  options?: { readonly conversationMode?: boolean; readonly terminal?: boolean },
+  options?: {
+    readonly conversationMode?: boolean;
+    readonly builder?: boolean;
+    readonly terminal?: boolean;
+  },
 ): string {
   const base =
     interactionMode === "plan"
@@ -207,7 +211,7 @@ export function buildCodexDeveloperInstructions(
   // directly, look things up with the terminal tools when attached, and hand
   // code changes to a Work task.
   return options?.conversationMode === true
-    ? `${base}\n\n${conversationModeInstructions({ terminal: options.terminal === true })}`
+    ? `${base}\n\n${conversationModeInstructions({ terminal: options.terminal === true, builder: options.builder })}`
     : base;
 }
 

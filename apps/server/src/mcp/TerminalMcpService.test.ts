@@ -90,9 +90,11 @@ it.effect(
         Layer.mock(ThreadManagement.ThreadManagementService)({
           getThreadShell: (id) =>
             Effect.succeed(
-              id === "chat"
-                ? { ...liveThreadShell(id), surface: "chat" as const }
-                : liveThreadShell(id, id === "restricted" ? { runtimeMode: "full-access" } : {}),
+              id === "builder"
+                ? { ...liveThreadShell(id), surface: "builder" as const }
+                : id === "chat"
+                  ? { ...liveThreadShell(id), surface: "chat" as const }
+                  : liveThreadShell(id, id === "restricted" ? { runtimeMode: "full-access" } : {}),
             ),
         }),
         Layer.mock(ProjectService.ProjectService)({
@@ -119,6 +121,15 @@ it.effect(
         const tools = yield* TerminalMcpService.TerminalMcpService;
         const as = <A, E, R>(id: string, effect: Effect.Effect<A, E, R>) =>
           effect.pipe(Effect.provideService(Invocation.McpInvocationContext, caller(id)));
+        for (const operation of [
+          tools.run({ command: "echo forbidden", background: true }),
+          tools.write({ terminalId: "builder-terminal", input: "echo forbidden\n" }),
+        ]) {
+          const error = yield* as("builder", operation).pipe(Effect.flip);
+          expect(error.message).toContain("Builder threads cannot run commands");
+        }
+        expect(spawnedIn).toEqual([]);
+        expect(inputs).toEqual([]);
         const started = yield* as("A", tools.run({ command: "cat", background: true }));
         expect(yield* as("B", tools.list())).toEqual([]);
         expect(yield* as("A", tools.list())).toHaveLength(1);

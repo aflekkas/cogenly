@@ -189,7 +189,7 @@ export const actsAsCaller = <P, A, E, R>(handle: (params: P) => Effect.Effect<A,
 /**
  * Chat-surface threads stay conversational: they cannot move into a
  * worktree, delegate, or start work sessions. Builder threads are
- * conversations too. They may still run terminal commands to look things up.
+ * conversations too. Chats may run terminal lookups; builders cannot run commands.
  * Handlers for those tools check this after establishing the live caller, so
  * a missing or ended caller still reports itself first. Callers without a
  * thread are unaffected. Reads, proposals, and the handoff draft stay on the

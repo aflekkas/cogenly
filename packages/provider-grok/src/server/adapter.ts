@@ -1290,7 +1290,11 @@ export const makeGrokAdapterV2 = Effect.fn("makeGrokAdapterV2")(function* (
           buildRuntimeInstructions({ harness: "Grok Build", model: session.model ?? undefined }) +
           (turnInput.runtimePolicy.conversationMode === true
             ? `\n${conversationModeInstructions({
-                terminal: mcpAttached && McpProviderSession.terminalToolsAvailable(mcp),
+                terminal:
+                  turnInput.runtimePolicy.builderMode !== true &&
+                  mcpAttached &&
+                  McpProviderSession.terminalToolsAvailable(mcp),
+                builder: turnInput.runtimePolicy.builderMode,
               })}`
             : "") +
           (turnInput.runtimePolicy.projectManifest === undefined

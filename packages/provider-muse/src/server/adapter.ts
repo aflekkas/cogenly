@@ -2071,7 +2071,9 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
               );
           } else {
             const turnMcp = yield* mcpSessions.read(turnInput.threadId);
-            const terminalTools = McpProviderSession.terminalToolsAvailable(turnMcp);
+            const terminalTools =
+              turnInput.runtimePolicy.builderMode !== true &&
+              McpProviderSession.terminalToolsAvailable(turnMcp);
             const result = yield* request(
               "turn/start",
               {
@@ -2088,7 +2090,7 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
                       // (read-only host): they look things up through the
                       // Cogenly terminal and hand changes to a Work task.
                       (turnInput.runtimePolicy.conversationMode === true
-                        ? `\n${conversationModeInstructions({ terminal: terminalTools })}`
+                        ? `\n${conversationModeInstructions({ terminal: terminalTools, builder: turnInput.runtimePolicy.builderMode })}`
                         : "") +
                       (turnInput.runtimePolicy.projectManifest === undefined
                         ? ""

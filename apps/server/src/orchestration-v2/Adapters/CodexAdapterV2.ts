@@ -704,7 +704,8 @@ export function buildCodexTurnStartParams(input: {
 }) {
   return Effect.gen(function* () {
     const conversationMode = input.runtimePolicy.conversationMode === true;
-    const terminalTools = input.terminalToolsAvailable ?? false;
+    const terminalTools =
+      input.runtimePolicy.builderMode !== true && (input.terminalToolsAvailable ?? false);
     const runtimeModeDefaults = codexRuntimeModeTurnDefaults(
       input.runtimePolicy.runtimeMode,
       conversationMode,
@@ -726,7 +727,13 @@ export function buildCodexTurnStartParams(input: {
         ? undefined
         : buildCodexDeveloperInstructions(
             input.runtimePolicy.interactionMode,
-            conversationMode ? { conversationMode, terminal: terminalTools } : undefined,
+            conversationMode
+              ? {
+                  conversationMode,
+                  builder: input.runtimePolicy.builderMode,
+                  terminal: terminalTools,
+                }
+              : undefined,
           );
     // An app's context is text an MCP server wrote, so it goes in as untrusted
     // context: Codex renders it as quoted user-side input, never as developer
@@ -757,7 +764,10 @@ export function buildCodexTurnStartParams(input: {
         : {
             cogenly_conversation: {
               kind: "application" as const,
-              value: conversationModeInstructions({ terminal: terminalTools }),
+              value: conversationModeInstructions({
+                terminal: terminalTools,
+                builder: input.runtimePolicy.builderMode,
+              }),
             },
           };
     const projectContext =
