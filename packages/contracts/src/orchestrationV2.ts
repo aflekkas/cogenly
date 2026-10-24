@@ -3883,6 +3883,11 @@ export class OrchestrationV2ThreadLaunchError extends Schema.TaggedError<Orchest
     commandId: CommandId,
     projectId: ProjectId,
     message: Schema.String,
+    /**
+     * Set when the requested `machine` could not take the launch because it
+     * is offline; the client offers this machine instead. Older servers omit it.
+     */
+    machineOffline: Schema.optional(Schema.Boolean),
     cause: Schema.optional(Schema.Defect()),
   },
 ) {}
