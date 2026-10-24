@@ -117,6 +117,39 @@ describe("shared configuration schemas", () => {
       );
     }),
   );
+  it.effect("integration fields validate web endpoints and exclude local credentials", () =>
+    Effect.gen(function* () {
+      yield* validateChange(
+        change("integration", {
+          name: "linear",
+          transport: "http",
+          url: "https://mcp.linear.app/mcp",
+          auth: { type: "oauth", scope: "read" },
+          enabled: true,
+        }),
+      );
+      for (const fields of [
+        { transport: "local" },
+        { url: "file:///bin/sh" },
+        { url: "https://user:password@example.com/mcp" },
+        { headers: { authorization: "private" } },
+        { approvedCredentialItems: ["secret"] },
+      ])
+        expect((yield* Effect.result(validateChange(change("integration", fields))))._tag).toBe(
+          "Failure",
+        );
+      const split = splitChange(
+        change("integration", {
+          transport: "local",
+          url: "file:///bin/sh",
+          enabled: true,
+          nextVersionOption: "kept",
+        }),
+      );
+      expect(split.deferred).toBe(true);
+      expect(split.accepted?.fields).toEqual({ enabled: true, nextVersionOption: "kept" });
+    }),
+  );
   it.effect.each([
     "https://dev.azure.com/org/My%20Project/_git/tools",
     "ssh://git@bitbucket.example.com:7999/~alice/repo.git",

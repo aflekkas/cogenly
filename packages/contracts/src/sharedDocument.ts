@@ -40,6 +40,7 @@ export const SharedDocumentKind = Schema.Literals([
   "schedule",
   "settings",
   "project-settings",
+  "integration",
 ]);
 export type SharedDocumentKind = typeof SharedDocumentKind.Type;
 /** A delta contains only fields authored by this edit; relay preserves their clocks. */

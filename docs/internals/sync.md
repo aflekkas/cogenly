@@ -1,7 +1,7 @@
 # Shared state invariants
 
 [SharedState](../../apps/server/src/sync/SharedState.ts) owns portable project,
-agent, schedule and settings configuration. Domain mutations record their field deltas in
+agent, schedule, integration and settings configuration. Domain mutations record their field deltas in
 the same transaction as their existing read models. Peer merges commit the
 merged document, projection, relay log and received cursor together. A socket
 reply means that transaction committed; sending bytes does not acknowledge it.
@@ -100,6 +100,15 @@ field: an older machine keeps it unread until it updates. Project overrides are 
 because every resolver reads them that way. Their `project-settings`
 document is keyed by the project folder ID, and every repository in that folder carries the same
 entry.
+
+Web integration documents carry only their HTTP definition and project scope.
+[IntegrationSync](../../apps/server/src/sync/IntegrationSync.ts) publishes definition
+edits in the local mutation transaction and materializes peer edits separately.
+OAuth grants, clients, headers and credential approvals stay local: receiving a
+peer definition must not authorize a credential or a command on this machine.
+Local command runners never enter this channel. Destination changes discard
+local grants and headers; cosmetic changes keep them. A colliding agent-facing
+name gets a local alias, which is never published back.
 
 Thread replication is separate and single-writer; see
 [thread sync](./thread-sync.md). Agent conversations are created lazily only

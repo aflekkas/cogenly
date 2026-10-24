@@ -25,7 +25,9 @@ a clone. Pick it, and it clones into the project's folder on this machine;
 repository's folder is named after the repository, so it lands in the same
 place everywhere. Removing a repository from one machine frees the disk space
 and keeps it in the project, so you can clone it back later. Resource files,
-vault items, integrations and memory facts do not sync yet. Matching
+vault items and memory facts do not sync yet. Web-based integrations sync too;
+sign in on each machine before using them there. Integrations that run a local
+command, including Google Workspace, stay on their machine. Matching
 project names are kept separately until you choose how to combine them.
 
 ## Your conversations on every machine

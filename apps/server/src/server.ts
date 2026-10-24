@@ -175,6 +175,7 @@ import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as UsageService from "./usage/UsageService.ts";
 import * as Scheduler from "./scheduling/Scheduler.ts";
 import * as SharedState from "./sync/SharedState.ts";
+import * as IntegrationSync from "./sync/IntegrationSync.ts";
 import * as SettingsSync from "./sync/SettingsSync.ts";
 import * as SharedSync from "./sync/SharedSync.ts";
 import * as ThreadReplication from "./threadSync/ThreadReplication.ts";
@@ -674,7 +675,17 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   Layer.effectDiscard(ProjectSettingsOverrideSweep.sweep),
 ).pipe(
   // Core Services
-  Layer.provideMerge(layerOrchestrationApplication),
+  Layer.provideMerge(
+    layerOrchestrationApplication.pipe(
+      Layer.provide(
+        IntegrationSync.layer.pipe(
+          Layer.provideMerge(layerMachines),
+          Layer.provide(SharedState.layer),
+          Layer.provide(ServerEnvironment.layerIdentity),
+        ),
+      ),
+    ),
+  ),
   Layer.provideMerge(RuntimeLayer.layerEventInfrastructure),
   Layer.provideMerge(Layer.merge(ProjectStore.layer, ThreadSearch.layer)),
   Layer.provideMerge(layerServerSettings),

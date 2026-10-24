@@ -16,6 +16,7 @@ import {
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import { IntegrationFields } from "./integrationDocument.ts";
 import { PROJECT_SETTINGS_CODECS, UNIVERSAL_SETTINGS_CODECS } from "./settingsDocument.ts";
 
 const decodeWire = Schema.decodeUnknownEffect(SharedDocumentChangeWire);
@@ -112,6 +113,7 @@ const FIELD_CODECS: Readonly<Record<SharedDocumentKind, ReadonlyMap<string, Fiel
   project: codecs(ProjectFields.fields),
   agent: codecs(AgentFields.fields),
   schedule: codecs(ScheduleFields.fields),
+  integration: codecs(IntegrationFields.fields),
   settings: UNIVERSAL_SETTINGS_CODECS,
   "project-settings": PROJECT_SETTINGS_CODECS,
 };

@@ -2,7 +2,6 @@ import {
   Integration,
   IntegrationError,
   IntegrationId,
-  IntegrationSyncedFrom,
   integrationCatalogEntry,
   integrationCatalogEntryFor,
   type IntegrationCallResult,
@@ -50,33 +49,12 @@ import { GOOGLE_CLIENT_ITEM, catalogSetupFor, setupActionFor } from "./Integrati
 import * as Installer from "./local/RuntimeInstaller.ts";
 import * as OAuth from "./IntegrationOAuth.ts";
 import * as Tokens from "./IntegrationTokens.ts";
+import { StoredIntegration } from "./StoredIntegration.ts";
+import type { OAuthState } from "./StoredIntegration.ts";
+import * as IntegrationSync from "../sync/IntegrationSync.ts";
 import * as Local from "./local/LocalIntegrations.ts";
 import { GOOGLE_WORKSPACE_VERSION } from "./local/GoogleWorkspace.ts";
 import { IntegrationEndpointPolicy, withPublicEndpoint } from "./RemoteEndpoint.ts";
-
-/**
- * Server-only OAuth state, persisted with the integration and stripped before
- * it reaches any client or agent. Secrets are in the vault item it names.
- */
-const OAuthState = Schema.Struct({
-  signedIn: Schema.Boolean,
-  server: Schema.optional(OAuth.OAuthServer),
-  /** The dynamically registered client; absent when the owner supplied a client id. */
-  registration: Schema.optional(OAuth.OAuthClientRegistration),
-  tokenItemId: Schema.optional(Schema.String),
-  /** Access token expiry in epoch milliseconds; null when the server gave none. */
-  expiresAt: Schema.optional(Schema.NullOr(Schema.Number)),
-});
-type OAuthState = typeof OAuthState.Type;
-
-const StoredIntegration = Schema.Struct({
-  ...Integration.fields,
-  oauthState: Schema.optional(OAuthState),
-  browserOrigin: Schema.optional(Schema.String),
-  /** Set by machine sync on a definition another machine signed in to. */
-  syncedFrom: Schema.optional(IntegrationSyncedFrom),
-});
-type StoredIntegration = typeof StoredIntegration.Type;
 
 const decode = Schema.decodeUnknownEffect(Schema.fromJsonString(StoredIntegration));
 const encode = Schema.encodeEffect(Schema.fromJsonString(StoredIntegration));
@@ -520,6 +498,7 @@ const tokenItemName = (integration: Integration) =>
 const make = (options: IntegrationsOptions = {}) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
+    const sync = yield* Effect.serviceOption(IntegrationSync.IntegrationSync);
     const crypto = yield* Crypto.Crypto;
     const client = yield* HttpClient.HttpClient;
     const credentials = yield* Credentials.IntegrationCredentials;
@@ -702,6 +681,13 @@ const make = (options: IntegrationsOptions = {}) =>
         });
       });
 
+    const localSignIn = (integration: StoredIntegration): StoredIntegration => {
+      if (!integration.oauthState?.signedIn && Object.keys(integration.headers).length === 0)
+        return integration;
+      const { syncedFrom: _, ...rest } = integration;
+      return rest;
+    };
+
     const summaries = (
       integrations: ReadonlyArray<StoredIntegration>,
       includeProcessOutput = false,
@@ -710,8 +696,9 @@ const make = (options: IntegrationsOptions = {}) =>
         const entries = yield* Ref.get(cache);
         const checked = yield* Ref.get(checks);
         return {
-          integrations: yield* Effect.forEach(integrations, (integration) =>
+          integrations: yield* Effect.forEach(integrations, (stored) =>
             Effect.gen(function* () {
+              const integration = localSignIn(stored);
               const prefix = `${integration.id}:${integration.updatedAt}`;
               const cached =
                 entries.get(prefix) ??
@@ -723,7 +710,8 @@ const make = (options: IntegrationsOptions = {}) =>
               const status: IntegrationSummary["status"] =
                 managed !== undefined
                   ? managed.status
-                  : usesOAuth(integration) && !integration.oauthState?.signedIn
+                  : (usesOAuth(integration) && !integration.oauthState?.signedIn) ||
+                      integration.syncedFrom !== undefined
                     ? "needs_sign_in"
                     : failed
                       ? "error"
@@ -1375,6 +1363,25 @@ const make = (options: IntegrationsOptions = {}) =>
         Effect.mapError(failure("write", "storage")),
       );
 
+    const persistDefinition = (integration: StoredIntegration, previous?: StoredIntegration) =>
+      Effect.gen(function* () {
+        yield* persist(integration);
+        if (Option.isSome(sync)) yield* sync.value.publish(integration, previous);
+      }).pipe(sql.withTransaction, Effect.mapError(failure("write", "storage")));
+
+    if (Option.isSome(sync))
+      yield* sync.value.changes.pipe(
+        Stream.runForEach(() =>
+          Effect.gen(function* () {
+            liveTokens.clear();
+            yield* Ref.set(cache, new Map());
+            yield* Ref.set(checks, new Map());
+            yield* notify;
+          }),
+        ),
+        Effect.forkScoped,
+      );
+
     if (Option.isSome(local)) {
       yield* rows().pipe(
         Effect.flatMap((all) =>
@@ -1531,7 +1538,7 @@ const make = (options: IntegrationsOptions = {}) =>
             updatedAt: at,
             deletedAt: null,
           };
-          yield* persist(integration);
+          yield* persistDefinition(integration);
           // The process starts now so a sign-in link answers quickly; listing retries a failure.
           if (integration.transport === "local" && Option.isSome(local))
             yield* local.value.start(integration).pipe(Effect.ignore);
@@ -1653,7 +1660,7 @@ const make = (options: IntegrationsOptions = {}) =>
             credentialOrigin,
             approvedCredentialItems,
           };
-          yield* persist(integration);
+          yield* persistDefinition(integration, current);
           if (!keepSignIn) yield* dropTokens(current);
           yield* invalidate(integration.id);
           return { integration: redactIntegration(integration), changed: true };
@@ -1684,7 +1691,7 @@ const make = (options: IntegrationsOptions = {}) =>
           if (current.transport === "local" && Option.isSome(local)) yield* local.value.stop(id);
           const at = yield* now;
           const { oauthState: _, ...rest } = current;
-          yield* persist({ ...rest, deletedAt: at, updatedAt: at });
+          yield* persistDefinition({ ...rest, deletedAt: at, updatedAt: at }, current);
           yield* dropTokens(current);
           yield* invalidate(id);
           yield* notify;
