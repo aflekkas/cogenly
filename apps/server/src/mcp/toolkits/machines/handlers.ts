@@ -98,8 +98,12 @@ export const layer = McpToolAccess.toLayer(MachinesToolkit, {
   machines_move_threads: McpToolAccess.writesEnvironment((input) =>
     Effect.gen(function* () {
       const transfer = yield* ThreadTransfer.ThreadTransfer;
-      const options =
-        input.leaveLocalChanges === undefined ? {} : { leaveLocalChanges: input.leaveLocalChanges };
+      const options = {
+        ...(input.leaveLocalChanges === undefined
+          ? {}
+          : { leaveLocalChanges: input.leaveLocalChanges }),
+        ...(input.dryRun === undefined ? {} : { dryRun: input.dryRun }),
+      };
       if ((input.threadIds === undefined) === (input.fromMachine === undefined))
         return yield* new OrchestratorMcpFailure({
           code: "invalid_request",

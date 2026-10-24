@@ -24,6 +24,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import * as Machines from "../machines/Machines.ts";
@@ -31,10 +32,11 @@ import * as PeerChannels from "../machines/PeerChannels.ts";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as RepositoryCheckout from "../project/RepositoryCheckout.ts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
+import * as ProjectLabelFolders from "../projectLabels/ProjectLabelFolders.ts";
 import * as ProjectLabelService from "../projectLabels/ProjectLabelService.ts";
 import * as ThreadReplication from "./ThreadReplication.ts";
 import * as ThreadRouting from "./ThreadRouting.ts";
-import { adoptLocalCheckout, findLocalCheckout } from "./localCheckout.ts";
+import { adoptLocalCheckout, findLocalCheckout, previewClonePath } from "./localCheckout.ts";
 import * as ThreadTransfer from "./ThreadTransfer.ts";
 
 export class ProjectMove extends Context.Service<
@@ -60,6 +62,8 @@ const make = Effect.gen(function* () {
     | FileSystem.FileSystem
     | RepositoryIdentityResolver.RepositoryIdentityResolver
     | ProjectLabelService.ProjectLabelService
+    | ProjectLabelFolders.ProjectLabelFolders
+    | Path.Path
   >();
   const self = replication.environmentId;
 
@@ -123,7 +127,11 @@ const make = Effect.gen(function* () {
         continue;
       }
       if (dryRun) {
-        results.push({ remote: link.remote, status: "will-clone" });
+        const destination = yield* previewClonePath(id, link.remote).pipe(
+          Effect.provideContext(context),
+          Effect.orDie,
+        );
+        results.push({ remote: link.remote, status: "will-clone", detail: destination });
         continue;
       }
       const started = yield* Effect.result(

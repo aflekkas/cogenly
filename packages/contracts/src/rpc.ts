@@ -633,6 +633,10 @@ export const WS_METHODS = {
   // Hand threads to another paired machine, which runs them from then on.
   machinesMoveThreads: "machines.moveThreads",
   machinesMoveAllThreads: "machines.moveAllThreads",
+  machinesPreviewMoveThreads: "machines.previewMoveThreads",
+  machinesPreviewMoveAllThreads: "machines.previewMoveAllThreads",
+  projectLabelsPreviewMoveToMachine: "projectLabels.previewMoveToMachine",
+  machinesAdoptThreads: "machines.adoptThreads",
   machineSecurityStatus: "machines.securityStatus",
   // Getting this machine ready to pair (Tailscale and Serve)
   machinesSetupStatus: "machines.setupStatus",
@@ -2001,9 +2005,24 @@ const WsMachinesMoveThreadsRpc = Rpc.make(WS_METHODS.machinesMoveThreads, {
   success: ThreadReplication.ThreadMoveResult,
   error: Schema.Union([ThreadReplication.ThreadRemoteError, EnvironmentAuthorizationError]),
 });
+const WsMachinesPreviewMoveThreadsRpc = Rpc.make(WS_METHODS.machinesPreviewMoveThreads, {
+  payload: ThreadReplication.ThreadMoveInput,
+  success: ThreadReplication.ThreadMoveResult,
+  error: Schema.Union([ThreadReplication.ThreadRemoteError, EnvironmentAuthorizationError]),
+});
 const WsMachinesMoveAllThreadsRpc = Rpc.make(WS_METHODS.machinesMoveAllThreads, {
   payload: ThreadReplication.ThreadMoveAllInput,
   success: ThreadReplication.ThreadMoveResult,
+  error: Schema.Union([ThreadReplication.ThreadRemoteError, EnvironmentAuthorizationError]),
+});
+const WsMachinesPreviewMoveAllThreadsRpc = Rpc.make(WS_METHODS.machinesPreviewMoveAllThreads, {
+  payload: ThreadReplication.ThreadMoveAllInput,
+  success: ThreadReplication.ThreadMoveResult,
+  error: Schema.Union([ThreadReplication.ThreadRemoteError, EnvironmentAuthorizationError]),
+});
+const WsMachinesAdoptThreadsRpc = Rpc.make(WS_METHODS.machinesAdoptThreads, {
+  payload: ThreadReplication.ThreadAdoptInput,
+  success: ThreadReplication.ThreadAdoptResult,
   error: Schema.Union([ThreadReplication.ThreadRemoteError, EnvironmentAuthorizationError]),
 });
 const WsProjectLabelsMoveToMachineRpc = Rpc.make(WS_METHODS.projectLabelsMoveToMachine, {
@@ -2011,6 +2030,14 @@ const WsProjectLabelsMoveToMachineRpc = Rpc.make(WS_METHODS.projectLabelsMoveToM
   success: ThreadReplication.ProjectMoveResult,
   error: Schema.Union([ThreadReplication.ThreadRemoteError, EnvironmentAuthorizationError]),
 });
+const WsProjectLabelsPreviewMoveToMachineRpc = Rpc.make(
+  WS_METHODS.projectLabelsPreviewMoveToMachine,
+  {
+    payload: ThreadReplication.ProjectMoveInput,
+    success: ThreadReplication.ProjectMoveResult,
+    error: Schema.Union([ThreadReplication.ThreadRemoteError, EnvironmentAuthorizationError]),
+  },
+);
 const WsProjectLabelsMoveThreadRpc = Rpc.make(WS_METHODS.projectLabelsMoveThread, {
   payload: ProjectLabels.MoveThreadProjectFolderInput,
   success: ProjectLabels.ThreadProjectFolderResult,
@@ -2667,8 +2694,12 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectLabelsSubscribeConfirmedThreadLabelsRpc,
   WsProjectLabelsMoveThreadRpc,
   WsProjectLabelsMoveToMachineRpc,
+  WsProjectLabelsPreviewMoveToMachineRpc,
   WsMachinesMoveThreadsRpc,
+  WsMachinesPreviewMoveThreadsRpc,
   WsMachinesMoveAllThreadsRpc,
+  WsMachinesPreviewMoveAllThreadsRpc,
+  WsMachinesAdoptThreadsRpc,
   WsProjectLabelsForkThreadToProjectRpc,
   WsProjectLabelsSetThreadLabelsRpc,
   WsProjectLabelsLinkSourceRpc,
