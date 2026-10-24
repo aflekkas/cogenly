@@ -34,6 +34,7 @@ import { OverlayPresence } from "../ui/overlay-presence";
 import { ScrollArea } from "../ui/scroll-area";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { WorkspacePageContainer } from "../WorkspacePageContainer";
+import { ProjectOrphanFolders } from "./ProjectOrphanFolders";
 import { latestProjectActivity, projectPanelSummary } from "./projectPanel.logic";
 import { useProjectFolderMenu } from "./useProjectFolderMenu";
 
@@ -291,6 +292,7 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
               </ul>
             )}
           </WorkspacePageContainer>
+          <ProjectOrphanFolders environmentId={props.environmentId} />
         </ScrollArea>
       </div>
       <OverlayPresence when={renaming}>
