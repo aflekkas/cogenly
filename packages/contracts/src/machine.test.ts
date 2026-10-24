@@ -24,6 +24,10 @@ describe("machine RPC permissions", () => {
       WS_METHODS.machinesCreatePeerGrant,
       WS_METHODS.machinesJoinHub,
       WS_METHODS.machinesUnpair,
+      // Setup installs software, exposes the server, and carries sign-in links.
+      WS_METHODS.machinesSetupStatus,
+      WS_METHODS.machinesSetupSubscribe,
+      WS_METHODS.machinesSetupRunStep,
     ]) {
       expect(clientRpcRequiredScopes(method, {})).toEqual(["access:write"]);
     }

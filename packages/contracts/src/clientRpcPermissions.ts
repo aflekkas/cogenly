@@ -100,6 +100,11 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.machinesCreatePeerGrant]: AuthAccessWriteScope,
   [WS_METHODS.machinesJoinHub]: AuthAccessWriteScope,
   [WS_METHODS.machinesUnpair]: AuthAccessWriteScope,
+  // Setup installs software and puts this server on the tailnet, and its
+  // status carries the one-time Tailscale sign-in link: access management too.
+  [WS_METHODS.machinesSetupStatus]: AuthAccessWriteScope,
+  [WS_METHODS.machinesSetupSubscribe]: AuthAccessWriteScope,
+  [WS_METHODS.machinesSetupRunStep]: AuthAccessWriteScope,
   [WS_METHODS.factsCreate]: AuthOrchestrationOperateScope,
   [WS_METHODS.factsUpdate]: AuthOrchestrationOperateScope,
   [WS_METHODS.factsSupersede]: AuthOrchestrationOperateScope,

@@ -11,6 +11,7 @@ import * as Facts from "./context/FactService.ts";
 import * as Integrations from "./integrations/Integrations.ts";
 import * as Machines from "./machines/Machines.ts";
 import * as MachineSecurity from "./security/MachineSecurity.ts";
+import * as MachineSetup from "./tailscale/MachineSetup.ts";
 import * as VisualStates from "./htmlRender/VisualState.ts";
 import * as Retrieval from "./context/ContextRetrievalService.ts";
 import * as Exports from "./export/ExportService.ts";
@@ -1088,6 +1089,7 @@ const makeWsRpcHandlers = (
     const integrations = yield* Integrations.Integrations;
     const machines = yield* Machines.Machines;
     const machineSecurity = yield* MachineSecurity.MachineSecurity;
+    const machineSetup = yield* MachineSetup.MachineSetup;
     const visualStates = yield* VisualStates.VisualStateService;
     const retrieval = yield* Retrieval.ContextRetrievalService;
     const scheduledTasks = yield* ScheduledTasks.ScheduledTaskService;
@@ -1708,6 +1710,9 @@ const makeWsRpcHandlers = (
       [WS_METHODS.machinesCreatePeerGrant]: (input) => machines.createPeerGrant(input),
       [WS_METHODS.machinesJoinHub]: (input) => machines.joinHub(input),
       [WS_METHODS.machinesUnpair]: (input) => machines.unpair(input),
+      [WS_METHODS.machinesSetupStatus]: () => machineSetup.status,
+      [WS_METHODS.machinesSetupSubscribe]: () => machineSetup.subscribe,
+      [WS_METHODS.machinesSetupRunStep]: (input) => machineSetup.runStep(input.step),
       [WS_METHODS.factsList]: (input) => facts.list(input),
       [WS_METHODS.factsCreate]: (input) => facts.create(input),
       [WS_METHODS.visualStateGet]: (input) =>
@@ -2786,6 +2791,7 @@ type WsRequestServices =
   | Integrations.Integrations
   | Machines.Machines
   | MachineSecurity.MachineSecurity
+  | MachineSetup.MachineSetup
   | FileSystem.FileSystem
   | GitHubRest.GitHubRest
   | GitWorkflowService.GitWorkflowService

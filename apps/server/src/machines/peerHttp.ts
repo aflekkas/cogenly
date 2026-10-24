@@ -25,6 +25,7 @@ import * as Crypto from "effect/Crypto";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 import { RpcSerialization, RpcServer } from "effect/rpc";
 
@@ -35,6 +36,7 @@ import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as SessionStore from "../auth/SessionStore.ts";
 import { deriveAuthClientMetadata } from "../auth/utils.ts";
 import * as ServerConfig from "../config.ts";
+import * as TailscaleServeMode from "../tailscale/TailscaleServeMode.ts";
 import { acceptsPeerIngress } from "./peerIngress.ts";
 import * as PeerHub from "./PeerHub.ts";
 
@@ -62,14 +64,24 @@ export const layer = Layer.unwrap(
     const sessions = yield* SessionStore.SessionStore;
     const secrets = yield* ServerSecretStore.ServerSecretStore;
     const crypto = yield* Crypto.Crypto;
+    // Machine setup can put the server behind Tailscale Serve while it runs.
+    const serveMode = yield* Effect.serviceOption(TailscaleServeMode.TailscaleServeMode);
+    const acceptsIngress = (request: HttpServerRequest.HttpServerRequest) =>
+      Option.match(serveMode, {
+        onNone: () => Effect.succeed(config.tailscaleServeEnabled),
+        onSome: (mode) => Effect.map(mode.current, (current) => current.enabled),
+      }).pipe(
+        Effect.map((tailscaleServeEnabled) =>
+          acceptsPeerIngress(request, { ...config, tailscaleServeEnabled }),
+        ),
+      );
 
     const identity = HttpRouter.add(
       "POST",
       PEER_IDENTITY_PATH,
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest;
-        if (!acceptsPeerIngress(request, config))
-          return refuse(403, "private_peer_ingress_required");
+        if (!(yield* acceptsIngress(request))) return refuse(403, "private_peer_ingress_required");
         const body = yield* HttpServerRequest.schemaBodyJson(PeerIdentityRequest).pipe(
           Effect.option,
         );
@@ -87,8 +99,7 @@ export const layer = Layer.unwrap(
       PEER_JOIN_PATH,
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest;
-        if (!acceptsPeerIngress(request, config))
-          return refuse(403, "private_peer_ingress_required");
+        if (!(yield* acceptsIngress(request))) return refuse(403, "private_peer_ingress_required");
         // The proof names the key the new session is bound to.
         const proofKeyThumbprint = yield* verifyRequestDpopProof({ request }).pipe(
           Effect.provideService(ServerSecretStore.ServerSecretStore, secrets),
@@ -134,8 +145,7 @@ export const layer = Layer.unwrap(
       PEER_TICKET_PATH,
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest;
-        if (!acceptsPeerIngress(request, config))
-          return refuse(403, "private_peer_ingress_required");
+        if (!(yield* acceptsIngress(request))) return refuse(403, "private_peer_ingress_required");
         return yield* auth.authenticatePeerRequest(request).pipe(
           Effect.flatMap(hub.issueTicket),
           Effect.flatMap((issued) =>
@@ -159,8 +169,7 @@ export const layer = Layer.unwrap(
       PEER_SOCKET_PATH,
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest;
-        if (!acceptsPeerIngress(request, config))
-          return refuse(403, "private_peer_ingress_required");
+        if (!(yield* acceptsIngress(request))) return refuse(403, "private_peer_ingress_required");
         const session = yield* auth.authenticatePeerWebSocket(request).pipe(Effect.option);
         if (session._tag === "None") return refuse(401, "not_paired");
         const connection = yield* hub.connect(session.value);
