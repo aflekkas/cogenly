@@ -54,7 +54,7 @@ const BRIEF_MAX = 4000;
  * True once `value` differs from what it was at mount, so a card animates the
  * state change the user just caused or watched, never history on load.
  */
-function useChangedSinceMount<T>(value: T): boolean {
+export function useChangedSinceMount<T>(value: T): boolean {
   const [initial] = useState(value);
   const [changed, setChanged] = useState(false);
   const differs = !Object.is(initial, value);
@@ -63,7 +63,7 @@ function useChangedSinceMount<T>(value: T): boolean {
 }
 
 /** Fades content in when it changes after mount: opacity only, so reduced motion keeps it too. */
-const changeFade =
+export const changeFade =
   "transition-opacity duration-(--motion-duration-fast) ease-out starting:opacity-0";
 
 function StateIcon({ state }: { readonly state: WorkTaskCardState }) {

@@ -6167,7 +6167,7 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
     ? notificationChildThreadId(notification.source)
     : undefined;
   // A Work session this chat handed off reports back as Work, matching its
-  // "Continued in Work" row, not as a subagent.
+  // "Handed off to Work" card, not as a subagent.
   const notifiedThread = useThreadShell(
     notifiedSubagentThreadId
       ? scopeThreadRef(ctx.activeThreadEnvironmentId, notifiedSubagentThreadId)

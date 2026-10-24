@@ -315,12 +315,13 @@ export function anchorAtTurnEnd(
   );
 }
 
-export type WorkHandoffStatus = "running" | "attention" | "done" | "stopped";
+export type WorkHandoffStatus = "running" | "waiting" | "done" | "failed" | "stopped";
 
 /**
- * A Work session's state as its chat's handoff marker shows it, from the
- * thread shell alone so a marker never loads the Work thread's history.
- * Null when it has not started a run yet.
+ * A Work session's state as its chat's handoff card shows it, from the
+ * thread shell alone so a card never loads the Work thread's history.
+ * `waiting` means it waits on the user (an approval or an answer). Null when
+ * it has not started a run yet.
  */
 export function deriveWorkHandoffStatus(thread: {
   readonly latestRun: { readonly status: string } | null;
@@ -331,7 +332,7 @@ export function deriveWorkHandoffStatus(thread: {
   readonly settledOverride: "settled" | "active" | null;
   readonly settledAt: string | null;
 }): WorkHandoffStatus | null {
-  if (thread.hasPendingApprovals || thread.hasPendingUserInput) return "attention";
+  if (thread.hasPendingApprovals || thread.hasPendingUserInput) return "waiting";
   const runtimeStatus = thread.runtime?.status;
   if (
     runtimeStatus === "preparing" ||
@@ -355,7 +356,7 @@ export function deriveWorkHandoffStatus(thread: {
     case "completed":
       return "done";
     case "failed":
-      return "attention";
+      return "failed";
     case "interrupted":
     case "cancelled":
     case "rolled_back":

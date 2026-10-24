@@ -289,17 +289,32 @@ describe("deriveWorkHandoffStatus", () => {
     settledAt: null,
   } as const;
 
-  it("reads running, attention, done and stopped from the shell", () => {
+  it("reads running, waiting, done, failed and stopped from the shell", () => {
     expect(deriveWorkHandoffStatus(idle)).toBeNull();
     expect(deriveWorkHandoffStatus({ ...idle, runtime: { status: "running" } })).toBe("running");
+    expect(deriveWorkHandoffStatus({ ...idle, runtime: { status: "waiting" } })).toBe("running");
     expect(
       deriveWorkHandoffStatus({
         ...idle,
         runtime: { status: "waiting" },
         hasPendingApprovals: true,
       }),
-    ).toBe("attention");
-    expect(deriveWorkHandoffStatus({ ...idle, latestRun: { status: "failed" } })).toBe("attention");
+    ).toBe("waiting");
+    expect(
+      deriveWorkHandoffStatus({
+        ...idle,
+        latestRun: { status: "failed" },
+        hasPendingUserInput: true,
+      }),
+    ).toBe("waiting");
+    expect(deriveWorkHandoffStatus({ ...idle, latestRun: { status: "failed" } })).toBe("failed");
+    expect(
+      deriveWorkHandoffStatus({
+        ...idle,
+        latestRun: { status: "failed" },
+        settledOverride: "settled",
+      }),
+    ).toBe("done");
     expect(deriveWorkHandoffStatus({ ...idle, latestRun: { status: "completed" } })).toBe("done");
     expect(
       deriveWorkHandoffStatus({
