@@ -150,8 +150,8 @@ import {
   COGENLY_ORCHESTRATION_INSTRUCTIONS,
 } from "@t3tools/provider-core/server/orchestrationInstructions";
 import {
-  CONVERSATION_MODE_INSTRUCTIONS,
   buildRuntimeInstructions,
+  conversationModeInstructions,
 } from "@t3tools/provider-core/server/runtimeInstructions";
 import {
   mcpToolPresentation,
@@ -398,6 +398,10 @@ export const CLAUDE_CONVERSATION_DISALLOWED_TOOLS: ReadonlyArray<string> = [
   "Bash",
   "BashOutput",
   "KillShell",
+  "Agent",
+  "Task",
+  "TaskOutput",
+  "TaskStop",
 ];
 
 function claudeAgentSdkQueryToolsForSdk(
@@ -1131,6 +1135,13 @@ export function makeClaudeQueryOptions(input: {
   readonly disallowedTools?: ReadonlyArray<string>;
   /** Chat-surface turns: appends the conversation-mode instructions. */
   readonly conversationMode?: boolean;
+  readonly builderMode?: boolean;
+  /**
+   * The turn's MCP credential grants the Cogenly terminal tools, so shell
+   * commands go through terminal_run. Absent: inferred from a disallowed Bash.
+   */
+  readonly terminalToolsAvailable?: boolean;
+  readonly runtimePolicy?: ProviderAdapter.ProviderAdapterV2RuntimePolicy;
   /** Threads filed in a project: appends the project manifest block. */
   readonly projectManifest?: string;
   readonly permissionMode?: PermissionMode;
@@ -1162,6 +1173,16 @@ export function makeClaudeQueryOptions(input: {
     ? { resume: input.nativeThreadId }
     : { sessionId: input.nativeThreadId };
   const selectedTools = input.tools ?? CLAUDE_CODE_PRESET_TOOLS;
+  // Conversation turns lose Bash independently. Advertise MCP commands only
+  // when both the session and the current turn policy permit them.
+  const terminalTools = McpProviderSession.terminalToolsAuthorized({
+    runtimeMode: input.runtimePolicy?.runtimeMode ?? "full-access",
+    interactionMode: input.runtimePolicy?.interactionMode ?? "default",
+    builderMode: input.runtimePolicy?.builderMode ?? input.builderMode,
+    enabled:
+      input.terminalToolsAvailable ??
+      (input.conversationMode !== true && input.disallowedTools?.includes("Bash") === true),
+  });
   const selectionSettings =
     Object.keys(compiledSelection.settings).length === 0
       ? undefined
@@ -1231,15 +1252,15 @@ export function makeClaudeQueryOptions(input: {
       preset: "claude_code" as const,
       append:
         buildRuntimeInstructions({ harness: "Claude Code" }) +
-        (input.conversationMode === true ? `\n${CONVERSATION_MODE_INSTRUCTIONS}` : "") +
+        (input.conversationMode === true
+          ? `\n${conversationModeInstructions({ terminal: terminalTools, builder: input.builderMode })}`
+          : "") +
         (input.projectManifest === undefined ? "" : `\n${input.projectManifest}`) +
         (input.mcpServers === undefined ? "" : COGENLY_ORCHESTRATION_INSTRUCTIONS) +
         (input.mcpServers !== undefined && input.browserToolsAvailable === true
           ? COGENLY_BROWSER_TOOL_INSTRUCTIONS
           : "") +
-        // Conversation turns have no shell at all, so they never route
-        // commands through the terminal tools.
-        (input.conversationMode === true || !input.disallowedTools?.includes("Bash")
+        (!terminalTools
           ? ""
           : "\nUse mcp__cogenly__terminal_run for every shell command so the owner sees it live. Use background=true for servers, terminal_read for output, terminal_write for stdin, and terminal_kill to stop. A command that may take more than about a minute, or may prompt (logins, cloud CLIs, installs, builds, test suites), runs with background=true and is polled with terminal_read, so the user's messages aren't blocked while it runs. Terminals and their children are killed when this thread settles."),
     },
@@ -1291,14 +1312,17 @@ export const CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS: ReadonlyArray<string> = [
   "mcp__cogenly__device_setup_status",
 ];
 
-// Chat-surface turns get the read-only tools plus the handoff draft, the
-// read-only memory tools, and the project and thread organizers, so a
-// conversation can propose Work, recall facts, set up projects, and snooze or
-// settle threads by talking. Project folders and thread lifecycle are metadata
-// only, so they stay conversational; clones and launches still need an
-// approval.
+// Chat-surface turns get the read-only tools plus the terminal, the handoff
+// draft, the read-only memory tools, and the project and thread organizers, so
+// a conversation can look things up, propose Work, recall facts, set up
+// projects, and snooze or settle threads by talking. Project folders and thread
+// lifecycle are metadata only, so they stay conversational; clones and
+// launches still need an approval.
 export const CLAUDE_CONVERSATION_T3_MCP_ALLOWED_TOOLS: ReadonlyArray<string> = [
   ...CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS,
+  "mcp__cogenly__terminal_run",
+  "mcp__cogenly__terminal_write",
+  "mcp__cogenly__terminal_kill",
   "mcp__cogenly__work_propose_handoff",
   "mcp__cogenly__work_task",
   "mcp__cogenly__memory_read",
@@ -1345,7 +1369,7 @@ export function claudeMcpQueryOverrides(input: {
   readonly mcpSession: McpProviderSession.McpProviderSessionConfig | undefined;
   readonly readOnlySandbox: boolean;
   readonly allowedTools?: ReadonlyArray<string>;
-  /** Chat-surface turns: read-only tools plus the handoff draft and memory reads. */
+  /** Chat-surface turns: read-only tools plus the terminal, the handoff draft and memory reads. */
   readonly conversationMode?: boolean;
 }): {
   readonly allowedTools?: ReadonlyArray<string>;
@@ -1924,8 +1948,10 @@ export function claudeEffectiveQueryPolicyKey(
     readonly mcpServers?: ClaudeQueryOptions["mcpServers"];
     readonly disallowedTools?: ReadonlyArray<string>;
   },
+  terminalAuthorized?: boolean,
 ): string {
   return JSON.stringify({
+    terminalAuthorized,
     runtimePolicy: claudeRuntimeQueryPolicyKey({
       ...queryPolicy,
       ...(mcpOverrides.allowedTools === undefined
@@ -8523,15 +8549,23 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               ? {}
               : { allowedTools: queryPolicy.allowedTools }),
           });
-          // Chat-surface turns lose file writes and the shell on top of the
-          // MCP read-only set, whatever the terminal attachment grants.
+          // Chat-surface turns lose file writes and the native shell whatever
+          // the terminal attachment grants; they run commands through
+          // terminal_run, which the user sees.
           const disallowedTools = Array.from(
             new Set([
               ...(mcpOverrides.disallowedTools ?? []),
               ...(conversationMode ? CLAUDE_CONVERSATION_DISALLOWED_TOOLS : []),
             ]),
           );
-          const queryPolicyKey = claudeEffectiveQueryPolicyKey(queryPolicy, mcpOverrides);
+          const queryPolicyKey = claudeEffectiveQueryPolicyKey(
+            queryPolicy,
+            mcpOverrides,
+            McpProviderSession.terminalToolsAuthorized({
+              ...turnInput.runtimePolicy,
+              enabled: McpProviderSession.terminalToolsAvailable(mcpSession),
+            }),
+          );
           const compiledSelection = compileClaudeModelSelection(turnInput.modelSelection);
           const resumeSessionAt = yield* getNativeConversationHeadId(turnInput.providerThread);
           const existing = yield* Ref.get(queryContext);
@@ -8639,6 +8673,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             ),
             tools: queryPolicy.tools ?? CLAUDE_CODE_PRESET_TOOLS,
             ...(conversationMode ? { conversationMode } : {}),
+            runtimePolicy: turnInput.runtimePolicy,
+            builderMode: turnInput.runtimePolicy.builderMode === true,
+            terminalToolsAvailable: McpProviderSession.terminalToolsAvailable(mcpSession),
             ...(turnInput.runtimePolicy.projectManifest === undefined
               ? {}
               : { projectManifest: turnInput.runtimePolicy.projectManifest }),

@@ -1,3 +1,6 @@
+import * as ReadOnlySandbox from "../terminal/ReadOnlySandbox.ts";
+import * as AgentStore from "../agents/AgentStore.ts";
+import { terminalLaunchPolicy } from "@t3tools/provider-core/server/mcpSession";
 import * as CliCredentials from "../accounts/CliCredentials.ts";
 import { AccountError } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
@@ -11,11 +14,16 @@ import * as Path from "effect/Path";
 
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as ThreadCommandExecutor from "../orchestration-v2/ThreadCommandExecutor.ts";
+import { worksInProjectFolder } from "../orchestration-v2/RuntimePolicy.ts";
 import * as ProjectService from "../project/ProjectService.ts";
+import * as ProjectFiles from "../projectLabels/ProjectFiles.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
-import { assertFullAccess, assertLiveCaller, loadCaller, unavailable } from "./threadAccess.ts";
+import { assertLiveCaller, loadCaller, unavailable } from "./threadAccess.ts";
+
+const isAccountError = Schema.is(AccountError);
+const isSandboxUnavailable = Schema.is(ReadOnlySandbox.SandboxUnavailable);
 
 const denied = (message: string) =>
   new OrchestratorMcpFailure({ code: "capability_denied", message });
@@ -60,10 +68,13 @@ export class TerminalMcpService extends Context.Service<
 >()("cogenly-server/mcp/TerminalMcpService") {}
 
 const make = Effect.gen(function* () {
+  const agents = yield* AgentStore.AgentStore;
+  const sandbox = yield* ReadOnlySandbox.ReadOnlySandbox;
   const manager = yield* TerminalManager.TerminalManager;
   const credentials = yield* CliCredentials.CliCredentials;
   const settings = yield* ServerSettings.ServerSettingsService;
   const projects = yield* ProjectService.ProjectService;
+  const files = yield* ProjectFiles.ProjectFiles;
   const executor = yield* ThreadCommandExecutor.ThreadCommandExecutor;
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -80,14 +91,33 @@ const make = Effect.gen(function* () {
   const writable = Effect.gen(function* () {
     const context = yield* access;
     yield* assertLiveCaller(context.caller);
-    // These PTYs run on the host. Do not let an MCP call bypass a provider sandbox or approval.
-    yield* assertFullAccess(
-      context.caller,
-      "Agent terminals require full-access mode with default interaction mode.",
-    );
-    if (!(yield* settings.getSettings.pipe(Effect.mapError(unavailable))).enableAgentTerminals)
-      return yield* denied("Agent terminals are disabled in server settings.");
-    return context;
+    if (context.caller.caller?.surface === "builder")
+      return yield* denied("Builder threads cannot run commands.");
+    const thread = context.caller.caller!;
+    const agent = yield* agents.forThread(thread.id).pipe(Effect.mapError(unavailable));
+    const terminalPolicy = terminalLaunchPolicy({
+      enabled: (yield* settings.getSettings.pipe(Effect.mapError(unavailable)))
+        .enableAgentTerminals,
+      ...context.caller.limits,
+      builderMode: thread.surface === "builder",
+      agentPermissions: agent?.permissions,
+      chatMode: thread.surface === "chat",
+      readOnlySandboxAvailable: sandbox.status.available,
+    });
+    if (
+      terminalPolicy === null &&
+      thread.surface === "chat" &&
+      agent == null &&
+      !sandbox.status.available
+    )
+      return yield* denied(
+        new ReadOnlySandbox.SandboxUnavailable({ reason: sandbox.status.reason }).message,
+      );
+    if (terminalPolicy === null)
+      return yield* denied(
+        "Agent terminals require enabled tools, full-access/default mode and all sensitive agent grants.",
+      );
+    return { ...context, terminalPolicy };
   });
   return TerminalMcpService.of({
     run: (input) =>
@@ -96,7 +126,7 @@ const make = Effect.gen(function* () {
         const started = yield* executor.withLock(
           threadId,
           Effect.gen(function* () {
-            const { caller, scope } = yield* writable;
+            const { caller, scope, terminalPolicy } = yield* writable;
             const thread = caller.caller!;
             if (thread.settledOverride === "settled" || thread.archivedAt !== null)
               return yield* denied("This thread is settled or archived.");
@@ -105,8 +135,13 @@ const make = Effect.gen(function* () {
               .pipe(Effect.mapError(unavailable));
             if (Option.isNone(project))
               return yield* denied("The thread workspace is unavailable.");
+            // Chats have no worktree: a filed one looks things up from its
+            // project folder, where its provider runs too.
+            const folder = worksInProjectFolder(thread)
+              ? yield* files.folderForThread(threadId).pipe(Effect.mapError(unavailable))
+              : null;
             const root = yield* fs
-              .realPath(thread.worktreePath ?? project.value.workspaceRoot)
+              .realPath(folder?.dir ?? thread.worktreePath ?? project.value.workspaceRoot)
               .pipe(Effect.mapError(unavailable));
             const cwd = yield* fs
               .realPath(path.resolve(root, input.cwd ?? "."))
@@ -123,6 +158,7 @@ const make = Effect.gen(function* () {
             return yield* manager
               .runAgent({
                 threadId,
+                terminalPolicy,
                 command: input.command,
                 cwd,
                 worktreePath: thread.worktreePath,
@@ -136,7 +172,9 @@ const make = Effect.gen(function* () {
               })
               .pipe(
                 Effect.mapError((cause) =>
-                  Schema.is(AccountError)(cause) ? denied(cause.message) : unavailable(),
+                  isAccountError(cause) || isSandboxUnavailable(cause)
+                    ? denied(cause.message)
+                    : unavailable(),
                 ),
               );
           }),

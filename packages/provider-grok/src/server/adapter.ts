@@ -43,8 +43,8 @@ import {
 } from "@t3tools/provider-core/server/attachmentPrompt";
 import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
 import {
-  CONVERSATION_MODE_INSTRUCTIONS,
   buildRuntimeInstructions,
+  conversationModeInstructions,
 } from "@t3tools/provider-core/server/runtimeInstructions";
 import { turnScopedSelectionTransition } from "@t3tools/provider-core/server/selectionTransition";
 
@@ -1283,15 +1283,24 @@ export const makeGrokAdapterV2 = Effect.fn("makeGrokAdapterV2")(function* (
         const blocks = yield* promptBlocks(turnInput.message);
         yield* setModel(turnInput.modelSelection);
         const mcp = yield* mcpSessions.read(turnInput.threadId);
+        const mcpAttached = mcp !== undefined && host.initializeResult.agentCapabilities.mcpHttp;
+        // Conversations decline Grok's own execute tool, so their lookups
+        // run through the Cogenly terminal when the credential grants it.
         const instructions =
           buildRuntimeInstructions({ harness: "Grok Build", model: session.model ?? undefined }) +
           (turnInput.runtimePolicy.conversationMode === true
-            ? `\n${CONVERSATION_MODE_INSTRUCTIONS}`
+            ? `\n${conversationModeInstructions({
+                terminal: McpProviderSession.terminalToolsAuthorized({
+                  ...turnInput.runtimePolicy,
+                  enabled: mcpAttached && McpProviderSession.terminalToolsAvailable(mcp),
+                }),
+                builder: turnInput.runtimePolicy.builderMode,
+              })}`
             : "") +
           (turnInput.runtimePolicy.projectManifest === undefined
             ? ""
             : `\n${turnInput.runtimePolicy.projectManifest}`) +
-          (mcp && host.initializeResult.agentCapabilities.mcpHttp
+          (mcpAttached
             ? `\n${COGENLY_ORCHESTRATION_INSTRUCTIONS.replaceAll("T3", "Cogenly")}`
             : "");
         // ACP has no turn ids; each run attempt is its own turn.

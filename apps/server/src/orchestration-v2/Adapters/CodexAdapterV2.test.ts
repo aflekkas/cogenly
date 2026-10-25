@@ -646,32 +646,71 @@ describe("CodexAdapterV2 runtime policy", () => {
     }),
   );
 
-  it.effect("runs chat-surface turns in a read-only sandbox with conversation instructions", () =>
-    Effect.gen(function* () {
-      const params = yield* CodexAdapterV2.buildCodexTurnStartParams({
-        nativeThreadId: "native-chat-conversation",
-        codexInput: [{ type: "text", text: "explain this idea" }],
-        runtimePolicy: {
-          runtimeMode: "full-access",
-          interactionMode: "default",
-          cwd: null,
-          conversationMode: true,
-        },
-        modelSelection: {
-          instanceId: ProviderInstanceId.make("codex"),
-          model: "gpt-5.4",
-        },
-        hasT3Mcp: true,
-      });
+  const chatTurn = (
+    terminalToolsAvailable: boolean,
+    interactionMode: "default" | "plan" = "default",
+  ) =>
+    CodexAdapterV2.buildCodexTurnStartParams({
+      nativeThreadId: "native-chat-conversation",
+      codexInput: [{ type: "text", text: "explain this idea" }],
+      runtimePolicy: {
+        runtimeMode: "full-access",
+        interactionMode,
+        cwd: null,
+        conversationMode: true,
+      },
+      modelSelection: {
+        instanceId: ProviderInstanceId.make("codex"),
+        model: "gpt-5.4",
+      },
+      hasT3Mcp: true,
+      terminalToolsAvailable,
+    });
 
+  it.effect("does not promise terminal lookups to a plan-mode chat", () =>
+    Effect.gen(function* () {
+      const params = yield* chatTurn(true, "plan");
+      assert.notInclude(JSON.stringify(params.additionalContext), "terminal_run");
+      assert.include(
+        params.additionalContext?.cogenly_conversation?.value ?? "",
+        "you cannot run commands",
+      );
+    }),
+  );
+
+  it.effect("lets chat-surface turns look things up through the terminal tools", () =>
+    Effect.gen(function* () {
+      const params = yield* chatTurn(true);
+
+      // Native patches stay blocked; commands run in the Cogenly terminal.
       assert.equal(params.approvalPolicy, "never");
       assert.equal(params.sandboxPolicy?.type, "readOnly");
       assert.include(
         params.collaborationMode?.settings.developer_instructions ?? "",
-        "<conversation_mode>",
+        "Look things up yourself with the cogenly terminal_run tool",
       );
-      assert.include(params.additionalContext?.cogenly_conversation?.value ?? "", "Start Work");
-      assert.include(params.additionalContext?.cogenly_conversation?.value ?? "", "image_search");
+      const conversation = params.additionalContext?.cogenly_conversation?.value ?? "";
+      assert.include(conversation, "Look things up yourself with the cogenly terminal_run tool");
+      assert.include(conversation, "work_task");
+      assert.include(conversation, "image_search");
+      assert.notInclude(conversation, "you cannot run commands");
+      assert.include(params.additionalContext?.cogenly_tools?.value ?? "", "terminal_run");
+    }),
+  );
+
+  it.effect("tells chat-surface turns they have no commands when agent terminals are off", () =>
+    Effect.gen(function* () {
+      const params = yield* chatTurn(false);
+
+      assert.equal(params.sandboxPolicy?.type, "readOnly");
+      assert.include(
+        params.collaborationMode?.settings.developer_instructions ?? "",
+        "you cannot run commands",
+      );
+      const conversation = params.additionalContext?.cogenly_conversation?.value ?? "";
+      assert.include(conversation, "you cannot run commands");
+      assert.include(conversation, "Start Work");
+      assert.notInclude(conversation, "terminal_run");
       assert.notInclude(params.additionalContext?.cogenly_tools?.value ?? "", "terminal_run");
     }),
   );
@@ -1307,6 +1346,28 @@ describe("Codex terminal routing", () => {
     authorizationHeader: "Bearer test",
     browserToolsAvailable: false,
   };
+  it("disables native commands and delegation for conversations regardless of MCP availability", () => {
+    for (const mcpSession of [
+      undefined,
+      session,
+      { ...session, terminalToolsAvailable: false },
+      { ...session, terminalToolsAvailable: true },
+    ]) {
+      const params = CodexAdapterV2.codexThreadRuntimeParams({
+        mcpSession,
+        runtimePolicy: {
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          cwd: null,
+          conversationMode: true,
+        },
+      });
+      assert.equal(params.config["features.shell_tool"], false);
+      assert.equal(params.config["features.multi_agent"], false);
+      assert.equal(params.config["features.multi_agent_v2"], false);
+    }
+  });
+
   it("disables all native shell execution while the terminal MCP server is attached", () => {
     const params = CodexAdapterV2.codexThreadRuntimeParams({
       mcpSession: { ...session, terminalToolsAvailable: true },

@@ -3,17 +3,19 @@ import * as McpToolAccess from "../../McpToolAccess.ts";
 import * as TerminalMcpService from "../../TerminalMcpService.ts";
 import { TerminalToolkit } from "./tools.ts";
 
+// Conversations run commands too, to look things up; their instructions keep
+// repository changes and long-running work in Work tasks.
 export const layer = McpToolAccess.toLayer(TerminalToolkit, {
-  terminal_run: McpToolAccess.actsAsWorkCaller((input) =>
+  terminal_run: McpToolAccess.actsAsCaller((input) =>
     Effect.flatMap(TerminalMcpService.TerminalMcpService, (service) => service.run(input)),
   ),
   terminal_read: McpToolAccess.readsAsCaller((input) =>
     Effect.flatMap(TerminalMcpService.TerminalMcpService, (service) => service.read(input)),
   ),
-  terminal_write: McpToolAccess.actsAsWorkCaller((input) =>
+  terminal_write: McpToolAccess.actsAsCaller((input) =>
     Effect.flatMap(TerminalMcpService.TerminalMcpService, (service) => service.write(input)),
   ),
-  terminal_kill: McpToolAccess.actsAsWorkCaller((input) =>
+  terminal_kill: McpToolAccess.actsAsCaller((input) =>
     Effect.flatMap(TerminalMcpService.TerminalMcpService, (service) => service.kill(input)),
   ),
   terminal_list: McpToolAccess.readsAsCaller(() =>

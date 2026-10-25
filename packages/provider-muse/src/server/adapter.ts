@@ -46,8 +46,8 @@ import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
 import * as McpProviderSession from "@t3tools/provider-core/server/mcpSession";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import {
-  CONVERSATION_MODE_INSTRUCTIONS,
   buildRuntimeInstructions,
+  conversationModeInstructions,
 } from "@t3tools/provider-core/server/runtimeInstructions";
 import { museModelCapabilities, resolveMuseReasoningEffort } from "./modelCatalog.ts";
 import {
@@ -1705,9 +1705,9 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
               cwd,
               environment,
               runtimeMode: input.runtimePolicy.runtimeMode,
-              // Chat-surface threads run on a read-only host: no shell, no
-              // filesystem writes, no workspace trust. They still attach the
-              // Cogenly MCP server, so sessionMcp stays requested.
+              // Chat-surface threads run on a read-only host: no native shell,
+              // no filesystem writes, no workspace trust. They still attach the
+              // Cogenly MCP server, whose terminal tools run their lookups.
               readOnly: input.runtimePolicy.conversationMode === true,
               sessionMcp: true,
               disableShell: McpProviderSession.terminalToolsAvailable(mcpSession),
@@ -2071,6 +2071,11 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
                 `Muse returned an unsupported compaction status: ${result.status}`,
               );
           } else {
+            const turnMcp = yield* mcpSessions.read(turnInput.threadId);
+            const terminalTools = McpProviderSession.terminalToolsAuthorized({
+              ...turnInput.runtimePolicy,
+              enabled: McpProviderSession.terminalToolsAvailable(turnMcp),
+            });
             const result = yield* request(
               "turn/start",
               {
@@ -2083,30 +2088,23 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
                         model: session.model ?? undefined,
                         reasoningEffort: effort,
                       }) +
-                      // Chat-surface turns have no shell or writes (read-only
-                      // host), so they answer directly and hand code changes
-                      // to a Work session via Start Work.
+                      // Chat-surface turns have no native shell or writes
+                      // (read-only host): they look things up through the
+                      // Cogenly terminal and hand changes to a Work task.
                       (turnInput.runtimePolicy.conversationMode === true
-                        ? `\n${CONVERSATION_MODE_INSTRUCTIONS}`
+                        ? `\n${conversationModeInstructions({ terminal: terminalTools, builder: turnInput.runtimePolicy.builderMode })}`
                         : "") +
                       (museNativeMcpNotice(turnInput.runtimePolicy.useProviderConnectors) ?? "") +
                       (turnInput.runtimePolicy.projectManifest === undefined
                         ? ""
                         : `\n${turnInput.runtimePolicy.projectManifest}`) +
-                      (yield* mcpSessions
-                        .read(turnInput.threadId)
-                        .pipe(
-                          Effect.map((mcp) =>
-                            mcp
-                              ? "\n" +
-                                COGENLY_ORCHESTRATION_INSTRUCTIONS +
-                                (!McpProviderSession.terminalToolsAvailable(mcp) ||
-                                turnInput.runtimePolicy.conversationMode === true
-                                  ? ""
-                                  : "\nUse the cogenly MCP terminal_run tool for every shell command. Native shell is disabled. Use background=true for servers, terminal_read for output, terminal_write for stdin, and terminal_kill to stop. A command that may take more than about a minute, or may prompt (logins, cloud CLIs, installs, builds, test suites), runs with background=true and is polled with terminal_read, so the user's messages aren't blocked while it runs. Terminals and their children stop when this thread settles.")
-                              : "",
-                          ),
-                        )),
+                      (turnMcp
+                        ? "\n" +
+                          COGENLY_ORCHESTRATION_INSTRUCTIONS +
+                          (!terminalTools
+                            ? ""
+                            : "\nUse the cogenly MCP terminal_run tool for every shell command. Native shell is disabled. Use background=true for servers, terminal_read for output, terminal_write for stdin, and terminal_kill to stop. A command that may take more than about a minute, or may prompt (logins, cloud CLIs, installs, builds, test suites), runs with background=true and is polled with terminal_read, so the user's messages aren't blocked while it runs. Terminals and their children stop when this thread settles.")
+                        : ""),
                   },
                   ...parts,
                 ],

@@ -156,3 +156,38 @@ describe("machine security parsers", () => {
     }),
   );
 });
+
+it.effect("machine security reports the startup chat sandbox result", () =>
+  Effect.sync(() => {
+    const base = {
+      platform: "linux",
+      cogenlyHost: "127.0.0.1",
+      cogenlyPort: 4773,
+      sockets: null,
+      socketsEvidence: "unavailable",
+      sshd: null,
+      tailscale: null,
+      firewall: null,
+    };
+    const available = buildMachineSecurityStatus(
+      { ...base, chatSandbox: { available: true, backend: "bwrap" } },
+      now,
+    );
+    assert.equal(
+      available.findings.find((f) => f.checkId === "chat-terminal-sandbox")?.status,
+      "pass",
+    );
+    const denied = buildMachineSecurityStatus(
+      { ...base, chatSandbox: { available: false, reason: "probe failed" } },
+      now,
+    );
+    assert.equal(
+      denied.findings.find((f) => f.checkId === "chat-terminal-sandbox")?.detail,
+      "probe failed",
+    );
+    assert.equal(
+      denied.findings.find((f) => f.checkId === "chat-terminal-sandbox")?.status,
+      "warn",
+    );
+  }),
+);

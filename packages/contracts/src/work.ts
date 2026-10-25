@@ -55,6 +55,8 @@ export const WorkTask = Schema.Struct({
   runId: Schema.optional(RunId),
   /** The Work thread, once started. */
   threadId: Schema.optional(ThreadId),
+  /** The chat's agent asked for the Work thread to settle once the task completes. */
+  settleWhenDone: Schema.optional(Schema.Boolean),
   outcome: Schema.optional(WorkTaskOutcome),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,

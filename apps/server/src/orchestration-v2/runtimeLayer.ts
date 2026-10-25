@@ -1,5 +1,6 @@
 import * as GoogleTokenStore from "../integrations/local/GoogleTokenStore.ts";
 import * as NativeIntegrationImport from "../integrations/NativeIntegrationImport.ts";
+import * as ReadOnlySandbox from "../terminal/ReadOnlySandbox.ts";
 import * as AccountConnections from "../accounts/AccountConnections.ts";
 import * as AccountAccess from "../accounts/AccountAccess.ts";
 import * as CliCredentials from "../accounts/CliCredentials.ts";
@@ -225,6 +226,8 @@ const layerCommandOutputHubProvided = CommandOutputHub.layer.pipe(
 );
 
 const layerProviderSessionManagerProvided = ProviderSessionManager.layer.pipe(
+  Layer.provide(ReadOnlySandbox.layer),
+  Layer.provide(AgentStore.layer),
   Layer.provide(
     Layer.mergeAll(
       layerCommandOutputHubProvided,

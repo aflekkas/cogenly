@@ -1,4 +1,11 @@
-import type { EnvironmentId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import type {
+  AgentPermissions,
+  EnvironmentId,
+  ProviderInstanceId,
+  ThreadId,
+  RuntimeMode,
+  ProviderInteractionMode,
+} from "@t3tools/contracts";
 
 export interface McpProviderSessionConfig {
   readonly environmentId: EnvironmentId;
@@ -33,12 +40,9 @@ export interface McpProviderSessionConfig {
 }
 
 /**
- * Whether the Cogenly terminal tools are definitely available to this
- * session: an MCP session is present and its credential explicitly grants
- * terminal tools. Adapters disable the provider's native shell only when
- * this is true. A credential that never stated terminal availability
- * (`terminalToolsAvailable` undefined) keeps the native shell, so the agent
- * always has some way to run commands instead of none.
+ * Whether the session explicitly offers terminal tools. Conversation turns
+ * disable native shell execution independently; Work keeps its native shell
+ * when this flag is absent. Prompt selection also checks the turn policy.
  */
 export const terminalToolsAvailable = (
   config: Pick<McpProviderSessionConfig, "terminalToolsAvailable"> | undefined,
@@ -60,3 +64,37 @@ export function withAgentDeviceEnvironment(
     ...(shimDir ? { PATH: basePath ? `${shimDir}${separator}${basePath}` : shimDir } : {}),
   };
 }
+
+/** Shared prompt/execution policy. Callers re-read modes, settings and grants at execution. */
+export function terminalLaunchPolicy(input: {
+  readonly enabled: boolean;
+  readonly runtimeMode: RuntimeMode;
+  readonly interactionMode: ProviderInteractionMode;
+  readonly builderMode?: boolean | undefined;
+  readonly chatMode?: boolean | undefined;
+  readonly readOnlySandboxAvailable?: boolean | undefined;
+  /** null/absent is an ordinary thread; an agent supplies its current grants. */
+  readonly agentPermissions?: AgentPermissions | null | undefined;
+}): "readOnlyLookup" | "unrestricted" | null {
+  const authorized =
+    input.enabled &&
+    input.runtimeMode === "full-access" &&
+    input.interactionMode === "default" &&
+    input.builderMode !== true &&
+    (input.agentPermissions == null ||
+      (input.agentPermissions.read &&
+        input.agentPermissions.execute &&
+        input.agentPermissions.send &&
+        input.agentPermissions.create_pr &&
+        input.agentPermissions.merge &&
+        input.agentPermissions.deploy &&
+        input.agentPermissions.delete));
+  if (!authorized) return null;
+  if (input.chatMode && input.agentPermissions == null)
+    return input.readOnlySandboxAvailable === true ? "readOnlyLookup" : null;
+  return "unrestricted";
+}
+
+export const terminalToolsAuthorized = (
+  input: Parameters<typeof terminalLaunchPolicy>[0],
+): boolean => terminalLaunchPolicy(input) !== null;

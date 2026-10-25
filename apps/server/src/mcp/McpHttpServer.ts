@@ -1,3 +1,4 @@
+import * as ReadOnlySandbox from "../terminal/ReadOnlySandbox.ts";
 import { AccountsToolkit } from "./toolkits/accounts/tools.ts";
 import * as AccountsHandlers from "./toolkits/accounts/handlers.ts";
 import * as AccountsMcp from "./AccountsMcpService.ts";
@@ -1021,7 +1022,7 @@ export const layer = Layer.mergeAll(
   toolkitRegistration(AgentsMcp.toolkit, AgentsMcp.handlers),
   layerOrchestratorToolkit,
   toolkitRegistration(TerminalToolkit, TerminalHandlers.layer).pipe(
-    Layer.provide(TerminalMcpService.layer),
+    Layer.provide(TerminalMcpService.layer.pipe(Layer.provide(ReadOnlySandbox.layer))),
     Layer.provide(ThreadCommandExecutor.layer),
   ),
   layerThreadToolkit,

@@ -108,14 +108,17 @@ The chat keeps a **Work started** line for each session it handed off. The sessi
 header shows the chat or agent it came from and its status, such as **Running**,
 **Needs input**, or **Ready for review**. You don't need to return to the chat.
 
-The chat's agent can also hand work off itself when you ask for something that needs
-commands or files, such as changing a repository or uninstalling an app. It picks a
+The chat's agent can also hand work off itself when you ask for something that changes
+things, such as editing a repository or uninstalling an app, or that runs for a long
+time. Lookups stay in the chat. It picks a
 repository, or **No project** for work on this machine, and shows a task card in the
 chat. A card it only proposes waits for **Approve**; **Edit** lets you change where it
 runs and what it's told first, and **Dismiss** can be undone with **Restore**. When you
 clearly asked for the action, the agent may start the task right away. Either way the
 card follows the task, has **Stop** while it runs, and when the task ends the chat's
-agent tells you how it went.
+agent tells you how it went. For a task whose result is all you need, the agent can ask
+for its Work thread to settle once it completes, so it doesn't linger in your list; a
+task that fails stays active. Un-settle the thread to continue there.
 
 ## Start a thread
 
@@ -143,9 +146,23 @@ or waiting on you. Older chats load as you scroll, and search covers all of them
 repositories from **Work** or the command palette.
 
 A chat is a conversation; Work is a coding session in a repository. Chats run in
-conversation mode: the agent answers directly and can't edit files or run shell
-commands itself; it hands that work to a task instead. So a chat's
-menu has **Start Work…**, rename, **Mark unread**, projects, copy and **Delete**,
+conversation mode: the agent answers directly and looks things up itself. It can run
+quick read-only commands, such as searching files, reading git history or querying
+`gh`, from the chat's project folder (or its own folder when it has no project), and
+each command shows in the conversation. It doesn't edit repositories, install
+anything or run long builds from a chat; it hands that work to a task instead.
+Chat commands need full-access mode and the `enableAgentTerminals` preference. They also require a working local sandbox:
+macOS uses `sandbox-exec`; Linux needs `bubblewrap` with user namespaces enabled.
+On Windows or when the sandbox probe fails, commands are unavailable in chats;
+use Work for command-based tasks.
+
+The sandbox prevents local file writes except in a fresh private temporary folder.
+It stays in effect for child processes and further input to the same terminal.
+Network access remains available for lookups. The sandbox does **not** prevent
+remote writes: chat agents are instructed never to run commands that change
+remote state, such as sending messages, changing issues or pushing commits.
+
+A chat's menu has **Start Work…**, rename, **Mark unread**, projects, copy and **Delete**,
 which always asks first, while settling, snoozing, archiving, repository settings
 and the branch and worktree controls, the right panel with its browser and device, and the
 terminal panel belong to Work. When a

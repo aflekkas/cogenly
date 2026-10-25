@@ -58,6 +58,8 @@ export const ProviderAdapterV2RuntimePolicy = Schema.Struct({
    * Absent or false keeps the full work toolset.
    */
   conversationMode: Schema.optional(Schema.Boolean),
+  /** Agent setup conversations have their own prompt and cannot run commands. */
+  builderMode: Schema.optional(Schema.Boolean),
   /**
    * Compact `<project_manifest>` block for threads filed in a project folder.
    * Absent when the thread has no project. Adapters append it to the turn

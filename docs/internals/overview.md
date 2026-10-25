@@ -119,3 +119,25 @@ down, so new native capability goes in a child with a deadline, not an `import` 
 
 See the [glossary](./glossary.md) for shared terms and the
 [development runbook](../operations/development.md) for setup and checks.
+
+## Chat terminal confinement
+
+Chat instructions alone cannot enforce the promise that a conversation will not
+edit the machine. Terminal authorization selects an immutable `readOnlyLookup`
+launch policy before the shell starts. The OS sandbox is inherited by every
+descendant and remains in force for later terminal input. Work terminals and
+persistent agents with all terminal grants retain their existing policy.
+
+The startup probe must pass before chat instructions advertise commands or
+execution accepts them. macOS uses Seatbelt through `sandbox-exec`; Linux uses
+bubblewrap with a read-only host filesystem, private temp/PID/IPC state and a
+seccomp filter that blocks Unix sockets and process-control escape routes.
+Read-only mounts alone do not prevent a Unix socket from asking an unconstrained
+host process to write. Unsupported platforms or failed probes disable chat
+terminals, and machine security status reports the result.
+
+This is a local filesystem boundary, with a terminal-private temp exception.
+Network access deliberately remains on for CLI and documentation lookups, so it
+does not guarantee the absence of remote writes. The instructions prohibit those
+commands; there is no network broker. Project file tools remain a separate,
+explicit way to save requested project artifacts.

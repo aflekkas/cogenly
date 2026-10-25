@@ -258,6 +258,11 @@ it.layer(layerTest)("RuntimePolicyV2", (it) => {
 
       assert.isTrue(yield* conversationFor("chat"));
       assert.isTrue(yield* conversationFor("builder"));
+      const builder = yield* policy.resolve({
+        thread: makeThread({ now, worktreePath: null, surface: "builder" }),
+        modelSelection,
+      });
+      assert.isTrue(builder.builderMode);
       assert.isUndefined(yield* conversationFor("work"));
       assert.isUndefined(yield* conversationFor(undefined));
     }),

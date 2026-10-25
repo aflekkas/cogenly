@@ -16,6 +16,7 @@ export const MachineSecurityState = Schema.Literals([
 export type MachineSecurityState = typeof MachineSecurityState.Type;
 
 export const MachineSecurityCheckId = Schema.Literals([
+  "chat-terminal-sandbox",
   "cogenly-bind",
   "listening-sockets",
   "sshd",

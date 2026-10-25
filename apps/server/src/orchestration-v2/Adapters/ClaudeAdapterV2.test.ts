@@ -255,23 +255,57 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
     },
   );
 
-  it("appends conversation instructions and drops the terminal routing for chat mode", () => {
+  const chatAppend = (terminalToolsAvailable: boolean) => {
     const options = ClaudeAdapterV2.makeClaudeQueryOptions({
       modelSelection: CLAUDE_TEST_MODEL_SELECTION,
       nativeThreadId: "chat-thread",
       resume: false,
       cwd: "/workspace",
       conversationMode: true,
+      terminalToolsAvailable,
       disallowedTools: [...ClaudeAdapterV2.CLAUDE_CONVERSATION_DISALLOWED_TOOLS],
     });
-    const append =
-      typeof options.systemPrompt === "object" && "append" in options.systemPrompt
-        ? String(options.systemPrompt.append ?? "")
-        : "";
+    return typeof options.systemPrompt === "object" && "append" in options.systemPrompt
+      ? String(options.systemPrompt.append ?? "")
+      : "";
+  };
+
+  it("does not promise commands in a plan-mode conversation", () => {
+    const options = ClaudeAdapterV2.makeClaudeQueryOptions({
+      modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+      nativeThreadId: "plan-chat",
+      resume: false,
+      cwd: "/workspace",
+      conversationMode: true,
+      terminalToolsAvailable: true,
+      runtimePolicy: {
+        runtimeMode: "full-access",
+        interactionMode: "plan",
+        cwd: "/workspace",
+        conversationMode: true,
+      },
+    });
+    const text = JSON.stringify(options.systemPrompt);
+    assert.include(text, "you cannot run commands");
+    assert.notInclude(text, "terminal_run");
+  });
+
+  it("lets chat mode look things up through terminal_run when the credential grants it", () => {
+    const append = chatAppend(true);
     assert.include(append, "<conversation_mode>");
-    assert.include(append, "Start Work");
+    assert.include(append, "Look things up yourself with the cogenly terminal_run tool");
+    assert.include(append, "Use mcp__cogenly__terminal_run for every shell command");
+    assert.include(append, "work_task");
     assert.include(append, "image_search");
     assert.include(append, "<how_cogenly_works>");
+    assert.notInclude(append, "you cannot run commands");
+  });
+
+  it("tells chat mode it has no commands when agent terminals are off", () => {
+    const append = chatAppend(false);
+    assert.include(append, "<conversation_mode>");
+    assert.include(append, "you cannot run commands");
+    assert.include(append, "Start Work");
     assert.notInclude(append, "terminal_run");
   });
 });
@@ -413,7 +447,7 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
     ]);
   });
 
-  it("adds the handoff draft, memory reads, and project and thread organizers to conversation-mode tools", () => {
+  it("adds the terminal, handoff draft, memory reads, and project and thread organizers to conversation-mode tools", () => {
     const threadId = ThreadId.make("thread-claude-mcp-conversation");
     const mcpSession = mcpSessionFor(threadId);
     const overrides = ClaudeAdapterV2.claudeMcpQueryOverrides({
@@ -424,6 +458,9 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
 
     assert.deepEqual(overrides.allowedTools, [
       ...ClaudeAdapterV2.CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS,
+      "mcp__cogenly__terminal_run",
+      "mcp__cogenly__terminal_write",
+      "mcp__cogenly__terminal_kill",
       "mcp__cogenly__work_propose_handoff",
       "mcp__cogenly__work_task",
       "mcp__cogenly__memory_read",
@@ -450,8 +487,6 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
     ]);
     assert.isFalse(overrides.allowedTools?.includes(ClaudeAdapterV2.CLAUDE_T3_MCP_TOOL_WILDCARD));
     for (const mutating of [
-      "mcp__cogenly__terminal_run",
-      "mcp__cogenly__terminal_write",
       "mcp__cogenly__work_start",
       "mcp__cogenly__thread_launch",
       "mcp__cogenly__worktree_handoff",
@@ -463,7 +498,7 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
   });
 
   it("disallows file writes and the shell for conversation turns", () => {
-    for (const tool of ["Edit", "Write", "MultiEdit", "NotebookEdit", "Bash"]) {
+    for (const tool of ["Edit", "Write", "MultiEdit", "NotebookEdit", "Bash", "Agent", "Task"]) {
       assert.include(ClaudeAdapterV2.CLAUDE_CONVERSATION_DISALLOWED_TOOLS, tool);
     }
   });

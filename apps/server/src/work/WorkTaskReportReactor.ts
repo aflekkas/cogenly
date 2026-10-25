@@ -4,6 +4,7 @@ import {
   type OrchestrationV2DomainEvent,
   type OrchestrationV2InternalCommand,
   type OrchestrationV2Run,
+  type OrchestrationV2ServerCommand,
   type ThreadId,
   type WorkTask,
   type WorkTaskOutcome,
@@ -61,6 +62,8 @@ export function workTaskReportFor(input: {
   readonly run: Pick<OrchestrationV2Run, "id" | "status">;
   readonly finalReply: string | null;
   readonly reportedAt: string;
+  /** The Work thread settled because the task asked to, from `workTaskSettleFor`. */
+  readonly settled?: boolean;
 }): Extract<OrchestrationV2InternalCommand, { readonly type: "work.task.report" }> | null {
   const status = input.run.status;
   if (!isReportedStatus(status)) return null;
@@ -77,6 +80,9 @@ export function workTaskReportFor(input: {
     reply.length === 0
       ? "It ended without a final reply."
       : `Its final reply:\n\n${clip(reply, REPORT_TEXT_CHARS)}`,
+    ...(input.settled === true
+      ? ["Its Work thread was settled, as you asked; the user can un-settle it to continue there."]
+      : []),
     status === "completed"
       ? "Tell the user the outcome in a sentence or two. Do not start another task for this unless they ask."
       : "Tell the user briefly what went wrong and offer a next step, such as retrying the task or opening its Work thread. Do not retry on your own.",
@@ -97,6 +103,24 @@ export function workTaskReportFor(input: {
         summary: `Task "${clip(input.task.title, 80)}" ${VERB[status]}`,
       },
     },
+  };
+}
+
+/**
+ * The `thread.settle` for a task that asked to settle when done. Only a
+ * completed task settles: a failed or cancelled one stays for the user to see.
+ */
+export function workTaskSettleFor(input: {
+  readonly chatThreadId: ThreadId;
+  readonly task: WorkTask;
+  readonly workThreadId: ThreadId;
+  readonly run: Pick<OrchestrationV2Run, "status">;
+}): Extract<OrchestrationV2ServerCommand, { readonly type: "thread.settle" }> | null {
+  if (input.task.settleWhenDone !== true || input.run.status !== "completed") return null;
+  return {
+    type: "thread.settle",
+    commandId: CommandId.make(`server:work-task-settle:${input.chatThreadId}:${input.task.id}`),
+    threadId: input.workThreadId,
   };
 }
 
@@ -150,6 +174,25 @@ const make = Effect.gen(function* () {
         messages.findLast(
           (message) => message.runId === latest.id && !message.streaming && message.text.trim(),
         )?.text ?? null;
+      // Settle before reporting, so the chat hears whether it happened. A
+      // refusal, such as a message queued on the Work, leaves it active.
+      const settle = workTaskSettleFor({
+        chatThreadId,
+        task,
+        workThreadId: event.threadId,
+        run: latest,
+      });
+      const settled =
+        settle !== null &&
+        (yield* engine.dispatch(settle).pipe(
+          Effect.as(true),
+          Effect.catchCause((cause) =>
+            Effect.logWarning("settling a finished chat task failed", {
+              threadId: event.threadId,
+              cause,
+            }).pipe(Effect.as(false)),
+          ),
+        ));
       const command = workTaskReportFor({
         chatThreadId,
         task,
@@ -157,6 +200,7 @@ const make = Effect.gen(function* () {
         run: latest,
         finalReply,
         reportedAt: DateTime.formatIso(yield* DateTime.now),
+        settled,
       });
       if (command !== null) yield* engine.dispatch(command);
     }).pipe(

@@ -70,15 +70,26 @@ export class RuntimePolicyV2 extends Context.Service<RuntimePolicyV2, RuntimePol
  * IMPLEMENTATIONS
  */
 /**
- * Chat-surface threads run in conversation mode: adapters offer
- * conversation-only tools (no file writes, no shell) plus a conversational
- * system prompt. Builder threads are conversations too. Every other thread
- * keeps the full work toolset.
+ * Chat-surface threads run in conversation mode: adapters drop native file
+ * writes, shell and delegation, and add a conversational system prompt.
+ * Builders share those native restrictions but get setup instructions and
+ * cannot run terminal commands. Every other thread keeps the work toolset.
  */
 const conversationModeFor = (
   thread: OrchestrationV2AppThread,
-): Pick<ProviderAdapter.ProviderAdapterV2RuntimePolicy, "conversationMode"> =>
-  thread.surface === "chat" || thread.surface === "builder" ? { conversationMode: true } : {};
+): Pick<ProviderAdapter.ProviderAdapterV2RuntimePolicy, "conversationMode" | "builderMode"> =>
+  thread.surface === "chat" || thread.surface === "builder"
+    ? { conversationMode: true, ...(thread.surface === "builder" ? { builderMode: true } : {}) }
+    : {};
+
+/**
+ * A chat or an agent's conversation filed in a project works in the project
+ * folder, even when the thread keeps a scratch worktree path from before it
+ * was filed. The provider cwd and the agent terminal root both follow this.
+ */
+export const worksInProjectFolder = (
+  thread: Pick<OrchestrationV2AppThread, "surface" | "agent">,
+): boolean => thread.surface === "chat" || thread.agent?.role === "conversation";
 
 /**
  * Whether a provider session opened in `previousCwd` must give way to a
@@ -214,8 +225,7 @@ export const layerFromProjectStore: Layer.Layer<
         // scratch worktree path from before it was filed. Unfiled ones keep
         // scratch, and Work in a repo still runs in that repo's worktree.
         const cwd =
-          (input.thread.surface === "chat" || input.thread.agent?.role === "conversation") &&
-          project !== undefined
+          worksInProjectFolder(input.thread) && project !== undefined
             ? project.dir
             : (input.thread.worktreePath ??
               (yield* projects.get(input.thread.projectId).pipe(
