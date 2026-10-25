@@ -5,6 +5,7 @@ import {
   resolveBackgroundDraftWorkspaceOptions,
   resolveComposerInteractionMode,
   resolveComposerProviderSelection,
+  resolveThreadDriverKind,
   resolveDraftHeroState,
   resolveEmptyServerThreadHero,
   resolveWorktreeSetupProgress,
@@ -1329,6 +1330,62 @@ describe("resolveComposerProviderSelection", () => {
         selectedProvider: selected.instanceId,
         threadProvider: original.instanceId,
         providers: [original.snapshot, selected.snapshot],
+      }),
+    ).toBeNull();
+  });
+
+  it("keeps an unlocked thread on its own driver when the instance that ran it is missing", () => {
+    const codex = entry("codex");
+    const claude = entry("claudeAgent");
+    const missing = ProviderInstanceId.make("claude-personal");
+    const select = (threadDriverKind: ProviderDriverKind | null) =>
+      resolveComposerProviderSelection({
+        entries: [codex, claude],
+        candidateInstanceIds: [missing],
+        lockedProvider: null,
+        lockedInstanceId: missing,
+        threadDriverKind,
+      }).selectedProviderEntry?.instanceId;
+
+    expect(select(claude.driverKind)).toBe(claude.instanceId);
+    expect(select(null)).toBe(codex.instanceId);
+  });
+});
+
+describe("resolveThreadDriverKind", () => {
+  const claude = ProviderDriverKind.make("claudeAgent");
+  const codex = ProviderDriverKind.make("codex");
+
+  it("reads the active provider thread's driver", () => {
+    expect(
+      resolveThreadDriverKind({
+        thread: { activeProviderThreadId: "pt-2" },
+        providerThreads: [
+          { id: "pt-1", driver: codex },
+          { id: "pt-2", driver: claude },
+        ],
+        turnItems: [],
+      }),
+    ).toBe(claude);
+  });
+
+  it("reads a provider subagent's driver from its native items", () => {
+    expect(
+      resolveThreadDriverKind({
+        thread: { activeProviderThreadId: null },
+        providerThreads: [],
+        turnItems: [{ nativeItemRef: { driver: claude } }, { nativeItemRef: null }],
+      }),
+    ).toBe(claude);
+  });
+
+  it("knows nothing about a thread without detail or history", () => {
+    expect(resolveThreadDriverKind(null)).toBeNull();
+    expect(
+      resolveThreadDriverKind({
+        thread: { activeProviderThreadId: null },
+        providerThreads: [],
+        turnItems: [],
       }),
     ).toBeNull();
   });

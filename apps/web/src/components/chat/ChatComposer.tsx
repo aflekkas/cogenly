@@ -1532,6 +1532,8 @@ export interface ChatComposerProps {
   providerCatalogKnown: boolean;
   activeProjectDefaultModelSelection: ModelSelection | null | undefined;
   activeThreadModelSelection: ModelSelection | null | undefined;
+  /** The driver the thread ran on, kept when its exact instance is missing here. */
+  activeThreadDriverKind?: ProviderDriverKind | null;
   reportedModelSelection?: ModelSelection | null;
   /**
    * Reports the selection a send would dispatch (null while no provider can
@@ -1681,6 +1683,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     providerCatalogKnown,
     activeProjectDefaultModelSelection,
     activeThreadModelSelection,
+    activeThreadDriverKind,
     reportedModelSelection,
     onSendModelSelectionChange,
     activeProjectId,
@@ -2063,9 +2066,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         lockedProvider,
         lockedInstanceId:
           activeThread?.runtime?.providerInstanceId ?? activeThreadModelSelection?.instanceId,
+        threadDriverKind: activeThreadDriverKind,
       }),
     [
       activeProjectDefaultModelSelection?.instanceId,
+      activeThreadDriverKind,
       activeThread?.runtime?.providerInstanceId,
       activeThreadModelSelection?.instanceId,
       selectedProviderByThreadId,
