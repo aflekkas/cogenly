@@ -11,11 +11,13 @@ import { ProjectFolderIcon } from "../../projectLabels/ProjectFolderMark";
 import { ProjectLabelEditorDialog } from "../../projectLabels/ProjectLabelEditorDialog";
 import { ProjectSourceLinksDialog } from "../../projectLabels/ProjectSourceLinks";
 import {
+  projectLabelEnvironmentIds,
+  possibleDuplicateProjects,
   projectLabelKey,
+  projectRepositoryCount,
   type EnvironmentProjectLabel,
   type ProjectLabelKey,
 } from "../../projectLabels/projectLabels.logic";
-import { projectRepositoryLinks } from "../../projectLabels/repositoryPicker.logic";
 import { useProjectContents } from "../../projectLabels/useProjectContents";
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import { environmentPresentations } from "../../state/presentation";
@@ -35,8 +37,13 @@ import { OverlayPresence } from "../ui/overlay-presence";
 import { ScrollArea } from "../ui/scroll-area";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { PageContent } from "../PageContent";
+import { PossibleDuplicateNotice } from "./PossibleDuplicateNotice";
 import { ProjectOrphanFolders } from "./ProjectOrphanFolders";
-import { latestProjectActivity, projectPanelSummary } from "./projectPanel.logic";
+import {
+  latestProjectActivity,
+  projectMachinesLabel,
+  projectPanelSummary,
+} from "./projectPanel.logic";
 import { useProjectFolderMenu } from "./useProjectFolderMenu";
 
 export interface ProjectsOverviewSearch {
@@ -81,14 +88,15 @@ type ProjectsFilter = "active" | "archived";
 
 /**
  * One project on the grid: its folder and name with the last activity, its
- * description, then what it holds and the machine it lives on. Clicking opens
- * the project's page; right-click (or the context-menu key) opens its menu.
+ * description, then what it holds on every machine and the machines that have
+ * it. Clicking opens the project's page; right-click (or the context-menu
+ * key) opens its menu.
  */
 function ProjectTile(props: {
   readonly entry: EnvironmentProjectLabel;
   readonly summary: string;
   readonly lastActivityAt: string | null;
-  readonly environmentLabel: string | null;
+  readonly machinesLabel: string | null;
   readonly onOpen: () => void;
   readonly onRename: () => void;
   readonly onLinkSources: () => void;
@@ -131,10 +139,10 @@ function ProjectTile(props: {
         ) : null}
         <span className="mt-auto flex min-w-0 items-center gap-3 pt-1 text-xs text-muted-foreground">
           <span className="min-w-0 flex-1 truncate tabular-nums">{props.summary}</span>
-          {props.environmentLabel ? (
+          {props.machinesLabel ? (
             <span className="flex max-w-1/2 shrink-0 items-center gap-1">
               <LaptopMinimalIcon aria-hidden className="size-3 shrink-0" />
-              <span className="truncate">{props.environmentLabel}</span>
+              <span className="truncate">{props.machinesLabel}</span>
             </span>
           ) : null}
         </span>
@@ -179,19 +187,27 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
     const counts = new Map<ProjectLabelKey, number>();
     for (const agent of agents) {
       if (!agent.projectFolderId) continue;
-      const key = projectLabelKey(agent.environmentId, agent.projectFolderId);
-      counts.set(key, (counts.get(key) ?? 0) + 1);
+      const key = directory.byKey.get(
+        projectLabelKey(agent.environmentId, agent.projectFolderId),
+      )?.key;
+      if (key !== undefined) counts.set(key, (counts.get(key) ?? 0) + 1);
     }
     return counts;
-  }, [agents]);
-  // The machine only says something when there is more than one.
-  const environmentLabel = (environmentId: EnvironmentId) =>
-    presentations.size > 1 ? (presentations.get(environmentId)?.entry.target.label ?? null) : null;
+  }, [agents, directory]);
+  // The machines only say something when there is more than one.
+  const machinesLabel = (entry: EnvironmentProjectLabel) =>
+    presentations.size > 1
+      ? projectMachinesLabel(
+          projectLabelEnvironmentIds(entry),
+          (environmentId) => presentations.get(environmentId)?.entry.target.label ?? null,
+        )
+      : null;
 
   // An empty filter falls back to the other, so the page never opens onto nothing.
   const shownFilter: ProjectsFilter =
     filter === "archived" && directory.archived.length === 0 ? "active" : filter;
   const shown = shownFilter === "archived" ? directory.archived : directory.active;
+  const duplicates = useMemo(() => possibleDuplicateProjects(directory.labels), [directory]);
 
   return (
     <>
@@ -239,6 +255,9 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
         {/* The tiles give keyboard access, so the viewport stays out of the tab order. */}
         <ScrollArea className="min-h-0 flex-1" viewportTabIndex={-1}>
           <PageContent width="wide">
+            {duplicates.map((pair) => (
+              <PossibleDuplicateNotice key={pair.key} pair={pair} />
+            ))}
             {directory.labels.length === 0 ? (
               <Empty>
                 <EmptyHeader>
@@ -280,8 +299,8 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
                       entry={entry}
                       summary={
                         projectPanelSummary({
-                          // Every linked repository, as the project page lists them.
-                          repositories: projectRepositoryLinks(entry.label).length,
+                          // Every repository any machine links, once each.
+                          repositories: projectRepositoryCount(entry),
                           chats: contents?.chats.length ?? 0,
                           work: contents?.work.length ?? 0,
                           files: 0,
@@ -289,7 +308,7 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
                         }) ?? "Empty"
                       }
                       lastActivityAt={latestProjectActivity(contents, chatActivityAt)}
-                      environmentLabel={environmentLabel(entry.environmentId)}
+                      machinesLabel={machinesLabel(entry)}
                       onOpen={() =>
                         void navigate({
                           to: PROJECTS_SETTINGS_PATH,

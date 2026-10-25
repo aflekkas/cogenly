@@ -102,10 +102,13 @@ import {
 } from "./chat/usageLimitRecovery.logic";
 import { ProjectFolderIcon } from "../projectLabels/ProjectFolderMark";
 import {
+  possibleDuplicateProjects,
   priorFiling,
+  projectLabelsOn,
   threadFolderState,
   threadForksIntoProjects,
 } from "../projectLabels/projectLabels.logic";
+import { useMergeDuplicateProjects } from "../projectLabels/useMergeDuplicateProjects";
 import { cloneableRepositoryRows } from "../projectLabels/repositoryPicker.logic";
 import { useRepositoryNames } from "../projectLabels/useRepositoryNames";
 import { ProjectFolderRowIcon, RepositoryRowIcon } from "../projectLabels/RepositorySourceRows";
@@ -1479,6 +1482,7 @@ function OpenCommandPaletteDialog(props: {
     [environments],
   );
   const repositoryDirectory = useProjectLabelDirectory(cloneEnvironmentIds);
+  const mergeDuplicates = useMergeDuplicateProjects();
   const cloneableEnvironmentIds = useAtomValue(
     useMemo(
       () =>
@@ -1499,9 +1503,10 @@ function OpenCommandPaletteDialog(props: {
   });
   const repositoryCloneItems = useMemo(
     (): CommandPaletteActionItem[] =>
+      // Each machine's own copy of a project, so every machine it is not cloned on offers it.
       cloneableRepositoryRows(
-        repositoryDirectory.active.filter((project) =>
-          cloneableEnvironmentIds.has(project.environmentId),
+        [...cloneableEnvironmentIds].flatMap((environmentId) =>
+          projectLabelsOn(repositoryDirectory.active, environmentId),
         ),
       ).flatMap((row) => {
         const { project, remote } = row;
@@ -1510,7 +1515,7 @@ function OpenCommandPaletteDialog(props: {
         return [
           {
             kind: "action" as const,
-            value: `clone-repository:${project.key}:${row.key}`,
+            value: `clone-repository:${project.environmentId}:${project.key}:${row.key}`,
             searchTerms: [row.name, remote, project.label.name, "clone", "set up"],
             title: row.name,
             description: [
@@ -2211,6 +2216,20 @@ function OpenCommandPaletteDialog(props: {
       await navigate({ to: "/settings/project-tags" });
     },
   });
+  // Same-name projects created apart: merge them, after the confirm that says what happens.
+  for (const pair of possibleDuplicateProjects(repositoryDirectory.labels)) {
+    if (pair.environmentId === null) continue;
+    actionItems.push({
+      kind: "action",
+      value: `action:merge-duplicate-projects:${pair.key}`,
+      searchTerms: ["merge projects", "duplicate project", pair.into.label.name],
+      title: `Merge duplicate projects: ${pair.into.label.name}`,
+      icon: <ProjectFolderIcon project={pair.into} className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        await mergeDuplicates.mergePair(pair);
+      },
+    });
+  }
   if (activeThread && (activeCapabilities?.projectFolder ?? true)) {
     const folderState = threadFolderState(activeThread, activeFolderDirectory);
     const thread = activeThread;

@@ -20,6 +20,18 @@ export function projectPanelSummary(counts: {
   return parts.length > 0 ? parts.join(" · ") : null;
 }
 
+/**
+ * The machines that have a project, by name: "MacBook · Contabo VPS". Ones
+ * not connected (no name) are left out; null when none is named.
+ */
+export function projectMachinesLabel<Id>(
+  environmentIds: ReadonlyArray<Id>,
+  nameOf: (environmentId: Id) => string | null,
+): string | null {
+  const names = environmentIds.map(nameOf).filter((name) => name !== null);
+  return names.length > 0 ? names.join(" · ") : null;
+}
+
 function plural(count: number, one: string, many: string): string | null {
   if (count <= 0) return null;
   return `${count} ${count === 1 ? one : many}`;

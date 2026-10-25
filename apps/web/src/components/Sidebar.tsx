@@ -2698,30 +2698,32 @@ export default function Sidebar() {
   const modeListsThreads = sidebarMode === "chats" || sidebarMode === "tasks";
   // Rows name their folder in the hover card. One object per folder, so
   // memoized rows keep the same prop while the directory holds.
-  const folderFor = useMemo(() => {
+  // Work cards name their project: an explicit filing, else the project their
+  // repository is in now, so filing a repository shows on its Work at once.
+  // One stable object per project, under every machine's key for it, so
+  // memoized cards skip unchanged renders.
+  const rowFolderByKey = useMemo(() => {
+    const byEntry = new Map(
+      projectLabelDirectory.labels.map(
+        (entry) =>
+          [entry, { name: entry.label.name, color: entry.label.color, icon: entry }] as const,
+      ),
+    );
     const byKey = new Map<string, SidebarRowFolder>();
-    for (const entry of projectLabelDirectory.labels) {
-      byKey.set(entry.key, { name: entry.label.name, color: entry.label.color, icon: entry });
+    for (const [key, entry] of projectLabelDirectory.byKey) {
+      const folder = byEntry.get(entry);
+      if (folder) byKey.set(key, folder);
     }
-    return (thread: SidebarThreadSummary): SidebarRowFolder | null => {
+    return byKey;
+  }, [projectLabelDirectory]);
+  const folderFor = useCallback(
+    (thread: SidebarThreadSummary): SidebarRowFolder | null => {
       const folderId = threadProjectFolderId(thread);
       return folderId === null
         ? null
-        : (byKey.get(projectLabelKey(thread.environmentId, folderId)) ?? null);
-    };
-  }, [projectLabelDirectory]);
-  // Work cards name their project: an explicit filing, else the project their
-  // repository is in now, so filing a repository shows on its Work at once.
-  // One stable object per project, so memoized cards skip unchanged renders.
-  const rowFolderByKey = useMemo(
-    () =>
-      new Map(
-        projectLabelDirectory.labels.map(
-          (entry) =>
-            [entry.key, { name: entry.label.name, color: entry.label.color, icon: entry }] as const,
-        ),
-      ),
-    [projectLabelDirectory],
+        : (rowFolderByKey.get(projectLabelKey(thread.environmentId, folderId)) ?? null);
+    },
+    [rowFolderByKey],
   );
   const workFolderFor = useCallback(
     (thread: SidebarThreadSummary): SidebarRowFolder | null => {
@@ -5095,10 +5097,8 @@ export default function Sidebar() {
         const api = readLocalApi();
         if (!api) return;
         const folder =
-          projectLabelDirectory.labels.find(
-            (entry) =>
-              entry.environmentId === projectRef.environmentId &&
-              entry.label.repositoryIds.includes(projectRef.projectId),
+          projectLabelDirectory.folderByRepository.get(
+            scopedRepositoryKey(projectRef.environmentId, projectRef.projectId),
           ) ?? null;
         const clicked = await settlePromise(() =>
           api.contextMenu.show(

@@ -41,8 +41,11 @@ import {
   projectGitHubOrg,
 } from "../../projectLabels/projectSourceLinks.logic";
 import {
+  possibleDuplicateProjects,
   PROJECT_LABEL_COLORS,
+  projectLabelEnvironmentIds,
   projectLabelKey,
+  projectLabelOn,
   projectLabelPaletteColor,
 } from "../../projectLabels/projectLabels.logic";
 import { linkedRepositoryRows } from "../../projectLabels/repositoryPicker.logic";
@@ -52,6 +55,7 @@ import { useProjectContents } from "../../projectLabels/useProjectContents";
 import { useEnvironmentProjectLabels } from "../../projectLabels/useProjectLabels";
 import { getSidebarProjectSettingsKey } from "../../sidebarProjectGrouping";
 import { useProjects } from "../../state/entities";
+import { useEnvironments } from "../../state/environments";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { chatActivityAt } from "../sidebar/modes/sidebarModes.logic";
@@ -80,6 +84,7 @@ import {
   RepositoriesCard,
   SourcesCard,
 } from "./ProjectHomeCards";
+import { PossibleDuplicateNotice } from "./PossibleDuplicateNotice";
 import { sortRecentFirst } from "./projectPanel.logic";
 import { PROJECTS_SETTINGS_PATH } from "./ProjectsOverview";
 import { useProjectResources } from "./useProjectResources";
@@ -292,12 +297,25 @@ function ProjectPage(props: {
   const { environmentId, labelId } = props;
   const navigate = useNavigate();
   const { directory, byProject } = useProjectContents();
-  const { labels, isLoaded, error } = useEnvironmentProjectLabels(environmentId);
-  const label = labels.find((candidate) => candidate.id === labelId) ?? null;
+  const { isLoaded, error } = useEnvironmentProjectLabels(environmentId);
+  // The project as one across connected machines; its page names any machine's copy.
   const entry = directory.byKey.get(projectLabelKey(environmentId, labelId)) ?? null;
-  const contents = byProject.get(projectLabelKey(environmentId, labelId));
-  const repositories = useEnvironmentRepositories(environmentId);
-  const files = useProjectResources(environmentId, labelId);
+  const label = entry?.label ?? null;
+  const contents = entry === null ? undefined : byProject.get(entry.key);
+  const { environments } = useEnvironments();
+  const machineIds = entry === null ? [environmentId] : projectLabelEnvironmentIds(entry);
+  const machineOptions = machineIds.map((id) => ({
+    environmentId: id,
+    label: environments.find((environment) => environment.environmentId === id)?.label ?? id,
+  }));
+  // Repositories and files are per machine: the page shows one machine's at a time.
+  const [pickedMachine, setPickedMachine] = useState(environmentId);
+  const machineId = machineIds.includes(pickedMachine)
+    ? pickedMachine
+    : (machineIds[0] ?? environmentId);
+  const machineEntry = entry === null ? null : projectLabelOn(entry, machineId);
+  const repositories = useEnvironmentRepositories(machineId);
+  const files = useProjectResources(machineId, labelId);
   const canEdit = useAtomValue(serverEnvironment.updateProjectLabel.permissionAtom(environmentId));
   const canDelete = useAtomValue(
     serverEnvironment.deleteProjectLabel.permissionAtom(environmentId),
@@ -325,13 +343,22 @@ function ProjectPage(props: {
   // the same list the repository pickers show.
   const repositoryRows = useMemo(
     () =>
-      entry === null
+      machineEntry === null
         ? []
         : linkedRepositoryRows({
-            project: entry,
+            project: machineEntry,
             localById: new Map(repositories.map((repository) => [repository.id, repository])),
           }),
-    [entry, repositories],
+    [machineEntry, repositories],
+  );
+  const duplicates = useMemo(
+    () =>
+      entry === null
+        ? []
+        : possibleDuplicateProjects(directory.labels).filter(
+            (pair) => pair.into.key === entry.key || pair.from.key === entry.key,
+          ),
+    [directory, entry],
   );
   const chats = useMemo(() => sortRecentFirst(contents?.chats ?? [], chatActivityAt), [contents]);
   const work = useMemo(() => sortRecentFirst(contents?.work ?? [], chatActivityAt), [contents]);
@@ -340,7 +367,7 @@ function ProjectPage(props: {
   const openRepositorySettings = (repositoryId: ProjectId) => {
     const group = projectGroups.find((candidate) =>
       candidate.memberProjectRefs.some(
-        (ref) => ref.environmentId === environmentId && ref.projectId === repositoryId,
+        (ref) => ref.environmentId === machineId && ref.projectId === repositoryId,
       ),
     );
     if (!group) return;
@@ -348,7 +375,7 @@ function ProjectPage(props: {
       to: "/projects/$projectKey",
       params: {
         projectKey: getSidebarProjectSettingsKey(group, groupingSettings, projects, {
-          environmentId,
+          environmentId: machineId,
           projectId: repositoryId,
         }),
       },
@@ -371,7 +398,7 @@ function ProjectPage(props: {
     if (await deleteFolder(environmentId, label)) leave();
   };
 
-  if (error !== null || !isLoaded || label === null || entry === null) {
+  if (label === null || entry === null || machineEntry === null) {
     const [title, description] =
       error !== null
         ? ["Could not load projects", error]
@@ -486,6 +513,9 @@ function ProjectPage(props: {
               />
             </span>
           </div>
+          {duplicates.map((pair) => (
+            <PossibleDuplicateNotice key={pair.key} pair={pair} />
+          ))}
           {/* Balanced columns: each card sizes to its content and the next one
               fills under the shortest column, so no gap opens under a short card. */}
           <section
@@ -494,10 +524,12 @@ function ProjectPage(props: {
           >
             <ProjectCardSlot>
               <RepositoriesCard
-                environmentId={environmentId}
-                folder={entry}
+                environmentId={machineId}
+                folder={machineEntry}
                 rows={repositoryRows}
                 onOpenRepository={openRepositorySettings}
+                machines={machineOptions}
+                onSelectMachine={setPickedMachine}
               />
             </ProjectCardSlot>
             <ProjectCardSlot>
@@ -510,7 +542,7 @@ function ProjectPage(props: {
               />
             </ProjectCardSlot>
             <ProjectCardSlot>
-              <AgentsCard environmentId={environmentId} label={label} />
+              <AgentsCard environmentId={environmentId} environmentIds={machineIds} label={label} />
             </ProjectCardSlot>
             {showSources ? (
               <ProjectCardSlot>
@@ -519,7 +551,7 @@ function ProjectPage(props: {
             ) : null}
             <ProjectCardSlot>
               <FilesCard
-                environmentId={environmentId}
+                environmentId={machineId}
                 label={label}
                 resources={files.resources}
                 loaded={files.isLoaded}
