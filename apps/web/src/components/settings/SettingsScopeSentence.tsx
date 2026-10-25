@@ -251,8 +251,11 @@ export function MachineScopeMenu() {
   );
 }
 
-/** All projects, or one project folder: its overrides apply to every repository it holds. */
-function ProjectScopeMenu() {
+/**
+ * All projects, or one project folder: its overrides apply to every repository
+ * it holds. The scope sentence uses it; a project-only row names it inline.
+ */
+export function ProjectScopeMenu() {
   const { folders, search, selectScope } = useSettingsScope();
   const selected = folders.find((folder) => folder.id === search.project);
   return (

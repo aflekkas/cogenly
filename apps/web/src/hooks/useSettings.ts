@@ -669,7 +669,7 @@ function useUpdateSettingsTarget(environmentId: EnvironmentId | null) {
         toastManager.add({
           type: "warning",
           title: "Setting not saved",
-          description: `This connection lacks permission to change settings on ${environments.find((target) => target.environmentId === environmentId)?.label ?? "the selected environment"}.`,
+          description: `This connection lacks permission to change settings on ${environments.find((target) => target.environmentId === environmentId)?.label ?? "the selected machine"}.`,
         });
       }
       if (Object.keys(serverPatch).length > 0 && canWriteServerPatch) {
