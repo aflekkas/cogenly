@@ -1,3 +1,4 @@
+import * as RepoMcpTrust from "./integrations/RepoMcpTrust.ts";
 import * as ReadOnlySandbox from "./terminal/ReadOnlySandbox.ts";
 import * as ProviderEventLoggers from "@cogenly/provider-core/server/ProviderEventLoggers";
 import type { RelayManagedEndpointRuntimeConfig } from "@cogenly/contracts/relay";
@@ -342,6 +343,12 @@ const layerSourceControlProviderRegistry = SourceControlProviderRegistry.layer.p
   Layer.provideMerge(SourceControlBuiltInDrivers.layer),
   Layer.provideMerge(GitVcsDriver.layer),
   Layer.provideMerge(layerVcsDriverRegistry),
+);
+
+const layerRepoMcpTrust = RepoMcpTrust.layer.pipe(
+  Layer.provide(ProcessRunner.layer),
+  Layer.provide(layerPersistence),
+  Layer.provide(layerSourceControlProviderRegistry),
 );
 
 const layerRepositoryIdentityResolver = Layer.effect(
@@ -766,6 +773,7 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   // through this layer. Built-in drivers come from `BUILT_IN_DRIVERS`;
   // hydration adds their default instances to `providerInstances` on boot.
   Layer.provideMerge(ProviderInstanceRegistryHydration.layer),
+  Layer.provideMerge(layerRepoMcpTrust),
   Layer.provideMerge(Layer.mergeAll(CodexInstallation.CodexInstallation.layer)),
 );
 

@@ -64,10 +64,12 @@ modified.
 Some servers stay on either way:
 
 - **Servers checked into a repo.** A repo's `.mcp.json` (and Codex's
-  `.codex/config.toml` in the repo) belongs to the project, so agents working in
-  that repo load its servers without asking for approval. Every checkout gets
-  them, including worktrees and other machines, and agents are told which
-  servers came from the repo.
+  `.codex/config.toml` in the repo) supplies its web servers automatically.
+  Local command servers also load automatically for repos owned by your connected
+  GitHub identity, any GitHub owner linked to a Cogenly project, and repos with no
+  remote. For other repos, choose **Trust** or **Don't trust** in the thread.
+  Trust applies on this machine from the next turn, including other checkouts of
+  the same remote. Changes to the server definitions need your trust again.
 - **Servers your organization manages for Claude.** Cogenly can't turn these
   off; agents are told they are outside Cogenly.
 - **Muse's own servers.** Muse can't hide them.

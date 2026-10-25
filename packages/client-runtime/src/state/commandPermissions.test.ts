@@ -70,6 +70,7 @@ describe("command permissions", () => {
     WS_METHODS.projectLabelsMerge,
     WS_METHODS.projectLabelsDismissDuplicate,
     WS_METHODS.projectLabelsUndismissDuplicate,
+    WS_METHODS.repoMcpTrustRespond,
   ])("%s checks the destination environment's operate grant", (method) =>
     Effect.scoped(
       Effect.gen(function* () {

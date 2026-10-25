@@ -1,3 +1,4 @@
+import * as RepoMcpTrust from "./repoMcpTrust.ts";
 import * as Search from "./search.ts";
 import * as Facts from "./fact.ts";
 import * as Visual from "./visual.ts";
@@ -622,6 +623,8 @@ export const WS_METHODS = {
   scheduledTasksGetWebhookDelivery: "scheduledTasks.getWebhookDelivery",
 
   // Cogenly-managed integrations (upstream MCP servers behind the gateway)
+  repoMcpTrustSubscribe: "repoMcpTrust.subscribe",
+  repoMcpTrustRespond: "repoMcpTrust.respond",
   integrationsList: "integrations.list",
   integrationsPreviewNative: "integrations.previewNative",
   integrationsImportNative: "integrations.importNative",
@@ -2274,6 +2277,17 @@ const WsIntegrationsImportNativeRpc = Rpc.make(WS_METHODS.integrationsImportNati
   success: Integrations.IntegrationNativeImportResult,
   error: Schema.Union([Integrations.IntegrationError, EnvironmentAuthorizationError]),
 });
+const WsRepoMcpTrustSubscribeRpc = Rpc.make(WS_METHODS.repoMcpTrustSubscribe, {
+  payload: RepoMcpTrust.RepoMcpTrustThreadInput,
+  success: RepoMcpTrust.RepoMcpTrustListResult,
+  error: Schema.Union([RepoMcpTrust.RepoMcpTrustError, EnvironmentAuthorizationError]),
+  stream: true,
+});
+const WsRepoMcpTrustRespondRpc = Rpc.make(WS_METHODS.repoMcpTrustRespond, {
+  payload: RepoMcpTrust.RepoMcpTrustRespondInput,
+  success: Schema.Void,
+  error: Schema.Union([RepoMcpTrust.RepoMcpTrustError, EnvironmentAuthorizationError]),
+});
 const WsIntegrationsListRpc = Rpc.make(WS_METHODS.integrationsList, {
   payload: Schema.Struct({}),
   success: Integrations.IntegrationListResult,
@@ -2889,6 +2903,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsAgentsActivityRpc,
   WsIntegrationsPreviewNativeRpc,
   WsIntegrationsImportNativeRpc,
+  WsRepoMcpTrustSubscribeRpc,
+  WsRepoMcpTrustRespondRpc,
   WsIntegrationsListRpc,
   WsIntegrationsCreateRpc,
   WsIntegrationsUpdateRpc,

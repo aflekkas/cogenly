@@ -97,3 +97,5 @@ export * from "./sharedDocument.ts";
 export * from "./threadReplication.ts";
 
 export * from "./projectRepositoryMembership.ts";
+
+export * from "./repoMcpTrust.ts";

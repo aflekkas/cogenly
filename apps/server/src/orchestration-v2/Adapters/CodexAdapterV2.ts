@@ -1,3 +1,4 @@
+import * as RepoMcpTrust from "../../integrations/RepoMcpTrust.ts";
 import {
   codexNativeMcpNames,
   codexNativeMcpOffArgs,
@@ -1421,6 +1422,8 @@ export interface CodexProviderDuplicates {
   readonly mcpServerNames: ReadonlyArray<string>;
   /** Defined in the repository's own `.codex/config.toml`: part of the project, kept on. */
   readonly repoServerNames?: ReadonlyArray<string>;
+  readonly blockedRepoServerNames?: ReadonlyArray<string>;
+  readonly repoServerEnabled?: Readonly<Record<string, boolean>>;
   /** Defined by administrator-managed configuration, which may outrank the session's override. */
   readonly managedServerNames?: ReadonlyArray<string>;
 }
@@ -1475,7 +1478,7 @@ export function codexProviderDuplicates(input: {
   const ownerOf = (name: string) =>
     layers.find((layer) =>
       Object.keys(recordOf(recordOf(recordOf(layer.config)["mcp_servers"])[name])).some(
-        (key) => key !== "enabled",
+        (key) => key === "command" || key === "url",
       ),
     )?.name.type;
   const owned = [...names].map((name) => ({ name, owner: ownerOf(name) }));
@@ -1502,7 +1505,9 @@ export function codexThreadRuntimeParams(input: {
 } {
   const { mcpSession } = input;
   const duplicates =
-    input.runtimePolicy?.useProviderConnectors === true ? undefined : input.providerDuplicates;
+    input.runtimePolicy?.useProviderConnectors === true
+      ? { appIds: [], mcpServerNames: input.providerDuplicates?.blockedRepoServerNames ?? [] }
+      : input.providerDuplicates;
   return {
     ...(input.runtimePolicy?.cwd == null ? {} : { cwd: input.runtimePolicy.cwd }),
     ...(input.modelSelection === undefined ? {} : { model: input.modelSelection.model }),
@@ -1524,6 +1529,11 @@ export function codexThreadRuntimeParams(input: {
       mcp_servers: {
         ...Object.fromEntries(
           (duplicates?.mcpServerNames ?? []).map((name) => [name, { enabled: false }]),
+        ),
+        ...Object.fromEntries(
+          Object.entries(input.providerDuplicates?.repoServerEnabled ?? {}).map(
+            ([name, enabled]) => [name, { enabled }],
+          ),
         ),
         ...(mcpSession === undefined
           ? {}
@@ -1819,6 +1829,7 @@ export type CodexAdapterV2DriverEnv =
   | Crypto.Crypto
   | FileSystem.FileSystem
   | IdAllocator.IdAllocatorV2
+  | RepoMcpTrust.RepoMcpTrust
   | McpProviderSessions.McpProviderSessions
   | Path.Path
   | ServerConfig;
@@ -1857,6 +1868,7 @@ export const createCodexAdapterV2 = (
     } satisfies CodexSettings;
 
     return yield* makeCodexAdapterV2({
+      repoMcpTrust: yield* RepoMcpTrust.RepoMcpTrust,
       instanceId,
       settings,
       environment: yield* mergeProviderInstanceEnvironment(environment, hostEnvironment),
@@ -1912,6 +1924,7 @@ const layer: Layer.Layer<
 );
 
 export interface CodexAdapterV2Options {
+  readonly repoMcpTrust?: RepoMcpTrust.RepoMcpTrust["Service"];
   readonly instanceId: ProviderInstanceId;
   readonly settings: CodexSettings;
   readonly environment: NodeJS.ProcessEnv;
@@ -1943,6 +1956,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
   adapterOptions: CodexAdapterV2Options,
 ) {
   const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
+  const repoTrust = Option.fromUndefinedOr(adapterOptions.repoMcpTrust);
   const readMcpSession = (threadId: ThreadId | null) =>
     threadId === null ? Effect.succeed(undefined) : mcpSessions.read(threadId);
   const { clientFactory, crypto, fileSystem, idAllocator, serverConfig } = adapterOptions;
@@ -2054,17 +2068,14 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             yield* Ref.set(initialized, true);
           }),
         );
-        // Native MCP servers, per thread cwd (a repo's .codex/config.toml can
-        // add servers, which stay on). Read once per app-server; a part that
-        // failed is retried by the next thread instead of cached.
-        const providerDuplicatesByCwd = new Map<string, CodexProviderDuplicates>();
+        // Re-read repo layers on each use: edits and trust decisions must reach
+        // existing sessions before their next turn starts.
+        const previousRepoNames = new Map<string, ReadonlyArray<string>>();
         const providerDuplicatesFor = Effect.fnUntraced(function* (
           runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy | undefined,
+          threadId?: ThreadId | null | undefined,
         ) {
-          if (runtimePolicy?.useProviderConnectors === true) return undefined;
           const cwd = runtimePolicy?.cwd ?? undefined;
-          const known = providerDuplicatesByCwd.get(cwd ?? "");
-          if (known !== undefined) return known;
           yield* ensureInitialized;
           const config = yield* requireCodexNativeMcpEnumeration(
             "thread",
@@ -2097,8 +2108,48 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             mcpServers: config.config["mcp_servers"],
             layers: config.layers,
           });
-          providerDuplicatesByCwd.set(cwd ?? "", duplicates);
-          return duplicates;
+          const definitions = Object.fromEntries(
+            (duplicates.repoServerNames ?? []).map((name) => {
+              const layer = config.layers?.find((layer) => {
+                const value = recordOf(recordOf(recordOf(layer.config)["mcp_servers"])[name]);
+                return Object.keys(value).some((key) => key === "command" || key === "url");
+              });
+              return [name, recordOf(recordOf(layer?.config)["mcp_servers"])[name]];
+            }),
+          );
+          const review =
+            cwd === undefined || Option.isNone(repoTrust)
+              ? {
+                  allowedNames: Object.keys(definitions).filter(
+                    (name) => typeof recordOf(definitions[name]).command !== "string",
+                  ),
+                  waitingNames: Object.keys(definitions).filter(
+                    (name) => typeof recordOf(definitions[name]).command === "string",
+                  ),
+                }
+              : yield* repoTrust.value.review({
+                  cwd,
+                  threadId: threadId ?? undefined,
+                  definitions,
+                });
+          const removed = (previousRepoNames.get(cwd ?? "") ?? []).filter(
+            (name) => !(name in definitions),
+          );
+          previousRepoNames.set(cwd ?? "", [
+            ...new Set([...(previousRepoNames.get(cwd ?? "") ?? []), ...Object.keys(definitions)]),
+          ]);
+          return {
+            ...duplicates,
+            repoServerNames: review.allowedNames,
+            repoServerEnabled: Object.fromEntries(
+              review.allowedNames.map((name) => [
+                name,
+                recordOf(definitions[name]).enabled !== false,
+              ]),
+            ),
+            blockedRepoServerNames: [...review.waitingNames, ...removed],
+            mcpServerNames: [...duplicates.mcpServerNames, ...review.waitingNames, ...removed],
+          };
         });
         const now = yield* DateTime.now;
         const session = providerSession({
@@ -6031,10 +6082,25 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
           Effect.gen(function* () {
             const threadId = yield* getNativeThreadId(turnInput.providerThread);
             const mcpSession = yield* mcpSessions.read(turnInput.threadId);
-            // Cached by the thread's start; only context, so a failed read omits it.
-            const nativeMcp = yield* providerDuplicatesFor(turnInput.runtimePolicy).pipe(
-              Effect.orElseSucceed(() => undefined),
+            // A failed trust check must stop the turn before any repo command starts.
+            const nativeMcp = yield* providerDuplicatesFor(
+              turnInput.runtimePolicy,
+              turnInput.threadId,
             );
+            if (
+              (nativeMcp.repoServerNames?.length ?? 0) + nativeMcp.blockedRepoServerNames.length >
+              0
+            )
+              yield* client.request("thread/resume", {
+                threadId,
+                excludeTurns: true,
+                ...codexThreadRuntimeParams({
+                  mcpSession,
+                  runtimePolicy: turnInput.runtimePolicy,
+                  modelSelection: turnInput.modelSelection,
+                  providerDuplicates: nativeMcp,
+                }),
+              });
             const nativeMcpContext =
               nativeMcp === undefined
                 ? undefined
@@ -6042,6 +6108,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                     repoFile: ".codex/config.toml",
                     repo: nativeMcp.repoServerNames,
                     managed: nativeMcp.managedServerNames,
+                    waiting: nativeMcp.blockedRepoServerNames,
                   });
             const turnStartParams = yield* buildCodexTurnStartParams({
               nativeThreadId: threadId,
@@ -6329,7 +6396,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               Effect.andThen(
                 Effect.all([
                   mcpSessions.read(threadInput.threadId),
-                  providerDuplicatesFor(threadInput.runtimePolicy),
+                  providerDuplicatesFor(threadInput.runtimePolicy, threadInput.threadId),
                 ]),
               ),
               Effect.flatMap(([mcpSession, providerDuplicates]) =>
@@ -6379,7 +6446,10 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                   ...(threadInput.runtimePolicy === undefined
                     ? {}
                     : { runtimePolicy: threadInput.runtimePolicy }),
-                  providerDuplicates: yield* providerDuplicatesFor(threadInput.runtimePolicy),
+                  providerDuplicates: yield* providerDuplicatesFor(
+                    threadInput.runtimePolicy,
+                    threadInput.threadId ?? threadInput.providerThread.appThreadId,
+                  ),
                 }),
               });
               const response = yield* ensureInitialized.pipe(
@@ -7104,7 +7174,10 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                     mcpSession: yield* readMcpSession(threadInput.providerThread.appThreadId),
                     modelSelection: input.modelSelection,
                     runtimePolicy: input.runtimePolicy,
-                    providerDuplicates: yield* providerDuplicatesFor(input.runtimePolicy),
+                    providerDuplicates: yield* providerDuplicatesFor(
+                      input.runtimePolicy,
+                      threadInput.providerThread.appThreadId,
+                    ),
                   }),
                 });
               }
@@ -7158,7 +7231,10 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                       ...(threadInput.runtimePolicy === undefined
                         ? {}
                         : { runtimePolicy: threadInput.runtimePolicy }),
-                      providerDuplicates: yield* providerDuplicatesFor(threadInput.runtimePolicy),
+                      providerDuplicates: yield* providerDuplicatesFor(
+                        threadInput.runtimePolicy,
+                        threadInput.targetThreadId,
+                      ),
                     }),
                   }),
                 ),

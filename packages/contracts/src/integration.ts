@@ -38,6 +38,8 @@ export const IntegrationCommand = Schema.Struct({
   command: TrimmedNonEmptyString.check(Schema.isMaxLength(2000)),
   args: Schema.Array(Schema.String.check(Schema.isMaxLength(4000))).check(Schema.isMaxLength(100)),
   env: Schema.Record(Schema.String, Schema.String.check(Schema.isMaxLength(4000))),
+  /** Environment keys explicitly reviewed as public constants. Everything else is vaulted. */
+  nonSecretEnv: Schema.optional(Schema.Array(Schema.String).check(Schema.isMaxLength(100))),
 });
 export type IntegrationCommand = typeof IntegrationCommand.Type;
 
@@ -68,6 +70,14 @@ export const IntegrationAuth = Schema.Struct({
   type: Schema.Literal("oauth"),
   clientId: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(500))),
   clientSecret: Schema.optional(Schema.String.check(Schema.isMaxLength(500))),
+  /** Explicitly reviewed authorization server; discovery must match all three endpoints. */
+  server: Schema.optional(
+    Schema.Struct({
+      issuer: TrimmedNonEmptyString,
+      authorizationEndpoint: TrimmedNonEmptyString,
+      tokenEndpoint: TrimmedNonEmptyString,
+    }),
+  ),
   /** Space-separated scopes to ask for; defaults to what the server advertises. */
   scope: Schema.optional(Schema.String.check(Schema.isMaxLength(1000))),
 });

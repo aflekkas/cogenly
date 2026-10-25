@@ -1,4 +1,5 @@
 import { useNewThreadPending } from "../hooks/useHandleNewThread";
+import { RepoMcpTrustPrompt } from "./chat/RepoMcpTrustPrompt";
 import { OverlayPresence } from "~/components/ui/overlay-presence";
 import { ThreadFind, ThreadFindCanvas, type ThreadFindControls } from "./chat/ThreadFindProvider";
 import { usageLimitRecoveryBannerItem } from "./chat/UsageLimitRecoveryBanner";
@@ -9590,6 +9591,9 @@ export default function ChatView(props: ChatViewProps) {
                 setThreadErrorBannerDismissTick((tick) => tick + 1);
               }}
             />
+            {props.routeKind === "server" && (
+              <RepoMcpTrustPrompt environmentId={props.environmentId} threadId={props.threadId} />
+            )}
             {/* Messages Wrapper */}
             <div className="relative flex min-h-0 flex-1 flex-col bg-background">
               {/* Messages — LegendList handles virtualization and scrolling internally */}

@@ -64,6 +64,7 @@ export type EnvironmentSubscriptionRpcTag =
   | typeof WS_METHODS.projectLabelsSubscribeResources
   | typeof WS_METHODS.agentsSubscribe
   | typeof WS_METHODS.threadApprovalsSubscribe
+  | typeof WS_METHODS.repoMcpTrustSubscribe
   | typeof WS_METHODS.integrationsSubscribe
   | typeof WS_METHODS.integrationsSubscribeSources
   | typeof WS_METHODS.machinesSubscribe

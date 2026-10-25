@@ -161,6 +161,16 @@ describe("Vault service", () => {
         approved: false,
       });
       expect(resolved.value).toBe("octo-user");
+      expect(
+        yield* vault
+          .resolveSecretByName({
+            name: "GitHub",
+            field: "password",
+            destinationHost: "evil.test",
+            approved: true,
+          })
+          .pipe(Effect.flip),
+      ).toMatchObject({ reason: "domain_not_allowed" });
 
       const usage = yield* vault.listUsage({ itemId: item.id });
       expect(usage.usage.map((entry) => entry.outcome)).toContain("allowed");

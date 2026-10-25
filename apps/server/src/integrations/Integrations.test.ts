@@ -743,8 +743,8 @@ describe("Integrations gateway", () => {
       }>`SELECT payload_json FROM integrations WHERE id = ${created.integration.id}`;
       expect(JSON.parse(row!.payload_json).headers).toEqual({
         authorization: "Bearer {{credential:gmail.apiKey}}",
-        "x-api-key": "literal-secret-123",
-        "x-extra": "visible-change",
+        "x-api-key": expect.stringMatching(/^\{\{credential:integration-secret:/),
+        "x-extra": expect.stringMatching(/^\{\{credential:integration-secret:/),
       });
 
       // A mask names no stored value under a new header name.
@@ -1019,9 +1019,10 @@ const vaultLayer = () => {
   const stored = new Map<string, Uint8Array>();
   return Integrations.layer.pipe(
     Layer.provide(Layer.succeed(IntegrationEndpointPolicy, loopbackHttpsPolicy)),
-    Layer.provide(Credentials.layer),
-    Layer.provide(Tokens.layer),
-    Layer.provide(IntegrationSyncPeers.layerFor("env:test")),
+    Layer.provideMerge(Credentials.layer),
+    Layer.provideMerge(Credentials.secretsLayer),
+    Layer.provideMerge(Tokens.layer),
+    Layer.provideMerge(IntegrationSyncPeers.layerFor("env:test")),
     Layer.provideMerge(Vault.layer),
     Layer.provide(
       Layer.mock(ServerSecretStore.ServerSecretStore)({
@@ -1036,10 +1037,129 @@ const vaultLayer = () => {
     ),
     Layer.provideMerge(database),
     Layer.provideMerge(FetchHttpClient.layer),
-    Layer.provide(NodeCrypto.layer),
+    Layer.provideMerge(NodeCrypto.layer),
     Layer.provide(NodeServices.layer),
   );
 };
+
+describe("encrypted integration definitions", () => {
+  it.effect(
+    "encrypts literal headers and environment values on create and update, including template fragments",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const service = yield* Integrations.Integrations;
+          const sql = yield* SqlClient.SqlClient;
+          const { integration } = yield* service.create({
+            ...createInput("https://localhost", "runner"),
+            transport: "stdio",
+            headers: {},
+            command: {
+              command: "node",
+              args: [],
+              env: { TOKEN: "PRIVATE-ENV-SECRET", MODE: "production" },
+              nonSecretEnv: ["MODE"],
+            },
+          });
+          expect(integration.command?.env).toEqual({
+            TOKEN: Integrations.HEADER_MASK,
+            MODE: "production",
+          });
+          const updated = yield* service.update({
+            id: integration.id,
+            command: {
+              ...integration.command!,
+              env: {
+                TOKEN: Integrations.HEADER_MASK,
+                MODE: "production",
+                SECOND: "PRIVATE-SECOND-SECRET",
+              },
+            },
+          });
+          const http = yield* service.create({
+            ...createInput("https://vendor.example/mcp", "web"),
+            headers: {
+              Authorization: "Bearer PRIVATE-HEADER-SECRET",
+              "X-Mixed": "PRIVATE-PREFIX-{{credential:existing.value}}",
+            },
+          });
+          yield* service.update({
+            id: http.integration.id,
+            headers: { Authorization: "PRIVATE-UPDATED-HEADER" },
+          });
+          const response = [
+            integration,
+            updated,
+            http,
+            yield* service.list(),
+            yield* service.subscribe().pipe(Stream.take(1), Stream.runCollect),
+          ];
+          const rows = yield* sql`SELECT * FROM integrations`;
+          for (const secret of [
+            "PRIVATE-ENV-SECRET",
+            "PRIVATE-SECOND-SECRET",
+            "PRIVATE-HEADER-SECRET",
+            "PRIVATE-PREFIX-",
+            "PRIVATE-UPDATED-HEADER",
+          ])
+            expect(
+              JSON.stringify([response, rows, yield* sql`SELECT * FROM vault_items`]),
+            ).not.toContain(secret);
+          const stored = JSON.parse(
+            (rows.find((r) => r.id === integration.id) as { payload_json: string }).payload_json,
+          );
+          const ref = Integrations.credentialRefsIn(stored.command.env.TOKEN)[0]!;
+          const credentials = yield* Credentials.IntegrationCredentials;
+          expect(yield* credentials.resolve(ref, { host: "localhost", approvedItems: [] })).toEqual(
+            Option.some("PRIVATE-ENV-SECRET"),
+          );
+          expect(
+            (yield* service
+              .update({
+                id: integration.id,
+                command: { ...integration.command!, env: { NEW: Integrations.HEADER_MASK } },
+              })
+              .pipe(Effect.flip)).reason,
+          ).toBe("invalid_request");
+        }),
+      ).pipe(Effect.provide(vaultLayer())),
+  );
+
+  it.effect("migrates existing active and deleted plaintext rows before the service starts", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const service = yield* Integrations.Integrations;
+        const sql = yield* SqlClient.SqlClient;
+        const { integration } = yield* service.create({
+          ...createInput("https://localhost", "legacy"),
+          transport: "stdio",
+          headers: {},
+          command: { command: "node", args: [], env: {} },
+        });
+        for (const deleted of [false, true]) {
+          const legacy = {
+            ...integration,
+            id: deleted ? "integration:deleted-legacy" : integration.id,
+            name: deleted ? "deleted-legacy" : integration.name,
+            deletedAt: deleted ? integration.updatedAt : null,
+            headers: { Authorization: "PRIVATE-LEGACY-HEADER" },
+            command: { command: "node", args: [], env: { TOKEN: "PRIVATE-LEGACY-ENV" } },
+          };
+          yield* sql`INSERT OR REPLACE INTO integrations(id,name,payload_json,deleted_at,updated_at) VALUES (${legacy.id},${legacy.name},${JSON.stringify(legacy)},${legacy.deletedAt},${legacy.updatedAt})`;
+        }
+        // A fresh instance upgrades stored rows, without requiring a list or update.
+        yield* Layer.build(Integrations.layerWith({}));
+        expect(JSON.stringify(yield* sql`SELECT * FROM integrations`)).not.toContain(
+          "PRIVATE-LEGACY",
+        );
+        expect(JSON.stringify(yield* service.list())).not.toContain("PRIVATE-LEGACY");
+        const before = (yield* sql`SELECT count(*) AS n FROM vault_items`)[0];
+        yield* Layer.build(Integrations.layerWith({}));
+        expect((yield* sql`SELECT count(*) AS n FROM vault_items`)[0]).toEqual(before);
+      }),
+    ).pipe(Effect.provide(vaultLayer())),
+  );
+});
 
 describe("Default catalog", () => {
   const owner = { approveCredentials: true, origin: { origin: undefined } };
@@ -1404,6 +1524,39 @@ describe("Integration credential destinations", () => {
   const tokenHeaders = { authorization: "Bearer {{credential:github.value}}" };
   const reasonOf = (exit: { readonly _tag: string; readonly failure?: unknown }) =>
     exit._tag === "Failure" ? (exit.failure as { readonly reason?: string }).reason : "success";
+
+  it.effect(
+    "vaults directly created and updated private endpoint paths before returning or persisting",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* runMigrations();
+          const upstream = yield* fakeUpstream;
+          const service = yield* Integrations.Integrations;
+          const sql = yield* SqlClient.SqlClient;
+          const secret = "bearer-path-PRIVATE-123";
+          const { integration } = yield* service.create({
+            ...createInput(`${upstream.url}/${secret}`),
+            headers: {},
+          });
+          expect(integration.url).toBe(`${new URL(upstream.url).origin}/`);
+          expect(integration.endpointRef).toBeDefined();
+          yield* service.callTool(integration.name, "echo", {}, null);
+          expect(upstream.seen.at(-1)?.path).toBe(`/mcp/${secret}`);
+          const updated = yield* service.update({
+            id: integration.id,
+            url: `${upstream.url}/${secret}-updated`,
+          });
+          yield* service.callTool(integration.name, "echo", {}, null);
+          expect(upstream.seen.at(-1)?.path).toBe(`/mcp/${secret}-updated`);
+          const rows = yield* sql`SELECT payload_json FROM integrations`;
+          expect(JSON.stringify([integration, updated, yield* service.list(), rows])).not.toContain(
+            secret,
+          );
+          expect(JSON.stringify(yield* sql`SELECT * FROM vault_items`)).not.toContain(secret);
+        }),
+      ).pipe(Effect.provide(vaultLayer())),
+  );
 
   it.effect(
     "resolves private endpoints only at call time and keeps them off settings and spans",

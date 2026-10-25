@@ -14,20 +14,23 @@ single universal preference `useProviderConnectors` restores native
 configuration for new sessions. The shared runtime policy carries it to all turn
 paths. Native configuration is never rewritten.
 
-Servers checked into a repository are part of the project and stay on: they
-travel with every checkout, so they are never imported or synced. Claude uses
-strict MCP configuration and disables claude.ai MCP loading in its environment;
-strict mode also drops the repo's `.mcp.json`, so Cogenly reads it from the
-checkout (`readClaudeRepoMcpServers`) and passes it in the explicit config, which
-Claude loads without its project-server approval prompt.
+Repo MCP definitions stay in the checkout rather than being imported or synced.
+`RepoMcpTrust` gates local command execution for both Claude and Codex, independently
+of `useProviderConnectors`. URL servers always load. Local consent is keyed by
+remote and a canonical hash of the full definitions; keeping it outside the repo
+prevents a checkout from granting its own consent. Own GitHub identities, linked
+project owners and repositories with no remote are trusted automatically. Provider
+adapters recheck before the next turn so edited definitions cannot reuse old trust.
+Claude passes reviewed repo servers explicitly; when native configuration is
+restored, its project-server settings still exclude commands waiting on trust.
 Administrator-managed `managed-mcp.json` rejects the strict flag; Cogenly omits
 that flag, and the managed servers remain and are named to agents. Codex has no
 strict flag: before launching each session, Cogenly lists enabled servers from
 the home directory, outside any repository, with `mcp list --json` and disables
 each, plus plugins/apps, using session overrides. Each thread then reads its
 cwd's config layers and disables every server whose transport is defined
-outside a `project` layer; that thread configuration propagates to native
-children. A failed server enumeration fails session startup rather than
+outside a `project` layer, plus untrusted project commands; that thread
+configuration propagates to native children. A failed server enumeration fails session startup rather than
 silently restoring bypass access. Muse SDK 1.4.6 only admits additive session
 MCP configuration and ignores unknown keys; native suppression is unsupported
 and its turns carry that notice.

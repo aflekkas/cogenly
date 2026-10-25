@@ -79,6 +79,8 @@ export interface VaultUseInput {
   readonly expectedRevision?: number | undefined;
   /** Browser fill refuses domains outside the item's allowedDomains. */
   readonly enforceAllowedDomains?: boolean | undefined;
+  /** Server destinations must respect any explicit restriction, even with owner approval. */
+  readonly enforceRestrictedDomains?: boolean | undefined;
 }
 
 export type VaultUseResult =
@@ -307,8 +309,8 @@ export class Vault extends Context.Service<
     /**
      * Server-internal only (integrations gateway, 2B): resolves a secret by
      * item name for server code sending it to `destinationHost`. The item's
-     * allowed domains must include that host unless the owner `approved` this
-     * item for it; otherwise it fails with `domain_not_allowed`. Never expose
+     * allowed domains must include that host. Owner approval can authorize an item
+     * with no domains, but cannot override an explicit domain restriction. Never expose
      * this through MCP or RPC; agents use `use` via vault_fill so values stay
      * out of model context.
      */
@@ -928,7 +930,8 @@ const make = Effect.gen(function* () {
           outcome,
         });
       if (
-        input.enforceAllowedDomains &&
+        (input.enforceAllowedDomains ||
+          (input.enforceRestrictedDomains && item.allowedDomains.length > 0)) &&
         !(input.domain && hostMatchesAnyDomain(input.domain, item.allowedDomains))
       ) {
         yield* record("denied_domain");
@@ -1209,6 +1212,7 @@ const make = Effect.gen(function* () {
           threadId: input.threadId,
           domain: input.destinationHost,
           enforceAllowedDomains: !input.approved,
+          enforceRestrictedDomains: true,
           action: "resolve",
         });
         if (result.status === "denied" && result.reason === "domain_not_allowed")

@@ -1,3 +1,4 @@
+import { isPublicIntegrationPath } from "../integrations/publicEndpoint.ts";
 import { Integration, IntegrationAuth } from "@cogenly/contracts";
 import * as Schema from "effect/Schema";
 
@@ -14,6 +15,8 @@ export function integrationNotSyncedReason(integration: Pick<Integration, "trans
     if (url.searchParams.size > 0)
       return "Not synced: URL query parameters may contain credentials.";
     if (url.hash) return "Not synced: URL fragments may contain credentials.";
+    if (!isPublicIntegrationPath(url.pathname))
+      return "Not synced: URL paths may contain credentials.";
   } catch {
     return "Not synced: invalid endpoint URL.";
   }
