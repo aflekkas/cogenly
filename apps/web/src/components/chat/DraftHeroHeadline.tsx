@@ -57,6 +57,7 @@ import {
   type RepositoryPickerItem,
 } from "~/projectLabels/useRepositoryPicker";
 import { useProjectLabelDirectory } from "~/projectLabels/useProjectLabels";
+import { useRepositoryNames } from "~/projectLabels/useRepositoryNames";
 import { answerNoProjectPick, useWorkNoProjectPicked } from "~/projectLabels/workNoProjectPicks";
 import { chatGreeting } from "./chatGreeting";
 import { FadeSwap } from "./StateTransition";
@@ -245,6 +246,7 @@ export function DraftHeroHeadline({
     [environments],
   );
   const projectDirectory = useProjectLabelDirectory(environmentIds);
+  const repositoryNameOf = useRepositoryNames();
   const draftThread = useComposerDraftStore((store) =>
     draftId ? store.draftThreadsByThreadKey[draftId] : undefined,
   );
@@ -321,10 +323,12 @@ export function DraftHeroHeadline({
           row.local.environmentId === activeProjectRef?.environmentId &&
           row.local.id === activeProjectRef.projectId,
       ) ?? null);
-  // The repository reads by its folder name in the project, as its row does.
+  // The repository reads as its picker row does, also before the row lists.
   const breadcrumb = workHeroBreadcrumb({
     projectName: workProject?.label.name ?? null,
-    repositoryName: selectedRow?.name ?? activeProjectDisplayName,
+    repositoryName:
+      selectedRow?.name ??
+      (activeProject ? repositoryNameOf(activeProject) : activeProjectDisplayName),
     hasRepository: !isScratchDraft,
   });
   const noRepositoryItem = useMemo(

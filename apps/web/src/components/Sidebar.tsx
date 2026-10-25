@@ -263,6 +263,7 @@ import { openCreateProjectDialog } from "../projectLabels/CreateProjectDialogHos
 import { usePendingProjectFolderStore } from "../projectLabels/pendingProjectFolders";
 import { useMoveThreadToFolder } from "../projectLabels/useMoveThreadToFolder";
 import { useProjectLabelDirectory } from "../projectLabels/useProjectLabels";
+import { useRepositoryNames } from "../projectLabels/useRepositoryNames";
 import { ProjectFolderIcon, type ProjectIconProject } from "../projectLabels/ProjectFolderMark";
 import {
   machineIconKind,
@@ -2623,16 +2624,19 @@ export default function Sidebar() {
     () => new Map(projects.map((project) => [`${project.environmentId}:${project.id}`, project])),
     [projects],
   );
+  // Repositories read as the repository pickers name them, never by folder.
+  const repositoryNameOf = useRepositoryNames();
   const projectDisplayNameByKey = useMemo(
     () =>
       new Map(
         projectGroups.flatMap((group) =>
           group.memberProjects.map(
-            (project) => [`${project.environmentId}:${project.id}`, group.displayName] as const,
+            (project) =>
+              [`${project.environmentId}:${project.id}`, repositoryNameOf(project)] as const,
           ),
         ),
       ),
-    [projectGroups],
+    [projectGroups, repositoryNameOf],
   );
 
   const nowMinute = useNowMinute();
@@ -2653,7 +2657,7 @@ export default function Sidebar() {
     ) {
       return null;
     }
-    return projectDisplayNameByKey.get(projectKey) ?? project.title;
+    return projectDisplayNameByKey.get(projectKey) ?? repositoryNameOf(project);
   };
   // Project folders hold chats and Work, across environments.
   const labelEnvironmentIds = useConnectedEnvironmentIds();

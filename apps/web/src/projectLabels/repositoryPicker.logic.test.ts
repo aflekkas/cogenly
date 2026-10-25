@@ -26,6 +26,7 @@ import {
   projectRepositoryLinks,
   REMOTE_ROWS_PREVIEW_LIMIT,
   remoteRowsOutsideProject,
+  repositoryNamesByCheckout,
   repositoryRowAction,
   repositoryRowView,
   type RepositoryListLocal,
@@ -258,8 +259,9 @@ describe("linkedRepositoryRows", () => {
     const oldRows = linkedRepositoryRows({ project: old, localById: byId([platformCheckout]) });
     expect(oldRows.map((row) => [row.name, row.checkout, row.remote])).toEqual([
       ["platform", "ready", null],
-      // Its remote comes from the placeholder id, so it can still be cloned here.
-      ["x", "not_cloned", "github.com/spawn/x"],
+      // Its remote comes from the placeholder id, so it can still be cloned
+      // here, and names it by the project's rule: no home owner, so `owner/name`.
+      ["spawn/x", "not_cloned", "github.com/spawn/x"],
     ]);
   });
 
@@ -329,6 +331,50 @@ describe("machineRepositoryRows", () => {
       ["Bartr", "bartr-platform-id"],
       ["Spawn Partners", "platform-id"],
     ]);
+  });
+
+  it("names a repository in no project by its remote, not its folder", () => {
+    const smile = local(
+      "smile-id",
+      "smile-folder",
+      "/Users/me/Code/smile-folder",
+      "github.com/spawn/smile",
+    );
+    const named = machineRepositoryRows({ locals: [smile, looseCheckout], projects: [] });
+    expect(named.map((row) => row.name)).toEqual(["loose", "smile"]);
+  });
+
+  it("adds the owner to a repository in no project only when another row reads the same", () => {
+    const fork = local(
+      "fork-id",
+      "platform-fork",
+      "/Users/me/Code/platform-fork",
+      "github.com/me/platform",
+    );
+    const named = machineRepositoryRows({ locals: [fork, platformCheckout], projects: [spawn] });
+    expect(named.map((row) => [row.name, row.project?.label.name ?? null])).toEqual([
+      ["me/platform", null],
+      ["platform", "Spawn Partners"],
+    ]);
+  });
+});
+
+describe("repositoryNamesByCheckout", () => {
+  it("names each checkout as its machine's picker does", () => {
+    const vps = "vps" as EnvironmentId;
+    const names = repositoryNamesByCheckout(
+      [
+        { ...bartrCheckout, environmentId: mac },
+        { ...looseCheckout, environmentId: mac },
+        { ...local("other-id", "folder", "/srv/folder", "github.com/x/tool"), environmentId: vps },
+      ],
+      [bartr],
+    );
+    expect(Object.fromEntries(names)).toEqual({
+      "mac:bartr-platform-id": "platform",
+      "mac:loose-id": "loose",
+      "vps:other-id": "tool",
+    });
   });
 });
 
@@ -488,7 +534,8 @@ describe("addRepositoryOptions", () => {
         option.kind === "local" ? (option.from?.label.name ?? null) : null,
       ]),
     ).toEqual([
-      ["local", "Bartr Platform", "Bartr"],
+      // By its remote under this project's rule, never its folder ("Bartr Platform").
+      ["local", "bartr-app/platform", "Bartr"],
       ["local", "loose", null],
       ["github", "billing", null],
       ["github", "mediamaxxing/billing", null],

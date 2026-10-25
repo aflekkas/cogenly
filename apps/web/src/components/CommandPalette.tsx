@@ -107,6 +107,7 @@ import {
   threadForksIntoProjects,
 } from "../projectLabels/projectLabels.logic";
 import { cloneableRepositoryRows } from "../projectLabels/repositoryPicker.logic";
+import { useRepositoryNames } from "../projectLabels/useRepositoryNames";
 import { ProjectFolderRowIcon, RepositoryRowIcon } from "../projectLabels/RepositorySourceRows";
 import {
   reportProjectFolderFailure,
@@ -779,6 +780,7 @@ function OpenCommandPaletteDialog(props: {
   const threads = useThreadShells();
   const serverConfigs = useServerConfigs();
   const startWork = useStartWork();
+  const repositoryNameOf = useRepositoryNames();
   /** Every place a chat can start Work, as palette rows; picking one starts it. */
   const startWorkItems = useCallback(
     (threadRef: ScopedThreadRef): CommandPaletteActionItem[] => {
@@ -791,6 +793,7 @@ function OpenCommandPaletteDialog(props: {
         repositories: listWorkRepositories(projects, threadRef.environmentId, scratchWorkspaceRoot),
         sourceProjectId: source?.projectId ?? null,
         canRunWithoutRepository: scratchWorkspaceRoot != null,
+        nameOf: repositoryNameOf,
       }).map((choice) => ({
         kind: "action" as const,
         value: `start-work:${choice.value}`,
@@ -806,7 +809,7 @@ function OpenCommandPaletteDialog(props: {
         },
       }));
     },
-    [projects, serverConfigs, startWork, threads],
+    [projects, repositoryNameOf, serverConfigs, startWork, threads],
   );
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { appearanceMode, setAppearanceMode } = useTheme();
@@ -981,11 +984,12 @@ function OpenCommandPaletteDialog(props: {
   );
   const pickerProjects = useMemo(
     () =>
-      projectPickerEntries.map(({ group, targetProject }) => ({
+      projectPickerEntries.map(({ targetProject }) => ({
         ...targetProject,
-        displayName: group.displayName,
+        // Named as the repository pickers name it, never by its folder.
+        displayName: repositoryNameOf(targetProject),
       })),
-    [projectPickerEntries],
+    [projectPickerEntries, repositoryNameOf],
   );
   const projectGroupByTargetKey = useMemo(
     () =>
@@ -2087,8 +2091,9 @@ function OpenCommandPaletteDialog(props: {
   const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
 
   if (projects.length > 0) {
+    const preferredEntry = projectPickerEntries.find((entry) => entry.isPreferred);
     const activeProjectTitle =
-      projectPickerEntries.find((entry) => entry.isPreferred)?.group.displayName ??
+      (preferredEntry ? repositoryNameOf(preferredEntry.targetProject) : null) ??
       (currentProjectId ? (projectTitleById.get(currentProjectId) ?? null) : null);
 
     if (activeProjectTitle) {

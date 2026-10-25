@@ -9,6 +9,7 @@ import { HERO_INLINE_ICON_STYLE, ProjectFolderIcon } from "~/projectLabels/Proje
 import { projectLabelKey, threadProjectFolderId } from "~/projectLabels/projectLabels.logic";
 import { workHeroBreadcrumb } from "~/projectLabels/projectMeta.logic";
 import { useProjectLabelDirectory } from "~/projectLabels/useProjectLabels";
+import { useRepositoryNames } from "~/projectLabels/useRepositoryNames";
 import { ProjectFavicon } from "../ProjectFavicon";
 import { RepositoryBadge } from "../sidebar/modes/RepositoryBadge";
 import { chatGreeting } from "./chatGreeting";
@@ -49,9 +50,10 @@ export function ThreadHeroHeadline({
   useHeroHeadlineMotion(headingRef, measureRef, isChat ? `chat:${thread.id}` : "heading");
 
   // The new-Work screen's sentence, read-only: both halves always named.
+  const repositoryNameOf = useRepositoryNames();
   const breadcrumb = workHeroBreadcrumb({
     projectName: folder?.label.name ?? null,
-    repositoryName: project?.title ?? null,
+    repositoryName: project ? repositoryNameOf(project) : null,
     hasRepository: !isScratch,
   });
   const headingLabel = isChat
