@@ -138,9 +138,9 @@ function ProjectTile(props: {
           <span className="line-clamp-2 text-xs/relaxed text-muted-foreground">{description}</span>
         ) : null}
         <span className="mt-auto flex min-w-0 items-center gap-3 pt-1 text-xs text-muted-foreground">
-          <span className="min-w-0 flex-1 truncate tabular-nums">{props.summary}</span>
+          <span className="min-w-0 truncate tabular-nums">{props.summary}</span>
           {props.machinesLabel ? (
-            <span className="flex max-w-1/2 shrink-0 items-center gap-1">
+            <span className="ms-auto flex min-w-0 items-center gap-1">
               <LaptopMinimalIcon aria-hidden className="size-3 shrink-0" />
               <span className="truncate">{props.machinesLabel}</span>
             </span>
