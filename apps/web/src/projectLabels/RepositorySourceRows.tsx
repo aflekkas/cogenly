@@ -121,7 +121,10 @@ export function RepositoryRowStatus(props: { readonly view: RepositoryRowView })
       key={kind}
       role={busy || kind === "starting" ? "status" : undefined}
       className={cn(
-        "swap-motion flex min-w-0 max-w-1/2 shrink-0 items-center gap-1 text-2xs tabular-nums",
+        // A fixed cap: the row's trailing slot sizes to its content, so a
+        // share of it would clip even "Clone to set up". Clone progress
+        // truncates at the cap; the name gives way first.
+        "swap-motion flex min-w-0 max-w-40 shrink-0 items-center gap-1 text-2xs tabular-nums",
         kind === "failed" ? "text-destructive-foreground" : "text-muted-foreground",
       )}
     >
