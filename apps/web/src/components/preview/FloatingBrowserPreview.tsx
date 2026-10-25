@@ -120,6 +120,21 @@ function sameSize(left: FloatingPreviewSize | null, right: FloatingPreviewSize):
   return left !== null && left.width === right.width && left.height === right.height;
 }
 
+/**
+ * An element's left edge within a positioned ancestor, from layout offsets, so
+ * a transform (such as a panel glide) in between does not skew it. Null when
+ * the ancestor is not on its offset-parent chain.
+ */
+function layoutLeft(element: HTMLElement, ancestor: HTMLElement): number | null {
+  let left = 0;
+  let node: Element | null = element;
+  while (node instanceof HTMLElement && node !== ancestor) {
+    left += node.offsetLeft;
+    node = node.offsetParent;
+  }
+  return node === ancestor ? left : null;
+}
+
 /** Page pixels onto the page area, for the agent cursor drawn over the thumbnail. */
 function cursorFrame(frame: FloatingPreviewPageFrame): AgentSurfaceFrame {
   return { offsetX: frame.left, offsetY: frame.top, scaleX: frame.scale, scaleY: frame.scale };
@@ -206,16 +221,28 @@ function FloatingBrowserPreviewCard({
   useLayoutEffect(() => {
     const element = paneRef.current;
     if (!element) return;
+    // The minimap sits in the timeline's own box, which settles after the
+    // pane resizes, so that box is watched too once it exists.
+    let minimapBox: Element | null = null;
+    let stopObservingMinimap = () => {};
     const measure = () => {
-      const rect = element.getBoundingClientRect();
-      const next = { width: Math.round(rect.width), height: Math.round(rect.height) };
+      // Layout sizes, not client rects: a panel opening or closing glides the
+      // pane with a transform, and a size read mid-glide would stick.
+      const next = { width: element.clientWidth, height: element.clientHeight };
       setPane((current) => (sameSize(current, next) ? current : next));
       // The timeline minimap rides the pane's right edge; right corners clear it.
-      const strip = element.parentElement?.querySelector<HTMLElement>("[data-minimap-strip]");
-      const stripRect = strip?.getBoundingClientRect();
+      const parent = element.parentElement;
+      const strip = parent?.querySelector<HTMLElement>("[data-minimap-strip]");
+      const box = strip?.closest("[data-testid='timeline-minimap']")?.parentElement ?? null;
+      if (box !== minimapBox) {
+        stopObservingMinimap();
+        minimapBox = box;
+        stopObservingMinimap = box ? observeResize(box, measure) : () => {};
+      }
+      const stripLeft = parent && strip && strip.offsetWidth > 0 ? layoutLeft(strip, parent) : null;
       const inset =
-        stripRect && stripRect.width > 0 && stripRect.left < rect.right
-          ? Math.max(0, Math.round(rect.right - stripRect.left))
+        stripLeft !== null && stripLeft < next.width
+          ? Math.max(0, Math.round(next.width - stripLeft))
           : 0;
       setMinimapInset((current) => (current === inset ? current : inset));
     };
@@ -225,11 +252,12 @@ function FloatingBrowserPreviewCard({
     return () => {
       window.removeEventListener("resize", measure);
       stopObserving();
+      stopObservingMinimap();
     };
   }, []);
   useLayoutEffect(() => {
     if (!composerElement) return;
-    const measure = () => setComposerHeight(composerElement.getBoundingClientRect().height);
+    const measure = () => setComposerHeight(composerElement.offsetHeight);
     measure();
     return observeResize(composerElement, measure);
   }, [composerElement]);
