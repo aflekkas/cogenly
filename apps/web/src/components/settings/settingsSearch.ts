@@ -673,7 +673,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Use only Cogenly integrations",
     to: "/settings/integrations",
     searchTerms: [
-      "claude.ai connectors chatgpt apps codex plugins mcp servers duplicate native gmail slack notion linear",
+      "claude.ai connectors chatgpt apps codex plugins mcp servers duplicate native gmail slack notion linear repo .mcp.json",
     ],
   },
   {

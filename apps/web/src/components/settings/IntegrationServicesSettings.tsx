@@ -178,7 +178,7 @@ function ProviderConnectorsSettingRow({
       <SettingsRow
         serverScoped
         {...searchableSetting("provider-connectors")}
-        description="Agents use the integrations connected here, not the MCP servers, connectors and plugins set up in Claude or Codex. Servers your organization manages for Claude stay on. Turn off to let agents use both. Applies to new agent sessions."
+        description="Agents use the integrations connected here, not the MCP servers, connectors and plugins set up in Claude or Codex. MCP servers checked into a repo, such as its .mcp.json, still load. Servers your organization manages for Claude stay on. Turn off to let agents use both. Applies to new agent sessions."
         settingKeys={["useProviderConnectors"]}
         control={
           <ScopedSwitch

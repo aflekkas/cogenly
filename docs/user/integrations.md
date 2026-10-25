@@ -56,17 +56,31 @@ availability; the agent also verifies that the required data can be read.
 **Use only Cogenly integrations** is on by default in Settings → Integrations.
 Agents then use only the integrations connected in Cogenly, not the MCP
 servers, claude.ai connectors and Codex plugins set up in Claude or Codex. This
-keeps integrations in one place and avoids duplicate tools. Servers your
-organization manages for Claude stay available, and Muse can't hide its own
-servers. Turn the setting off to let agents use both; the change applies to new
-agent sessions. Claude and Codex configuration files are never modified.
+keeps integrations in one place and avoids duplicate tools. The setting follows
+you to every paired machine. Turn it off to let agents use both; the change
+applies to new agent sessions. Claude and Codex configuration files are never
+modified.
 
-Until you import or skip **Import from Claude and Codex** on the same page,
-agents keep using the servers set up in Claude and Codex. **Review** lists what
-was found and what each server still needs. **Import** brings the definitions
-over, turned off; an agent then collects secrets into the vault and checks each
+Some servers stay on either way:
+
+- **Servers checked into a repo.** A repo's `.mcp.json` (and Codex's
+  `.codex/config.toml` in the repo) belongs to the project, so agents working in
+  that repo load its servers without asking for approval. Every checkout gets
+  them, including worktrees and other machines, and agents are told which
+  servers came from the repo.
+- **Servers your organization manages for Claude.** Cogenly can't turn these
+  off; agents are told they are outside Cogenly.
+- **Muse's own servers.** Muse can't hide them.
+
+To keep using a server you set up in Claude or Codex, bring it over with
+**Import from Claude and Codex** on the same page. **Review** lists what was
+found and what each server still needs. **Import** brings the definitions over,
+turned off; an agent then collects secrets into the vault and checks each
 connection with you. claude.ai connectors need a new sign-in through Cogenly
-because their authorization can't be imported.
+because their authorization can't be imported. Repo servers aren't imported;
+they already load from the repo. On a paired machine, an imported web
+integration asks you to sign in on that machine, and integrations that run a
+command stay on the machine that imported them.
 
 ## Sign-ins on paired machines
 

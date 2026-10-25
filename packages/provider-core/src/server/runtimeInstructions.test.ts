@@ -139,7 +139,7 @@ describe("integrations context line", () => {
   it("says provider connectors are off only when there is a line to add it to", () => {
     const connected = [{ name: "linear", displayName: "Linear", status: "connected" as const }];
     expect(buildIntegrationsContextLine(connected, ["notion"], true)).toBe(
-      "Connected integrations: linear (Linear). Use integration_tools / integration_call. Also available to connect: notion. Read integration_setup_guide before integration_add. Use Cogenly integrations. Native MCP servers, plugins and apps are turned off for supported providers; Muse and administrator-managed Claude configurations may still expose native servers.",
+      "Connected integrations: linear (Linear). Use integration_tools / integration_call. Also available to connect: notion. Read integration_setup_guide before integration_add. Use Cogenly integrations. The provider's own MCP servers, connectors, plugins and apps are off; only MCP servers checked into the repository still load.",
     );
     expect(buildIntegrationsContextLine(connected, ["notion"])).not.toContain("turned off");
     expect(buildIntegrationsContextLine([], [], true)).toBe("");

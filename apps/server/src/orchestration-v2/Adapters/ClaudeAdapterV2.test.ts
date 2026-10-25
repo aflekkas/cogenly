@@ -337,6 +337,57 @@ describe("ClaudeAdapterV2 native MCP isolation", () => {
     assert.isUndefined(result.strictMcpConfig);
     assert.equal(result.env?.ENABLE_CLAUDEAI_MCP_SERVERS, "true");
   });
+
+  const cogenly = { type: "http" as const, url: "http://127.0.0.1:1/mcp" };
+  const repoMcpServers = {
+    "repo-tools": { command: "node", args: ["${REPO}/tools.mjs"] },
+    cogenly: { type: "http" as const, url: "https://repo.example/mcp" },
+  };
+  const promptOf = (result: ReturnType<typeof options>) =>
+    typeof result.systemPrompt === "object" && "append" in result.systemPrompt
+      ? String(result.systemPrompt.append)
+      : "";
+
+  it("passes only Cogenly's server and the repo's .mcp.json servers in strict mode", () => {
+    const result = options({ mcpServers: { cogenly }, repoMcpServers });
+    assert.equal(result.strictMcpConfig, true);
+    // Cogenly's server, which carries integrations, browser, devices and computer use, wins its name.
+    assert.deepEqual(result.mcpServers, {
+      "repo-tools": repoMcpServers["repo-tools"],
+      cogenly,
+    });
+    assert.include(promptOf(result), "MCP servers from this repo (.mcp.json): repo-tools.");
+    // A user's --mcp-config launch argument is native configuration too.
+    const launched = options({
+      mcpServers: { cogenly },
+      settings: { ...AUTO_COMPACT_CLAUDE_SETTINGS, launchArgs: "--mcp-config /home/me/mcp.json" },
+    });
+    assert.notProperty(launched.extraArgs ?? {}, "mcp-config");
+  });
+
+  it("names administrator-managed servers and leaves the repo to managed policy", () => {
+    const result = options({
+      mcpServers: { cogenly },
+      repoMcpServers,
+      managedMcpConfig: true,
+      managedMcpServerNames: ["corp-search"],
+    });
+    assert.isUndefined(result.strictMcpConfig);
+    assert.deepEqual(result.mcpServers, { cogenly });
+    assert.include(promptOf(result), "Administrator-managed MCP servers");
+    assert.include(promptOf(result), "corp-search");
+    assert.notInclude(promptOf(result), "MCP servers from this repo");
+  });
+
+  it("leaves the repo's servers to Claude itself when native configuration is restored", () => {
+    const result = options({
+      mcpServers: { cogenly },
+      repoMcpServers,
+      useProviderConnectors: true,
+    });
+    assert.deepEqual(result.mcpServers, { cogenly });
+    assert.notInclude(promptOf(result), "MCP servers from this repo");
+  });
 });
 
 describe("ClaudeAdapterV2 MCP query overrides", () => {

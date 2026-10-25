@@ -28,7 +28,6 @@ import { claudeAccountConfigPath } from "../provider/claudeResetCredits.ts";
 import { resolveCodexHomeLayout } from "../provider/Drivers/CodexHomeLayout.ts";
 import { resolveCodexLaunchArgs } from "../provider/codexLaunchArgs.ts";
 import * as ServerSettings from "../serverSettings.ts";
-import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 
 const NativeConfig = Schema.Record(Schema.String, Schema.Unknown);
 const decodeNativeObject = Schema.decodeUnknownEffect(NativeConfig);
@@ -251,6 +250,13 @@ export class NativeIntegrationImport extends Context.Service<
   }
 >()("cogenly-server/integrations/NativeIntegrationImport") {}
 
+/**
+ * Reads only what native-off sessions lose: each provider home's servers
+ * (Claude's per-project local entries included) and claude.ai connectors.
+ * Servers checked into a repository (`.mcp.json`, `.codex/config.toml`) keep
+ * loading in its checkouts, so importing them would duplicate them and sync a
+ * repo's servers to machines without that repo.
+ */
 export const layer = Layer.effect(
   NativeIntegrationImport,
   Effect.gen(function* () {
@@ -260,7 +266,6 @@ export const layer = Layer.effect(
     const environment = yield* HostProcess.Environment;
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const settings = yield* ServerSettings.ServerSettingsService;
-    const projects = yield* ProjectStore.ProjectStoreV2;
     return NativeIntegrationImport.of({
       preview: Effect.gen(function* () {
         const definitions: IntegrationCreateInput[] = [];
@@ -304,14 +309,6 @@ export const layer = Layer.effect(
             }),
           );
         const configured = yield* settings.getSettings;
-        const roots = new Set(
-          (yield* projects.listShells().pipe(
-            Effect.catch(() => {
-              unavailable("Project configuration inventory");
-              return Effect.succeed([]);
-            }),
-          )).map((project) => project.workspaceRoot),
-        );
         // Unconfigured built-ins still run; explicit instance entries override their homes.
         const instances = new Map(Object.entries(configured.providerInstances));
         for (const driver of ["claudeAgent", "codex"]) {
@@ -342,7 +339,6 @@ export const layer = Layer.effect(
                 `${id}: no readable native user config found in the resolved provider home.`,
               );
             else {
-              for (const root of Object.keys(record(native.projects))) roots.add(root);
               merge(
                 mapNativeIntegrations(
                   native,
@@ -399,14 +395,6 @@ export const layer = Layer.effect(
                 `${id}: no readable native user config found in the resolved provider home.`,
               );
             else {
-              for (const root of Object.keys(record(native.projects))) roots.add(root);
-              if (
-                native.project_root_markers !== undefined &&
-                (!Array.isArray(native.project_root_markers) ||
-                  native.project_root_markers.length !== 1 ||
-                  native.project_root_markers[0] !== ".git")
-              )
-                unavailable(`${id}: custom project root markers are unsupported`);
               merge(
                 mapNativeIntegrations(
                   {},
@@ -424,68 +412,6 @@ export const layer = Layer.effect(
             }
             if (resolveCodexLaunchArgs(config.launchArgs, env))
               unavailable(`${id}: CLI launch overrides are unsupported`);
-          }
-        }
-        // Inventory project layers separately: they stay disabled pending project-scope review.
-        // Walk ancestors too, since a CLI may read a repository root above a thread's cwd.
-        const visited = new Set<string>();
-        for (const root of roots) {
-          if (!path.isAbsolute(root)) {
-            unavailable("Relative project configuration root");
-            continue;
-          }
-          let dir = path.normalize(root);
-          let boundary = dir;
-          let ancestor = dir;
-          while (true) {
-            const isRepository = yield* fs.exists(path.join(ancestor, ".git")).pipe(
-              Effect.catch(() => {
-                unavailable("Project repository boundary");
-                return Effect.succeed(false);
-              }),
-            );
-            if (isRepository) {
-              boundary = ancestor;
-              break;
-            }
-            const parent = path.dirname(ancestor);
-            if (parent === ancestor) break;
-            ancestor = parent;
-          }
-          // Without a repository marker, the CLI treats cwd as its project root.
-          // Never mistake an ancestor's user home config for a project layer.
-          while (!visited.has(dir)) {
-            visited.add(dir);
-            const prefix = `project-p${(Hash.string(dir) >>> 0).toString(36)}`;
-            const claude = yield* read(
-              path.join(dir, ".mcp.json"),
-              `${prefix}: Claude project config`,
-            );
-            const codex = yield* read(
-              path.join(dir, ".codex", "config.toml"),
-              `${prefix}: Codex project config`,
-              true,
-            );
-            if (claude !== undefined || codex !== undefined) {
-              warnings.push(
-                "Project MCP definitions need project scope review before enabling; provider trust rules may exclude these layers.",
-              );
-              merge(
-                mapNativeIntegrations(
-                  claude ?? {},
-                  codex ?? {},
-                  { claude: `claude-${prefix}`, codex: `codex-${prefix}` },
-                  {
-                    claude: shown(path.join(dir, ".mcp.json")),
-                    codex: shown(path.join(dir, ".codex", "config.toml")),
-                    scope: "project",
-                  },
-                ),
-              );
-            }
-            const parent = path.dirname(dir);
-            if (dir === boundary || parent === dir) break;
-            dir = parent;
           }
         }
         return {

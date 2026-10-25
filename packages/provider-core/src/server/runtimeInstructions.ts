@@ -72,7 +72,7 @@ export function buildIntegrationsContextLine(
 }
 
 const PROVIDER_CONNECTORS_HIDDEN_TEXT =
-  "Use Cogenly integrations. Native MCP servers, plugins and apps are turned off for supported providers; Muse and administrator-managed Claude configurations may still expose native servers.";
+  "Use Cogenly integrations. The provider's own MCP servers, connectors, plugins and apps are off; only MCP servers checked into the repository still load.";
 
 function integrationsLine(
   integrations: ReadonlyArray<IntegrationContextEntry>,

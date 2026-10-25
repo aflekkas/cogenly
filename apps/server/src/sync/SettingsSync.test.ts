@@ -177,6 +177,43 @@ describe("settings sync between paired machines", () => {
   );
 
   it.live(
+    "Use only Cogenly integrations follows the user between the Mac and the VPS",
+    () =>
+      Effect.gen(function* () {
+        const vps = yield* start("connectors-vps", "cloud-server", ProjectId.make("vps-repo"));
+        const mac = yield* start("connectors-mac", "computer", ProjectId.make("mac-repo"));
+        yield* pair(vps, mac);
+        const exchange = Effect.gen(function* () {
+          yield* vps.reconcile;
+          yield* mac.reconcile;
+          yield* mac.sync.sync(vps.environmentId);
+          yield* vps.reconcile;
+          yield* mac.reconcile;
+        });
+        // On by default on both: native servers stay off everywhere.
+        expect((yield* mac.settings.getSettings).useProviderConnectors).toBe(false);
+
+        // Turning it off on the Mac restores native servers on the VPS too.
+        yield* mac.settings.updateSettings({ useProviderConnectors: true });
+        yield* exchange;
+        expect((yield* vps.settings.getSettings).useProviderConnectors).toBe(true);
+        expect((yield* vps.state.get("settings", "universal"))?.fields).toMatchObject({
+          useProviderConnectors: true,
+        });
+        // The import prompt is per machine: what it reviewed is that machine's config.
+        yield* mac.settings.updateSettings({ nativeMcpImportReviewed: true });
+        yield* exchange;
+        expect((yield* vps.settings.getSettings).nativeMcpImportReviewed).toBe(false);
+
+        // And back on from the VPS.
+        yield* vps.settings.updateSettings({ useProviderConnectors: false });
+        yield* exchange;
+        expect((yield* mac.settings.getSettings).useProviderConnectors).toBe(false);
+      }).pipe(Effect.scoped),
+    20000,
+  );
+
+  it.live(
     "a machine that never customized a setting adopts its peer's value",
     () =>
       Effect.gen(function* () {
@@ -201,9 +238,15 @@ describe("settings sync between paired machines", () => {
         const hub = yield* start("newer-hub", "cloud-server", ProjectId.make("newer-hub-repo"));
         const spoke = yield* start("older-spoke", "computer", ProjectId.make("older-spoke-repo"));
         yield* pair(hub, spoke);
-        // What a newer hub sends: a key this build lacks, a value it cannot read
-        // for a key it knows, and a value it can.
-        const fields = { branchNamePrefix: "feat", branchNamingMode: "lunar", accentTheme: "dark" };
+        // What a newer hub sends: a key this build lacks (as useProviderConnectors
+        // is to builds before it), a value it cannot read for a key it knows, and
+        // values it can.
+        const fields = {
+          branchNamePrefix: "feat",
+          branchNamingMode: "lunar",
+          accentTheme: "dark",
+          useProviderConnectors: true,
+        };
         const wall = yield* Clock.currentTimeMillis;
         const after = (yield* spoke.state.cursors(hub.environmentId)).received;
         yield* spoke.state.receive(
@@ -234,10 +277,12 @@ describe("settings sync between paired machines", () => {
         const settings = yield* spoke.settings.getSettings;
         expect(settings.branchNamePrefix).toBe("feat");
         expect(settings.branchNamingMode).toBe("static");
+        expect(settings.useProviderConnectors).toBe(true);
         // The unknown key stays in the document; the unreadable value waits for an update.
         expect((yield* spoke.state.get("settings", "universal"))?.fields).toEqual({
           branchNamePrefix: "feat",
           accentTheme: "dark",
+          useProviderConnectors: true,
         });
         const sql = yield* spoke.run(SqlClient.SqlClient);
         expect(

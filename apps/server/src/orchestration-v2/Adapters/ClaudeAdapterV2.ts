@@ -120,7 +120,12 @@ import * as ServerConfig from "../../config.ts";
 import { expandHomePath } from "@cogenly/provider-core/server/pathExpansion";
 import { signalProcessGroup } from "@cogenly/provider-core/server/processGroup";
 import {
-  hasClaudeManagedMcpConfig,
+  type ClaudeRepoMcpServer,
+  nativeMcpContextLine,
+  readClaudeRepoMcpServers,
+} from "../../integrations/NativeMcpPolicy.ts";
+import {
+  claudeManagedMcpServerNames,
   claudeSessionTranscriptExists,
   claudeSignedOutMessage,
   makeClaudeEnvironment,
@@ -1152,6 +1157,14 @@ export function makeClaudeQueryOptions(input: {
   /** True restores Claude's native MCP configuration. */
   readonly useProviderConnectors?: boolean;
   readonly managedMcpConfig?: boolean;
+  /** Servers an administrator's `managed-mcp.json` defines, named in the prompt. */
+  readonly managedMcpServerNames?: ReadonlyArray<string>;
+  /**
+   * The repo's `.mcp.json` servers (`readClaudeRepoMcpServers`). Strict MCP
+   * mode ignores the file, so they join the explicit config; Cogenly's own
+   * servers win a shared name.
+   */
+  readonly repoMcpServers?: Readonly<Record<string, ClaudeRepoMcpServer>>;
 }): ClaudeAgentSdkQueryOptions {
   const compiledSelection = compileClaudeModelSelection(input.modelSelection);
   const {
@@ -1201,6 +1214,22 @@ export function makeClaudeQueryOptions(input: {
           autoCompactWindow: Number(input.settings.autoCompactWindow),
         } as ClaudeSdkSettings);
   const effectiveQuerySettings = compactedQuerySettings;
+  const repoMcpServers =
+    input.useProviderConnectors === true || input.managedMcpConfig === true
+      ? {}
+      : (input.repoMcpServers ?? {});
+  const sessionMcpServers =
+    Object.keys(repoMcpServers).length === 0
+      ? input.mcpServers
+      : { ...repoMcpServers, ...input.mcpServers };
+  const nativeMcpContext =
+    input.useProviderConnectors === true
+      ? undefined
+      : nativeMcpContextLine({
+          repoFile: ".mcp.json",
+          repo: Object.keys(repoMcpServers).filter((name) => !(name in (input.mcpServers ?? {}))),
+          managed: input.managedMcpServerNames,
+        });
   const options: ClaudeAgentSdkQueryOptions = {
     model: compiledSelection.apiModelId,
     tools: claudeAgentSdkQueryToolsForSdk(selectedTools),
@@ -1246,7 +1275,7 @@ export function makeClaudeQueryOptions(input: {
           ...(input.managedMcpConfig ? {} : { strictMcpConfig: true }),
           env: { ...input.environment, ENABLE_CLAUDEAI_MCP_SERVERS: "false" },
         }),
-    ...(input.mcpServers === undefined ? {} : { mcpServers: input.mcpServers }),
+    ...(sessionMcpServers === undefined ? {} : { mcpServers: sessionMcpServers }),
     systemPrompt: {
       type: "preset" as const,
       preset: "claude_code" as const,
@@ -1256,6 +1285,7 @@ export function makeClaudeQueryOptions(input: {
           ? `\n${conversationModeInstructions({ terminal: terminalTools, builder: input.builderMode })}`
           : "") +
         (input.projectManifest === undefined ? "" : `\n${input.projectManifest}`) +
+        (nativeMcpContext === undefined ? "" : `\n${nativeMcpContext}`) +
         (input.mcpServers === undefined ? "" : COGENLY_ORCHESTRATION_INSTRUCTIONS) +
         (input.mcpServers !== undefined && input.browserToolsAvailable === true
           ? COGENLY_BROWSER_TOOL_INSTRUCTIONS
@@ -8660,6 +8690,19 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             turnInput.nativeThreadHasTurns ?? turnInput.providerTurnOrdinal > 1;
           const shouldResume =
             resumeSessionAt !== undefined || openedWithResume || hasPersistedProviderTurn;
+          const managedMcpServerNames = yield* claudeManagedMcpServerNames().pipe(
+            Effect.provideService(FileSystem.FileSystem, fileSystem),
+          );
+          // Read when the process opens: worktrees and other machines get the
+          // servers of whatever checkout they run in.
+          const repoMcpServers =
+            turnInput.runtimePolicy.useProviderConnectors === true ||
+            turnInput.runtimePolicy.cwd == null
+              ? {}
+              : yield* readClaudeRepoMcpServers(turnInput.runtimePolicy.cwd).pipe(
+                  Effect.provideService(FileSystem.FileSystem, fileSystem),
+                  Effect.provideService(Path.Path, path),
+                );
           const queryOptions = makeClaudeQueryOptions({
             modelSelection: turnInput.modelSelection,
             nativeThreadId,
@@ -8669,9 +8712,10 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             attachmentsDir,
             settings: adapterOptions.settings,
             environment: adapterOptions.environment,
-            managedMcpConfig: yield* hasClaudeManagedMcpConfig().pipe(
-              Effect.provideService(FileSystem.FileSystem, fileSystem),
-            ),
+            ...(managedMcpServerNames === undefined
+              ? {}
+              : { managedMcpConfig: true, managedMcpServerNames }),
+            repoMcpServers,
             tools: queryPolicy.tools ?? CLAUDE_CODE_PRESET_TOOLS,
             ...(conversationMode ? { conversationMode } : {}),
             runtimePolicy: turnInput.runtimePolicy,

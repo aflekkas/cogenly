@@ -140,13 +140,12 @@ export const layerFromProjectStore: Layer.Layer<
     // silently never received it and turns lost the integrations line.
     const integrationsService = yield* Integrations.Integrations;
     const serverSettings = yield* Effect.serviceOption(ServerSettings.ServerSettingsService);
-    // Unreadable settings keep the default: provider duplicates stay hidden.
+    // Unreadable settings keep the default: native servers stay off. The import
+    // offer is only a prompt; leaving it unreviewed does not restore them.
     const useProviderConnectors = Option.isNone(serverSettings)
       ? Effect.succeed(false)
       : serverSettings.value.getSettings.pipe(
-          Effect.map(
-            (settings) => settings.useProviderConnectors || !settings.nativeMcpImportReviewed,
-          ),
+          Effect.map((settings) => settings.useProviderConnectors),
           Effect.orElseSucceed(() => false),
         );
     // The integrations line is best-effort turn context too: any failure

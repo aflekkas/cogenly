@@ -1,6 +1,7 @@
 import {
   codexNativeMcpNames,
   codexNativeMcpOffArgs,
+  nativeMcpContextLine,
   requireCodexNativeMcpEnumeration,
 } from "../../integrations/NativeMcpPolicy.ts";
 import { revertCodexThread } from "../../provider/CodexThreadRevert.ts";
@@ -706,6 +707,8 @@ export function buildCodexTurnStartParams(input: {
   readonly omitServiceTier?: boolean;
   /** What the thread's MCP Apps want the agent to know (`ui/update-model-context`). */
   readonly appContext?: ProviderAdapter.ProviderAdapterV2TurnInput["appContext"];
+  /** See `nativeMcpContextLine`. */
+  readonly nativeMcpContext?: string | undefined;
 }) {
   return Effect.gen(function* () {
     const conversationMode = input.runtimePolicy.conversationMode === true;
@@ -786,13 +789,26 @@ export function buildCodexTurnStartParams(input: {
               value: input.runtimePolicy.projectManifest,
             },
           };
+    const nativeMcpContext =
+      input.nativeMcpContext === undefined
+        ? undefined
+        : {
+            cogenly_native_mcp: { kind: "application" as const, value: input.nativeMcpContext },
+          };
     const additionalContext =
       t3Context === undefined &&
       Object.keys(appContext).length === 0 &&
       conversationContext === undefined &&
-      projectContext === undefined
+      projectContext === undefined &&
+      nativeMcpContext === undefined
         ? undefined
-        : { ...t3Context, ...appContext, ...conversationContext, ...projectContext };
+        : {
+            ...t3Context,
+            ...appContext,
+            ...conversationContext,
+            ...projectContext,
+            ...nativeMcpContext,
+          };
     const collaborationMode: CodexSchema.ClientRequest__CollaborationMode | undefined =
       input.runtimePolicy.interactionMode !== "plan" && developerInstructions === undefined
         ? undefined
@@ -1392,36 +1408,79 @@ export const CODEX_THREAD_CONFIG = {
 const CODEX_T3_MCP_TOOL_TIMEOUT_SEC = 65 * 60;
 
 /**
- * Native connectors disabled for a thread; stdio servers are included.
+ * Native connectors disabled for a thread (stdio servers included), and the
+ * servers a thread keeps or cannot drop, named in its context.
  */
 export interface CodexProviderDuplicates {
   readonly appIds: ReadonlyArray<string>;
   readonly mcpServerNames: ReadonlyArray<string>;
+  /** Defined in the repository's own `.codex/config.toml`: part of the project, kept on. */
+  readonly repoServerNames?: ReadonlyArray<string>;
+  /** Defined by administrator-managed configuration, which may outrank the session's override. */
+  readonly managedServerNames?: ReadonlyArray<string>;
 }
 
 // App ids use simple config paths; MCP names are literal keys in a combined table.
 const CODEX_CONFIG_KEY_SEGMENT = /^[A-Za-z0-9_-]+$/;
 
+const CODEX_MANAGED_LAYER_TYPES: ReadonlySet<string> = new Set([
+  "mdm",
+  "enterpriseManaged",
+  "legacyManagedConfigTomlFromFile",
+  "legacyManagedConfigTomlFromMdm",
+]);
+
+/** One `config/read` layer, highest precedence first, as `includeLayers` returns them. */
+export interface CodexConfigLayer {
+  readonly name: { readonly type: string };
+  readonly config: unknown;
+}
+
+const recordOf = (value: unknown): Readonly<Record<string, unknown>> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+
 /**
- * Picks the duplicates from `app/list` and the effective `mcp_servers`
- * config. Apps match by the service name ChatGPT shows, servers by the origin
- * of their URL; stdio servers carry neither and are kept.
+ * Picks what a thread turns off from `app/list` and the effective
+ * `mcp_servers` config. With `layers`, a server is owned by the highest layer
+ * that defines its transport (an `enabled` flag alone, like the launch
+ * override, defines nothing): a `project` layer keeps it on as a repo server,
+ * even when Codex marks that layer untrusted; every other owner turns it off.
  */
 export function codexProviderDuplicates(input: {
   readonly apps: ReadonlyArray<{ readonly id: string; readonly name: string }>;
   readonly mcpServers: unknown;
+  readonly layers?: ReadonlyArray<CodexConfigLayer> | null | undefined;
 }): CodexProviderDuplicates {
-  const servers =
-    typeof input.mcpServers === "object" && input.mcpServers !== null
-      ? Object.entries(input.mcpServers)
-      : [];
+  const layers = input.layers ?? [];
+  const names = new Set(
+    Object.entries(recordOf(input.mcpServers))
+      .filter(([, server]) => typeof server === "object" && server !== null)
+      .map(([name]) => name),
+  );
+  for (const layer of layers) {
+    if (layer.name.type === "project") {
+      for (const name of Object.keys(recordOf(recordOf(layer.config)["mcp_servers"]))) {
+        names.add(name);
+      }
+    }
+  }
+  names.delete("cogenly");
+  const ownerOf = (name: string) =>
+    layers.find((layer) =>
+      Object.keys(recordOf(recordOf(recordOf(layer.config)["mcp_servers"])[name])).some(
+        (key) => key !== "enabled",
+      ),
+    )?.name.type;
+  const owned = [...names].map((name) => ({ name, owner: ownerOf(name) }));
   return {
     appIds: input.apps.filter((app) => CODEX_CONFIG_KEY_SEGMENT.test(app.id)).map((app) => app.id),
-    mcpServerNames: servers
-      .filter(
-        ([name, server]) => typeof server === "object" && server !== null && name !== "cogenly",
-      )
-      .map(([name]) => name),
+    mcpServerNames: owned.filter((server) => server.owner !== "project").map(({ name }) => name),
+    repoServerNames: owned.filter((server) => server.owner === "project").map(({ name }) => name),
+    managedServerNames: owned
+      .filter((server) => server.owner !== undefined && CODEX_MANAGED_LAYER_TYPES.has(server.owner))
+      .map(({ name }) => name),
   };
 }
 
@@ -1670,6 +1729,10 @@ export const layerAppServerClientFactory: Layer.Layer<
             ...(input.settings.homePath ? { CODEX_HOME: input.settings.homePath } : {}),
           };
           const launchArgs = resolveCodexLaunchArgs(input.settings.launchArgs, input.environment);
+          // Listed from the home directory, outside any repository, so the
+          // launch override names only servers from outside the repo; the
+          // repo's own servers stay on and are sorted per thread below.
+          const listingCwd = yield* HostProcess.HomeDirectory;
           const nativeOffArgs =
             input.runtimePolicy?.useProviderConnectors === true
               ? []
@@ -1690,7 +1753,7 @@ export const layerAppServerClientFactory: Layer.Layer<
                       ChildProcess.make(listing.command, listing.args, {
                         env: environment,
                         shell: listing.shell,
-                        ...(input.runtimePolicy?.cwd ? { cwd: input.runtimePolicy.cwd } : {}),
+                        cwd: listingCwd,
                       }),
                     )
                     .pipe(Effect.timeout("10 seconds"));
@@ -1986,9 +2049,9 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             yield* Ref.set(initialized, true);
           }),
         );
-        // Native MCP servers, per thread cwd (a
-        // project's config.toml can add servers). Read once per app-server;
-        // a part that failed is retried by the next thread instead of cached.
+        // Native MCP servers, per thread cwd (a repo's .codex/config.toml can
+        // add servers, which stay on). Read once per app-server; a part that
+        // failed is retried by the next thread instead of cached.
         const providerDuplicatesByCwd = new Map<string, CodexProviderDuplicates>();
         const providerDuplicatesFor = Effect.fnUntraced(function* (
           runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy | undefined,
@@ -2001,7 +2064,10 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
           const config = yield* requireCodexNativeMcpEnumeration(
             "thread",
             client
-              .request("config/read", cwd === undefined ? {} : { cwd })
+              .request("config/read", {
+                includeLayers: true,
+                ...(cwd === undefined ? {} : { cwd }),
+              })
               .pipe(Effect.timeout("8 seconds")),
           ).pipe(
             Effect.tapError((error) =>
@@ -2024,6 +2090,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
           const duplicates = codexProviderDuplicates({
             apps: [],
             mcpServers: config.config["mcp_servers"],
+            layers: config.layers,
           });
           providerDuplicatesByCwd.set(cwd ?? "", duplicates);
           return duplicates;
@@ -5959,6 +6026,18 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
           Effect.gen(function* () {
             const threadId = yield* getNativeThreadId(turnInput.providerThread);
             const mcpSession = yield* mcpSessions.read(turnInput.threadId);
+            // Cached by the thread's start; only context, so a failed read omits it.
+            const nativeMcp = yield* providerDuplicatesFor(turnInput.runtimePolicy).pipe(
+              Effect.orElseSucceed(() => undefined),
+            );
+            const nativeMcpContext =
+              nativeMcp === undefined
+                ? undefined
+                : nativeMcpContextLine({
+                    repoFile: ".codex/config.toml",
+                    repo: nativeMcp.repoServerNames,
+                    managed: nativeMcp.managedServerNames,
+                  });
             const turnStartParams = yield* buildCodexTurnStartParams({
               nativeThreadId: threadId,
               codexInput,
@@ -5970,6 +6049,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               terminalToolsAvailable: McpProviderSession.terminalToolsAvailable(mcpSession),
               omitServiceTier: adapterOptions.resolveRuntime !== undefined,
               ...(turnInput.appContext === undefined ? {} : { appContext: turnInput.appContext }),
+              ...(nativeMcpContext === undefined ? {} : { nativeMcpContext }),
             });
             yield* Ref.update(pendingRootTurns, (current) => {
               const updated = new Map(current);
