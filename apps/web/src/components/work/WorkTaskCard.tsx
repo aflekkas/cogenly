@@ -24,6 +24,7 @@ import { useId, useMemo, useRef, useState } from "react";
 
 import { useScratchProject } from "~/hooks/useScratchProject";
 import { cn, randomUUID } from "~/lib/utils";
+import { useRepositoryNames } from "~/projectLabels/useRepositoryNames";
 import { useProjects, useServerConfigs, useThreadShell } from "~/state/entities";
 import { serverEnvironment } from "~/state/server";
 import { threadEnvironment } from "~/state/threads";
@@ -96,6 +97,7 @@ export function WorkTaskCard(props: {
   readonly onOpenThread: (threadId: ThreadId) => void;
 }) {
   const { environmentId, chatThreadId, task } = props;
+  const nameOf = useRepositoryNames();
   const workRef = useMemo(
     () => (task.threadId === undefined ? null : scopeThreadRef(environmentId, task.threadId)),
     [environmentId, task.threadId],
@@ -212,7 +214,7 @@ export function WorkTaskCard(props: {
     }
   };
 
-  const targetLabel = repository === null ? "No project · this machine" : repository.title;
+  const targetLabel = repository === null ? "No project · this machine" : nameOf(repository);
   const label = WORK_TASK_STATE_LABEL[state];
 
   if (state === "dismissed") {

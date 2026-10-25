@@ -12,6 +12,7 @@ import { ChevronRightIcon, GitBranchIcon, HammerIcon } from "lucide-react";
 import { createContext, use, useMemo, useState, type ReactNode } from "react";
 
 import { cn } from "~/lib/utils";
+import { useRepositoryNames } from "~/projectLabels/useRepositoryNames";
 import { useProjects, useServerConfigs, useThreadShell } from "~/state/entities";
 import type { MessagesTimelineRow } from "../chat/MessagesTimeline.logic";
 import { resolveThreadOrigin } from "../chat/threadLineage.logic";
@@ -239,6 +240,7 @@ function WorkHandoffMarker(props: {
   readonly onOpenThread: (threadId: ThreadId) => void;
 }) {
   const { environmentId, link } = props;
+  const nameOf = useRepositoryNames();
   const threadRef = useMemo(
     () => scopeThreadRef(environmentId, link.threadId),
     [environmentId, link.threadId],
@@ -272,7 +274,7 @@ function WorkHandoffMarker(props: {
         title={title}
         location={{
           repository,
-          label: repository?.title ?? "No repository",
+          label: repository ? nameOf(repository) : "No repository",
           branch: branch ?? null,
         }}
       />
