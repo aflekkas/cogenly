@@ -6,6 +6,7 @@ import {
   ProviderDriverKind,
   type IntegrationCreateInput,
   type IntegrationNativeImportPreview,
+  type IntegrationNativeImportServer,
 } from "@cogenly/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -52,31 +53,56 @@ const slug = (value: string) =>
     .slice(0, 40)
     .replace(/^-+/, "") || "server";
 
-/** Mapping deliberately drops secret values. Only definitions and missing-field names leave here. */
+/** A claude.ai connector, which only a fresh sign-in can bring over. */
+const claudeAiServer = (label: string): IntegrationNativeImportServer => ({
+  label: label.slice(0, 200),
+  provider: "claude",
+  scope: "account",
+  status: "needs-sign-in",
+});
+
+/**
+ * Mapping deliberately drops secret values. Only definitions and missing-field names leave here.
+ * `files` names where each config came from, for the owner's review; `scope` says whether that is
+ * the provider's own config or a project's.
+ */
 export function mapNativeIntegrations(
   claude: unknown,
   codex: unknown,
   prefixes = { claude: "claude", codex: "codex" },
+  files: {
+    readonly claude?: string;
+    readonly codex?: string;
+    readonly scope?: "user" | "project";
+  } = {},
 ): IntegrationNativeImportPreview {
   const definitions: IntegrationCreateInput[] = [];
+  const servers: IntegrationNativeImportServer[] = [];
   const reconnect: string[] = [];
   const warnings: string[] = [];
   let incomplete = false;
-  const add = (provider: string, servers: unknown) => {
+  const add = (
+    provider: string,
+    table: unknown,
+    origin: Pick<IntegrationNativeImportServer, "provider" | "scope" | "file">,
+  ) => {
     if (
-      servers !== undefined &&
-      (typeof servers !== "object" || servers === null || Array.isArray(servers))
+      table !== undefined &&
+      (typeof table !== "object" || table === null || Array.isArray(table))
     ) {
       incomplete = true;
       warnings.push(`${provider}: unsupported native server table; review the source manually.`);
     }
-    for (const [nativeName, raw] of Object.entries(record(servers))) {
+    for (const [nativeName, raw] of Object.entries(record(table))) {
       if (nativeName === "cogenly") continue;
       const server = record(raw);
       if (server.type === "claudeai-proxy") {
         reconnect.push(`claude.ai ${nativeName} (sign in again through Cogenly)`);
+        servers.push(claudeAiServer(nativeName));
         continue;
       }
+      const listed = (status: IntegrationNativeImportServer["status"]) =>
+        servers.push({ ...origin, label: nativeName.slice(0, 200), status });
       const name = IntegrationName.make(`${provider}-${slug(nativeName)}`.slice(0, 64));
       const refs = (value: unknown) =>
         Object.fromEntries(
@@ -104,6 +130,7 @@ export function mapNativeIntegrations(
         ) {
           incomplete = true;
           warnings.push(`${name}: URL needs manual review; private URL values were not imported.`);
+          listed("unsupported");
           continue;
         }
         // Only standard, credential-free paths may leave the native config reader.
@@ -112,19 +139,21 @@ export function mapNativeIntegrations(
           warnings.push(
             `${name}: private endpoint withheld; use request_secret with saveToVault for ${name}-endpoint, field value, allowed domain ${url.hostname}, then verify before enabling.`,
           );
+        const headers = {
+          ...refs(server.headers),
+          ...refs(server.http_headers),
+          ...(typeof server.bearer_token_env_var === "string"
+            ? { Authorization: `Bearer {{credential:${name}-token.value}}` }
+            : {}),
+        };
         definitions.push({
           ...base,
           transport: "http",
           url: privateEndpoint ? `${url.origin}/` : url.href,
           ...(privateEndpoint ? { endpointRef: `${name}-endpoint.value` } : {}),
-          headers: {
-            ...refs(server.headers),
-            ...refs(server.http_headers),
-            ...(typeof server.bearer_token_env_var === "string"
-              ? { Authorization: `Bearer {{credential:${name}-token.value}}` }
-              : {}),
-          },
+          headers,
         });
+        listed(privateEndpoint || Object.keys(headers).length > 0 ? "needs-secret" : "ready");
       } else if (typeof server.command === "string") {
         // Positional arguments may contain credentials: never copy their values into settings.
         const args =
@@ -135,43 +164,72 @@ export function mapNativeIntegrations(
           warnings.push(
             `${name}: command arguments were withheld; ask an agent to restore non-secret arguments.`,
           );
+        const env = refs(server.env);
         definitions.push({
           ...base,
           transport: "stdio",
           url: "https://localhost",
           headers: {},
-          command: { command: server.command, args, env: refs(server.env) },
+          command: { command: server.command, args, env },
         });
+        listed(
+          args.length > 0 ? "needs-setup" : Object.keys(env).length > 0 ? "needs-secret" : "ready",
+        );
       } else {
         incomplete = true;
         warnings.push(`${name}: unsupported native transport; reconnect with an agent.`);
+        listed("unsupported");
         continue;
       }
       reconnect.push(name);
     }
   };
+  const scope = files.scope ?? "user";
+  const claudeOrigin = {
+    provider: "claude" as const,
+    scope,
+    ...(files.claude === undefined ? {} : { file: files.claude }),
+  };
   const source = record(claude);
-  add(prefixes.claude, source.mcpServers);
+  add(prefixes.claude, source.mcpServers, claudeOrigin);
   // Local project definitions retain their project separation by staying disabled until reviewed.
   for (const [project, value] of Object.entries(record(source.projects))) {
-    const servers = record(record(value).mcpServers);
-    if (Object.keys(servers).length) {
+    const table = record(record(value).mcpServers);
+    if (Object.keys(table).length) {
       warnings.push("Claude project MCP definitions need project scope review before enabling.");
-      add(`${prefixes.claude}-p${(Hash.string(project) >>> 0).toString(36)}`, servers);
+      add(`${prefixes.claude}-p${(Hash.string(project) >>> 0).toString(36)}`, table, {
+        ...claudeOrigin,
+        scope: "project",
+      });
     }
   }
-  add(prefixes.codex, record(codex).mcp_servers);
+  add(prefixes.codex, record(codex).mcp_servers, {
+    provider: "codex",
+    scope,
+    ...(files.codex === undefined ? {} : { file: files.codex }),
+  });
   for (const connector of Array.isArray(source.claudeAiMcpServers)
     ? source.claudeAiMcpServers
     : []) {
     const value = record(connector);
-    if (typeof value.name === "string")
+    if (typeof value.name === "string") {
       reconnect.push(`claude.ai ${value.name.slice(0, 200)} (sign in again through Cogenly)`);
+      servers.push(claudeAiServer(value.name));
+    }
   }
   warnings.push(
     "claude.ai authorization cannot be imported. Its connector directory is account-hosted; ask the user which additional connectors to reconnect if none are listed here.",
   );
-  return { definitions, reconnect, warnings, incomplete };
+  return { definitions, servers, reconnect, warnings, incomplete };
+}
+
+/** A config path as the owner reads it: under their home directory, as `~/…`. */
+export function nativeConfigDisplayPath(file: string, home: string): string {
+  const root = home.replace(/[\\/]+$/, "");
+  return root !== "" &&
+    (file === root || file.startsWith(`${root}/`) || file.startsWith(`${root}\\`))
+    ? `~${file.slice(root.length)}`
+    : file;
 }
 
 /** `claude mcp list` includes cloud connector names; discard URLs, statuses and diagnostics. */
@@ -206,9 +264,11 @@ export const layer = Layer.effect(
     return NativeIntegrationImport.of({
       preview: Effect.gen(function* () {
         const definitions: IntegrationCreateInput[] = [];
+        const servers: IntegrationNativeImportServer[] = [];
         const reconnect: string[] = [];
         const warnings: string[] = [];
         let incomplete = false;
+        const shown = (file: string) => nativeConfigDisplayPath(file, home);
         const unavailable = (source: string) => {
           incomplete = true;
           warnings.push(
@@ -223,6 +283,7 @@ export const layer = Layer.effect(
             else if (JSON.stringify(previous) !== JSON.stringify(definition))
               unavailable(`${definition.name}: conflicting native definitions`);
           }
+          servers.push(...(preview.servers ?? []));
           reconnect.push(...preview.reconnect);
           warnings.push(...preview.warnings);
         };
@@ -282,7 +343,14 @@ export const layer = Layer.effect(
               );
             else {
               for (const root of Object.keys(record(native.projects))) roots.add(root);
-              merge(mapNativeIntegrations(native, {}, { claude: prefix, codex: prefix }));
+              merge(
+                mapNativeIntegrations(
+                  native,
+                  {},
+                  { claude: prefix, codex: prefix },
+                  { claude: shown(file) },
+                ),
+              );
             }
             const cloud = yield* Effect.gen(function* () {
               const command = yield* resolveSpawnCommand(
@@ -300,11 +368,10 @@ export const layer = Layer.effect(
             }).pipe(Effect.scoped, Effect.timeout("15 seconds"), Effect.option);
             if (Option.isNone(cloud)) unavailable(`${id}: Claude connector discovery`);
             else
-              reconnect.push(
-                ...claudeAiConnectorNames(cloud.value).map(
-                  (name) => `${name} (sign in again through Cogenly)`,
-                ),
-              );
+              for (const name of claudeAiConnectorNames(cloud.value)) {
+                reconnect.push(`${name} (sign in again through Cogenly)`);
+                servers.push(claudeAiServer(name.replace(/^claude\.ai /, "")));
+              }
           } else {
             const decoded = yield* decodeCodexSettings(instance.config ?? {}).pipe(Effect.option);
             if (Option.isNone(decoded)) {
@@ -317,11 +384,11 @@ export const layer = Layer.effect(
               homePath:
                 config.homePath || (config.setupMode !== "managed" ? (env.CODEX_HOME ?? "") : ""),
             });
-            const native = yield* read(
-              path.join(layout.effectiveHomePath ?? layout.sharedHomePath, "config.toml"),
-              `${id}: native user config`,
-              true,
+            const file = path.join(
+              layout.effectiveHomePath ?? layout.sharedHomePath,
+              "config.toml",
             );
+            const native = yield* read(file, `${id}: native user config`, true);
             if (
               native === undefined &&
               (config.homePath.trim() || config.shadowHomePath.trim() || env.CODEX_HOME?.trim())
@@ -340,7 +407,14 @@ export const layer = Layer.effect(
                   native.project_root_markers[0] !== ".git")
               )
                 unavailable(`${id}: custom project root markers are unsupported`);
-              merge(mapNativeIntegrations({}, native, { claude: prefix, codex: prefix }));
+              merge(
+                mapNativeIntegrations(
+                  {},
+                  native,
+                  { claude: prefix, codex: prefix },
+                  { codex: shown(file) },
+                ),
+              );
               if (
                 Object.values(record(native.profiles)).some(
                   (profile) => record(profile).mcp_servers !== undefined,
@@ -397,10 +471,16 @@ export const layer = Layer.effect(
                 "Project MCP definitions need project scope review before enabling; provider trust rules may exclude these layers.",
               );
               merge(
-                mapNativeIntegrations(claude ?? {}, codex ?? {}, {
-                  claude: `claude-${prefix}`,
-                  codex: `codex-${prefix}`,
-                }),
+                mapNativeIntegrations(
+                  claude ?? {},
+                  codex ?? {},
+                  { claude: `claude-${prefix}`, codex: `codex-${prefix}` },
+                  {
+                    claude: shown(path.join(dir, ".mcp.json")),
+                    codex: shown(path.join(dir, ".codex", "config.toml")),
+                    scope: "project",
+                  },
+                ),
               );
             }
             const parent = path.dirname(dir);
@@ -410,6 +490,7 @@ export const layer = Layer.effect(
         }
         return {
           definitions,
+          servers,
           reconnect: [...new Set(reconnect)],
           warnings: [...new Set(warnings)],
           incomplete,

@@ -61,6 +61,65 @@ KEY = "fixture-secret"
   expect(JSON.stringify(result)).not.toContain("fixture-secret");
 });
 
+it("lists each native server for review with where it came from and what it still needs", () => {
+  const result = mapNativeIntegrations(
+    {
+      mcpServers: {
+        docs: { url: "https://docs.example/mcp" },
+        keyed: { url: "https://keyed.example/mcp", headers: { Authorization: "fixture-secret" } },
+        tool: { command: "tool", args: ["--key", "fixture-secret"] },
+        odd: { transport: "carrier-pigeon" },
+      },
+      claudeAiMcpServers: [{ name: "Slack" }],
+    },
+    { mcp_servers: { worker: { command: "worker", env: { KEY: "fixture-secret" } } } },
+    undefined,
+    { claude: "~/.claude.json", codex: "~/.codex/config.toml" },
+  );
+  expect(result.servers).toEqual([
+    { label: "docs", provider: "claude", scope: "user", file: "~/.claude.json", status: "ready" },
+    {
+      label: "keyed",
+      provider: "claude",
+      scope: "user",
+      file: "~/.claude.json",
+      status: "needs-secret",
+    },
+    {
+      label: "tool",
+      provider: "claude",
+      scope: "user",
+      file: "~/.claude.json",
+      status: "needs-setup",
+    },
+    {
+      label: "odd",
+      provider: "claude",
+      scope: "user",
+      file: "~/.claude.json",
+      status: "unsupported",
+    },
+    {
+      label: "worker",
+      provider: "codex",
+      scope: "user",
+      file: "~/.codex/config.toml",
+      status: "needs-secret",
+    },
+    { label: "Slack", provider: "claude", scope: "account", status: "needs-sign-in" },
+  ]);
+  expect(JSON.stringify(result.servers)).not.toContain("fixture-secret");
+});
+
+it("shows config paths under the home directory as ~", () => {
+  expect(NativeImport.nativeConfigDisplayPath("/home/me/.claude.json", "/home/me")).toBe(
+    "~/.claude.json",
+  );
+  expect(NativeImport.nativeConfigDisplayPath("/home/meg/.mcp.json", "/home/me")).toBe(
+    "/home/meg/.mcp.json",
+  );
+});
+
 it("lists claude.ai connector names without copying URLs or account-hosted auth", () => {
   expect(
     claudeAiConnectorNames(
@@ -89,6 +148,23 @@ it.effect(
         "codex-worker",
       ]);
       expect(preview.reconnect).toContain("claude.ai Gmail (sign in again through Cogenly)");
+      expect(preview.servers).toEqual([
+        {
+          label: "mail",
+          provider: "claude",
+          scope: "user",
+          file: "~/.claude.json",
+          status: "needs-secret",
+        },
+        { label: "Gmail", provider: "claude", scope: "account", status: "needs-sign-in" },
+        {
+          label: "worker",
+          provider: "codex",
+          scope: "user",
+          file: "~/.codex/config.toml",
+          status: "needs-secret",
+        },
+      ]);
       expect(JSON.stringify(preview)).not.toContain("fixture-private");
     }).pipe(
       Effect.provide(
@@ -281,6 +357,20 @@ it.effect(
         preview.definitions.length,
       );
       expect(preview.incomplete).toBe(false);
+      expect(preview.servers).toContainEqual({
+        label: "project",
+        provider: "claude",
+        scope: "project",
+        file: "~/work/repo/.mcp.json",
+        status: "needs-secret",
+      });
+      expect(preview.servers).toContainEqual({
+        label: "parent",
+        provider: "codex",
+        scope: "project",
+        file: "~/work/.codex/config.toml",
+        status: "ready",
+      });
       expect(JSON.stringify(preview)).not.toContain("fixture-private");
       expect(preview.definitions.every((definition) => definition.enabled === false)).toBe(true);
     }),
