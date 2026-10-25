@@ -1,3 +1,4 @@
+import * as ReadOnlySandbox from "../terminal/ReadOnlySandbox.ts";
 import * as AgentStore from "../agents/AgentStore.ts";
 import { terminalToolsAuthorized } from "@t3tools/provider-core/server/mcpSession";
 import { AgentScope } from "@t3tools/shared/AgentScope";
@@ -361,6 +362,7 @@ export const layerWithOptions = (
        * reverse costs an agent one toolset and is visible immediately (#7083).
        */
       const agents = yield* Effect.serviceOption(AgentStore.AgentStore);
+      const sandbox = yield* Effect.serviceOption(ReadOnlySandbox.ReadOnlySandbox);
       const serverSettings = yield* Effect.serviceOption(ServerSettings.ServerSettingsService);
       const projectService = yield* Effect.serviceOption(ProjectService.ProjectService);
       const eventSink = yield* EventSink.EventSinkV2;
@@ -521,6 +523,9 @@ export const layerWithOptions = (
                       ...terminalThread,
                       builderMode: terminalThread.surface === "builder",
                       agentPermissions: agent?.permissions,
+                      chatMode: terminalThread.surface === "chat",
+                      readOnlySandboxAvailable:
+                        Option.isSome(sandbox) && sandbox.value.status.available,
                     })
                   );
                 }).pipe(Effect.orElseSucceed(() => false));

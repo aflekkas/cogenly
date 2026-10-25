@@ -1,3 +1,4 @@
+import * as ReadOnlySandbox from "../terminal/ReadOnlySandbox.ts";
 import { agentFixture } from "../agents/agent.testkit.ts";
 import * as AgentStore from "../agents/AgentStore.ts";
 import * as CliCredentials from "../accounts/CliCredentials.ts";
@@ -46,6 +47,21 @@ it.effect(
       const inputs: string[] = [];
       const signals: Array<string | undefined> = [];
       const spawnedIn: string[] = [];
+      const launches: Array<{ shell: string; args?: string[]; env: NodeJS.ProcessEnv }> = [];
+      let sandboxAvailable = true;
+      const sandbox = ReadOnlySandbox.ReadOnlySandbox.of({
+        get status() {
+          return sandboxAvailable
+            ? { available: true as const, backend: "sandbox-exec" as const }
+            : { available: false as const, reason: "sandbox probe failed" };
+        },
+        prepare: (input) =>
+          Effect.succeed({
+            shell: "/usr/bin/sandbox-exec",
+            args: ["-p", "(deny default)", input.shell, ...input.args],
+            env: { TMPDIR: "/terminal-private-temp" },
+          }),
+      });
       const manager = yield* Manager.makeWithOptions({
         logsDir: directory,
         processKillGraceMs: 0,
@@ -53,7 +69,10 @@ it.effect(
         resolveProviderInstanceEnvironment: () => Effect.succeed({}),
         ptyAdapter: {
           spawn: (input) =>
-            Effect.sync(() => spawnedIn.push(input.cwd)).pipe(
+            Effect.sync(() => {
+              spawnedIn.push(input.cwd);
+              launches.push(input);
+            }).pipe(
               Effect.as({
                 pid: 12345,
                 write: (data) => {
@@ -68,7 +87,7 @@ it.effect(
               }),
             ),
         },
-      });
+      }).pipe(Effect.provideService(ReadOnlySandbox.ReadOnlySandbox, sandbox));
       const project = {
         id: liveThreadShell(ThreadId.make("A")).projectId,
         title: "test",
@@ -89,6 +108,7 @@ it.effect(
         permissions: { ...agentFixture().permissions, deploy: false },
       };
       const dependencies = Layer.mergeAll(
+        Layer.succeed(ReadOnlySandbox.ReadOnlySandbox, sandbox),
         Layer.mock(AgentStore.AgentStore)({
           forThread: (id) => Effect.succeed(id === "persistent" ? agent : null),
         }),
@@ -196,6 +216,18 @@ it.effect(
         spawnedIn.length = 0;
         yield* as("chat", tools.run({ command: "git log --oneline", background: true }));
         expect(spawnedIn).toEqual([realFolder]);
+        expect(launches.at(-1)?.shell).toBe("/usr/bin/sandbox-exec");
+        expect(launches.at(-1)?.args).toContain("git log --oneline");
+        expect(launches.at(-1)?.env.TMPDIR).toBe("/terminal-private-temp");
+        expect(launches[0]?.shell).toBe("/bin/sh");
+        const count = launches.length;
+        sandboxAvailable = false;
+        const refused = yield* as("chat", tools.run({ command: "ls" })).pipe(Effect.flip);
+        expect(refused.message).toContain("Chat commands are unavailable on this machine");
+        expect(launches).toHaveLength(count);
+        yield* as("A", tools.run({ command: "pwd", background: true }));
+        expect(launches.at(-1)?.shell).toBe("/bin/sh");
+        sandboxAvailable = true;
         const escape = yield* as("chat", tools.run({ command: "ls", cwd: workspace })).pipe(
           Effect.flip,
         );

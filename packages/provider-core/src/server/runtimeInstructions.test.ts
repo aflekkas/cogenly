@@ -243,10 +243,13 @@ describe("conversationModeInstructions", () => {
     expect(withTerminal).toContain("never hand a question to a task just to run commands");
     expect(withTerminal).toContain("long-running work such as builds and test suites");
     expect(withTerminal).not.toContain("you cannot run commands");
+    expect(withTerminal).toContain("sandbox blocks local file writes");
+    expect(withTerminal).toContain("must not run commands that change remote state");
   });
 
   it("says commands are unavailable without the terminal tools", () => {
     expect(withoutTerminal).toContain("you cannot run commands");
+    expect(withoutTerminal).toContain("commands are unavailable on this machine");
     expect(withoutTerminal).not.toContain("terminal_run");
   });
 

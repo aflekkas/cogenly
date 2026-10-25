@@ -1,5 +1,6 @@
+import * as ReadOnlySandbox from "../terminal/ReadOnlySandbox.ts";
 import * as AgentStore from "../agents/AgentStore.ts";
-import { terminalToolsAuthorized } from "@t3tools/provider-core/server/mcpSession";
+import { terminalLaunchPolicy } from "@t3tools/provider-core/server/mcpSession";
 import * as CliCredentials from "../accounts/CliCredentials.ts";
 import { AccountError } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
@@ -20,6 +21,9 @@ import * as ServerSettings from "../serverSettings.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
 import { assertLiveCaller, loadCaller, unavailable } from "./threadAccess.ts";
+
+const isAccountError = Schema.is(AccountError);
+const isSandboxUnavailable = Schema.is(ReadOnlySandbox.SandboxUnavailable);
 
 const denied = (message: string) =>
   new OrchestratorMcpFailure({ code: "capability_denied", message });
@@ -65,6 +69,7 @@ export class TerminalMcpService extends Context.Service<
 
 const make = Effect.gen(function* () {
   const agents = yield* AgentStore.AgentStore;
+  const sandbox = yield* ReadOnlySandbox.ReadOnlySandbox;
   const manager = yield* TerminalManager.TerminalManager;
   const credentials = yield* CliCredentials.CliCredentials;
   const settings = yield* ServerSettings.ServerSettingsService;
@@ -90,19 +95,29 @@ const make = Effect.gen(function* () {
       return yield* denied("Builder threads cannot run commands.");
     const thread = context.caller.caller!;
     const agent = yield* agents.forThread(thread.id).pipe(Effect.mapError(unavailable));
+    const terminalPolicy = terminalLaunchPolicy({
+      enabled: (yield* settings.getSettings.pipe(Effect.mapError(unavailable)))
+        .enableAgentTerminals,
+      ...context.caller.limits,
+      builderMode: thread.surface === "builder",
+      agentPermissions: agent?.permissions,
+      chatMode: thread.surface === "chat",
+      readOnlySandboxAvailable: sandbox.status.available,
+    });
     if (
-      !terminalToolsAuthorized({
-        enabled: (yield* settings.getSettings.pipe(Effect.mapError(unavailable)))
-          .enableAgentTerminals,
-        ...context.caller.limits,
-        builderMode: thread.surface === "builder",
-        agentPermissions: agent?.permissions,
-      })
+      terminalPolicy === null &&
+      thread.surface === "chat" &&
+      agent == null &&
+      !sandbox.status.available
     )
+      return yield* denied(
+        new ReadOnlySandbox.SandboxUnavailable({ reason: sandbox.status.reason }).message,
+      );
+    if (terminalPolicy === null)
       return yield* denied(
         "Agent terminals require enabled tools, full-access/default mode and all sensitive agent grants.",
       );
-    return context;
+    return { ...context, terminalPolicy };
   });
   return TerminalMcpService.of({
     run: (input) =>
@@ -111,7 +126,7 @@ const make = Effect.gen(function* () {
         const started = yield* executor.withLock(
           threadId,
           Effect.gen(function* () {
-            const { caller, scope } = yield* writable;
+            const { caller, scope, terminalPolicy } = yield* writable;
             const thread = caller.caller!;
             if (thread.settledOverride === "settled" || thread.archivedAt !== null)
               return yield* denied("This thread is settled or archived.");
@@ -143,6 +158,7 @@ const make = Effect.gen(function* () {
             return yield* manager
               .runAgent({
                 threadId,
+                terminalPolicy,
                 command: input.command,
                 cwd,
                 worktreePath: thread.worktreePath,
@@ -156,7 +172,9 @@ const make = Effect.gen(function* () {
               })
               .pipe(
                 Effect.mapError((cause) =>
-                  Schema.is(AccountError)(cause) ? denied(cause.message) : unavailable(),
+                  isAccountError(cause) || isSandboxUnavailable(cause)
+                    ? denied(cause.message)
+                    : unavailable(),
                 ),
               );
           }),

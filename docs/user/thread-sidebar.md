@@ -151,9 +151,18 @@ quick read-only commands, such as searching files, reading git history or queryi
 `gh`, from the chat's project folder (or its own folder when it has no project), and
 each command shows in the conversation. It doesn't edit repositories, install
 anything or run long builds from a chat; it hands that work to a task instead.
-Chat commands use the same agent terminals as Work, so they need full-access mode and
-the `enableAgentTerminals` preference. So a chat's
-menu has **Start Work…**, rename, **Mark unread**, projects, copy and **Delete**,
+Chat commands need full-access mode and the `enableAgentTerminals` preference. They also require a working local sandbox:
+macOS uses `sandbox-exec`; Linux needs `bubblewrap` with user namespaces enabled.
+On Windows or when the sandbox probe fails, commands are unavailable in chats;
+use Work for command-based tasks.
+
+The sandbox prevents local file writes except in a fresh private temporary folder.
+It stays in effect for child processes and further input to the same terminal.
+Network access remains available for lookups. The sandbox does **not** prevent
+remote writes: chat agents are instructed never to run commands that change
+remote state, such as sending messages, changing issues or pushing commits.
+
+A chat's menu has **Start Work…**, rename, **Mark unread**, projects, copy and **Delete**,
 which always asks first, while settling, snoozing, archiving, repository settings
 and the branch and worktree controls, the right panel with its browser and device, and the
 terminal panel belong to Work. When a

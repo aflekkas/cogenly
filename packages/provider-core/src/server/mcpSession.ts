@@ -66,15 +66,17 @@ export function withAgentDeviceEnvironment(
 }
 
 /** Shared prompt/execution policy. Callers re-read modes, settings and grants at execution. */
-export function terminalToolsAuthorized(input: {
+export function terminalLaunchPolicy(input: {
   readonly enabled: boolean;
   readonly runtimeMode: RuntimeMode;
   readonly interactionMode: ProviderInteractionMode;
   readonly builderMode?: boolean | undefined;
+  readonly chatMode?: boolean | undefined;
+  readonly readOnlySandboxAvailable?: boolean | undefined;
   /** null/absent is an ordinary thread; an agent supplies its current grants. */
   readonly agentPermissions?: AgentPermissions | null | undefined;
-}): boolean {
-  return (
+}): "readOnlyLookup" | "unrestricted" | null {
+  const authorized =
     input.enabled &&
     input.runtimeMode === "full-access" &&
     input.interactionMode === "default" &&
@@ -86,6 +88,13 @@ export function terminalToolsAuthorized(input: {
         input.agentPermissions.create_pr &&
         input.agentPermissions.merge &&
         input.agentPermissions.deploy &&
-        input.agentPermissions.delete))
-  );
+        input.agentPermissions.delete));
+  if (!authorized) return null;
+  if (input.chatMode && input.agentPermissions == null)
+    return input.readOnlySandboxAvailable === true ? "readOnlyLookup" : null;
+  return "unrestricted";
 }
+
+export const terminalToolsAuthorized = (
+  input: Parameters<typeof terminalLaunchPolicy>[0],
+): boolean => terminalLaunchPolicy(input) !== null;

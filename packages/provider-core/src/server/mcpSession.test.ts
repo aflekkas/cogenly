@@ -8,6 +8,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   terminalToolsAvailable,
   terminalToolsAuthorized,
+  terminalLaunchPolicy,
   withAgentDeviceEnvironment,
   type McpProviderSessionConfig,
 } from "./mcpSession.ts";
@@ -98,5 +99,48 @@ describe("terminalToolsAuthorized", () => {
         terminalToolsAuthorized({ ...base, agentPermissions: { ...granted, [grant]: false } }),
       ).toBe(false);
     }
+  });
+});
+
+describe("terminal launch policy", () => {
+  const base = { enabled: true, runtimeMode: "full-access", interactionMode: "default" } as const;
+  it("fails closed for chats without a successful probe", () => {
+    expect(terminalLaunchPolicy({ ...base, chatMode: true })).toBeNull();
+    expect(
+      terminalToolsAuthorized({ ...base, chatMode: true, readOnlySandboxAvailable: false }),
+    ).toBe(false);
+    expect(terminalLaunchPolicy({ ...base, chatMode: true, readOnlySandboxAvailable: true })).toBe(
+      "readOnlyLookup",
+    );
+    expect(
+      terminalLaunchPolicy({
+        ...base,
+        chatMode: true,
+        readOnlySandboxAvailable: true,
+        enabled: false,
+      }),
+    ).toBeNull();
+  });
+  it("keeps Work, scheduled Work and fully granted persistent agents unrestricted", () => {
+    expect(terminalLaunchPolicy(base)).toBe("unrestricted");
+    expect(
+      terminalLaunchPolicy({ ...base, chatMode: false, readOnlySandboxAvailable: false }),
+    ).toBe("unrestricted");
+    expect(
+      terminalLaunchPolicy({
+        ...base,
+        chatMode: true,
+        agentPermissions: {
+          ...defaultAgentPermissions,
+          read: true,
+          execute: true,
+          send: true,
+          create_pr: true,
+          merge: true,
+          deploy: true,
+          delete: true,
+        },
+      }),
+    ).toBe("unrestricted");
   });
 });
