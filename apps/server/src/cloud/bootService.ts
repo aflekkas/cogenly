@@ -14,6 +14,7 @@ import * as Schema from "effect/Schema";
 
 import { CLI_RELEASE_BASE_URL_ENV } from "@cogenly/shared/cliRelease";
 
+import * as ReadOnlySandbox from "../terminal/ReadOnlySandbox.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import { normalizeTimeZoneSetting } from "../scheduling/serverTimeZone.ts";
 import {
@@ -648,6 +649,7 @@ export class BootService extends Context.Service<
     readonly withStopped: <A, E, R>(
       operation: Effect.Effect<A, E, R>,
     ) => Effect.Effect<A, E | BootServiceError, R>;
+    readonly provisionSandbox: Effect.Effect<void>;
     readonly uninstall: Effect.Effect<boolean, BootServiceError>;
     readonly status: Effect.Effect<BootServiceStatus, BootServiceError>;
   }
@@ -679,6 +681,16 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const runner = yield* ProcessRunner.ProcessRunner;
+  const environment = yield* HostProcess.Environment;
+  const provisionSandbox = ReadOnlySandbox.provisionLocal.pipe(
+    Effect.provideService(FileSystem.FileSystem, fs),
+    Effect.provideService(Path.Path, path),
+    Effect.provideService(ProcessRunner.ProcessRunner, runner),
+    Effect.provideService(HostProcess.Platform, platform),
+    Effect.provideService(HostProcess.Architecture, arch),
+    Effect.provideService(HostProcess.UserId, uid),
+    Effect.provideService(HostProcess.Environment, environment),
+  );
   const host = input.host ?? { execPath: hostExecPath };
   const environmentPath = bootServicePath({
     installerPath,
@@ -872,6 +884,7 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
     readonly timeZone?: string;
   }) {
     const manager = yield* requireManager;
+    yield* provisionSandbox;
     yield* fs
       .makeDirectory(input.logsDir, { recursive: true })
       .pipe(Effect.mapError((cause) => new BootServiceInstallError({ cause })));
@@ -1205,7 +1218,15 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
       return { unitPath: manager.unitPath, contents: manager.render(planFor(options?.timeZone)) };
     });
 
-  return BootService.of({ install, restart, withStopped, uninstall, status, print });
+  return BootService.of({
+    install,
+    restart,
+    withStopped,
+    uninstall,
+    status,
+    print,
+    provisionSandbox,
+  });
 });
 
 export const layer = (input: {

@@ -1,4 +1,4 @@
-import { assert, describe, it } from "@effect/vitest";
+import { assert, describe, expect, it } from "@effect/vitest";
 import {
   EnvironmentId,
   IntegrationId,
@@ -26,6 +26,7 @@ import {
   SYNC_STUCK_AFTER_MS,
   type SyncPeerSample,
   buildReport,
+  chatSandboxCheck,
   diskCheck,
   integrationsCheck,
   machineLinksCheck,
@@ -597,5 +598,29 @@ describe("stuckRunsCheck", () => {
       ],
     );
     assert.strictEqual(result.items[1]?.title, `"Fix login" has been running for 6 hours`);
+  });
+});
+
+it("chat sandbox health offers provisioning only for repairable failures", () => {
+  const missing = chatSandboxCheck({
+    available: false,
+    failure: "bwrap-missing",
+    reason: "bubblewrap isn't installed",
+  });
+  expect(missing.status).toBe("warn");
+  expect(missing.items[0]).toMatchObject({
+    title: "Chat commands are off: bubblewrap isn't installed",
+    fix: "setup-sandbox",
+  });
+  expect(
+    chatSandboxCheck({
+      available: false,
+      failure: "seccomp-unsupported",
+      reason: "seccomp unavailable",
+    }).items[0]?.fix,
+  ).toBeNull();
+  expect(chatSandboxCheck({ available: true, backend: "bwrap" })).toMatchObject({
+    status: "ok",
+    items: [],
   });
 });

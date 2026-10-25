@@ -596,6 +596,11 @@ if ! t3_runtime_ready; then
   if ! "$(t3_runtime_entry "$T3_STAGING")" --version >/dev/null 2>&1; then
     printf 'The Cogenly %s executable does not run on this host.\\n' "$T3_ARCHIVE_VERSION" >&2; exit 1
   fi
+  # The executable owns distro package detection and passwordless elevation.
+  # Keep setup output off the runner's stdout protocol.
+  if [ "$T3_PLATFORM" = "linux" ] && "$(t3_runtime_entry "$T3_STAGING")" security setup --help 2>/dev/null | grep -q -- "--local"; then
+    "$(t3_runtime_entry "$T3_STAGING")" security setup --local </dev/null >&2
+  fi
   printf '%s\\n' "$T3_ARCHIVE_VERSION" > "$T3_STAGING/.install-complete"
   rm -rf "$T3_RUNTIME_DIR"
   mv "$T3_STAGING" "$T3_RUNTIME_DIR"

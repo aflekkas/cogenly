@@ -5,6 +5,7 @@
  */
 import {
   AuthOrchestrationReadScope,
+  AuthSettingsWriteScope,
   EnvironmentId,
   MachineHealthReport,
   WS_METHODS,
@@ -69,6 +70,7 @@ export const describeHealthReport = (report: MachineHealthReport): string => {
 export const runHealth = (flags: {
   readonly baseDir: Option.Option<string>;
   readonly json: boolean;
+  readonly fix?: boolean;
   readonly machine: Option.Option<string>;
 }) =>
   Effect.gen(function* () {
@@ -88,7 +90,9 @@ export const runHealth = (flags: {
       });
     }
     const issued = yield* environmentAuth.issueSession({
-      scopes: [AuthOrchestrationReadScope],
+      scopes: flags.fix
+        ? [AuthOrchestrationReadScope, AuthSettingsWriteScope]
+        : [AuthOrchestrationReadScope],
       label: "cogenly health cli",
     });
     yield* Effect.addFinalizer(() =>
@@ -105,6 +109,15 @@ export const runHealth = (flags: {
         Effect.provideContext(authContext),
       ),
     );
+    if (flags.fix) {
+      if (Option.isSome(flags.machine))
+        return yield* new HealthCliError({
+          reason:
+            "Run health --fix on the affected machine, or use its Fix action in Settings → Machines.",
+        });
+      const result = yield* client[WS_METHODS.machineSandboxSetup]({});
+      if (!flags.json) yield* Console.log(result.message);
+    }
     const report = yield* client[WS_METHODS.machinesHealth](
       Option.match(flags.machine, {
         onNone: () => ({}),
@@ -133,6 +146,10 @@ export const runHealth = (flags: {
 
 export const healthCommand = Command.make("health", {
   ...projectLocationFlags,
+  fix: Flag.Boolean("fix").pipe(
+    Flag.withDescription("Provision the chat command sandbox using root or passwordless sudo."),
+    Flag.withDefault(false),
+  ),
   json: Flag.Boolean("json").pipe(
     Flag.withDescription("Print the report as JSON."),
     Flag.withDefault(false),

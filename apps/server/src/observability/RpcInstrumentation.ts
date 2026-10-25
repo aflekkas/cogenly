@@ -144,6 +144,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.integrationsSaveApiKey]: "integrations",
   [WS_METHODS.integrationsInstallRuntime]: "integrations",
   [WS_METHODS.integrationsSubscribeSources]: "integrations",
+  [WS_METHODS.machineSandboxSetup]: "machines",
   [WS_METHODS.machineSecurityStatus]: "machines",
   [WS_METHODS.machinesList]: "machines",
   [WS_METHODS.syncStatus]: "machines",

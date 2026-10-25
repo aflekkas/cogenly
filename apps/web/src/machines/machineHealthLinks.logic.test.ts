@@ -161,3 +161,22 @@ describe("healthAlertActions", () => {
     });
   });
 });
+
+it("sandbox fixes target only the connected origin machine", () => {
+  const origin = env("sandbox-host");
+  const via = env("viewer");
+  expect(
+    healthFixAction("setup-sandbox", null, {
+      originEnvironmentId: origin,
+      viaEnvironmentId: via,
+      isConnected: (id) => id === origin,
+    }),
+  ).toEqual({ kind: "setupSandbox", label: "Fix", environmentId: origin });
+  expect(
+    healthFixAction("setup-sandbox", null, {
+      originEnvironmentId: origin,
+      viaEnvironmentId: via,
+      isConnected: (id) => id === via,
+    }),
+  ).toBeNull();
+});

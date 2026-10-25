@@ -25,6 +25,8 @@ import {
 import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 
+import type { SandboxStatus } from "../terminal/ReadOnlySandbox.ts";
+
 import { formatAgo, peerReachabilityItem, peerReachabilityKey } from "./peerReachability.ts";
 
 const GB = 1024 ** 3;
@@ -748,3 +750,37 @@ export function tailscaleServeCheck(input: {
       : [item({ key: "tailscale-serve:problem", status: "warn", title: problem })],
   );
 }
+
+export const chatSandboxCheck = (status: SandboxStatus): MachineHealthCheck => {
+  if (status.available)
+    return {
+      id: "chat-terminal-sandbox",
+      status: "ok",
+      summary: "Chat commands are on",
+      items: [],
+    };
+  const fixable =
+    status.failure === "bwrap-missing" ||
+    status.failure === "apparmor-userns" ||
+    status.failure === "userns-blocked" ||
+    status.failure === "probe-failed";
+  const title = `Chat commands are off: ${status.reason}`;
+  return {
+    id: "chat-terminal-sandbox",
+    status: "warn",
+    summary: title,
+    items: [
+      {
+        key: "chat-terminal-sandbox",
+        status: "warn",
+        title,
+        detail: fixable
+          ? "Fix installs the distro bubblewrap package using root or passwordless sudo, then checks the sandbox again. If elevation is unavailable, it shows the command to run."
+          : "Chat commands stay off until this host supports the required sandbox.",
+        since: null,
+        target: null,
+        fix: fixable ? "setup-sandbox" : null,
+      },
+    ],
+  };
+};

@@ -50,6 +50,7 @@ export const reconcileService = Effect.fn("cli.service.reconcile")(function* (op
   const service = yield* BootService.BootService;
   const status = yield* service.status;
   if (status.installed && status.current) {
+    yield* service.provisionSandbox;
     return { changed: false, status } satisfies ServiceReconcileResult;
   }
   if (

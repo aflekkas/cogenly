@@ -1,4 +1,5 @@
 import {
+  ChatSandboxSetupResult,
   BackgroundActivityProfile,
   BackgroundActivityProfileSelection,
   DesktopCliCommandLocation,
@@ -148,7 +149,7 @@ const MachineHealthTool = Tool.make("machine_health", {
   ...shared,
   dependencies: [...shared.dependencies, MachineHealth.MachineHealth],
   description:
-    "Health of a Cogenly machine: server, database, disk, provider sign-ins, links to paired machines, sync, integrations, scheduled tasks, stuck runs, boot service, Tailscale Serve and the canary. Each check has a status (ok, warn, fail, unknown when it could not run), a summary and the items worth attention, with a suggested fix where there is one. Omit environmentId for this machine; give a paired machine's (from machines_list) to read its report over the peer link. reachable false means that machine did not answer and the report describes what this one saw.",
+    "Health of a Cogenly machine: server, database, disk, provider sign-ins, links to paired machines, sync, integrations, scheduled tasks, stuck runs, boot service, Tailscale Serve and the canary. Each check has a status (ok, warn, fail, unknown when it could not run), a summary and the items worth attention, with a suggested fix where there is one. For setup-sandbox, call machine_health_fix on the affected machine. Omit environmentId for this machine; give a paired machine's (from machines_list) to read its report over the peer link. reachable false means that machine did not answer and the report describes what this one saw.",
   parameters: Schema.Struct({
     environmentId: Schema.optionalKey(
       EnvironmentId.annotate({
@@ -160,6 +161,16 @@ const MachineHealthTool = Tool.make("machine_health", {
 })
   .annotate(Tool.Readonly, true)
   .annotate(Tool.Destructive, false);
+const MachineHealthFixTool = Tool.make("machine_health_fix", {
+  ...shared,
+  dependencies: [...shared.dependencies, MachineHealth.MachineHealth],
+  description:
+    "Fix this machine's chat-terminal-sandbox health finding. Installs the distro bubblewrap package on Linux using root or passwordless sudo, then re-probes and enables chat commands without restarting. Returns the exact command when sudo needs a password, or when installation fails. Never asks for a sudo password. Run machine_health afterwards to see current health.",
+  parameters: Tool.EmptyParams,
+  success: ChatSandboxSetupResult,
+})
+  .annotate(Tool.Readonly, false)
+  .annotate(Tool.Destructive, false);
 export const EnvironmentToolkit = Toolkit.make(
   EnvironmentReadTool,
   EnvironmentPreferencesTool,
@@ -168,4 +179,5 @@ export const EnvironmentToolkit = Toolkit.make(
   CliCommandChangeTool,
   MachineSecurityStatusTool,
   MachineHealthTool,
+  MachineHealthFixTool,
 );

@@ -180,13 +180,13 @@ export const buildMachineSecurityStatus = (
       status: input.chatSandbox.available ? "pass" : "warn",
       title: input.chatSandbox.available
         ? "Chat terminal sandbox available"
-        : "Chat commands unavailable",
+        : `Chat commands are off: ${input.chatSandbox.reason}`,
       detail: input.chatSandbox.available
         ? "Chat terminals cannot write local files outside their private temporary directory. Network requests remain available."
         : input.chatSandbox.reason,
       evidence: input.chatSandbox.available
         ? input.chatSandbox.backend
-        : "startup probe unavailable",
+        : (input.chatSandbox.failure ?? "confinement probe unavailable"),
     });
   const loopback = isLoopbackHost(input.cogenlyHost);
   findings.push(

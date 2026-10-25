@@ -31,6 +31,7 @@ export const MachineHealthCheckId = Schema.Literals([
   "tailscale-serve",
   "canary",
   "computer-use",
+  "chat-terminal-sandbox",
 ]);
 export type MachineHealthCheckId = typeof MachineHealthCheckId.Type;
 
@@ -50,7 +51,13 @@ export type MachineHealthTarget = typeof MachineHealthTarget.Type;
  * scheduled task, `resume` opens the stuck thread, `retry-sync` calls
  * `machines.healthRetrySync`.
  */
-export const MachineHealthFix = Schema.Literals(["sign-in", "run-now", "resume", "retry-sync"]);
+export const MachineHealthFix = Schema.Literals([
+  "sign-in",
+  "run-now",
+  "resume",
+  "retry-sync",
+  "setup-sandbox",
+]);
 export type MachineHealthFix = typeof MachineHealthFix.Type;
 
 export const MachineHealthItem = Schema.Struct({

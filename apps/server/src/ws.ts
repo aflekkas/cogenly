@@ -1762,6 +1762,7 @@ const makeWsRpcHandlers = (
         integrations.installRuntime(input.runtime),
       [WS_METHODS.integrationsSubscribeSources]: () => integrations.subscribeSources(),
       [WS_METHODS.machineSecurityStatus]: () => machineSecurity.status,
+      [WS_METHODS.machineSandboxSetup]: () => machineHealth.setupSandbox,
       [WS_METHODS.computerUseStatus]: () => computerUse.status(),
       [WS_METHODS.computerUseRequestPermission]: (input) =>
         computerUse.requestPermission(input.permission),

@@ -21,6 +21,8 @@ export function machineHealthActionPermissionAtom(action: MachineHealthAction): 
       return ALWAYS_PERMITTED;
     case "runTask":
       return serverEnvironment.runScheduledTaskNow.permissionAtom(action.environmentId);
+    case "setupSandbox":
+      return machinesRpc.sandboxSetup.permissionAtom(action.environmentId);
     case "retrySync":
       return machinesRpc.healthRetrySync.permissionAtom(action.environmentId);
   }
@@ -39,12 +41,34 @@ function failureMessage(cause: unknown): string {
 export function useRunMachineHealthAction(): (action: MachineHealthAction) => Promise<boolean> {
   const open = useOpenMachineHealthLink();
   const runTask = useAtomCommand(serverEnvironment.runScheduledTaskNow, { reportFailure: false });
+  const setupSandbox = useAtomCommand(machinesRpc.sandboxSetup, { reportFailure: false });
   const retrySync = useAtomCommand(machinesRpc.healthRetrySync, { reportFailure: false });
   return useCallback(
     async (action: MachineHealthAction) => {
       if (action.kind === "open") {
         open(action.link);
         return true;
+      }
+      if (action.kind === "setupSandbox") {
+        const outcome = await setupSandbox({ environmentId: action.environmentId, input: {} });
+        if (outcome._tag === "Success") {
+          toastManager.add({
+            type: outcome.value.available ? "success" : "info",
+            title: outcome.value.available
+              ? "Chat commands enabled"
+              : "Chat sandbox needs attention",
+            description: outcome.value.message,
+            timeout: outcome.value.available ? 5000 : 0,
+          });
+          return outcome.value.available;
+        }
+        if (!isAtomCommandInterrupted(outcome))
+          toastManager.add({
+            type: "error",
+            title: "Couldn't set up the sandbox",
+            description: failureMessage(squashAtomCommandFailure(outcome)),
+          });
+        return false;
       }
       const result =
         action.kind === "runTask"
@@ -69,6 +93,6 @@ export function useRunMachineHealthAction(): (action: MachineHealthAction) => Pr
       }
       return false;
     },
-    [open, retrySync, runTask],
+    [open, retrySync, runTask, setupSandbox],
   );
 }

@@ -39,6 +39,7 @@ export type MachineHealthLink =
     };
 
 export type MachineHealthAction =
+  | { readonly kind: "setupSandbox"; readonly label: string; readonly environmentId: EnvironmentId }
   | { readonly kind: "open"; readonly label: string; readonly link: MachineHealthLink }
   | {
       readonly kind: "runTask";
@@ -188,6 +189,10 @@ export function healthFixAction(
         : null;
     case "resume":
       return target?._tag === "thread" ? healthTargetAction(target, context) : null;
+    case "setup-sandbox":
+      return context.isConnected(context.originEnvironmentId)
+        ? { kind: "setupSandbox", label: "Fix", environmentId: context.originEnvironmentId }
+        : null;
     case "retry-sync":
       return retrySyncAction(target, context);
   }

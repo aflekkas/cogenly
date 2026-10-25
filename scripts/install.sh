@@ -216,6 +216,12 @@ else
   trap - EXIT
 fi
 
+# Keep package detection, non-interactive elevation and the confinement probe in Cogenly.
+# Older explicitly pinned releases may not have this command yet.
+if "$(runtime_entry "$target_dir")" security setup --help 2>/dev/null | grep -q -- "--local"; then
+  "$(runtime_entry "$target_dir")" security setup --local </dev/null
+fi
+
 step "Setting up the cogenly command..."
 mkdir -p "$bin_dir"
 ln -sfn "$(runtime_entry "$target_dir")" "${bin_dir}/cogenly"

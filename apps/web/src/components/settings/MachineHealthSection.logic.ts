@@ -39,6 +39,7 @@ export const HEALTH_CHECK_LABELS = {
   "tailscale-serve": "Private access",
   canary: "Canary check",
   "computer-use": "Computer use",
+  "chat-terminal-sandbox": "Chat command sandbox",
 } as const satisfies Record<MachineHealthCheckId, string>;
 
 /**

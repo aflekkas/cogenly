@@ -117,6 +117,7 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   // The composer's Sources picker runs for every paired client that can read threads.
   [WS_METHODS.integrationsSubscribeSources]: AuthOrchestrationReadScope,
   [WS_METHODS.machineSecurityStatus]: AuthOrchestrationReadScope,
+  [WS_METHODS.machineSandboxSetup]: AuthSettingsWriteScope,
   [WS_METHODS.computerUseStatus]: AuthOrchestrationReadScope,
   // Only opens System Settings on the server's Mac; the user still flips the switch there.
   [WS_METHODS.computerUseRequestPermission]: AuthOrchestrationOperateScope,

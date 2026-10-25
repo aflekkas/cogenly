@@ -78,6 +78,9 @@ const makeServer = (
     Effect.die("machine_health is not exercised here"),
   cliCommand: DesktopAppControl.DesktopAppControl["Service"]["cliCommand"] = () =>
     Effect.die("cli_command is not exercised here"),
+  setupSandbox: MachineHealth.MachineHealth["Service"]["setupSandbox"] = Effect.die(
+    "sandbox setup is not exercised here",
+  ),
 ) =>
   McpHttpServer.toolkitRegistration(EnvironmentToolkit, EnvironmentHandlers.layer).pipe(
     Layer.provideMerge(McpServer.McpServer.layer),
@@ -97,7 +100,7 @@ const makeServer = (
         Layer.succeed(MachineSecurity.MachineSecurity, {
           status: Effect.die("machine_security_status is not exercised here"),
         }),
-        Layer.mock(MachineHealth.MachineHealth)({ reportFor }),
+        Layer.mock(MachineHealth.MachineHealth)({ reportFor, setupSandbox }),
         Layer.mock(ChildProcessSpawner.ChildProcessSpawner)({}),
       ),
     ),
@@ -404,4 +407,43 @@ it.effect.each([
       ),
     ),
   ),
+);
+
+it.effect.each([
+  ["a full-access thread", threadCaller(fullAccessThreadId), true],
+  ["a plan-mode thread", threadCaller(planThreadId), false],
+  ["a read-only client", readOnlyClient, false],
+] as const)("machine_health_fix from %s", ([, scope, allowed]) =>
+  Effect.gen(function* () {
+    let calls = 0;
+    const outcome = yield* McpServer.McpServer.pipe(
+      Effect.flatMap((server) => server.callTool({ name: "machine_health_fix", arguments: {} })),
+      Effect.map(({ content }) =>
+        JSON.parse(content.map((part) => (part.type === "text" ? part.text : "")).join("")),
+      ),
+      Effect.provideService(McpInvocationContext.McpInvocationContext, scope),
+      Effect.provideService(McpSchema.McpServerClient, mcpClient),
+      Effect.provide(
+        makeServer(
+          () => Effect.die("unused"),
+          undefined,
+          undefined,
+          Effect.sync(() => {
+            calls++;
+            return {
+              available: false,
+              message: "Run: sudo apt-get install -y bubblewrap",
+              command: "sudo apt-get install -y bubblewrap",
+            };
+          }),
+        ),
+      ),
+    );
+    expect(calls).toBe(allowed ? 1 : 0);
+    expect(outcome).toMatchObject(
+      allowed
+        ? { available: false, command: "sudo apt-get install -y bubblewrap" }
+        : { code: "capability_denied" },
+    );
+  }),
 );

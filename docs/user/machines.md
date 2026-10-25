@@ -229,7 +229,13 @@ From a terminal on the machine, run `cogenly health` (or `cogenly doctor
 --health`). Add `--machine <environment-id>` to read a paired machine,
 and `--json` for structured output. The command exits with status 1 when a
 check fails, so a cron job or uptime monitor can use it. Agents read the same
-report with `machine_health`.
+report with `machine_health`. The chat command sandbox check explains whether
+bubblewrap is missing, AppArmor or the host blocks user namespaces, seccomp is
+unavailable, or the architecture is unsupported. Its **Fix** action installs the
+distro package using root or passwordless sudo and checks it again without a
+restart. If it cannot elevate, it shows the exact command instead. You can also
+run `cogenly health --fix` or `cogenly security setup`; agents use
+`machine_health_fix` on the affected machine.
 
 A scheduled task that says it succeeded only means its turn started. To prove
 the whole path works, turn on the health canary in your hub's health section
