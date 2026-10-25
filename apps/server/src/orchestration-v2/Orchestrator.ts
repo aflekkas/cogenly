@@ -11433,8 +11433,15 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       const parentTurnItem = parentProjection.turnItems.find(
         (candidate) => candidate.type === "subagent" && candidate.subagentId === task.id,
       );
+      const cancelledBeforeStart =
+        task.followUpOf !== undefined &&
+        childRun.status === "cancelled" &&
+        childRun.startedAt === null;
       const updatedTask: OrchestrationV2Subagent = {
         ...task,
+        ...(cancelledBeforeStart
+          ? { completionDelivery: { state: "disposed" as const, observedByRunId: null } }
+          : {}),
         providerThreadId: childRun.providerThreadId,
         status: terminalStatus,
         result: result.text,
@@ -11466,6 +11473,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               (candidate) => candidate.id === parentRun.providerThreadId,
             );
       const resultHandoff: OrchestrationV2ContextHandoff | null =
+        cancelledBeforeStart ||
         parentRun === undefined ||
         childProviderThread === undefined ||
         parentProviderThread === undefined
@@ -11524,7 +11532,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       // Committed with the result, so the parent hears of a failure exactly once
       // even when the server stops before the notice is queued.
       const failureNoticeEffects: ReadonlyArray<PendingOrchestrationEffectV2> =
-        terminalStatus === "completed"
+        terminalStatus === "completed" || cancelledBeforeStart
           ? []
           : [
               {

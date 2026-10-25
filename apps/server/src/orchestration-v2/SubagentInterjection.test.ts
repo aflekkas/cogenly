@@ -709,3 +709,61 @@ it.effect.each(["thread.stop", "run.interrupt"] as const)(
     }).pipe(Effect.provide(layer(provider, "followup-stopped-owner")));
   },
 );
+
+it.effect.each(["queued-run.cancel", "queue.send-all"] as const)(
+  "%s disposes an unstarted follow-up without waking its parent",
+  (type) => {
+    const provider = makeProvider(true);
+    return Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const worker = yield* Worker.OrchestrationEffectWorkerV2;
+      const childId = yield* delegate(yield* startParent);
+      yield* finishLatestTurn(provider, childId);
+      yield* awaitStored(
+        parentThreadId,
+        (row) => row.event.type === "subagent.updated" && row.event.payload.status === "completed",
+      );
+      yield* worker.drain();
+      yield* orchestrator.dispatch(userMessage(childId, "followup-active", "First follow-up"));
+      yield* worker.drain();
+      yield* awaitStored(
+        childId,
+        (row) => row.event.type === "provider-turn.updated" && row.event.payload.ordinal === 2,
+      );
+      yield* orchestrator.dispatch({
+        ...userMessage(childId, "followup-queued", "Second follow-up"),
+        deliveryIntent: undefined,
+        dispatchMode: { type: "queue_after_active" },
+      });
+      const queued = (yield* orchestrator.getThreadProjection(childId)).runs.find(
+        (run) => run.status === "queued",
+      )!;
+      const taskId = queued.delegatedTaskId!;
+      expect(taskId).toBeDefined();
+      yield* orchestrator.dispatch(
+        type === "queued-run.cancel"
+          ? {
+              type,
+              commandId: CommandId.make("remove-followup"),
+              threadId: childId,
+              runId: queued.id,
+            }
+          : { type, commandId: CommandId.make("remove-followup"), threadId: childId },
+      );
+      yield* orchestrator.recoverDelegatedTasks;
+      yield* worker.drain();
+      const parent = yield* orchestrator.getThreadProjection(parentThreadId);
+      expect(parent.subagents.find((task) => task.id === taskId)?.completionDelivery?.state).toBe(
+        "disposed",
+      );
+      expect(
+        parent.messages.some((message) => message.delegatedCompletion?.taskIds.includes(taskId)),
+      ).toBe(false);
+      expect(
+        parent.messages.some((message) =>
+          message.notification?.delegatedFailures?.some((failure) => failure.taskId === taskId),
+        ),
+      ).toBe(false);
+    }).pipe(Effect.provide(layer(provider, "cancel-queued-followup")));
+  },
+);
