@@ -10,7 +10,7 @@ import {
   DEFAULT_SERVER_SETTINGS,
   isUnconfiguredDefaultInstanceEnabled,
   requiredScopesForProjectMutation,
-  resolveProjectProviderInstanceEnabled,
+  isProviderInstanceIdEnabled,
   resolveProviderInstanceEnabled,
   ServerSettings,
   ServerSettingsPatch,
@@ -29,26 +29,16 @@ describe("ServerSettings response streaming", () => {
     expect(decodeServerSettings({}).responseStreamingMode).toBe("paragraph");
   });
 
-  it.each(["turn", "paragraph"])(
-    "round-trips %s as an environment setting and project override",
-    (responseStreamingMode) => {
-      const input = {
-        responseStreamingMode,
-        projectSettingsOverrides: { project: { responseStreamingMode } },
-      };
-      expect(encodeServerSettings(decodeServerSettings(input))).toMatchObject(input);
-      expect(decodeServerSettingsPatch(input)).toEqual(input);
-    },
-  );
+  it.each(["turn", "paragraph"])("round-trips %s", (responseStreamingMode) => {
+    const input = { responseStreamingMode };
+    expect(encodeServerSettings(decodeServerSettings(input))).toMatchObject(input);
+    expect(decodeServerSettingsPatch(input)).toEqual(input);
+  });
 
   it.each(["token", "unsupported"])("rejects %s in settings snapshots and writes", (mode) => {
-    for (const input of [
-      { responseStreamingMode: mode },
-      { projectSettingsOverrides: { project: { responseStreamingMode: mode } } },
-    ]) {
-      expect(() => decodeServerSettings(input)).toThrow();
-      expect(() => decodeServerSettingsPatch(input)).toThrow();
-    }
+    const input = { responseStreamingMode: mode };
+    expect(() => decodeServerSettings(input)).toThrow();
+    expect(() => decodeServerSettingsPatch(input)).toThrow();
   });
 });
 
@@ -81,7 +71,7 @@ describe("storage cleanup settings", () => {
     });
   });
 
-  it("accepts partial custom patches but requires complete stored project rules", () => {
+  it("accepts partial custom patches but requires complete stored rules", () => {
     expect(
       decodeServerSettingsPatch({
         worktreeCleanup: { mode: "custom", rules: { worktreeAfterDays: 8 } },
@@ -89,31 +79,9 @@ describe("storage cleanup settings", () => {
     ).toEqual({ worktreeCleanup: { mode: "custom", rules: { worktreeAfterDays: 8 } } });
     expect(() =>
       decodeServerSettings({
-        projectSettingsOverrides: {
-          project: { worktreeCleanup: { mode: "custom", rules: { worktreeAfterDays: 8 } } },
-        },
+        worktreeCleanup: { mode: "custom", rules: { worktreeAfterDays: 8 } },
       }),
     ).toThrow();
-    expect(
-      decodeServerSettings({
-        projectSettingsOverrides: {
-          project: {
-            worktreeCleanup: {
-              mode: "custom",
-              rules: {
-                worktreeAfterDays: null,
-                worktreeOnMerge: false,
-                worktreeOnDelete: false,
-                worktreeUnchanged: false,
-              },
-            },
-          },
-        },
-      }).projectSettingsOverrides[ProjectId.make("project")]?.worktreeCleanup,
-    ).toMatchObject({
-      mode: "custom",
-      rules: { worktreeSettledAfterDays: null, worktreeKeepWhen: "uncommitted-changes" },
-    });
   });
 
   it("decodes older custom rules with the default local-file policy", () => {
@@ -181,31 +149,19 @@ describe("ServerSettings default permissions", () => {
   });
 
   it.each(["approval-required", "auto-accept-edits", "auto", "full-access"])(
-    "round-trips %s as an environment default and project override",
+    "round-trips %s",
     (defaultRuntimeMode) => {
-      const input = {
-        defaultRuntimeMode,
-        projectSettingsOverrides: { project: { defaultRuntimeMode } },
-      };
+      const input = { defaultRuntimeMode };
       expect(encodeServerSettings(decodeServerSettings(input))).toMatchObject({
         defaultRuntimeMode: "full-access",
-        projectSettingsOverrides: { project: { defaultRuntimeMode: "full-access" } },
       });
-      expect(decodeServerSettingsPatch(input)).toEqual({
-        defaultRuntimeMode: "full-access",
-        projectSettingsOverrides: { project: { defaultRuntimeMode: "full-access" } },
-      });
+      expect(decodeServerSettingsPatch(input)).toEqual({ defaultRuntimeMode: "full-access" });
     },
   );
 
   it("rejects unsupported permission defaults", () => {
     expect(() => decodeServerSettings({ defaultRuntimeMode: "unsupported" })).toThrow();
     expect(() => decodeServerSettingsPatch({ defaultRuntimeMode: "unsupported" })).toThrow();
-    expect(() =>
-      decodeServerSettingsPatch({
-        projectSettingsOverrides: { project: { defaultRuntimeMode: "unsupported" } },
-      }),
-    ).toThrow();
   });
 });
 
@@ -598,18 +554,45 @@ describe("ServerSettings retired auto-settle", () => {
       sidebarAutoSettleAfterDays: 3,
       sidebarAutoSettleOnMerge: true,
       sidebarAutoSettleKeepPullRequests: false,
-      projectSettingsOverrides: {
-        "project-1": { sidebarAutoSettleAfterDays: null, defaultAutoPull: true },
-      },
     };
     const decoded = decodeServerSettings(stored);
     expect(decoded).not.toHaveProperty("sidebarAutoSettleAfterDays");
     expect(decoded).not.toHaveProperty("sidebarAutoSettleOnMerge");
     expect(decoded).not.toHaveProperty("sidebarAutoSettleKeepPullRequests");
-    expect(decoded.projectSettingsOverrides).toEqual({ "project-1": { defaultAutoPull: true } });
-    expect(decodeServerSettingsPatch(stored)).toEqual({
-      projectSettingsOverrides: { "project-1": { defaultAutoPull: true } },
-    });
+    expect(decodeServerSettingsPatch(stored)).toEqual({});
+  });
+});
+
+describe("ServerSettings retired project overrides", () => {
+  // Settings files and patches from before 0.3.2, valid or not: settings are
+  // global now, so every per-project value is dropped on decode.
+  const legacy = {
+    defaultAutoPull: true,
+    projectSettingsFolded: true,
+    projectSettingsOverrides: {
+      "project-1": {
+        defaultAutoPull: false,
+        defaultRuntimeMode: "unsupported",
+        worktreeCleanup: { mode: "custom", rules: { worktreeAfterDays: 8 } },
+        providerInstances: { codex: { enabled: false } },
+      },
+    },
+    projectAutoPullOverrides: { "project-1": false },
+    projectAgentBrowserAccessOverrides: { "project-1": false },
+    projectScriptOverrides: { "project-1": null },
+  };
+
+  it("loads settings files that still carry project overrides", () => {
+    const decoded = decodeServerSettings(legacy);
+    expect(decoded.defaultAutoPull).toBe(true);
+    for (const key of Object.keys(legacy).filter((key) => key.startsWith("project"))) {
+      expect(decoded).not.toHaveProperty(key);
+      expect(encodeServerSettings(decoded)).not.toHaveProperty(key);
+    }
+  });
+
+  it("accepts an older client's patch and keeps only its global keys", () => {
+    expect(decodeServerSettingsPatch(legacy)).toEqual({ defaultAutoPull: true });
   });
 });
 
@@ -908,19 +891,15 @@ describe("branch naming settings", () => {
       branchNameInstructions: "",
     });
   });
-  it.each(["static", "semantic", "custom"])(
-    "round-trips %s and project overrides",
-    (branchNamingMode) => {
-      const naming = {
-        branchNamingMode,
-        branchNamePrefix: "team/",
-        branchNameInstructions: "Include the issue ID.",
-      };
-      const input = { ...naming, projectSettingsOverrides: { project: naming } };
-      expect(encodeServerSettings(decodeServerSettings(input))).toMatchObject(input);
-      expect(decodeServerSettingsPatch(input)).toEqual(input);
-    },
-  );
+  it.each(["static", "semantic", "custom"])("round-trips %s", (branchNamingMode) => {
+    const input = {
+      branchNamingMode,
+      branchNamePrefix: "team/",
+      branchNameInstructions: "Include the issue ID.",
+    };
+    expect(encodeServerSettings(decodeServerSettings(input))).toMatchObject(input);
+    expect(decodeServerSettingsPatch(input)).toEqual(input);
+  });
 });
 
 describe("ServerSettings.removeAgentCreditsOnMerge", () => {
@@ -929,83 +908,23 @@ describe("ServerSettings.removeAgentCreditsOnMerge", () => {
     expect(
       decodeServerSettingsPatch({ removeAgentCreditsOnMerge: true }).removeAgentCreditsOnMerge,
     ).toBe(true);
-    expect(
-      decodeServerSettings({
-        projectSettingsOverrides: { project: { removeAgentCreditsOnMerge: true } },
-      }).projectSettingsOverrides["project" as ProjectId]?.removeAgentCreditsOnMerge,
-    ).toBe(true);
   });
 });
 
-describe("resolveProjectProviderInstanceEnabled", () => {
-  const projectId = "project-a" as ProjectId;
+describe("isProviderInstanceIdEnabled", () => {
   const instanceId = ProviderInstanceId.make("codex_work");
 
-  it("inherits the machine value when the project has no override", () => {
-    const settings: ServerSettings = {
+  it("reads the machine's flag, else the unconfigured default", () => {
+    const disabled: ServerSettings = {
       ...DEFAULT_SERVER_SETTINGS,
       providerInstances: {
         [instanceId]: { driver: ProviderDriverKind.make("codex"), enabled: false },
       },
     };
-    expect(resolveProjectProviderInstanceEnabled(settings, projectId, instanceId)).toBe(false);
-  });
-
-  it("lets a project enable an instance the machine disabled", () => {
-    const settings: ServerSettings = {
-      ...DEFAULT_SERVER_SETTINGS,
-      providerInstances: {
-        [instanceId]: { driver: ProviderDriverKind.make("codex"), enabled: false },
-      },
-      projectSettingsOverrides: {
-        [projectId]: { providerInstances: { [instanceId]: { enabled: true } } },
-      },
-    };
-    expect(resolveProjectProviderInstanceEnabled(settings, projectId, instanceId)).toBe(true);
-  });
-
-  it("lets a project disable an instance the machine enabled", () => {
-    const settings: ServerSettings = {
-      ...DEFAULT_SERVER_SETTINGS,
-      providerInstances: {
-        [instanceId]: { driver: ProviderDriverKind.make("codex"), enabled: true },
-      },
-      projectSettingsOverrides: {
-        [projectId]: { providerInstances: { [instanceId]: { enabled: false } } },
-      },
-    };
-    expect(resolveProjectProviderInstanceEnabled(settings, projectId, instanceId)).toBe(false);
-  });
-
-  it("always resolves to the machine value when no project is in scope", () => {
-    const settings: ServerSettings = {
-      ...DEFAULT_SERVER_SETTINGS,
-      providerInstances: {
-        [instanceId]: { driver: ProviderDriverKind.make("codex"), enabled: true },
-      },
-      projectSettingsOverrides: {
-        [projectId]: { providerInstances: { [instanceId]: { enabled: false } } },
-      },
-    };
-    expect(resolveProjectProviderInstanceEnabled(settings, null, instanceId)).toBe(true);
-  });
-
-  it("falls back to the unconfigured default when the instance has no settings entry", () => {
-    const settings: ServerSettings = { ...DEFAULT_SERVER_SETTINGS, providerInstances: {} };
-    // `codex_work` has no entry in `providerInstances`, so with no project
-    // override either, this is the same unconfigured-default fallback a
-    // machine-wide (no project) lookup would use.
-    expect(resolveProjectProviderInstanceEnabled(settings, projectId, instanceId)).toBe(
-      resolveProjectProviderInstanceEnabled(settings, null, instanceId),
+    expect(isProviderInstanceIdEnabled(disabled, instanceId)).toBe(false);
+    expect(isProviderInstanceIdEnabled(DEFAULT_SERVER_SETTINGS, instanceId)).toBe(
+      isUnconfiguredDefaultInstanceEnabled(instanceId),
     );
-
-    const overridden = {
-      ...settings,
-      projectSettingsOverrides: {
-        [projectId]: { providerInstances: { [instanceId]: { enabled: true } } },
-      },
-    };
-    expect(resolveProjectProviderInstanceEnabled(overridden, projectId, instanceId)).toBe(true);
   });
 });
 

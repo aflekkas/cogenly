@@ -30,9 +30,10 @@ export const HybridClock = Schema.Struct({
 });
 export type HybridClock = typeof HybridClock.Type;
 /**
- * `settings` carries universal server settings (id `universal`), and
- * `project-settings` one project's setting overrides (id: the project
- * folder's id); see SettingsSync.
+ * `settings` carries universal server settings (id `universal`); see
+ * SettingsSync. `project-settings` held per-project overrides from builds
+ * before 0.3.2. This build reads none of its fields, so older machines'
+ * documents are kept and relayed as they came, and never applied.
  */
 export const SharedDocumentKind = Schema.Literals([
   "project",
