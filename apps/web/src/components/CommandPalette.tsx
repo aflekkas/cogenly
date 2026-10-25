@@ -109,6 +109,7 @@ import {
   threadForksIntoProjects,
 } from "../projectLabels/projectLabels.logic";
 import { useMergeDuplicateProjects } from "../projectLabels/useMergeDuplicateProjects";
+import { useThreadRepository } from "../projectLabels/useThreadRepository";
 import { cloneableRepositoryRows } from "../projectLabels/repositoryPicker.logic";
 import { useRepositoryNames } from "../projectLabels/useRepositoryNames";
 import { ProjectFolderRowIcon, RepositoryRowIcon } from "../projectLabels/RepositorySourceRows";
@@ -731,6 +732,7 @@ function OpenCommandPaletteDialog(props: {
     [activeThread],
   );
   const activeFolderDirectory = useProjectLabelDirectory(activeFolderEnvironmentIds);
+  const threadRepositoryOf = useThreadRepository();
   const canMoveActiveThread = useAtomValue(
     serverEnvironment.moveThreadProjectFolder.permissionAtom(activeThread?.environmentId ?? null),
   );
@@ -2231,7 +2233,11 @@ function OpenCommandPaletteDialog(props: {
     });
   }
   if (activeThread && (activeCapabilities?.projectFolder ?? true)) {
-    const folderState = threadFolderState(activeThread, activeFolderDirectory);
+    const folderState = threadFolderState(
+      activeThread,
+      activeFolderDirectory,
+      threadRepositoryOf(activeThread),
+    );
     const thread = activeThread;
     const previous = priorFiling(folderState);
     // Chats re-home into a project in place; forks are explicit only.
@@ -2262,14 +2268,23 @@ function OpenCommandPaletteDialog(props: {
               searchTerms: [entry.label.name],
               title: entry.label.name,
               icon: <ProjectFolderIcon project={entry} className="size-4" />,
-              disabled: entry.key === folderState.current?.key,
+              disabled:
+                entry.key === folderState.current?.key || folderState.blocked.has(entry.key),
               ...(entry.key === folderState.current?.key
                 ? {
                     titleTrailingContent: (
                       <span className="text-xs text-muted-foreground/70">Current</span>
                     ),
                   }
-                : {}),
+                : folderState.blocked.has(entry.key)
+                  ? {
+                      titleTrailingContent: (
+                        <span className="text-xs text-muted-foreground/70">
+                          {folderState.blocked.get(entry.key)}
+                        </span>
+                      ),
+                    }
+                  : {}),
               run: async () => {
                 await moveThreadToFolder({
                   thread,

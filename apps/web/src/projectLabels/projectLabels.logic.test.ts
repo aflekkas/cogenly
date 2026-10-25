@@ -76,6 +76,18 @@ describe("threadFolderState", () => {
     expect(state.options.map((entry) => entry.label.name)).toEqual(["Bartr", "Spawn Partners"]);
   });
 
+  it("lists every project but blocks those without the thread's repository, saying why", () => {
+    const repository = { projectId: ProjectId.make("server"), name: "platform" };
+    const state = threadFolderState(thread(null), directory, repository);
+    expect(state.options.map((entry) => entry.label.name)).toEqual(["Bartr", "Spawn Partners"]);
+    expect([...state.blocked]).toEqual([[bartr.key, "Doesn't include platform"]]);
+    expect(state.inRepository).toBe(true);
+    // A chat in its machine's folder can go anywhere.
+    const chat = threadFolderState(thread(null), directory);
+    expect(chat.blocked.size).toBe(0);
+    expect(chat.inRepository).toBe(false);
+  });
+
   it("lets only an explicit filing be removed; Work in its repository's folder cannot", () => {
     expect(threadFolderState(thread("spawn", "repository"), directory)).toMatchObject({
       current: spawn,

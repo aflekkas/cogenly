@@ -263,6 +263,7 @@ import { openCreateProjectDialog } from "../projectLabels/CreateProjectDialogHos
 import { usePendingProjectFolderStore } from "../projectLabels/pendingProjectFolders";
 import { useMoveThreadToFolder } from "../projectLabels/useMoveThreadToFolder";
 import { useProjectLabelDirectory } from "../projectLabels/useProjectLabels";
+import { useThreadRepository } from "../projectLabels/useThreadRepository";
 import { useRepositoryNames } from "../projectLabels/useRepositoryNames";
 import { ProjectFolderIcon, type ProjectIconProject } from "../projectLabels/ProjectFolderMark";
 import {
@@ -2661,6 +2662,8 @@ export default function Sidebar() {
     }
     return projectDisplayNameByKey.get(projectKey) ?? repositoryNameOf(project);
   };
+  // The repository a thread works in, which move menus keep it with.
+  const threadRepositoryOf = useThreadRepository();
   // Whether Work runs in a real repository, not a machine's or a project's folder.
   const workInRepository = useCallback(
     (thread: { readonly environmentId: EnvironmentId; readonly projectId: ProjectId }) => {
@@ -4806,7 +4809,11 @@ export default function Sidebar() {
         const isSnoozed = snoozedThreadKeysRef.current.has(threadKey);
         // Presets resolve at menu-open time (same as the popover).
         const snoozePresets = resolveSnoozePresets(new Date(), timestampFormat);
-        const folderState = threadFolderState(thread, projectLabelDirectory);
+        const folderState = threadFolderState(
+          thread,
+          projectLabelDirectory,
+          threadRepositoryOf(thread),
+        );
         const machineList = machineDirectory.get(thread.environmentId) ?? null;
         const machineTargets = machineMoveTargetsForThreads(machineList, [
           thread.source.ownerMachine,
@@ -4865,7 +4872,9 @@ export default function Sidebar() {
                   id: entry.label.id,
                   name: entry.label.name,
                   color: entry.label.color,
+                  blockedReason: folderState.blocked.get(entry.key),
                 })),
+                inRepository: folderState.inRepository,
                 canMove: appAtomRegistry.get(
                   serverEnvironment.moveThreadProjectFolder.permissionAtom(thread.environmentId),
                 ),
@@ -4911,7 +4920,11 @@ export default function Sidebar() {
               : (folderState.options.find(
                   (entry) => entry.label.id === clickedId.slice("move-folder:".length),
                 ) ?? null);
-          if (clickedId !== "remove-folder" && target === null) return;
+          if (
+            clickedId !== "remove-folder" &&
+            (target === null || folderState.blocked.has(target.key))
+          )
+            return;
           await moveThreadToFolder({
             thread,
             folder: target && { id: target.label.id, name: target.label.name },

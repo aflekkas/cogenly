@@ -216,9 +216,13 @@ export interface ThreadActionMenuFolder {
     readonly name: string;
     /** The project's stored color name; its folder icon takes it. */
     readonly color?: string | undefined;
+    /** Why the thread can't go there, such as "Doesn't include platform"; listed, disabled. */
+    readonly blockedReason?: string | undefined;
   }>;
   /** The move command's permission on the thread's environment. */
   readonly canMove: boolean;
+  /** Work in a repository can't go into a new project, which would not include it. */
+  readonly inRepository?: boolean;
   /** A chat with turns: picking a project forks it there instead of moving it. */
   readonly forks?: boolean;
 }
@@ -241,7 +245,8 @@ export function threadActionRequiresOperate(action: ThreadActionMenuId): boolean
 /**
  * "Move to project…" ("Fork into project…" for a chat with turns, which goes
  * into a project as a fork) with "Open <folder>" first when filed, then every folder
- * (the current one checked), "Remove from project", and "New project…".
+ * (the current one checked, one that can't take the thread disabled with why),
+ * "Remove from project", and "New project…" unless the thread works in a repository.
  */
 function folderMenuItems(
   folder: ThreadActionMenuFolder | undefined,
@@ -258,13 +263,15 @@ function folderMenuItems(
     });
   }
   folder.options.forEach((option, index) => {
+    const isCurrent = option.id === current?.id;
+    const blocked = !isCurrent && option.blockedReason !== undefined;
     children.push({
       id: `move-folder:${option.id}`,
-      label: option.name,
+      label: blocked ? `${option.name} (${option.blockedReason})` : option.name,
       icon: "folder",
       iconColor: projectLabelColorValue(option.color),
-      checked: option.id === current?.id,
-      disabled: disabled || option.id === current?.id,
+      checked: isCurrent,
+      disabled: disabled || isCurrent || blocked,
       separatorBefore: index === 0 && children.length > 0,
     });
   });
@@ -276,11 +283,13 @@ function folderMenuItems(
       separatorBefore: children.length > 0,
     });
   }
-  children.push({
-    id: "new-folder",
-    label: "New project…",
-    separatorBefore: children.length > 0,
-  });
+  if (folder.inRepository !== true) {
+    children.push({
+      id: "new-folder",
+      label: "New project…",
+      separatorBefore: children.length > 0,
+    });
+  }
   const label = folder.forks === true ? "Fork into project…" : "Move to project…";
   return [{ id: "move-folder", label, icon: "folder", children }];
 }

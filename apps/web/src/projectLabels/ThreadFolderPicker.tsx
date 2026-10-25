@@ -24,13 +24,20 @@ import {
   priorFiling,
   threadFolderState,
   threadForksIntoProjects,
+  type ProjectLabelKey,
 } from "./projectLabels.logic";
 import { ProjectFolderIcon } from "./ProjectFolderMark";
 import { useMoveThreadToFolder } from "./useMoveThreadToFolder";
 import { useProjectLabelDirectory } from "./useProjectLabels";
+import { useThreadRepository } from "./useThreadRepository";
 
 type FolderOption =
-  | { readonly kind: "folder"; readonly key: string; readonly id: string; readonly name: string }
+  | {
+      readonly kind: "folder";
+      readonly key: ProjectLabelKey;
+      readonly id: string;
+      readonly name: string;
+    }
   | { readonly kind: "remove"; readonly key: "remove" }
   | { readonly kind: "create"; readonly key: "create"; readonly name: string };
 
@@ -71,7 +78,8 @@ export function ThreadFolderPicker(props: {
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const state = thread ? threadFolderState(thread, directory) : null;
+  const repositoryOf = useThreadRepository();
+  const state = thread ? threadFolderState(thread, directory, repositoryOf(thread)) : null;
   const current = state?.current ?? null;
 
   const options = useMemo((): FolderOption[] => {
@@ -88,9 +96,11 @@ export function ThreadFolderPicker(props: {
     if (needle === "" && state.current !== null && state.removable) {
       result.push({ kind: "remove", key: "remove" });
     }
+    // A new project would not include the thread's repository either.
     if (
       needle !== "" &&
       canCreate &&
+      !state.inRepository &&
       !state.options.some((entry) => entry.label.name.toLowerCase() === needle)
     ) {
       result.push({ kind: "create", key: "create", name: query.trim() });
@@ -123,7 +133,7 @@ export function ThreadFolderPicker(props: {
       if (option.kind === "folder") {
         if (option.id === current?.label.id) return;
         const target = state.options.find((entry) => entry.key === option.key);
-        if (!target) return;
+        if (!target || state.blocked.has(target.key)) return;
         await moveThread({
           thread,
           folder: { id: target.label.id, name: target.label.name },
@@ -192,7 +202,14 @@ export function ThreadFolderPicker(props: {
             <ComboboxItem
               key={option.key}
               value={option}
-              disabled={!canMove || busy || (option.kind === "create" && option.name.length > 200)}
+              disabled={
+                !canMove ||
+                busy ||
+                (option.kind === "create" && option.name.length > 200) ||
+                (option.kind === "folder" &&
+                  option.id !== current?.label.id &&
+                  state.blocked.has(option.key))
+              }
             >
               {option.kind === "folder" ? (
                 <>
@@ -201,7 +218,13 @@ export function ThreadFolderPicker(props: {
                     className="size-4"
                   />
                   <span className="min-w-0 flex-1 truncate">{option.name}</span>
-                  {option.id === current?.label.id ? <CheckIcon className="ml-auto" /> : null}
+                  {option.id === current?.label.id ? (
+                    <CheckIcon className="ml-auto" />
+                  ) : state.blocked.has(option.key) ? (
+                    <span className="ml-auto shrink-0 text-xs text-muted-foreground">
+                      {state.blocked.get(option.key)}
+                    </span>
+                  ) : null}
                 </>
               ) : option.kind === "remove" ? (
                 <>

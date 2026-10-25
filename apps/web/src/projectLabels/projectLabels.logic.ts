@@ -393,8 +393,22 @@ export interface ThreadFolderState {
   readonly viaRepository: boolean;
   /** Only an explicit filing can be removed; removing restores the repository default. */
   readonly removable: boolean;
-  /** Active folders on the thread's environment it can move to, alphabetical. */
+  /** Active folders on the thread's environment, alphabetical. */
   readonly options: ReadonlyArray<EnvironmentProjectLabel>;
+  /**
+   * Why an option can't take the thread, by option key: a project that does
+   * not include the repository it works in ("Doesn't include platform").
+   * Such options are listed, disabled; a move menu never links a repository.
+   */
+  readonly blocked: ReadonlyMap<ProjectLabelKey, string>;
+  /** Whether the thread works in a repository, so a new project could not take it either. */
+  readonly inRepository: boolean;
+}
+
+/** The repository a thread works in, for move menus; null for a machine's or a project's folder. */
+export interface ThreadRepository {
+  readonly projectId: ProjectId;
+  readonly name: string;
 }
 
 /**
@@ -418,6 +432,7 @@ export function threadFolderState(
     readonly labels: ReadonlyArray<EnvironmentProjectLabel>;
     readonly byKey: ReadonlyMap<ProjectLabelKey, EnvironmentProjectLabel>;
   },
+  repository: ThreadRepository | null = null,
 ): ThreadFolderState {
   const folderId = threadProjectFolderId(thread);
   const current =
@@ -427,18 +442,28 @@ export function threadFolderState(
   const source = current === null ? null : (thread.source.projectFolderSource ?? null);
   // A project's own conversation stays in its project: nowhere to move it.
   const projectHome = thread.id !== undefined && isProjectChatThread(thread, directory.labels);
+  // An archived folder is never offered, though a thread already in one
+  // still names it as `current`.
+  const options = projectHome
+    ? []
+    : projectLabelsOn(directory.labels, thread.environmentId).filter(
+        (entry) => !isProjectLabelArchived(entry.label),
+      );
+  const blocked = new Map<ProjectLabelKey, string>();
+  if (repository !== null) {
+    for (const entry of options) {
+      if (!entry.label.repositoryIds.includes(repository.projectId))
+        blocked.set(entry.key, `Doesn't include ${repository.name}`);
+    }
+  }
   return {
     current,
     source,
     viaRepository: source === "repository",
     removable: source === "explicit" && !projectHome,
-    // An archived folder is never offered, though a thread already in one
-    // still names it as `current`.
-    options: projectHome
-      ? []
-      : projectLabelsOn(directory.labels, thread.environmentId).filter(
-          (entry) => !isProjectLabelArchived(entry.label),
-        ),
+    options,
+    blocked,
+    inRepository: repository !== null,
   };
 }
 
