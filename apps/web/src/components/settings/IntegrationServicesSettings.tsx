@@ -30,6 +30,7 @@ import {
 } from "./integrationServices.logic";
 import { openSignInPage } from "./openIntegrationSignIn";
 import { useStatusFade } from "./integrationStatusMotion";
+import { useEnvironmentMachineList } from "../../machines/useMachines";
 import { ScopedSwitch } from "./ScopedSwitch";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { SettingsRow, SettingsSection } from "./settingsLayout";
@@ -252,6 +253,11 @@ function AccountRow({
 }) {
   const { integration } = summary;
   const { labels } = useEnvironmentProjectLabels(environmentId);
+  // Why an account stays on this machine only matters once there is another one.
+  const paired =
+    useEnvironmentMachineList(environmentId)?.machines.some(
+      (machine) => machine.pairing === "paired",
+    ) ?? false;
   const update = useOrchestrationCommand(integrationsRpc.update, { reportFailure: false });
   const remove = useOrchestrationCommand(integrationsRpc.remove, { reportFailure: false });
   const test = useOrchestrationCommand(integrationsRpc.testConnection, { reportFailure: false });
@@ -313,6 +319,7 @@ function AccountRow({
           <span ref={statusRef}>{status.label}</span>
           {` · ${scopeLabel(integration.scope, labels)}`}
           {integration.accountLabel ? ` · ${integration.accountLabel}` : ""}
+          {paired && summary.notSyncedReason ? ` · ${summary.notSyncedReason}` : ""}
         </>
       }
       control={
