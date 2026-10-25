@@ -19,6 +19,7 @@ import * as Scheduler from "../scheduling/Scheduler.ts";
 import * as Integrations from "../integrations/Integrations.ts";
 import * as Credentials from "../integrations/IntegrationCredentials.ts";
 import * as IntegrationSyncPeers from "../integrations/IntegrationSyncPeers.ts";
+import { mapNativeIntegrations } from "../integrations/NativeIntegrationImport.ts";
 import * as Tokens from "../integrations/IntegrationTokens.ts";
 import { StoredIntegration } from "../integrations/StoredIntegration.ts";
 import * as IntegrationSync from "./IntegrationSync.ts";
@@ -304,6 +305,50 @@ describe("integration definitions between paired machines", () => {
         expect((yield* hub.read(id))?.deletedAt).not.toBeNull();
         expect((yield* hub.state.get("integration", id))?.tombstone).not.toBeNull();
         expect((yield* hub.integrations.list()).integrations).toEqual([]);
+      }).pipe(Effect.scoped),
+    20000,
+  );
+
+  it.live(
+    "imported native definitions: web ones ask for sign-in on the peer, command runners stay home",
+    () =>
+      Effect.gen(function* () {
+        const { hub, spoke } = yield* paired;
+        // What the Mac's import creates from its Claude config.
+        const preview = mapNativeIntegrations(
+          {
+            mcpServers: {
+              linear: { type: "http", url: "https://mcp.linear.app/mcp" },
+              notion: {
+                type: "http",
+                url: "https://mcp.notion.com/mcp",
+                headers: { Authorization: "Bearer native-private" },
+              },
+              repl: { command: "node", env: { TOKEN: "native-private" } },
+            },
+          },
+          {},
+        );
+        for (const imported of preview.definitions) yield* hub.integrations.create(imported);
+        yield* exchange(hub, spoke);
+
+        const received = (yield* spoke.integrations.list()).integrations;
+        expect(received.map((summary) => summary.integration.name).sort()).toEqual([
+          "claude-linear",
+          "claude-notion",
+        ]);
+        for (const summary of received) {
+          expect(summary.status).toBe("needs_sign_in");
+          expect(summary.setup?.title).toBe("Sign in on this machine");
+          expect(summary.integration.enabled).toBe(false);
+          // Credentials reach a peer only through vault sync, never in the definition.
+          expect(summary.integration.headers).toEqual({});
+        }
+        const shared = yield* hub.sql<{
+          fields_json: string;
+        }>`SELECT fields_json FROM shared_documents WHERE kind = 'integration'`;
+        expect(shared).toHaveLength(2);
+        expect(JSON.stringify(shared)).not.toMatch(/native-private|credential:|"node"/);
       }).pipe(Effect.scoped),
     20000,
   );

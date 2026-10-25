@@ -5,14 +5,8 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import * as HostProcess from "@cogenly/shared/HostProcess";
-import * as Schema from "effect/Schema";
-import {
-  OrchestrationProjectShell,
-  ProviderInstanceId,
-  ProviderDriverKind,
-} from "@cogenly/contracts";
+import { ProviderInstanceId, ProviderDriverKind } from "@cogenly/contracts";
 import * as ServerSettings from "../serverSettings.ts";
-import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as NativeImport from "./NativeIntegrationImport.ts";
 import { parse } from "smol-toml";
 import { mapNativeIntegrations, claudeAiConnectorNames } from "./NativeIntegrationImport.ts";
@@ -172,9 +166,6 @@ it.effect(
           Layer.provide(NodePath.layer),
           Layer.provide(ServerSettings.layerTest()),
           Layer.provide(
-            Layer.mock(ProjectStore.ProjectStoreV2)({ listShells: () => Effect.succeed([]) }),
-          ),
-          Layer.provide(
             Layer.succeed(
               FileSystem.FileSystem,
               FileSystem.makeNoop({
@@ -227,15 +218,6 @@ it("withholds every nonstandard imported URL path and requests private vault re-
   }
 });
 
-const project = Schema.decodeUnknownSync(OrchestrationProjectShell)({
-  id: "fixture-project",
-  title: "Fixture",
-  workspaceRoot: "/fixture/work/repo",
-  defaultModelSelection: null,
-  scripts: [],
-  createdAt: "2026-01-01T00:00:00.000Z",
-  updatedAt: "2026-01-01T00:00:00.000Z",
-});
 const fixturePreview = (files: ReadonlyMap<string, string>, broken = false) => {
   const read: string[] = [];
   return Effect.gen(function* () {
@@ -273,9 +255,6 @@ const fixturePreview = (files: ReadonlyMap<string, string>, broken = false) => {
           }),
         ),
         Layer.provide(
-          Layer.mock(ProjectStore.ProjectStoreV2)({ listShells: () => Effect.succeed([project]) }),
-        ),
-        Layer.provide(
           Layer.succeed(
             FileSystem.FileSystem,
             FileSystem.makeNoop({
@@ -299,7 +278,7 @@ const fixturePreview = (files: ReadonlyMap<string, string>, broken = false) => {
 };
 
 it.effect(
-  "reads each provider instance home and project configs without falling back to default homes",
+  "reads each provider instance home without falling back to default homes, and leaves repo configs to the checkout",
   () =>
     Effect.gen(function* () {
       const { preview, read } = yield* fixturePreview(
@@ -308,7 +287,7 @@ it.effect(
           ["/fixture/.codex/config.toml", '[mcp_servers.decoy]\nurl="https://wrong.example/mcp"'],
           [
             "/fixture/claude-profile/.claude.json",
-            '{"mcpServers":{"work":{"url":"https://claude-profile.example/mcp"}}}',
+            '{"mcpServers":{"work":{"url":"https://claude-profile.example/mcp"}},"projects":{"/fixture/work/repo":{"mcpServers":{"local":{"url":"https://claude-local.example/mcp"}}}}}',
           ],
           [
             "/fixture/claude-env/.claude.json",
@@ -316,7 +295,7 @@ it.effect(
           ],
           [
             "/fixture/codex-profile/config.toml",
-            '[mcp_servers.work]\nurl="https://codex-profile.example/mcp"',
+            '[mcp_servers.work]\nurl="https://codex-profile.example/mcp"\n[projects."/fixture/work/repo"]\ntrust_level="trusted"',
           ],
           [
             "/fixture/codex-env/config.toml",
@@ -324,12 +303,8 @@ it.effect(
           ],
           ["/fixture/work/.git", ""],
           [
-            "/fixture/work/.codex/config.toml",
-            '[mcp_servers.parent]\nurl="https://parent-project.example/mcp"',
-          ],
-          [
             "/fixture/work/repo/.mcp.json",
-            '{"mcpServers":{"project":{"url":"https://claude-project.example/mcp","headers":{"Authorization":"fixture-private"}}}}',
+            '{"mcpServers":{"project":{"url":"https://claude-project.example/mcp"}}}',
           ],
           [
             "/fixture/work/repo/.codex/config.toml",
@@ -339,39 +314,26 @@ it.effect(
       );
       expect(read).not.toContain("/fixture/.claude.json");
       expect(read).not.toContain("/fixture/.codex/config.toml");
-      for (const source of [
-        "claude-profile",
-        "claude-env",
-        "codex-profile",
-        "codex-env",
-        "claude-project",
-        "codex-project",
-        "parent-project",
-      ])
-        expect(
-          preview.definitions.some(
-            (definition) => definition.url === `https://${source}.example/mcp`,
-          ),
-        ).toBe(true);
+      // Checked-in servers load with the repo; importing them would sync them without it.
+      expect(read).not.toContain("/fixture/work/repo/.mcp.json");
+      expect(read).not.toContain("/fixture/work/repo/.codex/config.toml");
+      expect(preview.definitions.map((definition) => definition.url).sort()).toEqual(
+        ["claude-profile", "claude-env", "codex-profile", "codex-env", "claude-local"]
+          .map((source) => `https://${source}.example/mcp`)
+          .sort(),
+      );
       expect(new Set(preview.definitions.map((definition) => definition.name)).size).toBe(
         preview.definitions.length,
       );
       expect(preview.incomplete).toBe(false);
+      // A user's private per-project Claude entry lives outside the repo, so it is imported.
       expect(preview.servers).toContainEqual({
-        label: "project",
+        label: "local",
         provider: "claude",
         scope: "project",
-        file: "~/work/repo/.mcp.json",
-        status: "needs-secret",
-      });
-      expect(preview.servers).toContainEqual({
-        label: "parent",
-        provider: "codex",
-        scope: "project",
-        file: "~/work/.codex/config.toml",
+        file: "~/claude-profile/.claude.json",
         status: "ready",
       });
-      expect(JSON.stringify(preview)).not.toContain("fixture-private");
       expect(preview.definitions.every((definition) => definition.enabled === false)).toBe(true);
     }),
 );

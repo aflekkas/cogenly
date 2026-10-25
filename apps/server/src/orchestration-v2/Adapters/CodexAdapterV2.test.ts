@@ -5,6 +5,7 @@ import {
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   CheckpointId,
+  EnvironmentId,
   RuntimeMode,
   type ModelSelection,
   NodeId,
@@ -24,6 +25,7 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import { TestClock } from "effect/testing";
 import * as ProviderAdapter from "@cogenly/provider-core/server/ProviderAdapter";
+import { nativeMcpContextLine } from "../../integrations/NativeMcpPolicy.ts";
 import * as CodexAdapterV2 from "./CodexAdapterV2.ts";
 
 const decodeRuntimeMode = Schema.decodeUnknownSync(RuntimeMode);
@@ -1439,6 +1441,9 @@ describe("Codex provider connector duplicates", () => {
         "asdk_app_6aa2b88dd4e881918d850abcf8b92206",
       ],
       mcpServerNames: ["linear", "notion-sse", "spawn-prod-followups", "node_repl"],
+      // Without config layers nothing is known to come from the repo.
+      repoServerNames: [],
+      managedServerNames: [],
     });
   });
 
@@ -1475,6 +1480,102 @@ describe("Codex provider connector duplicates", () => {
       Object.fromEntries(names.map((name) => [name, { enabled: false }])),
     );
   });
+
+  // `config/read` with includeLayers, highest precedence first, as Codex 0.164 returns it.
+  const layered = CodexAdapterV2.codexProviderDuplicates({
+    apps: [],
+    mcpServers: {
+      node_repl: { command: "/Applications/ChatGPT.app/node_repl", enabled: false },
+      "spawn-prod-followups": { url: "https://portal.spawnpartners.com/api/mcp/connect" },
+      "repo-tools": { command: "node", args: ["tools.mjs"] },
+      "corp-search": { url: "https://search.corp.example/mcp" },
+    },
+    layers: [
+      // The launch override: an enabled flag alone defines no server.
+      {
+        name: { type: "sessionFlags" },
+        config: { mcp_servers: { node_repl: { enabled: false } } },
+      },
+      {
+        name: { type: "enterpriseManaged" },
+        config: { mcp_servers: { "corp-search": { url: "https://search.corp.example/mcp" } } },
+      },
+      {
+        name: { type: "project" },
+        config: { mcp_servers: { "repo-tools": { command: "node", args: ["tools.mjs"] } } },
+      },
+      {
+        // Untrusted in config/read, but threads in the repo still load it.
+        name: { type: "project" },
+        config: { mcp_servers: { "untrusted-repo-tools": { command: "node" } } },
+      },
+      {
+        name: { type: "user" },
+        config: {
+          mcp_servers: {
+            node_repl: { command: "/Applications/ChatGPT.app/node_repl" },
+            "spawn-prod-followups": { url: "https://portal.spawnpartners.com/api/mcp/connect" },
+            cogenly: { url: "https://stale.example/mcp" },
+          },
+        },
+      },
+    ],
+  });
+
+  it("keeps the repo's own servers and turns off servers from outside the repo", () => {
+    assert.sameMembers(
+      [...layered.mcpServerNames],
+      ["node_repl", "spawn-prod-followups", "corp-search"],
+    );
+    assert.sameMembers(
+      [...(layered.repoServerNames ?? [])],
+      ["repo-tools", "untrusted-repo-tools"],
+    );
+    assert.deepEqual(layered.managedServerNames, ["corp-search"]);
+    const session = {
+      environmentId: EnvironmentId.make("environment-codex-native"),
+      threadId: ThreadId.make("thread-codex-native"),
+      providerSessionId: "mcp-session-codex-native",
+      providerInstanceId: ProviderInstanceId.make("codex"),
+      endpoint: "http://127.0.0.1:43123/mcp",
+      authorizationHeader: "Bearer codex-native",
+      browserToolsAvailable: true,
+    };
+    const { config } = CodexAdapterV2.codexThreadRuntimeParams({
+      mcpSession: session,
+      providerDuplicates: layered,
+    });
+    const servers = config.mcp_servers as Record<string, Record<string, unknown>>;
+    assert.deepEqual(servers["spawn-prod-followups"], { enabled: false });
+    assert.deepEqual(servers["corp-search"], { enabled: false });
+    assert.notProperty(servers, "repo-tools");
+    // Cogenly's server carries integrations, browser, devices and computer use.
+    assert.include(servers.cogenly, { enabled: true, url: "http://127.0.0.1:43123/mcp" });
+    assert.equal(config["features.plugins"], false);
+    assert.equal(config["features.apps"], false);
+  });
+
+  it.effect("names repo and administrator-managed servers in the turn context", () =>
+    Effect.gen(function* () {
+      const params = yield* CodexAdapterV2.buildCodexTurnStartParams({
+        nativeThreadId: "native-context-thread",
+        codexInput: [{ type: "text", text: "lint the repo" }],
+        runtimePolicy: { runtimeMode: "full-access", interactionMode: "default", cwd: "/repo" },
+        modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+        nativeMcpContext: nativeMcpContextLine({
+          repoFile: ".codex/config.toml",
+          repo: layered.repoServerNames,
+          managed: layered.managedServerNames,
+        }),
+      });
+      const value = params.additionalContext?.cogenly_native_mcp?.value ?? "";
+      assert.include(value, "MCP servers from this repo (.codex/config.toml): repo-tools");
+      assert.include(
+        value,
+        "Administrator-managed MCP servers, not Cogenly integrations: corp-search",
+      );
+    }),
+  );
 
   it("keeps every provider connector when the user opts in", () => {
     const { config } = CodexAdapterV2.codexThreadRuntimeParams({

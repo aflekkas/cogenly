@@ -132,14 +132,38 @@ export const claudeSessionTranscriptExists = Effect.fn("claudeSessionTranscriptE
  */
 export const hasClaudeManagedMcpConfig = Effect.fn("hasClaudeManagedMcpConfig")(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
-  const platform = yield* HostProcess.Platform;
-  const managedMcpConfigPath =
-    platform === "darwin"
-      ? "/Library/Application Support/ClaudeCode/managed-mcp.json"
-      : platform === "win32"
-        ? "C:\\Program Files\\ClaudeCode\\managed-mcp.json"
-        : "/etc/claude-code/managed-mcp.json";
-  return yield* fileSystem.exists(managedMcpConfigPath).pipe(Effect.orElseSucceed(() => false));
+  return yield* fileSystem
+    .exists(yield* claudeManagedMcpConfigPath)
+    .pipe(Effect.orElseSucceed(() => false));
+});
+
+const claudeManagedMcpConfigPath = Effect.map(HostProcess.Platform, (platform) =>
+  platform === "darwin"
+    ? "/Library/Application Support/ClaudeCode/managed-mcp.json"
+    : platform === "win32"
+      ? "C:\\Program Files\\ClaudeCode\\managed-mcp.json"
+      : "/etc/claude-code/managed-mcp.json",
+);
+
+const decodeManagedMcpConfig = Schema.decodeUnknownOption(
+  Schema.fromJsonString(
+    Schema.Struct({ mcpServers: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)) }),
+  ),
+);
+
+/**
+ * The servers an administrator's `managed-mcp.json` defines, so agents can be
+ * told they are outside Cogenly; undefined when there is no such file. A file
+ * that cannot be read or parsed still counts as installed, with no names.
+ */
+export const claudeManagedMcpServerNames = Effect.fn("claudeManagedMcpServerNames")(function* () {
+  if (!(yield* hasClaudeManagedMcpConfig())) return undefined;
+  const fileSystem = yield* FileSystem.FileSystem;
+  const text = yield* fileSystem
+    .readFileString(yield* claudeManagedMcpConfigPath)
+    .pipe(Effect.orElseSucceed(() => ""));
+  const config = decodeManagedMcpConfig(text);
+  return config._tag === "Some" ? Object.keys(config.value.mcpServers ?? {}) : [];
 });
 
 export const makeClaudeContinuationGroupKey = Effect.fn("makeClaudeContinuationGroupKey")(

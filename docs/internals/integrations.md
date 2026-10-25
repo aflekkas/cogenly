@@ -9,21 +9,28 @@ vendor setup flows. Add service knowledge there without adding a client wizard.
 
 Native CLI servers, plugins and hosted connectors otherwise bypass Cogenly's
 scope, status and credential handling and duplicate its tools. They are suppressed
-by default after the owner reviews or skips the native-definition import offer.
-The single preference `useProviderConnectors` restores native configuration for
-new sessions. The shared runtime policy carries it to all turn paths. Native
-configuration is never rewritten.
+by default, whether or not the native-definition import offer was reviewed. The
+single universal preference `useProviderConnectors` restores native
+configuration for new sessions. The shared runtime policy carries it to all turn
+paths. Native configuration is never rewritten.
 
-Claude uses strict MCP configuration and disables claude.ai MCP loading in its
-environment. Administrator-managed `managed-mcp.json` rejects the strict flag;
-Cogenly omits that flag, and administrator-managed servers may remain available.
-Codex has no strict flag: before launching each session, Cogenly captures only
-enabled server names from `mcp list --json` and disables each, plus plugins/apps,
-using session overrides. Thread configuration also covers project-local servers
-and propagates to native children. A failed server enumeration fails session
-startup rather than silently restoring bypass access. Muse SDK 1.4.6 only admits
-additive session MCP configuration and ignores unknown keys; native suppression
-is unsupported and its turns carry that notice.
+Servers checked into a repository are part of the project and stay on: they
+travel with every checkout, so they are never imported or synced. Claude uses
+strict MCP configuration and disables claude.ai MCP loading in its environment;
+strict mode also drops the repo's `.mcp.json`, so Cogenly reads it from the
+checkout (`readClaudeRepoMcpServers`) and passes it in the explicit config, which
+Claude loads without its project-server approval prompt.
+Administrator-managed `managed-mcp.json` rejects the strict flag; Cogenly omits
+that flag, and the managed servers remain and are named to agents. Codex has no
+strict flag: before launching each session, Cogenly lists enabled servers from
+the home directory, outside any repository, with `mcp list --json` and disables
+each, plus plugins/apps, using session overrides. Each thread then reads its
+cwd's config layers and disables every server whose transport is defined
+outside a `project` layer; that thread configuration propagates to native
+children. A failed server enumeration fails session startup rather than
+silently restoring bypass access. Muse SDK 1.4.6 only admits additive session
+MCP configuration and ignores unknown keys; native suppression is unsupported
+and its turns carry that notice.
 
 Imports are disconnected definitions. Header and environment values become vault
 references; potentially secret command arguments are withheld for agent review.

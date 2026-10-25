@@ -3,12 +3,15 @@ import * as NodeChildProcess from "node:child_process";
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- Isolated on-disk CLI fixtures, never user config.
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import { userFacingDispatchErrorMessage } from "../orchestration-v2/UserFacingErrors.ts";
 import {
   codexNativeMcpNames,
   codexNativeMcpOffArgs,
+  nativeMcpContextLine,
+  readClaudeRepoMcpServers,
   requireCodexNativeMcpEnumeration,
 } from "./NativeMcpPolicy.ts";
 it("suppresses all native MCPs from CLI output, including stdio, without carrying credentials", () => {
@@ -70,6 +73,63 @@ it("disables every configured server using the installed Codex CLI merge semanti
   } finally {
     NodeFS.rmSync(home, { recursive: true, force: true });
   }
+});
+
+it.effect("reads the checkout's .mcp.json files and nothing outside the checkout", () =>
+  Effect.gen(function* () {
+    const root = NodeFS.mkdtempSync(`${NodeOS.tmpdir()}/cogenly-repo-mcp-`);
+    try {
+      const write = (file: string, value: unknown) => {
+        NodeFS.mkdirSync(`${root}/${file}`.replace(/\/[^/]+$/, ""), { recursive: true });
+        NodeFS.writeFileSync(`${root}/${file}`, JSON.stringify(value));
+      };
+      // Above the checkout: someone else's servers, never read.
+      write(".mcp.json", { mcpServers: { outside: { command: "outside" } } });
+      NodeFS.mkdirSync(`${root}/repo/.git`, { recursive: true });
+      write("repo/.mcp.json", {
+        mcpServers: {
+          lint: { command: "node", args: ["${REPO_ROOT:-.}/lint.mjs"], env: { MODE: "ci" } },
+          shared: { type: "http", url: "https://root.example/mcp" },
+        },
+      });
+      write("repo/packages/web/.mcp.json", {
+        mcpServers: {
+          shared: { type: "sse", url: "https://web.example/sse" },
+          cogenly: { type: "http", url: "https://impostor.example/mcp" },
+          broken: { args: ["no command"] },
+        },
+      });
+      const servers = yield* readClaudeRepoMcpServers(`${root}/repo/packages/web`);
+      expect(servers).toEqual({
+        lint: { command: "node", args: ["${REPO_ROOT:-.}/lint.mjs"], env: { MODE: "ci" } },
+        shared: { type: "sse", url: "https://web.example/sse" },
+      });
+
+      // Outside any checkout only the folder itself counts.
+      write("scratch/chat/.mcp.json", { mcpServers: { notes: { command: "notes" } } });
+      expect(yield* readClaudeRepoMcpServers(`${root}/scratch/chat`)).toEqual({
+        notes: { command: "notes" },
+      });
+      // Unparseable files are skipped instead of failing the turn.
+      NodeFS.writeFileSync(`${root}/repo/.mcp.json`, "{ not json");
+      expect(yield* readClaudeRepoMcpServers(`${root}/repo`)).toEqual({});
+    } finally {
+      NodeFS.rmSync(root, { recursive: true, force: true });
+    }
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it("names repo servers as part of the project and managed ones as outside Cogenly", () => {
+  expect(nativeMcpContextLine({ repoFile: ".mcp.json" })).toBeUndefined();
+  const line = nativeMcpContextLine({
+    repoFile: ".mcp.json",
+    repo: ["lint"],
+    managed: ["corp-search"],
+  });
+  expect(line).toContain("MCP servers from this repo (.mcp.json): lint.");
+  expect(line).toContain(
+    "Administrator-managed MCP servers, not Cogenly integrations: corp-search.",
+  );
 });
 
 it.effect("halts on unavailable inventories with a safe turn/status message", () =>
