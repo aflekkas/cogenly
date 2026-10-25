@@ -767,3 +767,51 @@ it.effect.each(["queued-run.cancel", "queue.send-all"] as const)(
     }).pipe(Effect.provide(layer(provider, "cancel-queued-followup")));
   },
 );
+
+it.effect("a queued follow-up becomes running when its run starts", () => {
+  const provider = makeProvider(false);
+  return Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const worker = yield* Worker.OrchestrationEffectWorkerV2;
+    const childId = yield* delegate(yield* startParent);
+    yield* finishLatestTurn(provider, childId);
+    yield* awaitStored(
+      parentThreadId,
+      (row) => row.event.type === "subagent.updated" && row.event.payload.status === "completed",
+    );
+    yield* orchestrator.dispatch(userMessage(childId, "first-followup", "First follow-up"));
+    yield* worker.drain();
+    yield* orchestrator.dispatch({
+      ...userMessage(childId, "next-followup", "Queued follow-up"),
+      dispatchMode: { type: "queue_after_active" },
+      deliveryIntent: undefined,
+    });
+    const queued = (yield* orchestrator.getThreadProjection(childId)).runs.find(
+      (run) => run.status === "queued",
+    )!;
+    expect(
+      (yield* orchestrator.getThreadProjection(parentThreadId)).subagents.find(
+        (task) => task.id === queued.delegatedTaskId,
+      )?.status,
+    ).toBe("pending");
+    yield* finishLatestTurn(provider, childId);
+    yield* worker.drain();
+    yield* awaitStored(
+      childId,
+      (row) =>
+        row.event.type === "run.updated" &&
+        row.event.payload.id === queued.id &&
+        row.event.payload.status === "running",
+    );
+    const parent = yield* orchestrator.getThreadProjection(parentThreadId);
+    expect(parent.subagents.find((task) => task.id === queued.delegatedTaskId)?.status).toBe(
+      "running",
+    );
+    expect(parent.nodes.find((node) => node.id === queued.delegatedTaskId)?.status).toBe("running");
+    expect(
+      parent.turnItems.find(
+        (item) => item.type === "subagent" && item.subagentId === queued.delegatedTaskId,
+      )?.status,
+    ).toBe("running");
+  }).pipe(Effect.provide(layer(provider, "queued-followup-running")));
+});

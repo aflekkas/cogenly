@@ -12779,6 +12779,92 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       ),
     );
 
+  const markFollowupRunning = (threadId: ThreadId, runId: RunId) =>
+    Effect.gen(function* () {
+      const child = yield* projectionStore.getThread(threadId);
+      const parentThreadId = child.lineage.parentThreadId;
+      if (child.lineage.relationshipToParent !== "subagent" || parentThreadId === null) return;
+      yield* threadDispatch.withLock(
+        parentThreadId,
+        Effect.gen(function* () {
+          const { runs } = yield* projectionStore.getThreadRecords(threadId, ["runs"], {
+            runIds: [runId],
+          });
+          const run = runs[0];
+          if (run?.delegatedTaskId === undefined || !isBlockingRun(run)) return;
+          const parent = yield* projectionStore.getThreadRecords(
+            parentThreadId,
+            ["subagents", "nodes", "turnItems"],
+            { turnItemTypes: ["subagent"] },
+          );
+          const task = parent.subagents.find((task) => task.id === run.delegatedTaskId);
+          if (
+            parent.thread.ownerMachine != null ||
+            task?.origin !== "app_owned" ||
+            task.followUpOf === undefined ||
+            task.status !== "pending"
+          )
+            return;
+          const now = yield* DateTime.now;
+          const node = parent.nodes.find((node) => node.id === task.id);
+          const item = parent.turnItems.find(
+            (item) => item.type === "subagent" && item.subagentId === task.id,
+          );
+          yield* writeSystemEvents([
+            {
+              type: "subagent.updated",
+              threadId: parentThreadId,
+              nodeId: task.id,
+              occurredAt: now,
+              payload: {
+                ...task,
+                status: "running",
+                providerThreadId: run.providerThreadId,
+                startedAt: now,
+                updatedAt: now,
+              },
+            },
+            ...(node === undefined
+              ? []
+              : [
+                  {
+                    type: "node.updated" as const,
+                    threadId: parentThreadId,
+                    nodeId: task.id,
+                    occurredAt: now,
+                    payload: {
+                      ...node,
+                      status: "running" as const,
+                      providerThreadId: run.providerThreadId,
+                      startedAt: now,
+                    },
+                  },
+                ]),
+            ...(item === undefined
+              ? []
+              : [
+                  {
+                    type: "turn-item.updated" as const,
+                    threadId: parentThreadId,
+                    nodeId: task.id,
+                    occurredAt: now,
+                    payload: {
+                      ...item,
+                      status: "running" as const,
+                      startedAt: now,
+                      updatedAt: now,
+                    },
+                  },
+                ]),
+          ]);
+        }),
+      );
+    }).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("Failed to mark a queued follow-up running", { threadId, runId, cause }),
+      ),
+    );
+
   // Historical terminal events are already represented by the projections
   // below. Replaying the full event table on every server start delays live
   // queue promotion in proportion to the lifetime size of the database.
@@ -12801,6 +12887,23 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             stored.event.payload.status === "rolled_back"),
       ),
       Stream.runForEach(handleTerminalRun),
+      Effect.forkDetach,
+    );
+
+  yield* eventSink
+    .stream({ afterSequence: terminalEventsAfterSequence, eventType: "run.updated" })
+    .pipe(
+      Stream.filter(
+        (stored) =>
+          stored.event.type === "run.updated" &&
+          stored.event.payload.delegatedTaskId !== undefined &&
+          (stored.event.payload.status === "starting" || stored.event.payload.status === "running"),
+      ),
+      Stream.runForEach((stored) =>
+        stored.event.type === "run.updated"
+          ? markFollowupRunning(stored.event.threadId, stored.event.payload.id)
+          : Effect.void,
+      ),
       Effect.forkDetach,
     );
 
