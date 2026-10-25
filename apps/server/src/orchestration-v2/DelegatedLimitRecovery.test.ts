@@ -843,3 +843,39 @@ it.effect("releases a delegated child's held messages onto its handoff model", (
     ).toBe(accountB);
   }).pipe(Effect.provide(runtime));
 });
+
+it.effect("a manual handoff after Don't resume leaves the parent's published result alone", () => {
+  const { provider, runtime } = setupHandoff();
+  return Effect.gen(function* () {
+    const { orchestrator, worker, childId, failedRun } = yield* delegateIntoQuota(provider);
+    const resetAt = (yield* orchestrator.getThreadShell(childId))!.usageLimitResetAt!;
+    yield* orchestrator.dispatch({
+      type: "thread.metadata.update",
+      commandId: CommandId.make("dont-resume"),
+      threadId: childId,
+      limitRecovery: { runId: failedRun.id, resetAt, autoResume: false },
+    });
+    const published = (yield* orchestrator.getThreadProjection(parentId)).subagents[0]!.result;
+    expect(published).not.toBeNull();
+    const identity = `${childId}:${failedRun.id}:${accountB}`;
+    yield* orchestrator.dispatch({
+      type: "message.dispatch",
+      commandId: CommandId.make(`limit-handoff:${identity}`),
+      messageId: MessageId.make(`limit-handoff:${identity}`),
+      threadId: childId,
+      manualContinuationOfRunId: failedRun.id,
+      modelSelection: { instanceId: accountB, model: "gpt-5" },
+      text: "Continue where you left off.",
+      attachments: [],
+      dispatchMode: { type: "start_immediately" },
+      createdBy: "user",
+      creationSource: "web",
+    });
+    yield* worker.drain();
+    const parent = yield* orchestrator.getThreadProjection(parentId);
+    expect(parent.subagents[0]!.result).toBe(published);
+    expect(
+      parent.messages.some((message) => message.id.startsWith("message:delegated-task-recovery:")),
+    ).toBe(false);
+  }).pipe(Effect.provide(runtime));
+});

@@ -4801,23 +4801,34 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           lineage.parentThreadId !== null &&
           limited?.class === "usage_limit"
         ) {
-          const key = `${command.threadId}:${source.id}:${target.instanceId}`;
-          const notice: PendingOrchestrationEffectV2 = {
-            id: `effect:delegated-task-recovery:${key}`,
-            commandId: CommandId.make(`command:delegated-task-recovery-effect:${key}`),
-            threadId: lineage.parentThreadId!,
-            request: {
-              type: "delegated-task.recovery-notice",
-              childThreadId: command.threadId,
-              childRunId: source.id,
-              recovery: {
-                type: "handed_off",
-                providerInstanceId: target.instanceId,
-                model: target.model,
+          const parent = yield* projectionStore
+            .getThreadRecords(lineage.parentThreadId, ["subagents"])
+            .pipe(mapDispatchError(command));
+          const taskId =
+            source.delegatedTaskId ??
+            (projection.thread.forkedFrom?.type === "node"
+              ? projection.thread.forkedFrom.nodeId
+              : undefined);
+          const task = parent.subagents.find((task) => task.id === taskId);
+          if (task?.result === null) {
+            const key = `${command.threadId}:${source.id}:${target.instanceId}`;
+            const notice: PendingOrchestrationEffectV2 = {
+              id: `effect:delegated-task-recovery:${key}`,
+              commandId: CommandId.make(`command:delegated-task-recovery-effect:${key}`),
+              threadId: lineage.parentThreadId!,
+              request: {
+                type: "delegated-task.recovery-notice",
+                childThreadId: command.threadId,
+                childRunId: source.id,
+                recovery: {
+                  type: "handed_off",
+                  providerInstanceId: target.instanceId,
+                  model: target.model,
+                },
               },
-            },
-          };
-          yield* Ref.update(effects, (existing) => [...existing, notice]);
+            };
+            yield* Ref.update(effects, (existing) => [...existing, notice]);
+          }
         }
       }
       if (command.usageLimitContinuationOfRunId !== undefined) {
