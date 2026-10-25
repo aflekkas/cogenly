@@ -4667,6 +4667,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     routeKind === "draft" ? draftId : null,
   );
   const showProjectPicker = activeThreadId !== null && canPickProject;
+  const showSourcesPicker = activeThreadId !== null;
   const restingProviderTraitsPicker = renderProviderTraitsPicker({
     ...providerTraitsPickerInput,
     size: composerControlsCollapsed ? "xs" : "sm",
@@ -4674,7 +4675,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     // (mode, then project and sources for a thread).
     hidden:
       composerControlsHidden ||
-      restingHiddenBlockCount > (planModeUiEnabled ? 1 : 0) + (showProjectPicker ? 1 : 0),
+      restingHiddenBlockCount >
+        (planModeUiEnabled ? 1 : 0) + (showProjectPicker ? 1 : 0) + (showSourcesPicker ? 1 : 0),
   });
   // Sources is the last block, so it is the first to fold. A picker whose trigger folds away
   // (or unfolds, when it sits on the overflow trigger) closes rather than float off nothing.
@@ -4710,8 +4712,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           },
         ]
       : []),
-    // Last, so a narrow toolbar drops it to its folder icon and then hides it
-    // before the model or effort controls give way.
+    // The project folds before the model or effort controls give way.
     ...(showProjectPicker
       ? [
           {
@@ -4730,6 +4731,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               </>
             ),
           },
+        ]
+      : []),
+    ...(showSourcesPicker
+      ? [
           {
             // Last, so it folds first; the overflow menu then offers it.
             id: "sources",
