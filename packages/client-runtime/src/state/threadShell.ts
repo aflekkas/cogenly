@@ -89,6 +89,30 @@ export function pendingSubagentRequestsByThread(
   return requests.size === 0 ? EMPTY_SUBAGENT_REQUESTS : requests;
 }
 
+/**
+ * The machine each thread is listed from. Paired machines each hold a copy of
+ * every thread under one id, so a thread lists once: from the machine that
+ * runs it when that one is connected, else from the first listed that has it.
+ */
+export function preferredThreadCopies(
+  perEnvironment: ReadonlyArray<{
+    readonly environmentId: EnvironmentId;
+    readonly threads: ReadonlyArray<Pick<OrchestrationV2ThreadShell, "id" | "ownerMachine">>;
+  }>,
+): ReadonlyMap<ThreadId, EnvironmentId> {
+  const preferred = new Map<ThreadId, EnvironmentId>();
+  const fromRunner = new Set<ThreadId>();
+  for (const { environmentId, threads } of perEnvironment) {
+    for (const thread of threads) {
+      if (fromRunner.has(thread.id)) continue;
+      const runsHere = (thread.ownerMachine ?? environmentId) === environmentId;
+      if (runsHere) fromRunner.add(thread.id);
+      if (runsHere || !preferred.has(thread.id)) preferred.set(thread.id, environmentId);
+    }
+  }
+  return preferred;
+}
+
 /** Banner title for the subagents `childThreadInputsAtom` lists. */
 export function childThreadInputsTitle(
   children: ReadonlyArray<Pick<EnvironmentThreadShell, "hasPendingApprovals">>,
@@ -298,6 +322,7 @@ export function createEnvironmentThreadShellAtoms(input: {
     return Atom.make((get) => {
       const next: EnvironmentThreadShell[] = [];
       const seen = new Set<string>();
+      const preferred = get(preferredCopiesAtom);
       for (const projectRef of projectRefs) {
         const refs =
           get(environmentThreadRefsByProjectAtom(projectRef.environmentId)).get(
@@ -309,7 +334,7 @@ export function createEnvironmentThreadShellAtoms(input: {
         const ownerApprovals = get(ownerApprovalsAtom(projectRef.environmentId));
         for (const ref of refs) {
           const key = threadKey(ref);
-          if (seen.has(key)) {
+          if (seen.has(key) || !listedHere(preferred, ref.environmentId, ref.threadId)) {
             continue;
           }
           seen.add(key);
@@ -327,11 +352,31 @@ export function createEnvironmentThreadShellAtoms(input: {
     }).pipe(Atom.withLabel(`environment-thread-shells-for-projects:${key}`));
   });
 
+  // Null while one machine is connected: every thread lists from it.
+  const preferredCopiesAtom = Atom.make((get): ReadonlyMap<ThreadId, EnvironmentId> | null => {
+    const environmentIds = [...enabledEnvironmentIds(get(input.catalogValueAtom))];
+    if (environmentIds.length < 2) return null;
+    return preferredThreadCopies(
+      environmentIds.map((environmentId) => ({
+        environmentId,
+        threads: get(environmentThreadsAtom(environmentId)),
+      })),
+    );
+  }).pipe(Atom.withLabel("environment-thread-preferred-copies"));
+  const listedHere = (
+    preferred: ReadonlyMap<ThreadId, EnvironmentId> | null,
+    environmentId: EnvironmentId,
+    threadId: ThreadId,
+  ) => preferred === null || (preferred.get(threadId) ?? environmentId) === environmentId;
+
   let previousThreadRefs: ReadonlyArray<ScopedThreadRef> = [];
   const threadRefsAtom = Atom.make((get) => {
     const refs: ScopedThreadRef[] = [];
+    const preferred = get(preferredCopiesAtom);
     for (const environmentId of enabledEnvironmentIds(get(input.catalogValueAtom))) {
-      refs.push(...get(environmentThreadRefsAtom(environmentId)));
+      for (const ref of get(environmentThreadRefsAtom(environmentId))) {
+        if (listedHere(preferred, environmentId, ref.threadId)) refs.push(ref);
+      }
     }
     if (threadRefsEqual(previousThreadRefs, refs)) {
       return previousThreadRefs;
@@ -343,10 +388,12 @@ export function createEnvironmentThreadShellAtoms(input: {
   let previousThreadShells: ReadonlyArray<EnvironmentThreadShell> = [];
   const threadShellsAtom = Atom.make((get) => {
     const next: EnvironmentThreadShell[] = [];
+    const preferred = get(preferredCopiesAtom);
     for (const environmentId of enabledEnvironmentIds(get(input.catalogValueAtom))) {
       const subagentRequests = get(pendingSubagentRequestsAtom(environmentId));
       const ownerApprovals = get(ownerApprovalsAtom(environmentId));
       for (const thread of get(environmentThreadsAtom(environmentId))) {
+        if (!listedHere(preferred, environmentId, thread.id)) continue;
         next.push(scopedThread(environmentId, thread, subagentRequests, ownerApprovals));
       }
     }
@@ -360,11 +407,16 @@ export function createEnvironmentThreadShellAtoms(input: {
   let previousNavigationShells: ReadonlyArray<EnvironmentThreadShell> = [];
   const navigationThreadShellsAtom = Atom.make((get) => {
     const next: EnvironmentThreadShell[] = [];
+    const preferred = get(preferredCopiesAtom);
     for (const environmentId of enabledEnvironmentIds(get(input.catalogValueAtom))) {
       const subagentRequests = get(pendingSubagentRequestsAtom(environmentId));
       const ownerApprovals = get(ownerApprovalsAtom(environmentId));
       for (const thread of get(environmentThreadsAtom(environmentId))) {
-        if (thread.archivedAt !== null || thread.lineage.relationshipToParent === "subagent")
+        if (
+          thread.archivedAt !== null ||
+          thread.lineage.relationshipToParent === "subagent" ||
+          !listedHere(preferred, environmentId, thread.id)
+        )
           continue;
         next.push(scopedThread(environmentId, thread, subagentRequests, ownerApprovals));
       }
