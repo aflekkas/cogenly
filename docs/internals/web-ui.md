@@ -40,6 +40,12 @@ The composer banners are the reference.
 - Consumers are a few lines of slots, and the slots carry the styling:
   [`ComposerActivityStatus.tsx`](../../apps/web/src/components/chat/ComposerActivityStatus.tsx).
 
+Settings pages compose the pieces in
+[`settingsLayout.tsx`](../../apps/web/src/components/settings/settingsLayout.tsx): a page container,
+sections with a header and actions, rows, and the shared toolbar, note, empty, refresh and fold
+pieces. A settings card, row, empty state or header button styled by hand drifts from the rest;
+add a prop or a piece there instead.
+
 Build new UI the same way. Compose or extend a component instead of copying its markup and classes.
 When a call site repeats a treatment another one already uses, make it a variant or a slot on the
 shared component. A new composer banner or notice uses the `ComposerBanner` slots.

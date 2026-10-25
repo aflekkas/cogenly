@@ -111,6 +111,7 @@ import {
 } from "./integrationServices.logic";
 import { createIntegrationStatusFade } from "./integrationStatusMotion";
 import { useSettingsScope } from "./SettingsScopeContext";
+import { SettingsGroup } from "./SettingsGroup";
 import { SettingsRow, SettingsSection } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 
@@ -204,11 +205,17 @@ export function IntegrationServicesSettings() {
   return (
     <SettingsSection {...searchableSetting("integration-services")} variant="plain">
       {environmentId === null ? (
-        <SettingsRow title="Choose an environment to see its integrations." />
+        <SettingsGroup>
+          <SettingsRow title="Choose an environment to see its integrations." />
+        </SettingsGroup>
       ) : query.error !== null ? (
-        <SettingsRow title="Could not load integrations" description={query.error} />
+        <SettingsGroup>
+          <SettingsRow title="Could not load integrations" description={query.error} />
+        </SettingsGroup>
       ) : query.data === null ? (
-        <SettingsRow title="Loading integrations…" role="status" />
+        <SettingsGroup>
+          <SettingsRow title="Loading integrations…" role="status" />
+        </SettingsGroup>
       ) : (
         <div className="grid gap-2 sm:grid-cols-2">
           {groups.map((group) => {

@@ -11,7 +11,7 @@ import { ProjectFavicon } from "../ProjectFavicon";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { ITEM_ROW_CLASSNAME } from "./itemRows";
 import { SettingsGroup } from "./SettingsGroup";
-import { SettingsPageContainer, SettingsSection } from "./settingsLayout";
+import { SettingsPageContainer, SettingsPageMessage, SettingsSection } from "./settingsLayout";
 import { useSettingsScope } from "./SettingsScopeContext";
 import type { SettingsScopeSearch } from "./settingsScope";
 import {
@@ -156,9 +156,7 @@ export function SettingsScopeNotice({
   return (
     <SettingsPageContainer>
       <div className="space-y-3">
-        <p role="status" className="px-3 text-sm text-muted-foreground sm:px-4">
-          {children}
-        </p>
+        <SettingsPageMessage>{children}</SettingsPageMessage>
         <div className="space-y-4">
           {choiceGroups.map((group) =>
             group?.displayName ? (

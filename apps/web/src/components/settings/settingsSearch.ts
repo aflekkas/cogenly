@@ -91,25 +91,29 @@ export interface SettingsSearchAvailability {
 /**
  * Section labels in sidebar order. The sidebar nav and the search-result
  * subtitles both render from this record, so each label exists once.
+ *
+ * The order runs in groups: the selected repository, then how the app looks
+ * and behaves, then what agents run on and reach, then what they know, then
+ * where data lives.
  */
 export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/diagnostics": "Diagnostics",
   "/settings/projects": "Repository",
   "/settings/general": "General",
-  "/settings/project-tags": "Projects",
-  "/settings/memory": "Memory",
-  "/settings/vault": "Vault",
   "/settings/appearance": "Appearance",
   "/settings/keybindings": "Keybindings",
   "/settings/providers": "Providers",
+  "/settings/connections": "Connections",
+  "/settings/source-control": "Source Control",
   "/settings/integrations": "Integrations",
   "/settings/scheduled-tasks": "Scheduled Tasks",
-  "/settings/source-control": "Source Control",
+  "/settings/project-tags": "Projects",
+  "/settings/memory": "Memory",
+  "/settings/vault": "Vault",
   "/settings/storage": "Storage",
+  "/settings/archived": "Archive",
   "/settings/data": "Data",
   "/settings/import": "Import",
-  "/settings/connections": "Connections",
-  "/settings/archived": "Archive",
 };
 
 /** Anchor id of the first row bound to `command` on the Keybindings page. */

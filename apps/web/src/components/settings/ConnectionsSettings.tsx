@@ -77,9 +77,12 @@ import {
   togglePairingScopeSelection,
 } from "./ConnectionsSettings.logic";
 import {
+  SettingsDisclosure,
+  SettingsNote,
   SettingsPageContainer,
   SettingsRow,
   SettingsSection,
+  SettingsSectionAction,
   useRelativeTimeTick,
 } from "./settingsLayout";
 import { LocalEnvironmentSetting } from "./LocalEnvironmentSetting";
@@ -136,6 +139,7 @@ import { Switch } from "../ui/switch";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { Alert, AlertDescription } from "../ui/alert";
+import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { DisclosureChevron } from "../ui/disclosure";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "../ui/empty";
@@ -974,9 +978,9 @@ const ConnectedClientListRow = memo(function ConnectedClientListRow({
             />
             <h3 className="text-sm font-medium text-foreground">{primaryLabel}</h3>
             {clientSession.current ? (
-              <span className="text-3xs text-muted-foreground/80 rounded-md border border-border/50 bg-muted/50 px-1 py-0.5">
+              <Badge size="sm" variant="outline">
                 This device
-              </span>
+              </Badge>
             ) : null}
           </div>
           <p className="text-xs text-muted-foreground">
@@ -1274,9 +1278,7 @@ const PairingClientsList = memo(function PairingClientsList({
       ))}
 
       {pairingLinks.length === 0 && clientSessions.length === 0 && !isLoading ? (
-        <div className={accessRowClassName(presentation)}>
-          <p className="text-xs text-muted-foreground/60">No pairing links or client sessions.</p>
-        </div>
+        <SettingsNote>No pairing links or client sessions.</SettingsNote>
       ) : null}
     </>
   );
@@ -1330,16 +1332,16 @@ const AdvertisedEndpointListRow = memo(function AdvertisedEndpointListRow({
             </Tooltip>
           ) : null}
           {!isAvailable ? (
-            <span className="shrink-0 rounded-md border border-border/70 px-1 py-0.5 text-3xs text-muted-foreground">
+            <Badge size="sm" variant="outline">
               Setup required
-            </span>
+            </Badge>
           ) : null}
         </div>
         <div className="ml-auto flex min-h-6 shrink-0 items-center justify-end gap-2">
           {isDefault ? (
-            <span className="rounded-md border border-primary/30 bg-primary/10 px-1 py-0.5 text-3xs text-primary">
+            <Badge size="sm" variant="info">
               Default
-            </span>
+            </Badge>
           ) : null}
           {needsTailscaleSetup ? (
             <Button
@@ -3512,9 +3514,7 @@ export function ConnectionsSettings() {
   const renderAuthorizedClients = (presentation: AccessSectionPresentation) => (
     <>
       {desktopAccessManagementError ? (
-        <div className={accessRowClassName(presentation)}>
-          <p className="text-xs text-destructive">{desktopAccessManagementError}</p>
-        </div>
+        <SettingsNote tone="destructive">{desktopAccessManagementError}</SettingsNote>
       ) : null}
       <PairingClientsList
         endpointUrl={desktopServerExposureState?.endpointUrl}
@@ -3713,16 +3713,14 @@ export function ConnectionsSettings() {
               </>
             ) : null}
             {primaryEnvironment ? (
-              <details className="px-3 sm:px-4">
-                <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 rounded-md text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
-                  Permissions
-                  <DisclosureChevron />
-                </summary>
-                <SessionPermissions
-                  environmentId={primaryEnvironment.environmentId}
-                  connected={primaryEnvironment.connection.phase === "connected"}
-                />
-              </details>
+              <SettingsDisclosure title="Permissions">
+                <div className="px-3 sm:px-4">
+                  <SessionPermissions
+                    environmentId={primaryEnvironment.environmentId}
+                    connected={primaryEnvironment.connection.phase === "connected"}
+                  />
+                </div>
+              </SettingsDisclosure>
             ) : null}
           </SettingsSection>
 
@@ -3761,9 +3759,9 @@ export function ConnectionsSettings() {
                 {canReadAccess ? (
                   renderAuthorizedClients("current")
                 ) : (
-                  <p className="px-4 py-3 text-xs text-muted-foreground">
+                  <SettingsNote>
                     This connection can create access links but cannot view authorized clients.
-                  </p>
+                  </SettingsNote>
                 )}
               </ScrollArea>
             </FoldedSettingsSection>
@@ -4076,25 +4074,13 @@ export function ConnectionsSettings() {
                 }
               }}
             >
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <DialogTrigger
-                      render={
-                        <Button size="xs" variant="ghost-muted" aria-label="Add environment">
-                          <PlusIcon className="size-3" />
-                          <span>Add environment</span>
-                        </Button>
-                      }
-                    />
-                  }
-                />
-                <TooltipPopup side="top">Add environment</TooltipPopup>
-              </Tooltip>
+              <DialogTrigger
+                render={<SettingsSectionAction>Add environment</SettingsSectionAction>}
+              />
               <DialogPopup className="max-h-[80dvh] sm:max-w-3xl">
                 <DialogHeader>
                   <DialogTitle>
-                    {routeTarget ? `Add a route to ${routeTarget.label}` : "Add Environment"}
+                    {routeTarget ? `Add a route to ${routeTarget.label}` : "Add environment"}
                   </DialogTitle>
                   <DialogDescription>
                     {routeTarget

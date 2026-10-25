@@ -1,6 +1,5 @@
 import { OverlayPresence } from "~/components/ui/overlay-presence";
 import type { EnvironmentId, UnifiedSettings } from "@t3tools/contracts";
-import { PlusIcon } from "lucide-react";
 import { useState } from "react";
 
 import { useUpdateEnvironmentSettings } from "../../hooks/useSettings";
@@ -16,7 +15,12 @@ import {
 import { Button } from "../ui/button";
 import { AddUsageLimitSourceDialog } from "./AddUsageLimitSourceDialog";
 import { searchableSetting } from "./settingsSearch";
-import { SettingsRow, SettingsSection } from "./settingsLayout";
+import {
+  SettingsEmpty,
+  SettingsRow,
+  SettingsSection,
+  SettingsSectionAction,
+} from "./settingsLayout";
 
 /** Hub management follows the selected device and access rules of provider settings. */
 export function UsageProviderSettings({
@@ -40,15 +44,16 @@ export function UsageProviderSettings({
         {...searchableSetting("usage-providers")}
         headerAction={
           !readOnly ? (
-            <Button size="xs" variant="outline" onClick={() => setAdding(true)}>
-              <PlusIcon className="size-3" aria-hidden />
-              Add hub
-            </Button>
+            <SettingsSectionAction onClick={() => setAdding(true)}>Add hub</SettingsSectionAction>
           ) : null
         }
       >
         {entries.length === 0 ? (
-          <SettingsRow title="No hubs configured." />
+          <SettingsEmpty
+            size="sm"
+            title="No hubs configured"
+            description="Add a CLI Proxy hub to see its pooled accounts in Limits."
+          />
         ) : (
           entries.map(([id, source]) => {
             const label = source.label?.trim() || source.url;
@@ -100,7 +105,7 @@ function RemoveUsageProviderButton({
   const [open, setOpen] = useState(false);
   return (
     <>
-      <Button size="xs" variant="ghost" onClick={() => setOpen(true)}>
+      <Button size="sm" variant="destructive-outline" onClick={() => setOpen(true)}>
         Remove
       </Button>
       <AlertDialog open={open} onOpenChange={setOpen}>

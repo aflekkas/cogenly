@@ -21,7 +21,12 @@ import { Button } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { useSettingsScope } from "./SettingsScopeContext";
-import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
+import {
+  SettingsEmpty,
+  SettingsPageContainer,
+  SettingsRow,
+  SettingsSection,
+} from "./settingsLayout";
 
 type ExportSection = "chats" | "work" | "agents" | "commitments" | "projects" | "memory";
 const SECTIONS: ReadonlyArray<{ value: ExportSection; label: string }> = [
@@ -229,15 +234,19 @@ function DataSettingsPanel({ environmentId }: { environmentId: EnvironmentId | n
         />
       </SettingsSection>
 
-      <SettingsSection id="data-exports-recent" title="Recent exports">
+      <SettingsSection
+        id="data-exports-recent"
+        title="Recent exports"
+        footer="Validate reads a bundle back and checks every record without changing anything. Importing a bundle isn't available yet."
+      >
         {disabledReason !== null ? (
           <SettingsRow title={disabledReason} />
         ) : recentError !== null ? (
           <SettingsRow title="Could not list exports" description={recentError} />
         ) : recent === null ? (
-          <SettingsRow title="Loading exports…" />
+          <SettingsRow title="Loading exports…" role="status" />
         ) : recent.length === 0 ? (
-          <SettingsRow title="No exports yet" />
+          <SettingsEmpty size="sm" title="No exports yet" />
         ) : (
           recent.map((entry) => {
             const createdAt = exportCreatedAt(entry.path);
@@ -280,10 +289,6 @@ function DataSettingsPanel({ environmentId }: { environmentId: EnvironmentId | n
           })
         )}
       </SettingsSection>
-      <p className="px-3 text-xs text-muted-foreground sm:px-4">
-        Validate reads a bundle back and checks every record without changing anything. Importing a
-        bundle isn't available yet.
-      </p>
     </SettingsPageContainer>
   );
 }

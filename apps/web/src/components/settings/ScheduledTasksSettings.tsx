@@ -10,7 +10,6 @@ import {
   MoreHorizontalIcon,
   PencilIcon,
   PlayIcon,
-  PlusIcon,
   Trash2Icon,
 } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -95,7 +94,6 @@ import {
 import { Label } from "../ui/label";
 import { Menu, MenuTrigger, MenuPopup, MenuItem, MenuSeparator } from "../ui/menu";
 import { ToggleGroup, Toggle } from "../ui/toggle-group";
-import { Empty, EmptyHeader, EmptyTitle, EmptyDescription, EmptyMedia } from "../ui/empty";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -116,9 +114,12 @@ import { Textarea } from "../ui/textarea";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
+  SettingsEmpty,
+  SettingsNote,
   SettingsPageContainer,
   SettingsRow,
   SettingsSection,
+  SettingsSectionAction,
   SETTINGS_PICKER_TRIGGER_CLASSNAME,
   useRelativeTimeTick,
 } from "./settingsLayout";
@@ -294,34 +295,29 @@ export function ScheduledTasksSettings(target: {
         title="Scheduled tasks"
         variant="plain"
         headerAction={
-          <Button
-            size="xs"
-            variant="ghost-muted"
+          <SettingsSectionAction
             disabled={!defaultEnvironment || !canCreate}
             onClick={() =>
               defaultEnvironment &&
               setEditor({ environmentId: defaultEnvironment.environmentId, task: null })
             }
           >
-            <PlusIcon className="size-3" />
             New task
-          </Button>
+          </SettingsSectionAction>
         }
       >
         {scope.kind === "unavailable" ? (
-          <SettingsSection title="Unavailable selection">
+          <SettingsGroup>
             <SettingsRow title={scope.message} />
-          </SettingsSection>
+          </SettingsGroup>
         ) : environments.length === 0 ? (
-          <Empty>
-            <EmptyHeader>
-              <EmptyMedia>
-                <Clock3Icon />
-              </EmptyMedia>
-              <EmptyTitle>No environments available</EmptyTitle>
-              <EmptyDescription>Connect an environment to manage scheduled tasks.</EmptyDescription>
-            </EmptyHeader>
-          </Empty>
+          <SettingsGroup>
+            <SettingsEmpty
+              icon={<Clock3Icon />}
+              title="No environments available"
+              description="Connect an environment to manage scheduled tasks."
+            />
+          </SettingsGroup>
         ) : environments.length > 1 ? (
           <ScheduledTaskEnvironmentList
             key={`${target.environmentId ?? defaultEnvironment?.environmentId}:${target.taskId ?? ""}`}
@@ -480,25 +476,13 @@ function ScheduledTaskEnvironmentList({
           role="status"
         />
       ) : null}
-      {populated.length === 0 && loaded.length > 0 ? (
-        <SettingsRow
-          title="No scheduled tasks"
-          description="No tasks match this environment and repository selection."
-        />
-      ) : null}
+      {populated.length === 0 && loaded.length > 0 ? <NoScheduledTasks /> : null}
       {Object.entries(summaries).map(([label, entries]) => {
         if (entries.length === 0) return null;
         const summary = `${label} ${entries.join(", ")}`;
         return (
           <Tooltip key={label}>
-            <TooltipTrigger
-              render={
-                <p
-                  className="truncate px-3 py-2.5 text-xs text-muted-foreground sm:px-4"
-                  role="status"
-                />
-              }
-            >
+            <TooltipTrigger render={<SettingsNote className="truncate" role="status" />}>
               {summary}
             </TooltipTrigger>
             <TooltipPopup>{summary}</TooltipPopup>
@@ -506,6 +490,16 @@ function ScheduledTaskEnvironmentList({
         );
       })}
     </SettingsGroup>
+  );
+}
+
+function NoScheduledTasks() {
+  return (
+    <SettingsEmpty
+      icon={<Clock3Icon />}
+      title="No scheduled tasks"
+      description="No tasks match this environment and repository selection."
+    />
   );
 }
 
@@ -573,10 +567,7 @@ function ScheduledTaskEnvironmentSection({
             />
           ) : null}
           {tasks.length === 0 ? (
-            <SettingsRow
-              title="No scheduled tasks"
-              description="No tasks match this environment and repository selection."
-            />
+            <NoScheduledTasks />
           ) : (
             tasks.map((task) => (
               <ScheduledTaskRow
@@ -666,7 +657,9 @@ function ScheduledTaskRow({
                   : "Not scheduled"}
           </span>
           {task.lastRunStatus !== "never" ? (
-            <Badge variant={statusVariant(task.lastRunStatus)}>{task.lastRunStatus}</Badge>
+            <Badge size="sm" variant={statusVariant(task.lastRunStatus)}>
+              {task.lastRunStatus}
+            </Badge>
           ) : null}
           {task.lastRunError ? <span className="text-destructive">{task.lastRunError}</span> : null}
         </div>
@@ -720,7 +713,7 @@ function ScheduledTaskRow({
                 </MenuItem>
               )}
               <MenuSeparator />
-              <MenuItem onClick={() => void act("delete")}>
+              <MenuItem variant="destructive" onClick={() => void act("delete")}>
                 <Trash2Icon />
                 Delete
               </MenuItem>
