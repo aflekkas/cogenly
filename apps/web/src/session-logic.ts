@@ -1,6 +1,7 @@
 import { resolveThreadWorkingStartedAt } from "@cogenly/client-runtime/state/models";
 import {
   type AssetResource,
+  type ComputerUsePermission,
   type OrchestrationV2ExecutionNode,
   type OrchestrationV2PlanArtifact,
   type OrchestrationV2ProjectedTurnItem,
@@ -35,6 +36,8 @@ import type {
 import type { ThreadRunSummary, ThreadRuntimeSummary } from "@cogenly/client-runtime/state/shell";
 import { threadRuntimeHasInterruptibleRun } from "@cogenly/client-runtime/state/thread-execution";
 import { turnItemIsWorkspacePreparation } from "@cogenly/client-runtime/state/turn-item-presentation";
+
+import { computerUsePermissionPrompt } from "./computerUse/computerUse.logic";
 
 import {
   isImageAttachment,
@@ -152,6 +155,14 @@ export type TimelineEntry = (
       readonly itemId: TurnItemId;
       readonly revision: string;
       readonly mcpApp: McpAppReference;
+    }
+  | {
+      /** The macOS permission a failed `computer_*` call needs, shown once after the latest such call. */
+      readonly id: string;
+      readonly kind: "computer-use-permission";
+      readonly createdAt: string;
+      readonly runId: RunId | null;
+      readonly permission: ComputerUsePermission;
     }
   | {
       readonly id: string;
@@ -581,6 +592,40 @@ export interface TimelineEntriesProjection {
 export function deriveTimelineEntriesFromVisibleTurnItems(
   input: TimelineEntriesInput,
 ): TimelineEntry[] {
+  return placeComputerUsePermissionPrompt(buildTimelineEntries(input), input.visibleTurnItems);
+}
+
+/**
+ * Puts the thread's one computer-use permission prompt right after the failed
+ * call it answers. It depends on every later call, so it is placed over the
+ * whole timeline, never over an appended slice.
+ */
+function placeComputerUsePermissionPrompt(
+  entries: TimelineEntry[],
+  visibleTurnItems: ReadonlyArray<OrchestrationV2ProjectedTurnItem>,
+): TimelineEntry[] {
+  const withoutPrompt = entries.some((entry) => entry.kind === "computer-use-permission")
+    ? entries.filter((entry) => entry.kind !== "computer-use-permission")
+    : entries;
+  const prompt = computerUsePermissionPrompt(visibleTurnItems.map((row) => row.item));
+  if (prompt === null) return withoutPrompt;
+  const index = withoutPrompt.findIndex(
+    (entry) => entry.kind === "work" && entry.id === prompt.itemId,
+  );
+  const anchor = withoutPrompt[index];
+  if (anchor?.kind !== "work") return withoutPrompt;
+  const entry: TimelineEntry = {
+    id: `computer-use-permission:${prompt.itemId}`,
+    kind: "computer-use-permission",
+    createdAt: anchor.createdAt,
+    runId: anchor.entry.runId ?? null,
+    permission: prompt.permission,
+    ...(anchor.attempt === undefined ? {} : { attempt: anchor.attempt }),
+  };
+  return [...withoutPrompt.slice(0, index + 1), entry, ...withoutPrompt.slice(index + 1)];
+}
+
+function buildTimelineEntries(input: TimelineEntriesInput): TimelineEntry[] {
   const committedMessageIds = new Set<string>();
   const entries: TimelineEntry[] = [];
   const attemptByRootNodeId = new Map(
@@ -981,15 +1026,14 @@ function reuseTimelineEntries(
       },
     };
   });
-  if (appended) {
-    entries.push(
-      ...deriveTimelineEntriesFromVisibleTurnItems({
-        ...input,
-        visibleTurnItems: input.visibleTurnItems.slice(before.visibleTurnItems.length),
-      }),
-    );
-  }
-  return entries;
+  if (!appended) return entries;
+  entries.push(
+    ...buildTimelineEntries({
+      ...input,
+      visibleTurnItems: input.visibleTurnItems.slice(before.visibleTurnItems.length),
+    }),
+  );
+  return placeComputerUsePermissionPrompt(entries, input.visibleTurnItems);
 }
 
 /** Reuse immutable entries during streaming without reordering the canonical v2 sequence. */

@@ -7,6 +7,7 @@
  */
 import {
   isProviderAvailable,
+  type ComputerUseStatus,
   type EnvironmentId,
   type IntegrationSummary,
   type MachineHealthCheck,
@@ -665,6 +666,41 @@ export function bootServiceCheck(input: {
         "It won't come back after a crash or reboot. Run `cogenly service install` on this machine.",
     }),
   ]);
+}
+
+/**
+ * Whether agents can drive this machine's apps. A missing macOS grant is
+ * reported but never alerts: agents ask for it in the thread the first time
+ * they need it, and an owner who never uses computer use should not be nagged.
+ */
+export function computerUseCheck(status: ComputerUseStatus): MachineHealthCheck {
+  switch (status.state) {
+    case "ready":
+      return check("computer-use", "Agents can control this Mac's apps", []);
+    case "disabled":
+      return check("computer-use", "Turned off", []);
+    case "unsupported":
+      return check(
+        "computer-use",
+        status.supported ? "No desktop session to control" : "Not available on this machine",
+        [],
+      );
+    case "needs-permission": {
+      const missing = status.permissions.filter((entry) => entry.grant !== "granted");
+      return check(
+        "computer-use",
+        `Waiting for ${missing.map((entry) => entry.title).join(" and ")}`,
+        missing.map((entry) =>
+          item({
+            key: `computer-use:${entry.permission}`,
+            status: "ok",
+            title: `${entry.title} isn't granted yet`,
+            detail: `Needed for ${entry.neededFor}. Agents ask the first time they need it; to grant it now, open System Settings → Privacy & Security → ${entry.title} and turn on ${status.hostApp ?? "the app that runs the Cogenly server"}.`,
+          }),
+        ),
+      );
+    }
+  }
 }
 
 export function tailscaleServeCheck(input: {

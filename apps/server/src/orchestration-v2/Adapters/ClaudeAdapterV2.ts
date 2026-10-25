@@ -152,6 +152,7 @@ import type { ManagedServerProvider } from "@cogenly/provider-core/server/snapsh
 import { mergeProviderInstanceEnvironment } from "@cogenly/provider-core/server/instanceEnvironment";
 import {
   COGENLY_BROWSER_TOOL_INSTRUCTIONS,
+  cogenlyComputerUseInstructions,
   COGENLY_ORCHESTRATION_INSTRUCTIONS,
 } from "@cogenly/provider-core/server/orchestrationInstructions";
 import {
@@ -1135,6 +1136,8 @@ export function makeClaudeQueryOptions(input: {
   readonly mcpServers?: ClaudeQueryOptions["mcpServers"];
   /** The turn's MCP session carries the collaborative browser tools. */
   readonly browserToolsAvailable?: boolean;
+  /** The turn's MCP session carries the computer-use tools; the platform of the machine they drive. */
+  readonly computerUsePlatform?: string;
   readonly tools?: ClaudeAgentSdkQueryTools;
   readonly allowedTools?: ReadonlyArray<string>;
   readonly disallowedTools?: ReadonlyArray<string>;
@@ -1289,6 +1292,10 @@ export function makeClaudeQueryOptions(input: {
         (input.mcpServers === undefined ? "" : COGENLY_ORCHESTRATION_INSTRUCTIONS) +
         (input.mcpServers !== undefined && input.browserToolsAvailable === true
           ? COGENLY_BROWSER_TOOL_INSTRUCTIONS
+          : "") +
+        // Chats get this too: "change that setting in another app" is a conversational ask.
+        (input.mcpServers !== undefined && input.computerUsePlatform !== undefined
+          ? cogenlyComputerUseInstructions(input.computerUsePlatform)
           : "") +
         (!terminalTools
           ? ""
@@ -8732,6 +8739,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               : { mcpServers: mcpOverrides.mcpServers }),
             ...(mcpSession?.browserToolsAvailable === true && !conversationMode
               ? { browserToolsAvailable: true }
+              : {}),
+            ...(mcpSession?.capabilities?.has("computer") === true
+              ? { computerUsePlatform: yield* HostProcess.Platform }
               : {}),
             ...(disallowedTools.length === 0 ? {} : { disallowedTools }),
             permissionMode: queryPolicy.permissionMode,

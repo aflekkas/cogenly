@@ -285,6 +285,8 @@ export function PlatformStatus(props: {
   readonly platform: string;
   readonly status: { readonly ready: boolean; readonly message: string };
   readonly compact?: boolean;
+  /** What a compact ready row says. Defaults to "Ready". */
+  readonly readyLabel?: string;
 }) {
   return (
     <div
@@ -300,7 +302,9 @@ export function PlatformStatus(props: {
       <div className={cn(props.compact && props.status.ready && "flex items-center gap-2")}>
         <p className="font-medium">{props.platform}</p>
         <p className="text-xs text-muted-foreground">
-          {props.compact && props.status.ready ? "Ready" : props.status.message}
+          {props.compact && props.status.ready
+            ? (props.readyLabel ?? "Ready")
+            : props.status.message}
         </p>
       </div>
     </div>

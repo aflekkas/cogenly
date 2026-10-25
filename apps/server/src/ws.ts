@@ -15,6 +15,7 @@ import * as ProjectMove from "./threadSync/ProjectMove.ts";
 import * as ThreadTransfer from "./threadSync/ThreadTransfer.ts";
 import * as ThreadFork from "./threadSync/ThreadFork.ts";
 import * as MachineSecurity from "./security/MachineSecurity.ts";
+import * as ComputerUseService from "./computerUse/ComputerUseService.ts";
 import * as MachineHealth from "./health/MachineHealth.ts";
 import * as HealthAlerts from "./health/HealthAlerts.ts";
 import * as MachineSetup from "./tailscale/MachineSetup.ts";
@@ -1104,6 +1105,7 @@ const makeWsRpcHandlers = (
     const threadFork = yield* ThreadFork.ThreadFork;
     const projectMove = yield* ProjectMove.ProjectMove;
     const machineSecurity = yield* MachineSecurity.MachineSecurity;
+    const computerUse = yield* ComputerUseService.ComputerUse;
     const machineSetup = yield* MachineSetup.MachineSetup;
     const machineHealth = yield* MachineHealth.MachineHealth;
     const healthAlerts = yield* HealthAlerts.HealthAlerts;
@@ -1751,6 +1753,9 @@ const makeWsRpcHandlers = (
         integrations.installRuntime(input.runtime),
       [WS_METHODS.integrationsSubscribeSources]: () => integrations.subscribeSources(),
       [WS_METHODS.machineSecurityStatus]: () => machineSecurity.status,
+      [WS_METHODS.computerUseStatus]: () => computerUse.status(),
+      [WS_METHODS.computerUseRequestPermission]: (input) =>
+        computerUse.requestPermission(input.permission),
       [WS_METHODS.machinesList]: () => machines.list,
       [WS_METHODS.syncStatus]: (input) => syncStatus.status(input),
       [WS_METHODS.machinesCatalog]: (input) => threadLaunch.providers(input.machine),
@@ -2875,6 +2880,7 @@ type WsRequestServices =
   | ThreadTransfer.ThreadTransfer
   | ProjectMove.ProjectMove
   | MachineSecurity.MachineSecurity
+  | ComputerUseService.ComputerUse
   | MachineSetup.MachineSetup
   | MachineHealth.MachineHealth
   | HealthAlerts.HealthAlerts

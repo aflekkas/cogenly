@@ -9,6 +9,7 @@ import * as Machines from "./machine.ts";
 import * as ThreadReplication from "./threadReplication.ts";
 import * as SharedDocuments from "./sharedDocument.ts";
 import * as MachineSecurity from "./machineSecurity.ts";
+import * as ComputerUse from "./computerUse.ts";
 import * as MachineSetup from "./machineSetup.ts";
 import * as MachineHealth from "./machineHealth.ts";
 import * as Work from "./work.ts";
@@ -651,6 +652,8 @@ export const WS_METHODS = {
   projectLabelsPreviewMoveToMachine: "projectLabels.previewMoveToMachine",
   machinesAdoptThreads: "machines.adoptThreads",
   machineSecurityStatus: "machines.securityStatus",
+  computerUseStatus: "computerUse.status",
+  computerUseRequestPermission: "computerUse.requestPermission",
   // What each paired machine has yet to receive from this one
   syncStatus: "sync.status",
   // Getting this machine ready to pair (Tailscale and Serve)
@@ -2329,6 +2332,16 @@ const WsMachineSecurityStatusRpc = Rpc.make(WS_METHODS.machineSecurityStatus, {
   success: MachineSecurity.MachineSecurityStatus,
   error: machineErrors,
 });
+const WsComputerUseStatusRpc = Rpc.make(WS_METHODS.computerUseStatus, {
+  payload: Schema.Struct({}),
+  success: ComputerUse.ComputerUseStatus,
+  error: EnvironmentAuthorizationError,
+});
+const WsComputerUseRequestPermissionRpc = Rpc.make(WS_METHODS.computerUseRequestPermission, {
+  payload: ComputerUse.ComputerUseRequestPermissionInput,
+  success: ComputerUse.ComputerUseStatus,
+  error: Schema.Union([ComputerUse.ComputerUseUnavailableError, EnvironmentAuthorizationError]),
+});
 const WsSyncStatusRpc = Rpc.make(WS_METHODS.syncStatus, {
   payload: SharedDocuments.SharedSyncStatusInput,
   success: SharedDocuments.SharedSyncStatusResult,
@@ -2865,6 +2878,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsIntegrationsInstallRuntimeRpc,
   WsIntegrationsSubscribeSourcesRpc,
   WsMachineSecurityStatusRpc,
+  WsComputerUseStatusRpc,
+  WsComputerUseRequestPermissionRpc,
   WsSyncStatusRpc,
   WsMachinesListRpc,
   WsMachinesCatalogRpc,

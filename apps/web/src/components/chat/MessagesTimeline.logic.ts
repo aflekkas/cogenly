@@ -45,6 +45,7 @@ import {
   type TurnDiffSummary,
 } from "../../types";
 import {
+  type ComputerUsePermission,
   type MessageId,
   type WorktreeSetupSnapshot,
   type OrchestrationV2ProjectedTurnItem,
@@ -73,7 +74,13 @@ function timelineEntryRunId(entry: TimelineEntry): RunId | null {
   if (entry.kind === "proposed-plan") {
     return entry.proposedPlan.runId;
   }
-  if (entry.kind === "html-render" || entry.kind === "mcp-app") return entry.runId;
+  if (
+    entry.kind === "html-render" ||
+    entry.kind === "mcp-app" ||
+    entry.kind === "computer-use-permission"
+  ) {
+    return entry.runId;
+  }
   return entry.kind === "work" ? (entry.entry.runId ?? null) : null;
 }
 
@@ -691,6 +698,12 @@ type MessagesTimelineRowContent =
       itemId: TurnItemId;
       revision: string;
       mcpApp: McpAppReference;
+    }
+  | {
+      kind: "computer-use-permission";
+      id: string;
+      createdAt: string;
+      permission: ComputerUsePermission;
     };
 
 export interface StableMessagesTimelineRowsState {
@@ -920,9 +933,11 @@ function deriveSupersededAttemptFolds(
       completeAttemptIds.has(entry.attempt.id) ||
       unfoldedRunIds.has(entry.attempt.runId) ||
       (entry.kind === "message" && entry.message.role === "user") ||
-      // A published page stays visible, as it does when its turn folds.
+      // A published page stays visible, as it does when its turn folds, and
+      // so does a permission the user still has to grant.
       entry.kind === "html-render" ||
       entry.kind === "mcp-app" ||
+      entry.kind === "computer-use-permission" ||
       timelineEntryIsPersistentResourceCard(entry) ||
       // A steer supersedes the attempt but leaves its children running.
       liveSubagentEntryIds.has(entry.id) ||
@@ -2057,6 +2072,16 @@ export function deriveMessagesTimelineRows(input: {
       continue;
     }
 
+    if (timelineEntry.kind === "computer-use-permission") {
+      nextRows.push({
+        kind: "computer-use-permission",
+        id: timelineEntry.id,
+        createdAt: timelineEntry.createdAt,
+        permission: timelineEntry.permission,
+      });
+      continue;
+    }
+
     if (timelineEntry.kind === "event") {
       const members = subagentEntryMembers(timelineEntry);
       if (timelineEntry.projectedItem.item.type === "subagent" && members.length > 1) {
@@ -2606,6 +2631,11 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
         a.revision === bm.revision &&
         mcpAppReferencesEqual(a.mcpApp, bm.mcpApp)
       );
+    }
+
+    case "computer-use-permission": {
+      const bc = b as typeof a;
+      return a.createdAt === bc.createdAt && a.permission === bc.permission;
     }
 
     case "event":

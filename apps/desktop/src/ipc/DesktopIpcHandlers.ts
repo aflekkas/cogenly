@@ -46,6 +46,7 @@ import {
   openExternal,
   openSystemSettings,
   checkSystemPermission,
+  relaunchApp,
   pasteAsText,
   pickFolder,
   pickProjectFavicon,
@@ -121,6 +122,7 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
   yield* ipc.handle(cancelProviderAuthCallback);
   yield* ipc.handle(openSystemSettings);
   yield* ipc.handle(checkSystemPermission);
+  yield* ipc.handle(relaunchApp);
   yield* ipc.handle(pasteAsText);
   yield* ipc.handle(getUpdateState);
   yield* ipc.handle(setUpdateChannel);

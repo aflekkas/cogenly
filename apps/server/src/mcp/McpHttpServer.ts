@@ -26,7 +26,11 @@ import * as Stream from "effect/Stream";
 import type * as Types from "effect/Types";
 import { AiError, McpProtocol, McpSchema, McpServer, Tool, Toolkit } from "effect/ai";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
-import { OrchestratorMcpFailure, PreviewAutomationError } from "@cogenly/contracts";
+import {
+  ComputerUseUnavailableError,
+  OrchestratorMcpFailure,
+  PreviewAutomationError,
+} from "@cogenly/contracts";
 
 import packageJson from "../../package.json" with { type: "json" };
 import * as ServerConfig from "../config.ts";
@@ -72,6 +76,13 @@ import * as WorktreeMcpService from "./WorktreeMcpService.ts";
 import * as PullRequestsHandlers from "./toolkits/pullRequests/handlers.ts";
 import { PullRequestsToolkit } from "./toolkits/pullRequests/tools.ts";
 import * as DeviceHandlers from "./toolkits/device/handlers.ts";
+import * as ComputerHandlers from "./toolkits/computer/handlers.ts";
+import {
+  ComputerScreenshotTool,
+  ComputerScreenshotToolkit,
+  ComputerStandardToolkit,
+} from "./toolkits/computer/tools.ts";
+import * as ComputerUseService from "../computerUse/ComputerUseService.ts";
 import {
   DeviceScreenshotTool,
   DeviceScreenshotToolkit,
@@ -163,6 +174,7 @@ type AuthenticatedHttpEffect = Effect.Effect<
 const agentToolReads = new Map<string, boolean>([
   ["preview_snapshot", true],
   ["device_screenshot", true],
+  ["computer_screenshot", true],
   ["html_preview", true],
 ]);
 const AgentToolRequest = Schema.Struct({
@@ -841,6 +853,31 @@ const registerDeviceScreenshot = Effect.fn("McpHttpServer.registerDeviceScreensh
   );
 });
 
+const isComputerUseUnavailableError = Schema.is(ComputerUseUnavailableError);
+
+const registerComputerScreenshot = Effect.fn("McpHttpServer.registerComputerScreenshot")(
+  function* () {
+    const computer = yield* ComputerUseService.ComputerUse;
+    const threads = yield* ThreadManagementService.ThreadManagementService;
+    const built = yield* ComputerScreenshotToolkit;
+    yield* registerImageTool(
+      ComputerScreenshotTool,
+      (payload) =>
+        built
+          .handle("computer_screenshot", payload)
+          .pipe(Stream.unwrap, Stream.run(Sink.last()), Effect.flatMap(Effect.fromOption)),
+      (effect) =>
+        effect.pipe(
+          Effect.provideService(ComputerUseService.ComputerUse, computer),
+          Effect.provideService(ThreadManagementService.ThreadManagementService, threads),
+        ),
+      "screenshot",
+      // The service writes these messages for the agent, including which grant is missing.
+      (error) => (isComputerUseUnavailableError(error) ? error.message : "Screenshot failed."),
+    );
+  },
+);
+
 const isOrchestratorMcpFailure = Schema.is(OrchestratorMcpFailure);
 
 const registerHtmlPreview = Effect.fn("McpHttpServer.registerHtmlPreview")(function* () {
@@ -1001,6 +1038,11 @@ export const layerDeviceToolkit = Layer.mergeAll(
   layerDeviceScreenshotRegistration,
 );
 
+export const layerComputerToolkit = Layer.mergeAll(
+  toolkitRegistration(ComputerStandardToolkit, ComputerHandlers.layerStandard),
+  imageToolRegistration(registerComputerScreenshot(), ComputerHandlers.layerScreenshot),
+);
+
 export const layerMcpTransport = McpServer.layerHttp({
   name: "Cogenly",
   version: packageJson.version,
@@ -1048,5 +1090,6 @@ export const layer = Layer.mergeAll(
   layerWorktreeToolkitRegistration,
   layerPullRequestsToolkit,
   layerDeviceToolkit,
+  layerComputerToolkit,
   layerHtmlToolkit,
 ).pipe(Layer.provideMerge(layerMcpTransport));

@@ -17,6 +17,8 @@ import * as AgentStore from "../../agents/AgentStore.ts";
 import * as Orchestrator from "../../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../../orchestration-v2/ProjectionStore.ts";
 import * as DeviceService from "../../device/DeviceService.ts";
+import { ComputerHost } from "../../computerUse/ComputerHost.ts";
+import * as ComputerUseService from "../../computerUse/ComputerUseService.ts";
 import * as ServerConfig from "../../config.ts";
 import { expect, it } from "@effect/vitest";
 import { NodeHttpServer } from "@effect/platform-node";
@@ -237,6 +239,21 @@ const layerStubServices = Layer.mergeAll(
       revision: 0,
     }),
   }),
+  // A Linux host, like a VPS: the tools register and report themselves unavailable.
+  ComputerUseService.layer.pipe(
+    Layer.provide(
+      Layer.succeed(
+        ComputerHost,
+        ComputerHost.of({
+          platform: "linux",
+          hostApp: null,
+          script: () => Effect.die("computer use must not reach the OS on Linux"),
+          capture: () => Effect.die("computer use must not reach the OS on Linux"),
+          open: () => Effect.die("computer use must not reach the OS on Linux"),
+        }),
+      ),
+    ),
+  ),
   Layer.mock(ThreadManagementService.ThreadManagementService)({
     getThreadShell: () => Effect.succeed(shell),
     getThreadRecords: () => Effect.succeed({ ...projection, visualStates: visualStateRows }),
@@ -687,6 +704,30 @@ const smokeCases = [
     },
   },
   {
+    toolkit: "computer",
+    names: [
+      "computer_apps",
+      "computer_click",
+      "computer_drag",
+      "computer_key",
+      "computer_open_app",
+      "computer_press",
+      "computer_screenshot",
+      "computer_scroll",
+      "computer_status",
+      "computer_type",
+      "computer_ui",
+    ],
+    tool: "computer_status",
+    args: {},
+    expected: {
+      state: "unsupported",
+      enabled: true,
+      supported: false,
+      platform: "linux",
+    },
+  },
+  {
     toolkit: "pullRequests",
     names: [
       "link_pull_request",
@@ -860,7 +901,7 @@ it.effect.each(smokeCases)(
         const registry = McpSessionRegistry.issueActiveMcpCredential({
           threadId,
           providerInstanceId: ProviderInstanceId.make("codex"),
-          capabilities: new Set(["preview", "device"]),
+          capabilities: new Set(["preview", "device", "computer"]),
         });
         const credential = yield* registry;
         expect(credential).toBeDefined();

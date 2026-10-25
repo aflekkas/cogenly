@@ -8,6 +8,7 @@ import {
 import {
   COGENLY_BROWSER_TOOL_INSTRUCTIONS,
   COGENLY_ORCHESTRATION_INSTRUCTIONS,
+  cogenlyComputerUseInstructions,
 } from "@cogenly/provider-core/server/orchestrationInstructions";
 
 const COGENLY_DEVICE_TOOL_INSTRUCTIONS = `## Cogenly devices
@@ -17,6 +18,8 @@ The \`cogenly\` MCP server also exposes \`device_*\` tools for iOS Simulators an
 export interface T3CodeToolAvailability {
   readonly browser: boolean;
   readonly device: boolean;
+  /** The platform of the machine the `computer_*` tools drive; absent when they are not attached. */
+  readonly computer?: string;
   readonly terminal?: boolean;
 }
 
@@ -37,6 +40,7 @@ const toolInstructions = (availability: boolean | T3CodeToolAvailability): strin
   return [
     tools.browser ? COGENLY_BROWSER_TOOL_INSTRUCTIONS : "",
     tools.device ? COGENLY_DEVICE_TOOL_INSTRUCTIONS : "",
+    tools.computer === undefined ? "" : cogenlyComputerUseInstructions(tools.computer).trim(),
     tools.terminal
       ? "Use the cogenly MCP terminal_run tool for every shell command so the owner sees it live. Native shell tools are disabled. Use background=true for servers, terminal_read for output, terminal_write for stdin, and terminal_kill to stop. A command that may take more than about a minute, or may prompt (logins, cloud CLIs, installs, builds, test suites), runs with background=true and is polled with terminal_read, so the user's messages aren't blocked while it runs. Thread settlement kills these terminals and their children."
       : "",

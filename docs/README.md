@@ -18,6 +18,7 @@
 - [Camera, microphone and other site permissions](./user/site-permissions.md)
 - [Use Cogenly as your default browser](./user/default-browser.md)
 - [Devices](./user/devices.md)
+- [Computer use](./user/computer-use.md)
 - [Usage and limits](./user/usage.md)
 - [Product usage data](./user/telemetry.md)
 - [Remote access](./user/remote-access.md)
@@ -54,6 +55,7 @@ source alone does not explain. Most code changes do not need an internal documen
 - [Assistant citations](./internals/assistant-citations.md)
 - [Terminal runtime](./internals/terminal-runtime.md)
 - [Devices](./internals/devices.md)
+- [Computer use](./internals/computer-use.md)
 - [Voice input](./internals/voice-input.md)
 - [Import from T3 Code](./internals/t3-import.md)
 

@@ -55,12 +55,14 @@ import * as MachineSetup from "../tailscale/MachineSetup.ts";
 import * as TailscaleServeMode from "../tailscale/TailscaleServeMode.ts";
 import * as ThreadSync from "../threadSync/ThreadSync.ts";
 import * as HealthCanary from "./HealthCanary.ts";
+import * as ComputerUseService from "../computerUse/ComputerUseService.ts";
 import {
   type ActiveRun,
   STUCK_RUN_AFTER_MS,
   type SyncPeerProgress,
   type SyncPeerSample,
   bootServiceCheck,
+  computerUseCheck,
   buildReport,
   databaseCheck,
   directPeers,
@@ -257,6 +259,7 @@ const make = Effect.gen(function* () {
   const serveMode = yield* TailscaleServeMode.TailscaleServeMode;
   const launcher = yield* ServiceLauncherClient.ServiceLauncherClient;
   const canary = yield* HealthCanary.HealthCanary;
+  const computerUse = yield* ComputerUseService.ComputerUse;
 
   const freeSpace = yield* Effect.cachedWithTTL(
     Effect.tryPromise(() => NodeFSP.statfs(config.stateDir)).pipe(
@@ -468,6 +471,7 @@ const make = Effect.gen(function* () {
           }),
         ),
         guarded("canary", canary.check),
+        guarded("computer-use", Effect.map(computerUse.status(), computerUseCheck)),
       ],
       { concurrency: "unbounded" },
     );
