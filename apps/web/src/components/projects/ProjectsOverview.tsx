@@ -97,6 +97,8 @@ function ProjectTile(props: {
   readonly summary: string;
   readonly lastActivityAt: string | null;
   readonly machinesLabel: string | null;
+  /** Every project, for its menu's Merge with. */
+  readonly projects: ReadonlyArray<EnvironmentProjectLabel>;
   readonly onOpen: () => void;
   readonly onRename: () => void;
   readonly onLinkSources: () => void;
@@ -310,6 +312,7 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
                       }
                       lastActivityAt={latestProjectActivity(contents, chatActivityAt)}
                       machinesLabel={machinesLabel(entry)}
+                      projects={directory.labels}
                       onOpen={() =>
                         void navigate({
                           to: PROJECTS_SETTINGS_PATH,

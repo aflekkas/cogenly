@@ -27,9 +27,11 @@ import { cn } from "~/lib/utils";
 import { Button } from "~/components/ui/button";
 import { ComboboxItem } from "~/components/ui/combobox";
 import {
+  SearchListRowCheck,
   SearchListRowDescription,
   SearchListRowIcon,
   SearchListRowLabel,
+  SearchListRowSubmenu,
   SearchListRowText,
   SearchListRowTrailing,
 } from "~/components/ui/search-list";
@@ -378,14 +380,29 @@ export function ShowMoreRemoteRow<Item>(props: { readonly item: Item; readonly h
   );
 }
 
-/** A picker row that is an icon and a label, such as "Add repository…" or "Back". */
-export function PickerRowContent(props: { readonly icon: ReactNode; readonly label: ReactNode }) {
+/**
+ * A picker row that is an icon and a label, such as "Add repository…" or
+ * "Back". `chosen` checks the row holding the picker's value; `submenu` marks
+ * a row that opens a nested list.
+ */
+export function PickerRowContent(props: {
+  readonly icon: ReactNode;
+  readonly label: ReactNode;
+  readonly chosen?: boolean;
+  readonly submenu?: boolean;
+}) {
   return (
     <>
       <SearchListRowIcon>{props.icon}</SearchListRowIcon>
       <SearchListRowText>
         <SearchListRowLabel>{props.label}</SearchListRowLabel>
       </SearchListRowText>
+      {props.chosen || props.submenu ? (
+        <SearchListRowTrailing>
+          {props.chosen ? <SearchListRowCheck /> : null}
+          {props.submenu ? <SearchListRowSubmenu /> : null}
+        </SearchListRowTrailing>
+      ) : null}
     </>
   );
 }

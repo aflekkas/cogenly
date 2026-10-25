@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState } from "react";
 
+import { InlineButton } from "../components/ui/button";
 import { cn } from "../lib/utils";
 import { PANEL_MOTION_EASING } from "../lib/panelFlip";
 import { PANEL_ANIMATION_DURATION } from "../panelAnimations";
@@ -38,7 +39,10 @@ export function HeroProjectSuffixText(props: {
   readonly name: string | null;
   /** The project, for its icon. */
   readonly project: ProjectIconProject | null;
+  /** While its picker is open, the name stays marked as the picker's. */
+  readonly open?: boolean;
 }) {
+  const open = props.open ?? false;
   const [shown, setShown] = useState<Layer>({ key: 0, name: props.name, project: props.project });
   const [leaving, setLeaving] = useState<Layer | null>(null);
   if (props.name !== shown.name) {
@@ -76,7 +80,7 @@ export function HeroProjectSuffixText(props: {
           className="pointer-events-none absolute start-0 top-0 opacity-0 transition-opacity duration-(--motion-duration-base) ease-standard starting:opacity-100"
           onTransitionEnd={() => setLeaving(null)}
         >
-          <SuffixContent name={leaving.name} project={leaving.project} />
+          <SuffixContent name={leaving.name} project={leaving.project} open={false} />
         </span>
       ) : null}
       <span
@@ -89,17 +93,18 @@ export function HeroProjectSuffixText(props: {
             "transition-opacity duration-(--motion-duration-base) ease-standard starting:opacity-0",
         )}
       >
-        <SuffixContent name={shown.name} project={shown.project} />
+        <SuffixContent name={shown.name} project={shown.project} open={open} />
       </span>
     </span>
   );
 }
 
-// Reads like the Work hero's project picker (InlineButton tone="picker"): the
-// project's folder and name in the heading's color, underlined quietly.
+// Reads like the Work hero's project picker: the project's folder and name as
+// an InlineButton picker. The trigger around it is the button, so it renders a span.
 function SuffixContent(props: {
   readonly name: string | null;
   readonly project: ProjectIconProject | null;
+  readonly open: boolean;
 }) {
   if (props.name === null) return null;
   return (
@@ -111,14 +116,22 @@ function SuffixContent(props: {
         {" · "}
       </span>
       {"in "}
-      <span className="underline decoration-foreground/30 decoration-from-font underline-offset-4 transition-colors duration-(--motion-duration-fast) group-hover/hero-suffix:decoration-foreground group-data-popup-open/hero-suffix:decoration-foreground">
-        <ProjectFolderIcon
-          project={props.project}
-          className="inline-block"
-          style={HERO_INLINE_ICON_STYLE}
-        />
-        {props.name}
-      </span>
+      <InlineButton
+        tone="picker"
+        render={<span />}
+        tabIndex={-1}
+        className="align-baseline"
+        data-popup-open={props.open ? "" : undefined}
+      >
+        <span>
+          <ProjectFolderIcon
+            project={props.project}
+            className="inline-block"
+            style={HERO_INLINE_ICON_STYLE}
+          />
+          {props.name}
+        </span>
+      </InlineButton>
     </>
   );
 }

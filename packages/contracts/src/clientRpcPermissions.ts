@@ -67,6 +67,7 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.projectLabelsMerge]: AuthOrchestrationOperateScope,
   [WS_METHODS.projectLabelsUndismissDuplicate]: AuthOrchestrationOperateScope,
   [WS_METHODS.projectLabelsDismissDuplicate]: AuthOrchestrationOperateScope,
+  [WS_METHODS.projectLabelsUndismissDuplicate]: AuthOrchestrationOperateScope,
   [WS_METHODS.projectLabelsDelete]: AuthOrchestrationOperateScope,
   [WS_METHODS.projectLabelsArchive]: AuthOrchestrationOperateScope,
   [WS_METHODS.projectLabelsUnarchive]: AuthOrchestrationOperateScope,

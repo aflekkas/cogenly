@@ -209,7 +209,11 @@ function EnvironmentOrphanFolders(props: {
                     <>
                       {REASON_LABEL[folder.reason]}
                       {error !== null ? (
-                        <span role="alert" className="block text-destructive">
+                        <span
+                          key={error}
+                          role="alert"
+                          className="reveal-motion block text-destructive-foreground"
+                        >
                           {error}
                         </span>
                       ) : null}

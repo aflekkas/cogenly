@@ -241,8 +241,8 @@ export function unifyProjectLabels(
 }
 
 /**
- * Two projects created apart under the same name, which the server flags as
- * possibly one. Merging moves `from` into `into`, the older one.
+ * Two projects to merge: usually same-name ones created apart, which the
+ * server flags as possibly one. Merging moves `from` into `into`, the older one.
  */
 export interface PossibleDuplicateProjects {
   readonly key: string;
@@ -266,16 +266,40 @@ export function possibleDuplicateProjects(
       const key = [entry.label.id, other.label.id].toSorted().join("\0");
       if (seen.has(key)) continue;
       seen.add(key);
-      const entryFirst =
-        entry.label.createdAt < other.label.createdAt ||
-        (entry.label.createdAt === other.label.createdAt && entry.label.id < other.label.id);
-      const [into, from] = entryFirst ? [entry, other] : [other, entry];
-      const fromMachines = new Set(projectLabelEnvironmentIds(from));
-      const shared = projectLabelEnvironmentIds(into).filter((id) => fromMachines.has(id));
-      pairs.push({ key, into, from, environmentId: shared[0] ?? null });
+      pairs.push(projectMergePair(entry, other));
     }
   }
   return pairs;
+}
+
+/** `a` and `b` as a merge: the newer moves into the older, run by a machine that has both. */
+export function projectMergePair(
+  a: EnvironmentProjectLabel,
+  b: EnvironmentProjectLabel,
+): PossibleDuplicateProjects {
+  const key = [a.label.id, b.label.id].toSorted().join("\0");
+  const aFirst =
+    a.label.createdAt < b.label.createdAt ||
+    (a.label.createdAt === b.label.createdAt && a.label.id < b.label.id);
+  const [into, from] = aFirst ? [a, b] : [b, a];
+  const fromMachines = new Set(projectLabelEnvironmentIds(from));
+  const shared = projectLabelEnvironmentIds(into).find((id) => fromMachines.has(id));
+  return { key, into, from, environmentId: shared ?? null };
+}
+
+/**
+ * The projects `entry` can merge with any time ("Merge with…"): every other
+ * project a machine has alongside it, in the order the entries come.
+ */
+export function projectMergeCandidates(
+  entry: EnvironmentProjectLabel,
+  entries: ReadonlyArray<EnvironmentProjectLabel>,
+): PossibleDuplicateProjects[] {
+  return entries.flatMap((other) => {
+    if (other.label.id === entry.label.id) return [];
+    const pair = projectMergePair(entry, other);
+    return pair.environmentId === null ? [] : [pair];
+  });
 }
 
 export function projectLabelKey(

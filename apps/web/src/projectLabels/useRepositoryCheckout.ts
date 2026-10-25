@@ -149,6 +149,8 @@ export function useRepositoryCheckouts(environmentId: EnvironmentId | null) {
     forget: (row: RepositoryListRow) => {
       if (requests.has(requestKey(row))) setRequest(requestKey(row), null);
     },
+    /** The row action running on `row`, if any. */
+    workOf: (row: RepositoryListRow): RepositoryRowWork | null => work.get(requestKey(row)) ?? null,
     /** Runs a row action, showing it on the row (`working`) until it settles. */
     track: async <A>(row: RepositoryListRow, kind: RepositoryRowWork, run: () => Promise<A>) => {
       const key = requestKey(row);
@@ -166,8 +168,11 @@ export function useRepositoryCheckouts(environmentId: EnvironmentId | null) {
   };
 }
 
-/** What `useRepositoryCheckouts` gives the row actions: a way to show work on a row. */
-export type RepositoryRowWorkTracker = Pick<ReturnType<typeof useRepositoryCheckouts>, "track">;
+/** What `useRepositoryCheckouts` gives the row actions: a way to show and read work on a row. */
+export type RepositoryRowWorkTracker = Pick<
+  ReturnType<typeof useRepositoryCheckouts>,
+  "track" | "workOf"
+>;
 
 /**
  * The row menu's machine actions: "Remove from this machine" (deletes the
@@ -243,8 +248,8 @@ export function useRepositoryMachineActions(environmentId: EnvironmentId | null)
  * folder" for a checkout outside `<project>/repos/`, "Remove from this
  * machine" for a cloned repository with a remote, and "Remove from <project>"
  * (unlink) for one with a record here. Each is offered only where this
- * connection may do it. `onLeave` runs first, for a picker that closes
- * before a dialog.
+ * connection may do it, and none while a removal or move runs on the row.
+ * `onLeave` runs first, for a picker that closes before a dialog.
  */
 export function useRepositoryRowActions(
   environmentId: EnvironmentId | null,
@@ -267,6 +272,8 @@ export function useRepositoryRowActions(
       <A>(run: () => Promise<A>) =>
         tracker.track(row, kind, run);
     const actions: RepositoryRowMenuAction[] = [];
+    // A second removal or move would race the one running.
+    if (tracker.workOf(row) !== null) return actions;
     if (machine.canAdopt && canMoveIntoProjectFolder(row)) {
       actions.push({
         key: "move-into-project-folder",
