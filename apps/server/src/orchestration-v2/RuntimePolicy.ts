@@ -113,7 +113,9 @@ export const layer: Layer.Layer<RuntimePolicyV2> = Layer.succeed(RuntimePolicyV2
 export const layerFromProjectStore: Layer.Layer<
   RuntimePolicyV2,
   never,
-  ProjectStore.ProjectStoreV2 | ProviderInstanceRegistry.ProviderInstanceRegistry
+  | ProjectStore.ProjectStoreV2
+  | ProviderInstanceRegistry.ProviderInstanceRegistry
+  | Integrations.Integrations
 > = Layer.effect(
   RuntimePolicyV2,
   Effect.gen(function* () {
@@ -121,10 +123,9 @@ export const layerFromProjectStore: Layer.Layer<
     // Optional so layers without the project-files service (unit tests over a
     // memory database) still resolve; production always provides it.
     const files = yield* Effect.serviceOption(ProjectFiles.ProjectFiles);
-    // Isolated policy tests and lightweight layers can resolve without a
-    // gateway. runtimeLayer provides it explicitly; its production composition
-    // test guards this optional dependency, including the duplicate-connector note.
-    const integrationsService = yield* Effect.serviceOption(Integrations.Integrations);
+    // Required, not optional: as an optional service the production runtime
+    // silently never received it and turns lost the integrations line.
+    const integrationsService = yield* Integrations.Integrations;
     const serverSettings = yield* Effect.serviceOption(ServerSettings.ServerSettingsService);
     // Unreadable settings keep the default: provider duplicates stay hidden.
     const useProviderConnectors = Option.isNone(serverSettings)
@@ -139,21 +140,19 @@ export const layerFromProjectStore: Layer.Layer<
     // resolves to no line rather than failing the turn.
     const noIntegrations = { integrations: [], available: [] };
     const integrationsFor = (labelId: ProjectLabelId | null) =>
-      Option.isNone(integrationsService)
-        ? Effect.succeed(noIntegrations)
-        : integrationsService.value.contextIntegrations(labelId).pipe(
-            Effect.map((found) => ({
-              integrations: found.map((integration) => ({
-                name: integration.name,
-                status: integration.status,
-                displayName: integration.displayName,
-                hint: integration.hint,
-                accountLabel: integration.accountLabel,
-              })),
-              available: availableToConnect(found),
-            })),
-            Effect.catch(() => Effect.succeed(noIntegrations)),
-          );
+      integrationsService.contextIntegrations(labelId).pipe(
+        Effect.map((found) => ({
+          integrations: found.map((integration) => ({
+            name: integration.name,
+            status: integration.status,
+            displayName: integration.displayName,
+            hint: integration.hint,
+            accountLabel: integration.accountLabel,
+          })),
+          available: availableToConnect(found),
+        })),
+        Effect.orElseSucceed(() => noIntegrations),
+      );
     // The project context is best-effort turn context from the derived index:
     // any failure resolves to no folder rather than failing the turn.
     const projectFor = (
