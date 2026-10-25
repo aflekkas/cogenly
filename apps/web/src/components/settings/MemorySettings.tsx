@@ -1,6 +1,6 @@
 import { OverlayPresence } from "~/components/ui/overlay-presence";
 import type { AgentId, ProjectLabelId } from "@t3tools/contracts";
-import { BrainIcon, PlusIcon } from "lucide-react";
+import { BrainIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { useAgents } from "../../agents/agentsClient";
@@ -9,12 +9,17 @@ import { FactEditorDialog, FactList, factInputFromDraft } from "../../memory/Fac
 import { useFactActions, useFactNavigation, useFacts } from "../../memory/useFacts";
 import { sortProjectLabels } from "../../projectLabels/projectLabels.logic";
 import { useEnvironmentProjectLabels } from "../../projectLabels/useProjectLabels";
-import { Button } from "../ui/button";
-import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "../ui/empty";
 import { SearchInput } from "../ui/search-input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { useSettingsScope } from "./SettingsScopeContext";
-import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
+import {
+  SettingsEmpty,
+  SettingsPageContainer,
+  SettingsRow,
+  SettingsSection,
+  SettingsSectionAction,
+  SettingsToolbar,
+} from "./settingsLayout";
 
 const ALL = "all";
 
@@ -55,23 +60,21 @@ export function MemorySettings() {
         id="memory"
         title="Memory"
         headerAction={
-          <Button
-            size="xs"
-            variant="ghost-muted"
+          <SettingsSectionAction
             disabled={!actions.canWrite}
             title={actions.canWrite ? undefined : "This connection cannot change memory."}
             onClick={() => setCreating(true)}
           >
-            <PlusIcon className="size-3" />
             Remember something
-          </Button>
+          </SettingsSectionAction>
         }
+        footer="Chats tagged with a confirmed project, and agents allowed to read that project, use its confirmed facts as context. Proposals are never used until you confirm them. Private facts stay with you and the agent they belong to."
       >
         {environmentId === null ? (
           <SettingsRow title="Choose an environment to see what it remembers." />
         ) : (
           <>
-            <div className="flex flex-wrap items-center gap-2 px-3 py-2.5 sm:px-4">
+            <SettingsToolbar>
               <SearchInput
                 frameClassName="min-w-40 flex-1"
                 aria-label="Search memory"
@@ -134,25 +137,21 @@ export function MemorySettings() {
                   ))}
                 </SelectPopup>
               </Select>
-            </div>
+            </SettingsToolbar>
             {list.error !== null ? (
               <SettingsRow title="Could not load memory" description={list.error} />
             ) : !list.isLoaded ? (
-              <SettingsRow title="Loading memory…" />
+              <SettingsRow title="Loading memory…" role="status" />
             ) : facts.length === 0 ? (
-              <Empty>
-                <EmptyHeader>
-                  <EmptyMedia>
-                    <BrainIcon />
-                  </EmptyMedia>
-                  <EmptyTitle>{filtered ? "Nothing matches" : "Nothing remembered yet"}</EmptyTitle>
-                  <EmptyDescription>
-                    {filtered
-                      ? "Try another project, agent or status."
-                      : "Add something here. Agents can propose facts for you to confirm."}
-                  </EmptyDescription>
-                </EmptyHeader>
-              </Empty>
+              <SettingsEmpty
+                icon={<BrainIcon />}
+                title={filtered ? "Nothing matches" : "Nothing remembered yet"}
+                description={
+                  filtered
+                    ? "Try another project, agent or status."
+                    : "Add something here. Agents can propose facts for you to confirm."
+                }
+              />
             ) : (
               <FactList
                 environmentId={environmentId}
@@ -166,11 +165,6 @@ export function MemorySettings() {
           </>
         )}
       </SettingsSection>
-      <p className="px-3 text-xs text-muted-foreground sm:px-4">
-        Chats tagged with a confirmed project, and agents allowed to read that project, use its
-        confirmed facts as context. Proposals are never used until you confirm them. Private facts
-        stay with you and the agent they belong to.
-      </p>
       <OverlayPresence when={creating && environmentId}>
         {(environmentId) => (
           <FactEditorDialog

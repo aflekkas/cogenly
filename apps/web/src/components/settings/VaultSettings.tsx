@@ -20,17 +20,16 @@ import {
 } from "../../vault/vault.logic";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
-import {
-  Empty,
-  EmptyContent,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "../ui/empty";
 import { OverlayPresence } from "../ui/overlay-presence";
 import { useSettingsScope } from "./SettingsScopeContext";
-import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
+import {
+  SettingsEmpty,
+  SettingsNote,
+  SettingsPageContainer,
+  SettingsRow,
+  SettingsSection,
+  SettingsSectionAction,
+} from "./settingsLayout";
 
 const NO_WRITE_TITLE = "This connection cannot change the vault.";
 
@@ -68,83 +67,83 @@ export function VaultSettings() {
   const scopeName = (id: string | null) =>
     id === null ? null : (labels.find((label) => label.id === id)?.name ?? "A removed project");
 
-  const addButton = (size: "xs" | "default") => (
-    <Button
-      size={size}
-      variant={size === "xs" ? "ghost-muted" : "default"}
-      disabled={!actions.canWrite}
-      title={actions.canWrite ? undefined : NO_WRITE_TITLE}
-      onClick={() => setEditing({ kind: "create" })}
-    >
-      <PlusIcon className={size === "xs" ? "size-3" : undefined} />
-      Add item
-    </Button>
-  );
+  const canWriteTitle = actions.canWrite ? undefined : NO_WRITE_TITLE;
+  const startCreate = () => setEditing({ kind: "create" });
 
   return (
     <SettingsPageContainer>
-      <SettingsSection id="vault" title="Vault" headerAction={addButton("xs")}>
+      <SettingsSection
+        id="vault"
+        title="Vault"
+        headerAction={
+          <SettingsSectionAction
+            disabled={!actions.canWrite}
+            title={canWriteTitle}
+            onClick={startCreate}
+          >
+            Add item
+          </SettingsSectionAction>
+        }
+      >
         {environmentId === null ? (
           <SettingsRow title="Choose an environment to see its vault." />
         ) : list.error !== null ? (
           <SettingsRow title="Could not load the vault" description={list.error} />
         ) : !list.isLoaded ? (
-          <SettingsRow title="Loading vault…" />
+          <SettingsRow title="Loading vault…" role="status" />
         ) : items.length === 0 ? (
-          <Empty>
-            <EmptyHeader>
-              <EmptyMedia>
-                <KeyRoundIcon />
-              </EmptyMedia>
-              <EmptyTitle>Nothing in the vault yet</EmptyTitle>
-              <EmptyDescription>
-                Store logins, API keys, cards and notes here so agents can use them without ever
-                seeing them.
-              </EmptyDescription>
-            </EmptyHeader>
-            <EmptyContent>{addButton("default")}</EmptyContent>
-          </Empty>
+          <SettingsEmpty
+            icon={<KeyRoundIcon />}
+            title="Nothing in the vault yet"
+            description="Store logins, API keys, cards and notes here so agents can use them without ever seeing them."
+            action={
+              <Button disabled={!actions.canWrite} title={canWriteTitle} onClick={startCreate}>
+                <PlusIcon />
+                Add item
+              </Button>
+            }
+          />
         ) : (
-          <ul className="divide-y divide-border/60">
-            {items.map((item) => (
-              <VaultItemRow
-                key={item.id}
-                environmentId={environmentId}
-                item={item}
-                scope={scopeName(item.scopeProjectId)}
-                policy={vaultPolicySummary(item.policy, agentName)}
-                lastUsedAt={lastUsed.get(item.id) ?? null}
-                agentName={agentName}
-                canWrite={actions.canWrite}
-                onEdit={() => setEditing({ kind: "edit", item })}
-                onDelete={async () => {
-                  const message = `Delete “${item.name}”?\nAgents can no longer use it. Its usage log stays.`;
-                  const confirmed =
-                    (await requestConfirmDialog(message, { variant: "destructive" })) ??
-                    window.confirm(message);
-                  if (confirmed) await actions.remove(item.id);
-                }}
-              />
-            ))}
-          </ul>
+          items.map((item) => (
+            <VaultItemRow
+              key={item.id}
+              environmentId={environmentId}
+              item={item}
+              scope={scopeName(item.scopeProjectId)}
+              policy={vaultPolicySummary(item.policy, agentName)}
+              lastUsedAt={lastUsed.get(item.id) ?? null}
+              agentName={agentName}
+              canWrite={actions.canWrite}
+              onEdit={() => setEditing({ kind: "edit", item })}
+              onDelete={async () => {
+                const message = `Delete “${item.name}”?\nAgents can no longer use it. Its usage log stays.`;
+                const confirmed =
+                  (await requestConfirmDialog(message, { variant: "destructive" })) ??
+                  window.confirm(message);
+                if (confirmed) await actions.remove(item.id);
+              }}
+            />
+          ))
         )}
       </SettingsSection>
       {environmentId !== null && items.length > 0 ? (
         <SettingsSection id="vault-activity" title="All activity">
-          <div className="px-3 py-3 sm:px-4">
-            <UsageBody
-              error={activity.error}
-              isLoaded={activity.isLoaded}
-              empty={activity.usage.length === 0}
-            >
+          {activity.error ? (
+            <SettingsNote tone="destructive">{activity.error}</SettingsNote>
+          ) : !activity.isLoaded ? (
+            <SettingsNote role="status">Loading usage…</SettingsNote>
+          ) : activity.usage.length === 0 ? (
+            <SettingsNote>Not used yet.</SettingsNote>
+          ) : (
+            <div className="px-3 py-3 sm:px-4">
               <VaultUsageList
                 environmentId={environmentId}
                 usage={activity.usage}
                 agentName={agentName}
                 itemName={itemName}
               />
-            </UsageBody>
-          </div>
+            </div>
+          )}
         </SettingsSection>
       ) : null}
       <OverlayPresence when={editing}>
@@ -187,18 +186,35 @@ function VaultItemRow(props: {
   const label = item.label ?? null;
   const cardLast4 = item.type === "card" && item.cardLast4 ? `•••• ${item.cardLast4}` : null;
   return (
-    <li className="flex flex-col gap-1.5 px-3 py-3 sm:px-4">
-      <div className="flex items-start gap-2">
-        <div className="flex min-w-0 flex-1 items-center gap-1.5">
-          <p className="truncate text-sm text-foreground">{item.name}</p>
+    <SettingsRow
+      title={
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="truncate">{item.name}</span>
           <Badge size="sm" variant="outline">
             {VAULT_TYPE_LABELS[item.type]}
           </Badge>
-          {label ? <span className="truncate text-xs text-muted-foreground">{label}</span> : null}
-          {cardLast4 ? (
-            <span className="truncate text-xs text-muted-foreground">{cardLast4}</span>
+          {label ? (
+            <span className="truncate text-xs font-normal text-muted-foreground">{label}</span>
           ) : null}
-        </div>
+          {cardLast4 ? (
+            <span className="truncate text-xs font-normal text-muted-foreground">{cardLast4}</span>
+          ) : null}
+        </span>
+      }
+      description={
+        <span className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
+          <span>{props.policy}</span>
+          <span>· {props.scope ?? "All projects"}</span>
+          {item.allowedDomains.length > 0 ? <span>· {item.allowedDomains.join(", ")}</span> : null}
+          <span>
+            ·{" "}
+            {props.lastUsedAt
+              ? `Last used ${formatRelativeTimeLabel(props.lastUsedAt)}`
+              : "Never used"}
+          </span>
+        </span>
+      }
+      control={
         <div className="flex shrink-0 items-center gap-0.5">
           <Button
             size="icon-xs"
@@ -234,22 +250,12 @@ function VaultItemRow(props: {
             <HistoryIcon />
           </Button>
         </div>
-      </div>
-      <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-muted-foreground">
-        <span>{props.policy}</span>
-        <span>· {props.scope ?? "All projects"}</span>
-        {item.allowedDomains.length > 0 ? <span>· {item.allowedDomains.join(", ")}</span> : null}
-        <span>
-          ·{" "}
-          {props.lastUsedAt
-            ? `Last used ${formatRelativeTimeLabel(props.lastUsedAt)}`
-            : "Never used"}
-        </span>
-      </div>
+      }
+    >
       {showUsage ? (
         <ItemUsage environmentId={props.environmentId} item={item} agentName={props.agentName} />
       ) : null}
-    </li>
+    </SettingsRow>
   );
 }
 
@@ -260,7 +266,7 @@ function ItemUsage(props: {
 }) {
   const usage = useVaultUsage(props.environmentId, props.item.id);
   return (
-    <div className="reveal-motion ms-0.5 border-s border-border/70 ps-3 text-xs text-muted-foreground">
+    <div className="reveal-motion ms-0.5 mt-2 mb-2 border-s border-border/70 ps-3 text-xs text-muted-foreground">
       <UsageBody error={usage.error} isLoaded={usage.isLoaded} empty={usage.usage.length === 0}>
         <VaultUsageList
           environmentId={props.environmentId}

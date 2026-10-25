@@ -9363,7 +9363,6 @@ export default function ChatView(props: ChatViewProps) {
               <ThreadDetailsDock
                 environmentId={activeThreadRef.environmentId}
                 threadId={activeThreadRef.threadId}
-                rightPanelOpen={rightPanelOpen}
                 findOpen={isThreadFindActive}
               />
             ) : null}
@@ -9382,7 +9381,11 @@ export default function ChatView(props: ChatViewProps) {
               </div>
             ) : null}
             {/* Banners overlay the timeline without changing its content height. */}
-            <div className="chat-banner-lane pointer-events-none absolute top-0 z-20 flex flex-col">
+            <div
+              className="chat-banner-lane pointer-events-none absolute top-0 z-20 flex flex-col"
+              data-panel-flip="start"
+              data-panel-flip-size=""
+            >
               <ProviderStatusBanner
                 status={visibleProviderStatus}
                 onDismiss={() => setDismissedProviderStatusBannerKey(providerStatusBannerKey)}
@@ -9454,7 +9457,11 @@ export default function ChatView(props: ChatViewProps) {
                       threadFooterLines
                     ) : (
                       <>
-                        <div className="chat-content-lane">
+                        <div
+                          className="chat-content-lane"
+                          data-panel-flip="start"
+                          data-panel-flip-size=""
+                        >
                           <HandoffRow
                             endpoints={pendingHandoff}
                             providers={providerStatuses}
@@ -9556,6 +9563,8 @@ export default function ChatView(props: ChatViewProps) {
               {/* Scroll-to-end button: shown once the reader leaves the live edge. */}
               <div
                 className="chat-scroll-to-bottom pointer-events-none absolute z-30 flex justify-center py-2"
+                data-panel-flip="center"
+                data-panel-flip-contain="window"
                 style={{ bottom: scrollToEndClearance + 4 }}
               >
                 <ScrollToEndButton
@@ -9595,10 +9604,8 @@ export default function ChatView(props: ChatViewProps) {
               >
                 <div
                   data-chat-composer-stack="true"
-                  // The centred hero and composer glide by their center when a
-                  // panel toggle resizes them, instead of jumping (panelFlip).
-                  data-panel-flip={isDraftHeroState ? "center" : undefined}
-                  data-panel-flip-contain={isDraftHeroState ? "window" : undefined}
+                  data-panel-flip="start"
+                  data-panel-flip-size=""
                   className="group/composer-stack chat-content-lane pointer-events-auto relative z-10 px-(--chat-content-inset)"
                 >
                   {isDraftHeroState ? (

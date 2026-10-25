@@ -1,12 +1,12 @@
 import { useDictationAvailable } from "~/dictation/dictationAvailability";
 import { SettingsGroup } from "./SettingsGroup";
+import { FoldedSettingsSection } from "./FoldedSettingsSection";
 import { settingsScopeEnvironmentLabels } from "./settingsScopeAxis";
 import { useScopedSettingsWriteAllowed } from "./useScopedSettings";
-import { Spinner } from "~/components/ui/spinner";
 import { NotificationSettings } from "./NotificationSettings";
 import { ArchiveIcon, ArchiveX, CheckIcon, RotateCcwIcon, SettingsIcon } from "lucide-react";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import {
   type BackgroundActivityProfile,
   ProviderDriverKind,
@@ -88,7 +88,6 @@ import { EMPTY_SERVER_PROVIDERS } from "../../state/server";
 import { useArchivedThreadSnapshots } from "../../lib/archivedThreadsState";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { Button } from "../ui/button";
-import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import {
   Dialog,
   DialogDescription,
@@ -98,15 +97,7 @@ import {
   DialogPopup,
   DialogTitle,
 } from "../ui/dialog";
-import { DisclosureChevron } from "../ui/disclosure";
 import { DraftInput } from "../ui/draft-input";
-import {
-  NumberField,
-  NumberFieldDecrement,
-  NumberFieldGroup,
-  NumberFieldIncrement,
-  NumberFieldInput,
-} from "../ui/number-field";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
 import { ScopedSwitch } from "./ScopedSwitch";
@@ -131,11 +122,11 @@ import {
   PolicyTooltip,
   SETTINGS_PICKER_TRIGGER_CLASSNAME,
   SettingResetButton,
+  SettingsEmpty,
+  SettingsNumberField,
   SettingsPageContainer,
   SettingsRow,
   SettingsSection,
-  useSettingsSearchTarget,
-  useSettingsSearchTargetId,
 } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 import { ProjectFavicon } from "../ProjectFavicon";
@@ -695,243 +686,163 @@ function BackgroundActivityAdvancedDialog({
   const hostPowerMonitorIdleIntervalSeconds = durationToSeconds(
     resolvedBackgroundActivity.hostPowerMonitorIdleInterval,
   );
+  const updateOverrides = (patch: Parameters<typeof backgroundActivityOverrideSettings>[2]) =>
+    updateSettings(
+      backgroundActivityOverrideSettings(
+        settings.backgroundActivity,
+        resolvedBackgroundActivity,
+        patch,
+      ),
+    );
 
   return (
     <Dialog open={open && canWriteSettings} onOpenChange={onOpenChange}>
       <DialogPopup className="max-w-xl">
         <DialogHeader>
-          <DialogTitle>Background Activity</DialogTitle>
+          <DialogTitle>Background activity</DialogTitle>
           <DialogDescription>
             Tune the shared power policy and the background intervals that feed it.
           </DialogDescription>
         </DialogHeader>
         <DialogPanel>
-          <fieldset
-            disabled={!canWriteSettings}
-            className="min-w-0 overflow-hidden rounded-xl border bg-card text-card-foreground"
-          >
-            <div className="flex flex-col gap-3 border-b px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="min-w-0 space-y-1">
-                <div className="text-sm font-medium">Shared policy</div>
-                <p className="text-xs leading-relaxed text-muted-foreground">
-                  Controls whether background work may run after a subscribed interval fires.
-                </p>
-              </div>
-              <Select
-                value={activeProfile}
-                onValueChange={(value) => {
-                  if (
-                    value === "balanced" ||
-                    value === "performance" ||
-                    value === "battery-saver"
-                  ) {
-                    updateSettings({
-                      backgroundActivity: backgroundActivitySharedPolicySettings(settings, value),
-                    });
-                  }
-                }}
-              >
-                <SelectTrigger
-                  size="sm"
-                  className="w-full sm:w-40"
-                  aria-label="Shared background policy"
-                >
-                  <SelectValue>{BACKGROUND_ACTIVITY_PROFILE_LABELS[activeProfile]}</SelectValue>
-                </SelectTrigger>
-                <SelectPopup align="end" alignItemWithTrigger={false}>
-                  <SelectItem hideIndicator value="balanced">
-                    {BACKGROUND_ACTIVITY_PROFILE_LABELS.balanced}
-                  </SelectItem>
-                  <SelectItem hideIndicator value="performance">
-                    {BACKGROUND_ACTIVITY_PROFILE_LABELS.performance}
-                  </SelectItem>
-                  <SelectItem hideIndicator value="battery-saver">
-                    {BACKGROUND_ACTIVITY_PROFILE_LABELS["battery-saver"]}
-                  </SelectItem>
-                </SelectPopup>
-              </Select>
-            </div>
-
-            <div className="flex flex-col gap-3 border-b px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="min-w-0 space-y-1">
-                <div className="text-sm font-medium">
-                  {searchableSetting("git-fetch-interval").title}
-                </div>
-                <p className="text-xs leading-relaxed text-muted-foreground">
-                  Refresh remote branch status in the background.
-                </p>
-              </div>
-              <div className="flex shrink-0 items-center gap-2">
-                <NumberField
-                  value={automaticGitFetchIntervalSeconds}
-                  min={0}
-                  step={5}
-                  size="sm"
-                  className="w-32"
-                  onValueChange={(value) =>
-                    updateSettings(
-                      backgroundActivityOverrideSettings(
-                        settings.backgroundActivity,
-                        resolvedBackgroundActivity,
-                        {
-                          automaticGitFetchInterval: Duration.seconds(
-                            normalizeIntervalSeconds(value),
+          <fieldset disabled={!canWriteSettings} className="min-w-0">
+            <SettingsGroup>
+              <SettingsRow
+                title="Shared policy"
+                description="Controls whether background work may run after a subscribed interval fires."
+                control={
+                  <Select
+                    value={activeProfile}
+                    onValueChange={(value) => {
+                      if (
+                        value === "balanced" ||
+                        value === "performance" ||
+                        value === "battery-saver"
+                      ) {
+                        updateSettings({
+                          backgroundActivity: backgroundActivitySharedPolicySettings(
+                            settings,
+                            value,
                           ),
-                        },
-                      ),
-                    )
-                  }
-                >
-                  <NumberFieldGroup>
-                    <NumberFieldDecrement aria-label="Decrease Git fetch interval" />
-                    <NumberFieldInput aria-label="Git fetch interval in seconds" />
-                    <NumberFieldIncrement aria-label="Increase Git fetch interval" />
-                  </NumberFieldGroup>
-                </NumberField>
-                <span className="text-xs text-muted-foreground">seconds</span>
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="min-w-0 space-y-1">
-                <div className="text-sm font-medium">Provider health interval</div>
-                <p className="text-xs leading-relaxed text-muted-foreground">
-                  Refresh provider availability, versions, and auth state. Model catalog updates
-                  follow Provider update checks.
-                </p>
-              </div>
-              <div className="flex shrink-0 items-center gap-2">
-                <NumberField
-                  value={providerHealthRefreshIntervalSeconds}
-                  min={0}
-                  step={PROVIDER_HEALTH_INTERVAL_STEP_SECONDS}
-                  size="sm"
-                  className="w-32"
-                  onValueChange={(value) =>
-                    updateSettings(
-                      backgroundActivityOverrideSettings(
-                        settings.backgroundActivity,
-                        resolvedBackgroundActivity,
-                        {
-                          providerHealthRefreshInterval: Duration.seconds(
-                            normalizeIntervalSeconds(value),
-                          ),
-                        },
-                      ),
-                    )
-                  }
-                >
-                  <NumberFieldGroup>
-                    <NumberFieldDecrement aria-label="Decrease provider health interval" />
-                    <NumberFieldInput aria-label="Provider health interval in seconds" />
-                    <NumberFieldIncrement aria-label="Increase provider health interval" />
-                  </NumberFieldGroup>
-                </NumberField>
-                <span className="text-xs text-muted-foreground">seconds</span>
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-3 border-t px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="min-w-0 space-y-1">
-                <div className="text-sm font-medium">Host power monitor</div>
-                <p className="text-xs leading-relaxed text-muted-foreground">
-                  Poll host power state while clients are active.
-                </p>
-              </div>
-              <div className="flex shrink-0 items-center gap-2">
-                <NumberField
-                  value={hostPowerMonitorActiveIntervalSeconds}
-                  min={5}
-                  step={5}
-                  size="sm"
-                  className="w-32"
-                  onValueChange={(value) =>
-                    updateSettings(
-                      backgroundActivityOverrideSettings(
-                        settings.backgroundActivity,
-                        resolvedBackgroundActivity,
-                        {
-                          hostPowerMonitorActiveInterval: Duration.seconds(
-                            normalizeIntervalSeconds(value, 5),
-                          ),
-                        },
-                      ),
-                    )
-                  }
-                >
-                  <NumberFieldGroup>
-                    <NumberFieldDecrement aria-label="Decrease active host power interval" />
-                    <NumberFieldInput aria-label="Active host power interval in seconds" />
-                    <NumberFieldIncrement aria-label="Increase active host power interval" />
-                  </NumberFieldGroup>
-                </NumberField>
-                <span className="text-xs text-muted-foreground">seconds</span>
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-3 border-t px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="min-w-0 space-y-1">
-                <div className="text-sm font-medium">Idle host monitor</div>
-                <p className="text-xs leading-relaxed text-muted-foreground">
-                  Poll host power state when no foreground client is active.
-                </p>
-              </div>
-              <div className="flex shrink-0 items-center gap-2">
-                <NumberField
-                  value={hostPowerMonitorIdleIntervalSeconds}
-                  min={5}
-                  step={30}
-                  size="sm"
-                  className="w-32"
-                  onValueChange={(value) =>
-                    updateSettings(
-                      backgroundActivityOverrideSettings(
-                        settings.backgroundActivity,
-                        resolvedBackgroundActivity,
-                        {
-                          hostPowerMonitorIdleInterval: Duration.seconds(
-                            normalizeIntervalSeconds(value, 5),
-                          ),
-                        },
-                      ),
-                    )
-                  }
-                >
-                  <NumberFieldGroup>
-                    <NumberFieldDecrement aria-label="Decrease idle host power interval" />
-                    <NumberFieldInput aria-label="Idle host power interval in seconds" />
-                    <NumberFieldIncrement aria-label="Increase idle host power interval" />
-                  </NumberFieldGroup>
-                </NumberField>
-                <span className="text-xs text-muted-foreground">seconds</span>
-              </div>
-            </div>
-
-            <div className="grid gap-0 border-t sm:grid-cols-2">
-              {BACKGROUND_ACTIVITY_BOOLEAN_OVERRIDES.map(({ key, label }) => (
-                <label
-                  key={key}
-                  className="flex items-center justify-between gap-3 border-b px-4 py-3 last:border-b-0 sm:border-r sm:even:border-r-0"
-                >
-                  <span className="text-sm font-medium">{label}</span>
-                  <Switch
-                    checked={resolvedBackgroundActivity[key]}
-                    onCheckedChange={(checked) =>
-                      updateSettings(
-                        backgroundActivityOverrideSettings(
-                          settings.backgroundActivity,
-                          resolvedBackgroundActivity,
-                          {
-                            [key]: Boolean(checked),
-                          },
+                        });
+                      }
+                    }}
+                  >
+                    <SelectTrigger
+                      size="sm"
+                      className="w-full sm:w-40"
+                      aria-label="Shared background policy"
+                    >
+                      <SelectValue>{BACKGROUND_ACTIVITY_PROFILE_LABELS[activeProfile]}</SelectValue>
+                    </SelectTrigger>
+                    <SelectPopup align="end" alignItemWithTrigger={false}>
+                      <SelectItem hideIndicator value="balanced">
+                        {BACKGROUND_ACTIVITY_PROFILE_LABELS.balanced}
+                      </SelectItem>
+                      <SelectItem hideIndicator value="performance">
+                        {BACKGROUND_ACTIVITY_PROFILE_LABELS.performance}
+                      </SelectItem>
+                      <SelectItem hideIndicator value="battery-saver">
+                        {BACKGROUND_ACTIVITY_PROFILE_LABELS["battery-saver"]}
+                      </SelectItem>
+                    </SelectPopup>
+                  </Select>
+                }
+              />
+              <SettingsRow
+                title={searchableSetting("git-fetch-interval").title}
+                description="Refresh remote branch status in the background."
+                control={
+                  <SettingsNumberField
+                    label="Git fetch interval"
+                    unit="seconds"
+                    value={automaticGitFetchIntervalSeconds}
+                    min={0}
+                    step={5}
+                    onValueChange={(value) =>
+                      updateOverrides({
+                        automaticGitFetchInterval: Duration.seconds(
+                          normalizeIntervalSeconds(value),
                         ),
-                      )
+                      })
                     }
-                    aria-label={label}
                   />
-                </label>
+                }
+              />
+              <SettingsRow
+                title="Provider health interval"
+                description="Refresh provider availability, versions, and auth state. Model catalog updates follow Provider update checks."
+                control={
+                  <SettingsNumberField
+                    label="provider health interval"
+                    unit="seconds"
+                    value={providerHealthRefreshIntervalSeconds}
+                    min={0}
+                    step={PROVIDER_HEALTH_INTERVAL_STEP_SECONDS}
+                    onValueChange={(value) =>
+                      updateOverrides({
+                        providerHealthRefreshInterval: Duration.seconds(
+                          normalizeIntervalSeconds(value),
+                        ),
+                      })
+                    }
+                  />
+                }
+              />
+              <SettingsRow
+                title="Host power monitor"
+                description="Poll host power state while clients are active."
+                control={
+                  <SettingsNumberField
+                    label="active host power interval"
+                    unit="seconds"
+                    value={hostPowerMonitorActiveIntervalSeconds}
+                    min={5}
+                    step={5}
+                    onValueChange={(value) =>
+                      updateOverrides({
+                        hostPowerMonitorActiveInterval: Duration.seconds(
+                          normalizeIntervalSeconds(value, 5),
+                        ),
+                      })
+                    }
+                  />
+                }
+              />
+              <SettingsRow
+                title="Idle host monitor"
+                description="Poll host power state when no foreground client is active."
+                control={
+                  <SettingsNumberField
+                    label="idle host power interval"
+                    unit="seconds"
+                    value={hostPowerMonitorIdleIntervalSeconds}
+                    min={5}
+                    step={30}
+                    onValueChange={(value) =>
+                      updateOverrides({
+                        hostPowerMonitorIdleInterval: Duration.seconds(
+                          normalizeIntervalSeconds(value, 5),
+                        ),
+                      })
+                    }
+                  />
+                }
+              />
+              {BACKGROUND_ACTIVITY_BOOLEAN_OVERRIDES.map(({ key, label }) => (
+                <SettingsRow
+                  key={key}
+                  title={label}
+                  control={
+                    <Switch
+                      checked={resolvedBackgroundActivity[key]}
+                      onCheckedChange={(checked) => updateOverrides({ [key]: Boolean(checked) })}
+                      aria-label={label}
+                    />
+                  }
+                />
               ))}
-            </div>
+            </SettingsGroup>
           </fieldset>
         </DialogPanel>
         <DialogFooter>
@@ -1107,11 +1018,11 @@ export function AppearanceSettingsPanel() {
 
 // The legacy rows sit behind the fold, so a settings-search jump has to
 // expand the section before its target can mount and scroll.
-const LEGACY_FEATURE_TARGET_IDS: ReadonlySet<string> = new Set([
+const LEGACY_FEATURE_TARGET_IDS = [
   "legacy-plan-mode",
   "legacy-context-window-indicator",
   "legacy-sidebar",
-]);
+] as const;
 
 /**
  * Retired features kept only for users who still depend on them. Collapsed by
@@ -1121,79 +1032,54 @@ const LEGACY_FEATURE_TARGET_IDS: ReadonlySet<string> = new Set([
 function LegacyFeaturesSection() {
   const settings = useScopedSettings();
   const updateSettings = useUpdateScopedSettings();
-  const [open, setOpen] = useState(false);
-  const searchTargetId = useSettingsSearchTargetId();
-  const targetRef = useSettingsSearchTarget<HTMLElement>("legacy-features");
-  // Unfold once per search jump; tracking the handled id lets the user fold
-  // the section back up without the still-set target immediately reopening it.
-  const lastExpandedTargetRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (searchTargetId === null) {
-      // A handled jump clears the target; forgetting it here lets a later
-      // jump to the same row expand the section again.
-      lastExpandedTargetRef.current = null;
-      return;
-    }
-    if (!LEGACY_FEATURE_TARGET_IDS.has(searchTargetId)) return;
-    if (lastExpandedTargetRef.current === searchTargetId) return;
-    lastExpandedTargetRef.current = searchTargetId;
-    setOpen(true);
-  }, [searchTargetId]);
 
   return (
-    <section id="legacy-features" ref={targetRef} tabIndex={-1} className="space-y-2.5">
-      <Collapsible open={open} onOpenChange={setOpen}>
-        <CollapsibleTrigger className="group flex min-h-8 w-full items-center gap-2 px-3 sm:px-4">
-          <h2 className="text-sm font-normal text-foreground/70 transition-colors group-hover:text-foreground">
-            Legacy features
-          </h2>
-          <DisclosureChevron />
-        </CollapsibleTrigger>
-        <CollapsiblePanel>
-          <SettingsGroup>
-            <SettingsRow
-              {...searchableSetting("legacy-plan-mode")}
-              description="Restore Build/Plan, /plan, /default, and Shift+Tab. Off uses build mode."
-              control={
-                <Switch
-                  checked={settings.planModeEnabled}
-                  onCheckedChange={(checked) => {
-                    updateSettings({ planModeEnabled: Boolean(checked) });
-                  }}
-                  aria-label="Plan mode (legacy)"
-                />
-              }
-            />
-            <SettingsRow
-              {...searchableSetting("legacy-context-window-indicator")}
-              description="Shows context window usage as a circular indicator in the composer."
-              control={
-                <Switch
-                  checked={settings.contextWindowMeterEnabled}
-                  onCheckedChange={(checked) =>
-                    updateSettings({ contextWindowMeterEnabled: Boolean(checked) })
-                  }
-                  aria-label="Context window indicator (legacy)"
-                />
-              }
-            />
-            <SettingsRow
-              {...searchableSetting("legacy-sidebar")}
-              description="Restore per-repository thread trees instead of the default flat sidebar."
-              control={
-                <Switch
-                  checked={settings.legacySidebarEnabled}
-                  onCheckedChange={(checked) =>
-                    updateSettings({ legacySidebarEnabled: Boolean(checked) })
-                  }
-                  aria-label="Sidebar (legacy)"
-                />
-              }
-            />
-          </SettingsGroup>
-        </CollapsiblePanel>
-      </Collapsible>
-    </section>
+    <FoldedSettingsSection
+      id="legacy-features"
+      targetIds={LEGACY_FEATURE_TARGET_IDS}
+      title="Legacy features"
+      headerPlacement="outside"
+    >
+      <SettingsRow
+        {...searchableSetting("legacy-plan-mode")}
+        description="Restore Build/Plan, /plan, /default, and Shift+Tab. Off uses build mode."
+        control={
+          <Switch
+            checked={settings.planModeEnabled}
+            onCheckedChange={(checked) => {
+              updateSettings({ planModeEnabled: Boolean(checked) });
+            }}
+            aria-label="Plan mode (legacy)"
+          />
+        }
+      />
+      <SettingsRow
+        {...searchableSetting("legacy-context-window-indicator")}
+        description="Shows context window usage as a circular indicator in the composer."
+        control={
+          <Switch
+            checked={settings.contextWindowMeterEnabled}
+            onCheckedChange={(checked) =>
+              updateSettings({ contextWindowMeterEnabled: Boolean(checked) })
+            }
+            aria-label="Context window indicator (legacy)"
+          />
+        }
+      />
+      <SettingsRow
+        {...searchableSetting("legacy-sidebar")}
+        description="Restore per-repository thread trees instead of the default flat sidebar."
+        control={
+          <Switch
+            checked={settings.legacySidebarEnabled}
+            onCheckedChange={(checked) =>
+              updateSettings({ legacySidebarEnabled: Boolean(checked) })
+            }
+            aria-label="Sidebar (legacy)"
+          />
+        }
+      />
+    </FoldedSettingsSection>
   );
 }
 
@@ -2210,16 +2096,12 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
         {isElectron || HOSTED_APP_CHANNEL ? (
           <AboutVersionSection />
         ) : (
-          <>
-            <SettingsRow
-              id={searchableSetting("app-version").id}
-              title={<AboutVersionTitle />}
-              description="Current version of the application."
-            />
-          </>
+          <SettingsRow
+            id={searchableSetting("app-version").id}
+            title={<AboutVersionTitle />}
+            description="Current version of the application."
+          />
         )}
-      </SettingsSection>
-      <SettingsSection title="Diagnostics">
         <SettingsRow
           {...searchableSetting("diagnostics")}
           description={
@@ -2417,27 +2299,17 @@ export function ArchivedThreadsPanel() {
           id={isLoadingArchive ? undefined : searchableSetting("archive").id}
           title={searchableSetting("archive").title}
         >
-          <SettingsRow
-            title={
-              <span className="inline-flex items-center gap-2">
-                {isLoadingArchive ? (
-                  <Spinner size="sm" tone="muted" />
-                ) : (
-                  <ArchiveIcon className="size-3.5 text-muted-foreground" />
-                )}
-                {isLoadingArchive
-                  ? "Loading archived threads"
-                  : archiveError
-                    ? "Could not load archived threads"
-                    : "No archived threads"}
-              </span>
-            }
-            description={
-              isLoadingArchive
-                ? "Checking connected environments."
-                : (archiveError ?? "Archived threads will appear here.")
-            }
-          />
+          {isLoadingArchive ? (
+            <SettingsRow title="Loading archived threads…" role="status" />
+          ) : archiveError ? (
+            <SettingsRow title="Could not load archived threads" description={archiveError} />
+          ) : (
+            <SettingsEmpty
+              icon={<ArchiveIcon />}
+              title="No archived threads"
+              description="Archived threads will appear here."
+            />
+          )}
         </SettingsSection>
       ) : (
         archivedGroups.map(({ key, project, title, threads: projectThreads }, index) => (
@@ -2488,8 +2360,7 @@ export function ArchivedThreadsPanel() {
                   <Button
                     type="button"
                     variant="outline"
-                    size="xs"
-                    className="shrink-0"
+                    size="sm"
                     onClick={() => {
                       void (async () => {
                         const result = await unarchiveThread(

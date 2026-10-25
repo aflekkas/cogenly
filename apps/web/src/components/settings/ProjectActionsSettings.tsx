@@ -150,7 +150,7 @@ export function ProjectActionsSettings() {
                   render={
                     <Button
                       id="import-scripts"
-                      size="xs"
+                      size="sm"
                       variant="ghost"
                       disabled={saving || !canWriteSettings}
                       type="button"
@@ -186,7 +186,7 @@ export function ProjectActionsSettings() {
               </Menu>
             ) : null}
             <Button
-              size="xs"
+              size="sm"
               variant="outline"
               disabled={saving || !canWriteSettings || targets.length === 0}
               onClick={() => setRequest({ scriptId: null, initial: EMPTY_PROJECT_SCRIPT_INPUT })}

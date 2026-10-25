@@ -13,29 +13,12 @@ import * as VcsProcess from "../vcs/VcsProcess.ts";
 import { detailFromCause, firstNonEmptyLine } from "@t3tools/source-control-core/server/discovery";
 import * as SourceControlProviderRegistry from "./SourceControlProviderRegistry.ts";
 
-interface DiscoveryProbe {
-  readonly label: string;
-  readonly executable?: string;
-  readonly versionArgs?: ReadonlyArray<string>;
-  readonly implemented: boolean;
-  readonly installHint: string;
-}
-
-type VcsProbe = DiscoveryProbe & {
+interface VcsProbe {
   readonly kind: VcsDriverKind;
+  readonly label: string;
   readonly executable: string;
   readonly versionArgs: ReadonlyArray<string>;
-};
-
-interface DiscoveryProbeResult<Kind extends string> {
-  readonly kind: Kind;
-  readonly label: string;
-  readonly executable?: string;
-  readonly implemented: boolean;
-  readonly status: "available" | "missing";
-  readonly version: Option.Option<string>;
   readonly installHint: string;
-  readonly detail: Option.Option<string>;
 }
 
 const VCS_PROBES: ReadonlyArray<VcsProbe> = [
@@ -44,16 +27,7 @@ const VCS_PROBES: ReadonlyArray<VcsProbe> = [
     label: "Git",
     executable: "git",
     versionArgs: ["--version"],
-    implemented: true,
     installHint: "Install Git from https://git-scm.com/downloads or with your package manager.",
-  },
-  {
-    kind: "jj",
-    label: "Jujutsu",
-    executable: "jj",
-    versionArgs: ["--version"],
-    implemented: false,
-    installHint: "Install Jujutsu with `brew install jj` or from https://github.com/jj-vcs/jj.",
   },
 ];
 
@@ -70,29 +44,12 @@ export const make = Effect.gen(function* () {
   const process = yield* VcsProcess.VcsProcess;
   const sourceControlProviders = yield* SourceControlProviderRegistry.SourceControlProviderRegistry;
 
-  const probe = <Kind extends VcsDriverKind>(
-    input: DiscoveryProbe & { readonly kind: Kind },
-  ): Effect.Effect<DiscoveryProbeResult<Kind>> => {
-    const executable = input.executable;
-    const versionArgs = input.versionArgs;
-
-    if (!executable || !versionArgs) {
-      return Effect.succeed({
-        kind: input.kind,
-        label: input.label,
-        implemented: input.implemented,
-        status: "missing" as const,
-        version: Option.none<string>(),
-        installHint: input.installHint,
-        detail: Option.some(input.installHint),
-      } satisfies DiscoveryProbeResult<Kind>);
-    }
-
-    return process
+  const probe = (input: VcsProbe): Effect.Effect<VcsDiscoveryItem> =>
+    process
       .run({
         operation: "source-control.discovery.probe",
-        command: executable,
-        args: versionArgs,
+        command: input.executable,
+        args: input.versionArgs,
         cwd: config.cwd,
         timeoutMs: 5_000,
         maxOutputBytes: 8_000,
@@ -104,37 +61,31 @@ export const make = Effect.gen(function* () {
             ({
               kind: input.kind,
               label: input.label,
-              executable,
-              implemented: input.implemented,
+              executable: input.executable,
               status: "available" as const,
               version: Option.orElse(firstNonEmptyLine(result.stdout), () =>
                 firstNonEmptyLine(result.stderr),
               ),
               installHint: input.installHint,
               detail: Option.none<string>(),
-            }) satisfies DiscoveryProbeResult<Kind>,
+            }) satisfies VcsDiscoveryItem,
         ),
         Effect.catch((cause) =>
           Effect.succeed({
             kind: input.kind,
             label: input.label,
-            executable,
-            implemented: input.implemented,
+            executable: input.executable,
             status: "missing" as const,
             version: Option.none<string>(),
             installHint: input.installHint,
             detail: detailFromCause(cause),
-          } satisfies DiscoveryProbeResult<Kind>),
+          } satisfies VcsDiscoveryItem),
         ),
       );
-  };
 
   return SourceControlDiscovery.of({
     discover: Effect.all({
-      versionControlSystems: Effect.all(
-        VCS_PROBES.map((entry) => probe(entry)) as ReadonlyArray<Effect.Effect<VcsDiscoveryItem>>,
-        { concurrency: "unbounded" },
-      ),
+      versionControlSystems: Effect.all(VCS_PROBES.map(probe), { concurrency: "unbounded" }),
       sourceControlProviders: sourceControlProviders.discover,
     }),
   });

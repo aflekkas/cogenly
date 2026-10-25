@@ -63,12 +63,14 @@ export function useShortcutModifierState(ignoreEditable = false): ShortcutModifi
     window.addEventListener("keyup", onKeyboardEvent, true);
     window.addEventListener("paste", onResetEvent, true);
     window.addEventListener("blur", onResetEvent);
+    document.addEventListener("visibilitychange", onResetEvent);
     return () => {
       window.removeEventListener("focusin", onFocus);
       window.removeEventListener("keydown", onKeyboardEvent, true);
       window.removeEventListener("keyup", onKeyboardEvent, true);
       window.removeEventListener("paste", onResetEvent, true);
       window.removeEventListener("blur", onResetEvent);
+      document.removeEventListener("visibilitychange", onResetEvent);
     };
   }, [ignoreEditable]);
 

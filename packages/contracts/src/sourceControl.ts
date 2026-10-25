@@ -157,7 +157,6 @@ const SourceControlDiscoverySharedFields = {
 
 export const VcsDiscoveryItem = Schema.Struct({
   kind: VcsDriverKind,
-  implemented: Schema.Boolean,
   ...SourceControlDiscoverySharedFields,
 });
 export type VcsDiscoveryItem = typeof VcsDiscoveryItem.Type;

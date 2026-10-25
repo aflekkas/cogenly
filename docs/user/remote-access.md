@@ -324,7 +324,7 @@ permissions.
 To change an existing client's permissions, create a fresh pairing link with the
 scopes it needs. In a browser opened directly on the environment, open that link
 to replace the browser's current grant. For a saved remote environment
-in web or desktop, use **Add Environment** with the fresh link or code; pairing
+in web or desktop, use **Add environment** with the fresh link or code; pairing
 the same environment replaces its saved grant. Reconnecting alone does not change
 permissions.
 

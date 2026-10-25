@@ -68,7 +68,14 @@ import {
   whenNodeRemoveLabel,
 } from "./KeybindingsSettings.logic";
 import { SettingsGroup } from "./SettingsGroup";
-import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
+import {
+  SettingsEmpty,
+  SettingsPageContainer,
+  SettingsRow,
+  SettingsSection,
+  SettingsSectionAction,
+  SettingsToolbar,
+} from "./settingsLayout";
 import { keybindingSearchAnchorId, searchableSetting } from "./settingsSearch";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -1427,29 +1434,28 @@ export function KeybindingsSettingsPanel() {
     <SettingsPageContainer>
       <SettingsSection
         {...searchableSetting("keybindings")}
-        headerAction={!isElectron ? <BrowserKeybindingNotice /> : null}
-      >
-        <div className="flex flex-wrap items-center gap-2 px-3 py-3 sm:px-4">
-          <KeybindingsSearchInput query={query} onChange={setQuery} inputRef={searchInputRef} />
-          <Button
-            type="button"
-            variant="outline"
+        titleAction={!isElectron ? <BrowserKeybindingNotice /> : null}
+        headerAction={
+          <SettingsSectionAction
             disabled={isAddingBinding || !canWriteSettings}
             onClick={() => setIsAddingBinding(true)}
           >
-            <PlusIcon aria-hidden className="size-4" />
             Add keybinding
-          </Button>
-        </div>
+          </SettingsSectionAction>
+        }
+        footer={
+          !canWriteSettings
+            ? connectedEnvironments.length === 0
+              ? "Connect an environment to change keybindings."
+              : "This connection can view keybindings but cannot change them."
+            : null
+        }
+      >
+        <SettingsToolbar>
+          <KeybindingsSearchInput query={query} onChange={setQuery} inputRef={searchInputRef} />
+        </SettingsToolbar>
       </SettingsSection>
 
-      {!canWriteSettings ? (
-        <p className="text-xs text-muted-foreground">
-          {connectedEnvironments.length === 0
-            ? "Connect an environment to change keybindings."
-            : "This connection can view keybindings but cannot change them."}
-        </p>
-      ) : null}
       <div inert={!canWriteSettings} className="flex flex-col gap-8">
         {isAddingBinding ? (
           <SettingsGroup>
@@ -1473,9 +1479,11 @@ export function KeybindingsSettingsPanel() {
           />
         ) : (
           <SettingsGroup>
-            <div className="px-4 py-12 text-center text-sm text-muted-foreground">
-              No keybindings match your search.
-            </div>
+            <SettingsEmpty
+              size="sm"
+              title="No keybindings match your search"
+              description="Try a command name, a key, or part of a shortcut."
+            />
           </SettingsGroup>
         )}
       </div>

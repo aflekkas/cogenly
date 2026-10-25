@@ -30,6 +30,7 @@ import {
 } from "../ui/number-field";
 import {
   SettingResetButton,
+  SettingsNote,
   SettingsPageContainer,
   SettingsRow,
   SettingsSection,
@@ -236,15 +237,15 @@ function CleanupResults({
         );
       })}
       {report.omittedCount > 0 && (
-        <p className="px-3 py-2.5 text-xs text-muted-foreground sm:px-4">
+        <SettingsNote>
           {environmentLabel ? `${environmentLabel}: ` : ""}
           {report.omittedCount.toLocaleString()} more results.
-        </p>
+        </SettingsNote>
       )}
       {report.entries.length === 0 && report.omittedCount === 0 && (
-        <p className="px-3 py-2.5 text-xs text-muted-foreground sm:px-4">
+        <SettingsNote>
           {environmentLabel ? `${environmentLabel}: ` : ""}Nothing needed cleanup.
-        </p>
+        </SettingsNote>
       )}
     </>
   );

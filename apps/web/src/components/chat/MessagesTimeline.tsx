@@ -1434,7 +1434,11 @@ const ConversationTimeline = memo(function ConversationTimeline({
         {citationThreadRef !== null && !paintOnly ? (
           // Same frame and lane as every row, so these sit in the message column.
           <div className="messages-timeline-row-frame">
-            <div className="chat-content-lane overflow-x-clip">
+            <div
+              className="chat-content-lane overflow-x-clip"
+              data-panel-flip="start"
+              data-panel-flip-size=""
+            >
               <PendingSubagentCompletions
                 parentRef={citationThreadRef}
                 timestampFormat={timestampFormat}
@@ -1884,7 +1888,12 @@ const ConversationTimeline = memo(function ConversationTimeline({
   const renderItem = useCallback(
     ({ item }: { item: MessagesTimelineRow }) => (
       <div className="messages-timeline-row-frame">
-        <div className="chat-content-lane overflow-x-clip" data-timeline-root="true">
+        <div
+          className="chat-content-lane overflow-x-clip"
+          data-timeline-root="true"
+          data-panel-flip="start"
+          data-panel-flip-size=""
+        >
           <TimelineRowContent row={item} />
         </div>
       </div>
@@ -1963,6 +1972,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
                 />
               ) : null}
               <LegendList<MessagesTimelineRow>
+                data-panel-flip="start"
+                data-panel-flip-clip-size=""
                 ref={setTimelineList}
                 data={rows}
                 extraData={`${listIdentityKey}:${rows.length}`}
@@ -2029,7 +2040,11 @@ function TimelineHistoryControl(props: MessagesTimelineHistoryControls) {
   }
   return (
     <div className="messages-timeline-row-frame">
-      <div className="chat-content-lane flex flex-col items-center gap-1.5 pt-1 pb-3">
+      <div
+        className="chat-content-lane flex flex-col items-center gap-1.5 pt-1 pb-3"
+        data-panel-flip="start"
+        data-panel-flip-size=""
+      >
         {props.hasMoreHistory ? (
           <Button
             size="xs"
@@ -2252,6 +2267,9 @@ function TimelineMinimap({
       )}
       data-testid="timeline-minimap"
       data-persistent-gutter={hasPersistentGutter ? "true" : "false"}
+      // Rides the viewport's right edge, which the list's clip eases on the
+      // panel curve; unmarked, it would inherit the centered column's glide.
+      data-panel-flip="end"
       ref={wheelTargetRef}
     >
       <div className="relative h-full w-full select-none">

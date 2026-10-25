@@ -15,6 +15,8 @@ import {
   setLocalStorageItem,
 } from "./useLocalStorage";
 import { useResizeDrag } from "./useResizeDrag";
+import { capturePanelFlip, playPanelFlip, type PanelFlipSnapshot } from "../lib/panelFlip";
+import { PANEL_ANIMATION_DURATION, readPanelAnimationsActive } from "../panelAnimations";
 
 const WidthSchema = Schema.Finite;
 
@@ -54,6 +56,7 @@ export function useThreadSidebarWidth(input: {
   const { viewportWidth, availableWidth, minimumWidth, rightPanelMinimumWidth, enabled } = input;
   // No cross-tab subscription: the column's width is per-window state.
   const [storedWidth, setStoredWidth] = useState(readStoredWidth);
+  const resetSnapshotRef = useRef<PanelFlipSnapshot | null>(null);
   const width = clampThreadSidebarWidth(
     resolveInitialThreadSidebarWidth(storedWidth, viewportWidth),
     minimumWidth,
@@ -107,6 +110,11 @@ export function useThreadSidebarWidth(input: {
   useLayoutEffect(refresh, [dragMaximumWidth, minimumWidth, refresh]);
 
   const reset = useCallback(() => {
+    if (readPanelAnimationsActive()) {
+      resetSnapshotRef.current = capturePanelFlip(
+        document.querySelector('[data-slot="sidebar-wrapper"]'),
+      );
+    }
     setStoredWidth(null);
     try {
       removeLocalStorageItem(THREAD_SIDEBAR_WIDTH_STORAGE_KEY);
@@ -114,6 +122,12 @@ export function useThreadSidebarWidth(input: {
       console.error("Could not reset persisted sidebar width.", error);
     }
   }, []);
+
+  useLayoutEffect(() => {
+    const snapshot = resetSnapshotRef.current;
+    resetSnapshotRef.current = null;
+    if (snapshot) playPanelFlip(snapshot, PANEL_ANIMATION_DURATION, { contain: true });
+  });
 
   return { width, handlers, reset };
 }

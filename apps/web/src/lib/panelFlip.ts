@@ -23,7 +23,11 @@ import { observeResize } from "./observeResize";
  * Contained motion (`contain`) keeps content inside the window: a column that
  * resizes with the pane reflows once, at its final width, and glides by its
  * start edge, so its text keeps its left edge and only the line endings
- * change. Centred content that resizes (the draft hero and its composer) adds
+ * change. Content marked `data-panel-flip-size` instead eases its real width:
+ * use it on rendered message frames and the composer, never the viewport or
+ * pane. Only mounted rows reflow; the viewport holds its larger width and
+ * eases its clip edge (`data-panel-flip-clip-size`), so its resize observers
+ * stay idle during the glide. Centred content that only translates adds
  * `data-panel-flip-contain="window"`: it keeps its center where it was, and
  * only stays inside the window.
  *
@@ -50,6 +54,17 @@ const PANEL_FLIP_ENTER_SELECTOR = "[data-panel-flip-enter]";
 const PANEL_FLIP_WINDOW_CONTAIN = "window";
 const PANEL_FLIP_ANIMATION_ID = "panel-flip";
 const PANEL_FLIP_FOLLOW_ANIMATION_ID = "panel-flip-follow";
+let flipGeneration = 0;
+let resizeDragging = false;
+
+/** A live resize owns geometry until pointer release, including auto-collapsing panels. */
+export function setPanelResizeDragging(dragging: boolean): void {
+  resizeDragging = dragging;
+}
+
+export function readPanelResizeDragging(): boolean {
+  return resizeDragging;
+}
 
 /** Each glide's starting offset and duration, for surfaces that replay it (followPanelFlip). */
 const glideMotions = new WeakMap<
@@ -142,6 +157,15 @@ function readAnchor(element: HTMLElement): PanelFlipAnchor {
 function readBounds(element: HTMLElement): HorizontalBounds | null {
   const rect = element.getBoundingClientRect();
   if (rect.width === 0 && rect.height === 0) return null;
+  if (element.dataset.panelFlipClipSize !== undefined) {
+    // A viewport holds its larger width and clips to the moving edge. Capture
+    // that visible width on interruption, rather than the temporary hold.
+    const clip = getComputedStyle(element).clipPath.match(/^inset\(\S+\s+([\d.]+)px/);
+    return { left: rect.left, right: rect.right - Number(clip?.[1] ?? 0) };
+  }
+  // A rendered frame is already the column; don't scan its Markdown/diff DOM
+  // for the pane's column probe, especially on long tool-output rows.
+  if (element.dataset.panelFlipSize !== undefined) return { left: rect.left, right: rect.right };
   const column = element.querySelector<HTMLElement>(PANEL_FLIP_COLUMN_SELECTOR);
   if (!column || column.parentElement?.closest(PANEL_FLIP_SELECTOR) !== element) {
     return { left: rect.left, right: rect.right };
@@ -190,6 +214,7 @@ export function playPanelFlip(
   durationMs: number,
   options: PanelFlipOptions = {},
 ): void {
+  if (resizeDragging) return;
   flipPanelContent(snapshot, durationMs, false, options);
   notifyPanelMotion(durationMs + PANEL_MOTION_SETTLE_MS);
   retargetAfterResize(snapshot, durationMs, options);
@@ -209,6 +234,7 @@ export function retargetPanelFlip(
   durationMs: number,
   options: PanelFlipOptions = {},
 ): void {
+  if (resizeDragging) return;
   flipPanelContent(snapshot, durationMs, true, options);
   notifyPanelMotion(durationMs + PANEL_MOTION_SETTLE_MS);
   retargetAfterResize(snapshot, durationMs, options);
@@ -220,6 +246,7 @@ function retargetAfterResize(
   durationMs: number,
   options: PanelFlipOptions,
 ): void {
+  const generation = flipGeneration;
   let retargeted = false;
   const stopObserving = observeResize(document.documentElement, () => {
     if (retargeted) return;
@@ -227,9 +254,23 @@ function retargetAfterResize(
     // Resize callbacks share one flushSync; the microtask runs after it commits.
     queueMicrotask(() => {
       stopObserving();
+      if (generation !== flipGeneration) return;
       flipPanelContent(snapshot, durationMs, true, options);
     });
   });
+}
+
+/** A grabbed resize handle takes over immediately, including a half-finished toggle. */
+export function cancelPanelFlips(root: ParentNode): void {
+  flipGeneration++;
+  for (const element of root.querySelectorAll<HTMLElement>(PANEL_FLIP_SELECTOR)) {
+    for (const animation of element.getAnimations()) {
+      if (animation.id !== PANEL_FLIP_ANIMATION_ID) continue;
+      pendingStart.delete(animation);
+      animation.cancel();
+    }
+  }
+  for (const listener of flipListeners) listener();
 }
 
 /**
@@ -331,11 +372,69 @@ function flipPanelContent(
     const ancestor = elements[index]!.parentElement?.closest<HTMLElement>(PANEL_FLIP_SELECTOR);
     return { ...measurement, parent: (ancestor && indexByElement.get(ancestor)) ?? null };
   });
+  // Read resting margins/padding before any viewport hold changes layout.
+  const styles = elements.map((element) => {
+    if (
+      element.dataset.panelFlipSize === undefined &&
+      element.dataset.panelFlipClipSize === undefined
+    )
+      return null;
+    const style = getComputedStyle(element);
+    return {
+      marginLeft: style.marginLeft,
+      paddingRight: Number.parseFloat(style.paddingRight) || 0,
+    };
+  });
   resolvePanelFlipOffsets(resolved, options).forEach((offset, index) => {
-    if (offset === 0) return;
     const element = elements[index]!;
+    const { before, after } = resolved[index]!;
+    const beforeWidth = before.right - before.left;
+    const afterWidth = after.right - after.left;
+    const resize =
+      element.dataset.panelFlipSize !== undefined && Math.abs(beforeWidth - afterWidth) >= 0.5;
+    const clip =
+      element.dataset.panelFlipClipSize !== undefined && Math.abs(beforeWidth - afterWidth) >= 0.5;
+    if (offset === 0 && !resize && !clip) return;
+    // Freeze the resting margin while width changes. Auto margins would clamp
+    // to zero when the old width exceeds the new parent, snapping the left
+    // edge. The start-anchored glide supplies all horizontal travel instead.
+    const margin = styles[index]?.marginLeft;
+    // Give the old text room until the panel reaches it, without resizing the
+    // scroller on every frame. Extra padding preserves the final content area
+    // (including rows mounted by virtualization during the glide).
+    const heldWidth = Math.max(beforeWidth, afterWidth);
+    const viewport = clip
+      ? {
+          width: `${heldWidth}px`,
+          maxWidth: `${heldWidth}px`,
+          paddingRight: `${(styles[index]?.paddingRight ?? 0) + heldWidth - afterWidth}px`,
+        }
+      : {};
     const animation = element.animate(
-      [{ transform: `translateX(${offset}px)` }, { transform: "translateX(0)" }],
+      [
+        {
+          transform: `translateX(${offset}px)`,
+          ...viewport,
+          ...(clip && { clipPath: `inset(0px ${heldWidth - beforeWidth}px 0px 0px)` }),
+          ...(resize && {
+            width: `${beforeWidth}px`,
+            maxWidth: `${beforeWidth}px`,
+            marginLeft: margin,
+            marginRight: "0px",
+          }),
+        },
+        {
+          transform: "translateX(0)",
+          ...viewport,
+          ...(clip && { clipPath: `inset(0px ${heldWidth - afterWidth}px 0px 0px)` }),
+          ...(resize && {
+            width: `${afterWidth}px`,
+            maxWidth: `${afterWidth}px`,
+            marginLeft: margin,
+            marginRight: "0px",
+          }),
+        },
+      ],
       { duration: durationMs, easing: PANEL_MOTION_EASING },
     );
     animation.id = PANEL_FLIP_ANIMATION_ID;

@@ -20,7 +20,7 @@ import {
 } from "../components/settings/SettingsScopeContext";
 import { SettingsScopeNotice } from "../components/settings/SettingsScopeNotice";
 import { SETTINGS_DEVICE_ONLY_PATHS } from "../components/settings/SettingsScopeSentence";
-import { SettingsPageContainer } from "../components/settings/settingsLayout";
+import { SettingsPageContainer, SettingsPageMessage } from "../components/settings/settingsLayout";
 import {
   retainSettingsScope,
   validateSettingsRouteSearch,
@@ -60,15 +60,13 @@ function SettingsScopeBoundary({ pathname, children }: { pathname: string; child
   if (scope.kind === "unavailable")
     return (
       <SettingsPageContainer>
-        <p className="text-sm text-muted-foreground">{scope.message}</p>
+        <SettingsPageMessage>{scope.message}</SettingsPageMessage>
       </SettingsPageContainer>
     );
   if (scope.kind === "environment" && connectedEnvironments.length === 0) {
     return (
       <SettingsPageContainer>
-        <p className="text-sm text-muted-foreground">
-          Reconnect {scope.label} to change its settings.
-        </p>
+        <SettingsPageMessage>Reconnect {scope.label} to change its settings.</SettingsPageMessage>
       </SettingsPageContainer>
     );
   }
