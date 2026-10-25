@@ -293,6 +293,7 @@ export function ComposerProjectPicker(props: {
           render={
             <InlineButton
               tone="picker"
+              weight="normal"
               className="pointer-events-auto min-w-0 max-w-64 shrink align-baseline"
             />
           }
@@ -303,9 +304,7 @@ export function ComposerProjectPicker(props: {
           </span>
         </ComboboxTrigger>
       ) : isHero ? (
-        // Stays mounted without a project, empty and out of reach, so the
-        // name can fade out and the greeting glide back to centre. On its own
-        // line under a stacked heading, it is a size smaller.
+        // The headline owns the fade; the suffix only renders its reserved name slot.
         <ComboboxTrigger
           disabled={props.disabled}
           aria-label={current ? `In ${current.label.name}. Move to project` : undefined}
@@ -316,7 +315,7 @@ export function ComposerProjectPicker(props: {
             <button
               type="button"
               className={cn(
-                "group/hero-suffix pointer-events-auto inline-block cursor-pointer rounded-sm align-baseline text-foreground group-data-stacked/hero-headline:text-base outline-none focus-visible:outline-2 focus-visible:outline-ring",
+                "group/hero-suffix pointer-events-auto inline-block max-w-full cursor-pointer rounded-sm align-baseline text-foreground outline-none focus-visible:outline-2 focus-visible:outline-ring",
                 current === null && "pointer-events-none",
               )}
             />

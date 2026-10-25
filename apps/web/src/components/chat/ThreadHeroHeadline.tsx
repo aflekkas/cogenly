@@ -61,8 +61,7 @@ export function ThreadHeroHeadline({
   // Fixed when the screen opens, so the line holds still while the user types.
   const [greeting] = useState(() => chatGreeting(new Date()));
   const headingRef = useRef<HTMLHeadingElement>(null);
-  const measureRef = useRef<HTMLSpanElement>(null);
-  useHeroHeadlineMotion(headingRef, measureRef, isChat ? `chat:${thread.id}` : "heading");
+  useHeroHeadlineMotion(headingRef, isChat ? "chat" : "work");
 
   // The new-Work screen's sentence, read-only: both halves always named.
   const repositoryNameOf = useRepositoryNames();
@@ -116,15 +115,10 @@ export function ThreadHeroHeadline({
     <div className="@container flex w-full flex-col items-center">
       <h1
         ref={headingRef}
+        style={{ fontSize: "clamp(var(--text-xl), 3cqw, var(--text-3xl))" }}
         aria-label={headingLabel}
-        className="group/hero-headline relative w-full origin-bottom text-balance text-center font-normal text-xl text-foreground tracking-tight @xl:text-2xl @2xl:text-3xl"
+        className="group/hero-headline relative w-full origin-bottom text-balance text-center font-normal text-xl text-foreground tracking-tight"
       >
-        {/* The greeting and its project on one line, to tell whether they fit. */}
-        <span
-          ref={measureRef}
-          aria-hidden
-          className="pointer-events-none invisible absolute start-0 top-0 whitespace-pre"
-        />
         {/* The new-thread screen's slot, so moving between it and here cross-fades. */}
         <FadeSwap
           group="draft-heading"
@@ -132,10 +126,7 @@ export function ThreadHeroHeadline({
         >
           {isChat ? (
             <>
-              <span
-                data-hero-greeting=""
-                className="inline-block max-w-full group-data-stacked/hero-headline:block"
-              >
+              <span data-hero-greeting="" className="inline">
                 {greeting}
               </span>
               <ComposerProjectPicker
