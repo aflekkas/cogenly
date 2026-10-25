@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { type PanelAnimationDurationMs } from "@t3tools/contracts/settings";
 
 import { useMediaQuery } from "./hooks/useMediaQuery";
-import { PANEL_MOTION_SETTLE_MS } from "./lib/panelFlip";
+import { PANEL_MOTION_SETTLE_MS, readPanelResizeDragging } from "./lib/panelFlip";
 
 /**
  * The sidebar and list column, right panel and bottom drawer all open and
@@ -45,7 +45,7 @@ function prefersReducedMotion(): boolean {
  * be visible immediately. Read it at event time, never during render.
  */
 export function readPanelAnimationsActive(): boolean {
-  return !navigationSuppressed && !prefersReducedMotion();
+  return !navigationSuppressed && !readPanelResizeDragging() && !prefersReducedMotion();
 }
 
 /**

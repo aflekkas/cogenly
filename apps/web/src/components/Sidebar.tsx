@@ -328,6 +328,7 @@ import {
 } from "./sidebar/workCards.logic";
 import { SidebarListRevealSentinel, useSidebarListReveal } from "./sidebar/SidebarListReveal";
 import { useSidebarListAnchor } from "./sidebar/useSidebarListAnchor";
+import { SidebarShortcutSlot } from "./sidebar/SidebarShortcutSlot";
 import { sidebarListEdge } from "./sidebar/sidebarListAnchor.logic";
 import { useSidebarLayout } from "../appearancePreferences";
 import { useAgentListFilter } from "../agents/agentListFilter";
@@ -421,23 +422,6 @@ function threadTimeLabel(thread: SidebarThreadSummary): string {
 function settledTimeLabel(thread: SidebarThreadSummary): string {
   const timestamp = resolveSettledThreadTimestamp(thread);
   return timestamp === null ? "" : compactSidebarTimeLabel(formatRelativeTimeLabel(timestamp));
-}
-
-// Floats at the row's right edge, vertically centered, while the jump
-// modifier is held. An overlay pill instead of an inline slot: the hint
-// must neither displace the status/time label (holding ⌘ used to blank
-// out "Working") nor shift any layout when it appears. pointer-events-none
-// so it never swallows clicks meant for the settle/un-settle buttons it
-// can overlap.
-function JumpHintBadge(props: { label: string }) {
-  return (
-    <span
-      aria-hidden
-      className="pointer-events-none absolute right-1.5 top-1/2 z-10 inline-flex h-5 -translate-y-1/2 items-center rounded-full border border-border/80 bg-background/95 px-1.5 font-mono text-3xs font-medium tracking-tight text-foreground shadow-sm"
-    >
-      {props.label}
-    </span>
-  );
 }
 
 // Self-ticking so only this span re-renders each second, not the whole row.
@@ -1324,13 +1308,14 @@ const SidebarChatRow = memo(function SidebarChatRow(props: {
         </span>
         {/* With a project line, the time stays on the title line. */}
         <span className={cn("flex shrink-0", props.folder && "mt-1 self-start")}>
-          <SidebarChatStatusSlot
-            isRunning={isRunning}
-            dot={needsYou ? "warning" : isUnread ? "info" : null}
-            timeLabel={props.timeLabel}
-          />
+          <SidebarShortcutSlot label={props.jumpLabel}>
+            <SidebarChatStatusSlot
+              isRunning={isRunning}
+              dot={needsYou ? "warning" : isUnread ? "info" : null}
+              timeLabel={props.timeLabel}
+            />
+          </SidebarShortcutSlot>
         </span>
-        {props.jumpLabel ? <JumpHintBadge label={props.jumpLabel} /> : null}
       </div>
     </li>
   );
@@ -1749,7 +1734,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     hasUnsentDraft && SIDEBAR_DRAFT_CLASS_NAME,
     variantAction === "unsettle" &&
       !hasUnsentDraft &&
-      "[&:not(:hover):not(:focus-within)_*]:text-secondary-label/70",
+      "[&:not(:hover):not(:focus-within)_:not([data-slot=kbd])]:text-secondary-label/70",
     isCardSelected
       ? "state-selected"
       : cn(
@@ -1891,106 +1876,104 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               Regenerating title
             </span>
           ) : null}
-          {/* The PR badge stays outside the hover-fading slot: it must
-              remain visible AND clickable while the row is hovered. Only
-              the time/jump label yields to the settle affordance. */}
-          <span
-            className={cn(
-              "relative ml-auto flex h-6 min-w-8 shrink-0 items-center justify-end",
-              props.sweepAction !== null && "hidden",
-            )}
-          >
+          <SidebarShortcutSlot label={props.sweepAction === null ? props.jumpLabel : null}>
             <span
               className={cn(
-                "inline-flex justify-end tabular-nums text-secondary-label interactive",
-                !isWoke && "group-any-hover/sidebar-row:opacity-0",
+                "relative ml-auto flex h-6 min-w-8 shrink-0 items-center justify-end",
+                props.sweepAction !== null && "hidden",
               )}
             >
-              {variantAction === "unsnooze" && props.snoozeWakeLabelText !== null ? (
-                // Snoozed rows show when they come BACK, not when they were
-                // last touched — the return ticket is the row's whole story.
-                <span className="text-xs text-info-foreground tabular-nums">
-                  {props.snoozeWakeLabelText}
-                </span>
-              ) : isWoke ? (
-                // A wake can land straight in the settled tail (e.g. PR
-                // merged while snoozed); the signal must survive the trip.
+              <span
+                className={cn(
+                  "inline-flex justify-end tabular-nums text-secondary-label interactive",
+                  !isWoke && "group-any-hover/sidebar-row:opacity-0",
+                )}
+              >
+                {variantAction === "unsnooze" && props.snoozeWakeLabelText !== null ? (
+                  // Snoozed rows show when they come BACK, not when they were
+                  // last touched — the return ticket is the row's whole story.
+                  <span className="text-xs text-info-foreground tabular-nums">
+                    {props.snoozeWakeLabelText}
+                  </span>
+                ) : isWoke ? (
+                  // A wake can land straight in the settled tail (e.g. PR
+                  // merged while snoozed); the signal must survive the trip.
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <button
+                          type="button"
+                          aria-label="Dismiss Woke notification"
+                          onClick={handleAcknowledgeWokeClick}
+                          className="inline-flex cursor-pointer items-center gap-1 rounded-sm text-xs font-medium text-warning-foreground outline-none hover:underline focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                        >
+                          <AlarmClockIcon aria-hidden className="size-3" />
+                          <span role="status">Woke</span>
+                        </button>
+                      }
+                    />
+                    <TooltipPopup side="top">Dismiss Woke notification</TooltipPopup>
+                  </Tooltip>
+                ) : (
+                  <span className="text-xs">
+                    {variantAction === "unsettle"
+                      ? settledTimeLabel(thread)
+                      : threadTimeLabel(thread)}
+                  </span>
+                )}
+              </span>
+              {variantAction === "unsnooze" ? (
+                !props.snoozeSupported ? null : (
+                  <button
+                    type="button"
+                    aria-label="Wake thread now"
+                    onClick={handleUnsnoozeClick}
+                    onPointerDown={handleActionPointerDown}
+                    className={cn(
+                      "pointer-events-none absolute inset-y-0 right-0 -mr-1 inline-flex cursor-pointer items-center gap-1 rounded-md bg-transparent px-1.5 text-xs text-muted-foreground opacity-0 interactive hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-any-hover/sidebar-row:pointer-events-auto group-any-hover/sidebar-row:opacity-100",
+                      isWoke && "group-any-hover/sidebar-row:static",
+                    )}
+                  >
+                    <AlarmClockOffIcon className="mb-px size-3" />
+                  </button>
+                )
+              ) : !props.settlementSupported ? null : variantAction === "unsettle" ? (
                 <Tooltip>
                   <TooltipTrigger
                     render={
                       <button
                         type="button"
-                        aria-label="Dismiss Woke notification"
-                        onClick={handleAcknowledgeWokeClick}
-                        className="inline-flex cursor-pointer items-center gap-1 rounded-sm text-xs font-medium text-warning-foreground outline-none hover:underline focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-                      >
-                        <AlarmClockIcon aria-hidden className="size-3" />
-                        <span role="status">Woke</span>
-                      </button>
+                        aria-label="Unsettle thread"
+                        onClick={handleUnsettleClick}
+                        onPointerDown={handleActionPointerDown}
+                        className={cn(
+                          "pointer-events-none absolute inset-y-0 right-0 -mr-1 inline-flex cursor-pointer items-center gap-1 rounded-md bg-transparent px-1.5 text-xs text-muted-foreground opacity-0 interactive hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-any-hover/sidebar-row:pointer-events-auto group-any-hover/sidebar-row:opacity-100",
+                          isWoke && "group-any-hover/sidebar-row:static",
+                        )}
+                      />
                     }
-                  />
-                  <TooltipPopup side="top">Dismiss Woke notification</TooltipPopup>
+                  >
+                    <Undo2Icon className="mb-px size-3.5" />
+                  </TooltipTrigger>
+                  <TooltipPopup side="top">Unsettle thread</TooltipPopup>
                 </Tooltip>
               ) : (
-                <span className="text-xs">
-                  {variantAction === "unsettle"
-                    ? settledTimeLabel(thread)
-                    : threadTimeLabel(thread)}
-                </span>
-              )}
-            </span>
-            {variantAction === "unsnooze" ? (
-              !props.snoozeSupported ? null : (
                 <button
                   type="button"
-                  aria-label="Wake thread now"
-                  onClick={handleUnsnoozeClick}
+                  aria-label="Settle thread"
+                  onClick={handleSettleClick}
                   onPointerDown={handleActionPointerDown}
                   className={cn(
-                    "pointer-events-none absolute inset-y-0 right-0 -mr-1 inline-flex cursor-pointer items-center gap-1 rounded-md bg-transparent px-1.5 text-xs text-muted-foreground opacity-0 interactive hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-any-hover/sidebar-row:pointer-events-auto group-any-hover/sidebar-row:opacity-100",
+                    "pointer-events-none absolute inset-y-0 right-0 inline-flex cursor-pointer items-center gap-1 rounded-md bg-transparent px-2 text-xs text-muted-foreground opacity-0 interactive hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-any-hover/sidebar-row:pointer-events-auto group-any-hover/sidebar-row:opacity-100",
                     isWoke && "group-any-hover/sidebar-row:static",
                   )}
                 >
-                  <AlarmClockOffIcon className="mb-px size-3" />
+                  <CheckIcon className="size-3" />
                 </button>
-              )
-            ) : !props.settlementSupported ? null : variantAction === "unsettle" ? (
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <button
-                      type="button"
-                      aria-label="Unsettle thread"
-                      onClick={handleUnsettleClick}
-                      onPointerDown={handleActionPointerDown}
-                      className={cn(
-                        "pointer-events-none absolute inset-y-0 right-0 -mr-1 inline-flex cursor-pointer items-center gap-1 rounded-md bg-transparent px-1.5 text-xs text-muted-foreground opacity-0 interactive hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-any-hover/sidebar-row:pointer-events-auto group-any-hover/sidebar-row:opacity-100",
-                        isWoke && "group-any-hover/sidebar-row:static",
-                      )}
-                    />
-                  }
-                >
-                  <Undo2Icon className="mb-px size-3.5" />
-                </TooltipTrigger>
-                <TooltipPopup side="top">Unsettle thread</TooltipPopup>
-              </Tooltip>
-            ) : (
-              <button
-                type="button"
-                aria-label="Settle thread"
-                onClick={handleSettleClick}
-                onPointerDown={handleActionPointerDown}
-                className={cn(
-                  "pointer-events-none absolute inset-y-0 right-0 inline-flex cursor-pointer items-center gap-1 rounded-md bg-transparent px-2 text-xs text-muted-foreground opacity-0 interactive hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-any-hover/sidebar-row:pointer-events-auto group-any-hover/sidebar-row:opacity-100",
-                  isWoke && "group-any-hover/sidebar-row:static",
-                )}
-              >
-                <CheckIcon className="size-3" />
-              </button>
-            )}
-          </span>
+              )}
+            </span>
+          </SidebarShortcutSlot>
           {sweepBadge}
-          {props.jumpLabel ? <JumpHintBadge label={props.jumpLabel} /> : null}
         </div>
       </li>
     );
@@ -2051,9 +2034,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                   (--sidebar-row-actions-overlap). Woke keeps its pill, so
                   there the actions take their own width beside it. */}
             <span
+              inert={props.jumpLabel !== null && !topStatus}
               className={cn(
-                "group/sidebar-status-slot relative ml-auto flex h-5 min-w-8 shrink-0 items-stretch justify-end text-xs",
+                "group/sidebar-status-slot relative ml-auto flex h-5 min-w-8 shrink-0 items-stretch justify-end text-xs transition-opacity duration-(--motion-duration-fast) ease-standard",
                 props.sweepAction !== null && "hidden",
+                props.jumpLabel !== null && !topStatus && "opacity-0",
               )}
             >
               {/* Read-only status labels yield to the hover actions. Woke is
@@ -2302,28 +2287,29 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                   <span className="truncate">{props.environmentLabel}</span>
                 </span>
               ) : null}
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <span
-                      role="img"
-                      aria-label={`Model: ${providerModelLabel}`}
-                      className="inline-flex shrink-0 items-center"
+              <SidebarShortcutSlot label={props.jumpLabel}>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <span
+                        role="img"
+                        aria-label={`Model: ${providerModelLabel}`}
+                        className="inline-flex shrink-0 items-center"
+                      />
+                    }
+                  >
+                    <SidebarProviderStack
+                      thread={thread}
+                      providerEntryByInstanceId={props.providerEntryByInstanceId}
+                      selected={isCardSelected}
                     />
-                  }
-                >
-                  <SidebarProviderStack
-                    thread={thread}
-                    providerEntryByInstanceId={props.providerEntryByInstanceId}
-                    selected={isCardSelected}
-                  />
-                </TooltipTrigger>
-                <TooltipPopup side="top">{providerModelLabel}</TooltipPopup>
-              </Tooltip>
+                  </TooltipTrigger>
+                  <TooltipPopup side="top">{providerModelLabel}</TooltipPopup>
+                </Tooltip>
+              </SidebarShortcutSlot>
             </span>
           </SidebarCardLine>
         </SidebarCardBody>
-        {props.jumpLabel ? <JumpHintBadge label={props.jumpLabel} /> : null}
       </div>
     </SidebarCardItem>
   );

@@ -60,7 +60,13 @@ that pace reads as the content being shoved aside.
 - A new page marks its centered frame (`PageContent` already does) and a leading title
   that isn't a `WorkspaceBreadcrumb` with `data-panel-flip="start"`. Unmarked content snaps.
 - Don't animate panel widths or header padding. Every frame would rerun the chat's
-  `observeResize` callbacks, each a synchronous React render.
+  `observeResize` callbacks, each a synchronous React render. The message frames and composer
+  use `data-panel-flip="start" data-panel-flip-size` to ease their own widths instead. Their
+  resting margins stay fixed during the glide so crossing the column cap cannot snap them.
+  Text reflows in mounted virtualized rows; the pane and canvas resize once. The timeline
+  viewport holds the larger width and eases its clip edge, with extra padding keeping the
+  content area at its final size. Its width settles when the glide ends, never per frame.
+  A resize handle cancels these glides before taking over, with no easing during a drag.
 - Start a flip in the layout effect that commits the change. An animation started from a
   ResizeObserver callback lands a frame late, and that frame shows content at its final place.
 - Don't clip a pane's left edge horizontally, its `SidebarInset` included (`overflow-y-clip`,

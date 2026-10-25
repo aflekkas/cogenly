@@ -1,17 +1,33 @@
 import type * as React from "react";
+import { cva, type VariantProps } from "class-variance-authority";
 
 import { cn } from "~/lib/utils";
 
-function Kbd({ className, ...props }: React.ComponentProps<"kbd">) {
+const kbdVariants = cva(
+  "pointer-events-none inline-flex select-none items-center justify-center gap-1 rounded font-medium font-sans whitespace-nowrap [&_svg:not([class*='size-'])]:size-3",
+  {
+    variants: {
+      variant: {
+        default: "bg-muted text-muted-foreground",
+        outline: "border border-border bg-background text-foreground",
+      },
+      size: {
+        default: "h-5 min-w-5 px-1 text-xs",
+        sm: "h-4 min-w-4 px-1 text-xs leading-none",
+      },
+    },
+    defaultVariants: { variant: "default", size: "default" },
+  },
+);
+
+function Kbd({
+  className,
+  variant,
+  size,
+  ...props
+}: React.ComponentProps<"kbd"> & VariantProps<typeof kbdVariants>) {
   return (
-    <kbd
-      className={cn(
-        "pointer-events-none inline-flex h-5 min-w-5 select-none items-center justify-center gap-1 rounded bg-muted px-1 font-medium font-sans text-muted-foreground text-xs [&_svg:not([class*='size-'])]:size-3",
-        className,
-      )}
-      data-slot="kbd"
-      {...props}
-    />
+    <kbd className={cn(kbdVariants({ variant, size }), className)} data-slot="kbd" {...props} />
   );
 }
 

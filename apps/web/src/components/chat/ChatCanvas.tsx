@@ -1,5 +1,4 @@
 import {
-  useCallback,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -14,40 +13,9 @@ import {
   type ChatCanvasDetailsCard,
 } from "./chatCanvasLayout";
 import { observeResize } from "../../lib/observeResize";
-import { notifyPanelMotion } from "../../lib/panelFlip";
-import { readPanelAnimationsActive } from "../../panelAnimations";
-
-// Everything that reads the lane insets (index.css).
-const CHAT_LANE_SELECTOR =
-  ".messages-timeline-scroll, .chat-composer-lane, .chat-banner-lane, .chat-scroll-to-bottom";
-const CHAT_LANE_GLIDE_ID = "chat-lane-glide";
-// The details card's own open: 160ms on ease-drawer (ThreadDetailsCard).
-const CHAT_LANE_GLIDE_MS = 160;
-const CHAT_LANE_GLIDE_EASING = "cubic-bezier(0.32, 0.72, 0, 1)";
-
-/**
- * Glides the lanes by offset from where they were drawn to the committed
- * insets. Call from a layout effect, so the frame that paints the new insets
- * already draws the lanes where they were. An interrupted glide continues
- * from where it has drawn them.
- */
-function glideChatLanes(canvas: HTMLElement, offset: number) {
-  for (const lane of canvas.querySelectorAll<HTMLElement>(CHAT_LANE_SELECTOR)) {
-    let from = offset;
-    for (const animation of lane.getAnimations()) {
-      if (animation.id !== CHAT_LANE_GLIDE_ID) continue;
-      from += new DOMMatrixReadOnly(getComputedStyle(lane).transform).m41;
-      animation.cancel();
-    }
-    if (Math.abs(from) < 0.5) continue;
-    const animation = lane.animate(
-      [{ transform: `translateX(${from}px)` }, { transform: "translateX(0)" }],
-      { duration: CHAT_LANE_GLIDE_MS, easing: CHAT_LANE_GLIDE_EASING },
-    );
-    animation.id = CHAT_LANE_GLIDE_ID;
-  }
-  notifyPanelMotion(CHAT_LANE_GLIDE_MS);
-}
+import { capturePanelFlip, playPanelFlip, type PanelFlipSnapshot } from "../../lib/panelFlip";
+import { PANEL_ANIMATION_DURATION, readPanelAnimationsActive } from "../../panelAnimations";
+import { useStableCallback } from "../../hooks/useStableCallback";
 
 /**
  * Owns the available conversation space. Cards only report where they sit; the
@@ -61,7 +29,15 @@ export function ChatCanvas({
   const widthProbeRef = useRef<HTMLDivElement | null>(null);
   const [timelineElement, registerTimeline] = useState<HTMLElement | null>(null);
   const [detailsCard, setDetailsCard] = useState<ChatCanvasDetailsCard | null>(null);
-  const reportDetailsCard = useCallback((next: ChatCanvasDetailsCard | null) => {
+  const reportedCardRef = useRef<ChatCanvasDetailsCard | null>(null);
+  const laneSnapshotRef = useRef<PanelFlipSnapshot | null>(null);
+  const reportDetailsCard = useStableCallback((next: ChatCanvasDetailsCard | null) => {
+    // Capture before the card changes the lane insets, not after the new
+    // layout has painted. Ordinary resize/drag reports never start a glide.
+    if ((reportedCardRef.current === null) !== (next === null) && readPanelAnimationsActive()) {
+      laneSnapshotRef.current = capturePanelFlip(elementRef.current);
+    }
+    reportedCardRef.current = next;
     setDetailsCard((current) =>
       current?.left === next?.left &&
       current?.right === next?.right &&
@@ -69,7 +45,7 @@ export function ChatCanvas({
         ? current
         : next,
     );
-  }, []);
+  });
   const [measurements, setMeasurements] = useState({
     width: 0,
     height: 0,
@@ -123,19 +99,11 @@ export function ChatCanvas({
     };
   }, [measurements, detailsCard, reportDetailsCard]);
   const { layout } = context;
-  // A details card that opens or closes where it does not fit beside the
-  // centered chat moves the lanes over; they glide instead of jumping. A
-  // resize, the first measure, or reduced motion snaps.
-  const drawnLaneRef = useRef<{ left: number; card: boolean; width: number } | null>(null);
   useLayoutEffect(() => {
-    const drawn = drawnLaneRef.current;
-    const next = { left: layout.chat.left, card: detailsCard !== null, width: measurements.width };
-    drawnLaneRef.current = next;
-    const element = elementRef.current;
-    if (!element || !drawn || !readPanelAnimationsActive()) return;
-    if (drawn.card === next.card || drawn.width !== next.width) return;
-    if (Math.abs(drawn.left - next.left) >= 0.5) glideChatLanes(element, drawn.left - next.left);
-  }, [layout.chat.left, detailsCard, measurements.width]);
+    const snapshot = laneSnapshotRef.current;
+    laneSnapshotRef.current = null;
+    if (snapshot) playPanelFlip(snapshot, PANEL_ANIMATION_DURATION, { contain: true });
+  });
   return (
     <ChatCanvasContext value={context}>
       <div

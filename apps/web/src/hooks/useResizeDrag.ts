@@ -1,4 +1,5 @@
 import { type PointerEvent, useCallback, useEffect, useLayoutEffect, useRef } from "react";
+import { cancelPanelFlips, setPanelResizeDragging } from "../lib/panelFlip";
 
 interface ResizeSession {
   width: number;
@@ -41,6 +42,7 @@ export function useResizeDrag<T extends HTMLElement>(
       if (commit) flush();
       // Release can synchronously dispatch lostpointercapture.
       drag.current = null;
+      setPanelResizeDragging(false);
       try {
         if (active.target.hasPointerCapture(active.pointerId)) {
           active.target.releasePointerCapture(active.pointerId);
@@ -96,6 +98,8 @@ export function useResizeDrag<T extends HTMLElement>(
       }
       event.preventDefault();
       event.stopPropagation();
+      cancelPanelFlips(event.currentTarget.closest('[data-slot="sidebar-wrapper"]') ?? document);
+      setPanelResizeDragging(true);
       drag.current = {
         session,
         target: event.currentTarget,
