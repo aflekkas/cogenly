@@ -2,7 +2,7 @@ import { SettingsGroup } from "./SettingsGroup";
 import { AuthSettingsWriteScope } from "@cogenly/contracts";
 import { usePrimaryEnvironmentId, usePrimaryEnvironment } from "../../state/environments";
 import { useEnvironmentScope, useEnvironmentsWithScope } from "../../state/session";
-import { InfoIcon, Undo2Icon } from "lucide-react";
+import { InfoIcon, PlusIcon, Undo2Icon } from "lucide-react";
 import {
   DEFAULT_SERVER_SETTINGS,
   isUniversalServerSettingKey,
@@ -13,7 +13,9 @@ import * as Equal from "effect/Equal";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import {
   createContext,
+  type ComponentProps,
   type ComponentPropsWithoutRef,
+  type ComponentType,
   type ReactNode,
   type Ref,
   useCallback,
@@ -28,8 +30,27 @@ import {
   usePrimarySettingsAvailable,
 } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
+import { getRelativeTimeState } from "../../timestampFormat";
 import { PageContent } from "../PageContent";
 import { Button, InlineButton } from "../ui/button";
+import { RefreshIcon } from "../ui/refresh-icon";
+import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
+import { DisclosureChevron } from "../ui/disclosure";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "../ui/empty";
+import {
+  NumberField,
+  NumberFieldDecrement,
+  NumberFieldGroup,
+  NumberFieldIncrement,
+  NumberFieldInput,
+} from "../ui/number-field";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { useOptionalSettingsScope } from "./SettingsScopeContext";
 import { MachineScopeMenu, SettingsScopeSentence } from "./SettingsScopeSentence";
@@ -184,13 +205,51 @@ export function useRelativeTimeTick(intervalMs = 1_000) {
   return nowMs;
 }
 
-/** Muted section headings have no descriptions; explanatory copy belongs to individual settings. */
+/**
+ * The heading row above a section's card: a muted title (with an optional
+ * leading icon), an optional small control right after it, and the section's
+ * actions on the right. `title` may be a fold's trigger.
+ */
+export function SettingsSectionHeader({
+  title,
+  icon,
+  titleAction,
+  headerAction,
+}: {
+  title: ReactNode;
+  icon?: ReactNode;
+  titleAction?: ReactNode;
+  headerAction?: ReactNode;
+}) {
+  return (
+    <div
+      data-settings-scroll-target
+      className="flex min-h-7 items-start justify-between gap-4 px-3 sm:px-4"
+    >
+      <div className="flex min-w-0 items-center gap-1">
+        <h2 className="flex min-h-7 min-w-0 items-center gap-2 text-sm font-normal text-foreground/70">
+          {icon}
+          {title}
+        </h2>
+        {titleAction}
+      </div>
+      <div className="flex min-h-7 min-w-7 items-center justify-end gap-1.5">{headerAction}</div>
+    </div>
+  );
+}
+
+/**
+ * One titled card of settings. Headings are short nouns in sentence case with
+ * no description; explanatory copy belongs to the rows, and anything that
+ * applies to the whole section goes in `footer`, a muted note under the card.
+ */
 export function SettingsSection({
   title,
   hideTitle = false,
   icon,
   titleAction,
   headerAction,
+  footer,
   variant = "grouped",
   children,
   className,
@@ -199,9 +258,11 @@ export function SettingsSection({
   title: ReactNode;
   hideTitle?: boolean;
   icon?: ReactNode;
-  /** Small control shown right after the title, such as an add button. */
+  /** Small control shown right after the title, such as an icon-only add button. */
   titleAction?: ReactNode;
+  /** The section's actions: a `SettingsSectionAction`, a refresh, a menu. */
   headerAction?: ReactNode;
+  footer?: ReactNode;
   variant?: "grouped" | "plain";
   children: ReactNode;
 }) {
@@ -217,24 +278,286 @@ export function SettingsSection({
       {hideTitle ? (
         <h2 className="sr-only">{title}</h2>
       ) : (
-        <div
-          data-settings-scroll-target
-          className="flex min-h-7 items-start justify-between gap-4 px-3 sm:px-4"
-        >
-          <div className="flex min-w-0 items-center gap-1">
-            <h2 className="flex min-h-7 items-center gap-2 text-sm font-normal text-foreground/70">
-              {icon}
-              {title}
-            </h2>
-            {titleAction}
-          </div>
-          <div className="flex min-h-7 min-w-7 items-center justify-end">{headerAction}</div>
-        </div>
+        <SettingsSectionHeader
+          title={title}
+          icon={icon}
+          titleAction={titleAction}
+          headerAction={headerAction}
+        />
       )}
       <SettingsGroup data-settings-scroll-target={hideTitle ? "" : undefined} variant={variant}>
         {children}
       </SettingsGroup>
+      {footer ? <SettingsFootnote>{footer}</SettingsFootnote> : null}
     </section>
+  );
+}
+
+/** A muted note under a card, aligned with the section heading. */
+function SettingsFootnote({ children }: { children: ReactNode }) {
+  return <p className="px-3 pt-0.5 text-xs text-muted-foreground sm:px-4">{children}</p>;
+}
+
+/**
+ * A section's labelled header action, the one that adds to its list ("Add
+ * item", "New task"). Pass `icon={null}` for an action that doesn't add.
+ */
+export function SettingsSectionAction({
+  icon: Icon = PlusIcon,
+  children,
+  ...props
+}: Omit<ComponentProps<typeof Button>, "size" | "variant"> & {
+  icon?: ComponentType<{ className?: string }> | null;
+}) {
+  return (
+    <Button {...props} size="xs" variant="ghost-muted">
+      {Icon ? <Icon aria-hidden className="size-3" /> : null}
+      {children}
+    </Button>
+  );
+}
+
+/**
+ * A section's refresh, in its header: a quiet button that says when the data
+ * was last checked (or `idleLabel` when nothing has been checked), and
+ * "Refreshing" while it runs. `label` names the action for the tooltip and
+ * assistive tech.
+ */
+export function SettingsRefreshAction({
+  label,
+  refreshing,
+  disabled = false,
+  checkedAt,
+  idleLabel = "Refresh",
+  onRefresh,
+}: {
+  label: string;
+  refreshing: boolean;
+  disabled?: boolean;
+  /** ISO time of the last check; omit for data that has no check time. */
+  checkedAt?: string | null;
+  idleLabel?: string;
+  onRefresh: () => void;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            size="xs"
+            variant="ghost-muted"
+            disabled={refreshing || disabled}
+            aria-busy={refreshing}
+            onClick={onRefresh}
+          >
+            <RefreshIcon refreshing={refreshing} />
+            <span className="sr-only">{label}</span>
+            <span aria-hidden className="hidden min-w-0 truncate sm:inline">
+              {refreshing ? (
+                "Refreshing"
+              ) : (
+                <LastCheckedLabel checkedAt={checkedAt ?? null} idleLabel={idleLabel} />
+              )}
+            </span>
+          </Button>
+        }
+      />
+      <TooltipPopup side="top">{label}</TooltipPopup>
+    </Tooltip>
+  );
+}
+
+function LastCheckedLabel({
+  checkedAt,
+  idleLabel,
+}: {
+  checkedAt: string | null;
+  idleLabel: string;
+}) {
+  useRelativeTimeTick();
+  const relative = getRelativeTimeState(checkedAt);
+  if (relative.status === "missing") return <>{idleLabel}</>;
+  if (relative.status === "invalid") return <>Checked unavailable</>;
+  return relative.suffix ? (
+    <>
+      Checked <span className="font-mono tabular-nums">{relative.value}</span> {relative.suffix}
+    </>
+  ) : (
+    <>Checked {relative.value}</>
+  );
+}
+
+/** Search and filters for a section's list, as the first row of its card. */
+export function SettingsToolbar({ className, ...props }: ComponentProps<"div">) {
+  return (
+    <div
+      {...props}
+      className={cn("flex flex-wrap items-center gap-2 px-3 py-2.5 sm:px-4", className)}
+    />
+  );
+}
+
+/**
+ * A muted line inside a card, padded like a row: a list summary, "N more",
+ * or why a list is partial. Use `SettingsEmpty` for a list with nothing in it.
+ */
+export function SettingsNote({
+  tone = "muted",
+  className,
+  ...props
+}: ComponentProps<"p"> & { tone?: "muted" | "destructive" }) {
+  return (
+    <p
+      {...props}
+      className={cn(
+        "px-3 py-2.5 text-xs sm:px-4",
+        tone === "destructive" ? "text-destructive" : "text-muted-foreground",
+        className,
+      )}
+    />
+  );
+}
+
+/**
+ * An empty list inside a card. `default` for the main list of a page,
+ * `sm` for a secondary list. Loading and failures are `SettingsRow`s with a
+ * title ("Loading memory…", "Could not load memory") instead.
+ */
+export function SettingsEmpty({
+  icon,
+  title,
+  description,
+  action,
+  size = "default",
+}: {
+  icon?: ReactNode;
+  title: ReactNode;
+  description?: ReactNode;
+  action?: ReactNode;
+  size?: "default" | "sm";
+}) {
+  return (
+    <Empty size={size}>
+      <EmptyHeader>
+        {icon ? <EmptyMedia>{icon}</EmptyMedia> : null}
+        <EmptyTitle>{title}</EmptyTitle>
+        {description ? <EmptyDescription>{description}</EmptyDescription> : null}
+      </EmptyHeader>
+      {action ? <EmptyContent>{action}</EmptyContent> : null}
+    </Empty>
+  );
+}
+
+/** A page whose sections can't show yet: one status line where they would be. */
+export function SettingsPageMessage({ children }: { children: ReactNode }) {
+  return (
+    <p role="status" className="px-3 text-sm text-muted-foreground sm:px-4">
+      {children}
+    </p>
+  );
+}
+
+/**
+ * A fold inside a card: a header row with the disclosure chevron, a title, a
+ * one-line summary and an optional control, over rows that are divided like
+ * the card's own. A settings search that targets `id`, or one of `targetIds`
+ * inside it, opens it.
+ */
+export function SettingsDisclosure({
+  id,
+  targetIds,
+  title,
+  summary,
+  control,
+  children,
+}: {
+  id?: string;
+  targetIds?: readonly string[];
+  title: ReactNode;
+  summary?: ReactNode;
+  control?: ReactNode;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useSearchTargetFold(id, targetIds);
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <div className="flex items-center gap-4 px-3 sm:px-4">
+        <CollapsibleTrigger className="flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-md py-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
+          <DisclosureChevron />
+          <span className="shrink-0 text-sm font-medium">{title}</span>
+          {summary ? (
+            <span className="min-w-0 truncate text-xs text-muted-foreground">{summary}</span>
+          ) : null}
+        </CollapsibleTrigger>
+        {control ? <div className="flex shrink-0 items-center">{control}</div> : null}
+      </div>
+      <CollapsiblePanel>
+        <div className="border-t border-border/50 [&>*+*]:border-t [&>*+*]:border-border/50">
+          {children}
+        </div>
+      </CollapsiblePanel>
+    </Collapsible>
+  );
+}
+
+/**
+ * Open state for a fold that a settings-search jump can land in. A jump to
+ * `id` or one of `targetIds` opens it once, so the user can still fold it
+ * back while the target is set; a later jump opens it again.
+ */
+export function useSearchTargetFold(
+  id: string | undefined,
+  targetIds: readonly string[] = [],
+): [boolean, (open: boolean) => void] {
+  const [open, setOpen] = useState(false);
+  const searchTargetId = useSettingsSearchTargetId();
+  const [handledTarget, setHandledTarget] = useState<string | null>(null);
+  const wantsOpen =
+    searchTargetId !== null && (searchTargetId === id || targetIds.includes(searchTargetId));
+  if (wantsOpen && handledTarget !== searchTargetId) {
+    setHandledTarget(searchTargetId);
+    if (!open) setOpen(true);
+  } else if (searchTargetId === null && handledTarget !== null) {
+    setHandledTarget(null);
+  }
+  return [open, setOpen];
+}
+
+/** A number with its unit after it ("60 seconds"), sized for a settings row's control. */
+export function SettingsNumberField({
+  label,
+  unit,
+  value,
+  min,
+  step,
+  onValueChange,
+}: {
+  /** Names the value in the stepper labels: "Decrease {label}", "{label} in {unit}". */
+  label: string;
+  unit: string;
+  value: number;
+  min?: number;
+  step?: number;
+  onValueChange: (value: number | null) => void;
+}) {
+  return (
+    <div className="flex shrink-0 items-center gap-2">
+      <NumberField
+        value={value}
+        {...(min === undefined ? {} : { min })}
+        {...(step === undefined ? {} : { step })}
+        size="sm"
+        className="w-32"
+        onValueChange={onValueChange}
+      >
+        <NumberFieldGroup>
+          <NumberFieldDecrement aria-label={`Decrease ${label}`} />
+          <NumberFieldInput aria-label={`${label} in ${unit}`} />
+          <NumberFieldIncrement aria-label={`Increase ${label}`} />
+        </NumberFieldGroup>
+      </NumberField>
+      <span className="text-xs text-muted-foreground">{unit}</span>
+    </div>
   );
 }
 

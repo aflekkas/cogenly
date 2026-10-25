@@ -1316,7 +1316,9 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
                 {/* Dimmed with the rest of the row, whose controls are all disabled. */}
                 {isDefault ? (
                   <span className={cn("flex", profileWritesDisabled && "opacity-64")}>
-                    <Badge>Default</Badge>
+                    <Badge size="sm" variant="info">
+                      Default
+                    </Badge>
                   </span>
                 ) : null}
               </span>

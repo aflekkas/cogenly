@@ -84,6 +84,28 @@ function fillName(line: string, firstName: string | null | undefined): string {
   return line.replace(NAME_SLOT, name ? `, ${name}` : "");
 }
 
+/**
+ * The local day, bucket and weekday the server writes an AI greeting for, so a
+ * server in another time zone still greets for the user's own day.
+ */
+export function chatGreetingRequest(now: Date): {
+  readonly day: string;
+  readonly bucket: GreetingBucket;
+  readonly weekday: number;
+} {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return {
+    day: `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`,
+    bucket: greetingBucket(now),
+    weekday: now.getDay(),
+  };
+}
+
+/** Holidays keep their own line all day, even when greetings are written by AI. */
+export function isSpecialGreetingDay(now: Date): boolean {
+  return SPECIAL_DATES[`${now.getMonth() + 1}-${now.getDate()}`] !== undefined;
+}
+
 export function chatGreeting(now: Date, firstName?: string | null): string {
   const special = SPECIAL_DATES[`${now.getMonth() + 1}-${now.getDate()}`];
   if (special) return fillName(special, firstName);

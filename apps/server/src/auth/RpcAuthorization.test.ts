@@ -47,6 +47,11 @@ describe("RPC authorization scopes", () => {
     expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationOperateScope);
     expect(clientRpcRequiredScopes(method, {})).toEqual([AuthOrchestrationOperateScope]);
   });
+  it("requires orchestration read access for generated chat greetings", () => {
+    expect(requiredScopeForRpcMethod(WS_METHODS.serverGetChatGreeting)).toBe(
+      AuthOrchestrationReadScope,
+    );
+  });
   it("requires orchestration read access for global search", () => {
     expect(requiredScopeForRpcMethod(WS_METHODS.searchQuery)).toBe(AuthOrchestrationReadScope);
   });

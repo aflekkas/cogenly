@@ -1366,6 +1366,12 @@ export const ServerSettings = Schema.Struct({
   snoozeLimitedThreads: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   /** On by default: a usage-limit stop continues at its reset unless the thread or this opts out. */
   autoResumeLimitedThreads: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  /**
+   * On by default: the new-chat greeting is written a few times a day by the
+   * text generation model from recent thread titles. Off keeps the built-in lines
+   * and makes no model calls.
+   */
+  aiGreetings: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   backgroundActivity: BackgroundActivitySettings,
   // Legacy flat fields retained for old settings files and old clients. New
   // consumers should resolve `backgroundActivity` instead.
@@ -1512,6 +1518,7 @@ export const DEFAULT_SERVER_SETTINGS: ServerSettings = Schema.decodeSync(ServerS
  * they reach. Every other `ServerSettings` key is machine-local.
  */
 export const UNIVERSAL_SERVER_SETTING_KEYS = [
+  "aiGreetings",
   ...UNIVERSAL_CLIENT_PREFERENCE_KEYS,
   "sharedKeybindings",
   "favorites",
@@ -1809,6 +1816,7 @@ export const ServerSettingsPatch = Schema.Struct({
   deviceHosts: Schema.optionalKey(SshDeviceHostConfigs),
   autoResumeLimitedThreads: Schema.optionalKey(Schema.Boolean),
   snoozeLimitedThreads: Schema.optionalKey(Schema.Boolean),
+  aiGreetings: Schema.optionalKey(Schema.Boolean),
   backgroundActivity: Schema.optionalKey(
     Schema.Struct({
       schemaVersion: Schema.optionalKey(Schema.Literal(1)),

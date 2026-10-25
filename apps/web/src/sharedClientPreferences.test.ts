@@ -22,6 +22,12 @@ const defaults = clientPreferenceValues(
 );
 
 describe("universal client preferences", () => {
+  it("fans AI greeting preferences out while keeping machine paths local", () => {
+    expect(splitSharedServerPatch({ aiGreetings: false, projectsRoot: "/srv/projects" })).toEqual({
+      sharedPatch: { aiGreetings: false },
+      localPatch: { projectsRoot: "/srv/projects" },
+    });
+  });
   it("publishes offline edits on reconnect instead of restoring the stale server value", () => {
     const environmentId = EnvironmentId.make("machine-a");
     const shared = { ...DEFAULT_SERVER_SETTINGS, clientAppearanceAccent: "blue" as const };

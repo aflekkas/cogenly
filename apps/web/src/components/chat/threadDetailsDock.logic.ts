@@ -7,7 +7,7 @@ export const THREAD_DETAILS_DOCK_INSET = 12;
 
 /**
  * Whether thread details can dock beside the chat instead of opening as a
- * popover: only while the right panel is closed, and only when the chat still
+ * popover: only when the chat still
  * gets its minimum width (the canvas's own, 40rem) left of the card, after
  * the card's clearance and the lane's gutter. The canvas keeps its width
  * whether the card shows or not, so this never flips because the card opened.
@@ -15,9 +15,8 @@ export const THREAD_DETAILS_DOCK_INSET = 12;
 export function canDockThreadDetails(input: {
   readonly canvasWidth: number;
   readonly minChatWidth: number;
-  readonly rightPanelOpen: boolean;
 }): boolean {
-  if (input.rightPanelOpen || input.canvasWidth <= 0) return false;
+  if (input.canvasWidth <= 0) return false;
   const cardLeft = input.canvasWidth - THREAD_DETAILS_DOCK_INSET - THREAD_DETAILS_DOCK_WIDTH;
   const room = cardLeft - DETAILS_CARD_CLEARANCE - resolveChatLaneGutter(input.canvasWidth);
   return room >= input.minChatWidth;

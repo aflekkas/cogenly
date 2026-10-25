@@ -47,6 +47,21 @@ const ITEMS: ReadonlyArray<SettingsSearchItem> = [
 ];
 
 describe("searchSettings", () => {
+  it("finds AI greetings on General without restoring the moved model picker", () => {
+    expect(searchSettings("AI greetings")).toContainEqual(
+      expect.objectContaining({
+        id: "ai-greetings",
+        to: "/settings/general",
+        scope: "environment-defaults",
+      }),
+    );
+    expect(searchSettings("text generation model")).toContainEqual(
+      expect.objectContaining({
+        id: "text-generation-model",
+        to: "/settings/models",
+      }),
+    );
+  });
   it.each(["OTel", "OTLP", "telemetry export", "Grafana"])(
     "finds environment telemetry settings for %s",
     (query) => {

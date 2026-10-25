@@ -253,6 +253,7 @@ import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as HostResources from "./resourceTelemetry/HostResources.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as UsageService from "./usage/UsageService.ts";
+import * as ChatGreetingService from "./greeting/ChatGreetingService.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import * as PullRequestService from "./pullRequest/PullRequestService.ts";
 import * as PullRequestReviewGuideService from "./pullRequest/PullRequestReviewGuideService.ts";
@@ -1139,6 +1140,7 @@ const makeWsRpcHandlers = (
             Effect.orElseSucceed(() => null),
           );
     const usage = yield* UsageService.UsageService;
+    const chatGreetings = yield* ChatGreetingService.ChatGreetingService;
     const worktreeSetupTracker = yield* WorktreeSetupTracker.WorktreeSetupTracker;
     const projectCloneTracker = yield* ProjectCloneTracker.ProjectCloneTracker;
     const repositoryCheckout = yield* RepositoryCheckout.RepositoryCheckout;
@@ -2136,6 +2138,7 @@ const makeWsRpcHandlers = (
       [WS_METHODS.serverReportHostPowerState]: (input) =>
         backgroundPolicy.reportHostPowerState(input),
       [WS_METHODS.serverGetBackgroundPolicy]: (_input) => backgroundPolicy.snapshot,
+      [WS_METHODS.serverGetChatGreeting]: (input) => chatGreetings.get(input),
       [WS_METHODS.cloudGetRelayClientStatus]: (_input) => relayClient.resolve,
       [WS_METHODS.cloudInstallRelayClient]: (_input) =>
         Stream.callback<RelayClientInstallProgressEvent, RelayClientInstallFailedError>((queue) =>
@@ -2925,6 +2928,7 @@ type WsRequestServices =
   | ThreadSearch.ThreadSearch
   | TraceDiagnostics.TraceDiagnostics
   | UsageService.UsageService
+  | ChatGreetingService.ChatGreetingService
   | VcsProcess.VcsProcess
   | VcsProvisioningService.VcsProvisioningService
   | VcsStatusBroadcaster.VcsStatusBroadcaster

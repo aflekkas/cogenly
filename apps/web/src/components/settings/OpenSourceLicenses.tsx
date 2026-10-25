@@ -15,7 +15,7 @@ import { DisclosureChevron } from "../ui/disclosure";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { SearchInput } from "../ui/search-input";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { SettingsSection } from "./settingsLayout";
+import { SettingsEmpty, SettingsRow, SettingsSection } from "./settingsLayout";
 
 type LicenseManifestState =
   | { readonly status: "loading" }
@@ -190,17 +190,15 @@ function LicenseHeaderAction({
 
 function LicenseManifestError({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
-    <div className="flex flex-col items-start gap-3 px-3 py-5 sm:px-4">
-      <div className="flex flex-col gap-1">
-        <h3 className="text-sm font-medium text-foreground">Open-source notices are unavailable</h3>
-        <p className="max-w-[70ch] text-pretty text-xs leading-normal text-muted-foreground/80">
-          {message}
-        </p>
-      </div>
-      <Button type="button" size="xs" variant="outline" onClick={onRetry}>
-        Try again
-      </Button>
-    </div>
+    <SettingsRow
+      title="Open-source notices are unavailable"
+      description={message}
+      control={
+        <Button type="button" size="sm" variant="outline" onClick={onRetry}>
+          Try again
+        </Button>
+      }
+    />
   );
 }
 
@@ -270,17 +268,13 @@ export function OpenSourceLicensesPanel() {
                 );
               })
             ) : (
-              <p className="px-3 py-8 text-center text-sm/6 text-muted-foreground sm:px-4">
-                No licenses match that search.
-              </p>
+              <SettingsEmpty size="sm" title="No licenses match that search" />
             )}
           </div>
         ) : state.status === "error" ? (
           <LicenseManifestError message={state.message} onRetry={retry} />
         ) : (
-          <p className="px-3 py-5 text-sm/6 text-muted-foreground sm:px-4">
-            Loading open-source notices…
-          </p>
+          <SettingsRow title="Loading open-source notices…" role="status" />
         )}
       </SettingsSection>
     </>

@@ -20,7 +20,7 @@ import {
 } from "../components/settings/SettingsScopeContext";
 import { SettingsScopeNotice } from "../components/settings/SettingsScopeNotice";
 import { SETTINGS_SCOPELESS_PATHS } from "../components/settings/SettingsScopeSentence";
-import { SettingsPageContainer } from "../components/settings/settingsLayout";
+import { SettingsPageContainer, SettingsPageMessage } from "../components/settings/settingsLayout";
 import {
   retainSettingsScope,
   validateSettingsRouteSearch,
@@ -67,12 +67,10 @@ function SettingsScopeBoundary({ pathname, children }: { pathname: string; child
   }
   // Keep the scope sentence on screen so the selection can be changed back.
   if (scope.kind === "unavailable")
-    return <p className="px-3 text-sm text-muted-foreground sm:px-4">{scope.message}</p>;
+    return <SettingsPageMessage>{scope.message}</SettingsPageMessage>;
   if (scope.kind === "environment" && connectedEnvironments.length === 0) {
     return (
-      <p className="px-3 text-sm text-muted-foreground sm:px-4">
-        Reconnect {scope.label} to change its settings.
-      </p>
+      <SettingsPageMessage>Reconnect {scope.label} to change its settings.</SettingsPageMessage>
     );
   }
   return children;

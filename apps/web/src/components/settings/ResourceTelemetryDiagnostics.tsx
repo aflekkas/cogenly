@@ -44,7 +44,6 @@ import { ensureLocalApi } from "../../localApi";
 import { serverEnvironment } from "../../state/server";
 import { readEnvironmentScope, useEnvironmentScope } from "../../state/session";
 import { useAtomCommand } from "../../state/use-atom-command";
-import { formatRelativeTime } from "../../timestampFormat";
 import { Button } from "../ui/button";
 import { MorphIcon } from "~/components/MorphIcon";
 import { ScrollArea } from "../ui/scroll-area";
@@ -57,7 +56,8 @@ import {
   shouldShowResourceMonitorRetry,
   visibleResourceTelemetryProcesses,
 } from "./ResourceTelemetryDiagnostics.logic";
-import { SettingsSection, useRelativeTimeTick } from "./settingsLayout";
+import { SettingsGroup } from "./SettingsGroup";
+import { SettingsRefreshAction, SettingsSection } from "./settingsLayout";
 
 const HISTORY_WINDOWS = [
   { label: "5m", windowMs: 5 * 60_000, bucketMs: 15_000 },
@@ -202,23 +202,6 @@ function SourceStatusBadge({
         )}
       />
       {label} {presentation?.label ?? status}
-    </span>
-  );
-}
-
-function LastSampleLabel({ sampledAt }: { sampledAt: DateTime.Utc | null }) {
-  useRelativeTimeTick();
-  if (!sampledAt) {
-    return <span className="text-2xs text-muted-foreground/55">Waiting for sample</span>;
-  }
-  const relative = formatRelativeTime(DateTime.formatIso(sampledAt));
-  if (!relative) {
-    return <span className="text-2xs text-muted-foreground/55">Waiting for sample</span>;
-  }
-  return (
-    <span className="text-2xs text-muted-foreground/60">
-      Updated <span className="font-mono tabular-nums">{relative.value}</span>
-      {relative.suffix ? ` ${relative.suffix}` : ""}
     </span>
   );
 }
@@ -975,33 +958,23 @@ export function ResourceTelemetryDiagnostics({
     <>
       <SettingsSection
         title="Resource monitor"
-        icon={<ActivityIcon className="size-4 text-muted-foreground" />}
+        variant="plain"
         headerAction={
-          <div className="flex items-center gap-2">
+          <>
             {snapshot ? (
               <SourceStatusBadge label="Native" status={snapshot.health.native.status} />
             ) : null}
-            <LastSampleLabel sampledAt={snapshot?.readAt ?? null} />
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    size="icon-micro"
-                    variant="ghost"
-                    disabled={telemetry.isPending}
-                    onClick={telemetry.refresh}
-                    aria-label="Refresh resource telemetry"
-                  >
-                    <RefreshIcon size="xs" refreshing={telemetry.isPending} />
-                  </Button>
-                }
-              />
-              <TooltipPopup side="top">Refresh telemetry snapshot</TooltipPopup>
-            </Tooltip>
-          </div>
+            <SettingsRefreshAction
+              label="Refresh telemetry snapshot"
+              refreshing={telemetry.isPending}
+              checkedAt={snapshot ? DateTime.formatIso(snapshot.readAt) : null}
+              idleLabel="Waiting for sample"
+              onRefresh={telemetry.refresh}
+            />
+          </>
         }
       >
-        <div className="overflow-hidden rounded-2xl border border-border/70 bg-card shadow-sm/5">
+        <SettingsGroup divided={false} className="overflow-hidden">
           <div className="flex flex-col gap-3 border-b border-border/60 bg-linear-to-r from-muted/45 via-muted/20 to-transparent px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
             <div>
               <div className="text-3xs font-semibold uppercase tracking-widest text-muted-foreground/70">
@@ -1094,12 +1067,12 @@ export function ResourceTelemetryDiagnostics({
               />
             </div>
           ) : null}
-        </div>
+        </SettingsGroup>
       </SettingsSection>
 
       <SettingsSection
         title="Host & collection"
-        icon={<GaugeIcon className="size-4 text-muted-foreground" />}
+        variant="plain"
         headerAction={
           collectorNeedsRetry ? (
             <Button size="xs" variant="outline" disabled={isRetrying} onClick={retryCollector}>
@@ -1109,7 +1082,10 @@ export function ResourceTelemetryDiagnostics({
           ) : null
         }
       >
-        <div className="grid overflow-hidden rounded-2xl border border-border/70 bg-card shadow-xs/5 md:grid-cols-2 md:divide-x md:divide-border/60">
+        <SettingsGroup
+          divided={false}
+          className="grid overflow-hidden md:grid-cols-2 md:divide-x md:divide-border/60"
+        >
           <div className="px-4 py-4 sm:px-5">
             <div className="mb-3 flex items-center gap-2 text-3xs font-semibold uppercase tracking-widest text-muted-foreground/70">
               <span className="flex size-6 items-center justify-center rounded-md bg-muted/60">
@@ -1225,28 +1201,24 @@ export function ResourceTelemetryDiagnostics({
               </div>
             )}
           </div>
-        </div>
+        </SettingsGroup>
       </SettingsSection>
 
       <SettingsSection
         title="Resource timeline"
-        icon={<HardDriveIcon className="size-4 text-muted-foreground" />}
+        variant="plain"
         headerAction={
-          <div className="flex items-center gap-2">
+          <>
             <HistoryWindowSelector selectedWindowMs={windowMs} onSelect={setWindowMs} />
-            <Button
-              size="icon-micro"
-              variant="ghost"
-              disabled={history.isPending}
-              onClick={history.refresh}
-              aria-label="Refresh resource history"
-            >
-              <RefreshIcon size="xs" refreshing={history.isPending} />
-            </Button>
-          </div>
+            <SettingsRefreshAction
+              label="Refresh resource history"
+              refreshing={history.isPending}
+              onRefresh={history.refresh}
+            />
+          </>
         }
       >
-        <div className="overflow-hidden rounded-2xl border border-border/70 bg-card shadow-xs/5">
+        <SettingsGroup divided={false} className="overflow-hidden">
           {history.error ? (
             <div className="flex items-start gap-2 border-b border-destructive/20 bg-destructive/5 px-4 py-3 text-xs text-destructive sm:px-5">
               <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
@@ -1255,12 +1227,12 @@ export function ResourceTelemetryDiagnostics({
           ) : null}
           <ResourceHistoryChart buckets={history.data?.buckets ?? []} />
           <HistoryProcessTable processes={history.data?.topProcesses ?? []} />
-        </div>
+        </SettingsGroup>
       </SettingsSection>
 
       <SettingsSection
         title="Live process tree"
-        icon={<CpuIcon className="size-4 text-muted-foreground" />}
+        variant="plain"
         headerAction={
           snapshot ? (
             <span className="text-3xs text-muted-foreground/55">
@@ -1269,31 +1241,31 @@ export function ResourceTelemetryDiagnostics({
           ) : null
         }
       >
-        <div className="overflow-hidden rounded-2xl border border-border/70 bg-card shadow-xs/5">
+        <SettingsGroup divided={false} className="overflow-hidden">
           <ProcessTable
             processes={snapshot?.processes ?? []}
             canMaintainEnvironment={canMaintainEnvironment}
             signalingKeys={signalingKeys}
             onSignal={signalProcess}
           />
-        </div>
+        </SettingsGroup>
       </SettingsSection>
 
       <SettingsSection
         title="Instrumented application I/O"
-        icon={<DatabaseIcon className="size-4 text-muted-foreground" />}
+        variant="plain"
         headerAction={
           <span className="text-3xs text-muted-foreground/55">Logical bytes by operation</span>
         }
       >
-        <div className="overflow-hidden rounded-2xl border border-border/70 bg-card shadow-xs/5">
+        <SettingsGroup divided={false} className="overflow-hidden">
           <div className="bg-muted/15 px-4 py-3 text-2xs leading-relaxed text-muted-foreground sm:px-5">
             Native counters identify which process is reading or writing. These application-level
             counters identify known Cogenly operations so process spikes can be correlated with
             specific persistence and logging paths.
           </div>
           <AttributionTable entries={snapshot?.attribution.entries ?? []} />
-        </div>
+        </SettingsGroup>
       </SettingsSection>
     </>
   );

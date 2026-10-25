@@ -361,7 +361,11 @@ it.effect("vault_fill fills card fields by field and never returns them", () =>
           locator: `input[name=${field}]`,
         });
         expect(filled).toMatchObject({ status: "filled", field, domain: "shop.test" });
-        expect(JSON.stringify(filled)).not.toContain(text);
+        // Bounded by non-alphanumerics, so a short value like the CVC can't match inside a random id or timestamp.
+        const escaped = text.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+        expect(JSON.stringify(filled)).not.toMatch(
+          new RegExp(`(?<![0-9a-zA-Z])${escaped}(?![0-9a-zA-Z])`),
+        );
       }
       expect(typed).toEqual([
         {

@@ -6,7 +6,7 @@ import {
 } from "./SettingsList";
 import { OverlayPresence } from "~/components/ui/overlay-presence";
 import type { AgentId, ProjectLabelId } from "@cogenly/contracts";
-import { BrainIcon, PlusIcon } from "lucide-react";
+import { BrainIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { useAgents } from "../../agents/agentsClient";
@@ -17,10 +17,9 @@ import { useSyncPeers } from "../../machines/usePeerSync";
 import { useFactActions, useFactNavigation, useFacts } from "../../memory/useFacts";
 import { sortProjectLabels } from "../../projectLabels/projectLabels.logic";
 import { useEnvironmentProjectLabels } from "../../projectLabels/useProjectLabels";
-import { Button } from "../ui/button";
 import { PeerSyncRow } from "./PeerSyncRow";
 import { useSettingsScope } from "./SettingsScopeContext";
-import { SettingsRow, SettingsSection } from "./settingsLayout";
+import { SettingsRow, SettingsSection, SettingsSectionAction } from "./settingsLayout";
 
 const ALL = "all";
 
@@ -62,19 +61,17 @@ export function MemorySettings() {
   return (
     <>
       <SettingsSection
+        footer="Chats tagged with a confirmed project, and agents allowed to read that project, use its confirmed facts as context. Proposals are never used until you confirm them. Private facts stay with you and the agent they belong to."
         id="memory"
         title="Memory"
         headerAction={
-          <Button
-            size="xs"
-            variant="ghost-muted"
+          <SettingsSectionAction
             disabled={!actions.canWrite}
             title={actions.canWrite ? undefined : "This connection cannot change memory."}
             onClick={() => setCreating(true)}
           >
-            <PlusIcon className="size-3" />
             Remember something
-          </Button>
+          </SettingsSectionAction>
         }
       >
         {environmentId === null ? (
@@ -116,7 +113,7 @@ export function MemorySettings() {
             {list.error !== null ? (
               <SettingsRow title="Could not load memory" description={list.error} />
             ) : !list.isLoaded ? (
-              <SettingsRow title="Loading memory…" />
+              <SettingsRow title="Loading memory…" role="status" />
             ) : facts.length === 0 ? (
               <SettingsListEmpty
                 icon={<BrainIcon />}
@@ -140,11 +137,6 @@ export function MemorySettings() {
           </>
         )}
       </SettingsSection>
-      <p className="px-3 text-xs text-muted-foreground sm:px-4">
-        Chats tagged with a confirmed project, and agents allowed to read that project, use its
-        confirmed facts as context. Proposals are never used until you confirm them. Private facts
-        stay with you and the agent they belong to.
-      </p>
       {syncPeers.peers.length > 0 ? (
         <SettingsSection id="memory-machines" title="Paired machines">
           {syncPeers.peers.map((peer) => (

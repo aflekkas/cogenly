@@ -92,6 +92,21 @@ export const make = Effect.gen(function* () {
               );
         }),
       ),
+    generateGreeting: (input) =>
+      resolveInstance(registry, "generateThreadTitle", input.modelSelection.instanceId).pipe(
+        Effect.flatMap((textGeneration) => {
+          const generator: ProviderTextGeneration & Partial<WorkScopeSummaryGeneration> =
+            textGeneration;
+          return generator.generateGreeting
+            ? generator.generateGreeting(input)
+            : Effect.fail(
+                new TextGenerationError({
+                  operation: "generateThreadTitle",
+                  detail: "This provider does not support greetings.",
+                }),
+              );
+        }),
+      ),
     generateCommitMessage: (input) =>
       resolveInstance(registry, "generateCommitMessage", input.modelSelection.instanceId).pipe(
         Effect.flatMap((textGeneration) => textGeneration.generateCommitMessage(input)),
