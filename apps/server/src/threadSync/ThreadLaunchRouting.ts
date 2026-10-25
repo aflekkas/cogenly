@@ -42,6 +42,7 @@ import { derive } from "@cogenly/provider-core/server/IdAllocator";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as Clock from "effect/Clock";
 import * as Ref from "effect/Ref";
+import type * as Crypto from "effect/Crypto";
 import type * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import type * as FileSystem from "effect/FileSystem";
@@ -109,6 +110,7 @@ const make = Effect.gen(function* () {
     | SqlClient.SqlClient
     | Git.GitVcsDriver
     | FileSystem.FileSystem
+    | Crypto.Crypto
     | Path.Path
     | ServerConfig.ServerConfig
     | RepositoryCheckout.RepositoryCheckout

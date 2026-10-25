@@ -24,6 +24,7 @@ import {
   ThreadRemoteError,
 } from "@cogenly/contracts";
 import * as Cause from "effect/Cause";
+import * as Crypto from "effect/Crypto";
 import * as Context from "effect/Context";
 import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -49,6 +50,7 @@ import { commandThreadId } from "../orchestration-v2/Orchestrator.ts";
 import * as RemoteThreadCommands from "../orchestration-v2/RemoteThreadCommands.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as ProjectLabels from "../projectLabels/ProjectLabelService.ts";
+import { writeAttachmentFiles } from "./attachmentFiles.ts";
 import * as ThreadReplication from "./ThreadReplication.ts";
 import * as ThreadSync from "./ThreadSync.ts";
 
@@ -237,43 +239,11 @@ const make = Effect.gen(function* () {
     return files;
   });
 
-  // Ids name their files, so an existing file is the same attachment.
+  const attachmentContext = yield* Effect.context<
+    ServerConfig.ServerConfig | FileSystem.FileSystem | Path.Path | Crypto.Crypto
+  >();
   const writeFiles = (files: ReadonlyArray<ThreadAttachmentFile>) =>
-    Effect.gen(function* () {
-      if (
-        files.reduce((total, file) => total + Buffer.byteLength(file.base64, "base64"), 0) >
-        THREAD_FORWARD_MAX_FILE_BYTES
-      )
-        return yield* new ThreadRemoteError({ reason: "too-large" });
-      yield* Effect.forEach(
-        files,
-        (file) =>
-          fileSystem
-            .exists(attachmentPath(file.name))
-            .pipe(
-              Effect.flatMap((exists) =>
-                exists
-                  ? Effect.void
-                  : fileSystem
-                      .makeDirectory(config.attachmentsDir, { recursive: true })
-                      .pipe(
-                        Effect.andThen(
-                          fileSystem.writeFile(
-                            attachmentPath(file.name),
-                            new Uint8Array(Buffer.from(file.base64, "base64")),
-                          ),
-                        ),
-                      ),
-              ),
-            ),
-        { discard: true },
-      ).pipe(
-        Effect.mapError(
-          () =>
-            new ThreadRemoteError({ reason: "rejected", detail: "Could not store an attachment." }),
-        ),
-      );
-    });
+    writeAttachmentFiles(files).pipe(Effect.provideContext(attachmentContext));
 
   const fromPeer =
     (view: MachineListResult | undefined, owner: EnvironmentId) =>

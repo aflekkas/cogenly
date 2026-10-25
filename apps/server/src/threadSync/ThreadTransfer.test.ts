@@ -68,6 +68,13 @@ describe("moving threads between paired machines", () => {
           "png",
         );
 
+        // A previous interrupted/corrupt copy must be verified before the old owner can leave.
+        yield* fileSystem.makeDirectory(hubConfig.attachmentsDir, { recursive: true });
+        yield* fileSystem.writeFileString(
+          path.join(hubConfig.attachmentsDir, `${image}.png`),
+          "bad",
+        );
+
         // Asked on the hub: the laptop runs the thread, so the laptop moves it.
         const result = yield* hub.transfer.move({
           threadIds: [threadId],

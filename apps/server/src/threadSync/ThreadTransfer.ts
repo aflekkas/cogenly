@@ -41,7 +41,6 @@ import * as Schema from "effect/Schema";
 
 import {
   parseThreadSegmentFromAttachmentId,
-  resolveAttachmentPathById,
   toSafeThreadAttachmentSegment,
 } from "../attachmentStore.ts";
 import * as ServerConfig from "../config.ts";
@@ -842,15 +841,11 @@ const make = Effect.gen(function* () {
         yield* requireProject(payload.threadId);
         // The old owner may go offline for good once this answers.
         for (const attachmentId of payload.attachmentIds)
-          if (
-            resolveAttachmentPathById({ attachmentsDir: config.attachmentsDir, attachmentId }) ===
-            null
-          )
-            if (Option.isNone(yield* routing.fetchAttachment(attachmentId)))
-              return yield* new ThreadRemoteError({
-                reason: "rejected",
-                detail: "A thread attachment is unavailable on its owner.",
-              });
+          if (Option.isNone(yield* routing.fetchAttachment(attachmentId)))
+            return yield* new ThreadRemoteError({
+              reason: "rejected",
+              detail: "A thread attachment is unavailable on its owner.",
+            });
       }
       // Ownership and the machine-local paths commit before the sink publishes.
       if (owner !== undefined && owner.epoch >= payload.epoch && !owner.local) return {};

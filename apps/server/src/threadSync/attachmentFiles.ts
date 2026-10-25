@@ -1,7 +1,7 @@
 /**
  * Attachment files that travel with a request to another machine, by their
- * names in the attachments directory. Ids name their files, so a file the
- * receiver already has is the same attachment and is kept.
+ * names in the attachments directory. Only complete, verified files receive
+ * their final names.
  */
 import {
   type ChatAttachment,
@@ -9,6 +9,7 @@ import {
   type ThreadAttachmentFile,
   ThreadRemoteError,
 } from "@cogenly/contracts";
+import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
@@ -43,20 +44,50 @@ export const readAttachmentFiles = Effect.fn("attachmentFiles.read")(function* (
   return files;
 });
 
-/** Stores files another machine sent, keeping any this machine already has. */
+/** Verifies existing copies and atomically publishes complete replacements. */
 export const writeAttachmentFiles = Effect.fn("attachmentFiles.write")(
   function* (files: ReadonlyArray<ThreadAttachmentFile>) {
     const config = yield* ServerConfig.ServerConfig;
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
+    const crypto = yield* Crypto.Crypto;
+    if (
+      files.reduce((total, file) => total + Buffer.byteLength(file.base64, "base64"), 0) >
+      THREAD_FORWARD_MAX_FILE_BYTES
+    )
+      return yield* new ThreadRemoteError({ reason: "too-large" });
     for (const file of files) {
       const target = path.join(config.attachmentsDir, file.name);
-      if (yield* fileSystem.exists(target)) continue;
+      const bytes = new Uint8Array(Buffer.from(file.base64, "base64"));
+      const digest = Buffer.from(yield* crypto.digest("SHA-256", bytes));
+      const existing = yield* fileSystem.readFile(target).pipe(
+        Effect.catchIf(
+          (error) => error.reason._tag === "NotFound",
+          () => Effect.succeed(undefined),
+        ),
+      );
+      if (
+        existing !== undefined &&
+        existing.byteLength === bytes.byteLength &&
+        digest.equals(Buffer.from(yield* crypto.digest("SHA-256", existing)))
+      )
+        continue;
       yield* fileSystem.makeDirectory(config.attachmentsDir, { recursive: true });
-      yield* fileSystem.writeFile(target, new Uint8Array(Buffer.from(file.base64, "base64")));
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const temporary = yield* fileSystem.makeTempFileScoped({
+            directory: config.attachmentsDir,
+            prefix: ".transfer-",
+          });
+          yield* fileSystem.writeFile(temporary, bytes);
+          yield* fileSystem.rename(temporary, target);
+        }),
+      );
     }
   },
-  Effect.mapError(
-    () => new ThreadRemoteError({ reason: "rejected", detail: "Could not store an attachment." }),
+  Effect.mapError((error) =>
+    error._tag === "ThreadRemoteError"
+      ? error
+      : new ThreadRemoteError({ reason: "rejected", detail: "Could not store an attachment." }),
   ),
 );

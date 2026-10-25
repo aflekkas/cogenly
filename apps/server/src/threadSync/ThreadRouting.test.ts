@@ -320,3 +320,28 @@ it.live(
     }).pipe(Effect.scoped),
   30000,
 );
+
+it.live(
+  "forwarding repairs truncated and same-length corrupt attachment copies",
+  () =>
+    Effect.gen(function* () {
+      const hub = yield* startThreadMachine("repair-hub", "cloud-server");
+      const laptop = yield* startThreadMachine("repair-laptop", "computer");
+      yield* pair(hub, laptop);
+      const fs = yield* laptop.run(FileSystem.FileSystem);
+      const path = yield* laptop.run(Path.Path);
+      const dir = (yield* laptop.run(ServerConfig.ServerConfig)).attachmentsDir;
+      yield* fs.makeDirectory(dir, { recursive: true });
+      for (const corrupt of ["no", "wrong"]) {
+        yield* fs.writeFileString(path.join(dir, `${attachment.id}.txt`), corrupt);
+        yield* hub.machines.call(laptop.environmentId, ThreadCommandForward, {
+          command: send(`repair:${corrupt}`, threadId, [attachment]),
+          files: [
+            { name: `${attachment.id}.txt`, base64: Buffer.from("notes").toString("base64") },
+          ],
+        });
+        expect(yield* fs.readFileString(path.join(dir, `${attachment.id}.txt`))).toBe("notes");
+      }
+    }).pipe(Effect.scoped),
+  30000,
+);
