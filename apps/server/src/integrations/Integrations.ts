@@ -1125,6 +1125,33 @@ const make = (options: IntegrationsOptions = {}) =>
       });
 
     /** The client a token request authenticates as. */
+    /** Discovery cannot change a reviewed destination, even within the same host. */
+    const authorizeOAuthServer = (integration: StoredIntegration, server: OAuth.OAuthServer) => {
+      const expected = integration.auth?.server ?? integration.oauthState?.server;
+      const endpoint = new URL(integration.url);
+      const catalog = integrationCatalogEntryFor(integration);
+      const origin =
+        catalog?.kind === "remote" && catalog.tokenHost !== undefined
+          ? `https://${catalog.tokenHost}`
+          : endpoint.origin;
+      const allowed =
+        expected !== undefined
+          ? expected.issuer === server.issuer &&
+            expected.authorizationEndpoint === server.authorizationEndpoint &&
+            expected.tokenEndpoint === server.tokenEndpoint
+          : !integration.auth?.clientSecret ||
+            (new URL(server.authorizationEndpoint).origin === origin &&
+              new URL(server.tokenEndpoint).origin === origin);
+      return allowed
+        ? Effect.void
+        : Effect.fail(
+            new IntegrationError({
+              operation: "approve OAuth server",
+              reason: "approval_required",
+            }),
+          );
+    };
+
     const oauthClient = (
       integration: StoredIntegration,
       server: OAuth.OAuthServer,
@@ -1132,18 +1159,16 @@ const make = (options: IntegrationsOptions = {}) =>
       registeredSecret: string | undefined,
     ) =>
       Effect.gen(function* () {
+        yield* authorizeOAuthServer(integration, server);
         const auth = integration.auth;
         if (auth?.clientId !== undefined) {
           const template = auth.clientSecret?.trim() ?? "";
           if (template === "") return { clientId: auth.clientId, authMethod: "none" as const };
-          const endpoint = new URL(integration.url);
           const resolved = yield* resolveHeaderTemplates({ secret: template }, (ref) =>
             credentials.resolve(ref, {
               host: new URL(server.tokenEndpoint).hostname,
-              approvedItems:
-                integration.credentialOrigin === endpoint.origin
-                  ? (integration.approvedCredentialItems ?? [])
-                  : [],
+              // Resource-origin approval never authorizes a client secret at an auth server.
+              approvedItems: [],
             }),
           );
           return {
@@ -2139,6 +2164,11 @@ const make = (options: IntegrationsOptions = {}) =>
               operation: "approve executable integration",
               reason: "approval_required",
             });
+          if (input.auth?.server !== undefined && options?.fromAgent && !options.approveCredentials)
+            return yield* new IntegrationError({
+              operation: "approve OAuth server",
+              reason: "approval_required",
+            });
           yield* validateCommand(input);
           yield* validateUrl(input.url);
           yield* validateAuth(input.auth, "create");
@@ -2264,6 +2294,18 @@ const make = (options: IntegrationsOptions = {}) =>
               operation: "change account label",
               reason: "approval_required",
             });
+          if (
+            (options?.fromAgent || options?.holdStoredSecrets) &&
+            !options.approveCredentials &&
+            input.auth !== undefined &&
+            (["issuer", "authorizationEndpoint", "tokenEndpoint"] as const).some(
+              (key) => input.auth?.server?.[key] !== current.auth?.server?.[key],
+            )
+          )
+            return yield* new IntegrationError({
+              operation: "approve OAuth server",
+              reason: "approval_required",
+            });
           const auth = input.auth === undefined ? current.auth : (input.auth ?? undefined);
           if (
             (options?.holdStoredSecrets || options?.fromAgent) &&
@@ -2319,7 +2361,8 @@ const make = (options: IntegrationsOptions = {}) =>
           const keepSignIn =
             auth?.type === "oauth" &&
             (input.url === undefined || input.url === current.url) &&
-            auth.clientId === current.auth?.clientId;
+            auth.clientId === current.auth?.clientId &&
+            JSON.stringify(auth.server) === JSON.stringify(current.auth?.server);
           const {
             auth: _auth,
             endpointRef: _endpointRef,
@@ -2530,6 +2573,14 @@ const make = (options: IntegrationsOptions = {}) =>
           const origin = yield* selectCallbackOrigin(from, integration.browserOrigin);
           const redirectUri = `${origin}${OAuth.CALLBACK_PATH}`;
           const server = yield* protocol.discover(integration.url);
+          yield* authorizeOAuthServer(integration, server);
+          if (integration.oauthState?.server === undefined) {
+            yield* persistState(integration.id, integration, (state) => ({
+              ...state,
+              signedIn: state?.signedIn ?? false,
+              server,
+            }));
+          }
           const auth = integration.auth!;
           const previous = integration.oauthState;
           // A registration made earlier for this server and redirect is reused.

@@ -36,6 +36,10 @@ import { CALLBACK_PATH } from "./IntegrationOAuth.ts";
  */
 export interface MockAuthServer {
   base: string;
+  authorizationServerBase?: string;
+  authorizationEndpoint?: string;
+  tokenEndpoint?: string;
+  readonly tokenRequests: Array<string>;
   registrations: number;
   refreshes: number;
   /** Refresh tokens answer invalid_grant, as after the user revokes access. */
@@ -66,6 +70,7 @@ const reply = (body: unknown, status = 200, headers: Record<string, string> = {}
 export const startMockAuthServer = Effect.gen(function* () {
   const mock: MockAuthServer = {
     base: "",
+    tokenRequests: [],
     registrations: 0,
     refreshes: 0,
     revoked: false,
@@ -101,7 +106,7 @@ export const startMockAuthServer = Effect.gen(function* () {
       Effect.succeed(
         reply({
           resource: `${mock.base}/mcp`,
-          authorization_servers: [`${mock.base}/auth`],
+          authorization_servers: [`${mock.authorizationServerBase ?? mock.base}/auth`],
           scopes_supported: ["read", "write"],
         }),
       ),
@@ -111,8 +116,8 @@ export const startMockAuthServer = Effect.gen(function* () {
       Effect.succeed(
         reply({
           issuer: `${mock.base}/auth`,
-          authorization_endpoint: `${mock.base}/auth/authorize`,
-          token_endpoint: `${mock.base}/auth/token`,
+          authorization_endpoint: mock.authorizationEndpoint ?? `${mock.base}/auth/authorize`,
+          token_endpoint: mock.tokenEndpoint ?? `${mock.base}/auth/token`,
           registration_endpoint: `${mock.base}/auth/register`,
           ...(mock.omitPkce ? {} : { code_challenge_methods_supported: ["S256"] }),
           authorization_response_iss_parameter_supported: mock.requireIssuer === true,
@@ -173,7 +178,8 @@ export const startMockAuthServer = Effect.gen(function* () {
     ),
     HttpRouter.add("POST", "/auth/token", (request) =>
       form(request).pipe(
-        Effect.tap(() => {
+        Effect.tap((params) => {
+          mock.tokenRequests.push(params.toString());
           const gate = mock.tokenGate;
           return gate === undefined
             ? Effect.void

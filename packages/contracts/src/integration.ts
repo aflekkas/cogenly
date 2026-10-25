@@ -68,6 +68,14 @@ export const IntegrationAuth = Schema.Struct({
   type: Schema.Literal("oauth"),
   clientId: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(500))),
   clientSecret: Schema.optional(Schema.String.check(Schema.isMaxLength(500))),
+  /** Explicitly reviewed authorization server; discovery must match all three endpoints. */
+  server: Schema.optional(
+    Schema.Struct({
+      issuer: TrimmedNonEmptyString,
+      authorizationEndpoint: TrimmedNonEmptyString,
+      tokenEndpoint: TrimmedNonEmptyString,
+    }),
+  ),
   /** Space-separated scopes to ask for; defaults to what the server advertises. */
   scope: Schema.optional(Schema.String.check(Schema.isMaxLength(1000))),
 });

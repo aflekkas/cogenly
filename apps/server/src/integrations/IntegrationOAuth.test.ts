@@ -105,6 +105,153 @@ const whoami = (name: string) =>
   });
 
 describe("Integration OAuth sign-in", () => {
+  it.effect(
+    "never sends an approved resource client secret to a discovered foreign auth server",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* runMigrations();
+          const resource = yield* startMockAuthServer;
+          const attacker = yield* startMockAuthServer;
+          resource.authorizationServerBase = attacker.base;
+          const service = yield* Integrations.Integrations;
+          const vault = yield* Vault.Vault;
+          yield* vault.create({
+            name: "resource-client",
+            type: "api_key",
+            allowedDomains: ["127.0.0.1"],
+            secretFields: { value: "PRIVATE-CLIENT-SECRET" },
+          });
+          const { integration } = yield* service.create(
+            {
+              ...linearInput(resource, "resource"),
+              auth: {
+                type: "oauth",
+                clientId: "manual-client",
+                clientSecret: "{{credential:resource-client.value}}",
+              },
+            },
+            { approveCredentials: true },
+          );
+          const link = yield* service
+            .beginSignIn(integration.id, { origin: COGENLY_ORIGIN })
+            .pipe(Effect.result);
+          // Exercise the exchange too if discovery incorrectly permits the foreign server.
+          if (link._tag === "Success") {
+            yield* service
+              .completeSignIn({
+                state: new URL(link.success.authorizationUrl).searchParams.get("state")!,
+                code: "attacker-code",
+              })
+              .pipe(Effect.result);
+          }
+          expect(attacker.tokenRequests).toEqual([]);
+          expect(link).toMatchObject({ _tag: "Failure", failure: { reason: "approval_required" } });
+        }),
+      ).pipe(Effect.provide(gatewayLayer())),
+  );
+
+  it.effect.each(["authorizationEndpoint", "tokenEndpoint"] as const)(
+    "rejects an unapproved discovery change to %s, including a path on the same origin",
+    (endpoint) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* runMigrations();
+          const mock = yield* startMockAuthServer;
+          const integration = yield* addLinear(mock, "linear");
+          const service = yield* Integrations.Integrations;
+          yield* service.beginSignIn(integration.id, { origin: COGENLY_ORIGIN });
+          mock[endpoint] = `${mock.base}/changed`;
+          expect(
+            yield* service
+              .beginSignIn(integration.id, { origin: COGENLY_ORIGIN })
+              .pipe(Effect.result),
+          ).toMatchObject({ _tag: "Failure", failure: { reason: "approval_required" } });
+          expect(mock.tokenRequests).toEqual([]);
+        }),
+      ).pipe(Effect.provide(gatewayLayer())),
+  );
+
+  it.effect("requires the vault domain even for an explicitly reviewed OAuth server", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* runMigrations();
+        const mock = yield* startMockAuthServer;
+        const service = yield* Integrations.Integrations;
+        const vault = yield* Vault.Vault;
+        yield* vault.create({
+          name: "restricted-client",
+          type: "api_key",
+          allowedDomains: ["resource.example"],
+          secretFields: { value: "RESTRICTED-CLIENT-SECRET" },
+        });
+        const { integration } = yield* service.create(
+          {
+            ...linearInput(mock, "manual"),
+            auth: {
+              type: "oauth",
+              clientId: "manual-client",
+              clientSecret: "{{credential:restricted-client.value}}",
+              server: {
+                issuer: `${mock.base}/auth`,
+                authorizationEndpoint: `${mock.base}/auth/authorize`,
+                tokenEndpoint: `${mock.base}/auth/token`,
+              },
+            },
+          },
+          { approveCredentials: true },
+        );
+        const link = yield* service.beginSignIn(integration.id, { origin: COGENLY_ORIGIN });
+        expect(
+          yield* service
+            .completeSignIn({
+              state: new URL(link.authorizationUrl).searchParams.get("state")!,
+              code: "code",
+            })
+            .pipe(Effect.result),
+        ).toMatchObject({ _tag: "Failure", failure: { reason: "credential_not_allowed" } });
+        expect(mock.tokenRequests).toEqual([]);
+      }),
+    ).pipe(Effect.provide(gatewayLayer())),
+  );
+
+  it.effect(
+    "requires owner approval for explicit OAuth server overrides, even before a grant exists",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* runMigrations();
+          const mock = yield* startMockAuthServer;
+          const service = yield* Integrations.Integrations;
+          const integration = yield* addLinear(mock, "linear");
+          yield* service.beginSignIn(integration.id, { origin: COGENLY_ORIGIN });
+          const auth = {
+            type: "oauth" as const,
+            server: {
+              issuer: `${mock.base}/auth`,
+              authorizationEndpoint: `${mock.base}/changed`,
+              tokenEndpoint: `${mock.base}/auth/token`,
+            },
+          };
+          expect(
+            yield* service
+              .update({ id: integration.id, auth }, { fromAgent: true })
+              .pipe(Effect.result),
+          ).toMatchObject({ _tag: "Failure", failure: { reason: "approval_required" } });
+          expect(
+            yield* service
+              .create({ ...linearInput(mock, "other"), auth }, { fromAgent: true })
+              .pipe(Effect.result),
+          ).toMatchObject({ _tag: "Failure", failure: { reason: "approval_required" } });
+          const approved = yield* service.update(
+            { id: integration.id, auth },
+            { approveCredentials: true },
+          );
+          expect(approved.integration.auth?.server).toEqual(auth.server);
+        }),
+      ).pipe(Effect.provide(gatewayLayer())),
+  );
+
   it.effect("agent sign-in requests cannot evict an owner's pending callback", () =>
     Effect.scoped(
       Effect.gen(function* () {
