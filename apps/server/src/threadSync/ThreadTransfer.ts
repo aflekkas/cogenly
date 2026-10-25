@@ -41,7 +41,6 @@ import * as Schema from "effect/Schema";
 
 import {
   parseThreadSegmentFromAttachmentId,
-  resolveAttachmentPathById,
   toSafeThreadAttachmentSegment,
 } from "../attachmentStore.ts";
 import * as ServerConfig from "../config.ts";
@@ -360,13 +359,19 @@ const make = Effect.gen(function* () {
     agentId: string,
     target: EnvironmentId,
   ) {
-    yield* shared.write("agent", agentId, { ownerMachine: target });
-    const schedules = yield* sql<{
-      readonly id: string;
-    }>`SELECT id FROM shared_documents WHERE kind = 'schedule' AND tombstone_json IS NULL
-      AND json_extract(fields_json, '$.agentId') = ${agentId}`;
-    for (const schedule of schedules)
-      yield* shared.write("schedule", schedule.id, { ownerMachine: target });
+    // Recovery may retry after the conversation moved. Never leave a committed
+    // agent owner that makes recovery skip schedules still owned by this machine.
+    yield* sql.withTransaction(
+      Effect.gen(function* () {
+        yield* shared.write("agent", agentId, { ownerMachine: target });
+        const schedules = yield* sql<{
+          readonly id: string;
+        }>`SELECT id FROM shared_documents WHERE kind = 'schedule' AND tombstone_json IS NULL
+        AND json_extract(fields_json, '$.agentId') = ${agentId}`;
+        for (const schedule of schedules)
+          yield* shared.write("schedule", schedule.id, { ownerMachine: target });
+      }),
+    );
   }, Effect.orDie);
 
   /** Dry run of moving threads this machine runs: the checks here, then the target's placement. */
@@ -836,15 +841,11 @@ const make = Effect.gen(function* () {
         yield* requireProject(payload.threadId);
         // The old owner may go offline for good once this answers.
         for (const attachmentId of payload.attachmentIds)
-          if (
-            resolveAttachmentPathById({ attachmentsDir: config.attachmentsDir, attachmentId }) ===
-            null
-          )
-            if (Option.isNone(yield* routing.fetchAttachment(attachmentId)))
-              return yield* new ThreadRemoteError({
-                reason: "rejected",
-                detail: "A thread attachment is unavailable on its owner.",
-              });
+          if (Option.isNone(yield* routing.fetchAttachment(attachmentId)))
+            return yield* new ThreadRemoteError({
+              reason: "rejected",
+              detail: "A thread attachment is unavailable on its owner.",
+            });
       }
       // Ownership and the machine-local paths commit before the sink publishes.
       if (owner !== undefined && owner.epoch >= payload.epoch && !owner.local) return {};

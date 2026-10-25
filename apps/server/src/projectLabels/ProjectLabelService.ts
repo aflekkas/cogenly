@@ -792,6 +792,16 @@ const make = Effect.gen(function* () {
       "moveThread",
       input,
       Effect.gen(function* () {
+        // Routing is advisory: ownership can change before this transaction starts.
+        // Read the fence under the same write lock as the filing and its audit.
+        const runner = yield* sql`SELECT 1 FROM thread_owners WHERE thread_id = ${input.threadId}
+          AND (local = 0 OR handoff_json IS NOT NULL)`;
+        if (runner.length > 0)
+          return yield* new ProjectLabelError({
+            operation: "moveThread",
+            reason: "remote",
+            detail: "This thread moved or is moving to another machine. Retry the filing there.",
+          });
         const thread = yield* requireThread(input.threadId);
         // A project's own conversation lives on its page: it may be filed in
         // that project (as ProjectHome does) but never moved out or elsewhere.

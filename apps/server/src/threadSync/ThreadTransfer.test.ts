@@ -68,6 +68,13 @@ describe("moving threads between paired machines", () => {
           "png",
         );
 
+        // A previous interrupted/corrupt copy must be verified before the old owner can leave.
+        yield* fileSystem.makeDirectory(hubConfig.attachmentsDir, { recursive: true });
+        yield* fileSystem.writeFileString(
+          path.join(hubConfig.attachmentsDir, `${image}.png`),
+          "bad",
+        );
+
         // Asked on the hub: the laptop runs the thread, so the laptop moves it.
         const result = yield* hub.transfer.move({
           threadIds: [threadId],
@@ -712,6 +719,88 @@ it.live(
       expect((yield* Effect.flip(laptop.replication.preflight(threadId))).reason).toBe("busy");
       yield* laptop.sql`DELETE FROM orchestration_v2_projection_provider_threads WHERE provider_thread_id = 'provider-thread:background'`;
       yield* laptop.replication.preflight(threadId);
+    }).pipe(Effect.scoped),
+  30000,
+);
+
+it.live(
+  "an agent cannot move with active jobs or undelivered completions",
+  () =>
+    Effect.gen(function* () {
+      const { hub, laptop, at } = yield* start("busy-agent");
+      yield* addProject(laptop, "/Users/someone/racing");
+      yield* addProject(hub, "/srv/racing");
+      yield* laptop.sink.write({ events: [threadCreated("event:created", at)] });
+      yield* laptop.sql`INSERT INTO agents(agent_id, conversation_thread_id, payload_json, enabled, daily_run_cap, owner_machine)
+      VALUES ('agent:busy', ${threadId}, '{}', 1, 10, ${laptop.environmentId})`;
+      yield* laptop.sql`INSERT INTO agent_work_runs(run_id, agent_id, trigger_id, work_thread_id, status, created_at)
+      VALUES ('job:busy', 'agent:busy', 'task:busy', 'thread:job', 'starting', '2026-10-24T00:00:00.000Z')`;
+      for (const status of ["starting", "running", "completed", "failed"]) {
+        yield* laptop.sql`UPDATE agent_work_runs SET status = ${status}`;
+        const result = yield* laptop.transfer.move({
+          threadIds: [threadId],
+          target: hub.environmentId,
+        });
+        expect(result.moved).toEqual([]);
+        expect(result.skipped[0]?.reason).toBe("busy");
+        expect(yield* laptop.replication.owner(threadId)).toBeUndefined();
+      }
+      yield* laptop.sql`UPDATE agent_work_runs SET posted = 1`;
+      const fenced = yield* laptop.replication.fence(threadId, hub.environmentId);
+      expect(fenced.epoch).toBe(1);
+    }).pipe(Effect.scoped),
+  30000,
+);
+
+it.live(
+  "agent and schedule ownership roll back together and recover after a failed handoff",
+  () =>
+    Effect.gen(function* () {
+      const { hub, laptop, at } = yield* start("atomic-agent");
+      yield* addProject(laptop, "/Users/someone/racing");
+      yield* addProject(hub, "/srv/racing");
+      yield* laptop.sink.write({ events: [threadCreated("event:created", at)] });
+      yield* laptop.sync.sync(hub.environmentId);
+      yield* laptop.sql`INSERT INTO agents(agent_id, conversation_thread_id, payload_json, enabled, daily_run_cap, owner_machine)
+          VALUES ('agent:pit', ${threadId}, '{}', 1, 10, ${laptop.environmentId})`;
+      yield* laptop.shared.write("agent", "agent:pit", { ownerMachine: laptop.environmentId });
+      yield* laptop.shared.write("schedule", "task:pit", {
+        agentId: "agent:pit",
+        title: "Morning check",
+        prompt: "Check",
+        enabled: true,
+        schedule: { type: "interval", everyMs: 60000 },
+        repositoryRemote: null,
+        workspaceStrategy: { type: "root" },
+        modelSelection: { instanceId: "codex", model: "gpt-5" },
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        ownerMachine: laptop.environmentId,
+        createdAt: "2026-10-24T00:00:00.000Z",
+      });
+
+      yield* laptop.sql`CREATE TRIGGER fail_schedule_handoff BEFORE UPDATE ON shared_documents
+          WHEN NEW.kind = 'schedule' AND json_extract(NEW.fields_json, '$.ownerMachine') <> json_extract(OLD.fields_json, '$.ownerMachine')
+          BEGIN SELECT RAISE(ABORT, 'injected schedule failure'); END`;
+      const failed = yield* Effect.exit(
+        laptop.transfer.move({ threadIds: [threadId], target: hub.environmentId }),
+      );
+      expect(failed._tag).toBe("Failure");
+      expect((yield* laptop.replication.owner(threadId))?.local).toBe(false);
+      expect((yield* laptop.shared.get("agent", "agent:pit"))?.fields.ownerMachine).toBe(
+        laptop.environmentId,
+      );
+      expect((yield* laptop.shared.get("schedule", "task:pit"))?.fields.ownerMachine).toBe(
+        laptop.environmentId,
+      );
+      yield* laptop.sql`DROP TRIGGER fail_schedule_handoff`;
+      yield* laptop.transfer.resume;
+      expect((yield* laptop.shared.get("agent", "agent:pit"))?.fields.ownerMachine).toBe(
+        hub.environmentId,
+      );
+      expect((yield* laptop.shared.get("schedule", "task:pit"))?.fields.ownerMachine).toBe(
+        hub.environmentId,
+      );
     }).pipe(Effect.scoped),
   30000,
 );

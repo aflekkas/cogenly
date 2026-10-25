@@ -22,6 +22,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import * as Stream from "effect/Stream";
 
 import * as IdAllocator from "@cogenly/provider-core/server/IdAllocator";
+import * as ApplicationEvents from "../persistence/OrchestrationEventStore.ts";
 import * as CommandReceipts from "../orchestration-v2/CommandReceiptStore.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as SetupTracker from "../project/WorktreeSetupTracker.ts";
@@ -84,6 +85,7 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
     readonly providers: ReadonlyArray<ServerProvider>;
     readonly clone?: (remote: string) => Effect.Effect<string>;
   },
+  realFiling = false,
 ) {
   const machine = yield* startMachine(name, role);
   const database = Layer.succeed(SqlClient.SqlClient, yield* machine.run(SqlClient.SqlClient));
@@ -234,7 +236,7 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
           ),
   });
   // Projects read straight from the tables tests fill; nothing here clones.
-  const labels = Layer.unwrap(
+  const stubLabels = Layer.unwrap(
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
       const moveThread = ({ threadId, folderId }: MoveThreadProjectFolderInput) =>
@@ -291,6 +293,9 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
       });
     }),
   );
+  const labels = realFiling
+    ? ProjectLabelService.layer.pipe(Layer.provide(ApplicationEvents.layer))
+    : stubLabels;
   // Cloning stands in as binding the link to a new record, as bindRepositoryCheckout does.
   const checkouts: Array<{ readonly labelId: string; readonly remote: string }> = [];
   // Which folders are checkouts of which remote, as git would report them.
@@ -426,9 +431,10 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
         ),
         Layer.provide(ProjectStore.layer),
         Layer.provide(Layer.mock(Git.GitVcsDriver)({})),
-        Layer.provide(labels),
+        Layer.provideMerge(labels),
         Layer.provide(
           Layer.mock(ProjectLabelFolders.ProjectLabelFolders)({
+            reconcileMerges: Effect.void,
             dirForLabel: (label) =>
               Effect.succeed({ dir: `/projects/${label.name}`, dirName: label.name }),
           }),
@@ -486,6 +492,7 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
     routing,
     transfer,
     projectMove,
+    labels: yield* ProjectLabelService.ProjectLabelService.pipe(Effect.provideContext(context)),
     checkouts,
     bound,
     remotes,
