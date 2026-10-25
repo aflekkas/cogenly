@@ -6666,58 +6666,64 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   data-chat-composer-primary-actions-compact={
                     isComposerPrimaryActionsCompact ? "true" : "false"
                   }
-                  // Even breathing room between dictation, attach and the primary button.
-                  className="flex shrink-0 flex-nowrap items-center justify-end gap-2"
+                  // Dictation and attach sit as one tight pair; the larger send/stop button
+                  // gets more room so the pair reads as evenly spaced next to it.
+                  className="flex shrink-0 flex-nowrap items-center justify-end gap-2.5"
                 >
-                  {settings.dictationEnabled && !isChoiceOnlyPendingQuestion ? (
-                    <ComposerDictationControl
-                      ownerKey={composerDraftTargetKey}
-                      disabled={composerEditorLocked}
-                      keybindings={keybindings}
-                      handleRef={dictationRef}
-                      onPartial={onDictationPartial}
-                      onFinal={onDictationFinal}
-                      onActiveChange={onDictationActiveChange}
-                      onRecordingChange={setDictationRecording}
-                      waveform={expandedControlsLayout.dictationWaveform}
-                    />
-                  ) : null}
-                  {showComposerAttachAction ? (
-                    <>
-                      <input
-                        ref={attachmentInputRef}
-                        type="file"
-                        multiple
-                        className="hidden"
-                        onChange={(event) => {
-                          const files = Array.from(event.currentTarget.files ?? []);
-                          event.currentTarget.value = "";
-                          // Inserting a chip refocuses the editor after the draft renders;
-                          // focusing synchronously here would report the editor's stale text
-                          // over the prompt that was just written.
-                          void addComposerAttachments(files).then((inserted) => {
-                            if (!inserted) focusComposer();
-                          });
-                        }}
-                      />
-                      <Tooltip>
-                        <TooltipTrigger
-                          render={
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon-sm"
-                              onPointerDown={(event) => event.preventDefault()}
-                              onClick={() => attachmentInputRef.current?.click()}
-                              aria-label="Attach files"
-                            />
-                          }
-                        >
-                          <PaperclipIcon />
-                        </TooltipTrigger>
-                        <TooltipPopup>Attach files</TooltipPopup>
-                      </Tooltip>
-                    </>
+                  {(settings.dictationEnabled && !isChoiceOnlyPendingQuestion) ||
+                  showComposerAttachAction ? (
+                    <div className="flex shrink-0 items-center gap-0.5">
+                      {settings.dictationEnabled && !isChoiceOnlyPendingQuestion ? (
+                        <ComposerDictationControl
+                          ownerKey={composerDraftTargetKey}
+                          disabled={composerEditorLocked}
+                          keybindings={keybindings}
+                          handleRef={dictationRef}
+                          onPartial={onDictationPartial}
+                          onFinal={onDictationFinal}
+                          onActiveChange={onDictationActiveChange}
+                          onRecordingChange={setDictationRecording}
+                          waveform={expandedControlsLayout.dictationWaveform}
+                        />
+                      ) : null}
+                      {showComposerAttachAction ? (
+                        <>
+                          <input
+                            ref={attachmentInputRef}
+                            type="file"
+                            multiple
+                            className="hidden"
+                            onChange={(event) => {
+                              const files = Array.from(event.currentTarget.files ?? []);
+                              event.currentTarget.value = "";
+                              // Inserting a chip refocuses the editor after the draft renders;
+                              // focusing synchronously here would report the editor's stale text
+                              // over the prompt that was just written.
+                              void addComposerAttachments(files).then((inserted) => {
+                                if (!inserted) focusComposer();
+                              });
+                            }}
+                          />
+                          <Tooltip>
+                            <TooltipTrigger
+                              render={
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon-sm"
+                                  onPointerDown={(event) => event.preventDefault()}
+                                  onClick={() => attachmentInputRef.current?.click()}
+                                  aria-label="Attach files"
+                                />
+                              }
+                            >
+                              <PaperclipIcon />
+                            </TooltipTrigger>
+                            <TooltipPopup>Attach files</TooltipPopup>
+                          </Tooltip>
+                        </>
+                      ) : null}
+                    </div>
                   ) : null}
                   <ComposerFooterPrimaryActions
                     compact={isComposerPrimaryActionsCompact}
