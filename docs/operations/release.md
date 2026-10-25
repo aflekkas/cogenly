@@ -8,25 +8,91 @@ hosted-web deployment runs here.
 
 ## Release assets
 
-| Asset                                                            | Consumer                                                                                                           |
-| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `Cogenly-X.Y.Z-arm64.dmg`, `.zip`, `.blockmap`, `latest-mac.yml` | Mac first install and the desktop updater                                                                          |
-| `t3-X.Y.Z-linux-x64.tar.gz`, `t3-X.Y.Z-linux-arm64.tar.gz`       | Desktop SSH provisioning, `scripts/install.sh`, `cogenly update`, `cogenly service install`, remote server updates |
-| `SHA256SUMS`                                                     | One `<sha256>  <file>` line per asset, bare file names; every downloader verifies against it                       |
+| Asset                                                                | Consumer                                                                                                                 |
+| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `Cogenly-X.Y.Z-arm64.dmg`, `.zip`, `.blockmap`, `latest-mac.yml`     | Mac first install and the desktop updater                                                                                |
+| `cogenly-X.Y.Z-linux-x64.tar.gz`, `cogenly-X.Y.Z-linux-arm64.tar.gz` | Desktop SSH provisioning, `scripts/install.sh`, `cogenly update`, `cogenly service install`, remote server updates       |
+| `t3-X.Y.Z-linux-x64.tar.gz`, `t3-X.Y.Z-linux-arm64.tar.gz`           | The same bytes under the old names, for installs older than the rename (see [Transition](#transition-t3--cogenly-names)) |
+| `SHA256SUMS`                                                         | One `<sha256>  <file>` line per asset, bare file names; every downloader verifies against it                             |
 
-A Linux archive holds one directory, `t3-X.Y.Z-linux-<arch>/`, containing the
-`t3` single executable (Node is embedded), `client/` (the web app),
-`resource-monitor/`, and `node_modules/` with the native externals. Installers
-unpack it into `~/.cogenly/runtime/versions/X.Y.Z/` and write
-`.install-complete`. The names are spelled in
-[`cliRelease.ts`](../../packages/shared/src/cliRelease.ts),
+A Linux archive holds one directory, `cogenly-X.Y.Z-linux-<arch>/`, containing
+the `cogenly` single executable (Node is embedded), a `t3` symlink to it,
+`client/` (the web app), `resource-monitor/`, and `node_modules/` with the
+native externals. Installers unpack it into
+`~/.cogenly/runtime/versions/X.Y.Z/` and write `.install-complete`. The names
+are spelled in [`cliRelease.ts`](../../packages/shared/src/cliRelease.ts),
 [`release-plan.cjs`](../../.github/scripts/release-plan.cjs), the SSH runner in
-[`tunnel.ts`](../../packages/ssh/src/tunnel.ts), and
-[`install.sh`](../../scripts/install.sh); renaming one breaks every installer.
+[`tunnel.ts`](../../packages/ssh/src/tunnel.ts),
+[`install.sh`](../../scripts/install.sh), and the service launcher in
+[`serviceLauncher.ts`](../../apps/server/src/serviceLauncher.ts). Installed
+servers and launchers keep looking for the names they were built with, so a
+rename needs a transition like the one below.
 
 The desktop app provisions an SSH host with the archive of its own version, so a
 release without Linux archives leaves desktop SSH unable to install on a fresh
-host. Publish refuses a `SHA256SUMS` that lacks either archive.
+host. Publish refuses a `SHA256SUMS` that lacks any of the four archive names,
+or whose `t3-` and `cogenly-` archives differ.
+
+### Transition: t3 → cogenly names
+
+Releases through v0.2.5 named the archives `t3-X.Y.Z-linux-<arch>.tar.gz` and the
+executable `t3`. v0.3.0 is the first release that ships the `cogenly` names.
+From it on, each release uploads one archive under both names,
+and the archive carries `t3` as a symlink to `cogenly`.
+
+Why both are needed, by what an older install does against a new release:
+
+- **Servers and CLIs from v0.2.5 or older** (`cogenly update` / `t3 update`, a
+  remote update from the app, `cogenly service install`) look up
+  `t3-X.Y.Z-linux-<arch>.tar.gz` in `SHA256SUMS`, unpack it, and run
+  `versions/X.Y.Z/t3`. The `t3-` upload and the `t3` symlink satisfy both.
+- **Service launchers from v0.2.5 or older** run `versions/<active>/t3 serve`
+  and treat a version as installed when `stat` of that path is a file and
+  `.install-complete` matches. The symlink passes. The launcher is the binary
+  named in the unit's `ExecStart` (or the plist's `ProgramArguments`), for
+  example `versions/0.1.11/t3 __service-launcher`. It never updates itself: a
+  remote update from the app only changes which version it runs. Only
+  `cogenly update` or `cogenly service install` on that machine rewrites the
+  unit, and then it names `versions/<new>/cogenly __service-launcher`.
+  `cogenly service status` reports a unit that still names `t3` as needing
+  repair.
+- **Current code** downloads the `cogenly-` archive, falls back to the `t3-`
+  one when `SHA256SUMS` lists only that (a release from before the rename, so
+  pinning or rolling back to one still works), and runs `cogenly`, falling
+  back to `t3` in a version directory unpacked from an older archive.
+
+Every place that keeps an old name says "Transition: t3 → cogenly names";
+search for that phrase to find them all. There are two separate removals.
+
+**Publishing the old names** (the `t3-` uploads in `release.yml` and
+`release-plan.cjs`, the `t3` symlink in `build-cli-archive.ts`, its check in
+`smoke-cli-archive.ts`) may stop in a minor release, and only when all of these
+hold:
+
+1. Every machine we know of runs a service launcher from v0.3.0 or later. On
+   each one, `systemctl --user cat cogenly.service | grep ExecStart` (on macOS,
+   the `ProgramArguments` in
+   `~/Library/LaunchAgents/com.cogenly.app.service.plist`) names
+   `runtime/versions/<v>/cogenly __service-launcher` with `<v>` at least
+   0.2.3. An older launcher can still name `0.1.11/t3`; run
+   `cogenly update` or `cogenly service install` there first.
+2. Every machine we know of runs a server and CLI from v0.3.0 or later
+   (`activeVersion` in `~/.cogenly/runtime/service-state.json`, and
+   `cogenly --version`), so nothing still downloads a `t3-` name.
+3. At least two prod releases after the first transition release have shipped,
+   and not before 2027-01-24, three months after the first one, for installs
+   we don't know about.
+
+The release notes of that release tell users with older installs to run
+`cogenly update` on the machine first, or reinstall with `scripts/install.sh`.
+An older launcher asked to update to it rolls the update back
+(`target-runtime-missing`) and keeps running; it does not lose data.
+
+**Reading the old names** (the `t3` fallbacks in `cliRelease.ts`,
+`pinnedRuntime.ts`, `serviceLauncher.ts`, `install.sh`, and `tunnel.ts`) stays
+as long as rolling back to a release older than the first transition release
+is supported, because those releases and the version directories they
+unpacked hold only `t3`. Remove them no earlier than the publishing side.
 
 ## Main → prod
 

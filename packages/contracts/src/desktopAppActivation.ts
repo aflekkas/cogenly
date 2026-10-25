@@ -1,6 +1,7 @@
 import * as Schema from "effect/Schema";
 
 import { EnvironmentId, ProjectId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { DesktopCliCommandLocation, DesktopCliCommandStateSchema } from "./cliCommand.ts";
 
 export const DESKTOP_APP_ACTIVATION_PROTOCOL_VERSION = 1 as const;
 
@@ -48,10 +49,33 @@ export const DesktopAppPairMachinesRequest = Schema.Struct({
 });
 export type DesktopAppPairMachinesRequest = typeof DesktopAppPairMachinesRequest.Type;
 
+/**
+ * `cli_command_status` and `cli_command_change`: read, install, or uninstall the
+ * desktop app's `cogenly` command, as Settings does. The app's main process
+ * answers; the window is not involved.
+ */
+export const DesktopAppCliCommandRequest = Schema.Struct({
+  version: Schema.Literal(DESKTOP_APP_ACTIVATION_PROTOCOL_VERSION),
+  requestId: TrimmedNonEmptyString,
+  type: Schema.Literal("cli-command"),
+  action: Schema.Literals(["status", "install", "uninstall"]),
+  location: Schema.optionalKey(DesktopCliCommandLocation),
+});
+export type DesktopAppCliCommandRequest = typeof DesktopAppCliCommandRequest.Type;
+
+/** The requests the desktop window handles. */
+export const DesktopAppRendererRequest = Schema.Union([
+  DesktopAppOpenWorkspaceRequest,
+  DesktopAppAddEnvironmentRequest,
+  DesktopAppPairMachinesRequest,
+]);
+export type DesktopAppRendererRequest = typeof DesktopAppRendererRequest.Type;
+
 export const DesktopAppActivationRequest = Schema.Union([
   DesktopAppOpenWorkspaceRequest,
   DesktopAppAddEnvironmentRequest,
   DesktopAppPairMachinesRequest,
+  DesktopAppCliCommandRequest,
 ]);
 export type DesktopAppActivationRequest = typeof DesktopAppActivationRequest.Type;
 
@@ -64,6 +88,7 @@ export const DesktopAppActivationErrorCode = Schema.Literals([
   "thread-open-failed",
   "environment-add-failed",
   "machines-pair-failed",
+  "cli-command-failed",
   "request-timeout",
   "internal-error",
 ]);
@@ -103,6 +128,15 @@ export const DesktopAppMachinesPaired = Schema.Struct({
 });
 export type DesktopAppMachinesPaired = typeof DesktopAppMachinesPaired.Type;
 
+/** `cli-command` finished: the command's state after the action. */
+export const DesktopAppCliCommandResult = Schema.Struct({
+  version: Schema.Literal(DESKTOP_APP_ACTIVATION_PROTOCOL_VERSION),
+  requestId: TrimmedNonEmptyString,
+  ok: Schema.Literal(true),
+  cliCommand: DesktopCliCommandStateSchema,
+});
+export type DesktopAppCliCommandResult = typeof DesktopAppCliCommandResult.Type;
+
 export const DesktopAppActivationFailure = Schema.Struct({
   version: Schema.Literal(DESKTOP_APP_ACTIVATION_PROTOCOL_VERSION),
   requestId: TrimmedNonEmptyString,
@@ -116,6 +150,7 @@ export const DesktopAppActivationResponse = Schema.Union([
   DesktopAppActivationSuccess,
   DesktopAppEnvironmentAdded,
   DesktopAppMachinesPaired,
+  DesktopAppCliCommandResult,
   DesktopAppActivationFailure,
 ]);
 export type DesktopAppActivationResponse = typeof DesktopAppActivationResponse.Type;

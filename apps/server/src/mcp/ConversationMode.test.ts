@@ -323,6 +323,7 @@ describe("conversation-mode MCP boundary", () => {
     ["project_delete", { projectId: "project:probe" }],
     ["project_clone", { repository: "acme/probe" }],
     ["environment_add", { ssh: "probe-host" }],
+    ["cli_command_change", { action: "install" }],
     ["environment_preferences_update", { enableAgentTerminals: true }],
   ] as const)("%s refuses a chat-surface caller", ([tool, args]) =>
     callText(tool, chatThreadId, args).pipe(

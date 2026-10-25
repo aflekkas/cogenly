@@ -13,10 +13,23 @@ launch Cogenly and configure providers afterwards.
 Download the `.dmg` from [Cogenly releases](https://github.com/aflekkas/cogenly/releases/latest).
 It is built for Apple Silicon Macs and updates itself.
 
+### The `cogenly` command
+
 The app includes the `cogenly` command-line tool. To run it from any terminal,
-open **Settings → General → About** and choose **Install** next to the
-`cogenly` command. Open a new terminal afterwards. **Remove** takes it off
-again.
+open **Settings → General → About** and choose **Install** next to the `cogenly`
+command, or run **Install cogenly command line tool** from the command palette.
+Then open a new terminal. The command uses the app's data and talks to the
+app's running server, so `cogenly project list` shows the same projects as the
+app.
+
+Cogenly installs the command to `~/.local/bin`, which needs no password. If your
+shell does not have `~/.local/bin` on its `PATH`, the row says so. You can then
+choose `/usr/local/bin` instead (macOS asks for your password) or add
+`~/.local/bin` to your `PATH`. If you move the app, the row shows the command
+as out of date. Choose **Update** to fix it.
+
+**Uninstall** removes the command. Cogenly never overwrites or removes a
+`cogenly` file it did not install.
 
 ## Linux server (command line)
 

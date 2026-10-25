@@ -257,7 +257,7 @@ const desktopBridge = {
   installUpdate: () => ipcRenderer.invoke(IpcChannels.UPDATE_INSTALL_CHANNEL),
   cliCommand: {
     getState: () => ipcRenderer.invoke(IpcChannels.CLI_COMMAND_GET_STATE_CHANNEL),
-    install: () => ipcRenderer.invoke(IpcChannels.CLI_COMMAND_INSTALL_CHANNEL),
+    install: (input) => ipcRenderer.invoke(IpcChannels.CLI_COMMAND_INSTALL_CHANNEL, input ?? {}),
     uninstall: () => ipcRenderer.invoke(IpcChannels.CLI_COMMAND_UNINSTALL_CHANNEL),
   },
   onUpdateState: (listener) => {

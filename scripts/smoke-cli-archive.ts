@@ -74,8 +74,8 @@ const smokeCliArchive = Effect.fn("smokeCliArchive")(function* (input: {
   const path = yield* Path.Path;
   const platform = yield* HostProcess.Platform;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const scratch = yield* fs.makeTempDirectory({ prefix: "t3-cli-smoke-" });
-  // Windows can keep t3.exe locked (EBUSY) for a moment after the server
+  const scratch = yield* fs.makeTempDirectory({ prefix: "cogenly-cli-smoke-" });
+  // Windows can keep cogenly.exe locked (EBUSY) for a moment after the server
   // exits. A leftover scratch directory on a CI runner is harmless, so
   // cleanup retries briefly and never fails a smoke test that passed.
   yield* Effect.addFinalizer(() =>
@@ -107,8 +107,16 @@ const smokeCliArchive = Effect.fn("smokeCliArchive")(function* (input: {
     });
   }
   const contentDir = path.join(scratch, root);
-  const executable = path.join(contentDir, platform === "win32" ? "t3.exe" : "t3");
-  for (const required of [executable, path.join(contentDir, "client/index.html")]) {
+  const executable = path.join(contentDir, platform === "win32" ? "cogenly.exe" : "cogenly");
+  // Launchers from before the rename run `<version>/t3`; the archive keeps
+  // that name as a link to `cogenly` (see "Transition: t3 → cogenly names"
+  // in docs/operations/release.md). Windows archives have no such link.
+  const legacyExecutable = platform === "win32" ? undefined : path.join(contentDir, "t3");
+  for (const required of [
+    executable,
+    ...(legacyExecutable === undefined ? [] : [legacyExecutable]),
+    path.join(contentDir, "client/index.html"),
+  ]) {
     if (!(yield* fs.exists(required))) {
       return yield* new CliArchiveSmokeError({
         step: "checking the archive layout",
@@ -116,13 +124,24 @@ const smokeCliArchive = Effect.fn("smokeCliArchive")(function* (input: {
       });
     }
   }
-
-  const version = yield* runExecutable(executable, ["--version"], contentDir);
-  if (version.exitCode !== 0 || !version.stdout.includes(input.expectVersion)) {
+  if (
+    legacyExecutable !== undefined &&
+    (yield* fs.realPath(legacyExecutable)) !== (yield* fs.realPath(executable))
+  ) {
     return yield* new CliArchiveSmokeError({
-      step: "running --version",
-      detail: `exit ${String(version.exitCode)}\n${version.stdout}${version.stderr}`,
+      step: "checking the archive layout",
+      detail: "t3 is not a link to cogenly",
     });
+  }
+
+  for (const entry of [executable, ...(legacyExecutable === undefined ? [] : [legacyExecutable])]) {
+    const version = yield* runExecutable(entry, ["--version"], contentDir);
+    if (version.exitCode !== 0 || !version.stdout.includes(input.expectVersion)) {
+      return yield* new CliArchiveSmokeError({
+        step: `running ${path.basename(entry)} --version`,
+        detail: `exit ${String(version.exitCode)}\n${version.stdout}${version.stderr}`,
+      });
+    }
   }
 
   // Starting the server is what actually opens sqlite, loads the terminal

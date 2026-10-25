@@ -1,6 +1,8 @@
 import {
   BackgroundActivityProfile,
   BackgroundActivityProfileSelection,
+  DesktopCliCommandLocation,
+  DesktopCliCommandStateSchema,
   ExecutionEnvironmentDescriptor,
   OrchestratorMcpFailure,
   ServerSettings,
@@ -106,6 +108,29 @@ const EnvironmentAddTool = Tool.make("environment_add", {
 })
   .annotate(Tool.Readonly, false)
   .annotate(Tool.Destructive, false);
+const desktopCliCommandShared = {
+  ...shared,
+  dependencies: [...shared.dependencies, DesktopAppControl.DesktopAppControl],
+  success: DesktopCliCommandStateSchema,
+};
+const CliCommandStatusTool = Tool.make("cli_command_status", {
+  ...desktopCliCommandShared,
+  description:
+    "Read whether the Cogenly desktop app's `cogenly` command line tool is on PATH on this computer: installed (where, and which app it runs), stale (its app moved or was removed), foreign (a `cogenly` Cogenly did not write is in the way), or not installed, plus whether ~/.local/bin is on the login shell's PATH. Only works from an environment on the same computer as the desktop app.",
+})
+  .annotate(Tool.Readonly, true)
+  .annotate(Tool.Destructive, false);
+const CliCommandChangeTool = Tool.make("cli_command_change", {
+  ...desktopCliCommandShared,
+  description:
+    "Install or uninstall the Cogenly desktop app's `cogenly` command line tool, as Settings does. Install writes a small launcher to ~/.local/bin (location `user`), or on macOS to /usr/local/bin (location `system`), which shows the user macOS's administrator prompt; omit location to use the state's recommendedLocation. Install updates a stale launcher. Never overwrites or removes a `cogenly` Cogenly did not write. Uninstall removes every launcher Cogenly wrote. Requires a live full-access/default calling thread; tell the user before a `system` change, since it asks for their password.",
+  parameters: Schema.Struct({
+    action: Schema.Literals(["install", "uninstall"]),
+    location: Schema.optionalKey(DesktopCliCommandLocation),
+  }),
+})
+  .annotate(Tool.Readonly, false)
+  .annotate(Tool.Destructive, false);
 const MachineSecurityStatusTool = Tool.make("machine_security_status", {
   ...shared,
   dependencies: [
@@ -139,6 +164,8 @@ export const EnvironmentToolkit = Toolkit.make(
   EnvironmentReadTool,
   EnvironmentPreferencesTool,
   EnvironmentAddTool,
+  CliCommandStatusTool,
+  CliCommandChangeTool,
   MachineSecurityStatusTool,
   MachineHealthTool,
 );

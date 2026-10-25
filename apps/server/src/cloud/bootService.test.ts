@@ -9,7 +9,7 @@ import {
 } from "./bootService.ts";
 
 const plan: BootServicePlan = {
-  program: ["/home/owner/.cogenly/runtime/versions/0.1.0/t3", "__service-launcher"],
+  program: ["/home/owner/.cogenly/runtime/versions/0.1.0/cogenly", "__service-launcher"],
   baseDir: "/home/owner/.cogenly",
   logPath: "/home/owner/.cogenly/userdata/logs/boot-service.log",
   unitPath: "/home/owner/.config/systemd/user/cogenly.service",
@@ -27,7 +27,7 @@ describe("boot service unit renderer", () => {
     expect(unit).toContain("Restart=always\n");
     expect(unit).toContain("RestartSec=5\n");
     expect(unit).toContain(
-      "ExecStart=/home/owner/.cogenly/runtime/versions/0.1.0/t3 __service-launcher\n",
+      "ExecStart=/home/owner/.cogenly/runtime/versions/0.1.0/cogenly __service-launcher\n",
     );
     expect(unit).toContain("Environment=COGENLY_HOME=/home/owner/.cogenly\n");
     expect(unit).toContain(
@@ -98,7 +98,7 @@ describe("boot service plist renderer", () => {
     expect(plist).toContain("<key>RunAtLoad</key>\n  <true/>");
     expect(plist).toContain("<key>KeepAlive</key>\n  <true/>");
     expect(plist).toContain("<key>ThrottleInterval</key>\n  <integer>5</integer>");
-    expect(plist).toContain("<string>/home/owner/.cogenly/runtime/versions/0.1.0/t3</string>");
+    expect(plist).toContain("<string>/home/owner/.cogenly/runtime/versions/0.1.0/cogenly</string>");
     expect(plist).toContain("<string>__service-launcher</string>");
     expect(plist).toContain("<key>COGENLY_HOME</key>\n    <string>/home/owner/.cogenly</string>");
     expect(plist).toContain(

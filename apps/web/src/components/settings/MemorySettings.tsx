@@ -198,6 +198,7 @@ export function MemorySettings() {
           <FactEditorDialog
             title="Remember something"
             description="Saved as confirmed. You can correct or forget it later."
+            environmentId={environmentId}
             labels={labels}
             initial={{
               subject: "",

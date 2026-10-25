@@ -71,7 +71,7 @@ type CodexRateLimitsProbe =
 const CODEX_APP_SERVER_PROBE_FORCE_KILL_AFTER = "2 seconds" as const;
 const CODEX_CATALOG_REFRESH_TIMEOUT = "3 seconds" as const;
 const CODEX_CATALOG_REFRESH_POLL = "100 millis" as const;
-const CODEX_CLIENT_NAME = "T3 Code";
+const CODEX_CLIENT_NAME = "Cogenly";
 
 const CODEX_PRESENTATION = {
   displayName: "Codex",
@@ -355,7 +355,7 @@ const readCodexModelsCacheFetchedAt = Effect.fn("readCodexModelsCacheFetchedAt")
 });
 
 /**
- * Lists the ChatGPT model catalog as fetched for T3 Code.
+ * Lists the ChatGPT model catalog as fetched for Cogenly.
  *
  * `model/list` serves `CODEX_HOME/models_cache.json` while it is under five
  * minutes old. Every Codex client on the machine shares that file, and the
@@ -389,7 +389,7 @@ const requestCodexChatGptModels = Effect.fn("requestCodexChatGptModels")(functio
 });
 
 /**
- * Environment for every `codex app-server` T3 Code spawns.
+ * Environment for every `codex app-server` Cogenly spawns.
  *
  * Codex sends its client name as the `originator` header, and the backend
  * tailors the model catalog to it. App-server starts its catalog refresh

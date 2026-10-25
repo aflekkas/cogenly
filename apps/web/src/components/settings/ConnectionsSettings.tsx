@@ -1484,7 +1484,7 @@ function SavedBackendListRow({
       toastManager.add({
         type: "success",
         title: "MCP URL copied",
-        description: `Add it to an agent, e.g. claude mcp add --transport http t3 ${url}`,
+        description: `Add it to an agent, e.g. claude mcp add --transport http cogenly ${url}`,
       });
     },
     onError: (error) => {

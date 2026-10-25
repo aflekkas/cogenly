@@ -623,6 +623,8 @@ const smokeCases = [
   {
     toolkit: "environment",
     names: [
+      "cli_command_change",
+      "cli_command_status",
       "environment_add",
       "environment_preferences_update",
       "environment_read",

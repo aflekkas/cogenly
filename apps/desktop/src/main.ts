@@ -181,7 +181,9 @@ const layerDesktopWindow = DesktopWindow.layer.pipe(
   Layer.provideMerge(layerDesktopPreview),
 );
 
+// Merged so the IPC handlers reach the same CLI command service the control socket answers with.
 const layerDesktopAppActivation = DesktopAppActivation.layer.pipe(
+  Layer.provideMerge(DesktopCliCommand.layer),
   Layer.provide(layerDesktopWindow),
 );
 
@@ -217,7 +219,6 @@ const layerDesktopApplication = Layer.mergeAll(
   DesktopWebLinks.layer,
   DesktopApplicationMenu.layer,
   DesktopLinuxUrlHandler.layer,
-  DesktopCliCommand.layer,
   DesktopDictation.layer,
   layerDesktopSsh,
 ).pipe(

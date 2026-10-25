@@ -102,7 +102,7 @@ export function useServerUpdate() {
           description:
             selfUpdate === "desktop-managed"
               ? `Desktop app relaunched on ${result.value.targetVersion}.`
-              : `Reconnected on ${result.value.targetVersion}.`,
+              : `Reconnected on Cogenly ${result.value.targetVersion}.`,
         });
       }
       return { status: "updated" };
@@ -371,7 +371,7 @@ export function OutdatedServerUpdateAction({
       toastManager.add({
         type: "success",
         title: `${serverLabel} updated`,
-        description: `Reconnected on ${result.value.targetVersion}.`,
+        description: `Reconnected on Cogenly ${result.value.targetVersion}.`,
       });
     } catch (error) {
       toastManager.add({
