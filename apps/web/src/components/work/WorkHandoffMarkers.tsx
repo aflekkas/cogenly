@@ -1,3 +1,4 @@
+import { useAtomValue } from "@effect/atom-react";
 import { scopeThreadRef } from "@cogenly/client-runtime/environment";
 import { isScratchProject } from "@cogenly/client-runtime/state/projects";
 import type {
@@ -14,6 +15,7 @@ import { createContext, use, useMemo, useState, type ReactNode } from "react";
 import { cn } from "~/lib/utils";
 import { useRepositoryNames } from "~/projectLabels/useRepositoryNames";
 import { useProjects, useServerConfigs, useThreadShell } from "~/state/entities";
+import { environmentShell } from "~/state/shell";
 import type { MessagesTimelineRow } from "../chat/MessagesTimeline.logic";
 import { resolveThreadOrigin } from "../chat/threadLineage.logic";
 import { ProjectFavicon } from "../ProjectFavicon";
@@ -257,7 +259,11 @@ function WorkHandoffMarker(props: {
     isScratchProject(project, scratchWorkspaceRoot)
       ? null
       : project;
-  const status = thread ? deriveWorkHandoffStatus(thread) : null;
+  // A live shell without the Work thread means it was deleted; until the
+  // shell is live, a missing thread may only be still loading.
+  const shellLive = useAtomValue(environmentShell.stateValueAtom(environmentId)).status === "live";
+  const deleted = thread?.deletedAt != null || (thread === null && shellLive);
+  const status = thread && !deleted ? deriveWorkHandoffStatus(thread) : null;
   const title = thread?.title || link.title;
   const branch = repository ? thread?.branch : null;
 
@@ -272,11 +278,17 @@ function WorkHandoffMarker(props: {
         heading="Handed off to Work"
         status={status}
         title={title}
-        location={{
-          repository,
-          label: repository ? nameOf(repository) : "No repository",
-          branch: branch ?? null,
-        }}
+        location={
+          deleted
+            ? { repository: null, label: "This Work was deleted", branch: null }
+            : thread === null
+              ? undefined
+              : {
+                  repository,
+                  label: repository ? nameOf(repository) : "No repository",
+                  branch: branch ?? null,
+                }
+        }
       />
     </WorkHandoffCardFrame>
   );
@@ -322,11 +334,13 @@ function WorkHandoffCardContent(props: {
   readonly status: WorkHandoffStatus | null;
   readonly title: string;
   /** The repository and branch line; left out where a card above already shows it. */
-  readonly location?: {
-    readonly repository: Parameters<typeof ProjectFavicon>[0]["project"] | null;
-    readonly label: string;
-    readonly branch: string | null;
-  };
+  readonly location?:
+    | {
+        readonly repository: Parameters<typeof ProjectFavicon>[0]["project"] | null;
+        readonly label: string;
+        readonly branch: string | null;
+      }
+    | undefined;
 }) {
   const { status, title, location } = props;
   const statusChanged = useChangedSinceMount(status);
