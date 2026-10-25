@@ -52,25 +52,73 @@ import * as ProjectLabels from "../projectLabels/ProjectLabelService.ts";
 import * as ThreadReplication from "./ThreadReplication.ts";
 import * as ThreadSync from "./ThreadSync.ts";
 
-/**
- * Bookkeeping the owner's own workers record. A replica never produces these;
- * if one does, it is a bug to surface, not a command to send elsewhere.
- */
-const OWNER_ONLY_COMMANDS: ReadonlySet<OrchestrationV2ServerCommand["type"]> = new Set([
-  "prepared-run.progress",
-  "prepared-run.fail",
-  "checkpoint.rollback.fail",
-  "thread.title.regeneration.complete",
-  "thread.background-work.settle",
-  "thread.pull-request-link.sync",
-  "thread.pull-request-watch.sync",
-  "thread.pull-request.sync",
-  "notification.delivery.accept",
-  "delegated_task.completion-delivery.acknowledge",
-  "delegated_task.completion-delivery.dispose",
-  "thread.created.record",
-  "secret_request.record",
+/** New commands require an explicit portability decision before peers may invoke them. */
+const PORTABLE_COMMANDS: ReadonlySet<OrchestrationV2ServerCommand["type"]> = new Set([
+  "thread.archive",
+  "thread.unarchive",
+  "thread.delete",
+  "thread.settle",
+  "thread.unsettle",
+  "thread.snooze",
+  "thread.unsnooze",
+  "thread.pin",
+  "thread.unpin",
+  "thread.pin.reorder",
+  "thread.active.reorder",
+  "thread.visit",
+  "thread.mark-unread",
+  "work.task.dismiss",
+  "thread.metadata.update",
+  "thread.pull-request.link",
+  "thread.pull-request.unlink",
+  "thread.pull-request.watch",
+  "thread.runtime-mode.set",
+  "thread.interaction-mode.set",
+  "thread.model-selection.set",
+  "provider-session.detach",
+  "message.dispatch",
+  "prepared-run.release",
+  "prepared-run.retry",
+  "subagent.stop",
+  "run.interrupt",
+  "queued-message.promote-to-steer",
+  "queue.resume",
+  "queue.clear",
+  "queue.send-all",
+  "queued-run.reorder",
+  "queued-run.cancel",
+  "queued-run.edit",
+  "runtime-request.respond",
+  "thread.user-input.dismiss",
+  "checkpoint.rollback",
+  "thread.fork",
+  "thread.merge_back",
+  "delegated_task.request",
+  "delegated_task.wake-policy",
+  "provider.switch",
+  "visual-state.set",
+  "visual-state.submit",
+  "thread.stop",
 ]);
+
+const validatePortableCommand = (command: OrchestrationV2ServerCommand) => {
+  const strategy =
+    command.type === "message.dispatch" && command.dispatchMode.type === "defer_start"
+      ? command.dispatchMode.workspaceStrategy
+      : command.type === "delegated_task.request"
+        ? command.workspaceStrategy
+        : undefined;
+  // Checkout paths belong to the destination. Root/worktree strategies resolve there;
+  // a replica cannot supply a path or a path-shaped compare-and-swap precondition.
+  return (
+    PORTABLE_COMMANDS.has(command.type) &&
+    !(
+      command.type === "thread.metadata.update" &&
+      (command.worktreePath !== undefined || command.expectedWorktreePath !== undefined)
+    ) &&
+    strategy?.type !== "existing_worktree"
+  );
+};
 
 /** Read-state bookkeeping, dropped rather than failed while the owner is offline. */
 const BEST_EFFORT_COMMANDS: ReadonlySet<OrchestrationV2ServerCommand["type"]> = new Set([
@@ -279,10 +327,10 @@ const make = Effect.gen(function* () {
           reason: "moving",
           detail: "This thread is moving to another machine. Try again when the move finishes.",
         });
-      if (OWNER_ONLY_COMMANDS.has(command.type))
+      if (!validatePortableCommand(command))
         return yield* new ThreadRemoteError({
           reason: "not-owner",
-          detail: `${command.type} runs only on the machine that runs the thread.`,
+          detail: `${command.type} is not portable across machines with these inputs.`,
         });
       const forwarded = Effect.gen(function* () {
         const hop = yield* nextHop(owner.owner);
@@ -317,10 +365,10 @@ const make = Effect.gen(function* () {
   yield* channels.register(ThreadCommandForward, ({ command, files }, caller) =>
     Effect.gen(function* () {
       // A peer never speaks for this machine's own workers.
-      if (OWNER_ONLY_COMMANDS.has(command.type))
+      if (!validatePortableCommand(command))
         return yield* new ThreadRemoteError({
           reason: "not-owner",
-          detail: `${command.type} runs only on the machine that runs the thread.`,
+          detail: `${command.type} is not portable across machines with these inputs.`,
         });
       const threadId = commandThreadId(command);
       const owner = yield* replication.owner(threadId);

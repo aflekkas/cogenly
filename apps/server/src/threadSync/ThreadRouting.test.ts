@@ -16,6 +16,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 
+import { idleThreadProjection, liveThreadShell } from "../mcp/McpToolAccess.testkit.ts";
 import * as ServerConfig from "../config.ts";
 import { pair } from "../machines/testkit.ts";
 import { startThreadMachine, threadCreated, threadId, userMessage } from "./testkit.ts";
@@ -31,7 +32,7 @@ const send = (
   text: string,
   target = threadId,
   attachments: ReadonlyArray<ChatAttachment> = [],
-): OrchestrationV2ServerCommand => ({
+): Extract<OrchestrationV2ServerCommand, { type: "message.dispatch" }> => ({
   type: "message.dispatch",
   createdBy: "user",
   creationSource: "web",
@@ -244,6 +245,78 @@ it.live(
           }),
         ))._tag,
       ).toBe("Failure");
+    }).pipe(Effect.scoped),
+  30000,
+);
+
+it.live(
+  "peers cannot create threads or supply workspace paths to forwarded commands",
+  () =>
+    Effect.gen(function* () {
+      const hub = yield* startThreadMachine("paths-hub", "cloud-server");
+      let dispatched = 0;
+      const laptop = yield* startThreadMachine("paths-laptop", "computer", () => {
+        dispatched++;
+        return [];
+      });
+      yield* pair(hub, laptop);
+      const shell = idleThreadProjection(liveThreadShell(threadId)).thread;
+      const commands: ReadonlyArray<OrchestrationV2ServerCommand> = [
+        {
+          type: "thread.create",
+          commandId: CommandId.make("command:create"),
+          threadId,
+          projectId: shell.projectId,
+          title: "Injected",
+          modelSelection: shell.modelSelection,
+          runtimeMode: shell.runtimeMode,
+          interactionMode: shell.interactionMode,
+          createdBy: "user",
+          creationSource: "web",
+          branch: null,
+          worktreePath: "/private/peer-cwd",
+        },
+        {
+          type: "thread.metadata.update",
+          commandId: CommandId.make("command:path"),
+          threadId,
+          worktreePath: "/private/peer-cwd",
+        },
+        {
+          type: "thread.metadata.update",
+          commandId: CommandId.make("command:expected-path"),
+          threadId,
+          expectedWorktreePath: "/private/peer-cwd",
+          title: "Injected",
+        },
+        {
+          ...send("workspace"),
+          dispatchMode: {
+            type: "defer_start",
+            workspaceStrategy: {
+              type: "existing_worktree",
+              worktreePath: "/private/peer-cwd",
+            },
+          },
+        },
+      ];
+      for (const command of commands) {
+        const result = yield* Effect.result(
+          hub.machines.call(laptop.environmentId, ThreadCommandForward, { command, files: [] }),
+        );
+        expect(result._tag).toBe("Failure");
+      }
+      expect(dispatched).toBe(0);
+      yield* hub.machines.call(laptop.environmentId, ThreadCommandForward, {
+        command: {
+          type: "thread.metadata.update",
+          commandId: CommandId.make("command:title"),
+          threadId,
+          title: "Portable",
+        },
+        files: [],
+      });
+      expect(dispatched).toBe(1);
     }).pipe(Effect.scoped),
   30000,
 );
