@@ -83,6 +83,8 @@ const integrationFields = {
   local: Schema.optional(LocalIntegrationConfig),
   command: Schema.optional(IntegrationCommand),
   url: TrimmedNonEmptyString.check(Schema.isMaxLength(2000)),
+  /** Vault item.field containing a private HTTP endpoint on the same origin as url. */
+  endpointRef: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(500))),
   headers: IntegrationHeaders,
   enabled: Schema.Boolean,
   scope: IntegrationScope,
@@ -179,6 +181,7 @@ export const IntegrationAddToolInput = Schema.Struct({
   local: integrationFields.local,
   command: integrationFields.command,
   url: Schema.optional(integrationFields.url),
+  endpointRef: integrationFields.endpointRef,
   headers: Schema.optional(IntegrationHeaders),
   enabled: Schema.optional(Schema.Boolean),
   scope: Schema.optional(IntegrationScope),
@@ -195,6 +198,8 @@ export const IntegrationUpdateInput = Schema.Struct({
   displayName: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(200))),
   transport: Schema.optional(IntegrationTransport),
   url: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(2000))),
+  /** Null removes the private endpoint reference. */
+  endpointRef: Schema.optional(Schema.NullOr(TrimmedNonEmptyString.check(Schema.isMaxLength(500)))),
   headers: Schema.optional(IntegrationHeaders),
   enabled: Schema.optional(Schema.Boolean),
   scope: Schema.optional(IntegrationScope),
@@ -541,6 +546,8 @@ export const IntegrationUpdateByNameInput = Schema.Struct({
   displayName: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(200))),
   transport: Schema.optional(IntegrationTransport),
   url: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(2000))),
+  /** Null removes the private endpoint reference. */
+  endpointRef: Schema.optional(Schema.NullOr(TrimmedNonEmptyString.check(Schema.isMaxLength(500)))),
   headers: Schema.optional(IntegrationHeaders),
   enabled: Schema.optional(Schema.Boolean),
   scope: Schema.optional(IntegrationScope),

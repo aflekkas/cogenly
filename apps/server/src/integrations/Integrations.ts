@@ -109,12 +109,14 @@ const credentialItemsIn = (
   headers: Readonly<Record<string, string>>,
   auth?: Integration["auth"],
   command?: Integration["command"],
+  endpointRef?: string,
 ): Array<string> => [
   ...new Set(
     [
       ...Object.values(headers),
       ...Object.values(command?.env ?? {}),
       auth?.clientSecret ?? "",
+      endpointRef === undefined ? "" : `{{credential:${endpointRef}}}`,
     ].flatMap((template) =>
       credentialRefsIn(template).flatMap((ref) => {
         const parsed = Credentials.parseCredentialRef(ref);
@@ -173,6 +175,7 @@ export const integrationDestinationChanged = (
   (input.command !== undefined &&
     JSON.stringify(input.command) !== JSON.stringify(current.command)) ||
   (input.url !== undefined && input.url !== current.url) ||
+  (input.endpointRef !== undefined && (input.endpointRef ?? undefined) !== current.endpointRef) ||
   (input.transport !== undefined && input.transport !== current.transport) ||
   (input.auth !== undefined &&
     JSON.stringify(input.auth) !== JSON.stringify(current.auth ?? null)) ||
@@ -1106,6 +1109,9 @@ const make = (options: IntegrationsOptions = {}) =>
         );
         const live = liveTokens.get(integration.id);
         const requestSecrets = [
+          ...(integration.endpointRef === undefined
+            ? []
+            : [integration.url, new URL(integration.url).pathname]),
           ...Object.values(headers).flatMap((value) => [
             value,
             value.replace(/^(?:Bearer|Basic)\s+/i, ""),
@@ -1236,13 +1242,14 @@ const make = (options: IntegrationsOptions = {}) =>
 
     /** Resolve credentials, handshake, then call. */
     const exchange = (
-      integration: Integration,
+      stored: Integration,
       method: string,
       params: unknown,
       labelId?: ProjectLabelId | null,
       bearer?: string,
     ) =>
       Effect.gen(function* () {
+        let integration = stored;
         if (integration.transport === "local" || integration.transport === "stdio") {
           if (Option.isNone(local))
             return yield* new IntegrationError({
@@ -1271,6 +1278,26 @@ const make = (options: IntegrationsOptions = {}) =>
               ? (integration.approvedCredentialItems ?? [])
               : [],
         };
+        if (integration.endpointRef !== undefined) {
+          const resolved = yield* resolveHeaderTemplates(
+            { endpoint: `{{credential:${integration.endpointRef}}}` },
+            (ref) => credentials.resolve(ref, destination),
+          );
+          const privateUrl = URL.parse(resolved.endpoint ?? "");
+          if (
+            !privateUrl ||
+            privateUrl.origin !== endpoint.origin ||
+            privateUrl.protocol !== "https:" ||
+            privateUrl.username ||
+            privateUrl.password ||
+            privateUrl.hash
+          )
+            return yield* new IntegrationError({
+              operation: method,
+              reason: "credential_unresolved",
+            });
+          integration = { ...integration, url: privateUrl.href };
+        }
         const resolved = yield* resolveHeaderTemplates(integration.headers, (ref) =>
           credentials.resolve(ref, destination),
         );
@@ -1321,13 +1348,18 @@ const make = (options: IntegrationsOptions = {}) =>
         return yield* post(integration, headers, method, params, initialized?.sessionId).pipe(
           Effect.map((response) => response.result),
         );
-      }).pipe((effect) =>
-        Effect.flatMap(Headers.CurrentRedactedNames, (names) =>
-          Effect.provideService(effect, Headers.CurrentRedactedNames, [
-            ...names,
-            ...Object.keys(integration.headers).map((name) => name.toLowerCase()),
-          ]),
-        ),
+      }).pipe(
+        (effect) =>
+          stored.endpointRef === undefined
+            ? effect
+            : Effect.provideService(effect, HttpClient.TracerDisabledWhen, () => true),
+        (effect) =>
+          Effect.flatMap(Headers.CurrentRedactedNames, (names) =>
+            Effect.provideService(effect, Headers.CurrentRedactedNames, [
+              ...names,
+              ...Object.keys(stored.headers).map((name) => name.toLowerCase()),
+            ]),
+          ),
       );
 
     const fetchTools = (integration: StoredIntegration, labelId?: ProjectLabelId | null) =>
@@ -1379,7 +1411,9 @@ const make = (options: IntegrationsOptions = {}) =>
         return result;
       });
 
-    const validateTransport = (integration: Pick<Integration, "url" | "auth" | "headers">) =>
+    const validateTransport = (
+      integration: Pick<Integration, "url" | "auth" | "headers" | "endpointRef" | "transport">,
+    ) =>
       Effect.gen(function* () {
         const endpoint = yield* Effect.try({
           try: () => new URL(integration.url),
@@ -1387,7 +1421,18 @@ const make = (options: IntegrationsOptions = {}) =>
             new IntegrationError({ operation: "validate transport", reason: "invalid_request" }),
         });
         if (
-          (integration.auth?.type === "oauth" ||
+          integration.endpointRef !== undefined &&
+          (Credentials.parseCredentialRef(integration.endpointRef) === undefined ||
+            integration.auth !== undefined ||
+            integration.transport !== "http")
+        )
+          return yield* new IntegrationError({
+            operation: "validate private endpoint",
+            reason: "invalid_request",
+          });
+        if (
+          (integration.endpointRef !== undefined ||
+            integration.auth?.type === "oauth" ||
             Object.values(integration.headers).some((value) => value.trim() !== "")) &&
           endpoint.protocol !== "https:"
         )
@@ -1643,10 +1688,11 @@ const make = (options: IntegrationsOptions = {}) =>
             ...(input.local ? { local: input.local } : {}),
             ...(input.command ? { command: input.command } : {}),
             url: input.url,
+            ...(input.endpointRef === undefined ? {} : { endpointRef: input.endpointRef }),
             headers: input.headers,
             credentialOrigin: new URL(input.url).origin,
             approvedCredentialItems: options?.approveCredentials
-              ? credentialItemsIn(input.headers, input.auth, input.command)
+              ? credentialItemsIn(input.headers, input.auth, input.command, input.endpointRef)
               : [],
             enabled: input.enabled ?? true,
             scope: input.scope,
@@ -1729,7 +1775,8 @@ const make = (options: IntegrationsOptions = {}) =>
           if (
             (options?.holdStoredSecrets || options?.fromAgent) &&
             integrationDestinationChanged(current, input) &&
-            (current.oauthState?.tokenItemId !== undefined ||
+            (current.endpointRef !== undefined ||
+              current.oauthState?.tokenItemId !== undefined ||
               headersKeepStoredSecrets(current, input.headers ?? current.headers) ||
               Object.values(current.command?.env ?? {}).some(
                 (value) => credentialRefsIn(value).length > 0,
@@ -1755,7 +1802,13 @@ const make = (options: IntegrationsOptions = {}) =>
           });
           if (input.url !== undefined) yield* validateUrl(input.url);
           yield* validateAuth(auth, "update");
+          const endpointRef =
+            input.endpointRef === undefined
+              ? current.endpointRef
+              : (input.endpointRef ?? undefined);
           yield* validateTransport({
+            transport: input.transport ?? current.transport,
+            ...(endpointRef === undefined ? {} : { endpointRef }),
             url: input.url ?? current.url,
             headers: input.headers ?? current.headers,
             ...(auth === undefined ? {} : { auth }),
@@ -1765,7 +1818,7 @@ const make = (options: IntegrationsOptions = {}) =>
             : new URL(input.url ?? current.url).origin;
           const headers = input.headers ?? current.headers;
           const approvedCredentialItems = options?.approveCredentials
-            ? credentialItemsIn(headers, auth, input.command ?? current.command)
+            ? credentialItemsIn(headers, auth, input.command ?? current.command, endpointRef)
             : credentialOrigin === current.credentialOrigin
               ? (current.approvedCredentialItems ?? [])
               : [];
@@ -1774,11 +1827,18 @@ const make = (options: IntegrationsOptions = {}) =>
             auth?.type === "oauth" &&
             (input.url === undefined || input.url === current.url) &&
             auth.clientId === current.auth?.clientId;
-          const { auth: _auth, accountLabel: _label, oauthState, ...rest } = current;
+          const {
+            auth: _auth,
+            endpointRef: _endpointRef,
+            accountLabel: _label,
+            oauthState,
+            ...rest
+          } = current;
           const accountLabel =
             input.accountLabel === undefined ? current.accountLabel : input.accountLabel.trim();
           const integration: StoredIntegration = {
             ...rest,
+            ...(endpointRef === undefined ? {} : { endpointRef }),
             ...(input.displayName === undefined ? {} : { displayName: input.displayName }),
             ...(input.transport === undefined ? {} : { transport: input.transport }),
             ...(input.url === undefined ? {} : { url: input.url }),

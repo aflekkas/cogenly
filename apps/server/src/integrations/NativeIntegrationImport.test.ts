@@ -110,3 +110,31 @@ it.effect(
     );
   },
 );
+
+it("withholds every nonstandard imported URL path and requests private vault re-entry", () => {
+  for (const pathname of [
+    "/mcp/fixture-private-capability-6YpA92x",
+    "/short-key",
+    "/tenant/mcp",
+    "/mcp/%66ixture-private",
+  ]) {
+    const preview = mapNativeIntegrations(
+      { mcpServers: { private: { url: `https://example.com${pathname}` } } },
+      {},
+    );
+    expect(JSON.stringify(preview)).not.toContain(pathname);
+    expect(preview.definitions[0]).toMatchObject({
+      url: "https://example.com/",
+      endpointRef: "claude-private-endpoint.value",
+      enabled: false,
+    });
+    expect(preview.warnings.join(" ")).toContain("request_secret");
+  }
+  for (const pathname of ["/", "/mcp", "/sse"]) {
+    const preview = mapNativeIntegrations(
+      {},
+      { mcp_servers: { safe: { url: `https://example.com${pathname}` } } },
+    );
+    expect(preview.definitions[0]?.url).toBe(`https://example.com${pathname}`);
+  }
+});

@@ -78,10 +78,17 @@ export function mapNativeIntegrations(
           warnings.push(`${name}: URL needs manual review; private URL values were not imported.`);
           continue;
         }
+        // Only standard, credential-free paths may leave the native config reader.
+        const privateEndpoint = !["/", "/mcp", "/sse"].includes(url.pathname);
+        if (privateEndpoint)
+          warnings.push(
+            `${name}: private endpoint withheld; use request_secret with saveToVault for ${name}-endpoint, field value, allowed domain ${url.hostname}, then verify before enabling.`,
+          );
         definitions.push({
           ...base,
           transport: "http",
-          url: url.href,
+          url: privateEndpoint ? `${url.origin}/` : url.href,
+          ...(privateEndpoint ? { endpointRef: `${name}-endpoint.value` } : {}),
           headers: {
             ...refs(server.headers),
             ...refs(server.http_headers),

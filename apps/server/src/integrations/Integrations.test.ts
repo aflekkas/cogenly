@@ -54,6 +54,7 @@ interface FakeUpstream {
   readonly url: string;
   readonly seen: Array<{
     method: string;
+    path: string | undefined;
     authorization: string | undefined;
     sessionId: string | undefined;
   }>;
@@ -81,6 +82,7 @@ const fakeUpstreamWith = (redirectTo?: string, denyListScope = false) =>
           };
           seen.push({
             method: body.method,
+            path: request.url,
             authorization: request.headers.authorization,
             sessionId: [request.headers["mcp-session-id"]].flat()[0],
           });
@@ -1378,6 +1380,57 @@ describe("Integration credential destinations", () => {
   const tokenHeaders = { authorization: "Bearer {{credential:github.value}}" };
   const reasonOf = (exit: { readonly _tag: string; readonly failure?: unknown }) =>
     exit._tag === "Failure" ? (exit.failure as { readonly reason?: string }).reason : "success";
+
+  it.effect(
+    "resolves private endpoints only at call time and keeps them off settings and spans",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* runMigrations();
+          const upstream = yield* fakeUpstream;
+          const vault = yield* Vault.Vault;
+          const service = yield* Integrations.Integrations;
+          const spans: Array<Tracer.NativeSpan> = [];
+          const tracer = Tracer.make({
+            span(options) {
+              const span = new Tracer.NativeSpan(options);
+              spans.push(span);
+              return span;
+            },
+          });
+          const { integration } = yield* service.create({
+            ...createInput(new URL(upstream.url).origin),
+            headers: {},
+            endpointRef: "private-endpoint.value",
+          });
+          expect(
+            (yield* service.callTool(integration.name, "echo", {}, null).pipe(Effect.flip)).reason,
+          ).toBe("credential_unresolved");
+          expect(upstream.seen).toHaveLength(0);
+          const privatePath = "/mcp/fixture-private-capability-6YpA92x";
+          yield* vault.create({
+            name: "private-endpoint",
+            type: "api_key",
+            allowedDomains: ["127.0.0.1"],
+            secretFields: { value: new URL(privatePath, upstream.url).href },
+          });
+          yield* service
+            .callTool(integration.name, "echo", {}, null)
+            .pipe(Effect.withSpan("private-endpoint-test"), Effect.withTracer(tracer));
+          expect(upstream.seen.at(-1)?.path).toBe(privatePath);
+          expect(JSON.stringify(yield* service.list())).not.toContain(privatePath);
+          expect(JSON.stringify(spans.map((span) => [...span.attributes]))).not.toContain(
+            privatePath,
+          );
+          const calls = upstream.seen.length;
+          yield* service.update({ id: integration.id, url: "https://other.example" });
+          expect(
+            (yield* service.callTool(integration.name, "echo", {}, null).pipe(Effect.flip)).reason,
+          ).toBe("credential_not_allowed");
+          expect(upstream.seen).toHaveLength(calls);
+        }),
+      ).pipe(Effect.provide(vaultLayer())),
+  );
 
   it.effect(
     "keeps project-scoped vault credentials inside that project, including cached tools",
