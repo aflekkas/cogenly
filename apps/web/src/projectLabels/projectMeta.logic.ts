@@ -271,6 +271,22 @@ export function projectSwitchRepository<Item>(input: {
 }
 
 /**
+ * The note a Work draft shows when picking `projectName` could not keep it in
+ * the project: none of its repositories was chosen and `machineName` can't
+ * run Work without one, so the draft stays outside the project.
+ */
+export function projectDroppedNote(
+  projectName: string,
+  machineName: string | null,
+): { readonly title: string; readonly description: string } {
+  const machine = machineName ?? "This machine";
+  return {
+    title: `Not in ${projectName}`,
+    description: `${machine} can't run Work without a repository. Pick a repository from ${projectName} to work in it.`,
+  };
+}
+
+/**
  * The project a Work draft is in, given its pending pick (`pending`, with the
  * repository it was filed with) and its repository. With no pick it follows
  * its repository's project, or none. `stale` marks a pick that does not link

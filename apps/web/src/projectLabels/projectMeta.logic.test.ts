@@ -21,6 +21,7 @@ import {
   workDraftFolderId,
   workHeroBreadcrumb,
   workHeroLine,
+  projectDroppedNote,
   workThreadDisplayProject,
 } from "./projectMeta.logic";
 
@@ -440,6 +441,17 @@ describe("toggleCollapsedGroup", () => {
   it("toggles one group without touching the others", () => {
     expect(toggleCollapsedGroup(["env:bartr"], "env:spawn")).toEqual(["env:bartr", "env:spawn"]);
     expect(toggleCollapsedGroup(["env:bartr", "env:spawn"], "env:spawn")).toEqual(["env:bartr"]);
+  });
+});
+
+describe("projectDroppedNote", () => {
+  it("says why a project pick did not stick on a machine that needs a repository", () => {
+    expect(projectDroppedNote("Spawn Partners", "Contabo VPS")).toEqual({
+      title: "Not in Spawn Partners",
+      description:
+        "Contabo VPS can't run Work without a repository. Pick a repository from Spawn Partners to work in it.",
+    });
+    expect(projectDroppedNote("Bartr", null).description).toMatch(/^This machine can't/);
   });
 });
 

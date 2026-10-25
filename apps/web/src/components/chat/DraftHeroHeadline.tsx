@@ -41,6 +41,7 @@ import {
   isPickableRepository,
   projectDefaultRepository,
   projectHoldsRepository,
+  projectDroppedNote,
   projectSwitchRepository,
   workDraftFolderId,
   workHeroBreadcrumb,
@@ -82,6 +83,7 @@ import {
   ComboboxTrigger,
   useComboboxFilter,
 } from "../ui/combobox";
+import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { InlineButton } from "../ui/button";
 import { resolveProjectSettings } from "@cogenly/shared/projectSettings";
@@ -499,10 +501,14 @@ export function DraftHeroHeadline({
   };
   // Work without a repository, filed in `folder` (the Work project by default).
   // A draft already without one is re-filed in place. `onUnavailable` runs
-  // when this machine cannot host Work without a repository.
+  // when the draft could not move there; `onNoFolderWork` when this machine
+  // cannot host Work without a repository at all.
   const startScratch = async (
     folder: EnvironmentProjectLabel | null = workProject,
-    options?: { readonly onUnavailable?: () => void },
+    options?: {
+      readonly onUnavailable?: () => void;
+      readonly onNoFolderWork?: () => void;
+    },
   ): Promise<void> => {
     if (isScratchDraft) {
       if (!draftThread || isChatDraft || activeProject === null) return;
@@ -525,6 +531,7 @@ export function DraftHeroHeadline({
     }
     if (scratchTargetEnvironmentId === null) {
       options?.onUnavailable?.();
+      options?.onNoFolderWork?.();
       return;
     }
     const requested = { draftId, activeProjectKey, scratchTargetEnvironmentId };
@@ -756,7 +763,8 @@ export function DraftHeroHeadline({
   // the project holds it, else its only one, else the project's folder. A
   // draft whose project does not hold its repository (left from before this
   // rule) is moved the same way. When the draft cannot move, it leaves the
-  // project instead: a repository never pairs with a project outside it. "No
+  // project instead, with a note when the machine can't run Work without a
+  // repository: a repository never pairs with a project outside it. "No
   // project" moves it to the most recently active repository in no project.
   const noProjectPicked = useWorkNoProjectPicked(draftThread?.threadId);
   // The project move last started, so a re-render while it lands does not repeat it.
@@ -818,7 +826,18 @@ export function DraftHeroHeadline({
           return;
         }
         case "project-folder":
-          void startScratch(project, { onUnavailable: leaveProject });
+          void startScratch(project, {
+            onUnavailable: leaveProject,
+            // Says why the pick did not stick, rather than dropping it silently.
+            onNoFolderWork: () =>
+              toastManager.add({
+                type: "info",
+                ...projectDroppedNote(
+                  project.label.name,
+                  environmentLabelById.get(pickerEnvironmentId ?? project.environmentId) ?? null,
+                ),
+              }),
+          });
           return;
       }
     }
