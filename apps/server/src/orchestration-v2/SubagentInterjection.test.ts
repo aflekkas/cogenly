@@ -651,3 +651,61 @@ it.effect("a Codex native subagent whose thread cannot resume starts seeded inst
     ]);
   }).pipe(Effect.provide(layer(provider, "subagent-interjection-codex-fallback")));
 });
+
+it.effect.each(["thread.stop", "run.interrupt"] as const)(
+  "a follow-up reopens a parent cohort after %s",
+  (type) => {
+    const provider = makeProvider(true);
+    return Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const worker = yield* Worker.OrchestrationEffectWorkerV2;
+      const owner = yield* startParent;
+      const childId = yield* delegate(owner);
+      yield* finishLatestTurn(provider, childId);
+      yield* awaitStored(
+        parentThreadId,
+        (row) => row.event.type === "subagent.updated" && row.event.payload.status === "completed",
+      );
+      yield* worker.drain();
+      yield* orchestrator.dispatch(
+        type === "run.interrupt"
+          ? {
+              type,
+              commandId: CommandId.make("stop-owner"),
+              threadId: parentThreadId,
+              runId: owner.id,
+            }
+          : { type, commandId: CommandId.make("stop-owner"), threadId: parentThreadId },
+      );
+      yield* worker.drain();
+      expect(
+        (yield* orchestrator.getThreadProjection(parentThreadId)).runs.find(
+          (run) => run.id === owner.id,
+        )?.delegatedCompletion?.disposition,
+      ).toBe("stopped");
+      yield* orchestrator.dispatch(userMessage(childId, "after-stop", "Try the new approach"));
+      yield* worker.drain();
+      const followUp = (yield* orchestrator.getThreadProjection(parentThreadId)).subagents.find(
+        (task) => task.followUpOf !== undefined,
+      )!;
+      yield* finishLatestTurn(provider, childId);
+      yield* awaitStored(
+        parentThreadId,
+        (row) =>
+          row.event.type === "subagent.updated" &&
+          row.event.payload.id === followUp.id &&
+          row.event.payload.status === "completed",
+      );
+      const parent = yield* orchestrator.getThreadProjection(parentThreadId);
+      expect(
+        parent.runs.find((run) => run.id === owner.id)?.delegatedCompletion?.delivery?.taskIds,
+      ).toContain(followUp.id);
+      yield* awaitStored(
+        parentThreadId,
+        (row) =>
+          row.event.type === "message.updated" &&
+          row.event.payload.delegatedCompletion?.taskIds.includes(followUp.id) === true,
+      );
+    }).pipe(Effect.provide(layer(provider, "followup-stopped-owner")));
+  },
+);

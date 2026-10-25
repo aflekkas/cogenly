@@ -7398,6 +7398,22 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       result: null,
     };
     const emitEvent = emit(events, command);
+    // A new follow-up is fresh work, even if Stop disposed the owner's old tasks.
+    if (
+      owner.delegatedCompletion !== undefined &&
+      owner.delegatedCompletion.disposition !== "open"
+    ) {
+      yield* emitEvent({
+        type: "run.updated",
+        threadId: parentThreadId,
+        runId: owner.id,
+        occurredAt: now,
+        payload: {
+          ...owner,
+          delegatedCompletion: { ...owner.delegatedCompletion, disposition: "open" },
+        },
+      });
+    }
     yield* emitEvent({
       type: "run.updated",
       threadId: child.id,
