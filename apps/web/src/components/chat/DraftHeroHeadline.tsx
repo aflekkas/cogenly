@@ -1,5 +1,9 @@
 import type { DraftId } from "~/composerDraftStore";
-import { composerDraftHasUserContent, useComposerDraftStore } from "~/composerDraftStore";
+import {
+  composerDraftHasUserContent,
+  surfaceDraftKey,
+  useComposerDraftStore,
+} from "~/composerDraftStore";
 import {
   type EnvironmentId,
   type ScopedProjectRef,
@@ -478,7 +482,7 @@ export function DraftHeroHeadline({
       return;
     }
     setLogicalProjectDraftThreadId(
-      logicalProjectKey,
+      surfaceDraftKey(logicalProjectKey, isChatDraft ? "chat" : "work"),
       scopeProjectRef(project.environmentId, project.id),
       draftId,
     );
