@@ -54,6 +54,33 @@ const start = Effect.fn("startSettingsMachine")(function* (
 });
 
 describe("settings sync between paired machines", () => {
+  it.live("late source overrides follow a merged project and an explicit target reset wins", () =>
+    Effect.gen(function* () {
+      const repository = ProjectId.make("merge-settings-repo");
+      const machine = yield* start("merge-settings", "cloud-server", repository);
+      yield* machine.state.write(
+        "project",
+        "label:source",
+        { mergedInto: LABEL, mergeSourceName: "Source" },
+        true,
+      );
+      yield* machine.state.write("project-settings", "label:source", {
+        enableAgentBrowserAccess: { value: false },
+      });
+      yield* machine.reconcile;
+      expect(
+        (yield* machine.settings.getSettings).projectSettingsOverrides[repository]
+          ?.enableAgentBrowserAccess,
+      ).toBe(false);
+      yield* machine.state.write("project-settings", LABEL, { enableAgentBrowserAccess: null });
+      yield* machine.reconcile;
+      expect(
+        (yield* machine.settings.getSettings).projectSettingsOverrides[repository]
+          ?.enableAgentBrowserAccess,
+      ).toBeUndefined();
+    }),
+  );
+
   it.live(
     "lifecycle scripts stay local in universal settings and project overrides",
     () =>

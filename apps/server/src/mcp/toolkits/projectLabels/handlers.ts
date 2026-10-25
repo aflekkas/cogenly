@@ -156,6 +156,18 @@ export const layer = McpToolAccess.toLayer(ProjectLabelsToolkit, {
       return yield* labels.update(input).pipe(Effect.mapError(failure));
     }),
   ),
+  project_label_merge: McpToolAccess.writesEnvironment((input) =>
+    Effect.gen(function* () {
+      const labels = yield* Labels.ProjectLabelService;
+      return yield* labels.merge(input).pipe(Effect.mapError(failure));
+    }),
+  ),
+  project_label_dismiss_duplicate: McpToolAccess.writesEnvironment((input) =>
+    Effect.gen(function* () {
+      const labels = yield* Labels.ProjectLabelService;
+      return yield* labels.dismissDuplicate(input).pipe(Effect.mapError(failure));
+    }),
+  ),
   project_label_delete: McpToolAccess.writes((input) =>
     Effect.gen(function* () {
       const labels = yield* Labels.ProjectLabelService;

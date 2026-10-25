@@ -13,6 +13,8 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
+import { resolveProjectLabelId } from "../sync/ProjectMergeProjection.ts";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import * as ServerConfig from "../config.ts";
@@ -54,6 +56,7 @@ export interface ProjectLabelRef {
 export class ProjectLabelFolders extends Context.Service<
   ProjectLabelFolders,
   {
+    readonly reconcileMerges: Effect.Effect<void, ProjectLabelFolderError>;
     /** The resolved projects root. Blank settings land in `<Cogenly home>/projects`. */
     readonly projectsRoot: Effect.Effect<string, ProjectLabelFolderError>;
     /**
@@ -126,6 +129,7 @@ const make = Effect.gen(function* () {
   const serverSettings = yield* ServerSettings.ServerSettingsService;
   // Label id to directory name, from the last reconcile or refresh.
   const folders = yield* Ref.make(new Map<string, string>());
+  const mergePermit = yield* Semaphore.make(1);
 
   const fail = (operation: string, label?: ProjectLabelRef, dir?: string) => (cause: unknown) =>
     new ProjectLabelFolderError({
@@ -239,7 +243,7 @@ const make = Effect.gen(function* () {
     sql<{ readonly live: number; readonly synced: number }>`
       SELECT
         (SELECT count(*) FROM project_labels WHERE label_id = ${id}) AS live,
-        (SELECT count(*) FROM shared_documents WHERE kind = 'project' AND id = ${id} AND tombstone_json IS NULL) AS synced
+        (SELECT count(*) FROM shared_documents WHERE kind = 'project' AND id = ${id} AND (tombstone_json IS NULL OR json_type(fields_json,'$.mergedInto')='text')) AS synced
     `.pipe(
       Effect.map((rows) => (rows[0]?.live ?? 0) === 0 && (rows[0]?.synced ?? 0) === 0),
       Effect.mapError(fail("scan")),
@@ -346,6 +350,137 @@ const make = Effect.gen(function* () {
     )(`Every folder name for "${target}" is taken.`);
   });
 
+  const resumeMove = Effect.fn("ProjectLabelFolders.resumeMove")(function* (move: {
+    source: string;
+    target: string;
+    directory: number;
+  }) {
+    const sourceExists = yield* fileSystem.exists(move.source);
+    const targetExists = yield* fileSystem.exists(move.target);
+    if (!sourceExists && !targetExists)
+      return yield* fail("merge files", undefined, move.source)("Both move paths are missing.");
+    if (move.directory) {
+      if (sourceExists && !targetExists) {
+        // Reserve an empty directory. rename refuses if another writer puts anything in it.
+        yield* fileSystem.makeDirectory(move.target);
+        yield* fileSystem.rename(move.source, move.target);
+      } else if (sourceExists && targetExists) {
+        const link = yield* fileSystem.readLink(move.source).pipe(Effect.option);
+        if (Option.isNone(link)) {
+          const entries = yield* fileSystem.readDirectory(move.target);
+          if (entries.length !== 0)
+            return yield* fail(
+              "merge files",
+              undefined,
+              move.target,
+            )("Destination changed during move.");
+          yield* fileSystem.rename(move.source, move.target);
+        }
+      }
+      if (!(yield* fileSystem.exists(move.source)))
+        yield* fileSystem.symlink(move.target, move.source);
+    } else if (sourceExists) {
+      // link is exclusive and leaves data at the source on a destination collision.
+      if (!targetExists) yield* fileSystem.link(move.source, move.target);
+      const sourceInfo = yield* fileSystem.stat(move.source);
+      const targetInfo = yield* fileSystem.stat(move.target);
+      if (
+        sourceInfo.dev !== targetInfo.dev ||
+        Option.isNone(sourceInfo.ino) ||
+        Option.isNone(targetInfo.ino) ||
+        sourceInfo.ino.value !== targetInfo.ino.value
+      )
+        return yield* fail(
+          "merge files",
+          undefined,
+          move.target,
+        )("Destination changed during move.");
+      yield* fileSystem.remove(move.source);
+    }
+    if (!(yield* fileSystem.exists(move.source)) && (yield* fileSystem.exists(move.target)))
+      yield* fileSystem.symlink(move.target, move.source);
+    yield* sql`UPDATE project_merge_file_moves SET complete=1 WHERE source=${move.source} AND target=${move.target}`;
+  });
+  const mergeDirectory = (
+    source: string,
+    target: string,
+  ): Effect.Effect<void, ProjectLabelFolderError> =>
+    Effect.gen(function* () {
+      const entries = yield* fileSystem.readDirectory(source);
+      for (const entry of entries) {
+        if (entry === PROJECT_LABEL_ID_FILE) continue;
+        const from = path.join(source, entry);
+        const to = path.join(target, entry);
+        const link = yield* fileSystem.readLink(from).pipe(Effect.option);
+        if (Option.isSome(link)) {
+          const forwarding =
+            yield* sql`SELECT 1 FROM project_merge_file_moves WHERE source=${from} AND target=${link.value} AND complete=1`;
+          if (forwarding.length > 0) continue;
+          // Preserve a user symlink itself; never recurse into a symlink's destination.
+          let destination = to;
+          for (let i = 2; yield* fileSystem.exists(destination); i++)
+            destination = path.join(
+              target,
+              `${path.parse(entry).name} (${i})${path.extname(entry)}`,
+            );
+          yield* fileSystem.symlink(path.resolve(source, link.value), destination);
+          yield* fileSystem.remove(from);
+          continue;
+        }
+        const info = yield* fileSystem.stat(from);
+        const destinationLink = yield* fileSystem.readLink(to).pipe(Effect.option);
+        if (
+          info.type === "Directory" &&
+          Option.isNone(destinationLink) &&
+          (yield* isDirectory(to))
+        ) {
+          yield* mergeDirectory(from, to);
+          continue;
+        }
+        let destination = to;
+        for (let i = 2; yield* fileSystem.exists(destination); i++)
+          destination = path.join(target, `${path.parse(entry).name} (${i})${path.extname(entry)}`);
+        const move = {
+          source: from,
+          target: destination,
+          directory: info.type === "Directory" ? 1 : 0,
+        };
+        yield* sql`INSERT INTO project_merge_file_moves(source,target,directory) VALUES (${from},${destination},${move.directory})`;
+        yield* resumeMove(move);
+      }
+    }).pipe(Effect.mapError(fail("merge files")));
+  const reconcileMerges = mergePermit.withPermits(1)(
+    Effect.gen(function* () {
+      const pending = yield* sql<{
+        source: string;
+        target: string;
+        directory: number;
+      }>`SELECT source,target,directory FROM project_merge_file_moves WHERE complete=0`;
+      for (const move of pending) yield* resumeMove(move);
+      const merges = yield* sql<{
+        id: string;
+        name: string;
+        target: string;
+      }>`SELECT id,COALESCE(json_extract(fields_json,'$.mergeSourceName'),json_extract(fields_json,'$.name')) AS name,json_extract(fields_json,'$.mergedInto') AS target FROM shared_documents WHERE kind='project' AND tombstone_json IS NOT NULL AND json_type(fields_json,'$.mergedInto')='text'`;
+      yield* scanFolders;
+      for (const merge of merges) {
+        const targetId = yield* resolveProjectLabelId(merge.target);
+        if (!targetId) continue;
+        const targets = yield* sql<{
+          name: string;
+        }>`SELECT name FROM project_labels WHERE label_id=${targetId}`;
+        if (!targets[0] || !merge.name) continue;
+        // Only a marker claiming the source can be moved. A fallback by name could
+        // otherwise take a different same-name project's files after restart.
+        const sourceName = (yield* Ref.get(folders)).get(merge.id);
+        if (!sourceName) continue;
+        const sourceDir = path.join(yield* projectsRoot, sourceName);
+        const target = yield* ensureForLabel({ id: targetId, name: targets[0].name });
+        if (sourceDir !== target.dir) yield* mergeDirectory(sourceDir, target.dir);
+      }
+    }).pipe(Effect.provideService(SqlClient.SqlClient, sql), Effect.mapError(fail("merge files"))),
+  );
+
   const reconcile: ProjectLabelFolders["Service"]["reconcile"] = Effect.gen(function* () {
     yield* scanFolders;
     const labels = yield* sql<{ label_id: string; name: string }>`
@@ -441,6 +576,7 @@ const make = Effect.gen(function* () {
   });
 
   return ProjectLabelFolders.of({
+    reconcileMerges,
     claimForLabel,
     removeSkeleton,
     listOrphans,

@@ -11,6 +11,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
+import { resolveProjectLabelId } from "./ProjectMergeProjection.ts";
 import { decodeFact, factDocumentId } from "./documentSchemas.ts";
 
 type FactDocument = Effect.Success<ReturnType<typeof decodeFact>>;
@@ -97,21 +98,17 @@ const writeFact = Effect.fn("FactProjection.writeFact")(function* (
   const sql = yield* SqlClient.SqlClient;
   const { id, fields: f } = member;
   const at = DateTime.formatIso(yield* DateTime.now);
-  // A deleted project's tag stays in the document; its projection drops the tag here.
-  const deleted =
-    f.labelIds.length === 0
-      ? []
-      : (yield* sql<{
-          id: string;
-        }>`SELECT id FROM shared_documents WHERE kind='project' AND tombstone_json IS NOT NULL AND id IN ${sql.in(f.labelIds)}`).map(
-          (row) => row.id,
-        );
+  const labelIds = [
+    ...new Set(
+      (yield* Effect.forEach(f.labelIds, resolveProjectLabelId)).filter((id) => id !== null),
+    ),
+  ];
   const fact: Fact = {
     id,
     subject: f.subject,
     ...(f.predicate ? { predicate: f.predicate } : {}),
     text: f.text,
-    labelIds: f.labelIds.filter((label) => !deleted.includes(label)),
+    labelIds,
     visibility: f.visibility,
     ...(f.agentId ? { agentId: f.agentId } : {}),
     sourceRefs: f.sourceRefs,

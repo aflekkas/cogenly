@@ -1139,6 +1139,14 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:projectLabels:updateProjectLabel",
       tag: WS_METHODS.projectLabelsUpdate,
     }),
+    mergeProjectLabels: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:projectLabels:mergeProjectLabels",
+      tag: WS_METHODS.projectLabelsMerge,
+    }),
+    dismissProjectLabelDuplicate: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:projectLabels:dismissProjectLabelDuplicate",
+      tag: WS_METHODS.projectLabelsDismissDuplicate,
+    }),
     deleteProjectLabel: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:projectLabels:deleteProjectLabel",
       tag: WS_METHODS.projectLabelsDelete,

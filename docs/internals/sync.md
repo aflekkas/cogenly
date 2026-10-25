@@ -158,9 +158,12 @@ name gets a local alias, which is never published back.
 Thread replication is separate and single-writer; see
 [thread sync](./thread-sync.md). Agent conversations are created lazily only
 on their owner. An agent's `ownerMachine` changes only when the current owner
-authors it, after the agent's conversation has moved. Shared project IDs
-identify one project; equal names with different IDs produce
-possible-duplicate records rather than an automatic merge.
+authors it, after the agent's conversation has moved. Shared project IDs identify
+one project; equal names with different IDs offer a merge or a synced “Keep separate”
+decision. A merge updates the target document and permanently redirects the source
+tombstone: each machine re-files its own metadata (including replicas) and moves local
+files with conflict renaming, retaining forwarding links for existing checkout/worktree
+paths.
 
 Delete projections must not launch work or append replicated thread events.
 In particular, an incoming agent tombstone retires its schedules immediately

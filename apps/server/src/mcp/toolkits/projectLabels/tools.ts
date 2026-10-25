@@ -12,6 +12,8 @@ import {
   ProjectLabelRemoveCheckoutInput,
   ProjectLabelRemoveCheckoutResult,
   ProjectLabelDeleteResult,
+  ProjectLabelMergeInput,
+  ProjectLabelDismissDuplicateInput,
   ProjectLabelListResult,
   ProjectLabelKey,
   ProjectLabelMutationResult,
@@ -99,6 +101,20 @@ export const ProjectLabelsToolkit = Toolkit.make(
     success: ProjectLabelMutationResult,
     description:
       "Change what the Projects page shows for a project: rename it, set its color (gray, red, amber, green, teal, blue, violet or pink; not hex), description, or instructions (standing guidance for every agent in the project). Omitted fields are preserved; null clears color or description; an empty string clears instructions.",
+  }).annotate(Tool.Destructive, false),
+  Tool.make("project_label_merge", {
+    ...shared,
+    parameters: ProjectLabelMergeInput,
+    success: ProjectLabelMutationResult,
+    description:
+      "Merge sourceId into targetId: move all repositories, source links, threads (including the project chat), agents, schedules, memory labels, settings and local project files into the target. Keep the target's instructions and append different source instructions. Files with conflicting names are renamed, never overwritten. The source project is removed on every paired machine. This cannot be undone automatically; confirm the source and target with the user first.",
+  }).annotate(Tool.Destructive, true),
+  Tool.make("project_label_dismiss_duplicate", {
+    ...shared,
+    parameters: ProjectLabelDismissDuplicateInput,
+    success: ProjectLabelMutationResult,
+    description:
+      "Keep two possible duplicate projects separate. Dismiss the suggestion for id and otherId on every paired machine; both projects and all their contents remain.",
   }).annotate(Tool.Destructive, false),
   Tool.make("project_label_delete", {
     ...shared,

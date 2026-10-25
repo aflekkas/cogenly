@@ -82,6 +82,8 @@ const RPC_AGGREGATES = {
   [WS_METHODS.projectLabelsSubscribe]: "projectLabels",
   [WS_METHODS.projectLabelsCreate]: "projectLabels",
   [WS_METHODS.projectLabelsUpdate]: "projectLabels",
+  [WS_METHODS.projectLabelsMerge]: "projectLabels",
+  [WS_METHODS.projectLabelsDismissDuplicate]: "projectLabels",
   [WS_METHODS.projectLabelsDelete]: "projectLabels",
   [WS_METHODS.projectLabelsArchive]: "projectLabels",
   [WS_METHODS.projectLabelsUnarchive]: "projectLabels",
