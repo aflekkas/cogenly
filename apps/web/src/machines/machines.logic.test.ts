@@ -12,6 +12,7 @@ import {
   machineMoveTargets,
   machineMoveTargetsForThreads,
   summarizeProjectMove,
+  mergeThreadMoveResults,
   summarizeThreadMove,
   threadOwnerMachine,
   threadsRunOnName,
@@ -237,4 +238,27 @@ describe("summarizeProjectMove", () => {
       localChanges: ["b"],
     });
   });
+});
+
+it("keeps preservation reports across batches and shows them for thread and project moves", () => {
+  const result = {
+    moved: [thread("a")],
+    skipped: [],
+    branches: [
+      {
+        threadId: thread("a"),
+        branch: "feature/work",
+        revision: "a".repeat(40),
+        action: "preserve" as const,
+        preservedBranch: "preserved/feature/work-123",
+      },
+    ],
+  };
+  expect(mergeThreadMoveResults([result, { moved: [], skipped: [] }]).branches).toEqual(
+    result.branches,
+  );
+  expect(summarizeThreadMove(result, "VPS").description).toContain("preserved/feature/work-123");
+  expect(
+    summarizeProjectMove({ repositories: [], threads: result }, "Project", "VPS").description,
+  ).toContain("preserved/feature/work-123");
 });

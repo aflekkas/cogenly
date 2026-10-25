@@ -1,3 +1,4 @@
+import * as RepositoryHandoff from "./RepositoryHandoff.ts";
 import {
   CommandId,
   EventId,
@@ -430,6 +431,24 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
         Layer.provideMerge(forkLaunches),
         Layer.provide(providerCatalog),
         Layer.provideMerge(ThreadTransfer.layer),
+        Layer.provide(
+          lifecycle?.git === undefined
+            ? Layer.succeed(RepositoryHandoff.RepositoryHandoff, {
+                source: (entry) =>
+                  Effect.succeed(
+                    entry.worktreePath === null || entry.branch === null
+                      ? null
+                      : {
+                          branch: entry.branch,
+                          revision: "a".repeat(40),
+                          remoteRef: `refs/heads/${entry.branch}`,
+                        },
+                  ),
+                verify: () => Effect.void,
+                prepare: ({ worktreePath }) => Effect.succeed({ worktreePath }),
+              })
+            : RepositoryHandoff.layer,
+        ),
         Layer.provideMerge(ThreadRouting.layer),
         Layer.provideMerge(ThreadSync.layer),
         Layer.provideMerge(

@@ -1,3 +1,4 @@
+import * as RepositoryHandoff from "./threadSync/RepositoryHandoff.ts";
 import * as RepoMcpTrust from "./integrations/RepoMcpTrust.ts";
 import * as ReadOnlySandbox from "./terminal/ReadOnlySandbox.ts";
 import * as ProviderEventLoggers from "@cogenly/provider-core/server/ProviderEventLoggers";
@@ -640,6 +641,7 @@ const layerPairedMachines = Layer.mergeAll(
   Layer.mergeAll(ProjectMove.layer, ThreadLaunchRouting.layer, ThreadFork.layer).pipe(
     Layer.provide(SharedSync.layer.pipe(Layer.provide(SharedState.layer))),
     Layer.provideMerge(ThreadTransfer.layer),
+    Layer.provide(RepositoryHandoff.layer),
     Layer.provideMerge(ThreadRouting.layer),
     Layer.provideMerge(ThreadSync.layer),
     Layer.provide(ThreadReplication.layer),
