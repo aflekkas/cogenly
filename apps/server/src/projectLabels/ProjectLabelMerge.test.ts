@@ -1,3 +1,5 @@
+// @effect-diagnostics nodeBuiltinImport:off - regression tests use real git in isolated temporary folders.
+import * as NodeChildProcess from "node:child_process";
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
@@ -8,6 +10,7 @@ import {
   type SharedChangeBatch,
 } from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
+import * as Deferred from "effect/Deferred";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -21,12 +24,19 @@ import { resolveProjectLabelId } from "../sync/ProjectMergeProjection.ts";
 import * as Folders from "./ProjectLabelFolders.ts";
 import * as Labels from "./ProjectLabelService.ts";
 
+const git = (cwd: string, args: ReadonlyArray<string>) =>
+  NodeChildProcess.execFileSync("git", [...args], {
+    cwd,
+    encoding: "utf8",
+    env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" },
+  }).trim();
+
 const at = "2026-01-01T00:00:00.000Z";
 const repoA = ProjectId.make("repo-a");
 const repoB = ProjectId.make("repo-b");
-const makeLayer = (name: string) => {
+const makeLayer = (name: string, foldersLayer = Folders.layer) => {
   const database = Sqlite.layerMemory.pipe(Layer.provideMerge(NodeServices.layer));
-  const infrastructure = Layer.mergeAll(Events.layer, Folders.layer, Shared.layer).pipe(
+  const infrastructure = Layer.mergeAll(Events.layer, foldersLayer, Shared.layer).pipe(
     Layer.provideMerge(database),
     Layer.provideMerge(ServerConfig.layerTest("/tmp", { prefix: `project-merge-${name}` })),
     Layer.provideMerge(Settings.layerTest()),
@@ -272,6 +282,83 @@ describe("project merge", () => {
       }).pipe(Effect.provide(makeLayer("duplicates"))),
   );
 
+  it.effect("restores only the selected duplicate pair, in either id order", () =>
+    Effect.gen(function* () {
+      const labels = yield* Labels.ProjectLabelService;
+      const first = (yield* labels.create({ name: "Same" })).label;
+      const second = (yield* labels.create({ name: "Same" })).label;
+      const third = (yield* labels.create({ name: "Same" })).label;
+      yield* labels.dismissDuplicate({ id: first.id, otherId: second.id });
+      yield* labels.dismissDuplicate({ id: first.id, otherId: third.id });
+      expect((yield* labels.read(first.id)).label.possibleDuplicateIds).toEqual([]);
+      yield* labels.undismissDuplicate({ id: second.id, otherId: first.id });
+      expect((yield* labels.read(first.id)).label.possibleDuplicateIds).toEqual([second.id]);
+      expect((yield* labels.read(second.id)).label.possibleDuplicateIds).toContain(first.id);
+      yield* labels.undismissDuplicate({ id: first.id, otherId: second.id });
+      expect((yield* labels.read(first.id)).label.possibleDuplicateIds).toEqual([second.id]);
+      expect(
+        yield* Effect.flip(labels.undismissDuplicate({ id: first.id, otherId: first.id })),
+      ).toMatchObject({ reason: "same_project" });
+    }).pipe(Effect.provide(makeLayer("undismiss"))),
+  );
+
+  it.effect.each(
+    ["repos/platform", "platform", ".worktrees", "worktrees"].flatMap((layout) =>
+      [false, true].map((gitFile) => ({ layout, gitFile })),
+    ),
+  )("keeps colliding $layout checkouts atomic (.git file: $gitFile)", ({ layout, gitFile }) =>
+    Effect.gen(function* () {
+      const labels = yield* Labels.ProjectLabelService;
+      const folders = yield* Folders.ProjectLabelFolders;
+      const fs = yield* FileSystem.FileSystem;
+      const source = (yield* labels.create({ name: "Source" })).label;
+      const target = (yield* labels.create({ name: "Target" })).label;
+      const from = (yield* folders.dirForLabel(source)).dir;
+      const to = (yield* folders.dirForLabel(target)).dir;
+      const seed = yield* fs.makeTempDirectoryScoped();
+      git(seed, ["init", "--initial-branch=main"]);
+      git(seed, [
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.com",
+        "commit",
+        "--allow-empty",
+        "-m",
+        "init",
+      ]);
+      for (const [root, branch] of [
+        [from, "source"],
+        [to, "target"],
+      ]) {
+        const checkout = `${root}/${layout}`;
+        yield* fs.makeDirectory(checkout, { recursive: true });
+        if (gitFile) git(seed, ["worktree", "add", checkout, "-b", branch!]);
+        else {
+          git(checkout, ["init", `--initial-branch=${branch}`]);
+          git(checkout, [
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.com",
+            "commit",
+            "--allow-empty",
+            "-m",
+            branch!,
+          ]);
+        }
+        yield* fs.writeFileString(`${checkout}/${branch}.txt`, branch!);
+      }
+      yield* labels.merge({ sourceId: source.id, targetId: target.id });
+      yield* folders.reconcileMerges;
+      const moved = `${to}/${layout} (2)`;
+      expect(yield* fs.readFileString(`${moved}/source.txt`)).toBe("source");
+      expect(yield* fs.exists(`${to}/${layout}/source.txt`)).toBe(false);
+      expect(git(`${to}/${layout}`, ["branch", "--show-current"])).toBe("target");
+      expect(git(moved, ["branch", "--show-current"])).toBe("source");
+    }).pipe(Effect.provide(makeLayer(`atomic-${layout.replaceAll("/", "-")}-${gitFile}`))),
+  );
+
   it.effect(
     "moves files without overwriting conflicts, preserves checkout paths, and resumes after a crash",
     () =>
@@ -289,6 +376,7 @@ describe("project merge", () => {
         yield* fs.makeDirectory(`${from}/repos/a`, { recursive: true });
         yield* fs.writeFileString(`${from}/repos/a/README.md`, "checkout");
         yield* labels.merge({ sourceId: source.id, targetId: target.id });
+        yield* folders.reconcileMerges;
         expect(yield* fs.readFileString(`${to}/Resources/note.md`)).toBe("target");
         expect(yield* fs.readFileString(`${to}/Resources/note (2).md`)).toBe("source");
         expect(yield* fs.readFileString(`${from}/Resources/note.md`)).toBe("source");
@@ -306,6 +394,62 @@ describe("project merge", () => {
           "note.md",
         ]);
       }).pipe(Effect.provide(makeLayer("files"))),
+  );
+
+  it.effect("returns the committed merge while file reconciliation is still running", () => {
+    const entered = Deferred.makeUnsafe<void>();
+    const release = Deferred.makeUnsafe<void>();
+    let block = false;
+    const folders = Layer.mock(Folders.ProjectLabelFolders)({
+      reconcileMerges: Effect.suspend(() =>
+        block
+          ? Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release)))
+          : Effect.void,
+      ),
+      mergeFileStatus: Effect.succeed({ pendingMoves: 1, failedMoves: 0 }),
+      ensureForLabel: () => Effect.succeed({ dir: "/tmp/unused", dirName: "unused" }),
+    });
+    return Effect.gen(function* () {
+      const labels = yield* Labels.ProjectLabelService;
+      const source = (yield* labels.create({ name: "Source" })).label;
+      const target = (yield* labels.create({ name: "Target" })).label;
+      block = true;
+      expect((yield* labels.merge({ sourceId: source.id, targetId: target.id })).label.id).toBe(
+        target.id,
+      );
+      yield* Deferred.await(entered);
+      expect(yield* labels.mergeFileStatus()).toEqual({ pendingMoves: 1, failedMoves: 0 });
+      expect((yield* labels.list()).labels.map((label) => label.id)).toEqual([target.id]);
+      yield* Deferred.succeed(release, undefined);
+    }).pipe(Effect.provide(makeLayer("background-files", folders)));
+  });
+
+  it.effect("a stuck journal row does not fail a committed merge or block later file moves", () =>
+    Effect.gen(function* () {
+      const labels = yield* Labels.ProjectLabelService;
+      const folders = yield* Folders.ProjectLabelFolders;
+      const fs = yield* FileSystem.FileSystem;
+      const sql = yield* SqlClient.SqlClient;
+      const source = (yield* labels.create({ name: "Source" })).label;
+      const target = (yield* labels.create({ name: "Target" })).label;
+      const from = (yield* folders.dirForLabel(source)).dir;
+      const to = (yield* folders.dirForLabel(target)).dir;
+      yield* sql`INSERT INTO project_merge_file_moves(source,target,directory) VALUES (${`${from}/missing`},${`${to}/missing`},1)`;
+      yield* fs.writeFileString(`${from}/Resources/note.md`, "saved");
+      expect((yield* labels.merge({ sourceId: source.id, targetId: target.id })).label.id).toBe(
+        target.id,
+      );
+      yield* folders.reconcileMerges;
+      expect(yield* fs.readFileString(`${to}/Resources/note.md`)).toBe("saved");
+      expect(yield* labels.mergeFileStatus()).toEqual({ pendingMoves: 1, failedMoves: 1 });
+      // A later retry can finish the same row, and its failure status clears.
+      yield* fs.makeDirectory(`${from}/missing`);
+      yield* fs.writeFileString(`${from}/missing/recovered.txt`, "recovered");
+      yield* folders.reconcileMerges;
+      expect(yield* fs.readFileString(`${to}/missing/recovered.txt`)).toBe("recovered");
+      expect(yield* labels.mergeFileStatus()).toEqual({ pendingMoves: 0, failedMoves: 0 });
+      expect((yield* labels.list()).labels.map((label) => label.id)).toEqual([target.id]);
+    }).pipe(Effect.provide(makeLayer("stuck-row"))),
   );
 
   it.effect("defers missing targets and redirects facts and filing that arrive after a merge", () =>
@@ -397,6 +541,9 @@ describe("project merge", () => {
       yield* labels.dismissDuplicate({ id: source.id, otherId: target.id });
       yield* sync;
       expect((yield* peerLabels.read(source.id)).label.possibleDuplicateIds).toEqual([]);
+      yield* labels.undismissDuplicate({ id: target.id, otherId: source.id });
+      yield* sync;
+      expect((yield* peerLabels.read(source.id)).label.possibleDuplicateIds).toEqual([target.id]);
       yield* two(seed);
       const peerSql = yield* two(SqlClient.SqlClient);
       yield* peerSql`INSERT INTO thread_project_labels(thread_id,label_id) VALUES ('replica',${source.id})`;

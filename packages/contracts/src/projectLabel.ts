@@ -515,6 +515,11 @@ export const ProjectLabelKey = Schema.Struct({ id: ProjectLabelId });
 export const ProjectLabelListResult = Schema.Struct({
   labels: Schema.Array(ProjectLabelWithRepositories),
 });
+export const ProjectMergeFileStatus = Schema.Struct({
+  pendingMoves: Schema.Number,
+  failedMoves: Schema.Number,
+});
+export type ProjectMergeFileStatus = typeof ProjectMergeFileStatus.Type;
 export const ProjectLabelMergeInput = Schema.Struct({
   sourceId: ProjectLabelId,
   targetId: ProjectLabelId,

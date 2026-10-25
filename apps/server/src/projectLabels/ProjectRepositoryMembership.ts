@@ -7,6 +7,7 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 
+import { resolveProjectLabelId } from "../sync/ProjectMergeProjection.ts";
 import * as ServerConfig from "../config.ts";
 import * as ProjectLabelFolders from "./ProjectLabelFolders.ts";
 
@@ -40,9 +41,13 @@ const make = Effect.gen(function* () {
 
   return ProjectRepositoryMembership.of({
     validate: Effect.fn("ProjectRepositoryMembership.validate")(function* (input) {
-      const folderId = input.projectFolderId;
-      if (folderId == null) return;
+      const requestedFolderId = input.projectFolderId;
+      if (requestedFolderId == null) return;
       yield* Effect.gen(function* () {
+        const folderId =
+          (yield* resolveProjectLabelId(requestedFolderId).pipe(
+            Effect.provideService(SqlClient.SqlClient, sql),
+          )) ?? requestedFolderId;
         const labels = yield* sql<{ readonly name: string }>`
           SELECT name FROM project_labels WHERE label_id = ${folderId}`;
         const label = labels[0] ?? { name: folderId };
@@ -82,7 +87,7 @@ const make = Effect.gen(function* () {
             ? cause
             : new ProjectRepositoryMembershipError({
                 projectId: input.projectId,
-                projectFolderId: folderId,
+                projectFolderId: requestedFolderId,
                 cause,
               }),
         ),

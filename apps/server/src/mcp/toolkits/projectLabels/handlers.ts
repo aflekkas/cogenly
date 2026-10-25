@@ -168,6 +168,12 @@ export const layer = McpToolAccess.toLayer(ProjectLabelsToolkit, {
       return yield* labels.dismissDuplicate(input).pipe(Effect.mapError(failure));
     }),
   ),
+  project_label_undismiss_duplicate: McpToolAccess.writesEnvironment((input) =>
+    Effect.gen(function* () {
+      const labels = yield* Labels.ProjectLabelService;
+      return yield* labels.undismissDuplicate(input).pipe(Effect.mapError(failure));
+    }),
+  ),
   project_label_delete: McpToolAccess.writes((input) =>
     Effect.gen(function* () {
       const labels = yield* Labels.ProjectLabelService;

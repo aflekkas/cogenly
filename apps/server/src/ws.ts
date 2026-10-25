@@ -1665,7 +1665,10 @@ const makeWsRpcHandlers = (
       [WS_METHODS.projectLabelsSubscribe]: () => projectLabels.subscribe(),
       [WS_METHODS.projectLabelsCreate]: (input) => projectLabels.create(input),
       [WS_METHODS.projectLabelsUpdate]: (input) => projectLabels.update(input),
+      [WS_METHODS.projectLabelsMergeFileStatus]: () => projectLabels.mergeFileStatus(),
       [WS_METHODS.projectLabelsMerge]: (input) => projectLabels.merge(input),
+      [WS_METHODS.projectLabelsUndismissDuplicate]: (input) =>
+        projectLabels.undismissDuplicate(input),
       [WS_METHODS.projectLabelsDismissDuplicate]: (input) => projectLabels.dismissDuplicate(input),
       [WS_METHODS.projectLabelsDelete]: (input) => projectLabels.delete(input.id),
       [WS_METHODS.projectLabelsArchive]: (input) => projectLabels.archive(input.id),

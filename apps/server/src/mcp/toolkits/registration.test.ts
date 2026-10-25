@@ -588,6 +588,7 @@ const smokeCases = [
       "project_label_update",
       "project_label_merge",
       "project_label_dismiss_duplicate",
+      "project_label_undismiss_duplicate",
       "project_label_delete",
       "project_label_archive",
       "project_label_unarchive",

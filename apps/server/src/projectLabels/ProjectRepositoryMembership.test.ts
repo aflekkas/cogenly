@@ -64,6 +64,34 @@ describe("project repository membership", () => {
     }).pipe(Effect.provide(layer)),
   );
 
+  it.effect("follows merged-away project ids for local and portable launches", () =>
+    Effect.gen(function* () {
+      yield* seed;
+      const sql = yield* SqlClient.SqlClient;
+      const oldId = ProjectLabelId.make("label:old");
+      const middleId = ProjectLabelId.make("label:middle");
+      for (const [id, target] of [
+        [oldId, middleId],
+        [middleId, projectFolderId],
+      ])
+        yield* sql`INSERT INTO shared_documents(kind,id,fields_json,clocks_json,tombstone_json,updated_by_env)
+          VALUES ('project',${id},${JSON.stringify({ mergedInto: target })},'{}','{}','local')`;
+      const remote = "github.com/acme/cogenly";
+      yield* sql`INSERT INTO label_repositories(label_id,repository_id,remote) VALUES (${projectFolderId},${projectId},${remote})`;
+      const membership = yield* Membership.ProjectRepositoryMembership;
+      yield* membership.validate({ projectId, projectFolderId: oldId });
+      yield* membership.validate({ projectId, projectFolderId: oldId, repositoryRemote: remote });
+      const error = yield* Effect.flip(
+        membership.validate({
+          projectId,
+          projectFolderId: oldId,
+          repositoryRemote: "github.com/other/repo",
+        }),
+      );
+      expect(error).toMatchObject({ projectFolderId, projectName: "Spawn Partners" });
+    }).pipe(Effect.provide(layer)),
+  );
+
   it.effect("exempts scratch and the project's own folder, but not another project's folder", () =>
     Effect.gen(function* () {
       yield* seed;

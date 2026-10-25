@@ -1,6 +1,7 @@
 import {
   PROJECT_REPOSITORIES_SEGMENT,
   ProjectLabelId,
+  type ProjectMergeFileStatus,
   type ProjectOrphanFolder,
 } from "@cogenly/contracts";
 import * as HostProcess from "@cogenly/shared/HostProcess";
@@ -56,6 +57,7 @@ export interface ProjectLabelRef {
 export class ProjectLabelFolders extends Context.Service<
   ProjectLabelFolders,
   {
+    readonly mergeFileStatus: Effect.Effect<ProjectMergeFileStatus, ProjectLabelFolderError>;
     readonly reconcileMerges: Effect.Effect<void, ProjectLabelFolderError>;
     /** The resolved projects root. Blank settings land in `<Cogenly home>/projects`. */
     readonly projectsRoot: Effect.Effect<string, ProjectLabelFolderError>;
@@ -130,6 +132,30 @@ const make = Effect.gen(function* () {
   // Label id to directory name, from the last reconcile or refresh.
   const folders = yield* Ref.make(new Map<string, string>());
   const mergePermit = yield* Semaphore.make(1);
+  const failedMoves = yield* Ref.make(new Set<string>());
+  const deferMove = (source: string, cause: unknown) =>
+    Ref.update(failedMoves, (failed) => new Set([...failed, source])).pipe(
+      Effect.andThen(Effect.logWarning("Project merge file move deferred", { source, cause })),
+    );
+  const clearFailedMove = (source: string) =>
+    Ref.update(failedMoves, (failed) => {
+      const next = new Set(failed);
+      next.delete(source);
+      return next;
+    });
+  const mergeFileStatus = Effect.gen(function* () {
+    const pending = yield* sql<{
+      count: number;
+    }>`SELECT count(*) AS count FROM project_merge_file_moves WHERE complete=0`;
+    return {
+      pendingMoves: pending[0]?.count ?? 0,
+      failedMoves: (yield* Ref.get(failedMoves)).size,
+    };
+  }).pipe(
+    Effect.mapError(
+      (cause) => new ProjectLabelFolderError({ operation: "read merge file status", cause }),
+    ),
+  );
 
   const fail = (operation: string, label?: ProjectLabelRef, dir?: string) => (cause: unknown) =>
     new ProjectLabelFolderError({
@@ -407,47 +433,59 @@ const make = Effect.gen(function* () {
   ): Effect.Effect<void, ProjectLabelFolderError> =>
     Effect.gen(function* () {
       const entries = yield* fileSystem.readDirectory(source);
-      for (const entry of entries) {
-        if (entry === PROJECT_LABEL_ID_FILE) continue;
-        const from = path.join(source, entry);
-        const to = path.join(target, entry);
-        const link = yield* fileSystem.readLink(from).pipe(Effect.option);
-        if (Option.isSome(link)) {
-          const forwarding =
-            yield* sql`SELECT 1 FROM project_merge_file_moves WHERE source=${from} AND target=${link.value} AND complete=1`;
-          if (forwarding.length > 0) continue;
-          // Preserve a user symlink itself; never recurse into a symlink's destination.
+      for (const entry of entries)
+        yield* Effect.gen(function* () {
+          if (entry === PROJECT_LABEL_ID_FILE) return;
+          const from = path.join(source, entry);
+          const to = path.join(target, entry);
+          const link = yield* fileSystem.readLink(from).pipe(Effect.option);
+          if (Option.isSome(link)) {
+            const forwarding =
+              yield* sql`SELECT 1 FROM project_merge_file_moves WHERE source=${from} AND target=${link.value} AND complete=1`;
+            if (forwarding.length > 0) return;
+            // Preserve a user symlink itself; never recurse into a symlink's destination.
+            let destination = to;
+            for (let i = 2; yield* fileSystem.exists(destination); i++)
+              destination = path.join(
+                target,
+                `${path.parse(entry).name} (${i})${path.extname(entry)}`,
+              );
+            yield* fileSystem.symlink(path.resolve(source, link.value), destination);
+            yield* fileSystem.remove(from);
+            return;
+          }
+          // An incomplete journal entry is retried independently above; do not
+          // insert it again or let it stop unrelated files in this directory.
+          if ((yield* sql`SELECT 1 FROM project_merge_file_moves WHERE source=${from}`).length > 0)
+            return;
+          const info = yield* fileSystem.stat(from);
+          const destinationLink = yield* fileSystem.readLink(to).pipe(Effect.option);
+          if (
+            info.type === "Directory" &&
+            !isWorktreesSegment(entry) &&
+            !(yield* fileSystem.exists(path.join(from, ".git"))) &&
+            !(yield* fileSystem.exists(path.join(to, ".git"))) &&
+            Option.isNone(destinationLink) &&
+            (yield* isDirectory(to))
+          ) {
+            yield* mergeDirectory(from, to);
+            return;
+          }
           let destination = to;
           for (let i = 2; yield* fileSystem.exists(destination); i++)
             destination = path.join(
               target,
               `${path.parse(entry).name} (${i})${path.extname(entry)}`,
             );
-          yield* fileSystem.symlink(path.resolve(source, link.value), destination);
-          yield* fileSystem.remove(from);
-          continue;
-        }
-        const info = yield* fileSystem.stat(from);
-        const destinationLink = yield* fileSystem.readLink(to).pipe(Effect.option);
-        if (
-          info.type === "Directory" &&
-          Option.isNone(destinationLink) &&
-          (yield* isDirectory(to))
-        ) {
-          yield* mergeDirectory(from, to);
-          continue;
-        }
-        let destination = to;
-        for (let i = 2; yield* fileSystem.exists(destination); i++)
-          destination = path.join(target, `${path.parse(entry).name} (${i})${path.extname(entry)}`);
-        const move = {
-          source: from,
-          target: destination,
-          directory: info.type === "Directory" ? 1 : 0,
-        };
-        yield* sql`INSERT INTO project_merge_file_moves(source,target,directory) VALUES (${from},${destination},${move.directory})`;
-        yield* resumeMove(move);
-      }
+          const move = {
+            source: from,
+            target: destination,
+            directory: info.type === "Directory" ? 1 : 0,
+          };
+          yield* sql`INSERT INTO project_merge_file_moves(source,target,directory) VALUES (${from},${destination},${move.directory})`;
+          yield* resumeMove(move);
+          yield* clearFailedMove(from);
+        }).pipe(Effect.catch((cause) => deferMove(path.join(source, entry), cause)));
     }).pipe(Effect.mapError(fail("merge files")));
   const reconcileMerges = mergePermit.withPermits(1)(
     Effect.gen(function* () {
@@ -456,28 +494,40 @@ const make = Effect.gen(function* () {
         target: string;
         directory: number;
       }>`SELECT source,target,directory FROM project_merge_file_moves WHERE complete=0`;
-      for (const move of pending) yield* resumeMove(move);
+      for (const move of pending)
+        yield* resumeMove(move).pipe(
+          Effect.tap(() => clearFailedMove(move.source)),
+          Effect.catch((cause) => deferMove(move.source, cause)),
+        );
       const merges = yield* sql<{
         id: string;
         name: string;
         target: string;
       }>`SELECT id,COALESCE(json_extract(fields_json,'$.mergeSourceName'),json_extract(fields_json,'$.name')) AS name,json_extract(fields_json,'$.mergedInto') AS target FROM shared_documents WHERE kind='project' AND tombstone_json IS NOT NULL AND json_type(fields_json,'$.mergedInto')='text'`;
       yield* scanFolders;
-      for (const merge of merges) {
-        const targetId = yield* resolveProjectLabelId(merge.target);
-        if (!targetId) continue;
-        const targets = yield* sql<{
-          name: string;
-        }>`SELECT name FROM project_labels WHERE label_id=${targetId}`;
-        if (!targets[0] || !merge.name) continue;
-        // Only a marker claiming the source can be moved. A fallback by name could
-        // otherwise take a different same-name project's files after restart.
-        const sourceName = (yield* Ref.get(folders)).get(merge.id);
-        if (!sourceName) continue;
-        const sourceDir = path.join(yield* projectsRoot, sourceName);
-        const target = yield* ensureForLabel({ id: targetId, name: targets[0].name });
-        if (sourceDir !== target.dir) yield* mergeDirectory(sourceDir, target.dir);
-      }
+      for (const merge of merges)
+        yield* Effect.gen(function* () {
+          const targetId = yield* resolveProjectLabelId(merge.target);
+          if (!targetId) return;
+          const targets = yield* sql<{
+            name: string;
+          }>`SELECT name FROM project_labels WHERE label_id=${targetId}`;
+          if (!targets[0] || !merge.name) return;
+          // Only a marker claiming the source can be moved. A fallback by name could
+          // otherwise take a different same-name project's files after restart.
+          const sourceName = (yield* Ref.get(folders)).get(merge.id);
+          if (!sourceName) return;
+          const sourceDir = path.join(yield* projectsRoot, sourceName);
+          const target = yield* ensureForLabel({ id: targetId, name: targets[0].name });
+          if (sourceDir !== target.dir)
+            yield* mergeDirectory(sourceDir, target.dir).pipe(
+              Effect.tap(() => clearFailedMove(sourceDir)),
+              Effect.catch((cause) => deferMove(sourceDir, cause)),
+            );
+        }).pipe(
+          Effect.tap(() => clearFailedMove(merge.id)),
+          Effect.catch((cause) => deferMove(merge.id, cause)),
+        );
     }).pipe(Effect.provideService(SqlClient.SqlClient, sql), Effect.mapError(fail("merge files"))),
   );
 
@@ -577,6 +627,7 @@ const make = Effect.gen(function* () {
 
   return ProjectLabelFolders.of({
     reconcileMerges,
+    mergeFileStatus,
     claimForLabel,
     removeSkeleton,
     listOrphans,

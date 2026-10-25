@@ -116,6 +116,13 @@ export const ProjectLabelsToolkit = Toolkit.make(
     description:
       "Keep two possible duplicate projects separate. Dismiss the suggestion for id and otherId on every paired machine; both projects and all their contents remain.",
   }).annotate(Tool.Destructive, false),
+  Tool.make("project_label_undismiss_duplicate", {
+    ...shared,
+    parameters: ProjectLabelDismissDuplicateInput,
+    success: ProjectLabelMutationResult,
+    description:
+      "Restore the possible-duplicate suggestion for id and otherId on every paired machine after keeping them separate. Both projects and their contents remain.",
+  }).annotate(Tool.Destructive, false),
   Tool.make("project_label_delete", {
     ...shared,
     parameters: ProjectLabelKey,

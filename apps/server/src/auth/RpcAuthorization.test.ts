@@ -39,13 +39,14 @@ import {
 import * as RpcAuthorization from "./RpcAuthorization.ts";
 
 describe("RPC authorization scopes", () => {
-  it.each([WS_METHODS.projectLabelsMerge, WS_METHODS.projectLabelsDismissDuplicate])(
-    "requires the operate grant for %s on server and client",
-    (method) => {
-      expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationOperateScope);
-      expect(clientRpcRequiredScopes(method, {})).toEqual([AuthOrchestrationOperateScope]);
-    },
-  );
+  it.each([
+    WS_METHODS.projectLabelsMerge,
+    WS_METHODS.projectLabelsDismissDuplicate,
+    WS_METHODS.projectLabelsUndismissDuplicate,
+  ])("requires the operate grant for %s on server and client", (method) => {
+    expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationOperateScope);
+    expect(clientRpcRequiredScopes(method, {})).toEqual([AuthOrchestrationOperateScope]);
+  });
   it("requires orchestration read access for global search", () => {
     expect(requiredScopeForRpcMethod(WS_METHODS.searchQuery)).toBe(AuthOrchestrationReadScope);
   });
@@ -78,6 +79,9 @@ describe("RPC authorization scopes", () => {
   });
 
   it("requires operate access to create a project's chat", () => {
+    expect(requiredScopeForRpcMethod(WS_METHODS.projectLabelsMergeFileStatus)).toBe(
+      AuthOrchestrationReadScope,
+    );
     expect(requiredScopeForRpcMethod(WS_METHODS.projectLabelsEnsureProjectChat)).toBe(
       AuthOrchestrationOperateScope,
     );
