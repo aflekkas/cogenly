@@ -13,9 +13,9 @@ connections are local to a client profile; the server's identity and state are
 not. Separately, [machine peer links](./machines.md) let an admin pair servers
 under one hub. A spoke stores its own peer credential and dials the hub; that
 server-owned link does not use the client's saved connection catalog. It
-currently carries presence and typed channels, with no project or thread
-replication or remote execution. Projects and threads still execute and persist
-in their original environment.
+carries presence, shared configuration and replicated thread histories through
+typed channels. A thread has one execution owner; remote launch, fork and move
+services coordinate that owner over the peer link. See [shared state](./sync.md).
 
 A repository identity correlates clones across environments. The canonical key follows the `upstream` remote when one exists, so pull request
 features target the repository a fork tracks. A fork also reports its own
