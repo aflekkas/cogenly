@@ -416,10 +416,16 @@ const account = (instanceId: ProviderInstanceId, usedPercent: number, now: DateT
  * spent; B has headroom.
  */
 const setupHandoff = (options?: {
+  readonly firstCandidateRefuses?: boolean;
   /** Runs once, mid-sweep, after the sweep read its candidates and before it hands off. */
   readonly midSweep?: (orchestrator: Orchestrator.OrchestratorV2["Service"]) => Effect.Effect<void>;
 }) => {
-  const provider = makeControllableProvider(CodexProviderCapabilitiesV2, [accountA, accountB]);
+  const accountC = ProviderInstanceId.make("codex-c");
+  const provider = makeControllableProvider(CodexProviderCapabilitiesV2, [
+    accountA,
+    accountB,
+    accountC,
+  ]);
   let midSweep = options?.midSweep;
   const database = Sqlite.layerMemory;
   const base = Layer.mergeAll(
@@ -442,7 +448,18 @@ const setupHandoff = (options?: {
     Effect.gen(function* () {
       const orchestrator = yield* Orchestrator.OrchestratorV2;
       return Layer.mock(ThreadManagementService.ThreadManagementService)({
-        dispatch: orchestrator.dispatch,
+        dispatch: (command) =>
+          options?.firstCandidateRefuses &&
+          command.type === "message.dispatch" &&
+          command.modelSelection?.instanceId === accountB
+            ? Effect.fail(
+                new Orchestrator.OrchestratorDispatchError({
+                  commandId: command.commandId,
+                  commandType: command.type,
+                  cause: "Target refused",
+                }),
+              )
+            : orchestrator.dispatch(command),
         getThreadRecords: (...args) =>
           Effect.suspend(() => {
             const hook = midSweep;
@@ -457,9 +474,10 @@ const setupHandoff = (options?: {
     getProviders: Effect.map(DateTime.now, (now) => [
       account(accountA, 100, now),
       account(accountB, 20, now),
+      ...(options?.firstCandidateRefuses ? [account(accountC, 30, now)] : []),
     ]),
   });
-  const settings = ServerSettings.layerTest({}).pipe(Layer.orDie);
+  const settings = ServerSettings.layerTest({ autoResumeLimitedThreads: true }).pipe(Layer.orDie);
   const recovery = UsageLimitRecoveryWorker.layer.pipe(
     Layer.provide(UsageLimitHandoff.layer),
     Layer.provideMerge(Layer.mergeAll(threads, registry, settings, scheduler)),
@@ -755,6 +773,109 @@ it.effect("a Stop on a delegated child still recovering from a limit ends the re
       (yield* orchestrator.getThreadProjection(parentId)).messages.some((message) =>
         message.id.startsWith("message:delegated-task-failure:"),
       ),
+    ).toBe(false);
+  }).pipe(Effect.provide(runtime));
+});
+
+// A refusal restores the scheduled reset before the next candidate is tried.
+it.effect("hands off to the second target after the first target refuses", () => {
+  const { provider, runtime, sweep } = setupHandoff({ firstCandidateRefuses: true });
+  return Effect.gen(function* () {
+    const { orchestrator, childId } = yield* delegateIntoQuota(provider);
+    yield* sweep;
+    expect(
+      (yield* orchestrator.getThreadProjection(childId)).thread.modelSelection.instanceId,
+    ).toBe("codex-c");
+  }).pipe(Effect.provide(runtime));
+});
+
+it.effect("releases a delegated child's held messages onto its handoff model", () => {
+  const { provider, runtime, sweep } = setupHandoff();
+  return Effect.gen(function* () {
+    const { orchestrator, worker, childId, failedRun } = yield* delegateIntoQuota(provider);
+    yield* orchestrator.dispatch({
+      type: "message.dispatch",
+      commandId: CommandId.make("queued-notice"),
+      threadId: childId,
+      messageId: MessageId.make("message:held"),
+      text: "Check the background result",
+      attachments: [],
+      dispatchMode: { type: "queue_after_active" },
+      createdBy: "agent",
+      creationSource: "server",
+    });
+    expect((yield* orchestrator.getThreadProjection(childId)).runs.at(-1)?.queueHeld).toBe(true);
+    yield* sweep;
+    const queued = (yield* orchestrator.getThreadProjection(childId)).runs.find(
+      (run) => run.status === "queued",
+    )!;
+    expect(queued).toMatchObject({
+      queueHeld: false,
+      providerInstanceId: accountB,
+      modelSelection: { instanceId: accountB, model: "gpt-5" },
+    });
+    yield* worker.drain();
+    const input = provider.turns.find(
+      (turn) => turn.threadId === childId && turn.runId !== failedRun.id,
+    )!;
+    yield* waitFor(
+      orchestrator,
+      childId,
+      (row) =>
+        row.event.type === "provider-turn.updated" &&
+        row.event.payload.runAttemptId === input.attemptId,
+    );
+    const turn = (yield* orchestrator.getThreadProjection(childId)).providerTurns.find(
+      (turn) => turn.runAttemptId === input.attemptId,
+    )!;
+    yield* provider.finish(input, turn.id);
+    yield* waitFor(
+      orchestrator,
+      childId,
+      (row) =>
+        row.event.type === "run.updated" &&
+        row.event.payload.id === input.runId &&
+        row.event.payload.status === "waiting",
+    );
+    yield* worker.drain();
+    expect(
+      provider.turns.find((turn) => turn.runId === queued.id)?.providerThread.providerInstanceId,
+    ).toBe(accountB);
+  }).pipe(Effect.provide(runtime));
+});
+
+it.effect("a manual handoff after Don't resume leaves the parent's published result alone", () => {
+  const { provider, runtime } = setupHandoff();
+  return Effect.gen(function* () {
+    const { orchestrator, worker, childId, failedRun } = yield* delegateIntoQuota(provider);
+    const resetAt = (yield* orchestrator.getThreadShell(childId))!.usageLimitResetAt!;
+    yield* orchestrator.dispatch({
+      type: "thread.metadata.update",
+      commandId: CommandId.make("dont-resume"),
+      threadId: childId,
+      limitRecovery: { runId: failedRun.id, resetAt, autoResume: false },
+    });
+    const published = (yield* orchestrator.getThreadProjection(parentId)).subagents[0]!.result;
+    expect(published).not.toBeNull();
+    const identity = `${childId}:${failedRun.id}:${accountB}`;
+    yield* orchestrator.dispatch({
+      type: "message.dispatch",
+      commandId: CommandId.make(`limit-handoff:${identity}`),
+      messageId: MessageId.make(`limit-handoff:${identity}`),
+      threadId: childId,
+      manualContinuationOfRunId: failedRun.id,
+      modelSelection: { instanceId: accountB, model: "gpt-5" },
+      text: "Continue where you left off.",
+      attachments: [],
+      dispatchMode: { type: "start_immediately" },
+      createdBy: "user",
+      creationSource: "web",
+    });
+    yield* worker.drain();
+    const parent = yield* orchestrator.getThreadProjection(parentId);
+    expect(parent.subagents[0]!.result).toBe(published);
+    expect(
+      parent.messages.some((message) => message.id.startsWith("message:delegated-task-recovery:")),
     ).toBe(false);
   }).pipe(Effect.provide(runtime));
 });

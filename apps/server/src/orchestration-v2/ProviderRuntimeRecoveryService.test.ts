@@ -506,3 +506,87 @@ it.effect("startup keeps the interrupted outcome when resuming is turned off", (
     expect(state.continuation).toBeUndefined();
   }).pipe(Effect.provide(recoveryRuntime(false))),
 );
+
+it.effect("startup leaves a delegated child's queued server notices deliverable", () =>
+  Effect.gen(function* () {
+    const sink = yield* EventSink.EventSinkV2;
+    const projections = yield* Projections.ProjectionStoreV2;
+    const recovery = yield* Recovery.ProviderRuntimeRecoveryService;
+    const at = yield* DateTime.now;
+    const threadId = ThreadId.make("thread:child-notice");
+    const base = idleThreadProjection(liveThreadShell(threadId)).thread;
+    const run: OrchestrationV2Run = {
+      id: RunId.make("run:notice"),
+      threadId,
+      ordinal: 1,
+      providerInstanceId: base.providerInstanceId,
+      modelSelection: base.modelSelection,
+      providerThreadId: null,
+      userMessageId: MessageId.make("message:notice"),
+      rootNodeId: null,
+      activeAttemptId: null,
+      status: "queued",
+      queuePosition: 1,
+      requestedAt: at,
+      startedAt: null,
+      completedAt: null,
+      checkpointId: null,
+      contextHandoffId: null,
+    };
+    yield* sink.write({
+      events: [
+        {
+          id: EventId.make("event:notice-thread"),
+          type: "thread.created",
+          threadId,
+          occurredAt: at,
+          payload: {
+            ...base,
+            lineage: {
+              parentThreadId: ThreadId.make("thread:parent"),
+              rootThreadId: ThreadId.make("thread:parent"),
+              relationshipToParent: "subagent",
+            },
+          },
+        },
+        {
+          id: EventId.make("event:notice-message"),
+          type: "message.updated",
+          threadId,
+          occurredAt: at,
+          payload: {
+            id: run.userMessageId,
+            threadId,
+            runId: run.id,
+            nodeId: null,
+            role: "user",
+            text: "A server task finished",
+            attachments: [],
+            createdBy: "agent",
+            creationSource: "server",
+            streaming: false,
+            createdAt: at,
+            updatedAt: at,
+            notification: {
+              source: { kind: "system" },
+              outcome: "completed",
+              summary: "Task finished",
+            },
+          },
+        },
+        {
+          id: EventId.make("event:notice-run"),
+          type: "run.created",
+          threadId,
+          runId: run.id,
+          occurredAt: at,
+          payload: run,
+        },
+      ],
+    });
+    yield* recovery.recover;
+    expect((yield* projections.getThreadRecords(threadId, ["runs"])).runs[0]?.queueHeld).not.toBe(
+      true,
+    );
+  }).pipe(Effect.provide(runtime)),
+);

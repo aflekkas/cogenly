@@ -563,6 +563,7 @@ export interface RunExecutionServiceV2StartRootRunInput {
   readonly shouldFinalizeRun?: () => Effect.Effect<boolean, ProjectionStoreV2Error>;
   readonly hasUnpairedRunInterruptRequest?: () => Effect.Effect<boolean, never>;
   readonly message: ProviderAdapter.ProviderAdapterV2TurnMessage;
+  readonly rawUserText?: string;
   readonly modelSelection: ModelSelection;
   readonly runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy;
 }
@@ -1526,7 +1527,7 @@ export const layer: Layer.Layer<
 
           const compact =
             input.message.attachments.length === 0 &&
-            input.message.text.trim().toLowerCase() === "/compact";
+            (input.rawUserText ?? input.message.text).trim().toLowerCase() === "/compact";
           const startTurn = compact
             ? (input.session.compactThread?.(turnInput) ??
               Effect.fail(

@@ -12,13 +12,14 @@ import * as Stream from "effect/Stream";
 
 import * as MachinesTurnContext from "../orchestration-v2/MachinesTurnContext.ts";
 import * as Machines from "./Machines.ts";
+import { normalizeMachineName } from "./machineName.ts";
 
 const machineLine = (machine: MachineInfo, isHub: boolean) => {
   const roles = [
     ...(machine.relation === "this" ? ["this machine"] : []),
     ...(isHub ? ["hub"] : []),
   ];
-  const name = machine.name.replace(/\s+/g, " ");
+  const name = normalizeMachineName(machine.name);
   const state = machine.online ? "online" : "offline";
   return `- ${name} (${machine.hardware}, ${state})${roles.length === 0 ? "" : ` — ${roles.join(", ")}`}`;
 };

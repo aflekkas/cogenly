@@ -328,7 +328,7 @@ export const deliverDelegatedTaskRecoveryNotice = Effect.fn(
       candidate.origin === "app_owned" &&
       candidate.childThreadId === input.childThreadId,
   );
-  if (task === undefined) return;
+  if (task === undefined || task.result !== null) return;
   const notice = delegatedTaskRecoveryNotice({
     taskId: task.id,
     childThreadId: input.childThreadId,

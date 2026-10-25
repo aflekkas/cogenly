@@ -651,3 +651,167 @@ it.effect("a Codex native subagent whose thread cannot resume starts seeded inst
     ]);
   }).pipe(Effect.provide(layer(provider, "subagent-interjection-codex-fallback")));
 });
+
+it.effect.each(["thread.stop", "run.interrupt"] as const)(
+  "a follow-up reopens a parent cohort after %s",
+  (type) => {
+    const provider = makeProvider(true);
+    return Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const worker = yield* Worker.OrchestrationEffectWorkerV2;
+      const owner = yield* startParent;
+      const childId = yield* delegate(owner);
+      yield* finishLatestTurn(provider, childId);
+      yield* awaitStored(
+        parentThreadId,
+        (row) => row.event.type === "subagent.updated" && row.event.payload.status === "completed",
+      );
+      yield* worker.drain();
+      yield* orchestrator.dispatch(
+        type === "run.interrupt"
+          ? {
+              type,
+              commandId: CommandId.make("stop-owner"),
+              threadId: parentThreadId,
+              runId: owner.id,
+            }
+          : { type, commandId: CommandId.make("stop-owner"), threadId: parentThreadId },
+      );
+      yield* worker.drain();
+      expect(
+        (yield* orchestrator.getThreadProjection(parentThreadId)).runs.find(
+          (run) => run.id === owner.id,
+        )?.delegatedCompletion?.disposition,
+      ).toBe("stopped");
+      yield* orchestrator.dispatch(userMessage(childId, "after-stop", "Try the new approach"));
+      yield* worker.drain();
+      const followUp = (yield* orchestrator.getThreadProjection(parentThreadId)).subagents.find(
+        (task) => task.followUpOf !== undefined,
+      )!;
+      yield* finishLatestTurn(provider, childId);
+      yield* awaitStored(
+        parentThreadId,
+        (row) =>
+          row.event.type === "subagent.updated" &&
+          row.event.payload.id === followUp.id &&
+          row.event.payload.status === "completed",
+      );
+      const parent = yield* orchestrator.getThreadProjection(parentThreadId);
+      expect(
+        parent.runs.find((run) => run.id === owner.id)?.delegatedCompletion?.delivery?.taskIds,
+      ).toContain(followUp.id);
+      yield* awaitStored(
+        parentThreadId,
+        (row) =>
+          row.event.type === "message.updated" &&
+          row.event.payload.delegatedCompletion?.taskIds.includes(followUp.id) === true,
+      );
+    }).pipe(Effect.provide(layer(provider, "followup-stopped-owner")));
+  },
+);
+
+it.effect.each(["queued-run.cancel", "queue.send-all"] as const)(
+  "%s disposes an unstarted follow-up without waking its parent",
+  (type) => {
+    const provider = makeProvider(true);
+    return Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const worker = yield* Worker.OrchestrationEffectWorkerV2;
+      const childId = yield* delegate(yield* startParent);
+      yield* finishLatestTurn(provider, childId);
+      yield* awaitStored(
+        parentThreadId,
+        (row) => row.event.type === "subagent.updated" && row.event.payload.status === "completed",
+      );
+      yield* worker.drain();
+      yield* orchestrator.dispatch(userMessage(childId, "followup-active", "First follow-up"));
+      yield* worker.drain();
+      yield* awaitStored(
+        childId,
+        (row) => row.event.type === "provider-turn.updated" && row.event.payload.ordinal === 2,
+      );
+      yield* orchestrator.dispatch({
+        ...userMessage(childId, "followup-queued", "Second follow-up"),
+        deliveryIntent: undefined,
+        dispatchMode: { type: "queue_after_active" },
+      });
+      const queued = (yield* orchestrator.getThreadProjection(childId)).runs.find(
+        (run) => run.status === "queued",
+      )!;
+      const taskId = queued.delegatedTaskId!;
+      expect(taskId).toBeDefined();
+      yield* orchestrator.dispatch(
+        type === "queued-run.cancel"
+          ? {
+              type,
+              commandId: CommandId.make("remove-followup"),
+              threadId: childId,
+              runId: queued.id,
+            }
+          : { type, commandId: CommandId.make("remove-followup"), threadId: childId },
+      );
+      yield* orchestrator.recoverDelegatedTasks;
+      yield* worker.drain();
+      const parent = yield* orchestrator.getThreadProjection(parentThreadId);
+      expect(parent.subagents.find((task) => task.id === taskId)?.completionDelivery?.state).toBe(
+        "disposed",
+      );
+      expect(
+        parent.messages.some((message) => message.delegatedCompletion?.taskIds.includes(taskId)),
+      ).toBe(false);
+      expect(
+        parent.messages.some((message) =>
+          message.notification?.delegatedFailures?.some((failure) => failure.taskId === taskId),
+        ),
+      ).toBe(false);
+    }).pipe(Effect.provide(layer(provider, "cancel-queued-followup")));
+  },
+);
+
+it.effect("a queued follow-up becomes running when its run starts", () => {
+  const provider = makeProvider(false);
+  return Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const worker = yield* Worker.OrchestrationEffectWorkerV2;
+    const childId = yield* delegate(yield* startParent);
+    yield* finishLatestTurn(provider, childId);
+    yield* awaitStored(
+      parentThreadId,
+      (row) => row.event.type === "subagent.updated" && row.event.payload.status === "completed",
+    );
+    yield* orchestrator.dispatch(userMessage(childId, "first-followup", "First follow-up"));
+    yield* worker.drain();
+    yield* orchestrator.dispatch({
+      ...userMessage(childId, "next-followup", "Queued follow-up"),
+      dispatchMode: { type: "queue_after_active" },
+      deliveryIntent: undefined,
+    });
+    const queued = (yield* orchestrator.getThreadProjection(childId)).runs.find(
+      (run) => run.status === "queued",
+    )!;
+    expect(
+      (yield* orchestrator.getThreadProjection(parentThreadId)).subagents.find(
+        (task) => task.id === queued.delegatedTaskId,
+      )?.status,
+    ).toBe("pending");
+    yield* finishLatestTurn(provider, childId);
+    yield* worker.drain();
+    yield* awaitStored(
+      childId,
+      (row) =>
+        row.event.type === "run.updated" &&
+        row.event.payload.id === queued.id &&
+        row.event.payload.status === "running",
+    );
+    const parent = yield* orchestrator.getThreadProjection(parentThreadId);
+    expect(parent.subagents.find((task) => task.id === queued.delegatedTaskId)?.status).toBe(
+      "running",
+    );
+    expect(parent.nodes.find((node) => node.id === queued.delegatedTaskId)?.status).toBe("running");
+    expect(
+      parent.turnItems.find(
+        (item) => item.type === "subagent" && item.subagentId === queued.delegatedTaskId,
+      )?.status,
+    ).toBe("running");
+  }).pipe(Effect.provide(layer(provider, "queued-followup-running")));
+});

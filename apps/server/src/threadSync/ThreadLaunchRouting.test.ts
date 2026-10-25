@@ -1,4 +1,8 @@
 import { describe, expect, it } from "@effect/vitest";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as FileSystem from "effect/FileSystem";
+import * as Layer from "effect/Layer";
+import * as Git from "../vcs/GitVcsDriver.ts";
 import {
   CommandId,
   EnvironmentId,
@@ -233,3 +237,84 @@ describe("launching a thread on another machine", () => {
     30000,
   );
 });
+
+it.live(
+  "waits for a new checkout before importing a delegated commit bundle",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const git = yield* Git.GitVcsDriver;
+      const root = yield* fs.makeTempDirectoryScoped();
+      const sourceRoot = path.join(root, "source");
+      const targetRoot = path.join(root, "target");
+      yield* fs.makeDirectory(sourceRoot);
+      const execute = (cwd: string, args: ReadonlyArray<string>) =>
+        git.execute({ cwd, args, operation: "checkout-bundle-test" });
+      yield* execute(sourceRoot, ["init", "--initial-branch=main"]);
+      yield* execute(sourceRoot, [
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.com",
+        "commit",
+        "--allow-empty",
+        "-m",
+        "local commit",
+      ]);
+      const revision = (yield* git.resolveCommit({ cwd: sourceRoot, revision: "HEAD" })).commitSha;
+      const hub = yield* startThreadMachine(
+        "bundle-source",
+        "cloud-server",
+        undefined,
+        undefined,
+        false,
+        undefined,
+        false,
+        { git },
+      );
+      let ready = false;
+      const target = yield* startThreadMachine(
+        "bundle-target",
+        "computer",
+        undefined,
+        undefined,
+        false,
+        undefined,
+        false,
+        {
+          git,
+          checkoutRoot: () => Effect.succeed(targetRoot),
+          ensureCheckout: () =>
+            Effect.gen(function* () {
+              yield* fs.makeDirectory(targetRoot);
+              yield* execute(targetRoot, ["init", "--initial-branch=main"]);
+              ready = true;
+            }).pipe(Effect.orDie),
+        },
+      );
+      yield* pair(hub, target);
+      yield* addRacing(hub, true);
+      yield* addRacing(target, false);
+      const launched = yield* hub.remoteLaunch.launch(
+        target.environmentId,
+        launch(racingId, {
+          workspaceStrategy: { type: "worktree", baseRef: revision },
+          projectFolderId: ProjectLabelId.make("label:racing"),
+          repositorySource: { cwd: sourceRoot, revision },
+        }),
+      );
+      expect(Option.isSome(launched)).toBe(true);
+      expect(ready).toBe(true);
+      expect((yield* git.resolveCommit({ cwd: targetRoot, revision })).commitSha).toBe(revision);
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        Git.layer.pipe(
+          Layer.provideMerge(ServerConfig.layerTest("/tmp", { prefix: "checkout-bundle" })),
+          Layer.provideMerge(NodeServices.layer),
+        ),
+      ),
+    ),
+  30000,
+);

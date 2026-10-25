@@ -423,7 +423,13 @@ export const make = Effect.gen(function* () {
       const delegatedWakeIds = new Set(
         delegatedChild
           ? queuedMessages
-              .filter((message) => message.delegatedCompletion !== undefined)
+              .filter(
+                (message) =>
+                  message.delegatedCompletion !== undefined ||
+                  (message.createdBy === "agent" &&
+                    message.creationSource === "server" &&
+                    message.notification !== undefined),
+              )
               .map((message) => message.id)
           : [],
       );

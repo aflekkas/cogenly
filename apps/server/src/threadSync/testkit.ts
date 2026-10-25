@@ -86,6 +86,12 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
     readonly clone?: (remote: string) => Effect.Effect<string>;
   },
   realFiling = false,
+  lifecycle?: {
+    readonly afterLaunch?: () => Effect.Effect<void>;
+    readonly git?: Git.GitVcsDriver["Service"];
+    readonly checkoutRoot?: () => Effect.Effect<string>;
+    readonly ensureCheckout?: () => Effect.Effect<void>;
+  },
 ) {
   const machine = yield* startMachine(name, role);
   const database = Layer.succeed(SqlClient.SqlClient, yield* machine.run(SqlClient.SqlClient));
@@ -167,6 +173,7 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
               createdBy: input.createdBy,
               creationSource: input.creationSource,
             });
+          yield* lifecycle?.afterLaunch?.() ?? Effect.void;
           return {
             threadId: id,
             projection: yield* projections.getThreadProjection(id),
@@ -341,14 +348,16 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
       return Layer.mock(RepositoryCheckout.RepositoryCheckout)({
-        ensureCheckout: () => Effect.void,
+        ensureCheckout: () => lifecycle?.ensureCheckout?.() ?? Effect.void,
         checkoutRepository: ({ labelId, remote }) =>
           Effect.gen(function* () {
             checkouts.push({ labelId, remote });
             const root =
-              forkOptions?.clone === undefined
-                ? `/clones/${remote}`
-                : yield* forkOptions.clone(remote);
+              lifecycle?.checkoutRoot !== undefined
+                ? yield* lifecycle.checkoutRoot()
+                : forkOptions?.clone === undefined
+                  ? `/clones/${remote}`
+                  : yield* forkOptions.clone(remote);
             const repositoryId = ProjectId.make(`project:clone:${remote}`);
             yield* sql`INSERT OR IGNORE INTO projection_projects(project_id, title, workspace_root, auto_pull, scripts_json, created_at, updated_at)
               VALUES (${repositoryId}, ${remote}, ${root}, 0, '[]', '2026-10-24T00:00:00.000Z', '2026-10-24T00:00:00.000Z')`;
@@ -430,7 +439,11 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
           }),
         ),
         Layer.provide(ProjectStore.layer),
-        Layer.provide(Layer.mock(Git.GitVcsDriver)({})),
+        Layer.provide(
+          lifecycle?.git === undefined
+            ? Layer.mock(Git.GitVcsDriver)({})
+            : Layer.succeed(Git.GitVcsDriver, lifecycle.git),
+        ),
         Layer.provideMerge(labels),
         Layer.provide(
           Layer.mock(ProjectLabelFolders.ProjectLabelFolders)({

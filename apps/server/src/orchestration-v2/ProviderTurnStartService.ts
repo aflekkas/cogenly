@@ -1077,16 +1077,19 @@ export const layer: Layer.Layer<
       // Per turn, in the user message: a machine going offline then changes
       // only the newest turn and never invalidates the cached prefix.
       const machinesContext = yield* machinesTurnContext.read;
-      const userText = [
-        turnContext,
-        machinesContext,
-        projectComposerContextForProvider({
-          text: message.text,
-          records: message.context?.records ?? [],
-        }),
-      ]
-        .filter(Boolean)
-        .join("\n\n");
+      const slashCommand = message.text.trimStart().startsWith("/");
+      const userText = slashCommand
+        ? message.text.trimStart()
+        : [
+            turnContext,
+            machinesContext,
+            projectComposerContextForProvider({
+              text: message.text,
+              records: message.context?.records ?? [],
+            }),
+          ]
+            .filter(Boolean)
+            .join("\n\n");
       // Delivered once: this run's provider turn marks the work as told. A
       // restart continuation is prompted by its own text or resumes natively.
       const noteContinuation = isRestartNoteContinuation(
@@ -1264,7 +1267,7 @@ export const layer: Layer.Layer<
                 ];
           const delivery = yield* deliverContextHandoffs({
             handoffs: [...effectiveHandoffs, ...retryHandoff],
-            deferInline: compact,
+            deferInline: compact || slashCommand,
             providerThread: target,
             budget: Effect.gen(function* () {
               return handoffBudget({
@@ -1314,7 +1317,7 @@ export const layer: Layer.Layer<
           });
           if (!(yield* isCurrentAttemptInStatus("running"))) return;
           const start = compact ? session.compactThread! : session.startTurn;
-          const context = [delivery.context, restartNote]
+          const context = [delivery.context, slashCommand ? "" : restartNote]
             .filter((part) => part !== "")
             .join("\n\n");
           // A note continuation has no turn to resume; its text is the prompt.
@@ -1508,6 +1511,7 @@ export const layer: Layer.Layer<
         shouldStartProviderTurn: runControls.shouldStartProviderTurn,
         shouldFinalizeRun: runControls.shouldFinalizeRun,
         hasUnpairedRunInterruptRequest: runControls.hasUnpairedRunInterruptRequest,
+        rawUserText: message.text,
         message: {
           messageId: message.id,
           text: userText,
