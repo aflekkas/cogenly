@@ -561,6 +561,32 @@ const make = Effect.gen(function* () {
     update: (input) =>
       Effect.gen(function* () {
         const previous = (yield* get(input.id)).label.name;
+        // Renaming moves the project folder on disk. A thread whose
+        // worktree lives inside it would keep the old path, and its next
+        // turn would recreate a fresh worktree there, stranding the old
+        // one's uncommitted changes. Refuse until those worktrees are
+        // gone; repairing them in place is not attempted here.
+        if (input.name !== undefined && input.name !== previous && Option.isSome(folders)) {
+          const folder = yield* folders.value
+            .dirForLabel({ id: input.id, name: previous })
+            .pipe(Effect.mapError(failure("update")));
+          const inside = `${folder.dir}/`;
+          const rows = yield* sql<{ readonly thread_id: string }>`
+            SELECT thread_id FROM orchestration_v2_projection_threads
+            WHERE deleted_at IS NULL
+              AND json_extract(payload_json, '$.archivedAt') IS NULL
+              AND json_extract(payload_json, '$.worktreePath') IS NOT NULL
+              AND (json_extract(payload_json, '$.worktreePath') = ${folder.dir}
+                OR json_extract(payload_json, '$.worktreePath') LIKE ${`${inside}%`})
+            LIMIT 1
+          `.pipe(Effect.mapError(failure("update")));
+          if (rows.length > 0)
+            return yield* new ProjectLabelError({
+              operation: "update",
+              reason: "worktrees_inside",
+              projectName: previous,
+            });
+        }
         const result = yield* mutate(
           "update",
           input,

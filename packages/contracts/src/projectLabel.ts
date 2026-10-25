@@ -298,6 +298,7 @@ export class ProjectLabelError extends Schema.TaggedError<ProjectLabelError>()(
       "invalid_path",
       "fork_required",
       "thread_active",
+      "worktrees_inside",
       "archived",
       "project_chat",
     ]),
@@ -320,6 +321,8 @@ export class ProjectLabelError extends Schema.TaggedError<ProjectLabelError>()(
         return "This chat already has turns; fork it into the project instead of moving it.";
       case "thread_active":
         return "A turn is running in this thread; wait for it to finish before moving it.";
+      case "worktrees_inside":
+        return `${this.projectName ?? "This project"} cannot be renamed while threads have worktrees inside its folder. Remove those worktrees first, or archive their threads.`;
       case "project_chat":
         return `This is ${this.projectName ?? "a project"}'s own conversation; it stays in its project.`;
       case "storage":

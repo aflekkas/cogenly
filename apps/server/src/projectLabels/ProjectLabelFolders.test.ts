@@ -78,6 +78,28 @@ describe("project label folders", () => {
     }).pipe(Effect.provide(labelsLayer("label-folders-hooks"))),
   );
 
+  it.effect("refuses a rename while a thread has a worktree inside the project folder", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const sql = yield* SqlClient.SqlClient;
+      const labels = yield* Labels.ProjectLabelService;
+      const folders = yield* Folders.ProjectLabelFolders;
+      const created = yield* labels.create({ name: "Spawn Partners" });
+      const first = (yield* folders.dirForLabel(created.label)).dir;
+      const worktreePath = path.join(first, "worktrees", "fix-login");
+      const at = "2026-01-01T00:00:00.000Z";
+      yield* sql`INSERT INTO orchestration_v2_projection_threads(thread_id,project_id,title,default_provider,runtime_mode,interaction_mode,created_at,updated_at,payload_json) VALUES ('work', 'repo-a', 'Work', 'codex', 'full-access', 'default', ${at}, ${at}, ${JSON.stringify({ worktreePath })})`;
+      const error = yield* Effect.flip(labels.update({ id: created.label.id, name: "Spawned" }));
+      expect(error._tag).toBe("ProjectLabelError");
+      expect(error).toMatchObject({ reason: "worktrees_inside" });
+      expect(error.message).toContain("cannot be renamed");
+      // Neither the label nor the folder moved.
+      expect((yield* labels.list()).labels[0]?.name).toBe("Spawn Partners");
+      expect((yield* fs.stat(first)).type).toBe("Directory");
+    }).pipe(Effect.provide(labelsLayer("label-folders-worktree-guard"))),
+  );
+
   it.effect("reconcile adopts a Finder-renamed folder by its id file", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
