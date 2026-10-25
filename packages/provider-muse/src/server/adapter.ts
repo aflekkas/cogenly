@@ -1,3 +1,4 @@
+import { prepareCommitAttributionEnvironment } from "@cogenly/provider-core/server/commitAttribution";
 import { museNativeMcpNotice } from "./nativeMcpPolicy.ts";
 import { parseMuseUsageLimits } from "./usageLimits.ts";
 import type { ServerProviderUsageLimits } from "@cogenly/contracts";
@@ -1683,11 +1684,25 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
         ),
         Effect.forkIn(scope),
       );
+      const attributionEnvironment = yield* prepareCommitAttributionEnvironment(
+        options.environment,
+        input.runtimePolicy.aiAttributionEnabled === true,
+      ).pipe(
+        Effect.provideService(FileSystem.FileSystem, fileSystem),
+        Effect.mapError(
+          (cause) =>
+            new ProviderAdapter.ProviderAdapterOpenSessionError({
+              driver: MUSE_PROVIDER,
+              providerSessionId: input.providerSessionId,
+              cause,
+            }),
+        ),
+      );
       const launchHost = Effect.fnUntraced(function* () {
         const epoch = ++hostEpoch;
         const mcpSession = yield* mcpSessions.read(input.threadId);
         const environment = McpProviderSession.withAgentDeviceEnvironment(
-          options.environment,
+          attributionEnvironment,
           mcpSession,
         );
         const launch = yield* agentScope.wrap({

@@ -1190,3 +1190,15 @@ describe("synchronized model preferences", () => {
     });
   });
 });
+
+it("replaces attribution overrides so clearing them restores inheritance", () => {
+  const set = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
+    aiAttribution: { enabled: true, providers: { [ProviderInstanceId.make("codex")]: "off" } },
+  });
+  const toggled = applyServerSettingsPatch(set, { aiAttribution: { enabled: false } });
+  expect(toggled.aiAttribution).toEqual({ enabled: false, providers: { codex: "off" } });
+  const cleared = applyServerSettingsPatch(set, {
+    aiAttribution: { enabled: true, providers: {} },
+  });
+  expect(cleared.aiAttribution).toEqual({ enabled: true, providers: {} });
+});

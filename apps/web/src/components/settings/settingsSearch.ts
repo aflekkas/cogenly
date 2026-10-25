@@ -637,6 +637,15 @@ export const SETTINGS_SEARCH_ITEMS = [
     ],
   },
   {
+    id: "ai-attribution",
+    title: "AI attribution in commits and pull requests",
+    to: "/settings/providers",
+    searchTerms: [
+      "co authored author credit byline generated with claude codex muse grok git trailers session links",
+    ],
+    providerSettingsOnly: true,
+  },
+  {
     id: "usage-providers",
     title: "Usage providers",
     to: "/settings/providers",

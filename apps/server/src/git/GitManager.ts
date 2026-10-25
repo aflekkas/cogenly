@@ -1,3 +1,5 @@
+import { stripAiAttribution } from "@cogenly/provider-core/server/commitAttribution";
+import { resolveAiAttribution } from "@cogenly/contracts";
 import { SourceControlProviderKind } from "@cogenly/contracts";
 import * as Arr from "effect/Array";
 import * as Cache from "effect/Cache";
@@ -2273,11 +2275,30 @@ export const make = Effect.gen(function* () {
             },
           }
         : null;
-    const { commitSha } = yield* gitCore.commit(cwd, suggestion.subject, suggestion.body, {
-      timeoutMs: COMMIT_TIMEOUT_MS,
-      stage: filePaths ? { filePaths } : {},
-      ...(commitProgress ? { progress: commitProgress } : {}),
-    });
+    const attributionEnabled = resolveAiAttribution(
+      yield* serverSettingsService.getSettings.pipe(
+        Effect.mapError(
+          (cause) =>
+            new GitManagerError({
+              operation: "runCommitStep",
+              cwd,
+              detail: "Failed to read attribution preference.",
+              cause,
+            }),
+        ),
+      ),
+      settings.modelSelection.instanceId,
+    );
+    const { commitSha } = yield* gitCore.commit(
+      cwd,
+      suggestion.subject,
+      attributionEnabled ? suggestion.body : stripAiAttribution(suggestion.body),
+      {
+        timeoutMs: COMMIT_TIMEOUT_MS,
+        stage: filePaths ? { filePaths } : {},
+        ...(commitProgress ? { progress: commitProgress } : {}),
+      },
+    );
     if (currentHookName !== null) {
       yield* emit({
         kind: "hook_finished",
@@ -2368,17 +2389,36 @@ export const make = Effect.gen(function* () {
       tempDir,
       `cogenly-pr-body-${process.pid}-${yield* randomUUIDv4(cwd)}.md`,
     );
-    yield* fileSystem.writeFileString(bodyFile, generated.body).pipe(
-      Effect.mapError(
-        (cause) =>
-          new GitManagerError({
-            operation: "runPrStep",
-            cwd,
-            detail: "Failed to write pull request body temp file.",
-            cause,
-          }),
+    const attributionEnabled = resolveAiAttribution(
+      yield* serverSettingsService.getSettings.pipe(
+        Effect.mapError(
+          (cause) =>
+            new GitManagerError({
+              operation: "runPrStep",
+              cwd,
+              detail: "Failed to read attribution preference.",
+              cause,
+            }),
+        ),
       ),
+      settings.modelSelection.instanceId,
     );
+    yield* fileSystem
+      .writeFileString(
+        bodyFile,
+        attributionEnabled ? generated.body : stripAiAttribution(generated.body),
+      )
+      .pipe(
+        Effect.mapError(
+          (cause) =>
+            new GitManagerError({
+              operation: "runPrStep",
+              cwd,
+              detail: "Failed to write pull request body temp file.",
+              cause,
+            }),
+        ),
+      );
     yield* emit({
       kind: "phase_started",
       phase: "pr",

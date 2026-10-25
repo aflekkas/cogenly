@@ -823,3 +823,54 @@ describe("ClaudeAdapterV2 approval cancellation", () => {
     }),
   );
 });
+
+describe("Claude commit attribution settings", () => {
+  it.each([undefined, "2.1.280", "2.1.281", "2.2.0"])(
+    "uses compatible session settings for version %s",
+    (claudeVersion) => {
+      const original = {
+        env: { EXAMPLE: "kept" },
+        attribution: { commit: "User byline", pr: "User PR byline" },
+      };
+      const options = ClaudeAdapterV2.makeClaudeQueryOptions({
+        modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+        nativeThreadId: "attribution-thread",
+        resume: false,
+        cwd: "/workspace",
+        sdkSettings: original,
+        ...(claudeVersion === undefined ? {} : { claudeVersion }),
+      });
+      const expected =
+        claudeVersion === "2.1.281" || claudeVersion === "2.2.0"
+          ? false
+          : { commit: "", pr: "", sessionUrl: false };
+      const actual: unknown =
+        typeof options.settings === "object" ? options.settings.attribution : undefined;
+      assert.deepEqual(actual, expected);
+      assert.deepEqual(typeof options.settings === "object" ? options.settings.env : undefined, {
+        EXAMPLE: "kept",
+      });
+      assert.deepEqual(original.attribution, { commit: "User byline", pr: "User PR byline" });
+    },
+  );
+  it("leaves native attribution settings alone when allowed", () => {
+    const original = { attribution: { commit: "User byline", pr: "User PR byline" } };
+    const options = ClaudeAdapterV2.makeClaudeQueryOptions({
+      modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+      nativeThreadId: "attribution-thread",
+      resume: true,
+      cwd: "/workspace",
+      sdkSettings: original,
+      runtimePolicy: {
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        cwd: "/workspace",
+        aiAttributionEnabled: true,
+      },
+    });
+    assert.deepEqual(
+      typeof options.settings === "object" ? options.settings.attribution : undefined,
+      original.attribution,
+    );
+  });
+});

@@ -1,3 +1,4 @@
+import { prepareCommitAttributionEnvironment } from "@cogenly/provider-core/server/commitAttribution";
 import {
   codexNativeMcpNames,
   codexNativeMcpOffArgs,
@@ -1508,6 +1509,7 @@ export function codexThreadRuntimeParams(input: {
     ...(input.modelSelection === undefined ? {} : { model: input.modelSelection.model }),
     config: {
       ...CODEX_THREAD_CONFIG,
+      ...(input.runtimePolicy?.aiAttributionEnabled === true ? {} : { commit_attribution: "" }),
       ...(input.runtimePolicy?.conversationMode === true
         ? {
             "features.shell_tool": false,
@@ -1733,7 +1735,11 @@ export const layerAppServerClientFactory: Layer.Layer<
             ...codexAppServerEnvironment(input.environment),
             ...(input.settings.homePath ? { CODEX_HOME: input.settings.homePath } : {}),
           };
-          const launchArgs = resolveCodexLaunchArgs(input.settings.launchArgs, input.environment);
+          const launchArgs =
+            resolveCodexLaunchArgs(input.settings.launchArgs, input.environment) +
+            (input.runtimePolicy?.aiAttributionEnabled === true
+              ? ""
+              : ` -c 'commit_attribution=""'`);
           // Listed from the home directory, outside any repository, so the
           // launch override names only servers from outside the repo; the
           // repo's own servers stay on and are sorted per thread below.
@@ -1969,13 +1975,27 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                     }),
                 ),
               );
+        const attributionEnvironment = yield* prepareCommitAttributionEnvironment(
+          resolvedRuntime?.environment ?? adapterOptions.environment,
+          input.runtimePolicy.aiAttributionEnabled === true,
+        ).pipe(
+          Effect.provideService(FileSystem.FileSystem, fileSystem),
+          Effect.mapError(
+            (cause) =>
+              new ProviderAdapter.ProviderAdapterOpenSessionError({
+                driver: CODEX_PROVIDER,
+                providerSessionId: input.providerSessionId,
+                cause,
+              }),
+          ),
+        );
         const client = yield* clientFactory.open({
           instanceId: adapterOptions.instanceId,
           threadId: input.threadId,
           providerSessionId: input.providerSessionId,
           runtimePolicy: input.runtimePolicy,
           settings: resolvedRuntime?.config ?? adapterOptions.settings,
-          environment: resolvedRuntime?.environment ?? adapterOptions.environment,
+          environment: attributionEnvironment,
         });
         const additionalContextByThread = yield* Ref.make(
           new Map<

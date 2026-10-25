@@ -1253,7 +1253,33 @@ export const StorageCleanupSettings = Schema.Struct({
 });
 export type StorageCleanupSettings = typeof StorageCleanupSettings.Type;
 
+const AiAttributionProviderOverrides = Schema.Record(
+  ProviderInstanceId,
+  Schema.Literals(["inherit", "on", "off"]),
+);
+
+export const AiAttributionSettings = Schema.Struct({
+  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  providers: AiAttributionProviderOverrides.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+});
+export type AiAttributionSettings = typeof AiAttributionSettings.Type;
+
+/** Attribution is a portable preference, including overrides for named provider instances. */
+export function resolveAiAttribution(
+  settings: Pick<ServerSettings, "aiAttribution">,
+  instanceId?: string,
+): boolean {
+  const override =
+    instanceId === undefined
+      ? undefined
+      : settings.aiAttribution.providers[ProviderInstanceId.make(instanceId)];
+  return override === "on" ? true : override === "off" ? false : settings.aiAttribution.enabled;
+}
+
 export const ServerSettings = Schema.Struct({
+  aiAttribution: AiAttributionSettings.pipe(
+    Schema.withDecodingDefault(Effect.succeed(Schema.decodeSync(AiAttributionSettings)({}))),
+  ),
   ...UniversalClientPreferenceDefaults,
   sharedKeybindings: Schema.NullOr(KeybindingsConfig).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
@@ -1533,6 +1559,7 @@ export const DEFAULT_SERVER_SETTINGS: ServerSettings = Schema.decodeSync(ServerS
  * they reach. Every other `ServerSettings` key is machine-local.
  */
 export const UNIVERSAL_SERVER_SETTING_KEYS = [
+  "aiAttribution",
   ...UNIVERSAL_CLIENT_PREFERENCE_KEYS,
   "sharedKeybindings",
   "favorites",
@@ -1717,6 +1744,12 @@ const ModelSelectionPatch = Schema.Struct({
 });
 
 export const ServerSettingsPatch = Schema.Struct({
+  aiAttribution: Schema.optionalKey(
+    Schema.Struct({
+      enabled: Schema.optionalKey(Schema.Boolean),
+      providers: Schema.optionalKey(AiAttributionProviderOverrides),
+    }),
+  ),
   ...UniversalClientPreferencePatch.fields,
   sharedKeybindings: Schema.optionalKey(Schema.NullOr(KeybindingsConfig)),
   /** Seeds legacy browser preferences only while each destination field is still unset. */

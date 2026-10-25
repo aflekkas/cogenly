@@ -1,3 +1,4 @@
+import * as ServerSettings from "../serverSettings.ts";
 import { assert, it } from "@effect/vitest";
 import {
   type ModelSelection,
@@ -472,3 +473,38 @@ it.layer(layerWithInstructions)("RuntimePolicyV2 project instructions", (it) => 
     }),
   );
 });
+
+for (const enabled of [false, true]) {
+  it.layer(layerTest.pipe(Layer.provideMerge(ServerSettings.layerTest())))(
+    `AI attribution global=${enabled}`,
+    (it) => {
+      it.effect("resolves the provider preference on every turn surface", () =>
+        Effect.gen(function* () {
+          const settings = yield* ServerSettings.ServerSettingsService;
+          const policy = yield* RuntimePolicy.RuntimePolicyV2;
+          const now = yield* DateTime.now;
+          yield* settings.updateSettings({ aiAttribution: { enabled, providers: {} } });
+          for (const surface of ["chat", "work", "builder"] as const) {
+            const resolved = yield* policy.resolve({
+              thread: makeThread({ now, worktreePath: null, surface }),
+              modelSelection,
+            });
+            assert.equal(resolved.aiAttributionEnabled, enabled);
+            assert.equal(
+              (resolved.projectManifest ?? "").includes("<commit_attribution>"),
+              !enabled,
+            );
+          }
+          yield* settings.updateSettings({
+            aiAttribution: { enabled, providers: { [providerInstanceId]: enabled ? "off" : "on" } },
+          });
+          const overridden = yield* policy.resolve({
+            thread: makeThread({ now, worktreePath: null }),
+            modelSelection,
+          });
+          assert.equal(overridden.aiAttributionEnabled, !enabled);
+        }),
+      );
+    },
+  );
+}

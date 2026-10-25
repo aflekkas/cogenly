@@ -437,6 +437,7 @@ export function applyServerSettingsPatch(
     setProviderModelOrder,
     setModelEffortDefault,
     providerModelPreferences,
+    aiAttribution,
     automaticGitFetchInterval,
     providerHealthRefreshInterval,
     backgroundActivityProfile,
@@ -544,6 +545,10 @@ export function applyServerSettingsPatch(
   }
   const nextWithReplacementsBase = {
     ...next,
+    // An explicitly supplied map replaces the old one, including an empty reset.
+    ...(aiAttribution === undefined
+      ? {}
+      : { aiAttribution: { ...current.aiAttribution, ...aiAttribution } }),
     favorites,
     providerModelPreferences: nextModelPreferences,
     ...(setModelEffortDefault === undefined

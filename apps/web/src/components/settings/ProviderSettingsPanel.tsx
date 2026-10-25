@@ -1,3 +1,5 @@
+import { Switch } from "../ui/switch";
+import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { OverlayPresence } from "~/components/ui/overlay-presence";
 import { SettingsGroup } from "./SettingsGroup";
 import { RefreshIcon } from "~/components/ui/refresh-icon";
@@ -344,7 +346,8 @@ function ProviderSettingsPanelContent(target: ProviderSettingsTarget) {
     if (
       !target.scoped &&
       (searchTargetId === searchableSetting("provider-health-check-interval").id ||
-        searchTargetId === searchableSetting("usage-providers").id) &&
+        searchTargetId === searchableSetting("usage-providers").id ||
+        searchTargetId === searchableSetting("ai-attribution").id) &&
       !selectedEnvironmentCanRenderSettings &&
       searchableEnvironmentId !== undefined
     ) {
@@ -886,6 +889,38 @@ export function EnvironmentProviderSettings({
         key={row.instanceId}
         environmentId={environmentId}
         projectOverride={projectOverride}
+        attribution={
+          <SettingsRow
+            title="AI attribution"
+            description="Override the shared commit and pull request attribution preference for this provider instance. Applies to new sessions."
+            control={
+              <Select
+                value={settings.aiAttribution.providers[row.instanceId] ?? "inherit"}
+                disabled={!canWriteSettings}
+                onValueChange={(value) => {
+                  if (value !== "inherit" && value !== "on" && value !== "off") return;
+                  updateSettings({
+                    aiAttribution: {
+                      ...settings.aiAttribution,
+                      providers: { ...settings.aiAttribution.providers, [row.instanceId]: value },
+                    },
+                  });
+                }}
+              >
+                <SelectTrigger size="sm" aria-label="AI attribution for this provider">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectPopup>
+                  <SelectItem value="inherit">
+                    Inherit ({settings.aiAttribution.enabled ? "on" : "off"})
+                  </SelectItem>
+                  <SelectItem value="on">On</SelectItem>
+                  <SelectItem value="off">Off</SelectItem>
+                </SelectPopup>
+              </Select>
+            }
+          />
+        }
         projectOverrides={
           projectOverride === undefined && supportsProjectProviderOverrides ? (
             <ProviderInstanceProjectOverrides
@@ -1034,6 +1069,25 @@ export function EnvironmentProviderSettings({
 
   return (
     <>
+      <SettingsSection
+        {...searchableSetting("ai-attribution")}
+        title="Commit and pull request attribution"
+      >
+        <SettingsRow
+          title="AI attribution in commits and pull requests"
+          description="Off by default. Shared across paired machines. Applies to new provider sessions and future commits made through Cogenly; human co-authors are preserved."
+          control={
+            <Switch
+              checked={settings.aiAttribution.enabled}
+              disabled={!canWriteSettings}
+              onCheckedChange={(enabled) =>
+                updateSettings({ aiAttribution: { ...settings.aiAttribution, enabled } })
+              }
+              aria-label="AI attribution in commits and pull requests"
+            />
+          }
+        />
+      </SettingsSection>
       <SettingsSection
         {...searchableSetting("providers")}
         variant="plain"
