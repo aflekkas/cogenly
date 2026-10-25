@@ -1017,6 +1017,7 @@ function OpenCommandPaletteDialog(props: {
             isPrimary,
             environmentId: environment.environmentId,
             runtimeLabel: environment.label,
+            savedLabel: environment.entry.target.label,
           }),
           isPrimary,
           machine: resolveEnvironmentMachineKind(environment.serverConfig),
@@ -1942,11 +1943,12 @@ function OpenCommandPaletteDialog(props: {
     value,
     searchTerms: [option.label, option.environmentId, option.isPrimary ? "this device" : ""],
     title: option.label,
-    description: option.isConnected
+    // Named by the machine, never its environment ID.
+    ...(option.isConnected
       ? option.isPrimary
-        ? "This device"
-        : option.environmentId
-      : option.status,
+        ? { description: "This machine" }
+        : {}
+      : { description: option.status }),
     disabled: !option.isConnected,
     icon: <EnvironmentMachineIcon kind={option.machine} className={ITEM_ICON_CLASS} />,
     keepOpen: true,
