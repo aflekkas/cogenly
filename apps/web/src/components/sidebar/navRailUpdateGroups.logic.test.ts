@@ -108,7 +108,7 @@ describe("describeComponentVersions", () => {
           row("muse", "current", "1.4.13"),
         ),
       ),
-    ).toBe("1.4.12 → 1.4.13 on 1 of 3 machines");
+    ).toBe("1.4.12 → 1.4.13 on 1 of 3");
   });
 
   it("counts machines on the target when the behind ones start from different versions", () => {
@@ -122,7 +122,7 @@ describe("describeComponentVersions", () => {
           row("server", "available", "0.2.1", "0.2.3"),
         ),
       ),
-    ).toBe("0.2.3 on 3 of 5 machines");
+    ).toBe("0.2.3 on 3 of 5");
   });
 
   it("is short when every machine agrees", () => {
@@ -141,7 +141,7 @@ describe("describeComponentVersions", () => {
           row("codex", "current", "0.50.0"),
         ),
       ),
-    ).toBe("0.50.0 on 2 of 3 machines");
+    ).toBe("0.50.0 on 2 of 3");
   });
 
   it("falls back to a count when machines head to different versions", () => {
@@ -153,7 +153,7 @@ describe("describeComponentVersions", () => {
           row("codex", "current", "0.50.0"),
         ),
       ),
-    ).toBe("Updates on 2 of 3 machines");
+    ).toBe("Updates on 2 of 3");
   });
 });
 

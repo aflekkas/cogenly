@@ -6,14 +6,21 @@ import { environmentSession } from "../../state/session";
 import { AuthOrchestrationOperateScope } from "@cogenly/contracts";
 import { readEnvironmentScope, useEnvironmentScope } from "../../state/session";
 import { AuthEnvironmentMaintainScope } from "@cogenly/contracts";
-import { RefreshIcon } from "~/components/ui/refresh-icon";
 import { AlertTriangleIcon, FolderOpenIcon, InfoIcon } from "lucide-react";
 import { ChevronDown, ChevronRight } from "lucide";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@cogenly/client-runtime/state/runtime";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentProps,
+  type ReactNode,
+} from "react";
 import type {
   ServerProcessDiagnosticsEntry,
   ServerProcessResourceHistorySummary,
@@ -24,7 +31,7 @@ import * as Option from "effect/Option";
 
 import { cn } from "../../lib/utils";
 import { ensureLocalApi } from "../../localApi";
-import { formatRelativeTimeLabel, getRelativeTimeState } from "../../timestampFormat";
+import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
 import { Button } from "../ui/button";
@@ -35,7 +42,12 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
 import { ExpandableText } from "./ExpandableText";
 import { ResourceTelemetryDiagnostics } from "./ResourceTelemetryDiagnostics";
-import { SettingsSection, useRelativeTimeTick } from "./settingsLayout";
+import {
+  SettingsNote,
+  SettingsPageMessage,
+  SettingsRefreshAction,
+  SettingsSection,
+} from "./settingsLayout";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { TelemetryExportSettings } from "./TelemetryExportSettings";
@@ -151,7 +163,7 @@ function StatsGrid({ children }: { children: ReactNode }) {
 }
 
 function EmptyRows({ label }: { label: string }) {
-  return <div className="px-4 py-4 text-xs text-muted-foreground sm:px-5">{label}</div>;
+  return <SettingsNote>{label}</SettingsNote>;
 }
 
 function DiagnosticsTable({
@@ -639,57 +651,19 @@ function ProcessResourceHistoryTable({
   );
 }
 
-function DiagnosticsLastChecked({ checkedAt }: { checkedAt: DateTime.Utc | null }) {
-  useRelativeTimeTick();
-  const relative = getRelativeTimeState(checkedAt ? DateTime.formatIso(checkedAt) : null);
-
-  if (relative.status === "missing") {
-    return <span className="text-2xs text-muted-foreground/50">Checking</span>;
-  }
-
-  if (relative.status === "invalid") {
-    return <span className="text-2xs text-muted-foreground/50">Checked unavailable</span>;
-  }
-
-  return (
-    <span className="text-2xs text-muted-foreground/60">
-      {relative.suffix ? (
-        <>
-          Checked <span className="font-mono tabular-nums">{relative.value}</span> {relative.suffix}
-        </>
-      ) : (
-        <>Checked {relative.value}</>
-      )}
-    </span>
-  );
-}
-
-function DiagnosticsRefreshButton({
-  isPending,
-  label,
-  onClick,
-}: {
-  isPending: boolean;
-  label: string;
-  onClick: () => void;
+/** The shared section refresh, fed the diagnostics read time. */
+function DiagnosticsRefreshAction({
+  checkedAt,
+  ...props
+}: Omit<ComponentProps<typeof SettingsRefreshAction>, "checkedAt" | "idleLabel"> & {
+  checkedAt: DateTime.Utc | null;
 }) {
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Button
-            size="icon-xs"
-            variant="ghost-muted"
-            disabled={isPending}
-            onClick={onClick}
-            aria-label={label}
-          >
-            <RefreshIcon refreshing={isPending} />
-          </Button>
-        }
-      />
-      <TooltipPopup side="top">{label}</TooltipPopup>
-    </Tooltip>
+    <SettingsRefreshAction
+      {...props}
+      checkedAt={checkedAt ? DateTime.formatIso(checkedAt) : null}
+      idleLabel="Checking"
+    />
   );
 }
 
@@ -920,13 +894,13 @@ export function DiagnosticsSettingsPanel() {
   if (!canReadDiagnostics) {
     return (
       <>
-        <p className="text-sm text-muted-foreground">
+        <SettingsPageMessage>
           {environmentId === null
             ? "Connect a machine to see diagnostics."
             : diagnosticsAccess.isPending
               ? "Checking diagnostics access…"
               : diagnosticsAccess.error}
-        </p>
+        </SettingsPageMessage>
       </>
     );
   }
@@ -936,17 +910,14 @@ export function DiagnosticsSettingsPanel() {
       <ResourceTelemetryDiagnostics environmentId={environmentId} />
 
       <SettingsSection
-        id="diagnostics"
         title="Live processes"
         headerAction={
-          <div className="flex items-center gap-1.5">
-            <DiagnosticsLastChecked checkedAt={processData?.readAt ?? null} />
-            <DiagnosticsRefreshButton
-              isPending={isProcessPending}
-              label="Refresh process diagnostics"
-              onClick={refreshProcesses}
-            />
-          </div>
+          <DiagnosticsRefreshAction
+            checkedAt={processData?.readAt ?? null}
+            refreshing={isProcessPending}
+            label="Refresh process diagnostics"
+            onRefresh={refreshProcesses}
+          />
         }
       >
         <StatsGrid>
@@ -1001,18 +972,18 @@ export function DiagnosticsSettingsPanel() {
       <SettingsSection
         title="Resource history"
         headerAction={
-          <div className="flex items-center gap-1.5">
+          <>
             <ResourceHistoryWindowSelector
               selectedWindowMs={resourceWindowMs}
               onSelect={setResourceWindowMs}
             />
-            <DiagnosticsLastChecked checkedAt={resourceData?.readAt ?? null} />
-            <DiagnosticsRefreshButton
-              isPending={isResourcePending}
+            <DiagnosticsRefreshAction
+              checkedAt={resourceData?.readAt ?? null}
+              refreshing={isResourcePending}
               label="Refresh resource history"
-              onClick={refreshResources}
+              onRefresh={refreshResources}
             />
-          </div>
+          </>
         }
       >
         <StatsGrid>
@@ -1071,8 +1042,7 @@ export function DiagnosticsSettingsPanel() {
       <SettingsSection
         title="Trace diagnostics"
         headerAction={
-          <div className="flex items-center gap-1.5">
-            <DiagnosticsLastChecked checkedAt={data?.readAt ?? null} />
+          <>
             <Tooltip>
               <TooltipTrigger
                 render={
@@ -1093,12 +1063,13 @@ export function DiagnosticsSettingsPanel() {
               />
               <TooltipPopup side="top">Reveal logs folder</TooltipPopup>
             </Tooltip>
-            <DiagnosticsRefreshButton
-              isPending={isPending}
+            <DiagnosticsRefreshAction
+              checkedAt={data?.readAt ?? null}
+              refreshing={isPending}
               label="Refresh trace diagnostics"
-              onClick={refresh}
+              onRefresh={refresh}
             />
-          </div>
+          </>
         }
       >
         <StatsGrid>

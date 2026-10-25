@@ -1,6 +1,27 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { chatGreeting, greetingBucket } from "./chatGreeting";
+import {
+  chatGreeting,
+  chatGreetingRequest,
+  greetingBucket,
+  isSpecialGreetingDay,
+} from "./chatGreeting";
+
+describe("chatGreetingRequest", () => {
+  it("names the local day, bucket and weekday", () => {
+    expect(chatGreetingRequest(new Date(2026, 9, 25, 9, 30))).toEqual({
+      day: "2026-10-25",
+      bucket: "morning",
+      weekday: 0,
+    });
+    expect(chatGreetingRequest(new Date(2026, 0, 5, 23)).day).toBe("2026-01-05");
+  });
+
+  it("leaves holidays to their built-in line", () => {
+    expect(isSpecialGreetingDay(new Date(2026, 11, 25, 9))).toBe(true);
+    expect(isSpecialGreetingDay(new Date(2026, 9, 25, 9))).toBe(false);
+  });
+});
 
 describe("greetingBucket", () => {
   it("splits the day into morning, afternoon, evening and late night", () => {

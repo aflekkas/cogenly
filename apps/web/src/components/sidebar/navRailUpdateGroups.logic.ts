@@ -73,8 +73,10 @@ export function groupUpdatesByComponent<Row extends UpdateRowView>(
 
 /**
  * A component's versions across machines, for its row: the version pair to
- * show and how far it reaches ("on 2 of 5 machines"). One machine shows its
- * own pair and no scope, as before machines were grouped.
+ * show and how far it reaches ("on 2 of 5"). One machine shows its own pair
+ * and no scope, as before machines were grouped. A part count drops the word
+ * "machines": the section header already says "5 machines", and the row
+ * shares its width with "Updating 2 of 3".
  */
 export interface ComponentVersionSummary {
   readonly current: string | null;
@@ -118,12 +120,12 @@ export function describeComponentVersions(
     // Every machine is current by its own check, but they disagree.
     const latest = newest(versions);
     const onLatest = machines.filter(({ row }) => row.currentVersion === latest).length;
-    return { current: latest, next: null, scope: `on ${onLatest} of ${total} machines` };
+    return { current: latest, next: null, scope: `on ${onLatest} of ${total}` };
   }
   const targets = distinct(behind.map(({ row }) => row.latestVersion));
   const froms = distinct(behind.map(({ row }) => row.currentVersion));
   const reach =
-    behind.length === total ? `on ${total} machines` : `on ${behind.length} of ${total} machines`;
+    behind.length === total ? `on ${total} machines` : `on ${behind.length} of ${total}`;
   if (targets.length === 1 && froms.length <= 1) {
     return { current: froms[0] ?? null, next: targets[0]!, scope: reach };
   }
@@ -133,12 +135,12 @@ export function describeComponentVersions(
     const onTarget = machines.filter(
       ({ row }) => row.status === "current" && row.currentVersion === target,
     ).length;
-    return { current: target, next: null, scope: `on ${onTarget} of ${total} machines` };
+    return { current: target, next: null, scope: `on ${onTarget} of ${total}` };
   }
   return { current: null, next: null, scope: `Updates ${reach}` };
 }
 
-/** The summary as one line: "1.4.12 → 1.4.13 on 2 machines". */
+/** The summary as one line: "1.4.12 → 1.4.13 on 2 of 3". */
 export function formatComponentVersionSummary(summary: ComponentVersionSummary): string {
   const versions =
     summary.current && summary.next && summary.current !== summary.next

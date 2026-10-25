@@ -2,7 +2,7 @@ import type {
   EnvironmentProject,
   EnvironmentThreadShell,
 } from "@cogenly/client-runtime/state/shell";
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef } from "react";
 
 import { ComposerProjectPicker } from "~/projectLabels/ComposerProjectPicker";
 import { HERO_INLINE_ICON_STYLE, ProjectFolderIcon } from "~/projectLabels/ProjectFolderMark";
@@ -16,7 +16,7 @@ import { linkedRepositoryIcon } from "~/projectLabels/repositoryPicker.logic";
 import { RepositoryRowIcon } from "~/projectLabels/RepositorySourceRows";
 import { useProjectLabelDirectory } from "~/projectLabels/useProjectLabels";
 import { useRepositoryNames } from "~/projectLabels/useRepositoryNames";
-import { chatGreeting } from "./chatGreeting";
+import { useChatGreeting } from "./useChatGreeting";
 import { FadeSwap } from "./StateTransition";
 import { useHeroHeadlineMotion } from "./useHeroHeadlineMotion";
 import { WorkHeroCrumbText, WorkHeroSentence } from "./WorkHeroSentence";
@@ -59,7 +59,7 @@ export function ThreadHeroHeadline({
         folderByRepository: directory.folderByRepository,
       });
   // Fixed when the screen opens, so the line holds still while the user types.
-  const [greeting] = useState(() => chatGreeting(new Date()));
+  const greeting = useChatGreeting(thread.environmentId);
   const headingRef = useRef<HTMLHeadingElement>(null);
   useHeroHeadlineMotion(headingRef, isChat ? "chat" : "work");
 

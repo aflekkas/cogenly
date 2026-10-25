@@ -3,8 +3,9 @@ import { SettingsIcon } from "lucide-react";
 import { shortcutLabelForCommand } from "../../keybindings";
 import { commandForProjectScript } from "../../projectScripts";
 import { ScriptIcon } from "../projectScriptEditor";
+import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
-import { SettingsRow } from "./settingsLayout";
+import { SettingsNote, SettingsRow } from "./settingsLayout";
 
 export function ProjectActionsList({
   scripts,
@@ -17,35 +18,32 @@ export function ProjectActionsList({
   disabled: boolean;
   onEdit: (script: ProjectScript) => void;
 }) {
-  if (scripts.length === 0)
-    return (
-      <p className="px-3 py-2 text-base text-muted-foreground sm:px-4 sm:text-sm">
-        No actions configured.
-      </p>
-    );
+  if (scripts.length === 0) return <SettingsNote>No actions configured.</SettingsNote>;
   return scripts.map((script) => {
     const shortcutLabel = shortcutLabelForCommand(keybindings, commandForProjectScript(script.id));
     return (
       <SettingsRow
         key={script.id}
-        className="group py-2"
+        className="group"
         title={
           <span className="flex min-w-0 items-center gap-2">
             <ScriptIcon icon={script.icon} className="size-4 shrink-0 text-muted-foreground" />
             <span className="min-w-0 truncate">{script.name}</span>
             {script.runOnWorktreeCreate ? (
-              <span className="shrink-0 rounded-sm border border-border/60 px-1.5 py-px text-2xs font-normal text-muted-foreground">
+              <Badge size="sm" variant="outline">
                 setup
-              </span>
+              </Badge>
             ) : null}
             {script.runOnSettle ? (
-              <span className="shrink-0 rounded-sm border border-border/60 px-1.5 py-px text-2xs font-normal text-muted-foreground">
+              <Badge size="sm" variant="outline">
                 on settle
-              </span>
+              </Badge>
             ) : null}
             {script.previewUrl ? (
-              <span className="shrink-0 rounded-sm border border-border/60 px-1.5 py-px text-2xs font-normal text-muted-foreground max-sm:hidden">
-                preview · desktop only
+              <span className="flex max-sm:hidden">
+                <Badge size="sm" variant="outline">
+                  preview · desktop only
+                </Badge>
               </span>
             ) : null}
           </span>
@@ -56,7 +54,7 @@ export function ProjectActionsList({
             {shortcutLabel ? (
               <span className="text-xs text-muted-foreground">{shortcutLabel}</span>
             ) : null}
-            <span className="flex shrink-0 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100">
+            <span className="flex shrink-0 opacity-0 interactive group-focus-within:opacity-100 group-hover:opacity-100">
               <Button
                 size="icon-xs"
                 variant="ghost-muted"

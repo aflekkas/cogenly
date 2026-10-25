@@ -33,7 +33,13 @@ import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { SettingResetButton, SettingsRow, SettingsSection } from "./settingsLayout";
+import {
+  SettingResetButton,
+  SettingsNote,
+  SettingsPageMessage,
+  SettingsRow,
+  SettingsSection,
+} from "./settingsLayout";
 import {
   canPickExternalProjectFavicon,
   ProjectFaviconPickerDialog,
@@ -124,18 +130,18 @@ export function ProjectSettingsPanel({
 
   if (!selected) {
     return (
-      <div className="flex flex-1 items-center justify-center p-8 text-sm text-muted-foreground">
+      <SettingsPageMessage>
         {groups.length === 0
           ? "Add a repository from the sidebar to configure it here."
           : "This repository is no longer available."}
-      </div>
+      </SettingsPageMessage>
     );
   }
   if (members.length === 0)
     return (
-      <p className="p-8 text-sm text-muted-foreground">
-        This checkout is no longer available in the selected repository and machine.
-      </p>
+      <SettingsPageMessage>
+        This checkout is no longer available in the selected repository and environment.
+      </SettingsPageMessage>
     );
   const scopedGroup = {
     ...selected,
@@ -424,7 +430,7 @@ function ProjectDetail({
   const checkoutRemoveButton = (member: SidebarProjectGroupMember) => (
     <Button
       size="sm"
-      variant="outline"
+      variant="destructive-outline"
       disabled={!editableIds.has(member.environmentId)}
       onClick={() => void removeMembers([member])}
       aria-label={`Remove checkout ${member.workspaceRoot}`}
@@ -505,11 +511,11 @@ function ProjectDetail({
       <>
         <SettingsSection id="project-overview" title="Repository" hideTitle>
           {!canEditGroup ? (
-            <p className="px-3 py-2 text-sm text-muted-foreground sm:px-4">
+            <SettingsNote>
               {group.memberProjects.length > 1
                 ? "Shared settings require permission to change every checkout in this group."
                 : "This connection cannot change this repository."}
-            </p>
+            </SettingsNote>
           ) : null}
           <SettingsRow
             title="Name"

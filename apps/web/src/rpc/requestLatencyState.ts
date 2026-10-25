@@ -28,7 +28,11 @@ interface PendingRpcAckRequest {
 }
 
 const pendingRpcAckRequests = new Map<string, PendingRpcAckRequest>();
-const untrackedRpcAckMethods = new Set<string>([WS_METHODS.serverGetUsageSummary]);
+// A greeting request may wait on a model call; that is not a slow connection.
+const untrackedRpcAckMethods = new Set<string>([
+  WS_METHODS.serverGetUsageSummary,
+  WS_METHODS.serverGetChatGreeting,
+]);
 const longRunningRpcAckMethods = new Set<string>([
   WS_METHODS.serverUpdateProvider,
   WS_METHODS.serverRefreshProviders,

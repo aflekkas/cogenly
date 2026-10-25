@@ -1,9 +1,13 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vite-plus/test";
 
 import {
+  cancelPanelFlips,
+  capturePanelFlip,
   followPanelFlip,
   playPanelFlip,
   resolvePanelFlipOffsets,
+  retargetPanelFlip,
+  setPanelResizeDragging,
   subscribePanelFlips,
   type PanelFlipSnapshot,
 } from "./panelFlip";
@@ -123,6 +127,7 @@ interface FakeAnimation {
   currentTime: number | null;
   playState: "idle" | "paused" | "running";
   readonly from: string;
+  readonly keyframes: ReadonlyArray<Keyframe>;
   readonly finished: Promise<unknown>;
   cancel(): void;
   finish(): void;
@@ -135,6 +140,7 @@ function fakeElement(left: number, dataset: Record<string, string> = { panelFlip
   const animations: FakeAnimation[] = [];
   const fake = {
     left,
+    width: 100,
     isConnected: true,
     dataset,
     style: {
@@ -149,8 +155,8 @@ function fakeElement(left: number, dataset: Record<string, string> = { panelFlip
     parentElement: null,
     getBoundingClientRect: () => ({
       left: fake.left,
-      right: fake.left + 100,
-      width: 100,
+      right: fake.left + fake.width,
+      width: fake.width,
       height: 20,
     }),
     getAnimations: () => animations.filter((animation) => animation.playState !== "idle"),
@@ -166,6 +172,7 @@ function fakeElement(left: number, dataset: Record<string, string> = { panelFlip
         currentTime: 0,
         playState: "running",
         from: keyframes[0]!.transform,
+        keyframes,
         finished,
         cancel() {
           this.playState = "idle";
@@ -197,6 +204,11 @@ describe("playPanelFlip", () => {
 
   beforeAll(() => {
     vi.stubGlobal("document", { documentElement });
+    vi.stubGlobal("getComputedStyle", (element: { clipPath?: string }) => ({
+      marginLeft: "24px",
+      paddingRight: "12px",
+      clipPath: element.clipPath ?? "none",
+    }));
     vi.stubGlobal("window", {
       requestAnimationFrame: (callback: () => void) => frameCallbacks.push(callback),
     });
@@ -348,5 +360,114 @@ describe("playPanelFlip", () => {
     playPanelFlip(snapshotOf(sidebar, 0), 250);
     expect(sidebar.getAnimations()).toEqual([]);
     expect(sidebar.style.visibility).toBe("");
+  });
+
+  it("eases a capped message frame's width while holding its resting margin", async () => {
+    const row = fakeElement(320, { panelFlip: "start", panelFlipSize: "" });
+    row.width = 480;
+    const root = { querySelectorAll: () => [row] } as unknown as ParentNode;
+    playPanelFlip(
+      { root, entries: [{ element: row as unknown as HTMLElement, bounds: bounds(100, 868) }] },
+      300,
+      { contain: true },
+    );
+    expect(row.getAnimations()[0]?.keyframes).toEqual([
+      {
+        transform: "translateX(-220px)",
+        width: "768px",
+        maxWidth: "768px",
+        marginLeft: "24px",
+        marginRight: "0px",
+      },
+      {
+        transform: "translateX(0)",
+        width: "480px",
+        maxWidth: "480px",
+        marginLeft: "24px",
+        marginRight: "0px",
+      },
+    ]);
+    // A resize-derived gutter changes before paint: keep the old width and
+    // re-aim the final width on the same clock, rather than restarting it.
+    runNextFrame();
+    row.getAnimations()[0]!.currentTime = 32;
+    row.width = 456;
+    await runResizeStep();
+    expect(row.getAnimations()[0]?.keyframes[1]?.width).toBe("456px");
+    expect(row.getAnimations()[0]?.currentTime).toBe(32);
+  });
+
+  it("animates width when the left edge stays put, in both directions", () => {
+    const row = fakeElement(24, { panelFlip: "start", panelFlipSize: "" });
+    const snapshot = snapshotOf(row, 24);
+    row.width = 320;
+    playPanelFlip(snapshot, 300, { contain: true });
+    expect(row.getAnimations()[0]?.keyframes.map((frame) => frame.width)).toEqual([
+      "100px",
+      "320px",
+    ]);
+    cancelPanelFlips({ querySelectorAll: () => [row] } as unknown as ParentNode);
+    const expanded = capturePanelFlip({ querySelectorAll: () => [row] } as unknown as ParentNode)!;
+    row.width = 100;
+    playPanelFlip(expanded, 300, { contain: true });
+    expect(row.getAnimations()[0]?.keyframes.map((frame) => frame.width)).toEqual([
+      "320px",
+      "100px",
+    ]);
+  });
+
+  it("releases width overrides on drag and never restarts a pending resize retarget", async () => {
+    const row = fakeElement(24, { panelFlip: "start", panelFlipSize: "" });
+    const root = { querySelectorAll: () => [row] } as unknown as ParentNode;
+    row.width = 480;
+    playPanelFlip(
+      { root, entries: [{ element: row as unknown as HTMLElement, bounds: bounds(24, 792) }] },
+      300,
+    );
+    expect(row.getAnimations()).toHaveLength(1);
+    cancelPanelFlips(root);
+    await runResizeStep();
+    runNextFrame();
+    expect(row.getAnimations()).toEqual([]);
+  });
+
+  it("moves the viewport's clip edge without resizing it on each frame", () => {
+    const viewport = fakeElement(40, { panelFlip: "start", panelFlipClipSize: "" });
+    viewport.width = 600;
+    const root = { querySelectorAll: () => [viewport] } as unknown as ParentNode;
+    playPanelFlip(
+      {
+        root,
+        entries: [{ element: viewport as unknown as HTMLElement, bounds: bounds(40, 1240) }],
+      },
+      300,
+    );
+    const frames = viewport.getAnimations()[0]!.keyframes;
+    expect(frames.map((frame) => frame.width)).toEqual(["1200px", "1200px"]);
+    // The extra 600px of padding leaves the row container at its final size,
+    // even when virtualization mounts another row during the motion.
+    expect(frames.map((frame) => frame.paddingRight)).toEqual(["612px", "612px"]);
+    expect(frames.map((frame) => frame.clipPath)).toEqual([
+      "inset(0px 0px 0px 0px)",
+      "inset(0px 600px 0px 0px)",
+    ]);
+
+    // An interrupted transition resumes from the visible edge, not the hold.
+    viewport.width = 1200;
+    Object.assign(viewport, { clipPath: "inset(0px 240px)" });
+    expect(capturePanelFlip(root)?.entries[0]?.bounds).toEqual(bounds(40, 1000));
+  });
+
+  it("does not start or revive a toggle while a resize handle owns the layout", () => {
+    const row = fakeElement(24, { panelFlip: "start", panelFlipSize: "" });
+    const snapshot = snapshotOf(row, 120);
+    setPanelResizeDragging(true);
+    try {
+      playPanelFlip(snapshot, 300);
+      retargetPanelFlip(snapshot, 300);
+      expect(row.getAnimations()).toEqual([]);
+    } finally {
+      setPanelResizeDragging(false);
+    }
   });
 });

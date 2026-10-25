@@ -54,7 +54,12 @@ import { Switch } from "../ui/switch";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { PeerSyncRow } from "./PeerSyncRow";
 import { useSettingsScope } from "./SettingsScopeContext";
-import { SettingsRow, SettingsSection } from "./settingsLayout";
+import {
+  SettingsRow,
+  SettingsSection,
+  SettingsSectionAction,
+  SettingsNote,
+} from "./settingsLayout";
 
 const NO_WRITE_TITLE = "This connection cannot change the vault.";
 
@@ -107,22 +112,32 @@ export function VaultSettings() {
   const scopeName = (id: string | null) =>
     id === null ? null : (labels.find((label) => label.id === id)?.name ?? "A removed project");
 
-  const addButton = (size: "xs" | "default") => (
+  const addButton = () => (
     <Button
-      size={size}
-      variant={size === "xs" ? "ghost-muted" : "default"}
       disabled={!actions.canWrite}
       title={actions.canWrite ? undefined : NO_WRITE_TITLE}
       onClick={() => setEditing({ kind: "create" })}
     >
-      <PlusIcon className={size === "xs" ? "size-3" : undefined} />
+      <PlusIcon />
       Add item
     </Button>
   );
 
   return (
     <>
-      <SettingsSection id="vault" title="Vault" headerAction={addButton("xs")}>
+      <SettingsSection
+        id="vault"
+        title="Vault"
+        headerAction={
+          <SettingsSectionAction
+            disabled={!actions.canWrite}
+            title={actions.canWrite ? undefined : NO_WRITE_TITLE}
+            onClick={() => setEditing({ kind: "create" })}
+          >
+            Add item
+          </SettingsSectionAction>
+        }
+      >
         <SettingsListToolbar>
           <SettingsListSearch label="Search vault" value={query} onValueChange={setQuery} />
           <SettingsListFilter
@@ -140,7 +155,7 @@ export function VaultSettings() {
         ) : list.error !== null ? (
           <SettingsRow title="Could not load the vault" description={list.error} />
         ) : !list.isLoaded ? (
-          <SettingsRow title="Loading vault…" />
+          <SettingsRow title="Loading vault…" role="status" />
         ) : items.length === 0 ? (
           <SettingsListEmpty
             icon={<KeyRoundIcon />}
@@ -151,7 +166,7 @@ export function VaultSettings() {
                 : "Store logins, API keys, cards and notes here so agents can use them without ever seeing them."
             }
           >
-            {query || type !== "all" ? null : addButton("default")}
+            {query || type !== "all" ? null : addButton()}
           </SettingsListEmpty>
         ) : (
           <SettingsList>
@@ -184,20 +199,22 @@ export function VaultSettings() {
       ) : null}
       {environmentId !== null && list.items.length > 0 ? (
         <SettingsSection id="vault-activity" title="All activity">
-          <div className="px-3 py-3 sm:px-4">
-            <UsageBody
-              error={activity.error}
-              isLoaded={activity.isLoaded}
-              empty={activity.usage.length === 0}
-            >
+          {activity.error ? (
+            <SettingsNote tone="destructive">{activity.error}</SettingsNote>
+          ) : !activity.isLoaded ? (
+            <SettingsNote role="status">Loading usage…</SettingsNote>
+          ) : activity.usage.length === 0 ? (
+            <SettingsNote>Not used yet.</SettingsNote>
+          ) : (
+            <div className="px-3 py-3 sm:px-4">
               <VaultUsageList
                 environmentId={environmentId}
                 usage={activity.usage}
                 agentName={agentName}
                 itemName={itemName}
               />
-            </UsageBody>
-          </div>
+            </div>
+          )}
         </SettingsSection>
       ) : null}
       <OverlayPresence when={editing}>
@@ -418,7 +435,7 @@ function ItemUsage(props: {
 }) {
   const usage = useVaultUsage(props.environmentId, props.item.id);
   return (
-    <div className="reveal-motion ms-0.5 border-s border-border/70 ps-3 text-xs text-muted-foreground">
+    <div className="reveal-motion ms-0.5 mt-2 mb-2 border-s border-border/70 ps-3 text-xs text-muted-foreground">
       <UsageBody error={usage.error} isLoaded={usage.isLoaded} empty={usage.usage.length === 0}>
         <VaultUsageList
           environmentId={props.environmentId}

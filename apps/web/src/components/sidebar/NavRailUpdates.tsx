@@ -395,7 +395,7 @@ function ListRow({
 
 /**
  * A component on several machines, as one row: its versions across them
- * ("1.4.12 → 1.4.13 on 2 of 5 machines"), one button for every machine that
+ * ("1.4.12 → 1.4.13 on 2 of 5"), one button for every machine that
  * needs it, and "Updating 2 of 3" while they run. The row opens on each
  * machine's own version and button.
  */
@@ -1004,6 +1004,9 @@ export function NavRailUpdates({
           if (pinned && (details.reason === "trigger-hover" || details.reason === "focus-out")) {
             return;
           }
+          // The "Update all" confirmation sits outside this popover, so its
+          // clicks and Escape read as outside ones. They belong to the dialog.
+          if (confirmingAll) return;
           closePopover();
         }}
       >
@@ -1214,8 +1217,9 @@ export function NavRailUpdates({
         restarts={everything.restarts}
         skipped={everything.skipped}
         onConfirm={() => {
+          // The popover stays open so its rows show the run's progress. Only
+          // this app's own restart, at the end of the run, takes it away.
           setConfirmingAll(false);
-          closePopover();
           void runUpdateEverythingPass(everything, desktopAction);
         }}
       />

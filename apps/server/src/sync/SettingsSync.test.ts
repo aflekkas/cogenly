@@ -148,6 +148,7 @@ describe("settings sync between paired machines", () => {
 
         yield* hub.settings.updateSettings({
           branchNamePrefix: "feat",
+          aiGreetings: false,
           clientAppearanceAccent: "blue",
           clientFollowUpBehavior: "queue",
           sharedKeybindings: [{ key: "mod+shift+k", command: "settings.open" }],
@@ -157,6 +158,7 @@ describe("settings sync between paired machines", () => {
         yield* exchange;
         const onSpoke = yield* spoke.settings.getSettings;
         expect(onSpoke.branchNamePrefix).toBe("feat");
+        expect(onSpoke.aiGreetings).toBe(false);
         expect(onSpoke.clientAppearanceAccent).toBe("blue");
         expect(onSpoke.clientFollowUpBehavior).toBe("queue");
         expect(onSpoke.sharedKeybindings).toEqual([
@@ -170,6 +172,7 @@ describe("settings sync between paired machines", () => {
         // The way back: an edit and a reset on the spoke reach the hub.
         yield* spoke.settings.updateSettings({
           branchNamePrefix: "fix",
+          aiGreetings: true,
           clientAppearanceAccent: "orange",
           sharedKeybindings: [],
           projectSettingsOverrides: { [spokeRepository]: null },
@@ -177,6 +180,7 @@ describe("settings sync between paired machines", () => {
         yield* exchange;
         const onHub = yield* hub.settings.getSettings;
         expect(onHub.branchNamePrefix).toBe("fix");
+        expect(onHub.aiGreetings).toBe(true);
         expect(onHub.clientAppearanceAccent).toBe("orange");
         expect(onHub.clientFollowUpBehavior).toBe("queue");
         expect(onHub.sharedKeybindings).toEqual([]);
