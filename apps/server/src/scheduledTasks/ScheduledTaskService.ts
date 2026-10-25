@@ -1,5 +1,7 @@
+import { userFacingDispatchErrorMessage } from "../orchestration-v2/UserFacingErrors.ts";
+import * as Membership from "../projectLabels/ProjectRepositoryMembership.ts";
 import * as SharedState from "../sync/SharedState.ts";
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId } from "@cogenly/contracts";
 import * as Access from "../agents/AgentAccessScope.ts";
 import { matchesAgentEvent } from "../agents/agentEventPolicy.ts";
 import * as Agents from "../agents/AgentService.ts";
@@ -30,7 +32,7 @@ import {
   type ScheduledTaskRunNowResult,
   type ScheduledTaskSetEnabledInput,
   type ScheduledTaskUpsertInput,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
@@ -50,6 +52,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 
+import * as RemoteLaunch from "../orchestration-v2/RemoteThreadLaunch.ts";
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
 import * as Metrics from "../observability/Metrics.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
@@ -197,6 +200,7 @@ const encodeHeadersJson = Schema.encodeSync(HeadersJson);
 const encodeMissingFieldsJson = Schema.encodeSync(MissingFieldsJson);
 
 interface ScheduledTaskRow {
+  readonly target_machine?: string | null;
   readonly agent_id: string | null;
   readonly task_id: string;
   readonly owner_machine?: string | null;
@@ -205,6 +209,7 @@ interface ScheduledTaskRow {
   readonly enabled: number;
   readonly schedule_json: string;
   readonly project_id: string;
+  readonly project_folder_id: string | null;
   readonly thread_id: string | null;
   readonly workspace_strategy_json: string;
   readonly model_selection_json: string;
@@ -316,7 +321,8 @@ function nextRunAt(
 }
 
 function errorMessage(error: unknown): string {
-  if (Cause.isCause(error)) return Cause.pretty(error);
+  if (Cause.isCause(error))
+    return userFacingDispatchErrorMessage(Cause.squash(error)) ?? Cause.pretty(error);
   if (error instanceof Error) return error.message;
   return String(error);
 }
@@ -349,12 +355,14 @@ const decodeRow = (row: ScheduledTaskRow, origin: WebhookOrigin | null = null) =
       // as a typed parse error, not a `ScheduledTaskId.make` defect.
       id: row.task_id,
       ...(row.owner_machine == null ? {} : { ownerMachine: row.owner_machine }),
+      ...(row.target_machine == null ? {} : { machine: row.target_machine }),
       agentId: row.agent_id,
       title: row.title,
       prompt: row.prompt,
       enabled: row.enabled === 1,
       schedule,
       projectId: row.project_id,
+      projectFolderId: row.project_folder_id,
       threadId: row.thread_id,
       workspaceStrategy,
       modelSelection,
@@ -431,7 +439,9 @@ export const layer = Layer.effect(
     const agents = yield* Agents.AgentService;
     const agentStore = yield* AgentStore.AgentStore;
     const threadLaunch = yield* ThreadLaunchService.ThreadLaunchService;
+    const remoteLaunch = yield* Effect.serviceOption(RemoteLaunch.RemoteThreadLaunch);
     const threadManagement = yield* ThreadManagementService.ThreadManagementService;
+    const membership = yield* Membership.ProjectRepositoryMembership;
     const secretRequests = yield* SecretRequests.SecretRequests;
     const scheduler = yield* Scheduler.Scheduler;
     const readWebhookOrigin = yield* ScheduledTaskWebhookOrigin;
@@ -455,6 +465,7 @@ export const layer = Layer.effect(
     const selectAllRows = () => sql<ScheduledTaskRow>`
       SELECT
         owner_machine,
+        target_machine,
         agent_id,
         task_id,
         title,
@@ -462,6 +473,7 @@ export const layer = Layer.effect(
         enabled,
         schedule_json,
         project_id,
+        project_folder_id,
         thread_id,
         workspace_strategy_json,
         model_selection_json,
@@ -492,6 +504,7 @@ export const layer = Layer.effect(
     const getRows = (id: ScheduledTaskId) => sql<ScheduledTaskRow>`
       SELECT
         owner_machine,
+        target_machine,
         agent_id,
         task_id,
         title,
@@ -499,6 +512,7 @@ export const layer = Layer.effect(
         enabled,
         schedule_json,
         project_id,
+        project_folder_id,
         thread_id,
         workspace_strategy_json,
         model_selection_json,
@@ -574,6 +588,7 @@ export const layer = Layer.effect(
       sql<{ task_id: string }>`
         INSERT INTO scheduled_tasks (
           owner_machine,
+          target_machine,
           agent_id,
           task_id,
           title,
@@ -581,6 +596,7 @@ export const layer = Layer.effect(
           enabled,
           schedule_json,
           project_id,
+        project_folder_id,
           thread_id,
           workspace_strategy_json,
           model_selection_json,
@@ -600,6 +616,7 @@ export const layer = Layer.effect(
         )
         SELECT
           ${task.ownerMachine ?? shared.environmentId},
+          ${task.machine ?? null},
           ${task.agentId ?? null},
           ${task.id},
           ${task.title},
@@ -607,6 +624,7 @@ export const layer = Layer.effect(
           ${task.enabled ? 1 : 0},
           ${JSON.stringify(task.schedule)},
           ${task.projectId},
+          ${task.projectFolderId ?? null},
           ${task.threadId},
           ${JSON.stringify(task.workspaceStrategy)},
           ${JSON.stringify(task.modelSelection)},
@@ -628,12 +646,14 @@ export const layer = Layer.effect(
         ON CONFLICT (task_id)
         DO UPDATE SET
           owner_machine = excluded.owner_machine,
+          target_machine = excluded.target_machine,
           agent_id = excluded.agent_id,
           title = excluded.title,
           prompt = excluded.prompt,
           enabled = excluded.enabled,
           schedule_json = excluded.schedule_json,
           project_id = excluded.project_id,
+          project_folder_id = excluded.project_folder_id,
           thread_id = excluded.thread_id,
           workspace_strategy_json = excluded.workspace_strategy_json,
           model_selection_json = excluded.model_selection_json,
@@ -891,7 +911,11 @@ export const layer = Layer.effect(
               ? yield* Effect.exit(
                   threadLaunch.launch({
                     commandId,
+                    ...(active.machine == null ? {} : { machine: active.machine }),
                     projectId: active.projectId,
+                    ...(active.projectFolderId == null
+                      ? {}
+                      : { projectFolderId: active.projectFolderId }),
                     title: active.title,
                     modelSelection: active.modelSelection,
                     runtimeMode: enforceRuntimeMode(active.runtimeMode),
@@ -1145,6 +1169,30 @@ export const layer = Layer.effect(
                 .forThread(input.threadId)
                 .pipe(Effect.mapError((cause) => taskError("Could not resolve agent.", { cause })))
             : null;
+        const explicitAgent =
+          input.agentId == null
+            ? null
+            : yield* agentStore
+                .get(input.agentId)
+                .pipe(
+                  Effect.mapError((cause) => taskError("Agent not found.", { taskId: id, cause })),
+                );
+        const owner =
+          input.ownerMachine ??
+          existingTask?.ownerMachine ??
+          explicitAgent?.ownerMachine ??
+          boundAgent?.ownerMachine ??
+          (yield* shared.defaultOwner);
+        if (owner !== shared.environmentId) {
+          if (Option.isNone(remoteLaunch))
+            return yield* taskError("The machine that owns this schedule is unavailable.", {
+              taskId: id,
+            });
+          yield* remoteLaunch.value
+            .upsertSchedule(owner, { ...input, id })
+            .pipe(Effect.mapError((cause) => taskError(cause.message, { taskId: id, cause })));
+          return { task: yield* loadTask(id) };
+        }
         // Keep the existing next_run_at when the schedule itself is untouched:
         // editing a title or prompt must not postpone (or resurrect) a due
         // run — only schedule/enabled changes restart the clock.
@@ -1212,6 +1260,7 @@ export const layer = Layer.effect(
             existingTask?.ownerMachine ??
             boundAgent?.ownerMachine ??
             (yield* shared.defaultOwner),
+          machine: input.machine === undefined ? (existingTask?.machine ?? null) : input.machine,
           agentId:
             input.agentId === undefined
               ? (existingTask?.agentId ?? boundAgent?.id ?? null)
@@ -1221,6 +1270,10 @@ export const layer = Layer.effect(
           enabled: input.enabled,
           schedule,
           projectId: input.projectId,
+          projectFolderId:
+            input.projectFolderId === undefined
+              ? (existingTask?.projectFolderId ?? null)
+              : input.projectFolderId,
           threadId: input.threadId ?? null,
           workspaceStrategy: input.workspaceStrategy,
           modelSelection: input.modelSelection,
@@ -1238,6 +1291,18 @@ export const layer = Layer.effect(
           lastRunError: existingTask?.lastRunError ?? null,
           runCount: existingTask?.runCount ?? 0,
         };
+        yield* membership
+          .validate({
+            projectId: explicitAgent?.projectId ?? boundAgent?.projectId ?? task.projectId,
+            projectFolderId:
+              task.projectFolderId ?? explicitAgent?.projectFolderId ?? boundAgent?.projectFolderId,
+          })
+          .pipe(Effect.mapError((cause) => taskError(cause.message, { taskId: id, cause })));
+        if (task.machine != null && (task.threadId !== null || task.agentId != null))
+          return yield* taskError(
+            "machine selects where a fresh thread runs; omit it for a bound thread or agent trigger.",
+            { taskId: id },
+          );
         if (task.schedule.type === "event" && task.agentId == null) {
           return yield* taskError("Event triggers require an agent.", { taskId: id });
         }
@@ -1363,6 +1428,17 @@ export const layer = Layer.effect(
     const runNow: ScheduledTaskService["Service"]["runNow"] = (input: ScheduledTaskRunNowInput) =>
       Effect.gen(function* () {
         const task = yield* loadTask(input.id);
+        if (task.ownerMachine !== undefined && task.ownerMachine !== shared.environmentId) {
+          if (Option.isNone(remoteLaunch))
+            return yield* taskError("The machine that owns this schedule is unavailable.", {
+              taskId: input.id,
+            });
+          return yield* remoteLaunch.value
+            .runSchedule(task.ownerMachine, input)
+            .pipe(
+              Effect.mapError((cause) => taskError(cause.message, { taskId: input.id, cause })),
+            );
+        }
         if (task.schedule.type === "event")
           return yield* new ScheduledTaskError({
             taskId: input.id,
@@ -1918,4 +1994,8 @@ export const layer = Layer.effect(
       triggerWebhook,
     });
   }),
-).pipe(Layer.provide(Access.layer), Layer.provide(SharedState.layer));
+).pipe(
+  Layer.provide(Access.layer),
+  Layer.provide(SharedState.layer),
+  Layer.provide(Membership.layer),
+);

@@ -1,11 +1,11 @@
-import type { VisualState } from "@t3tools/contracts";
+import type { VisualState } from "@cogenly/contracts";
 import {
   type HtmlRenderVisualSnapshot,
   htmlRenderVisualError,
   readHtmlRenderVisualStateGet,
   readHtmlRenderVisualStateSet,
   readHtmlRenderVisualSubmit,
-} from "@t3tools/shared/htmlRender";
+} from "@cogenly/shared/htmlRender";
 
 /** A request a framed render made through `window.cogenly`. */
 export type VisualBridgeRequest =

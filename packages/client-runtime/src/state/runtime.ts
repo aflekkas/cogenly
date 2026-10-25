@@ -7,7 +7,7 @@ import {
   type ClientGuardedReadRpcTag,
   EnvironmentId,
   type EnvironmentId as EnvironmentIdType,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -714,17 +714,31 @@ export function createEnvironmentCommand<R, ER, Input, A, E>(
   });
 }
 
-/** Protected reads authorize against the destination session when the query runs. */
+/**
+ * Protected reads authorize against the destination session when the query runs.
+ * `permissionAtom` says whether the session holds the read's grant, so a view can
+ * skip a read it would only be refused.
+ */
 export function createEnvironmentGuardedRpcQueryAtomFamily<
   R,
   ER,
   TTag extends Extract<EnvironmentUnaryRpcTag, ClientGuardedReadRpcTag>,
 >(
   runtime: Atom.AtomRuntime<EnvironmentRegistry.EnvironmentRegistry | R, ER>,
-  options: { readonly label: string; readonly tag: TTag },
+  options: {
+    readonly label: string;
+    readonly tag: TTag;
+    readonly staleTimeMs?: number;
+    readonly refreshTrigger?: (target: {
+      readonly environmentId: EnvironmentIdType;
+      readonly input: EnvironmentRpcInput<TTag>;
+    }) => Atom.Atom<unknown> | undefined;
+  },
 ) {
-  return createEnvironmentQueryAtomFamily(runtime, {
+  const query = createEnvironmentQueryAtomFamily(runtime, {
     label: options.label,
+    ...(options.staleTimeMs === undefined ? {} : { staleTimeMs: options.staleTimeMs }),
+    ...(options.refreshTrigger === undefined ? {} : { refreshTrigger: options.refreshTrigger }),
     execute: (input: EnvironmentRpcInput<TTag>) =>
       Effect.gen(function* () {
         const registry = yield* AtomRegistry.AtomRegistry;
@@ -735,6 +749,9 @@ export function createEnvironmentGuardedRpcQueryAtomFamily<
           }),
         );
       }),
+  });
+  return Object.assign(query, {
+    permissionAtom: createCommandPermissions(runtime, options.tag).permissionAtom,
   });
 }
 
@@ -886,6 +903,53 @@ export function createEnvironmentRpcCommand<
         Effect.ensuring(options.onSettled?.(target, registry) ?? Effect.void),
       );
     },
+  });
+  return {
+    ...command,
+    requiredScopes: permissions.requiredScopes,
+    permissionAtom: permissions.permissionAtom,
+  };
+}
+
+/**
+ * A command whose effect makes several protected requests, possibly on other
+ * environments through `EnvironmentRegistry.run`. `tag` gates the target
+ * environment before anything runs and supplies `permissionAtom`; every
+ * `requestGuarded` inside is authorized again against its own destination.
+ */
+export function createEnvironmentGuardedCommand<R, ER, Input, A, E>(
+  runtime: Atom.AtomRuntime<EnvironmentRegistry.EnvironmentRegistry | R, ER>,
+  options: {
+    readonly label: string;
+    readonly tag: ClientGuardedRpcTag;
+    readonly execute: (
+      input: Input,
+      environmentId: EnvironmentIdType,
+    ) => Effect.Effect<
+      A,
+      E,
+      EnvironmentSupervisor.EnvironmentSupervisor | EnvironmentRegistry.EnvironmentRegistry
+    >;
+    readonly scheduler?: AtomCommandScheduler;
+    readonly concurrency?: AtomCommandConcurrency<{
+      readonly environmentId: EnvironmentIdType;
+      readonly input: NoInfer<Input>;
+    }>;
+  },
+) {
+  const permissions = createCommandPermissions(runtime, options.tag);
+  const command = createEnvironmentCommand(runtime, {
+    label: options.label,
+    ...(options.scheduler === undefined ? {} : { scheduler: options.scheduler }),
+    ...(options.concurrency === undefined ? {} : { concurrency: options.concurrency }),
+    execute: (input: Input, registry, environmentId) =>
+      permissions.authorize(registry, environmentId).pipe(
+        Effect.andThen(() => options.execute(input, environmentId)),
+        Effect.provideService(RpcPermissionGuard, {
+          authorize: (id, method, payload) =>
+            createCommandPermissions(runtime, method).authorize(registry, id, payload),
+        }),
+      ),
   });
   return {
     ...command,

@@ -3,9 +3,8 @@ import {
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
-  UsageLimitSourceId,
   type ServerProvider,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Duration from "effect/Duration";
 import { describe, expect, it } from "vite-plus/test";
 import { resolveServerBackgroundActivitySettings } from "./backgroundActivitySettings.ts";
@@ -53,6 +52,30 @@ describe("fallbackTextGenerationModelSelection", () => {
 });
 
 describe("serverSettings helpers", () => {
+  it("legacy client migration seeds only unset fields and preserves explicit edits", () => {
+    const current = {
+      ...DEFAULT_SERVER_SETTINGS,
+      clientAppearanceAccent: "green" as const,
+      clientWordWrap: false,
+    };
+    const migrated = applyServerSettingsPatch(current, {
+      migrateClientPreferences: {
+        clientAppearanceAccent: "blue",
+        clientAppearanceMode: "light",
+        clientWordWrap: true,
+      },
+    });
+    expect(migrated.clientAppearanceAccent).toBe("green");
+    expect(migrated.clientAppearanceMode).toBe("light");
+    expect(migrated.clientWordWrap).toBe(false);
+    expect(
+      applyServerSettingsPatch(migrated, {
+        clientAppearanceMode: "dark",
+        migrateClientPreferences: { clientAppearanceMode: "system" },
+      }).clientAppearanceMode,
+    ).toBe("dark");
+  });
+
   it("sets and clears one model's default effort without touching others", () => {
     const codex = ProviderInstanceId.make("codex");
     const set = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
@@ -96,27 +119,14 @@ describe("serverSettings helpers", () => {
       }).storageCleanup,
     ).toEqual({
       worktreeAfterDays: null,
-      worktreeSettledAfterDays: null,
+      worktreeSettledAfterDays: 7,
       worktreeOnMerge: true,
       worktreeOnDelete: false,
       worktreeUnchanged: false,
       worktreeKeepWhen: "uncommitted-changes",
-      browserArtifactsAfterDays: null,
+      browserArtifactsAfterDays: 14,
       logsAfterDays: 30,
-    });
-  });
-  it("replaces a source control host's patched field so a cleared account pin does not survive", () => {
-    const pinned = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
-      sourceControlHosts: {
-        github: { hosts: { "github.com": { account: "work", enabled: true } }, tokens: {} },
-      },
-    });
-    const unpinned = applyServerSettingsPatch(pinned, {
-      sourceControlHosts: { github: { hosts: { "github.com": { enabled: false } } } },
-    });
-    expect(unpinned.sourceControlHosts.github).toEqual({
-      hosts: { "github.com": { enabled: false } },
-      tokens: {},
+      dependenciesAfterDays: null,
     });
   });
   it("replaces SSH host lists when saving, editing, and removing hosts", () => {
@@ -741,29 +751,6 @@ describe("serverSettings helpers", () => {
       newWorktreesStartFromOrigin: true,
       providerInstances: {},
     });
-  });
-
-  it("upserts and removes usageLimitSources per entry so concurrent edits cannot clobber", () => {
-    const hubA = UsageLimitSourceId.make("cliproxy-a");
-    const hubB = UsageLimitSourceId.make("cliproxy-b");
-    const source = (url: string) => ({
-      kind: "cliproxy" as const,
-      url,
-      managementKey: "secret",
-      enabled: true,
-    });
-    const current = {
-      ...DEFAULT_SERVER_SETTINGS,
-      usageLimitSources: { [hubA]: source("http://a:8318") },
-    };
-
-    const added = applyServerSettingsPatch(current, {
-      usageLimitSources: { [hubB]: source("http://b:8318") },
-    });
-    expect(Object.keys(added.usageLimitSources)).toEqual([hubA, hubB]);
-
-    const removed = applyServerSettingsPatch(added, { usageLimitSources: { [hubA]: null } });
-    expect(Object.keys(removed.usageLimitSources)).toEqual([hubB]);
   });
 
   it("stores background activity profiles as a versioned object and syncs legacy aliases", () => {

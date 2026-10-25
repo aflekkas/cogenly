@@ -16,14 +16,17 @@ import {
   cliArchiveFileName,
   cliArchivePlatformKey,
   cliArchiveTarCommand,
+  cliExecutableFileName,
   cliReleaseDownloadBaseUrl,
+  LEGACY_CLI_EXECUTABLE_NAME,
   parseChecksums,
-} from "@t3tools/shared/cliRelease";
+  selectCliArchive,
+} from "@cogenly/shared/cliRelease";
 
 import * as ProcessRunner from "../processRunner.ts";
 
 /**
- * A pinned runtime is an exact t3 release archive unpacked into
+ * A pinned runtime is an exact release archive unpacked into
  * <baseDir>/runtime/versions/<version>: the self-contained executable, the
  * web client, and the native packages beside it. The boot service points its
  * unit or launch agent at the executable, and server self-update installs the
@@ -34,7 +37,10 @@ import * as ProcessRunner from "../processRunner.ts";
  */
 const PINNED_RUNTIME_DIR = "runtime";
 const PINNED_RUNTIME_INSTALL_TIMEOUT = Duration.minutes(10);
-const PINNED_RUNTIME_ARCHIVE_FILE = "t3-runtime-archive";
+const PINNED_RUNTIME_ARCHIVE_FILE = "cogenly-runtime-archive";
+/** Step names `cogenly update` matches to report a release without a Linux archive. */
+export const PINNED_RUNTIME_CHECKSUMS_STEP = "downloading the release checksums";
+export const PINNED_RUNTIME_ARCHIVE_MISSING_STEP = "finding the release archive in the checksums";
 // Boot-service setup and remote update can construct separate layers. Serialize
 // the complete install transaction across every caller in this process.
 const pinnedRuntimeInstallLock = Semaphore.makeUnsafe(1);
@@ -114,10 +120,31 @@ export function pinnedRuntimePaths(
   const versionDir = path.join(pinnedRuntimeVersionsDir(path, baseDir), version);
   return {
     versionDir,
-    entryPath: path.join(versionDir, platform === "win32" ? "t3.exe" : "t3"),
+    entryPath: path.join(versionDir, cliExecutableFileName(platform)),
     sentinelPath: path.join(versionDir, ".install-complete"),
   };
 }
+
+/**
+ * `paths` with the executable that is actually on disk: `cogenly`, else the
+ * `t3` of a runtime unpacked from an archive older than the rename. A
+ * runtime with neither keeps the `cogenly` path. Remove the `t3` fallback
+ * only as "Transition: t3 → cogenly names" in docs/operations/release.md
+ * describes.
+ */
+export const resolvePinnedRuntimeEntry = Effect.fn("cloud.pinned_runtime.resolve_entry")(function* (
+  fs: FileSystem.FileSystem,
+  path: Path.Path,
+  paths: PinnedRuntimePaths,
+  platform: NodeJS.Platform,
+) {
+  if (yield* fs.exists(paths.entryPath)) return paths;
+  const legacy = path.join(
+    paths.versionDir,
+    cliExecutableFileName(platform, LEGACY_CLI_EXECUTABLE_NAME),
+  );
+  return (yield* fs.exists(legacy)) ? { ...paths, entryPath: legacy } : paths;
+});
 
 export class PinnedRuntimeInstallError extends Schema.TaggedError<PinnedRuntimeInstallError>()(
   "PinnedRuntimeInstallError",
@@ -153,7 +180,7 @@ export type PinnedRuntimeProgress =
   | { readonly stage: "verify" | "extract" | "validate" | "cached" };
 
 /**
- * Installs the t3 release archive for `version` into the pinned runtime
+ * Installs the release archive for `version` into the pinned runtime
  * directory unless a complete install is already there, and returns its
  * paths. The sentinel is written only after extraction and validation
  * succeed; checking the entry file alone is not enough, since tar writes the
@@ -248,7 +275,6 @@ const installFromArchive = Effect.fn("cloud.pinned_runtime.install_archive")(fun
     });
   }
   const httpClient = input.httpClient;
-  const fileName = cliArchiveFileName(input.version, platformKey);
 
   input.onProgress?.({ stage: "download", received: 0, total: undefined });
   const checksums = parseChecksums(
@@ -256,31 +282,33 @@ const installFromArchive = Effect.fn("cloud.pinned_runtime.install_archive")(fun
       yield* fetchReleaseAsset(
         httpClient,
         `${baseUrl}/${CLI_RELEASE_CHECKSUMS_FILE}`,
-        "downloading the t3 release checksums",
+        PINNED_RUNTIME_CHECKSUMS_STEP,
       ),
     ),
   );
-  const expected = checksums.get(fileName);
-  if (expected === undefined) {
+  // Releases from before the rename list only the t3- name; the checksum
+  // file says which one exists, so no download is tried that would 404.
+  const selected = selectCliArchive(checksums, input.version, platformKey);
+  if (selected === undefined) {
     return yield* new PinnedRuntimeInstallError({
-      step: `finding ${fileName} in the t3 release checksums`,
+      step: `${PINNED_RUNTIME_ARCHIVE_MISSING_STEP} (${cliArchiveFileName(input.version, platformKey)})`,
     });
   }
   const archive = yield* fetchReleaseAsset(
     httpClient,
-    `${baseUrl}/${fileName}`,
-    "downloading the t3 release archive",
+    `${baseUrl}/${selected.fileName}`,
+    "downloading the release archive",
     input.onProgress,
   );
   input.onProgress?.({ stage: "verify" });
   const digest = yield* Effect.tryPromise({
     try: () => crypto.subtle.digest("SHA-256", archive),
     catch: (cause) =>
-      new PinnedRuntimeInstallError({ step: "verifying the t3 release archive", cause }),
+      new PinnedRuntimeInstallError({ step: "verifying the release archive", cause }),
   });
-  if (Hex.encode(new Uint8Array(digest)) !== expected) {
+  if (Hex.encode(new Uint8Array(digest)) !== selected.sha256) {
     return yield* new PinnedRuntimeInstallError({
-      step: "verifying the t3 release archive checksum",
+      step: "verifying the release archive checksum",
     });
   }
 
@@ -289,13 +317,13 @@ const installFromArchive = Effect.fn("cloud.pinned_runtime.install_archive")(fun
     .writeFile(archivePath, archive)
     .pipe(
       Effect.mapError(
-        (cause) => new PinnedRuntimeInstallError({ step: "writing the t3 release archive", cause }),
+        (cause) => new PinnedRuntimeInstallError({ step: "writing the release archive", cause }),
       ),
     );
   input.onProgress?.({ stage: "extract" });
-  const extractStep = "extracting the t3 release archive";
+  const extractStep = "extracting the release archive";
   // The archive wraps everything in one directory named after its stem;
-  // strip it so the executable lands at <versionDir>/t3.
+  // strip it so the executable lands at <versionDir>/cogenly.
   yield* input.runner
     .run({
       command: cliArchiveTarCommand(input.platform, process.env),
@@ -371,7 +399,14 @@ const installPinnedRuntime = Effect.fn("cloud.pinned_runtime.ensure_installed")(
   input: PinnedRuntimeInstallInput,
 ) {
   const { fs } = input;
-  const paths = pinnedRuntimePaths(input.path, input.baseDir, input.version, input.platform);
+  const resolveEntry = (candidate: PinnedRuntimePaths, step: string) =>
+    resolvePinnedRuntimeEntry(fs, input.path, candidate, input.platform).pipe(
+      Effect.mapError((cause) => new PinnedRuntimeInstallError({ step, cause })),
+    );
+  const paths = yield* resolveEntry(
+    pinnedRuntimePaths(input.path, input.baseDir, input.version, input.platform),
+    "checking the pinned runtime",
+  );
   const [versionDirExists, entryExists, sentinel] = yield* Effect.all([
     fs.exists(paths.versionDir),
     fs.exists(paths.entryPath),
@@ -432,22 +467,28 @@ const installPinnedRuntime = Effect.fn("cloud.pinned_runtime.ensure_installed")(
 
   return yield* Effect.gen(function* () {
     yield* installRuntime(input, stagingDir, stagingPaths);
+    // An archive from before the rename unpacks only `t3`.
+    const installed = yield* resolveEntry(stagingPaths, "checking the unpacked release archive");
+    const published = {
+      ...paths,
+      entryPath: input.path.join(paths.versionDir, input.path.basename(installed.entryPath)),
+    };
 
     input.onProgress?.({ stage: "validate" });
-    yield* input.validate(stagingPaths);
+    yield* input.validate(installed);
     yield* fs
-      .writeFileString(stagingPaths.sentinelPath, `${input.version}\n`)
+      .writeFileString(installed.sentinelPath, `${input.version}\n`)
       .pipe(
         Effect.mapError(
           (cause) =>
             new PinnedRuntimeInstallError({ step: "recording the completed install", cause }),
         ),
       );
-    const published = yield* fs.rename(stagingDir, paths.versionDir).pipe(
+    const renamed = yield* fs.rename(stagingDir, paths.versionDir).pipe(
       Effect.as(true),
       Effect.catch((cause) =>
         Effect.all([
-          fs.exists(paths.entryPath),
+          fs.exists(published.entryPath),
           fs.readFileString(paths.sentinelPath).pipe(Effect.option),
         ]).pipe(
           Effect.mapError(
@@ -472,8 +513,8 @@ const installPinnedRuntime = Effect.fn("cloud.pinned_runtime.ensure_installed")(
         ),
       ),
     );
-    if (!published) yield* input.validate(paths);
-    return paths;
+    if (!renamed) yield* input.validate(published);
+    return published;
   }).pipe(
     Effect.ensuring(fs.remove(stagingDir, { recursive: true, force: true }).pipe(Effect.ignore)),
   );

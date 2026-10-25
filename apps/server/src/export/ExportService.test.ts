@@ -14,7 +14,7 @@ import {
   ProjectId,
   ProviderInstanceId,
   ProjectLabelId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Exports from "./ExportService.ts";
 import * as Config from "../config.ts";
 import * as Sqlite from "../persistence/Sqlite.ts";

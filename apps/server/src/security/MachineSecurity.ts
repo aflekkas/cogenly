@@ -1,3 +1,4 @@
+import * as ReadOnlySandbox from "../terminal/ReadOnlySandbox.ts";
 /**
  * MachineSecurity: read-only, non-root posture check of this machine.
  * Every transport (WebSocket RPC, MCP, CLI) calls the same `status`.
@@ -8,8 +9,8 @@ import type {
   MachineSecurityListeningSocket,
   MachineSecurityState,
   MachineSecurityStatus,
-} from "@t3tools/contracts";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+} from "@cogenly/contracts";
+import * as HostProcess from "@cogenly/shared/HostProcess";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
@@ -157,6 +158,7 @@ export const parseUfw = (
 // --- State derivation -------------------------------------------------------
 
 export interface MachineSecurityInputs {
+  readonly chatSandbox?: ReadOnlySandbox.SandboxStatus;
   readonly platform: string;
   readonly cogenlyHost: string;
   readonly cogenlyPort: number;
@@ -172,6 +174,20 @@ export const buildMachineSecurityStatus = (
   observedAt: MachineSecurityStatus["observedAt"],
 ): MachineSecurityStatus => {
   const findings: MachineSecurityFinding[] = [];
+  if (input.chatSandbox)
+    findings.push({
+      checkId: "chat-terminal-sandbox",
+      status: input.chatSandbox.available ? "pass" : "warn",
+      title: input.chatSandbox.available
+        ? "Chat terminal sandbox available"
+        : `Chat commands are off: ${input.chatSandbox.reason}`,
+      detail: input.chatSandbox.available
+        ? "Chat terminals cannot write local files outside their private temporary directory. Network requests remain available."
+        : input.chatSandbox.reason,
+      evidence: input.chatSandbox.available
+        ? input.chatSandbox.backend
+        : (input.chatSandbox.failure ?? "confinement probe unavailable"),
+    });
   const loopback = isLoopbackHost(input.cogenlyHost);
   findings.push(
     loopback
@@ -381,6 +397,7 @@ const runText = (
 
 export const make = Effect.gen(function* () {
   const config = yield* ServerConfig.ServerConfig;
+  const sandbox = yield* ReadOnlySandbox.ReadOnlySandbox;
   const status = Effect.gen(function* () {
     const platform = yield* HostProcess.Platform;
     const isLinux = platform === "linux";
@@ -403,6 +420,7 @@ export const make = Effect.gen(function* () {
     return buildMachineSecurityStatus(
       {
         platform,
+        chatSandbox: sandbox.status,
         cogenlyHost: config.host ?? "127.0.0.1",
         cogenlyPort: config.port,
         sockets,
@@ -426,4 +444,4 @@ export const make = Effect.gen(function* () {
   return MachineSecurity.of({ status });
 });
 
-export const layer = Layer.effect(MachineSecurity, make);
+export const layer = Layer.effect(MachineSecurity, make).pipe(Layer.provide(ReadOnlySandbox.layer));

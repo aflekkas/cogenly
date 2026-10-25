@@ -1,5 +1,5 @@
-import { withWorkMetadata } from "@t3tools/shared/workMetadata";
-import { applyThreadPullRequestLinkUpdate } from "@t3tools/shared/threadPullRequests";
+import { withWorkMetadata } from "@cogenly/shared/workMetadata";
+import { applyThreadPullRequestLinkUpdate } from "@cogenly/shared/threadPullRequests";
 import { projectTurnItemForWire } from "./WireProjection.ts";
 import * as Stream from "effect/Stream";
 import { makeThreadFind, findProjectedThreadItems } from "./ThreadFind.ts";
@@ -7,14 +7,14 @@ import type {
   OrchestrationV2SearchThreadInput,
   OrchestrationV2SearchThreadResult,
   OrchestrationV2ThreadHistoryPage,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import {
   latestRootProviderFailure,
   latestUnheldRun,
   threadErrorSummary,
   usageLimitRunPresentedAsLatest,
-} from "@t3tools/shared/orchestrationV2ThreadError";
-import { threadPullRequestsOf } from "@t3tools/shared/threadPullRequests";
+} from "@cogenly/shared/orchestrationV2ThreadError";
+import { threadPullRequestsOf } from "@cogenly/shared/threadPullRequests";
 import type {
   OrchestrationV2AppThread,
   OrchestrationV2CheckpointScope,
@@ -24,6 +24,7 @@ import type {
   OrchestrationV2ConversationMessage,
   OrchestrationV2DomainEvent,
   OrchestrationV2ProjectedTurnItem,
+  OrchestrationV2ProviderLimitKind,
   OrchestrationV2ProviderThread,
   OrchestrationV2ProviderTurn,
   OrchestrationV2Run,
@@ -39,7 +40,7 @@ import type {
   ProviderThreadId,
   ProviderTurnId,
   RunAttemptId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import {
   OrchestrationV2AppThreadJson as OrchestrationV2AppThreadJsonSchema,
   OrchestrationV2CheckpointJson as OrchestrationV2CheckpointJsonSchema,
@@ -66,12 +67,12 @@ import {
   ThreadId,
   TurnItemId,
   NodeId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import {
   createOrchestrationV2TurnItemVisibility,
   isOrchestrationV2SupersededInterrupt,
-} from "@t3tools/shared/orchestrationV2Timeline";
-import { derivePendingBackgroundWork } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
+} from "@cogenly/shared/orchestrationV2Timeline";
+import { derivePendingBackgroundWork } from "@cogenly/shared/orchestrationV2PendingBackgroundWork";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -82,7 +83,7 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import type * as Statement from "effect/sql/Statement";
 
-import { MCP_APP_OUTPUT_KEY } from "@t3tools/shared/mcpApp";
+import { MCP_APP_OUTPUT_KEY } from "@cogenly/shared/mcpApp";
 import { threadHtmlRenderAttachmentIds } from "../attachmentStore.ts";
 import {
   isThreadHistoryUserTurn,
@@ -170,7 +171,17 @@ export type ProjectionLimitRecoveryCandidate = Pick<
   | "updatedAt"
   | "limitRecovery"
   | "snoozedUntil"
->;
+> & {
+  /** The stop's limit kind; absent reads as an exhausted quota. */
+  readonly limitKind?: OrchestrationV2ProviderLimitKind | undefined;
+  /** A delegated task waits on the thread, so it recovers from a limit on its own. */
+  readonly delegated?: boolean;
+  /**
+   * The recorded limit recovery is the stop just before this one: on the same
+   * instance, with no run finished since. False starts a new retry streak.
+   */
+  readonly retryChained?: boolean;
+};
 
 /** The thread fields pull request sync reads, for a thread with at least one link. */
 export type ProjectionThreadPullRequests = Pick<
@@ -179,6 +190,7 @@ export type ProjectionThreadPullRequests = Pick<
 >;
 
 const ProjectionCheckpointContext = Schema.Struct({
+  repositoryCwd: Schema.optionalKey(Schema.NullOr(Schema.String)),
   runs: Schema.Array(
     OrchestrationV2RunJsonSchema.mapFields(({ id, ordinal, status }) => ({ id, ordinal, status })),
   ),
@@ -1570,6 +1582,8 @@ export function threadShellFromProjection(
     projectId: projection.thread.projectId,
     projectFolderId: projection.thread.projectFolderId ?? null,
     projectFolderSource: projection.thread.projectFolderSource ?? null,
+    // Omitted for this machine's own threads, which are most of a shell snapshot.
+    ...(projection.thread.ownerMachine ? { ownerMachine: projection.thread.ownerMachine } : {}),
     title: projection.thread.title,
     providerInstanceId: projection.thread.providerInstanceId,
     modelSelection: projection.thread.modelSelection,
@@ -1885,6 +1899,7 @@ function shellFromState(input: {
     projectId: input.state.thread.projectId,
     projectFolderId: input.state.thread.projectFolderId ?? null,
     projectFolderSource: input.state.thread.projectFolderSource ?? null,
+    ...(input.state.thread.ownerMachine ? { ownerMachine: input.state.thread.ownerMachine } : {}),
     title: input.state.thread.title,
     providerInstanceId: input.state.thread.providerInstanceId,
     modelSelection: input.state.thread.modelSelection,
@@ -1957,6 +1972,11 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
   ProjectionStoreV2,
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
+
+    // Recovery, usage-limit resume and pull request polling act only on threads
+    // this machine runs. A replica records another machine's run as it is there.
+    const locallyOwned = (threadId: Statement.Fragment) =>
+      sql`NOT EXISTS (SELECT 1 FROM thread_owners owner WHERE owner.thread_id = ${threadId} AND owner.local = 0)`;
 
     // For run upserts: a snapshot without `path` keeps the value another event recorded there.
     const keepRecordedRunField = (payload: Statement.Fragment, path: string) => sql`
@@ -2903,7 +2923,9 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             '$.projectFolderSource', CASE
               WHEN EXISTS (SELECT 1 FROM thread_project_labels WHERE thread_id = ${threadId}) THEN 'explicit'
               WHEN EXISTS (SELECT 1 FROM effective_thread_project_folders WHERE thread_id = ${threadId} AND folder_id IS NOT NULL) THEN 'repository'
-              ELSE NULL END) AS payload_json
+              ELSE NULL END,
+            '$.ownerMachine',
+              (SELECT owner_env FROM thread_owners WHERE thread_id = ${threadId} AND local = 0)) AS payload_json
           FROM orchestration_v2_projection_threads
           WHERE thread_id = ${threadId}
           LIMIT 1
@@ -3746,9 +3768,26 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           readonly completed_at: string | null;
           readonly failure_payload_json: string;
           readonly last_error: string | null;
+          readonly awaiting_task_id: string | null;
+          readonly retry_chained: number;
         }>`
           SELECT t.payload_json, r.run_id, r.completed_at,
             item.payload_json AS failure_payload_json,
+            awaiting_task.subagent_id AS awaiting_task_id,
+            -- The recorded recovery belongs to the stop just before this one:
+            -- same instance, and nothing finished in between.
+            CASE
+              WHEN previous.run_id IS NULL THEN 0
+              WHEN json_extract(previous.payload_json, '$.providerInstanceId')
+                IS NOT json_extract(r.payload_json, '$.providerInstanceId') THEN 0
+              WHEN EXISTS (
+                SELECT 1 FROM orchestration_v2_projection_runs done
+                WHERE done.thread_id = t.thread_id
+                  AND done.status = 'completed'
+                  AND julianday(done.completed_at) > julianday(previous.completed_at)
+              ) THEN 0
+              ELSE 1
+            END AS retry_chained,
             (
               SELECT json_extract(session.payload_json, '$.lastError')
               -- Keep bindings outermost: one provider instance can hold every session.
@@ -3782,7 +3821,19 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             ORDER BY error.updated_at DESC, error.ordinal DESC, error.turn_item_id DESC
             LIMIT 1
           )
+          -- A delegated task, its parent's or a follow-up, still waiting on this child.
+          LEFT JOIN orchestration_v2_projection_subagents awaiting_task ON awaiting_task.subagent_id = (
+            SELECT task.subagent_id FROM orchestration_v2_projection_subagents task
+            WHERE task.child_thread_id = t.thread_id
+              AND json_extract(task.payload_json, '$.origin') = 'app_owned'
+              AND json_extract(task.payload_json, '$.result') IS NULL
+            LIMIT 1
+          )
+          LEFT JOIN orchestration_v2_projection_runs previous
+            ON previous.run_id = json_extract(t.payload_json, '$.limitRecovery.runId')
+            AND previous.thread_id = t.thread_id
           WHERE t.deleted_at IS NULL
+            AND ${locallyOwned(sql`t.thread_id`)}
             AND json_extract(t.payload_json, '$.archivedAt') IS NULL
             AND json_extract(t.payload_json, '$.settledOverride') IS NOT 'settled'
             AND json_extract(item.payload_json, '$.failure.class') = 'usage_limit'
@@ -3794,6 +3845,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 AND json_extract(t.payload_json, '$.limitRecovery.resetAt') IS json_extract(item.payload_json, '$.failure.resetAt')
                 AND json_extract(t.payload_json, '$.limitRecovery.autoResume') = 1
                 AND julianday(json_extract(item.payload_json, '$.failure.resetAt')) <= julianday(${DateTime.formatIso(options.now)})
+                AND COALESCE(julianday(json_extract(t.payload_json, '$.limitRecovery.retryAt')), 0) <= julianday(${DateTime.formatIso(options.now)})
                 AND (
                   json_extract(t.payload_json, '$.snoozedUntil') IS NULL
                   OR julianday(json_extract(t.payload_json, '$.snoozedUntil')) <= julianday(${DateTime.formatIso(options.now)})
@@ -3804,8 +3856,23 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                   json_extract(t.payload_json, '$.limitRecovery.runId') IS NOT r.run_id
                   OR json_extract(t.payload_json, '$.limitRecovery.resetAt') IS NOT json_extract(item.payload_json, '$.failure.resetAt')
                 )
-                AND (${booleanInt(options.autoResume)} OR ${booleanInt(options.snooze)})
-                AND julianday(json_extract(item.payload_json, '$.failure.resetAt')) > julianday(${DateTime.formatIso(options.now)})
+                AND (
+                  (
+                    (${booleanInt(options.autoResume)} OR ${booleanInt(options.snooze)})
+                    AND julianday(json_extract(item.payload_json, '$.failure.resetAt')) > julianday(${DateTime.formatIso(options.now)})
+                  )
+                  -- The server decides these stops itself. A short-term rate
+                  -- limit it retries, while recent: an old one is left for a
+                  -- person.
+                  OR (
+                    json_extract(item.payload_json, '$.failure.limitKind') = 'rate_limit'
+                    AND julianday(COALESCE(r.completed_at, json_extract(t.payload_json, '$.updatedAt'))) > julianday(${DateTime.formatIso(options.now)}) - 1
+                  )
+                  -- A delegated child's stop it hands off or resumes however
+                  -- old, while a task waits on it (limitRecoveryPending holds
+                  -- that task until the stop is decided).
+                  OR awaiting_task.subagent_id IS NOT NULL
+                )
               )
             )
             AND NOT EXISTS (
@@ -3837,6 +3904,9 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             pendingRuntimeRequest: null,
             limitRecovery: thread.limitRecovery ?? null,
             snoozedUntil: thread.snoozedUntil ?? null,
+            limitKind: item.type === "error" ? item.failure.limitKind : undefined,
+            delegated: row.awaiting_task_id !== null,
+            retryChained: row.retry_chained === 1,
           });
         }
         return candidates;
@@ -3977,6 +4047,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         const rows = yield* sql<{ readonly thread_id: string }>`
           SELECT thread_id FROM orchestration_v2_projection_threads
           WHERE deleted_at IS NULL
+            AND ${locallyOwned(sql`thread_id`)}
             AND thread_id IN (${candidates})
             ${kind === "queued-runs" ? sql`AND archived_at IS NULL` : sql``}
           ORDER BY updated_at ASC, thread_id ASC
@@ -4889,9 +4960,13 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       sql
         .withTransaction(
           Effect.gen(function* () {
-            const threads = yield* sql<{ readonly thread_id: string }>`
-            SELECT thread_id FROM orchestration_v2_projection_threads
-            WHERE thread_id = ${threadId} LIMIT 1
+            const threads = yield* sql<{
+              readonly thread_id: string;
+              readonly repositoryCwd: string | null;
+            }>`
+            SELECT t.thread_id, p.workspace_root AS "repositoryCwd" FROM orchestration_v2_projection_threads t
+            LEFT JOIN projection_projects p ON p.project_id = t.project_id
+            WHERE t.thread_id = ${threadId} LIMIT 1
           `;
             if (threads.length === 0) {
               return yield* new ProjectionStoreThreadNotFoundError({ threadId });
@@ -4921,7 +4996,12 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               ORDER BY scope_id ASC, ordinal_within_scope ASC
             `,
             ]);
-            return yield* decodeCheckpointContext({ runs, checkpointScopes, checkpoints });
+            return yield* decodeCheckpointContext({
+              runs,
+              checkpointScopes,
+              checkpoints,
+              repositoryCwd: threads[0]?.repositoryCwd,
+            });
           }),
         )
         .pipe(
@@ -5486,7 +5566,9 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 '$.projectFolderSource', CASE
                   WHEN EXISTS (SELECT 1 FROM thread_project_labels e WHERE e.thread_id = t.thread_id) THEN 'explicit'
                   WHEN EXISTS (SELECT 1 FROM effective_thread_project_folders f WHERE f.thread_id = t.thread_id AND f.folder_id IS NOT NULL) THEN 'repository'
-                  ELSE NULL END) AS payload_json,
+                  ELSE NULL END,
+                '$.ownerMachine',
+                  (SELECT o.owner_env FROM thread_owners o WHERE o.thread_id = t.thread_id AND o.local = 0)) AS payload_json,
               CASE
                 WHEN json_extract(t.payload_json, '$.forkedFrom.type') = 'run'
                   THEN json_extract(t.payload_json, '$.forkedFrom.threadId')
@@ -5816,6 +5898,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           SELECT payload_json
           FROM orchestration_v2_projection_threads
           WHERE deleted_at IS NULL${threadId === undefined ? sql`` : sql` AND thread_id = ${threadId}`}
+            AND ${locallyOwned(sql`thread_id`)}
             AND json_extract(payload_json, '$.archivedAt') IS NULL
             AND json_array_length(payload_json, '$.pullRequests') > 0
           ORDER BY updated_at ASC, thread_id ASC

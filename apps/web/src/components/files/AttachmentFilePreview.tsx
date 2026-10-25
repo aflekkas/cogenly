@@ -1,8 +1,8 @@
-import { filePreviewDelimiter } from "@t3tools/shared/delimitedPreview";
-import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
-import { formatAttachmentSize } from "@t3tools/client-runtime/state/attachments";
-import { readFilePreviewResponse } from "@t3tools/client-runtime/file-preview";
-import { filePreviewKind, FILE_TEXT_PREVIEW_MAX_BYTES } from "@t3tools/shared/filePreview";
+import { filePreviewDelimiter } from "@cogenly/shared/delimitedPreview";
+import type { EnvironmentId, ScopedThreadRef } from "@cogenly/contracts";
+import { formatAttachmentSize } from "@cogenly/client-runtime/state/attachments";
+import { readFilePreviewResponse } from "@cogenly/client-runtime/file-preview";
+import { filePreviewKind, FILE_TEXT_PREVIEW_MAX_BYTES } from "@cogenly/shared/filePreview";
 import { ChevronRightIcon, DownloadIcon, Trash2Icon, WrapTextIcon, XIcon } from "lucide-react";
 import { Code2, Eye, Table2 } from "lucide";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
@@ -124,7 +124,7 @@ export function AttachmentFilePreview(props: {
     void refresh()
       .then((url) => {
         if (cancelled) return;
-        if (!url) throw new Error("Reconnect to the environment and try again.");
+        if (!url) throw new Error("Reconnect to the machine and try again.");
         authorizedAt.current = Date.now();
         setRemoteUrl(url);
       })
@@ -152,7 +152,7 @@ export function AttachmentFilePreview(props: {
       if (!file && Date.now() - authorizedAt.current > STALE_URL_MS) {
         const target = await refresh();
         if (controller.signal.aborted) return;
-        if (!target) throw new Error("Reconnect to the environment and try again.");
+        if (!target) throw new Error("Reconnect to the machine and try again.");
         authorizedAt.current = Date.now();
         if (target !== url) {
           setRemoteUrl(target);
@@ -196,7 +196,7 @@ export function AttachmentFilePreview(props: {
         let file = props.file;
         if (!file) {
           const target = await prepareDownload();
-          if (!target) throw new Error("Reconnect to the environment and try again.");
+          if (!target) throw new Error("Reconnect to the machine and try again.");
           const response = await fetch(target);
           if (!response.ok) throw new Error("The file could not be loaded. Try again.");
           file = await response.blob();

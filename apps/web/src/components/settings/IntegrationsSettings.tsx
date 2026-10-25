@@ -39,8 +39,8 @@ import {
   type BrowserImportSource,
   type BrowserAppearanceSetting,
   type PreviewViewportSetting,
-} from "@t3tools/contracts";
-import { PREVIEW_VIEWPORT_PRESETS } from "@t3tools/shared/previewViewport";
+} from "@cogenly/contracts";
+import { PREVIEW_VIEWPORT_PRESETS } from "@cogenly/shared/previewViewport";
 import { MoreVertical, Plus as PlusIcon } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
 
@@ -55,7 +55,7 @@ import { readEnvironmentScope, useEnvironmentScope } from "~/state/session";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { previewEnvironment } from "~/state/preview";
 import { useServerConfigs } from "~/state/entities";
-import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+import { squashAtomCommandFailure } from "@cogenly/client-runtime/state/runtime";
 import {
   AgentDeviceSetupStatus,
   DeviceHubSetupStatus,
@@ -114,7 +114,6 @@ import {
 import {
   SettingsUnavailableGroup,
   SettingResetButton,
-  SettingsPageContainer,
   SettingsRow,
   SettingsSection,
 } from "./settingsLayout";
@@ -659,7 +658,7 @@ function DeviceIntegrationControls({
   const { state, loaded } = useDeviceState(environmentId);
   const { scope, environments, connectedEnvironments } = useSettingsScope();
   const updateSettings = useUpdateScopedSettings();
-  const projectScope = scope.kind === "project" || scope.kind === "checkout";
+  const projectScope = scope.kind === "project";
   const anyHubEnabled = connectedEnvironments.some(
     (environment) => environment.serverConfig?.settings.enableDeviceSupport,
   );
@@ -690,11 +689,17 @@ function DeviceIntegrationControls({
   ) => {
     if (!environmentId || !readEnvironmentScope(environmentId, AuthSettingsWriteScope)) return;
     setPending(kind);
+    // Agent access is universal and goes to every machine; the hub itself
+    // is machine-local and only changes on this page's machine.
+    const targets =
+      input.enabled === undefined
+        ? environments
+        : environments.filter((environment) => environment.environmentId === environmentId);
     try {
       const results = await Promise.allSettled(
-        environments.map(async (environment) => {
+        targets.map(async (environment) => {
           if (environment.connection.phase !== "connected" || !environment.serverConfig) {
-            throw new Error("Environment disconnected");
+            throw new Error("Machine disconnected");
           }
           if (!readEnvironmentScope(environment.environmentId, AuthSettingsWriteScope)) {
             throw new Error("This connection cannot change device settings.");
@@ -705,14 +710,14 @@ function DeviceIntegrationControls({
           });
         }),
       );
-      const failed = environments.filter((_, index) => {
+      const failed = targets.filter((_, index) => {
         const result = results[index];
         return result?.status !== "fulfilled" || result.value._tag === "Failure";
       });
       if (failed.length > 0) {
         toastManager.add({
           type: "error",
-          title: "Device settings not saved on all environments",
+          title: "Device settings not saved on every machine",
           description: `Could not update ${failed.map((environment) => environment.label).join(", ")}.`,
         });
       }
@@ -822,7 +827,7 @@ function DeviceIntegrationControls({
             {...searchableSetting("device-platform-support")}
             description={
               connectedEnvironments.length > 1
-                ? `Status for ${connectedEnvironments.find((environment) => environment.environmentId === environmentId)?.label}. Select an environment to inspect its simulator support.`
+                ? `Status for ${connectedEnvironments.find((environment) => environment.environmentId === environmentId)?.label}.`
                 : undefined
             }
             status={
@@ -1020,7 +1025,7 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
   const removeProfile = async (id: string) => {
     if (!settingsHydrated || importInFlightRef.current) return;
     if (!removalAvailable) {
-      setProfileRemovalError("Connect to an environment before removing this profile.");
+      setProfileRemovalError("Connect to a machine before removing this profile.");
       return;
     }
     setProfileRemovalError(null);
@@ -1256,7 +1261,7 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
                     </MenuItem>
                   ))}
                   {primaryEnvironment == null ? (
-                    <MenuItem disabled>Connect to an environment to import cookies</MenuItem>
+                    <MenuItem disabled>Connect to a machine to import cookies</MenuItem>
                   ) : null}
                 </>
               )}
@@ -1368,8 +1373,8 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
                       <MenuSeparator />
                       <MenuItem disabled>
                         {environmentsReady
-                          ? "Connect to an environment to clear profile data"
-                          : "Checking environments…"}
+                          ? "Connect to a machine to clear profile data"
+                          : "Checking machines…"}
                       </MenuItem>
                     </>
                   ) : null}
@@ -1402,7 +1407,7 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
             ) : null}
             {!removalAvailable ? (
               <p className="text-sm text-muted-foreground">
-                Connect to an environment to remove this profile and its data.
+                Connect to a machine to remove this profile and its data.
               </p>
             ) : null}
           </AlertDialogHeader>
@@ -1513,7 +1518,7 @@ export function IntegrationsSettingsPanel() {
   );
 
   return (
-    <SettingsPageContainer>
+    <>
       <IntegrationServicesSettings />
       {/* Server-authoritative agent access is scoped by the header selection;
           the preview defaults below are device-local and ignore it. */}
@@ -1528,6 +1533,6 @@ export function IntegrationsSettingsPanel() {
         )}
       </SettingsSection>
       <DeviceIntegrationSettings />
-    </SettingsPageContainer>
+    </>
   );
 }

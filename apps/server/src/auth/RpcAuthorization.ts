@@ -29,7 +29,7 @@ import {
   RpcScopeAuthorization,
   WS_METHODS,
   WsRpcGroup,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as Layer from "effect/Layer";
@@ -88,6 +88,7 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.serverUpsertKeybinding]: AuthSettingsWriteScope,
   [WS_METHODS.serverRemoveKeybinding]: AuthSettingsWriteScope,
   [WS_METHODS.serverGetStorageCleanupReport]: AuthOrchestrationReadScope,
+  [WS_METHODS.serverGetStorageStatus]: AuthOrchestrationReadScope,
   [WS_METHODS.serverGetDatabaseStorage]: AuthOrchestrationReadScope,
   [WS_METHODS.serverGetSettings]: AuthOrchestrationReadScope,
   [WS_METHODS.serverUpdateSettings]: AuthSettingsWriteScope,
@@ -108,6 +109,7 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.serverGetBackgroundPolicy]: AuthOrchestrationReadScope,
   [WS_METHODS.serverGetChatGreeting]: AuthOrchestrationReadScope,
   [WS_METHODS.searchQuery]: AuthOrchestrationReadScope,
+  [WS_METHODS.projectLabelsMergeFileStatus]: AuthOrchestrationReadScope,
   [WS_METHODS.projectLabelsList]: AuthOrchestrationReadScope,
   [WS_METHODS.projectLabelsSubscribe]: AuthOrchestrationReadScope,
   [WS_METHODS.projectLabelsGetThreadLabels]: AuthOrchestrationReadScope,
@@ -115,6 +117,7 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.projectLabelsSubscribeConfirmedThreadLabels]: AuthOrchestrationReadScope,
   [WS_METHODS.projectLabelsSearchOwnerRepositories]: AuthOrchestrationReadScope,
   [WS_METHODS.projectLabelsListResources]: AuthOrchestrationReadScope,
+  [WS_METHODS.projectLabelsListOrphanFolders]: AuthOrchestrationReadScope,
   [WS_METHODS.projectLabelsSubscribeResources]: AuthOrchestrationReadScope,
   [WS_METHODS.projectLabelsReadResource]: AuthOrchestrationReadScope,
   [WS_METHODS.agentsList]: AuthOrchestrationReadScope,

@@ -28,7 +28,7 @@ import {
   ServerSettings,
   ServerSettingsError,
   type ServerSettingsPatch,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Cache from "effect/Cache";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
@@ -49,17 +49,17 @@ import * as Semaphore from "effect/Semaphore";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
-import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
-import { resolveSymlinkTarget } from "@t3tools/shared/symlink";
+import { writeFileStringAtomically } from "@cogenly/shared/atomicWrite";
+import { resolveSymlinkTarget } from "@cogenly/shared/symlink";
 import * as ServerConfig from "./config.ts";
-import { type DeepPartial, deepMerge } from "@t3tools/shared/Struct";
-import { fromJsonStringPretty, fromLenientJson } from "@t3tools/shared/schemaJson";
+import { type DeepPartial, deepMerge } from "@cogenly/shared/Struct";
+import { fromJsonStringPretty, fromLenientJson } from "@cogenly/shared/schemaJson";
 import {
   applyServerSettingsPatch,
   deriveLegacyProjectOverrides,
   fallbackTextGenerationModelSelection,
   isModelSelectionProviderEnabled,
-} from "@t3tools/shared/serverSettings";
+} from "@cogenly/shared/serverSettings";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import { BUILT_IN_DRIVERS } from "./provider/builtInDrivers.ts";
 import {
@@ -67,7 +67,7 @@ import {
   defaultTextGenerationModelForDriver,
   isRegisteredDriverKind,
   textGenerationFallbackDriverKinds,
-} from "@t3tools/provider-core/server/driver";
+} from "@cogenly/provider-core/server/driver";
 import {
   readSecretFieldValues,
   sourceControlHostSecretName,
@@ -78,7 +78,7 @@ import { mapSettingsSecrets, SECRET_REDACTED, type SettingsSecret } from "./sett
 export {
   resolveReviewGuideModelSelection,
   resolveSourceControlWriterModelSelection,
-} from "@t3tools/shared/serverSettings";
+} from "@cogenly/shared/serverSettings";
 
 const encodeServerSettings = Schema.encodeEffect(ServerSettings);
 const encodeServerSettingsJson = Schema.encodeUnknownEffect(fromJsonStringPretty(ServerSettings));
@@ -216,6 +216,16 @@ export class ServerSettingsService extends Context.Service<
       patch?: ServerSettingsPatch,
     ) => Effect.Effect<ServerSettings, ServerSettingsError>;
 
+    /**
+     * Replace stored settings from the latest stored snapshot, before secrets
+     * are materialized or the text generation provider is resolved. Returning
+     * null leaves the file untouched. For SettingsSync, which writes whole
+     * values that a patch's deep merge could not express.
+     */
+    readonly updateStoredSettings: (
+      update: (current: ServerSettings) => ServerSettings | null,
+    ) => Effect.Effect<ServerSettings, ServerSettingsError>;
+
     /** Run an effect against a settings snapshot while settings writes are paused. */
     readonly withSettingsSnapshot: <A, E, R>(
       use: (settings: ServerSettings) => Effect.Effect<A, E, R>,
@@ -285,6 +295,20 @@ const makeTest = (overrides: DeepPartial<ServerSettings> = {}) =>
             const patched = applyServerSettingsPatch(currentSettings, patch);
             return applyProviderInstanceMutation(patched, mutation);
           }),
+        ),
+      updateStoredSettings: (update) =>
+        writeSemaphore.withPermits(1)(
+          Ref.get(currentSettingsRef).pipe(
+            Effect.flatMap((current) => {
+              const next = update(current);
+              return next === null
+                ? Effect.succeed(current)
+                : normalizeServerSettings(next).pipe(
+                    Effect.tap((settings) => Ref.set(currentSettingsRef, settings)),
+                  );
+            }),
+            Effect.map(resolveTextGenerationProvider),
+          ),
         ),
       withSettingsSnapshot: (use) =>
         writeSemaphore.withPermits(1)(getSettings.pipe(Effect.flatMap(use))),
@@ -1099,12 +1123,15 @@ const make = Effect.gen(function* () {
   };
 
   const updateAndPersistSettings = (
-    update: (current: ServerSettings) => Effect.Effect<ServerSettings, ServerSettingsError>,
+    update: (current: ServerSettings) => Effect.Effect<ServerSettings | null, ServerSettingsError>,
   ): Effect.Effect<ServerSettings, ServerSettingsError> =>
     writeSemaphore.withPermits(1)(
       Effect.gen(function* () {
         const current = yield* getSettingsFromCache;
         const updated = yield* update(current);
+        if (updated === null) {
+          return resolveTextGenerationProvider(yield* materializeSettingsSecrets(current));
+        }
         const persisted = yield* persistSettingsSecrets(current, updated);
         const next = yield* normalizeServerSettings(persisted.settings);
         const materialized = yield* Effect.uninterruptibleMask(() =>
@@ -1263,6 +1290,8 @@ const make = Effect.gen(function* () {
           return applyProviderInstanceMutation(patched, mutation);
         }),
       ),
+    updateStoredSettings: (update) =>
+      updateAndPersistSettings((current) => Effect.succeed(update(current))),
     withSettingsSnapshot,
     get streamChanges() {
       return materializeChanges(Stream.fromPubSub(changesPubSub));

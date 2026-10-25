@@ -17,8 +17,8 @@ import {
   ThreadId,
   type OrchestrationV2AppThread,
   type OrchestrationV2ProviderThread,
-} from "@t3tools/contracts";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+} from "@cogenly/contracts";
+import * as HostProcess from "@cogenly/shared/HostProcess";
 import { MuseSettings } from "../settings.ts";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
@@ -31,13 +31,13 @@ import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
-import * as TestProviderHost from "@t3tools/provider-testing/TestProviderHost";
-import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
+import * as TestProviderHost from "@cogenly/provider-testing/TestProviderHost";
+import * as McpProviderSessions from "@cogenly/provider-core/server/McpProviderSessions";
 import type { MuseItem } from "./protocol.ts";
 import { MUSE_MIN_SESSION_MCP_VERSION, type MuseSdkHost } from "./sdk.ts";
-import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
-import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
-import type * as ProviderContinuationRequests from "@t3tools/provider-core/server/ProviderContinuationRequests";
+import * as IdAllocator from "@cogenly/provider-core/server/IdAllocator";
+import * as ProviderAdapter from "@cogenly/provider-core/server/ProviderAdapter";
+import type * as ProviderContinuationRequests from "@cogenly/provider-core/server/ProviderContinuationRequests";
 import { makeMuseAdapterV2, type MuseAdapterV2Options } from "./adapter.ts";
 
 const testLayer = Layer.mergeAll(
@@ -526,9 +526,103 @@ describe("MuseAdapterV2", () => {
       const call = yield* fake.takeCall("turn/start");
       const text = JSON.stringify(call.params.input);
       assert.include(text, "<conversation_mode>");
+      // No MCP credential, so no terminal tools to look things up with.
+      assert.include(text, "you cannot run commands");
       assert.include(text, "Start Work");
       assert.include(text, "image_search");
       assert.include(text, "<how_cogenly_works>");
+      yield* fake.emit("turn/completed", { turnId: call.commandId, terminal: "completed" });
+    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+  );
+
+  it.effect("lets chat-surface turns look things up through the granted terminal tools", () =>
+    Effect.gen(function* () {
+      yield* (yield* McpProviderSessions.McpProviderSessions).set({
+        environmentId: EnvironmentId.make("test-environment"),
+        threadId: THREAD_ID,
+        providerSessionId: "test-session",
+        providerInstanceId: INSTANCE_ID,
+        terminalToolsAvailable: true,
+        endpoint: "http://127.0.0.1:43210/mcp",
+        authorizationHeader: "Bearer conversation-terminal-token",
+        browserToolsAvailable: true,
+      });
+      const policy = ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+        ...runtimePolicy,
+        conversationMode: true,
+      });
+      const fake = yield* makeFakeMuse();
+      fake.host.initializeResult.grantedCapabilities.push("sessionMcp");
+      let readOnly: boolean | undefined;
+      const harness = yield* makeHarness(
+        fake,
+        INSTANCE_ID,
+        undefined,
+        undefined,
+        undefined,
+        policy,
+        {
+          createHost: async (options) => {
+            readOnly = options.readOnly;
+            return fake.host;
+          },
+        },
+      );
+      // The native shell and writes stay off; commands go through the MCP terminal.
+      assert.isTrue(readOnly);
+      yield* harness.runtime.startTurn(yield* turnInput(harness.providerThread, 1, policy));
+      const call = yield* fake.takeCall("turn/start");
+      const text = JSON.stringify(call.params.input);
+      assert.include(text, "Look things up yourself with the cogenly terminal_run tool");
+      assert.include(text, "Use the cogenly MCP terminal_run tool for every shell command");
+      assert.include(text, "work_task");
+      assert.notInclude(text, "you cannot run commands");
+      yield* fake.emit("turn/completed", { turnId: call.commandId, terminal: "completed" });
+    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+  );
+
+  it.effect("keeps builder instructions separate from terminal and task instructions", () =>
+    Effect.gen(function* () {
+      yield* (yield* McpProviderSessions.McpProviderSessions).set({
+        environmentId: EnvironmentId.make("test-environment"),
+        threadId: THREAD_ID,
+        providerSessionId: "test-session",
+        providerInstanceId: INSTANCE_ID,
+        terminalToolsAvailable: true,
+        endpoint: "http://127.0.0.1:43210/mcp",
+        authorizationHeader: "Bearer conversation-terminal-token",
+        browserToolsAvailable: true,
+      });
+      const policy = ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+        ...runtimePolicy,
+        conversationMode: true,
+        builderMode: true,
+      });
+      const fake = yield* makeFakeMuse();
+      fake.host.initializeResult.grantedCapabilities.push("sessionMcp");
+      let readOnly: boolean | undefined;
+      const harness = yield* makeHarness(
+        fake,
+        INSTANCE_ID,
+        undefined,
+        undefined,
+        undefined,
+        policy,
+        {
+          createHost: async (options) => {
+            readOnly = options.readOnly;
+            return fake.host;
+          },
+        },
+      );
+      // The native shell and writes stay off; commands go through the MCP terminal.
+      assert.isTrue(readOnly);
+      yield* harness.runtime.startTurn(yield* turnInput(harness.providerThread, 1, policy));
+      const call = yield* fake.takeCall("turn/start");
+      const text = JSON.stringify(call.params.input);
+      assert.notInclude(text, "terminal_run");
+      assert.notInclude(text, "work_task");
+      assert.include(text, "<builder_mode>");
       yield* fake.emit("turn/completed", { turnId: call.commandId, terminal: "completed" });
     }).pipe(Effect.scoped, Effect.provide(testLayer)),
   );

@@ -20,12 +20,12 @@ Prefer a container? See [Dev container](../internals/devcontainer.md) for VS Cod
 Use `vp run dev` for server and web, or `vp run dev:desktop` for the Electron client.
 `dev:server` and `dev:web` start those processes separately.
 
-Flags go directly after the task name, for example `vp run dev --home-dir /tmp/t3code-dev`.
+Flags go directly after the task name, for example `vp run dev --home-dir /tmp/cogenly-dev`.
 Add `--browser` to open a browser automatically.
 
 ### State and ports
 
-Linked worktrees default to their own `.t3/userdata`, even when `COGENLY_HOME` is set.
+Linked worktrees default to their own `.cogenly/userdata`, even when `COGENLY_HOME` is set.
 The main checkout defaults to `~/.cogenly/dev/userdata`. An explicit `--home-dir` wins in both cases.
 Never run a development server against the live `~/.cogenly/userdata`.
 See [test data](../../AGENTS.md#test-data) for copying a consistent database snapshot.
@@ -110,7 +110,6 @@ Keep `typescript`, `@effect/tsgo`, and the `effect-tsgo patch` prepare step: edi
 still use them for Effect quick fixes and refactors. Keep `@effect/tsgo` on the
 effect-tsgo version that tsc-rs ports (see the tsc-rs README), or the two disagree
 on rule names.
-Marketing keeps `astro check` for Astro files.
 
 CI owns the full suite; see
 [ci.yml](../../.github/workflows/ci.yml) for its current jobs.

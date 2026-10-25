@@ -5,7 +5,7 @@ import {
   type OrchestrationV2DomainEvent,
   ProviderThreadId,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -23,10 +23,10 @@ import {
 } from "./CheckpointRestoreSafety.ts";
 import { CheckpointServiceV2 } from "./CheckpointService.ts";
 import { EventSinkV2 } from "./EventSink.ts";
-import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import * as IdAllocator from "@cogenly/provider-core/server/IdAllocator";
 import { ProjectionStoreV2 } from "./ProjectionStore.ts";
 import * as ProjectStore from "./ProjectStore.ts";
-import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
+import type * as ProviderAdapter from "@cogenly/provider-core/server/ProviderAdapter";
 import { ProviderSessionManagerV2 } from "./ProviderSessionManager.ts";
 import { RuntimePolicyV2 } from "./RuntimePolicy.ts";
 import * as ThreadCommandExecutor from "./ThreadCommandExecutor.ts";
@@ -43,6 +43,7 @@ export class CheckpointRollbackExecutionError extends Schema.TaggedError<Checkpo
       "provider-turn-unavailable",
       "unexpected-failure",
       "shared-workspace",
+      "checkpoint-unavailable",
     ]),
     threadId: ThreadId,
     providerThreadId: ProviderThreadId,
@@ -58,6 +59,8 @@ export class CheckpointRollbackExecutionError extends Schema.TaggedError<Checkpo
         return `Active provider changed before rollback target ${this.checkpointId} could execute on thread ${this.threadId}.`;
       case "provider-turn-unavailable":
         return `Provider turn for rollback target ${this.checkpointId} is unavailable on provider thread ${this.providerThreadId}.`;
+      case "checkpoint-unavailable":
+        return "This checkpoint is unavailable on this machine. Restore it on the machine where it was captured, or rewind without restoring files.";
       case "shared-workspace":
         return SHARED_WORKSPACE_RESTORE_MESSAGE;
       case "unexpected-failure":
@@ -196,6 +199,31 @@ export const layer: Layer.Layer<
               };
             });
 
+      if (input.restoreFiles !== false) {
+        // Replicated checkpoint scopes still name the old machine's cwd.
+        // Check before creating a worktree, pruning Git state or opening a provider.
+        const unavailable = new CheckpointRollbackExecutionError({
+          reason: "checkpoint-unavailable",
+          threadId: input.threadId,
+          providerThreadId: input.providerThreadId,
+          checkpointId: input.checkpointId,
+        });
+        if (
+          projection.thread.worktreePath !== null &&
+          path.resolve(scope.cwd) !== path.resolve(projection.thread.worktreePath)
+        )
+          return yield* unavailable;
+        const project = !(yield* fileSystem.exists(scope.cwd))
+          ? yield* projects.get(projection.thread.projectId)
+          : Option.none();
+        yield* checkpoints
+          .assertRestorable({
+            scope: Option.isSome(project) ? { ...scope, cwd: project.value.workspaceRoot } : scope,
+            checkpoint,
+          })
+          .pipe(Effect.mapError(() => unavailable));
+      }
+
       const { worktreePath, branch } = projection.thread;
       if (worktreePath != null && branch != null && !(yield* fileSystem.exists(worktreePath))) {
         const project = yield* projects.get(projection.thread.projectId);
@@ -206,6 +234,18 @@ export const layer: Layer.Layer<
             refName: branch,
             path: worktreePath,
           });
+          const gitFile = yield* fileSystem.readFileString(path.join(worktreePath, ".git"));
+          if (gitFile.startsWith("gitdir: ")) {
+            // Restoring files does not need dependencies. The next provider
+            // turn runs setup before using this recreated checkout.
+            yield* fileSystem.writeFileString(
+              path.join(
+                path.resolve(worktreePath, gitFile.slice("gitdir: ".length).trim()),
+                "cogenly-dependencies-pruned",
+              ),
+              "Setup required before next turn.\n",
+            );
+          }
         }
       }
 

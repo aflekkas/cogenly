@@ -90,8 +90,8 @@ function crossFade(group: string, incoming: HTMLElement) {
 
 /**
  * Stops a group's cross-fade that just started, for a replacement that
- * animates the change itself (the Work hero's pieces glide and crossfade on
- * their own when a new draft replaces the old).
+ * animates its content change itself, including when a new draft replaces
+ * the old hero during the same fade.
  */
 export function settleFadeSwap(group: string) {
   const animations = running.get(group);

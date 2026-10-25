@@ -1,5 +1,5 @@
-import type { ServerProviderUsageWindow } from "@t3tools/contracts";
-import { elapsedShare, remainingPercent } from "@t3tools/shared/usageLimits";
+import type { ServerProviderUsageWindow } from "@cogenly/contracts";
+import { elapsedShare, remainingPercent } from "@cogenly/shared/usageLimits";
 
 import type { UsageMeterMode } from "../../appearancePreferences";
 

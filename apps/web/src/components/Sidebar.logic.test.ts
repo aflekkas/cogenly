@@ -1,4 +1,4 @@
-import { presentThreadShell } from "@t3tools/client-runtime/state/models";
+import { presentThreadShell } from "@cogenly/client-runtime/state/models";
 import * as DateTime from "effect/DateTime";
 import { deriveActiveWorkStartedAt } from "../session-logic.ts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
@@ -52,9 +52,9 @@ import {
   type SidebarListMarker,
   type SidebarSection,
 } from "./Sidebar.logic";
-import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
-import { sortSettledThreads } from "@t3tools/client-runtime/state/thread-sort";
-import { EnvironmentId, ProjectId, ProviderInstanceId, RunId, ThreadId } from "@t3tools/contracts";
+import { threadSearchMatchKey } from "@cogenly/client-runtime/state/thread-search";
+import { sortSettledThreads } from "@cogenly/client-runtime/state/thread-sort";
+import { EnvironmentId, ProjectId, ProviderInstanceId, RunId, ThreadId } from "@cogenly/contracts";
 
 import {
   DEFAULT_INTERACTION_MODE,
@@ -261,7 +261,7 @@ describe("buildBulkTitleRegenerationContextMenuItem", () => {
       }),
     ).toEqual({
       id: "regenerate-title",
-      label: "Regenerate Titles (3)",
+      label: "Regenerate titles (3)",
     });
   });
 
@@ -1193,7 +1193,7 @@ describe("resolveThreadStatusPill", () => {
           hasPendingUserInput: true,
         },
       }),
-    ).toMatchObject({ label: "Pending Approval", pulse: false });
+    ).toMatchObject({ label: "Pending approval", pulse: false });
   });
 
   it("shows awaiting input when plan mode is blocked on user answers", () => {
@@ -1204,7 +1204,7 @@ describe("resolveThreadStatusPill", () => {
           hasPendingUserInput: true,
         },
       }),
-    ).toMatchObject({ label: "Awaiting Input", pulse: false });
+    ).toMatchObject({ label: "Awaiting input", pulse: false });
   });
 
   it("falls back to working when the thread is actively running without blockers", () => {
@@ -1277,7 +1277,7 @@ describe("resolveThreadStatusPill", () => {
           },
         },
       }),
-    ).toMatchObject({ label: "Plan Ready", pulse: false });
+    ).toMatchObject({ label: "Plan ready", pulse: false });
   });
 
   it("does not manufacture completed state without a client visit marker", () => {
@@ -1330,7 +1330,7 @@ describe("resolveProjectStatusIndicator", () => {
           pulse: false,
         },
         {
-          label: "Pending Approval",
+          label: "Pending approval",
           colorClass: "text-amber-600",
           dotClass: "bg-amber-500",
           pulse: false,
@@ -1342,7 +1342,7 @@ describe("resolveProjectStatusIndicator", () => {
           pulse: true,
         },
       ]),
-    ).toMatchObject({ label: "Pending Approval", dotClass: "bg-amber-500" });
+    ).toMatchObject({ label: "Pending approval", dotClass: "bg-amber-500" });
   });
 
   it("prefers plan-ready over completed when no stronger action is needed", () => {
@@ -1355,13 +1355,13 @@ describe("resolveProjectStatusIndicator", () => {
           pulse: false,
         },
         {
-          label: "Plan Ready",
+          label: "Plan ready",
           colorClass: "text-violet-600",
           dotClass: "bg-violet-500",
           pulse: false,
         },
       ]),
-    ).toMatchObject({ label: "Plan Ready", dotClass: "bg-violet-500" });
+    ).toMatchObject({ label: "Plan ready", dotClass: "bg-violet-500" });
   });
 
   it("ranks waiting below active work and above plan-ready", () => {
@@ -1386,7 +1386,7 @@ describe("resolveProjectStatusIndicator", () => {
     expect(
       resolveProjectStatusIndicator([
         {
-          label: "Plan Ready",
+          label: "Plan ready",
           colorClass: "text-violet-600",
           dotClass: "bg-violet-500",
           pulse: false,

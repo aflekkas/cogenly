@@ -1,10 +1,10 @@
-import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { scopedThreadKey, scopeThreadRef } from "@cogenly/client-runtime/environment";
 import {
   AuthTerminalOperateScope,
   AuthTerminalReadScope,
   ThreadId,
   type ScopedThreadRef,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { Bot, TerminalSquare, X } from "lucide-react";
 import {
   memo,
@@ -434,7 +434,7 @@ export function BottomTerminalPanel(props: BottomTerminalPanelProps) {
       body = (
         <PanelMessage
           title="Terminals unavailable"
-          detail="Couldn’t reach this environment to check terminal access."
+          detail="Couldn’t reach this machine to check terminal access."
         />
       );
       break;
@@ -442,7 +442,7 @@ export function BottomTerminalPanel(props: BottomTerminalPanelProps) {
       body = (
         <PanelMessage
           title="Terminals unavailable"
-          detail="This connection is not allowed to view terminals in this environment."
+          detail="This connection is not allowed to view terminals on this machine."
         />
       );
       break;

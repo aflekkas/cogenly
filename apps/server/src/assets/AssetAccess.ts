@@ -1,4 +1,4 @@
-import type { AssetResource } from "@t3tools/contracts";
+import type { AssetResource } from "@cogenly/contracts";
 import {
   AssetAttachmentNotFoundError,
   AssetGitHubMediaUrlValidationError,
@@ -17,7 +17,7 @@ import {
   ThreadId,
   ToolActivityNativeAppReference,
   TurnItemId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import {
   audioMimeTypeFromExtension,
   hostPreviewMimeTypeFromExtension,
@@ -25,19 +25,19 @@ import {
   isWorkspacePreviewEntryPath,
   WORKSPACE_BROWSER_PREVIEW_EXTENSIONS,
   WORKSPACE_IMAGE_PREVIEW_EXTENSIONS,
-} from "@t3tools/shared/filePreview";
+} from "@cogenly/shared/filePreview";
 import {
   IMAGE_DIMENSIONS_HEADER_BYTES,
   readImageDimensions,
   type ImageDimensions,
-} from "@t3tools/shared/imageDimensions";
-import { githubMediaFetchUrl, githubMediaFileName } from "@t3tools/shared/githubMedia";
-import { MCP_APP_MAX_HTML_BYTES } from "@t3tools/shared/mcpApp";
+} from "@cogenly/shared/imageDimensions";
+import { githubMediaFetchUrl, githubMediaFileName } from "@cogenly/shared/githubMedia";
+import { MCP_APP_MAX_HTML_BYTES } from "@cogenly/shared/mcpApp";
 import {
   isProjectFaviconPath,
   PROJECT_FAVICON_FALLBACK_MARKER,
-} from "@t3tools/shared/projectFavicon";
-import { MAX_TOOL_OUTPUT_IMAGE_BASE64_LENGTH, toolOutputImages } from "@t3tools/shared/toolOutput";
+} from "@cogenly/shared/projectFavicon";
+import { MAX_TOOL_OUTPUT_IMAGE_BASE64_LENGTH, toolOutputImages } from "@cogenly/shared/toolOutput";
 import * as Clock from "effect/Clock";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -59,14 +59,16 @@ import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import { parseAttachmentFileExtension, resolveAttachmentPathById } from "../attachmentStore.ts";
 import * as ServerConfig from "../config.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
-import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
+import * as ThreadRouting from "../threadSync/ThreadRouting.ts";
+import { expandHomePath } from "@cogenly/provider-core/server/pathExpansion";
 import * as ProjectFaviconResolver from "../project/ProjectFaviconResolver.ts";
+import type * as RepositoryIconResolver from "../project/RepositoryIconResolver.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 import * as NativeAppIconResolver from "./NativeAppIconResolver.ts";
 import { extractIcnsPng } from "./icns.ts";
 import { parseImageProxyTarget } from "./ImageProxyFetch.ts";
 import { openMediaFile, readMediaFileHeader, type OpenMediaFile } from "./MediaFile.ts";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as HostProcess from "@cogenly/shared/HostProcess";
 
 export const ASSET_ROUTE_PREFIX = "/api/assets";
 
@@ -245,6 +247,27 @@ const optionOnNotFound = <A, R>(
         error.reason._tag === "NotFound" ? Effect.succeed(Option.none<A>()) : Effect.fail(error),
     }),
   );
+
+/**
+ * The attachment's file here. An attachment of a thread another machine runs
+ * is copied from that machine on first use; null when neither has it.
+ */
+const findAttachmentPath = Effect.fn("AssetAccess.findAttachmentPath")(function* (
+  attachmentsDir: string,
+  attachmentId: string,
+) {
+  const local = resolveAttachmentPathById({ attachmentsDir, attachmentId });
+  if (local !== null) return local;
+  const routing = yield* Effect.serviceOption(ThreadRouting.ThreadRouting);
+  if (Option.isNone(routing)) return null;
+  return yield* routing.value.fetchAttachment(attachmentId).pipe(
+    Effect.map(Option.getOrNull),
+    Effect.tapError((cause) =>
+      Effect.logWarning("Could not copy an attachment from its machine.", { attachmentId, cause }),
+    ),
+    Effect.orElseSucceed(() => null),
+  );
+});
 
 /** Reads a stored MCP HTML snapshot; null means it exceeds the preview limit. */
 export const readMcpAppHtml = Effect.fn("AssetAccess.readMcpAppHtml")(function* (filePath: string) {
@@ -526,6 +549,8 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
   readonly projectFaviconPath?: string;
   /** The project's clone has not landed, so its icon is reported missing without a lookup. */
   readonly projectCheckoutPending?: boolean;
+  /** For a `repository-icon`: what RepositoryIconResolver found. */
+  readonly repositoryIcon?: RepositoryIconResolver.RepositoryIcon;
 }) {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -627,10 +652,10 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
     }
     case "attachment": {
       const config = yield* ServerConfig.ServerConfig;
-      const attachmentPath = resolveAttachmentPathById({
-        attachmentsDir: config.attachmentsDir,
-        attachmentId: input.resource.attachmentId,
-      });
+      const attachmentPath = yield* findAttachmentPath(
+        config.attachmentsDir,
+        input.resource.attachmentId,
+      );
       if (!attachmentPath) {
         return yield* new AssetAttachmentNotFoundError({
           resource: input.resource,
@@ -801,6 +826,42 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
       imageDimensions = readImageDimensions(image.bytes);
       break;
     }
+    case "repository-icon": {
+      // Served like a project's own icon: a file through the external-favicon
+      // claim (so `.icns` still converts), the avatar through the image
+      // proxy, and none as the favicon fallback marker clients already read.
+      const icon = input.repositoryIcon ?? null;
+      const iconFile =
+        icon?.kind === "file"
+          ? yield* resolveCanonicalFile(icon.path).pipe(Effect.orElseSucceed(() => null))
+          : null;
+      const avatar = icon?.kind === "avatar" ? parseImageProxyTarget(icon.url) : null;
+      if (iconFile !== null && isProjectFaviconPath(iconFile)) {
+        const crypto = yield* Crypto.Crypto;
+        const revision = yield* fileSystem.readFile(iconFile).pipe(
+          Effect.flatMap((bytes) => crypto.digest("SHA-256", bytes)),
+          Effect.map(Hex.encode),
+          Effect.mapError(
+            (cause) => new AssetProjectFaviconInspectionError({ resource: input.resource, cause }),
+          ),
+        );
+        claims = { version: 1, kind: "project-favicon-external", filePath: iconFile, expiresAt };
+        fileName = `${PROJECT_FAVICON_VERSION_PREFIX}${revision}-${path.basename(iconFile)}`;
+      } else if (avatar !== null && "url" in avatar) {
+        claims = { version: 1, kind: "remote-image", url: avatar.url, expiresAt };
+        fileName = `${PROJECT_FAVICON_VERSION_PREFIX}avatar-${remoteImageFileName(avatar.url)}`;
+      } else {
+        claims = {
+          version: 1,
+          kind: "project-favicon",
+          workspaceRoot: "",
+          relativePath: null,
+          expiresAt,
+        };
+        fileName = PROJECT_FAVICON_FALLBACK_MARKER;
+      }
+      break;
+    }
     case "native-app-icon": {
       claims = {
         version: 1,
@@ -847,7 +908,11 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
         }),
     ),
   );
-  if (claims.kind === "project-favicon" || claims.kind === "project-favicon-external") {
+  if (
+    claims.kind === "project-favicon" ||
+    claims.kind === "project-favicon-external" ||
+    input.resource._tag === "repository-icon"
+  ) {
     const issuedAt = yield* Clock.currentTimeMillis;
     expiresAt =
       (Math.floor(issuedAt / PROJECT_FAVICON_TOKEN_BUCKET_MS) + 2) *

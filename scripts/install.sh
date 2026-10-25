@@ -161,10 +161,16 @@ if [ -z "$version" ]; then
   [ -n "$version" ] || fail "could not find a ${channel} release; set COGENLY_VERSION"
 fi
 
-stem="t3-${version}-${platform}-${arch}"
-archive="${stem}.tar.gz"
 versions_dir="${t3_home}/runtime/versions"
 target_dir="${versions_dir}/${version}"
+
+# The executable is `cogenly`, or `t3` in a release from before the rename.
+# Drop the t3 fallbacks only as "Transition: t3 → cogenly names" in
+# docs/operations/release.md describes.
+runtime_entry() {
+  if [ -e "$1/cogenly" ] || [ ! -e "$1/t3" ]; then printf '%s/cogenly\n' "$1"
+  else printf '%s/t3\n' "$1"; fi
+}
 
 if [ -f "${target_dir}/.install-complete" ] && [ "$(cat "${target_dir}/.install-complete")" = "$version" ]; then
   step "Version ${version} is already downloaded."
@@ -186,18 +192,23 @@ else
   elif [ "$fetch_status" -ne 0 ]; then
     fail "could not download the release checksums"
   fi
+  # Releases from before the rename list only the t3- archive.
+  archive=
+  for candidate in "cogenly-${version}-${platform}-${arch}.tar.gz" "t3-${version}-${platform}-${arch}.tar.gz"; do
+    expected="$(grep " \*\{0,1\}${candidate}\$" "${staging}/SHA256SUMS" | cut -d' ' -f1)"
+    if [ -n "$expected" ]; then archive="$candidate"; break; fi
+  done
+  [ -n "$archive" ] || fail "Cogenly ${version} has no release archive for ${platform}-${arch}"
   download "${base_url}/v${version}/${archive}" "${staging}/${archive}"
 
   step "Verifying the download..."
-  expected="$(grep " \*\{0,1\}${archive}\$" "${staging}/SHA256SUMS" | cut -d' ' -f1)"
-  [ -n "$expected" ] || fail "${archive} is not listed in SHA256SUMS"
   actual="$(checksum "${staging}/${archive}")"
   [ "$actual" = "$expected" ] || fail "checksum mismatch for ${archive}"
 
   step "Extracting Cogenly..."
   tar -xzf "${staging}/${archive}" -C "$staging" --strip-components=1
   rm -f "${staging}/${archive}" "${staging}/SHA256SUMS"
-  "${staging}/t3" --version >/dev/null || fail "the downloaded executable does not run"
+  "$(runtime_entry "$staging")" --version >/dev/null || fail "the downloaded executable does not run"
   printf '%s\n' "$version" > "${staging}/.install-complete"
 
   rm -rf "$target_dir"
@@ -205,9 +216,15 @@ else
   trap - EXIT
 fi
 
+# Keep package detection, non-interactive elevation and the confinement probe in Cogenly.
+# Older explicitly pinned releases may not have this command yet.
+if "$(runtime_entry "$target_dir")" security setup --help 2>/dev/null | grep -q -- "--local"; then
+  "$(runtime_entry "$target_dir")" security setup --local </dev/null
+fi
+
 step "Setting up the cogenly command..."
 mkdir -p "$bin_dir"
-ln -sfn "${target_dir}/t3" "${bin_dir}/cogenly"
+ln -sfn "$(runtime_entry "$target_dir")" "${bin_dir}/cogenly"
 if "$interactive"; then printf '\r\033[2K' >&2; fi
 printf '  %sInstalled Cogenly %s%s\n\n' "$green" "$version" "$reset" >&2
 case ":${PATH}:" in

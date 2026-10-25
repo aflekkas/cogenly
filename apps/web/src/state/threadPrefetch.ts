@@ -1,4 +1,4 @@
-import { parseScopedThreadKey, scopedThreadKey } from "@t3tools/client-runtime/environment";
+import { parseScopedThreadKey, scopedThreadKey } from "@cogenly/client-runtime/environment";
 import {
   canStartThreadIntent,
   createThreadPrefetcher,
@@ -6,8 +6,8 @@ import {
   THREAD_INTENT_DWELL_MS,
   THREAD_INTENT_PREFETCH_IDLE_MS,
   THREAD_INTENT_PREFETCH_LIMIT,
-} from "@t3tools/client-runtime/state/threads";
-import type { ScopedThreadRef } from "@t3tools/contracts";
+} from "@cogenly/client-runtime/state/threads";
+import type { ScopedThreadRef } from "@cogenly/contracts";
 
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { environmentThreadStateAtom } from "./threads";

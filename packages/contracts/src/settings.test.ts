@@ -53,17 +53,19 @@ describe("ServerSettings response streaming", () => {
 });
 
 describe("storage cleanup settings", () => {
-  it("keeps cleanup disabled for existing installations", () => {
+  it("defaults to seven-day settled retention and fourteen-day artifacts and logs", () => {
     expect(decodeServerSettings({}).worktreeCleanup).toBeNull();
+    expect(decodeServerSettings({}).automaticBackups.retentionCount).toBe(2);
     expect(decodeServerSettings({}).storageCleanup).toEqual({
       worktreeAfterDays: null,
-      worktreeSettledAfterDays: null,
+      worktreeSettledAfterDays: 7,
       worktreeOnMerge: false,
       worktreeOnDelete: false,
       worktreeUnchanged: false,
       worktreeKeepWhen: "uncommitted-changes",
-      browserArtifactsAfterDays: null,
-      logsAfterDays: null,
+      browserArtifactsAfterDays: 14,
+      logsAfterDays: 14,
+      dependenciesAfterDays: null,
     });
   });
 
@@ -1090,5 +1092,16 @@ describe("ServerSettings machine identity", () => {
     expect(decodeServerSettings({ machineRole: "future-role" }).machineRole).toBeNull();
     expect(() => decodeServerSettingsPatch({ machineRole: "future-role" })).toThrow();
     expect(() => decodeServerSettingsPatch({ machineName: "   " })).toThrow();
+  });
+});
+
+describe("retired usage hubs", () => {
+  it("discards old hub configuration without losing other saved settings", () => {
+    const settings = decodeServerSettings({
+      enableAgentBrowserAccess: false,
+      usageLimitSources: { old: { kind: "cliproxy", url: "http://old", managementKey: "old-key" } },
+    });
+    expect(settings.enableAgentBrowserAccess).toBe(false);
+    expect(settings).not.toHaveProperty("usageLimitSources");
   });
 });

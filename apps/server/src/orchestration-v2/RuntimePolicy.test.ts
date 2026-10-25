@@ -2,6 +2,7 @@ import { assert, it } from "@effect/vitest";
 import {
   type ModelSelection,
   AgentId,
+  EnvironmentId,
   type OrchestrationV2AppThread,
   ProjectId,
   ProjectLabelId,
@@ -10,7 +11,7 @@ import {
   type ServerProvider,
   ThreadId,
   type ThreadSurface,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -18,7 +19,9 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
-import type { ProviderInstance } from "@t3tools/provider-core/server/driver";
+import type { ProviderInstance } from "@cogenly/provider-core/server/driver";
+import * as Integrations from "../integrations/Integrations.ts";
+import * as HealthAlertsState from "../health/HealthAlertsState.ts";
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
 import * as ProjectFiles from "../projectLabels/ProjectFiles.ts";
 import * as ProjectStore from "./ProjectStore.ts";
@@ -95,6 +98,10 @@ const layerTest = RuntimePolicy.layerFromProjectStore.pipe(
       streamChanges: Stream.empty,
       subscribeChanges: Effect.never,
     }),
+  ),
+  // No accounts connected; the production gateway path is covered in runtimeLayer.test.ts.
+  Layer.provide(
+    Layer.mock(Integrations.Integrations)({ contextIntegrations: () => Effect.succeed([]) }),
   ),
   Layer.provide(
     Layer.mock(ProjectStore.ProjectStoreV2)({
@@ -251,6 +258,11 @@ it.layer(layerTest)("RuntimePolicyV2", (it) => {
 
       assert.isTrue(yield* conversationFor("chat"));
       assert.isTrue(yield* conversationFor("builder"));
+      const builder = yield* policy.resolve({
+        thread: makeThread({ now, worktreePath: null, surface: "builder" }),
+        modelSelection,
+      });
+      assert.isTrue(builder.builderMode);
       assert.isUndefined(yield* conversationFor("work"));
       assert.isUndefined(yield* conversationFor(undefined));
     }),
@@ -264,7 +276,8 @@ it.layer(layerTest)("RuntimePolicyV2", (it) => {
         thread: makeThread({ now, worktreePath: null, surface: "chat" }),
         modelSelection,
       });
-      assert.isUndefined(resolved.projectManifest);
+      // Only the standalone integrations line (catalog entries to connect) remains.
+      assert.notInclude(resolved.projectManifest ?? "", "<project_manifest>");
     }),
   );
 
@@ -356,6 +369,56 @@ it.layer(layerWithFiles)("RuntimePolicyV2 project manifest", (it) => {
         modelSelection,
       });
       assert.equal(work.cwd, "/repo/worktree");
+    }),
+  );
+});
+
+const layerWithHealthAlert = layerWithFiles.pipe(
+  Layer.provideMerge(
+    Layer.mock(HealthAlertsState.HealthAlertsState)({
+      current: Effect.succeed({
+        open: [
+          {
+            id: "hub:providers:claude:0",
+            originEnvironmentId: EnvironmentId.make("hub"),
+            originMachineName: "Contabo VPS",
+            itemKey: "providers:claude",
+            checkId: "providers",
+            state: "open",
+            status: "fail",
+            title: "Claude needs sign-in",
+            detail: "",
+            openedAt: DateTime.makeUnsafe(0),
+            resolvedAt: null,
+            target: null,
+            fix: null,
+          },
+        ],
+        recentlyResolved: [],
+      }),
+    }),
+  ),
+);
+
+it.layer(layerWithHealthAlert)("RuntimePolicyV2 machine health", (it) => {
+  it.effect("appends the open-alert line to the project manifest and to unfiled turns", () =>
+    Effect.gen(function* () {
+      const policy = yield* RuntimePolicy.RuntimePolicyV2;
+      const now = yield* DateTime.now;
+      const line =
+        "Machine health: Contabo VPS: Claude needs sign-in. Call machine_health for details.";
+      const filed = yield* policy.resolve({
+        thread: makeThread({ now, worktreePath: null, surface: "work" }),
+        modelSelection,
+      });
+      assert.include(filed.projectManifest ?? "", "<project_manifest>");
+      assert.isTrue((filed.projectManifest ?? "").endsWith(`\n${line}`));
+      const unfiled = yield* policy.resolve({
+        thread: { ...makeThread({ now, worktreePath: null }), id: ThreadId.make("thread:unfiled") },
+        modelSelection,
+      });
+      assert.ok(unfiled.projectManifest?.includes(line));
+      assert.ok(unfiled.projectManifest?.includes("Use Cogenly integrations."));
     }),
   );
 });

@@ -2,12 +2,14 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import {
   filterAvailableSettingsSearchItems,
-  getSettingsSearchTargetScope,
-  isSettingsOverviewVisible,
-  isSettingsSearchScopeAvailable,
+  movedGeneralSettingsPath,
   searchableSetting,
   searchSettings,
+  SETTINGS_DETAIL_PARENTS,
+  SETTINGS_NAV_GROUPS,
   SETTINGS_SEARCH_ITEMS,
+  SETTINGS_SECTION_LABELS,
+  settingsNavPathFor,
   type SettingsSearchItem,
 } from "./settingsSearch";
 
@@ -43,6 +45,20 @@ const ITEMS: ReadonlyArray<SettingsSearchItem> = [
 ];
 
 describe("searchSettings", () => {
+  it("finds AI greetings on General without restoring the moved model picker", () => {
+    expect(searchSettings("AI greetings")).toContainEqual(
+      expect.objectContaining({
+        id: "ai-greetings",
+        to: "/settings/general",
+      }),
+    );
+    expect(searchSettings("text generation model")).toContainEqual(
+      expect.objectContaining({
+        id: "text-generation-model",
+        to: "/settings/models",
+      }),
+    );
+  });
   it.each(["OTel", "OTLP", "telemetry export", "Grafana"])(
     "finds environment telemetry settings for %s",
     (query) => {
@@ -51,7 +67,6 @@ describe("searchSettings", () => {
           id: "telemetry-export",
           to: "/settings/diagnostics",
           targetId: "telemetry-export",
-          scope: "environment",
         }),
       );
     },
@@ -108,16 +123,6 @@ describe("searchSettings", () => {
     ]);
   });
 
-  it.each(["usage providers", "CLIProxyAPI", "CLI proxy hub", "management key"])(
-    "finds usage-provider management by %s",
-    (query) => {
-      expect(searchSettings(query)[0]).toMatchObject({
-        id: "usage-providers",
-        to: "/settings/providers",
-      });
-    },
-  );
-
   it("returns no results for an empty query", () => {
     expect(searchSettings("   ", ITEMS)).toEqual([]);
   });
@@ -134,7 +139,7 @@ describe("searchSettings", () => {
     expect(SETTINGS_SEARCH_ITEMS.find((item) => item.id === "update-track")).toMatchObject({
       title: "Update track",
       to: "/settings/general",
-      releaseChannelOnly: true,
+      hostedChannelOnly: true,
     });
   });
 
@@ -180,7 +185,6 @@ describe("searchSettings", () => {
       "source-control-writing-style",
       "t3-connect",
       "hold-webhooks-while-offline",
-      "tailscale-https",
       "wsl-backend",
     ]);
     expect(available.map((item) => item.id).filter((id) => gatedIds.has(id))).toEqual([]);
@@ -297,14 +301,42 @@ describe("searchSettings", () => {
   });
 
   it.each([
-    ["default model", "default-model", "/settings/general"],
-    ["new threads", "new-threads", "/settings/general"],
+    ["default model", "default-model", "/settings/models"],
+    ["text generation model", "text-generation-model", "/settings/models"],
+    ["new threads", "project-defaults", "/settings/new-threads"],
+    ["workspace", "new-threads", "/settings/new-threads"],
+    ["projects folder", "projects-folder", "/settings/new-threads"],
+    ["live processes", "diagnostics", "/settings/diagnostics"],
     ["agent browser access", "agent-browser-access", "/settings/integrations"],
+    ["computer use", "agent-computer-use", "/settings/integrations"],
+    ["screen recording", "agent-computer-use", "/settings/integrations"],
+    ["connect a machine", "remote-environments", "/settings/connections"],
+    ["private access", "machines", "/settings/machines"],
+    ["orphan folders", "project-folders", "/settings/project-tags"],
     ["automatically pull", "automatic-pull", "/settings/source-control"],
-    ["actions", "project-actions", "/settings/projects"],
+    ["actions", "project-actions", "/settings/new-threads"],
     ["project overview", "project-overview", "/settings/projects"],
   ])("routes %s to its owning category", (query, id, to) => {
     expect(searchSettings(query)[0]).toMatchObject({ id, to });
+  });
+
+  it("finds the one Tailscale switch on the Machines page", () => {
+    const results = searchSettings("tailscale serve");
+    expect(results[0]?.id).toBe("machines");
+    expect(results.every((item) => item.to === "/settings/machines")).toBe(true);
+  });
+
+  it("finds machine pairing on the Machines page", () => {
+    expect(searchSettings("add a machine")[0]).toMatchObject({
+      id: "add-machine",
+      to: "/settings/machines",
+      targetId: "machines",
+    });
+    expect(searchSettings("unpair")[0]).toMatchObject({ id: "machines", to: "/settings/machines" });
+    expect(searchSettings("pair machines").map((item) => item.id)).toEqual([
+      "machines",
+      "add-machine",
+    ]);
   });
 
   it("keeps environment settings discoverable without a primary environment", () => {
@@ -320,70 +352,45 @@ describe("searchSettings", () => {
   });
 });
 
-describe("settings search targets", () => {
-  it("requires an environment for the resolved telemetry export destination", () => {
-    const result = searchSettings("OpenTelemetry export").find(
-      (item) => item.id === "telemetry-export",
-    )!;
-    const target = getSettingsSearchTargetScope(result.targetId ?? result.id)!;
-    expect(isSettingsSearchScopeAvailable(target.scope, "all")).toBe(false);
-    expect(isSettingsSearchScopeAvailable(target.scope, "project")).toBe(false);
-    expect(isSettingsSearchScopeAvailable(target.scope, "environment")).toBe(true);
-  });
-  it("treats device-local rows as reachable from every selection", () => {
-    const setting = getSettingsSearchTargetScope("time-format")!;
-    expect(setting).toEqual({ title: "Time format", scope: null });
-    expect(isSettingsSearchScopeAvailable(setting.scope, "project")).toBe(true);
-    expect(isSettingsSearchScopeAvailable(setting.scope, "all")).toBe(true);
-    expect(getSettingsSearchTargetScope("appearance")).toMatchObject({ scope: null });
-    expect(getSettingsSearchTargetScope("missing-setting")).toBeNull();
+describe("settings navigation", () => {
+  it("lists every page once, in the sidebar or as a detail page", () => {
+    const navPaths = SETTINGS_NAV_GROUPS.flatMap((group) => group.paths);
+    const detailPaths = Object.keys(SETTINGS_DETAIL_PARENTS);
+    expect(new Set(navPaths).size).toBe(navPaths.length);
+    expect(
+      [...navPaths, ...detailPaths.filter((path) => path in SETTINGS_SECTION_LABELS)].toSorted(),
+    ).toEqual(Object.keys(SETTINGS_SECTION_LABELS).toSorted());
   });
 
-  it.each(["all", "environment", "project", "checkout"] as const)(
-    "makes browser access editable at the %s scope",
-    (kind) => {
-      const setting = getSettingsSearchTargetScope("agent-browser-access")!;
-      expect(isSettingsSearchScopeAvailable(setting.scope, kind)).toBe(true);
-      expect(isSettingsSearchScopeAvailable(setting.scope, "unavailable")).toBe(false);
-    },
-  );
-
-  it("lets project-scopable rows resolve at every server-backed scope", () => {
-    const model = getSettingsSearchTargetScope("text-generation-model")!;
-    expect(isSettingsSearchScopeAvailable(model.scope, "all")).toBe(true);
-    expect(isSettingsSearchScopeAvailable(model.scope, "environment")).toBe(true);
-    expect(isSettingsSearchScopeAvailable(model.scope, "project")).toBe(true);
+  it.each([
+    ["/settings/models", "/settings/models"],
+    ["/settings/diagnostics", "/settings/diagnostics"],
+    ["/settings/projects", "/settings/project-tags"],
+    ["/settings/open-source-licenses", "/settings/general"],
+    ["/settings/general/", "/settings/general"],
+    ["/threads", null],
+  ])("highlights %s as %s", (pathname, expected) => {
+    expect(settingsNavPathFor(pathname)).toBe(expected);
   });
 
-  it("reaches source control discovery and git fetch interval from the default scope", () => {
-    for (const id of ["source-control", "git-fetch-interval"]) {
-      const item = getSettingsSearchTargetScope(id)!;
-      expect(isSettingsSearchScopeAvailable(item.scope, "all")).toBe(true);
-      expect(isSettingsSearchScopeAvailable(item.scope, "environment")).toBe(true);
-      expect(isSettingsSearchScopeAvailable(item.scope, "project")).toBe(false);
+  it.each([
+    ["#default-model", "/settings/models"],
+    ["text-generation-model", "/settings/models"],
+    ["project-defaults", "/settings/new-threads"],
+    ["projects-folder", "/settings/new-threads"],
+    ["project-actions", "/settings/new-threads"],
+    ["diagnostics", "/settings/diagnostics"],
+    ["send-shortcut", null],
+    ["", null],
+  ])("sends the old General anchor %s to %s", (hash, expected) => {
+    expect(movedGeneralSettingsPath(hash)).toBe(expected);
+  });
+
+  it("moves every General anchor that no search result still places on General", () => {
+    const items: ReadonlyArray<SettingsSearchItem> = SETTINGS_SEARCH_ITEMS;
+    for (const item of items) {
+      const moved = movedGeneralSettingsPath(item.targetId ?? item.id);
+      if (moved) expect(item.to).toBe(moved);
     }
-  });
-
-  it("keeps environment-wide settings out of project scopes", () => {
-    const updates = getSettingsSearchTargetScope("provider-update-checks")!;
-    expect(updates.scope).toBe("environment-defaults");
-    expect(isSettingsSearchScopeAvailable(updates.scope, "environment")).toBe(true);
-    expect(isSettingsSearchScopeAvailable(updates.scope, "all")).toBe(true);
-    expect(isSettingsSearchScopeAvailable(updates.scope, "project")).toBe(false);
-    const streaming = getSettingsSearchTargetScope("response-streaming")!;
-    expect(streaming.scope).toBe("project-defaults");
-    expect(isSettingsSearchScopeAvailable(streaming.scope, "project")).toBe(true);
-    for (const id of ["legacy-plan-mode", "legacy-context-window-indicator", "legacy-sidebar"]) {
-      expect(getSettingsSearchTargetScope(id)!.scope).toBeNull();
-    }
-  });
-});
-
-describe("settings sidebar scope", () => {
-  it("shows Overview only for project and checkout targets", () => {
-    expect(isSettingsOverviewVisible({})).toBe(false);
-    expect(isSettingsOverviewVisible({ machine: "remote" })).toBe(false);
-    expect(isSettingsOverviewVisible({ project: "project" })).toBe(true);
-    expect(isSettingsOverviewVisible({ project: "project", checkout: "checkout" })).toBe(true);
   });
 });

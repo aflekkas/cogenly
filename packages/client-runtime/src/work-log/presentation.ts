@@ -7,15 +7,15 @@ import {
   type ToolActivityIcon,
   type OrchestrationV2TurnItem,
   type ThreadId,
-} from "@t3tools/contracts";
-import { resolveT3McpToolDefinition } from "@t3tools/shared/t3McpToolPresentation";
-import { classifyMarkdownImageSource } from "@t3tools/client-runtime/markdown-images";
-import { resolveMediaSource } from "@t3tools/client-runtime/media-source";
-import { isWorkspaceImagePreviewPath } from "@t3tools/shared/filePreview";
-import { formatTokens } from "@t3tools/shared/usageFormat";
-import { toolOutputIndicatesFailure } from "@t3tools/shared/toolOutput";
+} from "@cogenly/contracts";
+import { resolveT3McpToolDefinition } from "@cogenly/shared/t3McpToolPresentation";
+import { classifyMarkdownImageSource } from "@cogenly/client-runtime/markdown-images";
+import { resolveMediaSource } from "@cogenly/client-runtime/media-source";
+import { isWorkspaceImagePreviewPath } from "@cogenly/shared/filePreview";
+import { formatTokens } from "@cogenly/shared/usageFormat";
+import { toolOutputIndicatesFailure } from "@cogenly/shared/toolOutput";
 
-import { t3ToolResultIndicatesFailure } from "@t3tools/client-runtime/t3ToolSummary";
+import { t3ToolResultIndicatesFailure } from "@cogenly/client-runtime/t3ToolSummary";
 import {
   resolveWorkLogTool,
   workLogCallFromItem,
@@ -62,7 +62,7 @@ export function contextCompactionLabel(
 }
 
 export interface WorkLogPresentationEntry {
-  readonly questionAnswer?: import("@t3tools/contracts").UserInputAttachmentAnswerPayload;
+  readonly questionAnswer?: import("@cogenly/contracts").UserInputAttachmentAnswerPayload;
   readonly id: string;
   readonly createdAt: string;
   readonly label: string;

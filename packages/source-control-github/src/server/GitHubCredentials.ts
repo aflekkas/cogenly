@@ -11,11 +11,11 @@ import * as PlatformError from "effect/PlatformError";
 import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as HostProcess from "@cogenly/shared/HostProcess";
 
-import * as SourceControlHost from "@t3tools/source-control-core/server/SourceControlHost";
-import { readSourceControlHostSettings } from "@t3tools/source-control-core/client/definition";
-import type { ServerSettings } from "@t3tools/contracts";
+import * as SourceControlHost from "@cogenly/source-control-core/server/SourceControlHost";
+import { readSourceControlHostSettings } from "@cogenly/source-control-core/client/definition";
+import type { ServerSettings } from "@cogenly/contracts";
 
 import * as GitHubClient from "../client/definition.ts";
 
@@ -53,7 +53,7 @@ export class GitHubNotSignedInError extends Schema.TaggedError<GitHubNotSignedIn
   override get message(): string {
     return this.account === undefined
       ? `No GitHub credential for ${this.host}: run \`gh auth login --hostname ${this.host}\`.`
-      : `No GitHub credential for ${this.account} on ${this.host}: run \`gh auth login --hostname ${this.host}\` for that account or pick another in Settings → Source Control.`;
+      : `No GitHub credential for ${this.account} on ${this.host}: run \`gh auth login --hostname ${this.host}\` for that account or pick another in Settings → Source control.`;
   }
 }
 
@@ -63,7 +63,7 @@ export class GitHubHostDisabledError extends Schema.TaggedError<GitHubHostDisabl
   { host: Schema.String },
 ) {
   override get message(): string {
-    return `GitHub host ${this.host} is turned off in Settings → Source Control.`;
+    return `GitHub host ${this.host} is turned off in Settings → Source control.`;
   }
 }
 
@@ -97,7 +97,7 @@ export class GitHubCredentials extends Context.Service<
     /** Drops the held token after GitHub refused it, so the next read asks its source again. */
     readonly invalidate: (host: string) => Effect.Effect<void>;
   }
->()("@t3tools/source-control-github/server/GitHubCredentials") {}
+>()("@cogenly/source-control-github/server/GitHubCredentials") {}
 
 function normalizeHost(host: string): string {
   return host.trim().toLowerCase();

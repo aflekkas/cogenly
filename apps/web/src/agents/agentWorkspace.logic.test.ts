@@ -8,7 +8,7 @@ import {
   type AgentApproval,
   type Commitment,
   type ScheduledTaskUpsertSchedule,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { describe, expect, it } from "vite-plus/test";
 import {
   agentAttentionCount,
@@ -525,4 +525,30 @@ describe("describeRunAction", () => {
       "Something new",
     );
   });
+});
+
+it("shows exact executable arguments and environment mappings in thread approvals", () => {
+  const command = {
+    command: "/bin/sh",
+    args: ["-c", "printf 'synthetic value'"],
+    env: { API_KEY: "{{credential:fixture.value}}" },
+  };
+  const description = describeThreadApproval({
+    action: {
+      actionKind: "integration_add",
+      threadId: ThreadId.make("thread:fixture"),
+      payload: {
+        name: "worker",
+        displayName: "Worker",
+        transport: "stdio",
+        url: "https://localhost",
+        headers: {},
+        scope: { type: "all" },
+        hint: "",
+        command,
+      },
+    },
+  });
+  expect(description?.details).toContain(`Command: "/bin/sh" "-c" "printf 'synthetic value'"`);
+  expect(description?.details).toContain(`Environment: ${JSON.stringify(command.env)}`);
 });

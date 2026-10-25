@@ -6,7 +6,7 @@ import {
   ProviderSession,
   ScheduledTask,
   ServerSettings,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { BUILT_IN_DRIVERS } from "./builtInDrivers.ts";

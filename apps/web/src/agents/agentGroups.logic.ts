@@ -1,6 +1,7 @@
-import type { EnvironmentId, ProjectLabelId } from "@t3tools/contracts";
+import type { EnvironmentId, ProjectLabelId } from "@cogenly/contracts";
 
 import {
+  projectLabelEnvironmentIds,
   projectLabelKey,
   sortProjectLabels,
   type EnvironmentProjectLabel,
@@ -22,6 +23,32 @@ export function orderAgentsForList<A extends { readonly orderKey?: string | null
       left.orderKey! < right.orderKey! ? -1 : left.orderKey! > right.orderKey! ? 1 : 0,
     );
   return [...keyless, ...keyed];
+}
+
+/**
+ * One contact per agent across connected machines. Agents sync under one id,
+ * so each paired machine lists a copy; the owner machine's copy (where its
+ * conversation runs) wins, else the first, in the first copy's place.
+ */
+export function onePerAgent<
+  A extends {
+    readonly id: string;
+    readonly environmentId: EnvironmentId;
+    readonly ownerMachine?: EnvironmentId | undefined;
+  },
+>(agents: ReadonlyArray<A>): A[] {
+  const slot = new Map<string, number>();
+  const kept: A[] = [];
+  for (const agent of agents) {
+    const index = slot.get(agent.id);
+    if (index === undefined) {
+      slot.set(agent.id, kept.length);
+      kept.push(agent);
+    } else if ((agent.ownerMachine ?? agent.environmentId) === agent.environmentId) {
+      kept[index] = agent;
+    }
+  }
+  return kept;
 }
 
 /** The group for agents filed in no project, or in a folder that no longer exists. */
@@ -59,15 +86,21 @@ export function groupAgentsByProject<
   readonly include?: ((agent: A) => boolean) | undefined;
 }): AgentProjectGroups<A> {
   const shown = input.include ? input.agents.filter(input.include) : input.agents;
-  const folders = new Map(input.folders.map((folder) => [folder.key as string, folder]));
+  // Every machine's key for a folder leads to it.
+  const folders = new Map<string, EnvironmentProjectLabel>();
+  for (const folder of input.folders) {
+    for (const environmentId of projectLabelEnvironmentIds(folder)) {
+      folders.set(projectLabelKey(environmentId, folder.label.id), folder);
+    }
+  }
   const byFolder = new Map<string, A[]>();
   const unfiled: A[] = [];
   for (const agent of shown) {
     const key =
       agent.projectFolderId === null
         ? null
-        : projectLabelKey(agent.environmentId, agent.projectFolderId);
-    if (key === null || !folders.has(key)) {
+        : (folders.get(projectLabelKey(agent.environmentId, agent.projectFolderId))?.key ?? null);
+    if (key === null) {
       unfiled.push(agent);
       continue;
     }

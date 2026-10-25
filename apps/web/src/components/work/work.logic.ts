@@ -1,16 +1,19 @@
 import type {
   EnvironmentId,
   MessageId,
+  OrchestrationV2Notification,
   ProjectId,
+  ServerProvider,
+  ProviderInstanceId,
   RunId,
   ThreadEnvMode,
   WorkHandoffError,
   WorkHandoffLink,
-} from "@t3tools/contracts";
-import type { ProjectSettingSource } from "@t3tools/shared/projectSettings";
-import type { EnvironmentProject } from "@t3tools/client-runtime/state/models";
+} from "@cogenly/contracts";
+import type { ProjectSettingSource } from "@cogenly/shared/projectSettings";
+import type { EnvironmentProject } from "@cogenly/client-runtime/state/models";
 import { isPickableRepository } from "~/projectLabels/projectMeta.logic";
-import type { WorkStatus } from "@t3tools/client-runtime/state/work-status";
+import type { WorkStatus } from "@cogenly/client-runtime/state/work-status";
 
 /** The picker's "No repository" choice: Work runs in the environment's scratch project. */
 export const NO_REPOSITORY = "no-repository";
@@ -34,13 +37,16 @@ export function listWorkPickerChoices(input: {
   readonly repositories: ReadonlyArray<EnvironmentProject>;
   readonly sourceProjectId: ProjectId | null;
   readonly canRunWithoutRepository: boolean;
+  /** What a repository row reads, as the repository pickers name it (`useRepositoryNames`). */
+  readonly nameOf?: (repository: EnvironmentProject) => string;
 }): WorkPickerChoice[] {
+  const nameOf = input.nameOf ?? ((repository: EnvironmentProject) => repository.title);
   const own = input.repositories.filter((repository) => repository.id === input.sourceProjectId);
   const others = input.repositories.filter((repository) => repository.id !== input.sourceProjectId);
   return [
     ...[...own, ...others].map((repository) => ({
       value: repository.id,
-      label: repository.title,
+      label: nameOf(repository),
       repository,
     })),
     ...(input.canRunWithoutRepository
@@ -315,12 +321,13 @@ export function anchorAtTurnEnd(
   );
 }
 
-export type WorkHandoffStatus = "running" | "attention" | "done" | "stopped";
+export type WorkHandoffStatus = "running" | "waiting" | "done" | "failed" | "stopped";
 
 /**
- * A Work session's state as its chat's handoff marker shows it, from the
- * thread shell alone so a marker never loads the Work thread's history.
- * Null when it has not started a run yet.
+ * A Work session's state as its chat's handoff card shows it, from the
+ * thread shell alone so a card never loads the Work thread's history.
+ * `waiting` means it waits on the user (an approval or an answer). Null when
+ * it has not started a run yet.
  */
 export function deriveWorkHandoffStatus(thread: {
   readonly latestRun: { readonly status: string } | null;
@@ -331,7 +338,7 @@ export function deriveWorkHandoffStatus(thread: {
   readonly settledOverride: "settled" | "active" | null;
   readonly settledAt: string | null;
 }): WorkHandoffStatus | null {
-  if (thread.hasPendingApprovals || thread.hasPendingUserInput) return "attention";
+  if (thread.hasPendingApprovals || thread.hasPendingUserInput) return "waiting";
   const runtimeStatus = thread.runtime?.status;
   if (
     runtimeStatus === "preparing" ||
@@ -355,7 +362,7 @@ export function deriveWorkHandoffStatus(thread: {
     case "completed":
       return "done";
     case "failed":
-      return "attention";
+      return "failed";
     case "interrupted":
     case "cancelled":
     case "rolled_back":
@@ -363,4 +370,37 @@ export function deriveWorkHandoffStatus(thread: {
     default:
       return "running";
   }
+}
+
+/**
+ * The status a Work session reported back to its chat with, as that chat's
+ * notification card shows it: the state then, not now. A delegated session
+ * reports `updated` when it has a question for the user.
+ */
+export function workNotificationStatus(
+  outcome: OrchestrationV2Notification["outcome"],
+): WorkHandoffStatus {
+  switch (outcome) {
+    case "failed":
+      return "failed";
+    case "cancelled":
+      return "stopped";
+    case "updated":
+      return "waiting";
+    case "completed":
+    case "unknown":
+      return "done";
+  }
+}
+
+/** Names a refused provider instance using the same machine snapshot as Settings. */
+export function disabledWorkProviderMessage(
+  instanceId: ProviderInstanceId,
+  providers: ReadonlyArray<ServerProvider>,
+): string {
+  const provider = providers.find((entry) => entry.instanceId === instanceId);
+  const fallbackName = instanceId
+    .replace(/[_-]+/g, " ")
+    .replace(/\b[a-z]/g, (letter) => letter.toUpperCase());
+  return `${provider?.displayName ?? fallbackName} is turned off for Work on this machine. Turn it on in provider settings.`;
 }

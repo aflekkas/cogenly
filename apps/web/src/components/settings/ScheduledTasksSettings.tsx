@@ -1,7 +1,19 @@
+import { matchesSettingsListQuery } from "./settingsList.logic";
+import {
+  SettingsList,
+  SettingsListItem,
+  SettingsListToolbar,
+  SettingsListSearch,
+  SettingsListFilter,
+  SettingsListEmpty,
+} from "./SettingsList";
+import { useEnvironmentMachineList } from "~/machines/useMachines";
+import { mergeRunOnOptions } from "~/machines/launchMachine.logic";
+import { EnvironmentOptionContent } from "../BranchToolbarEnvironmentSelector";
 import { OverlayPresence } from "~/components/ui/overlay-presence";
 import { CopyButton } from "../ui/copy-button";
 import { useAtomValue } from "@effect/atom-react";
-import { connectionStatusTitle } from "@t3tools/client-runtime/connection";
+import { connectionStatusTitle } from "@cogenly/client-runtime/connection";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
 import {
@@ -25,19 +37,19 @@ import type {
   ScheduledTaskWebhookDeliveryOutcome,
   ScheduledTaskWebhookDeliverySummary,
   ThreadId,
-} from "@t3tools/contracts";
-import { DEFAULT_WEBHOOK_PROMPT } from "@t3tools/client-runtime/scheduled-task-webhook";
+} from "@cogenly/contracts";
+import { DEFAULT_WEBHOOK_PROMPT } from "@cogenly/client-runtime/scheduled-task-webhook";
 import {
   AgentId,
   MAX_WEBHOOK_DELIVERY_AGE_MINUTES,
   MIN_SCHEDULED_TASK_INTERVAL_MS,
   ProviderInstanceId,
   resolveEnvironmentMachineKind,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@cogenly/client-runtime/state/runtime";
 
 import { formatRelativeTime } from "../../timestampFormat";
 import { useEnvironmentSettings } from "../../hooks/useSettings";
@@ -49,7 +61,7 @@ import {
 } from "../../providerInstances";
 import { usePrimaryCloudLinkState } from "../../cloud/primaryCloudLinkState";
 import { requestConfirmDialog } from "../../confirmDialog";
-import { webhookAddress } from "@t3tools/client-runtime/webhook-address";
+import { webhookAddress } from "@cogenly/client-runtime/webhook-address";
 import { Link } from "@tanstack/react-router";
 import {
   useEnvironment,
@@ -63,7 +75,7 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { WorktreeBaseBranchPicker } from "../WorktreeBaseBranchPicker";
 import { EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
 import { ConnectionStatusDot, connectionPhaseDotClassName } from "../ConnectionStatusDot";
-import { AuthOrchestrationOperateScope } from "@t3tools/contracts";
+import { AuthOrchestrationOperateScope } from "@cogenly/contracts";
 import { readEnvironmentScope } from "~/state/session";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { useAgents } from "../../agents/agentsClient";
@@ -78,7 +90,6 @@ import {
 import { EventTriggerFields } from "../../agents/EventTriggerFields";
 import { useEnvironmentProjectLabels } from "../../projectLabels/useProjectLabels";
 import { EnvironmentRow, environmentTransportLabel } from "./EnvironmentRow";
-import { SettingsGroup } from "./SettingsGroup";
 import { settingsScopeEnvironmentLabel, settingsScopeEnvironmentLabels } from "./settingsScopeAxis";
 import {
   DEFAULT_DRAFT_EVENT,
@@ -114,12 +125,10 @@ import { Textarea } from "../ui/textarea";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
-  SettingsEmpty,
-  SettingsNote,
-  SettingsPageContainer,
   SettingsRow,
   SettingsSection,
   SettingsSectionAction,
+  SettingsNote,
   SETTINGS_PICKER_TRIGGER_CLASSNAME,
   useRelativeTimeTick,
 } from "./settingsLayout";
@@ -268,6 +277,11 @@ export function ScheduledTasksSettings(target: {
   readonly taskId?: ScheduledTaskId | undefined;
   readonly create?: true | undefined;
 }) {
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const matchesTask = (task: ScheduledTask) =>
+    (statusFilter === "all" || task.enabled === (statusFilter === "enabled")) &&
+    matchesSettingsListQuery(query, [task.title, task.prompt]);
   const { scope, environments, connectedEnvironments, environment } = useSettingsScope();
   const [editor, setEditor] = useState<{
     environmentId: EnvironmentId;
@@ -290,10 +304,9 @@ export function ScheduledTasksSettings(target: {
     setEditor({ environmentId: createEnvironmentId, task: null });
   }, [canCreate, createEnvironmentId, target.create]);
   return (
-    <SettingsPageContainer>
+    <>
       <SettingsSection
         title="Scheduled tasks"
-        variant="plain"
         headerAction={
           <SettingsSectionAction
             disabled={!defaultEnvironment || !canCreate}
@@ -306,42 +319,58 @@ export function ScheduledTasksSettings(target: {
           </SettingsSectionAction>
         }
       >
+        <SettingsListToolbar>
+          <SettingsListSearch
+            label="Search scheduled tasks"
+            value={query}
+            onValueChange={setQuery}
+          />
+          <SettingsListFilter
+            label="Status"
+            value={statusFilter}
+            onValueChange={setStatusFilter}
+            options={[
+              { value: "all", label: "All tasks" },
+              { value: "enabled", label: "Enabled" },
+              { value: "paused", label: "Paused" },
+            ]}
+          />
+        </SettingsListToolbar>
         {scope.kind === "unavailable" ? (
-          <SettingsGroup>
+          <SettingsSection title="Unavailable selection">
             <SettingsRow title={scope.message} />
-          </SettingsGroup>
+          </SettingsSection>
         ) : environments.length === 0 ? (
-          <SettingsGroup>
-            <SettingsEmpty
-              icon={<Clock3Icon />}
-              title="No environments available"
-              description="Connect an environment to manage scheduled tasks."
-            />
-          </SettingsGroup>
+          <SettingsListEmpty
+            icon={<Clock3Icon />}
+            title="No machines available"
+            description="Connect a machine to manage scheduled tasks."
+          />
         ) : environments.length > 1 ? (
           <ScheduledTaskEnvironmentList
             key={`${target.environmentId ?? defaultEnvironment?.environmentId}:${target.taskId ?? ""}`}
             environmentId={target.environmentId ?? defaultEnvironment?.environmentId}
             taskId={target.taskId}
+            matchesTask={matchesTask}
             onEdit={openForEdit}
           />
         ) : (
-          <div className="space-y-8">
+          <>
             {environments.map((entry) => (
               <ScheduledTaskEnvironmentSection
                 key={`${entry.environmentId}:${target.taskId ?? ""}`}
                 environment={entry}
-                showEnvironmentHeading={environments.length > 1}
                 taskId={
                   (target.environmentId ?? defaultEnvironment?.environmentId) ===
                   entry.environmentId
                     ? target.taskId
                     : undefined
                 }
+                matchesTask={matchesTask}
                 onEdit={openForEdit}
               />
             ))}
-          </div>
+          </>
         )}
       </SettingsSection>
       <OverlayPresence when={editor}>
@@ -354,7 +383,7 @@ export function ScheduledTasksSettings(target: {
           />
         )}
       </OverlayPresence>
-    </SettingsPageContainer>
+    </>
   );
 }
 
@@ -362,9 +391,11 @@ function ScheduledTaskEnvironmentList({
   environmentId,
   taskId,
   onEdit,
+  matchesTask,
 }: {
   readonly environmentId: EnvironmentId | undefined;
   readonly taskId: ScheduledTaskId | undefined;
+  readonly matchesTask: (task: ScheduledTask) => boolean;
   readonly onEdit: (environmentId: EnvironmentId, task: ScheduledTask) => void;
 }) {
   const { scope, environments } = useSettingsScope();
@@ -409,7 +440,7 @@ function ScheduledTaskEnvironmentList({
   useRelativeTimeTick(60_000);
 
   const loaded = states.filter((state) => state.connected && state.error === null && state.tasks);
-  const populated = loaded.filter((state) => state.tasks && state.tasks.length > 0);
+  const populated = loaded.filter((state) => state.tasks && state.tasks.some(matchesTask));
   const summaries: Record<string, string[]> = {
     "Not connected:": [],
     "Loading scheduled tasks on": [],
@@ -432,7 +463,7 @@ function ScheduledTaskEnvironmentList({
   }
 
   return (
-    <SettingsGroup>
+    <>
       {populated.map(({ environment, tasks }) => {
         const { primary, secondary } = settingsScopeEnvironmentLabels(environment, environments);
         const transport = environmentTransportLabel(environment);
@@ -458,14 +489,16 @@ function ScheduledTaskEnvironmentList({
                 {connectionStatusTitle(environment.connection)}
               </span>
             </EnvironmentRow>
-            {tasks?.map((task) => (
-              <ScheduledTaskRow
-                key={task.id}
-                environmentId={environment.environmentId}
-                task={task}
-                onEdit={() => onEdit(environment.environmentId, task)}
-              />
-            ))}
+            <SettingsList>
+              {tasks?.filter(matchesTask).map((task) => (
+                <ScheduledTaskRow
+                  key={task.id}
+                  environmentId={environment.environmentId}
+                  task={task}
+                  onEdit={() => onEdit(environment.environmentId, task)}
+                />
+              ))}
+            </SettingsList>
           </div>
         );
       })}
@@ -476,7 +509,13 @@ function ScheduledTaskEnvironmentList({
           role="status"
         />
       ) : null}
-      {populated.length === 0 && loaded.length > 0 ? <NoScheduledTasks /> : null}
+      {populated.length === 0 && loaded.length > 0 ? (
+        <SettingsListEmpty
+          icon={<Clock3Icon />}
+          title="No scheduled tasks"
+          description="No tasks match the selected search and filters."
+        />
+      ) : null}
       {Object.entries(summaries).map(([label, entries]) => {
         if (entries.length === 0) return null;
         const summary = `${label} ${entries.join(", ")}`;
@@ -489,29 +528,19 @@ function ScheduledTaskEnvironmentList({
           </Tooltip>
         );
       })}
-    </SettingsGroup>
-  );
-}
-
-function NoScheduledTasks() {
-  return (
-    <SettingsEmpty
-      icon={<Clock3Icon />}
-      title="No scheduled tasks"
-      description="No tasks match this environment and repository selection."
-    />
+    </>
   );
 }
 
 function ScheduledTaskEnvironmentSection({
   environment,
-  showEnvironmentHeading,
   taskId,
   onEdit,
+  matchesTask,
 }: {
   readonly environment: EnvironmentPresentation;
-  readonly showEnvironmentHeading: boolean;
   readonly taskId?: ScheduledTaskId | undefined;
+  readonly matchesTask: (task: ScheduledTask) => boolean;
   readonly onEdit: (environmentId: EnvironmentId, task: ScheduledTask) => void;
 }) {
   const { scope } = useSettingsScope();
@@ -538,19 +567,10 @@ function ScheduledTaskEnvironmentSection({
   }, [environment.environmentId, linkedTask, onEdit]);
   useRelativeTimeTick(60_000);
   return (
-    <SettingsSection
-      title={environment.label}
-      hideTitle={!showEnvironmentHeading}
-      icon={
-        <EnvironmentMachineIcon
-          kind={resolveEnvironmentMachineKind(environment.serverConfig)}
-          className="size-3.5"
-        />
-      }
-    >
+    <>
       {!connected ? (
         <SettingsRow
-          title="Environment disconnected"
+          title="Machine disconnected"
           description={`Reconnect ${environment.label} to view its scheduled tasks.`}
         />
       ) : tasksQuery.error ? (
@@ -566,21 +586,27 @@ function ScheduledTaskEnvironmentSection({
               role="status"
             />
           ) : null}
-          {tasks.length === 0 ? (
-            <NoScheduledTasks />
+          {tasks.filter(matchesTask).length === 0 ? (
+            <SettingsListEmpty
+              icon={<Clock3Icon />}
+              title="No scheduled tasks"
+              description="No tasks match the selected search and filters."
+            />
           ) : (
-            tasks.map((task) => (
-              <ScheduledTaskRow
-                key={task.id}
-                environmentId={environment.environmentId}
-                task={task}
-                onEdit={() => onEdit(environment.environmentId, task)}
-              />
-            ))
+            <SettingsList>
+              {tasks.filter(matchesTask).map((task) => (
+                <ScheduledTaskRow
+                  key={task.id}
+                  environmentId={environment.environmentId}
+                  task={task}
+                  onEdit={() => onEdit(environment.environmentId, task)}
+                />
+              ))}
+            </SettingsList>
           )}
         </>
       )}
-    </SettingsSection>
+    </>
   );
 }
 
@@ -641,7 +667,7 @@ function ScheduledTaskRow({
     }
   };
   return (
-    <SettingsRow
+    <SettingsListItem
       title={task.title}
       description={<span className="line-clamp-2">{task.prompt}</span>}
       status={
@@ -969,8 +995,8 @@ function WebhookDeliveryMode({ environmentId }: { readonly environmentId: Enviro
   return (
     <p className="text-xs text-muted-foreground">
       {cloudLink.data.holdWebhooksWhileOffline
-        ? "Held for up to 24 hours while this environment is offline. "
-        : "Forwarded live. Requests fail while this environment is offline. "}
+        ? "Held for up to 24 hours while this machine is offline. "
+        : "Forwarded live. Requests fail while this machine is offline. "}
       <Link to="/settings/connections" className="link">
         Change in Connections
       </Link>
@@ -989,6 +1015,23 @@ function ScheduledTaskEditorDialog({
 }) {
   const { scope, connectedEnvironments } = useSettingsScope();
   const [environmentId, setEnvironmentId] = useState(initialEnvironmentId);
+  const [targetMachine, setTargetMachine] = useState<EnvironmentId | null>(task?.machine ?? null);
+  const machineList = useEnvironmentMachineList(environmentId);
+  const runTarget =
+    targetMachine ??
+    task?.ownerMachine ??
+    (machineList?.link._tag === "spoke" ? machineList.link.hubEnvironmentId : environmentId);
+  const runOnOptions = mergeRunOnOptions({
+    environments: connectedEnvironments.map((entry) => ({
+      environmentId: entry.environmentId,
+      projectId: null,
+      label: entry.label,
+      isPrimary: entry.environmentId === environmentId,
+      machine: resolveEnvironmentMachineKind(entry.serverConfig),
+    })),
+    machines: machineList,
+    pickedMachine: targetMachine,
+  });
   const environment = useEnvironment(environmentId);
   const connected =
     environment?.connection.phase === "connected" && environment.serverConfig !== null;
@@ -1006,8 +1049,14 @@ function ScheduledTaskEditorDialog({
     [allProjects, environmentId, scope],
   );
   const settings = useEnvironmentSettings(environmentId);
-  const providers =
+  const localProviders =
     useAtomValue(serverEnvironment.providersValueAtom(environmentId)) ?? EMPTY_SERVER_PROVIDERS;
+  const remoteProviders = useEnvironmentQuery(
+    runTarget === environmentId
+      ? null
+      : serverEnvironment.machineProviders({ environmentId, input: { machine: runTarget } }),
+  );
+  const providers = remoteProviders.data?.providers ?? localProviders;
   const canOperate = useAtomValue(
     serverEnvironment.upsertScheduledTask.permissionAtom(environmentId),
   );
@@ -1146,6 +1195,7 @@ function ScheduledTaskEditorDialog({
             };
     const input: ScheduledTaskUpsertInput = {
       ...(draft.editingId ? { id: draft.editingId as ScheduledTaskId, requireExisting: true } : {}),
+      machine: draft.threadId || draft.agentId ? null : targetMachine,
       title: draft.title.trim(),
       prompt: draft.prompt.trim(),
       enabled: draft.enabled,
@@ -1199,15 +1249,30 @@ function ScheduledTaskEditorDialog({
         <DialogPanel>
           <fieldset disabled={saving} className="space-y-5">
             {!connected ? (
-              <p className="text-sm text-destructive">Reconnect this environment before saving.</p>
+              <p className="text-sm text-destructive">Reconnect this machine before saving.</p>
             ) : null}
             <Field label="Runs on" htmlFor="scheduled-task-environment">
               <Select
-                value={environmentId}
-                disabled={task !== null || saving}
+                value={runTarget}
+                disabled={saving || Boolean(draft.threadId) || Boolean(draft.agentId)}
                 onValueChange={(id) => {
                   const next = connectedEnvironments.find((entry) => entry.environmentId === id);
-                  if (!next) return;
+                  if (!next) {
+                    const picked = runOnOptions.find((option) => option.environmentId === id);
+                    if (!picked) return;
+                    setTargetMachine(picked.environmentId);
+                    setDraft((current) =>
+                      current.workspaceMode === "existing_worktree"
+                        ? { ...current, workspaceMode: "worktree", existingWorktreePath: "" }
+                        : current,
+                    );
+                    return;
+                  }
+                  if (task !== null && next.environmentId !== environmentId) {
+                    setTargetMachine(next.environmentId);
+                    return;
+                  }
+                  setTargetMachine(next.environmentId);
                   setEnvironmentId(next.environmentId);
                   setDraft((current) => ({
                     ...current,
@@ -1224,10 +1289,16 @@ function ScheduledTaskEditorDialog({
                   <SelectValue>
                     <span className="flex items-center gap-2">
                       <EnvironmentMachineIcon
-                        kind={resolveEnvironmentMachineKind(environment?.serverConfig ?? null)}
+                        kind={
+                          runOnOptions.find((option) => option.environmentId === runTarget)
+                            ?.machine ??
+                          resolveEnvironmentMachineKind(environment?.serverConfig ?? null)
+                        }
                         className="size-4"
                       />
-                      {environment?.label ?? "Unavailable environment"}
+                      {runOnOptions.find((option) => option.environmentId === runTarget)?.label ??
+                        environment?.label ??
+                        "Unavailable machine"}
                     </span>
                   </SelectValue>
                 </SelectTrigger>
@@ -1260,6 +1331,17 @@ function ScheduledTaskEditorDialog({
                       </SelectItem>
                     );
                   })}
+                  {runOnOptions
+                    .filter((option) => option.pairedMachine !== undefined)
+                    .map((option) => (
+                      <SelectItem
+                        key={option.environmentId}
+                        value={option.environmentId}
+                        label={option.label}
+                      >
+                        <EnvironmentOptionContent option={option} />
+                      </SelectItem>
+                    ))}
                 </SelectPopup>
               </Select>
             </Field>
@@ -1728,6 +1810,7 @@ function EventScheduleFields({
       ) : null}
       <EventTriggerFields
         value={draft.event}
+        environmentId={environmentId}
         {...choices}
         Field={Field}
         onChange={(event) => onChange({ event })}

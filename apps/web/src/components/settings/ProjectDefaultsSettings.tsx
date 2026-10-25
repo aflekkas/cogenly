@@ -3,9 +3,9 @@ import {
   type ModelSelection,
   type ProviderInstanceId,
   type WorktreeSubmodules,
-} from "@t3tools/contracts";
-import { createModelSelection } from "@t3tools/shared/model";
-import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+} from "@cogenly/contracts";
+import { createModelSelection } from "@cogenly/shared/model";
+import { resolveProjectSettings } from "@cogenly/shared/projectSettings";
 import { useNavigate } from "@tanstack/react-router";
 
 import { mergeEnvironmentSettings } from "../../hooks/useSettings";
@@ -25,7 +25,8 @@ import { TraitsPicker } from "../chat/TraitsPicker";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { toastManager } from "../ui/toast";
 import { Switch } from "../ui/switch";
-import type { ProjectSettingsCategory } from "./ProjectSettingsPanel";
+import { ComputerUsePermissionsSetting } from "./ComputerUsePermissionsSetting";
+import { ScopedSwitch } from "./ScopedSwitch";
 import { searchableSetting } from "./settingsSearch";
 import { useSettingsScope } from "./SettingsScopeContext";
 import {
@@ -41,17 +42,21 @@ import {
   useUpdateScopedSettings,
 } from "./useScopedSettings";
 
-/**
- * Rows for the settings a project may override. The same rows edit
- * environment defaults at an environment scope and project overrides at a
- * project or checkout scope; the scoped hooks route the write.
- */
 const WORKTREE_SUBMODULES_OPTIONS = ["recursive", "top-level", "none"] as const;
 function isWorktreeSubmodules(value: string | null): value is WorktreeSubmodules {
   return value !== null && (WORKTREE_SUBMODULES_OPTIONS as readonly string[]).includes(value);
 }
 
-export function ProjectDefaultsSettings({ category }: { category: ProjectSettingsCategory }) {
+/**
+ * Rows for the settings a project may override. The same rows edit the value
+ * for all projects at All projects and a project's override at a project
+ * scope; the scoped hooks route the write.
+ */
+export function ProjectDefaultsSettings({
+  category,
+}: {
+  category: "models" | "new-threads" | "integrations" | "source-control";
+}) {
   const { scope, target, targets, connectedEnvironments } = useSettingsScope();
   const settings = useScopedSettings();
   const updateSettings = useUpdateScopedSettings();
@@ -80,11 +85,12 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
   const mixedWorkspace = useScopedSettingsMixed(["defaultThreadEnvMode"]);
   const mixedSubmodules = useScopedSettingsMixed(["worktreeSubmodules"]);
   const mixedBrowser = useScopedSettingsMixed(["enableAgentBrowserAccess"]);
+  const mixedComputerUse = useScopedSettingsMixed(["enableAgentComputerUse"]);
   const mixedAutoPull = useScopedSettingsMixed(["defaultAutoPull"]);
   const mixedAgentCredits = useScopedSettingsMixed(["removeAgentCreditsOnMerge"]);
   const mixedMergeMethod = useScopedSettingsMixed(["pullRequestMergeMethod"]);
   const modelSource = useScopedSettingSource(["defaultModelSelection"]);
-  const isProjectScope = scope.kind === "project" || scope.kind === "checkout";
+  const isProjectScope = scope.kind === "project";
   const unavailable = connectedEnvironments.length === 0;
   // File-backed keys show their effective value; the target already carries
   // the checkout's cogenly.json, and a null file here only fills the built-in.
@@ -118,7 +124,7 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
         entry.driverKind !== sourceEntry?.driverKind ||
         !options?.some((option) => option.slug === model && !option.isUnavailable)
       ) {
-        return `This model is unavailable on ${environment?.label ?? "a selected environment"}. Select that environment to choose its model separately.`;
+        return `This model is unavailable on ${environment?.label ?? "one of this project's machines"}.`;
       }
     }
     return null;
@@ -138,12 +144,11 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
       serverScoped
       settingKeys={["defaultModelSelection"]}
       mixed={mixedModel}
-      id="default-model"
-      title="Model"
+      {...searchableSetting("default-model")}
       description={
         isProjectScope
-          ? "Model for new threads in this repository."
-          : "Default model for new threads. Repositories can override it."
+          ? "Model for new threads in this project."
+          : "Default model for new threads. Projects can override it."
       }
       status={
         unavailable || mixedModel || modelSource === "project"
@@ -209,12 +214,11 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
       serverScoped
       settingKeys={["defaultThreadEnvMode"]}
       mixed={mixedWorkspace}
-      id={searchableSetting("new-threads").id}
-      title="Workspace"
+      {...searchableSetting("new-threads")}
       description={
         isProjectScope
-          ? "Where new threads in this repository start."
-          : "Where new threads start. Repositories and their cogenly.json can override it."
+          ? "Where new threads in this project start."
+          : "Where new threads start. Projects and a repository's cogenly.json can override it."
       }
       resetAction={
         !isProjectScope && settings.defaultThreadEnvMode !== null ? (
@@ -252,31 +256,28 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
     />
   );
 
+  // The Models page puts the default model in a section of its own.
+  if (category === "models") return modelRow;
+
   return (
     <SettingsSection
       id={
-        category === "general" || category === "project"
+        category === "new-threads"
           ? "project-defaults"
           : category === "integrations"
             ? "browser-access"
             : "source-control-defaults"
       }
       title={
-        category === "general" || category === "project"
+        category === "new-threads"
           ? "New threads"
           : category === "integrations"
-            ? "Browser"
+            ? "Agent access"
             : "Repositories"
       }
     >
-      {category === "project" ? (
+      {category === "new-threads" ? (
         <>
-          {modelRow}
-          {workspaceRow}
-        </>
-      ) : category === "general" ? (
-        <>
-          {modelRow}
           {workspaceRow}
           <SettingsRow
             serverScoped
@@ -285,8 +286,8 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
             {...searchableSetting("worktree-submodules")}
             description={
               isProjectScope
-                ? "How new worktrees in this repository populate git submodules."
-                : "How new worktrees populate git submodules. Repositories and their cogenly.json can override it."
+                ? "How new worktrees in this project populate git submodules."
+                : "How new worktrees populate git submodules. Projects and a repository's cogenly.json can override it."
             }
             resetAction={
               !isProjectScope && settings.worktreeSubmodules !== null ? (
@@ -324,6 +325,36 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
               </Select>
             }
           />
+          <SettingsRow
+            serverScoped
+            settingKeys={["newWorktreesStartFromOrigin"]}
+            {...searchableSetting("start-from-origin")}
+            description="Creates the worktree from the latest matching branch on origin instead of your local branch."
+            resetAction={
+              settings.newWorktreesStartFromOrigin !==
+              DEFAULT_SERVER_SETTINGS.newWorktreesStartFromOrigin ? (
+                <SettingResetButton
+                  label="new worktrees start from origin"
+                  onClick={() =>
+                    updateSettings({
+                      newWorktreesStartFromOrigin:
+                        DEFAULT_SERVER_SETTINGS.newWorktreesStartFromOrigin,
+                    })
+                  }
+                />
+              ) : null
+            }
+            control={
+              <ScopedSwitch
+                settingKeys={["newWorktreesStartFromOrigin"]}
+                checked={settings.newWorktreesStartFromOrigin}
+                onCheckedChange={(checked) =>
+                  updateSettings({ newWorktreesStartFromOrigin: Boolean(checked) })
+                }
+                aria-label="Start new worktrees from origin by default"
+              />
+            }
+          />
         </>
       ) : category === "source-control" ? (
         <>
@@ -335,8 +366,8 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
             title="Automatically pull"
             description={
               isProjectScope
-                ? "Keeps this repository's default branch current when the checkout has no local changes or commits."
-                : "Keeps the default branch current when the checkout has no local changes or commits. Repositories can override it."
+                ? "Keeps this project's default branches current when a checkout has no local changes or commits."
+                : "Keeps the default branch current when the checkout has no local changes or commits. Projects can override it."
             }
             resetAction={
               settings.defaultAutoPull ? (
@@ -389,7 +420,7 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
             {...searchableSetting("pull-request-merge-method")}
             description={
               isProjectScope
-                ? "Pull requests in this repository start with this method."
+                ? "Pull requests in this project start with this method."
                 : "Pull requests start with this method. Last selected reuses whatever you chose most recently on this device."
             }
             resetAction={
@@ -437,12 +468,11 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
             serverScoped
             settingKeys={["enableAgentBrowserAccess"]}
             mixed={mixedBrowser}
-            id={searchableSetting("agent-browser-access").id}
-            title="Agent browser access"
+            {...searchableSetting("agent-browser-access")}
             description={
               isProjectScope
-                ? "Allow agents in this repository to use the shared browser. Applies when the agent session next starts."
-                : "Allow agents to use the shared browser. Repositories can override it."
+                ? "Allow agents in this project to use the shared browser. Applies when the agent session next starts."
+                : "Allow agents to use the shared browser. Projects can override it."
             }
             resetAction={
               settings.enableAgentBrowserAccess !==
@@ -466,6 +496,42 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
               />
             }
           />
+          <SettingsRow
+            serverScoped
+            settingKeys={["enableAgentComputerUse"]}
+            mixed={mixedComputerUse}
+            {...searchableSetting("agent-computer-use")}
+            description={
+              isProjectScope
+                ? "Allow agents in this project to control this machine's apps: clicks, typing, screenshots. Applies when the agent session next starts."
+                : "Allow agents to control this machine's apps: clicks, typing, screenshots. macOS asks once for Accessibility and Screen Recording. Projects can override it."
+            }
+            resetAction={
+              settings.enableAgentComputerUse !== DEFAULT_SERVER_SETTINGS.enableAgentComputerUse ? (
+                <SettingResetButton
+                  label="default computer use"
+                  onClick={() =>
+                    updateSettings({
+                      enableAgentComputerUse: DEFAULT_SERVER_SETTINGS.enableAgentComputerUse,
+                    })
+                  }
+                />
+              ) : null
+            }
+            control={
+              <Switch
+                aria-label="Computer use"
+                mixed={mixedComputerUse}
+                checked={mixedComputerUse ? false : settings.enableAgentComputerUse}
+                onCheckedChange={(enabled) => updateSettings({ enableAgentComputerUse: enabled })}
+              />
+            }
+          />
+          {isProjectScope ? null : (
+            <ComputerUsePermissionsSetting
+              enabled={!mixedComputerUse && settings.enableAgentComputerUse}
+            />
+          )}
         </>
       )}
     </SettingsSection>

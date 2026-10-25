@@ -1,10 +1,10 @@
-import type { ServerUpdateState } from "@t3tools/client-runtime/state/server";
+import type { ServerUpdateState } from "@cogenly/client-runtime/state/server";
 import {
   PROVIDER_DISPLAY_NAMES,
   type DesktopUpdateState,
   type ProviderDriverKind,
   type ServerProvider,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 
 import {
   canOneClickUpdateProviderCandidate,

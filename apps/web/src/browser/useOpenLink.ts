@@ -1,8 +1,8 @@
-import { AuthPreviewOperateScope, type ScopedThreadRef } from "@t3tools/contracts";
+import { AuthPreviewOperateScope, type ScopedThreadRef } from "@cogenly/contracts";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@cogenly/client-runtime/state/runtime";
 import { useCallback } from "react";
 
 import { recordVisitForThread } from "~/browserHistoryStore";

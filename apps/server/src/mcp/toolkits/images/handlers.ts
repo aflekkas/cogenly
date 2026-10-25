@@ -1,4 +1,4 @@
-import { OrchestratorMcpFailure } from "@t3tools/contracts";
+import { OrchestratorMcpFailure } from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
 
 import * as ImageSearchService from "../../../images/ImageSearchService.ts";

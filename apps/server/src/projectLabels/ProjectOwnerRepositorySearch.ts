@@ -5,9 +5,9 @@ import {
   type ProjectLabelOwnerRepositorySearchInput,
   ProjectLabelOwnerSearchError,
   type RepositoryIdentity,
-} from "@t3tools/contracts";
-import * as GitHubRest from "@t3tools/source-control-github/server/GitHubRest";
-import * as GitHubRequestPolicy from "@t3tools/source-control-github/server/GitHubRequestPolicy";
+} from "@cogenly/contracts";
+import * as GitHubRest from "@cogenly/source-control-github/server/GitHubRest";
+import * as GitHubRequestPolicy from "@cogenly/source-control-github/server/GitHubRequestPolicy";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";

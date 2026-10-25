@@ -1,3 +1,4 @@
+import * as RepoMcpTrust from "./repoMcpTrust.ts";
 import * as Search from "./search.ts";
 import * as Facts from "./fact.ts";
 import * as Visual from "./visual.ts";
@@ -6,7 +7,12 @@ import * as T3Import from "./t3Import.ts";
 import * as ProjectLabels from "./projectLabel.ts";
 import * as Integrations from "./integration.ts";
 import * as Machines from "./machine.ts";
+import * as ThreadReplication from "./threadReplication.ts";
+import * as SharedDocuments from "./sharedDocument.ts";
 import * as MachineSecurity from "./machineSecurity.ts";
+import * as ComputerUse from "./computerUse.ts";
+import * as MachineSetup from "./machineSetup.ts";
+import * as MachineHealth from "./machineHealth.ts";
 import * as Work from "./work.ts";
 import * as Vault from "./vault.ts";
 import * as Accounts from "./accounts.ts";
@@ -310,7 +316,6 @@ import {
   ResourceTelemetrySnapshot,
 } from "./resourceTelemetry.ts";
 import {
-  UsageLimitSourceError,
   ProviderConsumeResetCreditInput,
   ProviderConsumeResetCreditResult,
 } from "./providerUsageLimits.ts";
@@ -324,6 +329,7 @@ import {
 import { UsagePricing, UsageReadError, UsageSummary, UsageSummaryInput } from "./usage.ts";
 import {
   StorageCleanupReport,
+  StorageStatus,
   DatabaseStorageStatus,
   ServerSettings,
   ServerSettingsError,
@@ -494,6 +500,7 @@ export const WS_METHODS = {
   serverRemoveKeybinding: "server.removeKeybinding",
   serverRunStorageCleanup: "server.runStorageCleanup",
   serverGetStorageCleanupReport: "server.getStorageCleanupReport",
+  serverGetStorageStatus: "server.getStorageStatus",
   serverGetDatabaseStorage: "server.getDatabaseStorage",
   serverGetSettings: "server.getSettings",
   serverUpdateSettings: "server.updateSettings",
@@ -523,6 +530,10 @@ export const WS_METHODS = {
   projectLabelsSubscribe: "projectLabels.subscribe",
   projectLabelsCreate: "projectLabels.create",
   projectLabelsUpdate: "projectLabels.update",
+  projectLabelsMergeFileStatus: "projectLabels.mergeFileStatus",
+  projectLabelsMerge: "projectLabels.merge",
+  projectLabelsUndismissDuplicate: "projectLabels.undismissDuplicate",
+  projectLabelsDismissDuplicate: "projectLabels.dismissDuplicate",
   projectLabelsDelete: "projectLabels.delete",
   projectLabelsArchive: "projectLabels.archive",
   projectLabelsUnarchive: "projectLabels.unarchive",
@@ -532,12 +543,20 @@ export const WS_METHODS = {
   projectLabelsSubscribeThreadLabels: "projectLabels.subscribeThreadLabels",
   projectLabelsSubscribeConfirmedThreadLabels: "projectLabels.subscribeConfirmedThreadLabels",
   projectLabelsMoveThread: "projectLabels.moveThread",
+  // Hand a project's threads, agents and repositories to another paired machine.
+  projectLabelsMoveToMachine: "projectLabels.moveToMachine",
   projectLabelsForkThreadToProject: "projectLabels.forkThreadToProject",
   projectLabelsSetThreadLabels: "projectLabels.setThreadLabels",
   projectLabelsLinkSource: "projectLabels.linkSource",
   projectLabelsUnlinkSource: "projectLabels.unlinkSource",
   projectLabelsSearchOwnerRepositories: "projectLabels.searchOwnerRepositories",
   projectLabelsCloneRepository: "projectLabels.cloneRepository",
+  projectLabelsCheckoutRepository: "projectLabels.checkoutRepository",
+  projectLabelsRemoveCheckout: "projectLabels.removeCheckout",
+  projectLabelsAdoptRepository: "projectLabels.adoptRepository",
+  projectLabelsListOrphanFolders: "projectLabels.listOrphanFolders",
+  projectLabelsAdoptOrphanFolder: "projectLabels.adoptOrphanFolder",
+  projectLabelsRemoveOrphanFolder: "projectLabels.removeOrphanFolder",
   projectLabelsListResources: "projectLabels.listResources",
   projectLabelsSubscribeResources: "projectLabels.subscribeResources",
   projectLabelsAddResource: "projectLabels.addResource",
@@ -601,11 +620,18 @@ export const WS_METHODS = {
   vaultUpdate: "vault.update",
   vaultDelete: "vault.delete",
   vaultUsage: "vault.usage",
+  // Sharing this vault with directly paired machines (owner decision, never agents)
+  vaultSetPeerSharing: "vault.setPeerSharing",
+  vaultSharingStatus: "vault.sharingStatus",
   scheduledTasksListWebhookDeliveries: "scheduledTasks.listWebhookDeliveries",
   scheduledTasksGetWebhookDelivery: "scheduledTasks.getWebhookDelivery",
 
   // Cogenly-managed integrations (upstream MCP servers behind the gateway)
+  repoMcpTrustSubscribe: "repoMcpTrust.subscribe",
+  repoMcpTrustRespond: "repoMcpTrust.respond",
   integrationsList: "integrations.list",
+  integrationsPreviewNative: "integrations.previewNative",
+  integrationsImportNative: "integrations.importNative",
   integrationsCreate: "integrations.create",
   integrationsUpdate: "integrations.update",
   integrationsDelete: "integrations.delete",
@@ -613,16 +639,45 @@ export const WS_METHODS = {
   integrationsBeginSignIn: "integrations.beginSignIn",
   integrationsConnectFromCatalog: "integrations.connectFromCatalog",
   integrationsSubscribe: "integrations.subscribe",
+  integrationsSaveOAuthClient: "integrations.saveOAuthClient",
+  integrationsSaveApiKey: "integrations.saveApiKey",
+  integrationsInstallRuntime: "integrations.installRuntime",
+  integrationsSubscribeSources: "integrations.subscribeSources",
 
   // Machines: this server, its hub, and its paired spokes
   machinesList: "machines.list",
+  machinesCatalog: "machines.catalog",
   machinesSubscribe: "machines.subscribe",
   machinesUpdate: "machines.update",
   machinesPrepareJoin: "machines.prepareJoin",
   machinesCreatePeerGrant: "machines.createPeerGrant",
   machinesJoinHub: "machines.joinHub",
   machinesUnpair: "machines.unpair",
+  // Hand threads to another paired machine, which runs them from then on.
+  machinesMoveThreads: "machines.moveThreads",
+  machinesForkThread: "machines.forkThread",
+  machinesMoveAllThreads: "machines.moveAllThreads",
+  machinesPreviewMoveThreads: "machines.previewMoveThreads",
+  machinesPreviewMoveAllThreads: "machines.previewMoveAllThreads",
+  projectLabelsPreviewMoveToMachine: "projectLabels.previewMoveToMachine",
+  machinesAdoptThreads: "machines.adoptThreads",
   machineSecurityStatus: "machines.securityStatus",
+  machineSandboxSetup: "machines.sandboxSetup",
+  computerUseStatus: "computerUse.status",
+  computerUseRequestPermission: "computerUse.requestPermission",
+  // What each paired machine has yet to receive from this one
+  syncStatus: "sync.status",
+  // Getting this machine ready to pair (Tailscale and Serve)
+  machinesSetupStatus: "machines.setupStatus",
+  machinesSetupSubscribe: "machines.setupSubscribe",
+  machinesSetupRunStep: "machines.setupRunStep",
+  machinesSetupDisableServe: "machines.setupDisableServe",
+  // Health of this machine and its paired machines, and alerts when it turns bad
+  machinesHealth: "machines.health",
+  machinesHealthSubscribe: "machines.healthSubscribe",
+  machinesHealthAlertsSubscribe: "machines.healthAlertsSubscribe",
+  machinesHealthRetrySync: "machines.healthRetrySync",
+  machinesHealthTestAlertChannels: "machines.healthTestAlertChannels",
 
   // Cloud environment methods
   cloudGetRelayClientStatus: "cloud.getRelayClientStatus",
@@ -743,7 +798,7 @@ const ProviderSetupRpcError = Schema.Union([ProviderSetupError, EnvironmentAutho
 const WsProviderConsumeResetCreditRpc = Rpc.make(WS_METHODS.providerConsumeResetCredit, {
   payload: ProviderConsumeResetCreditInput,
   success: ProviderConsumeResetCreditResult,
-  error: Schema.Union([ProviderSetupError, UsageLimitSourceError, EnvironmentAuthorizationError]),
+  error: Schema.Union([ProviderSetupError, EnvironmentAuthorizationError]),
 });
 
 const WsProviderAuthStartRpc = Rpc.make(WS_METHODS.providerAuthStart, {
@@ -851,8 +906,13 @@ const WsServerCommitDesktopUpdateRpc = Rpc.make(WS_METHODS.serverCommitDesktopUp
 });
 
 const WsServerRunStorageCleanupRpc = Rpc.make(WS_METHODS.serverRunStorageCleanup, {
-  payload: Schema.Struct({}),
+  payload: Schema.Struct({ dryRun: Schema.optionalKey(Schema.Boolean) }),
   success: StorageCleanupReport,
+  error: Schema.Union([ServerSettingsError, EnvironmentAuthorizationError]),
+});
+const WsServerGetStorageStatusRpc = Rpc.make(WS_METHODS.serverGetStorageStatus, {
+  payload: Schema.Struct({}),
+  success: StorageStatus,
   error: Schema.Union([ServerSettingsError, EnvironmentAuthorizationError]),
 });
 const WsServerGetStorageCleanupReportRpc = Rpc.make(WS_METHODS.serverGetStorageCleanupReport, {
@@ -1869,8 +1929,6 @@ const WsSubscribeTerminalMetadataRpc = Rpc.make(WS_METHODS.subscribeTerminalMeta
 
 export const WsSubscribeServerConfigRpc = Rpc.make(WS_METHODS.subscribeServerConfig, {
   payload: Schema.Struct({
-    /** Whether this client understands `usageLimitSourcesUpdated` events. */
-    usageLimitSources: Schema.optional(Schema.Boolean),
     /**
      * Whether this client answers `/usage-limits` itself. The server injects
      * that command into provider catalogs only for such clients; an older
@@ -1937,6 +1995,25 @@ const WsProjectLabelsUpdateRpc = Rpc.make(WS_METHODS.projectLabelsUpdate, {
   success: ProjectLabels.ProjectLabelMutationResult,
   error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
 });
+const WsProjectLabelsMergeFileStatusRpc = Rpc.make(WS_METHODS.projectLabelsMergeFileStatus, {
+  success: ProjectLabels.ProjectMergeFileStatus,
+  error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
+});
+const WsProjectLabelsMergeRpc = Rpc.make(WS_METHODS.projectLabelsMerge, {
+  payload: ProjectLabels.ProjectLabelMergeInput,
+  success: ProjectLabels.ProjectLabelMutationResult,
+  error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
+});
+const WsProjectLabelsDismissDuplicateRpc = Rpc.make(WS_METHODS.projectLabelsDismissDuplicate, {
+  payload: ProjectLabels.ProjectLabelDismissDuplicateInput,
+  success: ProjectLabels.ProjectLabelMutationResult,
+  error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
+});
+const WsProjectLabelsUndismissDuplicateRpc = Rpc.make(WS_METHODS.projectLabelsUndismissDuplicate, {
+  payload: ProjectLabels.ProjectLabelDismissDuplicateInput,
+  success: ProjectLabels.ProjectLabelMutationResult,
+  error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
+});
 const WsProjectLabelsDeleteRpc = Rpc.make(WS_METHODS.projectLabelsDelete, {
   payload: ProjectLabels.ProjectLabelKey,
   success: ProjectLabels.ProjectLabelDeleteResult,
@@ -1984,6 +2061,51 @@ const WsProjectLabelsSubscribeConfirmedThreadLabelsRpc = Rpc.make(
     success: ProjectLabels.ThreadProjectLabelsResult,
     error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
     stream: true,
+  },
+);
+// Machine forks preserve the source and select a pushed repository snapshot.
+const WsMachinesForkThreadRpc = Rpc.make(WS_METHODS.machinesForkThread, {
+  payload: ThreadReplication.ThreadForkMachineInput,
+  success: ThreadReplication.ThreadForkMachineResult,
+  error: Schema.Union([ThreadReplication.ThreadRemoteError, EnvironmentAuthorizationError]),
+});
+// Moves are answered once the target runs the threads; skipped threads say why.
+const WsMachinesMoveThreadsRpc = Rpc.make(WS_METHODS.machinesMoveThreads, {
+  payload: ThreadReplication.ThreadMoveInput,
+  success: ThreadReplication.ThreadMoveResult,
+  error: Schema.Union([ThreadReplication.ThreadRemoteError, EnvironmentAuthorizationError]),
+});
+const WsMachinesPreviewMoveThreadsRpc = Rpc.make(WS_METHODS.machinesPreviewMoveThreads, {
+  payload: ThreadReplication.ThreadMoveInput,
+  success: ThreadReplication.ThreadMoveResult,
+  error: Schema.Union([ThreadReplication.ThreadRemoteError, EnvironmentAuthorizationError]),
+});
+const WsMachinesMoveAllThreadsRpc = Rpc.make(WS_METHODS.machinesMoveAllThreads, {
+  payload: ThreadReplication.ThreadMoveAllInput,
+  success: ThreadReplication.ThreadMoveResult,
+  error: Schema.Union([ThreadReplication.ThreadRemoteError, EnvironmentAuthorizationError]),
+});
+const WsMachinesPreviewMoveAllThreadsRpc = Rpc.make(WS_METHODS.machinesPreviewMoveAllThreads, {
+  payload: ThreadReplication.ThreadMoveAllInput,
+  success: ThreadReplication.ThreadMoveResult,
+  error: Schema.Union([ThreadReplication.ThreadRemoteError, EnvironmentAuthorizationError]),
+});
+const WsMachinesAdoptThreadsRpc = Rpc.make(WS_METHODS.machinesAdoptThreads, {
+  payload: ThreadReplication.ThreadAdoptInput,
+  success: ThreadReplication.ThreadAdoptResult,
+  error: Schema.Union([ThreadReplication.ThreadRemoteError, EnvironmentAuthorizationError]),
+});
+const WsProjectLabelsMoveToMachineRpc = Rpc.make(WS_METHODS.projectLabelsMoveToMachine, {
+  payload: ThreadReplication.ProjectMoveInput,
+  success: ThreadReplication.ProjectMoveResult,
+  error: Schema.Union([ThreadReplication.ThreadRemoteError, EnvironmentAuthorizationError]),
+});
+const WsProjectLabelsPreviewMoveToMachineRpc = Rpc.make(
+  WS_METHODS.projectLabelsPreviewMoveToMachine,
+  {
+    payload: ThreadReplication.ProjectMoveInput,
+    success: ThreadReplication.ProjectMoveResult,
+    error: Schema.Union([ThreadReplication.ThreadRemoteError, EnvironmentAuthorizationError]),
   },
 );
 const WsProjectLabelsMoveThreadRpc = Rpc.make(WS_METHODS.projectLabelsMoveThread, {
@@ -2042,6 +2164,42 @@ const WsProjectLabelsCloneRepositoryRpc = Rpc.make(WS_METHODS.projectLabelsClone
     OrchestrationDispatchCommandError,
     EnvironmentAuthorizationError,
   ]),
+});
+// Clone a repository the project already links onto this machine. Returns
+// once the clone runs; the link's `checkout` state and the project-clone
+// subscription carry its progress.
+const WsProjectLabelsCheckoutRepositoryRpc = Rpc.make(WS_METHODS.projectLabelsCheckoutRepository, {
+  payload: ProjectLabels.ProjectLabelCheckoutRepositoryInput,
+  success: ProjectLabels.ProjectLabelCheckoutRepositoryResult,
+  error: Schema.Union([ProjectLabels.RepositoryCheckoutError, EnvironmentAuthorizationError]),
+});
+// Delete this machine's checkout of a linked repository; the link stays.
+const WsProjectLabelsRemoveCheckoutRpc = Rpc.make(WS_METHODS.projectLabelsRemoveCheckout, {
+  payload: ProjectLabels.ProjectLabelRemoveCheckoutInput,
+  success: ProjectLabels.ProjectLabelRemoveCheckoutResult,
+  error: Schema.Union([ProjectLabels.RepositoryCheckoutError, EnvironmentAuthorizationError]),
+});
+// Move a linked repository's checkout into its project folder.
+const WsProjectLabelsAdoptRepositoryRpc = Rpc.make(WS_METHODS.projectLabelsAdoptRepository, {
+  payload: ProjectLabels.ProjectLabelAdoptRepositoryInput,
+  success: ProjectLabels.ProjectLabelAdoptRepositoryResult,
+  error: Schema.Union([ProjectLabels.RepositoryCheckoutError, EnvironmentAuthorizationError]),
+});
+// Folders under the projects root that no project claims, and what to do with them.
+const WsProjectLabelsListOrphanFoldersRpc = Rpc.make(WS_METHODS.projectLabelsListOrphanFolders, {
+  payload: Schema.Struct({}),
+  success: ProjectLabels.ProjectOrphanFoldersResult,
+  error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
+});
+const WsProjectLabelsAdoptOrphanFolderRpc = Rpc.make(WS_METHODS.projectLabelsAdoptOrphanFolder, {
+  payload: ProjectLabels.ProjectOrphanFolderInput,
+  success: ProjectLabels.ProjectLabelMutationResult,
+  error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
+});
+const WsProjectLabelsRemoveOrphanFolderRpc = Rpc.make(WS_METHODS.projectLabelsRemoveOrphanFolder, {
+  payload: ProjectLabels.ProjectOrphanFolderInput,
+  success: ProjectLabels.ProjectOrphanFolderRemoveResult,
+  error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
 });
 const WsProjectLabelsListResourcesRpc = Rpc.make(WS_METHODS.projectLabelsListResources, {
   payload: ProjectLabels.ProjectLabelKey,
@@ -2126,6 +2284,27 @@ const WsAgentsActivityRpc = Rpc.make(WS_METHODS.agentsActivity, {
   success: AgentWorkspace.AgentActivityResult,
   error: Schema.Union([Agents.AgentError, EnvironmentAuthorizationError]),
 });
+const WsIntegrationsPreviewNativeRpc = Rpc.make(WS_METHODS.integrationsPreviewNative, {
+  payload: Schema.Struct({}),
+  success: Integrations.IntegrationNativeImportPreview,
+  error: Schema.Union([Integrations.IntegrationError, EnvironmentAuthorizationError]),
+});
+const WsIntegrationsImportNativeRpc = Rpc.make(WS_METHODS.integrationsImportNative, {
+  payload: Schema.Struct({}),
+  success: Integrations.IntegrationNativeImportResult,
+  error: Schema.Union([Integrations.IntegrationError, EnvironmentAuthorizationError]),
+});
+const WsRepoMcpTrustSubscribeRpc = Rpc.make(WS_METHODS.repoMcpTrustSubscribe, {
+  payload: RepoMcpTrust.RepoMcpTrustThreadInput,
+  success: RepoMcpTrust.RepoMcpTrustListResult,
+  error: Schema.Union([RepoMcpTrust.RepoMcpTrustError, EnvironmentAuthorizationError]),
+  stream: true,
+});
+const WsRepoMcpTrustRespondRpc = Rpc.make(WS_METHODS.repoMcpTrustRespond, {
+  payload: RepoMcpTrust.RepoMcpTrustRespondInput,
+  success: Schema.Void,
+  error: Schema.Union([RepoMcpTrust.RepoMcpTrustError, EnvironmentAuthorizationError]),
+});
 const WsIntegrationsListRpc = Rpc.make(WS_METHODS.integrationsList, {
   payload: Schema.Struct({}),
   success: Integrations.IntegrationListResult,
@@ -2156,10 +2335,13 @@ const WsIntegrationsBeginSignInRpc = Rpc.make(WS_METHODS.integrationsBeginSignIn
   success: Integrations.IntegrationSignIn,
   error: Schema.Union([Integrations.IntegrationError, EnvironmentAuthorizationError]),
 });
-/** Connects a default catalog entry; returns the sign-in link when it needs one. */
+/**
+ * Connects a default catalog entry; returns the sign-in link when it needs
+ * one, or the next setup action when something has to happen first.
+ */
 const WsIntegrationsConnectFromCatalogRpc = Rpc.make(WS_METHODS.integrationsConnectFromCatalog, {
   payload: Integrations.IntegrationCatalogConnectInput,
-  success: Integrations.IntegrationMutationResult,
+  success: Integrations.IntegrationConnectResult,
   error: Schema.Union([Integrations.IntegrationError, EnvironmentAuthorizationError]),
 });
 /** The list, then again after every change (including a finished sign-in). */
@@ -2169,12 +2351,63 @@ const WsIntegrationsSubscribeRpc = Rpc.make(WS_METHODS.integrationsSubscribe, {
   error: Schema.Union([Integrations.IntegrationError, EnvironmentAuthorizationError]),
   stream: true,
 });
+/** Stores an app's client secret in the vault, wires the integration to it, and connects. */
+const WsIntegrationsSaveOAuthClientRpc = Rpc.make(WS_METHODS.integrationsSaveOAuthClient, {
+  payload: Integrations.IntegrationSaveOAuthClientInput,
+  success: Integrations.IntegrationConnectResult,
+  error: Schema.Union([Integrations.IntegrationError, EnvironmentAuthorizationError]),
+});
+/** Stores an API key in the vault, wires the integration to it, and connects. */
+const WsIntegrationsSaveApiKeyRpc = Rpc.make(WS_METHODS.integrationsSaveApiKey, {
+  payload: Integrations.IntegrationSaveApiKeyInput,
+  success: Integrations.IntegrationConnectResult,
+  error: Schema.Union([Integrations.IntegrationError, EnvironmentAuthorizationError]),
+});
+/** Installs a program a managed integration runs (uv), with a fixed command. */
+const WsIntegrationsInstallRuntimeRpc = Rpc.make(WS_METHODS.integrationsInstallRuntime, {
+  payload: Integrations.IntegrationInstallRuntimeInput,
+  success: Integrations.IntegrationInstallRuntimeResult,
+  error: Schema.Union([Integrations.IntegrationError, EnvironmentAuthorizationError]),
+});
+/** Connected accounts for the composer's Sources picker, again after every change. */
+const WsIntegrationsSubscribeSourcesRpc = Rpc.make(WS_METHODS.integrationsSubscribeSources, {
+  payload: Schema.Struct({}),
+  success: Integrations.IntegrationSourcesResult,
+  error: Schema.Union([Integrations.IntegrationError, EnvironmentAuthorizationError]),
+  stream: true,
+});
 
 const machineErrors = Schema.Union([Machines.MachineError, EnvironmentAuthorizationError]);
+const WsMachineSandboxSetupRpc = Rpc.make(WS_METHODS.machineSandboxSetup, {
+  payload: Schema.Struct({}),
+  success: MachineSecurity.ChatSandboxSetupResult,
+  error: EnvironmentAuthorizationError,
+});
 const WsMachineSecurityStatusRpc = Rpc.make(WS_METHODS.machineSecurityStatus, {
   payload: Schema.Struct({}),
   success: MachineSecurity.MachineSecurityStatus,
   error: machineErrors,
+});
+const WsComputerUseStatusRpc = Rpc.make(WS_METHODS.computerUseStatus, {
+  payload: Schema.Struct({}),
+  success: ComputerUse.ComputerUseStatus,
+  error: EnvironmentAuthorizationError,
+});
+const WsComputerUseRequestPermissionRpc = Rpc.make(WS_METHODS.computerUseRequestPermission, {
+  payload: ComputerUse.ComputerUseRequestPermissionInput,
+  success: ComputerUse.ComputerUseStatus,
+  error: Schema.Union([ComputerUse.ComputerUseUnavailableError, EnvironmentAuthorizationError]),
+});
+const WsSyncStatusRpc = Rpc.make(WS_METHODS.syncStatus, {
+  payload: SharedDocuments.SharedSyncStatusInput,
+  success: SharedDocuments.SharedSyncStatusResult,
+  error: Schema.Union([SharedDocuments.SharedStateError, EnvironmentAuthorizationError]),
+});
+
+const WsMachinesCatalogRpc = Rpc.make(WS_METHODS.machinesCatalog, {
+  payload: Machines.MachineCatalogInput,
+  success: Machines.MachineCatalogResult,
+  error: Schema.Union([ThreadReplication.ThreadRemoteError, EnvironmentAuthorizationError]),
 });
 const WsMachinesListRpc = Rpc.make(WS_METHODS.machinesList, {
   payload: Schema.Struct({}),
@@ -2211,6 +2444,71 @@ const WsMachinesUnpairRpc = Rpc.make(WS_METHODS.machinesUnpair, {
   payload: Machines.MachineUnpairInput,
   success: Machines.MachineUnpairResult,
   error: machineErrors,
+});
+const machineSetupErrors = Schema.Union([
+  MachineSetup.MachineSetupError,
+  EnvironmentAuthorizationError,
+]);
+const WsMachinesSetupStatusRpc = Rpc.make(WS_METHODS.machinesSetupStatus, {
+  payload: Schema.Struct({}),
+  success: MachineSetup.MachineSetupStatus,
+  error: machineSetupErrors,
+});
+/** The status, then again whenever it changes, re-checked while subscribed. */
+const WsMachinesSetupSubscribeRpc = Rpc.make(WS_METHODS.machinesSetupSubscribe, {
+  payload: Schema.Struct({}),
+  success: MachineSetup.MachineSetupStatus,
+  error: machineSetupErrors,
+  stream: true,
+});
+/** Starts one step and returns at once; progress arrives through the status. */
+const WsMachinesSetupRunStepRpc = Rpc.make(WS_METHODS.machinesSetupRunStep, {
+  payload: MachineSetup.MachineSetupRunStepInput,
+  success: MachineSetup.MachineSetupStatus,
+  error: machineSetupErrors,
+});
+/** Turns Tailscale Serve off for this server and saves that choice. */
+const WsMachinesSetupDisableServeRpc = Rpc.make(WS_METHODS.machinesSetupDisableServe, {
+  payload: Schema.Struct({}),
+  success: MachineSetup.MachineSetupStatus,
+  error: machineSetupErrors,
+});
+
+const machineHealthErrors = Schema.Union([
+  MachineHealth.MachineHealthError,
+  EnvironmentAuthorizationError,
+]);
+/** This machine's health, or a paired machine's read over the peer link. */
+const WsMachinesHealthRpc = Rpc.make(WS_METHODS.machinesHealth, {
+  payload: MachineHealth.MachineHealthInput,
+  success: MachineHealth.MachineHealthReport,
+  error: machineHealthErrors,
+});
+/** The report, then a fresh one whenever it changes. */
+const WsMachinesHealthSubscribeRpc = Rpc.make(WS_METHODS.machinesHealthSubscribe, {
+  payload: MachineHealth.MachineHealthInput,
+  success: MachineHealth.MachineHealthReport,
+  error: machineHealthErrors,
+  stream: true,
+});
+/** Open alerts for this machine and the machines it is paired with, then each transition. */
+const WsMachinesHealthAlertsSubscribeRpc = Rpc.make(WS_METHODS.machinesHealthAlertsSubscribe, {
+  payload: Schema.Struct({}),
+  success: MachineHealth.MachineHealthAlertsSnapshot,
+  error: machineHealthErrors,
+  stream: true,
+});
+/** Retries held or failed sync with one paired machine now. */
+const WsMachinesHealthRetrySyncRpc = Rpc.make(WS_METHODS.machinesHealthRetrySync, {
+  payload: MachineHealth.MachineHealthRetrySyncInput,
+  success: Schema.Struct({}),
+  error: machineHealthErrors,
+});
+/** Sends a test message through each enabled external alert channel. */
+const WsMachinesHealthTestAlertChannelsRpc = Rpc.make(WS_METHODS.machinesHealthTestAlertChannels, {
+  payload: Schema.Struct({}),
+  success: MachineHealth.MachineHealthChannelTestResult,
+  error: machineHealthErrors,
 });
 
 const WsFactsListRpc = Rpc.make(WS_METHODS.factsList, {
@@ -2468,6 +2766,16 @@ const WsVaultUsageRpc = Rpc.make(WS_METHODS.vaultUsage, {
   success: Vault.VaultUsageListResult,
   error: Schema.Union([Vault.VaultError, EnvironmentAuthorizationError]),
 });
+const WsVaultSetPeerSharingRpc = Rpc.make(WS_METHODS.vaultSetPeerSharing, {
+  payload: Vault.VaultSetPeerSharingInput,
+  success: Vault.VaultSharingStatus,
+  error: Schema.Union([Vault.VaultError, EnvironmentAuthorizationError]),
+});
+const WsVaultSharingStatusRpc = Rpc.make(WS_METHODS.vaultSharingStatus, {
+  payload: Schema.Struct({}),
+  success: Vault.VaultSharingStatus,
+  error: Schema.Union([Vault.VaultError, EnvironmentAuthorizationError]),
+});
 
 const WsScheduledTasksListWebhookDeliveriesRpc = Rpc.make(
   WS_METHODS.scheduledTasksListWebhookDeliveries,
@@ -2545,6 +2853,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerRemoveKeybindingRpc,
   WsServerRunStorageCleanupRpc,
   WsServerGetStorageCleanupReportRpc,
+  WsServerGetStorageStatusRpc,
   WsServerGetDatabaseStorageRpc,
   WsServerGetSettingsRpc,
   WsServerUpdateSettingsRpc,
@@ -2568,6 +2877,10 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectLabelsSubscribeRpc,
   WsProjectLabelsCreateRpc,
   WsProjectLabelsUpdateRpc,
+  WsProjectLabelsMergeRpc,
+  WsProjectLabelsMergeFileStatusRpc,
+  WsProjectLabelsDismissDuplicateRpc,
+  WsProjectLabelsUndismissDuplicateRpc,
   WsProjectLabelsDeleteRpc,
   WsProjectLabelsArchiveRpc,
   WsProjectLabelsUnarchiveRpc,
@@ -2577,12 +2890,26 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectLabelsSubscribeThreadLabelsRpc,
   WsProjectLabelsSubscribeConfirmedThreadLabelsRpc,
   WsProjectLabelsMoveThreadRpc,
+  WsProjectLabelsMoveToMachineRpc,
+  WsProjectLabelsPreviewMoveToMachineRpc,
+  WsMachinesMoveThreadsRpc,
+  WsMachinesForkThreadRpc,
+  WsMachinesPreviewMoveThreadsRpc,
+  WsMachinesMoveAllThreadsRpc,
+  WsMachinesPreviewMoveAllThreadsRpc,
+  WsMachinesAdoptThreadsRpc,
   WsProjectLabelsForkThreadToProjectRpc,
   WsProjectLabelsSetThreadLabelsRpc,
   WsProjectLabelsLinkSourceRpc,
   WsProjectLabelsUnlinkSourceRpc,
   WsProjectLabelsSearchOwnerRepositoriesRpc,
   WsProjectLabelsCloneRepositoryRpc,
+  WsProjectLabelsCheckoutRepositoryRpc,
+  WsProjectLabelsRemoveCheckoutRpc,
+  WsProjectLabelsAdoptRepositoryRpc,
+  WsProjectLabelsListOrphanFoldersRpc,
+  WsProjectLabelsAdoptOrphanFolderRpc,
+  WsProjectLabelsRemoveOrphanFolderRpc,
   WsProjectLabelsListResourcesRpc,
   WsProjectLabelsSubscribeResourcesRpc,
   WsProjectLabelsAddResourceRpc,
@@ -2597,6 +2924,10 @@ export const WsRpcGroup = RpcGroup.make(
   WsThreadApprovalsSubscribeRpc,
   WsAgentsStartWorkRpc,
   WsAgentsActivityRpc,
+  WsIntegrationsPreviewNativeRpc,
+  WsIntegrationsImportNativeRpc,
+  WsRepoMcpTrustSubscribeRpc,
+  WsRepoMcpTrustRespondRpc,
   WsIntegrationsListRpc,
   WsIntegrationsCreateRpc,
   WsIntegrationsUpdateRpc,
@@ -2605,14 +2936,32 @@ export const WsRpcGroup = RpcGroup.make(
   WsIntegrationsBeginSignInRpc,
   WsIntegrationsConnectFromCatalogRpc,
   WsIntegrationsSubscribeRpc,
+  WsIntegrationsSaveOAuthClientRpc,
+  WsIntegrationsSaveApiKeyRpc,
+  WsIntegrationsInstallRuntimeRpc,
+  WsIntegrationsSubscribeSourcesRpc,
   WsMachineSecurityStatusRpc,
+  WsMachineSandboxSetupRpc,
+  WsComputerUseStatusRpc,
+  WsComputerUseRequestPermissionRpc,
+  WsSyncStatusRpc,
   WsMachinesListRpc,
+  WsMachinesCatalogRpc,
   WsMachinesSubscribeRpc,
   WsMachinesUpdateRpc,
   WsMachinesPrepareJoinRpc,
   WsMachinesCreatePeerGrantRpc,
   WsMachinesJoinHubRpc,
   WsMachinesUnpairRpc,
+  WsMachinesSetupStatusRpc,
+  WsMachinesSetupSubscribeRpc,
+  WsMachinesSetupRunStepRpc,
+  WsMachinesSetupDisableServeRpc,
+  WsMachinesHealthRpc,
+  WsMachinesHealthSubscribeRpc,
+  WsMachinesHealthAlertsSubscribeRpc,
+  WsMachinesHealthRetrySyncRpc,
+  WsMachinesHealthTestAlertChannelsRpc,
   WsFactsListRpc,
   WsFactsCreateRpc,
   WsFactsUpdateRpc,
@@ -2661,6 +3010,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsVaultUpdateRpc,
   WsVaultDeleteRpc,
   WsVaultUsageRpc,
+  WsVaultSetPeerSharingRpc,
+  WsVaultSharingStatusRpc,
   WsScheduledTasksListWebhookDeliveriesRpc,
   WsScheduledTasksGetWebhookDeliveryRpc,
   WsServerReportClientActivityRpc,

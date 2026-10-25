@@ -5,8 +5,8 @@ import {
   ProviderTurnId,
   type OrchestrationV2ProviderCapabilities,
   type OrchestrationV2ProviderFailure,
-} from "@t3tools/contracts";
-import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
+} from "@cogenly/contracts";
+import * as ProviderAdapter from "@cogenly/provider-core/server/ProviderAdapter";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -14,23 +14,40 @@ import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
 import * as Registry from "../ProviderAdapterRegistry.ts";
 
-/** External provider stand-in; orchestration, persistence and effects remain real. */
-export const makeControllableProvider = (capabilities: OrchestrationV2ProviderCapabilities) => {
+type EventQueue = Queue.Queue<
+  ProviderAdapter.ProviderAdapterV2Event,
+  ProviderAdapter.ProviderAdapterV2Error
+>;
+
+/**
+ * External provider stand-in; orchestration, persistence and effects remain
+ * real. Pass more than one instance id to model separate accounts of one
+ * driver, each with its own session and native threads.
+ */
+export const makeControllableProvider = (
+  capabilities: OrchestrationV2ProviderCapabilities,
+  instanceIds: ReadonlyArray<string> = ["codex"],
+  turnIdPrefix = "turn",
+) => {
   const driver = ProviderDriverKind.make("codex");
-  const instanceId = ProviderInstanceId.make("codex");
+  const defaultInstanceId = ProviderInstanceId.make(instanceIds[0]!);
   const turns: ProviderAdapter.ProviderAdapterV2TurnInput[] = [];
   const steers: ProviderAdapter.ProviderAdapterV2SteerInput[] = [];
-  let queue: Queue.Queue<
-    ProviderAdapter.ProviderAdapterV2Event,
-    ProviderAdapter.ProviderAdapterV2Error
-  >;
+  // The latest session's queue, for events not tied to a turn input.
+  let queue: EventQueue;
+  const queues = new Map<ProviderInstanceId, EventQueue>();
+  const sessionQueues: Array<EventQueue> = [];
   let ordinal = 0;
   const publish = (event: ProviderAdapter.ProviderAdapterV2Event) => Queue.offer(queue, event);
+  const publishFor = (
+    input: ProviderAdapter.ProviderAdapterV2TurnInput,
+    event: ProviderAdapter.ProviderAdapterV2Event,
+  ) => Queue.offer(queues.get(input.providerThread.providerInstanceId) ?? queue, event);
   const begin = (input: ProviderAdapter.ProviderAdapterV2TurnInput) =>
     Effect.gen(function* () {
       turns.push(input);
-      const id = ProviderTurnId.make(`turn:${++ordinal}`);
-      yield* publish({
+      const id = ProviderTurnId.make(`${turnIdPrefix}:${++ordinal}`);
+      yield* publishFor(input, {
         type: "provider_turn.updated",
         driver,
         threadId: input.threadId,
@@ -55,7 +72,7 @@ export const makeControllableProvider = (capabilities: OrchestrationV2ProviderCa
   ) =>
     Effect.gen(function* () {
       const now = yield* DateTime.now;
-      yield* publish({
+      yield* publishFor(input, {
         type: "provider_turn.updated",
         driver,
         threadId: input.threadId,
@@ -71,7 +88,7 @@ export const makeControllableProvider = (capabilities: OrchestrationV2ProviderCa
           completedAt: now,
         },
       });
-      return yield* publish({
+      return yield* publishFor(input, {
         type: "turn.terminal",
         driver,
         providerThreadId: input.providerThread.id,
@@ -91,11 +108,21 @@ export const makeControllableProvider = (capabilities: OrchestrationV2ProviderCa
     begin(input).pipe(Effect.asVoid);
   let compact: NonNullable<ProviderAdapter.ProviderAdapterV2SessionRuntime["compactThread"]> = () =>
     Effect.die("Unexpected compaction");
+  const resumes: Array<ProviderThreadId> = [];
+  let resume: ProviderAdapter.ProviderAdapterV2SessionRuntime["resumeThread"] = ({
+    providerThread,
+  }) => Effect.succeed(providerThread);
   const registry = Layer.mock(Registry.ProviderAdapterRegistryV2)({
-    list: () => Effect.succeed([instanceId]),
-    getMetadata: () =>
-      Effect.succeed({ driver, continuationKey: "codex", enabled: true, capabilities }),
-    get: () =>
+    list: () => Effect.succeed(instanceIds.map((id) => ProviderInstanceId.make(id))),
+    // Separate accounts never share native threads.
+    getMetadata: (instanceId) =>
+      Effect.succeed({
+        driver,
+        continuationKey: instanceId === defaultInstanceId ? "codex" : instanceId,
+        enabled: true,
+        capabilities,
+      }),
+    get: (instanceId) =>
       Effect.succeed(
         ProviderAdapter.ProviderAdapterV2.of({
           instanceId,
@@ -108,6 +135,10 @@ export const makeControllableProvider = (capabilities: OrchestrationV2ProviderCa
                 ProviderAdapter.ProviderAdapterV2Event,
                 ProviderAdapter.ProviderAdapterV2Error
               >();
+              queues.set(instanceId, queue);
+              sessionQueues.push(queue);
+              const threadKey = (threadId: string) =>
+                instanceId === defaultInstanceId ? threadId : `${instanceId}:${threadId}`;
               const now = yield* DateTime.now;
               return {
                 instanceId,
@@ -130,7 +161,7 @@ export const makeControllableProvider = (capabilities: OrchestrationV2ProviderCa
                   Effect.succeed({
                     id:
                       input.existingProviderThread?.id ??
-                      ProviderThreadId.make(`provider-thread:${input.threadId}`),
+                      ProviderThreadId.make(`provider-thread:${threadKey(input.threadId)}`),
                     driver,
                     providerInstanceId: instanceId,
                     providerSessionId: request.providerSessionId,
@@ -138,7 +169,7 @@ export const makeControllableProvider = (capabilities: OrchestrationV2ProviderCa
                     ownerNodeId: null,
                     nativeThreadRef: {
                       driver,
-                      nativeId: `native:${input.threadId}`,
+                      nativeId: `native:${threadKey(input.threadId)}`,
                       strength: "strong",
                     },
                     nativeConversationHeadRef: null,
@@ -150,7 +181,11 @@ export const makeControllableProvider = (capabilities: OrchestrationV2ProviderCa
                     createdAt: now,
                     updatedAt: now,
                   }),
-                resumeThread: ({ providerThread }) => Effect.succeed(providerThread),
+                resumeThread: (input) =>
+                  Effect.suspend(() => {
+                    resumes.push(input.providerThread.id);
+                    return resume(input);
+                  }),
                 startTurn: (input) => start(input),
                 compactThread: (input) => compact(input),
                 steerTurn: (input) =>
@@ -171,15 +206,23 @@ export const makeControllableProvider = (capabilities: OrchestrationV2ProviderCa
     registry,
     turns,
     steers,
+    resumes,
     begin,
     finish,
     publish,
+    publishFor,
+    /** Publishes on the nth session opened, such as a parent's after its child opened one. */
+    publishOn: (session: number, event: ProviderAdapter.ProviderAdapterV2Event) =>
+      Queue.offer(sessionQueues[session]!, event),
     failEvents: (error: ProviderAdapter.ProviderAdapterV2Error) => Queue.fail(queue, error),
     setStart: (value: typeof start) => {
       start = value;
     },
     setCompact: (value: typeof compact) => {
       compact = value;
+    },
+    setResume: (value: typeof resume) => {
+      resume = value;
     },
   };
 };

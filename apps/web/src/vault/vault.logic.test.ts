@@ -4,7 +4,7 @@ import {
   VaultItemId,
   type VaultItemMetadata,
   type VaultUsageEntry,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -184,6 +184,19 @@ describe("vaultUpdateInput", () => {
     const project = ProjectLabelId.make("label-1");
     const saved = item("vault:1", "GitHub", { scopeProjectId: project });
     expect(vaultUpdateInput(saved.id, vaultDraftFromItem(saved)).scopeProjectId).toBe(project);
+  });
+
+  it("saves the owner's portability, not one a rule imposes", () => {
+    const chosen = item("vault:1", "GitHub", { portability: "machine" });
+    expect(vaultUpdateInput(chosen.id, vaultDraftFromItem(chosen)).portability).toBe("machine");
+    const byRule = item("vault:2", "Google OAuth", {
+      portability: "machine",
+      portabilityReason: "local_integration",
+    });
+    expect(vaultUpdateInput(byRule.id, vaultDraftFromItem(byRule)).portability).toBe("shared");
+    // A server that predates vault sync reports none, and is sent none.
+    const legacy = item("vault:3", "Stripe");
+    expect(vaultUpdateInput(legacy.id, vaultDraftFromItem(legacy)).portability).toBeUndefined();
   });
 });
 

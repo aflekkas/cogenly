@@ -1,7 +1,7 @@
 import { cn } from "~/lib/utils";
 import { ChevronDownIcon, GaugeIcon, type LucideIcon } from "lucide-react";
 import { useState, type ComponentProps, type KeyboardEvent, type ReactNode } from "react";
-import type { ProjectId, ProjectLabelWithRepositories } from "@t3tools/contracts";
+import type { EnvironmentId, ProjectId, ProjectLabelWithRepositories } from "@cogenly/contracts";
 import { triggerErrorMessage } from "./agentWorkspace.logic";
 import { ThreadDetailsControl } from "~/components/chat/ThreadDetailsControl";
 import {
@@ -238,6 +238,7 @@ export function TriggerForm({
   pending,
   onSave,
   onCancel,
+  environmentId,
   labels = NO_LABELS,
   repositories = NO_REPOSITORIES,
   onManageProjects,
@@ -246,6 +247,8 @@ export function TriggerForm({
   pending: boolean;
   onSave: (trigger: Omit<AgentTrigger, "id"> & { id?: string }) => Promise<unknown>;
   onCancel: () => void;
+  /** The agent's environment, which `labels` belong to. */
+  environmentId: EnvironmentId;
   /** Projects an event trigger may be limited to. */
   labels?: ReadonlyArray<ProjectLabelWithRepositories>;
   /** Repositories an event trigger may be limited to. */
@@ -396,6 +399,7 @@ export function TriggerForm({
       {schedule.type === "event" && (
         <EventTriggerFields
           value={schedule}
+          environmentId={environmentId}
           labels={labels}
           repositories={repositories}
           onManageProjects={onManageProjects}

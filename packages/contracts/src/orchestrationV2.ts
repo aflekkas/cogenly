@@ -14,6 +14,7 @@ import {
   CommandId,
   ContextHandoffId,
   ContextTransferId,
+  EnvironmentId,
   EventId,
   IsoDateTime,
   MessageId,
@@ -168,7 +169,17 @@ export const OrchestrationV2ContextTransferResolution = Schema.Union([
 export type OrchestrationV2ContextTransferResolution =
   typeof OrchestrationV2ContextTransferResolution.Type;
 
+/** The pushed repository snapshot explicitly selected for a machine fork. */
+export const ThreadForkRepository = Schema.Struct({
+  remote: TrimmedNonEmptyString,
+  branch: Schema.NullOr(TrimmedNonEmptyString),
+  commit: TrimmedNonEmptyString,
+  usedLastPushed: Schema.Boolean,
+});
+export type ThreadForkRepository = typeof ThreadForkRepository.Type;
+
 export const OrchestrationV2ContextTransfer = Schema.Struct({
+  repository: Schema.optional(ThreadForkRepository),
   id: ContextTransferId,
   type: OrchestrationV2ContextTransferType,
   sourceThreadId: ThreadId,
@@ -347,8 +358,28 @@ export const OrchestrationV2LimitRecovery = Schema.Struct({
   resetAt: IsoDateTime,
   autoResume: Schema.Boolean,
   snooze: Schema.optional(Schema.Boolean),
+  /**
+   * Set when the server armed this recovery itself to retry a short-term rate
+   * limit: the consecutive retry this is, counting from 1.
+   */
+  retryAttempt: Schema.optional(PositiveInt),
+  /** A retry's backoff, when it ends after `resetAt`. The resume waits for both. */
+  retryAt: Schema.optional(IsoDateTime),
 });
 export type OrchestrationV2LimitRecovery = typeof OrchestrationV2LimitRecovery.Type;
+
+/** Consecutive server retries of a short-term rate limit before it counts as a hard stop. */
+export const MAX_RATE_LIMIT_RETRIES = 5;
+
+/** When a recorded recovery may continue the thread: its reset, or a later retry backoff. */
+export function limitRecoveryResumeAt(
+  recovery: Pick<OrchestrationV2LimitRecovery, "resetAt" | "retryAt">,
+): string {
+  return recovery.retryAt !== undefined &&
+    Date.parse(recovery.retryAt) > Date.parse(recovery.resetAt)
+    ? recovery.retryAt
+    : recovery.resetAt;
+}
 
 /** A choice update preserves omitted options for this same run and reset. */
 export const OrchestrationV2LimitRecoveryUpdate = Schema.Struct({
@@ -356,6 +387,8 @@ export const OrchestrationV2LimitRecoveryUpdate = Schema.Struct({
   resetAt: IsoDateTime,
   autoResume: Schema.optional(Schema.Boolean),
   snooze: Schema.optional(Schema.Boolean),
+  retryAttempt: Schema.optional(PositiveInt),
+  retryAt: Schema.optional(IsoDateTime),
 }).check(
   Schema.makeFilter(
     (update) =>
@@ -402,6 +435,8 @@ export const OrchestrationV2AppThread = Schema.Struct({
   projectFolderId: Schema.optional(Schema.NullOr(ProjectLabelId)),
   /** Absent only on older servers/caches. Null means unfiled. */
   projectFolderSource: Schema.optional(ProjectFolderSource),
+  /** Read-time: the paired machine that runs this thread. Null or absent: this machine. */
+  ownerMachine: Schema.optional(Schema.NullOr(EnvironmentId)),
   ...WorkMetadataFields,
   workHandoffs: Schema.optional(Schema.Array(WorkHandoffLink)),
   /** Tasks this chat's agent proposed or started, each shown as a card in the chat. */
@@ -812,6 +847,12 @@ export const OrchestrationV2Subagent = Schema.Struct({
   // blocking tool call). Absent on legacy records; treated as settled_only.
   completionWake: Schema.optional(Schema.Literals(["always", "settled_only"])),
   completionDelivery: Schema.optional(OrchestrationV2DelegatedCompletionTaskDelivery),
+  /**
+   * Set on an app-owned task started by a message to an existing subagent's
+   * thread after that subagent ran: the task whose child it continues. Its
+   * result is an update to that task's, which keeps its own.
+   */
+  followUpOf: Schema.optional(NodeId),
   status: Schema.Literals([
     "idle",
     "pending",
@@ -1262,13 +1303,33 @@ export type OrchestrationV2NotificationSource = typeof OrchestrationV2Notificati
 
 /** Why a delegated task's child run stopped without a result, as its parent is told. */
 export const OrchestrationV2DelegatedTaskFailureKind = Schema.Literals([
+  /** A short-term API rate limit (429). */
   "rate_limit",
+  /** An exhausted usage window, lasting until its reset. */
+  "usage_limit",
   "provider_error",
   "interrupted_by_restart",
   "crashed",
 ]);
 export type OrchestrationV2DelegatedTaskFailureKind =
   typeof OrchestrationV2DelegatedTaskFailureKind.Type;
+
+/** What the server is doing about a delegated child's stop, so its parent need not act. */
+export const OrchestrationV2DelegatedTaskRecovery = Schema.Union([
+  /** Retrying on the same provider instance after a short backoff. */
+  Schema.Struct({ type: Schema.Literal("retrying"), at: IsoDateTime, attempt: PositiveInt }),
+  /** Continued on another provider instance with the child's context. */
+  Schema.Struct({
+    type: Schema.Literal("handed_off"),
+    providerInstanceId: ProviderInstanceId,
+    model: TrimmedNonEmptyString,
+  }),
+  /** Nothing else had headroom; resumes on its own at the reset. */
+  Schema.Struct({ type: Schema.Literal("resuming_at_reset"), at: IsoDateTime }),
+  /** A restart cut the run; it resumes once the server is back. */
+  Schema.Struct({ type: Schema.Literal("resuming_after_restart") }),
+]);
+export type OrchestrationV2DelegatedTaskRecovery = typeof OrchestrationV2DelegatedTaskRecovery.Type;
 
 export const OrchestrationV2DelegatedTaskFailure = Schema.Struct({
   taskId: NodeId,
@@ -1277,10 +1338,14 @@ export const OrchestrationV2DelegatedTaskFailure = Schema.Struct({
   title: Schema.String,
   kind: OrchestrationV2DelegatedTaskFailureKind,
   message: Schema.String,
-  /** The provider's reported limit reset, for `rate_limit`. */
+  /** The provider's reported limit reset, for `rate_limit` and `usage_limit`. */
   resetAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   /** The child may have left edits or other partial work behind. */
   partialWork: Schema.Boolean,
+  /** Set when the stop is not final: the server is recovering the child on its own. */
+  recovery: Schema.optional(OrchestrationV2DelegatedTaskRecovery),
+  /** The earlier task whose subagent a later message continued (see the subagent's `followUpOf`). */
+  followUpOf: Schema.optional(NodeId),
 });
 export type OrchestrationV2DelegatedTaskFailure = typeof OrchestrationV2DelegatedTaskFailure.Type;
 
@@ -1456,6 +1521,9 @@ export const OrchestrationV2ProviderFailureClass = Schema.Literals([
 ]);
 export type OrchestrationV2ProviderFailureClass = typeof OrchestrationV2ProviderFailureClass.Type;
 
+export const OrchestrationV2ProviderLimitKind = Schema.Literals(["rate_limit", "quota"]);
+export type OrchestrationV2ProviderLimitKind = typeof OrchestrationV2ProviderLimitKind.Type;
+
 const OrchestrationV2ProviderFailureMessage = TrimmedNonEmptyString.check(
   Schema.isMaxLength(4_096),
 );
@@ -1473,6 +1541,13 @@ export const OrchestrationV2ProviderFailure = Schema.Struct({
   retryable: Schema.NullOr(Schema.Boolean),
   /** Reported reset time; absent when the provider cannot name one. */
   resetAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  /**
+   * For `usage_limit`: `rate_limit` is a short-term API throttle (429) the
+   * server retries on the same instance; `quota` is an exhausted usage window
+   * that lasts until `resetAt`. Absent on failures recorded before the split,
+   * which are treated as `quota`.
+   */
+  limitKind: Schema.optional(OrchestrationV2ProviderLimitKind),
 });
 export type OrchestrationV2ProviderFailure = typeof OrchestrationV2ProviderFailure.Type;
 
@@ -2060,6 +2135,8 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   projectFolderId: Schema.optional(Schema.NullOr(ProjectLabelId)),
   /** Absent only on older servers/caches. Null means unfiled. */
   projectFolderSource: Schema.optional(ProjectFolderSource),
+  /** The paired machine that runs this thread. Null or absent: this machine. */
+  ownerMachine: Schema.optional(Schema.NullOr(EnvironmentId)),
   ...WorkMetadataFields,
   workHandoffs: Schema.optional(Schema.Array(WorkHandoffLink)),
   workTasks: Schema.optional(Schema.Array(WorkTask)),
@@ -2852,9 +2929,27 @@ export const OrchestrationV2StoredEventJson = Schema.Struct({
 });
 export type OrchestrationV2StoredEventJson = typeof OrchestrationV2StoredEventJson.Type;
 
+/** A portable fork seeded from replicated conversation history. */
+export const ThreadLaunchFork = Schema.Struct({
+  sourceThreadId: ThreadId,
+  sourcePoint: OrchestrationV2ThreadForkSourcePoint,
+  repository: Schema.optional(ThreadForkRepository),
+});
+export type ThreadLaunchFork = typeof ThreadLaunchFork.Type;
+
+export const ThreadLaunchSubagent = Schema.Struct({
+  parentThreadId: ThreadId,
+  rootThreadId: ThreadId,
+  taskNodeId: NodeId,
+});
+export type ThreadLaunchSubagent = typeof ThreadLaunchSubagent.Type;
+
 export const OrchestrationV2Command = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("thread.create"),
+    projectFolderId: Schema.optional(Schema.NullOr(ProjectLabelId)),
+    subagent: Schema.optional(ThreadLaunchSubagent),
+    fork: Schema.optional(ThreadLaunchFork),
     ...WorkMetadataFields,
     agent: Schema.optional(AgentThreadIdentity),
     ...OrchestrationV2CreationFields,
@@ -3260,6 +3355,7 @@ export const OrchestrationV2Command = Schema.Union([
   }),
   Schema.Struct({
     type: Schema.Literal("delegated_task.request"),
+    machine: Schema.optional(EnvironmentId),
     ...OrchestrationV2CreationFields,
     commandId: CommandId,
     parentThreadId: ThreadId,
@@ -3340,6 +3436,33 @@ export type OrchestrationV2Command = typeof OrchestrationV2Command.Type;
  * send them.
  */
 const OrchestrationV2InternalCommand = Schema.Union([
+  Schema.Struct({
+    type: Schema.Literal("delegated_task.attach"),
+    driver: ProviderDriverKind,
+    ...OrchestrationV2CreationFields,
+    commandId: CommandId,
+    parentThreadId: ThreadId,
+    parentRunId: RunId,
+    parentNodeId: NodeId,
+    task: TrimmedNonEmptyString,
+    title: Schema.optional(TrimmedNonEmptyString),
+    modelSelection: ModelSelection,
+    runtimeMode: RuntimeMode,
+    interactionMode: ProviderInteractionMode,
+    workspaceStrategy: Schema.optional(OrchestrationV2ThreadLaunchWorkspaceStrategy),
+    // Omitted behaves as "settled_only" (no wake while the parent has a live
+    // run); producers that want fire-and-forget wakes must set "always".
+    completionWake: Schema.optional(Schema.Literals(["always", "settled_only"])),
+    createdAt: Schema.optional(Schema.DateTimeUtc),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("work.handoff.context"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    sourceThreadId: ThreadId,
+    scopeSummary: TrimmedNonEmptyString,
+    handoffContext: OrchestrationV2WorkHandoffContext,
+  }),
   Schema.Struct({
     type: Schema.Literal("work.handoff.record"),
     commandId: CommandId,
@@ -3461,6 +3584,11 @@ export type OrchestrationV2InternalCommand = typeof OrchestrationV2InternalComma
 
 /** Everything the server's orchestrator accepts: client commands plus internal ones. */
 export type OrchestrationV2ServerCommand = OrchestrationV2Command | OrchestrationV2InternalCommand;
+/** For server-to-server forwarding only; clients send `OrchestrationV2Command`. */
+export const OrchestrationV2ServerCommand = Schema.Union([
+  OrchestrationV2Command,
+  OrchestrationV2InternalCommand,
+]);
 
 export const ORCHESTRATION_V2_WS_METHODS = {
   dispatchCommand: "orchestration.dispatchCommand",
@@ -3497,7 +3625,7 @@ export type OrchestrationV2SubscribeCommandOutputInput =
  * fell behind); `append` extends it. Text is terminal output, not display
  * text: `replace` carries the cleaned tail plus the cursor and style escapes
  * needed to resume, and `append` carries raw chunks. Clients must feed both
- * through `appendTerminalOutput` from `@t3tools/shared/terminalOutput`.
+ * through `appendTerminalOutput` from `@cogenly/shared/terminalOutput`.
  * The stream ends after a frame with `running: false`.
  */
 export const OrchestrationV2CommandOutputFrame = Schema.Struct({
@@ -3572,6 +3700,13 @@ export const OrchestrationV2ThreadLaunchInput = Schema.Struct({
       attachments: Schema.Array(ChatAttachment),
     }),
   ),
+  /**
+   * The paired machine that runs the new thread, from its first event. The
+   * server this request reaches launches it there over the machine link;
+   * omitted or this server's own id runs it here. An offline target fails
+   * rather than queueing.
+   */
+  machine: Schema.optional(EnvironmentId),
 });
 export type OrchestrationV2ThreadLaunchInput = typeof OrchestrationV2ThreadLaunchInput.Type;
 
@@ -3804,6 +3939,11 @@ export class OrchestrationV2ThreadLaunchError extends Schema.TaggedError<Orchest
     commandId: CommandId,
     projectId: ProjectId,
     message: Schema.String,
+    /**
+     * Set when the requested `machine` could not take the launch because it
+     * is offline; the client offers this machine instead. Older servers omit it.
+     */
+    machineOffline: Schema.optional(Schema.Boolean),
     cause: Schema.optional(Schema.Defect()),
   },
 ) {}

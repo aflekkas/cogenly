@@ -10,11 +10,12 @@ import {
   DESKTOP_APP_ACTIVATION_PROTOCOL_VERSION,
   DesktopAppActivationRequest,
   type DesktopAppActivationResponse,
-} from "@t3tools/contracts";
-import { resolveDesktopAppControlAddress } from "@t3tools/shared/desktopAppControl";
-import type { AddEnvironmentRequest } from "@t3tools/shared/environmentLinks";
-import type { PromptLinkResult } from "@t3tools/shared/promptLinks";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+  type DesktopAppCliCommandRequest,
+} from "@cogenly/contracts";
+import { resolveDesktopAppControlAddress } from "@cogenly/shared/desktopAppControl";
+import type { AddEnvironmentRequest } from "@cogenly/shared/environmentLinks";
+import type { PromptLinkResult } from "@cogenly/shared/promptLinks";
+import * as HostProcess from "@cogenly/shared/HostProcess";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -31,6 +32,7 @@ import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import { DESKTOP_APP_ACTIVATION_REQUEST_CHANNEL } from "../ipc/channels.ts";
 import * as DesktopWindow from "../window/DesktopWindow.ts";
 import { DesktopAppActivationBroker } from "./DesktopAppActivationBroker.ts";
+import * as DesktopCliCommand from "./DesktopCliCommand.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import { makeComponentLogger } from "./DesktopObservability.ts";
 
@@ -38,6 +40,8 @@ const MAX_REQUEST_BYTES = 64 * 1024;
 const REQUEST_TIMEOUT_MS = 15_000;
 // Connecting a host can wait on an SSH password prompt and a first-time download.
 const ADD_ENVIRONMENT_TIMEOUT_MS = 10 * 60_000;
+// Pairing checks the hub's Tailscale, then makes three requests across both machines.
+const PAIR_MACHINES_TIMEOUT_MS = 2 * 60_000;
 const isDesktopAppActivationRequest = Schema.is(DesktopAppActivationRequest);
 
 export class DesktopAppActivationStartError extends Schema.TaggedError<DesktopAppActivationStartError>()(
@@ -320,7 +324,7 @@ export class DesktopAppActivation extends Context.Service<
       link: PromptLinkResult<AddEnvironmentRequest>,
     ) => Effect.Effect<void>;
   }
->()("@t3tools/desktop/app/DesktopAppActivation") {}
+>()("@cogenly/desktop/app/DesktopAppActivation") {}
 
 /** The native confirmation for a deep link, worded for a request the user may not have made. */
 export function environmentLinkConfirmation(request: AddEnvironmentRequest) {
@@ -347,6 +351,7 @@ export const make = Effect.gen(function* () {
   const electronWindow = yield* ElectronWindow.ElectronWindow;
   const path = yield* Path.Path;
   const userId = yield* HostProcess.UserId;
+  const cliCommand = yield* DesktopCliCommand.DesktopCliCommand;
   const runPromise = Effect.runPromiseWith(yield* Effect.context<never>());
   const address = resolveDesktopAppControlAddress({
     stateDir: path.resolve(desktopEnvironment.stateDir),
@@ -360,7 +365,11 @@ export const make = Effect.gen(function* () {
 
   const broker = new DesktopAppActivationBroker({
     requestTimeoutMs: (request) =>
-      request.type === "add-environment" ? ADD_ENVIRONMENT_TIMEOUT_MS : REQUEST_TIMEOUT_MS,
+      request.type === "add-environment"
+        ? ADD_ENVIRONMENT_TIMEOUT_MS
+        : request.type === "pair-machines"
+          ? PAIR_MACHINES_TIMEOUT_MS
+          : REQUEST_TIMEOUT_MS,
     activate: () => {
       void runPromise(
         desktopWindow.activate.pipe(
@@ -369,6 +378,32 @@ export const make = Effect.gen(function* () {
       );
     },
   });
+
+  /** The main process answers `cli-command` itself: it needs no window, and focusing one would only interrupt. */
+  const answerCliCommand = (request: DesktopAppCliCommandRequest) =>
+    (request.action === "install"
+      ? cliCommand.install(request.location === undefined ? {} : { location: request.location })
+      : request.action === "uninstall"
+        ? cliCommand.uninstall
+        : cliCommand.state
+    ).pipe(
+      Effect.map((state): DesktopAppActivationResponse => ({
+        version: DESKTOP_APP_ACTIVATION_PROTOCOL_VERSION,
+        requestId: request.requestId,
+        ok: true,
+        cliCommand: state,
+      })),
+      Effect.catchTags({
+        DesktopCliCommandError: (error) =>
+          Effect.succeed<DesktopAppActivationResponse>({
+            version: DESKTOP_APP_ACTIVATION_PROTOCOL_VERSION,
+            requestId: request.requestId,
+            ok: false,
+            code: "cli-command-failed",
+            message: error.message,
+          }),
+      }),
+    );
 
   const clearRegisteredRenderer = () => {
     detachRendererListeners?.();
@@ -384,7 +419,10 @@ export const make = Effect.gen(function* () {
           startDesktopAppControlServer({
             ...address,
             userId,
-            handle: (request) => broker.request(request),
+            handle: (request) =>
+              request.type === "cli-command"
+                ? runPromise(answerCliCommand(request))
+                : broker.request(request),
             cancel: (requestId) => broker.cancel(requestId),
             onReclaimError: (cause) =>
               void runPromise(

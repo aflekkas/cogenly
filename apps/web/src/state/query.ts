@@ -1,10 +1,16 @@
-import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
+import { useAtomRefresh } from "@effect/atom-react";
 import * as Cause from "effect/Cause";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
 
+import { useAtomValueBuiltOutsideRender } from "./useAtomValueBuiltOutsideRender";
+
 const EMPTY_ASYNC_RESULT_ATOM = Atom.make(AsyncResult.initial<never, never>(false)).pipe(
   Atom.withLabel("web-environment-query:empty"),
+);
+// What a query reads for the render before it is first built: loading.
+const PENDING_ASYNC_RESULT_ATOM = Atom.make(AsyncResult.initial<never, never>(true)).pipe(
+  Atom.withLabel("web-environment-query:pending"),
 );
 
 export interface EnvironmentQueryView<A, E = unknown> {
@@ -21,14 +27,14 @@ export function formatEnvironmentQueryError(cause: Cause.Cause<unknown>): string
   const error = Cause.squash(cause);
   return error instanceof Error && error.message.trim().length > 0
     ? error.message
-    : "The environment request failed.";
+    : "The request to the machine failed.";
 }
 
 export function useEnvironmentQuery<A, E>(
   atom: Atom.Atom<AsyncResult.AsyncResult<A, E>> | null,
 ): EnvironmentQueryView<A, E> {
   const selectedAtom = atom ?? EMPTY_ASYNC_RESULT_ATOM;
-  const result = useAtomValue(selectedAtom);
+  const result = useAtomValueBuiltOutsideRender(selectedAtom, PENDING_ASYNC_RESULT_ATOM);
   const refresh = useAtomRefresh(selectedAtom);
   return {
     data: Option.getOrNull(AsyncResult.value(result)),

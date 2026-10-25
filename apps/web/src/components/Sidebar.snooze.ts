@@ -1,11 +1,11 @@
-import type { TimestampFormat } from "@t3tools/contracts/settings";
+import type { TimestampFormat } from "@cogenly/contracts/settings";
 import {
   resolveSnoozePresets as resolveSharedSnoozePresets,
   snoozeWakeLabel,
   type SnoozePreset,
-} from "@t3tools/client-runtime/state/thread-settled";
+} from "@cogenly/client-runtime/state/thread-settled";
 
-import { localTimeZone, parseSnoozePhrase } from "@t3tools/shared/snooze";
+import { localTimeZone, parseSnoozePhrase } from "@cogenly/shared/snooze";
 
 import { formatShortTimestamp, parseTimestampDate } from "../timestampFormat";
 

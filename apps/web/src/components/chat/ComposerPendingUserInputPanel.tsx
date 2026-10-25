@@ -1,4 +1,4 @@
-import { type RuntimeRequestId, type ScopedThreadRef } from "@t3tools/contracts";
+import { type RuntimeRequestId, type ScopedThreadRef } from "@cogenly/contracts";
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { type PendingUserInput } from "../../session-logic";
 import {

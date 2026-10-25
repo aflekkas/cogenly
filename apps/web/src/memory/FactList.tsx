@@ -1,3 +1,4 @@
+import { SettingsList, SettingsListItem } from "../components/settings/SettingsList";
 import { OverlayPresence } from "~/components/ui/overlay-presence";
 import type {
   EnvironmentId,
@@ -6,7 +7,7 @@ import type {
   ProjectLabelId,
   ProjectLabelWithRepositories,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import {
   ArrowUpRightIcon,
   CheckIcon,
@@ -63,11 +64,11 @@ export interface FactListContext {
 export function FactList(props: FactListContext & { readonly facts: ReadonlyArray<Fact> }) {
   const { facts, ...context } = props;
   return (
-    <ul className="divide-y divide-border/60">
+    <SettingsList>
       {facts.map((fact) => (
         <FactRow key={fact.id} fact={fact} context={context} />
       ))}
-    </ul>
+    </SettingsList>
   );
 }
 
@@ -129,16 +130,14 @@ function FactRow({ fact, context }: { fact: Fact; context: FactListContext }) {
     });
   const refs = resolveFactRefs(fact.sourceRefs);
   return (
-    <li className="flex flex-col gap-1.5 px-3 py-3 sm:px-4">
-      <div className="flex items-start gap-2">
-        <div className="min-w-0 flex-1">
-          <p className="text-sm text-foreground">{fact.subject}</p>
-          {fact.text.trim() !== fact.subject.trim() ? (
-            <p className="line-clamp-4 text-xs whitespace-pre-wrap text-muted-foreground">
-              {fact.text}
-            </p>
-          ) : null}
-        </div>
+    <SettingsListItem
+      title={fact.subject}
+      description={
+        fact.text.trim() !== fact.subject.trim() ? (
+          <span className="line-clamp-4 whitespace-pre-wrap">{fact.text}</span>
+        ) : undefined
+      }
+      control={
         <div className="flex shrink-0 items-center gap-0.5">
           {fact.status === "proposed" ? (
             <>
@@ -213,8 +212,9 @@ function FactRow({ fact, context }: { fact: Fact; context: FactListContext }) {
             <HistoryIcon />
           </Button>
         </div>
-      </div>
-      <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-muted-foreground">
+      }
+    >
+      <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 py-2 text-xs text-muted-foreground">
         {fact.status !== "confirmed" ? (
           <Badge size="sm" variant={fact.status === "proposed" ? "warning" : "outline"}>
             {FACT_STATUS_LABEL[fact.status]}
@@ -245,6 +245,7 @@ function FactRow({ fact, context }: { fact: Fact; context: FactListContext }) {
           <FactEditorDialog
             title="Correct this fact"
             description="Saving keeps the old wording in history and uses the correction from now on."
+            environmentId={context.environmentId}
             labels={context.labels}
             initial={fact}
             saveLabel="Save correction"
@@ -256,7 +257,7 @@ function FactRow({ fact, context }: { fact: Fact; context: FactListContext }) {
           />
         )}
       </OverlayPresence>
-    </li>
+    </SettingsListItem>
   );
 }
 
@@ -302,6 +303,7 @@ export interface FactDraft {
 export function FactEditorDialog(props: {
   title: string;
   description: string;
+  environmentId: EnvironmentId;
   labels: ReadonlyArray<ProjectLabelWithRepositories>;
   initial: FactDraft | null;
   saveLabel: string;
@@ -371,6 +373,7 @@ export function FactEditorDialog(props: {
                 <div className="flex flex-wrap items-center gap-1.5">
                   <ProjectLabelChips labels={props.labels} ids={labelIds} />
                   <ProjectLabelPicker
+                    environmentId={props.environmentId}
                     labels={props.labels}
                     selectedIds={labelIds}
                     onToggle={(id, selected) =>

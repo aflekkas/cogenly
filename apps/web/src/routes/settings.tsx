@@ -18,56 +18,41 @@ import {
   SettingsScopeProvider,
   useSettingsScope,
 } from "../components/settings/SettingsScopeContext";
-import { SettingsScopeNotice } from "../components/settings/SettingsScopeNotice";
-import { SETTINGS_DEVICE_ONLY_PATHS } from "../components/settings/SettingsScopeSentence";
+import { SETTINGS_SCOPELESS_PATHS } from "../components/settings/SettingsScopeSentence";
 import { SettingsPageContainer, SettingsPageMessage } from "../components/settings/settingsLayout";
 import {
   retainSettingsScope,
   validateSettingsRouteSearch,
 } from "../components/settings/settingsScopeNavigation";
-import {
-  getSettingsSearchTargetScope,
-  isSettingsSearchScopeAvailable,
-} from "../components/settings/settingsSearch";
 
+/**
+ * Pages about one machine's own state, which are mostly machine-local
+ * settings: the scope picks one machine and no project.
+ */
+const MACHINE_SETTINGS_PATHS: ReadonlySet<string> = new Set([
+  "/settings/providers",
+  "/settings/machines",
+  "/settings/diagnostics",
+  "/settings/storage",
+]);
+
+/**
+ * Search results and deep links (the hash) never gate the page: every row
+ * renders at the selected scope, and one that can't vary there marks itself.
+ */
 function SettingsScopeBoundary({ pathname, children }: { pathname: string; children: ReactNode }) {
   const { scope, connectedEnvironments } = useSettingsScope();
-  const hash = useLocation({ select: (location) => location.hash });
-  const searchTarget = getSettingsSearchTargetScope(hash);
-  if (
-    scope.kind !== "unavailable" &&
-    searchTarget &&
-    !isSettingsSearchScopeAvailable(searchTarget.scope, scope.kind)
-  ) {
-    const target =
-      searchTarget.scope === "environment" ||
-      searchTarget.scope === "project" ||
-      searchTarget.scope === "checkout"
-        ? searchTarget.scope
-        : "all";
-    return (
-      <SettingsScopeNotice target={target} targetId={hash}>
-        {`${searchTarget.title} is not available for the selected target. Choose its owning scope to continue.`}
-      </SettingsScopeNotice>
-    );
-  }
-  // Device-local pages ignore the scope entirely; the project page follows
-  // remembered members while a grouping change replaces its URL key.
-  if (SETTINGS_DEVICE_ONLY_PATHS.has(pathname) || pathname === "/settings/projects") {
+  // Unscoped pages handle their own targets; the Repository page follows
+  // its own `repository` key.
+  if (SETTINGS_SCOPELESS_PATHS.has(pathname) || pathname === "/settings/projects") {
     return children;
   }
   // Keep the scope sentence on screen so the selection can be changed back.
   if (scope.kind === "unavailable")
-    return (
-      <SettingsPageContainer>
-        <SettingsPageMessage>{scope.message}</SettingsPageMessage>
-      </SettingsPageContainer>
-    );
+    return <SettingsPageMessage>{scope.message}</SettingsPageMessage>;
   if (scope.kind === "environment" && connectedEnvironments.length === 0) {
     return (
-      <SettingsPageContainer>
-        <SettingsPageMessage>Reconnect {scope.label} to change its settings.</SettingsPageMessage>
-      </SettingsPageContainer>
+      <SettingsPageMessage>Reconnect {scope.label} to change its settings.</SettingsPageMessage>
     );
   }
   return children;
@@ -78,10 +63,9 @@ function SettingsContentLayout() {
   const navigateToMainApp = useNavigateToMainApp();
   useEscapeToGoBack(navigateToMainApp);
   const { search, environment } = useSettingsScope();
-  const contentScopeKey =
-    location.pathname === "/settings/diagnostics" || location.pathname === "/settings/providers"
-      ? environment?.environmentId
-      : JSON.stringify(search);
+  const contentScopeKey = MACHINE_SETTINGS_PATHS.has(location.pathname)
+    ? environment?.environmentId
+    : JSON.stringify(search);
   // The section's route, which changes only once its (lazily loaded) page
   // commits; until then the old page stays on screen. Hash and search changes
   // within a section keep it. Its commit is the new frame of the crossfade
@@ -101,9 +85,13 @@ function SettingsContentLayout() {
         </WorkspacePageHeader>
 
         <div key={contentScopeKey} className="min-h-0 flex flex-1 flex-col">
-          <SettingsScopeBoundary pathname={location.pathname}>
-            <Outlet />
-          </SettingsScopeBoundary>
+          {/* Every page shares this frame and its width; a new section starts
+              its own scroller at the top. */}
+          <SettingsPageContainer key={sectionRouteId}>
+            <SettingsScopeBoundary pathname={location.pathname}>
+              <Outlet />
+            </SettingsScopeBoundary>
+          </SettingsPageContainer>
         </div>
       </div>
     </SidebarInset>
@@ -117,15 +105,16 @@ function SettingsRouteLayout() {
   return (
     <SettingsScopeProvider
       search={rawSearch}
-      singleEnvironment={pathname === "/settings/providers"}
+      machinePage={MACHINE_SETTINGS_PATHS.has(pathname)}
       onChange={(next) => {
-        // Send every axis so the retain middleware sees an explicit target
+        // Send every key so the retain middleware sees an explicit target
         // even when the choice is "all", which is the absence of a key.
         void navigate({
           to: pathname,
           search: () => ({
             project: next.project,
             machine: next.machine,
+            repository: next.repository,
             checkout: next.checkout,
           }),
           hash: "",

@@ -6,7 +6,7 @@ import type {
   DesktopPreviewRecordingFrame,
   DesktopPreviewSitePermissionPromptEvent,
   DesktopPreviewTabState,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { exposeClerkBridge } from "@clerk/electron/preload";
 import { contextBridge, ipcRenderer, webFrame, webUtils } from "electron";
 
@@ -147,8 +147,6 @@ const desktopBridge = {
   getServerExposureState: () => ipcRenderer.invoke(IpcChannels.GET_SERVER_EXPOSURE_STATE_CHANNEL),
   setServerExposureMode: (mode) =>
     ipcRenderer.invoke(IpcChannels.SET_SERVER_EXPOSURE_MODE_CHANNEL, mode),
-  setTailscaleServeEnabled: (input) =>
-    ipcRenderer.invoke(IpcChannels.SET_TAILSCALE_SERVE_ENABLED_CHANNEL, input),
   getAdvertisedEndpoints: () => ipcRenderer.invoke(IpcChannels.GET_ADVERTISED_ENDPOINTS_CHANNEL),
   getWslState: () => ipcRenderer.invoke(IpcChannels.GET_WSL_STATE_CHANNEL),
   setWslBackendEnabled: (enabled) =>
@@ -175,6 +173,7 @@ const desktopBridge = {
   openSystemSettings: (pane: string) =>
     ipcRenderer.invoke(IpcChannels.OPEN_SYSTEM_SETTINGS_CHANNEL, pane),
   pasteAsText: () => ipcRenderer.invoke(IpcChannels.PASTE_AS_TEXT_CHANNEL, undefined),
+  relaunchApp: () => ipcRenderer.invoke(IpcChannels.RELAUNCH_APP_CHANNEL, undefined),
   ...(clientPlatform === "darwin"
     ? {
         dictation: {
@@ -259,7 +258,7 @@ const desktopBridge = {
   installUpdate: () => ipcRenderer.invoke(IpcChannels.UPDATE_INSTALL_CHANNEL),
   cliCommand: {
     getState: () => ipcRenderer.invoke(IpcChannels.CLI_COMMAND_GET_STATE_CHANNEL),
-    install: () => ipcRenderer.invoke(IpcChannels.CLI_COMMAND_INSTALL_CHANNEL),
+    install: (input) => ipcRenderer.invoke(IpcChannels.CLI_COMMAND_INSTALL_CHANNEL, input ?? {}),
     uninstall: () => ipcRenderer.invoke(IpcChannels.CLI_COMMAND_UNINSTALL_CHANNEL),
   },
   onUpdateState: (listener) => {

@@ -1,28 +1,40 @@
 import {
+  ChatSandboxSetupResult,
   BackgroundActivityProfile,
   BackgroundActivityProfileSelection,
+  DesktopCliCommandLocation,
+  DesktopCliCommandStateSchema,
   ExecutionEnvironmentDescriptor,
   OrchestratorMcpFailure,
   ServerSettings,
   ServerSettingsPatch,
-} from "@t3tools/contracts";
+  StorageStatus,
+  StorageCleanupReport,
+  UniversalClientPreferenceValues,
+  UniversalClientPreferencePatch,
+} from "@cogenly/contracts";
 import * as Schema from "effect/Schema";
 import { Tool, Toolkit } from "effect/ai";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
-import { MachineSecurityStatus } from "@t3tools/contracts";
+import { EnvironmentId, MachineHealthReport, MachineSecurityStatus } from "@cogenly/contracts";
 import * as DesktopAppControl from "../../../environment/DesktopAppControl.ts";
 import * as ServerEnvironment from "../../../environment/ServerEnvironment.ts";
+import * as MachineHealth from "../../../health/MachineHealth.ts";
 import * as MachineSecurity from "../../../security/MachineSecurity.ts";
 import * as ThreadCommandExecutor from "../../../orchestration-v2/ThreadCommandExecutor.ts";
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as Settings from "../../../serverSettings.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
+import * as StorageCleanup from "../../../storageCleanup.ts";
 
 const PreferenceFields = {
+  ...UniversalClientPreferenceValues.fields,
+  sharedKeybindings: ServerSettings.fields.sharedKeybindings,
   defaultThreadEnvMode: ServerSettings.fields.defaultThreadEnvMode,
   newWorktreesStartFromOrigin: ServerSettings.fields.newWorktreesStartFromOrigin,
   enableAgentTerminals: ServerSettings.fields.enableAgentTerminals,
   enableProviderUpdateChecks: ServerSettings.fields.enableProviderUpdateChecks,
+  useProviderConnectors: ServerSettings.fields.useProviderConnectors,
   projectsRoot: ServerSettings.fields.projectsRoot,
   modelEffortDefaults: ServerSettings.fields.modelEffortDefaults,
   backgroundActivity: Schema.Struct({ profile: BackgroundActivityProfileSelection }),
@@ -47,7 +59,7 @@ const shared = {
 const EnvironmentReadTool = Tool.make("environment_read", {
   ...shared,
   description:
-    "Read this server's identity and selected environment preferences, including the projects root. Provider/model availability is exposed by orchestrator_capabilities. Writing instructions are limited to 4,000 characters.",
+    "Read this server's identity and selected preferences. The projects root, provider update checks and background activity belong to this machine; the rest are universal across paired machines. Provider/model availability is exposed by orchestrator_capabilities. Writing instructions are limited to 4,000 characters.",
   success: Schema.Struct({
     environmentId: ExecutionEnvironmentDescriptor.fields.environmentId,
     label: Schema.String,
@@ -61,15 +73,19 @@ const EnvironmentReadTool = Tool.make("environment_read", {
 const EnvironmentPreferencesTool = Tool.make("environment_preferences_update", {
   ...shared,
   description:
-    "Update selected environment-wide preferences through normal settings persistence and notifications. Requires a live full-access/default calling thread. Omitted fields are preserved; empty customInstructions clears them. setModelEffortDefault sets the reasoning effort a model starts at ({ provider: instance id, model: slug, option: { id: the model's effort option id from orchestrator_capabilities, e.g. reasoningEffort or effort, value } }); option null restores the model's own default.",
+    "Update selected preferences through normal settings persistence and notifications. Requires a live full-access/default calling thread. defaultThreadEnvMode, setModelEffortDefault, newWorktreesStartFromOrigin, enableAgentTerminals, sourceControlWritingStyle and useProviderConnectors are universal: they reach every paired machine. The client-prefixed appearance, notifications, confirmation, composer, sidebar and diff preferences, and sharedKeybindings, are universal too. sharedKeybindings is the complete ordered list of { key, command, when? } rules; use mod for the platform modifier. enableProviderUpdateChecks, backgroundActivity and projectsRoot apply to this machine only. Omitted fields are preserved; empty customInstructions clears them. setModelEffortDefault sets the reasoning effort a model starts at ({ provider: instance id, model: slug, option: { id: the model's effort option id from orchestrator_capabilities, e.g. reasoningEffort or effort, value } }); option null restores the model's own default. projectsRoot sets where new project folders and their repositories go on this machine; empty restores the default, <Cogenly home>/projects. Existing project folders are not moved. useProviderConnectors (off by default) restores provider-native MCP servers, connectors, plugins and apps; servers checked into a repo load either way. It applies to new agent sessions.",
   parameters: Schema.Struct({
+    ...UniversalClientPreferencePatch.fields,
+    sharedKeybindings: ServerSettingsPatch.fields.sharedKeybindings,
     defaultThreadEnvMode: ServerSettingsPatch.fields.defaultThreadEnvMode,
     setModelEffortDefault: ServerSettingsPatch.fields.setModelEffortDefault,
     newWorktreesStartFromOrigin: ServerSettingsPatch.fields.newWorktreesStartFromOrigin,
     enableAgentTerminals: ServerSettingsPatch.fields.enableAgentTerminals,
     enableProviderUpdateChecks: ServerSettingsPatch.fields.enableProviderUpdateChecks,
+    useProviderConnectors: ServerSettingsPatch.fields.useProviderConnectors,
     backgroundActivity: Schema.optionalKey(Schema.Struct({ profile: BackgroundActivityProfile })),
     sourceControlWritingStyle: ServerSettingsPatch.fields.sourceControlWritingStyle,
+    projectsRoot: ServerSettingsPatch.fields.projectsRoot,
   }),
   success: Schema.Struct(PreferenceFields),
 }).annotate(Tool.Destructive, true);
@@ -96,6 +112,29 @@ const EnvironmentAddTool = Tool.make("environment_add", {
 })
   .annotate(Tool.Readonly, false)
   .annotate(Tool.Destructive, false);
+const desktopCliCommandShared = {
+  ...shared,
+  dependencies: [...shared.dependencies, DesktopAppControl.DesktopAppControl],
+  success: DesktopCliCommandStateSchema,
+};
+const CliCommandStatusTool = Tool.make("cli_command_status", {
+  ...desktopCliCommandShared,
+  description:
+    "Read whether the Cogenly desktop app's `cogenly` command line tool is on PATH on this computer: installed (where, and which app it runs), stale (its app moved or was removed), foreign (a `cogenly` Cogenly did not write is in the way), or not installed, plus whether ~/.local/bin is on the login shell's PATH. Only works from an environment on the same computer as the desktop app.",
+})
+  .annotate(Tool.Readonly, true)
+  .annotate(Tool.Destructive, false);
+const CliCommandChangeTool = Tool.make("cli_command_change", {
+  ...desktopCliCommandShared,
+  description:
+    "Install or uninstall the Cogenly desktop app's `cogenly` command line tool, as Settings does. Install writes a small launcher to ~/.local/bin (location `user`), or on macOS to /usr/local/bin (location `system`), which shows the user macOS's administrator prompt; omit location to use the state's recommendedLocation. Install updates a stale launcher. Never overwrites or removes a `cogenly` Cogenly did not write. Uninstall removes every launcher Cogenly wrote. Requires a live full-access/default calling thread; tell the user before a `system` change, since it asks for their password.",
+  parameters: Schema.Struct({
+    action: Schema.Literals(["install", "uninstall"]),
+    location: Schema.optionalKey(DesktopCliCommandLocation),
+  }),
+})
+  .annotate(Tool.Readonly, false)
+  .annotate(Tool.Destructive, false);
 const MachineSecurityStatusTool = Tool.make("machine_security_status", {
   ...shared,
   dependencies: [
@@ -109,9 +148,59 @@ const MachineSecurityStatusTool = Tool.make("machine_security_status", {
 })
   .annotate(Tool.Readonly, true)
   .annotate(Tool.Destructive, false);
+const MachineHealthTool = Tool.make("machine_health", {
+  ...shared,
+  dependencies: [...shared.dependencies, MachineHealth.MachineHealth],
+  description:
+    "Health of a Cogenly machine: server, database, disk, provider sign-ins, links to paired machines, sync, integrations, scheduled tasks, stuck runs, boot service, Tailscale Serve and the canary. Each check has a status (ok, warn, fail, unknown when it could not run), a summary and the items worth attention, with a suggested fix where there is one. For setup-sandbox, call machine_health_fix on the affected machine. Omit environmentId for this machine; give a paired machine's (from machines_list) to read its report over the peer link. reachable false means that machine did not answer and the report describes what this one saw.",
+  parameters: Schema.Struct({
+    environmentId: Schema.optionalKey(
+      EnvironmentId.annotate({
+        description: "A paired machine's environment ID from machines_list. Omit for this machine.",
+      }),
+    ),
+  }),
+  success: MachineHealthReport,
+})
+  .annotate(Tool.Readonly, true)
+  .annotate(Tool.Destructive, false);
+const MachineHealthFixTool = Tool.make("machine_health_fix", {
+  ...shared,
+  dependencies: [...shared.dependencies, MachineHealth.MachineHealth],
+  description:
+    "Fix this machine's chat-terminal-sandbox health finding. Installs the distro bubblewrap package on Linux using root or passwordless sudo, then re-probes and enables chat commands without restarting. Returns the exact command when sudo needs a password, or when installation fails. Never asks for a sudo password. Run machine_health afterwards to see current health.",
+  parameters: Tool.EmptyParams,
+  success: ChatSandboxSetupResult,
+})
+  .annotate(Tool.Readonly, false)
+  .annotate(Tool.Destructive, false);
+const StorageStatusTool = Tool.make("storage_status", {
+  ...shared,
+  dependencies: [...shared.dependencies, StorageCleanup.StorageCleanup],
+  description:
+    "Read actual volume usage and available space, database file size, and file counts for agent and user worktrees, dependencies, dev data, browser artifacts, logs and backups. On APFS or reflink filesystems, per-category bytes are null because directory sizes overcount shared blocks. Does not follow symlinks.",
+  success: StorageStatus,
+})
+  .annotate(Tool.Readonly, true)
+  .annotate(Tool.Destructive, false);
+const StorageCleanupTool = Tool.make("storage_cleanup", {
+  ...shared,
+  dependencies: [...shared.dependencies, StorageCleanup.StorageCleanup],
+  description:
+    "Preview or run this environment's configured storage cleanup. dryRun defaults to true and changes nothing; pass false to remove only eligible, safely preserved worktrees and expired artifacts/logs. Branches and checkpoints are kept. Kept entries explain blockers such as unsaved changes or running processes. Preview is advisory: execution rechecks safety.",
+  parameters: Schema.Struct({ dryRun: Schema.optionalKey(Schema.Boolean) }),
+  success: StorageCleanupReport,
+}).annotate(Tool.Destructive, true);
+
 export const EnvironmentToolkit = Toolkit.make(
+  StorageStatusTool,
+  StorageCleanupTool,
   EnvironmentReadTool,
   EnvironmentPreferencesTool,
   EnvironmentAddTool,
+  CliCommandStatusTool,
+  CliCommandChangeTool,
   MachineSecurityStatusTool,
+  MachineHealthTool,
+  MachineHealthFixTool,
 );

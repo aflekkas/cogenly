@@ -1,6 +1,7 @@
+import { museNativeMcpNotice } from "./nativeMcpPolicy.ts";
 import { parseMuseUsageLimits } from "./usageLimits.ts";
-import type { ServerProviderUsageLimits } from "@t3tools/contracts";
-import { COGENLY_ORCHESTRATION_INSTRUCTIONS as COGENLY_ORCHESTRATION_INSTRUCTIONS } from "@t3tools/provider-core/server/orchestrationInstructions";
+import type { ServerProviderUsageLimits } from "@cogenly/contracts";
+import { COGENLY_ORCHESTRATION_INSTRUCTIONS as COGENLY_ORCHESTRATION_INSTRUCTIONS } from "@cogenly/provider-core/server/orchestrationInstructions";
 import { MspError, type SendUserTurnOptions } from "@muse-code/sdk";
 import {
   MUSE_DEFAULT_MODEL,
@@ -25,10 +26,10 @@ import {
   type RuntimeRequestId,
   type ServerProviderModel,
   type ThreadId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import type { MuseSettings } from "../settings.ts";
-import { AgentScope } from "@t3tools/shared/AgentScope";
-import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
+import { AgentScope } from "@cogenly/shared/AgentScope";
+import { getModelSelectionStringOptionValue } from "@cogenly/shared/model";
 import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
@@ -41,13 +42,13 @@ import * as Semaphore from "effect/Semaphore";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
-import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
-import * as McpProviderSession from "@t3tools/provider-core/server/mcpSession";
-import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
+import * as ProviderHost from "@cogenly/provider-core/server/ProviderHost";
+import * as McpProviderSession from "@cogenly/provider-core/server/mcpSession";
+import * as McpProviderSessions from "@cogenly/provider-core/server/McpProviderSessions";
 import {
-  CONVERSATION_MODE_INSTRUCTIONS,
   buildRuntimeInstructions,
-} from "@t3tools/provider-core/server/runtimeInstructions";
+  conversationModeInstructions,
+} from "@cogenly/provider-core/server/runtimeInstructions";
 import { museModelCapabilities, resolveMuseReasoningEffort } from "./modelCatalog.ts";
 import {
   MuseApproval,
@@ -76,25 +77,25 @@ import {
   type createMuseSdkHost,
   type MuseSdkHost,
 } from "./sdk.ts";
-import type * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
+import type * as ProviderEventLoggers from "@cogenly/provider-core/server/ProviderEventLoggers";
 import {
   providerMessageTextWithAttachmentPaths,
   isProviderNativeImageAttachment,
-} from "@t3tools/provider-core/server/attachmentPrompt";
-import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
-import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
+} from "@cogenly/provider-core/server/attachmentPrompt";
+import * as IdAllocator from "@cogenly/provider-core/server/IdAllocator";
+import * as ProviderAdapter from "@cogenly/provider-core/server/ProviderAdapter";
 import {
   backgroundWorkNotification,
   type BackgroundWorkReport,
-} from "@t3tools/provider-core/server/notification";
-import type * as ProviderContinuationRequests from "@t3tools/provider-core/server/ProviderContinuationRequests";
-import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
+} from "@cogenly/provider-core/server/notification";
+import type * as ProviderContinuationRequests from "@cogenly/provider-core/server/ProviderContinuationRequests";
+import { makeProviderFailure } from "@cogenly/provider-core/server/failure";
 import {
   makeSubagentChildThread,
   makeSubagentConversationArtifacts,
   subagentThreadTitle,
-} from "@t3tools/provider-core/server/subagentProjection";
-import { turnScopedSelectionTransition } from "@t3tools/provider-core/server/selectionTransition";
+} from "@cogenly/provider-core/server/subagentProjection";
+import { turnScopedSelectionTransition } from "@cogenly/provider-core/server/selectionTransition";
 import { museItemStatus, museToolPresentation } from "./itemPresentation.ts";
 
 const MUSE_PROVIDER = ProviderDriverKind.make("muse");
@@ -1704,9 +1705,9 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
               cwd,
               environment,
               runtimeMode: input.runtimePolicy.runtimeMode,
-              // Chat-surface threads run on a read-only host: no shell, no
-              // filesystem writes, no workspace trust. They still attach the
-              // Cogenly MCP server, so sessionMcp stays requested.
+              // Chat-surface threads run on a read-only host: no native shell,
+              // no filesystem writes, no workspace trust. They still attach the
+              // Cogenly MCP server, whose terminal tools run their lookups.
               readOnly: input.runtimePolicy.conversationMode === true,
               sessionMcp: true,
               disableShell: McpProviderSession.terminalToolsAvailable(mcpSession),
@@ -2070,6 +2071,11 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
                 `Muse returned an unsupported compaction status: ${result.status}`,
               );
           } else {
+            const turnMcp = yield* mcpSessions.read(turnInput.threadId);
+            const terminalTools = McpProviderSession.terminalToolsAuthorized({
+              ...turnInput.runtimePolicy,
+              enabled: McpProviderSession.terminalToolsAvailable(turnMcp),
+            });
             const result = yield* request(
               "turn/start",
               {
@@ -2082,29 +2088,23 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
                         model: session.model ?? undefined,
                         reasoningEffort: effort,
                       }) +
-                      // Chat-surface turns have no shell or writes (read-only
-                      // host), so they answer directly and hand code changes
-                      // to a Work session via Start Work.
+                      // Chat-surface turns have no native shell or writes
+                      // (read-only host): they look things up through the
+                      // Cogenly terminal and hand changes to a Work task.
                       (turnInput.runtimePolicy.conversationMode === true
-                        ? `\n${CONVERSATION_MODE_INSTRUCTIONS}`
+                        ? `\n${conversationModeInstructions({ terminal: terminalTools, builder: turnInput.runtimePolicy.builderMode })}`
                         : "") +
+                      (museNativeMcpNotice(turnInput.runtimePolicy.useProviderConnectors) ?? "") +
                       (turnInput.runtimePolicy.projectManifest === undefined
                         ? ""
                         : `\n${turnInput.runtimePolicy.projectManifest}`) +
-                      (yield* mcpSessions
-                        .read(turnInput.threadId)
-                        .pipe(
-                          Effect.map((mcp) =>
-                            mcp
-                              ? "\n" +
-                                COGENLY_ORCHESTRATION_INSTRUCTIONS +
-                                (!McpProviderSession.terminalToolsAvailable(mcp) ||
-                                turnInput.runtimePolicy.conversationMode === true
-                                  ? ""
-                                  : "\nUse the cogenly MCP terminal_run tool for every shell command. Native shell is disabled. Use background=true for servers, terminal_read for output, terminal_write for stdin, and terminal_kill to stop. A command that may take more than about a minute, or may prompt (logins, cloud CLIs, installs, builds, test suites), runs with background=true and is polled with terminal_read, so the user's messages aren't blocked while it runs. Terminals and their children stop when this thread settles.")
-                              : "",
-                          ),
-                        )),
+                      (turnMcp
+                        ? "\n" +
+                          COGENLY_ORCHESTRATION_INSTRUCTIONS +
+                          (!terminalTools
+                            ? ""
+                            : "\nUse the cogenly MCP terminal_run tool for every shell command. Native shell is disabled. Use background=true for servers, terminal_read for output, terminal_write for stdin, and terminal_kill to stop. A command that may take more than about a minute, or may prompt (logins, cloud CLIs, installs, builds, test suites), runs with background=true and is polled with terminal_read, so the user's messages aren't blocked while it runs. Terminals and their children stop when this thread settles.")
+                        : ""),
                   },
                   ...parts,
                 ],

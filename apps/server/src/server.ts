@@ -1,10 +1,13 @@
-import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
-import type { RelayManagedEndpointRuntimeConfig } from "@t3tools/contracts/relay";
+import * as RepoMcpTrust from "./integrations/RepoMcpTrust.ts";
+import * as ReadOnlySandbox from "./terminal/ReadOnlySandbox.ts";
+import * as ProviderEventLoggers from "@cogenly/provider-core/server/ProviderEventLoggers";
+import type { RelayManagedEndpointRuntimeConfig } from "@cogenly/contracts/relay";
 import * as Clock from "effect/Clock";
 import * as Random from "effect/Random";
 import * as Semaphore from "effect/Semaphore";
 import * as DatabaseStorage from "./persistence/DatabaseStorage.ts";
 import * as StorageCleanup from "./storageCleanup.ts";
+import * as StorageInspection from "./housekeeping/StorageInspection.ts";
 import * as ServerBackup from "./housekeeping/ServerBackup.ts";
 import * as ServerHousekeeping from "./housekeeping/ServerHousekeeping.ts";
 import * as PullRequestSyncReactor from "./orchestration-v2/PullRequestSyncReactor.ts";
@@ -16,7 +19,7 @@ import * as NodeHttp from "node:http";
 
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { EnvironmentHttpApi, type RepositoryIdentity } from "@t3tools/contracts";
+import { EnvironmentHttpApi, type RepositoryIdentity } from "@cogenly/contracts";
 import * as Cause from "effect/Cause";
 import * as Duration from "effect/Duration";
 import * as Deferred from "effect/Deferred";
@@ -40,6 +43,13 @@ import * as HubLink from "./machines/HubLink.ts";
 import * as MachineIdentity from "./machines/MachineIdentity.ts";
 import * as Machines from "./machines/Machines.ts";
 import * as MachineSecurity from "./security/MachineSecurity.ts";
+import * as MachineHealth from "./health/MachineHealth.ts";
+import * as HealthCanary from "./health/HealthCanary.ts";
+import * as HealthAlerts from "./health/HealthAlerts.ts";
+import * as HealthAlertsState from "./health/HealthAlertsState.ts";
+import * as MachineSetup from "./tailscale/MachineSetup.ts";
+import * as TailscaleHost from "./tailscale/TailscaleHost.ts";
+import * as TailscaleServeMode from "./tailscale/TailscaleServeMode.ts";
 import * as PeerChannels from "./machines/PeerChannels.ts";
 import * as PeerHttp from "./machines/peerHttp.ts";
 import * as PeerHub from "./machines/PeerHub.ts";
@@ -61,8 +71,8 @@ import * as ProviderEventIngestor from "./orchestration-v2/ProviderEventIngestor
 import * as ModelManifest from "./provider/ModelManifest.ts";
 import * as ResetCreditCoordinator from "./provider/resetCreditCoordinator.ts";
 import * as EventNdjsonLogger from "./provider/EventNdjsonLogger.ts";
-import * as ProviderLatestVersions from "@t3tools/provider-core/server/ProviderLatestVersions";
-import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
+import * as ProviderLatestVersions from "@cogenly/provider-core/server/ProviderLatestVersions";
+import * as McpProviderSessions from "@cogenly/provider-core/server/McpProviderSessions";
 import * as ProviderHostLive from "./provider/ProviderHostLive.ts";
 import * as CheckpointDiffQuery from "./checkpointing/CheckpointDiffQuery.ts";
 import * as CheckpointStore from "./checkpointing/CheckpointStore.ts";
@@ -75,6 +85,8 @@ import * as McpHttpServer from "./mcp/McpHttpServer.ts";
 import * as McpSessionRegistry from "./mcp/McpSessionRegistry.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as DeviceService from "./device/DeviceService.ts";
+import * as ComputerHost from "./computerUse/ComputerHost.ts";
+import * as ComputerUseService from "./computerUse/ComputerUseService.ts";
 import * as DeviceHubProxy from "./device/DeviceHubProxy.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import * as PortScanner from "./preview/PortScanner.ts";
@@ -97,7 +109,6 @@ import * as ProviderInstanceRegistry from "./provider/ProviderInstanceRegistry.t
 import * as ProviderAdapterRegistry from "./orchestration-v2/ProviderAdapterRegistry.ts";
 import * as ProviderRegistry from "./provider/ProviderRegistry.ts";
 import * as ProviderUsageLimitsIngestion from "./provider/ProviderUsageLimitsIngestion.ts";
-import * as UsageLimitSources from "./usage/UsageLimitSources.ts";
 import * as ProjectFaviconResolver from "./project/ProjectFaviconResolver.ts";
 import * as ProjectConfigFileLoader from "./project/ProjectConfigFileLoader.ts";
 import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolver.ts";
@@ -115,7 +126,7 @@ import * as GitWorkflowService from "./git/GitWorkflowService.ts";
 import * as ReviewService from "./review/ReviewService.ts";
 import * as SourceControlProviderRegistry from "./sourceControl/SourceControlProviderRegistry.ts";
 import * as PullRequestReadCache from "./pullRequest/PullRequestReadCache.ts";
-import * as SourceControlRateLimit from "@t3tools/source-control-core/server/SourceControlRateLimit";
+import * as SourceControlRateLimit from "@cogenly/source-control-core/server/SourceControlRateLimit";
 import * as SourceControlRepositoryService from "./sourceControl/SourceControlRepositoryService.ts";
 import * as WorktreeSetupTracker from "./project/WorktreeSetupTracker.ts";
 import * as Observability from "./observability/Observability.ts";
@@ -173,7 +184,23 @@ import * as UsageService from "./usage/UsageService.ts";
 import * as ChatGreetingService from "./greeting/ChatGreetingService.ts";
 import * as Scheduler from "./scheduling/Scheduler.ts";
 import * as SharedState from "./sync/SharedState.ts";
+import * as IntegrationSync from "./sync/IntegrationSync.ts";
+import * as SettingsSync from "./sync/SettingsSync.ts";
 import * as SharedSync from "./sync/SharedSync.ts";
+import * as SharedSyncStatus from "./sync/SharedSyncStatus.ts";
+import * as VaultSync from "./vault/VaultSync.ts";
+import * as IntegrationSyncBinding from "./integrations/IntegrationSyncBinding.ts";
+import * as ThreadReplication from "./threadSync/ThreadReplication.ts";
+import * as ThreadRouting from "./threadSync/ThreadRouting.ts";
+import * as ThreadTransfer from "./threadSync/ThreadTransfer.ts";
+import * as ThreadFork from "./threadSync/ThreadFork.ts";
+import * as ProjectMove from "./threadSync/ProjectMove.ts";
+import * as RemoteThreadCommands from "./orchestration-v2/RemoteThreadCommands.ts";
+import * as RemoteThreadLaunch from "./orchestration-v2/RemoteThreadLaunch.ts";
+import * as ThreadLaunchRouting from "./threadSync/ThreadLaunchRouting.ts";
+import * as MachinesTurnContext from "./orchestration-v2/MachinesTurnContext.ts";
+import * as MachinesTurnContextLive from "./machines/machinesTurnContext.ts";
+import * as ThreadSync from "./threadSync/ThreadSync.ts";
 import * as RuntimeLayer from "./orchestration-v2/runtimeLayer.ts";
 import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
 import * as ProjectLabelFolders from "./projectLabels/ProjectLabelFolders.ts";
@@ -188,9 +215,9 @@ import * as ProjectionStoreV2 from "./orchestration-v2/ProjectionStore.ts";
 import { makePersistedServerRuntimeState } from "./serverRuntimeState.ts";
 import * as OrchestrationHttp from "./orchestration-v2/http.ts";
 import * as ProjectHttp from "./project/http.ts";
-import * as NetService from "@t3tools/shared/Net";
-import * as RelayClient from "@t3tools/shared/relayClient";
-import { disableTailscaleServe, ensureTailscaleServe } from "@t3tools/tailscale";
+import * as NetService from "@cogenly/shared/Net";
+import * as RelayClient from "@cogenly/shared/relayClient";
+import { disableTailscaleServe } from "@cogenly/tailscale";
 import * as ServerActivation from "./serverActivation.ts";
 
 // MCP handoff thread IDs include escaped provenance and can exceed find-my-way's
@@ -320,6 +347,12 @@ const layerSourceControlProviderRegistry = SourceControlProviderRegistry.layer.p
   Layer.provideMerge(layerVcsDriverRegistry),
 );
 
+const layerRepoMcpTrust = RepoMcpTrust.layer.pipe(
+  Layer.provide(ProcessRunner.layer),
+  Layer.provide(layerPersistence),
+  Layer.provide(layerSourceControlProviderRegistry),
+);
+
 const layerRepositoryIdentityResolver = Layer.effect(
   RepositoryIdentityResolver.RepositoryIdentityResolver,
   Effect.gen(function* () {
@@ -417,6 +450,7 @@ const layerCheckpointStore = CheckpointStore.layer.pipe(Layer.provide(layerVcsDr
 const layerPortScanner = PortScanner.layer.pipe(Layer.provide(ProcessRunner.layer));
 
 const layerTerminal = TerminalManager.layer.pipe(
+  Layer.provide(ReadOnlySandbox.layer),
   Layer.provide(RuntimeLayer.layerVaultProvided),
   Layer.provide(layerPtyAdapter),
   Layer.provide(layerPortScanner),
@@ -432,6 +466,11 @@ const layerDevice = DeviceService.layer.pipe(
   Layer.provide(layerServerSettings),
   Layer.provide(ProcessRunner.layer),
   Layer.provide(NetService.layer),
+);
+
+const layerComputerUse = ComputerUseService.layer.pipe(
+  Layer.provide(ComputerHost.layer),
+  Layer.provide(layerServerSettings),
 );
 
 // Machines paired with this one. Spokes dial their hub over a WebSocket, so
@@ -570,19 +609,92 @@ const layerProviderInstallationRefresh = Layer.effectDiscard(
   }),
 );
 
+const layerVaultSync = VaultSync.layer.pipe(
+  Layer.provide(RuntimeLayer.layerVaultProvided),
+  Layer.provide(RuntimeLayer.layerVaultSyncCapture),
+  Layer.provide(SharedState.layer),
+);
+
+// One instance for every transport: it remembers sign-ins and approvals in progress.
+const layerMachineSetup = MachineSetup.layer.pipe(
+  Layer.provide(TailscaleHost.layer),
+  Layer.provide(MachineIdentity.layer),
+);
+
+const layerPairedMachines = Layer.mergeAll(
+  SharedSync.layer.pipe(Layer.provide(SharedState.layer)),
+  SharedSyncStatus.layer,
+  // Vault items shared with paired machines, end-to-end encrypted over the same documents.
+  layerVaultSync,
+  // Web integration sign-ins ride the vault: who refreshes them, and renewing them in time.
+  IntegrationSyncBinding.layer.pipe(
+    Layer.provide(layerVaultSync),
+    Layer.provide(RuntimeLayer.layerVaultSyncCapture),
+    Layer.provide(RuntimeLayer.layerIntegrationSyncPeers),
+  ),
+  // Same reference as turn start's, which reads the block.
+  MachinesTurnContextLive.layer.pipe(Layer.provide(MachinesTurnContext.layer)),
+  // The orchestrator's own sink, so replicated events reach the same
+  // subscribers, and its forwarder registry, so routing sees its commands.
+  // Its launcher registry, so a launch naming another machine reaches it.
+  Layer.mergeAll(ProjectMove.layer, ThreadLaunchRouting.layer, ThreadFork.layer).pipe(
+    Layer.provide(SharedSync.layer.pipe(Layer.provide(SharedState.layer))),
+    Layer.provideMerge(ThreadTransfer.layer),
+    Layer.provideMerge(ThreadRouting.layer),
+    Layer.provideMerge(ThreadSync.layer),
+    Layer.provide(ThreadReplication.layer),
+    Layer.provide(ProjectLabelFolders.layer),
+    Layer.provide(RemoteThreadCommands.layer),
+    Layer.provide(RemoteThreadLaunch.layer),
+    // Agents follow their conversation; the same layer as SharedSync's.
+    Layer.provide(SharedState.layer),
+    Layer.provide(
+      Layer.mergeAll(
+        RuntimeLayer.layerEventSink,
+        EventStoreV2.layerFromOrchestrationEventStore,
+        ProjectionStoreV2.layer,
+        ProjectStore.layer,
+      ),
+    ),
+  ),
+).pipe(
+  Layer.provideMerge(layerMachines),
+  Layer.provide(ServerEnvironment.layerIdentity),
+  Layer.provide(Scheduler.layer),
+);
+
+// Machine health reports on the paired machines and their sync, so it sits
+// above that group. Alerts read paired machines' alerts over the link; their
+// state layer is the same reference turn context reads in the orchestration
+// runtime. Scheduler and identity are the same references the group uses.
+const layerMachineHealth = HealthAlerts.layer.pipe(
+  Layer.provide(HealthAlertsState.layer),
+  Layer.provideMerge(MachineHealth.layer),
+  Layer.provide(HealthCanary.layer),
+  Layer.provide(layerMachineSetup),
+  Layer.provide(Scheduler.layer),
+  Layer.provide(ServerEnvironment.layerIdentity),
+  Layer.provideMerge(layerPairedMachines),
+);
+
 const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   AgentAwarenessRelay.layer,
   MachineSecurity.layer,
-  SharedSync.layer.pipe(
-    Layer.provideMerge(layerMachines),
+  layerMachineSetup,
+  layerMachineHealth,
+  // Universal settings and project overrides follow the user to paired machines.
+  SettingsSync.layer.pipe(
     Layer.provide(SharedState.layer),
     Layer.provide(ServerEnvironment.layerIdentity),
-    Layer.provide(Scheduler.layer),
   ),
   // Asks Cogenly Connect to deliver webhooks it held while this environment was offline.
   HeldHooksWaker.layer,
   layerThreadSettlementWorker,
-  StorageCleanup.layer.pipe(Layer.provide(ProjectionStoreV2.layer)),
+  StorageCleanup.layer.pipe(
+    Layer.provide(ProjectionStoreV2.layer),
+    Layer.provide(StorageInspection.layer),
+    Layer.provide(ServerBackup.layer),
+  ),
   ChatGreetingService.layer.pipe(Layer.provide(ProjectionStoreV2.layer)),
   // Server-owned periodic jobs: nightly home backups and housekeeping.
   // Neither starts provider turns; both are plain service methods.
@@ -638,7 +750,17 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   Layer.effectDiscard(ProjectSettingsOverrideSweep.sweep),
 ).pipe(
   // Core Services
-  Layer.provideMerge(layerOrchestrationApplication),
+  Layer.provideMerge(
+    layerOrchestrationApplication.pipe(
+      Layer.provide(
+        IntegrationSync.layer.pipe(
+          Layer.provideMerge(layerMachines),
+          Layer.provide(SharedState.layer),
+          Layer.provide(ServerEnvironment.layerIdentity),
+        ),
+      ),
+    ),
+  ),
   Layer.provideMerge(RuntimeLayer.layerEventInfrastructure),
   Layer.provideMerge(Layer.merge(ProjectStore.layer, ThreadSearch.layer)),
   Layer.provideMerge(layerServerSettings),
@@ -647,17 +769,18 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   Layer.provideMerge(layerSourceControlProviderRegistry),
   Layer.provideMerge(layerGit),
   Layer.provideMerge(layerVcs),
-  Layer.provideMerge(Layer.mergeAll(layerTerminal, layerPreview, layerDevice)),
+  Layer.provideMerge(Layer.mergeAll(layerTerminal, layerPreview, layerDevice, layerComputerUse)),
   Layer.provideMerge(layerPersistence),
   // Both read a user-owned file out of the state directory and stream changes
-  // to clients; neither depends on the other.
-  Layer.provideMerge(Layer.mergeAll(Keybindings.layer, UsageLimitSources.layer)),
+  // to clients. Keybindings mirrors its portable list through server settings.
+  Layer.provideMerge(Layer.mergeAll(Keybindings.layer.pipe(Layer.provide(layerServerSettings)))),
   Layer.provideMerge(ProviderRegistry.layer),
   // The instance registry is the new routing keystone — text generation,
   // adapter lookup, and runtime ingestion all resolve `ProviderInstanceId`
   // through this layer. Built-in drivers come from `BUILT_IN_DRIVERS`;
   // hydration adds their default instances to `providerInstances` on boot.
   Layer.provideMerge(ProviderInstanceRegistryHydration.layer),
+  Layer.provideMerge(layerRepoMcpTrust),
   Layer.provideMerge(Layer.mergeAll(CodexInstallation.CodexInstallation.layer)),
 );
 
@@ -706,6 +829,7 @@ const layerRuntimeDependencies = layerRuntimeCoreDependencies.pipe(
   Layer.provideMerge(AnalyticsService.layer),
   Layer.provideMerge(ExternalLauncher.layer),
   Layer.provideMerge(DirectEndpoints.layer),
+  Layer.provideMerge(TailscaleServeMode.layer),
   Layer.provideMerge(ServerLifecycleEvents.layer),
   Layer.provide(NetService.layer),
 );
@@ -831,59 +955,49 @@ const layerMakeServer = Layer.unwrap(
           );
       }),
     );
-    const layerTailscaleServe = config.tailscaleServeEnabled
-      ? Layer.effectDiscard(
-          Effect.acquireRelease(
-            Effect.gen(function* () {
-              yield* Deferred.succeed(tailscaleParked, undefined).pipe(Effect.orDie);
-              yield* awaitActivation;
-              const server = yield* HttpServer.HttpServer;
-              const address = server.address;
-              if (typeof address === "string" || !("port" in address)) {
-                return null;
-              }
-
-              const localPort = address.port;
-              return yield* ensureTailscaleServe({
-                localPort,
-                servePort: config.tailscaleServePort,
-                localHost: "127.0.0.1",
-              }).pipe(
-                Effect.as({ localPort, servePort: config.tailscaleServePort }),
+    // Machine setup points a saved Serve mapping at this run's port, adopts
+    // one made by hand, and waits in the background when the tailnet has not
+    // approved HTTPS yet. Only `--tailscale-serve` turns Serve off at shutdown;
+    // a mapping set up through Cogenly persists, like `tailscale serve --bg`.
+    const layerTailscaleServe = Layer.effectDiscard(
+      Effect.acquireRelease(
+        Effect.gen(function* () {
+          yield* Deferred.succeed(tailscaleParked, undefined).pipe(Effect.orDie);
+          yield* awaitActivation;
+          const server = yield* HttpServer.HttpServer;
+          const address = server.address;
+          if (typeof address === "string" || !("port" in address)) {
+            return null;
+          }
+          const setup = yield* MachineSetup.MachineSetup;
+          const serveMode = yield* TailscaleServeMode.TailscaleServeMode;
+          yield* setup
+            .start(address.port)
+            .pipe(
+              Effect.catchCause((cause) =>
+                Effect.logWarning("Failed to configure Tailscale Serve", { cause }),
+              ),
+            );
+          return serveMode.explicit ? yield* serveMode.current : null;
+        }),
+        (configured) =>
+          configured
+            ? disableTailscaleServe({ servePort: configured.servePort }).pipe(
                 Effect.tap(() =>
-                  Effect.logInfo("Tailscale Serve configured", {
-                    localPort,
-                    servePort: config.tailscaleServePort,
+                  Effect.logInfo("Tailscale Serve disabled", {
+                    servePort: configured.servePort,
                   }),
                 ),
                 Effect.catch((cause) =>
-                  Effect.logWarning("Failed to configure Tailscale Serve", {
+                  Effect.logWarning("Failed to disable Tailscale Serve", {
                     cause,
-                    localPort,
-                    servePort: config.tailscaleServePort,
-                  }).pipe(Effect.as(null)),
+                    servePort: configured.servePort,
+                  }),
                 ),
-              );
-            }),
-            (configured) =>
-              configured
-                ? disableTailscaleServe({ servePort: configured.servePort }).pipe(
-                    Effect.tap(() =>
-                      Effect.logInfo("Tailscale Serve disabled", {
-                        servePort: configured.servePort,
-                      }),
-                    ),
-                    Effect.catch((cause) =>
-                      Effect.logWarning("Failed to disable Tailscale Serve", {
-                        cause,
-                        servePort: configured.servePort,
-                      }),
-                    ),
-                  )
-                : Effect.void,
-          ),
-        )
-      : Layer.empty;
+              )
+            : Effect.void,
+      ),
+    );
     const layerCloudDesiredLinkReconcile = Layer.effectDiscard(
       Effect.gen(function* () {
         const cloudLink = yield* CloudLink.CloudLink;
@@ -1117,7 +1231,7 @@ const layerMakeServer = Layer.unwrap(
           Deferred.await(runtimeStateParked),
           Deferred.await(cloudLinkParked),
           Deferred.await(routesReady),
-          ...(config.tailscaleServeEnabled ? [Deferred.await(tailscaleParked)] : []),
+          Deferred.await(tailscaleParked),
         ],
         { concurrency: "unbounded" },
       ).pipe(Effect.asVoid),

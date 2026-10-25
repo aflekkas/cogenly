@@ -1,14 +1,15 @@
-import type { ProviderInteractionMode } from "@t3tools/contracts";
+import type { ProviderInteractionMode } from "@cogenly/contracts";
 import type { V2TurnStartParams__AdditionalContextEntry } from "effect-codex-app-server/schema";
 import {
-  CONVERSATION_MODE_INSTRUCTIONS,
   buildRuntimeInstructions,
-} from "@t3tools/provider-core/server/runtimeInstructions";
+  conversationModeInstructions,
+} from "@cogenly/provider-core/server/runtimeInstructions";
 
 import {
   COGENLY_BROWSER_TOOL_INSTRUCTIONS,
   COGENLY_ORCHESTRATION_INSTRUCTIONS,
-} from "@t3tools/provider-core/server/orchestrationInstructions";
+  cogenlyComputerUseInstructions,
+} from "@cogenly/provider-core/server/orchestrationInstructions";
 
 const COGENLY_DEVICE_TOOL_INSTRUCTIONS = `## Cogenly devices
 
@@ -17,6 +18,8 @@ The \`cogenly\` MCP server also exposes \`device_*\` tools for iOS Simulators an
 export interface T3CodeToolAvailability {
   readonly browser: boolean;
   readonly device: boolean;
+  /** The platform of the machine the `computer_*` tools drive; absent when they are not attached. */
+  readonly computer?: string;
   readonly terminal?: boolean;
 }
 
@@ -37,6 +40,7 @@ const toolInstructions = (availability: boolean | T3CodeToolAvailability): strin
   return [
     tools.browser ? COGENLY_BROWSER_TOOL_INSTRUCTIONS : "",
     tools.device ? COGENLY_DEVICE_TOOL_INSTRUCTIONS : "",
+    tools.computer === undefined ? "" : cogenlyComputerUseInstructions(tools.computer).trim(),
     tools.terminal
       ? "Use the cogenly MCP terminal_run tool for every shell command so the owner sees it live. Native shell tools are disabled. Use background=true for servers, terminal_read for output, terminal_write for stdin, and terminal_kill to stop. A command that may take more than about a minute, or may prompt (logins, cloud CLIs, installs, builds, test suites), runs with background=true and is polled with terminal_read, so the user's messages aren't blocked while it runs. Thread settlement kills these terminals and their children."
       : "",
@@ -197,15 +201,22 @@ export interface CodexRuntimeInfo {
 /** Mode prompt for `turn/start.collaborationMode.settings.developer_instructions`. */
 export function buildCodexDeveloperInstructions(
   interactionMode: ProviderInteractionMode,
-  options?: { readonly conversationMode?: boolean },
+  options?: {
+    readonly conversationMode?: boolean;
+    readonly builder?: boolean | undefined;
+    readonly terminal?: boolean;
+  },
 ): string {
   const base =
     interactionMode === "plan"
       ? CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS
       : CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS;
   // Chat-surface turns stay conversational on top of either mode: answer
-  // directly, and hand code changes to a Work session via Start Work.
-  return options?.conversationMode === true ? `${base}\n\n${CONVERSATION_MODE_INSTRUCTIONS}` : base;
+  // directly, look things up with the terminal tools when attached, and hand
+  // code changes to a Work task.
+  return options?.conversationMode === true
+    ? `${base}\n\n${conversationModeInstructions({ terminal: options.terminal === true, builder: options.builder })}`
+    : base;
 }
 
 /**

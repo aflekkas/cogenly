@@ -13,10 +13,23 @@ launch Cogenly and configure providers afterwards.
 Download the `.dmg` from [Cogenly releases](https://github.com/aflekkas/cogenly/releases/latest).
 It is built for Apple Silicon Macs and updates itself.
 
+### The `cogenly` command
+
 The app includes the `cogenly` command-line tool. To run it from any terminal,
-open **Settings → General → About** and choose **Install** next to the
-`cogenly` command. Open a new terminal afterwards. **Remove** takes it off
-again.
+open **Settings → General → About** and choose **Install** next to the `cogenly`
+command, or run **Install cogenly command line tool** from the command palette.
+Then open a new terminal. The command uses the app's data and talks to the
+app's running server, so `cogenly project list` shows the same projects as the
+app.
+
+Cogenly installs the command to `~/.local/bin`, which needs no password. If your
+shell does not have `~/.local/bin` on its `PATH`, the row says so. You can then
+choose `/usr/local/bin` instead (macOS asks for your password) or add
+`~/.local/bin` to your `PATH`. If you move the app, the row shows the command
+as out of date. Choose **Update** to fix it.
+
+**Uninstall** removes the command. Cogenly never overwrites or removes a
+`cogenly` file it did not install.
 
 ## Linux server (command line)
 
@@ -30,6 +43,14 @@ This puts `cogenly` in `~/.local/bin`. If your shell reports `command not found`
 afterwards, that directory is not on your `PATH` yet; the installer prints the
 line to add. Set `COGENLY_VERSION` to install an exact version, such as the one
 your desktop app runs. The download is self-contained: the host needs no Node.js.
+
+On Linux, installation, updates, and background service setup also provision the
+chat command sandbox through the distro's `bubblewrap` package. Cogenly uses root
+or passwordless sudo and never asks for a sudo password. Otherwise, it prints the
+command to run, such as `sudo apt-get update && sudo apt-get install -y bubblewrap`
+on Ubuntu/Debian. Run `cogenly security setup` afterwards, or use **Fix** in
+Settings → Machines → Health, to enable chat commands without restarting. macOS
+uses its built-in sandbox and needs no package.
 
 | Task                                  | Command                                                                           |
 | ------------------------------------- | --------------------------------------------------------------------------------- |
@@ -56,7 +77,7 @@ them. Sign in to the providers on the VPS first (`claude auth login`,
 `codex login`, `gh auth login`).
 
 **Recommended: desktop SSH.** In the desktop app, open **Settings → Connections
-→ Add environment**, choose **SSH**, and pick the host from your `~/.ssh/config`.
+→ Connect a machine**, choose **SSH**, and pick the host from your `~/.ssh/config`.
 Cogenly connects and pairs without a token to copy. If the VPS has no Cogenly
 yet, it downloads the release that matches your desktop app; if it already runs
 one, it uses that. See [Desktop-managed SSH](./remote-access.md#desktop-managed-ssh).
@@ -73,7 +94,7 @@ cogenly auth pairing create --base-url http://127.0.0.1:14773
 ```
 
 On your Mac, forward that port with `ssh -N -L 14773:127.0.0.1:4773 your-vps`
-and paste the printed pairing URL into **Add environment**. (`cogenly pair`
+and paste the printed pairing URL into **Connect a machine**. (`cogenly pair`
 prints the same kind of link for the server's own address, `127.0.0.1:4773`;
 change its port to `14773` if you use it instead.) The environment connects
 while the tunnel runs.

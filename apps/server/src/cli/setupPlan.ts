@@ -4,7 +4,7 @@
  *
  * @module cli/setupPlan
  */
-import { ProviderInstanceId, type T3ImportSourceProject } from "@t3tools/contracts";
+import { ProviderInstanceId, type T3ImportSourceProject } from "@cogenly/contracts";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 

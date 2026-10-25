@@ -3,9 +3,9 @@ import {
   PullRequestListEntry,
   PullRequestListProjectError,
   PullRequestListResult,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 
-import type { PullRequestDiffStat, PullRequestListCursors } from "@t3tools/contracts";
+import type { PullRequestDiffStat, PullRequestListCursors } from "@cogenly/contracts";
 
 /**
  * A listed change request with the environment that read it. Nothing on a row says which machine

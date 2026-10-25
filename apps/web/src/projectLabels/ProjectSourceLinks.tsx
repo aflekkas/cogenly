@@ -1,10 +1,10 @@
 import { useAtomValue } from "@effect/atom-react";
-import { isAtomCommandInterrupted } from "@t3tools/client-runtime/state/runtime";
+import { isAtomCommandInterrupted } from "@cogenly/client-runtime/state/runtime";
 import type {
   EnvironmentId,
   ProjectLabelWithRepositories,
   ProjectSourceLink,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { XIcon } from "lucide-react";
 import { useState } from "react";
 
@@ -84,15 +84,16 @@ export function ProjectSourceLinkChips(props: {
             <Badge variant="outline" size="control">
               <GitHubIcon aria-hidden />
               <span className="max-w-48 truncate">{text}</span>
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon-micro"
                 aria-label={`Unlink ${text}`}
                 disabled={!canUnlink}
-                className="-me-1 flex size-4 cursor-pointer items-center justify-center rounded-sm text-muted-foreground outline-none transition-colors duration-(--motion-duration-fast) ease-standard hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                 onClick={() => void remove(link)}
               >
-                <XIcon className="size-3" />
-              </button>
+                <XIcon />
+              </Button>
             </Badge>
           </li>
         );

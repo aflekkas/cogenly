@@ -1,4 +1,4 @@
-import type { EnvironmentId, OrchestrationV2ProjectedTurnItem, ThreadId } from "@t3tools/contracts";
+import type { EnvironmentId, OrchestrationV2ProjectedTurnItem, ThreadId } from "@cogenly/contracts";
 import {
   toolCallLines,
   turnItemDetailRevision,
@@ -6,12 +6,12 @@ import {
   turnItemOutputImages,
   turnItemOutputText,
   webSearchQueries,
-} from "@t3tools/client-runtime/work-log/item-detail";
-import { formatDiffCount } from "@t3tools/client-runtime/diff-count";
-import { isJavaScriptReplTool } from "@t3tools/shared/toolActivity";
+} from "@cogenly/client-runtime/work-log/item-detail";
+import { formatDiffCount } from "@cogenly/client-runtime/diff-count";
+import { isJavaScriptReplTool } from "@cogenly/shared/toolActivity";
 import { ExternalLinkIcon, GitBranchIcon, RotateCcwIcon } from "lucide-react";
 import { memo, type ReactNode, Suspense, use, useMemo } from "react";
-import type { WorkLogToolPresentation } from "@t3tools/client-runtime/work-log/tool-registry";
+import type { WorkLogToolPresentation } from "@cogenly/client-runtime/work-log/tool-registry";
 
 import { useTheme } from "../../hooks/useTheme";
 import { cn } from "../../lib/utils";
@@ -23,7 +23,16 @@ import { formatWorkspaceRelativePath } from "../../filePathDisplay";
 import { Button } from "../ui/button";
 import ChatMarkdown, { ChatMarkdownAssetImage } from "../ChatMarkdown";
 import { RenderErrorBoundary } from "../RenderErrorBoundary";
-import { CommandOutputPanel, useCommandOutputStreaming } from "./CommandOutputPanel";
+import {
+  CommandOutputPanel,
+  TerminalOutputBlock,
+  useCommandOutputStreaming,
+} from "./CommandOutputPanel";
+import {
+  parseTerminalRunResult,
+  terminalRunItem,
+  terminalRunResultSummary,
+} from "./terminalRunResult.logic";
 import { resolveExternalWebLinkHref } from "./externalLinkContextMenu";
 import type { ExpandedImagePreview } from "./ExpandedImagePreview";
 import { ShellCommandBlock } from "./ShellCommandBlock";
@@ -542,6 +551,25 @@ export const V2ItemExpansion = memo(function V2ItemExpansion(props: {
       break;
     }
     case "dynamic_tool": {
+      // A command the agent ran reads like one: the command, then its output
+      // as a terminal shows it, not the tool's JSON.
+      const terminalRunCall = terminalRunItem(item);
+      const terminalRun = terminalRunCall ? parseTerminalRunResult(terminalRunCall.output) : null;
+      if (terminalRun) {
+        const call = toolCallLines({ args: item.input });
+        const commandText = call.args?.find(([key]) => key === "command")?.[1];
+        command = commandText ? <ShellCommandBlock command={commandText} /> : null;
+        args = undefined;
+        resultSummary = terminalRunResultSummary(terminalRun) ?? resultSummary;
+        body = mono(
+          terminalRun.output ? (
+            <TerminalOutputBlock text={terminalRun.output} truncated={terminalRun.truncated} />
+          ) : (
+            <div className="italic">No output.</div>
+          ),
+        );
+        break;
+      }
       if (!args) {
         const call = toolCallLines({ args: item.input });
         args = call.args ? argRows(call.args, item.toolName) : undefined;

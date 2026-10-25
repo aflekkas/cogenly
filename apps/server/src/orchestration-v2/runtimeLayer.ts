@@ -1,3 +1,8 @@
+import * as WorktreeLifecycle from "../workspace/WorktreeLifecycle.ts";
+import * as Membership from "../projectLabels/ProjectRepositoryMembership.ts";
+import * as GoogleTokenStore from "../integrations/local/GoogleTokenStore.ts";
+import * as NativeIntegrationImport from "../integrations/NativeIntegrationImport.ts";
+import * as ReadOnlySandbox from "../terminal/ReadOnlySandbox.ts";
 import * as AccountConnections from "../accounts/AccountConnections.ts";
 import * as AccountAccess from "../accounts/AccountAccess.ts";
 import * as CliCredentials from "../accounts/CliCredentials.ts";
@@ -5,10 +10,13 @@ import * as ProcessRunner from "../processRunner.ts";
 import * as VisualStates from "../htmlRender/VisualState.ts";
 import * as GlobalSearch from "../search/GlobalSearch.ts";
 import * as Facts from "../context/FactService.ts";
+import * as HealthAlertsState from "../health/HealthAlertsState.ts";
 import * as Integrations from "../integrations/Integrations.ts";
 import * as LocalIntegrations from "../integrations/local/LocalIntegrations.ts";
 import * as LocalMcpRunner from "../integrations/local/LocalMcpRunner.ts";
+import * as RuntimeInstaller from "../integrations/local/RuntimeInstaller.ts";
 import * as IntegrationCredentials from "../integrations/IntegrationCredentials.ts";
+import * as IntegrationSyncPeers from "../integrations/IntegrationSyncPeers.ts";
 import * as IntegrationTokens from "../integrations/IntegrationTokens.ts";
 import * as Retrieval from "../context/ContextRetrievalService.ts";
 import * as Exports from "../export/ExportService.ts";
@@ -41,6 +49,7 @@ import * as AgentSessionScanner from "../project/AgentSessionScanner.ts";
 import * as T3Import from "../t3Import/T3ImportService.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as RepositoryCheckout from "../project/RepositoryCheckout.ts";
+import * as RepositoryIconResolver from "../project/RepositoryIconResolver.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
 import * as CheckpointCaptureService from "./CheckpointCaptureService.ts";
@@ -53,14 +62,17 @@ import * as EffectOutbox from "./EffectOutbox.ts";
 import * as EffectWorker from "./EffectWorker.ts";
 import * as EventSink from "./EventSink.ts";
 import * as EventStore from "./EventStore.ts";
-import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import * as IdAllocator from "@cogenly/provider-core/server/IdAllocator";
 import * as LegacyV1ThreadImporter from "./legacy/LegacyV1ThreadImporter.ts";
 import * as Orchestrator from "./Orchestrator.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ProjectionMaintenance from "./ProjectionMaintenance.ts";
 import * as ProjectStore from "./ProjectStore.ts";
 import * as ProviderAdapterRegistry from "./ProviderAdapterRegistry.ts";
-import * as ProviderContinuationRequests from "@t3tools/provider-core/server/ProviderContinuationRequests";
+import * as MachinesTurnContext from "./MachinesTurnContext.ts";
+import * as ProviderContinuationRequests from "@cogenly/provider-core/server/ProviderContinuationRequests";
+import * as RemoteThreadCommands from "./RemoteThreadCommands.ts";
+import * as RemoteThreadLaunch from "./RemoteThreadLaunch.ts";
 import * as ProviderContinuationService from "./ProviderContinuationService.ts";
 import * as ThreadTitleRegenerationService from "./ThreadTitleRegenerationService.ts";
 import * as ProviderEventIngestor from "./ProviderEventIngestor.ts";
@@ -83,6 +95,8 @@ import * as TurnItemPositionStore from "./TurnItemPositionStore.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
 import * as SecretRequests from "../secrets/SecretRequests.ts";
 import * as Vault from "../vault/Vault.ts";
+import * as VaultSyncCapture from "../vault/VaultSyncCapture.ts";
+import * as SharedState from "../sync/SharedState.ts";
 import * as Accounts from "../accounts/Accounts.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 
@@ -95,13 +109,53 @@ export const layerEventInfrastructure = Layer.mergeAll(
 // Shared so every consumer gets the one files index and watcher.
 const layerProjectFilesProvided = ProjectFiles.layer.pipe(Layer.provide(ProjectLabelFolders.layer));
 
-const layerRuntimePolicyProvided = RuntimePolicy.layerFromProjectStore.pipe(
+// One signal shared by every writer of agent_approvals and both approval streams.
+const layerApprovalChanges = ApprovalChanges.layer;
+export const layerVaultSyncCapture = VaultSyncCapture.layer.pipe(
+  Layer.provide(SharedState.layer),
+  Layer.provide(ServerEnvironment.layerIdentity),
+);
+export const layerVaultProvided = Vault.layer.pipe(
+  Layer.provide(layerVaultSyncCapture),
+  Layer.provide(ServerEnvironment.layerIdentity),
+  Layer.provide(layerProjectFilesProvided),
+  Layer.provide(layerApprovalChanges),
+);
+const layerIntegrationCredentials = IntegrationCredentials.layer.pipe(
+  Layer.provide(layerVaultProvided),
+);
+const layerLocalIntegrationsProvided = LocalIntegrations.layer.pipe(
+  Layer.provide(GoogleTokenStore.layer.pipe(Layer.provide(layerVaultProvided))),
+  Layer.provide(LocalMcpRunner.layer),
+  Layer.provide(layerIntegrationCredentials),
+);
+// Shared by reference so the runtime policy, agent MCP policy and settings
+// all read one gateway (one tool cache, one change stream).
+export const layerIntegrationSyncPeers = IntegrationSyncPeers.layer.pipe(
+  Layer.provide(ServerEnvironment.layerIdentity),
+);
+export const layerIntegrationsProvided = Integrations.layer.pipe(
+  Layer.provide(layerIntegrationSyncPeers),
+  Layer.provide(NativeIntegrationImport.layer),
+  Layer.provide(layerIntegrationCredentials),
+  Layer.provide(IntegrationTokens.layer.pipe(Layer.provide(layerVaultProvided))),
+  Layer.provide(layerLocalIntegrationsProvided),
+  // Settings' secret forms and the uv installer.
+  Layer.provide(IntegrationCredentials.secretsLayer.pipe(Layer.provide(layerVaultProvided))),
+  Layer.provide(RuntimeInstaller.layer),
+);
+
+/** The runtime policy every provider turn resolves, as the orchestrator and turn start get it. */
+export const layerRuntimePolicyProvided = RuntimePolicy.layerFromProjectStore.pipe(
   Layer.provide(
     Layer.mergeAll(
       ProjectStore.layer,
       ProjectLabelFolders.layer,
       // Nested: a merge would leave the files layer's folder requirement dangling.
       layerProjectFilesProvided,
+      layerIntegrationsProvided,
+      // The same reference HealthAlerts publishes to in server.ts.
+      HealthAlertsState.layer,
     ),
   ),
 );
@@ -174,6 +228,8 @@ const layerCommandOutputHubProvided = CommandOutputHub.layer.pipe(
 );
 
 const layerProviderSessionManagerProvided = ProviderSessionManager.layer.pipe(
+  Layer.provide(ReadOnlySandbox.layer),
+  Layer.provide(AgentStore.layer),
   Layer.provide(
     Layer.mergeAll(
       layerCommandOutputHubProvided,
@@ -202,11 +258,17 @@ const layerRunExecutionServiceProvided = RunExecutionService.layer.pipe(
   ),
 );
 
+export const layerProjectSetupScriptRunner = ProjectSetupScriptRunner.layer.pipe(
+  Layer.provide(layerProjectService),
+);
 const layerProviderTurnStartServiceProvided = ProviderTurnStartService.layer.pipe(
+  Layer.provide(WorktreeLifecycle.layer.pipe(Layer.provide(layerProjectSetupScriptRunner))),
   Layer.provide(AgentStore.layer),
   Layer.provide(
     Layer.mergeAll(
       layerContextHandoffServiceProvided,
+      // Same reference as the machine link's, which registers the reader.
+      MachinesTurnContext.layer,
       layerEventSinkProvided,
       IdAllocator.layer,
       ProjectionStore.layer,
@@ -253,6 +315,8 @@ const layerRunFinalizationServiceProvided = RunFinalizationService.layer.pipe(
 );
 
 const layerOrchestratorProvided = Orchestrator.layer.pipe(
+  Layer.provide(Membership.layer),
+  Layer.provide(ServerEnvironment.layerIdentity),
   Layer.provide(
     Layer.mergeAll(
       layerCheckpointServiceProvided,
@@ -267,6 +331,9 @@ const layerOrchestratorProvided = Orchestrator.layer.pipe(
       // Same layer reference as the continuation worker and the adapter
       // infrastructure so layer memoization yields one shared request queue.
       ProviderContinuationRequests.layer,
+      // Same reference as thread sync's router, which registers the forwarder.
+      RemoteThreadCommands.layer,
+      RemoteThreadLaunch.layer,
       layerProviderEventIngestorProvided,
       layerRuntimePolicyProvided,
       layerProviderSessionManagerProvided,
@@ -300,15 +367,19 @@ const layerThreadManagementProvided = ThreadManagementService.layerWithLegacyImp
     ),
   ),
 );
-export const layerProjectSetupScriptRunner = ProjectSetupScriptRunner.layer.pipe(
-  Layer.provide(layerProjectService),
-);
 // Built once and shared: named projects file into labels through the same
 // instance direct consumers use, so filing notifications reach every
 // subscriber. Layers memoize by identity, so providing this twice below
 // still constructs one service.
 const layerProjectLabelsProvided = ProjectLabels.layer.pipe(
-  Layer.provide(Layer.mergeAll(layerEventInfrastructure, ProjectLabelFolders.layer)),
+  Layer.provide(
+    Layer.mergeAll(
+      layerEventInfrastructure,
+      ProjectLabelFolders.layer,
+      // Same reference as thread sync's router, which registers the folder mover.
+      RemoteThreadCommands.layer,
+    ),
+  ),
 );
 const layerManagedProjectFoldersProvided = ManagedProjectFolders.layer.pipe(
   Layer.provide(layerProjectService),
@@ -321,9 +392,12 @@ const layerT3ImportProvided = T3Import.layer.pipe(
   ),
 );
 const layerRepositoryCheckoutProvided = RepositoryCheckout.layer.pipe(
-  Layer.provide(Layer.mergeAll(layerProjectService, layerProjectLabelsProvided)),
+  Layer.provide(
+    Layer.mergeAll(layerProjectService, layerProjectLabelsProvided, ProjectLabelFolders.layer),
+  ),
 );
 const layerThreadLaunchProvided = ThreadLaunchService.layer.pipe(
+  Layer.provide(Membership.layer),
   Layer.provide(
     Layer.mergeAll(
       layerProjectService,
@@ -334,6 +408,8 @@ const layerThreadLaunchProvided = ThreadLaunchService.layer.pipe(
       layerThreadManagementProvided,
       layerCommandReceiptStoreProvided,
       IdAllocator.layer,
+      // Same reference as thread sync's launch router, which registers the launcher.
+      RemoteThreadLaunch.layer,
     ),
   ),
 );
@@ -354,26 +430,9 @@ const layerThreadLifecycleProvided = ThreadLifecycleService.layer.pipe(
 const layerSecretRequestsProvided = SecretRequests.layer.pipe(
   Layer.provide(layerThreadManagementProvided),
 );
-// One signal shared by every writer of agent_approvals and both approval streams.
-const layerApprovalChanges = ApprovalChanges.layer;
-export const layerVaultProvided = Vault.layer.pipe(
-  Layer.provide(ServerEnvironment.layerIdentity),
-  Layer.provide(layerProjectFilesProvided),
-  Layer.provide(layerApprovalChanges),
-);
-const layerIntegrationCredentials = IntegrationCredentials.layer.pipe(
-  Layer.provide(layerVaultProvided),
-);
-const layerLocalIntegrationsProvided = LocalIntegrations.layer.pipe(
-  Layer.provide(LocalMcpRunner.layer),
-  Layer.provide(layerIntegrationCredentials),
-);
-const layerIntegrationsProvided = Integrations.layer.pipe(
-  Layer.provide(layerIntegrationCredentials),
-  Layer.provide(IntegrationTokens.layer.pipe(Layer.provide(layerVaultProvided))),
-  Layer.provide(layerLocalIntegrationsProvided),
-);
 const layerAgentsProvided = Agents.layer.pipe(
+  Layer.provide(Membership.layer),
+  Layer.provide(RemoteThreadLaunch.layer),
   Layer.provide(
     Layer.mergeAll(
       AgentStore.layer,
@@ -388,6 +447,8 @@ const layerAgentsProvided = Agents.layer.pipe(
   ),
 );
 const layerScheduledTaskProvided = ScheduledTaskService.layer.pipe(
+  Layer.provide(Membership.layer),
+  Layer.provide(RemoteThreadLaunch.layer),
   Layer.provide(
     Layer.mergeAll(
       layerThreadLaunchProvided,
@@ -533,6 +594,7 @@ export const layer = Layer.mergeAll(
 );
 
 const layerProductionBase = Layer.mergeAll(
+  RemoteThreadLaunch.layer,
   layerLocalIntegrationsProvided,
   Facts.layer,
   layerIntegrationsProvided,
@@ -541,6 +603,11 @@ const layerProductionBase = Layer.mergeAll(
   layerProjectService,
   layerManagedProjectFoldersProvided,
   layerThreadLaunchProvided,
+  layerRepositoryCheckoutProvided,
+  RepositoryIconResolver.layer,
+  RepositoryCheckout.layerRelocation.pipe(
+    Layer.provide(Layer.mergeAll(layerRepositoryCheckoutProvided, layerProjectLabelsProvided)),
+  ),
   layerWorkHandoffProvided,
   layerThreadLifecycleProvided,
   layerAgentsProvided,
@@ -573,7 +640,14 @@ const layerProductionBase = Layer.mergeAll(
   layerCliCredentialsProvided,
   layerAccountConnectionsProvided,
   UsageLimitRecoveryWorker.layer.pipe(
-    Layer.provide(Layer.mergeAll(ProjectionStore.layer, layerThreadManagementProvided)),
+    Layer.provide(AgentStore.layer),
+    Layer.provide(
+      Layer.mergeAll(
+        ProjectionStore.layer,
+        layerThreadManagementProvided,
+        UsageLimitHandoff.layer.pipe(Layer.provide(layerThreadManagementProvided)),
+      ),
+    ),
   ),
   UsageLimitHandoff.layer.pipe(Layer.provide(layerThreadManagementProvided)),
   layerProviderContinuationWorkerProvided,

@@ -4,7 +4,7 @@ import {
   type Commitment,
   type CommitmentRef,
   type ProjectLabelId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import {
   ArrowUpRightIcon,
   CalendarIcon,
@@ -765,6 +765,7 @@ function AddCommitment({
         <ProjectLabelChips labels={workspace.labels} ids={labelIds} />
         <ProjectLabelPicker
           onManage={client.openProjectSettings}
+          environmentId={agent.environmentId}
           labels={workspace.labels}
           selectedIds={labelIds}
           onToggle={(id, selected) =>

@@ -7,7 +7,7 @@ desktop when the terminal is not focused. Customize `usage.open` in
 ## Track subscription limits
 
 **Usage** pools every subscription account it can see per provider, so with several Codex
-or Claude accounts across your environments and hubs you read one number per window rather than a
+or Claude accounts across your environments you read one number per window rather than a
 list. Each window card shows how much of the pool is left and a bar with one segment per account,
 kept in the same column across windows. Accounts are ordered by their 5-hour reset, soonest
 first, or by the first available window when no account reports a 5-hour limit. A gap means the
@@ -24,13 +24,13 @@ Bars show quota remaining and drain as you spend. To see quota used fill up inst
 **Used** under **Settings → Appearance → Usage meters**. It is a per-device choice and applies to the bars, percentages and the notice above the composer. The
 even-pace line moves with it: it marks time left when bars drain and time elapsed when they fill.
 
-The same account signed in on more than one environment, or reported by a hub as well, counts once.
+The same account signed in on more than one environment, counts once.
 With more than one environment, filter with the environment dropdown to see what a single
 machine has.
 
 Opening Usage checks the selected connected environments automatically. Each client waits at
 least five minutes between automatic checks of an environment, including after a failed check.
-If a window still looks stale, refresh Usage to re-check every provider and hub.
+If a window still looks stale, refresh Usage to re-check every provider.
 
 Pick `/usage-limits` from the composer's command menu, or send it as a message, to check the
 current model's limits without leaving the conversation. The result opens above the composer and
@@ -54,17 +54,15 @@ Agents see the same headroom: `orchestrator_capabilities` reports each account's
 so you can ask an agent to delegate to the account with room. An agent can also continue a stopped
 thread on another account when you ask it to.
 
-## Connect a CLIProxyAPI hub
+A short-term rate limit is not a spent quota. When a provider throttles requests rather than
+reporting an exhausted window, the thread retries on its own after a short wait, backing off from a
+minute up to fifteen, for up to five tries in a row. The notice above the composer shows the next
+try, and **Don't resume** stops it.
 
-To see pooled accounts, open **Settings → Providers → Usage providers → Add hub**. Choose the
-environment that will connect to the hub and enter its URL and management key.
-
-The accounts appear under **Usage**. Codex accounts show banked reset credits; select an
-account and choose **Use reset** to redeem one. No hub plugin is required.
-
-This connection supplies usage information; configure
-the provider separately to send agent requests through the hub. Remove the hub from the same
-settings section when you no longer need it.
+Tasks an agent delegates recover without you. A delegated task that stops on a limit moves to the
+best account with room, keeping its conversation, and the agent that delegated it is told where it
+went. When no account has room, it resumes at the reset instead, and the delegating agent waits for
+it. Turn off its resume from the task's own thread to stop it there.
 
 ## Subscription usage widget
 

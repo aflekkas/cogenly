@@ -1,4 +1,4 @@
-import { remapComposerContextAttachments } from "@t3tools/shared/composerContextReferences";
+import { remapComposerContextAttachments } from "@cogenly/shared/composerContextReferences";
 import {
   type ThreadLinkedPullRequest,
   CommandId,
@@ -8,6 +8,7 @@ import {
   OrchestrationV2CheckpointUnavailableError,
   WS_METHODS,
   type ChatAttachment,
+  type EnvironmentId,
   type MessageId,
   type ModelSelection,
   type NodeId,
@@ -29,10 +30,10 @@ import {
   type ThreadEnvMode,
   type UploadChatAttachment,
   type ThreadSurface,
-} from "@t3tools/contracts";
-import { modelSelectionCommandType } from "@t3tools/shared/model";
-import { derivePendingBackgroundWork } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
-import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
+} from "@cogenly/contracts";
+import { modelSelectionCommandType } from "@cogenly/shared/model";
+import { derivePendingBackgroundWork } from "@cogenly/shared/orchestrationV2PendingBackgroundWork";
+import { visibleThreadPullRequests } from "@cogenly/shared/threadPullRequests";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 
@@ -134,7 +135,7 @@ export interface DismissWorkTaskInput extends ThreadCommandInput {
 }
 
 export interface UpdateThreadMetadataInput extends ThreadCommandInput {
-  readonly limitRecovery?: import("@t3tools/contracts").OrchestrationV2LimitRecoveryUpdate | null;
+  readonly limitRecovery?: import("@cogenly/contracts").OrchestrationV2LimitRecoveryUpdate | null;
   readonly title?: string;
   readonly modelSelection?: ModelSelection;
   readonly branch?: string | null;
@@ -168,6 +169,11 @@ interface StartThreadBootstrap {
     readonly createdAt: string;
     /** The project picked for the draft: the chat is created filed in it. */
     readonly projectFolderId?: ProjectLabelId;
+    /**
+     * A paired machine of the environment this request reaches that runs the
+     * new thread. Omitted runs it on that environment itself.
+     */
+    readonly machine?: EnvironmentId;
   };
   readonly prepareWorktree?: {
     /** V2 worktree launches always fail rather than falling back to the project checkout. */
@@ -187,7 +193,7 @@ export interface StartThreadTurnInput extends ThreadCommandInput {
     readonly role: "user";
     readonly text: string;
     readonly attachments: ReadonlyArray<ChatAttachment | UploadChatAttachment>;
-    readonly context?: import("@t3tools/contracts").OrchestrationMessageContext;
+    readonly context?: import("@cogenly/contracts").OrchestrationMessageContext;
   };
   readonly modelSelection?: ModelSelection;
   readonly titleSeed?: string;
@@ -213,7 +219,7 @@ export interface RespondToThreadApprovalInput extends ThreadCommandInput {
 export interface RespondToThreadUserInputInput extends ThreadCommandInput {
   readonly requestId: RuntimeRequestId;
   readonly answers: ProviderUserInputAnswers;
-  readonly attachmentsByQuestionId?: import("@t3tools/contracts").UserInputAttachments;
+  readonly attachmentsByQuestionId?: import("@cogenly/contracts").UserInputAttachments;
 }
 
 export interface DismissThreadUserInputInput extends ThreadCommandInput {
@@ -272,7 +278,7 @@ export interface EditQueuedRunInput extends ThreadCommandInput {
   readonly edit?: {
     readonly messageId: MessageId;
     readonly attachments: ReadonlyArray<ChatAttachment | UploadChatAttachment>;
-    readonly context?: import("@t3tools/contracts").OrchestrationMessageContext;
+    readonly context?: import("@cogenly/contracts").OrchestrationMessageContext;
   };
 }
 
@@ -701,6 +707,7 @@ export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(
       ...(bootstrap?.projectFolderId === undefined
         ? {}
         : { projectFolderId: bootstrap.projectFolderId }),
+      ...(bootstrap?.machine === undefined ? {} : { machine: bootstrap.machine }),
       initialMessage: {
         messageId: input.message.messageId,
         text: input.message.text,

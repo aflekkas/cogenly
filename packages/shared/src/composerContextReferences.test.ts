@@ -1,4 +1,4 @@
-import type { ComposerContextId, ComposerContextRecord } from "@t3tools/contracts";
+import type { ComposerContextId, ComposerContextRecord } from "@cogenly/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -386,6 +386,39 @@ describe("provider projection", () => {
     for (const tool of ["project_files_list", "project_file_read", "project_recall"]) {
       expect(projected).toContain(tool);
     }
+  });
+
+  it("projects a source as its service and account, with the slug to call it by", () => {
+    const source = (contextId: string, name: string, accountLabel: string | null) => ({
+      version: 1 as const,
+      kind: "integration" as const,
+      contextId: ctx(contextId),
+      // A chip label the user may have edited; the marker names the account from the record.
+      label: "my mail",
+      integrationId: `integration:${name}`,
+      name,
+      serviceName: "Google Workspace",
+      displayName: "Google",
+      accountLabel,
+      icon: "google-workspace" as const,
+    });
+    const projected = projectComposerContextForProvider({
+      text: "Compare [my mail](cogenly-context://v1/integration/integration_w) with [home](cogenly-context://v1/integration/integration_p)",
+      records: [
+        source("integration_w", "google-work", "work"),
+        source("integration_p", "google-personal", null),
+      ],
+    });
+    expect(
+      projected.startsWith(
+        "Compare [Source: Google Workspace (work); ref=integration_w] with [Source: Google Workspace; ref=integration_p]",
+      ),
+    ).toBe(true);
+    expect(projected).toContain('<context kind="integration" id="integration_w">');
+    expect(projected).toContain("name: google-work");
+    expect(projected).toContain('integration_call(name: "google-work", tool, arguments)');
+    expect(projected).toContain('integration_call(name: "google-personal", tool, arguments)');
+    expect(projected).toContain("integration_tools");
   });
 
   it("marks duplicate identities unavailable instead of choosing one payload", () => {

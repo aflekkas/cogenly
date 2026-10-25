@@ -18,7 +18,7 @@ import {
   type AgentUpsertInput,
   type OrchestrationV2Run,
   type OrchestrationV2ThreadProjection,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -27,6 +27,7 @@ import { McpSchema, McpServer } from "effect/ai";
 import * as Folders from "../project/ManagedProjectFolders.ts";
 import * as Labels from "../projectLabels/ProjectLabelService.ts";
 import * as LabelEvents from "../persistence/OrchestrationEventStore.ts";
+import * as RemoteLaunch from "../orchestration-v2/RemoteThreadLaunch.ts";
 import * as Launch from "../orchestration-v2/ThreadLaunchService.ts";
 import * as Threads from "../orchestration-v2/ThreadManagementService.ts";
 import * as Projections from "../orchestration-v2/ProjectionStore.ts";
@@ -189,11 +190,17 @@ const makeHarness = Effect.sync(() => {
     .pipe(Layer.provide(layerSharedIdentity))
     .pipe(Layer.provide(Layer.merge(database, LabelEvents.layer.pipe(Layer.provide(database)))));
   const agents = Agents.layer
+    .pipe(Layer.provide(RemoteLaunch.layer))
     .pipe(Layer.provide(layerSharedIdentity))
     .pipe(Layer.provide(Layer.mergeAll(boundaries, store, labels, database)));
-  const layer = Layer.mergeAll(store, agents, labels, database, boundaries).pipe(
-    Layer.provide(NodeServices.layer),
-  );
+  const layer = Layer.mergeAll(
+    store,
+    agents,
+    labels,
+    database,
+    boundaries,
+    RemoteLaunch.layer,
+  ).pipe(Layer.provide(NodeServices.layer));
   return { launches, sends, posts, projections, seedThread, runFor, layer };
 });
 
@@ -682,3 +689,34 @@ describe("agent thread tools", () => {
     }),
   );
 });
+
+it.effect(
+  "creating a remotely owned agent delegates creation and keeps its target-authored identity",
+  () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness;
+      yield* Effect.gen(function* () {
+        const remote = yield* RemoteLaunch.RemoteThreadLaunch;
+        const store = yield* Store.AgentStore;
+        const agents = yield* Agents.AgentService;
+        const machine = EnvironmentId.make("machine:target");
+        const calls: Array<string> = [];
+        yield* remote.registerAgentCreate((target, input, id) =>
+          Effect.gen(function* () {
+            calls.push(target);
+            // The peer sync has delivered the target's created profile before it replies.
+            const agent = { ...agentFixture("remote"), id, name: input.name, ownerMachine: target };
+            yield* store.save(agent).pipe(Effect.orDie);
+            return { agent };
+          }),
+        );
+        const { agent } = yield* agents.upsert(
+          createInput({ ownerMachine: machine, kickoff: true }),
+        );
+        expect(agent.ownerMachine).toBe(machine);
+        expect(calls).toEqual([machine]);
+        expect(harness.launches).toEqual([]);
+        expect(harness.sends).toEqual([]);
+      }).pipe(Effect.provide(harness.layer));
+    }).pipe(Effect.scoped),
+);

@@ -1,17 +1,25 @@
+import { projectReplicaFilings } from "../threadSync/replicaFiling.ts";
 import {
   Agent,
   HybridClock,
   SharedStateError,
   type SharedDocumentChange,
   type SharedDocumentKind,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
+import { projectPendingMerges, resolveProjectLabelId } from "./ProjectMergeProjection.ts";
 import { compareClock } from "./merge.ts";
 import { nextScheduledRunAt } from "../scheduledTasks/Schedule.ts";
 import { decodeAgent, decodeProject, decodeSchedule } from "./documentSchemas.ts";
+import {
+  linkArrivedProject,
+  projectFact,
+  projectWaitingFacts,
+  readFactConfiguration,
+} from "./FactProjection.ts";
 
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const json = Schema.decodeUnknownEffect(
@@ -56,6 +64,9 @@ export const readConfiguration = Effect.fn("SharedState.readConfiguration")(func
   id: string,
 ) {
   const sql = yield* SqlClient.SqlClient;
+  if (kind === "fact") return yield* readFactConfiguration(id);
+  // Settings live in settings.json; SettingsSync writes their documents directly.
+  if (kind === "settings" || kind === "project-settings" || kind === "integration") return null;
   if (kind === "project") {
     const rows = yield* sql<{
       name: string;
@@ -67,10 +78,15 @@ export const readConfiguration = Effect.fn("SharedState.readConfiguration")(func
     }>`SELECT * FROM project_labels WHERE label_id=${id}`;
     const row = rows[0];
     if (!row) return null;
-    const repositories = yield* sql<{
+    // A remote cloned twice here still carries one icon.
+    const repositoryRows = yield* sql<{
       remote: string;
       directoryName: string | null;
-    }>`SELECT DISTINCT remote, directory_name AS directoryName FROM label_repositories WHERE label_id=${id} AND remote IS NOT NULL ORDER BY remote`;
+      iconPath: string | null;
+    }>`SELECT remote, directory_name AS directoryName, MAX(icon_path) AS iconPath FROM label_repositories WHERE label_id=${id} AND remote IS NOT NULL GROUP BY remote, directory_name ORDER BY remote`;
+    const repositories = repositoryRows.map(({ iconPath, ...link }) =>
+      iconPath === null ? link : { ...link, iconPath },
+    );
     const sources = yield* sql<{
       kind: string;
       owner: string;
@@ -129,11 +145,13 @@ export const readConfiguration = Effect.fn("SharedState.readConfiguration")(func
     enabled: number;
     schedule_json: string;
     project_id: string;
+    project_folder_id: string | null;
     workspace_strategy_json: string;
     model_selection_json: string;
     runtime_mode: string;
     interaction_mode: string;
     owner_machine: string;
+    target_machine: string | null;
     created_at: string;
   }>`SELECT * FROM scheduled_tasks WHERE task_id=${id}`;
   const row = rows[0];
@@ -155,22 +173,48 @@ export const readConfiguration = Effect.fn("SharedState.readConfiguration")(func
       strategy.type = "root";
     }
   }
+  const savedFiling = (yield* sql<{
+    folder: string | null;
+    field_type: string | null;
+  }>`SELECT json_extract(fields_json,'$.projectFolderId') AS folder,json_type(fields_json,'$.projectFolderId') AS field_type FROM shared_documents WHERE kind='schedule' AND id=${id}`)[0];
+  // A merge places every machine's schedule locally without authoring its owner's
+  // sensitive fields. Keep an equivalent portable reference during later captures,
+  // so a non-owner can still rename or pause the schedule.
+  const projectFolderId =
+    savedFiling &&
+    (yield* resolveProjectLabelId(savedFiling.folder)) === (row.project_folder_id ?? null)
+      ? savedFiling.folder
+      : (row.project_folder_id ?? null);
   return {
     agentId: row.agent_id,
     title: row.title,
     prompt: row.prompt,
     enabled: row.enabled === 1,
     schedule: yield* json(row.schedule_json),
+    ...(projectFolderId !== null || savedFiling?.field_type ? { projectFolderId } : {}),
     repositoryRemote: yield* repository(row.project_id, kind, id),
     workspaceStrategy: strategy,
     modelSelection: yield* json(row.model_selection_json),
     runtimeMode: row.runtime_mode,
     interactionMode: row.interaction_mode,
     ownerMachine: row.owner_machine,
+    machine: row.target_machine ?? null,
     createdAt: row.created_at,
   };
 }, Effect.mapError(storage));
 
+const decodeClock = Schema.decodeUnknownEffect(Schema.fromJsonString(HybridClock));
+const decodeRepositoryRefs = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(
+    Schema.Array(
+      Schema.Struct({
+        remote: Schema.String,
+        directoryName: Schema.NullOr(Schema.String),
+        iconPath: Schema.optionalKey(Schema.String),
+      }),
+    ),
+  ),
+);
 // The legacy read model allows one project per repository. Concurrent moves in
 // different documents therefore need a deterministic winner across those documents.
 const reconcileRepositories = Effect.fn("SharedState.reconcileRepositories")(function* () {
@@ -182,17 +226,11 @@ const reconcileRepositories = Effect.fn("SharedState.reconcileRepositories")(fun
   }>`SELECT d.id,json_extract(d.fields_json,'$.repositories') AS repositories,json_extract(d.clocks_json,'$.repositories') AS clock FROM shared_documents d JOIN project_labels l ON l.label_id=d.id WHERE d.kind='project' AND d.tombstone_json IS NULL AND json_type(d.fields_json,'$.repositories')='array'`;
   const winners = new Map<
     string,
-    { id: string; clock: HybridClock; directoryName: string | null }
+    { id: string; clock: HybridClock; directoryName: string | null; iconPath: string | null }
   >();
   for (const row of refs) {
-    const clock = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(HybridClock))(row.clock);
-    const repositories = yield* Schema.decodeUnknownEffect(
-      Schema.fromJsonString(
-        Schema.Array(
-          Schema.Struct({ remote: Schema.String, directoryName: Schema.NullOr(Schema.String) }),
-        ),
-      ),
-    )(row.repositories);
+    const clock = yield* decodeClock(row.clock);
+    const repositories = yield* decodeRepositoryRefs(row.repositories);
     for (const link of repositories) {
       const previous = winners.get(link.remote);
       if (
@@ -200,7 +238,12 @@ const reconcileRepositories = Effect.fn("SharedState.reconcileRepositories")(fun
         compareClock(clock, previous.clock) > 0 ||
         (compareClock(clock, previous.clock) === 0 && row.id > previous.id)
       )
-        winners.set(link.remote, { id: row.id, clock, directoryName: link.directoryName });
+        winners.set(link.remote, {
+          id: row.id,
+          clock,
+          directoryName: link.directoryName,
+          iconPath: link.iconPath ?? null,
+        });
     }
   }
   const checkouts = yield* sql<{
@@ -239,8 +282,9 @@ const reconcileRepositories = Effect.fn("SharedState.reconcileRepositories")(fun
     const clones = localByRemote.get(remote)?.values() ?? [
       { repository_id: `remote:${remote}`, directory_name: winner.directoryName },
     ];
+    // The synced icon wins; a checkout here that lacks that file records its own on read.
     for (const clone of clones)
-      yield* sql`INSERT INTO label_repositories(label_id,repository_id,remote,directory_name) VALUES (${winner.id},${clone.repository_id},${remote},${clone.directory_name ?? winner.directoryName}) ON CONFLICT(repository_id) DO UPDATE SET label_id=excluded.label_id,remote=excluded.remote,directory_name=excluded.directory_name`;
+      yield* sql`INSERT INTO label_repositories(label_id,repository_id,remote,directory_name,icon_path) VALUES (${winner.id},${clone.repository_id},${remote},${clone.directory_name ?? winner.directoryName},${winner.iconPath}) ON CONFLICT(repository_id) DO UPDATE SET label_id=excluded.label_id,remote=excluded.remote,directory_name=excluded.directory_name,icon_path=COALESCE(excluded.icon_path,label_repositories.icon_path)`;
   }
 });
 
@@ -250,13 +294,25 @@ export const projectDocument = Effect.fn("SharedState.projectDocument")(function
   preserveLocalBindings = false,
   changedFields?: ReadonlyArray<string>,
 ) {
+  // Vault documents project asynchronously through VaultSync, which needs
+  // this machine's keys; see docs/internals/vault-sync.md.
+  if (document.kind === "vault") return;
   const sql = yield* SqlClient.SqlClient;
   const { kind, id, fields } = document;
+  if (kind === "fact") return yield* projectFact(document);
+  // SettingsSync applies settings documents to settings.json outside this transaction.
+  if (kind === "settings" || kind === "project-settings" || kind === "integration") return;
   const at = DateTime.formatIso(yield* DateTime.now);
   if (kind === "project")
     yield* sql`INSERT INTO shared_repository_checkouts(remote,repository_id,directory_name) SELECT r.remote,r.repository_id,r.directory_name FROM label_repositories r JOIN projection_projects p ON p.project_id=r.repository_id WHERE r.remote IS NOT NULL AND p.deleted_at IS NULL GROUP BY r.remote ON CONFLICT(remote) DO UPDATE SET repository_id=excluded.repository_id,directory_name=excluded.directory_name`;
   if (document.tombstone) {
     if (kind === "project") {
+      if (typeof fields.mergedInto === "string") {
+        yield* projectPendingMerges();
+        yield* projectReplicaFilings();
+        if (!preserveLocalBindings) yield* reconcileRepositories();
+        return;
+      }
       yield* sql`UPDATE commitments SET payload_json=json_set(payload_json,'$.labelIds',json((SELECT json_group_array(l.value) FROM json_each(commitments.payload_json,'$.labelIds') l WHERE l.value<>${id}))) WHERE id IN (SELECT commitment_id FROM commitment_labels WHERE label_id=${id})`;
       yield* sql`DELETE FROM commitment_labels WHERE label_id=${id}`;
       yield* sql`UPDATE facts SET updated_at=${at},payload_json=json_set(payload_json,'$.updatedAt',${at},'$.labelIds',json((SELECT json_group_array(l.value) FROM json_each(facts.payload_json,'$.labelIds') l WHERE l.value<>${id}))) WHERE id IN (SELECT fact_id FROM fact_labels WHERE label_id=${id})`;
@@ -294,6 +350,9 @@ export const projectDocument = Effect.fn("SharedState.projectDocument")(function
     )
       yield* reconcileRepositories();
     yield* sql`INSERT OR IGNORE INTO shared_possible_duplicates(kind,first_id,second_id) SELECT 'project',min(label_id,${id}),max(label_id,${id}) FROM project_labels WHERE lower(trim(name))=lower(trim(${f.name})) AND label_id<>${id}`;
+    yield* projectPendingMerges();
+    yield* linkArrivedProject(id);
+    yield* projectReplicaFilings();
     return;
   }
   const remote = typeof fields.repositoryRemote === "string" ? fields.repositoryRemote : null;
@@ -322,7 +381,9 @@ export const projectDocument = Effect.fn("SharedState.projectDocument")(function
           ? previous.projectId
           : (checkout?.project_id ?? previous.projectId ?? null),
       conversationThreadId: previous.conversationThreadId ?? `agent-conversation:${id}`,
-      projectFolderId: null,
+      projectFolderId: yield* resolveProjectLabelId(
+        typeof previous.projectFolderId === "string" ? previous.projectFolderId : null,
+      ),
       updatedAt: at,
       consecutiveFailures: 0,
       backoffUntil: null,
@@ -334,6 +395,7 @@ export const projectDocument = Effect.fn("SharedState.projectDocument")(function
       yield* Schema.decodeUnknownEffect(Agent)(payload),
     );
     yield* sql`INSERT INTO agents(agent_id,conversation_thread_id,payload_json,enabled,daily_run_cap,owner_machine) VALUES (${id},${payload.conversationThreadId},${encoded},1,${f.dailyRunCap},${f.ownerMachine}) ON CONFLICT(agent_id) DO UPDATE SET payload_json=excluded.payload_json,daily_run_cap=excluded.daily_run_cap,owner_machine=excluded.owner_machine`;
+    yield* projectWaitingFacts(id);
     return;
   }
   const decoded = yield* Effect.result(decodeSchedule(fields));
@@ -382,5 +444,5 @@ export const projectDocument = Effect.fn("SharedState.projectDocument")(function
       })
     : null;
   const next = occurrence === null ? null : DateTime.formatIso(occurrence);
-  yield* sql`INSERT INTO scheduled_tasks(task_id,agent_id,title,prompt,enabled,schedule_json,project_id,thread_id,workspace_strategy_json,model_selection_json,runtime_mode,interaction_mode,created_by,creation_source,created_at,updated_at,next_run_at,last_run_status,run_count,owner_machine) VALUES (${id},${f.agentId},${f.title},${f.prompt},${f.enabled ? 1 : 0},${schedule},${projectId},${previous[0]?.thread_id ?? null},${encodeJson(strategy)},${encodeJson(f.modelSelection)},${f.runtimeMode},${f.interactionMode},'user','web',${f.createdAt},${at},${next},'never',0,${f.ownerMachine}) ON CONFLICT(task_id) DO UPDATE SET agent_id=excluded.agent_id,title=excluded.title,prompt=excluded.prompt,enabled=excluded.enabled,schedule_json=excluded.schedule_json,project_id=excluded.project_id,workspace_strategy_json=excluded.workspace_strategy_json,model_selection_json=excluded.model_selection_json,runtime_mode=excluded.runtime_mode,interaction_mode=excluded.interaction_mode,updated_at=excluded.updated_at,owner_machine=excluded.owner_machine,next_run_at=CASE WHEN scheduled_tasks.schedule_json=excluded.schedule_json AND scheduled_tasks.enabled=excluded.enabled THEN scheduled_tasks.next_run_at ELSE excluded.next_run_at END`;
+  yield* sql`INSERT INTO scheduled_tasks(task_id,agent_id,title,prompt,enabled,schedule_json,project_id,thread_id,workspace_strategy_json,model_selection_json,runtime_mode,interaction_mode,created_by,creation_source,created_at,updated_at,next_run_at,last_run_status,run_count,owner_machine,target_machine,project_folder_id) VALUES (${id},${f.agentId},${f.title},${f.prompt},${f.enabled ? 1 : 0},${schedule},${projectId},${previous[0]?.thread_id ?? null},${encodeJson(strategy)},${encodeJson(f.modelSelection)},${f.runtimeMode},${f.interactionMode},'user','web',${f.createdAt},${at},${next},'never',0,${f.ownerMachine},${f.machine ?? null},${yield* resolveProjectLabelId(f.projectFolderId ?? null)}) ON CONFLICT(task_id) DO UPDATE SET agent_id=excluded.agent_id,title=excluded.title,prompt=excluded.prompt,enabled=excluded.enabled,schedule_json=excluded.schedule_json,project_id=excluded.project_id,workspace_strategy_json=excluded.workspace_strategy_json,model_selection_json=excluded.model_selection_json,runtime_mode=excluded.runtime_mode,interaction_mode=excluded.interaction_mode,updated_at=excluded.updated_at,owner_machine=excluded.owner_machine,target_machine=excluded.target_machine,project_folder_id=excluded.project_folder_id,next_run_at=CASE WHEN scheduled_tasks.schedule_json=excluded.schedule_json AND scheduled_tasks.enabled=excluded.enabled THEN scheduled_tasks.next_run_at ELSE excluded.next_run_at END`;
 }, Effect.mapError(storage));

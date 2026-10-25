@@ -1,5 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
-import type { OtlpEndpointCheckResult, OtlpSignal } from "@t3tools/contracts";
+import type { OtlpEndpointCheckResult, OtlpSignal } from "@cogenly/contracts";
 import { useEffect, useEffectEvent, useState } from "react";
 
 import { serverEnvironment } from "../../state/server";
@@ -47,7 +47,7 @@ export function TelemetryExportSettings() {
     return (
       <SettingsSection title="OpenTelemetry export" id="telemetry-export">
         <SettingsScopeNotice target="environment">
-          Choose one environment to configure its telemetry exports.
+          Choose one machine to configure its telemetry exports.
         </SettingsScopeNotice>
       </SettingsSection>
     );
@@ -153,7 +153,7 @@ function TelemetryExportForm() {
         {!canEdit && (
           <p className="text-xs text-muted-foreground">
             This connection lacks permission to change settings on{" "}
-            {environment?.label ?? "the selected environment"}.
+            {environment?.label ?? "the selected machine"}.
           </p>
         )}
         {SIGNALS.map(({ key, label, signal }) => {

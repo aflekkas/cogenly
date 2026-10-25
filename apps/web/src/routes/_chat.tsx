@@ -1,4 +1,4 @@
-import { AuthPreviewOperateScope } from "@t3tools/contracts";
+import { AuthPreviewOperateScope } from "@cogenly/contracts";
 import { Outlet, createFileRoute, redirect, useParams } from "@tanstack/react-router";
 import { useAtomValue } from "@effect/atom-react";
 import { Activity, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";

@@ -265,7 +265,8 @@ pull request is older than the recent list. Type a single word after `#` to sear
 the repository by text. Choose a result to insert it as a chip.
 
 Typing `@` finds more than files. The menu groups Work tasks and chats by title, agents and
-project folders by name, and files and folders, closest matches first and then the most recent.
+project folders by name, [sources](#sources) by service and account, and files and folders,
+closest matches first and then the most recent.
 `@` on its own shows a few recent ones from each group. Everything it offers is on the same
 server.
 
@@ -299,6 +300,19 @@ context is no longer available shows the same dashed outline; hover it for what 
 Copying a message with the copy button, or copying text out of it, gives other apps readable
 Markdown with a link in place of each chip. Older messages that were sent before chips still
 show their context.
+
+## Sources
+
+A source is a connected integration, such as a Gmail or Linear account, named in your message
+so the agent uses that account for the task. Choose **Sources** in the composer toolbar, or type
+`@` and the service or account name, then pick one. It lands as a chip at your cursor, such as
+"Gmail · work". On a narrow window, **Sources** moves into the toolbar's **…** menu.
+
+The list shows the integrations this thread's project can use, both those available in every
+project and those limited to this one. A source that needs sign-in, needs signing in on this
+machine, or is failing stays listed with a badge. Its chip shows a warning until you fix it
+in **Settings → Integrations**; hover the chip for the reason. Choose **Connect sources** at the
+end of the list to add more.
 
 ## Attached files
 

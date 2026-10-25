@@ -1,3 +1,4 @@
+import * as RepoMcpTrust from "../../integrations/RepoMcpTrust.ts";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
@@ -16,10 +17,10 @@ import {
   RunId,
   RuntimeMode,
   ThreadId,
-} from "@t3tools/contracts";
-import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
-import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
-import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
+} from "@cogenly/contracts";
+import * as IdAllocator from "@cogenly/provider-core/server/IdAllocator";
+import * as McpProviderSessions from "@cogenly/provider-core/server/McpProviderSessions";
+import type * as ProviderAdapter from "@cogenly/provider-core/server/ProviderAdapter";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
@@ -73,126 +74,159 @@ const legacyThread = (
     });
   });
 
-it.effect("starts a legacy Claude thread with full access and never emits a tool approval", () =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const root = yield* fs.makeTempDirectoryScoped({ prefix: "cogenly-full-access-" });
-    const opened = yield* Deferred.make<ClaudeAdapter.ClaudeAgentSdkQueryOpenInput>();
-    const offered = yield* Deferred.make<void>();
-    const closed = yield* Deferred.make<void>();
-    const queryRunner: ClaudeAdapter.ClaudeAgentSdkQueryRunnerShape = {
-      allocateSessionId: Effect.succeed("native-full-access"),
-      open: (input) =>
-        Effect.gen(function* () {
-          yield* Deferred.succeed(opened, input);
-          return {
-            messages: Stream.fromEffect(Deferred.await(closed)).pipe(Stream.drain),
-            offer: () => Deferred.succeed(offered, undefined).pipe(Effect.asVoid),
-            setModel: () => Effect.void,
-            applyFlagSettings: () => Effect.void,
-            setPermissionMode: () => Effect.void,
-            stopTask: () => Effect.void,
-            backgroundTasks: () => Effect.succeed(false),
-            interrupt: Effect.void,
-            close: Deferred.succeed(closed, undefined).pipe(Effect.asVoid),
-          };
+const repoTrust = (trusted: boolean): RepoMcpTrust.RepoMcpTrust["Service"] => ({
+  review: ({ definitions }) =>
+    Effect.sync(() => {
+      assert.property(definitions, "local");
+      assert.property(definitions, "web");
+      return {
+        allowedNames: trusted ? ["local", "web"] : ["web"],
+        waitingNames: trusted ? [] : ["local"],
+      };
+    }),
+  subscribe: () => Stream.never,
+  respond: () => Effect.void,
+});
+
+it.effect.each([false, true])(
+  "starts a legacy Claude thread with full access and applies repo MCP trust=%s",
+  (trusted) =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "cogenly-full-access-" });
+      yield* fs.writeFileString(
+        `${root}/.mcp.json`,
+        JSON.stringify({
+          mcpServers: {
+            local: { command: "node", args: ["tools.mjs"] },
+            web: { type: "http", url: "https://example.com/mcp" },
+          },
         }),
-      forkSession: () => Effect.die("unexpected fork"),
-      subagentLaunchToolUseId: () => Effect.succeed(null),
-      assertComplete: Effect.void,
-    };
-    const instanceId = ProviderInstanceId.make("claude");
-    const threadId = ThreadId.make("full-access");
-    const modelSelection = { instanceId, model: "claude-sonnet-4-6" };
-    const runtimePolicy = {
-      runtimeMode: yield* decodeRuntimeMode("approval-required"),
-      interactionMode: "default" as const,
-      cwd: root,
-      approvalPolicy: "on-request",
-    };
-    const adapter = yield* ClaudeAdapter.makeClaudeAdapterV2({
-      instanceId,
-      settings: yield* decodeClaudeSettings({
-        launchArgs: "--permission-mode default",
-      }),
-      environment: { HOME: root },
-      attachmentsDir: root,
-      fileSystem: fs,
-      path,
-      crypto: yield* Crypto.Crypto,
-      idAllocator: yield* IdAllocator.IdAllocatorV2,
-      queryRunner,
-    });
-    const session = yield* adapter.openSession({
-      threadId,
-      providerSessionId: ProviderSessionId.make("full-access"),
-      modelSelection,
-      runtimePolicy,
-    });
-    const events: ProviderAdapter.ProviderAdapterV2Event[] = [];
-    const boundary = yield* Deferred.make<void>();
-    yield* session.events.pipe(
-      Stream.runForEach((event) =>
-        Effect.gen(function* () {
-          events.push(event);
-          if (event.type === "turn.terminal") {
-            yield* Deferred.succeed(boundary, undefined);
-          }
+      );
+      const opened = yield* Deferred.make<ClaudeAdapter.ClaudeAgentSdkQueryOpenInput>();
+      const offered = yield* Deferred.make<void>();
+      const closed = yield* Deferred.make<void>();
+      const queryRunner: ClaudeAdapter.ClaudeAgentSdkQueryRunnerShape = {
+        allocateSessionId: Effect.succeed("native-full-access"),
+        open: (input) =>
+          Effect.gen(function* () {
+            yield* Deferred.succeed(opened, input);
+            return {
+              messages: Stream.fromEffect(Deferred.await(closed)).pipe(Stream.drain),
+              offer: () => Deferred.succeed(offered, undefined).pipe(Effect.asVoid),
+              setModel: () => Effect.void,
+              applyFlagSettings: () => Effect.void,
+              setPermissionMode: () => Effect.void,
+              stopTask: () => Effect.void,
+              backgroundTasks: () => Effect.succeed(false),
+              interrupt: Effect.void,
+              close: Deferred.succeed(closed, undefined).pipe(Effect.asVoid),
+            };
+          }),
+        forkSession: () => Effect.die("unexpected fork"),
+        subagentLaunchToolUseId: () => Effect.succeed(null),
+        assertComplete: Effect.void,
+      };
+      const instanceId = ProviderInstanceId.make("claude");
+      const threadId = ThreadId.make("full-access");
+      const modelSelection = { instanceId, model: "claude-sonnet-4-6" };
+      const runtimePolicy = {
+        runtimeMode: yield* decodeRuntimeMode("approval-required"),
+        interactionMode: "default" as const,
+        cwd: root,
+        approvalPolicy: "on-request",
+      };
+      const adapter = yield* ClaudeAdapter.makeClaudeAdapterV2({
+        repoMcpTrust: repoTrust(trusted),
+        instanceId,
+        settings: yield* decodeClaudeSettings({
+          launchArgs: "--permission-mode default",
         }),
-      ),
-      Effect.forkChild,
-    );
-    const providerThread = yield* session.ensureThread({ threadId, modelSelection, runtimePolicy });
-    const appThread = yield* legacyThread(threadId, modelSelection);
-    yield* session.startTurn({
-      appThread,
-      threadId,
-      runId: RunId.make("test"),
-      runOrdinal: 1,
-      providerTurnOrdinal: 1,
-      attemptId: RunAttemptId.make("test"),
-      rootNodeId: NodeId.make("test"),
-      providerThread,
-      modelSelection,
-      runtimePolicy,
-      message: {
-        messageId: MessageId.make("test"),
-        text: "Write a file",
-        attachments: [],
-        createdBy: "user",
-        creationSource: "web",
-      },
-    });
-    yield* Deferred.await(offered);
-    const { options } = yield* Deferred.await(opened);
-    assert.equal(options.permissionMode, "bypassPermissions");
-    assert.isTrue(options.allowDangerouslySkipPermissions);
-    assert.isFunction(options.canUseTool);
-    const toolInput = { file_path: path.join(root, "test.txt"), content: "ok" };
-    const result = yield* Effect.promise(() =>
-      options.canUseTool!("Write", toolInput, {
-        signal: new AbortController().signal,
+        environment: { HOME: root },
+        attachmentsDir: root,
+        fileSystem: fs,
+        path,
+        crypto: yield* Crypto.Crypto,
+        idAllocator: yield* IdAllocator.IdAllocatorV2,
+        queryRunner,
+      });
+      const session = yield* adapter.openSession({
+        threadId,
+        providerSessionId: ProviderSessionId.make("full-access"),
+        modelSelection,
+        runtimePolicy,
+      });
+      const events: ProviderAdapter.ProviderAdapterV2Event[] = [];
+      const boundary = yield* Deferred.make<void>();
+      yield* session.events.pipe(
+        Stream.runForEach((event) =>
+          Effect.gen(function* () {
+            events.push(event);
+            if (event.type === "turn.terminal") {
+              yield* Deferred.succeed(boundary, undefined);
+            }
+          }),
+        ),
+        Effect.forkChild,
+      );
+      const providerThread = yield* session.ensureThread({
+        threadId,
+        modelSelection,
+        runtimePolicy,
+      });
+      const appThread = yield* legacyThread(threadId, modelSelection);
+      yield* session.startTurn({
+        appThread,
+        threadId,
+        runId: RunId.make("test"),
+        runOrdinal: 1,
+        providerTurnOrdinal: 1,
+        attemptId: RunAttemptId.make("test"),
+        rootNodeId: NodeId.make("test"),
+        providerThread,
+        modelSelection,
+        runtimePolicy,
+        message: {
+          messageId: MessageId.make("test"),
+          text: "Write a file",
+          attachments: [],
+          createdBy: "user",
+          creationSource: "web",
+        },
+      });
+      yield* Deferred.await(offered);
+      const { options } = yield* Deferred.await(opened);
+      assert.property(options.mcpServers, "web");
+      assert.equal("local" in (options.mcpServers ?? {}), trusted);
+      assert.equal(options.permissionMode, "bypassPermissions");
+      assert.isTrue(options.allowDangerouslySkipPermissions);
+      assert.isFunction(options.canUseTool);
+      const toolInput = { file_path: path.join(root, "test.txt"), content: "ok" };
+      const result = yield* Effect.promise(() =>
+        options.canUseTool!("Write", toolInput, {
+          signal: new AbortController().signal,
+          toolUseID: "write-test",
+          requestId: "request-test",
+          suggestions: [],
+        }),
+      );
+      assert.deepEqual(result, {
+        behavior: "allow",
+        updatedInput: toolInput,
         toolUseID: "write-test",
-        requestId: "request-test",
-        suggestions: [],
-      }),
-    );
-    assert.deepEqual(result, {
-      behavior: "allow",
-      updatedInput: toolInput,
-      toolUseID: "write-test",
-    });
-    // The terminal event follows the callback's events, draining the queue without polling.
-    yield* Deferred.succeed(closed, undefined);
-    yield* Deferred.await(boundary);
-    assert.isFalse(events.some((event) => event.type === "runtime_request.updated"));
-    assert.isFalse(
-      events.some(
-        (event) => event.type === "turn_item.updated" && event.turnItem.type === "approval_request",
-      ),
-    );
-  }).pipe(Effect.provide([McpProviderSessions.layer, IdAllocator.layer, NodeServices.layer])),
+      });
+      // The terminal event follows the callback's events, draining the queue without polling.
+      yield* Deferred.succeed(closed, undefined);
+      yield* Deferred.await(boundary);
+      assert.isFalse(events.some((event) => event.type === "runtime_request.updated"));
+      assert.isFalse(
+        events.some(
+          (event) =>
+            event.type === "turn_item.updated" && event.turnItem.type === "approval_request",
+        ),
+      );
+    }).pipe(Effect.provide([McpProviderSessions.layer, IdAllocator.layer, NodeServices.layer])),
 );
 
 // The CLI can report `default` on init although it was opened in bypass
@@ -350,160 +384,204 @@ it.effect("keeps approving tool calls when Claude refuses the bypass restore", (
   }).pipe(Effect.provide([McpProviderSessions.layer, IdAllocator.layer, NodeServices.layer])),
 );
 
-it.effect("starts a legacy Codex thread with full access and auto-approves native requests", () =>
-  Effect.gen(function* () {
-    const serverConfig = yield* makeReplayServerConfig("full-access");
-    const requests: Array<{ method: string; payload: unknown }> = [];
-    const handlers = new Map<string, (payload: unknown) => Effect.Effect<unknown>>();
-    const notifications = new Map<string, (payload: unknown) => Effect.Effect<unknown>>();
-    const request = (method: string, payload: unknown) =>
-      Effect.sync(() => {
-        requests.push({ method, payload });
-        switch (method) {
-          case "initialize":
-            return {};
-          case "thread/start":
-            return { thread: { id: "native-codex", createdAt: 1, updatedAt: 1 } };
-          case "turn/start":
-            return { turn: { id: "native-turn", startedAt: 1 } };
-          default:
-            throw new Error(`Unexpected request: ${method}`);
-        }
+it.effect.each([false, true])(
+  "starts a legacy Codex thread with full access and applies repo MCP trust=%s",
+  (trusted) =>
+    Effect.gen(function* () {
+      const serverConfig = yield* makeReplayServerConfig("full-access");
+      const requests: Array<{ method: string; payload: unknown }> = [];
+      const handlers = new Map<string, (payload: unknown) => Effect.Effect<unknown>>();
+      const notifications = new Map<string, (payload: unknown) => Effect.Effect<unknown>>();
+      const request = (method: string, payload: unknown) =>
+        Effect.sync(() => {
+          requests.push({ method, payload });
+          switch (method) {
+            case "initialize":
+              return {};
+            case "config/read":
+              return {
+                config: {
+                  mcp_servers: {
+                    linear: { url: "https://mcp.linear.app/mcp" },
+                    local: { command: "node" },
+                    web: { url: "https://example.com/mcp" },
+                  },
+                },
+                layers: [
+                  {
+                    name: { type: "project" },
+                    config: {
+                      mcp_servers: {
+                        local: { command: "node" },
+                        web: { url: "https://example.com/mcp" },
+                      },
+                    },
+                  },
+                ],
+                origins: {},
+              };
+            case "thread/resume":
+            case "thread/start":
+              return { thread: { id: "native-codex", createdAt: 1, updatedAt: 1 } };
+            case "turn/start":
+              return { turn: { id: "native-turn", startedAt: 1 } };
+            default:
+              throw new Error(`Unexpected request: ${method}`);
+          }
+        });
+      // The transport fixture supplies only the protocol fields read by these paths.
+      const client = {
+        request,
+        notify: () => Effect.void,
+        handleServerRequest: (
+          method: string,
+          handler: (payload: unknown) => Effect.Effect<unknown>,
+        ) =>
+          Effect.sync(() => {
+            handlers.set(method, handler);
+          }),
+        handleServerNotification: (
+          method: string,
+          handler: (payload: unknown) => Effect.Effect<unknown>,
+        ) =>
+          Effect.sync(() => {
+            notifications.set(method, handler);
+          }),
+        handleUnknownServerRequest: () => Effect.void,
+        handleUnknownServerNotification: () => Effect.void,
+      } as unknown as CodexClient.CodexAppServerClient["Service"];
+      const instanceId = ProviderInstanceId.make("codex");
+      const threadId = ThreadId.make("full-access-codex");
+      const modelSelection = { instanceId, model: "gpt-5.5" };
+      const runtimePolicy = {
+        runtimeMode: yield* decodeRuntimeMode("auto-accept-edits"),
+        interactionMode: "default" as const,
+        cwd: serverConfig.baseDir,
+        approvalPolicy: "on-request",
+        sandboxPolicy: { type: "readOnly" },
+      };
+      const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
+      yield* mcpSessions.set({
+        environmentId: EnvironmentId.make("test"),
+        threadId,
+        providerInstanceId: instanceId,
+        providerSessionId: "test",
+        endpoint: "http://127.0.0.1/mcp",
+        authorizationHeader: "Bearer test",
+        browserToolsAvailable: true,
       });
-    // The transport fixture supplies only the protocol fields read by these paths.
-    const client = {
-      request,
-      notify: () => Effect.void,
-      handleServerRequest: (
-        method: string,
-        handler: (payload: unknown) => Effect.Effect<unknown>,
-      ) =>
-        Effect.sync(() => {
-          handlers.set(method, handler);
-        }),
-      handleServerNotification: (
-        method: string,
-        handler: (payload: unknown) => Effect.Effect<unknown>,
-      ) =>
-        Effect.sync(() => {
-          notifications.set(method, handler);
-        }),
-      handleUnknownServerRequest: () => Effect.void,
-      handleUnknownServerNotification: () => Effect.void,
-    } as unknown as CodexClient.CodexAppServerClient["Service"];
-    const instanceId = ProviderInstanceId.make("codex");
-    const threadId = ThreadId.make("full-access-codex");
-    const modelSelection = { instanceId, model: "gpt-5.5" };
-    const runtimePolicy = {
-      runtimeMode: yield* decodeRuntimeMode("auto-accept-edits"),
-      interactionMode: "default" as const,
-      cwd: serverConfig.baseDir,
-      approvalPolicy: "on-request",
-      sandboxPolicy: { type: "readOnly" },
-    };
-    const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
-    yield* mcpSessions.set({
-      environmentId: EnvironmentId.make("test"),
-      threadId,
-      providerInstanceId: instanceId,
-      providerSessionId: "test",
-      endpoint: "http://127.0.0.1/mcp",
-      authorizationHeader: "Bearer test",
-      browserToolsAvailable: true,
-    });
-    const adapter = yield* CodexAdapter.makeCodexAdapterV2({
-      instanceId,
-      settings: yield* decodeCodexSettings({}),
-      environment: {},
-      clientFactory: { open: () => Effect.succeed(client) },
-      crypto: yield* Crypto.Crypto,
-      fileSystem: yield* FileSystem.FileSystem,
-      idAllocator: yield* IdAllocator.IdAllocatorV2,
-      serverConfig,
-    });
-    const session = yield* adapter.openSession({
-      threadId,
-      providerSessionId: ProviderSessionId.make("codex-test"),
-      modelSelection,
-      runtimePolicy,
-    });
-    const events: ProviderAdapter.ProviderAdapterV2Event[] = [];
-    const boundary = yield* Deferred.make<void>();
-    yield* session.events.pipe(
-      Stream.runForEach((event) =>
-        Effect.gen(function* () {
-          events.push(event);
-          if (event.type === "turn.terminal") yield* Deferred.succeed(boundary, undefined);
-        }),
-      ),
-      Effect.forkChild,
-    );
-    const providerThread = yield* session.ensureThread({ threadId, modelSelection, runtimePolicy });
-    yield* session.startTurn({
-      appThread: yield* legacyThread(threadId, modelSelection),
-      threadId,
-      runId: RunId.make("test"),
-      runOrdinal: 1,
-      providerTurnOrdinal: 1,
-      attemptId: RunAttemptId.make("test"),
-      rootNodeId: NodeId.make("test"),
-      providerThread,
-      modelSelection,
-      runtimePolicy,
-      message: {
-        messageId: MessageId.make("test"),
-        text: "Write a file",
-        attachments: [],
-        createdBy: "user",
-        creationSource: "web",
-      },
-    });
-    assert.deepInclude(requests.find(({ method }) => method === "turn/start")?.payload, {
-      approvalPolicy: "never",
-      sandboxPolicy: { type: "dangerFullAccess" },
-    });
-    assert.nestedPropertyVal(
-      requests.find(({ method }) => method === "thread/start")?.payload,
-      "config.mcp_servers.cogenly.default_tools_approval_mode",
-      "approve",
-    );
-    for (const method of [
-      "item/commandExecution/requestApproval",
-      "item/fileChange/requestApproval",
-    ]) {
-      assert.deepEqual(
-        yield* handlers.get(method)!({ threadId: "native-codex", turnId: "native-turn" }),
-        { decision: "acceptForSession" },
+      const adapter = yield* CodexAdapter.makeCodexAdapterV2({
+        repoMcpTrust: repoTrust(trusted),
+        instanceId,
+        settings: yield* decodeCodexSettings({}),
+        environment: {},
+        clientFactory: { open: () => Effect.succeed(client) },
+        crypto: yield* Crypto.Crypto,
+        fileSystem: yield* FileSystem.FileSystem,
+        idAllocator: yield* IdAllocator.IdAllocatorV2,
+        serverConfig,
+      });
+      const session = yield* adapter.openSession({
+        threadId,
+        providerSessionId: ProviderSessionId.make("codex-test"),
+        modelSelection,
+        runtimePolicy,
+      });
+      const events: ProviderAdapter.ProviderAdapterV2Event[] = [];
+      const boundary = yield* Deferred.make<void>();
+      yield* session.events.pipe(
+        Stream.runForEach((event) =>
+          Effect.gen(function* () {
+            events.push(event);
+            if (event.type === "turn.terminal") yield* Deferred.succeed(boundary, undefined);
+          }),
+        ),
+        Effect.forkChild,
       );
-    }
-    assert.deepEqual(
-      yield* handlers.get("item/permissions/requestApproval")!({
-        permissions: { fileSystem: { read: ["/tmp"] } },
-      }),
-      { permissions: { fileSystem: { read: ["/tmp"] } }, scope: "session" },
-    );
-    assert.propertyVal(
-      yield* handlers.get("mcpServer/elicitation/request")!({
-        serverName: "cogenly",
-        mode: "form",
-        message: "Allow?",
-        requestedSchema: { type: "object", properties: {} },
-      }),
-      "action",
-      "accept",
-    );
-    yield* notifications.get("turn/completed")!({
-      threadId: "native-codex",
-      turn: { id: "native-turn", status: "completed", completedAt: 2, error: null },
-    });
-    yield* Deferred.await(boundary);
-    assert.isFalse(events.some((event) => event.type === "runtime_request.updated"));
-    assert.isFalse(
-      events.some(
-        (event) => event.type === "turn_item.updated" && event.turnItem.type === "approval_request",
-      ),
-    );
-  }).pipe(Effect.provide([McpProviderSessions.layer, IdAllocator.layer, NodeServices.layer])),
+      const providerThread = yield* session.ensureThread({
+        threadId,
+        modelSelection,
+        runtimePolicy,
+      });
+      const start = requests.find((request) => request.method === "thread/start")!.payload as {
+        config: { mcp_servers: Record<string, { enabled: boolean }> };
+      };
+      assert.equal(start.config.mcp_servers.local?.enabled, trusted);
+      assert.propertyVal(start.config.mcp_servers.web, "enabled", true);
+      yield* session.startTurn({
+        appThread: yield* legacyThread(threadId, modelSelection),
+        threadId,
+        runId: RunId.make("test"),
+        runOrdinal: 1,
+        providerTurnOrdinal: 1,
+        attemptId: RunAttemptId.make("test"),
+        rootNodeId: NodeId.make("test"),
+        providerThread,
+        modelSelection,
+        runtimePolicy,
+        message: {
+          messageId: MessageId.make("test"),
+          text: "Write a file",
+          attachments: [],
+          createdBy: "user",
+          creationSource: "web",
+        },
+      });
+      assert.deepInclude(requests.find(({ method }) => method === "turn/start")?.payload, {
+        approvalPolicy: "never",
+        sandboxPolicy: { type: "dangerFullAccess" },
+      });
+      assert.nestedPropertyVal(
+        requests.find(({ method }) => method === "thread/start")?.payload,
+        "config.mcp_servers.cogenly.default_tools_approval_mode",
+        "approve",
+      );
+      // Native apps and plugins stay off; configured MCP servers use literal table keys.
+      const threadStart = requests.find(({ method }) => method === "thread/start");
+      assert.isDefined(threadStart);
+      const threadConfig = (threadStart.payload as { readonly config: Record<string, unknown> })
+        .config;
+      assert.equal(threadConfig["features.apps"], false);
+      assert.equal(threadConfig["features.plugins"], false);
+      assert.deepInclude(threadConfig.mcp_servers, { linear: { enabled: false } });
+      for (const method of [
+        "item/commandExecution/requestApproval",
+        "item/fileChange/requestApproval",
+      ]) {
+        assert.deepEqual(
+          yield* handlers.get(method)!({ threadId: "native-codex", turnId: "native-turn" }),
+          { decision: "acceptForSession" },
+        );
+      }
+      assert.deepEqual(
+        yield* handlers.get("item/permissions/requestApproval")!({
+          permissions: { fileSystem: { read: ["/tmp"] } },
+        }),
+        { permissions: { fileSystem: { read: ["/tmp"] } }, scope: "session" },
+      );
+      assert.propertyVal(
+        yield* handlers.get("mcpServer/elicitation/request")!({
+          serverName: "cogenly",
+          mode: "form",
+          message: "Allow?",
+          requestedSchema: { type: "object", properties: {} },
+        }),
+        "action",
+        "accept",
+      );
+      yield* notifications.get("turn/completed")!({
+        threadId: "native-codex",
+        turn: { id: "native-turn", status: "completed", completedAt: 2, error: null },
+      });
+      yield* Deferred.await(boundary);
+      assert.isFalse(events.some((event) => event.type === "runtime_request.updated"));
+      assert.isFalse(
+        events.some(
+          (event) =>
+            event.type === "turn_item.updated" && event.turnItem.type === "approval_request",
+        ),
+      );
+    }).pipe(Effect.provide([McpProviderSessions.layer, IdAllocator.layer, NodeServices.layer])),
 );
 
 it.effect("reads legacy persisted threads and sessions and rewrites canonical runtime modes", () =>

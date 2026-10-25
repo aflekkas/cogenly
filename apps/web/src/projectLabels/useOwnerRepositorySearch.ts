@@ -1,11 +1,11 @@
-import { useAtomValue } from "@effect/atom-react";
-import type { EnvironmentId, ProjectLabelId } from "@t3tools/contracts";
+import type { EnvironmentId, ProjectLabelId } from "@cogenly/contracts";
 import * as Cause from "effect/Cause";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
 import { useEffect, useMemo, useState } from "react";
 
 import { serverEnvironment } from "../state/server";
+import { useAtomValueOverBuiltSources } from "../state/useAtomValueBuiltOutsideRender";
 import {
   projectLabelKey,
   type EnvironmentProjectLabel,
@@ -112,7 +112,18 @@ export function useOwnerRepositorySearch(
       return states;
     }).pipe(Atom.withLabel("owner-repository-search"));
   }, [searchedQuery, targetsKey]);
-  const raw = useAtomValue(atom);
+  // Each search is built outside render: starting one updates other atoms.
+  const sources = useMemo(
+    () =>
+      (JSON.parse(targetsKey) as SearchTarget[]).map((target) =>
+        serverEnvironment.projectLabelOwnerRepositories({
+          environmentId: target.environmentId,
+          input: { id: target.labelId, query: searchedQuery },
+        }),
+      ),
+    [searchedQuery, targetsKey],
+  );
+  const raw = useAtomValueOverBuiltSources(atom, sources, EMPTY_RAW_ATOM);
 
   // Last settled state per project, shown while a newer search runs, so rows
   // update in place instead of blinking out on every keystroke.

@@ -1,17 +1,17 @@
 import { shellEnvironment } from "../../state/shell";
 import { CopyButton } from "../ui/copy-button";
 import { ProcessSignalActions } from "./ProcessSignalActions";
-import { resolveUsageAccess } from "@t3tools/client-runtime/state/usage-access";
+import { resolveUsageAccess } from "@cogenly/client-runtime/state/usage-access";
 import { environmentSession } from "../../state/session";
-import { AuthOrchestrationOperateScope } from "@t3tools/contracts";
+import { AuthOrchestrationOperateScope } from "@cogenly/contracts";
 import { readEnvironmentScope, useEnvironmentScope } from "../../state/session";
-import { AuthEnvironmentMaintainScope } from "@t3tools/contracts";
+import { AuthEnvironmentMaintainScope } from "@cogenly/contracts";
 import { AlertTriangleIcon, FolderOpenIcon, InfoIcon } from "lucide-react";
 import { ChevronDown, ChevronRight } from "lucide";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@cogenly/client-runtime/state/runtime";
 import {
   useCallback,
   useEffect,
@@ -25,7 +25,7 @@ import type {
   ServerProcessDiagnosticsEntry,
   ServerProcessResourceHistorySummary,
   ServerProcessSignal,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 
@@ -44,7 +44,6 @@ import { ExpandableText } from "./ExpandableText";
 import { ResourceTelemetryDiagnostics } from "./ResourceTelemetryDiagnostics";
 import {
   SettingsNote,
-  SettingsPageContainer,
   SettingsPageMessage,
   SettingsRefreshAction,
   SettingsSection,
@@ -590,7 +589,7 @@ function ProcessResourceHistoryTable({
               <th className="px-3 py-2 text-right font-semibold">Current</th>
               <th className="px-3 py-2 text-right font-semibold">Average</th>
               <th className="px-3 py-2 text-right font-semibold">Peak</th>
-              <th className="px-3 py-2 text-right font-semibold">Max Mem</th>
+              <th className="px-3 py-2 text-right font-semibold">Max mem</th>
               <th className="px-3 py-2 font-semibold">Command</th>
               <th className="px-3 py-2 text-right font-semibold sm:pr-5">PID</th>
             </tr>
@@ -894,20 +893,20 @@ export function DiagnosticsSettingsPanel() {
 
   if (!canReadDiagnostics) {
     return (
-      <SettingsPageContainer>
+      <>
         <SettingsPageMessage>
           {environmentId === null
-            ? "Connect an environment to see diagnostics."
+            ? "Connect a machine to see diagnostics."
             : diagnosticsAccess.isPending
               ? "Checking diagnostics access…"
               : diagnosticsAccess.error}
         </SettingsPageMessage>
-      </SettingsPageContainer>
+      </>
     );
   }
 
   return (
-    <SettingsPageContainer width="wide">
+    <>
       <ResourceTelemetryDiagnostics environmentId={environmentId} />
 
       <SettingsSection
@@ -923,7 +922,7 @@ export function DiagnosticsSettingsPanel() {
       >
         <StatsGrid>
           <StatBlock
-            label="Child Processes"
+            label="Child processes"
             value={processData ? formatCount(processData.processCount) : "..."}
           />
           <StatBlock
@@ -1081,7 +1080,7 @@ export function DiagnosticsSettingsPanel() {
             tone={data && data.failureCount > 0 ? "danger" : "default"}
           />
           <StatBlock
-            label="Slow Spans"
+            label="Slow spans"
             value={data ? formatCount(data.slowSpanCount) : "..."}
             tooltip={
               data
@@ -1091,7 +1090,7 @@ export function DiagnosticsSettingsPanel() {
             tone={data && data.slowSpanCount > 0 ? "warning" : "default"}
           />
           <StatBlock
-            label="Parse Errors"
+            label="Parse errors"
             value={data ? formatCount(data.parseErrorCount) : "..."}
             tone={data && data.parseErrorCount > 0 ? "warning" : "default"}
           />
@@ -1310,6 +1309,6 @@ export function DiagnosticsSettingsPanel() {
         )}
       </SettingsSection>
       {exportFormEnvironmentId === environmentId && <TelemetryExportSettings />}
-    </SettingsPageContainer>
+    </>
   );
 }

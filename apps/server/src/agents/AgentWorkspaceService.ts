@@ -2,6 +2,7 @@ import * as AccountAccess from "../accounts/AccountAccess.ts";
 import * as Access from "./AgentAccessScope.ts";
 import {
   AgentError,
+  WorkHandoffError,
   AgentEventContext,
   AgentId,
   AgentApproval,
@@ -21,7 +22,7 @@ import {
   type CommitmentListInput,
   type CommitmentStatusInput,
   type CommitmentRef,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
@@ -76,10 +77,17 @@ const decodeRunAction = Schema.decodeUnknownEffect(AgentRunAction);
 
 type AgentActor = { readonly agent: Agent; readonly threadId: ThreadId };
 const fail = (message: string) => new AgentError({ message });
+const isWorkHandoffError = Schema.is(WorkHandoffError);
 const wrap = (cause: unknown) =>
   isAgentError(cause)
     ? cause
-    : new AgentError({ message: "Could not access agent workspace state.", cause });
+    : new AgentError({
+        message:
+          isWorkHandoffError(cause) && cause.repositoryMismatch !== undefined
+            ? cause.message
+            : "Could not access agent workspace state.",
+        cause,
+      });
 export class AgentWorkspaceService extends Context.Service<
   AgentWorkspaceService,
   {
@@ -116,12 +124,19 @@ export class AgentWorkspaceService extends Context.Service<
       action: AgentApprovalAction,
       actor?: AgentActor,
     ) => Effect.Effect<{ approval: AgentApproval }, AgentError>;
+    readonly requestThreadIntegrationApproval: (
+      threadId: ThreadId,
+      action: Extract<
+        AgentApprovalAction,
+        { actionKind: "integration_add" | "integration_update" }
+      >,
+    ) => Effect.Effect<{ approval: AgentApproval }, AgentError>;
     readonly listApprovals: (
       input: typeof AgentApprovalListInput.Type,
     ) => Effect.Effect<{ approvals: ReadonlyArray<AgentApproval> }, AgentError>;
     /**
      * Pending approvals raised by ordinary threads (no persistent agent): vault
-     * fills and CLI token exposure, keyed by the thread in their payload. A
+     * fills, CLI token exposure and integration proposals, keyed by their thread. A
      * deleted, archived or settled thread's approvals are left out.
      */
     readonly listThreadApprovals: (
@@ -347,6 +362,23 @@ const make = Effect.gen(function* () {
       yield* notifyApprovals;
       return { approval: yield* getApproval(id) };
     }).pipe(Effect.mapError(wrap));
+  const requestThreadIntegrationApproval: AgentWorkspaceService["Service"]["requestThreadIntegrationApproval"] =
+    (threadId, proposal) =>
+      Effect.gen(function* () {
+        const threads =
+          yield* sql`SELECT thread_id FROM orchestration_v2_projection_threads WHERE thread_id = ${threadId} AND deleted_at IS NULL AND archived_at IS NULL AND json_extract(payload_json, '$.settledOverride') IS NOT 'settled'`;
+        if (!threads[0]) return yield* fail("A live calling thread is required.");
+        const action = { ...proposal, threadId };
+        const encoded = yield* encodeApprovalAction(action);
+        const pending = yield* sql<{
+          id: string;
+        }>`SELECT id FROM agent_approvals WHERE agent_id IS NULL AND status = 'pending' AND action_json = ${encoded}`;
+        if (pending[0]) return { approval: yield* getApproval(pending[0].id) };
+        const id = yield* uuid("approval");
+        yield* sql`INSERT INTO agent_approvals(id, agent_id, action_json, status, requested_at) VALUES (${id}, NULL, ${encoded}, 'pending', ${yield* now})`;
+        yield* notifyApprovals;
+        return { approval: yield* getApproval(id) };
+      }).pipe(Effect.mapError(wrap));
   const executeWork = (
     input: AgentStartWorkInput,
     key: string,
@@ -363,6 +395,9 @@ const make = Effect.gen(function* () {
           commandId: CommandId.make(`agent-work:${agent.id}:${key}`),
           sourceThreadId: input.sourceThreadId ?? agent.conversationThreadId,
           targetProjectId: input.projectId,
+          ...(input.projectFolderId === undefined
+            ? {}
+            : { projectFolderId: input.projectFolderId }),
           title: input.title,
           scopeSummary: input.prompt,
           modelSelection: agent.modelSelection,
@@ -430,12 +465,12 @@ const make = Effect.gen(function* () {
         ORDER BY c.updated_at DESC, c.id LIMIT 500`;
       return { commitments: yield* Effect.forEach(rows, (r) => getCommitment(r.id)) };
     }).pipe(Effect.mapError(wrap));
-  // Both the vault and the accounts kind carry the calling thread in payload.threadId.
+  // Vault/account requests carry payload.threadId; integration proposals carry threadId.
   const listThreadApprovals = (threadId?: ThreadId) =>
     expireApprovals().pipe(
       Effect.andThen(
-        sql`SELECT a.* FROM agent_approvals a JOIN orchestration_v2_projection_threads t ON t.thread_id = json_extract(a.action_json, '$.payload.threadId')
-          WHERE a.status = 'pending' AND a.agent_id IS NULL AND json_extract(a.action_json, '$.actionKind') = 'vault_use'
+        sql`SELECT a.* FROM agent_approvals a JOIN orchestration_v2_projection_threads t ON t.thread_id = COALESCE(json_extract(a.action_json, '$.threadId'), json_extract(a.action_json, '$.payload.threadId'))
+          WHERE a.status = 'pending' AND a.agent_id IS NULL AND json_extract(a.action_json, '$.actionKind') IN ('vault_use', 'integration_add', 'integration_update')
             AND (${threadId ?? null} IS NULL OR t.thread_id = ${threadId ?? null})
             AND t.deleted_at IS NULL AND t.archived_at IS NULL AND json_extract(t.payload_json, '$.settledOverride') IS NOT 'settled'
           ORDER BY a.requested_at, a.id LIMIT 200`,
@@ -458,6 +493,7 @@ const make = Effect.gen(function* () {
     listThreadApprovals,
     subscribeThreadApprovals,
     requestApproval,
+    requestThreadIntegrationApproval,
     startWork,
     listCommitments,
     listOpenItems: (input, actor) =>
@@ -606,6 +642,41 @@ const make = Effect.gen(function* () {
               );
               return { approval: yield* getApproval(id) };
             }
+            if (
+              approval.action.actionKind === "integration_add" ||
+              approval.action.actionKind === "integration_update"
+            ) {
+              if (integrations._tag === "None")
+                return yield* fail("Integrations are unavailable on this server.");
+              const action = approval.action;
+              const agent = approval.agentId === null ? null : yield* store.get(approval.agentId);
+              if (!agent && !action.threadId)
+                return yield* fail("An integration approval needs a calling thread.");
+              if (action.actionKind === "integration_add") {
+                yield* integrations.value
+                  .create(action.payload, {
+                    approveCredentials: true,
+                    approveExecutable: true,
+                    fromAgent: true,
+                    addedByAgent: agent
+                      ? { id: agent.id, name: agent.name }
+                      : { id: action.threadId!, name: "Coding agent" },
+                  })
+                  .pipe(Effect.mapError((cause) => fail(cause.message)));
+              } else {
+                yield* integrations.value
+                  .update(action.payload, { approveCredentials: true, approveExecutable: true })
+                  .pipe(Effect.mapError((cause) => fail(cause.message)));
+              }
+              yield* sql.withTransaction(
+                Effect.gen(function* () {
+                  yield* sql`UPDATE agent_approvals SET status = 'approved', decided_at = ${yield* now}, decided_by = 'user' WHERE id = ${id} AND status = 'pending'`;
+                  if (agent)
+                    yield* sql`INSERT INTO agent_run_actions(id, agent_id, run_id, kind, target_id, at) VALUES (${`approval-action:${id}`}, ${agent.id}, ${approval.sourceRunId}, ${action.actionKind}, ${id}, ${yield* now}) ON CONFLICT(id) DO NOTHING`;
+                }),
+              );
+              return { approval: yield* getApproval(id) };
+            }
             if (approval.agentId === null) return yield* fail("An agent approval needs an agent.");
             const agent = yield* store.get(approval.agentId);
             let resultThreadId: ThreadId | null = null;
@@ -630,27 +701,6 @@ const make = Effect.gen(function* () {
               case "change_permissions":
                 yield* agents.upsert({ ...agent, ...action.payload });
                 break;
-              case "integration_add": {
-                if (integrations._tag === "None")
-                  return yield* fail("Integrations are unavailable on this server.");
-                // The owner reviewed these headers, so their vault items are approved.
-                yield* integrations.value
-                  .create(action.payload, {
-                    approveCredentials: true,
-                    fromAgent: true,
-                    addedByAgent: { id: agent.id, name: agent.name },
-                  })
-                  .pipe(Effect.mapError((cause) => fail(cause.message)));
-                break;
-              }
-              case "integration_update": {
-                if (integrations._tag === "None")
-                  return yield* fail("Integrations are unavailable on this server.");
-                yield* integrations.value
-                  .update(action.payload, { approveCredentials: true })
-                  .pipe(Effect.mapError((cause) => fail(cause.message)));
-                break;
-              }
             }
             yield* sql.withTransaction(
               Effect.gen(function* () {

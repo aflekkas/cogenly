@@ -1,9 +1,10 @@
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { isScratchProject } from "@t3tools/client-runtime/state/projects";
+import { useNavigate } from "@tanstack/react-router";
+import { scopeThreadRef } from "@cogenly/client-runtime/environment";
+import { isScratchProject } from "@cogenly/client-runtime/state/projects";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@cogenly/client-runtime/state/runtime";
 import {
   CommandId,
   WorkHandoffError,
@@ -11,7 +12,7 @@ import {
   type ProjectId,
   type ThreadId,
   type WorkTask,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import {
   CheckIcon,
   CircleAlertIcon,
@@ -24,6 +25,7 @@ import { useId, useMemo, useRef, useState } from "react";
 
 import { useScratchProject } from "~/hooks/useScratchProject";
 import { cn, randomUUID } from "~/lib/utils";
+import { useRepositoryNames } from "~/projectLabels/useRepositoryNames";
 import { useProjects, useServerConfigs, useThreadShell } from "~/state/entities";
 import { serverEnvironment } from "~/state/server";
 import { threadEnvironment } from "~/state/threads";
@@ -37,7 +39,12 @@ import { Spinner } from "../ui/spinner";
 import { Textarea } from "../ui/textarea";
 import { toastManager } from "../ui/toast";
 import { useWorkPickerChoices } from "./StartWork";
-import { ADD_REPOSITORY, describeWorkStartFailure, NO_REPOSITORY } from "./work.logic";
+import {
+  ADD_REPOSITORY,
+  describeWorkStartFailure,
+  disabledWorkProviderMessage,
+  NO_REPOSITORY,
+} from "./work.logic";
 import {
   deriveWorkTaskCardState,
   WORK_TASK_STATE_LABEL,
@@ -54,7 +61,7 @@ const BRIEF_MAX = 4000;
  * True once `value` differs from what it was at mount, so a card animates the
  * state change the user just caused or watched, never history on load.
  */
-function useChangedSinceMount<T>(value: T): boolean {
+export function useChangedSinceMount<T>(value: T): boolean {
   const [initial] = useState(value);
   const [changed, setChanged] = useState(false);
   const differs = !Object.is(initial, value);
@@ -63,7 +70,7 @@ function useChangedSinceMount<T>(value: T): boolean {
 }
 
 /** Fades content in when it changes after mount: opacity only, so reduced motion keeps it too. */
-const changeFade =
+export const changeFade =
   "transition-opacity duration-(--motion-duration-fast) ease-out starting:opacity-0";
 
 function StateIcon({ state }: { readonly state: WorkTaskCardState }) {
@@ -96,6 +103,9 @@ export function WorkTaskCard(props: {
   readonly onOpenThread: (threadId: ThreadId) => void;
 }) {
   const { environmentId, chatThreadId, task } = props;
+  const nameOf = useRepositoryNames();
+  const navigate = useNavigate();
+  const serverConfigs = useServerConfigs();
   const workRef = useMemo(
     () => (task.threadId === undefined ? null : scopeThreadRef(environmentId, task.threadId)),
     [environmentId, task.threadId],
@@ -160,6 +170,9 @@ export function WorkTaskCard(props: {
       if (result._tag === "Failure") {
         if (isAtomCommandInterrupted(result)) return;
         const failure = squashAtomCommandFailure(result);
+        const disabledInstanceId = isWorkHandoffError(failure)
+          ? failure.disabledProviderInstanceId
+          : undefined;
         const described = describeWorkStartFailure(
           isWorkHandoffError(failure) ? failure.stage : null,
         );
@@ -167,7 +180,26 @@ export function WorkTaskCard(props: {
         toastManager.add({
           type: "error",
           title: "Could not start the task",
-          description: described.message,
+          description:
+            disabledInstanceId === undefined
+              ? described.message
+              : disabledWorkProviderMessage(
+                  disabledInstanceId,
+                  serverConfigs.get(environmentId)?.providers ?? [],
+                ),
+          ...(disabledInstanceId === undefined
+            ? {}
+            : {
+                actionProps: {
+                  children: "Provider settings",
+                  onClick: () => {
+                    void navigate({
+                      to: "/settings/providers",
+                      search: { environmentId, instanceId: disabledInstanceId },
+                    });
+                  },
+                },
+              }),
         });
         return;
       }
@@ -212,7 +244,7 @@ export function WorkTaskCard(props: {
     }
   };
 
-  const targetLabel = repository === null ? "No project · this machine" : repository.title;
+  const targetLabel = repository === null ? "No project · this machine" : nameOf(repository);
   const label = WORK_TASK_STATE_LABEL[state];
 
   if (state === "dismissed") {
@@ -293,6 +325,12 @@ export function WorkTaskCard(props: {
               <span className="min-w-0 truncate">{task.modelSelection.model}</span>
             </>
           )}
+          {task.settleWhenDone === true ? (
+            <>
+              <span aria-hidden>·</span>
+              <span className="shrink-0">Settles when done</span>
+            </>
+          ) : null}
         </div>
         {task.outcome?.summary && (state === "done" || state === "failed") ? (
           <p

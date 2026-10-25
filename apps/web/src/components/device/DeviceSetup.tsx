@@ -1,8 +1,8 @@
 import { DeviceHostUpdates, deviceHostUpdateShown } from "./DeviceHostUpdates";
-import type { DevicePlatform, DeviceServiceState, EnvironmentId } from "@t3tools/contracts";
+import type { DevicePlatform, DeviceServiceState, EnvironmentId } from "@cogenly/contracts";
 import { Check } from "lucide-react";
 import { Check as CheckGlyph, CircleAlert } from "lucide";
-import { AuthSettingsWriteScope } from "@t3tools/contracts";
+import { AuthSettingsWriteScope } from "@cogenly/contracts";
 import { useEffect, useState } from "react";
 
 import { Button } from "~/components/ui/button";
@@ -18,9 +18,9 @@ import { cn } from "~/lib/utils";
 const platformName = (platform: DevicePlatform) => (platform === "ios" ? "iOS" : "Android");
 
 export const deviceHubDescription =
-  "Enable this environment to open simulators and emulators, whether they run here or on a remote device host.";
+  "Enable this machine to open simulators and emulators, whether they run here or on a remote device host.";
 export const agentDeviceDescription =
-  "Allow new agent sessions in this environment to start and control local and remote devices, with required tools set up automatically.";
+  "Allow new agent sessions on this machine to start and control local and remote devices, with required tools set up automatically.";
 
 /**
  * `hostStatus` only tracks this machine. A machine without simulator tooling never
@@ -104,7 +104,7 @@ export function DeviceSetup(props: {
     <>
       <WizardHeader
         title="Device setup"
-        description="What device support has installed on this environment, and what each platform needs."
+        description="What device support has installed on this machine, and what each platform needs."
       />
 
       <WizardPanel>
@@ -127,7 +127,7 @@ export function DeviceSetup(props: {
             ) : (
               <div className="flex items-start justify-between gap-4">
                 <p className="text-muted-foreground">
-                  Device support is turned off for this environment.
+                  Device support is turned off for this machine.
                 </p>
                 <Button
                   size="compact"
@@ -285,6 +285,8 @@ export function PlatformStatus(props: {
   readonly platform: string;
   readonly status: { readonly ready: boolean; readonly message: string };
   readonly compact?: boolean;
+  /** What a compact ready row says. Defaults to "Ready". */
+  readonly readyLabel?: string;
 }) {
   return (
     <div
@@ -300,7 +302,9 @@ export function PlatformStatus(props: {
       <div className={cn(props.compact && props.status.ready && "flex items-center gap-2")}>
         <p className="font-medium">{props.platform}</p>
         <p className="text-xs text-muted-foreground">
-          {props.compact && props.status.ready ? "Ready" : props.status.message}
+          {props.compact && props.status.ready
+            ? (props.readyLabel ?? "Ready")
+            : props.status.message}
         </p>
       </div>
     </div>

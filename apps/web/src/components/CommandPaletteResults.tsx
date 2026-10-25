@@ -1,6 +1,5 @@
-import { type ResolvedKeybindingsConfig } from "@t3tools/contracts";
+import { type ResolvedKeybindingsConfig } from "@cogenly/contracts";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
-import { ChevronRightIcon } from "lucide-react";
 import { type RefObject } from "react";
 import { shortcutLabelForCommand } from "../keybindings";
 import {
@@ -17,8 +16,19 @@ import {
   CommandList,
   CommandListHeading,
   CommandListVirtualized,
-  CommandShortcut,
 } from "./ui/command";
+import {
+  SearchListEmpty,
+  SearchListRowDescription,
+  SearchListRowIcon,
+  SearchListRowLabel,
+  SearchListRowMeta,
+  SearchListRowShortcut,
+  SearchListRowSubmenu,
+  SearchListRowText,
+  SearchListRowTrailing,
+  SearchListStaticRow,
+} from "./ui/search-list";
 import { ThreadSearchMatchExcerpt } from "./ThreadSearchMatch";
 
 interface CommandPaletteResultsProps {
@@ -32,12 +42,12 @@ interface CommandPaletteResultsProps {
 
 function CommandPaletteEmptyState(props: { emptyStateMessage?: string; isActionsOnly: boolean }) {
   return (
-    <div className="py-10 text-center text-sm text-muted-foreground">
+    <SearchListEmpty size="dialog">
       {props.emptyStateMessage ??
         (props.isActionsOnly
           ? "No matching actions."
           : "No matching commands, repositories, or threads.")}
-    </div>
+    </SearchListEmpty>
   );
 }
 
@@ -129,6 +139,7 @@ export function CommandPaletteVirtualizedResults(props: CommandPaletteVirtualize
           )
         }
         estimatedItemSize={40}
+        recycleItems={false}
         drawDistance={400}
         contentContainerClassName="px-2"
         className="scroll-fade-y min-h-0 scroll-py-6 overflow-x-hidden overscroll-y-contain py-2 [&::-webkit-scrollbar-track]:my-2"
@@ -137,35 +148,47 @@ export function CommandPaletteVirtualizedResults(props: CommandPaletteVirtualize
   );
 }
 
+/** A palette row's content, the same whether it can be picked or not. */
+function CommandPaletteRowContent(props: {
+  item: CommandPaletteActionItem | CommandPaletteSubmenuItem;
+  shortcutLabel?: string | null;
+}) {
+  const { item } = props;
+  const hasTrailing =
+    item.titleTrailingContent || item.timestamp || props.shortcutLabel || item.kind === "submenu";
+  return (
+    <>
+      {item.icon ? <SearchListRowIcon>{item.icon}</SearchListRowIcon> : null}
+      <SearchListRowText>
+        <SearchListRowLabel leading={item.titleLeadingContent}>{item.title}</SearchListRowLabel>
+        {item.threadContentMatch ? (
+          <ThreadSearchMatchExcerpt match={item.threadContentMatch} />
+        ) : null}
+        {item.description ? (
+          <SearchListRowDescription>{item.description}</SearchListRowDescription>
+        ) : null}
+      </SearchListRowText>
+      {hasTrailing ? (
+        <SearchListRowTrailing>
+          {item.titleTrailingContent}
+          {item.timestamp ? <SearchListRowMeta>{item.timestamp}</SearchListRowMeta> : null}
+          {props.shortcutLabel ? (
+            <SearchListRowShortcut>{props.shortcutLabel}</SearchListRowShortcut>
+          ) : null}
+          {item.kind === "submenu" ? <SearchListRowSubmenu /> : null}
+        </SearchListRowTrailing>
+      ) : null}
+    </>
+  );
+}
+
 function DisabledCommandPaletteResultRow(props: {
   item: CommandPaletteActionItem | CommandPaletteSubmenuItem;
 }) {
   return (
-    <div className="flex min-h-8 select-none items-center gap-2 rounded-sm px-2 py-1.5 text-base opacity-64 sm:min-h-7 sm:text-sm">
-      {props.item.icon}
-      {props.item.description || props.item.threadContentMatch ? (
-        <span className="flex min-w-0 flex-1 flex-col">
-          <span className="flex min-w-0 items-center gap-1.5 text-sm text-foreground">
-            {props.item.titleLeadingContent}
-            <span className="truncate">{props.item.title}</span>
-          </span>
-          {props.item.threadContentMatch ? (
-            <ThreadSearchMatchExcerpt match={props.item.threadContentMatch} />
-          ) : null}
-          {props.item.description ? (
-            <span className="min-w-0 text-muted-foreground/70 text-xs">
-              {props.item.description}
-            </span>
-          ) : null}
-        </span>
-      ) : (
-        <span className="flex min-w-0 flex-1 items-center gap-1.5 text-sm text-foreground">
-          {props.item.titleLeadingContent}
-          <span className="truncate">{props.item.title}</span>
-        </span>
-      )}
-      {props.item.titleTrailingContent}
-    </div>
+    <SearchListStaticRow>
+      <CommandPaletteRowContent item={props.item} />
+    </SearchListStaticRow>
   );
 }
 
@@ -192,38 +215,7 @@ function CommandPaletteResultRow(props: {
         props.onExecuteItem(props.item);
       }}
     >
-      {props.item.icon}
-      {props.item.description || props.item.threadContentMatch ? (
-        <span className="flex min-w-0 flex-1 flex-col">
-          <span className="flex min-w-0 items-center gap-1.5 text-sm text-foreground">
-            {props.item.titleLeadingContent}
-            <span className="truncate">{props.item.title}</span>
-          </span>
-          {props.item.threadContentMatch ? (
-            <ThreadSearchMatchExcerpt match={props.item.threadContentMatch} />
-          ) : null}
-          {props.item.description ? (
-            <span className="min-w-0 text-muted-foreground/70 text-xs">
-              {props.item.description}
-            </span>
-          ) : null}
-        </span>
-      ) : (
-        <span className="flex min-w-0 flex-1 items-center gap-1.5 text-sm text-foreground">
-          {props.item.titleLeadingContent}
-          <span className="truncate">{props.item.title}</span>
-        </span>
-      )}
-      {props.item.titleTrailingContent}
-      {props.item.timestamp ? (
-        <span className="min-w-12 shrink-0 text-right text-xs tabular-nums text-muted-foreground/70">
-          {props.item.timestamp}
-        </span>
-      ) : null}
-      {shortcutLabel ? <CommandShortcut>{shortcutLabel}</CommandShortcut> : null}
-      {props.item.kind === "submenu" ? (
-        <ChevronRightIcon className="-me-0.5 ms-auto size-4 shrink-0 text-muted-foreground/70" />
-      ) : null}
+      <CommandPaletteRowContent item={props.item} shortcutLabel={shortcutLabel} />
     </CommandItem>
   );
 }

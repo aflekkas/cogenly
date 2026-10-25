@@ -1,12 +1,44 @@
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
 
 import {
   EXTEND_TIMEOUT_USEC,
   LauncherNotifier,
   launcherNotifyEnabled,
   launcherNotifyMessages,
+  resolveRuntimePaths,
   WATCHDOG_PING_INTERVAL_MS,
 } from "./serviceLauncher.ts";
+
+describe("launcher runtime entry", () => {
+  it.effect("runs cogenly, falls back to the t3 of a pre-rename runtime, and prefers cogenly", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const home = yield* fs.makeTempDirectoryScoped({ prefix: "cogenly-launcher-" });
+      const install = Effect.fn(function* (version: string, names: ReadonlyArray<string>) {
+        const dir = path.join(home, "runtime/versions", version);
+        yield* fs.makeDirectory(dir, { recursive: true });
+        for (const name of names) yield* fs.writeFileString(path.join(dir, name), "");
+      });
+      yield* install("0.3.0", ["cogenly"]);
+      yield* install("0.2.2", ["t3"]);
+      yield* install("0.3.1", ["cogenly", "t3"]);
+      const entry = (version: string) =>
+        Effect.promise(() => resolveRuntimePaths(home, version)).pipe(
+          Effect.map((paths) => path.basename(paths.entryPath)),
+        );
+      expect(yield* entry("0.3.0")).toBe("cogenly");
+      expect(yield* entry("0.2.2")).toBe("t3");
+      expect(yield* entry("0.3.1")).toBe("cogenly");
+      // Nothing installed: report the current name as the missing one.
+      expect(yield* entry("0.4.0")).toBe("cogenly");
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+});
 
 describe("launcher sd_notify decisions", () => {
   it("extends the start timeout and pings the watchdog while a child starts, before READY", () => {

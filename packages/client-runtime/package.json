@@ -1,5 +1,5 @@
 {
-  "name": "@t3tools/client-runtime",
+  "name": "@cogenly/client-runtime",
   "private": true,
   "type": "module",
   "exports": {
@@ -442,6 +442,14 @@
     "./state/vault": {
       "types": "./src/state/vault.ts",
       "default": "./src/state/vault.ts"
+    },
+    "./state/sync": {
+      "types": "./src/state/sync.ts",
+      "default": "./src/state/sync.ts"
+    },
+    "./machines/pair": {
+      "types": "./src/machines/pairMachines.ts",
+      "default": "./src/machines/pairMachines.ts"
     }
   },
   "scripts": {
@@ -449,10 +457,10 @@
     "test": "vp test run"
   },
   "dependencies": {
-    "@t3tools/contracts": "workspace:*",
-    "@t3tools/shared": "workspace:*",
-    "@t3tools/source-control-core": "workspace:*",
-    "@t3tools/source-control-github": "workspace:*",
+    "@cogenly/contracts": "workspace:*",
+    "@cogenly/shared": "workspace:*",
+    "@cogenly/source-control-core": "workspace:*",
+    "@cogenly/source-control-github": "workspace:*",
     "effect": "catalog:",
     "three": "0.180.0"
   },

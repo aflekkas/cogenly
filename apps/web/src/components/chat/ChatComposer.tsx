@@ -1,5 +1,5 @@
 import { OverlayPresence } from "~/components/ui/overlay-presence";
-import { formatProviderSkillDisplayName } from "@t3tools/shared/inlineSkills";
+import { formatProviderSkillDisplayName } from "@cogenly/shared/inlineSkills";
 import { useComposerTypingGuard } from "./useComposerTypingGuard";
 import { DESKTOP_PASTE_AS_TEXT_EVENT } from "../../lib/desktopPasteAsText";
 import { isLocalEnvironmentDisabled } from "../../localEnvironment";
@@ -10,7 +10,7 @@ import { Dialog, DialogPopup, DialogTitle } from "../ui/dialog";
 import {
   composerPullRequestsFromLinks,
   filterComposerPullRequestMatches,
-} from "@t3tools/shared/composerPullRequestMatches";
+} from "@cogenly/shared/composerPullRequestMatches";
 import { importPastedComposerText, readPastedComposerContext } from "../composerInlineTokenPaste";
 import { elementContextToPreviewAnnotation } from "../../lib/elementContext";
 import { RefreshIcon } from "~/components/ui/refresh-icon";
@@ -26,6 +26,7 @@ import type {
   ChatAttachment as ContractChatAttachment,
   ChatFileAttachment,
   EnvironmentId,
+  IntegrationSource,
   ModelSelection,
   ProjectId,
   PullRequestListInput,
@@ -39,7 +40,7 @@ import type {
   ScopedThreadRef,
   ServerProvider,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import {
   EnvironmentRequestInvalidError,
   AuthOrchestrationOperateScope,
@@ -48,23 +49,22 @@ import {
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
   PROVIDER_WORKSPACE_SNAPSHOT_TTL_MS,
-} from "@t3tools/contracts";
-import type { EnvironmentConnectionPresentation } from "@t3tools/client-runtime/connection";
-import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+} from "@cogenly/contracts";
+import type { EnvironmentConnectionPresentation } from "@cogenly/client-runtime/connection";
+import { squashAtomCommandFailure } from "@cogenly/client-runtime/state/runtime";
 import * as Schema from "effect/Schema";
 import {
   isPasteAsTextShortcut,
   nextPastedTextFileName,
   pastedTextDisposition,
   wouldTextPasteExceedLimit,
-} from "@t3tools/client-runtime/text-paste";
-import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
+} from "@cogenly/client-runtime/text-paste";
+import { serializeComposerFileLink } from "@cogenly/shared/composerTrigger";
 import { folderDropTarget, resolveDroppedFolderPath } from "./folderDrop";
-import { createModelSelection, normalizeModelSlug } from "@t3tools/shared/model";
-import { USAGE_LIMITS_COMMAND } from "@t3tools/shared/usageLimits";
+import { createModelSelection, normalizeModelSlug } from "@cogenly/shared/model";
+import { USAGE_LIMITS_COMMAND } from "@cogenly/shared/usageLimits";
 import {
   memo,
-  type ComponentProps,
   type ReactNode,
   useCallback,
   useEffect,
@@ -146,7 +146,7 @@ import {
   type ComposerBannerStackItem,
 } from "./ComposerBannerStack";
 import { ComposerStackColumn } from "./ComposerStackColumn";
-import { formatAttachmentSize } from "@t3tools/client-runtime/state/attachments";
+import { formatAttachmentSize } from "@cogenly/client-runtime/state/attachments";
 import {
   acceptComposerAttachmentFiles,
   attachmentsToReleaseOnUploadCapabilityLoss,
@@ -175,7 +175,7 @@ import {
   type TerminalContextSelection,
 } from "../../lib/terminalContext";
 import { useComposerPathSearch } from "../../lib/composerPathSearchState";
-import { toKindScopedComposerContextId } from "@t3tools/shared/composerContextReferences";
+import { toKindScopedComposerContextId } from "@cogenly/shared/composerContextReferences";
 import {
   getRestingComposerImagePreviewCounts,
   resolveComposerDictationFit,
@@ -227,20 +227,21 @@ import {
   linkContextReference,
   agentContextRecord,
   projectFolderContextRecord,
+  integrationContextRecord,
 } from "~/lib/composerContextRecords";
-import { matchComposerMentionItems } from "@t3tools/client-runtime/composerThreadItems";
+import { matchComposerMentionItems } from "@cogenly/client-runtime/composerThreadItems";
 import { useAgents } from "~/agents/agentsClient";
 import { useThreadKindResolver } from "~/hooks/useThreadKind";
 import { useEnvironmentProjectLabels } from "~/projectLabels/useProjectLabels";
 import { useThreadContextDrop, threadContextDropTargetProps } from "./threadContextDrag";
 import { readThreadShell, useThreadShells } from "~/state/entities";
 import { requestConfirmDialog } from "~/confirmDialog";
-import { encodeComposerContextFragment } from "@t3tools/shared/composerContextClipboard";
+import { encodeComposerContextFragment } from "@cogenly/shared/composerContextClipboard";
 import type {
   ComposerContextClipboardFragment,
   ComposerContextRecord,
   ThreadPullRequestLink,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { resolveAssetUrl } from "~/assets/assetUrls";
 import { assetEnvironment } from "~/state/assets";
 import { readPreparedConnection } from "~/state/session";
@@ -262,6 +263,7 @@ import {
   composerSuggestionOptionId,
 } from "./ComposerCommandMenu";
 import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
+import { ComposerSourcesPicker, useComposerSources } from "./ComposerSourcesPicker";
 import { ComposerImageThumbnail } from "./ComposerImageThumbnail";
 import { ImageMarkupDialog } from "./ImageMarkupDialog";
 import {
@@ -326,7 +328,7 @@ import {
   PlayIcon,
   XIcon,
 } from "lucide-react";
-import { proposedPlanTitle } from "@t3tools/shared/proposedPlanText";
+import { proposedPlanTitle } from "@cogenly/shared/proposedPlanText";
 import { hasProviderSetup } from "./ProviderStatusBanner";
 import {
   applyProviderInstanceSettings,
@@ -336,7 +338,7 @@ import {
   type ProviderInstanceEntry,
 } from "../../providerInstances";
 import { type AppModelOption, getAppModelOptionsForInstance } from "../../modelSelection";
-import type { UnifiedSettings } from "@t3tools/contracts/settings";
+import type { UnifiedSettings } from "@cogenly/contracts/settings";
 import {
   isVideoAttachment,
   type ChatMessage,
@@ -358,7 +360,7 @@ import type {
 import {
   resolveComposerDispatchMode,
   type ComposerDispatchMode,
-} from "@t3tools/client-runtime/state/composer-dispatch";
+} from "@cogenly/client-runtime/state/composer-dispatch";
 import type { ContextWindowSnapshot } from "../../lib/contextWindow";
 import {
   getProviderSlashCommandsForSlashMenu,
@@ -367,7 +369,7 @@ import {
   hasCurrentProviderWorkspaceSnapshot,
   resolveProviderSkillsForCwd,
   resolveProviderSlashCommandsForCwd,
-} from "@t3tools/client-runtime/providerSkills";
+} from "@cogenly/client-runtime/providerSkills";
 import { searchProviderSkills } from "../../providerSkillSearch";
 import { useDelayedStatus } from "../../hooks/useDelayedStatus";
 import { useElementState } from "../../hooks/useElementState";
@@ -384,6 +386,7 @@ import {
   ComposerProjectPicker,
   useComposerProjectPickerState,
 } from "../../projectLabels/ComposerProjectPicker";
+import { useComposerProjectFolder } from "../../projectLabels/useComposerProjectFolder";
 import type { ReviewCommentContext } from "../../reviewCommentContext";
 
 function ComposerVideoThumbnail({ file }: { file: File }) {
@@ -1489,6 +1492,11 @@ export interface ChatComposerProps {
     readonly label: string;
     readonly connection: EnvironmentConnectionPresentation;
   } | null;
+  /**
+   * The unavailable environment is still connecting and nothing has failed:
+   * send stays blocked, but the composer reads "Connecting", not disconnected.
+   */
+  environmentConnecting?: boolean;
 
   // Pending approvals / inputs
   activePendingApproval: PendingApproval | null;
@@ -1529,6 +1537,8 @@ export interface ChatComposerProps {
   providerCatalogKnown: boolean;
   activeProjectDefaultModelSelection: ModelSelection | null | undefined;
   activeThreadModelSelection: ModelSelection | null | undefined;
+  /** The driver the thread ran on, kept when its exact instance is missing here. */
+  activeThreadDriverKind?: ProviderDriverKind | null;
   reportedModelSelection?: ModelSelection | null;
   /**
    * Reports the selection a send would dispatch (null while no provider can
@@ -1663,6 +1673,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     sendDisabledReason: externalSendDisabledReason,
     isPreparingWorktree,
     environmentUnavailable,
+    environmentConnecting = false,
     pendingUserInputs: incomingPendingUserInputs,
     activePendingProgress: incomingPendingProgress,
     activePendingResolvedAnswers,
@@ -1678,6 +1689,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     providerCatalogKnown,
     activeProjectDefaultModelSelection,
     activeThreadModelSelection,
+    activeThreadDriverKind,
     reportedModelSelection,
     onSendModelSelectionChange,
     activeProjectId,
@@ -2060,9 +2072,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         lockedProvider,
         lockedInstanceId:
           activeThread?.runtime?.providerInstanceId ?? activeThreadModelSelection?.instanceId,
+        threadDriverKind: activeThreadDriverKind,
       }),
     [
       activeProjectDefaultModelSelection?.instanceId,
+      activeThreadDriverKind,
       activeThread?.runtime?.providerInstanceId,
       activeThreadModelSelection?.instanceId,
       selectedProviderByThreadId,
@@ -2078,8 +2092,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // stays blocked either way; only the chrome waits, keeping the picker with
   // the thread's own selection instead of swapping in the setup button and
   // back once the catalog lands.
-  const providerCatalogPending = noProviderAvailable && !providerCatalogKnown;
+  // An environment still connecting has not reported its providers either.
+  const providerCatalogPending =
+    noProviderAvailable && (!providerCatalogKnown || environmentConnecting);
   const showProviderUnavailable = noProviderAvailable && !providerCatalogPending;
+  // What the send button says while send is blocked: "Connecting" until the
+  // environment or its catalog arrives, "disconnected" only once that failed.
+  const sendWaitsForConnection = isConnecting || environmentConnecting || providerCatalogPending;
+  const sendBlockedByEnvironment =
+    (environmentUnavailable !== null && !environmentConnecting) ||
+    showProviderUnavailable ||
+    projectSelectionRequired;
   const providerSetupInstanceId = noProviderAvailable
     ? (unavailableProviderInstanceId ??
       (lockedProvider === null
@@ -2487,6 +2510,35 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const { labels: mentionProjectFolders } = useEnvironmentProjectLabels(
     isPathTrigger ? environmentId : null,
   );
+  // Sources are kept to the thread's project, the same set its agent can call.
+  const { currentId: composerProjectLabelId } = useComposerProjectFolder({
+    environmentId,
+    threadId: activeThreadId,
+    draftId: routeKind === "draft" ? draftId : null,
+  });
+  const { sources: mentionSources } = useComposerSources(
+    isPathTrigger ? environmentId : null,
+    composerProjectLabelId,
+  );
+  // The Sources picker opens from its toolbar button, or from the overflow menu once the
+  // button has folded away; then it sits on the overflow trigger (`anchor`).
+  const [sourcesPicker, setSourcesPicker] = useState<{
+    readonly open: boolean;
+    readonly anchor: HTMLElement | null;
+  }>({ open: false, anchor: null });
+  const restingOverflowRef = useRef<HTMLDivElement>(null);
+  const onSourcesPickerOpenChange = (open: boolean) => {
+    setSourcesPicker((current) => (open ? { ...current, open } : { open: false, anchor: null }));
+  };
+  const onSourcesPickerOpenChangeStable = useStableCallback(onSourcesPickerOpenChange);
+  const openSourcesFromOverflow = () => {
+    // A frame later, so the closing overflow menu hands focus back before the picker
+    // takes it for its search field.
+    window.requestAnimationFrame(() => {
+      setSourcesPicker({ open: true, anchor: restingOverflowRef.current });
+    });
+  };
+  const openSourcesFromOverflowStable = useStableCallback(openSourcesFromOverflow);
   const mentionItems = useMemo(
     () =>
       composerTrigger?.kind !== "path"
@@ -2513,6 +2565,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               name: folder.name,
               updatedAt: folder.updatedAt,
             })),
+            sources: mentionSources,
             environmentId,
             excludeThreadId: activeThreadId,
             query: composerTrigger.query,
@@ -2524,6 +2577,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       environmentThreadShells,
       mentionAgents,
       mentionProjectFolders,
+      mentionSources,
       resolveThreadKind,
     ],
   );
@@ -2882,7 +2936,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         : "No pull requests found in this repository.";
     }
     return composerTriggerKind === "path"
-      ? "No matching tasks, chats, agents, projects or files."
+      ? "No matching tasks, chats, agents, projects, sources or files."
       : "No matching command.";
   }, [
     composerTrigger,
@@ -3201,7 +3255,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     };
     const sourceConnection = readPreparedConnection(sourceEnvironmentId);
     if (!sourceConnection) {
-      fail("The environment it came from is not connected.");
+      fail("The machine it came from is not connected.");
       return;
     }
     const result = await createAssetUrl({
@@ -3330,7 +3384,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               ? previewAnnotationContextRecord(existing.record)
               : existing?.kind === "thread" ||
                   existing?.kind === "agent" ||
-                  existing?.kind === "project-folder"
+                  existing?.kind === "project-folder" ||
+                  existing?.kind === "integration"
                 ? existing.record
                 : existing
                   ? (uploadedContextRecordFromDraft(existing) ?? undefined)
@@ -3384,6 +3439,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         case "project-folder": {
           // The agent can only follow links on its own server; a pasted foreign one is dropped.
           if (record.environmentId !== environmentId) break;
+          addComposerDraftThreadContexts(attachmentDraftTarget, [record], {
+            appendReference: false,
+          });
+          rewritten.set(record.contextId, record.contextId);
+          break;
+        }
+        case "integration": {
+          // An integration id names an account on one server; one pasted from another is dropped.
+          if (sourceEnvironmentId !== null && sourceEnvironmentId !== environmentId) break;
           addComposerDraftThreadContexts(attachmentDraftTarget, [record], {
             appendReference: false,
           });
@@ -3927,6 +3991,42 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   };
 
   const { onUsageLimitsCommand } = props;
+  /**
+   * The one way a source enters the draft, from the Sources picker or `@`: its chip at the
+   * caret (or in place of the `@` query) and its record beside it. Picking a source the draft
+   * already holds adds another chip for the same record.
+   */
+  const insertIntegrationSource = (
+    source: IntegrationSource,
+    replace?: { text: string; rangeStart: number; rangeEnd: number },
+  ): boolean => {
+    const record = integrationContextRecord(source);
+    const replacement = `${formatInlineContextReference(linkContextReference(record))} `;
+    if (!replace) {
+      if (insertComposerText(replacement, "cursor", { ensureLeadingBoundary: true })) {
+        addComposerDraftThreadContexts(attachmentDraftTarget, [record], { appendReference: false });
+        return true;
+      }
+      // The editor is not taking input (connecting, a question pending): the store appends
+      // the chip to the draft, as it does for context from other panels.
+      addComposerDraftThreadContexts(attachmentDraftTarget, [record]);
+      return false;
+    }
+    const rangeEnd = extendReplacementRangeForTrailingSpace(
+      replace.text,
+      replace.rangeEnd,
+      replacement,
+    );
+    const applied = applyPromptReplacement(replace.rangeStart, rangeEnd, replacement, {
+      expectedText: replace.text.slice(replace.rangeStart, rangeEnd),
+    });
+    if (applied) {
+      addComposerDraftThreadContexts(attachmentDraftTarget, [record], { appendReference: false });
+    }
+    return applied;
+  };
+  const insertIntegrationSourceStable = useStableCallback(insertIntegrationSource);
+
   const onSelectComposerItem = (item: ComposerCommandItem) => {
     if (composerSelectLockRef.current) return;
     composerSelectLockRef.current = true;
@@ -4085,6 +4185,19 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         addComposerDraftThreadContexts(attachmentDraftTarget, [record], {
           appendReference: false,
         });
+        setComposerHighlightedItemId(null);
+      }
+      return;
+    }
+    if (item.type === "integration") {
+      if (trigger.kind !== "path") return;
+      if (
+        insertIntegrationSource(item.source, {
+          text: snapshot.value,
+          rangeStart: trigger.rangeStart,
+          rangeEnd: trigger.rangeEnd,
+        })
+      ) {
         setComposerHighlightedItemId(null);
       }
       return;
@@ -4574,14 +4687,27 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     routeKind === "draft" ? draftId : null,
   );
   const showProjectPicker = activeThreadId !== null && canPickProject;
+  const showSourcesPicker = activeThreadId !== null;
   const restingProviderTraitsPicker = renderProviderTraitsPicker({
     ...providerTraitsPickerInput,
     size: composerControlsCollapsed ? "xs" : "sm",
-    // Traits is the first block, so it hides once every block after it has.
+    // Traits is the first block, so it hides once every block after it has
+    // (mode, then project and sources for a thread).
     hidden:
       composerControlsHidden ||
-      restingHiddenBlockCount > (planModeUiEnabled ? 1 : 0) + (showProjectPicker ? 1 : 0),
+      restingHiddenBlockCount >
+        (planModeUiEnabled ? 1 : 0) + (showProjectPicker ? 1 : 0) + (showSourcesPicker ? 1 : 0),
   });
+  // Sources is the last block, so it is the first to fold. A picker whose trigger folds away
+  // (or unfolds, when it sits on the overflow trigger) closes rather than float off nothing.
+  const sourcesBlockFolded = restingHiddenBlockCount > 0;
+  const sourcesPickerOpen =
+    sourcesPicker.open &&
+    !composerControlsHidden &&
+    (sourcesPicker.anchor === null ? !sourcesBlockFolded : sourcesBlockFolded);
+  if (sourcesPicker.open && !sourcesPickerOpen) {
+    setSourcesPicker({ open: false, anchor: null });
+  }
   const restingBlockDefs = [
     ...(providerTraitsPicker
       ? [
@@ -4606,8 +4732,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           },
         ]
       : []),
-    // Last, so a narrow toolbar drops it to its folder icon and then hides it
-    // before the model or effort controls give way.
+    // The project folds before the model or effort controls give way.
     ...(showProjectPicker
       ? [
           {
@@ -4624,6 +4749,26 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   disabled={isSendBusy}
                 />
               </>
+            ),
+          },
+        ]
+      : []),
+    ...(showSourcesPicker
+      ? [
+          {
+            // Last, so it folds first; the overflow menu then offers it.
+            id: "sources",
+            content: (
+              <ComposerSourcesPicker
+                environmentId={environmentId}
+                projectLabelId={composerProjectLabelId}
+                size={composerControlsCollapsed ? "xs" : "sm"}
+                disabled={isSendBusy}
+                open={sourcesPickerOpen}
+                anchor={sourcesPicker.anchor}
+                onOpenChange={onSourcesPickerOpenChangeStable}
+                onPick={insertIntegrationSourceStable}
+              />
             ),
           },
         ]
@@ -4777,6 +4922,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           );
         })}
         <div
+          ref={restingOverflowRef}
           data-resting-controls-overflow
           aria-hidden={hiddenRestingBlockIds.length === 0 || undefined}
           inert={hiddenRestingBlockIds.length === 0 || undefined}
@@ -4795,6 +4941,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               hiddenRestingBlockIds.includes("traits") ? providerTraitsMenuContent : undefined
             }
             onToggleInteractionMode={toggleInteractionMode}
+            {...(hiddenRestingBlockIds.includes("sources")
+              ? { onOpenSources: openSourcesFromOverflowStable }
+              : {})}
           />
         </div>
       </>
@@ -5304,7 +5453,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             isEnvironmentRequestInvalidError(error) &&
             error.reason === "thread_transcript_too_large"
               ? "This thread exceeds the attachment size limit. Try a shorter thread."
-              : "Check that its environment is connected and up to date, then try again.",
+              : "Check that its machine is connected and up to date, then try again.",
         });
       } finally {
         toastManager.close(loadingToast);
@@ -5476,7 +5625,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         if (target === "remote") {
           toastManager.add({
             type: "error",
-            title: "Folders can't be dropped into remote environments",
+            title: "Folders can't be dropped onto remote machines",
           });
           return;
         }
@@ -5892,12 +6041,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                             promptHasText={false}
                             isSendBusy={isSendBusy}
                             sendDisabledReason={sendDisabledReason}
-                            isConnecting={isConnecting}
-                            isEnvironmentUnavailable={
-                              environmentUnavailable !== null ||
-                              noProviderAvailable ||
-                              projectSelectionRequired
-                            }
+                            isConnecting={sendWaitsForConnection}
+                            isEnvironmentUnavailable={sendBlockedByEnvironment}
                             isPreparingWorktree={false}
                             hasSendableContent={false}
                             preserveComposerFocusOnPointerDown
@@ -6470,12 +6615,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       promptHasText={false}
                       isSendBusy={isSendBusy}
                       sendDisabledReason={sendDisabledReason}
-                      isConnecting={isConnecting}
-                      isEnvironmentUnavailable={
-                        environmentUnavailable !== null ||
-                        noProviderAvailable ||
-                        projectSelectionRequired
-                      }
+                      isConnecting={sendWaitsForConnection}
+                      isEnvironmentUnavailable={sendBlockedByEnvironment}
                       isPreparingWorktree={false}
                       hasSendableContent={false}
                       preserveComposerFocusOnPointerDown
@@ -6607,12 +6748,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     promptHasText={prompt.trim().length > 0}
                     isSendBusy={isSendBusy}
                     sendDisabledReason={sendDisabledReason}
-                    isConnecting={isConnecting}
-                    isEnvironmentUnavailable={
-                      environmentUnavailable !== null ||
-                      noProviderAvailable ||
-                      projectSelectionRequired
-                    }
+                    isConnecting={sendWaitsForConnection}
+                    isEnvironmentUnavailable={sendBlockedByEnvironment}
                     isPreparingWorktree={isPreparingWorktree}
                     hasSendableContent={composerSendState.hasSendableContent}
                     canResume={showResumeAction}

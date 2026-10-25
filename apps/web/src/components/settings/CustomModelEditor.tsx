@@ -2,8 +2,8 @@
 
 import { PlusIcon, XIcon } from "lucide-react";
 import { useMemo, useState } from "react";
-import type { ProviderDriverKind, ServerProviderModel } from "@t3tools/contracts";
-import type { CustomModelDefinition } from "@t3tools/shared/model";
+import type { ProviderDriverKind, ServerProviderModel } from "@cogenly/contracts";
+import type { CustomModelDefinition } from "@cogenly/shared/model";
 
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
@@ -171,7 +171,6 @@ export function CustomModelEditor({
       />
       <label className="flex shrink-0 items-center gap-1.5 text-2xs text-muted-foreground">
         <Switch
-          size="sm"
           checked={choice.isDefault}
           onCheckedChange={(checked) =>
             updateChoice(descriptor.key, choice.key, { isDefault: checked })

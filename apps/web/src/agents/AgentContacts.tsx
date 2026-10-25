@@ -1,10 +1,10 @@
 import { useSensor, useSensors, type DragEndEvent, type UniqueIdentifier } from "@dnd-kit/core";
 import { arrayMove, SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { useAtomValue } from "@effect/atom-react";
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { planPinnedReorder } from "@t3tools/client-runtime/state/thread-sort";
-import type { ContextMenuItem, EnvironmentId, ProjectLabelId } from "@t3tools/contracts";
-import { formatThreadLink } from "@t3tools/shared/threadLinks";
+import { scopeThreadRef } from "@cogenly/client-runtime/environment";
+import { planPinnedReorder } from "@cogenly/client-runtime/state/thread-sort";
+import type { ContextMenuItem, EnvironmentId, ProjectLabelId } from "@cogenly/contracts";
+import { formatThreadLink } from "@cogenly/shared/threadLinks";
 import * as Schema from "effect/Schema";
 import { EllipsisIcon } from "lucide-react";
 import {
@@ -544,14 +544,14 @@ function AgentRow({
     if (!api) return;
     const items: ContextMenuItem<AgentMenuAction>[] = [
       { id: "open", label: "Open", icon: "mail-open" },
-      { id: "details", label: "Open Details", icon: "settings" },
+      { id: "details", label: "Open details", icon: "settings" },
       { id: "rename", label: "Rename", icon: "pencil", disabled: !canWrite },
-      { id: "face", label: "Change Face…", disabled: !canWrite },
+      { id: "face", label: "Change face…", disabled: !canWrite },
       ...(folders.length > 0 || currentFolderId !== null
         ? [
             {
               id: "move-project" as const,
-              label: "Move to Project",
+              label: "Move to project…",
               icon: "folder",
               disabled: !canMoveProject,
               children: [
@@ -569,13 +569,16 @@ function AgentRow({
                     checked: entry.label.id === currentFolderId,
                     disabled: entry.label.id === currentFolderId,
                   })),
-                {
-                  id: "move-project-none" as const,
-                  label: "No Project",
-                  checked: currentFolderId === null,
-                  disabled: currentFolderId === null,
-                  separatorBefore: folders.length > 0,
-                },
+                // The way out, as on a thread's menu: only while it is in one.
+                ...(currentFolderId !== null
+                  ? [
+                      {
+                        id: "move-project-none" as const,
+                        label: "Remove from project",
+                        separatorBefore: folders.length > 0,
+                      },
+                    ]
+                  : []),
               ],
             },
           ]
@@ -583,7 +586,7 @@ function AgentRow({
       ...(unread > 0 && latestReply
         ? [{ id: "mark-read" as const, label: "Mark as Read", icon: "check" }]
         : []),
-      { id: "copy-link", label: "Copy Link", icon: "link" },
+      { id: "copy-link", label: "Copy link", icon: "link" },
       {
         id: "delete",
         label: "Delete…",

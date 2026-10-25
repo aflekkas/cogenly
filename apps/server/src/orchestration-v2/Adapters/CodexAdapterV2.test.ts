@@ -5,6 +5,7 @@ import {
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   CheckpointId,
+  EnvironmentId,
   RuntimeMode,
   type ModelSelection,
   NodeId,
@@ -16,14 +17,15 @@ import {
   ProviderTurnId,
   RunAttemptId,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { assert, describe, it } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import { TestClock } from "effect/testing";
-import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
+import * as ProviderAdapter from "@cogenly/provider-core/server/ProviderAdapter";
+import { nativeMcpContextLine } from "../../integrations/NativeMcpPolicy.ts";
 import * as CodexAdapterV2 from "./CodexAdapterV2.ts";
 
 const decodeRuntimeMode = Schema.decodeUnknownSync(RuntimeMode);
@@ -646,32 +648,71 @@ describe("CodexAdapterV2 runtime policy", () => {
     }),
   );
 
-  it.effect("runs chat-surface turns in a read-only sandbox with conversation instructions", () =>
-    Effect.gen(function* () {
-      const params = yield* CodexAdapterV2.buildCodexTurnStartParams({
-        nativeThreadId: "native-chat-conversation",
-        codexInput: [{ type: "text", text: "explain this idea" }],
-        runtimePolicy: {
-          runtimeMode: "full-access",
-          interactionMode: "default",
-          cwd: null,
-          conversationMode: true,
-        },
-        modelSelection: {
-          instanceId: ProviderInstanceId.make("codex"),
-          model: "gpt-5.4",
-        },
-        hasT3Mcp: true,
-      });
+  const chatTurn = (
+    terminalToolsAvailable: boolean,
+    interactionMode: "default" | "plan" = "default",
+  ) =>
+    CodexAdapterV2.buildCodexTurnStartParams({
+      nativeThreadId: "native-chat-conversation",
+      codexInput: [{ type: "text", text: "explain this idea" }],
+      runtimePolicy: {
+        runtimeMode: "full-access",
+        interactionMode,
+        cwd: null,
+        conversationMode: true,
+      },
+      modelSelection: {
+        instanceId: ProviderInstanceId.make("codex"),
+        model: "gpt-5.4",
+      },
+      hasT3Mcp: true,
+      terminalToolsAvailable,
+    });
 
+  it.effect("does not promise terminal lookups to a plan-mode chat", () =>
+    Effect.gen(function* () {
+      const params = yield* chatTurn(true, "plan");
+      assert.notInclude(JSON.stringify(params.additionalContext), "terminal_run");
+      assert.include(
+        params.additionalContext?.cogenly_conversation?.value ?? "",
+        "you cannot run commands",
+      );
+    }),
+  );
+
+  it.effect("lets chat-surface turns look things up through the terminal tools", () =>
+    Effect.gen(function* () {
+      const params = yield* chatTurn(true);
+
+      // Native patches stay blocked; commands run in the Cogenly terminal.
       assert.equal(params.approvalPolicy, "never");
       assert.equal(params.sandboxPolicy?.type, "readOnly");
       assert.include(
         params.collaborationMode?.settings.developer_instructions ?? "",
-        "<conversation_mode>",
+        "Look things up yourself with the cogenly terminal_run tool",
       );
-      assert.include(params.additionalContext?.cogenly_conversation?.value ?? "", "Start Work");
-      assert.include(params.additionalContext?.cogenly_conversation?.value ?? "", "image_search");
+      const conversation = params.additionalContext?.cogenly_conversation?.value ?? "";
+      assert.include(conversation, "Look things up yourself with the cogenly terminal_run tool");
+      assert.include(conversation, "work_task");
+      assert.include(conversation, "image_search");
+      assert.notInclude(conversation, "you cannot run commands");
+      assert.include(params.additionalContext?.cogenly_tools?.value ?? "", "terminal_run");
+    }),
+  );
+
+  it.effect("tells chat-surface turns they have no commands when agent terminals are off", () =>
+    Effect.gen(function* () {
+      const params = yield* chatTurn(false);
+
+      assert.equal(params.sandboxPolicy?.type, "readOnly");
+      assert.include(
+        params.collaborationMode?.settings.developer_instructions ?? "",
+        "you cannot run commands",
+      );
+      const conversation = params.additionalContext?.cogenly_conversation?.value ?? "";
+      assert.include(conversation, "you cannot run commands");
+      assert.include(conversation, "Start Work");
+      assert.notInclude(conversation, "terminal_run");
       assert.notInclude(params.additionalContext?.cogenly_tools?.value ?? "", "terminal_run");
     }),
   );
@@ -1299,7 +1340,7 @@ describe("CodexAdapterV2 background command detail", () => {
 
 describe("Codex terminal routing", () => {
   const session = {
-    environmentId: "env" as import("@t3tools/contracts").EnvironmentId,
+    environmentId: "env" as import("@cogenly/contracts").EnvironmentId,
     threadId: ThreadId.make("terminal-test"),
     providerSessionId: "mcp-test",
     providerInstanceId: ProviderInstanceId.make("codex"),
@@ -1307,6 +1348,28 @@ describe("Codex terminal routing", () => {
     authorizationHeader: "Bearer test",
     browserToolsAvailable: false,
   };
+  it("disables native commands and delegation for conversations regardless of MCP availability", () => {
+    for (const mcpSession of [
+      undefined,
+      session,
+      { ...session, terminalToolsAvailable: false },
+      { ...session, terminalToolsAvailable: true },
+    ]) {
+      const params = CodexAdapterV2.codexThreadRuntimeParams({
+        mcpSession,
+        runtimePolicy: {
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          cwd: null,
+          conversationMode: true,
+        },
+      });
+      assert.equal(params.config["features.shell_tool"], false);
+      assert.equal(params.config["features.multi_agent"], false);
+      assert.equal(params.config["features.multi_agent_v2"], false);
+    }
+  });
+
   it("disables all native shell execution while the terminal MCP server is attached", () => {
     const params = CodexAdapterV2.codexThreadRuntimeParams({
       mcpSession: { ...session, terminalToolsAvailable: true },
@@ -1314,6 +1377,7 @@ describe("Codex terminal routing", () => {
     assert.equal(params.config["features.shell_tool"], false);
     assert.deepInclude(params.config.mcp_servers, {
       cogenly: {
+        enabled: true,
         url: session.endpoint,
         tool_timeout_sec: 65 * 60,
         default_tools_approval_mode: "approve",
@@ -1341,6 +1405,230 @@ describe("Codex terminal routing", () => {
       CodexAdapterV2.codexThreadRuntimeParams({ mcpSession: session }).config[
         "features.shell_tool"
       ],
+    );
+  });
+});
+
+describe("Codex provider connector duplicates", () => {
+  // As the owner's account lists them: usable ChatGPT apps, and config.toml servers.
+  const duplicates = CodexAdapterV2.codexProviderDuplicates({
+    apps: [
+      { id: "connector_2128aebfecb84f64a069897515042a44", name: "Gmail" },
+      { id: "connector_947e0d954944416db111db556030eea6", name: "Google Calendar" },
+      { id: "connector_76869538009648d5b282a4bb21c3d157", name: "GitHub" },
+      { id: "asdk_app_69a1d78e929881919bba0dbda1f6436d", name: "Slack" },
+      { id: "asdk_app_6a5ae9736be0819199d06d61ac171080", name: "Wispr Flow" },
+      { id: "connector_68de829bf7648191acd70a907364c67c", name: "Spotify" },
+      { id: "asdk_app_6aa2b88dd4e881918d850abcf8b92206", name: "Spawn Partners" },
+    ],
+    mcpServers: {
+      linear: { url: "https://mcp.linear.app/mcp" },
+      "notion-sse": { url: "https://mcp.notion.com/sse" },
+      "spawn-prod-followups": { url: "https://portal.spawnpartners.com/api/mcp/connect" },
+      node_repl: { command: "/Applications/ChatGPT.app/node_repl" },
+    },
+  });
+
+  it("finds all apps and configured HTTP or stdio servers", () => {
+    assert.deepEqual(duplicates, {
+      appIds: [
+        "connector_2128aebfecb84f64a069897515042a44",
+        "connector_947e0d954944416db111db556030eea6",
+        "connector_76869538009648d5b282a4bb21c3d157",
+        "asdk_app_69a1d78e929881919bba0dbda1f6436d",
+        "asdk_app_6a5ae9736be0819199d06d61ac171080",
+        "connector_68de829bf7648191acd70a907364c67c",
+        "asdk_app_6aa2b88dd4e881918d850abcf8b92206",
+      ],
+      mcpServerNames: ["linear", "notion-sse", "spawn-prod-followups", "node_repl"],
+      // Without config layers nothing is known to come from the repo.
+      repoServerNames: [],
+      managedServerNames: [],
+    });
+  });
+
+  it("turns the duplicates off in the thread config without touching the rest", () => {
+    const { config } = CodexAdapterV2.codexThreadRuntimeParams({
+      mcpSession: undefined,
+      providerDuplicates: duplicates,
+    });
+    assert.equal(config["apps.connector_2128aebfecb84f64a069897515042a44.enabled"], false);
+    assert.equal(config["apps.asdk_app_69a1d78e929881919bba0dbda1f6436d.enabled"], false);
+    assert.deepInclude(config.mcp_servers, { linear: { enabled: false } });
+    assert.deepInclude(config.mcp_servers, { "notion-sse": { enabled: false } });
+    assert.equal(config["apps.connector_68de829bf7648191acd70a907364c67c.enabled"], false);
+    assert.equal(config["features.plugins"], false);
+    assert.equal(config["features.apps"], false);
+    assert.deepInclude(config.mcp_servers, { "spawn-prod-followups": { enabled: false } });
+    assert.deepInclude(config.mcp_servers, { node_repl: { enabled: false } });
+    assert.equal(config["apps._default.default_tools_approval_mode"], "approve");
+  });
+
+  it.each([false, true])(
+    "disables untrusted repo commands even with native connectors enabled=%s",
+    (useProviderConnectors) => {
+      const params = CodexAdapterV2.codexThreadRuntimeParams({
+        mcpSession: undefined,
+        runtimePolicy: {
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          cwd: "/repo",
+          useProviderConnectors,
+        },
+        providerDuplicates: {
+          appIds: [],
+          mcpServerNames: ["untrusted-local"],
+          blockedRepoServerNames: ["untrusted-local"],
+          repoServerNames: ["web"],
+        },
+      });
+      assert.deepInclude(params.config.mcp_servers, { "untrusted-local": { enabled: false } });
+      assert.notProperty(params.config.mcp_servers, "web");
+    },
+  );
+
+  it("keeps repo transport ownership when a higher layer only overrides environment or arguments", () => {
+    const found = CodexAdapterV2.codexProviderDuplicates({
+      apps: [],
+      mcpServers: { local: { command: "node", args: ["tools.mjs"] } },
+      layers: [
+        {
+          name: { type: "user" },
+          config: { mcp_servers: { local: { env: { MODE: "ci" }, args: ["tools.mjs"] } } },
+        },
+        { name: { type: "project" }, config: { mcp_servers: { local: { command: "node" } } } },
+      ],
+    });
+    assert.deepEqual(found.repoServerNames, ["local"]);
+  });
+
+  it("disables literal dotted and quoted MCP names alongside Cogenly", () => {
+    const names = ["plain", "local.tools", 'quoted"name'];
+    const found = CodexAdapterV2.codexProviderDuplicates({
+      apps: [],
+      mcpServers: Object.fromEntries(names.map((name) => [name, { command: "fixture" }])),
+    });
+    assert.deepEqual(found.mcpServerNames, names);
+    const params = CodexAdapterV2.codexThreadRuntimeParams({
+      mcpSession: undefined,
+      providerDuplicates: found,
+    });
+    assert.deepEqual(
+      params.config.mcp_servers,
+      Object.fromEntries(names.map((name) => [name, { enabled: false }])),
+    );
+  });
+
+  // `config/read` with includeLayers, highest precedence first, as Codex 0.164 returns it.
+  const layered = CodexAdapterV2.codexProviderDuplicates({
+    apps: [],
+    mcpServers: {
+      node_repl: { command: "/Applications/ChatGPT.app/node_repl", enabled: false },
+      "spawn-prod-followups": { url: "https://portal.spawnpartners.com/api/mcp/connect" },
+      "repo-tools": { command: "node", args: ["tools.mjs"] },
+      "corp-search": { url: "https://search.corp.example/mcp" },
+    },
+    layers: [
+      // The launch override: an enabled flag alone defines no server.
+      {
+        name: { type: "sessionFlags" },
+        config: { mcp_servers: { node_repl: { enabled: false } } },
+      },
+      {
+        name: { type: "enterpriseManaged" },
+        config: { mcp_servers: { "corp-search": { url: "https://search.corp.example/mcp" } } },
+      },
+      {
+        name: { type: "project" },
+        config: { mcp_servers: { "repo-tools": { command: "node", args: ["tools.mjs"] } } },
+      },
+      {
+        // Untrusted in config/read, but threads in the repo still load it.
+        name: { type: "project" },
+        config: { mcp_servers: { "untrusted-repo-tools": { command: "node" } } },
+      },
+      {
+        name: { type: "user" },
+        config: {
+          mcp_servers: {
+            node_repl: { command: "/Applications/ChatGPT.app/node_repl" },
+            "spawn-prod-followups": { url: "https://portal.spawnpartners.com/api/mcp/connect" },
+            cogenly: { url: "https://stale.example/mcp" },
+          },
+        },
+      },
+    ],
+  });
+
+  it("keeps the repo's own servers and turns off servers from outside the repo", () => {
+    assert.sameMembers(
+      [...layered.mcpServerNames],
+      ["node_repl", "spawn-prod-followups", "corp-search"],
+    );
+    assert.sameMembers(
+      [...(layered.repoServerNames ?? [])],
+      ["repo-tools", "untrusted-repo-tools"],
+    );
+    assert.deepEqual(layered.managedServerNames, ["corp-search"]);
+    const session = {
+      environmentId: EnvironmentId.make("environment-codex-native"),
+      threadId: ThreadId.make("thread-codex-native"),
+      providerSessionId: "mcp-session-codex-native",
+      providerInstanceId: ProviderInstanceId.make("codex"),
+      endpoint: "http://127.0.0.1:43123/mcp",
+      authorizationHeader: "Bearer codex-native",
+      browserToolsAvailable: true,
+    };
+    const { config } = CodexAdapterV2.codexThreadRuntimeParams({
+      mcpSession: session,
+      providerDuplicates: layered,
+    });
+    const servers = config.mcp_servers as Record<string, Record<string, unknown>>;
+    assert.deepEqual(servers["spawn-prod-followups"], { enabled: false });
+    assert.deepEqual(servers["corp-search"], { enabled: false });
+    assert.notProperty(servers, "repo-tools");
+    // Cogenly's server carries integrations, browser, devices and computer use.
+    assert.include(servers.cogenly, { enabled: true, url: "http://127.0.0.1:43123/mcp" });
+    assert.equal(config["features.plugins"], false);
+    assert.equal(config["features.apps"], false);
+  });
+
+  it.effect("names repo and administrator-managed servers in the turn context", () =>
+    Effect.gen(function* () {
+      const params = yield* CodexAdapterV2.buildCodexTurnStartParams({
+        nativeThreadId: "native-context-thread",
+        codexInput: [{ type: "text", text: "lint the repo" }],
+        runtimePolicy: { runtimeMode: "full-access", interactionMode: "default", cwd: "/repo" },
+        modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+        nativeMcpContext: nativeMcpContextLine({
+          repoFile: ".codex/config.toml",
+          repo: layered.repoServerNames,
+          managed: layered.managedServerNames,
+        }),
+      });
+      const value = params.additionalContext?.cogenly_native_mcp?.value ?? "";
+      assert.include(value, "MCP servers from this repo (.codex/config.toml): repo-tools");
+      assert.include(
+        value,
+        "Administrator-managed MCP servers, not Cogenly integrations: corp-search",
+      );
+    }),
+  );
+
+  it("keeps every provider connector when the user opts in", () => {
+    const { config } = CodexAdapterV2.codexThreadRuntimeParams({
+      mcpSession: undefined,
+      runtimePolicy: {
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        cwd: "/workspace",
+        useProviderConnectors: true,
+      },
+      providerDuplicates: duplicates,
+    });
+    assert.deepEqual(
+      Object.keys(config).filter((key) => key.endsWith(".enabled") && !key.startsWith("tools.")),
+      [],
     );
   });
 });

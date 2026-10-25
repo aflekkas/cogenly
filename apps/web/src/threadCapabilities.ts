@@ -1,4 +1,4 @@
-import type { ThreadSurface } from "@t3tools/contracts";
+import type { ThreadSurface } from "@cogenly/contracts";
 
 import type { SidebarThreadMode } from "./components/sidebar/modes/sidebarModes.logic";
 

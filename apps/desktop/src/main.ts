@@ -17,9 +17,9 @@ import * as Option from "effect/Option";
 
 import * as Electron from "electron";
 
-import * as NetService from "@t3tools/shared/Net";
-import * as HostProcess from "@t3tools/shared/HostProcess";
-import type { RemoteT3RunnerOptions } from "@t3tools/ssh/tunnel";
+import * as NetService from "@cogenly/shared/Net";
+import * as HostProcess from "@cogenly/shared/HostProcess";
+import type { RemoteT3RunnerOptions } from "@cogenly/ssh/tunnel";
 import serverPackageJson from "../../server/package.json" with { type: "json" };
 
 import * as DesktopIpc from "./ipc/DesktopIpc.ts";
@@ -181,7 +181,9 @@ const layerDesktopWindow = DesktopWindow.layer.pipe(
   Layer.provideMerge(layerDesktopPreview),
 );
 
+// Merged so the IPC handlers reach the same CLI command service the control socket answers with.
 const layerDesktopAppActivation = DesktopAppActivation.layer.pipe(
+  Layer.provideMerge(DesktopCliCommand.layer),
   Layer.provide(layerDesktopWindow),
 );
 
@@ -217,7 +219,6 @@ const layerDesktopApplication = Layer.mergeAll(
   DesktopWebLinks.layer,
   DesktopApplicationMenu.layer,
   DesktopLinuxUrlHandler.layer,
-  DesktopCliCommand.layer,
   DesktopDictation.layer,
   layerDesktopSsh,
 ).pipe(

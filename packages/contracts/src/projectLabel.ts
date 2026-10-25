@@ -1,5 +1,6 @@
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
+import * as SchemaTransformation from "effect/SchemaTransformation";
 import {
   IsoDateTime,
   PositiveInt,
@@ -86,21 +87,108 @@ export const ProjectSourceLink = Schema.Union([
 export type ProjectSourceLink = typeof ProjectSourceLink.Type;
 
 /**
+ * Where a linked repository stands on the machine serving the list:
+ * `ready` has a checkout, `not_cloned` is linked (from another machine) but
+ * was never cloned here, `missing` has a record here whose folder is gone or
+ * empty, and `cloning` / `failed` follow the tracked clone.
+ */
+export const ProjectLabelRepositoryCheckout = Schema.Literals([
+  "ready",
+  "missing",
+  "not_cloned",
+  "cloning",
+  "failed",
+]);
+export type ProjectLabelRepositoryCheckout = typeof ProjectLabelRepositoryCheckout.Type;
+/**
+ * Id prefix of a linked repository with no checkout record on this machine:
+ * `remote:<host/owner/repo>`. Cloning it here replaces the id with a real one.
+ */
+export const REMOTE_REPOSITORY_ID_PREFIX = "remote:";
+export const isRemoteRepositoryPlaceholder = (repositoryId: string): boolean =>
+  repositoryId.startsWith(REMOTE_REPOSITORY_ID_PREFIX);
+/** The folder inside a project that holds its repository checkouts. */
+export const PROJECT_REPOSITORIES_SEGMENT = "repos";
+/**
+ * The host, owner and repository name of a normalized remote
+ * (`host/owner/repo`; nested groups make the owner `group/sub`). Anything that
+ * is not one (a filesystem path to a local bare repository) has no host or
+ * owner, only the last path segment as its name.
+ */
+export const repositoryRemoteParts = (
+  remote: string,
+): {
+  readonly host: string | null;
+  readonly owner: string | null;
+  readonly name: string;
+} | null => {
+  const trimmed = remote.trim();
+  const segments = trimmed.split(/[/\\]+/).filter((segment) => segment.length > 0);
+  const name = segments.at(-1)?.replace(/\.git$/i, "") ?? "";
+  if (name.length === 0 || name === "." || name === "..") return null;
+  const normalized = /^[a-z0-9][a-z0-9.-]*\.[a-z]+\//.test(trimmed) && segments.length >= 3;
+  return normalized
+    ? { host: segments[0] ?? null, owner: segments.slice(1, -1).join("/"), name }
+    : { host: null, owner: null, name };
+};
+/**
+ * The GitHub owner whose repositories sit directly in a project's `repos/`:
+ * the project's linked GitHub owner (the first by name when it links
+ * several). Synced with the project, so every machine derives the same
+ * folders. Null when the project links no owner.
+ */
+export const projectHomeOwner = (sourceLinks: ReadonlyArray<ProjectSourceLink>): string | null =>
+  sourceLinks
+    .flatMap((link) => (link.kind === "github-owner" ? [link.owner] : []))
+    .sort((left, right) => left.localeCompare(right, "en", { sensitivity: "base" }))[0] ?? null;
+/**
+ * A linked repository's folder under `<project>/repos/`, and the name it is
+ * shown by: `<repo>` for the project's home owner (`Spawn-Partners/platform`
+ * in Spawn Partners is `platform`), `<owner>/<repo>` for any other owner
+ * (`aflekkas/athens-racing`), so same-named repositories never collide.
+ * Derived, never chosen: no caller can pick another name. Null when the
+ * remote names nothing; a repository with no remote keeps its folder name.
+ */
+export const repositoryDirectoryNameFor = (
+  remote: string,
+  homeOwner: string | null,
+): string | null => {
+  const parts = repositoryRemoteParts(remote);
+  if (parts === null) return null;
+  if (parts.owner === null || parts.owner.length === 0) return parts.name;
+  const home =
+    homeOwner !== null &&
+    parts.host === "github.com" &&
+    parts.owner.toLowerCase() === homeOwner.toLowerCase();
+  return home ? parts.name : `${parts.owner}/${parts.name}`;
+};
+/**
  * One repository filed in a project, identified portably by its remote.
  * `remote` is the normalized remote (`host/owner/repo`: lowercase host,
  * ssh/https unified, no `.git` suffix); null marks a local-only repository
- * with no remote. `directoryName` is the repository's directory name under
- * the project folder (where another machine clones it); null until known.
+ * with no remote. `directoryName` is the repository's path under the
+ * project's `repos/` folder (where every machine clones it): derived from the
+ * remote by {@link repositoryDirectoryNameFor} (the project schema below
+ * enforces it), else the checkout's own folder name; null until known.
  */
 export const ProjectLabelRepositoryLink = Schema.Struct({
   repositoryId: ProjectId,
   remote: Schema.NullOr(TrimmedNonEmptyString),
   directoryName: Schema.NullOr(TrimmedNonEmptyString),
+  // Older servers (and caches written by them) predate per-machine state.
+  checkout: Schema.optionalKey(ProjectLabelRepositoryCheckout),
+  /**
+   * The repository's icon file, relative to its root, as a machine with a
+   * checkout found it. Synced, so a machine without one can show the same
+   * icon; absent until some machine has looked.
+   */
+  iconPath: Schema.optionalKey(TrimmedNonEmptyString),
 });
 export type ProjectLabelRepositoryLink = typeof ProjectLabelRepositoryLink.Type;
 
-export const ProjectLabelWithRepositories = Schema.Struct({
+const projectLabelWithRepositoriesFields = {
   ...ProjectLabel.fields,
+  possibleDuplicateIds: Schema.optionalKey(Schema.Array(ProjectLabelId)),
   repositoryIds: Schema.Array(ProjectId),
   // Older servers (and caches written by them) predate portable repo identity.
   repositories: Schema.optionalKey(Schema.Array(ProjectLabelRepositoryLink)),
@@ -119,7 +207,49 @@ export const ProjectLabelWithRepositories = Schema.Struct({
    * conversations and the project chat.
    */
   threadCount: Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
-});
+};
+type DerivableLabel = {
+  readonly sourceLinks: ReadonlyArray<ProjectSourceLink>;
+  readonly repositories?: ReadonlyArray<ProjectLabelRepositoryLink>;
+};
+const derivedDirectoryName = (link: ProjectLabelRepositoryLink, homeOwner: string | null) =>
+  link.remote === null
+    ? link.directoryName
+    : (repositoryDirectoryNameFor(link.remote, homeOwner) ?? link.directoryName);
+const followsRepositoryNames = Schema.makeFilter(
+  (label: DerivableLabel) => {
+    const homeOwner = projectHomeOwner(label.sourceLinks);
+    return (label.repositories ?? []).every(
+      (link) => link.directoryName === derivedDirectoryName(link, homeOwner),
+    );
+  },
+  { expected: "repository directory names derived from their remotes and the project's owner" },
+);
+/**
+ * A project with its repositories. Every repository's `directoryName` follows
+ * {@link repositoryDirectoryNameFor}: decoding derives it (so a cache written
+ * before the rule reads right), and a project that disagrees cannot be made
+ * or encoded.
+ */
+export const ProjectLabelWithRepositories = Schema.Struct(projectLabelWithRepositoriesFields).pipe(
+  Schema.decodeTo(
+    Schema.toType(Schema.Struct(projectLabelWithRepositoriesFields)).check(followsRepositoryNames),
+    SchemaTransformation.transform({
+      decode: (label) => {
+        if (label.repositories === undefined) return label;
+        const homeOwner = projectHomeOwner(label.sourceLinks);
+        return {
+          ...label,
+          repositories: label.repositories.map((link) => ({
+            ...link,
+            directoryName: derivedDirectoryName(link, homeOwner),
+          })),
+        };
+      },
+      encode: (label) => label,
+    }),
+  ),
+);
 export type ProjectLabelWithRepositories = typeof ProjectLabelWithRepositories.Type;
 export const ProjectLabelRepository = Schema.Struct({
   labelId: ProjectLabelId,
@@ -204,6 +334,155 @@ export const ProjectLabelCloneRepositoryInput = Schema.Struct({
   protocol: Schema.optional(SourceControlCloneProtocol),
 });
 export type ProjectLabelCloneRepositoryInput = typeof ProjectLabelCloneRepositoryInput.Type;
+
+/**
+ * Give a repository the project already links (by remote) a checkout on this
+ * machine: a `not_cloned` one clones into `<project folder>/<directoryName>`,
+ * a `missing` or `failed` one clones again in place, and a `ready` one is left
+ * alone. Returns once the clone is running; progress arrives on the
+ * project-clone subscription and the link's `checkout` state.
+ */
+export const ProjectLabelCheckoutRepositoryInput = Schema.Struct({
+  labelId: ProjectLabelId,
+  /** The link's remote, as `repositories[].remote` reports it. */
+  remote: TrimmedNonEmptyString,
+});
+export type ProjectLabelCheckoutRepositoryInput = typeof ProjectLabelCheckoutRepositoryInput.Type;
+export const ProjectLabelCheckoutRepositoryResult = Schema.Struct({
+  /** This machine's repository record for the remote. */
+  repositoryId: ProjectId,
+});
+export type ProjectLabelCheckoutRepositoryResult = typeof ProjectLabelCheckoutRepositoryResult.Type;
+
+/**
+ * Remove a linked repository's checkout from this machine and keep the link:
+ * the folder is deleted, the record and its threads stay, and the link reads
+ * `missing` until it is cloned here again. Refused while the checkout holds
+ * work that exists nowhere else (uncommitted or stashed changes, commits on
+ * no remote, other worktrees) or a turn runs in it.
+ */
+export const ProjectLabelRemoveCheckoutInput = Schema.Struct({
+  labelId: ProjectLabelId,
+  repositoryId: ProjectId,
+});
+export type ProjectLabelRemoveCheckoutInput = typeof ProjectLabelRemoveCheckoutInput.Type;
+export const ProjectLabelRemoveCheckoutResult = Schema.Struct({
+  /** False when there was no checkout here to remove. */
+  removed: Schema.Boolean,
+});
+export type ProjectLabelRemoveCheckoutResult = typeof ProjectLabelRemoveCheckoutResult.Type;
+
+/**
+ * Move a linked repository's checkout into its place in the project folder,
+ * `<project>/repos/<directoryName>` (renaming a `spawn-platform` checkout to
+ * `platform`), repairing its worktrees and repointing its record. Refused
+ * while a turn runs in it or a worktree lives inside it; a no-op when it is
+ * already there.
+ */
+export const ProjectLabelAdoptRepositoryInput = Schema.Struct({
+  labelId: ProjectLabelId,
+  repositoryId: ProjectId,
+});
+export type ProjectLabelAdoptRepositoryInput = typeof ProjectLabelAdoptRepositoryInput.Type;
+export const ProjectLabelAdoptRepositoryResult = Schema.Struct({
+  /** False when the checkout was already in place. */
+  moved: Schema.Boolean,
+  workspaceRoot: TrimmedNonEmptyString,
+});
+export type ProjectLabelAdoptRepositoryResult = typeof ProjectLabelAdoptRepositoryResult.Type;
+
+/**
+ * A folder directly under the projects root that no project claims: it has
+ * no project marker (`no_marker`), or its marker names a project that no
+ * longer exists (`deleted_project`). `empty` folders hold only the skeleton
+ * Cogenly made and can be removed; anything else can only be adopted.
+ */
+export const ProjectOrphanFolder = Schema.Struct({
+  dirName: TrimmedNonEmptyString,
+  path: TrimmedNonEmptyString,
+  reason: Schema.Literals(["no_marker", "deleted_project"]),
+  empty: Schema.Boolean,
+});
+export type ProjectOrphanFolder = typeof ProjectOrphanFolder.Type;
+export const ProjectOrphanFoldersResult = Schema.Struct({
+  folders: Schema.Array(ProjectOrphanFolder),
+});
+export type ProjectOrphanFoldersResult = typeof ProjectOrphanFoldersResult.Type;
+export const ProjectOrphanFolderInput = Schema.Struct({ dirName: TrimmedNonEmptyString });
+export type ProjectOrphanFolderInput = typeof ProjectOrphanFolderInput.Type;
+export const ProjectOrphanFolderRemoveResult = Schema.Struct({ removed: Schema.Boolean });
+export type ProjectOrphanFolderRemoveResult = typeof ProjectOrphanFolderRemoveResult.Type;
+/** `project_folders_reconcile`: list orphans, or adopt / remove one first. */
+export const ProjectFoldersReconcileInput = Schema.Struct({
+  action: Schema.Literals(["list", "adopt", "remove"]),
+  /** The orphan's folder name, for `adopt` and `remove`. */
+  dirName: Schema.optional(TrimmedNonEmptyString),
+});
+export type ProjectFoldersReconcileInput = typeof ProjectFoldersReconcileInput.Type;
+export const ProjectFoldersReconcileResult = Schema.Struct({
+  folders: Schema.Array(ProjectOrphanFolder),
+  /** The project an `adopt` created for the folder. */
+  adopted: Schema.optional(ProjectLabelWithRepositories),
+  /** Whether a `remove` deleted the folder (only skeleton folders go). */
+  removed: Schema.optional(Schema.Boolean),
+});
+export type ProjectFoldersReconcileResult = typeof ProjectFoldersReconcileResult.Type;
+
+export class RepositoryCheckoutError extends Schema.TaggedError<RepositoryCheckoutError>()(
+  "RepositoryCheckoutError",
+  {
+    repositoryId: ProjectId,
+    repositoryName: Schema.String,
+    reason: Schema.Literals([
+      "not_found",
+      "not_linked",
+      "no_remote",
+      "destination_taken",
+      "clone_failed",
+      "has_worktrees",
+      "uncommitted_changes",
+      "unpushed_commits",
+      "thread_active",
+      "worktrees_inside",
+      "move_failed",
+      "protected_folder",
+      "storage",
+    ]),
+    detail: Schema.optional(Schema.String),
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {
+  override get message(): string {
+    switch (this.reason) {
+      case "not_found":
+        return `Repository ${this.repositoryId} was not found.`;
+      case "not_linked":
+        return `${this.repositoryName} is not linked to this project.`;
+      case "no_remote":
+        return `${this.repositoryName} has no checkout and no known remote; clone it with project_label_clone_repository or link an existing checkout.`;
+      case "destination_taken":
+        return `${this.detail ?? "The destination folder"} already holds other files; move them away, then clone ${this.repositoryName} again.`;
+      case "clone_failed":
+        return `${this.repositoryName} could not be cloned${this.detail ? `: ${this.detail}` : ""}.`;
+      case "has_worktrees":
+        return `${this.repositoryName} has worktrees on this machine; remove them first.`;
+      case "uncommitted_changes":
+        return `${this.repositoryName} has uncommitted, stashed or ignored local files on this machine${this.detail ? ` (${this.detail})` : ""}; commit and push them, or remove them, first.`;
+      case "unpushed_commits":
+        return `${this.repositoryName} has commits that are on no remote; push them first.`;
+      case "thread_active":
+        return `A turn is running in ${this.repositoryName}; wait for it to finish.`;
+      case "worktrees_inside":
+        return `${this.repositoryName} has a worktree inside its folder; remove it before moving the repository.`;
+      case "move_failed":
+        return `${this.repositoryName} could not be moved${this.detail ? `: ${this.detail}` : ""}.`;
+      case "protected_folder":
+        return `${this.repositoryName}'s record points at ${this.detail ?? "a folder"}, which holds more than this repository; it is never deleted.`;
+      case "storage":
+        return `The checkout for ${this.repositoryName} could not be inspected.`;
+    }
+  }
+}
 /**
  * Legacy membership envelope. Arrays contain at most one effective folder per
  * thread; confidence/source/confirmation fields are fixed compatibility values.
@@ -236,6 +515,21 @@ export const ProjectLabelKey = Schema.Struct({ id: ProjectLabelId });
 export const ProjectLabelListResult = Schema.Struct({
   labels: Schema.Array(ProjectLabelWithRepositories),
 });
+export const ProjectMergeFileStatus = Schema.Struct({
+  pendingMoves: Schema.Number,
+  failedMoves: Schema.Number,
+});
+export type ProjectMergeFileStatus = typeof ProjectMergeFileStatus.Type;
+export const ProjectLabelMergeInput = Schema.Struct({
+  sourceId: ProjectLabelId,
+  targetId: ProjectLabelId,
+});
+export type ProjectLabelMergeInput = typeof ProjectLabelMergeInput.Type;
+export const ProjectLabelDismissDuplicateInput = Schema.Struct({
+  id: ProjectLabelId,
+  otherId: ProjectLabelId,
+});
+export type ProjectLabelDismissDuplicateInput = typeof ProjectLabelDismissDuplicateInput.Type;
 export const ProjectLabelMutationResult = Schema.Struct({ label: ProjectLabelWithRepositories });
 export const ProjectLabelDeleteResult = Schema.Struct({ deleted: Schema.Boolean });
 export const ThreadProjectLabelsInput = Schema.Struct({ threadId: ThreadId });
@@ -293,6 +587,8 @@ export class ProjectLabelError extends Schema.TaggedError<ProjectLabelError>()(
     operation: Schema.String,
     reason: Schema.Literals([
       "storage",
+      "same_project",
+      "instructions_too_long",
       "not_found",
       "invalid_membership",
       "invalid_path",
@@ -301,19 +597,30 @@ export class ProjectLabelError extends Schema.TaggedError<ProjectLabelError>()(
       "worktrees_inside",
       "archived",
       "project_chat",
+      // The machine that runs the thread could not be reached or refused.
+      "remote",
     ]),
     /** The project's name, so an `archived` or `project_chat` refusal can say which one. */
     projectName: Schema.optional(Schema.String),
+    repositoryName: Schema.optional(Schema.String),
+    /** What the machine that runs the thread said, for a `remote` refusal. */
+    detail: Schema.optional(Schema.String),
     cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message(): string {
     switch (this.reason) {
+      case "same_project":
+        return "Choose two different projects.";
+      case "instructions_too_long":
+        return "The combined project instructions are too long. Shorten them before merging.";
       case "archived":
         return `${this.projectName ?? "This project"} is archived. Unarchive it to add to it.`;
       case "not_found":
         return "The folder, repository, thread, or file was not found.";
       case "invalid_membership":
+        if (this.repositoryName !== undefined)
+          return `${this.repositoryName} is not in the ${this.projectName} project. Add it to the project first, or start without a project.`;
         return "A thread can belong to at most one project folder.";
       case "invalid_path":
         return "That path is not a file in this project folder.";
@@ -327,6 +634,8 @@ export class ProjectLabelError extends Schema.TaggedError<ProjectLabelError>()(
         return `This is ${this.projectName ?? "a project"}'s own conversation; it stays in its project.`;
       case "storage":
         return "Could not access project folders.";
+      case "remote":
+        return this.detail ?? "The machine that runs this thread could not move it.";
     }
   }
 }
@@ -535,6 +844,8 @@ export const ProjectOverviewResult = Schema.Struct({
       remote: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
       /** Directory name under the project folder; absent until known. */
       directoryName: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+      /** Checkout state on this machine; `not_cloned` repositories clone with project_label_clone_repository. */
+      checkout: Schema.optional(ProjectLabelRepositoryCheckout),
     }),
   ),
   sourceLinks: Schema.Array(ProjectSourceLink),

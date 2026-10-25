@@ -2,16 +2,17 @@ import ChatMarkdown from "./ChatMarkdown";
 import { ReadOnlySourcePreview } from "./files/AttachmentFilePreview";
 import type {
   AgentContextRecord,
+  IntegrationContextRecord,
   LinkContextRecord,
   PreviewAnnotationPayload,
   ProjectFolderContextRecord,
   ThreadContextRecord,
-} from "@t3tools/contracts";
-import { formatAttachmentSize } from "@t3tools/client-runtime/state/attachments";
-import { videoMimeType } from "@t3tools/shared/video";
+} from "@cogenly/contracts";
+import { formatAttachmentSize } from "@cogenly/client-runtime/state/attachments";
+import { videoMimeType } from "@cogenly/shared/video";
 import { MessageCircleIcon, MousePointerClickIcon } from "lucide-react";
 import { createContext, type MouseEvent, type ReactElement, type ReactNode, use } from "react";
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId } from "@cogenly/contracts";
 
 import type { ComposerFileAttachment, ComposerImageAttachment } from "~/composerDraftStore";
 import { composerFileNeedsReattach } from "~/composerDraftStore";
@@ -37,7 +38,12 @@ import {
 import type { TerminalContextDraft } from "~/lib/terminalContext";
 import type { ReviewCommentContext } from "~/reviewCommentContext";
 import { ComposerPendingTerminalContextChip } from "./chat/ComposerPendingTerminalContexts";
-import { AgentContextChip, ProjectFolderContextChip, ThreadContextChip } from "./ThreadContextChip";
+import {
+  AgentContextChip,
+  IntegrationContextChip,
+  ProjectFolderContextChip,
+  ThreadContextChip,
+} from "./ThreadContextChip";
 import {
   createContextPresentationRegistry,
   type ContextPresentationCapability,
@@ -71,7 +77,8 @@ export type ComposerDraftContextRecord =
   | { kind: "file"; record: ComposerFileAttachment; upload?: AttachmentUploadState | undefined }
   | { kind: "thread"; record: ThreadContextRecord }
   | { kind: "agent"; record: AgentContextRecord }
-  | { kind: "project-folder"; record: ProjectFolderContextRecord };
+  | { kind: "project-folder"; record: ProjectFolderContextRecord }
+  | { kind: "integration"; record: IntegrationContextRecord };
 
 /** What a chip can do beyond showing itself; the composer supplies the handlers. */
 export interface ComposerContextActions {
@@ -158,7 +165,15 @@ function linkDraftContextRecord(record: LinkContextRecord): ComposerDraftContext
       return { kind: "agent", record };
     case "project-folder":
       return { kind: "project-folder", record };
+    case "integration":
+      return { kind: "integration", record };
   }
+}
+
+/** A source chip in the draft watches its account, so a lapsed sign-in shows before sending. */
+function ComposerIntegrationContextChip(props: { record: IntegrationContextRecord }) {
+  const actions = use(ComposerContextActionsContext);
+  return <IntegrationContextChip record={props.record} environmentId={actions.environmentId} />;
 }
 
 function ContextChip(props: {
@@ -376,6 +391,7 @@ const composerContextPresentationRegistry = createContextPresentationRegistry<
     "thread",
     "agent",
     "project-folder",
+    "integration",
   ],
   handlers: [
     {
@@ -488,6 +504,16 @@ const composerContextPresentationRegistry = createContextPresentationRegistry<
       render: (entry, context) =>
         entry.kind === "project-folder" ? (
           <ProjectFolderContextChip record={entry.record} />
+        ) : (
+          <UnresolvedContextChip label={context.label} />
+        ),
+    },
+    {
+      kind: "integration",
+      canRender: (entry) => entry.kind === "integration",
+      render: (entry, context) =>
+        entry.kind === "integration" ? (
+          <ComposerIntegrationContextChip record={entry.record} />
         ) : (
           <UnresolvedContextChip label={context.label} />
         ),

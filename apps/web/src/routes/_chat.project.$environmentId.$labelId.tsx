@@ -1,4 +1,4 @@
-import type { EnvironmentId, ProjectLabelId } from "@t3tools/contracts";
+import type { EnvironmentId, ProjectLabelId } from "@cogenly/contracts";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 
 import { projectSettingsSearch } from "../components/projects/ProjectsOverview";

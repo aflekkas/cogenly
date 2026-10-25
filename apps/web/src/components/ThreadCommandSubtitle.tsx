@@ -1,4 +1,4 @@
-import type { ProviderDriverKind } from "@t3tools/contracts";
+import type { ProviderDriverKind } from "@cogenly/contracts";
 import { FolderGit2Icon, FolderIcon, GitBranchIcon } from "lucide-react";
 import { ProjectFavicon, type ProjectFaviconProject } from "./ProjectFavicon";
 import { ProviderInstanceIcon } from "./chat/ProviderInstanceIcon";
@@ -54,7 +54,10 @@ export function ThreadCommandSubtitle(props: {
   const showHarness =
     variant !== "favicon-workspace" && props.driverKind != null && props.providerDisplayName;
 
-  const projectLabel = props.projectTitle?.trim() || null;
+  const projectTitle = props.projectTitle?.trim() || null;
+  const environmentLabel = props.environmentLabel?.trim() || null;
+  // The project and machine lead; a thread in no project still names its machine.
+  const projectLabel = projectTitle ?? environmentLabel;
   const branchLabel = props.branch?.trim() || null;
 
   if (!projectLabel && !branchLabel && !props.isCurrent && !showHarness) {
@@ -70,14 +73,14 @@ export function ThreadCommandSubtitle(props: {
     >
       {projectLabel ? (
         <span className="inline-flex min-w-0 items-center gap-1">
-          {props.project ? (
+          {props.project && projectTitle ? (
             <ProjectFavicon project={props.project} className="size-3 shrink-0" />
           ) : null}
           <span className="min-w-0 truncate">{projectLabel}</span>
-          {props.environmentLabel ? (
+          {projectTitle && environmentLabel ? (
             <>
               <CommandPaletteMetaDot />
-              <span className="shrink-0">{props.environmentLabel}</span>
+              <span className="shrink-0">{environmentLabel}</span>
             </>
           ) : null}
         </span>

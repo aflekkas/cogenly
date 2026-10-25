@@ -4,15 +4,15 @@ import {
   AuthSettingsWriteScope,
   AuthProvidersManageScope,
   AuthOrchestrationReadScope,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { useEnvironmentScope, readEnvironmentScope } from "../../state/session";
 import { useAtomValue } from "@effect/atom-react";
-import { connectionStatusTitle } from "@t3tools/client-runtime/connection";
-import { safeErrorLogAttributes } from "@t3tools/client-runtime/errors";
+import { connectionStatusTitle } from "@cogenly/client-runtime/connection";
+import { safeErrorLogAttributes } from "@cogenly/client-runtime/errors";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@cogenly/client-runtime/state/runtime";
 import {
   defaultInstanceIdForDriver,
   type EnvironmentId,
@@ -24,12 +24,12 @@ import {
   resolveEnvironmentMachineKind,
   resolveProjectProviderInstanceEnabled,
   resolveProviderInstanceEnabled,
-} from "@t3tools/contracts";
-import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
+} from "@cogenly/contracts";
+import { DEFAULT_UNIFIED_SETTINGS } from "@cogenly/contracts/settings";
 import {
   getBackgroundActivityPresetSettings,
   resolveServerBackgroundActivitySettings,
-} from "@t3tools/shared/backgroundActivitySettings";
+} from "@cogenly/shared/backgroundActivitySettings";
 import * as Duration from "effect/Duration";
 import { PlusIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -81,7 +81,8 @@ import { stackedThreadToast, toastManager } from "../ui/toast";
 import { AddProviderInstanceDialog } from "./AddProviderInstanceDialog";
 import { ExpandableText } from "./ExpandableText";
 import { ProviderInstanceCard } from "./ProviderInstanceCard";
-import { UsageProviderSettings } from "./UsageProviderSettings";
+import { ProjectOverridesPopover } from "./SettingInheritance";
+import { useProviderInstanceOverrides } from "./useScopedSettings";
 import { ProviderAuthenticationSection } from "./ProviderAuthenticationSection";
 import { CodexSetupSection, CodexManagedRuntimeFields } from "./CodexSetupSection";
 import { readCodexSetupMode } from "./CodexSetupSection.logic";
@@ -98,7 +99,6 @@ import {
   PolicyTooltip,
   SettingResetButton,
   SettingsNumberField,
-  SettingsPageContainer,
   SettingsRefreshAction,
   SettingsRow,
   SettingsSection,
@@ -140,7 +140,7 @@ function providerEnvironmentDetail(environment: EnvironmentPresentation): string
 // Shared by the editor grid and the placeholder states so switching devices
 // never changes the card's footprint.
 const providerCardHeightClassName =
-  "@min-[48rem]/providers:h-[min(44rem,calc(100dvh-11rem))] @min-[48rem]/providers:min-h-[32rem]";
+  "@min-[48rem]/settings-page:h-[min(44rem,calc(100dvh-11rem))] @min-[48rem]/settings-page:min-h-[32rem]";
 
 /**
  * Same chrome as the provider editor (section heading, floating device tabs,
@@ -229,6 +229,21 @@ function EnvironmentUnavailablePlaceholder({
   );
 }
 
+/**
+ * The projects that turn one provider on or off for themselves, beside its
+ * machine-wide switch, with a reset that clears them on every machine.
+ */
+function ProviderInstanceProjectOverrides({
+  instanceId,
+  canClear,
+}: {
+  instanceId: ProviderInstanceId;
+  canClear: boolean;
+}) {
+  const { onClear, ...overrides } = useProviderInstanceOverrides(instanceId);
+  return <ProjectOverridesPopover {...overrides} {...(canClear ? { onClear } : {})} />;
+}
+
 interface ProviderSettingsTarget {
   readonly environmentId?: EnvironmentId;
   readonly instanceId?: ProviderInstanceId;
@@ -243,12 +258,12 @@ interface ProviderSettingsTarget {
 
 export function ProviderSettingsPanel(target: ProviderSettingsTarget) {
   return (
-    <SettingsPageContainer className="@container/providers">
+    <>
       <ProviderSettingsPanelContent
         key={`${target.environmentId ?? ""}:${target.instanceId ?? ""}`}
         {...target}
       />
-    </SettingsPageContainer>
+    </>
   );
 }
 
@@ -292,8 +307,7 @@ function ProviderSettingsPanelContent(target: ProviderSettingsTarget) {
   useEffect(() => {
     if (
       !target.scoped &&
-      (searchTargetId === searchableSetting("provider-health-check-interval").id ||
-        searchTargetId === searchableSetting("usage-providers").id) &&
+      searchTargetId === searchableSetting("provider-health-check-interval").id &&
       !selectedEnvironmentCanRenderSettings &&
       searchableEnvironmentId !== undefined
     ) {
@@ -374,8 +388,8 @@ function ProviderSettingsPanelContent(target: ProviderSettingsTarget) {
           title={isReady ? "No connected devices" : "Loading devices"}
           description={
             isReady
-              ? "Connect an execution environment before configuring providers."
-              : "Reading connected execution environments."
+              ? "Connect a machine before configuring providers."
+              : "Reading connected machines."
           }
         />
       ) : null}
@@ -835,6 +849,14 @@ export function EnvironmentProviderSettings({
         key={row.instanceId}
         environmentId={environmentId}
         projectOverride={projectOverride}
+        projectOverrides={
+          projectOverride === undefined && supportsProjectProviderOverrides ? (
+            <ProviderInstanceProjectOverrides
+              instanceId={row.instanceId}
+              canClear={!readOnly && canWriteSettings}
+            />
+          ) : undefined
+        }
         instanceId={row.instanceId}
         instance={row.instance}
         driverOption={driverOption}
@@ -1025,14 +1047,14 @@ export function EnvironmentProviderSettings({
           divided={false}
           className={cn(
             providerCardHeightClassName,
-            "overflow-hidden @min-[48rem]/providers:grid @min-[48rem]/providers:grid-cols-[17rem_minmax(0,1fr)]",
+            "overflow-hidden @min-[48rem]/settings-page:grid @min-[48rem]/settings-page:grid-cols-[17rem_minmax(0,1fr)]",
           )}
         >
-          <div className="border-b border-border/60 bg-muted/10 @min-[48rem]/providers:flex @min-[48rem]/providers:min-h-0 @min-[48rem]/providers:flex-col @min-[48rem]/providers:border-r @min-[48rem]/providers:border-b-0">
+          <div className="border-b border-border/60 bg-muted/10 @min-[48rem]/settings-page:flex @min-[48rem]/settings-page:min-h-0 @min-[48rem]/settings-page:flex-col @min-[48rem]/settings-page:border-r @min-[48rem]/settings-page:border-b-0">
             <ScrollArea
               scrollFade
               chainVerticalScroll
-              className="@min-[48rem]/providers:min-h-0 @min-[48rem]/providers:flex-1"
+              className="@min-[48rem]/settings-page:min-h-0 @min-[48rem]/settings-page:flex-1"
             >
               <div className="divide-y divide-border/50">
                 {rows.map((row) => renderProviderInstance(row, "list"))}
@@ -1050,9 +1072,13 @@ export function EnvironmentProviderSettings({
             </ScrollArea>
           </div>
 
-          <div className="min-w-0 @min-[48rem]/providers:min-h-0">
+          <div className="min-w-0 @min-[48rem]/settings-page:min-h-0">
             {selectedRow ? (
-              <ScrollArea scrollFade chainVerticalScroll className="@min-[48rem]/providers:h-full">
+              <ScrollArea
+                scrollFade
+                chainVerticalScroll
+                className="@min-[48rem]/settings-page:h-full"
+              >
                 <div className="space-y-6 p-4">{renderProviderInstance(selectedRow, "editor")}</div>
               </ScrollArea>
             ) : (
@@ -1065,14 +1091,6 @@ export function EnvironmentProviderSettings({
           </div>
         </SettingsGroup>
       </SettingsSection>
-
-      <UsageProviderSettings
-        key={environmentId}
-        environmentId={environmentId}
-        environmentLabel={environmentLabel}
-        sources={settings.usageLimitSources}
-        readOnly={readOnly}
-      />
 
       <SettingsSection title="Advanced">
         <SettingsRow

@@ -1,10 +1,12 @@
-import { getProviderSendBlockReason } from "./ChatView.logic";
+import { getProviderSendBlockReason, timelineAwaitsRows } from "./ChatView.logic";
 import {
   agentControlledBrowserCloseConfirmation,
   ENVIRONMENT_RECONNECT_WARNING_GRACE_MS,
   resolveBackgroundDraftWorkspaceOptions,
   resolveComposerInteractionMode,
   resolveComposerProviderSelection,
+  resolveThreadDriverKind,
+  isEnvironmentStillConnecting,
   resolveDraftHeroState,
   resolveEmptyServerThreadHero,
   resolveWorktreeSetupProgress,
@@ -46,7 +48,7 @@ import {
   rememberCheckoutIsRepo,
   threadShellHasStarted,
 } from "./ChatView.logic";
-import { ProviderDriverKind, type ServerProvider } from "@t3tools/contracts";
+import { ProviderDriverKind, type ServerProvider } from "@cogenly/contracts";
 import { deriveProviderInstanceEntries } from "../providerInstances";
 import type { RightPanelSurface } from "../rightPanelStore";
 import {
@@ -60,8 +62,8 @@ import {
   TurnItemId,
   type OrchestrationV2ProjectedTurnItem,
   type WorktreeSetupSnapshot,
-} from "@t3tools/contracts";
-import type { CodexArtifactTemplate } from "@t3tools/shared/codexArtifactTemplates";
+} from "@cogenly/contracts";
+import type { CodexArtifactTemplate } from "@cogenly/shared/codexArtifactTemplates";
 import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
@@ -1332,6 +1334,89 @@ describe("resolveComposerProviderSelection", () => {
       }),
     ).toBeNull();
   });
+
+  it("keeps an unlocked thread on its own driver when the instance that ran it is missing", () => {
+    const codex = entry("codex");
+    const claude = entry("claudeAgent");
+    const missing = ProviderInstanceId.make("claude-personal");
+    const select = (threadDriverKind: ProviderDriverKind | null) =>
+      resolveComposerProviderSelection({
+        entries: [codex, claude],
+        candidateInstanceIds: [missing],
+        lockedProvider: null,
+        lockedInstanceId: missing,
+        threadDriverKind,
+      }).selectedProviderEntry?.instanceId;
+
+    expect(select(claude.driverKind)).toBe(claude.instanceId);
+    expect(select(null)).toBe(codex.instanceId);
+  });
+});
+
+describe("isEnvironmentStillConnecting", () => {
+  it("reads a first connection as connecting, however long it takes", () => {
+    for (const phase of ["available", "connecting"] as const) {
+      expect(isEnvironmentStillConnecting({ phase, reconnectWarningGraceElapsed: true })).toBe(
+        true,
+      );
+    }
+  });
+
+  it("reads a reconnect as connecting only inside the grace", () => {
+    expect(
+      isEnvironmentStillConnecting({ phase: "reconnecting", reconnectWarningGraceElapsed: false }),
+    ).toBe(true);
+    expect(
+      isEnvironmentStillConnecting({ phase: "reconnecting", reconnectWarningGraceElapsed: true }),
+    ).toBe(false);
+  });
+
+  it("reads a failed or offline environment as disconnected at once", () => {
+    for (const phase of ["error", "offline", "unsupported"] as const) {
+      expect(isEnvironmentStillConnecting({ phase, reconnectWarningGraceElapsed: false })).toBe(
+        false,
+      );
+    }
+  });
+});
+
+describe("resolveThreadDriverKind", () => {
+  const claude = ProviderDriverKind.make("claudeAgent");
+  const codex = ProviderDriverKind.make("codex");
+
+  it("reads the active provider thread's driver", () => {
+    expect(
+      resolveThreadDriverKind({
+        thread: { activeProviderThreadId: "pt-2" },
+        providerThreads: [
+          { id: "pt-1", driver: codex },
+          { id: "pt-2", driver: claude },
+        ],
+        turnItems: [],
+      }),
+    ).toBe(claude);
+  });
+
+  it("reads a provider subagent's driver from its native items", () => {
+    expect(
+      resolveThreadDriverKind({
+        thread: { activeProviderThreadId: null },
+        providerThreads: [],
+        turnItems: [{ nativeItemRef: { driver: claude } }, { nativeItemRef: null }],
+      }),
+    ).toBe(claude);
+  });
+
+  it("knows nothing about a thread without detail or history", () => {
+    expect(resolveThreadDriverKind(null)).toBeNull();
+    expect(
+      resolveThreadDriverKind({
+        thread: { activeProviderThreadId: null },
+        providerThreads: [],
+        turnItems: [],
+      }),
+    ).toBeNull();
+  });
 });
 
 describe("resolveComposerInteractionMode", () => {
@@ -1749,5 +1834,31 @@ describe("retired provider history", () => {
     expect(
       getProviderSendBlockReason({ driver: ProviderDriverKind.make("muse") }, "muse-spark-1.3"),
     ).toBeNull();
+  });
+});
+
+describe("timelineAwaitsRows", () => {
+  const settled = {
+    detailLoading: false,
+    shellStarted: true,
+    rowCount: 0,
+    isWorking: false,
+    hasHistoryToLoad: false,
+  };
+
+  it("waits while the detail loads, and while a thread with messages shows none yet", () => {
+    expect(timelineAwaitsRows({ ...settled, detailLoading: true, shellStarted: false })).toBe(true);
+    // A replica catching up after a move reports live before its rows arrive.
+    expect(timelineAwaitsRows(settled)).toBe(true);
+  });
+
+  it("stops once rows arrive, and never waits for a thread nobody wrote in", () => {
+    expect(timelineAwaitsRows({ ...settled, rowCount: 3 })).toBe(false);
+    expect(timelineAwaitsRows({ ...settled, shellStarted: false })).toBe(false);
+  });
+
+  it("leaves a running thread and trimmed history to their own rows", () => {
+    expect(timelineAwaitsRows({ ...settled, isWorking: true })).toBe(false);
+    expect(timelineAwaitsRows({ ...settled, hasHistoryToLoad: true })).toBe(false);
   });
 });

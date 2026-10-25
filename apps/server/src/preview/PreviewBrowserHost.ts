@@ -7,7 +7,7 @@
  * gets the command instead, and only the operator's explicit
  * `COGENLY_SERVER_BROWSER_SANDBOX=0` launches without it.
  */
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as HostProcess from "@cogenly/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Schema from "effect/Schema";

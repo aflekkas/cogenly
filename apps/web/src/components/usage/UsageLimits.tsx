@@ -6,7 +6,7 @@ import {
   ServerProvider,
   ServerProviderResetCredits,
   ServerProviderUsageWindow,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { useAtomValue } from "@effect/atom-react";
 import {
   formatDuration,
@@ -14,7 +14,7 @@ import {
   type LimitPace,
   paceOf,
   remainingPercent,
-} from "@t3tools/shared/usageLimits";
+} from "@cogenly/shared/usageLimits";
 import { GaugeIcon, TrendingDownIcon, TrendingUpIcon } from "lucide-react";
 import { Fragment, useState } from "react";
 
@@ -38,7 +38,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { MeterMarker, MeterSpan, useUsageMeter } from "./UsageMeter";
 import { quotaLabel, windowMeter } from "./usageMeter.logic";
 import { UsageLimitsPooled } from "./UsageLimitsPooled";
-import { barColorForDriver } from "@t3tools/provider-core/client";
+import { barColorForDriver } from "@cogenly/provider-core/client";
 import { providerClients } from "../settings/providerDriverMeta";
 
 const PACE: Record<LimitPace, { readonly label: string; readonly icon: typeof GaugeIcon }> = {
@@ -334,7 +334,7 @@ export function ResetCredits({
 }
 
 /**
- * Subscription quota across every connected environment's providers and hubs,
+ * Subscription quota across every connected environment's providers,
  * pooled per provider. The page advances `now` on explicit refresh rather than
  * ticking: a live clock would repaint the page for no decision-changing gain.
  */

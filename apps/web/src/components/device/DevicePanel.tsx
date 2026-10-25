@@ -1,11 +1,11 @@
 import { DeviceHostUpdates } from "./DeviceHostUpdates";
-import { AuthSettingsWriteScope } from "@t3tools/contracts";
+import { AuthSettingsWriteScope } from "@cogenly/contracts";
 import type {
   DevicePlatform,
   DeviceServiceState,
   DeviceSummary,
   ScopedThreadRef,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { Smartphone, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
@@ -228,10 +228,10 @@ export function DevicePanel(props: {
                     <Smartphone className="size-6 opacity-60" />
                     <p className="max-w-sm">
                       {hostDisabled
-                        ? "Device support is turned off for this environment."
+                        ? "Device support is turned off on this machine."
                         : state.hostStatus === "failed"
                           ? (state.hostStatusDetail ?? "The device hub failed to start.")
-                          : "No simulators or emulators were found on this environment."}
+                          : "No simulators or emulators were found on this machine."}
                     </p>
                   </>
                 ) : null}

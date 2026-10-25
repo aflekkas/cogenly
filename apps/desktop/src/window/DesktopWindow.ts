@@ -8,8 +8,8 @@ import * as Ref from "effect/Ref";
 
 import * as Electron from "electron";
 
-import { DEFAULT_CLIENT_SETTINGS, type AppearanceAccent } from "@t3tools/contracts";
-import { ACCENT_PRESETS, colorBlend, hexToRgb, rgbToHex } from "@t3tools/shared/accentColors";
+import { DEFAULT_CLIENT_SETTINGS, type AppearanceAccent } from "@cogenly/contracts";
+import { ACCENT_PRESETS, colorBlend, hexToRgb, rgbToHex } from "@cogenly/shared/accentColors";
 
 import * as DesktopAssets from "../app/DesktopAssets.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
@@ -140,7 +140,7 @@ export class DesktopWindow extends Context.Service<
     readonly runMainContentsCommand: (command: MainWindowContentsCommand) => Effect.Effect<void>;
     readonly syncAppearance: Effect.Effect<void>;
   }
->()("@t3tools/desktop/window/DesktopWindow") {}
+>()("@cogenly/desktop/window/DesktopWindow") {}
 
 const { logInfo: logWindowInfo, logWarning: logWindowWarning } =
   makeComponentLogger("desktop-window");

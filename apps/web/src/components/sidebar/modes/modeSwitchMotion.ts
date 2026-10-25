@@ -7,7 +7,8 @@ import { flushSync } from "react-dom";
  * frame fades out while the new one fades in, blended with plus-lighter, so
  * whatever is the same in both modes (the rail, the search bar, the header)
  * stays perfectly still and only what changed fades. Instant under reduced
- * motion. See the `data-mode-switch-transition` rules in index.css.
+ * motion. See the `data-mode-switch-transition` rules in index.css. Switching
+ * the sidebar layout (top or bottom) uses the same crossfade.
  *
  * The new frame is captured once the main pane's content for the new mode has
  * committed (`settleModeSwitchMainPane`), often a navigation or two later, or

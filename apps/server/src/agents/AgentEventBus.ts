@@ -2,7 +2,7 @@ import * as SharedState from "../sync/SharedState.ts";
 import * as Access from "./AgentAccessScope.ts";
 import * as DateTime from "effect/DateTime";
 import { canReceiveAgentEvent, matchesAgentEvent } from "./agentEventPolicy.ts";
-import { AgentError, AgentEventContext, type ThreadId } from "@t3tools/contracts";
+import { AgentError, AgentEventContext, type ThreadId } from "@cogenly/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";

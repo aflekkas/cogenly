@@ -5,8 +5,8 @@ import type {
   OrchestrationV2ThreadShell,
   Project,
   ThreadId,
-} from "@t3tools/contracts";
-import { ProviderInstanceId, RuntimeRequestId } from "@t3tools/contracts";
+} from "@cogenly/contracts";
+import { ProviderInstanceId, RuntimeRequestId } from "@cogenly/contracts";
 import * as DateTime from "effect/DateTime";
 
 import { projectThreadAwarenessV2 } from "./agentAwareness.ts";

@@ -1,7 +1,7 @@
 import type {
   OrchestrationV2SearchThreadInput,
   OrchestrationV2SearchThreadResult,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import type {
   ProjectionRecordField,
   ProjectionRecordFilter,
@@ -34,8 +34,8 @@ import {
   type ScheduledTaskId,
   ThreadId,
   type TurnItemId,
-} from "@t3tools/contracts";
-import { threadTranscriptHeader } from "@t3tools/shared/threadTranscript";
+} from "@cogenly/contracts";
+import { threadTranscriptHeader } from "@cogenly/shared/threadTranscript";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
@@ -86,7 +86,7 @@ export function existingThreadIdsForCommand(
 ): ReadonlyArray<ThreadId> {
   switch (command.type) {
     case "thread.create":
-      return [];
+      return command.fork === undefined ? [] : [command.fork.sourceThreadId];
     // Read-state commands only rewrite the thread payload's visited/unread
     // watermark; they never touch messages, so they do not need the imported
     // v1 transcript hydrated first. Visits fire on every thread-activity bump
@@ -94,6 +94,8 @@ export function existingThreadIdsForCommand(
     case "thread.visit":
     case "thread.mark-unread":
       return [];
+    case "work.handoff.context":
+      return [command.threadId];
     case "work.handoff.record":
       return [command.threadId, command.targetThreadId];
     case "thread.fork":
@@ -102,6 +104,7 @@ export function existingThreadIdsForCommand(
       return command.sourceThreadId === command.targetThreadId
         ? [command.sourceThreadId]
         : [command.sourceThreadId, command.targetThreadId];
+    case "delegated_task.attach":
     case "delegated_task.request":
     case "delegated_task.wake-policy":
     case "delegated_task.completion-delivery.acknowledge":
@@ -461,7 +464,7 @@ export interface ThreadManagementServiceShape {
   /**
    * Snoozes a thread until an ISO time, or until the reset of the usage limit
    * it stopped on. Resolve presets and typed phrases with
-   * `@t3tools/shared/snooze` first. A run that completes after the snooze
+   * `@cogenly/shared/snooze` first. A run that completes after the snooze
    * wakes the thread, so when its own agent asks mid-turn the snooze lands
    * once that turn completes, like `settleThread`.
    */
@@ -747,6 +750,7 @@ const make = Effect.gen(function* () {
           ),
         );
       case "delegated_task.request":
+        if (command.machine !== undefined) return Effect.void;
         return orchestrator.getThreadRecords(command.parentThreadId, []).pipe(
           Effect.flatMap((parent) =>
             assertProviderInstanceEnabled({

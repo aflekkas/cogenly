@@ -1,4 +1,4 @@
-import { scopedThreadKey } from "@t3tools/client-runtime/environment";
+import { scopedThreadKey } from "@cogenly/client-runtime/environment";
 import { useParams } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 

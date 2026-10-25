@@ -15,8 +15,13 @@ describe("machine RPC permissions", () => {
 
   it("lets readers see machines and keeps pairing behind access management", () => {
     expect(clientRpcRequiredScopes(WS_METHODS.machinesList, {})).toEqual(["orchestration:read"]);
+    expect(clientRpcRequiredScopes(WS_METHODS.machinesCatalog, {})).toEqual(["orchestration:read"]);
     expect(clientRpcRequiredScopes(WS_METHODS.machinesSubscribe, {})).toEqual([
       "orchestration:read",
+    ]);
+    expect(clientRpcRequiredScopes(WS_METHODS.syncStatus, {})).toEqual(["orchestration:read"]);
+    expect(clientRpcRequiredScopes(WS_METHODS.machinesForkThread, {})).toEqual([
+      "orchestration:operate",
     ]);
     expect(clientRpcRequiredScopes(WS_METHODS.machinesUpdate, {})).toEqual(["settings:write"]);
     for (const method of [
@@ -24,6 +29,11 @@ describe("machine RPC permissions", () => {
       WS_METHODS.machinesCreatePeerGrant,
       WS_METHODS.machinesJoinHub,
       WS_METHODS.machinesUnpair,
+      // Setup installs software, exposes the server, and carries sign-in links.
+      WS_METHODS.machinesSetupStatus,
+      WS_METHODS.machinesSetupSubscribe,
+      WS_METHODS.machinesSetupRunStep,
+      WS_METHODS.machinesSetupDisableServe,
     ]) {
       expect(clientRpcRequiredScopes(method, {})).toEqual(["access:write"]);
     }

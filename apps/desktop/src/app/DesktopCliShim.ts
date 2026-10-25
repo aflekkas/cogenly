@@ -128,6 +128,35 @@ export const renderCliShim = (input: {
   ].join("\n");
 };
 
+/**
+ * The app a Unix launcher runs, from its `app=` line: the Electron executable,
+ * or the AppImage. Null for anything else, such as a Windows launcher.
+ */
+export const parseCliShimApp = (content: string): string | null => {
+  const line = /^app='((?:[^']|'"'"')*)'$/m.exec(content);
+  return line ? line[1]!.replaceAll(`'"'"'`, "'") : null;
+};
+
+/** What a launcher for this running app executes. */
+export const resolveCliShimTarget = (
+  environment: DesktopEnvironment.DesktopEnvironment["Service"],
+): CliShimTarget => {
+  const path = environment.path;
+  const entry = path.join(environment.serverRoot, SERVER_ENTRY);
+  if (environment.platform === "win32") {
+    return { kind: "windows", executable: process.execPath, entry };
+  }
+  return Option.match(environment.appImagePath, {
+    onSome: (appImage) => ({
+      kind: "appimage" as const,
+      appImage,
+      executableName: path.basename(process.execPath),
+    }),
+    // macOS and .deb installs live at a fixed path, so the launcher runs the app directly.
+    onNone: () => ({ kind: "direct" as const, executable: process.execPath, entry }),
+  });
+};
+
 /** Where the packaged app keeps its launcher: `<Cogenly home>/bin/cogenly`, `cogenly.cmd` on Windows. */
 export const launcherPath = (environment: DesktopEnvironment.DesktopEnvironment["Service"]) =>
   environment.path.join(
@@ -146,20 +175,8 @@ export const install = Effect.gen(function* () {
   if (!environment.isPackaged) return Option.none<string>();
   const fs = yield* FileSystem.FileSystem;
   const path = environment.path;
-  const windows = environment.platform === "win32";
   const shimPath = launcherPath(environment);
-  const entry = path.join(environment.serverRoot, SERVER_ENTRY);
-  const target: CliShimTarget = windows
-    ? { kind: "windows", executable: process.execPath, entry }
-    : Option.match(environment.appImagePath, {
-        onSome: (appImage) => ({
-          kind: "appimage" as const,
-          appImage,
-          executableName: path.basename(process.execPath),
-        }),
-        // macOS and .deb installs live at a fixed path, so the launcher runs the app directly.
-        onNone: () => ({ kind: "direct" as const, executable: process.execPath, entry }),
-      });
+  const target = resolveCliShimTarget(environment);
   const content = renderCliShim({ target, shimPath, t3Home: environment.baseDir });
 
   return yield* Effect.gen(function* () {

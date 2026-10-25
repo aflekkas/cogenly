@@ -1,6 +1,9 @@
+import { ProjectRepositoryMismatchError } from "./projectRepositoryMembership.ts";
+import { ProjectLabelId } from "./projectLabel.ts";
 import * as Schema from "effect/Schema";
 import {
   CommandId,
+  EnvironmentId,
   IsoDateTime,
   MessageId,
   ProjectId,
@@ -8,6 +11,7 @@ import {
   ThreadId,
   TrimmedNonEmptyString,
 } from "./baseSchemas.ts";
+import { ProviderInstanceId } from "./providerInstance.ts";
 import { ModelSelection } from "./modelSelection.ts";
 
 export const WorkTitle = TrimmedNonEmptyString.check(Schema.isMaxLength(200));
@@ -39,6 +43,7 @@ export const WorkTaskOutcome = Schema.Struct({
 export type WorkTaskOutcome = typeof WorkTaskOutcome.Type;
 /** A coding task a chat handed off, shown as a card in the chat that asked for it. */
 export const WorkTask = Schema.Struct({
+  machine: Schema.optional(EnvironmentId),
   id: WorkTaskId,
   status: WorkTaskStatus,
   requestedMode: WorkTaskMode,
@@ -53,6 +58,8 @@ export const WorkTask = Schema.Struct({
   runId: Schema.optional(RunId),
   /** The Work thread, once started. */
   threadId: Schema.optional(ThreadId),
+  /** The chat's agent asked for the Work thread to settle once the task completes. */
+  settleWhenDone: Schema.optional(Schema.Boolean),
   outcome: Schema.optional(WorkTaskOutcome),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
@@ -60,6 +67,8 @@ export const WorkTask = Schema.Struct({
 export type WorkTask = typeof WorkTask.Type;
 
 export const WorkStartInput = Schema.Struct({
+  projectFolderId: Schema.optional(Schema.NullOr(ProjectLabelId)),
+  machine: Schema.optional(EnvironmentId),
   /** Stable across retries: one handoff creates one Work thread. */
   commandId: CommandId,
   sourceThreadId: ThreadId,
@@ -101,7 +110,10 @@ export const WorkHandoffDraft = Schema.Struct({
 });
 export type WorkHandoffDraft = typeof WorkHandoffDraft.Type;
 export class WorkHandoffError extends Schema.TaggedError<WorkHandoffError>()("WorkHandoffError", {
+  repositoryMismatch: Schema.optional(ProjectRepositoryMismatchError),
   sourceThreadId: ThreadId,
+  machineOffline: Schema.optional(Schema.Boolean),
+  disabledProviderInstanceId: Schema.optional(ProviderInstanceId),
   stage: Schema.Literals([
     "read-source",
     "resolve-project",
@@ -112,6 +124,6 @@ export class WorkHandoffError extends Schema.TaggedError<WorkHandoffError>()("Wo
   cause: Schema.optional(Schema.Defect()),
 }) {
   override get message(): string {
-    return `Work handoff failed during ${this.stage}.`;
+    return this.repositoryMismatch?.message ?? `Work handoff failed during ${this.stage}.`;
   }
 }

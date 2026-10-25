@@ -1,5 +1,12 @@
+import * as RepoMcpTrust from "../../integrations/RepoMcpTrust.ts";
+import {
+  codexNativeMcpNames,
+  codexNativeMcpOffArgs,
+  nativeMcpContextLine,
+  requireCodexNativeMcpEnumeration,
+} from "../../integrations/NativeMcpPolicy.ts";
 import { revertCodexThread } from "../../provider/CodexThreadRevert.ts";
-import { historyResponseItems } from "@t3tools/provider-core/server/handoffBudget";
+import { historyResponseItems } from "@cogenly/provider-core/server/handoffBudget";
 import {
   makeProviderTextDeltaCoalescer,
   type ProviderTextDeltaUpdate,
@@ -15,7 +22,7 @@ import {
   completeCodexTurnTokenUsage,
   type CodexTurnTokenUsageState,
 } from "../../provider/CodexTurnTokenUsage.ts";
-import type { ManagedServerProvider } from "@t3tools/provider-core/server/snapshot";
+import type { ManagedServerProvider } from "@cogenly/provider-core/server/snapshot";
 import type { CodexEffectiveRuntime } from "../../provider/CodexManagedRuntime.ts";
 import {
   buildCodexInitializeParams,
@@ -34,17 +41,17 @@ import {
   OrchestrationV2ProviderGoal,
   ProviderDriverKind,
   type ProviderSetupError,
-} from "@t3tools/contracts";
-import { SKILL_MENTION_PATTERN } from "@t3tools/shared/composerInlineTokens";
-import { AgentScope } from "@t3tools/shared/AgentScope";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+} from "@cogenly/contracts";
+import { SKILL_MENTION_PATTERN } from "@cogenly/shared/composerInlineTokens";
+import { AgentScope } from "@cogenly/shared/AgentScope";
+import * as HostProcess from "@cogenly/shared/HostProcess";
 import {
   COMPUTER_USE_TOOL_SOURCE,
   dynamicToolSurface,
   dynamicToolTitle,
-} from "@t3tools/shared/toolActivity";
-import { getModelSelectionStringOptionValue, modelSelectionsEqual } from "@t3tools/shared/model";
-import { resolveSpawnCommand } from "@t3tools/shared/shell";
+} from "@cogenly/shared/toolActivity";
+import { getModelSelectionStringOptionValue, modelSelectionsEqual } from "@cogenly/shared/model";
+import { resolveSpawnCommand } from "@cogenly/shared/shell";
 import type {
   ChatAttachment,
   OrchestrationV2AppThread,
@@ -71,7 +78,7 @@ import type {
   RuntimeMode,
   RuntimeRequestId,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as CodexClient from "effect-codex-app-server/client";
 import * as CodexErrors from "effect-codex-app-server/errors";
 import * as CodexSchema from "effect-codex-app-server/schema";
@@ -97,12 +104,12 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { resolveAttachmentPath, resolveAttachmentPathById } from "../../attachmentStore.ts";
 import { getCodexServiceTierOptionValue } from "../../codexModelOptions.ts";
 import { ServerConfig } from "../../config.ts";
-import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
+import { expandHomePath } from "@cogenly/provider-core/server/pathExpansion";
 import {
   buildCodexAdditionalContext,
   buildCodexDeveloperInstructions,
 } from "../../provider/CodexDeveloperInstructions.ts";
-import { CONVERSATION_MODE_INSTRUCTIONS } from "@t3tools/provider-core/server/runtimeInstructions";
+import { conversationModeInstructions } from "@cogenly/provider-core/server/runtimeInstructions";
 import { toMcpElicitationResponse } from "../../provider/CodexMcpElicitation.ts";
 import {
   materializeCodexShadowHome,
@@ -112,42 +119,42 @@ import {
   boundProviderEventForLogging,
   shouldPersistProviderEvent,
 } from "../../provider/EventNdjsonLogger.ts";
-import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
+import * as ProviderEventLoggers from "@cogenly/provider-core/server/ProviderEventLoggers";
 import { codexAppServerArgs, resolveCodexLaunchArgs } from "../../provider/codexLaunchArgs.ts";
-import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
-import * as McpProviderSession from "@t3tools/provider-core/server/mcpSession";
-import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
+import { mergeProviderInstanceEnvironment } from "@cogenly/provider-core/server/instanceEnvironment";
+import * as McpProviderSession from "@cogenly/provider-core/server/mcpSession";
+import * as McpProviderSessions from "@cogenly/provider-core/server/McpProviderSessions";
 import {
   MCP_APP_EXTENSION_ID,
   MCP_APP_MIME_TYPE,
   MCP_APP_OUTPUT_KEY,
   MCP_APP_RESOURCE_SCHEME,
-} from "@t3tools/shared/mcpApp";
+} from "@cogenly/shared/mcpApp";
 import { snapshotMcpApp } from "../../mcpApps/McpAppSnapshot.ts";
 import {
   ProviderAdapterDriverCreateError,
   type ProviderAdapterDriver,
   type ProviderAdapterDriverCreateInput,
-} from "@t3tools/provider-core/server/adapterDriver";
-import * as ProviderContinuationRequests from "@t3tools/provider-core/server/ProviderContinuationRequests";
-import { backgroundWorkNotification } from "@t3tools/provider-core/server/notification";
+} from "@cogenly/provider-core/server/adapterDriver";
+import * as ProviderContinuationRequests from "@cogenly/provider-core/server/ProviderContinuationRequests";
+import { backgroundWorkNotification } from "@cogenly/provider-core/server/notification";
 import {
   makeProviderFailure,
   makeProviderFailureTurnItem,
   makeProviderRetryTurnItem,
-} from "@t3tools/provider-core/server/failure";
-import { turnScopedSelectionTransition } from "@t3tools/provider-core/server/selectionTransition";
+} from "@cogenly/provider-core/server/failure";
+import { turnScopedSelectionTransition } from "@cogenly/provider-core/server/selectionTransition";
 import {
   isProviderNativeImageAttachment,
   providerMessageTextWithAttachmentPaths,
-} from "@t3tools/provider-core/server/attachmentPrompt";
+} from "@cogenly/provider-core/server/attachmentPrompt";
 import {
   makeSubagentChildThread,
   makeSubagentConversationArtifacts,
   subagentThreadTitle,
-} from "@t3tools/provider-core/server/subagentProjection";
-import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
-import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
+} from "@cogenly/provider-core/server/subagentProjection";
+import * as IdAllocator from "@cogenly/provider-core/server/IdAllocator";
+import * as ProviderAdapter from "@cogenly/provider-core/server/ProviderAdapter";
 
 const CODEX_PROVIDER = ProviderDriverKind.make("codex");
 export const CODEX_DRIVER_KIND = CODEX_PROVIDER;
@@ -671,8 +678,9 @@ function codexRuntimeModeTurnDefaults(
   readonly approvalsReviewer: CodexSchema.V2TurnStartParams__ApprovalsReviewer;
   readonly sandboxPolicy: CodexSchema.V2TurnStartParams__SandboxPolicy;
 } {
-  // Chat-surface turns run in Codex's read-only sandbox: no workspace writes
-  // and no exec of mutating commands. Approvals stay off; the sandbox denies.
+  // Chat-surface turns run in Codex's read-only sandbox: no native patches or
+  // writes. Approvals stay off; the sandbox denies. Their commands go through
+  // the Cogenly terminal tools, which run outside this sandbox.
   if (conversationMode) {
     return {
       approvalPolicy: "never",
@@ -695,14 +703,22 @@ export function buildCodexTurnStartParams(input: {
   readonly hasT3Mcp?: boolean;
   readonly browserToolsAvailable?: boolean;
   readonly deviceToolsAvailable?: boolean;
+  /** Set when the session carries the computer-use tools: the platform of the machine they drive. */
+  readonly computerUsePlatform?: string;
   readonly terminalToolsAvailable?: boolean;
   /** ChatGPT token sharing does not accept service tiers. */
   readonly omitServiceTier?: boolean;
   /** What the thread's MCP Apps want the agent to know (`ui/update-model-context`). */
   readonly appContext?: ProviderAdapter.ProviderAdapterV2TurnInput["appContext"];
+  /** See `nativeMcpContextLine`. */
+  readonly nativeMcpContext?: string | undefined;
 }) {
   return Effect.gen(function* () {
     const conversationMode = input.runtimePolicy.conversationMode === true;
+    const terminalTools = McpProviderSession.terminalToolsAuthorized({
+      ...input.runtimePolicy,
+      enabled: input.hasT3Mcp === true && input.terminalToolsAvailable === true,
+    });
     const runtimeModeDefaults = codexRuntimeModeTurnDefaults(
       input.runtimePolicy.runtimeMode,
       conversationMode,
@@ -724,7 +740,13 @@ export function buildCodexTurnStartParams(input: {
         ? undefined
         : buildCodexDeveloperInstructions(
             input.runtimePolicy.interactionMode,
-            conversationMode ? { conversationMode } : undefined,
+            conversationMode
+              ? {
+                  conversationMode,
+                  builder: input.runtimePolicy.builderMode,
+                  terminal: terminalTools,
+                }
+              : undefined,
           );
     // An app's context is text an MCP server wrote, so it goes in as untrusted
     // context: Codex renders it as quoted user-side input, never as developer
@@ -742,9 +764,10 @@ export function buildCodexTurnStartParams(input: {
             {
               browser: input.browserToolsAvailable ?? true,
               device: input.deviceToolsAvailable ?? false,
-              // Conversation turns have no shell, so they never route
-              // commands through the terminal tools.
-              terminal: conversationMode ? false : (input.terminalToolsAvailable ?? false),
+              ...(input.computerUsePlatform === undefined
+                ? {}
+                : { computer: input.computerUsePlatform }),
+              terminal: terminalTools,
             },
           )
         : undefined;
@@ -757,7 +780,10 @@ export function buildCodexTurnStartParams(input: {
         : {
             cogenly_conversation: {
               kind: "application" as const,
-              value: CONVERSATION_MODE_INSTRUCTIONS,
+              value: conversationModeInstructions({
+                terminal: terminalTools,
+                builder: input.runtimePolicy.builderMode,
+              }),
             },
           };
     const projectContext =
@@ -769,13 +795,26 @@ export function buildCodexTurnStartParams(input: {
               value: input.runtimePolicy.projectManifest,
             },
           };
+    const nativeMcpContext =
+      input.nativeMcpContext === undefined
+        ? undefined
+        : {
+            cogenly_native_mcp: { kind: "application" as const, value: input.nativeMcpContext },
+          };
     const additionalContext =
       t3Context === undefined &&
       Object.keys(appContext).length === 0 &&
       conversationContext === undefined &&
-      projectContext === undefined
+      projectContext === undefined &&
+      nativeMcpContext === undefined
         ? undefined
-        : { ...t3Context, ...appContext, ...conversationContext, ...projectContext };
+        : {
+            ...t3Context,
+            ...appContext,
+            ...conversationContext,
+            ...projectContext,
+            ...nativeMcpContext,
+          };
     const collaborationMode: CodexSchema.ClientRequest__CollaborationMode | undefined =
       input.runtimePolicy.interactionMode !== "plan" && developerInstructions === undefined
         ? undefined
@@ -922,6 +961,36 @@ export function parseCodexGoalCommand(text: string): CodexGoalCommand | null {
     default:
       return { type: "set", objective: argument };
   }
+}
+
+/** Codex names no retry-after; a throttled turn retries this long after it stopped. */
+const CODEX_RATE_LIMIT_RETRY_MS = 60_000;
+
+/**
+ * Splits a Codex limit stop. `usageLimitExceeded`, or a rate-limit snapshot
+ * showing a spent window, is an exhausted quota that lasts until that
+ * window's reset. A bare `rateLimitExceeded` is a short-term throttle that
+ * gets a near reset the server retries at.
+ */
+export function classifyCodexLimitFailure(
+  failure: OrchestrationV2ProviderFailure,
+  snapshot: CodexRateLimitSnapshot | undefined,
+  nowMs: number,
+): OrchestrationV2ProviderFailure {
+  const windowResetAt = codexUsageLimitResetAt(snapshot);
+  if (
+    failure.limitKind === "quota" ||
+    failure.code === "usageLimitExceeded" ||
+    windowResetAt !== null
+  ) {
+    return { ...failure, limitKind: "quota", resetAt: windowResetAt ?? failure.resetAt ?? null };
+  }
+  return {
+    ...failure,
+    limitKind: "rate_limit",
+    resetAt:
+      failure.resetAt ?? DateTime.formatIso(DateTime.makeUnsafe(nowMs + CODEX_RATE_LIMIT_RETRY_MS)),
+  };
 }
 
 type CodexThreadGoal = CodexSchema.V2ThreadGoalUpdatedNotification["goal"];
@@ -1344,43 +1413,145 @@ export const CODEX_THREAD_CONFIG = {
 // that limit so the server's own wait timeout ends a long call.
 const CODEX_T3_MCP_TOOL_TIMEOUT_SEC = 65 * 60;
 
+/**
+ * Native connectors disabled for a thread (stdio servers included), and the
+ * servers a thread keeps or cannot drop, named in its context.
+ */
+export interface CodexProviderDuplicates {
+  readonly appIds: ReadonlyArray<string>;
+  readonly mcpServerNames: ReadonlyArray<string>;
+  /** Defined in the repository's own `.codex/config.toml`: part of the project, kept on. */
+  readonly repoServerNames?: ReadonlyArray<string>;
+  readonly blockedRepoServerNames?: ReadonlyArray<string>;
+  readonly repoServerEnabled?: Readonly<Record<string, boolean>>;
+  /** Defined by administrator-managed configuration, which may outrank the session's override. */
+  readonly managedServerNames?: ReadonlyArray<string>;
+}
+
+// App ids use simple config paths; MCP names are literal keys in a combined table.
+const CODEX_CONFIG_KEY_SEGMENT = /^[A-Za-z0-9_-]+$/;
+
+const CODEX_MANAGED_LAYER_TYPES: ReadonlySet<string> = new Set([
+  "mdm",
+  "enterpriseManaged",
+  "legacyManagedConfigTomlFromFile",
+  "legacyManagedConfigTomlFromMdm",
+]);
+
+/** One `config/read` layer, highest precedence first, as `includeLayers` returns them. */
+export interface CodexConfigLayer {
+  readonly name: { readonly type: string };
+  readonly config: unknown;
+}
+
+const recordOf = (value: unknown): Readonly<Record<string, unknown>> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+
+/**
+ * Picks what a thread turns off from `app/list` and the effective
+ * `mcp_servers` config. With `layers`, a server is owned by the highest layer
+ * that defines its transport (an `enabled` flag alone, like the launch
+ * override, defines nothing): a `project` layer keeps it on as a repo server,
+ * even when Codex marks that layer untrusted; every other owner turns it off.
+ */
+export function codexProviderDuplicates(input: {
+  readonly apps: ReadonlyArray<{ readonly id: string; readonly name: string }>;
+  readonly mcpServers: unknown;
+  readonly layers?: ReadonlyArray<CodexConfigLayer> | null | undefined;
+}): CodexProviderDuplicates {
+  const layers = input.layers ?? [];
+  const names = new Set(
+    Object.entries(recordOf(input.mcpServers))
+      .filter(([, server]) => typeof server === "object" && server !== null)
+      .map(([name]) => name),
+  );
+  for (const layer of layers) {
+    if (layer.name.type === "project") {
+      for (const name of Object.keys(recordOf(recordOf(layer.config)["mcp_servers"]))) {
+        names.add(name);
+      }
+    }
+  }
+  names.delete("cogenly");
+  const ownerOf = (name: string) =>
+    layers.find((layer) =>
+      Object.keys(recordOf(recordOf(recordOf(layer.config)["mcp_servers"])[name])).some(
+        (key) => key === "command" || key === "url",
+      ),
+    )?.name.type;
+  const owned = [...names].map((name) => ({ name, owner: ownerOf(name) }));
+  return {
+    appIds: input.apps.filter((app) => CODEX_CONFIG_KEY_SEGMENT.test(app.id)).map((app) => app.id),
+    mcpServerNames: owned.filter((server) => server.owner !== "project").map(({ name }) => name),
+    repoServerNames: owned.filter((server) => server.owner === "project").map(({ name }) => name),
+    managedServerNames: owned
+      .filter((server) => server.owner !== undefined && CODEX_MANAGED_LAYER_TYPES.has(server.owner))
+      .map(({ name }) => name),
+  };
+}
+
 export function codexThreadRuntimeParams(input: {
   readonly mcpSession: McpProviderSession.McpProviderSessionConfig | undefined;
   readonly modelSelection?: { readonly model: string };
   readonly runtimePolicy?: ProviderAdapter.ProviderAdapterV2RuntimePolicy;
+  /** Turned off for this thread unless the runtime policy lets provider connectors through. */
+  readonly providerDuplicates?: CodexProviderDuplicates | undefined;
 }): {
   readonly cwd?: string;
   readonly model?: string;
   readonly config: Readonly<Record<string, Schema.Json>>;
 } {
   const { mcpSession } = input;
+  const duplicates =
+    input.runtimePolicy?.useProviderConnectors === true
+      ? { appIds: [], mcpServerNames: input.providerDuplicates?.blockedRepoServerNames ?? [] }
+      : input.providerDuplicates;
   return {
     ...(input.runtimePolicy?.cwd == null ? {} : { cwd: input.runtimePolicy.cwd }),
     ...(input.modelSelection === undefined ? {} : { model: input.modelSelection.model }),
     config: {
       ...CODEX_THREAD_CONFIG,
-      ...(mcpSession === undefined
+      ...(input.runtimePolicy?.conversationMode === true
+        ? {
+            "features.shell_tool": false,
+            "features.multi_agent": false,
+            "features.multi_agent_v2": false,
+          }
+        : {}),
+      ...(input.runtimePolicy?.useProviderConnectors === true
         ? {}
-        : {
-            // Codex gates both exec_command and write_stdin on ShellTool before UnifiedExec.
-            // https://github.com/openai/codex/blob/main/codex-rs/core/src/tools/spec_plan.rs#L1234-L1260
-            // The native shell is disabled only when the credential
-            // explicitly grants the Cogenly terminal tools; an absent flag
-            // keeps the shell so the agent can still run commands.
-            ...(McpProviderSession.terminalToolsAvailable(mcpSession)
-              ? { "features.shell_tool": false }
-              : {}),
-            mcp_servers: {
+        : { "features.plugins": false, "features.apps": false }),
+      // The combined table preserves literal dots and quotes in MCP names.
+      // Codex merges it with the configured transports and passes it to subagents.
+      ...Object.fromEntries((duplicates?.appIds ?? []).map((id) => [`apps.${id}.enabled`, false])),
+      mcp_servers: {
+        ...Object.fromEntries(
+          (duplicates?.mcpServerNames ?? []).map((name) => [name, { enabled: false }]),
+        ),
+        ...Object.fromEntries(
+          Object.entries(input.providerDuplicates?.repoServerEnabled ?? {}).map(
+            ([name, enabled]) => [name, { enabled }],
+          ),
+        ),
+        ...(mcpSession === undefined
+          ? {}
+          : {
               cogenly: {
+                enabled: true,
                 url: mcpSession.endpoint,
                 tool_timeout_sec: CODEX_T3_MCP_TOOL_TIMEOUT_SEC,
                 default_tools_approval_mode: "approve",
-                http_headers: {
-                  Authorization: mcpSession.authorizationHeader,
-                },
+                http_headers: { Authorization: mcpSession.authorizationHeader },
               },
-            },
-          }),
+            }),
+      },
+      // Codex gates both exec_command and write_stdin on ShellTool before UnifiedExec.
+      // Disable it only when the session explicitly grants Cogenly's terminal tools.
+      ...(mcpSession !== undefined && McpProviderSession.terminalToolsAvailable(mcpSession)
+        ? { "features.shell_tool": false }
+        : {}),
     },
   };
 }
@@ -1544,6 +1715,7 @@ function redactCodexProtocolValue(value: unknown): unknown {
 function isSensitiveCodexProtocolKey(key: string): boolean {
   const normalized = key.replace(/[^a-z0-9]/gi, "").toLowerCase();
   return (
+    ["env", "httpheaders", "headers"].includes(normalized) ||
     normalized.endsWith("authorization") ||
     normalized.endsWith("apikey") ||
     normalized.endsWith("token") ||
@@ -1571,11 +1743,51 @@ export const layerAppServerClientFactory: Layer.Layer<
             ...codexAppServerEnvironment(input.environment),
             ...(input.settings.homePath ? { CODEX_HOME: input.settings.homePath } : {}),
           };
+          const launchArgs = resolveCodexLaunchArgs(input.settings.launchArgs, input.environment);
+          // Listed from the home directory, outside any repository, so the
+          // launch override names only servers from outside the repo; the
+          // repo's own servers stay on and are sorted per thread below.
+          const listingCwd = yield* HostProcess.HomeDirectory;
+          const nativeOffArgs =
+            input.runtimePolicy?.useProviderConnectors === true
+              ? []
+              : yield* Effect.gen(function* () {
+                  const listing = yield* resolveSpawnCommand(
+                    input.settings.binaryPath || "codex",
+                    [
+                      ...codexAppServerArgs(launchArgs).slice(1),
+                      ...codexNativeMcpOffArgs([]),
+                      "mcp",
+                      "list",
+                      "--json",
+                    ],
+                    { env: environment },
+                  );
+                  const json = yield* spawner
+                    .string(
+                      ChildProcess.make(listing.command, listing.args, {
+                        env: environment,
+                        shell: listing.shell,
+                        cwd: listingCwd,
+                      }),
+                    )
+                    .pipe(Effect.timeout("10 seconds"));
+                  const names = yield* Effect.try(() => codexNativeMcpNames(json));
+                  return codexNativeMcpOffArgs(names);
+                }).pipe(
+                  (read) => requireCodexNativeMcpEnumeration("launch", read),
+                  Effect.mapError(
+                    (cause) =>
+                      new ProviderAdapter.ProviderAdapterOpenSessionError({
+                        driver: CODEX_PROVIDER,
+                        providerSessionId: input.providerSessionId,
+                        cause,
+                      }),
+                  ),
+                );
           const command = yield* makeCodexAppServerSpawnCommand({
             command: input.settings.binaryPath || "codex",
-            args: codexAppServerArgs(
-              resolveCodexLaunchArgs(input.settings.launchArgs, input.environment),
-            ),
+            args: [...codexAppServerArgs(launchArgs), ...nativeOffArgs],
             env: environment,
             threadId: input.threadId,
           }).pipe(Effect.provideService(AgentScope, agentScope));
@@ -1617,6 +1829,7 @@ export type CodexAdapterV2DriverEnv =
   | Crypto.Crypto
   | FileSystem.FileSystem
   | IdAllocator.IdAllocatorV2
+  | RepoMcpTrust.RepoMcpTrust
   | McpProviderSessions.McpProviderSessions
   | Path.Path
   | ServerConfig;
@@ -1655,6 +1868,7 @@ export const createCodexAdapterV2 = (
     } satisfies CodexSettings;
 
     return yield* makeCodexAdapterV2({
+      repoMcpTrust: yield* RepoMcpTrust.RepoMcpTrust,
       instanceId,
       settings,
       environment: yield* mergeProviderInstanceEnvironment(environment, hostEnvironment),
@@ -1710,6 +1924,7 @@ const layer: Layer.Layer<
 );
 
 export interface CodexAdapterV2Options {
+  readonly repoMcpTrust?: RepoMcpTrust.RepoMcpTrust["Service"];
   readonly instanceId: ProviderInstanceId;
   readonly settings: CodexSettings;
   readonly environment: NodeJS.ProcessEnv;
@@ -1741,6 +1956,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
   adapterOptions: CodexAdapterV2Options,
 ) {
   const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
+  const repoTrust = Option.fromUndefinedOr(adapterOptions.repoMcpTrust);
   const readMcpSession = (threadId: ThreadId | null) =>
     threadId === null ? Effect.succeed(undefined) : mcpSessions.read(threadId);
   const { clientFactory, crypto, fileSystem, idAllocator, serverConfig } = adapterOptions;
@@ -1852,6 +2068,89 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             yield* Ref.set(initialized, true);
           }),
         );
+        // Re-read repo layers on each use: edits and trust decisions must reach
+        // existing sessions before their next turn starts.
+        const previousRepoNames = new Map<string, ReadonlyArray<string>>();
+        const providerDuplicatesFor = Effect.fnUntraced(function* (
+          runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy | undefined,
+          threadId?: ThreadId | null | undefined,
+        ) {
+          const cwd = runtimePolicy?.cwd ?? undefined;
+          yield* ensureInitialized;
+          const config = yield* requireCodexNativeMcpEnumeration(
+            "thread",
+            client
+              .request("config/read", {
+                includeLayers: true,
+                ...(cwd === undefined ? {} : { cwd }),
+              })
+              .pipe(Effect.timeout("8 seconds")),
+          ).pipe(
+            Effect.tapError((error) =>
+              DateTime.now.pipe(
+                Effect.flatMap((updatedAt) =>
+                  Queue.offer(events, {
+                    type: "provider_session.updated",
+                    driver: CODEX_PROVIDER,
+                    providerSession: {
+                      ...session,
+                      status: "error",
+                      lastError: error.message,
+                      updatedAt,
+                    },
+                  }),
+                ),
+              ),
+            ),
+          );
+          const duplicates = codexProviderDuplicates({
+            apps: [],
+            mcpServers: config.config["mcp_servers"],
+            layers: config.layers,
+          });
+          const definitions = Object.fromEntries(
+            (duplicates.repoServerNames ?? []).map((name) => {
+              const layer = config.layers?.find((layer) => {
+                const value = recordOf(recordOf(recordOf(layer.config)["mcp_servers"])[name]);
+                return Object.keys(value).some((key) => key === "command" || key === "url");
+              });
+              return [name, recordOf(recordOf(layer?.config)["mcp_servers"])[name]];
+            }),
+          );
+          const review =
+            cwd === undefined || Option.isNone(repoTrust)
+              ? {
+                  allowedNames: Object.keys(definitions).filter(
+                    (name) => typeof recordOf(definitions[name]).command !== "string",
+                  ),
+                  waitingNames: Object.keys(definitions).filter(
+                    (name) => typeof recordOf(definitions[name]).command === "string",
+                  ),
+                }
+              : yield* repoTrust.value.review({
+                  cwd,
+                  threadId: threadId ?? undefined,
+                  definitions,
+                });
+          const removed = (previousRepoNames.get(cwd ?? "") ?? []).filter(
+            (name) => !(name in definitions),
+          );
+          previousRepoNames.set(cwd ?? "", [
+            ...new Set([...(previousRepoNames.get(cwd ?? "") ?? []), ...Object.keys(definitions)]),
+          ]);
+          return {
+            ...duplicates,
+            repoServerNames: review.allowedNames,
+            repoServerEnabled: Object.fromEntries(
+              review.allowedNames.map((name) => [
+                name,
+                recordOf(definitions[name]).enabled !== false,
+              ]),
+            ),
+            blockedRepoServerNames: [...review.waitingNames, ...removed],
+            mcpServerNames: [...duplicates.mcpServerNames, ...review.waitingNames, ...removed],
+          };
+        });
         const now = yield* DateTime.now;
         const session = providerSession({
           providerSessionId: input.providerSessionId,
@@ -5126,10 +5425,11 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                 status: terminalStatus,
                 failure:
                   failure.class === "usage_limit"
-                    ? {
-                        ...failure,
-                        resetAt: codexUsageLimitResetAt(yield* Ref.get(rateLimitSnapshot)),
-                      }
+                    ? classifyCodexLimitFailure(
+                        failure,
+                        yield* Ref.get(rateLimitSnapshot),
+                        DateTime.toEpochMillis(yield* DateTime.now),
+                      )
                     : failure,
                 ...(input.providerRetry === undefined
                   ? {}
@@ -5161,12 +5461,19 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             event.status === "failed" && event.failure.class === "usage_limit"
               ? {
                   ...event,
-                  failure: {
-                    ...event.failure,
-                    resetAt:
-                      event.failure.resetAt ??
-                      codexUsageLimitResetAt(yield* Ref.get(rateLimitSnapshot)),
-                  },
+                  failure:
+                    event.failure.limitKind === undefined
+                      ? classifyCodexLimitFailure(
+                          event.failure,
+                          yield* Ref.get(rateLimitSnapshot),
+                          DateTime.toEpochMillis(yield* DateTime.now),
+                        )
+                      : {
+                          ...event.failure,
+                          resetAt:
+                            event.failure.resetAt ??
+                            codexUsageLimitResetAt(yield* Ref.get(rateLimitSnapshot)),
+                        },
                 }
               : event;
           yield* emitProviderEvent(current);
@@ -5775,6 +6082,34 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
           Effect.gen(function* () {
             const threadId = yield* getNativeThreadId(turnInput.providerThread);
             const mcpSession = yield* mcpSessions.read(turnInput.threadId);
+            // A failed trust check must stop the turn before any repo command starts.
+            const nativeMcp = yield* providerDuplicatesFor(
+              turnInput.runtimePolicy,
+              turnInput.threadId,
+            );
+            if (
+              (nativeMcp.repoServerNames?.length ?? 0) + nativeMcp.blockedRepoServerNames.length >
+              0
+            )
+              yield* client.request("thread/resume", {
+                threadId,
+                excludeTurns: true,
+                ...codexThreadRuntimeParams({
+                  mcpSession,
+                  runtimePolicy: turnInput.runtimePolicy,
+                  modelSelection: turnInput.modelSelection,
+                  providerDuplicates: nativeMcp,
+                }),
+              });
+            const nativeMcpContext =
+              nativeMcp === undefined
+                ? undefined
+                : nativeMcpContextLine({
+                    repoFile: ".codex/config.toml",
+                    repo: nativeMcp.repoServerNames,
+                    managed: nativeMcp.managedServerNames,
+                    waiting: nativeMcp.blockedRepoServerNames,
+                  });
             const turnStartParams = yield* buildCodexTurnStartParams({
               nativeThreadId: threadId,
               codexInput,
@@ -5783,9 +6118,13 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               hasT3Mcp: mcpSession !== undefined,
               browserToolsAvailable: mcpSession?.browserToolsAvailable ?? true,
               deviceToolsAvailable: mcpSession?.capabilities?.has("device") ?? false,
+              ...(mcpSession?.capabilities?.has("computer") === true
+                ? { computerUsePlatform: yield* HostProcess.Platform }
+                : {}),
               terminalToolsAvailable: McpProviderSession.terminalToolsAvailable(mcpSession),
               omitServiceTier: adapterOptions.resolveRuntime !== undefined,
               ...(turnInput.appContext === undefined ? {} : { appContext: turnInput.appContext }),
+              ...(nativeMcpContext === undefined ? {} : { nativeMcpContext }),
             });
             yield* Ref.update(pendingRootTurns, (current) => {
               const updated = new Map(current);
@@ -6054,14 +6393,20 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             }),
           ensureThread: (threadInput) =>
             ensureInitialized.pipe(
-              Effect.andThen(mcpSessions.read(threadInput.threadId)),
-              Effect.flatMap((mcpSession) =>
+              Effect.andThen(
+                Effect.all([
+                  mcpSessions.read(threadInput.threadId),
+                  providerDuplicatesFor(threadInput.runtimePolicy, threadInput.threadId),
+                ]),
+              ),
+              Effect.flatMap(([mcpSession, providerDuplicates]) =>
                 client.request(
                   "thread/start",
                   codexThreadRuntimeParams({
                     mcpSession,
                     modelSelection: threadInput.modelSelection,
                     runtimePolicy: threadInput.runtimePolicy,
+                    providerDuplicates,
                   }),
                 ),
               ),
@@ -6101,6 +6446,10 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                   ...(threadInput.runtimePolicy === undefined
                     ? {}
                     : { runtimePolicy: threadInput.runtimePolicy }),
+                  providerDuplicates: yield* providerDuplicatesFor(
+                    threadInput.runtimePolicy,
+                    threadInput.threadId ?? threadInput.providerThread.appThreadId,
+                  ),
                 }),
               });
               const response = yield* ensureInitialized.pipe(
@@ -6825,6 +7174,10 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                     mcpSession: yield* readMcpSession(threadInput.providerThread.appThreadId),
                     modelSelection: input.modelSelection,
                     runtimePolicy: input.runtimePolicy,
+                    providerDuplicates: yield* providerDuplicatesFor(
+                      input.runtimePolicy,
+                      threadInput.providerThread.appThreadId,
+                    ),
                   }),
                 });
               }
@@ -6878,6 +7231,10 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                       ...(threadInput.runtimePolicy === undefined
                         ? {}
                         : { runtimePolicy: threadInput.runtimePolicy }),
+                      providerDuplicates: yield* providerDuplicatesFor(
+                        threadInput.runtimePolicy,
+                        threadInput.targetThreadId,
+                      ),
                     }),
                   }),
                 ),

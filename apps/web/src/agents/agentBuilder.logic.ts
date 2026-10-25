@@ -19,7 +19,7 @@ import {
   type ProjectLabelId,
   type ScheduledTaskSchedule,
   type ScheduledTaskUpsertSchedule,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { EXPRESSIONS as AGENT_FACE_EXPRESSIONS } from "~/components/agents/face/engine/expressions";
 import {
   COLORS as AGENT_FACE_COLORS,
@@ -54,6 +54,7 @@ export interface AgentProposalTrigger {
   schedule: ScheduledTaskSchedule | null;
 }
 export interface AgentProposal {
+  machine?: import("@cogenly/contracts").EnvironmentId;
   name?: string;
   face?: Pick<AgentAvatar, "shape" | "color" | "expression">;
   responsibility?: string;
@@ -186,6 +187,7 @@ function proposalSchedule(schedule: ScheduledTaskUpsertSchedule): ScheduledTaskS
 /** A `propose_agent` call as the card reads it: whole, so always complete. */
 export function structuredProposal(proposal: AgentBuilderProposal): AgentProposal {
   return {
+    ...(proposal.machine === undefined ? {} : { machine: proposal.machine }),
     name: proposal.name,
     face: {
       ...(SHAPE_IDS.has(proposal.face.shape) ? { shape: proposal.face.shape } : {}),
@@ -407,6 +409,7 @@ export function proposalToDraft(
   const permissions = { ...defaultAgentPermissions };
   for (const grant of proposal.permissions) permissions[grant] = true;
   return {
+    ...(proposal.machine === undefined ? {} : { ownerMachine: proposal.machine }),
     name: proposal.name.trim(),
     avatar: {
       seed: context.seed,

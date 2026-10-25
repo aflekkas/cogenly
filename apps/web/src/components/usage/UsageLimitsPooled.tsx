@@ -11,7 +11,7 @@ import {
   type LimitPoolMember,
   type LimitPoolWindow,
   remainingPercent,
-} from "@t3tools/shared/usageLimits";
+} from "@cogenly/shared/usageLimits";
 import { AlertTriangleIcon, ExternalLinkIcon, TicketIcon } from "lucide-react";
 import { Fragment, type ReactNode, useState } from "react";
 
@@ -69,7 +69,7 @@ function AccountChip({ email }: { readonly email: string }) {
 
 /**
  * The same mark the model picker uses for a native instance (provider glyph
- * with the instance's colored dot); hub accounts have no instance, so they get the chip.
+ * with the instance's colored dot).
  */
 function AccountAvatar({
   account,
@@ -162,7 +162,7 @@ function SegmentPopover({
   const where =
     account.environments.length > 0
       ? account.environments.map((environment) => environment.label).join(", ")
-      : account.sourceLabel;
+      : null;
   const credits =
     redeem && account.limits.resetCredits?.availableCount ? account.limits.resetCredits : null;
   return (
@@ -610,7 +610,7 @@ export function UsageLimitsPooled({
     <div className="flex flex-col gap-8">
       {pools.length === 0 && notices.length === 0 && externalLinks.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          No provider on the selected environments reports subscription limits.
+          No provider on the selected machines reports subscription limits.
         </p>
       ) : null}
       {pools.map((pool) => (

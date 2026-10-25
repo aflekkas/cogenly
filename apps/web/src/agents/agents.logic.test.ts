@@ -16,7 +16,7 @@ import {
   agentAttachmentSupport,
   wireAgentAttachments,
 } from "./agents.logic";
-import { ChatAttachmentId, ProviderInstanceId } from "@t3tools/contracts";
+import { ChatAttachmentId, ProviderInstanceId } from "@cogenly/contracts";
 import * as DateTime from "effect/DateTime";
 import type { AgentContact, AgentMessage } from "./agents.types";
 

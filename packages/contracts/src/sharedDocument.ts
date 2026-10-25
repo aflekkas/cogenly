@@ -1,7 +1,7 @@
 import * as Schema from "effect/Schema";
 import { AuthSyncReplicateScope } from "./auth.ts";
 import { EnvironmentId } from "./baseSchemas.ts";
-import { makePeerChannel } from "./machine.ts";
+import { MachineRelation, makePeerChannel } from "./machine.ts";
 
 export const SHARED_BATCH_LIMIT = 32;
 export const SHARED_BATCH_BYTES = 256 * 1024;
@@ -29,7 +29,21 @@ export const HybridClock = Schema.Struct({
   node: SharedDocumentId,
 });
 export type HybridClock = typeof HybridClock.Type;
-export const SharedDocumentKind = Schema.Literals(["project", "agent", "schedule"]);
+/**
+ * `settings` carries universal server settings (id `universal`), and
+ * `project-settings` one project's setting overrides (id: the project
+ * folder's id); see SettingsSync.
+ */
+export const SharedDocumentKind = Schema.Literals([
+  "project",
+  "agent",
+  "schedule",
+  "fact",
+  "vault",
+  "settings",
+  "project-settings",
+  "integration",
+]);
 export type SharedDocumentKind = typeof SharedDocumentKind.Type;
 /** A delta contains only fields authored by this edit; relay preserves their clocks. */
 export const SharedDocumentChange = Schema.Struct({
@@ -41,10 +55,20 @@ export const SharedDocumentChange = Schema.Struct({
   updatedBy: EnvironmentId,
 });
 export type SharedDocumentChange = typeof SharedDocumentChange.Type;
+/**
+ * A change as peers send it. The kind stays open so a newer peer's document
+ * kind reaches the receiver, which keeps it for a later build instead of
+ * refusing the whole batch (see docs/internals/sync.md).
+ */
+export const SharedDocumentChangeWire = Schema.Struct({
+  ...SharedDocumentChange.fields,
+  kind: SharedDocumentId,
+});
+export type SharedDocumentChangeWire = typeof SharedDocumentChangeWire.Type;
 export const SharedChangeBatch = Schema.Struct({
   after: Counter,
   cursor: Counter,
-  changes: Schema.Array(SharedDocumentChange).check(Schema.isMaxLength(SHARED_BATCH_LIMIT)),
+  changes: Schema.Array(SharedDocumentChangeWire).check(Schema.isMaxLength(SHARED_BATCH_LIMIT)),
 });
 export type SharedChangeBatch = typeof SharedChangeBatch.Type;
 export class SharedStateError extends Schema.TaggedError<SharedStateError>()("SharedStateError", {
@@ -55,6 +79,28 @@ export class SharedStateError extends Schema.TaggedError<SharedStateError>()("Sh
     return `Shared state failed (${this.reason}).`;
   }
 }
+/** Omit `kinds` for every kind this build syncs. */
+export const SharedSyncStatusInput = Schema.Struct({
+  kinds: Schema.optional(Schema.Array(SharedDocumentKind)),
+});
+export type SharedSyncStatusInput = typeof SharedSyncStatusInput.Type;
+/** What one directly paired machine has not yet acknowledged, by document kind. */
+export const SharedSyncPeerStatus = Schema.Struct({
+  environmentId: EnvironmentId,
+  label: Schema.String,
+  online: Schema.Boolean,
+  relation: MachineRelation,
+  kinds: Schema.Array(
+    Schema.Struct({
+      kind: SharedDocumentKind,
+      /** Local changes the peer has not acknowledged and would receive on the next pass. */
+      pendingOutgoing: Counter,
+    }),
+  ),
+});
+export type SharedSyncPeerStatus = typeof SharedSyncPeerStatus.Type;
+export const SharedSyncStatusResult = Schema.Struct({ peers: Schema.Array(SharedSyncPeerStatus) });
+export type SharedSyncStatusResult = typeof SharedSyncStatusResult.Type;
 export const SharedChangesRead = makePeerChannel({
   name: "sync.documents.read.v1",
   scope: AuthSyncReplicateScope,

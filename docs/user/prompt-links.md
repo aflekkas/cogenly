@@ -1,23 +1,20 @@
 # Prompt links
 
-A prompt link opens Cogenly with a prompt ready to send. Use one to share a prompt on social
-media, or to put a one-click fix in a pull request comment.
+A prompt link opens Cogenly with a prompt ready to send. Use one in a bookmark, a script, or a
+pull request comment to start a draft in one click.
 
 A link never runs anything. It opens a draft. You read the prompt, then press Send. A link cannot
 change your permission mode, branch, or worktree. Your own defaults apply.
 
 ## Make a link
 
-Open the command palette and choose **Copy prompt link**. It copies the draft in the composer.
-When the project is on GitHub, **Copy prompt link with repo and model** also adds the repository
-and the model you picked. Sent messages have a **Copy prompt link** button too.
-
-You can also write a link by hand:
+Write the link against the address you open Cogenly at, such as your server's Tailscale address.
+The desktop app also opens `cogenly://new?…` links with the same parameters.
 
 ```
-https://app.t3.codes/new?prompt=Rate%20my%20swearing
-https://app.t3.codes/new?prompt=Fix%20the%20build&repo=owner/name&provider=codex&model=gpt-5.5
-https://app.t3.codes/new?pr=owner/name/123&prompt=Fix%20the%20failing%20check
+https://your-cogenly-address/new?prompt=Rate%20my%20swearing
+https://your-cogenly-address/new?prompt=Fix%20the%20build&repo=owner/name&provider=codex&model=gpt-5.5
+https://your-cogenly-address/new?pr=owner/name/123&prompt=Fix%20the%20failing%20check
 ```
 
 | Parameter  | Meaning                                                                       |
@@ -32,10 +29,6 @@ Encode the prompt for a URL. In JavaScript, use `encodeURIComponent`.
 
 ## Open a link
 
-On app.t3.codes, the link first asks where to open it: the desktop app, this browser
-when it is connected to a machine, or the download page. Select **Remember my choice** to skip
-this step next time.
-
 - **No `repo`**: the draft opens without a project, on the machine you used last.
 - **`repo`**: the draft opens in your most recently used project for that repository. A fork
   counts only for its own owner. When you do not have the repository, choose **Clone** or **Use
@@ -47,7 +40,7 @@ this step next time.
   worktree. Cogenly checks the code out only after you confirm, because the checkout runs your
   setup script on it.
 
-A thread link with a prompt, such as `https://app.t3.codes/<environment>/<thread>?prompt=…`,
+A thread link with a prompt, such as `https://your-cogenly-address/<environment>/<thread>?prompt=…`,
 puts the prompt in that thread's composer. If you already typed a draft there, Cogenly asks
 before it replaces it.
 

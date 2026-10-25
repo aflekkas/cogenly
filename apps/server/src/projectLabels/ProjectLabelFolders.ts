@@ -1,6 +1,11 @@
-import { ProjectLabelId } from "@t3tools/contracts";
-import * as HostProcess from "@t3tools/shared/HostProcess";
-import { sanitizePathSegment } from "@t3tools/shared/path";
+import {
+  PROJECT_REPOSITORIES_SEGMENT,
+  ProjectLabelId,
+  type ProjectMergeFileStatus,
+  type ProjectOrphanFolder,
+} from "@cogenly/contracts";
+import * as HostProcess from "@cogenly/shared/HostProcess";
+import { UNFILED_REPOSITORIES_SEGMENT, sanitizePathSegment } from "@cogenly/shared/path";
 import * as Effect from "effect/Effect";
 import * as Context from "effect/Context";
 import * as FileSystem from "effect/FileSystem";
@@ -9,11 +14,13 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
+import { resolveProjectLabelId } from "../sync/ProjectMergeProjection.ts";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import * as ServerConfig from "../config.ts";
 import { resolveProjectsRootDirectory } from "../project/ProjectsRoot.ts";
-import { WORKTREES_SEGMENT } from "../worktreesDirectory.ts";
+import { isWorktreesSegment } from "../worktreesDirectory.ts";
 import * as ServerSettings from "../serverSettings.ts";
 
 export const PROJECT_LABEL_ID_FILE = ".cogenly-project.json";
@@ -50,6 +57,8 @@ export interface ProjectLabelRef {
 export class ProjectLabelFolders extends Context.Service<
   ProjectLabelFolders,
   {
+    readonly mergeFileStatus: Effect.Effect<ProjectMergeFileStatus, ProjectLabelFolderError>;
+    readonly reconcileMerges: Effect.Effect<void, ProjectLabelFolderError>;
     /** The resolved projects root. Blank settings land in `<Cogenly home>/projects`. */
     readonly projectsRoot: Effect.Effect<string, ProjectLabelFolderError>;
     /**
@@ -73,6 +82,33 @@ export class ProjectLabelFolders extends Context.Service<
       label: ProjectLabelRef,
     ) => Effect.Effect<ProjectLabelFolder, ProjectLabelFolderError>;
     /**
+     * Claims an existing folder under the projects root for the label (an
+     * orphan the user adopts): writes its id file, keeps everything in it.
+     */
+    readonly claimForLabel: (
+      label: ProjectLabelRef,
+      dirName: string,
+    ) => Effect.Effect<ProjectLabelFolder, ProjectLabelFolderError>;
+    /**
+     * Removes the label's folder when it is only the skeleton Cogenly made
+     * (id file, empty `Resources/`, empty repository and worktree folders).
+     * Anything else stays; returns whether the folder went.
+     */
+    readonly removeSkeleton: (
+      label: ProjectLabelRef,
+    ) => Effect.Effect<boolean, ProjectLabelFolderError>;
+    /**
+     * Folders directly under the projects root that no project claims: no id
+     * file, or one naming a project that no longer exists. `Repositories/`
+     * and worktree folders are never orphans.
+     */
+    readonly listOrphans: Effect.Effect<
+      ReadonlyArray<ProjectOrphanFolder>,
+      ProjectLabelFolderError
+    >;
+    /** Deletes an orphan that is only a skeleton; false when it holds anything else. */
+    readonly removeOrphan: (dirName: string) => Effect.Effect<boolean, ProjectLabelFolderError>;
+    /**
      * Startup pass: folders whose id file matches a label become that
      * label's folder even after a Finder rename, and labels without a
      * folder get one.
@@ -95,6 +131,31 @@ const make = Effect.gen(function* () {
   const serverSettings = yield* ServerSettings.ServerSettingsService;
   // Label id to directory name, from the last reconcile or refresh.
   const folders = yield* Ref.make(new Map<string, string>());
+  const mergePermit = yield* Semaphore.make(1);
+  const failedMoves = yield* Ref.make(new Set<string>());
+  const deferMove = (source: string, cause: unknown) =>
+    Ref.update(failedMoves, (failed) => new Set([...failed, source])).pipe(
+      Effect.andThen(Effect.logWarning("Project merge file move deferred", { source, cause })),
+    );
+  const clearFailedMove = (source: string) =>
+    Ref.update(failedMoves, (failed) => {
+      const next = new Set(failed);
+      next.delete(source);
+      return next;
+    });
+  const mergeFileStatus = Effect.gen(function* () {
+    const pending = yield* sql<{
+      count: number;
+    }>`SELECT count(*) AS count FROM project_merge_file_moves WHERE complete=0`;
+    return {
+      pendingMoves: pending[0]?.count ?? 0,
+      failedMoves: (yield* Ref.get(failedMoves)).size,
+    };
+  }).pipe(
+    Effect.mapError(
+      (cause) => new ProjectLabelFolderError({ operation: "read merge file status", cause }),
+    ),
+  );
 
   const fail = (operation: string, label?: ProjectLabelRef, dir?: string) => (cause: unknown) =>
     new ProjectLabelFolderError({
@@ -136,8 +197,8 @@ const make = Effect.gen(function* () {
     );
     const found = new Map<string, string>();
     for (const entry of [...entries].sort()) {
-      // `worktrees/` is a reserved container, never a project folder.
-      if (entry === WORKTREES_SEGMENT) continue;
+      // Worktree containers are reserved, never project folders.
+      if (isWorktreesSegment(entry)) continue;
       const dir = path.join(root, entry);
       if (!(yield* isDirectory(dir))) continue;
       const id = yield* readIdFile(dir);
@@ -202,6 +263,42 @@ const make = Effect.gen(function* () {
     )(`Every folder name for "${base}" is taken.`);
   });
 
+  // A marker left by a project that is gone: deleted here, or deleted on
+  // another machine. A project still syncing in keeps its claim.
+  const isAbandonedMarker = (id: ProjectLabelId) =>
+    sql<{ readonly live: number; readonly synced: number }>`
+      SELECT
+        (SELECT count(*) FROM project_labels WHERE label_id = ${id}) AS live,
+        (SELECT count(*) FROM shared_documents WHERE kind = 'project' AND id = ${id} AND (tombstone_json IS NULL OR json_type(fields_json,'$.mergedInto')='text')) AS synced
+    `.pipe(
+      Effect.map((rows) => (rows[0]?.live ?? 0) === 0 && (rows[0]?.synced ?? 0) === 0),
+      Effect.mapError(fail("scan")),
+    );
+
+  // Only what Cogenly made: the id file, and empty Resources/, repos/ and worktree folders.
+  const isSkeleton = (dir: string) =>
+    Effect.gen(function* () {
+      const entries = yield* fileSystem
+        .readDirectory(dir)
+        .pipe(Effect.mapError(fail("scan", undefined, dir)));
+      for (const entry of entries) {
+        // Finder drops `.DS_Store` into any folder it opens.
+        if (entry === PROJECT_LABEL_ID_FILE || entry === ".DS_Store") continue;
+        const reserved =
+          entry === PROJECT_LABEL_RESOURCES_SEGMENT ||
+          entry === PROJECT_REPOSITORIES_SEGMENT ||
+          isWorktreesSegment(entry);
+        if (!reserved) return false;
+        const full = path.join(dir, entry);
+        if (!(yield* isDirectory(full))) return false;
+        const inside = yield* fileSystem
+          .readDirectory(full)
+          .pipe(Effect.orElseSucceed(() => ["?"]));
+        if (inside.some((name) => name !== ".DS_Store")) return false;
+      }
+      return true;
+    });
+
   const ensureForLabel: ProjectLabelFolders["Service"]["ensureForLabel"] = Effect.fn(
     "ProjectLabelFolders.ensureForLabel",
   )(function* (label) {
@@ -223,7 +320,13 @@ const make = Effect.gen(function* () {
       const entries = yield* fileSystem
         .readDirectory(dir)
         .pipe(Effect.mapError(fail("create", label, dir)));
-      if (entries.length === 0 && Option.isNone(id)) {
+      // Empty and unclaimed, or claimed by a project that is gone (the
+      // marker a deleted project left behind): adopt it rather than making
+      // "Name (2)" beside it.
+      if (
+        (entries.length === 0 && Option.isNone(id)) ||
+        (Option.isSome(id) && (yield* isAbandonedMarker(id.value)))
+      ) {
         yield* writeIdFile(label, dir);
         yield* ensureResources(label, dir);
         yield* recordFolder(label, dirName);
@@ -273,6 +376,161 @@ const make = Effect.gen(function* () {
     )(`Every folder name for "${target}" is taken.`);
   });
 
+  const resumeMove = Effect.fn("ProjectLabelFolders.resumeMove")(function* (move: {
+    source: string;
+    target: string;
+    directory: number;
+  }) {
+    const sourceExists = yield* fileSystem.exists(move.source);
+    const targetExists = yield* fileSystem.exists(move.target);
+    if (!sourceExists && !targetExists)
+      return yield* fail("merge files", undefined, move.source)("Both move paths are missing.");
+    if (move.directory) {
+      if (sourceExists && !targetExists) {
+        // Reserve an empty directory. rename refuses if another writer puts anything in it.
+        yield* fileSystem.makeDirectory(move.target);
+        yield* fileSystem.rename(move.source, move.target);
+      } else if (sourceExists && targetExists) {
+        const link = yield* fileSystem.readLink(move.source).pipe(Effect.option);
+        if (Option.isNone(link)) {
+          const entries = yield* fileSystem.readDirectory(move.target);
+          if (entries.length !== 0)
+            return yield* fail(
+              "merge files",
+              undefined,
+              move.target,
+            )("Destination changed during move.");
+          yield* fileSystem.rename(move.source, move.target);
+        }
+      }
+      if (!(yield* fileSystem.exists(move.source)))
+        yield* fileSystem.symlink(move.target, move.source);
+    } else if (sourceExists) {
+      // link is exclusive and leaves data at the source on a destination collision.
+      if (!targetExists) yield* fileSystem.link(move.source, move.target);
+      const sourceInfo = yield* fileSystem.stat(move.source);
+      const targetInfo = yield* fileSystem.stat(move.target);
+      if (
+        sourceInfo.dev !== targetInfo.dev ||
+        Option.isNone(sourceInfo.ino) ||
+        Option.isNone(targetInfo.ino) ||
+        sourceInfo.ino.value !== targetInfo.ino.value
+      )
+        return yield* fail(
+          "merge files",
+          undefined,
+          move.target,
+        )("Destination changed during move.");
+      yield* fileSystem.remove(move.source);
+    }
+    if (!(yield* fileSystem.exists(move.source)) && (yield* fileSystem.exists(move.target)))
+      yield* fileSystem.symlink(move.target, move.source);
+    yield* sql`UPDATE project_merge_file_moves SET complete=1 WHERE source=${move.source} AND target=${move.target}`;
+  });
+  const mergeDirectory = (
+    source: string,
+    target: string,
+  ): Effect.Effect<void, ProjectLabelFolderError> =>
+    Effect.gen(function* () {
+      const entries = yield* fileSystem.readDirectory(source);
+      for (const entry of entries)
+        yield* Effect.gen(function* () {
+          if (entry === PROJECT_LABEL_ID_FILE) return;
+          const from = path.join(source, entry);
+          const to = path.join(target, entry);
+          const link = yield* fileSystem.readLink(from).pipe(Effect.option);
+          if (Option.isSome(link)) {
+            const forwarding =
+              yield* sql`SELECT 1 FROM project_merge_file_moves WHERE source=${from} AND target=${link.value} AND complete=1`;
+            if (forwarding.length > 0) return;
+            // Preserve a user symlink itself; never recurse into a symlink's destination.
+            let destination = to;
+            for (let i = 2; yield* fileSystem.exists(destination); i++)
+              destination = path.join(
+                target,
+                `${path.parse(entry).name} (${i})${path.extname(entry)}`,
+              );
+            yield* fileSystem.symlink(path.resolve(source, link.value), destination);
+            yield* fileSystem.remove(from);
+            return;
+          }
+          // An incomplete journal entry is retried independently above; do not
+          // insert it again or let it stop unrelated files in this directory.
+          if ((yield* sql`SELECT 1 FROM project_merge_file_moves WHERE source=${from}`).length > 0)
+            return;
+          const info = yield* fileSystem.stat(from);
+          const destinationLink = yield* fileSystem.readLink(to).pipe(Effect.option);
+          if (
+            info.type === "Directory" &&
+            !isWorktreesSegment(entry) &&
+            !(yield* fileSystem.exists(path.join(from, ".git"))) &&
+            !(yield* fileSystem.exists(path.join(to, ".git"))) &&
+            Option.isNone(destinationLink) &&
+            (yield* isDirectory(to))
+          ) {
+            yield* mergeDirectory(from, to);
+            return;
+          }
+          let destination = to;
+          for (let i = 2; yield* fileSystem.exists(destination); i++)
+            destination = path.join(
+              target,
+              `${path.parse(entry).name} (${i})${path.extname(entry)}`,
+            );
+          const move = {
+            source: from,
+            target: destination,
+            directory: info.type === "Directory" ? 1 : 0,
+          };
+          yield* sql`INSERT INTO project_merge_file_moves(source,target,directory) VALUES (${from},${destination},${move.directory})`;
+          yield* resumeMove(move);
+          yield* clearFailedMove(from);
+        }).pipe(Effect.catch((cause) => deferMove(path.join(source, entry), cause)));
+    }).pipe(Effect.mapError(fail("merge files")));
+  const reconcileMerges = mergePermit.withPermits(1)(
+    Effect.gen(function* () {
+      const pending = yield* sql<{
+        source: string;
+        target: string;
+        directory: number;
+      }>`SELECT source,target,directory FROM project_merge_file_moves WHERE complete=0`;
+      for (const move of pending)
+        yield* resumeMove(move).pipe(
+          Effect.tap(() => clearFailedMove(move.source)),
+          Effect.catch((cause) => deferMove(move.source, cause)),
+        );
+      const merges = yield* sql<{
+        id: string;
+        name: string;
+        target: string;
+      }>`SELECT id,COALESCE(json_extract(fields_json,'$.mergeSourceName'),json_extract(fields_json,'$.name')) AS name,json_extract(fields_json,'$.mergedInto') AS target FROM shared_documents WHERE kind='project' AND tombstone_json IS NOT NULL AND json_type(fields_json,'$.mergedInto')='text'`;
+      yield* scanFolders;
+      for (const merge of merges)
+        yield* Effect.gen(function* () {
+          const targetId = yield* resolveProjectLabelId(merge.target);
+          if (!targetId) return;
+          const targets = yield* sql<{
+            name: string;
+          }>`SELECT name FROM project_labels WHERE label_id=${targetId}`;
+          if (!targets[0] || !merge.name) return;
+          // Only a marker claiming the source can be moved. A fallback by name could
+          // otherwise take a different same-name project's files after restart.
+          const sourceName = (yield* Ref.get(folders)).get(merge.id);
+          if (!sourceName) return;
+          const sourceDir = path.join(yield* projectsRoot, sourceName);
+          const target = yield* ensureForLabel({ id: targetId, name: targets[0].name });
+          if (sourceDir !== target.dir)
+            yield* mergeDirectory(sourceDir, target.dir).pipe(
+              Effect.tap(() => clearFailedMove(sourceDir)),
+              Effect.catch((cause) => deferMove(sourceDir, cause)),
+            );
+        }).pipe(
+          Effect.tap(() => clearFailedMove(merge.id)),
+          Effect.catch((cause) => deferMove(merge.id, cause)),
+        );
+    }).pipe(Effect.provideService(SqlClient.SqlClient, sql), Effect.mapError(fail("merge files"))),
+  );
+
   const reconcile: ProjectLabelFolders["Service"]["reconcile"] = Effect.gen(function* () {
     yield* scanFolders;
     const labels = yield* sql<{ label_id: string; name: string }>`
@@ -292,7 +550,88 @@ const make = Effect.gen(function* () {
     return { labels: labels.length, folders: foldersCount };
   });
 
+  const claimForLabel: ProjectLabelFolders["Service"]["claimForLabel"] = Effect.fn(
+    "ProjectLabelFolders.claimForLabel",
+  )(function* (label, dirName) {
+    const dir = path.join(yield* projectsRoot, dirName);
+    if (!(yield* isDirectory(dir))) return yield* fail("adopt", label, dir)("Not a folder.");
+    const id = yield* readIdFile(dir);
+    if (Option.isSome(id) && id.value !== label.id && !(yield* isAbandonedMarker(id.value)))
+      return yield* fail("adopt", label, dir)("Another project owns this folder.");
+    yield* writeIdFile(label, dir);
+    yield* ensureResources(label, dir);
+    yield* recordFolder(label, dirName);
+    return { dir, dirName };
+  });
+
+  const removeSkeleton: ProjectLabelFolders["Service"]["removeSkeleton"] = Effect.fn(
+    "ProjectLabelFolders.removeSkeleton",
+  )(function* (label) {
+    const { dir } = yield* dirForLabel(label);
+    if (!(yield* isDirectory(dir))) return false;
+    const id = yield* readIdFile(dir);
+    if (Option.isSome(id) && id.value !== label.id) return false;
+    if (!(yield* isSkeleton(dir))) return false;
+    yield* fileSystem
+      .remove(dir, { recursive: true })
+      .pipe(Effect.mapError(fail("remove", label, dir)));
+    yield* Ref.update(folders, (all) => {
+      const next = new Map(all);
+      next.delete(label.id);
+      return next;
+    });
+    return true;
+  });
+
+  const listOrphans: ProjectLabelFolders["Service"]["listOrphans"] = Effect.gen(function* () {
+    const root = yield* projectsRoot;
+    const entries = yield* fileSystem.readDirectory(root).pipe(
+      Effect.catchIf(
+        (error) => error.reason._tag === "NotFound",
+        () => Effect.succeed([]),
+      ),
+      Effect.mapError(fail("scan", undefined, root)),
+    );
+    const orphans: Array<ProjectOrphanFolder> = [];
+    for (const entry of [...entries].sort()) {
+      if (
+        entry.startsWith(".") ||
+        isWorktreesSegment(entry) ||
+        entry === UNFILED_REPOSITORIES_SEGMENT
+      )
+        continue;
+      const dir = path.join(root, entry);
+      if (!(yield* isDirectory(dir))) continue;
+      const id = yield* readIdFile(dir);
+      if (Option.isSome(id) && !(yield* isAbandonedMarker(id.value))) continue;
+      orphans.push({
+        dirName: entry,
+        path: dir,
+        reason: Option.isSome(id) ? "deleted_project" : "no_marker",
+        empty: yield* isSkeleton(dir),
+      });
+    }
+    return orphans;
+  });
+
+  const removeOrphan: ProjectLabelFolders["Service"]["removeOrphan"] = Effect.fn(
+    "ProjectLabelFolders.removeOrphan",
+  )(function* (dirName) {
+    const orphan = (yield* listOrphans).find((candidate) => candidate.dirName === dirName);
+    if (orphan === undefined || !orphan.empty) return false;
+    yield* fileSystem
+      .remove(orphan.path, { recursive: true })
+      .pipe(Effect.mapError(fail("remove", undefined, orphan.path)));
+    return true;
+  });
+
   return ProjectLabelFolders.of({
+    reconcileMerges,
+    mergeFileStatus,
+    claimForLabel,
+    removeSkeleton,
+    listOrphans,
+    removeOrphan,
     projectsRoot,
     dirForLabel,
     dirNameForLabel,

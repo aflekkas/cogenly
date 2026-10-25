@@ -1,6 +1,6 @@
 import { Radio as RadioPrimitive } from "@base-ui/react/radio";
 import { RadioGroup as RadioGroupPrimitive } from "@base-ui/react/radio-group";
-import type { ProjectIconColor } from "@t3tools/contracts";
+import type { ProjectIconColor } from "@cogenly/contracts";
 import { CheckIcon } from "lucide-react";
 import type { CSSProperties } from "react";
 

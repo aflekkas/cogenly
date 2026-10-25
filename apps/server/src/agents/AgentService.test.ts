@@ -1,3 +1,4 @@
+import { ProjectRepositoryMismatchError } from "@cogenly/contracts";
 import * as SharedState from "../sync/SharedState.ts";
 import { layerIdentity as layerSharedIdentity } from "../sync/testkit.ts";
 // @effect-diagnostics nodeBuiltinImport:off
@@ -19,7 +20,7 @@ import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import * as Settings from "../serverSettings.ts";
 import * as Workspace from "./AgentWorkspaceService.ts";
 import * as Policy from "./AgentMcpPolicy.ts";
-import { defaultAgentPermissions, EnvironmentId, ProviderInstanceId } from "@t3tools/contracts";
+import { defaultAgentPermissions, EnvironmentId, ProviderInstanceId } from "@cogenly/contracts";
 import type { McpInvocationScope } from "../mcp/McpInvocationContext.ts";
 import * as Schema from "effect/Schema";
 import { describe, expect, it } from "@effect/vitest";
@@ -44,7 +45,7 @@ import {
   type OrchestrationV2Run,
   type OrchestrationV2ThreadProjection,
   type ScheduledTaskUpsertInput,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as DateTime from "effect/DateTime";
@@ -69,6 +70,7 @@ const encodeUnknown = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))
 const makeHarness = Effect.sync(() => {
   const projections = new Map<ThreadId, OrchestrationV2ThreadProjection>();
   const launches: Launch.ThreadLaunchInput[] = [];
+  const launchFailure: { current: ProjectRepositoryMismatchError | null } = { current: null };
   const posts: Parameters<Events.EventSinkV2["Service"]["commitCommand"]>[0][] = [];
   const jobs = new Map<string, Effect.Effect<void>>();
   const receipts = new Set<string>();
@@ -76,7 +78,7 @@ const makeHarness = Effect.sync(() => {
   const conversation = idleThreadProjection(liveThreadShell(fixture.conversationThreadId));
   projections.set(fixture.conversationThreadId, conversation);
   const calls: Threads.ThreadManagementSendInput[] = [];
-  const commands: import("@t3tools/contracts").OrchestrationV2ServerCommand[] = [];
+  const commands: import("@cogenly/contracts").OrchestrationV2ServerCommand[] = [];
   const runFor = (
     threadId: ThreadId,
     status: OrchestrationV2Run["status"] = "completed",
@@ -105,36 +107,42 @@ const makeHarness = Effect.sync(() => {
     }),
     Layer.mock(Launch.ThreadLaunchService)({
       launch: (input) =>
-        Effect.sync(() => {
-          launches.push(input);
-          const threadId = input.threadId!;
-          let projection = idleThreadProjection(liveThreadShell(threadId));
-          if (input.initialMessage) {
-            const run = runFor(threadId);
-            projection = {
-              ...projection,
-              runs: [run],
-              messages: [
-                {
-                  id: MessageId.make(`response:${threadId}`),
-                  threadId,
-                  runId: run.id,
-                  nodeId: null,
-                  role: "assistant",
-                  text: "Done. Your favourite colour is green.",
-                  attachments: [],
-                  streaming: false,
-                  createdAt: DateTime.makeUnsafe(fixture.createdAt),
-                  updatedAt: DateTime.makeUnsafe(fixture.createdAt),
-                  createdBy: "agent",
-                  creationSource: "provider",
-                },
-              ],
-            };
-          }
-          projections.set(threadId, projection);
-          return { threadId, projection, resumed: false };
-        }),
+        Effect.suspend(() =>
+          launchFailure.current === null ? Effect.void : Effect.fail(launchFailure.current),
+        ).pipe(
+          Effect.andThen(
+            Effect.sync(() => {
+              launches.push(input);
+              const threadId = input.threadId!;
+              let projection = idleThreadProjection(liveThreadShell(threadId));
+              if (input.initialMessage) {
+                const run = runFor(threadId);
+                projection = {
+                  ...projection,
+                  runs: [run],
+                  messages: [
+                    {
+                      id: MessageId.make(`response:${threadId}`),
+                      threadId,
+                      runId: run.id,
+                      nodeId: null,
+                      role: "assistant",
+                      text: "Done. Your favourite colour is green.",
+                      attachments: [],
+                      streaming: false,
+                      createdAt: DateTime.makeUnsafe(fixture.createdAt),
+                      updatedAt: DateTime.makeUnsafe(fixture.createdAt),
+                      createdBy: "agent",
+                      creationSource: "provider",
+                    },
+                  ],
+                };
+              }
+              projections.set(threadId, projection);
+              return { threadId, projection, resumed: false };
+            }),
+          ),
+        ),
     }),
     Layer.mock(Projects.ProjectService)({}),
     Layer.mock(TextGeneration.TextGeneration)({}),
@@ -225,7 +233,11 @@ const makeHarness = Effect.sync(() => {
   const store = Store.layer.pipe(Layer.provide(layerSharedIdentity)).pipe(Layer.provide(database));
   const labels = Labels.layer
     .pipe(Layer.provide(layerSharedIdentity))
-    .pipe(Layer.provide(Layer.merge(database, LabelEvents.layer.pipe(Layer.provide(database)))));
+    .pipe(
+      Layer.provide(
+        Layer.mergeAll(database, boundaries, LabelEvents.layer.pipe(Layer.provide(database))),
+      ),
+    );
   const agents = Agents.layer
     .pipe(Layer.provide(layerSharedIdentity))
     .pipe(Layer.provide(Layer.mergeAll(boundaries, store, labels, database)));
@@ -278,6 +290,7 @@ const makeHarness = Effect.sync(() => {
     layer,
     fixture,
     launches,
+    launchFailure,
     posts,
     calls,
     commands,
@@ -289,6 +302,58 @@ const makeHarness = Effect.sync(() => {
 });
 
 describe("agent execution", () => {
+  it.effect(
+    "records a refused agent launch as a failed schedule and run with the membership error",
+    () =>
+      Effect.gen(function* () {
+        const h = yield* makeHarness;
+        yield* Effect.gen(function* () {
+          const store = yield* Store.AgentStore;
+          const schedules = yield* Schedules.ScheduledTaskService;
+          yield* store.save(h.fixture);
+          const { task } = yield* schedules.upsert(h.triggerInput);
+          h.launchFailure.current = new ProjectRepositoryMismatchError({
+            projectId: h.fixture.projectId!,
+            projectFolderId: ProjectLabelId.make("label:spawn"),
+            repositoryName: "cogenly",
+            projectName: "Spawn Partners",
+          });
+          const result = yield* schedules.runNow({ id: task.id });
+          expect(result.task.lastRunStatus).toBe("failed");
+          expect(result.task.lastRunError).toBe(h.launchFailure.current.message);
+          expect((yield* store.runs(h.fixture.id))[0]).toMatchObject({
+            status: "failed",
+            summary: h.launchFailure.current.message,
+          });
+        }).pipe(Effect.provide(h.layer));
+      }).pipe(Effect.scoped),
+  );
+
+  it.effect("refuses to save a new or edited agent with an unrelated project and repository", () =>
+    Effect.gen(function* () {
+      const h = yield* makeHarness;
+      yield* Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const labels = yield* Labels.ProjectLabelService;
+        const agents = yield* Agents.AgentService;
+        const store = yield* Store.AgentStore;
+        const folderId = (yield* labels.create({ name: "Spawn Partners" })).label.id;
+        yield* sql`INSERT INTO projection_projects(project_id,title,workspace_root,scripts_json,created_at,updated_at) VALUES (${h.fixture.projectId},'cogenly','/repos/cogenly','[]',${h.fixture.createdAt},${h.fixture.createdAt})`;
+        const input = { ...h.fixture, projectFolderId: folderId };
+        const message =
+          "cogenly is not in the Spawn Partners project. Add it to the project first, or start without a project.";
+        const { id: _id, ...newInput } = input;
+        expect((yield* Effect.flip(agents.upsert(newInput))).message).toBe(message);
+        expect(h.launches).toEqual([]);
+        yield* store.save(h.fixture);
+        expect(
+          (yield* Effect.flip(agents.upsert({ ...input, name: "Invalid edit" }))).message,
+        ).toBe(message);
+        expect((yield* store.get(h.fixture.id)).name).toBe(h.fixture.name);
+      }).pipe(Effect.provide(h.layer));
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("schedule command ids stay portable and idempotent for arbitrary request keys", () =>
     Effect.gen(function* () {
       const h = yield* makeHarness;
@@ -497,11 +562,15 @@ describe("agent execution", () => {
         const schedules = yield* Schedules.ScheduledTaskService;
         const sql = yield* SqlClient.SqlClient;
         const ownerMachine = EnvironmentId.make("other-machine");
+        yield* store.save(h.fixture);
+        const { task } = yield* schedules.upsert(h.triggerInput);
+        // A replica arrives through sync; ordinary writes to a remote owner now route there.
         yield* store.save({ ...h.fixture, ownerMachine });
-        const { task } = yield* schedules.upsert({ ...h.triggerInput, ownerMachine });
-        yield* sql`UPDATE scheduled_tasks SET next_run_at='1969-01-01T00:00:00.000Z' WHERE task_id=${task.id}`;
+        yield* sql`UPDATE scheduled_tasks SET owner_machine=${ownerMachine}, next_run_at='1969-01-01T00:00:00.000Z' WHERE task_id=${task.id}`;
         expect(yield* store.reserve(h.fixture.id)).toBe(false);
-        expect(yield* agents.trigger(task, "off-owner", task.prompt)).toBe(false);
+        expect(yield* agents.trigger({ ...task, ownerMachine }, "off-owner", task.prompt)).toBe(
+          false,
+        );
         yield* h.jobs.get("scheduled-tasks")!;
         yield* agents.reconcile();
         expect(h.launches).toHaveLength(0);
@@ -922,6 +991,8 @@ it.effect("files an agent's conversation in a project and moves it between proje
       const sql = yield* SqlClient.SqlClient;
       const conversation = h.fixture.conversationThreadId;
       const at = h.fixture.createdAt;
+      const config = yield* ServerConfig.ServerConfig;
+      yield* sql`INSERT INTO projection_projects(project_id,title,workspace_root,scripts_json,created_at,updated_at) VALUES (${h.fixture.projectId},'No project',${`${config.baseDir}/scratch`},'[]',${at},${at})`;
       // An ongoing conversation with turns, which an ordinary chat could only fork.
       yield* sql`INSERT INTO orchestration_v2_projection_threads(thread_id,project_id,title,default_provider,runtime_mode,interaction_mode,created_at,updated_at,payload_json) VALUES (${conversation},${h.fixture.projectId},'Juniper','codex','full-access','default',${at},${at},${JSON.stringify({ agent: { id: h.fixture.id, role: "conversation" } })})`;
       yield* sql`INSERT INTO orchestration_v2_projection_runs(run_id,thread_id,ordinal,provider,status,requested_at,payload_json) VALUES ('conversation:run',${conversation},1,'codex','completed',${at},'{}')`;
@@ -1522,6 +1593,8 @@ it.effect(
           "deploy",
           "delete_project",
           "terminal_run",
+          "preview_click",
+          "preview_type",
           "create_threads",
           "delegate_task",
           "thread_configure",
@@ -1577,6 +1650,31 @@ it.effect(
         expect(h.launches).toHaveLength(1);
       }).pipe(Effect.provide(h.layer));
     }),
+);
+
+it.effect.each([
+  "computer_press",
+  "computer_click",
+  "computer_type",
+  "computer_key",
+  "computer_scroll",
+  "computer_drag",
+  "computer_open_app",
+])("agents use %s with default grants and lose access when execute is revoked", (name) =>
+  Effect.gen(function* () {
+    const h = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const store = yield* Store.AgentStore;
+      const policy = yield* Policy.AgentMcpPolicy;
+      const agent = yield* store.save({ ...h.fixture, permissions: defaultAgentPermissions });
+      const scope = scopeFor(agent.conversationThreadId);
+      expect(yield* policy.beforeTool(scope, name, {}, false)).toEqual({ handled: false });
+      yield* store.save({ ...agent, permissions: { ...agent.permissions, execute: false } });
+      const denied = yield* policy.beforeTool(scope, name, {}, false).pipe(Effect.flip);
+      expect(denied.code).toBe("agent_permission_denied");
+      expect(denied.message).toBe("This agent has no execute grant.");
+    }).pipe(Effect.provide(h.layer));
+  }),
 );
 
 it.effect("agents add projects with the execute grant, without the high-impact grants", () =>
@@ -1849,8 +1947,9 @@ describe("event-driven agent triggers", () => {
           yield* folders.linkRepository({ labelId: a, repositoryId: h.fixture.projectId! });
           const source = completedEvent(h, "folder");
           yield* sql`INSERT INTO orchestration_v2_projection_threads(thread_id,project_id,title,default_provider,runtime_mode,interaction_mode,created_at,updated_at,payload_json) VALUES (${source.event.threadId},${h.fixture.projectId!},'Work','codex','full-access','default',${h.fixture.createdAt},${h.fixture.createdAt},'{"surface":"work"}')`;
+          // Historical filing is retained as-is; new filing now requires a linked repository.
           if (membership !== "repository default")
-            yield* folders.moveThread({ threadId: source.event.threadId, folderId: b });
+            yield* sql`INSERT INTO thread_project_labels(thread_id,label_id) VALUES (${source.event.threadId},${b})`;
           const expectedFolder = membership === "explicit override matches" ? b : a;
           yield* (yield* Schedules.ScheduledTaskService).upsert({
             ...h.triggerInput,

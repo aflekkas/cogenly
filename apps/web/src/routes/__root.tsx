@@ -1,9 +1,10 @@
+import { SharedClientPreferencesSync } from "../components/SharedClientPreferencesSync";
 import { LiveAgentsProvider } from "../agents/agentsClient";
 import { AgentsCreateHost } from "../agents/AgentsCreateHost";
 import { CreateProjectDialogHost } from "../projectLabels/CreateProjectDialogHost";
 import { PermissionUpdateNotice } from "../components/PermissionUpdateNotice";
-import { type ServerLifecycleWelcomePayload } from "@t3tools/contracts";
-import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
+import { type ServerLifecycleWelcomePayload } from "@cogenly/contracts";
+import { scopedProjectKey, scopeProjectRef } from "@cogenly/client-runtime/environment";
 import {
   Outlet,
   Link,
@@ -21,6 +22,7 @@ import { AppErrorScreen } from "../components/AppErrorScreen";
 import { AppSidebarLayout } from "../components/AppSidebarLayout";
 import { CommandPalette } from "../components/CommandPalette";
 import { CustomSnoozeDialogHost } from "../components/CustomSnoozeDialog";
+import { LaunchMachineDialog } from "../machines/LaunchMachineDialog";
 import { ConfirmDialogHost } from "../components/ConfirmDialogHost";
 import { KeybindingsConfigWarning } from "../components/KeybindingsConfigWarning";
 import { FirstRunGate } from "../components/onboarding/FirstRunGate";
@@ -33,6 +35,7 @@ import { RunningThreadKeepAlive } from "../components/desktop/RunningThreadKeepA
 import { DesktopUpdateLaunchNotice } from "../components/sidebar/updateEverythingRun";
 import { LegacyThreadMigrationToast } from "../components/LegacyThreadMigrationToast";
 import { ThreadNotificationCoordinator } from "../components/ThreadNotificationCoordinator";
+import { MachineHealthAlertCoordinator } from "../components/MachineHealthAlertCoordinator";
 import { ThreadReadCoordinator } from "../components/ThreadReadCoordinator";
 import { ReopenClosedViewShortcut } from "../components/ReopenClosedViewShortcut";
 import { ProjectCloneToastCoordinator } from "../components/ProjectCloneToastCoordinator";
@@ -209,6 +212,7 @@ function RootRouteView() {
 
       <ProviderAuthCallbackCoordinator />
       <ChatGptWelcomeCoordinator />
+      <SharedClientPreferencesSync />
       <FirstRunGate
         enabled={primaryEnvironmentAuthenticated}
         hostedStatic={authGateState.status === "hosted-static"}
@@ -221,9 +225,11 @@ function RootRouteView() {
         <ConnectOnboardingDialog />
         <SshPasswordPromptDialog />
         <ThreadNotificationCoordinator />
+        <MachineHealthAlertCoordinator />
         <ThreadReadCoordinator />
         <ReopenClosedViewShortcut />
         <ConfirmDialogHost />
+        <LaunchMachineDialog />
         <CustomSnoozeDialogHost />
         <SlowRpcRequestToastCoordinator />
         <PermissionUpdateNotice />

@@ -21,7 +21,7 @@ import {
   type ProjectSnapshot,
   WS_METHODS,
   type WsRpcGroup,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Console from "effect/Console";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";

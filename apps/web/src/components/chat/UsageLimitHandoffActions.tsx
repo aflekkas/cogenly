@@ -2,14 +2,14 @@ import { useAtomValue } from "@effect/atom-react";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@cogenly/client-runtime/state/runtime";
 import type {
   EnvironmentId,
   ModelSelection,
   RunId,
   ThreadId,
   UsageLimitHandoffCandidate,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { ArrowRightLeftIcon, ChevronDownIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 

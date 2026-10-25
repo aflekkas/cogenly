@@ -1,6 +1,6 @@
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { isAtomCommandInterrupted } from "@t3tools/client-runtime/state/runtime";
-import type { ThreadId } from "@t3tools/contracts";
+import { scopeThreadRef } from "@cogenly/client-runtime/environment";
+import { isAtomCommandInterrupted } from "@cogenly/client-runtime/state/runtime";
+import type { ThreadId } from "@cogenly/contracts";
 import { useEffect, useMemo, useRef } from "react";
 
 import { useThreadShell } from "../state/entities";

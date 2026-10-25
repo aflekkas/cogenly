@@ -1,6 +1,7 @@
+import * as ReadOnlySandbox from "./ReadOnlySandbox.ts";
 import * as Vault from "../vault/Vault.ts";
 import type { CredentialDelivery } from "../accounts/CliCredentials.ts";
-import type { AccountError } from "@t3tools/contracts";
+import type { AccountError } from "@cogenly/contracts";
 /**
  * TerminalManager - Terminal session orchestration service interface.
  *
@@ -46,13 +47,13 @@ import {
   CodexSettings,
   ProviderInstanceId,
   TERMINAL_COMMAND_MAX_LENGTH,
-} from "@t3tools/contracts";
-import { makeKeyedCoalescingWorker } from "@t3tools/shared/KeyedCoalescingWorker";
-import * as KeyedLock from "@t3tools/shared/KeyedLock";
-import { AgentScope } from "@t3tools/shared/AgentScope";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+} from "@cogenly/contracts";
+import { makeKeyedCoalescingWorker } from "@cogenly/shared/KeyedCoalescingWorker";
+import * as KeyedLock from "@cogenly/shared/KeyedLock";
+import { AgentScope } from "@cogenly/shared/AgentScope";
+import * as HostProcess from "@cogenly/shared/HostProcess";
 
-import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
+import { getTerminalLabel } from "@cogenly/shared/terminalLabels";
 import * as DateTime from "effect/DateTime";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -69,7 +70,7 @@ import * as Scope from "effect/Scope";
 import * as SynchronizedRef from "effect/SynchronizedRef";
 
 import * as ServerConfig from "../config.ts";
-import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
+import { mergeProviderInstanceEnvironment } from "@cogenly/provider-core/server/instanceEnvironment";
 import { resolveCodexHomeLayout } from "../provider/Drivers/CodexHomeLayout.ts";
 import { makeClaudeEnvironment } from "../provider/Drivers/ClaudeHome.ts";
 import { deriveProviderInstanceConfigMap } from "../provider/ProviderInstanceRegistryHydration.ts";
@@ -79,11 +80,11 @@ import {
   terminalRestartsTotal,
   terminalSessionsTotal,
 } from "../observability/Metrics.ts";
-import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
+import { expandHomePath } from "@cogenly/provider-core/server/pathExpansion";
 import * as ProcessRunner from "../processRunner.ts";
 import * as PortScanner from "../preview/PortScanner.ts";
 import * as NativeTelemetryClient from "../resourceTelemetry/NativeTelemetryClient.ts";
-import * as PtyAdapter from "@t3tools/shared/PtyAdapter";
+import * as PtyAdapter from "@cogenly/shared/PtyAdapter";
 
 export {
   TerminalCwdError,
@@ -160,6 +161,8 @@ export class TerminalManager extends Context.Service<
     /** Run a command in a newly allocated agent PTY, optionally waiting for its exit. */
     readonly runAgent: (
       input: Omit<TerminalOpenInput, "terminalId"> & {
+        /** Server authorization selects this; it is never accepted from a tool or client. */
+        readonly terminalPolicy?: "readOnlyLookup" | "unrestricted";
         readonly command: string;
         readonly background?: boolean;
         readonly timeoutMs?: number;
@@ -167,7 +170,10 @@ export class TerminalManager extends Context.Service<
           terminalId: string,
         ) => Effect.Effect<CredentialDelivery, AccountError>;
       },
-    ) => Effect.Effect<AgentTerminalResult, TerminalError | AccountError>;
+    ) => Effect.Effect<
+      AgentTerminalResult,
+      TerminalError | AccountError | ReadOnlySandbox.SandboxUnavailable
+    >;
     readonly waitAgent: (input: {
       readonly threadId: string;
       readonly terminalId: string;
@@ -327,11 +333,13 @@ export const AGENT_TERMINAL_TIMEOUT_NOTICE =
 interface AgentTerminalOpenInput extends TerminalOpenInput {
   readonly redactOutput?: CredentialDelivery["redactOutput"];
   readonly agentCommand?: string;
+  readonly sandboxLaunch?: ReadOnlySandbox.SandboxLaunch;
 }
 
 interface TerminalSessionState {
   agent?: {
     readonly command: string;
+    readonly sandboxLaunch?: ReadOnlySandbox.SandboxLaunch;
     readonly redactOutput?: CredentialDelivery["redactOutput"];
     readonly output: AgentOutput;
     readonly startedAt: string;
@@ -1540,6 +1548,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
   options: TerminalManagerOptions,
 ) {
   const vault = yield* Effect.serviceOption(Vault.Vault);
+  const sandbox = yield* Effect.serviceOption(ReadOnlySandbox.ReadOnlySandbox);
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const crypto = yield* Crypto.Crypto;
@@ -2486,24 +2495,33 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       increment(terminalSessionsTotal, { lifecycle: eventType }).pipe(
         Effect.andThen(
           Effect.gen(function* () {
-            const shellCandidates = session.agent
-              ? [
-                  {
-                    shell: platform === "win32" ? (baseEnv.ComSpec ?? "cmd.exe") : "/bin/sh",
-                    args:
-                      platform === "win32"
-                        ? ["/d", "/s", "/c", session.agent.command]
-                        : ["-c", session.agent.command],
-                  },
-                ]
-              : resolveShellCandidates(shellResolver, platform, baseEnv);
+            const shellCandidates = session.agent?.sandboxLaunch
+              ? [session.agent.sandboxLaunch]
+              : session.agent
+                ? [
+                    {
+                      shell: platform === "win32" ? (baseEnv.ComSpec ?? "cmd.exe") : "/bin/sh",
+                      args:
+                        platform === "win32"
+                          ? ["/d", "/s", "/c", session.agent.command]
+                          : ["-c", session.agent.command],
+                    },
+                  ]
+                : resolveShellCandidates(shellResolver, platform, baseEnv);
             const terminalEnv = createTerminalSpawnEnv(
               baseEnv,
               session.runtimeEnv,
               platform,
               yield* HostProcess.HomeDirectory,
             );
-            const spawnResult = yield* trySpawn(shellCandidates, terminalEnv, session);
+            const spawnResult = yield* trySpawn(
+              shellCandidates,
+              {
+                ...terminalEnv,
+                ...session.agent?.sandboxLaunch?.env,
+              },
+              session,
+            );
             ptyProcess = spawnResult.process;
             startedShell = spawnResult.shellLabel;
 
@@ -2839,6 +2857,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
           : {
               agent: {
                 command: input.agentCommand,
+                ...(input.sandboxLaunch ? { sandboxLaunch: input.sandboxLaunch } : {}),
                 ...(input.redactOutput ? { redactOutput: input.redactOutput } : {}),
                 output: new AgentOutput(),
                 startedAt: yield* nowIso,
@@ -3539,6 +3558,20 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       input.threadId,
       Effect.gen(function* () {
         const resolved = yield* resolveLaunchInputEnvironment({ ...input, terminalId });
+        const sandboxLaunch =
+          input.terminalPolicy === "readOnlyLookup"
+            ? yield* Option.isSome(sandbox)
+                ? sandbox.value.prepare({
+                    shell: "/bin/sh",
+                    args: ["-c", input.command],
+                    cwd: input.cwd,
+                  })
+                : Effect.fail(
+                    new ReadOnlySandbox.SandboxUnavailable({
+                      reason: "the sandbox service is unavailable.",
+                    }),
+                  )
+            : undefined;
         // Explicit account bindings take precedence over provider configuration.
         // Resolve after allocating the terminal id; values never enter the wire input.
         const delivery = input.prepareCredentials
@@ -3549,6 +3582,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
           env: { ...resolved.env, ...delivery?.env },
           ...(delivery?.redactOutput ? { redactOutput: delivery.redactOutput } : {}),
           agentCommand: input.command,
+          ...(sandboxLaunch ? { sandboxLaunch } : {}),
         }).pipe(
           Effect.onError(() =>
             delivery ? delivery.complete("launch_failed").pipe(Effect.ignore) : Effect.void,

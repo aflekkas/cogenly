@@ -2,13 +2,13 @@ import { useAtomValue } from "@effect/atom-react";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@cogenly/client-runtime/state/runtime";
 import type {
   EnvironmentId,
   ExportResult,
   ExportValidation,
   ProjectLabelId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { formatBytes } from "../../lib/formatBytes";
@@ -21,12 +21,7 @@ import { Button } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { useSettingsScope } from "./SettingsScopeContext";
-import {
-  SettingsEmpty,
-  SettingsPageContainer,
-  SettingsRow,
-  SettingsSection,
-} from "./settingsLayout";
+import { SettingsEmpty, SettingsRow, SettingsSection } from "./settingsLayout";
 
 type ExportSection = "chats" | "work" | "agents" | "commitments" | "projects" | "memory";
 const SECTIONS: ReadonlyArray<{ value: ExportSection; label: string }> = [
@@ -146,13 +141,13 @@ function DataSettingsPanel({ environmentId }: { environmentId: EnvironmentId | n
 
   const disabledReason =
     environmentId === null
-      ? "Choose an environment to export."
+      ? "Choose a machine to export."
       : !canExport
         ? "This connection needs permission to change settings to export."
         : null;
 
   return (
-    <SettingsPageContainer>
+    <>
       <SettingsSection id="data-export" title="Export">
         <SettingsRow
           title="What to include"
@@ -217,8 +212,7 @@ function DataSettingsPanel({ environmentId }: { environmentId: EnvironmentId | n
                 <span className="block">{summarizeExportCounts(result.counts)}</span>
               </>
             ) : (
-              (disabledReason ??
-              "Saved as JSON Lines in the environment's exports folder, on the machine it runs on.")
+              (disabledReason ?? "Saved as JSON Lines in the exports folder on that machine.")
             ))
           }
           control={
@@ -289,6 +283,6 @@ function DataSettingsPanel({ environmentId }: { environmentId: EnvironmentId | n
           })
         )}
       </SettingsSection>
-    </SettingsPageContainer>
+    </>
   );
 }

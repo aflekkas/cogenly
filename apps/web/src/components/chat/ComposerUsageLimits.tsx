@@ -1,5 +1,5 @@
-import type { EnvironmentId, UsageLimitsReport } from "@t3tools/contracts";
-import { limitsNotice } from "@t3tools/shared/usageLimits";
+import type { EnvironmentId, UsageLimitsReport } from "@cogenly/contracts";
+import { limitsNotice } from "@cogenly/shared/usageLimits";
 import { GaugeIcon } from "lucide-react";
 
 import { ensureLocalApi } from "../../localApi";

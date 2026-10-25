@@ -1,4 +1,4 @@
-import { AuthProvidersManageScope, PROVIDER_DISPLAY_NAMES } from "@t3tools/contracts";
+import { AuthProvidersManageScope, PROVIDER_DISPLAY_NAMES } from "@cogenly/contracts";
 import { useMemo, useRef, useState } from "react";
 
 import { useEnvironments } from "~/state/environments";

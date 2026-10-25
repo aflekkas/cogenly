@@ -1,7 +1,8 @@
+import { PROJECT_REPOSITORIES_SEGMENT } from "@cogenly/contracts";
 import type * as Path from "effect/Path";
 
-import { UNFILED_REPOSITORIES_SEGMENT, sanitizePathSegment } from "@t3tools/shared/path";
-import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
+import { UNFILED_REPOSITORIES_SEGMENT, sanitizePathSegment } from "@cogenly/shared/path";
+import { expandHomePath } from "@cogenly/provider-core/server/pathExpansion";
 
 export { UNFILED_REPOSITORIES_SEGMENT, sanitizePathSegment };
 
@@ -21,6 +22,26 @@ export function resolveProjectsRootDirectory(
   if (trimmed === "") return path.join(path.resolve(cogenlyHome), "projects");
   const expanded = expandHomePath(trimmed, home);
   return path.resolve(path.isAbsolute(expanded) ? expanded : path.join(home, expanded));
+}
+
+/**
+ * Where a project's linked repository lives on every machine:
+ * `<project folder>/repos/<directoryName>`, where `directoryName` is `<repo>`
+ * or `<owner>/<repo>` (see `repositoryDirectoryNameFor`).
+ */
+export function projectRepositoryDirectory(
+  projectDir: string,
+  directoryName: string,
+  path: Path.Path,
+): string {
+  return path.join(
+    projectDir,
+    PROJECT_REPOSITORIES_SEGMENT,
+    ...directoryName
+      .split("/")
+      .filter((segment) => segment.length > 0)
+      .map((segment) => sanitizePathSegment(segment, "repository")),
+  );
 }
 
 /**

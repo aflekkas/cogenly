@@ -1,4 +1,4 @@
-import { COMPOSER_CONTEXT_KINDS, type KnownComposerContextKind } from "@t3tools/contracts";
+import { COMPOSER_CONTEXT_KINDS, type KnownComposerContextKind } from "@cogenly/contracts";
 
 export interface ContextPresentationCapability {
   details: "none" | "tooltip" | "popover";
@@ -54,6 +54,10 @@ const DEFINITIONS = [
   },
   {
     kind: "project-folder",
+    capabilities: { details: "tooltip", expanded: "none", defaultDraftView: "compact" },
+  },
+  {
+    kind: "integration",
     capabilities: { details: "tooltip", expanded: "none", defaultDraftView: "compact" },
   },
 ] as const satisfies ReadonlyArray<ContextPresentationDefinition>;

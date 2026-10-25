@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { type PanelAnimationDurationMs } from "@t3tools/contracts/settings";
+import { type PanelAnimationDurationMs } from "@cogenly/contracts/settings";
 
 import { useMediaQuery } from "./hooks/useMediaQuery";
 import { PANEL_MOTION_SETTLE_MS, readPanelResizeDragging } from "./lib/panelFlip";

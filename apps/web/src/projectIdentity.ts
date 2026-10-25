@@ -1,4 +1,4 @@
-import type { ProjectIconColor, ProjectIconOverride } from "@t3tools/contracts";
+import type { ProjectIconColor, ProjectIconOverride } from "@cogenly/contracts";
 
 import type { ProjectPaletteColor } from "./projectIconColors";
 

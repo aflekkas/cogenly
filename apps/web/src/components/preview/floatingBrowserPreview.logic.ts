@@ -1,4 +1,4 @@
-import type { PreviewNavStatus } from "@t3tools/contracts";
+import type { PreviewNavStatus } from "@cogenly/contracts";
 
 /** The streamed thumbnail asks for at most one frame per this interval. */
 export const FLOATING_PREVIEW_STREAM_FRAME_INTERVAL_MS = 1_000;

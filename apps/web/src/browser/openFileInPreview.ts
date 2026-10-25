@@ -5,12 +5,12 @@ import type {
   PreviewOpenInput,
   PreviewSessionSnapshot,
   ScopedThreadRef,
-} from "@t3tools/contracts";
-import { mediaFileReference } from "@t3tools/client-runtime/media-reference";
+} from "@cogenly/contracts";
+import { mediaFileReference } from "@cogenly/client-runtime/media-reference";
 import {
   type AtomCommandResult,
   mapAtomCommandResult,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@cogenly/client-runtime/state/runtime";
 import * as Cause from "effect/Cause";
 import * as Data from "effect/Data";
 import { AsyncResult } from "effect/reactivity";
@@ -156,9 +156,7 @@ export async function openFileInPreview<AssetError, PreviewError>(input: {
   }
   const assetUrl = resolveAssetUrl(input.httpBaseUrl, assetResult.value.relativeUrl);
   if (assetUrl === null) {
-    return AsyncResult.failure(
-      Cause.die(new Error("The environment returned an invalid asset URL.")),
-    );
+    return AsyncResult.failure(Cause.die(new Error("The machine returned an invalid asset URL.")));
   }
   return openUrlInPreview({
     threadRef: input.threadRef,

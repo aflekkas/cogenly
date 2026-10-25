@@ -1,12 +1,15 @@
-import { DATABASE_COMPACTION_RECOMMENDED_BYTES } from "@t3tools/contracts";
+import { DATABASE_COMPACTION_RECOMMENDED_BYTES } from "@cogenly/contracts";
 import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import { Command, Flag, GlobalFlag, Prompt } from "effect/cli";
 
 import * as BootService from "../cloud/bootService.ts";
 import * as DatabaseMaintenance from "../persistence/DatabaseMaintenance.ts";
 import { projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
+import { runTailscaleServeDoctor } from "./doctorTailscale.ts";
+import { runHealth } from "./health.ts";
 import * as CliService from "./service.ts";
 
 const formatBytes = (bytes: number) =>
@@ -105,16 +108,41 @@ export const doctorCommand = Command.make("doctor", {
     Flag.withDescription("Show the repairs without changing anything, even with --fix."),
     Flag.withDefault(false),
   ),
+  health: Flag.Boolean("health").pipe(
+    Flag.withDescription(
+      "Show the running server's health report instead of repairing, like `cogenly health`.",
+    ),
+    Flag.withDefault(false),
+  ),
+  storage: Flag.Boolean("storage").pipe(
+    Flag.withDescription(
+      "Show the running server's disk usage; --dry-run previews storage cleanup, --fix runs it.",
+    ),
+    Flag.withDefault(false),
+  ),
 }).pipe(
   Command.withDescription(
     "Inspect this Cogenly data directory and repair it. Pauses and restarts the background service as needed.",
   ),
   Command.withHandler((flags) =>
     Effect.gen(function* () {
+      if (flags.storage)
+        return yield* runHealth({
+          baseDir: flags.baseDir,
+          json: false,
+          machine: Option.none(),
+          storage: { fix: flags.fix, dryRun: flags.dryRun },
+        });
+      // Repairs pause the service the health report is read from, so --health only reads.
+      if (flags.health)
+        return yield* runHealth({ baseDir: flags.baseDir, json: false, machine: Option.none() });
       const logLevel = yield* GlobalFlag.LogLevel;
       const config = yield* resolveCliAuthConfig(flags, logLevel);
       yield* runDoctor(config.dbPath, { fix: flags.fix, dryRun: flags.dryRun }).pipe(
         Effect.provide(Layer.merge(DatabaseMaintenance.layer, CliService.layer(config))),
+      );
+      yield* runTailscaleServeDoctor(config, { fix: flags.fix, dryRun: flags.dryRun }).pipe(
+        Effect.provide(CliService.layer(config)),
       );
     }),
   ),

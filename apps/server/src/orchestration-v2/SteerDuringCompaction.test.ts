@@ -9,9 +9,9 @@ import {
   ProviderInstanceId,
   ThreadId,
   type OrchestrationV2Command,
-} from "@t3tools/contracts";
-import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
-import { makeProviderReplayGate } from "@t3tools/provider-testing/replayGate";
+} from "@cogenly/contracts";
+import * as IdAllocator from "@cogenly/provider-core/server/IdAllocator";
+import { makeProviderReplayGate } from "@cogenly/provider-testing/replayGate";
 import type * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";

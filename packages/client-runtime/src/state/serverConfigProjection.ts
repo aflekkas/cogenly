@@ -1,4 +1,4 @@
-import type { ServerConfig, ServerConfigStreamEvent } from "@t3tools/contracts";
+import type { ServerConfig, ServerConfigStreamEvent } from "@cogenly/contracts";
 import * as Option from "effect/Option";
 
 export interface ServerConfigProjection {
@@ -7,39 +7,14 @@ export interface ServerConfigProjection {
   readonly source: "cache" | "live";
 }
 
-/**
- * Cached config keeps the provider and model catalog available across reconnects.
- * Published themes and usage-limit sources are current machine state, so a
- * cache could restore a set the machine no longer reports. Replay sends both
- * as separate events.
- */
-export function withoutUsageLimitSources(config: ServerConfig): ServerConfig {
-  if (config.usageLimitSources === undefined) {
-    return config;
-  }
-  const { usageLimitSources: _sources, ...rest } = config;
-  return rest;
-}
-
 export function applyServerConfigProjection(
   current: Option.Option<ServerConfigProjection>,
   event: ServerConfigStreamEvent,
 ): Option.Option<ServerConfigProjection> {
   switch (event.type) {
     case "snapshot": {
-      // Wire snapshots never contain published themes. Keep the previous set
-      // until a capable server sends its authoritative theme event. A legacy
-      // server cannot send a later removal, so a downgrade must clear the set.
-      const capabilities = event.config.environment.capabilities;
-      const carriedSources =
-        capabilities.usageLimitSources === true && Option.isSome(current)
-          ? current.value.config.usageLimitSources
-          : undefined;
       return Option.some({
-        config: {
-          ...event.config,
-          ...(carriedSources === undefined ? {} : { usageLimitSources: carriedSources }),
-        },
+        config: event.config,
         latestEvent: event,
         source: "live" as const,
       });
@@ -68,15 +43,6 @@ export function applyServerConfigProjection(
         config: {
           ...projection.config,
           settings: event.payload.settings,
-        },
-        latestEvent: event,
-        source: "live",
-      }));
-    case "usageLimitSourcesUpdated":
-      return Option.map(current, (projection) => ({
-        config: {
-          ...projection.config,
-          usageLimitSources: event.payload.sources.length > 0 ? event.payload.sources : undefined,
         },
         latestEvent: event,
         source: "live",

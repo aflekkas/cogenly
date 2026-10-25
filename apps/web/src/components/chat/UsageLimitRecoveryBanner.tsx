@@ -1,5 +1,5 @@
-import type { OrchestrationV2LimitRecoveryUpdate } from "@t3tools/contracts";
-import type { TimestampFormat } from "@t3tools/contracts/settings";
+import type { OrchestrationV2LimitRecoveryUpdate } from "@cogenly/contracts";
+import type { TimestampFormat } from "@cogenly/contracts/settings";
 import { ClockIcon, GaugeIcon, PlayIcon, TimerOffIcon } from "lucide-react";
 import { useState } from "react";
 

@@ -25,7 +25,10 @@ import { Route as SettingsProvidersRouteImport } from './routes/settings.provide
 import { Route as SettingsProjectsRouteImport } from './routes/settings.projects'
 import { Route as SettingsProjectTagsRouteImport } from './routes/settings.project-tags'
 import { Route as SettingsOpenSourceLicensesRouteImport } from './routes/settings.open-source-licenses'
+import { Route as SettingsNewThreadsRouteImport } from './routes/settings.new-threads'
+import { Route as SettingsModelsRouteImport } from './routes/settings.models'
 import { Route as SettingsMemoryRouteImport } from './routes/settings.memory'
+import { Route as SettingsMachinesRouteImport } from './routes/settings.machines'
 import { Route as SettingsKeybindingsRouteImport } from './routes/settings.keybindings'
 import { Route as SettingsIntegrationsRouteImport } from './routes/settings.integrations'
 import { Route as SettingsImportRouteImport } from './routes/settings.import'
@@ -123,9 +126,24 @@ const SettingsOpenSourceLicensesRoute =
     path: '/open-source-licenses',
     getParentRoute: () => SettingsRoute,
   } as any)
+const SettingsNewThreadsRoute = SettingsNewThreadsRouteImport.update({
+  id: '/new-threads',
+  path: '/new-threads',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsModelsRoute = SettingsModelsRouteImport.update({
+  id: '/models',
+  path: '/models',
+  getParentRoute: () => SettingsRoute,
+} as any)
 const SettingsMemoryRoute = SettingsMemoryRouteImport.update({
   id: '/memory',
   path: '/memory',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsMachinesRoute = SettingsMachinesRouteImport.update({
+  id: '/machines',
+  path: '/machines',
   getParentRoute: () => SettingsRoute,
 } as any)
 const SettingsKeybindingsRoute = SettingsKeybindingsRouteImport.update({
@@ -230,7 +248,10 @@ export interface FileRoutesByFullPath {
   '/settings/import': typeof SettingsImportRoute
   '/settings/integrations': typeof SettingsIntegrationsRoute
   '/settings/keybindings': typeof SettingsKeybindingsRoute
+  '/settings/machines': typeof SettingsMachinesRoute
   '/settings/memory': typeof SettingsMemoryRoute
+  '/settings/models': typeof SettingsModelsRoute
+  '/settings/new-threads': typeof SettingsNewThreadsRoute
   '/settings/open-source-licenses': typeof SettingsOpenSourceLicensesRoute
   '/settings/project-tags': typeof SettingsProjectTagsRoute
   '/settings/projects': typeof SettingsProjectsRoute
@@ -263,7 +284,10 @@ export interface FileRoutesByTo {
   '/settings/import': typeof SettingsImportRoute
   '/settings/integrations': typeof SettingsIntegrationsRoute
   '/settings/keybindings': typeof SettingsKeybindingsRoute
+  '/settings/machines': typeof SettingsMachinesRoute
   '/settings/memory': typeof SettingsMemoryRoute
+  '/settings/models': typeof SettingsModelsRoute
+  '/settings/new-threads': typeof SettingsNewThreadsRoute
   '/settings/open-source-licenses': typeof SettingsOpenSourceLicensesRoute
   '/settings/project-tags': typeof SettingsProjectTagsRoute
   '/settings/projects': typeof SettingsProjectsRoute
@@ -299,7 +323,10 @@ export interface FileRoutesById {
   '/settings/import': typeof SettingsImportRoute
   '/settings/integrations': typeof SettingsIntegrationsRoute
   '/settings/keybindings': typeof SettingsKeybindingsRoute
+  '/settings/machines': typeof SettingsMachinesRoute
   '/settings/memory': typeof SettingsMemoryRoute
+  '/settings/models': typeof SettingsModelsRoute
+  '/settings/new-threads': typeof SettingsNewThreadsRoute
   '/settings/open-source-licenses': typeof SettingsOpenSourceLicensesRoute
   '/settings/project-tags': typeof SettingsProjectTagsRoute
   '/settings/projects': typeof SettingsProjectsRoute
@@ -336,7 +363,10 @@ export interface FileRouteTypes {
     | '/settings/import'
     | '/settings/integrations'
     | '/settings/keybindings'
+    | '/settings/machines'
     | '/settings/memory'
+    | '/settings/models'
+    | '/settings/new-threads'
     | '/settings/open-source-licenses'
     | '/settings/project-tags'
     | '/settings/projects'
@@ -369,7 +399,10 @@ export interface FileRouteTypes {
     | '/settings/import'
     | '/settings/integrations'
     | '/settings/keybindings'
+    | '/settings/machines'
     | '/settings/memory'
+    | '/settings/models'
+    | '/settings/new-threads'
     | '/settings/open-source-licenses'
     | '/settings/project-tags'
     | '/settings/projects'
@@ -404,7 +437,10 @@ export interface FileRouteTypes {
     | '/settings/import'
     | '/settings/integrations'
     | '/settings/keybindings'
+    | '/settings/machines'
     | '/settings/memory'
+    | '/settings/models'
+    | '/settings/new-threads'
     | '/settings/open-source-licenses'
     | '/settings/project-tags'
     | '/settings/projects'
@@ -546,11 +582,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsOpenSourceLicensesRouteImport
       parentRoute: typeof SettingsRoute
     }
+    '/settings/new-threads': {
+      id: '/settings/new-threads'
+      path: '/new-threads'
+      fullPath: '/settings/new-threads'
+      preLoaderRoute: typeof SettingsNewThreadsRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/models': {
+      id: '/settings/models'
+      path: '/models'
+      fullPath: '/settings/models'
+      preLoaderRoute: typeof SettingsModelsRouteImport
+      parentRoute: typeof SettingsRoute
+    }
     '/settings/memory': {
       id: '/settings/memory'
       path: '/memory'
       fullPath: '/settings/memory'
       preLoaderRoute: typeof SettingsMemoryRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/machines': {
+      id: '/settings/machines'
+      path: '/machines'
+      fullPath: '/settings/machines'
+      preLoaderRoute: typeof SettingsMachinesRouteImport
       parentRoute: typeof SettingsRoute
     }
     '/settings/keybindings': {
@@ -700,7 +757,10 @@ interface SettingsRouteChildren {
   SettingsImportRoute: typeof SettingsImportRoute
   SettingsIntegrationsRoute: typeof SettingsIntegrationsRoute
   SettingsKeybindingsRoute: typeof SettingsKeybindingsRoute
+  SettingsMachinesRoute: typeof SettingsMachinesRoute
   SettingsMemoryRoute: typeof SettingsMemoryRoute
+  SettingsModelsRoute: typeof SettingsModelsRoute
+  SettingsNewThreadsRoute: typeof SettingsNewThreadsRoute
   SettingsOpenSourceLicensesRoute: typeof SettingsOpenSourceLicensesRoute
   SettingsProjectTagsRoute: typeof SettingsProjectTagsRoute
   SettingsProjectsRoute: typeof SettingsProjectsRoute
@@ -721,7 +781,10 @@ const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsImportRoute: SettingsImportRoute,
   SettingsIntegrationsRoute: SettingsIntegrationsRoute,
   SettingsKeybindingsRoute: SettingsKeybindingsRoute,
+  SettingsMachinesRoute: SettingsMachinesRoute,
   SettingsMemoryRoute: SettingsMemoryRoute,
+  SettingsModelsRoute: SettingsModelsRoute,
+  SettingsNewThreadsRoute: SettingsNewThreadsRoute,
   SettingsOpenSourceLicensesRoute: SettingsOpenSourceLicensesRoute,
   SettingsProjectTagsRoute: SettingsProjectTagsRoute,
   SettingsProjectsRoute: SettingsProjectsRoute,

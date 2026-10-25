@@ -16,7 +16,7 @@ import {
   ThreadId,
   type OrchestrationV2AppThread,
   type OrchestrationV2DomainEvent,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Schema from "effect/Schema";
 

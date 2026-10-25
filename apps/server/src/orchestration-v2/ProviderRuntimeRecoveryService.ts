@@ -1,5 +1,5 @@
-import { runRanAfter } from "@t3tools/shared/orchestrationV2ThreadError";
-import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+import { runRanAfter } from "@cogenly/shared/orchestrationV2ThreadError";
+import { resolveProjectSettings } from "@cogenly/shared/projectSettings";
 import {
   CommandId,
   type OrchestrationV2DomainEvent,
@@ -10,7 +10,7 @@ import {
   isOrchestrationV2WorkActive,
   ThreadId,
   TurnItemId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -21,7 +21,7 @@ import * as Schema from "effect/Schema";
 
 import * as EffectOutbox from "./EffectOutbox.ts";
 import * as EventSink from "./EventSink.ts";
-import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import * as IdAllocator from "@cogenly/provider-core/server/IdAllocator";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import {
@@ -33,7 +33,7 @@ import { isBufferedProviderNotification } from "./NotificationMailbox.ts";
 import {
   endOrphanedNativeSubagent,
   endRunlessRootTurns,
-} from "@t3tools/provider-core/server/subagentProjection";
+} from "@cogenly/provider-core/server/subagentProjection";
 import {
   cancelledRosterTaskWork,
   cancelledTurnItemWork,
@@ -416,6 +416,23 @@ export const make = Effect.gen(function* () {
       const bufferedMessageIds = new Set(
         queuedMessages.filter(isBufferedProviderNotification).map((message) => message.id),
       );
+      // A delegated child has no user to resume its queue. Its parent's
+      // follow-up tasks and its own children's completion wakes stay queued,
+      // and delegated-task recovery starts them (Orchestrator.recoverDelegatedTasks).
+      const delegatedChild = projection.thread.lineage.relationshipToParent === "subagent";
+      const delegatedWakeIds = new Set(
+        delegatedChild
+          ? queuedMessages
+              .filter(
+                (message) =>
+                  message.delegatedCompletion !== undefined ||
+                  (message.createdBy === "agent" &&
+                    message.creationSource === "server" &&
+                    message.notification !== undefined),
+              )
+              .map((message) => message.id)
+          : [],
+      );
       // Buffered wakes lost their output with the process. Durable queued messages
       // keep their execution identities and order until the user resumes them.
       for (const run of queuedRuns) {
@@ -428,6 +445,11 @@ export const make = Effect.gen(function* () {
           continue;
         }
         if (run.queueHeld === true) continue;
+        if (
+          delegatedChild &&
+          (run.delegatedTaskId !== undefined || delegatedWakeIds.has(run.userMessageId))
+        )
+          continue;
         events.push({
           id: yield* allocateEventId(),
           type: "run.updated",
@@ -881,6 +903,15 @@ export const make = Effect.gen(function* () {
             (cause) => new ProviderRuntimeRecoveryError({ operation: "read-projections", cause }),
           ),
         );
+      // Sweep the previous process's effects first. The loop below enqueues a
+      // fresh turn start for each unstarted continuation it revives, and that
+      // start is process-bound too: sweeping after the loop cancelled it and
+      // left the run `starting` (a delegated task "running") forever.
+      const outboxReconciliation = yield* outbox.reconcileAfterProcessLoss.pipe(
+        Effect.mapError(
+          (cause) => new ProviderRuntimeRecoveryError({ operation: "drain-outbox", cause }),
+        ),
+      );
       let terminalizedRuns = 0;
       let stoppedSessions = 0;
       let closedRequests = 0;
@@ -906,11 +937,6 @@ export const make = Effect.gen(function* () {
         closedRequests += result.closedRequests;
         retiredEffects += result.retiredEffects;
       }
-      const outboxReconciliation = yield* outbox.reconcileAfterProcessLoss.pipe(
-        Effect.mapError(
-          (cause) => new ProviderRuntimeRecoveryError({ operation: "drain-outbox", cause }),
-        ),
-      );
       return {
         terminalizedRuns,
         stoppedSessions,

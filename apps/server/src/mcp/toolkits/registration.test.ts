@@ -1,3 +1,4 @@
+import * as StorageCleanup from "../../storageCleanup.ts";
 import * as Accounts from "../../accounts/Accounts.ts";
 import * as AccountAccess from "../../accounts/AccountAccess.ts";
 import * as AccountConnections from "../../accounts/AccountConnections.ts";
@@ -17,6 +18,8 @@ import * as AgentStore from "../../agents/AgentStore.ts";
 import * as Orchestrator from "../../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../../orchestration-v2/ProjectionStore.ts";
 import * as DeviceService from "../../device/DeviceService.ts";
+import { ComputerHost } from "../../computerUse/ComputerHost.ts";
+import * as ComputerUseService from "../../computerUse/ComputerUseService.ts";
 import * as ServerConfig from "../../config.ts";
 import { expect, it } from "@effect/vitest";
 import { NodeHttpServer } from "@effect/platform-node";
@@ -30,7 +33,7 @@ import {
   OrchestratorMcpFailure,
   type OrchestrationV2ServerCommand,
   type VisualState,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -54,6 +57,7 @@ import * as VcsStatusBroadcaster from "../../vcs/VcsStatusBroadcaster.ts";
 import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
 import * as ManagedProjectFolders from "../../project/ManagedProjectFolders.ts";
 import * as ProjectCloneTracker from "../../project/ProjectCloneTracker.ts";
+import * as RepositoryCheckout from "../../project/RepositoryCheckout.ts";
 import * as RepositoryIdentityResolver from "../../project/RepositoryIdentityResolver.ts";
 import * as ThreadLaunchService from "../../orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadSearch from "../../orchestration-v2/ThreadSearch.ts";
@@ -63,6 +67,10 @@ import * as SourceControlRepositoryService from "../../sourceControl/SourceContr
 import * as GitVcsDriver from "../../vcs/GitVcsDriver.ts";
 import * as Integrations from "../../integrations/Integrations.ts";
 import * as Machines from "../../machines/Machines.ts";
+import * as ProjectMove from "../../threadSync/ProjectMove.ts";
+import * as ThreadTransfer from "../../threadSync/ThreadTransfer.ts";
+import * as MachineSetup from "../../tailscale/MachineSetup.ts";
+import * as MachineHealth from "../../health/MachineHealth.ts";
 import * as McpHttpServer from "../McpHttpServer.ts";
 import * as McpSessionRegistry from "../McpSessionRegistry.ts";
 import * as PreviewAutomationBroker from "../PreviewAutomationBroker.ts";
@@ -215,6 +223,11 @@ const layerStubServices = Layer.mergeAll(
   Layer.mock(Machines.Machines)({
     list: Effect.succeed({ machines: [], link: { _tag: "standalone" } }),
   }),
+  Layer.mock(ThreadTransfer.ThreadTransfer)({}),
+  Layer.mock(ProjectMove.ProjectMove)({}),
+  Layer.mock(MachineSetup.MachineSetup)({}),
+  Layer.mock(StorageCleanup.StorageCleanup)({}),
+  Layer.mock(MachineHealth.MachineHealth)({}),
   Layer.mock(ProjectionStore.ProjectionStoreV2)({}),
   Layer.mock(DeviceService.DeviceService)({
     list: Effect.succeed({
@@ -228,6 +241,21 @@ const layerStubServices = Layer.mergeAll(
       revision: 0,
     }),
   }),
+  // A Linux host, like a VPS: the tools register and report themselves unavailable.
+  ComputerUseService.layer.pipe(
+    Layer.provide(
+      Layer.succeed(
+        ComputerHost,
+        ComputerHost.of({
+          platform: "linux",
+          hostApp: null,
+          script: () => Effect.die("computer use must not reach the OS on Linux"),
+          capture: () => Effect.die("computer use must not reach the OS on Linux"),
+          open: () => Effect.die("computer use must not reach the OS on Linux"),
+        }),
+      ),
+    ),
+  ),
   Layer.mock(ThreadManagementService.ThreadManagementService)({
     getThreadShell: () => Effect.succeed(shell),
     getThreadRecords: () => Effect.succeed({ ...projection, visualStates: visualStateRows }),
@@ -263,6 +291,7 @@ const layerStubServices = Layer.mergeAll(
   }),
   Layer.mock(SourceControlRepositoryService.SourceControlRepositoryService)({}),
   Layer.mock(ProjectCloneTracker.ProjectCloneTracker)({}),
+  Layer.mock(RepositoryCheckout.RepositoryCheckout)({}),
   Layer.mock(RepositoryIdentityResolver.RepositoryIdentityResolver)({}),
   Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
   Layer.mock(UsageLimitHandoff.UsageLimitHandoffService)({}),
@@ -345,6 +374,10 @@ const smokeCases = [
     toolkit: "integrations",
     names: [
       "integrations_list",
+      "integration_native_preview",
+      "integration_install_runtime",
+      "integration_setup_guide",
+      "integration_test",
       "integration_tools",
       "integration_call",
       "integration_add",
@@ -357,7 +390,15 @@ const smokeCases = [
   },
   {
     toolkit: "machines",
-    names: ["machines_list"],
+    names: [
+      "machine_pair",
+      "machine_setup_status",
+      "machine_setup_step",
+      "machine_unpair",
+      "machines_list",
+      "machines_move_threads",
+      "project_move_to_machine",
+    ],
     tool: "machines_list",
     args: {},
     expected: { machines: [], link: { _tag: "standalone" } },
@@ -547,6 +588,9 @@ const smokeCases = [
       "project_label_read",
       "project_label_create",
       "project_label_update",
+      "project_label_merge",
+      "project_label_dismiss_duplicate",
+      "project_label_undismiss_duplicate",
       "project_label_delete",
       "project_label_archive",
       "project_label_unarchive",
@@ -555,6 +599,9 @@ const smokeCases = [
       "project_label_link_repository",
       "project_label_unlink_repository",
       "project_label_clone_repository",
+      "project_label_remove_checkout",
+      "project_label_move_repository",
+      "project_folders_reconcile",
       "project_label_file_thread",
       "thread_move_project_folder",
       "thread_set_project_labels",
@@ -598,10 +645,16 @@ const smokeCases = [
   {
     toolkit: "environment",
     names: [
+      "cli_command_change",
+      "cli_command_status",
       "environment_add",
       "environment_preferences_update",
       "environment_read",
+      "machine_health",
+      "machine_health_fix",
       "machine_security_status",
+      "storage_cleanup",
+      "storage_status",
     ],
     tool: "environment_read",
     args: {},
@@ -656,6 +709,30 @@ const smokeCases = [
     expected: {
       devices: [],
       open: [],
+    },
+  },
+  {
+    toolkit: "computer",
+    names: [
+      "computer_apps",
+      "computer_click",
+      "computer_drag",
+      "computer_key",
+      "computer_open_app",
+      "computer_press",
+      "computer_screenshot",
+      "computer_scroll",
+      "computer_status",
+      "computer_type",
+      "computer_ui",
+    ],
+    tool: "computer_status",
+    args: {},
+    expected: {
+      state: "unsupported",
+      enabled: true,
+      supported: false,
+      platform: "linux",
     },
   },
   {
@@ -832,7 +909,7 @@ it.effect.each(smokeCases)(
         const registry = McpSessionRegistry.issueActiveMcpCredential({
           threadId,
           providerInstanceId: ProviderInstanceId.make("codex"),
-          capabilities: new Set(["preview", "device"]),
+          capabilities: new Set(["preview", "device", "computer"]),
         });
         const credential = yield* registry;
         expect(credential).toBeDefined();

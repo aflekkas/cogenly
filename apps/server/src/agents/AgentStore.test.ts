@@ -1,7 +1,7 @@
 import { layerIdentity as layerSharedIdentity } from "../sync/testkit.ts";
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { MessageId, ThreadId, ProviderInstanceId } from "@t3tools/contracts";
+import { MessageId, ThreadId, ProviderInstanceId } from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -14,7 +14,7 @@ import {
 } from "./context.ts";
 import { callingAgent } from "./MemoryMcp.ts";
 import * as Invocation from "../mcp/McpInvocationContext.ts";
-import { EnvironmentId } from "@t3tools/contracts";
+import { EnvironmentId } from "@cogenly/contracts";
 
 import { agentFixture } from "./agent.testkit.ts";
 const database = Sqlite.layerMemory.pipe(Layer.provide(NodeServices.layer));
@@ -259,3 +259,19 @@ describe("persistent agents", () => {
       }).pipe(Effect.provide(layer)),
   );
 });
+
+it.effect("job reservations stop at the conversation handoff fence and after ownership moves", () =>
+  Effect.gen(function* () {
+    const store = yield* Store.AgentStore;
+    const sql = yield* SqlClient.SqlClient;
+    const agent = yield* store.save(agentFixture());
+    expect(yield* store.reserve(agent.id)).toBe(true);
+    yield* sql`INSERT INTO thread_owners(thread_id, owner_env, local, epoch, handoff_json, updated_at)
+      VALUES (${agent.conversationThreadId}, 'env:self', 1, 0, '{"target":"env:other","epoch":1}', ${agent.createdAt})`;
+    expect(yield* store.reserve(agent.id)).toBe(false);
+    yield* sql`UPDATE thread_owners SET local = 0, handoff_json = NULL`;
+    expect(yield* store.reserve(agent.id)).toBe(false);
+    yield* sql`UPDATE thread_owners SET local = 1`;
+    expect(yield* store.reserve(agent.id)).toBe(true);
+  }).pipe(Effect.provide(layer)),
+);

@@ -2,7 +2,7 @@ import type {
   ChatAttachment as ContractChatAttachment,
   ModelSelection,
   OrchestrationV2Run,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { isFileAttachment, isImageAttachment, type ChatAttachment } from "~/types";
 import type {
   AgentAttachmentSupport,

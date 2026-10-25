@@ -1,10 +1,10 @@
-import type { MediaActionId } from "@t3tools/client-runtime/media-actions";
+import type { MediaActionId } from "@cogenly/client-runtime/media-actions";
 import {
   mediaReferenceFileName,
   type MediaReference,
-} from "@t3tools/client-runtime/media-reference";
-import { resolveAssetUrl } from "@t3tools/client-runtime/state/assets";
-import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+} from "@cogenly/client-runtime/media-reference";
+import { resolveAssetUrl } from "@cogenly/client-runtime/state/assets";
+import { squashAtomCommandFailure } from "@cogenly/client-runtime/state/runtime";
 import {
   AuthFilesystemReadScope,
   type AssetResource,
@@ -13,7 +13,7 @@ import {
   type EnvironmentId,
   sessionGrantsScope,
   type SessionGrantInput,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Option from "effect/Option";
 import { AsyncResult } from "effect/reactivity";
 import { useCallback, useRef, useState, type ReactElement } from "react";
@@ -86,12 +86,12 @@ export function useMediaActions(source: MediaActionSource) {
     }
     const { environmentId, resource } = source.asset;
     const connection = readPreparedConnection(environmentId);
-    if (!connection) throw new Error("Reconnect to this environment and try again.");
+    if (!connection) throw new Error("Reconnect to this machine and try again.");
     const result = await createAssetUrl({ environmentId, input: { resource } });
     if (result._tag === "Failure") throw squashAtomCommandFailure(result);
     assertCanReadMedia();
     const url = resolveAssetUrl(connection.httpBaseUrl, result.value.relativeUrl);
-    if (!url) throw new Error("The environment returned an invalid media URL.");
+    if (!url) throw new Error("The machine returned an invalid media URL.");
     return url;
   }, [source, createAssetUrl, assertCanReadMedia]);
   const save = useCallback(async () => {

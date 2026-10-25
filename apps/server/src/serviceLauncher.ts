@@ -158,21 +158,32 @@ interface ManagedChild {
   readonly process: NodeChildProcess.ChildProcess;
 }
 
-// Mirrors pinnedRuntimePaths: a runtime is an unpacked release archive whose
-// executable runs on its own. Kept inline so this file stays on Node
-// built-ins only.
-const runtimePaths = (baseDir: string, version: string) => {
+// Mirrors pinnedRuntimePaths and resolvePinnedRuntimeEntry: a runtime is an
+// unpacked release archive whose executable runs on its own. Kept inline so
+// this file stays on Node built-ins only.
+//
+// The executable is `cogenly`, or `t3` in a runtime unpacked from an archive
+// older than the rename, so this launcher can still start (or roll back to)
+// such a version. Launchers from before the rename look only for `t3`, which
+// is why archives keep a `t3` entry. Remove the fallback only as
+// "Transition: t3 → cogenly names" in docs/operations/release.md describes.
+export async function resolveRuntimePaths(baseDir: string, version: string) {
   const versionDir = NodePath.join(baseDir, "runtime", "versions", version);
   // oxlint-disable-next-line t3code/no-global-process-runtime -- Standalone launcher has no Effect runtime.
-  const executableName = process.platform === "win32" ? "t3.exe" : "t3";
+  const suffix = process.platform === "win32" ? ".exe" : "";
+  const entryPath = NodePath.join(versionDir, `cogenly${suffix}`);
+  const legacyEntryPath = NodePath.join(versionDir, `t3${suffix}`);
   return {
     versionDir,
-    entryPath: NodePath.join(versionDir, executableName),
+    entryPath:
+      (await pathExists(entryPath)) || !(await pathExists(legacyEntryPath))
+        ? entryPath
+        : legacyEntryPath,
     sentinelPath: NodePath.join(versionDir, ".install-complete"),
   };
-};
+}
 
-const runtimeSpawnArguments = (paths: ReturnType<typeof runtimePaths>) => ({
+const runtimeSpawnArguments = (paths: Awaited<ReturnType<typeof resolveRuntimePaths>>) => ({
   command: paths.entryPath,
   args: ["serve"],
 });
@@ -503,8 +514,8 @@ export async function writeServiceState(filePath: string, state: ServiceState): 
 }
 
 async function runtimeExists(baseDir: string, version: string): Promise<boolean> {
-  const paths = runtimePaths(baseDir, version);
   try {
+    const paths = await resolveRuntimePaths(baseDir, version);
     const [entry, sentinel] = await Promise.all([
       NodeFSP.stat(paths.entryPath),
       NodeFSP.readFile(paths.sentinelPath, "utf8"),
@@ -720,10 +731,10 @@ export class Launcher {
     this.#notifier.setPhase("starting");
     if (this.#stopping) return;
     if (!(await runtimeExists(this.#baseDir, version))) {
-      throw new Error(`Selected t3@${version} runtime is missing or incomplete.`);
+      throw new Error(`Selected cogenly@${version} runtime is missing or incomplete.`);
     }
+    const paths = await resolveRuntimePaths(this.#baseDir, version);
     if (this.#stopping) return;
-    const paths = runtimePaths(this.#baseDir, version);
     const context: ServiceLauncherContext = {
       protocol: SERVICE_LAUNCHER_PROTOCOL,
       childVersion: version,

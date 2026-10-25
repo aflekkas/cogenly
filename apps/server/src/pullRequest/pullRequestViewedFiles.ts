@@ -13,13 +13,13 @@ import {
   type PullRequestFilesViewedResult,
   type PullRequestRef,
   type PullRequestSetFilesViewedInput,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 
 import type * as PullRequestFilesViewed from "../persistence/PullRequestFilesViewed.ts";
 import type {
   ProviderFileRevisions,
   PullRequestProviderError,
-} from "@t3tools/source-control-core/server/PullRequestProvider";
+} from "@cogenly/source-control-core/server/PullRequestProvider";
 import type { PullRequestError, SupportedProject } from "./PullRequestService.ts";
 
 /**

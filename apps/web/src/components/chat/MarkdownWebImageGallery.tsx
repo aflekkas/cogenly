@@ -8,8 +8,8 @@ import {
   type ReactNode,
 } from "react";
 import { ImageOffIcon } from "lucide-react";
-import { mediaUrlReference } from "@t3tools/client-runtime/media-reference";
-import type { EnvironmentId } from "@t3tools/contracts";
+import { mediaUrlReference } from "@cogenly/client-runtime/media-reference";
+import type { EnvironmentId } from "@cogenly/contracts";
 import { useAssetUrlRefresh, useAssetUrlState } from "../../assets/assetUrls";
 import { resolvePrimaryEnvironmentHttpUrl } from "../../environments/primary";
 import { cn } from "../../lib/utils";

@@ -1,3 +1,5 @@
+import { useNewThreadPending } from "../hooks/useHandleNewThread";
+import { RepoMcpTrustPrompt } from "./chat/RepoMcpTrustPrompt";
 import { OverlayPresence } from "~/components/ui/overlay-presence";
 import { ThreadFind, ThreadFindCanvas, type ThreadFindControls } from "./chat/ThreadFindProvider";
 import { usageLimitRecoveryBannerItem } from "./chat/UsageLimitRecoveryBanner";
@@ -10,10 +12,12 @@ import {
   resolveServerThreadError,
   resolveVisibleWorktreeSetup,
   resolveWorktreeSetupProgress,
+  threadShellHasStarted,
+  timelineAwaitsRows,
 } from "./ChatView.logic";
 import * as DateTime from "effect/DateTime";
 import { restorePlanFollowUpComposer } from "./ChatView.logic";
-import { assistantCitationsToPlainText } from "@t3tools/shared/assistantCitations";
+import { assistantCitationsToPlainText } from "@cogenly/shared/assistantCitations";
 import { prepareQueuedEditAttachments, recoverQueuedMessageEdit } from "./chat/queuedMessageEdit";
 import {
   isPaintOnlyThreadTimeline,
@@ -31,17 +35,16 @@ import { useDelayedStatus } from "../hooks/useDelayedStatus";
 import { useElementState } from "../hooks/useElementState";
 import { useStableCallback } from "../hooks/useStableCallback";
 import { agentViewKey, requestAgentView } from "../agents/agentViewIntent";
-import { isScratchProject } from "@t3tools/client-runtime/state/projects";
+import { isScratchProject } from "@cogenly/client-runtime/state/projects";
 import {
   latestExecutedRun,
   latestRootProviderFailure,
-} from "@t3tools/shared/orchestrationV2ThreadError";
-import type { UsageLimitSourceSnapshots } from "@t3tools/contracts";
+} from "@cogenly/shared/orchestrationV2ThreadError";
 import {
   collectProviderUsageLimits,
   hasProviderUsageLimits,
   isUsageLimitsCommand,
-} from "@t3tools/shared/usageLimits";
+} from "@cogenly/shared/usageLimits";
 import { feedbackBannerItem } from "./chat/ComposerFeedback";
 import { usageLimitsBannerItem } from "./chat/ComposerUsageLimits";
 import * as Schema from "effect/Schema";
@@ -60,6 +63,7 @@ import {
   type ChatFileAttachment,
   CommandId,
   DEFAULT_MODEL,
+  isOrchestrationV2WorkActive,
   isProviderNativeSubagentThread,
   type ChatAttachment as ContractChatAttachment,
   type EnvironmentId,
@@ -82,16 +86,17 @@ import {
   resolveProjectProviderInstanceEnabled,
   RuntimeMode,
   type WorktreeSetupSnapshot,
-} from "@t3tools/contracts";
-import { type EnvironmentConnectionPresentation } from "@t3tools/client-runtime/connection";
+} from "@cogenly/contracts";
+import { type EnvironmentConnectionPresentation } from "@cogenly/client-runtime/connection";
 import {
   wasBootstrapThreadDeleted,
   wasBootstrapThreadNotCreated,
-} from "@t3tools/client-runtime/errors";
+  wasLaunchMachineOffline,
+} from "@cogenly/client-runtime/errors";
 import { readPastedComposerContext } from "./composerInlineTokenPaste";
-import { isPasteAsTextShortcut } from "@t3tools/client-runtime/text-paste";
-import { effectiveSnoozed, threadWokeAt } from "@t3tools/client-runtime/state/thread-settled";
-import { childThreadInputsTitle } from "@t3tools/client-runtime/state/threads";
+import { isPasteAsTextShortcut } from "@cogenly/client-runtime/text-paste";
+import { effectiveSnoozed, threadWokeAt } from "@cogenly/client-runtime/state/thread-settled";
+import { childThreadInputsTitle } from "@cogenly/client-runtime/state/threads";
 import { useAcknowledgeThreadWoke, useThreadActions } from "../hooks/useThreadActions";
 import {
   deriveProviderSubagentStatus,
@@ -103,12 +108,12 @@ import {
   deriveThreadRuntime,
   presentPendingBackgroundWork,
   presentProviderGoal,
-} from "@t3tools/client-runtime/state/thread-execution";
+} from "@cogenly/client-runtime/state/thread-execution";
 import {
   activeRunRefusesSteering,
   threadSupportsProviderHandoff,
-} from "@t3tools/client-runtime/state/thread-workflows";
-import { resolvePendingHandoff } from "@t3tools/client-runtime/handoff";
+} from "@cogenly/client-runtime/state/thread-workflows";
+import { resolvePendingHandoff } from "@cogenly/client-runtime/handoff";
 import { HandoffRow } from "./chat/V2LifecycleRow";
 import {
   codexFeedbackMessage,
@@ -117,32 +122,32 @@ import {
   shouldShowLoadEarlierControl,
   submitCodexFeedback,
   type CodexFeedbackSubmission,
-} from "@t3tools/client-runtime/state/threads";
+} from "@cogenly/client-runtime/state/threads";
 import { resolveThreadLastVisitedAt } from "./Sidebar.logic";
-import { derivePendingThreadRequests } from "@t3tools/client-runtime/state/thread-requests";
+import { derivePendingThreadRequests } from "@cogenly/client-runtime/state/thread-requests";
 import {
   parseScopedThreadKey,
   scopedThreadKey,
   scopeProjectRef,
   scopeThreadRef,
-} from "@t3tools/client-runtime/environment";
+} from "@cogenly/client-runtime/environment";
 import {
   applyClaudePromptEffortPrefix,
   createModelSelection,
   formatModelSlugName,
   resolvePromptInjectedEffort,
   resolveSelectableModel,
-} from "@t3tools/shared/model";
-import { projectScriptCwd, resolveProjectScripts } from "@t3tools/shared/projectScripts";
-import { derivePendingBackgroundWork } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
+} from "@cogenly/shared/model";
+import { projectScriptCwd, resolveProjectScripts } from "@cogenly/shared/projectScripts";
+import { derivePendingBackgroundWork } from "@cogenly/shared/orchestrationV2PendingBackgroundWork";
 import {
   latestUnheldRun,
   usageLimitRunPresentedAsLatest,
-} from "@t3tools/shared/orchestrationV2ThreadError";
-import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
-import { sourceControlRepositorySelector } from "@t3tools/shared/sourceControl";
-import { truncate } from "@t3tools/shared/String";
-import { resolveThreadReferenceCopyTarget } from "@t3tools/shared/threadReference";
+} from "@cogenly/shared/orchestrationV2ThreadError";
+import { resolveProjectSettings } from "@cogenly/shared/projectSettings";
+import { sourceControlRepositorySelector } from "@cogenly/shared/sourceControl";
+import { truncate } from "@cogenly/shared/String";
+import { resolveThreadReferenceCopyTarget } from "@cogenly/shared/threadReference";
 import {
   BottomTerminalPanel,
   type BottomPanelMotionTarget,
@@ -181,7 +186,7 @@ import {
   settlePromise,
   squashAtomCommandFailure,
   type AtomCommandResult,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@cogenly/client-runtime/state/runtime";
 import { AsyncResult } from "effect/reactivity";
 import { isElectron } from "../env";
 import { readLocalApi } from "../localApi";
@@ -227,7 +232,7 @@ import {
   withoutSettledUserInputs,
   type PendingUserInputDraftAnswer,
 } from "../pendingUserInput";
-import { seedUserInputDraftAnswers } from "@t3tools/client-runtime/state/thread-requests";
+import { seedUserInputDraftAnswers } from "@cogenly/client-runtime/state/thread-requests";
 import { useUiStateStore } from "../uiStateStore";
 import { useWorkspaceMutationRefresh } from "../hooks/useWorkspaceMutationRefresh";
 import {
@@ -283,12 +288,21 @@ import { WizardPopup } from "./ui/wizard";
 import { BranchToolbar, type BranchToolbarHandle } from "./BranchToolbar";
 import { makeWorkspaceFileDropHandlers } from "./chat/workspaceFileDrop";
 import { ThreadHeaderTitle } from "./chat/ThreadLineageBreadcrumb";
+import { ThreadOwnerBadge } from "../machines/ThreadOwnerBadge";
+import {
+  describeOfflineLaunch,
+  mergeRunOnOptions,
+  resolveDraftLaunchTarget,
+  resolveRunOnPick,
+} from "../machines/launchMachine.logic";
+import { useEnvironmentMachineList } from "../machines/useMachines";
 import { resolveThreadOrigin } from "./chat/threadLineage.logic";
 import { isEditableFocused } from "../lib/editableFocus";
-import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
+import { DEFAULT_RESOLVED_KEYBINDINGS } from "@cogenly/shared/keybindings";
 import { resolveChatShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import {
   AlarmClockIcon,
+  ArrowUpLeftIcon,
   CheckCircle2Icon,
   MessageCircleIcon,
   PaperclipIcon,
@@ -367,7 +381,7 @@ import {
   removeInlineContextReference,
   stripInlineContextReferences,
 } from "../lib/composerContextReferences";
-import { serializeLegacyContextMessage } from "@t3tools/shared/composerContextLegacySend";
+import { serializeLegacyContextMessage } from "@cogenly/shared/composerContextLegacySend";
 import {
   buildMessageContext,
   previewAnnotationContextLabel,
@@ -388,12 +402,12 @@ import {
 } from "../state/server";
 import { terminalEnvironment } from "../state/terminal";
 import { threadEnvironment } from "../state/threads";
-import { workspacePreparationRetryRunIds } from "@t3tools/client-runtime/state/turn-item-presentation";
-import { resolveProviderSkillsForCwd } from "@t3tools/client-runtime/providerSkills";
+import { workspacePreparationRetryRunIds } from "@cogenly/client-runtime/state/turn-item-presentation";
+import { resolveProviderSkillsForCwd } from "@cogenly/client-runtime/providerSkills";
 import { vcsEnvironment } from "../state/vcs";
 import { sourceControlEnvironment } from "../state/sourceControl";
 import { useProjectClone } from "../state/projectClones";
-import { projectCloneDisplayName, projectCloneProgressSummary } from "@t3tools/contracts";
+import { projectCloneDisplayName, projectCloneProgressSummary } from "@cogenly/contracts";
 import { useEnvironments, usePrimaryEnvironment } from "../state/environments";
 import {
   resolveThreadDetailRef,
@@ -418,7 +432,8 @@ import { CollapsePresence, useExtendedAfterFrame } from "./chat/StateTransition"
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import type { AssistantCitationRequest } from "./chat/AssistantCitationSource";
 import { MessagesTimeline, type MessagesTimelineHistoryControls } from "./chat/MessagesTimeline";
-import { ProviderSubagentBar } from "./chat/ProviderSubagentBar";
+import { ProviderInstanceIcon } from "./chat/ProviderInstanceIcon";
+import { SubagentBannerTitle } from "./chat/SubagentBannerTitle";
 import { getTriggerDisplayModelName } from "./chat/providerIconUtils";
 import { resolveTimelineIsAtEnd, worktreeSetupAgentStarted } from "./chat/MessagesTimeline.logic";
 import { resolveScrollToEndClearance } from "./composerFooterLayout";
@@ -487,7 +502,7 @@ import {
   DRAFT_HERO_TRANSITION_EASING,
   runMobileComposerTransition,
 } from "./chat/draftHeroTransition";
-import type { ComposerDispatchMode } from "@t3tools/client-runtime/state/composer-dispatch";
+import type { ComposerDispatchMode } from "@cogenly/client-runtime/state/composer-dispatch";
 import {
   agentControlledBrowserCloseConfirmation,
   branchMismatchKey,
@@ -499,6 +514,7 @@ import {
   deriveComposerSendState,
   dismissBranchMismatchForSession,
   hasEnvironmentReconnectWarningGraceElapsed,
+  isEnvironmentStillConnecting,
   scheduleEnvironmentReconnectWarning,
   hasServerAcknowledgedLocalDispatch,
   isBranchMismatchDismissedForSession,
@@ -508,6 +524,7 @@ import {
   type LocalDispatchSnapshot,
   cloneComposerImageForRetry,
   deriveLockedProvider,
+  resolveThreadDriverKind,
   readFileAsDataUrl,
   resolveFileAttachmentUrl,
   prepareRevertedMessageAttachments,
@@ -535,7 +552,7 @@ import {
 import { sanitizeThreadErrorMessage } from "~/rpc/transportError";
 import { RightPanelSheet } from "./RightPanelSheet";
 import { previewEnvironment } from "../state/preview";
-import { clampFileAttachmentUploadBytes } from "@t3tools/client-runtime/state/attachments";
+import { clampFileAttachmentUploadBytes } from "@cogenly/client-runtime/state/attachments";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { fileAttachmentCapabilityBlockReason } from "./chat/composerAttachmentFiles";
 import { assetEnvironment } from "../state/assets";
@@ -573,18 +590,17 @@ import {
   supportsServerUpdateThreadContinuation,
 } from "../versionSkew";
 import { useAssetUrls } from "../assets/assetUrls";
-import { ATTACHMENT_ONLY_BOOTSTRAP_PROMPT } from "@t3tools/shared/composerContextReferences";
+import { ATTACHMENT_ONLY_BOOTSTRAP_PROMPT } from "@cogenly/shared/composerContextReferences";
 import { recallableComposerPrompt } from "./chat/composerPromptHistory";
 import { observeResize } from "~/lib/observeResize";
 import {
   beginPendingProjectFolderLaunch,
   readPendingProjectFolderId,
 } from "../projectLabels/pendingProjectFolders";
-import type { CodexArtifactTemplate } from "@t3tools/shared/codexArtifactTemplates";
+import type { CodexArtifactTemplate } from "@cogenly/shared/codexArtifactTemplates";
 
 const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_PROVIDER_MODELS: ServerProvider["models"] = [];
-const EMPTY_USAGE_LIMIT_SOURCES: UsageLimitSourceSnapshots = [];
 
 const TIMELINE_SCROLL_CANCEL_SENTINEL = Object.freeze({});
 const EMPTY_FEEDBACK_SUBMISSIONS: ReadonlyArray<CodexFeedbackSubmission> = [];
@@ -1223,7 +1239,7 @@ export default function ChatView(props: ChatViewProps) {
     readonly messageId: MessageId;
     readonly originalText: string;
     readonly existingAttachments: ReadonlyArray<ContractChatAttachment>;
-    readonly context?: import("@t3tools/contracts").OrchestrationMessageContext | undefined;
+    readonly context?: import("@cogenly/contracts").OrchestrationMessageContext | undefined;
   } | null>(null);
   const queuedEditDraftTargetFor = useMemo(
     () => makeQueuedEditDraftTarget(routeThreadRef),
@@ -1541,8 +1557,6 @@ export default function ChatView(props: ChatViewProps) {
   // change should bring the timeline's end back into view.
   const composerStackHeightRef = useRef<number | null>(null);
   const pinTimelineEndAfterInsetRef = useRef(false);
-  // False while a status bar stands in for the composer (a native subagent).
-  const composerMountedRef = useRef(true);
   const [scrollToEndClearance, setScrollToEndClearance] = useState(0);
   const isAtEndRef = useRef(true);
   const isTimelineAtLogicalEnd = () =>
@@ -1634,6 +1648,7 @@ export default function ChatView(props: ChatViewProps) {
       projectSettings.defaultModelSelection ?? NO_PROVIDER_MODEL_SELECTION;
     return buildLocalDraftThread(threadId, draftThread, defaultModelSelection);
   }, [draftThread, fallbackDraftProject, settings, threadId]);
+  const newThreadPending = useNewThreadPending((state) => state.count > 0);
   const isServerThread = serverThread !== null;
   const activeThread = isServerThread ? serverThread : localDraftThread;
   const serverLatestRun = useMemo(
@@ -2098,6 +2113,12 @@ export default function ChatView(props: ChatViewProps) {
       setReconnectWarningGraceElapsedEnvironmentId(activeReconnectingEnvironmentId),
     );
   }, [activeReconnectingEnvironmentId]);
+  const activeEnvironmentConnecting =
+    activeEnvironmentUnavailable &&
+    isEnvironmentStillConnecting({
+      phase: activeEnvironmentConnectionPhase,
+      reconnectWarningGraceElapsed,
+    });
   const activeEnvironmentUnavailableLabel = activeEnvironment?.label ?? null;
   const activeEnvironmentUnavailableState = useMemo<EnvironmentUnavailableState | null>(() => {
     if (!activeEnvironmentUnavailable || !activeEnvironmentUnavailableLabel || !activeEnvironment) {
@@ -2117,7 +2138,7 @@ export default function ChatView(props: ChatViewProps) {
       toastManager.add(
         stackedThreadToast({
           type: "error",
-          title: "Could not reconnect environment",
+          title: "Could not reconnect machine",
           description: error instanceof Error ? error.message : "Failed to reconnect.",
         }),
       );
@@ -2222,13 +2243,29 @@ export default function ChatView(props: ChatViewProps) {
   // Auto balance retargets to an existing project; a machine's "No project"
   // folder may not exist until it is picked.
   const canAutoBalanceEnvironments = hasMultipleEnvironments && !activeProjectIsScratch;
+  // "Run on" also offers the draft environment's paired machines. A draft
+  // shows its pick; a started thread shows the machine that runs it.
+  const pickedRunOnMachine =
+    (isServerThread ? activeThreadShell?.source.ownerMachine : draftThread?.launchMachine) ?? null;
+  const runOnMachineList = useEnvironmentMachineList(activeThread?.environmentId ?? null);
+  const runOnOptions = useMemo(
+    () =>
+      activeProject
+        ? mergeRunOnOptions({
+            environments: logicalProjectEnvironments,
+            machines: runOnMachineList,
+            pickedMachine: pickedRunOnMachine,
+          })
+        : logicalProjectEnvironments,
+    [activeProject, logicalProjectEnvironments, runOnMachineList, pickedRunOnMachine],
+  );
+  const canPickRunOn = runOnOptions.length > 1;
+  const runOnEnvironmentId = pickedRunOnMachine ?? activeThread?.environmentId ?? null;
   const activeEnvironmentOption =
-    logicalProjectEnvironments.find(
-      (environment) => environment.environmentId === activeThread?.environmentId,
-    ) ?? null;
+    runOnOptions.find((environment) => environment.environmentId === runOnEnvironmentId) ?? null;
   const showComposerEnvironmentIndicator = shouldShowEnvironmentIndicator({
     activeEnvironment: activeEnvironmentOption,
-    canPickEnvironment: hasMultipleEnvironments,
+    canPickEnvironment: canPickRunOn,
   });
 
   const openOrReuseProjectDraftThread = async (input: {
@@ -2297,12 +2334,25 @@ export default function ChatView(props: ChatViewProps) {
   const serverConfig = activeThread
     ? (activeEnvironment?.serverConfig ?? null)
     : (primaryEnvironment?.serverConfig ?? null);
-  const providerStatuses = serverConfig?.providers ?? EMPTY_PROVIDERS;
+  const machineProviders = useEnvironmentQuery(
+    pickedRunOnMachine !== null && pickedRunOnMachine !== environmentId
+      ? serverEnvironment.machineProviders({
+          environmentId,
+          input: { machine: pickedRunOnMachine },
+        })
+      : null,
+  );
+  const providerStatuses =
+    machineProviders.data?.providers ?? serverConfig?.providers ?? EMPTY_PROVIDERS;
   const selectedProviderByThreadId = composerActiveProvider ?? null;
   const threadProvider =
     activeThread?.modelSelection.instanceId ??
     activeProjectDefaultModelSelection?.instanceId ??
     null;
+  const threadDriverKind = useMemo(
+    () => resolveThreadDriverKind(serverProjection),
+    [serverProjection],
+  );
   const lockedProvider = deriveLockedProvider({
     thread: activeThread,
     selectedProvider: selectedProviderByThreadId,
@@ -2369,7 +2419,6 @@ export default function ChatView(props: ChatViewProps) {
       : "server";
   const serverUpdateEnvironmentId = activeThread?.environmentId ?? null;
   const versionMismatchSelfUpdate = resolveServerSelfUpdateCapability(serverConfig);
-  const versionMismatchInstallation = serverConfig?.environment.capabilities.serverInstallation;
   const versionMismatchDesktopAppUpdate = supportsDesktopAppUpdate(serverConfig);
   const versionMismatchThreadContinuation = supportsServerUpdateThreadContinuation(serverConfig);
   const serverUpdateState = useAtomValue(
@@ -2506,7 +2555,6 @@ export default function ChatView(props: ChatViewProps) {
             environmentId={serverUpdateEnvironmentId}
             serverLabel={versionMismatchServerLabel}
             selfUpdate={versionMismatchSelfUpdate}
-            installation={versionMismatchInstallation}
             desktopAppUpdate={versionMismatchDesktopAppUpdate}
             threadContinuation={versionMismatchThreadContinuation}
             targetVersion={versionMismatch.clientVersion}
@@ -2550,7 +2598,6 @@ export default function ChatView(props: ChatViewProps) {
     versionMismatchDismissKey,
     serverUpdateEnvironmentId,
     versionMismatchSelfUpdate,
-    versionMismatchInstallation,
     versionMismatchDesktopAppUpdate,
     versionMismatchThreadContinuation,
     versionMismatchServerLabel,
@@ -2830,7 +2877,6 @@ export default function ChatView(props: ChatViewProps) {
   ) {
     setUsageLimitsPanel(null);
   }
-  const usageLimitSources = serverConfig?.usageLimitSources ?? EMPTY_USAGE_LIMIT_SOURCES;
   const usageLimitsReport = useMemo(
     () =>
       usageLimitsPanel !== null &&
@@ -2840,17 +2886,10 @@ export default function ChatView(props: ChatViewProps) {
         ? collectProviderUsageLimits(
             activeProviderInstanceId,
             providerStatuses,
-            usageLimitSources,
             usageLimitsPanel.now,
           )
         : null,
-    [
-      activeProviderInstanceId,
-      providerStatuses,
-      usageLimitSources,
-      usageLimitsKey,
-      usageLimitsPanel,
-    ],
+    [activeProviderInstanceId, providerStatuses, usageLimitsKey, usageLimitsPanel],
   );
   const usageLimitsBanner = useMemo(
     () =>
@@ -2869,18 +2908,13 @@ export default function ChatView(props: ChatViewProps) {
   // elsewhere the name stays the provider's own and is sent through untouched.
   const usageLimitsOffered =
     activeProviderStatus !== null &&
-    hasProviderUsageLimits(activeProviderStatus.driver, providerStatuses, usageLimitSources);
+    hasProviderUsageLimits(activeProviderStatus.driver, providerStatuses);
   // Answered locally from the last Limits snapshot; the agent never sees it.
   const openUsageLimits = () => {
     const now = Date.now();
     const report =
       activeProviderInstanceId !== null && usageLimitsKey !== null
-        ? collectProviderUsageLimits(
-            activeProviderInstanceId,
-            providerStatuses,
-            usageLimitSources,
-            now,
-          )
+        ? collectProviderUsageLimits(activeProviderInstanceId, providerStatuses, now)
         : null;
     if (report && usageLimitsKey !== null) {
       setUsageLimitsPanel({ key: usageLimitsKey, threadKey: routeThreadKey, now });
@@ -3062,7 +3096,7 @@ export default function ChatView(props: ChatViewProps) {
   const downloadFileAttachment = async (attachment: ChatFileAttachment) => {
     const connection = readPreparedConnection(environmentId);
     if (!connection) {
-      toastManager.add({ type: "error", title: "The environment is not connected." });
+      toastManager.add({ type: "error", title: "The machine is not connected." });
       return;
     }
 
@@ -3455,8 +3489,19 @@ export default function ChatView(props: ChatViewProps) {
       backgroundSubmissionPending,
       hasWorktreeSetupCard: worktreeSetup !== null,
     });
+  // The timeline's loading state: the detail is loading, or a thread with
+  // messages has shown none yet.
+  const timelineLoading =
+    isServerThread &&
+    timelineAwaitsRows({
+      detailLoading: threadDetailLoading,
+      shellStarted: threadShellHasStarted(activeThreadShell),
+      rowCount: timelineEntries.length,
+      isWorking,
+      hasHistoryToLoad: threadHistoryControls !== undefined,
+    });
   const embeddedEmptyStateVisible =
-    timelineEntries.length === 0 && !isWorking && !threadDetailLoading && !isDraftHeroState;
+    timelineEntries.length === 0 && !isWorking && !timelineLoading && !isDraftHeroState;
   const {
     attachTransitionGroup: attachDraftHeroTransitionGroup,
     attachComposerAnchor: attachDraftHeroComposerAnchor,
@@ -3644,11 +3689,10 @@ export default function ChatView(props: ChatViewProps) {
   // When context is enabled, keep a hidden, off-flow strip mounted so the composer
   // can measure whether its relocated controls fit. The visible chrome remains
   // content-driven: Git/environment context or controls that actually fit.
-  // A provider-native subagent cannot take messages: a status bar replaces the
-  // composer and its strips. Its approvals and questions are asked on the
-  // top-level parent thread.
-  const showProviderSubagentBar = isProviderSubagent;
-  const composerMounted = !showProviderSubagentBar;
+  // A provider-native subagent keeps the normal composer: a message sent while
+  // its provider still runs it waits in the queue, then runs as its own turn.
+  // A notice above the composer names its model and status. Its approvals and
+  // questions are asked on the top-level parent thread.
   const providerSubagentModels = selectedProviderEntry?.models ?? EMPTY_PROVIDER_MODELS;
   // Providers can report a dated id or alias (claude-haiku-4-5-20251001).
   const providerSubagentModelSlug = selectedProviderEntry
@@ -3675,7 +3719,7 @@ export default function ChatView(props: ChatViewProps) {
   const mountComposerContextStrip = shouldShowComposerContextStrip({
     isDraftHeroState,
     persistInActiveThreads: settings.persistComposerContextStrip,
-    hasActiveProject: activeProject !== null && !showProviderSubagentBar,
+    hasActiveProject: activeProject !== null,
     isGitRepo,
     showEnvironmentIndicator: showComposerEnvironmentIndicator,
     hostsRestingComposerControls: routeKind === "server",
@@ -3683,13 +3727,12 @@ export default function ChatView(props: ChatViewProps) {
   const showComposerContextStrip = shouldShowComposerContextStrip({
     isDraftHeroState,
     persistInActiveThreads: settings.persistComposerContextStrip,
-    hasActiveProject: activeProject !== null && !showProviderSubagentBar,
+    hasActiveProject: activeProject !== null,
     isGitRepo,
     showEnvironmentIndicator: showComposerEnvironmentIndicator,
     hostsRestingComposerControls: routeKind === "server" && restingComposerControlsVisible,
   });
-  const mountComposerModelStrip =
-    routeKind === "server" && !mountComposerContextStrip && !showProviderSubagentBar;
+  const mountComposerModelStrip = routeKind === "server" && !mountComposerContextStrip;
   const showComposerModelStrip = mountComposerModelStrip && restingComposerControlsVisible;
   // The shell's silhouette follows the strip while it grows and collapses.
   const composerStripVisible = showComposerContextStrip || showComposerModelStrip;
@@ -3778,6 +3821,7 @@ export default function ChatView(props: ChatViewProps) {
     setDraftThreadContext(draftId, {
       environmentSelection: "auto",
       loadBalancedEnvironmentId: null,
+      launchMachine: null,
       branch: null,
       worktreePath: null,
     });
@@ -3807,10 +3851,22 @@ export default function ChatView(props: ChatViewProps) {
     if (envLocked || !draftId || sendInFlightRef.current) return;
     const originalDraft = getDraftSession(draftId);
     if (!originalDraft || originalDraft.promotedTo) return;
-    const target = logicalProjectEnvironments.find(
-      (env) => env.environmentId === nextEnvironmentId,
-    );
-    if (!target) return;
+    const pick = resolveRunOnPick(runOnOptions, nextEnvironmentId);
+    if (!pick) return;
+    if (pick.kind === "machine") {
+      // The draft stays on its environment, which launches it on the machine.
+      // An existing worktree's path is this machine's; the branch carries over.
+      environmentChangeRef.current = null;
+      setIsEnvironmentChanging(false);
+      setDraftThreadContext(draftId, {
+        launchMachine: pick.environmentId,
+        environmentSelection: "manual",
+        loadBalancedEnvironmentId: null,
+        worktreePath: null,
+      });
+      return;
+    }
+    const target = pick.option;
     const request = { environmentId: target.environmentId };
     environmentChangeRef.current = request;
     setIsEnvironmentChanging(false);
@@ -3832,13 +3888,14 @@ export default function ChatView(props: ChatViewProps) {
           deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings),
           projectRef,
           draftId,
-          { environmentSelection: "manual", loadBalancedEnvironmentId: null },
+          { environmentSelection: "manual", loadBalancedEnvironmentId: null, launchMachine: null },
         );
       } else {
         setDraftThreadContext(draftId, {
           projectRef,
           environmentSelection: "manual",
           loadBalancedEnvironmentId: null,
+          launchMachine: null,
         });
       }
     };
@@ -5195,15 +5252,6 @@ export default function ChatView(props: ChatViewProps) {
     updateHeight();
     return observeResize(composerOverlayElement, updateHeight);
   }, [composerOverlayElement, publishComposerOverlayHeightStable, showScrollToBottom]);
-  // Swapping the composer for the status bar (or back) changes what the
-  // overlay holds, so rebuild the reservation from the new content.
-  useLayoutEffect(() => {
-    if (composerMountedRef.current === composerMounted) return;
-    composerMountedRef.current = composerMounted;
-    if (!composerOverlayElement) return;
-    composerTimelineInsetRef.current = 0;
-    publishComposerOverlayHeightStable(composerOverlayElement.getBoundingClientRect().height);
-  }, [composerMounted, composerOverlayElement, publishComposerOverlayHeightStable]);
   const activeThreadReferenceCopyTarget = useMemo(
     () =>
       activeThreadId === null || !isServerThread
@@ -5570,6 +5618,60 @@ export default function ChatView(props: ChatViewProps) {
     activePendingUserInput,
     activeThreadShell?.hasPendingUserInput,
     onOpenRelatedThreadStable,
+  ]);
+  // A provider-native subagent names the model its parent picked and how its
+  // work went, and leads back to that parent.
+  const parentThreadLinkId = parentThreadLink?.threadId ?? null;
+  const subagentBannerItem = useMemo<ComposerBannerStackItem | null>(() => {
+    if (!isProviderSubagent) return null;
+    return {
+      id: "provider-subagent",
+      variant: "info",
+      ...(providerSubagentStatus !== null &&
+      isOrchestrationV2WorkActive(providerSubagentStatus.status)
+        ? { priority: "activity" as const }
+        : {}),
+      icon: selectedProviderEntry ? (
+        <ProviderInstanceIcon
+          driverKind={selectedProviderEntry.driverKind}
+          displayName={selectedProviderEntry.displayName}
+          accentColor={selectedProviderEntry.accentColor}
+          showBadge={shouldShowInstanceBadge(selectedProviderEntry, providerInstanceEntries)}
+          className="size-3"
+          iconClassName="size-3"
+        />
+      ) : null,
+      title: (
+        <SubagentBannerTitle
+          modelLabel={providerSubagentModelLabel}
+          effortLabel={providerSubagentEffortLabel}
+          status={providerSubagentStatus}
+        />
+      ),
+      ...(parentThreadLinkId === null
+        ? {}
+        : {
+            actions: (
+              <Button
+                size="xs"
+                variant="ghost"
+                onClick={() => onOpenRelatedThreadStable(parentThreadLinkId)}
+              >
+                <ArrowUpLeftIcon />
+                Open parent
+              </Button>
+            ),
+          }),
+    };
+  }, [
+    isProviderSubagent,
+    onOpenRelatedThreadStable,
+    parentThreadLinkId,
+    providerInstanceEntries,
+    providerSubagentEffortLabel,
+    providerSubagentModelLabel,
+    providerSubagentStatus,
+    selectedProviderEntry,
   ]);
 
   // Commands such as /compact and /goal clear run as their own turn. The draft
@@ -5965,6 +6067,7 @@ export default function ChatView(props: ChatViewProps) {
   >(() => {
     const limitRecoveryItems = limitRecoveryBanner === null ? [] : [limitRecoveryBanner];
     const backgroundWorkItems = [
+      subagentBannerItem,
       childInputBannerItem,
       goalBannerItem,
       backgroundWorkBannerItem,
@@ -6042,6 +6145,7 @@ export default function ChatView(props: ChatViewProps) {
     isRestoringThreadBranch,
     backgroundWorkBannerItem,
     childInputBannerItem,
+    subagentBannerItem,
     goalBannerItem,
     localCheckoutBranchMismatch,
     projectCloneBannerItem,
@@ -6296,16 +6400,15 @@ export default function ChatView(props: ChatViewProps) {
       }
 
       if (command === "composer.cycleHost") {
-        if (envLocked || !draftId || !hasMultipleEnvironments) return;
+        if (envLocked || !draftId || !canPickRunOn) return;
         event.preventDefault();
         event.stopPropagation();
         if (event.repeat) return;
         // Step from where a pending switch is heading, so repeated presses keep advancing.
-        const currentId = environmentChangeRef.current?.environmentId ?? environmentId;
-        const index = logicalProjectEnvironments.findIndex(
-          (env) => env.environmentId === currentId,
-        );
-        const next = logicalProjectEnvironments[(index + 1) % logicalProjectEnvironments.length];
+        const currentId =
+          environmentChangeRef.current?.environmentId ?? runOnEnvironmentId ?? environmentId;
+        const index = runOnOptions.findIndex((env) => env.environmentId === currentId);
+        const next = runOnOptions[(index + 1) % runOnOptions.length];
         if (next) onEnvironmentChangeStable(next.environmentId);
         return;
       }
@@ -6418,8 +6521,9 @@ export default function ChatView(props: ChatViewProps) {
     draftId,
     environmentId,
     envLocked,
-    hasMultipleEnvironments,
-    logicalProjectEnvironments,
+    canPickRunOn,
+    runOnEnvironmentId,
+    runOnOptions,
     onEnvironmentChangeStable,
   ]);
 
@@ -6541,7 +6645,7 @@ export default function ChatView(props: ChatViewProps) {
           throw new Error("Wait for attachments to finish preparing before rewinding.");
         }
         const connection = readPreparedConnection(environmentId);
-        if (!connection) throw new Error("The environment is not connected.");
+        if (!connection) throw new Error("The machine is not connected.");
         const files = await prepareRevertedMessageAttachments({
           message,
           environmentId,
@@ -6800,6 +6904,38 @@ export default function ChatView(props: ChatViewProps) {
     onResumeNowRef.current = onResume;
   });
 
+  // A launch an offline paired machine refused created nothing, and the send's
+  // failure path restores the draft. The toast's one action clears the pick
+  // and sends the same draft from this machine.
+  const resendRef = useRef<() => void>(() => undefined);
+  const offlineLaunchToast = (machine: EnvironmentId, sendRouteThreadKey: string) => {
+    const copy = describeOfflineLaunch({
+      machineName:
+        runOnOptions.find((option) => option.environmentId === machine)?.label ?? "That machine",
+      hereName:
+        runOnOptions.find((option) => option.environmentId === environmentId)?.label ??
+        "this machine",
+    });
+    return {
+      title: copy.title,
+      description: copy.description,
+      actionProps: {
+        children: copy.actionLabel,
+        onClick: () => {
+          setDraftThreadContext(draftId ?? routeThreadRef, {
+            launchMachine: null,
+            environmentSelection: "manual",
+          });
+          if (currentRouteThreadKeyRef.current === sendRouteThreadKey) {
+            resendRef.current();
+          } else if (draftId) {
+            void navigate({ to: "/draft/$draftId", params: { draftId } });
+          }
+        },
+      },
+    };
+  };
+
   const onSend = async (
     e?: { preventDefault: () => void },
     dispatchMode: ComposerDispatchMode = "auto",
@@ -6872,7 +7008,7 @@ export default function ChatView(props: ChatViewProps) {
         ...stackedThreadToast({
           type: "warning",
           title: "Not connected: message not sent",
-          description: "Reconnecting to the environment. Try again once it is connected.",
+          description: "Reconnecting to the machine. Try again once it is connected.",
         }),
         id: `chat-send-environment-unavailable:${toastSlot}`,
       });
@@ -7561,6 +7697,19 @@ export default function ChatView(props: ChatViewProps) {
         };
       }),
     );
+    // A new thread launches on the paired machine picked in "Run on", read
+    // now so a pick made while uploads ran still applies.
+    const launchMachineForSend = isLocalDraftThread
+      ? resolveDraftLaunchTarget({
+          draftEnvironmentId: environmentId,
+          launchMachine: (draftId
+            ? useComposerDraftStore.getState().getDraftSession(draftId)
+            : useComposerDraftStore.getState().getDraftSessionByRef(routeThreadRef)
+          )?.launchMachine,
+        }).machine
+      : undefined;
+    const launchMachineFields =
+      launchMachineForSend === undefined ? {} : { machine: launchMachineForSend };
     if (multipleModelSelections !== null) {
       const failedSelections: ModelSelection[] = [];
       let clearedDraft = false;
@@ -7657,6 +7806,7 @@ export default function ChatView(props: ChatViewProps) {
                           ...(draftProjectFolderId === null
                             ? {}
                             : { projectFolderId: draftProjectFolderId }),
+                          ...launchMachineFields,
                         },
                         prepareWorktree: {
                           projectCwd: activeProject.workspaceRoot,
@@ -7671,7 +7821,11 @@ export default function ChatView(props: ChatViewProps) {
                   });
                   if (result._tag === "Failure") {
                     const error = squashAtomCommandFailure(result);
-                    if (wasBootstrapThreadDeleted(error) || wasBootstrapThreadNotCreated(error)) {
+                    if (
+                      wasBootstrapThreadDeleted(error) ||
+                      wasBootstrapThreadNotCreated(error) ||
+                      wasLaunchMachineOffline(error)
+                    ) {
                       requestMayHaveStarted = false;
                     }
                     throw error;
@@ -7687,6 +7841,17 @@ export default function ChatView(props: ChatViewProps) {
                   }
                   failedSelections.push(target.selection);
                   const retainedThreadId = uncertainMultipleSubmissionsRef.current.get(retryKey);
+                  if (launchMachineForSend !== undefined && wasLaunchMachineOffline(error)) {
+                    // One toast for every model the offline machine refused.
+                    toastManager.add({
+                      ...stackedThreadToast({
+                        type: "error",
+                        ...offlineLaunchToast(launchMachineForSend, routeThreadKey),
+                      }),
+                      id: `offline-launch:${routeThreadKey}`,
+                    });
+                    return;
+                  }
                   const failureToastId = toastManager.add(
                     stackedThreadToast({
                       type: "error",
@@ -8002,11 +8167,14 @@ export default function ChatView(props: ChatViewProps) {
                       runtimeMode,
                       interactionMode: sendInteractionMode,
                       branch: activeThreadBranch,
-                      worktreePath: activeThread.worktreePath,
+                      // A worktree path is this machine's; another machine starts from the branch.
+                      worktreePath:
+                        launchMachineForSend === undefined ? activeThread.worktreePath : null,
                       createdAt: activeThread.createdAt,
                       ...(draftProjectFolderId === null
                         ? {}
                         : { projectFolderId: draftProjectFolderId }),
+                      ...launchMachineFields,
                     },
                   }
                 : {}),
@@ -8206,7 +8374,15 @@ export default function ChatView(props: ChatViewProps) {
           threadIdForSend,
           error instanceof Error ? error.message : "Failed to send message.",
         );
-        if (backgroundDraftOpened && draftId) {
+        if (launchMachineForSend !== undefined && wasLaunchMachineOffline(error)) {
+          toastManager.add({
+            ...stackedThreadToast({
+              type: "error",
+              ...offlineLaunchToast(launchMachineForSend, routeThreadKey),
+            }),
+            id: `offline-launch:${routeThreadKey}`,
+          });
+        } else if (backgroundDraftOpened && draftId) {
           toastManager.add(
             stackedThreadToast({
               type: "error",
@@ -8285,7 +8461,7 @@ export default function ChatView(props: ChatViewProps) {
     if (userInputResponsesInFlight.current.has(responseKey)) return;
     const attachmentsByQuestionId = new Map<
       string,
-      import("@t3tools/contracts").UserInputAttachments[string]
+      import("@cogenly/contracts").UserInputAttachments[string]
     >();
     const providerAnswers = { ...answers };
     for (const question of pendingInput.questions) {
@@ -8313,7 +8489,7 @@ export default function ChatView(props: ChatViewProps) {
       }
       attachmentsByQuestionId.set(
         question.id,
-        uploaded as import("@t3tools/contracts").UserInputAttachments[string],
+        uploaded as import("@cogenly/contracts").UserInputAttachments[string],
       );
     }
     userInputResponsesInFlight.current.add(responseKey);
@@ -8899,6 +9075,9 @@ export default function ChatView(props: ChatViewProps) {
   };
   const onWorktreeSetupWorkLocallyStable = useStableCallback(onWorktreeSetupWorkLocally);
   const onComposerSendStable = useStableCallback(onSend);
+  useLayoutEffect(() => {
+    resendRef.current = () => void onComposerSendStable();
+  }, [onComposerSendStable]);
   const onComposerResumeStable = useStableCallback(onResume);
   const onComposerCompactContextStable = useStableCallback(onCompactContext);
   const addWorkspaceDroppedFilesStable = useStableCallback((files: File[]) =>
@@ -9316,17 +9495,25 @@ export default function ChatView(props: ChatViewProps) {
             : null}
           {/* The title stays visible whether or not the sidebar shows the
               thread; a draft has none yet, so its heading is for screen readers. */}
-          {isServerThread ? (
+          {isServerThread && !newThreadPending ? (
             <ThreadHeaderTitle
               shell={activeThreadShell}
               title={activeThread.title}
               messagesCarried={workHandoffMessagesCarried}
               onOpenThread={onOpenRelatedThreadStable}
+              trailing={
+                activeThreadShell ? (
+                  <ThreadOwnerBadge
+                    environmentId={activeThreadShell.environmentId}
+                    ownerMachine={activeThreadShell.source.ownerMachine}
+                  />
+                ) : null
+              }
             />
           ) : (
             <h2 className="sr-only">{activeThread.title}</h2>
           )}
-          {threadDetailsControl && !threadDetailsInTitlebarCluster ? (
+          {!newThreadPending && threadDetailsControl && !threadDetailsInTitlebarCluster ? (
             <span key="header" className="swap-motion ms-auto flex h-full shrink-0 items-center">
               {threadDetailsControl}
             </span>
@@ -9407,6 +9594,9 @@ export default function ChatView(props: ChatViewProps) {
                 setThreadErrorBannerDismissTick((tick) => tick + 1);
               }}
             />
+            {props.routeKind === "server" && (
+              <RepoMcpTrustPrompt environmentId={props.environmentId} threadId={props.threadId} />
+            )}
             {/* Messages Wrapper */}
             <div className="relative flex min-h-0 flex-1 flex-col bg-background">
               {/* Messages — LegendList handles virtualization and scrolling internally */}
@@ -9538,11 +9728,9 @@ export default function ChatView(props: ChatViewProps) {
                   onManualNavigation={cancelTimelineLiveFollowForUserNavigationStable}
                   cancelPositionRestoreRef={cancelPositionRestoreRef}
                   hideEmptyPlaceholder={
-                    isDraftHeroState ||
-                    threadDetailLoading ||
-                    embedded?.renderEmptyState !== undefined
+                    isDraftHeroState || timelineLoading || embedded?.renderEmptyState !== undefined
                   }
-                  loadingThread={threadDetailLoading && !isDraftHeroState}
+                  loadingThread={timelineLoading && !isDraftHeroState}
                   topFadeEnabled={!hasTimelineTopBanner}
                   {...(paintOnlyDisplayedTimeline || threadHistoryControls === undefined
                     ? {}
@@ -9652,197 +9840,165 @@ export default function ChatView(props: ChatViewProps) {
                         aria-busy={isSavingQueuedEdit}
                       >
                         <div className="relative z-10">
-                          {showProviderSubagentBar ? (
-                            <ProviderSubagentBar
-                              provider={selectedProviderEntry ?? null}
-                              showInstanceBadge={
-                                selectedProviderEntry !== undefined &&
-                                shouldShowInstanceBadge(
-                                  selectedProviderEntry,
-                                  providerInstanceEntries,
-                                )
-                              }
-                              modelLabel={providerSubagentModelLabel}
-                              effortLabel={providerSubagentEffortLabel}
-                              status={providerSubagentStatus}
-                              onOpenParent={
-                                parentThreadLink
-                                  ? () => onOpenRelatedThread(parentThreadLink.threadId)
-                                  : null
-                              }
-                            />
-                          ) : null}
-                          {!composerMounted ? null : (
-                            <ChatComposer
-                              canOperateThread={canOperateThread}
-                              isChat={activeThreadKind === "chat"}
-                              reportedModelSelection={reportedModelSelection}
-                              multipleModelSelections={multipleModelSelections}
-                              supportsMultipleModels={
-                                serverConfig?.environment.capabilities.requiredWorktreeBootstrap ===
-                                true
-                              }
-                              onMultipleModelSelectionsChange={setMultipleModelSelectionsStable}
-                              composerRef={composerRef}
-                              composerDraftTarget={composerDraftTarget}
-                              environmentId={environmentId}
-                              attachmentUploadsCapabilityKnown={attachmentUploadsCapabilityKnown}
-                              supportsAttachmentUploads={supportsAttachmentUploads}
-                              supportsQuestionAttachments={supportsQuestionAttachments}
-                              maxFileAttachmentBytes={maxFileAttachmentBytes}
-                              routeKind={routeKind}
-                              routeThreadRef={routeThreadRef}
-                              draftId={draftId}
-                              activeThreadId={activeThreadId}
-                              activeThreadEnvironmentId={activeThread?.environmentId}
-                              activeThread={activeThread}
-                              activeThreadShell={activeThreadShell}
-                              promptHistoryMessages={timelineMessages}
-                              isServerThread={isServerThread}
-                              isLocalDraftThread={isLocalDraftThread}
-                              forceExpandedOnMobile={
-                                forceExpandedMobileComposer && isDraftHeroState
-                              }
-                              projectSelectionRequired={
-                                isLocalDraftThread && activeProject === null
-                              }
-                              phase={phase}
-                              canInterrupt={canInterruptRunningThread}
-                              isConnecting={isConnecting}
-                              isSendBusy={
-                                (isSendBusy && !sendQueuesBehindSetup) ||
-                                (setupQueueSendThreadKey !== null &&
-                                  setupQueueSendThreadKey === activeThreadKey) ||
-                                isSavingQueuedEdit ||
-                                isResuming
-                              }
-                              canResume={resumableRunId !== null || hasHeldQueuedRuns}
-                              isRevertingCheckpoint={isRevertingCheckpoint}
-                              sendDisabledReason={
-                                !canOperateThread
-                                  ? "This connection cannot change threads."
-                                  : isEnvironmentChanging
-                                    ? "Preparing machine"
-                                    : isRevertingCheckpoint
-                                      ? "Rewinding conversation"
-                                      : feedbackUploading
-                                        ? "Sending feedback"
-                                        : threadDetailLoading
-                                          ? "Messages loading"
-                                          : worktreeSetupBlocksSend
-                                            ? "Preparing worktree"
-                                            : projectCloneSendBlockReason
-                              }
-                              isPreparingWorktree={isPreparingWorktree && !sendQueuesBehindSetup}
-                              queuedRunsControl={queuedRunsControl}
-                              bannerItems={composerBannerItems}
-                              resumeCompactionTokens={resumeCompactionTokens}
-                              keepFullHistory={keepFullHistory}
-                              onToggleKeepFullHistory={toggleKeepFullHistoryStable}
-                              // With attachments or contexts aboard the pick just inserts the
-                              // text, so it sends as a prompt like the typed path would.
-                              onUsageLimitsCommand={
-                                usageLimitsOffered &&
-                                usageLimitsKey !== null &&
-                                !composerHasNonPromptContent
-                                  ? openUsageLimitsStable
-                                  : undefined
-                              }
-                              environmentUnavailable={activeEnvironmentUnavailableState}
-                              activePendingApproval={activePendingApproval}
-                              pendingApprovals={pendingApprovals}
-                              pendingUserInputs={pendingUserInputs}
-                              activePendingProgress={activePendingProgress}
-                              activePendingResolvedAnswers={activePendingResolvedAnswers}
-                              activePendingIsResponding={activePendingIsResponding}
-                              activePendingDraftAnswers={activePendingDraftAnswers}
-                              activePendingQuestionIndex={activePendingQuestionIndex}
-                              respondingRequestIds={respondingRequestIds}
-                              showPlanFollowUpPrompt={showPlanFollowUpPrompt}
-                              activeProposedPlan={activeProposedPlan}
-                              threadSyncPhase={
-                                activeEnvironmentUnavailable ? null : threadSyncPhase
-                              }
-                              interactionMode={interactionMode}
-                              lockedProvider={modelPickerLockedProvider}
-                              providerStatuses={providerStatuses as ServerProvider[]}
-                              providerCatalogKnown={serverConfig !== null}
-                              activeProjectDefaultModelSelection={
-                                activeProjectDefaultModelSelection
-                              }
-                              activeThreadModelSelection={activeThread?.modelSelection}
-                              onSendModelSelectionChange={onComposerSendModelSelectionChange}
-                              activeProjectId={activeProject?.id ?? null}
-                              activeContextWindow={activeContextWindow}
-                              activeTasksProgress={activeComposerTasksProgress}
-                              activeTaskSteps={activeComposerTaskSteps}
-                              compactThreadUnavailable={compactThreadUnavailable}
-                              compactDisabled={compactDisabled}
-                              compactDisabledReason={compactDisabledReason}
-                              resolvedTheme={resolvedTheme}
-                              settings={settings}
-                              keybindings={keybindings}
-                              gitCwd={gitCwd}
-                              pullRequestProjectId={
-                                supportsPullRequests ? (activeProject?.id ?? null) : null
-                              }
-                              pullRequestRepository={
-                                supportsPullRequests
-                                  ? sourceControlRepositorySelector(
-                                      activeProject?.repositoryIdentity,
-                                    )
-                                  : null
-                              }
-                              threadPullRequests={(activeThreadShell ?? activeThread)?.pullRequests}
-                              restingControlsHost={restingComposerControlsHost}
-                              restingControlsHaveLeadingContext={
-                                mountComposerContextStrip &&
-                                (isGitRepo || showComposerEnvironmentIndicator)
-                              }
-                              onRestingControlsVisibilityChange={setRestingComposerControlsVisible}
-                              onComposerOverlayHeightChange={publishComposerOverlayHeightStable}
-                              promptRef={promptRef}
-                              composerImagesRef={composerImagesRef}
-                              composerFilesRef={composerFilesRef}
-                              composerTerminalContextsRef={composerTerminalContextsRef}
-                              onPageScrollKeyDown={onComposerPageScrollKeyDownStable}
-                              onPageScrollKeyUp={onComposerPageScrollKeyUpStable}
-                              onPageScrollRelease={onComposerPageScrollReleaseStable}
-                              onCompactContext={onComposerCompactContextStable}
-                              onSend={onComposerSendStable}
-                              onResume={onComposerResumeStable}
-                              onInterrupt={onInterruptStable}
-                              onImplementPlanInNewThread={onImplementPlanInNewThreadStable}
-                              onRespondToApproval={onRespondToApprovalStable}
-                              onSelectActivePendingUserInputOption={
-                                onSelectActivePendingUserInputOptionStable
-                              }
-                              onAdvanceActivePendingUserInput={
-                                onAdvanceActivePendingUserInputStable
-                              }
-                              onDismissActivePendingUserInput={onDismissUserInputStable}
-                              onPreviousActivePendingUserInputQuestion={
-                                onPreviousActivePendingUserInputQuestionStable
-                              }
-                              onChangeActivePendingUserInputCustomAnswer={
-                                onChangeActivePendingUserInputCustomAnswer
-                              }
-                              onProviderModelSelect={onProviderModelSelectStable}
-                              onOpenProviderSetup={openProviderSetupStable}
-                              getModelDisabledReason={getModelDisabledReason}
-                              toggleInteractionMode={toggleInteractionModeStable}
-                              handleInteractionModeChange={handleInteractionModeChangeStable}
-                              runtimeMode={runtimeMode}
-                              handleRuntimeModeChange={handleRuntimeModeChangeStable}
-                              focusComposer={focusComposerStable}
-                              scheduleComposerFocus={scheduleComposerFocusStable}
-                              setThreadError={setThreadError}
-                              onExpandImage={onExpandTimelineImageStable}
-                              onFileOpen={openFileAttachmentStable}
-                              editingQueuedAttachments={composerEditingQueuedAttachments}
-                              onRemoveEditingQueuedAttachment={removeEditingQueuedAttachmentStable}
-                            />
-                          )}
+                          <ChatComposer
+                            canOperateThread={canOperateThread}
+                            isChat={activeThreadKind === "chat"}
+                            reportedModelSelection={reportedModelSelection}
+                            multipleModelSelections={multipleModelSelections}
+                            supportsMultipleModels={
+                              serverConfig?.environment.capabilities.requiredWorktreeBootstrap ===
+                              true
+                            }
+                            onMultipleModelSelectionsChange={setMultipleModelSelectionsStable}
+                            composerRef={composerRef}
+                            composerDraftTarget={composerDraftTarget}
+                            environmentId={environmentId}
+                            attachmentUploadsCapabilityKnown={attachmentUploadsCapabilityKnown}
+                            supportsAttachmentUploads={supportsAttachmentUploads}
+                            supportsQuestionAttachments={supportsQuestionAttachments}
+                            maxFileAttachmentBytes={maxFileAttachmentBytes}
+                            routeKind={routeKind}
+                            routeThreadRef={routeThreadRef}
+                            draftId={draftId}
+                            activeThreadId={activeThreadId}
+                            activeThreadEnvironmentId={activeThread?.environmentId}
+                            activeThread={activeThread}
+                            activeThreadShell={activeThreadShell}
+                            promptHistoryMessages={timelineMessages}
+                            isServerThread={isServerThread}
+                            isLocalDraftThread={isLocalDraftThread}
+                            forceExpandedOnMobile={forceExpandedMobileComposer && isDraftHeroState}
+                            projectSelectionRequired={isLocalDraftThread && activeProject === null}
+                            phase={phase}
+                            canInterrupt={canInterruptRunningThread}
+                            isConnecting={isConnecting}
+                            isSendBusy={
+                              (isSendBusy && !sendQueuesBehindSetup) ||
+                              (setupQueueSendThreadKey !== null &&
+                                setupQueueSendThreadKey === activeThreadKey) ||
+                              isSavingQueuedEdit ||
+                              isResuming
+                            }
+                            canResume={resumableRunId !== null || hasHeldQueuedRuns}
+                            isRevertingCheckpoint={isRevertingCheckpoint}
+                            sendDisabledReason={
+                              !canOperateThread
+                                ? "This connection cannot change threads."
+                                : isEnvironmentChanging
+                                  ? "Preparing machine"
+                                  : isRevertingCheckpoint
+                                    ? "Rewinding conversation"
+                                    : feedbackUploading
+                                      ? "Sending feedback"
+                                      : threadDetailLoading
+                                        ? "Messages loading"
+                                        : worktreeSetupBlocksSend
+                                          ? "Preparing worktree"
+                                          : projectCloneSendBlockReason
+                            }
+                            isPreparingWorktree={isPreparingWorktree && !sendQueuesBehindSetup}
+                            queuedRunsControl={queuedRunsControl}
+                            bannerItems={composerBannerItems}
+                            resumeCompactionTokens={resumeCompactionTokens}
+                            keepFullHistory={keepFullHistory}
+                            onToggleKeepFullHistory={toggleKeepFullHistoryStable}
+                            // With attachments or contexts aboard the pick just inserts the
+                            // text, so it sends as a prompt like the typed path would.
+                            onUsageLimitsCommand={
+                              usageLimitsOffered &&
+                              usageLimitsKey !== null &&
+                              !composerHasNonPromptContent
+                                ? openUsageLimitsStable
+                                : undefined
+                            }
+                            environmentUnavailable={activeEnvironmentUnavailableState}
+                            environmentConnecting={activeEnvironmentConnecting}
+                            activePendingApproval={activePendingApproval}
+                            pendingApprovals={pendingApprovals}
+                            pendingUserInputs={pendingUserInputs}
+                            activePendingProgress={activePendingProgress}
+                            activePendingResolvedAnswers={activePendingResolvedAnswers}
+                            activePendingIsResponding={activePendingIsResponding}
+                            activePendingDraftAnswers={activePendingDraftAnswers}
+                            activePendingQuestionIndex={activePendingQuestionIndex}
+                            respondingRequestIds={respondingRequestIds}
+                            showPlanFollowUpPrompt={showPlanFollowUpPrompt}
+                            activeProposedPlan={activeProposedPlan}
+                            threadSyncPhase={activeEnvironmentUnavailable ? null : threadSyncPhase}
+                            interactionMode={interactionMode}
+                            lockedProvider={modelPickerLockedProvider}
+                            providerStatuses={providerStatuses as ServerProvider[]}
+                            providerCatalogKnown={serverConfig !== null}
+                            activeProjectDefaultModelSelection={activeProjectDefaultModelSelection}
+                            activeThreadModelSelection={activeThread?.modelSelection}
+                            activeThreadDriverKind={threadDriverKind}
+                            onSendModelSelectionChange={onComposerSendModelSelectionChange}
+                            activeProjectId={activeProject?.id ?? null}
+                            activeContextWindow={activeContextWindow}
+                            activeTasksProgress={activeComposerTasksProgress}
+                            activeTaskSteps={activeComposerTaskSteps}
+                            compactThreadUnavailable={compactThreadUnavailable}
+                            compactDisabled={compactDisabled}
+                            compactDisabledReason={compactDisabledReason}
+                            resolvedTheme={resolvedTheme}
+                            settings={settings}
+                            keybindings={keybindings}
+                            gitCwd={gitCwd}
+                            pullRequestProjectId={
+                              supportsPullRequests ? (activeProject?.id ?? null) : null
+                            }
+                            pullRequestRepository={
+                              supportsPullRequests
+                                ? sourceControlRepositorySelector(activeProject?.repositoryIdentity)
+                                : null
+                            }
+                            threadPullRequests={(activeThreadShell ?? activeThread)?.pullRequests}
+                            restingControlsHost={restingComposerControlsHost}
+                            restingControlsHaveLeadingContext={
+                              mountComposerContextStrip &&
+                              (isGitRepo || showComposerEnvironmentIndicator)
+                            }
+                            onRestingControlsVisibilityChange={setRestingComposerControlsVisible}
+                            onComposerOverlayHeightChange={publishComposerOverlayHeightStable}
+                            promptRef={promptRef}
+                            composerImagesRef={composerImagesRef}
+                            composerFilesRef={composerFilesRef}
+                            composerTerminalContextsRef={composerTerminalContextsRef}
+                            onPageScrollKeyDown={onComposerPageScrollKeyDownStable}
+                            onPageScrollKeyUp={onComposerPageScrollKeyUpStable}
+                            onPageScrollRelease={onComposerPageScrollReleaseStable}
+                            onCompactContext={onComposerCompactContextStable}
+                            onSend={onComposerSendStable}
+                            onResume={onComposerResumeStable}
+                            onInterrupt={onInterruptStable}
+                            onImplementPlanInNewThread={onImplementPlanInNewThreadStable}
+                            onRespondToApproval={onRespondToApprovalStable}
+                            onSelectActivePendingUserInputOption={
+                              onSelectActivePendingUserInputOptionStable
+                            }
+                            onAdvanceActivePendingUserInput={onAdvanceActivePendingUserInputStable}
+                            onDismissActivePendingUserInput={onDismissUserInputStable}
+                            onPreviousActivePendingUserInputQuestion={
+                              onPreviousActivePendingUserInputQuestionStable
+                            }
+                            onChangeActivePendingUserInputCustomAnswer={
+                              onChangeActivePendingUserInputCustomAnswer
+                            }
+                            onProviderModelSelect={onProviderModelSelectStable}
+                            onOpenProviderSetup={openProviderSetupStable}
+                            getModelDisabledReason={getModelDisabledReason}
+                            toggleInteractionMode={toggleInteractionModeStable}
+                            handleInteractionModeChange={handleInteractionModeChangeStable}
+                            runtimeMode={runtimeMode}
+                            handleRuntimeModeChange={handleRuntimeModeChangeStable}
+                            focusComposer={focusComposerStable}
+                            scheduleComposerFocus={scheduleComposerFocusStable}
+                            setThreadError={setThreadError}
+                            onExpandImage={onExpandTimelineImageStable}
+                            onFileOpen={openFileAttachmentStable}
+                            editingQueuedAttachments={composerEditingQueuedAttachments}
+                            onRemoveEditingQueuedAttachment={removeEditingQueuedAttachmentStable}
+                          />
                         </div>
                       </ComposerSurface.Host>
                       <div className="min-h-0">
@@ -9890,7 +10046,7 @@ export default function ChatView(props: ChatViewProps) {
                                 envLocked={envLocked}
                                 onComposerFocusRequest={scheduleComposerFocusStable}
 
-                                {...(hasMultipleEnvironments
+                                {...(canPickRunOn
                                   ? { onEnvironmentChange: onEnvironmentChangeStable }
                                   : {})}
                                 autoEnvironmentLabel={autoEnvironmentLabel}
@@ -9902,7 +10058,8 @@ export default function ChatView(props: ChatViewProps) {
                                     ? onAutoEnvironmentStable
                                     : undefined
                                 }
-                                availableEnvironments={logicalProjectEnvironments}
+                                availableEnvironments={runOnOptions}
+                                {...(runOnEnvironmentId ? { runOnEnvironmentId } : {})}
                                 composerControlsHostRef={setRestingComposerControlsHost}
                                 contextStripVisible={showComposerContextStrip}
                               />

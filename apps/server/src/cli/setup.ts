@@ -25,7 +25,7 @@ import {
   type T3ImportStatus,
   T3_IMPORT_RUNNING_NOTE,
   T3_IMPORT_STATUS_HEARTBEAT_MS,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Console from "effect/Console";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";

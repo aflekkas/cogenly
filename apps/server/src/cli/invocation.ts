@@ -4,9 +4,9 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 
-import type { ServerInstallation } from "@t3tools/contracts";
-import * as HostProcess from "@t3tools/shared/HostProcess";
-import { isCommandAvailable } from "@t3tools/shared/shell";
+import type { ServerInstallation } from "@cogenly/contracts";
+import * as HostProcess from "@cogenly/shared/HostProcess";
+import { isCommandAvailable } from "@cogenly/shared/shell";
 
 import packageJson from "../../package.json" with { type: "json" };
 
@@ -106,13 +106,13 @@ export const resolveServerInstallation = Effect.gen(function* () {
 
 /**
  * The npm package spec to suggest. The literal spec the user typed (e.g.
- * `t3@nightly`) is resolved away before our process starts, so re-derive it
+ * `cogenly@nightly`) is resolved away before our process starts, so re-derive it
  * from the running version: nightly builds re-suggest the nightly channel,
  * anything else suggests the bare package.
  */
 function suggestedPackageSpec(version: string): string {
   const channel = /^[^-+]+-(nightly|preview)\./.exec(version)?.[1];
-  return channel === undefined ? "t3" : `t3@${channel}`;
+  return channel === undefined ? "cogenly" : `cogenly@${channel}`;
 }
 
 /**

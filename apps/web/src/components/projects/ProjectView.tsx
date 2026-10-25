@@ -1,19 +1,21 @@
 import { useAtomValue } from "@effect/atom-react";
-import { isAtomCommandInterrupted } from "@t3tools/client-runtime/state/runtime";
+import { isAtomCommandInterrupted } from "@cogenly/client-runtime/state/runtime";
 import type {
   EnvironmentId,
   ProjectId,
   ProjectLabelId,
   ProjectLabelWithRepositories,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import {
   ArchiveIcon,
   ArchiveRestoreIcon,
   ChevronLeftIcon,
+  CopyIcon,
   MoreHorizontalIcon,
   PaletteIcon,
   PencilIcon,
+  ServerIcon,
   Settings2Icon,
   SquarePenIcon,
   TrashIcon,
@@ -21,6 +23,10 @@ import {
 import { useMemo, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 
 import { useScratchProject } from "../../hooks/useScratchProject";
+import { machineMoveTargets, type MachineMoveTarget } from "../../machines/machines.logic";
+import { useEnvironmentMachineList } from "../../machines/useMachines";
+import { useMoveProjectToMachine } from "../../machines/useMoveToMachine";
+import { EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
 import { useSidebarProjectGroups } from "../../hooks/useSidebarProjectGroups";
 import { useClientSettings } from "../../hooks/useSettings";
 import { selectProjectGroupingSettings } from "../../logicalProject";
@@ -36,16 +42,27 @@ import {
   projectGitHubOrg,
 } from "../../projectLabels/projectSourceLinks.logic";
 import {
+  possibleDuplicateProjects,
   PROJECT_LABEL_COLORS,
+  projectMergeCandidates,
+  projectLabelEnvironmentIds,
   projectLabelKey,
+  projectLabelOn,
   projectLabelPaletteColor,
+  type PossibleDuplicateProjects,
 } from "../../projectLabels/projectLabels.logic";
+import {
+  useMergeDuplicateProjects,
+  useProjectMergePermissions,
+} from "../../projectLabels/useMergeDuplicateProjects";
+import { linkedRepositoryRows } from "../../projectLabels/repositoryPicker.logic";
 import { reportProjectFolderFailure } from "../../projectLabels/useMoveThreadToFolder";
 import { useProjectArchive } from "../../projectLabels/useProjectArchive";
 import { useProjectContents } from "../../projectLabels/useProjectContents";
 import { useEnvironmentProjectLabels } from "../../projectLabels/useProjectLabels";
 import { getSidebarProjectSettingsKey } from "../../sidebarProjectGrouping";
 import { useProjects } from "../../state/entities";
+import { useEnvironments } from "../../state/environments";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { chatActivityAt } from "../sidebar/modes/sidebarModes.logic";
@@ -65,8 +82,6 @@ import {
 } from "../ui/menu";
 import { GitHubIcon } from "../Icons";
 import { OverlayPresence } from "../ui/overlay-presence";
-import { ScrollArea } from "../ui/scroll-area";
-import { PageContent } from "../PageContent";
 import {
   AgentsCard,
   FilesCard,
@@ -74,6 +89,7 @@ import {
   RepositoriesCard,
   SourcesCard,
 } from "./ProjectHomeCards";
+import { PossibleDuplicateNotice } from "./PossibleDuplicateNotice";
 import { sortRecentFirst } from "./projectPanel.logic";
 import { PROJECTS_SETTINGS_PATH } from "./ProjectsOverview";
 import { useProjectResources } from "./useProjectResources";
@@ -141,17 +157,85 @@ function ProjectNameEditor(props: {
   );
 }
 
-/** The header's ⋯ menu: a new chat in the project, rename, color, details, archive, delete. */
+/** "Move project to <machine>…", or a submenu of paired machines; nothing when standalone. */
+function ProjectMachineMenuItems(props: {
+  readonly targets: ReadonlyArray<MachineMoveTarget>;
+  readonly canMove: boolean;
+  readonly onMove: (target: MachineMoveTarget) => void;
+}) {
+  const [only] = props.targets;
+  if (only === undefined) return null;
+  const item = (target: MachineMoveTarget, label: string) => (
+    <MenuItem
+      key={target.environmentId}
+      disabled={!props.canMove || !target.online}
+      onClick={() => props.onMove(target)}
+    >
+      <EnvironmentMachineIcon aria-hidden kind={target.icon} />
+      {target.online ? label : `${label} (offline)`}
+    </MenuItem>
+  );
+  if (props.targets.length === 1) return item(only, `Move project to ${only.name}…`);
+  return (
+    <MenuSub>
+      <MenuSubTrigger disabled={!props.canMove}>
+        <ServerIcon />
+        Move project to machine
+      </MenuSubTrigger>
+      <MenuSubPopup>{props.targets.map((target) => item(target, `${target.name}…`))}</MenuSubPopup>
+    </MenuSub>
+  );
+}
+
+/** "Merge with" and the other projects a machine has alongside this one. */
+function ProjectMergeMenuItems(props: {
+  readonly labelId: ProjectLabelId;
+  readonly candidates: ReadonlyArray<PossibleDuplicateProjects>;
+  readonly allowedMerges: ReadonlySet<string>;
+  readonly onMerge: (pair: PossibleDuplicateProjects) => void;
+}) {
+  return (
+    <MenuSub>
+      <MenuSubTrigger disabled={props.allowedMerges.size === 0}>
+        <CopyIcon />
+        Merge with
+      </MenuSubTrigger>
+      <MenuSubPopup>
+        {props.candidates.map((pair) => {
+          const other = pair.into.label.id === props.labelId ? pair.from : pair.into;
+          return (
+            <MenuItem
+              key={pair.key}
+              disabled={!props.allowedMerges.has(pair.key)}
+              onClick={() => props.onMerge(pair)}
+            >
+              <ProjectFolderIcon project={other} className="size-4" />
+              {other.label.name}…
+            </MenuItem>
+          );
+        })}
+      </MenuSubPopup>
+    </MenuSub>
+  );
+}
+
+/** The header's ⋯ menu: a new chat in the project, rename, color, details, move, merge, archive, delete. */
 function ProjectHeaderMenu(props: {
   readonly label: ProjectLabelWithRepositories;
   readonly canEdit: boolean;
   readonly canDelete: boolean;
   readonly archived: boolean;
   readonly canArchive: boolean;
+  readonly machineTargets: ReadonlyArray<MachineMoveTarget>;
+  readonly canMoveToMachine: boolean;
+  readonly mergeCandidates: ReadonlyArray<PossibleDuplicateProjects>;
+  readonly allowedMerges: ReadonlySet<string>;
+  readonly onMerge: (pair: PossibleDuplicateProjects) => void;
   readonly onNewChat: () => void;
   readonly onRename: () => void;
   readonly onRecolor: (color: string) => void;
   readonly onEditDetails: () => void;
+  readonly onMoveToMachine: (target: MachineMoveTarget) => void;
   readonly onToggleArchived: () => void;
   readonly onDelete: () => void;
 }) {
@@ -199,6 +283,17 @@ function ProjectHeaderMenu(props: {
           <Settings2Icon />
           Edit details…
         </MenuItem>
+        <ProjectMachineMenuItems
+          targets={props.machineTargets}
+          canMove={props.canMoveToMachine}
+          onMove={props.onMoveToMachine}
+        />
+        <ProjectMergeMenuItems
+          labelId={props.label.id}
+          candidates={props.mergeCandidates}
+          allowedMerges={props.allowedMerges}
+          onMerge={props.onMerge}
+        />
         <MenuSeparator />
         <MenuItem disabled={!props.canArchive} onClick={props.onToggleArchived}>
           {props.archived ? <ArchiveRestoreIcon /> : <ArchiveIcon />}
@@ -248,12 +343,25 @@ function ProjectPage(props: {
   const { environmentId, labelId } = props;
   const navigate = useNavigate();
   const { directory, byProject } = useProjectContents();
-  const { labels, isLoaded, error } = useEnvironmentProjectLabels(environmentId);
-  const label = labels.find((candidate) => candidate.id === labelId) ?? null;
+  const { isLoaded, error } = useEnvironmentProjectLabels(environmentId);
+  // The project as one across connected machines; its page names any machine's copy.
   const entry = directory.byKey.get(projectLabelKey(environmentId, labelId)) ?? null;
-  const contents = byProject.get(projectLabelKey(environmentId, labelId));
-  const repositories = useEnvironmentRepositories(environmentId);
-  const files = useProjectResources(environmentId, labelId);
+  const label = entry?.label ?? null;
+  const contents = entry === null ? undefined : byProject.get(entry.key);
+  const { environments } = useEnvironments();
+  const machineIds = entry === null ? [environmentId] : projectLabelEnvironmentIds(entry);
+  const machineOptions = machineIds.map((id) => ({
+    environmentId: id,
+    label: environments.find((environment) => environment.environmentId === id)?.label ?? id,
+  }));
+  // Repositories and files are per machine: the page shows one machine's at a time.
+  const [pickedMachine, setPickedMachine] = useState(environmentId);
+  const machineId = machineIds.includes(pickedMachine)
+    ? pickedMachine
+    : (machineIds[0] ?? environmentId);
+  const machineEntry = entry === null ? null : projectLabelOn(entry, machineId);
+  const repositories = useEnvironmentRepositories(machineId);
+  const files = useProjectResources(machineId, labelId);
   const canEdit = useAtomValue(serverEnvironment.updateProjectLabel.permissionAtom(environmentId));
   const canDelete = useAtomValue(
     serverEnvironment.deleteProjectLabel.permissionAtom(environmentId),
@@ -264,6 +372,12 @@ function ProjectPage(props: {
   });
   const deleteFolder = useDeleteProjectFolder();
   const archive = useProjectArchive(environmentId, label);
+  const machineList = useEnvironmentMachineList(environmentId);
+  const machineTargets = machineMoveTargets(machineList, undefined, true);
+  const canMoveToMachine = useAtomValue(
+    serverEnvironment.moveProjectToMachine.permissionAtom(environmentId),
+  );
+  const moveProjectToMachine = useMoveProjectToMachine();
   const { startScratchThread } = useScratchProject();
   const [renaming, setRenaming] = useState(false);
   const [editingDetails, setEditingDetails] = useState(false);
@@ -271,13 +385,33 @@ function ProjectPage(props: {
   const projectGroups = useSidebarProjectGroups();
   const groupingSettings = useClientSettings(selectProjectGroupingSettings);
 
-  const linkedRepositories = useMemo(
+  // Every repository the project links, with its state on this machine:
+  // the same list the repository pickers show.
+  const repositoryRows = useMemo(
     () =>
-      label === null
+      machineEntry === null
         ? []
-        : repositories.filter((repository) => label.repositoryIds.includes(repository.id)),
-    [label, repositories],
+        : linkedRepositoryRows({
+            project: machineEntry,
+            localById: new Map(repositories.map((repository) => [repository.id, repository])),
+          }),
+    [machineEntry, repositories],
   );
+  const duplicates = useMemo(
+    () =>
+      entry === null
+        ? []
+        : possibleDuplicateProjects(directory.labels).filter(
+            (pair) => pair.into.key === entry.key || pair.from.key === entry.key,
+          ),
+    [directory, entry],
+  );
+  const mergeCandidates = useMemo(
+    () => (entry === null ? [] : projectMergeCandidates(entry, directory.labels)),
+    [directory, entry],
+  );
+  const allowedMerges = useProjectMergePermissions(mergeCandidates);
+  const { mergePair } = useMergeDuplicateProjects();
   const chats = useMemo(() => sortRecentFirst(contents?.chats ?? [], chatActivityAt), [contents]);
   const work = useMemo(() => sortRecentFirst(contents?.work ?? [], chatActivityAt), [contents]);
   const [editingSources, setEditingSources] = useState(false);
@@ -285,7 +419,7 @@ function ProjectPage(props: {
   const openRepositorySettings = (repositoryId: ProjectId) => {
     const group = projectGroups.find((candidate) =>
       candidate.memberProjectRefs.some(
-        (ref) => ref.environmentId === environmentId && ref.projectId === repositoryId,
+        (ref) => ref.environmentId === machineId && ref.projectId === repositoryId,
       ),
     );
     if (!group) return;
@@ -293,7 +427,7 @@ function ProjectPage(props: {
       to: "/projects/$projectKey",
       params: {
         projectKey: getSidebarProjectSettingsKey(group, groupingSettings, projects, {
-          environmentId,
+          environmentId: machineId,
           projectId: repositoryId,
         }),
       },
@@ -316,7 +450,7 @@ function ProjectPage(props: {
     if (await deleteFolder(environmentId, label)) leave();
   };
 
-  if (error !== null || !isLoaded || label === null || entry === null) {
+  if (label === null || entry === null || machineEntry === null) {
     const [title, description] =
       error !== null
         ? ["Could not load projects", error]
@@ -328,10 +462,10 @@ function ProjectPage(props: {
             ];
     return (
       <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
-        <PageContent width="wide" className="gap-1">
+        <div className="flex min-w-0 flex-col gap-6">
           <h1 className="truncate text-xl font-semibold tracking-tight">{title}</h1>
           {description ? <p className="text-sm text-muted-foreground">{description}</p> : null}
-        </PageContent>
+        </div>
       </div>
     );
   }
@@ -342,14 +476,14 @@ function ProjectPage(props: {
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
       {/* The cards give keyboard access, so the viewport stays out of the tab order. */}
-      <ScrollArea className="min-h-0 flex-1" viewportTabIndex={-1}>
-        <PageContent width="wide">
+      <>
+        <div className="flex min-w-0 flex-col gap-6">
           <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
             <Button size="sm" variant="ghost-muted" onClick={backToProjects}>
               <ChevronLeftIcon />
               Projects
             </Button>
-            <ProjectFolderIcon color={label.color} className="size-4 shrink-0" />
+            <ProjectFolderIcon project={{ environmentId, label }} className="size-4 shrink-0" />
             <ProjectNameEditor
               key={label.name}
               name={label.name}
@@ -401,6 +535,25 @@ function ProjectPage(props: {
                 canDelete={canDelete}
                 archived={archive.archived}
                 canArchive={archive.canArchive}
+                machineTargets={machineTargets}
+                canMoveToMachine={canMoveToMachine}
+                mergeCandidates={mergeCandidates}
+                allowedMerges={allowedMerges}
+                onMerge={(pair) =>
+                  void mergePair(pair).then((merged) => {
+                    // Merged away, this project's page is gone too.
+                    if (merged && pair.from.key === entry.key) leave();
+                  })
+                }
+                onMoveToMachine={(target) =>
+                  void moveProjectToMachine({
+                    environmentId,
+                    project: { id: label.id, name: label.name },
+                    target,
+                    // Its threads can run on several machines.
+                    fromName: null,
+                  })
+                }
                 onNewChat={() =>
                   void startScratchThread(environmentId, {
                     surface: "chat",
@@ -420,21 +573,20 @@ function ProjectPage(props: {
               />
             </span>
           </div>
+          {duplicates.map((pair) => (
+            <PossibleDuplicateNotice key={pair.key} pair={pair} />
+          ))}
           {/* Balanced columns: each card sizes to its content and the next one
               fills under the shortest column, so no gap opens under a short card. */}
-          <section
-            aria-label={`${label.name} details`}
-            className="columns-1 gap-3 md:columns-2 xl:columns-3"
-          >
+          <section aria-label={`${label.name} details`} className="flex min-w-0 flex-col gap-8">
             <ProjectCardSlot>
               <RepositoriesCard
-                environmentId={environmentId}
-                label={label}
-                folder={entry}
-                repositories={repositories}
-                linkedRepositories={linkedRepositories}
-                folderByRepository={directory.folderByRepository}
+                environmentId={machineId}
+                folder={machineEntry}
+                rows={repositoryRows}
                 onOpenRepository={openRepositorySettings}
+                machines={machineOptions}
+                onSelectMachine={setPickedMachine}
               />
             </ProjectCardSlot>
             <ProjectCardSlot>
@@ -447,7 +599,7 @@ function ProjectPage(props: {
               />
             </ProjectCardSlot>
             <ProjectCardSlot>
-              <AgentsCard environmentId={environmentId} label={label} />
+              <AgentsCard environmentId={environmentId} environmentIds={machineIds} label={label} />
             </ProjectCardSlot>
             {showSources ? (
               <ProjectCardSlot>
@@ -456,7 +608,7 @@ function ProjectPage(props: {
             ) : null}
             <ProjectCardSlot>
               <FilesCard
-                environmentId={environmentId}
+                environmentId={machineId}
                 label={label}
                 resources={files.resources}
                 loaded={files.isLoaded}
@@ -464,8 +616,8 @@ function ProjectPage(props: {
               />
             </ProjectCardSlot>
           </section>
-        </PageContent>
-      </ScrollArea>
+        </div>
+      </>
       <OverlayPresence when={editingSources && label}>
         {(label) => (
           <ProjectSourceLinksDialog

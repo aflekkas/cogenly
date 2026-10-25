@@ -1,5 +1,4 @@
-import type { EnvironmentId, ProjectLabelId } from "@t3tools/contracts";
-import { CheckIcon, FolderMinusIcon } from "lucide-react";
+import type { EnvironmentId, ProjectLabelId } from "@cogenly/contracts";
 import { useMemo, useState, type ReactElement, type ReactNode } from "react";
 
 import {
@@ -12,7 +11,7 @@ import {
   ComboboxTrigger,
 } from "~/components/ui/combobox";
 import type { EnvironmentProjectLabel } from "~/projectLabels/projectLabels.logic";
-import { ProjectFolderIcon } from "~/projectLabels/ProjectFolderMark";
+import { ProjectPickerRow } from "~/projectLabels/ProjectPickerRow";
 import { useProjectLabelDirectory } from "~/projectLabels/useProjectLabels";
 
 type ProjectOption =
@@ -104,19 +103,15 @@ export function AgentProjectPicker(props: {
         <ComboboxEmpty>No matching project.</ComboboxEmpty>
         <ComboboxList>
           {(option: ProjectOption) => (
-            <ComboboxItem key={option.key} value={option}>
+            <ComboboxItem key={option.key} value={option} hideIndicator>
               {option.kind === "folder" ? (
-                <>
-                  <ProjectFolderIcon color={option.folder.label.color} className="size-4" />
-                  <span className="min-w-0 flex-1 truncate">{option.folder.label.name}</span>
-                  {option.folder.key === current?.key ? <CheckIcon className="ml-auto" /> : null}
-                </>
+                <ProjectPickerRow
+                  project={option.folder}
+                  label={option.folder.label.name}
+                  chosen={option.folder.key === current?.key}
+                />
               ) : (
-                <>
-                  <FolderMinusIcon />
-                  <span className="min-w-0 flex-1 truncate">No project</span>
-                  {current === null ? <CheckIcon className="ml-auto" /> : null}
-                </>
+                <ProjectPickerRow project={null} label="No project" chosen={current === null} />
               )}
             </ComboboxItem>
           )}

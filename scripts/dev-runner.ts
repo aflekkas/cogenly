@@ -4,10 +4,10 @@ import * as NodeOS from "node:os";
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import * as NetService from "@t3tools/shared/Net";
-import { resolveGitWorktreePath, resolveWorktreeT3Home } from "@t3tools/shared/devHome";
-import * as HostProcess from "@t3tools/shared/HostProcess";
-import { resolveSpawnCommand } from "@t3tools/shared/shell";
+import * as NetService from "@cogenly/shared/Net";
+import { resolveGitWorktreePath, resolveWorktreeT3Home } from "@cogenly/shared/devHome";
+import * as HostProcess from "@cogenly/shared/HostProcess";
+import { resolveSpawnCommand } from "@cogenly/shared/shell";
 import * as Config from "effect/Config";
 import * as Effect from "effect/Effect";
 import * as Hash from "effect/Hash";
@@ -74,15 +74,15 @@ export const DEFAULT_T3_HOME = Effect.map(Effect.service(Path.Path), (path) =>
 const MODE_ARGS = {
   dev: [
     "run",
-    "--filter=@t3tools/contracts",
-    "--filter=@t3tools/web",
+    "--filter=@cogenly/contracts",
+    "--filter=@cogenly/web",
     "--filter=cogenly-server",
     "--parallel",
     "dev",
   ],
   "dev:server": ["run", "--filter=cogenly-server", "dev"],
-  "dev:web": ["run", "--filter=@t3tools/web", "dev"],
-  "dev:desktop": ["run", "--filter=@t3tools/desktop", "--filter=@t3tools/web", "dev"],
+  "dev:web": ["run", "--filter=@cogenly/web", "dev"],
+  "dev:desktop": ["run", "--filter=@cogenly/desktop", "--filter=@cogenly/web", "dev"],
 } as const satisfies Record<string, ReadonlyArray<string>>;
 
 type DevMode = keyof typeof MODE_ARGS;
@@ -665,7 +665,7 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
 
     const hostEnvironment = yield* HostProcess.Environment;
     // A dev server started inside a worktree defaults to that worktree's own
-    // (gitignored) `.cogenly` — see @t3tools/shared/devHome for why this must
+    // (gitignored) `.cogenly` — see @cogenly/shared/devHome for why this must
     // outrank an ambient COGENLY_HOME. `--home-dir` still wins.
     const worktreeHome = yield* resolveWorktreeT3Home(yield* HostProcess.WorkingDirectory);
     // Trim before choosing: `--home-dir ""` is not a selection, and treating it

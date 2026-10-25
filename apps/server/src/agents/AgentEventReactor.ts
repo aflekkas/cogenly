@@ -8,8 +8,8 @@ import {
   type AgentEventContext,
   type OrchestrationV2StoredEvent,
   ThreadId,
-} from "@t3tools/contracts";
-import { deriveWorkStatus } from "@t3tools/shared/workStatus";
+} from "@cogenly/contracts";
+import { deriveWorkStatus } from "@cogenly/shared/workStatus";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -19,7 +19,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Bus from "./AgentEventBus.ts";
-import { isT3ImportCommandId } from "../t3Import/T3ImportCommandIds.ts";
+import { isReplayedCommandId } from "../orchestration-v2/ReplayedCommandIds.ts";
 import * as Events from "../orchestration-v2/EventStore.ts";
 import * as Projections from "../orchestration-v2/ProjectionStore.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
@@ -69,7 +69,7 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const event = stored.event;
       // Imported T3 history must not trigger agents.
-      if (isT3ImportCommandId(stored.commandId)) return;
+      if (isReplayedCommandId(stored.commandId)) return;
       if (
         ![
           "run.updated",

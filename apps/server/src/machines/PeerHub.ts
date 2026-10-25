@@ -25,7 +25,7 @@ import {
   type PeerPush,
   type PeerReplyInput,
   isAuthPeerScope,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import type * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";

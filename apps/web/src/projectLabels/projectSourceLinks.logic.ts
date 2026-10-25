@@ -7,7 +7,7 @@ import type {
   ProjectLabelOwnerRepository,
   ProjectLabelOwnerSearchError,
   ProjectSourceLink,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 
 import type { EnvironmentProjectLabel, ProjectLabelKey } from "./projectLabels.logic";
 import type { RepositoryProjectGroup } from "./projectMeta.logic";

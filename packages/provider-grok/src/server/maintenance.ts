@@ -1,4 +1,4 @@
-import { ProviderDriverKind, type ServerProvider } from "@t3tools/contracts";
+import { ProviderDriverKind, type ServerProvider } from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
 
 import {
@@ -6,8 +6,8 @@ import {
   makeManualOnlyProviderMaintenanceCapabilities,
   type ProviderMaintenanceCapabilities,
   type ProviderMaintenanceCapabilitiesResolver,
-} from "@t3tools/provider-core/server/maintenanceResolver";
-import { parseGenericCliVersion } from "@t3tools/provider-core/server/snapshotProbe";
+} from "@cogenly/provider-core/server/maintenanceResolver";
+import { parseGenericCliVersion } from "@cogenly/provider-core/server/snapshotProbe";
 
 const DRIVER = ProviderDriverKind.make("grok");
 

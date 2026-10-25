@@ -11,7 +11,7 @@ import type {
   ProjectLabelId,
   ProviderApprovalDecision,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import type { ChatAttachment } from "~/types";
 import type {
   AgentAttachmentSupport,
@@ -38,6 +38,7 @@ import {
   resolveAgentModelStatus,
   type AgentModelStatus,
 } from "./agents.logic";
+import { onePerAgent } from "./agentGroups.logic";
 import { triggerErrorMessage } from "./agentWorkspace.logic";
 import { AgentHydrationContext, AgentsClientContext } from "./agentsContext";
 
@@ -201,15 +202,15 @@ export function useAgentUnread(agent: AgentContact) {
 
 // All environment, thread, and RPC access for the feature stays at this boundary.
 import { RegistryContext, useAtomValue } from "@effect/atom-react";
-import { derivePendingThreadRequests } from "@t3tools/client-runtime/state/thread-requests";
-import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+import { derivePendingThreadRequests } from "@cogenly/client-runtime/state/thread-requests";
+import { squashAtomCommandFailure } from "@cogenly/client-runtime/state/runtime";
 import {
   CommandId,
   MessageId,
   ScheduledTaskId,
   RuntimeRequestId,
   AuthOrchestrationOperateScope,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
@@ -218,7 +219,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { agentWorkspaceRpc, agentsRpc } from "~/rpc/agents";
 import { readLocalApi } from "~/localApi";
 import { useEnvironmentProjectLabels } from "~/projectLabels/useProjectLabels";
-import { isScratchProject } from "@t3tools/client-runtime/state/projects";
+import { isScratchProject } from "@cogenly/client-runtime/state/projects";
 import { usePrimaryEnvironmentId, useConnectedEnvironmentIds } from "~/state/environments";
 import {
   useProjects,
@@ -238,7 +239,7 @@ import {
   resolveDefaultProviderModelSelection,
   sortProviderInstanceEntries,
 } from "~/providerInstances";
-import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+import { resolveProjectSettings } from "@cogenly/shared/projectSettings";
 import { ProviderModelPicker } from "~/components/chat/ProviderModelPicker";
 import { TraitsPicker } from "~/components/chat/TraitsPicker";
 import { useAtomCommand } from "~/state/use-atom-command";
@@ -248,7 +249,7 @@ import { useEnvironmentQuery } from "~/state/query";
 import { randomUUID, newMessageId } from "~/lib/utils";
 import { useAgentScheduledTasks } from "~/components/sidebar/modes/useAgentScheduledTasks";
 import { AgentFactsSection } from "~/memory/AgentFacts";
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { scopeThreadRef } from "@cogenly/client-runtime/environment";
 import type { AgentRequest } from "./agents.types";
 
 function commandValue<A>(
@@ -392,92 +393,97 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
   const lastKnown = useRef(new Map<EnvironmentId, ReadonlyArray<AgentListItem>>());
   const agents = useMemo(
     () =>
-      results.flatMap(({ environmentId, result, approvals: approvalsResult }) => {
-        const received = Option.getOrNull(AsyncResult.value(result))?.agents;
-        if (received) lastKnown.current.set(environmentId, received);
-        const records = received ?? lastKnown.current.get(environmentId) ?? [];
-        const pendingApprovals =
-          Option.getOrNull(AsyncResult.value(approvalsResult))?.approvals ?? [];
-        return records.map((record): AgentContact => {
-          const shell = threads.find(
-            (thread) =>
-              thread.environmentId === environmentId && thread.id === record.conversationThreadId,
-          );
-          const latest = record.latestMessage;
-          const key = agentContactKey({ environmentId, id: record.id });
-          const cached = hydrated.get(key);
-          const triggers = tasks
-            .filter(
-              (entry) => entry.environmentId === environmentId && entry.task.agentId === record.id,
-            )
-            .map(({ task }) => ({
-              id: task.id,
-              title: task.title,
-              prompt: task.prompt,
-              schedule: task.schedule,
-              enabled: task.enabled,
-            }));
-          const workThreads = threads.filter((thread) => {
-            const ownership = thread.source.agent;
-            return (
-              thread.environmentId === environmentId &&
-              ownership?.id === record.id &&
-              ownership.role === "work"
+      onePerAgent(
+        results.flatMap(({ environmentId, result, approvals: approvalsResult }) => {
+          const received = Option.getOrNull(AsyncResult.value(result))?.agents;
+          if (received) lastKnown.current.set(environmentId, received);
+          const records = received ?? lastKnown.current.get(environmentId) ?? [];
+          const pendingApprovals =
+            Option.getOrNull(AsyncResult.value(approvalsResult))?.approvals ?? [];
+          return records.map((record): AgentContact => {
+            const shell = threads.find(
+              (thread) =>
+                thread.environmentId === environmentId && thread.id === record.conversationThreadId,
             );
-          });
-          const approvals = pendingApprovals.filter(
-            (approval) => approval.agentId === record.id && approval.status === "pending",
-          );
-          const waitingInRun = Boolean(
-            shell?.hasPendingApprovals ||
-            shell?.hasPendingUserInput ||
-            workThreads.some((thread) => thread.hasPendingApprovals || thread.hasPendingUserInput),
-          );
-          const state =
-            approvals.length || waitingInRun || cached?.requests.length
-              ? "blocked"
-              : shell?.runtime?.activeRunId ||
-                  workThreads.some((thread) => thread.runtime?.activeRunId)
-                ? "thinking"
-                : "idle";
-          return {
-            ...record,
-            environmentId,
-            state,
-            updatedAt: shell?.updatedAt ?? record.updatedAt,
-            // A text that only carried files has no words to preview.
-            preview: latest ? latest.text.trim() || "Attachment" : "Say hello",
-            messages: reconcileAgentMessages(
-              mergeLatestMessage(
-                cached?.messages ?? [],
-                latest && !cached?.messages.some((message) => message.id === latest.id)
-                  ? {
-                      id: latest.id,
-                      role: latest.role,
-                      text: latest.text,
-                      createdAt: latest.createdAt,
-                      updatedAt: latest.updatedAt,
-                    }
-                  : null,
+            const latest = record.latestMessage;
+            const key = agentContactKey({ environmentId, id: record.id });
+            const cached = hydrated.get(key);
+            const triggers = tasks
+              .filter(
+                (entry) =>
+                  entry.environmentId === environmentId && entry.task.agentId === record.id,
+              )
+              .map(({ task }) => ({
+                id: task.id,
+                title: task.title,
+                prompt: task.prompt,
+                schedule: task.schedule,
+                enabled: task.enabled,
+              }));
+            const workThreads = threads.filter((thread) => {
+              const ownership = thread.source.agent;
+              return (
+                thread.environmentId === environmentId &&
+                ownership?.id === record.id &&
+                ownership.role === "work"
+              );
+            });
+            const approvals = pendingApprovals.filter(
+              (approval) => approval.agentId === record.id && approval.status === "pending",
+            );
+            const waitingInRun = Boolean(
+              shell?.hasPendingApprovals ||
+              shell?.hasPendingUserInput ||
+              workThreads.some(
+                (thread) => thread.hasPendingApprovals || thread.hasPendingUserInput,
               ),
-              outbox.get(key) ?? [],
-            ),
-            triggers,
-            memory: cached?.memory ?? [],
-            activity: cached?.activity ?? [],
-            requests: cached?.requests ?? [],
-            approvals,
-            waitingInRun,
-            // The list's arranged order rides on the conversation thread, as Work's does.
-            orderKey: shell?.activeOrderKey ?? null,
-            orderable:
-              shell !== undefined &&
-              shell.pinnedAt == null &&
-              shell.settledOverride !== "settled" &&
-              shell.archivedAt == null,
-          };
-        });
-      }),
+            );
+            const state =
+              approvals.length || waitingInRun || cached?.requests.length
+                ? "blocked"
+                : shell?.runtime?.activeRunId ||
+                    workThreads.some((thread) => thread.runtime?.activeRunId)
+                  ? "thinking"
+                  : "idle";
+            return {
+              ...record,
+              environmentId,
+              state,
+              updatedAt: shell?.updatedAt ?? record.updatedAt,
+              // A text that only carried files has no words to preview.
+              preview: latest ? latest.text.trim() || "Attachment" : "Say hello",
+              messages: reconcileAgentMessages(
+                mergeLatestMessage(
+                  cached?.messages ?? [],
+                  latest && !cached?.messages.some((message) => message.id === latest.id)
+                    ? {
+                        id: latest.id,
+                        role: latest.role,
+                        text: latest.text,
+                        createdAt: latest.createdAt,
+                        updatedAt: latest.updatedAt,
+                      }
+                    : null,
+                ),
+                outbox.get(key) ?? [],
+              ),
+              triggers,
+              memory: cached?.memory ?? [],
+              activity: cached?.activity ?? [],
+              requests: cached?.requests ?? [],
+              approvals,
+              waitingInRun,
+              // The list's arranged order rides on the conversation thread, as Work's does.
+              orderKey: shell?.activeOrderKey ?? null,
+              orderable:
+                shell !== undefined &&
+                shell.pinnedAt == null &&
+                shell.settledOverride !== "settled" &&
+                shell.archivedAt == null,
+            };
+          });
+        }),
+      ),
     [results, tasks, threads, hydrated, outbox],
   );
   const snapshot = useMemo<AgentsSnapshot>(
@@ -511,7 +517,7 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
         text: string;
         attachmentIds: string;
         commandId: CommandId;
-        messageId: import("@t3tools/contracts").MessageId;
+        messageId: import("@cogenly/contracts").MessageId;
       }
     >(),
   );

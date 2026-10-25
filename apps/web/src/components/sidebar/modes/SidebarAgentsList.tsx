@@ -1,5 +1,5 @@
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import type { ScopedThreadRef } from "@t3tools/contracts";
+import { scopeThreadRef } from "@cogenly/client-runtime/environment";
+import type { ScopedThreadRef } from "@cogenly/contracts";
 import { AgentContacts } from "../../../agents/AgentContacts";
 import { useAgents } from "../../../agents/agentsClient";
 import { agentContactKey } from "../../../agents/agents.logic";

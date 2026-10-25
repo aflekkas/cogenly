@@ -1,11 +1,13 @@
 import { useAtomValue } from "@effect/atom-react";
-import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { isScratchProject } from "@t3tools/client-runtime/state/projects";
-import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
-import { formatThreadLink, percentDecodedThreadLinkId } from "@t3tools/shared/threadLinks";
+import { scopeProjectRef, scopeThreadRef } from "@cogenly/client-runtime/environment";
+import { isScratchProject } from "@cogenly/client-runtime/state/projects";
+import type { EnvironmentId, ThreadId } from "@cogenly/contracts";
+import { formatThreadLink, percentDecodedThreadLinkId } from "@cogenly/shared/threadLinks";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { ClockIcon, MessageSquareTextIcon } from "lucide-react";
 import type { ReactNode } from "react";
+
+import { useRepositoryNames } from "~/projectLabels/useRepositoryNames";
 
 import { isElectron } from "../../env";
 import { useProject, useThreadShell } from "../../state/entities";
@@ -29,6 +31,7 @@ export function MarkdownThreadLink(props: {
   readonly fallback?: ReactNode;
 }) {
   const navigate = useNavigate();
+  const nameOf = useRepositoryNames();
   const decodedId = percentDecodedThreadLinkId(props.threadId);
   const written = useThreadShell(scopeThreadRef(props.environmentId, props.threadId));
   const decoded = useThreadShell(
@@ -87,7 +90,7 @@ export function MarkdownThreadLink(props: {
           {shownProject ? (
             <div className="flex min-w-0 items-center gap-2">
               <ProjectFavicon project={shownProject} className="size-3 shrink-0" />
-              <div className="min-w-0 truncate text-foreground/75">{shownProject.title}</div>
+              <div className="min-w-0 truncate text-foreground/75">{nameOf(shownProject)}</div>
             </div>
           ) : null}
           {lastActivity ? (

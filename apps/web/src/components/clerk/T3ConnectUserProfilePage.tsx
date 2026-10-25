@@ -1,11 +1,11 @@
-import { findErrorTraceId } from "@t3tools/client-runtime/errors";
+import { findErrorTraceId } from "@cogenly/client-runtime/errors";
 import { writeTextToClipboard } from "~/hooks/useCopyToClipboard";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
-import type { EnvironmentId } from "@t3tools/contracts";
-import type { RelayClientEnvironmentRecord } from "@t3tools/contracts/relay";
+} from "@cogenly/client-runtime/state/runtime";
+import type { EnvironmentId } from "@cogenly/contracts";
+import type { RelayClientEnvironmentRecord } from "@cogenly/contracts/relay";
 import { ServerIcon } from "lucide-react";
 import { useRef, useState } from "react";
 
@@ -195,7 +195,7 @@ export function T3ConnectUserProfilePage() {
   return (
     <ClerkUserProfilePage
       title="Cogenly Connect"
-      description="Environments registered to your account. Connections on this device are managed in Settings."
+      description="Machines registered to your account. Connections on this device are managed in Settings."
       action={
         <ClerkUserProfileRefreshButton
           disabled={deregisteringEnvironmentId !== null}
@@ -208,7 +208,7 @@ export function T3ConnectUserProfilePage() {
         {environmentsState.error ? (
           <div className="mb-4 border-t border-destructive/35 py-3 text-xs" role="alert">
             <p className="font-medium text-destructive-foreground">
-              Could not load Cogenly Connect environments
+              Could not load Cogenly Connect machines
             </p>
             <p className="mt-1 text-xs text-muted-foreground">{environmentsState.error}</p>
           </div>
@@ -216,7 +216,7 @@ export function T3ConnectUserProfilePage() {
 
         {isInitialLoad ? (
           <p className="border-t py-4 text-xs text-muted-foreground" role="status">
-            Loading environments…
+            Loading machines…
           </p>
         ) : environments.length > 0 ? (
           <ul className="border-t">
@@ -240,9 +240,9 @@ export function T3ConnectUserProfilePage() {
                 <ServerIcon />
               </EmptyMedia>
               <EmptyHeader>
-                <EmptyTitle>No Cogenly Connect environments</EmptyTitle>
+                <EmptyTitle>No Cogenly Connect machines</EmptyTitle>
                 <EmptyDescription>
-                  Link an environment from its local Settings to make it available through Cogenly
+                  Link a machine from its local Settings to make it available through Cogenly
                   Connect.
                 </EmptyDescription>
               </EmptyHeader>

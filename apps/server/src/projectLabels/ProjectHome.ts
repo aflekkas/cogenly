@@ -14,7 +14,7 @@ import {
   type ProjectLabelWithRepositories,
   type ProjectOverviewResult,
   type ProjectSourceLink,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -220,7 +220,11 @@ const make = Effect.gen(function* () {
               title,
               ...(link === undefined
                 ? {}
-                : { remote: link.remote, directoryName: link.directoryName }),
+                : {
+                    remote: link.remote,
+                    directoryName: link.directoryName,
+                    ...(link.checkout === undefined ? {} : { checkout: link.checkout }),
+                  }),
             };
           }),
         ),

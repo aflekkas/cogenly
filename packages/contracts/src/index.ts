@@ -10,6 +10,7 @@ export * from "./relayClient.ts";
 export * from "./desktopBootstrap.ts";
 export * from "./desktopBrowser.ts";
 export * from "./desktopAppActivation.ts";
+export * from "./cliCommand.ts";
 export * from "./remoteAccess.ts";
 export * from "./ipc.ts";
 export * from "./terminal.ts";
@@ -19,7 +20,6 @@ export * from "./providerSetup.ts";
 export * from "./providerRuntime.ts";
 export * from "./providerUsageLimits.ts";
 export * from "./usageLimitHandoff.ts";
-export * from "./usageLimitSourceId.ts";
 export * from "./providerPolicy.ts";
 export * from "./modelSelection.ts";
 export * from "./chatAttachment.ts";
@@ -55,6 +55,7 @@ export * from "./mcpApps.ts";
 export * from "./browserImport.ts";
 export * from "./browserProfile.ts";
 export * from "./device.ts";
+export * from "./computerUse.ts";
 export * from "./preview.ts";
 export * from "./previewAutomation.ts";
 export * from "./sitePermissions.ts";
@@ -88,6 +89,14 @@ export * from "./integration.ts";
 export * from "./integrationCatalog.ts";
 export * from "./machine.ts";
 export * from "./machineSecurity.ts";
+export * from "./machineHealth.ts";
+export * from "./machineHealthSettings.ts";
+export * from "./machineSetup.ts";
 export * from "./accounts.ts";
 
 export * from "./sharedDocument.ts";
+export * from "./threadReplication.ts";
+
+export * from "./projectRepositoryMembership.ts";
+
+export * from "./repoMcpTrust.ts";

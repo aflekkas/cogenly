@@ -2,8 +2,8 @@ import {
   LEGACY_PROJECT_CONFIG_FILE_NAME,
   PROJECT_CONFIG_FILE_NAME,
   type T3ProjectFile,
-} from "@t3tools/contracts";
-import { parseT3ProjectFile } from "@t3tools/shared/t3ProjectFile";
+} from "@cogenly/contracts";
+import { parseT3ProjectFile } from "@cogenly/shared/t3ProjectFile";
 import { useAtomValue } from "@effect/atom-react";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
@@ -11,18 +11,24 @@ import { createContext, type ReactNode, useContext, useMemo } from "react";
 
 import { useEnvironments, usePrimaryEnvironmentId } from "../../state/environments";
 import { getProjectFileQueryAtom, optimisticFileAtom } from "../files/projectFilesQueryState";
-import { useSettingsProjectGroups } from "./useSettingsProjectGroups";
-import { resolveScopedSettingsTargets, selectScopedSettingsEnvironments } from "./scopedSettings";
+import { useSettingsProjectFolders, useSettingsProjectGroups } from "./useSettingsProjectGroups";
+import {
+  resolveScopedSettingsTargets,
+  scopedProjectFileKey,
+  selectScopedSettingsEnvironments,
+} from "./scopedSettings";
 import { resolveSettingsScope, type SettingsScopeSearch } from "./settingsScope";
-import { selectSingleEnvironmentScope } from "./settingsScopeAxis";
 
 /**
- * Each member's decoded cogenly.json (or legacy t3.json), so file-backed settings show the file as a
- * layer in the inheritance chain. A member is only present once its read has
- * settled; the query atom caches per (environment, cwd).
+ * Each repository's decoded cogenly.json (or legacy t3.json), so file-backed
+ * settings show the file as a layer in the inheritance chain. A repository is
+ * only present once its read has settled; the query atom caches per
+ * (environment, cwd).
  */
+const NO_MEMBERS: ReturnType<typeof resolveSettingsScope>["members"] = [];
+
 function useMemberProjectFiles(scope: ReturnType<typeof resolveSettingsScope>) {
-  const members = scope.kind === "project" || scope.kind === "checkout" ? scope.members : [];
+  const members = scope.kind === "project" ? scope.members : NO_MEMBERS;
   return useAtomValue(
     useMemo(
       () =>
@@ -45,7 +51,7 @@ function useMemberProjectFiles(scope: ReturnType<typeof resolveSettingsScope>) {
             const data = primary === null ? read(LEGACY_PROJECT_CONFIG_FILE_NAME) : primary;
             if (data === undefined) continue;
             files.set(
-              member.physicalProjectKey,
+              scopedProjectFileKey(member),
               data === null || data.truncated ? null : parseT3ProjectFile(data.contents),
             );
           }
@@ -56,25 +62,18 @@ function useMemberProjectFiles(scope: ReturnType<typeof resolveSettingsScope>) {
   );
 }
 
-function useResolvedSettingsScope(rawSearch: SettingsScopeSearch, singleEnvironment: boolean) {
+function useResolvedSettingsScope(search: SettingsScopeSearch, machinePage: boolean) {
+  const folders = useSettingsProjectFolders();
   const groups = useSettingsProjectGroups();
   const { environments: availableEnvironments } = useEnvironments();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
-  const search = useMemo(
-    () =>
-      singleEnvironment
-        ? selectSingleEnvironmentScope(
-            rawSearch,
-            resolveSettingsScope(rawSearch, groups, availableEnvironments),
-            availableEnvironments,
-            primaryEnvironmentId,
-          )
-        : rawSearch,
-    [availableEnvironments, groups, primaryEnvironmentId, rawSearch, singleEnvironment],
-  );
   const scope = useMemo(
-    () => resolveSettingsScope(search, groups, availableEnvironments),
-    [availableEnvironments, groups, search],
+    () =>
+      resolveSettingsScope(search, folders, availableEnvironments, {
+        machinePage,
+        primaryEnvironmentId,
+      }),
+    [availableEnvironments, folders, machinePage, primaryEnvironmentId, search],
   );
   const projectFiles = useMemberProjectFiles(scope);
   return useMemo(() => {
@@ -89,21 +88,25 @@ function useResolvedSettingsScope(rawSearch: SettingsScopeSearch, singleEnvironm
       projectFiles,
     );
     // The representative target supplies display values; project scopes
-    // prefer the member on the primary environment, like environments do.
+    // prefer the repository on the scope's machine.
     const target =
       targets.find(
         (candidate) => candidate.environmentId === selected.environment?.environmentId,
       ) ??
       targets[0] ??
       null;
-    return { scope, groups, search, ...selected, targets, target };
-  }, [availableEnvironments, groups, primaryEnvironmentId, projectFiles, scope, search]);
+    // The machine machine-local settings belong to, as the machine picker names it.
+    const machine =
+      availableEnvironments.find((environment) => environment.environmentId === scope.machineId) ??
+      null;
+    return { scope, folders, groups, search, ...selected, targets, target, machine };
+  }, [availableEnvironments, folders, groups, primaryEnvironmentId, projectFiles, scope, search]);
 }
 
 const SettingsScopeContext = createContext<
   | (ReturnType<typeof useResolvedSettingsScope> & {
-      singleEnvironment: boolean;
-      search: SettingsScopeSearch;
+      /** The page is about one machine's own state: it picks a machine, not a project. */
+      machinePage: boolean;
       selectScope: (next: SettingsScopeSearch) => void;
     })
   | null
@@ -113,17 +116,17 @@ export function SettingsScopeProvider({
   search,
   onChange,
   children,
-  singleEnvironment = false,
+  machinePage = false,
 }: {
-  singleEnvironment?: boolean;
+  machinePage?: boolean;
   search: SettingsScopeSearch;
   onChange: (next: SettingsScopeSearch) => void;
   children: ReactNode;
 }) {
-  const resolved = useResolvedSettingsScope(search, singleEnvironment);
+  const resolved = useResolvedSettingsScope(search, machinePage);
   const value = useMemo(
-    () => ({ ...resolved, singleEnvironment, selectScope: onChange }),
-    [onChange, resolved, singleEnvironment],
+    () => ({ ...resolved, machinePage, selectScope: onChange }),
+    [machinePage, onChange, resolved],
   );
   return <SettingsScopeContext value={value}>{children}</SettingsScopeContext>;
 }

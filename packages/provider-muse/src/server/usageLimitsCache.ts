@@ -2,8 +2,8 @@ import {
   ServerProviderUsageLimits as ServerProviderUsageLimitsSchema,
   type ProviderInstanceId,
   type ServerProviderUsageLimits,
-} from "@t3tools/contracts";
-import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
+} from "@cogenly/contracts";
+import { writeFileStringAtomically } from "@cogenly/shared/atomicWrite";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";

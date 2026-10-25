@@ -5,7 +5,7 @@ import {
   ProjectLabelId,
   ProviderInstanceId,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import type { Project, Thread } from "../types";
 import { makeThreadFixture } from "../test-fixtures";
 import {

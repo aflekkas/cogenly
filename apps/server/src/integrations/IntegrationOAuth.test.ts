@@ -1,8 +1,8 @@
-import { loopbackHttpsPolicy, loopbackHttpsFetch } from "./https.testkit.ts";
+import { loopbackHttpsPolicy } from "./https.testkit.ts";
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { NodeCrypto as EffectNodeCrypto, NodeHttpServer } from "@effect/platform-node";
-import { EnvironmentId, IntegrationName, type IntegrationId } from "@t3tools/contracts";
+import { NodeCrypto as EffectNodeCrypto } from "@effect/platform-node";
+import { EnvironmentId, IntegrationName, type IntegrationId } from "@cogenly/contracts";
 import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
@@ -11,20 +11,11 @@ import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
+import * as SqlClient from "effect/sql/SqlClient";
+import * as Schema from "effect/Schema";
+import { StoredIntegration } from "./StoredIntegration.ts";
 import * as TestClock from "effect/testing/TestClock";
-import {
-  FetchHttpClient,
-  HttpClient,
-  HttpClientRequest,
-  HttpRouter,
-  HttpServer,
-  HttpServerRequest,
-  HttpServerResponse,
-} from "effect/http";
-// @effect-diagnostics-next-line nodeBuiltinImport:off -- The mock authorization server checks PKCE with a plain SHA-256.
-import * as NodeCrypto from "node:crypto";
-// @effect-diagnostics-next-line nodeBuiltinImport:off -- NodeHttpServer.layer takes a node:http server factory.
-import * as NodeHttp from "node:http";
+import { FetchHttpClient, HttpRouter } from "effect/http";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
@@ -35,232 +26,38 @@ import * as Credentials from "./IntegrationCredentials.ts";
 import { CALLBACK_PATH } from "./IntegrationOAuth.ts";
 import * as Integrations from "./Integrations.ts";
 import * as IntegrationOAuthHttp from "./integrationOAuthHttp.ts";
+import * as IntegrationSyncPeers from "./IntegrationSyncPeers.ts";
 import * as Tokens from "./IntegrationTokens.ts";
 import { IntegrationEndpointPolicy } from "./RemoteEndpoint.ts";
-
-/**
- * A local OAuth 2.1 authorization server and MCP resource server in one:
- * protected-resource and authorization-server metadata, dynamic client
- * registration, PKCE authorization codes bound to `resource`, rotating
- * refresh tokens, and an MCP endpoint that answers 401 with a
- * `resource_metadata` challenge to anything without a live token.
- */
-interface MockAuthServer {
-  base: string;
-  registrations: number;
-  refreshes: number;
-  /** Refresh tokens answer invalid_grant, as after the user revokes access. */
-  revoked: boolean;
-  omitPkce?: boolean;
-  requireIssuer?: boolean;
-  tokenGate?: { entered: Deferred.Deferred<void>; resume: Deferred.Deferred<void> };
-  readonly clients: Map<string, ReadonlyArray<string>>;
-  readonly codes: Map<
-    string,
-    { clientId: string; challenge: string; redirectUri: string; account: string; resource: string }
-  >;
-  /** Live access tokens, by token: the account they act for. */
-  readonly accessTokens: Map<string, string>;
-  readonly refreshTokens: Map<string, string>;
-  /** Every bearer the MCP endpoint saw, in order. */
-  readonly bearers: Array<string | undefined>;
-}
-
-const reply = (body: unknown, status = 200, headers: Record<string, string> = {}) =>
-  HttpServerResponse.jsonUnsafe(body, { status, headers });
-
-const startMockAuthServer = Effect.gen(function* () {
-  const mock: MockAuthServer = {
-    base: "",
-    registrations: 0,
-    refreshes: 0,
-    revoked: false,
-    clients: new Map(),
-    codes: new Map(),
-    accessTokens: new Map(),
-    refreshTokens: new Map(),
-    bearers: [],
-  };
-  let issued = 0;
-  const issue = (account: string) => {
-    issued += 1;
-    const accessToken = `access-${account}-${issued}-secretvalue`;
-    const refreshToken = `refresh-${account}-${issued}-secretvalue`;
-    mock.accessTokens.set(accessToken, account);
-    mock.refreshTokens.set(refreshToken, account);
-    return {
-      access_token: accessToken,
-      refresh_token: refreshToken,
-      token_type: "Bearer",
-      expires_in: 3600,
-    };
-  };
-  const form = (request: HttpServerRequest.HttpServerRequest) =>
-    request.text.pipe(Effect.map((text) => new URLSearchParams(text)));
-
-  const routes = Layer.mergeAll(
-    HttpRouter.add("GET", "/.well-known/oauth-protected-resource/mcp", () =>
-      Effect.succeed(
-        reply({
-          resource: `${mock.base}/mcp`,
-          authorization_servers: [`${mock.base}/auth`],
-          scopes_supported: ["read", "write"],
-        }),
-      ),
-    ),
-    // Path-aware RFC 8414 metadata: the issuer has a path.
-    HttpRouter.add("GET", "/.well-known/oauth-authorization-server/auth", () =>
-      Effect.succeed(
-        reply({
-          issuer: `${mock.base}/auth`,
-          authorization_endpoint: `${mock.base}/auth/authorize`,
-          token_endpoint: `${mock.base}/auth/token`,
-          registration_endpoint: `${mock.base}/auth/register`,
-          ...(mock.omitPkce ? {} : { code_challenge_methods_supported: ["S256"] }),
-          authorization_response_iss_parameter_supported: mock.requireIssuer === true,
-          token_endpoint_auth_methods_supported: ["none"],
-        }),
-      ),
-    ),
-    HttpRouter.add("POST", "/auth/register", (request) =>
-      request.json.pipe(
-        Effect.map((body) => {
-          mock.registrations += 1;
-          const clientId = `client-${mock.registrations}`;
-          mock.clients.set(clientId, (body as { redirect_uris: Array<string> }).redirect_uris);
-          return reply({ client_id: clientId, token_endpoint_auth_method: "none" }, 201);
-        }),
-        Effect.orDie,
-      ),
-    ),
-    // Consent: the test plays the browser and picks the account with `account`.
-    HttpRouter.add("GET", "/auth/authorize", (request) =>
-      Effect.sync(() => {
-        const params = new URL(request.url, mock.base).searchParams;
-        const clientId = params.get("client_id") ?? "";
-        const redirectUri = params.get("redirect_uri") ?? "";
-        if (
-          !mock.clients.get(clientId)?.includes(redirectUri) ||
-          params.get("code_challenge_method") !== "S256" ||
-          params.get("response_type") !== "code"
-        )
-          return reply({ error: "invalid_request" }, 400);
-        const code = `code-${mock.codes.size + 1}`;
-        mock.codes.set(code, {
-          clientId,
-          challenge: params.get("code_challenge") ?? "",
-          redirectUri,
-          account: params.get("account") ?? "default",
-          resource: params.get("resource") ?? "",
-        });
-        const back = new URL(redirectUri);
-        back.searchParams.set("code", code);
-        back.searchParams.set("state", params.get("state") ?? "");
-        back.searchParams.set("iss", `${mock.base}/auth`);
-        return HttpServerResponse.redirect(back.href, { status: 302 });
-      }),
-    ),
-    HttpRouter.add("POST", "/auth/token", (request) =>
-      form(request).pipe(
-        Effect.tap(() =>
-          mock.tokenGate === undefined
-            ? Effect.void
-            : Effect.gen(function* () {
-                yield* Deferred.succeed(mock.tokenGate!.entered, undefined);
-                yield* Deferred.await(mock.tokenGate!.resume);
-              }),
-        ),
-        Effect.map((params) => {
-          if (params.get("resource") !== `${mock.base}/mcp`)
-            return reply({ error: "invalid_target" }, 400);
-          if (params.get("grant_type") === "authorization_code") {
-            const grant = mock.codes.get(params.get("code") ?? "");
-            mock.codes.delete(params.get("code") ?? "");
-            const verifier = params.get("code_verifier") ?? "";
-            const challenge = NodeCrypto.createHash("sha256").update(verifier).digest("base64url");
-            if (
-              grant === undefined ||
-              grant.clientId !== params.get("client_id") ||
-              grant.redirectUri !== params.get("redirect_uri") ||
-              grant.challenge !== challenge ||
-              grant.resource !== `${mock.base}/mcp`
-            )
-              return reply({ error: "invalid_grant" }, 400);
-            return reply(issue(grant.account));
-          }
-          if (params.get("grant_type") === "refresh_token") {
-            mock.refreshes += 1;
-            const account = mock.refreshTokens.get(params.get("refresh_token") ?? "");
-            if (mock.revoked || account === undefined)
-              return reply({ error: "invalid_grant" }, 400);
-            mock.refreshTokens.delete(params.get("refresh_token") ?? "");
-            return reply(issue(account));
-          }
-          return reply({ error: "unsupported_grant_type" }, 400);
-        }),
-        Effect.orDie,
-      ),
-    ),
-    HttpRouter.add("POST", "/mcp", (request) =>
-      request.json.pipe(
-        Effect.map((raw) => {
-          const body = raw as { id: number; method: string; params?: { name?: string } };
-          const bearer = /^Bearer (.+)$/.exec(request.headers.authorization ?? "")?.[1];
-          mock.bearers.push(bearer);
-          const account = bearer === undefined ? undefined : mock.accessTokens.get(bearer);
-          if (account === undefined)
-            return reply({ error: "invalid_token" }, 401, {
-              "www-authenticate": `Bearer resource_metadata="${mock.base}/.well-known/oauth-protected-resource/mcp"`,
-            });
-          if (body.method === "initialize")
-            return reply({
-              jsonrpc: "2.0",
-              id: body.id,
-              result: { protocolVersion: "2025-06-18" },
-            });
-          if (body.method === "tools/list")
-            return reply({
-              jsonrpc: "2.0",
-              id: body.id,
-              result: { tools: [{ name: "whoami", description: "", inputSchema: {} }] },
-            });
-          // Echoes the bearer back, as a careless server might.
-          return reply({
-            jsonrpc: "2.0",
-            id: body.id,
-            result: {
-              content: [{ type: "text", text: `account=${account} token=${bearer}` }],
-            },
-          });
-        }),
-        Effect.orDie,
-      ),
-    ),
-  );
-  const context = yield* Layer.build(
-    HttpRouter.serve(routes, { disableListenLog: true, disableLogger: true }).pipe(
-      Layer.provideMerge(
-        NodeHttpServer.layer(() => NodeHttp.createServer(), { port: 0, host: "127.0.0.1" }),
-      ),
-    ),
-  );
-  mock.base = HttpServer.formatAddress(Context.get(context, HttpServer.HttpServer).address).replace(
-    /^http:/,
-    "https:",
-  );
-  return mock;
-});
+import {
+  COGENLY_ORIGIN,
+  type MockAuthServer,
+  consent,
+  linearInput,
+  startMockAuthServer,
+} from "./oauthServer.testkit.ts";
 
 const database = Sqlite.layerMemory.pipe(Layer.provide(NodeServices.layer));
 
 /** The gateway over the real vault, as in production. */
-const gatewayLayer = () => {
+const decodeStored = Schema.decodeUnknownEffect(Schema.fromJsonString(StoredIntegration));
+
+const gatewayLayer = (
+  wrapTokens?: (tokens: Tokens.IntegrationTokens["Service"]) => Tokens.IntegrationTokens["Service"],
+) => {
   const stored = new Map<string, Uint8Array>();
   return Integrations.layer.pipe(
     // The mock servers listen on loopback, which production refuses.
     Layer.provide(Layer.succeed(IntegrationEndpointPolicy, loopbackHttpsPolicy)),
     Layer.provideMerge(Credentials.layer),
-    Layer.provideMerge(Tokens.layer),
+    Layer.provide(Credentials.secretsLayer),
+    Layer.provideMerge(
+      Layer.effect(
+        Tokens.IntegrationTokens,
+        Effect.map(Tokens.IntegrationTokens, (tokens) => wrapTokens?.(tokens) ?? tokens),
+      ).pipe(Layer.provide(Tokens.layer)),
+    ),
+    Layer.provideMerge(IntegrationSyncPeers.layerFor("env:test")),
     Layer.provideMerge(Vault.layer),
     Layer.provide(
       Layer.mock(ServerSecretStore.ServerSecretStore)({
@@ -280,47 +77,11 @@ const gatewayLayer = () => {
   );
 };
 
-/** Where clients reach Cogenly in these tests; the callback is never fetched. */
-const COGENLY_ORIGIN = "https://cogenly.example";
-
 const addLinear = (mock: MockAuthServer, name: string, accountLabel?: string) =>
   Effect.gen(function* () {
     const service = yield* Integrations.Integrations;
-    const { integration } = yield* service.create({
-      name: IntegrationName.make(name),
-      displayName: "Linear",
-      transport: "http",
-      url: `${mock.base}/mcp`,
-      headers: {},
-      scope: { type: "all" },
-      hint: "",
-      auth: { type: "oauth" },
-      ...(accountLabel === undefined ? {} : { accountLabel }),
-    });
+    const { integration } = yield* service.create(linearInput(mock, name, accountLabel));
     return integration;
-  });
-
-/** Plays the browser: opens the link, consents as `account`, and returns the callback query. */
-const consent = (authorizationUrl: string, account: string) =>
-  Effect.gen(function* () {
-    const client = yield* HttpClient.HttpClient;
-    const url = new URL(authorizationUrl);
-    url.searchParams.set("account", account);
-    const response = yield* client
-      .execute(HttpClientRequest.get(url.href))
-      .pipe(
-        Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }),
-        Effect.provideService(FetchHttpClient.Fetch, loopbackHttpsFetch),
-      );
-    expect(response.status).toBe(302);
-    const back = new URL(response.headers.location!);
-    expect(`${back.origin}${back.pathname}`).toBe(`${COGENLY_ORIGIN}${CALLBACK_PATH}`);
-    return {
-      state: back.searchParams.get("state") ?? undefined,
-      code: back.searchParams.get("code") ?? undefined,
-      error: back.searchParams.get("error") ?? undefined,
-      iss: back.searchParams.get("iss") ?? undefined,
-    };
   });
 
 const signIn = (id: IntegrationId, account: string) =>
@@ -345,6 +106,157 @@ const whoami = (name: string) =>
   });
 
 describe("Integration OAuth sign-in", () => {
+  it.effect(
+    "never sends an approved resource client secret to a discovered foreign auth server",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* runMigrations();
+          const resource = yield* startMockAuthServer;
+          const attacker = yield* startMockAuthServer;
+          resource.authorizationServerBase = attacker.base;
+          const service = yield* Integrations.Integrations;
+          const vault = yield* Vault.Vault;
+          yield* vault.create({
+            name: "resource-client",
+            type: "api_key",
+            allowedDomains: ["127.0.0.1"],
+            secretFields: { value: "PRIVATE-CLIENT-SECRET" },
+          });
+          const { integration } = yield* service.create(
+            {
+              ...linearInput(resource, "resource"),
+              auth: {
+                type: "oauth",
+                clientId: "manual-client",
+                clientSecret: "{{credential:resource-client.value}}",
+              },
+            },
+            { approveCredentials: true },
+          );
+          const link = yield* service
+            .beginSignIn(integration.id, { origin: COGENLY_ORIGIN })
+            .pipe(Effect.result);
+          // Exercise the exchange too if discovery incorrectly permits the foreign server.
+          if (link._tag === "Success") {
+            yield* service
+              .completeSignIn({
+                state: new URL(link.success.authorizationUrl).searchParams.get("state")!,
+                code: "attacker-code",
+                error: undefined,
+                iss: undefined,
+              })
+              .pipe(Effect.result);
+          }
+          expect(attacker.tokenRequests).toEqual([]);
+          expect(link).toMatchObject({ _tag: "Failure", failure: { reason: "approval_required" } });
+        }),
+      ).pipe(Effect.provide(gatewayLayer())),
+  );
+
+  it.effect.each(["authorizationEndpoint", "tokenEndpoint"] as const)(
+    "rejects an unapproved discovery change to %s, including a path on the same origin",
+    (endpoint) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* runMigrations();
+          const mock = yield* startMockAuthServer;
+          const integration = yield* addLinear(mock, "linear");
+          const service = yield* Integrations.Integrations;
+          yield* service.beginSignIn(integration.id, { origin: COGENLY_ORIGIN });
+          mock[endpoint] = `${mock.base}/changed`;
+          expect(
+            yield* service
+              .beginSignIn(integration.id, { origin: COGENLY_ORIGIN })
+              .pipe(Effect.result),
+          ).toMatchObject({ _tag: "Failure", failure: { reason: "approval_required" } });
+          expect(mock.tokenRequests).toEqual([]);
+        }),
+      ).pipe(Effect.provide(gatewayLayer())),
+  );
+
+  it.effect("requires the vault domain even for an explicitly reviewed OAuth server", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* runMigrations();
+        const mock = yield* startMockAuthServer;
+        const service = yield* Integrations.Integrations;
+        const vault = yield* Vault.Vault;
+        yield* vault.create({
+          name: "restricted-client",
+          type: "api_key",
+          allowedDomains: ["resource.example"],
+          secretFields: { value: "RESTRICTED-CLIENT-SECRET" },
+        });
+        const { integration } = yield* service.create(
+          {
+            ...linearInput(mock, "manual"),
+            auth: {
+              type: "oauth",
+              clientId: "manual-client",
+              clientSecret: "{{credential:restricted-client.value}}",
+              server: {
+                issuer: `${mock.base}/auth`,
+                authorizationEndpoint: `${mock.base}/auth/authorize`,
+                tokenEndpoint: `${mock.base}/auth/token`,
+              },
+            },
+          },
+          { approveCredentials: true },
+        );
+        const link = yield* service.beginSignIn(integration.id, { origin: COGENLY_ORIGIN });
+        expect(
+          yield* service
+            .completeSignIn({
+              state: new URL(link.authorizationUrl).searchParams.get("state")!,
+              code: "code",
+              error: undefined,
+              iss: undefined,
+            })
+            .pipe(Effect.result),
+        ).toMatchObject({ _tag: "Failure", failure: { reason: "credential_not_allowed" } });
+        expect(mock.tokenRequests).toEqual([]);
+      }),
+    ).pipe(Effect.provide(gatewayLayer())),
+  );
+
+  it.effect(
+    "requires owner approval for explicit OAuth server overrides, even before a grant exists",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* runMigrations();
+          const mock = yield* startMockAuthServer;
+          const service = yield* Integrations.Integrations;
+          const integration = yield* addLinear(mock, "linear");
+          yield* service.beginSignIn(integration.id, { origin: COGENLY_ORIGIN });
+          const auth = {
+            type: "oauth" as const,
+            server: {
+              issuer: `${mock.base}/auth`,
+              authorizationEndpoint: `${mock.base}/changed`,
+              tokenEndpoint: `${mock.base}/auth/token`,
+            },
+          };
+          expect(
+            yield* service
+              .update({ id: integration.id, auth }, { fromAgent: true })
+              .pipe(Effect.result),
+          ).toMatchObject({ _tag: "Failure", failure: { reason: "approval_required" } });
+          expect(
+            yield* service
+              .create({ ...linearInput(mock, "other"), auth }, { fromAgent: true })
+              .pipe(Effect.result),
+          ).toMatchObject({ _tag: "Failure", failure: { reason: "approval_required" } });
+          const approved = yield* service.update(
+            { id: integration.id, auth },
+            { approveCredentials: true },
+          );
+          expect(approved.integration.auth?.server).toEqual(auth.server);
+        }),
+      ).pipe(Effect.provide(gatewayLayer())),
+  );
+
   it.effect("agent sign-in requests cannot evict an owner's pending callback", () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -433,36 +345,32 @@ describe("Integration OAuth sign-in", () => {
       ).pipe(Effect.provide(gatewayLayer())),
   );
 
-  it.effect(
-    "only the owner can reauthorize an account, and sign-in records agent-link provenance",
-    () =>
-      Effect.scoped(
-        Effect.gen(function* () {
-          yield* runMigrations();
-          const mock = yield* startMockAuthServer;
-          const integration = yield* addLinear(mock, "linear");
-          const service = yield* Integrations.Integrations;
-          const first = yield* service.beginSignIn(integration.id, {
-            origin: COGENLY_ORIGIN,
-            fromAgent: true,
-          });
-          yield* service.completeSignIn(yield* consent(first.authorizationUrl, "owner"));
-          expect((yield* statusOf(integration.id))?.integration.provenance?.signedInViaAgent).toBe(
-            true,
-          );
-          mock.revoked = true;
-          mock.accessTokens.clear();
-          yield* whoami("linear").pipe(Effect.result);
-          expect(
-            yield* service
-              .beginSignIn(integration.id, { origin: COGENLY_ORIGIN, fromAgent: true })
-              .pipe(Effect.result),
-          ).toMatchObject({ _tag: "Failure", failure: { reason: "approval_required" } });
-          expect(
-            yield* service.beginSignIn(integration.id, { origin: COGENLY_ORIGIN }),
-          ).toHaveProperty("authorizationUrl");
-        }),
-      ).pipe(Effect.provide(gatewayLayer())),
+  it.effect("agents can request renewed consent, and sign-in records agent-link provenance", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* runMigrations();
+        const mock = yield* startMockAuthServer;
+        const integration = yield* addLinear(mock, "linear");
+        const service = yield* Integrations.Integrations;
+        const first = yield* service.beginSignIn(integration.id, {
+          origin: COGENLY_ORIGIN,
+          fromAgent: true,
+        });
+        yield* service.completeSignIn(yield* consent(first.authorizationUrl, "owner"));
+        expect((yield* statusOf(integration.id))?.integration.provenance?.signedInViaAgent).toBe(
+          true,
+        );
+        mock.revoked = true;
+        mock.accessTokens.clear();
+        yield* whoami("linear").pipe(Effect.result);
+        expect(
+          yield* service.beginSignIn(integration.id, { origin: COGENLY_ORIGIN, fromAgent: true }),
+        ).toHaveProperty("authorizationUrl");
+        expect(
+          yield* service.beginSignIn(integration.id, { origin: COGENLY_ORIGIN }),
+        ).toHaveProperty("authorizationUrl");
+      }),
+    ).pipe(Effect.provide(gatewayLayer())),
   );
 
   it.effect("retains each account's browser origin across service restarts", () =>
@@ -481,10 +389,11 @@ describe("Integration OAuth sign-in", () => {
           Integrations.Integrations,
         );
         expect(
-          yield* restarted
-            .beginSignIn(integration.id, { origin: "http://localhost:3000", fromAgent: true })
-            .pipe(Effect.result),
-        ).toMatchObject({ _tag: "Failure", failure: { reason: "approval_required" } });
+          yield* restarted.beginSignIn(integration.id, {
+            origin: "http://localhost:3000",
+            fromAgent: true,
+          }),
+        ).toHaveProperty("authorizationUrl");
         const link = yield* restarted.beginSignIn(integration.id, { origin: COGENLY_ORIGIN });
         expect(link.redirectUri).toBe(`${COGENLY_ORIGIN}${CALLBACK_PATH}`);
         expect(JSON.stringify(yield* restarted.list())).not.toContain("browserOrigin");
@@ -538,12 +447,106 @@ describe("Integration OAuth sign-in", () => {
           yield* Deferred.succeed(gate.resume, undefined);
           expect((yield* Fiber.join(completion))._tag).toBe("Failure");
           const vault = yield* Vault.Vault;
-          expect((yield* vault.list({})).items).toHaveLength(0);
+          expect(
+            (yield* vault.list({})).items.filter((item) =>
+              item.name.startsWith("integration-oauth:"),
+            ),
+          ).toHaveLength(0);
           expect(mock.bearers.filter((bearer) => bearer !== undefined)).toHaveLength(0);
           if (mutation === "edit")
             expect((yield* statusOf(integration.id))?.status).toBe("needs_sign_in");
         }),
       ).pipe(Effect.provide(gatewayLayer())),
+  );
+
+  it.effect.each([
+    ["refresh", "url"],
+    ["refresh", "delete"],
+    ["sign_in", "url"],
+    ["sign_in", "delete"],
+    ["refresh", "cosmetic"],
+    ["refresh", "disable"],
+    ["sign_in", "cosmetic"],
+    ["sign_in", "disable"],
+  ] as const)("grant commit respects a peer edit: %s", ([operation, mutation]) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const entered = yield* Deferred.make<void>();
+        const resume = yield* Deferred.make<void>();
+        let blocked = false;
+        yield* Effect.gen(function* () {
+          yield* runMigrations();
+          const mock = yield* startMockAuthServer;
+          const integration = yield* addLinear(mock, "linear");
+          const service = yield* Integrations.Integrations;
+          if (operation === "refresh") {
+            yield* signIn(integration.id, "owner");
+            yield* TestClock.adjust("3590 seconds");
+          }
+          const link =
+            operation === "sign_in"
+              ? yield* service.beginSignIn(integration.id, { origin: COGENLY_ORIGIN })
+              : undefined;
+          const callback = link ? yield* consent(link.authorizationUrl, "owner") : undefined;
+          blocked = true;
+          const pending = callback
+            ? service.completeSignIn(callback).pipe(Effect.asVoid)
+            : service.callTool(integration.name, "whoami", {}, null).pipe(Effect.asVoid);
+          const completion = yield* pending.pipe(Effect.result, Effect.forkScoped);
+          yield* Deferred.await(entered);
+          // Shared definitions materialize directly in SQL, outside the local
+          // OAuth lock. Change exactly that persisted boundary while vault I/O
+          // is in flight, after the service has validated its old definition.
+          const sql = yield* SqlClient.SqlClient;
+          const at = "2026-01-02T00:00:00.000Z";
+          if (mutation === "url")
+            yield* sql`UPDATE integrations SET payload_json=json_remove(json_set(payload_json,'$.url','https://changed.example/mcp','$.updatedAt',${at}),'$.oauthState'),updated_at=${at} WHERE id=${integration.id}`;
+          else if (mutation === "cosmetic")
+            yield* sql`UPDATE integrations SET payload_json=json_set(payload_json,'$.displayName','Renamed by peer','$.updatedAt',${at}),updated_at=${at} WHERE id=${integration.id}`;
+          else if (mutation === "disable")
+            yield* sql`UPDATE integrations SET payload_json=json_set(payload_json,'$.enabled',json('false'),'$.updatedAt',${at}),updated_at=${at} WHERE id=${integration.id}`;
+          else
+            yield* sql`UPDATE integrations SET payload_json=json_remove(json_set(payload_json,'$.deletedAt',${at},'$.updatedAt',${at}),'$.oauthState'),deleted_at=${at},updated_at=${at} WHERE id=${integration.id}`;
+          yield* Deferred.succeed(resume, undefined);
+          const result = yield* Fiber.join(completion);
+          const rejected = mutation === "url" || mutation === "delete";
+          expect(result._tag).toBe(
+            rejected || (mutation === "disable" && operation === "refresh") ? "Failure" : "Success",
+          );
+          const rows = yield* sql<{
+            payload_json: string;
+          }>`SELECT payload_json FROM integrations WHERE id=${integration.id}`;
+          const stored = yield* decodeStored(rows[0]!.payload_json);
+          if (rejected) expect(stored.oauthState).toBeUndefined();
+          else expect(stored.oauthState?.signedIn).toBe(true);
+          expect(stored.url).toBe(
+            mutation === "url" ? "https://changed.example/mcp" : integration.url,
+          );
+          expect((yield* (yield* Vault.Vault).list({})).items).toHaveLength(rejected ? 0 : 1);
+          if (!rejected) {
+            blocked = false;
+            if (mutation === "disable")
+              yield* service.update({ id: integration.id, enabled: true });
+            const call = yield* service.callTool(integration.name, "whoami", {}, null);
+            expect(call.isError).not.toBe(true);
+          }
+        }).pipe(
+          Effect.provide(
+            gatewayLayer((tokens) => ({
+              ...tokens,
+              write: (input) =>
+                Effect.gen(function* () {
+                  if (blocked) {
+                    yield* Deferred.succeed(entered, undefined);
+                    yield* Deferred.await(resume);
+                  }
+                  return yield* tokens.write(input);
+                }),
+            })),
+          ),
+        );
+      }),
+    ),
   );
 
   it.effect("discovers, registers, exchanges a PKCE code and calls with the token", () =>

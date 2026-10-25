@@ -13,14 +13,20 @@
  */
 import {
   AuthAccessWriteScope,
+  AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
   AuthSettingsWriteScope,
+  EnvironmentId,
   type MachineInfo,
-  MachineJoinCode,
   MachineRole,
+  MachineJoinCode,
   type MachineListResult,
+  ThreadId,
+  type ThreadMoveResult,
+  type MachineSetupStatus,
+  MachineSetupStepId,
   WS_METHODS,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Console from "effect/Console";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -42,9 +48,10 @@ import { readPersistedServerRuntimeState } from "../serverRuntimeState.ts";
 import { projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
 import { liveWebSocketUrl, liveWebSocketUrlSource, makeLiveRpcClient } from "./liveServer.ts";
 
-/** Read machines, and pair or unpair them: pairing is access management. */
+/** Read machines, pair or unpair them (access management), and move threads between them. */
 const MACHINES_CLI_SCOPES = [
   AuthOrchestrationReadScope,
+  AuthOrchestrationOperateScope,
   AuthSettingsWriteScope,
   AuthAccessWriteScope,
 ] as const;
@@ -333,6 +340,65 @@ const joinCommand = Command.make("join", {
   ),
 );
 
+const STEP_MARKS: Record<MachineSetupStatus["steps"][number]["state"], string> = {
+  done: "✓",
+  todo: "·",
+  working: "…",
+  waiting: "…",
+  blocked: " ",
+};
+
+/** The setup checklist, with the exact thing to do next for each open step. */
+export const describeSetup = (status: MachineSetupStatus) => {
+  const lines = status.steps.flatMap((step) => [
+    `${STEP_MARKS[step.state]} ${step.title}: ${step.detail}`,
+    ...(step.action === null || step.state === "working" || step.state === "waiting"
+      ? []
+      : [`    Run: cogenly machines setup ${step.id}`]),
+    ...(step.handoff === null
+      ? []
+      : step.handoff._tag === "open-url"
+        ? [`    Open: ${step.handoff.url}`]
+        : [`    ${step.handoff.reason}`, `      ${step.handoff.command}`]),
+  ]);
+  return [
+    status.ready
+      ? `Ready to pair. Other machines reach this one at ${status.joinUrl ?? "its tailnet address"}.`
+      : "Getting this machine ready to pair:",
+    ...lines,
+    ...(status.problem === null ? [] : ["", status.problem]),
+  ].join("\n");
+};
+
+const setupCommand = Command.make("setup", {
+  ...projectLocationFlags,
+  step: Argument.Literals("step", MachineSetupStepId.literals).pipe(
+    Argument.withDescription("A step to run now. Omit it to see the checklist."),
+    Argument.optional,
+  ),
+  json: jsonFlag,
+}).pipe(
+  Command.withDescription(
+    "Get this machine ready to pair: install and sign in to Tailscale, and put this Cogenly on your private tailnet.",
+  ),
+  Command.withHandler((flags) =>
+    runLive(flags, (client) =>
+      (Option.isSome(flags.step)
+        ? client[WS_METHODS.machinesSetupRunStep]({ step: flags.step.value })
+        : client[WS_METHODS.machinesSetupStatus]({})
+      ).pipe(
+        Effect.mapError(describe),
+        Effect.flatMap((status) =>
+          flags.json
+            ? encodeJson(status).pipe(Effect.orDie)
+            : Effect.succeed(describeSetup(status)),
+        ),
+        Effect.flatMap(Console.log),
+      ),
+    ),
+  ),
+);
+
 const unpairCommand = Command.make("unpair", {
   ...projectLocationFlags,
   machine: Argument.String("machine").pipe(
@@ -407,14 +473,221 @@ const renameCommand = Command.make("rename", {
   ),
 );
 
+/** A machine by name or environment id; `allowThis` also matches this machine. */
+const findMachine = (machines: ReadonlyArray<MachineInfo>, wanted: string, allowThis: boolean) => {
+  const trimmed = wanted.trim();
+  const matches = machines.filter(
+    (machine) =>
+      (allowThis || machine.relation !== "this") &&
+      (machine.environmentId === trimmed || machine.name.toLowerCase() === trimmed.toLowerCase()),
+  );
+  const match = matches[0];
+  return match !== undefined && matches.length === 1
+    ? Effect.succeed(match)
+    : Effect.fail(
+        new MachinesCliError({
+          reason:
+            matches.length > 1
+              ? `More than one machine is named "${trimmed}". Use its environment id.`
+              : `No ${allowThis ? "" : "paired "}machine matches "${trimmed}". Run \`cogenly machines list\`.`,
+        }),
+      );
+};
+
+/** At most this many skipped threads are listed; --json has them all. */
+const SKIPS_SHOWN = 20;
+
+const describeMove = (target: string, result: ThreadMoveResult) =>
+  [
+    ...(result.planned === undefined
+      ? [
+          `${result.moved.length} ${result.moved.length === 1 ? "thread runs" : "threads run"} on ${target} now.`,
+        ]
+      : [
+          `Dry run: ${result.planned.length} threads would move to ${target}; ${result.moved.length} already run there.`,
+          ...result.planned.map(
+            (entry) =>
+              `  ${entry.threadId} (${entry.title}): ${entry.worktreePath ?? entry.project}${entry.worktreePath === null ? "" : ` · checkout ${entry.project}`}`,
+          ),
+        ]),
+    ...(result.skipped.length === 0
+      ? []
+      : [
+          `Skipped ${result.skipped.length}; moving them again retries:`,
+          ...result.skipped
+            .slice(0, SKIPS_SHOWN)
+            .map((skip) => `  ${skip.threadId}: ${skip.detail}`),
+          ...(result.skipped.length > SKIPS_SHOWN
+            ? [`  …and ${result.skipped.length - SKIPS_SHOWN} more (use --json).`]
+            : []),
+        ]),
+  ].join("\n");
+
+const moveCommand = Command.make("move", {
+  ...projectLocationFlags,
+  to: Flag.String("to").pipe(
+    Flag.withDescription(
+      "The paired machine that runs them from now on: its name or environment id.",
+    ),
+  ),
+  from: Flag.String("from").pipe(
+    Flag.withDescription("Move every thread this machine runs (a name, an id, or this machine's)."),
+    Flag.optional,
+  ),
+  project: Flag.String("project").pipe(
+    Flag.withDescription(
+      "Move a project: clone its repositories on the target, then move its threads and agents.",
+    ),
+    Flag.optional,
+  ),
+  threads: Flag.String("threads").pipe(
+    Flag.withDescription("Comma-separated thread ids to move."),
+    Flag.optional,
+  ),
+  dryRun: Flag.Boolean("dry-run").pipe(
+    Flag.withDescription("List what would move, skipped threads and target paths without moving."),
+    Flag.withDefault(false),
+  ),
+  leaveLocalChanges: Flag.Boolean("leave-local-changes").pipe(
+    Flag.withDescription(
+      "Also move Work with uncommitted or unpushed changes; those changes stay on the old machine.",
+    ),
+    Flag.withDefault(false),
+  ),
+  json: jsonFlag,
+}).pipe(
+  Command.withDescription(
+    "Move threads, a project, or everything one machine runs to another paired machine. Every machine keeps showing them; the target runs them.",
+  ),
+  Command.withHandler((flags) =>
+    runLive(flags, (client) =>
+      Effect.gen(function* () {
+        const chosen = [flags.from, flags.project, flags.threads].filter(Option.isSome).length;
+        if (chosen !== 1)
+          return yield* new MachinesCliError({
+            reason: "Choose what to move: --from <machine>, --project <name> or --threads <ids>.",
+          });
+        const { machines } = yield* client[WS_METHODS.machinesList]({}).pipe(
+          Effect.mapError(describe),
+        );
+        const target = yield* findMachine(machines, flags.to, false);
+        const options = {
+          ...(flags.leaveLocalChanges ? { leaveLocalChanges: true } : {}),
+          ...(flags.dryRun ? { dryRun: true } : {}),
+        };
+        const print = (result: unknown, text: string) =>
+          (flags.json ? encodeJson(result).pipe(Effect.orDie) : Effect.succeed(text)).pipe(
+            Effect.flatMap(Console.log),
+          );
+        if (Option.isSome(flags.project)) {
+          const named = flags.project.value.trim();
+          const { labels } = yield* client[WS_METHODS.projectLabelsList]({}).pipe(
+            Effect.mapError(describe),
+          );
+          const label = labels.find(
+            (candidate) =>
+              candidate.id === named || candidate.name.toLowerCase() === named.toLowerCase(),
+          );
+          if (label === undefined)
+            return yield* new MachinesCliError({ reason: `No project is named "${named}".` });
+          const result = yield* client[
+            flags.dryRun
+              ? WS_METHODS.projectLabelsPreviewMoveToMachine
+              : WS_METHODS.projectLabelsMoveToMachine
+          ]({
+            id: label.id,
+            target: target.environmentId,
+            ...options,
+          }).pipe(Effect.mapError(describe));
+          return yield* print(
+            result,
+            [
+              ...result.repositories.map(
+                (repository) =>
+                  `${repository.remote}: ${repository.status}${repository.detail ? ` (${repository.detail})` : ""}`,
+              ),
+              describeMove(target.name, result.threads),
+            ].join("\n"),
+          );
+        }
+        const result = Option.isSome(flags.from)
+          ? yield* client[
+              flags.dryRun
+                ? WS_METHODS.machinesPreviewMoveAllThreads
+                : WS_METHODS.machinesMoveAllThreads
+            ]({
+              from: (yield* findMachine(machines, flags.from.value, true)).environmentId,
+              target: target.environmentId,
+              ...options,
+            }).pipe(Effect.mapError(describe))
+          : yield* client[
+              flags.dryRun ? WS_METHODS.machinesPreviewMoveThreads : WS_METHODS.machinesMoveThreads
+            ]({
+              threadIds: Option.getOrElse(flags.threads, () => "")
+                .split(",")
+                .map((id) => ThreadId.make(id.trim()))
+                .filter((id) => id.length > 0),
+              target: target.environmentId,
+              ...options,
+            }).pipe(Effect.mapError(describe));
+        return yield* print(result, describeMove(target.name, result));
+      }),
+    ),
+  ),
+);
+
+const adoptCommand = Command.make("adopt", {
+  ...projectLocationFlags,
+  from: Flag.String("from").pipe(
+    Flag.withDescription("Environment ID of a permanently lost, already unpaired machine."),
+    Flag.optional,
+  ),
+  dryRun: Flag.Boolean("dry-run").pipe(
+    Flag.withDescription("Preview recovery; omit --from to list lost owners."),
+    Flag.withDefault(false),
+  ),
+  json: jsonFlag,
+}).pipe(
+  Command.withDescription(
+    "Explicitly recover replicated threads from a lost machine on the hub. Unpair it first.",
+  ),
+  Command.withHandler((flags) =>
+    runLive(flags, (client) =>
+      Effect.gen(function* () {
+        if (Option.isNone(flags.from) && !flags.dryRun)
+          return yield* new MachinesCliError({
+            reason: "Give --from <environment-id>, or use --dry-run to list lost owners.",
+          });
+        const result = yield* client[WS_METHODS.machinesAdoptThreads]({
+          ...(Option.isSome(flags.from)
+            ? { from: EnvironmentId.make(flags.from.value.trim()) }
+            : {}),
+          dryRun: flags.dryRun,
+        }).pipe(Effect.mapError(describe));
+        const text = [
+          ...result.unpaired.map((owner) => `${owner.environmentId}: ${owner.threads} threads`),
+          `${flags.dryRun ? "Would recover" : "Recovered"} ${result.adopted.length} threads on this machine.`,
+          ...result.skipped.map((entry) => `${entry.threadId}: ${entry.detail}`),
+        ].join("\n");
+        yield* (flags.json ? encodeJson(result).pipe(Effect.orDie) : Effect.succeed(text)).pipe(
+          Effect.flatMap(Console.log),
+        );
+      }),
+    ),
+  ),
+);
+
 export const machinesCommand = Command.make("machines").pipe(
   Command.withDescription("Pair this Cogenly with your other machines."),
   Command.withSubcommands([
     listCommand,
+    setupCommand,
     prepareCommand,
     pairCommand,
     joinCommand,
     unpairCommand,
     renameCommand,
+    moveCommand,
+    adoptCommand,
   ]),
 );

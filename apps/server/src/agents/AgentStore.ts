@@ -1,3 +1,4 @@
+import { factDocumentId } from "../sync/documentSchemas.ts";
 import * as SharedState from "../sync/SharedState.ts";
 import { decodeAgentRow } from "./agentRecord.ts";
 import {
@@ -18,7 +19,7 @@ import {
   AgentEventContext,
   ThreadId,
   type AgentMemoryWriteInput,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -150,7 +151,8 @@ const make = Effect.gen(function* () {
   const memory = (id: AgentId) =>
     get(id).pipe(
       Effect.andThen(
-        sql`SELECT COALESCE(f.legacy_note_id,f.id) AS id,f.agent_id AS agentId,json_extract(f.payload_json,'$.text') AS text,COALESCE(f.legacy_source,CASE WHEN json_extract(f.payload_json,'$.createdBy')='user' THEN 'owner' ELSE json_extract(f.payload_json,'$.createdBy') END) AS source,json_extract(f.payload_json,'$.createdAt') AS createdAt,f.updated_at AS updatedAt FROM facts f WHERE f.agent_id=${id} AND f.status IN ('proposed','confirmed') AND NOT EXISTS (SELECT 1 FROM facts newer WHERE newer.agent_id=f.agent_id AND COALESCE(newer.legacy_note_id,newer.id)=COALESCE(f.legacy_note_id,f.id) AND newer.status IN ('proposed','confirmed') AND newer.rowid>f.rowid) ORDER BY f.updated_at DESC,f.id`,
+        // Newest by creation time, not rowid: a synced fact's rowid is its arrival order here.
+        sql`SELECT COALESCE(f.legacy_note_id,f.id) AS id,f.agent_id AS agentId,json_extract(f.payload_json,'$.text') AS text,COALESCE(f.legacy_source,CASE WHEN json_extract(f.payload_json,'$.createdBy')='user' THEN 'owner' ELSE json_extract(f.payload_json,'$.createdBy') END) AS source,json_extract(f.payload_json,'$.createdAt') AS createdAt,f.updated_at AS updatedAt FROM facts f WHERE f.agent_id=${id} AND f.status IN ('proposed','confirmed') AND NOT EXISTS (SELECT 1 FROM facts newer WHERE newer.agent_id=f.agent_id AND COALESCE(newer.legacy_note_id,newer.id)=COALESCE(f.legacy_note_id,f.id) AND newer.status IN ('proposed','confirmed') AND (json_extract(newer.payload_json,'$.createdAt'),newer.rowid)>(json_extract(f.payload_json,'$.createdAt'),f.rowid)) ORDER BY f.updated_at DESC,f.id`,
       ),
       Effect.flatMap((rows) => Effect.forEach(rows, (row) => decodeNote(row))),
       Effect.mapError(storeError),
@@ -176,13 +178,22 @@ const make = Effect.gen(function* () {
               ? []
               : yield* sql<{
                   id: string;
-                }>`SELECT id FROM facts WHERE agent_id=${input.agentId} AND (legacy_note_id=${input.id} OR id=${input.id}) AND status IN ('proposed','confirmed') ORDER BY rowid DESC LIMIT 1`;
+                }>`SELECT id FROM facts WHERE agent_id=${input.agentId} AND (legacy_note_id=${input.id} OR id=${input.id}) AND status IN ('proposed','confirmed') ORDER BY json_extract(payload_json,'$.createdAt') DESC,rowid DESC LIMIT 1`;
           const { fact } = existing[0]
             ? yield* facts.supersede({ id: FactId.make(existing[0].id), replacement }, principal)
             : yield* facts.create(replacement, principal);
           const noteId = input.id ?? fact.id;
           yield* sql`UPDATE facts SET legacy_note_id=${noteId},legacy_source=${input.source ?? "owner"} WHERE id=${fact.id}`;
-          return (yield* memory(input.agentId)).find((note) => note.id === noteId)!;
+          yield* shared.capture("fact", factDocumentId(fact.id));
+          const notes = yield* memory(input.agentId);
+          // A note identical to one this agent already has answers as that note.
+          const kept = yield* sql<{
+            id: string;
+          }>`SELECT COALESCE(w.legacy_note_id,w.id) AS id FROM facts f JOIN facts w ON w.id=f.duplicate_of WHERE f.id=${fact.id}`;
+          return (
+            notes.find((note) => note.id === noteId) ??
+            notes.find((note) => note.id === kept[0]?.id)!
+          );
         }),
       )
       .pipe(Effect.mapError(storeError));
@@ -331,7 +342,9 @@ const make = Effect.gen(function* () {
         const at = yield* now;
         const day = at.slice(0, 10);
         const rows =
-          yield* sql`UPDATE agents SET run_day = ${day}, daily_runs = CASE WHEN run_day = ${day} THEN daily_runs + 1 ELSE 1 END WHERE agent_id = ${id} AND enabled = 1 AND (owner_machine IS NULL OR owner_machine = ${shared.environmentId}) AND (backoff_until IS NULL OR backoff_until <= ${at}) AND (run_day IS NULL OR run_day <> ${day} OR daily_runs < daily_run_cap) AND NOT EXISTS (SELECT 1 FROM agent_work_runs WHERE agent_id = ${id} AND status IN ('starting', 'running')) RETURNING agent_id`;
+          yield* sql`UPDATE agents SET run_day = ${day}, daily_runs = CASE WHEN run_day = ${day} THEN daily_runs + 1 ELSE 1 END WHERE agent_id = ${id} AND enabled = 1 AND (owner_machine IS NULL OR owner_machine = ${shared.environmentId}) AND (backoff_until IS NULL OR backoff_until <= ${at}) AND (run_day IS NULL OR run_day <> ${day} OR daily_runs < daily_run_cap) AND NOT EXISTS (SELECT 1 FROM agent_work_runs WHERE agent_id = ${id} AND status IN ('starting', 'running'))
+            AND NOT EXISTS (SELECT 1 FROM thread_owners WHERE thread_id = agents.conversation_thread_id
+              AND (local = 0 OR handoff_json IS NOT NULL)) RETURNING agent_id`;
         return rows.length > 0;
       }).pipe(Effect.mapError(storeError)),
     outcome: (id, succeeded) =>

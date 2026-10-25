@@ -1,5 +1,5 @@
 import { OverlayPresence } from "~/components/ui/overlay-presence";
-import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
+import type { EnvironmentId, ScopedThreadRef } from "@cogenly/contracts";
 import {
   HTML_RENDER_COLUMN_WIDTH,
   htmlRenderFileName,
@@ -7,8 +7,8 @@ import {
   htmlRenderOutlineBoxes,
   type HtmlRenderOutlineBox,
   type HtmlRenderReference,
-} from "@t3tools/shared/htmlRender";
-import { Maximize2Icon } from "lucide-react";
+} from "@cogenly/shared/htmlRender";
+import { CircleAlertIcon, Maximize2Icon } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { useAssetUrlRefresh, useAssetUrlState } from "~/assets/assetUrls";
@@ -48,8 +48,8 @@ function rememberPageHeight(attachmentId: string, width: number, height: number)
 /**
  * An agent's HTML render inline in the thread: the page itself on the thread's
  * own background, at the server's measured height for this width until the
- * page reports its own. Loading and failure hold the same box so nothing below
- * it moves.
+ * page reports its own. Loading holds that box so nothing below it moves; a
+ * page that fails to load collapses to a one-line error.
  */
 export function HtmlRenderFrame(props: {
   readonly environmentId: EnvironmentId;
@@ -149,6 +149,20 @@ export function HtmlRenderFrame(props: {
     );
   }, [cacheFailed, cachedExpiresAt, cachedUrl, refresh, src]);
 
+  // A page that never loaded gives back its reserved box: an empty frame the
+  // page's height would leave a blank gap with its message out of view.
+  if (failed && src === null) {
+    return (
+      <p
+        role="status"
+        className="flex min-w-0 items-center gap-1.5 py-1 text-xs text-muted-foreground swap-motion"
+      >
+        <CircleAlertIcon aria-hidden className="size-3.5 shrink-0" />
+        <span className="min-w-0 truncate">Unable to load {title}</span>
+      </p>
+    );
+  }
+
   return (
     // The frame's chrome sits in a slim row above the page, never over it: a
     // page's own controls often live in its top corner.
@@ -174,7 +188,7 @@ export function HtmlRenderFrame(props: {
                         toastManager.add({
                           type: "error",
                           title: "Page unavailable",
-                          description: "Reconnect to the environment and try again.",
+                          description: "Reconnect to the machine and try again.",
                         });
                     }}
                   />
@@ -209,10 +223,6 @@ export function HtmlRenderFrame(props: {
             onLoad={showPage}
             onFullscreenChange={onFullscreenChange}
           />
-        ) : failed ? (
-          <p className="flex size-full items-center justify-center text-muted-foreground text-xs">
-            Unable to load {title}
-          </p>
         ) : null}
       </div>
       <OverlayPresence when={expandedSrc}>

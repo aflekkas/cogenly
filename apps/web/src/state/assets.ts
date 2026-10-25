@@ -1,7 +1,8 @@
 import {
   createAssetEnvironmentAtoms,
   createProjectFaviconUrlAtomFamily,
-} from "@t3tools/client-runtime/state/assets";
+  createRepositoryIconUrlAtomFamily,
+} from "@cogenly/client-runtime/state/assets";
 import { Atom } from "effect/reactivity";
 
 import { connectionAtomRuntime } from "../connection/runtime";
@@ -33,4 +34,9 @@ export const projectFaviconUrlAtom = createProjectFaviconUrlAtomFamily({
   createUrl: assetEnvironment.createUrl,
   preparedConnection: environmentSession.preparedConnectionValueAtom,
   projectClones: environmentProjectClonesAtom,
+});
+
+export const repositoryIconUrlAtom = createRepositoryIconUrlAtomFamily({
+  createUrl: assetEnvironment.createUrl,
+  preparedConnection: environmentSession.preparedConnectionValueAtom,
 });

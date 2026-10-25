@@ -17,7 +17,7 @@ import {
   shortcutLabelForCommand,
 } from "../keybindings";
 import { useRightPanelStore } from "../rightPanelStore";
-import { scopedThreadKey } from "@t3tools/client-runtime/environment";
+import { scopedThreadKey } from "@cogenly/client-runtime/environment";
 import { resolveThreadRouteRef } from "../threadRoutes";
 import { cn, isMacPlatform } from "../lib/utils";
 import { primaryServerKeybindingsAtom } from "../state/server";

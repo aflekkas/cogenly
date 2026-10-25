@@ -1,5 +1,9 @@
-import type { ProjectLabelId, ProjectLabelWithRepositories } from "@t3tools/contracts";
-import { CheckIcon, PlusIcon, Settings2Icon } from "lucide-react";
+import type {
+  EnvironmentId,
+  ProjectLabelId,
+  ProjectLabelWithRepositories,
+} from "@cogenly/contracts";
+import { PlusIcon, Settings2Icon } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 
 import { Button } from "../components/ui/button";
@@ -13,7 +17,7 @@ import {
   ComboboxTrigger,
 } from "../components/ui/combobox";
 import { isProjectLabelArchived, sortProjectLabels } from "./projectLabels.logic";
-import { ProjectFolderIcon } from "./ProjectFolderMark";
+import { ProjectPickerRow } from "./ProjectPickerRow";
 import { ProjectTag } from "./ProjectTag";
 
 /**
@@ -22,6 +26,8 @@ import { ProjectTag } from "./ProjectTag";
  * new open item's projects) and saves it however that record saves.
  */
 export function ProjectLabelPicker(props: {
+  /** The environment `labels` belong to, which resolves their icons. */
+  environmentId: EnvironmentId;
   labels: ReadonlyArray<ProjectLabelWithRepositories>;
   selectedIds: ReadonlyArray<ProjectLabelId>;
   onToggle: (labelId: ProjectLabelId, selected: boolean) => void;
@@ -87,10 +93,12 @@ export function ProjectLabelPicker(props: {
         </ComboboxEmpty>
         <ComboboxList>
           {(label: ProjectLabelWithRepositories) => (
-            <ComboboxItem key={label.id} value={label}>
-              <ProjectFolderIcon color={label.color} className="size-4" />
-              <span className="min-w-0 flex-1 truncate">{label.name}</span>
-              {selected.has(label.id) ? <CheckIcon className="ml-auto" /> : null}
+            <ComboboxItem key={label.id} value={label} hideIndicator>
+              <ProjectPickerRow
+                project={{ environmentId: props.environmentId, label }}
+                label={label.name}
+                chosen={selected.has(label.id)}
+              />
             </ComboboxItem>
           )}
         </ComboboxList>

@@ -1,8 +1,8 @@
 import {
   createEnvironmentRpcCommand,
   createEnvironmentRpcSubscriptionAtomFamily,
-} from "@t3tools/client-runtime/state/runtime";
-import { WS_METHODS } from "@t3tools/contracts";
+} from "@cogenly/client-runtime/state/runtime";
+import { WS_METHODS } from "@cogenly/contracts";
 
 import { connectionAtomRuntime } from "../connection/runtime";
 

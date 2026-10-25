@@ -1,11 +1,24 @@
+import * as Membership from "./ProjectRepositoryMembership.ts";
 import {
   ProjectId,
+  PROJECT_INSTRUCTIONS_MAX_LENGTH,
+  type ProjectLabelMergeInput,
+  type ProjectMergeFileStatus,
+  type ProjectLabelDismissDuplicateInput,
   ProjectLabelError,
   ProjectLabelId,
   ProjectLabelWithRepositories,
   ProjectSourceLink,
+  REMOTE_REPOSITORY_ID_PREFIX,
+  projectHomeOwner,
+  repositoryDirectoryNameFor,
+  repositoryRemoteParts,
   ThreadProjectLabel,
   type ProjectLabelCreateInput,
+  type ProjectOrphanFolderInput,
+  type ProjectOrphanFolderRemoveResult,
+  type ProjectOrphanFoldersResult,
+  type ProjectLabelRepositoryCheckout,
   type ProjectLabelUpdateInput,
   type ProjectLabelRepository,
   type ProjectLabelSourceLinkInput,
@@ -14,21 +27,30 @@ import {
   type ThreadProjectFolderResult,
   type ThreadId,
   type ApplicationStoredEvent,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as PubSub from "effect/PubSub";
+import * as Ref from "effect/Ref";
+import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 
+import * as GitHubRest from "@cogenly/source-control-github/server/GitHubRest";
+
 import * as SharedState from "../sync/SharedState.ts";
+import * as RemoteThreadCommands from "../orchestration-v2/RemoteThreadCommands.ts";
 import * as Events from "../persistence/OrchestrationEventStore.ts";
+import * as ProjectCloneTracker from "../project/ProjectCloneTracker.ts";
+import * as ProjectFaviconResolver from "../project/ProjectFaviconResolver.ts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
 import { normalizeRepositoryRemote, repositoryDirectoryName } from "../project/RepositoryRemote.ts";
 import * as ProjectLabelFolders from "./ProjectLabelFolders.ts";
@@ -52,7 +74,16 @@ export class ProjectLabelService extends Context.Service<
       id: ProjectLabelId,
     ) => Effect.Effect<{ label: ProjectLabelWithRepositories }, ProjectLabelError>;
     readonly subscribeChanges: Effect.Effect<Stream.Stream<void>, never, Scope.Scope>;
+    /**
+     * Re-emits project lists after something only the disk records changed,
+     * such as a checkout removed from this machine (its `checkout` state).
+     */
+    readonly notifyCheckoutChanged: Effect.Effect<void>;
     readonly moveThread: (
+      input: MoveThreadProjectFolderInput,
+    ) => Effect.Effect<ThreadProjectFolderResult, ProjectLabelError>;
+    /** moveThread on this machine's own record, for a move its owner routing forwarded here. */
+    readonly moveLocalThread: (
       input: MoveThreadProjectFolderInput,
     ) => Effect.Effect<ThreadProjectFolderResult, ProjectLabelError>;
     readonly list: () => Effect.Effect<Labels, ProjectLabelError>;
@@ -63,7 +94,27 @@ export class ProjectLabelService extends Context.Service<
     readonly update: (
       input: ProjectLabelUpdateInput,
     ) => Effect.Effect<{ label: ProjectLabelWithRepositories }, ProjectLabelError>;
+    readonly mergeFileStatus: () => Effect.Effect<ProjectMergeFileStatus, ProjectLabelError>;
+    readonly merge: (
+      input: ProjectLabelMergeInput,
+    ) => Effect.Effect<{ label: ProjectLabelWithRepositories }, ProjectLabelError>;
+    readonly dismissDuplicate: (
+      input: ProjectLabelDismissDuplicateInput,
+    ) => Effect.Effect<{ label: ProjectLabelWithRepositories }, ProjectLabelError>;
+    readonly undismissDuplicate: (
+      input: ProjectLabelDismissDuplicateInput,
+    ) => Effect.Effect<{ label: ProjectLabelWithRepositories }, ProjectLabelError>;
     readonly delete: (id: ProjectLabelId) => Effect.Effect<{ deleted: boolean }, ProjectLabelError>;
+    /** Project folders no project claims (see ProjectLabelFolders.listOrphans). */
+    readonly listOrphanFolders: () => Effect.Effect<ProjectOrphanFoldersResult, ProjectLabelError>;
+    /** Makes an orphan folder a project of the same name, keeping everything in it. */
+    readonly adoptOrphanFolder: (
+      input: ProjectOrphanFolderInput,
+    ) => Effect.Effect<{ label: ProjectLabelWithRepositories }, ProjectLabelError>;
+    /** Deletes an orphan folder that is only an empty skeleton; false otherwise. */
+    readonly removeOrphanFolder: (
+      input: ProjectOrphanFolderInput,
+    ) => Effect.Effect<ProjectOrphanFolderRemoveResult, ProjectLabelError>;
     /**
      * Archives the project: it leaves pickers but keeps its threads, chat,
      * repositories and filing, and refuses new threads and repositories until
@@ -89,6 +140,28 @@ export class ProjectLabelService extends Context.Service<
     readonly unlinkRepository: (
       input: ProjectLabelRepository,
     ) => Effect.Effect<{ label: ProjectLabelWithRepositories }, ProjectLabelError>;
+    /**
+     * Points a linked remote at this machine's checkout record, in one
+     * transaction: the `remote:` placeholder (or nothing, when it vanished)
+     * becomes `repositoryId`, and scheduled tasks bound to the placeholder
+     * follow it. RepositoryCheckout calls it once the record exists; the
+     * synced project data does not change, since it names repositories by
+     * remote and directory name.
+     */
+    /**
+     * The project's home owner (its linked GitHub owner), recording the
+     * connected account's login as that link when the project has none, so
+     * the folders it derives are the same on every machine. Null when there
+     * is neither.
+     */
+    readonly ensureHomeOwner: (
+      id: ProjectLabelId,
+    ) => Effect.Effect<string | null, ProjectLabelError>;
+    readonly bindRepositoryCheckout: (input: {
+      readonly labelId: ProjectLabelId;
+      readonly remote: string;
+      readonly repositoryId: ProjectId;
+    }) => Effect.Effect<{ label: ProjectLabelWithRepositories }, ProjectLabelError>;
     readonly linkSource: (
       input: ProjectLabelSourceLinkInput,
     ) => Effect.Effect<{ label: ProjectLabelWithRepositories }, ProjectLabelError>;
@@ -123,10 +196,24 @@ const decodeRepositoryLinks = Schema.decodeUnknownEffect(
         repositoryId: ProjectId,
         remote: Schema.NullOr(Schema.String),
         directoryName: Schema.NullOr(Schema.String),
+        workspaceRoot: Schema.NullOr(Schema.String),
+        faviconPath: Schema.NullOr(Schema.String),
+        iconPath: Schema.NullOr(Schema.String),
       }),
     ),
   ),
 );
+type StoredRepositoryLink = {
+  readonly repositoryId: ProjectId;
+  readonly remote: string | null;
+  readonly directoryName: string | null;
+  /** This machine's checkout path; null for a `remote:` placeholder. */
+  readonly workspaceRoot: string | null;
+  /** The record's own favicon choice, which the recorded icon follows. */
+  readonly faviconPath: string | null;
+  /** The synced icon file, relative to the repository root. */
+  readonly iconPath: string | null;
+};
 const decodeSourceLinkRows = Schema.decodeUnknownEffect(
   Schema.fromJsonString(
     Schema.Array(Schema.Struct({ kind: Schema.String, owner: Schema.String, repo: Schema.String })),
@@ -134,12 +221,35 @@ const decodeSourceLinkRows = Schema.decodeUnknownEffect(
 );
 const decodeSourceLink = Schema.decodeUnknownOption(ProjectSourceLink);
 const decodeLabel = Schema.decodeUnknownEffect(ProjectLabelWithRepositories);
+const decodeDuplicateIds = Schema.decodeUnknownEffect(Schema.Array(ProjectLabelId));
+const decodeDuplicateIdsJson = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(Schema.Array(ProjectLabelId)),
+);
+const decodeViewer = Schema.decodeUnknownOption(
+  Schema.fromJsonString(Schema.Struct({ login: Schema.String })),
+);
+/** `repos/` path of a link: derived from its remote, else the checkout's folder name. */
+const repositoryDirectoryNameOf = (
+  remote: string | null,
+  workspaceRoot: string | null,
+  homeOwner: string | null,
+) =>
+  remote !== null
+    ? repositoryDirectoryNameFor(remote, homeOwner)
+    : workspaceRoot === null
+      ? null
+      : repositoryDirectoryName(workspaceRoot);
 const decodeTag = Schema.decodeUnknownEffect(ThreadProjectLabel);
 const encodeAudit = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  const membership = yield* Membership.ProjectRepositoryMembership;
   const shared = yield* SharedState.SharedState;
+  // Absent on a server without the machine link (and in tests): every thread is local.
+  const remote = Option.getOrUndefined(
+    yield* Effect.serviceOption(RemoteThreadCommands.RemoteThreadCommands),
+  );
   const crypto = yield* Crypto.Crypto;
   const events = yield* Events.OrchestrationEventStore;
   const changes = yield* PubSub.sliding<void>(1);
@@ -151,8 +261,15 @@ const make = Effect.gen(function* () {
   const missing = (operation: string) => new ProjectLabelError({ operation, reason: "not_found" });
   const readLabels = (id?: ProjectLabelId) =>
     sql`SELECT label_id AS id, name, color, description, instructions, project_chat_thread_id AS projectChatThreadId, archived_at AS archivedAt, created_at AS createdAt, updated_at AS updatedAt,
+    (SELECT json_group_array(other_id) FROM (
+      SELECT CASE WHEN d.first_id=l.label_id THEN d.second_id ELSE d.first_id END AS other_id
+      FROM shared_possible_duplicates d JOIN project_labels a ON a.label_id=d.first_id JOIN project_labels b ON b.label_id=d.second_id
+      WHERE d.kind='project' AND (d.first_id=l.label_id OR d.second_id=l.label_id)
+      AND NOT EXISTS (SELECT 1 FROM shared_documents dead WHERE dead.kind='project' AND dead.id IN (d.first_id,d.second_id) AND dead.tombstone_json IS NOT NULL)
+      AND NOT EXISTS (SELECT 1 FROM shared_documents doc,json_each(doc.fields_json,'$.dismissedDuplicateIds') j WHERE doc.kind='project' AND ((doc.id=d.first_id AND j.value=d.second_id) OR (doc.id=d.second_id AND j.value=d.first_id)))
+      ORDER BY other_id)) AS duplicates,
     (SELECT json_group_array(repository_id) FROM (SELECT repository_id FROM label_repositories r WHERE r.label_id = l.label_id ORDER BY repository_id)) AS repositories
-    , (SELECT json_group_array(json(link)) FROM (SELECT json_object('repositoryId', repository_id, 'remote', remote, 'directoryName', directory_name) AS link FROM label_repositories r WHERE r.label_id = l.label_id ORDER BY repository_id)) AS repositoryLinks
+    , (SELECT json_group_array(json(link)) FROM (SELECT json_object('repositoryId', repository_id, 'remote', remote, 'directoryName', directory_name, 'workspaceRoot', (SELECT p.workspace_root FROM projection_projects p WHERE p.project_id = r.repository_id AND p.deleted_at IS NULL), 'faviconPath', (SELECT p.favicon_path FROM projection_projects p WHERE p.project_id = r.repository_id AND p.deleted_at IS NULL), 'iconPath', icon_path) AS link FROM label_repositories r WHERE r.label_id = l.label_id ORDER BY repository_id)) AS repositoryLinks
     , (SELECT json_group_array(json(source)) FROM (SELECT json_object('kind', kind, 'owner', owner, 'repo', repo) AS source FROM label_source_links s WHERE s.label_id = l.label_id ORDER BY kind, owner, repo)) AS sources
     , (SELECT count(*) FROM effective_thread_project_folders f
       JOIN orchestration_v2_projection_threads t ON t.thread_id = f.thread_id
@@ -163,14 +280,11 @@ const make = Effect.gen(function* () {
           json_extract(t.payload_json, '$.agent') IS NULL
           AND NOT EXISTS (SELECT 1 FROM agents a WHERE a.conversation_thread_id = t.thread_id)
         ))) AS threadCount
-    FROM project_labels l ${id === undefined ? sql`` : sql`WHERE label_id = ${id}`} ORDER BY name COLLATE NOCASE, label_id`.pipe(
+    FROM project_labels l WHERE NOT EXISTS (SELECT 1 FROM shared_documents dead WHERE dead.kind='project' AND dead.id=l.label_id AND dead.tombstone_json IS NOT NULL) ${id === undefined ? sql`` : sql`AND label_id = ${id}`} ORDER BY name COLLATE NOCASE, label_id`.pipe(
       Effect.flatMap((rows) =>
         Effect.forEach(rows, (row) =>
           Effect.gen(function* () {
             const repositoryIds = yield* decodeRepositories(row.repositories);
-            const repositoryLinks = yield* backfillRepositoryLinks(
-              yield* decodeRepositoryLinks(row.repositoryLinks),
-            );
             const sourceLinkRows = yield* decodeSourceLinkRows(row.sources);
             const sourceLinks = sourceLinkRows.flatMap((source) =>
               source.kind === "github-owner"
@@ -183,18 +297,32 @@ const make = Effect.gen(function* () {
                     }),
                   ),
             );
+            const repositoryLinks = yield* backfillRepositoryLinks(
+              yield* decodeRepositoryLinks(row.repositoryLinks),
+              projectHomeOwner(sourceLinks),
+            );
+            const checkouts = yield* Effect.forEach(repositoryLinks, checkoutState);
+            const icons = yield* Effect.forEach(repositoryLinks, (link, index) =>
+              checkouts[index] === "ready" ? recordIcon(link) : Effect.succeed(link.iconPath),
+            );
             return yield* decodeLabel({
               ...row,
+              possibleDuplicateIds: yield* decodeDuplicateIdsJson(row.duplicates),
               color: row.color ?? undefined,
               description: row.description ?? undefined,
               archivedAt: row.archivedAt ?? undefined,
               instructions: row.instructions ?? "",
               repositoryIds,
-              repositories: repositoryLinks.map((link) => ({
-                repositoryId: link.repositoryId,
-                remote: link.remote || null,
-                directoryName: link.directoryName || null,
-              })),
+              repositories: repositoryLinks.map((link, index) => {
+                const iconPath = icons[index];
+                return {
+                  repositoryId: link.repositoryId,
+                  remote: link.remote || null,
+                  directoryName: link.directoryName || null,
+                  checkout: checkouts[index],
+                  ...(iconPath ? { iconPath } : {}),
+                };
+              }),
               sourceLinks,
             });
           }),
@@ -299,6 +427,7 @@ const make = Effect.gen(function* () {
   const subscribe = <A>(
     read: () => Effect.Effect<A, ProjectLabelError>,
     affected: (event: ApplicationStoredEvent) => boolean,
+    extra: Stream.Stream<void> = Stream.empty,
   ) =>
     Stream.unwrap(
       Effect.gen(function* () {
@@ -318,9 +447,11 @@ const make = Effect.gen(function* () {
           );
         return Stream.concat(
           Stream.fromEffect(read()),
-          Stream.merge(
-            Stream.merge(Stream.fromSubscription(subscription), shared.changes),
-            deletions,
+          Stream.mergeAll(
+            [Stream.fromSubscription(subscription), shared.changes, deletions, extra],
+            {
+              concurrency: "unbounded",
+            },
           ).pipe(Stream.mapEffect(read)),
         );
       }),
@@ -351,54 +482,174 @@ const make = Effect.gen(function* () {
             }),
           ),
         );
+  const mergeFileRequests = yield* Queue.sliding<void>(1);
+  if (Option.isSome(folders)) {
+    const reconcileMerges = folders.value.reconcileMerges.pipe(
+      Effect.catch((cause) => Effect.logWarning("Project merge files deferred", { cause })),
+      Effect.andThen(PubSub.publish(changes, undefined)),
+    );
+    yield* Queue.take(mergeFileRequests).pipe(
+      Effect.andThen(reconcileMerges),
+      Effect.forever,
+      Effect.forkScoped,
+    );
+    yield* shared.changes.pipe(
+      Stream.runForEach(() => Queue.offer(mergeFileRequests, undefined)),
+      Effect.forkScoped,
+    );
+    yield* Queue.offer(mergeFileRequests, undefined);
+  }
   // Links written before portable identity (or by a link whose checkout had
-  // no readable remote yet) backfill lazily on read: the remote and directory
-  // name come from the checkout's git remote when it can be read. A repo with
-  // no remote stays null (local-only). The resolver caches, so repeat reads
-  // of a local-only repo do not spawn git every time.
+  // no readable remote yet) backfill lazily on read: the remote comes from
+  // the checkout's git remote when it can be read. A repo with no remote
+  // stays null (local-only) and keeps its folder name. The resolver caches,
+  // so repeat reads of a local-only repo do not spawn git every time. The
+  // directory name is re-derived every read (the project's owner may have
+  // changed, or a peer may have sent another), and a stored one that
+  // disagrees is corrected, so the synced shape follows the rule too.
   const backfillRepositoryLinks = (
-    links: ReadonlyArray<{
-      readonly repositoryId: ProjectId;
-      readonly remote: string | null;
-      readonly directoryName: string | null;
-    }>,
+    links: ReadonlyArray<StoredRepositoryLink>,
+    homeOwner: string | null,
   ) =>
-    Option.isNone(identities)
-      ? Effect.succeed(links)
-      : Effect.forEach(links, (link) =>
-          Effect.gen(function* () {
-            if (link.remote !== null && link.directoryName !== null) return link;
-            const rows = yield* sql<{
-              workspace_root: string;
-            }>`SELECT workspace_root FROM projection_projects WHERE project_id = ${link.repositoryId} AND deleted_at IS NULL`;
-            const workspaceRoot = rows[0]?.workspace_root;
-            if (typeof workspaceRoot !== "string" || workspaceRoot.length === 0) return link;
-            const identity = yield* identities.value.resolve(workspaceRoot);
-            const remote =
-              identity === null ? null : normalizeRepositoryRemote(identity.locator.remoteUrl);
-            const directoryName = repositoryDirectoryName(workspaceRoot) ?? link.directoryName;
-            if (remote !== link.remote || directoryName !== link.directoryName) {
-              yield* sql.withTransaction(
-                Effect.gen(function* () {
-                  yield* sql`UPDATE label_repositories SET remote=${remote},directory_name=${directoryName} WHERE repository_id=${link.repositoryId}`;
-                  const labels = yield* sql<{
-                    label_id: string;
-                  }>`SELECT label_id FROM label_repositories WHERE repository_id=${link.repositoryId}`;
-                  for (const row of labels)
-                    yield* shared.capture("project", row.label_id).pipe(
-                      Effect.catchTags({
-                        SharedStateError: (error) =>
-                          Effect.logWarning("Project repository backfill capture failed", {
-                            reason: error.reason,
-                          }),
+    Effect.forEach(links, (link) =>
+      Effect.gen(function* () {
+        const workspaceRoot = link.workspaceRoot;
+        const identity =
+          link.remote === null &&
+          Option.isSome(identities) &&
+          typeof workspaceRoot === "string" &&
+          workspaceRoot.length > 0
+            ? yield* identities.value.resolve(workspaceRoot)
+            : null;
+        const remote =
+          link.remote ??
+          (identity === null ? null : normalizeRepositoryRemote(identity.locator.remoteUrl));
+        const directoryName =
+          repositoryDirectoryNameOf(remote, workspaceRoot, homeOwner) ?? link.directoryName;
+        if (remote !== link.remote || directoryName !== link.directoryName) {
+          yield* sql.withTransaction(
+            Effect.gen(function* () {
+              yield* sql`UPDATE label_repositories SET remote=${remote},directory_name=${directoryName} WHERE repository_id=${link.repositoryId}`;
+              const labels = yield* sql<{
+                label_id: string;
+              }>`SELECT label_id FROM label_repositories WHERE repository_id=${link.repositoryId}`;
+              for (const row of labels)
+                yield* shared.capture("project", row.label_id).pipe(
+                  Effect.catchTags({
+                    SharedStateError: (error) =>
+                      Effect.logWarning("Project repository backfill capture failed", {
+                        reason: error.reason,
                       }),
-                    );
+                  }),
+                );
+            }),
+          );
+        }
+        return { ...link, remote, directoryName };
+      }),
+    );
+  // Optional like the resolver: memory-database tests have neither disk nor
+  // clones, and every linked repository with a record then reads as ready.
+  const fileSystem = yield* Effect.serviceOption(FileSystem.FileSystem);
+  const clones = yield* Effect.serviceOption(ProjectCloneTracker.ProjectCloneTracker);
+  // Mirrors what RepositoryCheckout.ensureCheckout would clone: a folder with
+  // its own `.git`, or any files at all (a monorepo subfolder, a plain
+  // folder), is ready; a missing or empty one is not.
+  const checkoutState = (
+    link: StoredRepositoryLink,
+  ): Effect.Effect<ProjectLabelRepositoryCheckout> =>
+    Effect.gen(function* () {
+      const clone = Option.isNone(clones) ? null : yield* clones.value.get(link.repositoryId);
+      if (clone?.phase === "running") return "cloning";
+      if (clone?.phase === "failed" || clone?.phase === "cancelled") return "failed";
+      if (link.workspaceRoot === null) return "not_cloned";
+      if (Option.isNone(fileSystem)) return "ready";
+      const fs = fileSystem.value;
+      if (yield* fs.exists(`${link.workspaceRoot}/.git`).pipe(Effect.orElseSucceed(() => false)))
+        return "ready";
+      const entries = yield* fs
+        .readDirectory(link.workspaceRoot)
+        .pipe(Effect.orElseSucceed((): ReadonlyArray<string> => []));
+      return entries.length > 0 ? "ready" : "missing";
+    });
+  const faviconResolver = yield* Effect.serviceOption(
+    ProjectFaviconResolver.ProjectFaviconResolver,
+  );
+  const paths = yield* Effect.serviceOption(Path.Path);
+  /**
+   * The icon a checkout here resolves (the record's chosen favicon, else the
+   * one the resolver finds), recorded on the link relative to the
+   * repository root so it syncs to machines without a checkout. A recorded
+   * icon that this checkout also has is kept, so two machines never trade
+   * paths back and forth; an external favicon outside the repository is
+   * not recorded, since no other machine could read it.
+   */
+  const recordIcon = (link: StoredRepositoryLink): Effect.Effect<string | null> =>
+    Effect.gen(function* () {
+      const root = link.workspaceRoot;
+      if (
+        root === null ||
+        link.remote === null ||
+        Option.isNone(faviconResolver) ||
+        Option.isNone(paths) ||
+        Option.isNone(fileSystem)
+      )
+        return link.iconPath;
+      const path = paths.value;
+      if (
+        link.iconPath !== null &&
+        (yield* fileSystem.value
+          .exists(path.join(root, link.iconPath))
+          .pipe(Effect.orElseSucceed(() => false)))
+      )
+        return link.iconPath;
+      const found = yield* faviconResolver.value
+        .resolvePath(root, link.faviconPath ?? undefined)
+        .pipe(Effect.orElseSucceed(() => null));
+      const relative = found === null ? null : path.relative(root, found).split(path.sep).join("/");
+      if (
+        relative === null ||
+        relative.length === 0 ||
+        relative.startsWith("..") ||
+        path.isAbsolute(relative) ||
+        relative === link.iconPath
+      )
+        return link.iconPath;
+      yield* sql
+        .withTransaction(
+          Effect.gen(function* () {
+            yield* sql`UPDATE label_repositories SET icon_path=${relative} WHERE repository_id=${link.repositoryId}`;
+            const labels = yield* sql<{
+              label_id: string;
+            }>`SELECT label_id FROM label_repositories WHERE repository_id=${link.repositoryId}`;
+            for (const row of labels)
+              yield* shared.capture("project", row.label_id).pipe(
+                Effect.catchTags({
+                  SharedStateError: (error) =>
+                    Effect.logWarning("Project repository icon capture failed", {
+                      reason: error.reason,
+                    }),
                 }),
               );
-            }
-            return { repositoryId: link.repositoryId, remote, directoryName };
           }),
-        );
+        )
+        .pipe(Effect.ignoreCause({ log: true }));
+      return relative;
+    });
+  // Clone phases change what `checkout` reads; progress ticks do not.
+  const clonePhaseChanges: Stream.Stream<void> = Option.isNone(clones)
+    ? Stream.empty
+    : clones.value.stream.pipe(
+        Stream.map((snapshots) =>
+          snapshots
+            .map((clone) => `${clone.projectId}:${clone.phase}`)
+            .sort()
+            .join("\n"),
+        ),
+        Stream.changes,
+        Stream.drop(1),
+        Stream.map(() => undefined),
+      );
   // A linked repository files its own GitHub link with the project, so owner
   // search and the picker know it without a manual step. Best-effort: no
   // remote, a non-GitHub remote, or an unparseable one simply adds nothing.
@@ -419,6 +670,38 @@ const make = Effect.gen(function* () {
       yield* sql`INSERT INTO label_source_links(label_id, kind, owner, repo, created_at) VALUES (${labelId}, ${link.kind}, ${link.owner}, ${link.repo}, ${yield* now}) ON CONFLICT(label_id, kind, owner, repo) DO NOTHING`;
     },
   );
+  // The connected GitHub account's login, read once: the home owner of a
+  // project that links no owner. Optional like the resolver; null when
+  // GitHub is not connected or cannot be reached.
+  const github = yield* Effect.serviceOption(GitHubRest.GitHubRest);
+  const viewer = yield* Ref.make<string | null>(null);
+  const viewerLogin: Effect.Effect<string | null> = Effect.gen(function* () {
+    const cached = yield* Ref.get(viewer);
+    if (cached !== null || Option.isNone(github)) return cached;
+    const response = yield* github.value.rest({
+      host: "github.com",
+      operation: "projectHomeOwner",
+      path: "user",
+    });
+    if (response.status !== 200) return null;
+    const login = Option.getOrNull(decodeViewer(response.body))?.login ?? null;
+    if (login !== null) yield* Ref.set(viewer, login);
+    return login;
+  }).pipe(Effect.orElseSucceed(() => null));
+  const ensureHomeOwner = (id: ProjectLabelId) =>
+    Effect.gen(function* () {
+      const { label } = yield* get(id);
+      const current = projectHomeOwner(label.sourceLinks);
+      if (current !== null || label.archivedAt !== undefined) return current;
+      const login = yield* viewerLogin;
+      const link =
+        login === null
+          ? undefined
+          : Option.getOrUndefined(decodeSourceLink({ kind: "github-owner", owner: login }));
+      if (link === undefined) return null;
+      yield* sourceLink({ id, link }, true);
+      return login;
+    });
   const repository = (
     input: ProjectLabelRepository & { readonly remote?: string | null | undefined },
     link: boolean,
@@ -449,8 +732,14 @@ const make = Effect.gen(function* () {
           const remote =
             normalizeRepositoryRemote(input.remote) ??
             (identity === null ? null : normalizeRepositoryRemote(identity.locator.remoteUrl));
-          const directoryName =
-            typeof workspaceRoot === "string" ? repositoryDirectoryName(workspaceRoot) : null;
+          const owners = yield* sql<{
+            owner: string;
+          }>`SELECT owner FROM label_source_links WHERE label_id = ${input.labelId} AND kind = 'github-owner'`;
+          const directoryName = repositoryDirectoryNameOf(
+            remote,
+            typeof workspaceRoot === "string" ? workspaceRoot : null,
+            projectHomeOwner(owners.map((row) => ({ kind: "github-owner", owner: row.owner }))),
+          );
           yield* sql`INSERT INTO label_repositories(label_id, repository_id, remote, directory_name) VALUES (${input.labelId}, ${input.repositoryId}, ${remote}, ${directoryName}) ON CONFLICT(repository_id) DO UPDATE SET label_id = excluded.label_id, remote = COALESCE(excluded.remote, label_repositories.remote), directory_name = COALESCE(excluded.directory_name, label_repositories.directory_name)`;
           yield* autoAddRepositorySourceLink(input.labelId, input.repositoryId);
         } else
@@ -477,12 +766,43 @@ const make = Effect.gen(function* () {
         return yield* get(input.id);
       }),
     );
+  // A thread another machine runs is filed there: its filing replicates from
+  // the owner, so a local one would be overwritten. The owner pushes the new
+  // filing back before it answers.
   const moveThread = (input: MoveThreadProjectFolderInput) =>
+    (remote === undefined ? Effect.succeedNone : remote.moveFolder(input)).pipe(
+      Effect.mapError((error) =>
+        isProjectLabelError(error)
+          ? error
+          : new ProjectLabelError({
+              operation: "moveThread",
+              reason: "remote",
+              detail: error.message,
+            }),
+      ),
+      Effect.flatMap((forwarded) =>
+        Option.isSome(forwarded)
+          ? PubSub.publish(changes, undefined).pipe(Effect.as(forwarded.value))
+          : moveLocalThread(input),
+      ),
+    );
+  /** Files a thread this machine runs; also what the owner runs for a forwarded move. */
+  const moveLocalThread = (input: MoveThreadProjectFolderInput) =>
     mutate(
       "moveThread",
       input,
       Effect.gen(function* () {
-        yield* requireThread(input.threadId);
+        // Routing is advisory: ownership can change before this transaction starts.
+        // Read the fence under the same write lock as the filing and its audit.
+        const runner = yield* sql`SELECT 1 FROM thread_owners WHERE thread_id = ${input.threadId}
+          AND (local = 0 OR handoff_json IS NOT NULL)`;
+        if (runner.length > 0)
+          return yield* new ProjectLabelError({
+            operation: "moveThread",
+            reason: "remote",
+            detail: "This thread moved or is moving to another machine. Retry the filing there.",
+          });
+        const thread = yield* requireThread(input.threadId);
         // A project's own conversation lives on its page: it may be filed in
         // that project (as ProjectHome does) but never moved out or elsewhere.
         const home = yield* sql<{
@@ -518,6 +838,26 @@ const make = Effect.gen(function* () {
               reason: "thread_active",
             });
         }
+        if (input.folderId !== current) {
+          yield* membership
+            .validate({
+              projectId: ProjectId.make(thread.project_id),
+              projectFolderId: input.folderId,
+            })
+            .pipe(
+              Effect.mapError((cause) =>
+                cause._tag === "ProjectRepositoryMismatchError"
+                  ? new ProjectLabelError({
+                      operation: "moveThread",
+                      reason: "invalid_membership",
+                      projectName: cause.projectName,
+                      repositoryName: cause.repositoryName,
+                      cause,
+                    })
+                  : failure("moveThread")(cause),
+              ),
+            );
+        }
         yield* sql`DELETE FROM thread_project_labels WHERE thread_id = ${input.threadId}`;
         if (input.folderId !== null)
           yield* sql`INSERT INTO thread_project_labels(thread_id, label_id) VALUES (${input.threadId}, ${input.folderId})`;
@@ -537,6 +877,8 @@ const make = Effect.gen(function* () {
       ].includes(stored.event.type));
   return ProjectLabelService.of({
     moveThread,
+    moveLocalThread,
+    notifyCheckoutChanged: PubSub.publish(changes, undefined).pipe(Effect.asVoid),
     subscribeChanges: PubSub.subscribe(changes).pipe(
       Effect.map((subscription) =>
         Stream.merge(Stream.fromSubscription(subscription), shared.changes),
@@ -545,7 +887,7 @@ const make = Effect.gen(function* () {
     list,
     read: get,
     readActive,
-    subscribe: () => subscribe(list, membershipLifecycle),
+    subscribe: () => subscribe(list, membershipLifecycle, clonePhaseChanges),
     getThreadLabels,
     subscribeThreadLabels: (threadId) =>
       Stream.unwrap(
@@ -606,19 +948,181 @@ const make = Effect.gen(function* () {
             return yield* get(input.id);
           }),
         );
-        yield* syncFolder(result.label, input.name !== undefined && input.name !== previous);
+        const renamed = input.name !== undefined && input.name !== previous;
+        yield* syncFolder(result.label, renamed);
+        // The folder moved on disk after the commit: say so again, so what
+        // follows the folder (checkout states, records relocated into it)
+        // sees the new path rather than the old one.
+        if (renamed) yield* PubSub.publish(changes, undefined);
         return result;
       }),
-    delete: (id) =>
+    merge: (input) =>
       mutate(
-        "delete",
-        { id },
+        "merge",
+        input,
         Effect.gen(function* () {
-          const rows = yield* sql`SELECT label_id FROM project_labels WHERE label_id=${id}`;
-          yield* shared.write("project", id, {}, true);
-          return { deleted: rows.length > 0 };
+          if (input.sourceId === input.targetId)
+            return yield* new ProjectLabelError({ operation: "merge", reason: "same_project" });
+          const previousMerge = yield* shared.get("project", input.sourceId);
+          if (previousMerge?.tombstone && previousMerge.fields.mergedInto === input.targetId)
+            return yield* get(input.targetId);
+          const source = (yield* get(input.sourceId)).label;
+          const target = (yield* readActive(input.targetId)).label;
+          const instructions =
+            source.instructions.trim() && source.instructions !== target.instructions
+              ? [
+                  target.instructions,
+                  `--- Instructions from ${source.name} ---`,
+                  source.instructions,
+                ]
+                  .filter(Boolean)
+                  .join("\n\n")
+              : target.instructions;
+          if (instructions.length > PROJECT_INSTRUCTIONS_MAX_LENGTH)
+            return yield* new ProjectLabelError({
+              operation: "merge",
+              reason: "instructions_too_long",
+            });
+          // Preserve local-only repository links before capture; portable remotes go in the target document.
+          yield* shared.capture("project", source.id);
+          yield* sql`UPDATE label_repositories SET label_id=${target.id} WHERE label_id=${source.id}`;
+          yield* sql`INSERT OR IGNORE INTO label_source_links(label_id,kind,owner,repo,created_at) SELECT ${target.id},kind,owner,repo,created_at FROM label_source_links WHERE label_id=${source.id}`;
+          yield* sql`UPDATE project_labels SET instructions=${instructions},description=${target.description?.trim() ? target.description : (source.description ?? target.description ?? null)},updated_at=${yield* now} WHERE label_id=${target.id}`;
+          yield* shared.capture("project", target.id);
+          const sourceSettings = yield* shared.get("project-settings", source.id);
+          const targetSettings = yield* shared.get("project-settings", target.id);
+          if (sourceSettings && !sourceSettings.tombstone) {
+            const fields = { ...sourceSettings.fields };
+            for (const [key, value] of Object.entries(targetSettings?.fields ?? {}))
+              if (value !== null) fields[key] = value;
+            yield* shared.write("project-settings", target.id, fields);
+          }
+          yield* shared.write(
+            "project",
+            source.id,
+            { mergedInto: target.id, mergeSourceName: source.name },
+            true,
+          );
+          return yield* get(target.id);
+        }),
+      ).pipe(Effect.tap(() => Queue.offer(mergeFileRequests, undefined))),
+    mergeFileStatus: () =>
+      Option.isSome(folders)
+        ? folders.value.mergeFileStatus.pipe(Effect.mapError(failure("mergeFileStatus")))
+        : Effect.succeed({ pendingMoves: 0, failedMoves: 0 }),
+    dismissDuplicate: (input) =>
+      mutate(
+        "dismissDuplicate",
+        input,
+        Effect.gen(function* () {
+          if (input.id === input.otherId)
+            return yield* new ProjectLabelError({
+              operation: "dismissDuplicate",
+              reason: "same_project",
+            });
+          yield* get(input.id);
+          yield* get(input.otherId);
+          const [first, second] = [input.id, input.otherId].sort();
+          const previous = yield* shared.get("project", first!);
+          const dismissed = yield* decodeDuplicateIds(previous?.fields.dismissedDuplicateIds ?? []);
+          yield* shared.write("project", first!, {
+            dismissedDuplicateIds: [...new Set([...dismissed, second!])],
+          });
+          return yield* get(input.id);
         }),
       ),
+    undismissDuplicate: (input) =>
+      mutate(
+        "undismissDuplicate",
+        input,
+        Effect.gen(function* () {
+          if (input.id === input.otherId)
+            return yield* new ProjectLabelError({
+              operation: "undismissDuplicate",
+              reason: "same_project",
+            });
+          yield* get(input.id);
+          yield* get(input.otherId);
+          const [first, second] = [input.id, input.otherId].sort();
+          const previous = yield* shared.get("project", first!);
+          const dismissed = yield* decodeDuplicateIds(previous?.fields.dismissedDuplicateIds ?? []);
+          yield* shared.write("project", first!, {
+            dismissedDuplicateIds: dismissed.filter((id) => id !== second),
+          });
+          return yield* get(input.id);
+        }),
+      ),
+    delete: (id) =>
+      Effect.gen(function* () {
+        const before = yield* readLabels(id);
+        const result = yield* mutate(
+          "delete",
+          { id },
+          Effect.gen(function* () {
+            const rows = yield* sql`SELECT label_id FROM project_labels WHERE label_id=${id}`;
+            yield* shared.write("project", id, {}, true);
+            return { deleted: rows.length > 0 };
+          }),
+        );
+        // An unused folder (only the skeleton Cogenly made) goes with its
+        // project; one holding anything stays, listed as an orphan.
+        const label = before.labels[0];
+        if (result.deleted && label !== undefined && Option.isSome(folders))
+          yield* folders.value
+            .removeSkeleton(label)
+            .pipe(
+              Effect.catch((cause) =>
+                Effect.logWarning("Deleted project's folder could not be removed.", { cause }).pipe(
+                  Effect.as(false),
+                ),
+              ),
+            );
+        return result;
+      }),
+    listOrphanFolders: () =>
+      Option.isNone(folders)
+        ? Effect.succeed({ folders: [] })
+        : folders.value.listOrphans.pipe(
+            Effect.map((found) => ({ folders: found })),
+            Effect.mapError(failure("listOrphanFolders")),
+          ),
+    adoptOrphanFolder: (input) =>
+      Effect.gen(function* () {
+        if (Option.isNone(folders)) return yield* missing("adoptOrphanFolder");
+        const orphan = (yield* folders.value.listOrphans.pipe(
+          Effect.mapError(failure("adoptOrphanFolder")),
+        )).find((candidate) => candidate.dirName === input.dirName);
+        if (orphan === undefined) return yield* missing("adoptOrphanFolder");
+        const created = yield* mutate(
+          "create",
+          input,
+          Effect.gen(function* () {
+            const id = ProjectLabelId.make(`label:${yield* crypto.randomUUIDv4()}`);
+            const at = yield* now;
+            yield* sql`INSERT INTO project_labels(label_id, name, color, description, instructions, created_at, updated_at) VALUES (${id}, ${orphan.dirName.slice(0, 200)}, NULL, NULL, '', ${at}, ${at})`;
+            return yield* get(id);
+          }),
+        );
+        return yield* folders.value.claimForLabel(created.label, orphan.dirName).pipe(
+          Effect.as(created),
+          // A claim that fails must not leave a project with no folder of its own.
+          Effect.tapError(() =>
+            mutate(
+              "delete",
+              { id: created.label.id },
+              shared.write("project", created.label.id, {}, true),
+            ).pipe(Effect.ignore),
+          ),
+          Effect.mapError(failure("adoptOrphanFolder")),
+        );
+      }),
+    removeOrphanFolder: (input) =>
+      Option.isNone(folders)
+        ? Effect.succeed({ removed: false })
+        : folders.value.removeOrphan(input.dirName).pipe(
+            Effect.map((removed) => ({ removed })),
+            Effect.mapError(failure("removeOrphanFolder")),
+          ),
     archive: (id) =>
       mutate(
         "archive",
@@ -640,8 +1144,56 @@ const make = Effect.gen(function* () {
           return yield* get(id);
         }),
       ),
-    linkRepository: (input) => repository(input, true),
+    linkRepository: (input) =>
+      Effect.gen(function* () {
+        // The first GitHub repository of a project with no linked owner
+        // makes the connected account its home owner, so its folder is
+        // `repos/<repo>` on every machine rather than `repos/<owner>/<repo>`.
+        const rows = yield* sql<{
+          workspace_root: string;
+        }>`SELECT workspace_root FROM projection_projects WHERE project_id = ${input.repositoryId} AND deleted_at IS NULL`.pipe(
+          Effect.mapError(failure("linkRepository")),
+        );
+        const workspaceRoot = rows[0]?.workspace_root;
+        const identity =
+          Option.isNone(identities) || typeof workspaceRoot !== "string"
+            ? null
+            : yield* identities.value.resolve(workspaceRoot);
+        const remote =
+          normalizeRepositoryRemote(input.remote) ??
+          (identity === null ? null : normalizeRepositoryRemote(identity.locator.remoteUrl));
+        if (remote !== null && repositoryRemoteParts(remote)?.host === "github.com")
+          yield* ensureHomeOwner(input.labelId).pipe(Effect.ignore);
+        return yield* repository(input, true);
+      }),
+    ensureHomeOwner,
     unlinkRepository: (input) => repository(input, false),
+    bindRepositoryCheckout: (input) =>
+      mutate(
+        "bindRepositoryCheckout",
+        input,
+        Effect.gen(function* () {
+          const remote = normalizeRepositoryRemote(input.remote) ?? input.remote;
+          const placeholder = `${REMOTE_REPOSITORY_ID_PREFIX}${remote}`;
+          const { label } = yield* get(input.labelId);
+          const directoryName = repositoryDirectoryNameFor(
+            remote,
+            projectHomeOwner(label.sourceLinks),
+          );
+          // Drop the placeholder first so the rebind never trips the
+          // one-project-per-repository key, then file the checkout under the
+          // same remote, directory name and synced icon.
+          const icon = yield* sql<{
+            icon_path: string | null;
+          }>`SELECT icon_path FROM label_repositories WHERE label_id = ${input.labelId} AND repository_id = ${placeholder}`;
+          const iconPath = icon[0]?.icon_path ?? null;
+          yield* sql`DELETE FROM label_repositories WHERE label_id = ${input.labelId} AND repository_id = ${placeholder}`;
+          yield* sql`INSERT INTO label_repositories(label_id, repository_id, remote, directory_name, icon_path) VALUES (${input.labelId}, ${input.repositoryId}, ${remote}, ${directoryName}, ${iconPath}) ON CONFLICT(repository_id) DO UPDATE SET label_id = excluded.label_id, remote = excluded.remote, directory_name = COALESCE(excluded.directory_name, label_repositories.directory_name), icon_path = COALESCE(label_repositories.icon_path, excluded.icon_path)`;
+          yield* sql`INSERT INTO shared_repository_checkouts(remote, repository_id, directory_name) VALUES (${remote}, ${input.repositoryId}, ${directoryName}) ON CONFLICT(remote) DO UPDATE SET repository_id = excluded.repository_id, directory_name = excluded.directory_name`;
+          yield* sql`UPDATE scheduled_tasks SET project_id = ${input.repositoryId} WHERE project_id = ${placeholder}`;
+          return yield* get(input.labelId);
+        }),
+      ),
     linkSource: (input) => sourceLink(input, true),
     unlinkSource: (input) => sourceLink(input, false),
     setProjectChat: (input) =>
@@ -679,4 +1231,7 @@ const make = Effect.gen(function* () {
     },
   });
 });
-export const layer = Layer.effect(ProjectLabelService, make).pipe(Layer.provide(SharedState.layer));
+export const layer = Layer.effect(ProjectLabelService, make).pipe(
+  Layer.provide(SharedState.layer),
+  Layer.provide(Membership.layer),
+);

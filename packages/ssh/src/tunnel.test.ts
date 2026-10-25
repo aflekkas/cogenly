@@ -1,6 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as HostProcess from "@cogenly/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as Hex from "effect/encoding/Hex";
 import * as FileSystem from "effect/FileSystem";
@@ -37,10 +37,14 @@ const run = Effect.fn("test.run")(function* (
   return { code, stdout: stdout.trim(), stderr: stderr.trim() };
 });
 
-/** The archive name the runner derives from `uname` on this machine. */
-const archiveName = Effect.gen(function* () {
-  return `t3-${VERSION}-${yield* HostProcess.Platform}-${yield* HostProcess.Architecture}.tar.gz`;
-});
+/**
+ * The archive name the runner derives from `uname` on this machine; `t3` is
+ * the name of releases from before the rename.
+ */
+const archiveName = (prefix: "cogenly" | "t3" = "cogenly") =>
+  Effect.gen(function* () {
+    return `${prefix}-${VERSION}-${yield* HostProcess.Platform}-${yield* HostProcess.Architecture}.tar.gz`;
+  });
 
 /** An executable that prints its label and arguments, standing in for `t3`/`cogenly`. */
 const writeFakeExecutable = Effect.fn("test.writeFakeExecutable")(function* (
@@ -50,27 +54,39 @@ const writeFakeExecutable = Effect.fn("test.writeFakeExecutable")(function* (
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   yield* fs.makeDirectory(path.dirname(file), { recursive: true });
-  yield* fs.writeFileString(file, `#!/bin/sh\necho "${label} $*"\n`);
+  yield* fs.writeFileString(
+    file,
+    `#!/bin/sh\nif [ "$*" = "security setup --help" ]; then echo --local; else echo "${label} $*"; fi\n`,
+  );
   yield* fs.chmod(file, 0o755);
 });
 
-const pinRuntime = Effect.fn("test.pinRuntime")(function* (home: string, version: string) {
+/** A complete pinned runtime; `t3` is the executable of one unpacked before the rename. */
+const pinRuntime = Effect.fn("test.pinRuntime")(function* (
+  home: string,
+  version: string,
+  executable: "cogenly" | "t3" = "cogenly",
+) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const dir = path.join(home, ".cogenly/runtime/versions", version);
-  yield* writeFakeExecutable(path.join(dir, "t3"), `pinned-${version}`);
+  yield* writeFakeExecutable(path.join(dir, executable), `pinned-${version}`);
   yield* fs.writeFileString(path.join(dir, ".install-complete"), `${version}\n`);
 });
 
 /** A file:// release mirror laid out like GitHub's releases/download/<tag>/. */
-const writeMirror = Effect.fn("test.writeMirror")(function* (listArchive: boolean) {
+const writeMirror = Effect.fn("test.writeMirror")(function* (
+  listArchive: boolean,
+  prefix: "cogenly" | "t3" = "cogenly",
+) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const archive = yield* archiveName;
+  const archive = yield* archiveName(prefix);
   const root = yield* fs.makeTempDirectoryScoped({ prefix: "cogenly-ssh-mirror-" });
   const releaseDir = path.join(root, `v${VERSION}`);
   const stem = archive.replace(/\.tar\.gz$/, "");
-  yield* writeFakeExecutable(path.join(root, "stage", stem, "t3"), "downloaded");
+  // Archives from before the rename hold only `t3`.
+  yield* writeFakeExecutable(path.join(root, "stage", stem, prefix), `downloaded-${prefix}`);
   yield* fs.makeDirectory(releaseDir, { recursive: true });
   const archivePath = path.join(releaseDir, archive);
   const tar = yield* run("tar", ["-czf", archivePath, "-C", path.join(root, "stage"), stem]);
@@ -98,7 +114,7 @@ const runRunner = Effect.fn("test.runRunner")(function* (home: string, releaseBa
   );
   return yield* run("/bin/sh", [runnerPath, "serve", "--port", "4773"], {
     HOME: home,
-    PATH: "/usr/bin:/bin",
+    PATH: `${home}/bin:/usr/bin:/bin`,
   });
 });
 
@@ -138,7 +154,8 @@ describe("SSH runner install selection", () => {
       const path = yield* Path.Path;
       const home = yield* makeHome;
       yield* pinRuntime(home, "0.1.9");
-      yield* pinRuntime(home, "0.1.10");
+      // Unpacked before the rename, so its executable is still `t3`.
+      yield* pinRuntime(home, "0.1.10", "t3");
       // No sentinel: an interrupted install is never picked.
       yield* writeFakeExecutable(path.join(home, ".cogenly/runtime/versions/0.2.0/t3"), "partial");
       expect(yield* runRunner(home, UNREACHABLE_ORIGIN)).toMatchObject({
@@ -154,12 +171,44 @@ describe("SSH runner install selection", () => {
       const path = yield* Path.Path;
       const home = yield* makeHome;
       const result = yield* runRunner(home, yield* writeMirror(true));
-      expect(result).toMatchObject({ code: 0, stdout: "downloaded serve --port 4773" });
+      expect(result).toMatchObject({ code: 0, stdout: "downloaded-cogenly serve --port 4773" });
       expect(
         yield* fs.readFileString(
           path.join(home, ".cogenly/runtime/versions", VERSION, ".install-complete"),
         ),
       ).toBe(`${VERSION}\n`);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("a Linux archive install provisions the sandbox without corrupting stdout", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const home = yield* makeHome;
+      yield* fs.makeDirectory(path.join(home, "bin"));
+      const uname = path.join(home, "bin/uname");
+      yield* fs.writeFileString(
+        uname,
+        '#!/bin/sh\nif [ "$1" = "-s" ]; then echo Linux; else exec /usr/bin/uname "$@"; fi\n',
+      );
+      yield* fs.chmod(uname, 0o755);
+      const mirror = yield* writeMirror(true).pipe(
+        Effect.provideService(HostProcess.Platform, "linux"),
+      );
+      const cold = yield* runRunner(home, mirror);
+      expect(cold).toMatchObject({ code: 0, stdout: "downloaded-cogenly serve --port 4773" });
+      expect(cold.stderr).toContain("downloaded-cogenly security setup --local");
+      const warm = yield* runRunner(home, mirror);
+      expect(warm).toMatchObject({ code: 0, stdout: "downloaded-cogenly serve --port 4773" });
+      expect(warm.stderr).not.toContain("security setup");
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("downloads the t3 archive of a release from before the rename", () =>
+    Effect.gen(function* () {
+      const home = yield* makeHome;
+      const result = yield* runRunner(home, yield* writeMirror(true, "t3"));
+      expect(result).toMatchObject({ code: 0, stdout: "downloaded-t3 serve --port 4773" });
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
@@ -170,7 +219,7 @@ describe("SSH runner install selection", () => {
       const home = yield* makeHome;
       const result = yield* runRunner(home, yield* writeMirror(false));
       expect(result.code).not.toBe(0);
-      expect(result.stderr).toContain(`Could not download ${yield* archiveName}`);
+      expect(result.stderr).toContain(`Could not download ${yield* archiveName()}`);
       expect(yield* fs.exists(path.join(home, ".cogenly/runtime/versions", VERSION))).toBe(false);
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );

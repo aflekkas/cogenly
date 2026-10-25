@@ -1,6 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
-import { isAtomCommandInterrupted } from "@t3tools/client-runtime/state/runtime";
-import type { EnvironmentId, ProjectLabelWithRepositories } from "@t3tools/contracts";
+import { isAtomCommandInterrupted } from "@cogenly/client-runtime/state/runtime";
+import type { EnvironmentId, ProjectLabelWithRepositories } from "@cogenly/contracts";
 import { useCallback } from "react";
 
 import { toastManager } from "../components/ui/toast";

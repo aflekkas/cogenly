@@ -2,7 +2,9 @@
  * Naming shared by the release workflow, the runtime installers, and
  * install scripts for the per-platform CLI archives attached to GitHub
  * Releases. Every consumer derives the same file names from a version and a
- * platform key, so a rename here is a release-breaking change.
+ * platform key, so a rename here is a release-breaking change: installed
+ * servers and launchers keep looking for the old names (see "Transition:
+ * t3 → cogenly names" in docs/operations/release.md).
  */
 
 /**
@@ -51,8 +53,58 @@ export function cliArchiveTarCommand(
   return `${systemRoot}\\System32\\tar.exe`;
 }
 
+/** The executable at the root of an unpacked archive and of a pinned runtime. */
+export const CLI_EXECUTABLE_NAME = "cogenly";
+/**
+ * The executable's name before the rename. Archives still carry a `t3`
+ * symlink to `cogenly`, and runtimes unpacked from older archives hold only
+ * `t3`. Transition only: see "Transition: t3 → cogenly names" in
+ * docs/operations/release.md before removing it.
+ */
+export const LEGACY_CLI_EXECUTABLE_NAME = "t3";
+
+export function cliExecutableFileName(
+  platform: NodeJS.Platform,
+  name: string = CLI_EXECUTABLE_NAME,
+): string {
+  return platform === "win32" ? `${name}.exe` : name;
+}
+
 export function cliArchiveFileName(version: string, platformKey: CliArchivePlatformKey): string {
+  return `cogenly-${version}-${platformKey}.tar.gz`;
+}
+
+/**
+ * The archive name before the rename. Releases publish the same bytes under
+ * both names so older installers and servers keep finding an archive, and
+ * releases from before the rename have only this one. Transition only: see
+ * "Transition: t3 → cogenly names" in docs/operations/release.md.
+ */
+export function legacyCliArchiveFileName(
+  version: string,
+  platformKey: CliArchivePlatformKey,
+): string {
   return `t3-${version}-${platformKey}.tar.gz`;
+}
+
+/**
+ * The archive to download for a release, chosen from its checksum file:
+ * the `cogenly-` name when the release lists one, else the `t3-` name of a
+ * release from before the rename. Undefined when it lists neither.
+ */
+export function selectCliArchive(
+  checksums: ReadonlyMap<string, string>,
+  version: string,
+  platformKey: CliArchivePlatformKey,
+): { readonly fileName: string; readonly sha256: string } | undefined {
+  for (const fileName of [
+    cliArchiveFileName(version, platformKey),
+    legacyCliArchiveFileName(version, platformKey),
+  ]) {
+    const sha256 = checksums.get(fileName);
+    if (sha256 !== undefined) return { fileName, sha256 };
+  }
+  return undefined;
 }
 
 const CLI_RELEASE_DEFAULT_BASE_URL =

@@ -1,4 +1,4 @@
-import type { RelayClientDeviceRecord } from "@t3tools/contracts/relay";
+import type { RelayClientDeviceRecord } from "@cogenly/contracts/relay";
 import { SmartphoneIcon } from "lucide-react";
 
 import { useManagedRelayDevices } from "../../cloud/managedRelayState";
@@ -112,7 +112,7 @@ export function MobileClientsUserProfilePage() {
   return (
     <ClerkUserProfilePage
       title="Mobile clients"
-      description="Mobile devices that get notifications from your environments."
+      description="Mobile devices that get notifications from your machines."
       action={
         <ClerkUserProfileRefreshButton
           isPending={devicesState.isPending}

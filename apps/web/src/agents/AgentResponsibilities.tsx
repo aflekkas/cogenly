@@ -16,7 +16,7 @@ import {
   ZapIcon,
 } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import type { AgentAvatar, AgentPermissions } from "@t3tools/contracts";
+import type { AgentAvatar, AgentPermissions } from "@cogenly/contracts";
 import { PopoverTrigger } from "~/components/ui/popover";
 import { ThreadDetailsControl } from "~/components/chat/ThreadDetailsControl";
 import { ThreadDetailsSection } from "~/components/chat/ThreadDetailsSection";
@@ -177,6 +177,7 @@ export function AgentResponsibilities({
   // Event triggers can name only what the agent can read, as the server enforces.
   const triggerFormProps = {
     ...eventFilterChoices(agent, workspace.labels, workspace.repositories),
+    environmentId: agent.environmentId,
     onManageProjects: client.openProjectSettings,
   };
   const saveTrigger = async (value: Parameters<typeof client.saveTrigger>[1]) => {

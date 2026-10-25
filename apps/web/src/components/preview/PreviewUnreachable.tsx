@@ -84,7 +84,7 @@ export function PreviewUnreachable({ url, code, description, onReload, move }: P
               <li>Checking your connection</li>
               <li>Confirming the dev server is running</li>
               {move ? (
-                <li>Opening it in the environment&rsquo;s browser, which reaches its network</li>
+                <li>Opening it in the machine&rsquo;s browser, which reaches its network</li>
               ) : null}
               <li>Checking the proxy and the firewall</li>
             </ul>

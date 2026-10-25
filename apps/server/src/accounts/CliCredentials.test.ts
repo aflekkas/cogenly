@@ -1,9 +1,9 @@
 import * as AccountsMcp from "../mcp/AccountsMcpService.ts";
 import * as Invocation from "../mcp/McpInvocationContext.ts";
-import { SecretRef } from "@t3tools/contracts";
+import { SecretRef } from "@cogenly/contracts";
 import * as SecretRequests from "../secrets/SecretRequests.ts";
 import * as Connections from "./AccountConnections.ts";
-import * as PtyAdapter from "@t3tools/shared/PtyAdapter";
+import * as PtyAdapter from "@cogenly/shared/PtyAdapter";
 import * as PlatformError from "effect/PlatformError";
 import * as Workspace from "../agents/AgentWorkspaceService.ts";
 import * as AgentService from "../agents/AgentService.ts";
@@ -20,7 +20,7 @@ import {
   defaultAgentPermissions,
   type Agent,
   type OrchestrationV2ThreadShell,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { NodeCrypto } from "@effect/platform-node";
 import { describe, expect, it } from "@effect/vitest";
@@ -29,7 +29,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/sql/SqlClient";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as HostProcess from "@cogenly/shared/HostProcess";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as AgentStore from "../agents/AgentStore.ts";

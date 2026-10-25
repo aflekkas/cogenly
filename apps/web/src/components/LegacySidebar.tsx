@@ -29,21 +29,21 @@ import {
   type SidebarProjectGroupingMode,
   resolveEnvironmentMachineKind,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import {
   parseScopedThreadKey,
   scopedProjectKey,
   scopedThreadKey,
   scopeProjectRef,
   scopeThreadRef,
-} from "@t3tools/client-runtime/environment";
-import { safeErrorLogAttributes } from "@t3tools/client-runtime/errors";
+} from "@cogenly/client-runtime/environment";
+import { safeErrorLogAttributes } from "@cogenly/client-runtime/errors";
 import {
   isAtomCommandInterrupted,
   settlePromise,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
-import { threadRuntimeCanArchive } from "@t3tools/client-runtime/state/models";
+} from "@cogenly/client-runtime/state/runtime";
+import { threadRuntimeCanArchive } from "@cogenly/client-runtime/state/models";
 import { useNavigate, useParams, useRouter } from "@tanstack/react-router";
 import {
   MAX_SIDEBAR_THREAD_PREVIEW_COUNT,
@@ -51,7 +51,7 @@ import {
   type SidebarProjectSortOrder,
   type SidebarThreadPreviewCount,
   type SidebarThreadSortOrder,
-} from "@t3tools/contracts/settings";
+} from "@cogenly/contracts/settings";
 import { isDesktopLocalConnectionTarget, isWslConnectionTarget } from "../connection/desktopLocal";
 import { useDesktopLocalBootstraps } from "../connection/useDesktopLocalBootstraps";
 import { isElectron } from "../env";
@@ -1436,7 +1436,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
                           }?`,
                           `Path: ${member.workspaceRoot}`,
                           ...(member.environmentLabel
-                            ? [`Environment: ${member.environmentLabel}`]
+                            ? [`Machine: ${member.environmentLabel}`]
                             : []),
                           "This permanently clears conversation history for those threads and any archived threads.",
                           "This removes only this repository entry.",
@@ -1446,7 +1446,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
                           `Remove repository "${member.title}"?`,
                           `Path: ${member.workspaceRoot}`,
                           ...(member.environmentLabel
-                            ? [`Environment: ${member.environmentLabel}`]
+                            ? [`Machine: ${member.environmentLabel}`]
                             : []),
                           "This permanently clears any archived conversation history.",
                           "This removes only this repository entry.",
@@ -1497,7 +1497,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       const message = [
         `Remove repository "${member.title}"?`,
         `Path: ${member.workspaceRoot}`,
-        ...(member.environmentLabel ? [`Environment: ${member.environmentLabel}`] : []),
+        ...(member.environmentLabel ? [`Machine: ${member.environmentLabel}`] : []),
         "This permanently clears any archived conversation history.",
         "This removes only this repository entry.",
       ].join("\n");
@@ -1618,7 +1618,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
                 !readEnvironmentScope(member.environmentId, AuthOrchestrationOperateScope),
             }),
             buildTargetedItem("grouping", "Group into..."),
-            buildTargetedItem("copy-path", "Copy Path"),
+            buildTargetedItem("copy-path", "Copy path"),
             { id: "project-settings", label: "Repository settings", icon: "settings" },
             buildTargetedItem("delete", "Remove", {
               destructive: true,
@@ -1949,7 +1949,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           toastManager.add(
             stackedThreadToast({
               type: "error",
-              title: "Could not choose environment",
+              title: "Could not choose machine",
               description: error instanceof Error ? error.message : "An error occurred.",
             }),
           );
@@ -2147,8 +2147,8 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
             : []),
           { id: "rename", label: "Rename thread", disabled: !canOperateThread },
           { id: "mark-unread", label: "Mark unread" },
-          { id: "copy-path", label: "Copy Path" },
-          { id: "copy-thread-id", label: "Copy Thread ID" },
+          { id: "copy-path", label: "Copy path" },
+          { id: "copy-thread-id", label: "Copy thread ID" },
           { id: "project-settings", label: "Repository settings" },
           {
             id: "delete",
@@ -2341,7 +2341,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
             <TooltipPopup side="top">
               {project.allRemoteMembersAreDesktopLocal
                 ? `Local sandbox: ${project.remoteEnvironmentLabels.join(", ")}`
-                : `Remote environment: ${project.remoteEnvironmentLabels.join(", ")}`}
+                : `Remote machine: ${project.remoteEnvironmentLabels.join(", ")}`}
             </TooltipPopup>
           </Tooltip>
         )}

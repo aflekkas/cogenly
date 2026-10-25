@@ -21,7 +21,7 @@ import {
   type OrchestrationV2ThreadLaunchInput,
   type OrchestrationV2ThreadProjection,
   type ProjectMutation,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -407,6 +407,45 @@ describe("V2 environment commands", () => {
       });
       // Filed by the launch itself: nothing else is dispatched to move it.
       expect(commands).toEqual([]);
+    }).pipe(Effect.provide(layerTestCrypto)),
+  );
+
+  it.effect("launches a draft on the paired machine it picked, and here without one", () =>
+    Effect.gen(function* () {
+      const launches: OrchestrationV2ThreadLaunchInput[] = [];
+      const supervisor = yield* makeSupervisor({ commands: [], projects: [], launches });
+      const launch = (machine: EnvironmentId | undefined) =>
+        startThreadTurn({
+          commandId: CommandId.make(`launch-${machine ?? "here"}`),
+          threadId: v2ThreadId,
+          message: {
+            messageId: MessageId.make(`message-${machine ?? "here"}`),
+            role: "user",
+            text: "Run it on the hub",
+            attachments: [],
+          },
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          bootstrap: {
+            createThread: {
+              projectId: ProjectId.make("project-1"),
+              title: "Thread",
+              modelSelection: v2Projection.thread.modelSelection,
+              runtimeMode: "full-access",
+              interactionMode: "default",
+              branch: null,
+              worktreePath: null,
+              createdAt: "2026-06-20T00:00:00.000Z",
+              ...(machine === undefined ? {} : { machine }),
+            },
+          },
+        }).pipe(Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor));
+
+      yield* launch(EnvironmentId.make("environment-hub"));
+      yield* launch(undefined);
+
+      expect(launches[0]).toMatchObject({ threadId: v2ThreadId, machine: "environment-hub" });
+      expect(launches[1]).not.toHaveProperty("machine");
     }).pipe(Effect.provide(layerTestCrypto)),
   );
 

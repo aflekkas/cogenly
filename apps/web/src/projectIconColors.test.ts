@@ -1,4 +1,4 @@
-import { ProjectIconColor } from "@t3tools/contracts";
+import { ProjectIconColor } from "@cogenly/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {

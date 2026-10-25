@@ -1,20 +1,20 @@
-import { resolveThreadWorkingStartedAt } from "@t3tools/client-runtime/state/models";
-import { backgroundWorkHoldsCompletion } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
-import { threadPullRequestSearchTerms } from "@t3tools/shared/threadPullRequests";
+import { resolveThreadWorkingStartedAt } from "@cogenly/client-runtime/state/models";
+import { backgroundWorkHoldsCompletion } from "@cogenly/shared/orchestrationV2PendingBackgroundWork";
+import { threadPullRequestSearchTerms } from "@cogenly/shared/threadPullRequests";
 import * as React from "react";
 import {
   isAtomCommandInterrupted,
   type AtomCommandResult,
-} from "@t3tools/client-runtime/state/runtime";
-import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
-import type { ContextMenuItem, EnvironmentId, ThreadId } from "@t3tools/contracts";
-import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@t3tools/contracts/settings";
+} from "@cogenly/client-runtime/state/runtime";
+import { threadSearchMatchKey } from "@cogenly/client-runtime/state/thread-search";
+import type { ContextMenuItem, EnvironmentId, ThreadId } from "@cogenly/contracts";
+import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@cogenly/contracts/settings";
 import type { AsyncResult } from "effect/reactivity";
-import { sortActiveThreadsByOrderKey } from "@t3tools/client-runtime/state/thread-sort";
+import { sortActiveThreadsByOrderKey } from "@cogenly/client-runtime/state/thread-sort";
 import {
   effectiveSnoozed,
   type ThreadSnoozeShell,
-} from "@t3tools/client-runtime/state/thread-settled";
+} from "@cogenly/client-runtime/state/thread-settled";
 import {
   getThreadSortTimestamp,
   sortThreads,
@@ -294,7 +294,7 @@ export function buildMultiSelectThreadContextMenuItems(input: {
   hasRunningThread: boolean;
 }): readonly ContextMenuItem<"mark-unread" | "archive" | "delete">[] {
   return [
-    { id: "mark-unread", label: `Mark as Unread (${input.count})` },
+    { id: "mark-unread", label: `Mark as unread (${input.count})` },
     {
       id: "archive",
       label: `Archive (${input.count})`,
@@ -348,7 +348,7 @@ export function buildBulkTitleRegenerationContextMenuItem(input: {
   }
   return {
     id: "regenerate-title",
-    label: `Regenerate Titles (${input.actionableCount})`,
+    label: `Regenerate titles (${input.actionableCount})`,
   };
 }
 
@@ -357,22 +357,22 @@ export interface ThreadStatusPill {
     | "Working"
     | "Connecting"
     | "Completed"
-    | "Pending Approval"
-    | "Awaiting Input"
+    | "Pending approval"
+    | "Awaiting input"
     | "Waiting"
-    | "Plan Ready";
+    | "Plan ready";
   colorClass: string;
   dotClass: string;
   pulse: boolean;
 }
 
 const THREAD_STATUS_PRIORITY: Record<ThreadStatusPill["label"], number> = {
-  "Pending Approval": 5,
-  "Awaiting Input": 4,
+  "Pending approval": 5,
+  "Awaiting input": 4,
   Working: 3,
   Connecting: 3,
   Waiting: 2.5,
-  "Plan Ready": 2,
+  "Plan ready": 2,
   Completed: 1,
 };
 
@@ -818,7 +818,7 @@ export {
   isThreadWorking as isSidebarThreadWorking,
   sortInboxThreadsByReturn,
   sortWorkingThreadsBySend,
-} from "@t3tools/client-runtime/state/thread-inbox";
+} from "@cogenly/client-runtime/state/thread-inbox";
 
 const EMPTY_CONTENT_MATCH_KEYS: ReadonlySet<string> = new Set<string>();
 
@@ -900,7 +900,7 @@ export function resolveThreadStatusPill(input: {
 
   if (thread.hasPendingApprovals || thread.pendingSubagentRequest === "approval") {
     return {
-      label: "Pending Approval",
+      label: "Pending approval",
       colorClass: "text-amber-600 dark:text-amber-300/90",
       dotClass: "bg-amber-500 dark:bg-amber-300/90",
       pulse: false,
@@ -909,7 +909,7 @@ export function resolveThreadStatusPill(input: {
 
   if (thread.hasPendingUserInput || thread.pendingSubagentRequest === "user_input") {
     return {
-      label: "Awaiting Input",
+      label: "Awaiting input",
       colorClass: "text-indigo-600 dark:text-indigo-300/90",
       dotClass: "bg-indigo-500 dark:bg-indigo-300/90",
       pulse: false,
@@ -954,7 +954,7 @@ export function resolveThreadStatusPill(input: {
     thread.hasActionableProposedPlan;
   if (hasPlanReadyPrompt) {
     return {
-      label: "Plan Ready",
+      label: "Plan ready",
       colorClass: "text-violet-600 dark:text-violet-300/90",
       dotClass: "bg-violet-500 dark:bg-violet-300/90",
       pulse: false,

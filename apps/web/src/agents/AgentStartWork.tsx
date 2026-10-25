@@ -1,4 +1,4 @@
-import type { ProjectId } from "@t3tools/contracts";
+import type { ProjectId } from "@cogenly/contracts";
 import { useState } from "react";
 import { Button } from "~/components/ui/button";
 import {
@@ -20,6 +20,7 @@ import {
 } from "~/components/ui/select";
 import { Textarea } from "~/components/ui/textarea";
 import { randomUUID } from "~/lib/utils";
+import { useRepositoryNames } from "~/projectLabels/useRepositoryNames";
 import { useAgentsClient } from "./agentsClient";
 import { agentRepositoryAccess } from "./agentWorkspace.logic";
 import type { AgentContact, AgentWorkspaceView } from "./agents.types";
@@ -54,6 +55,9 @@ export function AgentStartWork({
   const [commandId] = useState(() => `agent-start:${randomUUID()}`);
   const selected = repositories.find((repository) => repository.id === projectId);
   const canWrite = client.canWrite?.(agent.environmentId) ?? true;
+  const repositoryNameOf = useRepositoryNames();
+  const nameOf = (repository: { readonly id: ProjectId; readonly title: string }) =>
+    repositoryNameOf({ environmentId: agent.environmentId, ...repository });
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogPopup className="sm:max-w-md">
@@ -109,16 +113,18 @@ export function AgentStartWork({
                     }
                   >
                     <SelectTrigger size="sm" aria-label="Repository">
-                      <SelectValue>{selected?.title ?? "Choose a repository"}</SelectValue>
+                      <SelectValue>
+                        {selected ? nameOf(selected) : "Choose a repository"}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectPopup>
                       {repositories.map((repository) => (
                         <SelectItem
                           key={repository.id}
                           value={repository.id}
-                          label={repository.title}
+                          label={nameOf(repository)}
                         >
-                          <span className="min-w-0 flex-1 truncate">{repository.title}</span>
+                          <span className="min-w-0 flex-1 truncate">{nameOf(repository)}</span>
                           <span className="text-2xs text-muted-foreground">
                             {[
                               repository.home ? "Home" : "",

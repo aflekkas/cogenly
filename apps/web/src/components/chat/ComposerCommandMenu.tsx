@@ -1,19 +1,19 @@
-import { formatProviderSkillDisplayName } from "@t3tools/shared/inlineSkills";
+import { formatProviderSkillDisplayName } from "@cogenly/shared/inlineSkills";
 import {
   resolveProviderSkillSourceKind,
   type ProviderSkillSourceKind,
-} from "@t3tools/client-runtime/providerSkills";
+} from "@cogenly/client-runtime/providerSkills";
 import type {
   ComposerMentionGroup,
   ComposerMentionItem,
-} from "@t3tools/client-runtime/composerThreadItems";
+} from "@cogenly/client-runtime/composerThreadItems";
 import {
   type ProjectEntry,
   type ProviderDriverKind,
   type PullRequestContextMetadata,
   type ServerProviderSkill,
   type ServerProviderSlashCommand,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import {
   BlocksIcon,
   BotIcon,
@@ -22,6 +22,7 @@ import {
   HammerIcon,
   MessageCircleIcon,
   PackageIcon,
+  PlugIcon,
   SettingsIcon,
   UserRoundIcon,
   type LucideIcon,
@@ -30,10 +31,20 @@ import { memo, useLayoutEffect, useRef } from "react";
 
 import { type ComposerSlashCommand, type ComposerTriggerKind } from "../../composer-logic";
 import { useAnimatedPanelHeight } from "../ui/animated-panel-height";
-import { Badge } from "../ui/badge";
 import { Command, CommandGroup, CommandGroupLabel, CommandItem, CommandList } from "../ui/command";
+import {
+  SearchListEmpty,
+  SearchListRowBadge,
+  SearchListRowDescription,
+  SearchListRowIcon,
+  SearchListRowLabel,
+  SearchListRowText,
+  SearchListRowTrailing,
+} from "../ui/search-list";
 import { PierreEntryIcon } from "./PierreEntryIcon";
+import { IntegrationSourceRowContent } from "./ComposerSourcesPicker";
 import { ComposerBanner } from "./ComposerBanner";
+import { composerMenuEmptyText, composerMenuSections } from "./ComposerCommandMenu.logic";
 
 export type ComposerCommandItem =
   | {
@@ -79,31 +90,22 @@ export type ComposerCommandItem =
 
 type ComposerMenuGroup = ComposerMentionGroup | "files";
 
+/**
+ * Each `@` section's heading and its rows' leading mark (headings stay text-only, like every
+ * searchable list's). A new `@` item kind adds its group here
+ * (and to `ComposerCommandItem`); its rows then render through `ComposerCommandMenuItem`.
+ */
 const MENU_GROUP_PRESENTATION: Record<ComposerMenuGroup, { label: string; icon: LucideIcon }> = {
   tasks: { label: "Tasks", icon: HammerIcon },
   chats: { label: "Chats", icon: MessageCircleIcon },
   agents: { label: "Agents", icon: BotIcon },
   projects: { label: "Projects", icon: FolderIcon },
+  sources: { label: "Sources", icon: PlugIcon },
   files: { label: "Files and folders", icon: FileIcon },
 };
 
 function menuGroupOf(item: ComposerCommandItem): ComposerMenuGroup | null {
   return "group" in item ? item.group : null;
-}
-
-/**
- * Consecutive items of one `@` section. Items arrive already in section order, which is also
- * keyboard order, so sections are runs, not a regrouping. Slash and skill menus stay one run.
- */
-function menuSections(items: ReadonlyArray<ComposerCommandItem>) {
-  const sections: { group: ComposerMenuGroup | null; items: ComposerCommandItem[] }[] = [];
-  for (const item of items) {
-    const group = menuGroupOf(item);
-    const last = sections.at(-1);
-    if (last && last.group === group) last.items.push(item);
-    else sections.push({ group, items: [item] });
-  }
-  return sections;
 }
 
 export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
@@ -120,9 +122,7 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
   const listRef = useRef<HTMLDivElement>(null);
   // The drawer sits on the composer by its bottom edge, so a height change grows it upward.
   const panel = useAnimatedPanelHeight();
-  const sections = menuSections(props.items);
-  // Headings only once there is more than one kind of thing to tell apart.
-  const showHeadings = sections.length > 1 || sections[0]?.group !== "files";
+  const { sections, showHeadings } = composerMenuSections(props.items, menuGroupOf);
 
   useLayoutEffect(() => {
     if (!props.activeItemId || !listRef.current) return;
@@ -145,7 +145,7 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
       <ComposerBanner.Surface
         ref={listRef}
         {...panel.panelProps}
-        className="panel-height-motion min-h-0 w-full **:data-[slot=command-item]:rounded-lg **:data-[slot=scroll-area-scrollbar]:data-[orientation=vertical]:my-4"
+        className="panel-height-motion min-h-0 w-full **:data-[slot=scroll-area-scrollbar]:data-[orientation=vertical]:my-4"
         data-composer-command-drawer="true"
       >
         <div
@@ -163,16 +163,10 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
               {sections.map((section, index) => {
                 const presentation =
                   showHeadings && section.group ? MENU_GROUP_PRESENTATION[section.group] : null;
-                const Icon = presentation?.icon;
                 return (
                   <CommandGroup key={section.group ?? `section-${index}`}>
-                    {presentation && Icon ? (
-                      <CommandGroupLabel>
-                        <span className="flex items-center gap-1.5">
-                          <Icon aria-hidden="true" className="size-3.5 shrink-0" />
-                          {presentation.label}
-                        </span>
-                      </CommandGroupLabel>
+                    {presentation ? (
+                      <CommandGroupLabel>{presentation.label}</CommandGroupLabel>
                     ) : null}
                     {section.items.map((item) => (
                       <ComposerCommandMenuItem
@@ -191,24 +185,15 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
               })}
             </CommandList>
           ) : (
-            // One list-item row (same p-2 inset, same min height) so the empty state is as tall as
-            // a single result; the tucked overlap below it is the wrapper's padding, not extra.
-            <div className="p-2">
-              <p className="flex min-h-8 items-center px-2 text-secondary-label text-xs sm:min-h-7">
-                {props.isLoading
-                  ? props.triggerKind === "skill"
-                    ? "Searching workspace skills..."
-                    : props.triggerKind === "pull-request"
-                      ? "Finding pull request..."
-                      : "Searching workspace files..."
-                  : (props.emptyStateText ??
-                    (props.triggerKind === "skill"
-                      ? "No skills found. Try / to browse provider commands."
-                      : props.triggerKind === "path"
-                        ? "No matching tasks, chats, agents, projects or files."
-                        : "No matching command."))}
-              </p>
-            </div>
+            // One result row tall, so the drawer does not jump while results come and go; the
+            // tucked overlap below it is the wrapper's padding, not extra.
+            <SearchListEmpty size="row">
+              {composerMenuEmptyText({
+                triggerKind: props.triggerKind,
+                isLoading: props.isLoading,
+                emptyStateText: props.emptyStateText,
+              })}
+            </SearchListEmpty>
           )}
         </div>
       </ComposerBanner.Surface>
@@ -247,46 +232,57 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
         props.onSelect(props.item);
       }}
     >
+      {props.item.type === "integration" ? (
+        <IntegrationSourceRowContent source={props.item.source} />
+      ) : null}
       {props.item.type === "path" ? (
-        <PierreEntryIcon
-          pathValue={props.item.path}
-          kind={props.item.pathKind}
-          theme={props.resolvedTheme}
-        />
+        <SearchListRowIcon>
+          <PierreEntryIcon
+            pathValue={props.item.path}
+            kind={props.item.pathKind}
+            theme={props.resolvedTheme}
+          />
+        </SearchListRowIcon>
       ) : null}
       {props.item.type === "thread" ||
       props.item.type === "agent" ||
       props.item.type === "project-folder" ? (
-        <MentionItemIcon group={props.item.group} />
+        <SearchListRowIcon>
+          <MentionItemIcon group={props.item.group} />
+        </SearchListRowIcon>
       ) : null}
-      <span className="flex min-w-0 flex-1 items-center gap-2">
-        <span className="min-w-0 max-w-[45%] shrink-0 truncate font-sans text-xs font-medium">
-          {isSlashSkill ? (
-            <>
-              <span className="text-secondary-label">/skill:</span>
-              {formatProviderSkillDisplayName(isSlashSkill)}
-            </>
-          ) : (
-            props.item.label
-          )}
-        </span>
-        <span className="min-w-0 flex-1 truncate text-left text-secondary-label text-xs">
-          {props.item.description}
-        </span>
-        {skillSourceKind ? (
+      {props.item.type === "integration" ? null : (
+        <SearchListRowText layout="inline">
+          <SearchListRowLabel>
+            {isSlashSkill ? (
+              <>
+                <span className="text-muted-foreground">/skill:</span>
+                {formatProviderSkillDisplayName(isSlashSkill)}
+              </>
+            ) : (
+              props.item.label
+            )}
+          </SearchListRowLabel>
+          {props.item.description ? (
+            <SearchListRowDescription>{props.item.description}</SearchListRowDescription>
+          ) : null}
+        </SearchListRowText>
+      )}
+      {skillSourceKind ? (
+        <SearchListRowTrailing>
           <SkillSourceBadge
             kind={skillSourceKind}
             showSkillSuffix={props.triggerKind === "skill"}
           />
-        ) : null}
-      </span>
+        </SearchListRowTrailing>
+      ) : null}
     </CommandItem>
   );
 });
 
 function MentionItemIcon(props: { group: ComposerMentionGroup }) {
   const Icon = MENU_GROUP_PRESENTATION[props.group].icon;
-  return <Icon aria-hidden="true" className="size-4 shrink-0 text-secondary-label" />;
+  return <Icon aria-hidden="true" className="size-4 text-icon-muted" />;
 }
 
 export function composerSuggestionOptionId(listId: string, itemId: string): string {
@@ -295,7 +291,7 @@ export function composerSuggestionOptionId(listId: string, itemId: string): stri
 }
 
 const LISTBOX_LABEL_BY_TRIGGER: Record<ComposerTriggerKind, string> = {
-  path: "Tasks, chats, agents, projects and files",
+  path: "Tasks, chats, agents, projects, sources and files",
   "pull-request": "Pull requests",
   "slash-command": "Commands",
   skill: "Skills",
@@ -322,10 +318,10 @@ const SKILL_SOURCE_LABEL_BY_KIND: Record<ProviderSkillSourceKind, string> = {
 function SkillSourceBadge(props: { kind: ProviderSkillSourceKind; showSkillSuffix: boolean }) {
   const Icon = SKILL_SOURCE_ICON_BY_KIND[props.kind];
   return (
-    <Badge className="ms-auto" variant="secondary">
-      <Icon aria-hidden="true" className="text-current" />
+    <SearchListRowBadge>
+      <Icon aria-hidden="true" />
       {SKILL_SOURCE_LABEL_BY_KIND[props.kind]}
       {props.showSkillSuffix ? " Skill" : null}
-    </Badge>
+    </SearchListRowBadge>
   );
 }

@@ -18,7 +18,7 @@ import {
   type TerminalRestartInput,
   type TerminalSessionSnapshot,
   type TerminalWriteInput,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 
 /**
  * Thread id the onboarding wizard opens provider setup terminals under.

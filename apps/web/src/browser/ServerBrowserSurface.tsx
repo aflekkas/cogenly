@@ -14,14 +14,14 @@ import {
   type PreviewStreamPointer,
   type PreviewStreamViewport,
   previewStreamHostSetupMessage,
-} from "@t3tools/client-runtime/preview/server-browser-stream";
+} from "@cogenly/client-runtime/preview/server-browser-stream";
 import type {
   EnvironmentId,
   PreviewAnnotationPayload,
   PreviewAnnotationRect,
   PreviewStreamHostSetup,
   PreviewViewportSetting,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import {
   type FormEvent,
   type KeyboardEvent,

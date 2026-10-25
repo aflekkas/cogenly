@@ -10,7 +10,7 @@ import * as Layer from "effect/Layer";
 import { Argument, Command } from "effect/cli";
 import * as CliError from "effect/cli/CliError";
 
-import * as NetService from "@t3tools/shared/Net";
+import * as NetService from "@cogenly/shared/Net";
 import packageJson from "../package.json" with { type: "json" };
 import { authCommand } from "./cli/auth.ts";
 import { appCommand } from "./cli/app.ts";
@@ -23,6 +23,7 @@ import { keepOutboundFetchOnHttp1 } from "./outboundHttp.ts";
 import { sharedServerCommandFlags } from "./cli/config.ts";
 import { machinesCommand } from "./cli/machines.ts";
 import { securityCommand } from "./cli/security.ts";
+import { healthCommand } from "./cli/health.ts";
 import { projectCommand } from "./cli/project.ts";
 import { runDefaultServerCommand, serveCommand, startCommand } from "./cli/server.ts";
 import { updateCommand } from "./cli/update.ts";
@@ -82,6 +83,7 @@ export const makeCli = ({ cloudEnabled = hasCloudPublicConfig } = {}) =>
       projectCommand,
       machinesCommand,
       securityCommand,
+      healthCommand,
       serviceCommand,
       updateCommand,
       uninstallCommand,

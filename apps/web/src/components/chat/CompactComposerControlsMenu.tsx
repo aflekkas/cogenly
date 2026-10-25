@@ -1,8 +1,9 @@
-import type { ProviderInteractionMode } from "@t3tools/contracts";
+import type { ProviderInteractionMode } from "@cogenly/contracts";
 import { memo, type ReactNode } from "react";
-import { EllipsisIcon } from "lucide-react";
+import { EllipsisIcon, PlugIcon } from "lucide-react";
 import {
   Menu,
+  MenuItem,
   MenuPopup,
   MenuRadioGroup,
   MenuRadioItem,
@@ -25,6 +26,8 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
    */
   hidden?: boolean;
   onToggleInteractionMode: () => void;
+  /** Set while the Sources button has folded into this menu; opens its picker. */
+  onOpenSources?: () => void;
 }) {
   const composerFloatingLayerProps = useComposerMenuProps();
   const size = props.size ?? "sm";
@@ -62,6 +65,15 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
               <MenuRadioItem value="default">Chat</MenuRadioItem>
               <MenuRadioItem value="plan">Plan</MenuRadioItem>
             </MenuRadioGroup>
+          </>
+        ) : null}
+        {props.onOpenSources ? (
+          <>
+            {props.traitsMenuContent || props.showInteractionModeToggle ? <MenuDivider /> : null}
+            <MenuItem onClick={props.onOpenSources}>
+              <PlugIcon aria-hidden="true" />
+              Sources…
+            </MenuItem>
           </>
         ) : null}
       </MenuPopup>

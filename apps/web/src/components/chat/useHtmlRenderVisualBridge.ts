@@ -3,14 +3,14 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
   type AtomCommandResult,
-} from "@t3tools/client-runtime/state/runtime";
-import type { ScopedThreadRef, VisualState } from "@t3tools/contracts";
+} from "@cogenly/client-runtime/state/runtime";
+import type { ScopedThreadRef, VisualState } from "@cogenly/contracts";
 import {
   type HtmlRenderVisualSnapshot,
   htmlRenderResult,
   htmlRenderVisualError,
   htmlRenderVisualStateChangedMessage,
-} from "@t3tools/shared/htmlRender";
+} from "@cogenly/shared/htmlRender";
 import { Atom } from "effect/reactivity";
 import { type RefObject, useEffect, useEffectEvent, useRef } from "react";
 

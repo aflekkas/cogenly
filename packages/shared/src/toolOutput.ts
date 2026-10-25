@@ -1,7 +1,7 @@
 import {
   isProviderSendTurnSupportedImageMimeType,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Predicate from "effect/Predicate";
 
 import {
@@ -46,6 +46,10 @@ interface CompactToolOutput {
   threads?: Array<{ threadId?: string; status?: "rolled_back" }>;
   /** Hit count of a search-shaped result (`results` or `matches`), for work-log labels. */
   resultCount?: number;
+  /** The app a `computer_*` action left in front, so its work-log row can name it. */
+  frontmostApp?: string;
+  /** A `terminal_run` that ran in a chat's read-only sandbox, which its row tags. */
+  sandbox?: "read-only";
 }
 
 function readResult(value: unknown, budget: ResultReadBudget, depth = 0): ResultEnvelope {
@@ -200,6 +204,9 @@ export function compactDynamicToolOutput(value: unknown): CompactToolOutput | un
     }
     const hits = Array.isArray(data.results) ? data.results : data.matches;
     if (Array.isArray(hits)) output.resultCount = hits.length;
+    const frontmostApp = boundedTitle(data.frontmostApp);
+    if (frontmostApp !== undefined) output.frontmostApp = frontmostApp;
+    if (data.sandbox === "read-only") output.sandbox = "read-only";
 
     if (Array.isArray(data.threads)) {
       let complete = data.threads.length <= MAX_THREADS;

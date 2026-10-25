@@ -1,9 +1,14 @@
 import { SettingsGroup } from "./SettingsGroup";
-import { AuthSettingsWriteScope } from "@t3tools/contracts";
+import { AuthSettingsWriteScope } from "@cogenly/contracts";
 import { usePrimaryEnvironmentId, usePrimaryEnvironment } from "../../state/environments";
 import { useEnvironmentScope, useEnvironmentsWithScope } from "../../state/session";
 import { InfoIcon, PlusIcon, Undo2Icon } from "lucide-react";
-import { DEFAULT_SERVER_SETTINGS, type ServerSettings } from "@t3tools/contracts";
+import {
+  DEFAULT_SERVER_SETTINGS,
+  isUniversalServerSettingKey,
+  isMachineLocalProjectSettingKey,
+  type ServerSettings,
+} from "@cogenly/contracts";
 import * as Equal from "effect/Equal";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import {
@@ -12,6 +17,7 @@ import {
   type ComponentPropsWithoutRef,
   type ComponentType,
   type ReactNode,
+  type Ref,
   useCallback,
   useContext,
   useEffect,
@@ -25,8 +31,8 @@ import {
 } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
 import { getRelativeTimeState } from "../../timestampFormat";
-import { PageContent, type PageContentWidth } from "../PageContent";
-import { Button } from "../ui/button";
+import { PageContent } from "../PageContent";
+import { Button, InlineButton } from "../ui/button";
 import { RefreshIcon } from "../ui/refresh-icon";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { DisclosureChevron } from "../ui/disclosure";
@@ -47,15 +53,23 @@ import {
 } from "../ui/number-field";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { useOptionalSettingsScope } from "./SettingsScopeContext";
-import { SettingsScopeSentence } from "./SettingsScopeSentence";
+import { MachineScopeMenu, SettingsScopeSentence } from "./SettingsScopeSentence";
+import { ALL_PROJECTS_VALUE, selectProjectScope } from "./settingsScopeAxis";
 import {
+  groupProjectOverridesByFolder,
   isProjectScopedSettingKey,
+  settingAppliesToAllProjects,
   listProjectOverrides,
   type ProjectOverrideEntry,
   scopedSettingsAreMixed,
   scopedSettingsSource,
+  selectMachineLocalSettingsTargets,
 } from "./scopedSettings";
-import { useClearProjectOverrides, useClearScopedSettings } from "./useScopedSettings";
+import {
+  overridingProjectsFrom,
+  useClearProjectOverrides,
+  useClearScopedSettings,
+} from "./useScopedSettings";
 import {
   SettingInheritance,
   type SettingInheritanceState,
@@ -241,8 +255,8 @@ export function SettingsSection({
   children,
   className,
   ...sectionProps
-}: ComponentPropsWithoutRef<"section"> & {
-  title: string;
+}: Omit<ComponentPropsWithoutRef<"section">, "title"> & {
+  title: ReactNode;
   hideTitle?: boolean;
   icon?: ReactNode;
   /** Small control shown right after the title, such as an icon-only add button. */
@@ -592,6 +606,8 @@ export function SettingsRow({
   control,
   serverScoped = false,
   settingKeys = EMPTY_SETTING_KEYS,
+  clientSetting = false,
+  interactive = false,
   mixed: mixedOverride,
   children,
   className,
@@ -606,45 +622,73 @@ export function SettingsRow({
   control?: ReactNode;
   serverScoped?: boolean;
   settingKeys?: readonly (keyof ServerSettings)[];
+  /**
+   * The row edits a client setting, which has no per-project value. At a
+   * project scope it reads as applying to all projects, like a server row
+   * whose keys take no override.
+   */
+  clientSetting?: boolean;
+  interactive?: boolean;
   mixed?: boolean;
   children?: ReactNode;
 }) {
   const targetRef = useSettingsSearchTarget<HTMLDivElement>(rowProps.id);
   const primarySettingsAvailable = usePrimarySettingsAvailable();
   const context = useOptionalSettingsScope();
+  const machineLocalProjectSetting =
+    settingKeys.length > 0 && settingKeys.every(isMachineLocalProjectSettingKey);
+  const rowTargets = context
+    ? machineLocalProjectSetting
+      ? selectMachineLocalSettingsTargets(context.scope, context.targets)
+      : context.targets
+    : [];
+  const rowEnvironments = context
+    ? machineLocalProjectSetting
+      ? selectMachineLocalSettingsTargets(context.scope, context.connectedEnvironments)
+      : context.connectedEnvironments
+    : [];
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const primaryEnvironment = usePrimaryEnvironment();
   const primaryCanWrite = useEnvironmentScope(primaryEnvironmentId, AuthSettingsWriteScope);
-  const writableIds = useEnvironmentsWithScope(
-    context?.connectedEnvironments ?? [],
-    AuthSettingsWriteScope,
-  );
+  const writableIds = useEnvironmentsWithScope(rowEnvironments, AuthSettingsWriteScope);
   const canWriteSettings = context
-    ? context.connectedEnvironments.length > 0 &&
-      context.connectedEnvironments.every((target) => writableIds.has(target.environmentId))
+    ? rowEnvironments.length > 0 &&
+      rowEnvironments.every((target) => writableIds.has(target.environmentId))
     : primaryCanWrite;
   const clearOverrides = useClearScopedSettings();
   const clearProjectOverrides = useClearProjectOverrides();
-  const isProjectScope =
-    context !== null && (context.scope.kind === "project" || context.scope.kind === "checkout");
+  const isProjectScope = context !== null && context.scope.kind === "project";
   const scopedKeys = settingKeys.filter(isProjectScopedSettingKey);
+  const machineLocal =
+    settingKeys.length > 0 && !settingKeys.some((key) => isUniversalServerSettingKey(key));
   // A project scope can only edit keys that support overrides; the rest stay
-  // visible so the user sees the inherited value, but cannot change it here.
-  const environmentWide = isProjectScope && serverScoped && scopedKeys.length === 0;
+  // visible, marked as applying to all projects with a way there, but cannot
+  // change here.
+  const environmentWide = settingAppliesToAllProjects({
+    scopeKind: context?.scope.kind ?? null,
+    serverScoped,
+    clientSetting,
+    settingKeys,
+  });
   const mixed =
-    mixedOverride ?? (context !== null && scopedSettingsAreMixed(context.targets, settingKeys));
-  const source =
-    context && isProjectScope ? scopedSettingsSource(context.targets, scopedKeys) : null;
+    mixedOverride ?? (context !== null && scopedSettingsAreMixed(rowTargets, settingKeys));
+  const source = context && isProjectScope ? scopedSettingsSource(rowTargets, scopedKeys) : null;
   const unavailable =
     serverScoped &&
-    (!canWriteSettings ||
-      !(context ? context.connectedEnvironments.length > 0 : primarySettingsAvailable));
-  const inheritedFrom =
-    source === "environment" && context?.scope.environmentIds.length === 1
-      ? (context.environments.find(
-          (environment) => environment.environmentId === context.scope.environmentIds[0],
-        )?.label ?? "environment")
-      : "environment";
+    (!canWriteSettings || !(context ? rowEnvironments.length > 0 : primarySettingsAvailable));
+  // A machine-local row on a page about every machine names the machine it changes.
+  const machineLabel =
+    context !== null &&
+    serverScoped &&
+    machineLocal &&
+    !context.machinePage &&
+    (!isProjectScope || machineLocalProjectSetting) &&
+    context.environments.length > 1 ? (
+      <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+        on <MachineScopeMenu />
+      </span>
+    ) : null;
+  const machineName = context?.environment?.label ?? "this machine";
   const environmentSettingsById = useMemo(
     () =>
       new Map(
@@ -656,41 +700,33 @@ export function SettingsRow({
       ),
     [context?.connectedEnvironments],
   );
-  // At environment scope, projects with their own value keep it when the
-  // environment default changes; the chain names them and can reset them.
+  // At All projects, projects with their own value keep it when the value for
+  // all projects changes; the chain names them and can reset them.
   const overridingProjects = useMemo((): SettingOverridingProject[] => {
     if (context === null || isProjectScope || scopedKeys.length === 0) return [];
-    return listProjectOverrides(context.connectedEnvironments, scopedKeys).flatMap((entry) => {
-      const group = context.groups.find((candidate) =>
-        candidate.memberProjects.some(
-          (member) => member.environmentId === entry.environmentId && member.id === entry.projectId,
-        ),
-      );
-      if (!group) return [];
-      return [
-        {
-          ...entry,
-          label: group.displayName,
-          open: () =>
-            context.selectScope({
-              project: group.projectKey,
-              ...(context.search.machine ? { machine: context.search.machine } : {}),
-            }),
-        },
-      ];
-    });
+    return overridingProjectsFrom(
+      groupProjectOverridesByFolder(
+        listProjectOverrides(context.connectedEnvironments, scopedKeys),
+        context.folders,
+      ),
+      // A machine page has no project picker to open one with.
+      context.machinePage
+        ? undefined
+        : (folderId) => context.selectScope(selectProjectScope(context.search, folderId)),
+    );
   }, [context, isProjectScope, scopedKeys]);
-  const renderedReset = unavailable ? null : isProjectScope && scopedKeys.length > 0 ? (
-    source === "project" || source === "mixed" ? (
-      <SettingResetButton
-        label={typeof title === "string" ? title : "override"}
-        tooltip="Reset to inherited value"
-        onClick={() => (onResetOverride ? onResetOverride() : clearOverrides(scopedKeys))}
-      />
-    ) : null
-  ) : (
-    resetAction
-  );
+  const renderedReset =
+    unavailable || environmentWide ? null : isProjectScope && scopedKeys.length > 0 ? (
+      source === "project" || source === "mixed" ? (
+        <SettingResetButton
+          label={typeof title === "string" ? title : "override"}
+          tooltip="Reset to All projects"
+          onClick={() => (onResetOverride ? onResetOverride() : clearOverrides(scopedKeys))}
+        />
+      ) : null
+    ) : (
+      resetAction
+    );
   const inertControl = (message: string) => (
     <Tooltip>
       <TooltipTrigger
@@ -721,25 +757,42 @@ export function SettingsRow({
           !canWriteSettings
             ? `This connection lacks permission to change settings on ${
                 context
-                  ? context.connectedEnvironments
+                  ? rowEnvironments
                       .filter((target) => !writableIds.has(target.environmentId))
                       .map((target) => target.label)
-                      .join(", ") || "the selected environment"
-                  : (primaryEnvironment?.label ?? "the primary environment")
+                      .join(", ") || "the selected machine"
+                  : (primaryEnvironment?.label ?? "the primary machine")
               }.`
             : context
-              ? "Reconnect the selected environment to change this setting."
+              ? `Reconnect ${machineName} to change this setting.`
               : PRIMARY_SETTINGS_UNAVAILABLE_MESSAGE,
         )
       : environmentWide && control
-        ? inertControl("Environment-wide setting. Select an environment to change it.")
+        ? inertControl(
+            serverScoped && machineLocal
+              ? `Applies to every project on ${machineName}. Change it under All projects.`
+              : "Applies to all projects. Change it under All projects.",
+          )
         : control;
+  const allProjectsLink =
+    environmentWide && context ? (
+      <span className="text-xs">
+        <InlineButton
+          tone="muted"
+          onClick={() =>
+            context.selectScope(selectProjectScope(context.search, ALL_PROJECTS_VALUE))
+          }
+        >
+          Applies to all projects
+        </InlineButton>
+      </span>
+    ) : null;
   // Server rows get an indicator beside the title that opens the resolution
   // chain per target at every scope; client rows keep a plain status only.
   const customized =
     context !== null &&
     settingKeys.some((key) =>
-      context.targets.some((candidate) => {
+      rowTargets.some((candidate) => {
         const environmentSettings = environmentSettingsById.get(candidate.environmentId);
         return (
           environmentSettings !== undefined &&
@@ -748,23 +801,31 @@ export function SettingsRow({
       }),
     );
   const inheritance: { state: SettingInheritanceState; summary: string } = mixed
-    ? { state: "mixed", summary: "Mixed across selected environments" }
+    ? {
+        state: "mixed",
+        summary: isProjectScope
+          ? "Differs between this project's repositories"
+          : "Differs between machines",
+      }
     : source === "project"
-      ? { state: "overridden", summary: "Overridden for this repository" }
+      ? { state: "overridden", summary: "Overrides All projects" }
       : source === "cogenly.json"
-        ? { state: "inherited", summary: "Inherited from the repository's cogenly.json" }
+        ? { state: "inherited", summary: "From the repository's cogenly.json" }
         : source === "environment" && scopedKeys.length > 0
-          ? { state: "inherited", summary: `Inherited from ${inheritedFrom}` }
+          ? { state: "inherited", summary: "Follows All projects" }
           : customized
-            ? { state: "environment", summary: "Set on the environment" }
+            ? {
+                state: "environment",
+                summary: machineLocal ? `Set on ${machineName}` : "Set for all projects",
+              }
             : { state: "default", summary: "Built-in default" };
   const renderedInheritance =
     context && serverScoped && settingKeys.length > 0 ? (
       <SettingInheritance
         state={inheritance.state}
         summary={inheritance.summary}
-        targets={context.targets}
-        environments={context.connectedEnvironments}
+        targets={rowTargets}
+        environments={rowEnvironments}
         keys={settingKeys}
         overridingProjects={overridingProjects}
         {...(canWriteSettings
@@ -778,52 +839,94 @@ export function SettingsRow({
   const renderedStatus = status;
 
   return (
-    <div
+    <SettingsRowContent
       {...rowProps}
       ref={targetRef}
       tabIndex={rowProps.id ? -1 : rowProps.tabIndex}
-      data-slot="settings-row"
-      className={cn(
-        "@container/settings-row rounded-xl px-3 sm:px-4 aria-disabled:opacity-64 aria-disabled:[&_*]:text-muted-foreground",
-        children ? "pt-3 pb-1" : "py-3",
-        className,
-      )}
-    >
-      <div className="flex flex-col gap-3 @min-[32rem]/settings-row:grid @min-[32rem]/settings-row:grid-cols-[minmax(0,1fr)_minmax(10rem,auto)] @min-[32rem]/settings-row:items-center @min-[32rem]/settings-row:gap-8">
-        <div className="min-w-0 flex-1 space-y-1">
-          <div className="flex min-h-5 items-center gap-1.5">
-            <h3 className="text-sm font-medium text-foreground">{title}</h3>
-            {renderedInheritance ? (
-              <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center">
-                {renderedInheritance}
-              </span>
-            ) : null}
+      title={title}
+      description={description}
+      status={renderedStatus}
+      control={renderedControl}
+      interactive={interactive}
+      className={className}
+      titleActions={
+        <>
+          {renderedInheritance ? (
             <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center">
-              {renderedReset}
+              {renderedInheritance}
             </span>
-          </div>
-          {description ? (
-            <p className="max-w-xl text-xs leading-normal text-muted-foreground/80">
-              {description}
-            </p>
           ) : null}
-          {renderedStatus ? (
-            <div className="pt-0.5 text-xs text-muted-foreground">{renderedStatus}</div>
-          ) : null}
-        </div>
-        {renderedControl ? (
-          <div className="flex w-full min-w-0 shrink-0 items-center gap-2 @min-[32rem]/settings-row:w-auto @min-[32rem]/settings-row:justify-end">
-            {renderedControl}
-          </div>
-        ) : null}
-      </div>
-      {unavailable && children ? (
+          <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center">
+            {renderedReset}
+          </span>
+          {machineLabel}
+          {allProjectsLink}
+        </>
+      }
+    >
+      {(unavailable || environmentWide) && children ? (
         <div inert className="opacity-50">
           {children}
         </div>
       ) : (
         children
       )}
+    </SettingsRowContent>
+  );
+}
+
+/** Shared row presentation without settings subscriptions, also used by content lists. */
+export function SettingsRowContent({
+  title,
+  description,
+  status,
+  titleActions,
+  control,
+  children,
+  interactive = false,
+  className,
+  ...rowProps
+}: Omit<ComponentPropsWithoutRef<"div">, "title"> & {
+  title: ReactNode;
+  description?: ReactNode;
+  status?: ReactNode;
+  titleActions?: ReactNode;
+  control?: ReactNode;
+  interactive?: boolean;
+  ref?: Ref<HTMLDivElement>;
+}) {
+  return (
+    <div
+      {...rowProps}
+      data-slot="settings-row"
+      className={cn(
+        "@container/settings-row rounded-xl px-3 sm:px-4 aria-disabled:opacity-64 aria-disabled:[&_*]:text-muted-foreground",
+        children ? "pt-3 pb-1" : "py-3",
+        interactive &&
+          "cursor-pointer outline-none transition-opacity duration-(--motion-duration-fast) ease-out hover:bg-muted/20 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+        className,
+      )}
+    >
+      <div className="flex flex-col gap-3 @min-[32rem]/settings-row:grid @min-[32rem]/settings-row:grid-cols-[minmax(0,1fr)_minmax(10rem,auto)] @min-[32rem]/settings-row:items-center @min-[32rem]/settings-row:gap-8">
+        <div className="min-w-0 flex-1 space-y-1">
+          <div className="flex min-h-5 items-center gap-1.5">
+            <h3 className="min-w-0 text-sm font-medium text-foreground">{title}</h3>
+            {titleActions}
+          </div>
+          {description ? (
+            <p className="max-w-xl text-xs leading-normal text-muted-foreground/80">
+              {description}
+            </p>
+          ) : null}
+          {status ? <div className="pt-0.5 text-xs text-muted-foreground">{status}</div> : null}
+        </div>
+        {control ? (
+          <div className="flex w-full min-w-0 shrink-0 items-center gap-2 @min-[32rem]/settings-row:w-auto @min-[32rem]/settings-row:justify-end">
+            {control}
+          </div>
+        ) : null}
+      </div>
+      {children}
     </div>
   );
 }
@@ -862,15 +965,14 @@ export function SettingResetButton({
   );
 }
 
-export function SettingsPageContainer({
-  children,
-  className,
-  width = "default",
-}: {
-  children: ReactNode;
-  className?: string;
-  width?: PageContentWidth;
-}) {
+/**
+ * The one frame every settings page renders in, owned by the settings route
+ * layout: the page scroller, the content column's width and padding, and the
+ * scope sentence. Pages return their sections and never set their own width;
+ * size page content with `@container/settings-page` queries instead of
+ * viewport breakpoints.
+ */
+export function SettingsPageContainer({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const hash = useLocation({ select: (location) => location.hash });
   const highlightTarget = useLocation({
@@ -898,13 +1000,18 @@ export function SettingsPageContainer({
         className="scroll-fade-y scrollbar-gutter-both flex-1 overflow-x-hidden overflow-y-auto"
         data-settings-page-scroll
       >
-        <PageContent width={width} className={cn("gap-8", className)}>
+        <PageContent className="@container/settings-page gap-8">
           <SettingsScopeSentence />
           {children}
         </PageContent>
       </div>
     </SettingsSearchTargetProvider>
   );
+}
+
+/** Back to the top of the settings page, for a sub-page swapped in by search. */
+export function resetSettingsPageScroll(): void {
+  document.querySelector("[data-settings-page-scroll]")?.scrollTo({ top: 0 });
 }
 
 export function scrollToSettingsTarget(

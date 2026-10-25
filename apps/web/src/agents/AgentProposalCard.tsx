@@ -1,4 +1,4 @@
-import type { EnvironmentId, ProjectLabelId } from "@t3tools/contracts";
+import type { EnvironmentId, ProjectLabelId } from "@cogenly/contracts";
 import {
   FlagIcon,
   FolderIcon,
@@ -191,7 +191,7 @@ function ProposalProject(props: {
         trigger={<Button type="button" variant="ghost-muted" size="xs" />}
       >
         <span key={current?.key ?? "none"} className="swap-motion flex min-w-0 items-center gap-1">
-          {current ? <ProjectFolderIcon color={current.label.color} className="size-3.5" /> : null}
+          {current ? <ProjectFolderIcon project={current} className="size-3.5" /> : null}
           <span className="min-w-0 truncate">{current ? current.label.name : "No project"}</span>
         </span>
       </AgentProjectPicker>

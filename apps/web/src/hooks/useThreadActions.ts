@@ -3,15 +3,15 @@ import {
   scopeProjectRef,
   scopeThreadRef,
   scopedThreadKey,
-} from "@t3tools/client-runtime/environment";
+} from "@cogenly/client-runtime/environment";
 import {
   isAtomCommandInterrupted,
   settlePromise,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
-import { canSnooze, threadWokeAt } from "@t3tools/client-runtime/state/thread-settled";
-import { threadRuntimeCanArchive } from "@t3tools/client-runtime/state/models";
-import { pinOrderKeyBetween } from "@t3tools/client-runtime/state/thread-sort";
+} from "@cogenly/client-runtime/state/runtime";
+import { canSnooze, threadWokeAt } from "@cogenly/client-runtime/state/thread-settled";
+import { threadRuntimeCanArchive } from "@cogenly/client-runtime/state/models";
+import { pinOrderKeyBetween } from "@cogenly/client-runtime/state/thread-sort";
 import {
   AuthOrchestrationOperateScope,
   AuthSourceControlWriteScope,
@@ -20,8 +20,8 @@ import {
   type ScopedThreadRef,
   ThreadId,
   sessionGrantsScope,
-} from "@t3tools/contracts";
-import { resolveWorktreeCleanup } from "@t3tools/shared/projectSettings";
+} from "@cogenly/contracts";
+import { resolveWorktreeCleanup } from "@cogenly/shared/projectSettings";
 import * as Cause from "effect/Cause";
 import * as Schema from "effect/Schema";
 import { AsyncResult } from "effect/reactivity";
@@ -34,7 +34,7 @@ import { environmentSession, readEnvironmentScope } from "../state/session";
 import { terminalEnvironment } from "../state/terminal";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { environmentServerConfigsAtom } from "../state/server";
-import { isScratchProject } from "@t3tools/client-runtime/state/projects";
+import { isScratchProject } from "@cogenly/client-runtime/state/projects";
 import { threadEnvironment } from "../state/threads";
 import { vcsEnvironment } from "../state/vcs";
 import { useNewThreadHandler } from "./useHandleNewThread";
@@ -88,7 +88,7 @@ export class ThreadSettlementUnsupportedError extends Schema.TaggedError<ThreadS
   },
 ) {
   override get message(): string {
-    return "This environment's server does not support settling yet. Update the server to use Settle.";
+    return "This machine's server does not support settling yet. Update the server to use Settle.";
   }
 }
 
@@ -100,7 +100,7 @@ export class ThreadSnoozeUnsupportedError extends Schema.TaggedError<ThreadSnooz
   },
 ) {
   override get message(): string {
-    return "This environment's server does not support snoozing yet. Update the server to use Snooze.";
+    return "This machine's server does not support snoozing yet. Update the server to use Snooze.";
   }
 }
 
@@ -124,7 +124,7 @@ export class ThreadPinningUnsupportedError extends Schema.TaggedError<ThreadPinn
   },
 ) {
   override get message(): string {
-    return "This environment's server does not support pinning yet. Update the server to use Pin.";
+    return "This machine's server does not support pinning yet. Update the server to use Pin.";
   }
 }
 

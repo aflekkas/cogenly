@@ -13,7 +13,8 @@ import { projectLabelKey, threadProjectFolderId } from "./projectLabels.logic";
 import { useProjectLabelDirectory } from "./useProjectLabels";
 
 /**
- * Folders with the chats and Work filed in each, newest activity first. A
+ * Folders with the chats and Work filed in each, newest activity first,
+ * across every connected machine and keyed by each project's one entry. A
  * thread's folder comes from its shell, so this needs no membership query.
  */
 export function useProjectContents() {
@@ -30,8 +31,8 @@ export function useProjectContents() {
         folderKeyOf: (thread) => {
           const folderId = threadProjectFolderId(thread);
           if (folderId === null) return null;
-          const key = projectLabelKey(thread.environmentId, folderId);
-          return directory.byKey.has(key) ? key : null;
+          // Any machine's copy of a project files into its one entry.
+          return directory.byKey.get(projectLabelKey(thread.environmentId, folderId))?.key ?? null;
         },
       }),
     [classifier, directory, threads],

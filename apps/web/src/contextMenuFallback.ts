@@ -1,4 +1,4 @@
-import type { ContextMenuItem } from "@t3tools/contracts";
+import type { ContextMenuItem } from "@cogenly/contracts";
 
 import {
   MENU_VIEWPORT_MARGIN_PX,
@@ -147,6 +147,12 @@ const ICON_PATHS: Record<string, ReadonlyArray<{ tag: string; attrs: Record<stri
     { tag: "path", attrs: { d: "M21 3v5h-5" } },
     { tag: "path", attrs: { d: "M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" } },
     { tag: "path", attrs: { d: "M8 16H3v5" } },
+  ],
+  server: [
+    { tag: "rect", attrs: { width: "20", height: "8", x: "2", y: "2", rx: "2", ry: "2" } },
+    { tag: "rect", attrs: { width: "20", height: "8", x: "2", y: "14", rx: "2", ry: "2" } },
+    { tag: "line", attrs: { x1: "6", x2: "6.01", y1: "6", y2: "6" } },
+    { tag: "line", attrs: { x1: "6", x2: "6.01", y1: "18", y2: "18" } },
   ],
   settings: [
     {

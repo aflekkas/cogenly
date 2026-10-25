@@ -1,17 +1,22 @@
 import type {
   EnvironmentProject,
   EnvironmentThreadShell,
-} from "@t3tools/client-runtime/state/shell";
+} from "@cogenly/client-runtime/state/shell";
 import { useMemo, useRef } from "react";
 
 import { ComposerProjectPicker } from "~/projectLabels/ComposerProjectPicker";
 import { HERO_INLINE_ICON_STYLE, ProjectFolderIcon } from "~/projectLabels/ProjectFolderMark";
-import { projectLabelKey, threadProjectFolderId } from "~/projectLabels/projectLabels.logic";
-import { workHeroBreadcrumb } from "~/projectLabels/projectMeta.logic";
+import {
+  projectLabelKey,
+  scopedRepositoryKey,
+  threadProjectFolderId,
+} from "~/projectLabels/projectLabels.logic";
+import { workHeroBreadcrumb, workThreadDisplayProject } from "~/projectLabels/projectMeta.logic";
+import { linkedRepositoryIcon } from "~/projectLabels/repositoryPicker.logic";
+import { RepositoryRowIcon } from "~/projectLabels/RepositorySourceRows";
 import { useProjectLabelDirectory } from "~/projectLabels/useProjectLabels";
-import { ProjectFavicon } from "../ProjectFavicon";
-import { RepositoryBadge } from "../sidebar/modes/RepositoryBadge";
-import { ChatGreetingText, useChatGreeting } from "./ChatGreetingText";
+import { useRepositoryNames } from "~/projectLabels/useRepositoryNames";
+import { useChatGreeting } from "./useChatGreeting";
 import { FadeSwap } from "./StateTransition";
 import { useHeroHeadlineMotion } from "./useHeroHeadlineMotion";
 import { WorkHeroCrumbText, WorkHeroSentence } from "./WorkHeroSentence";
@@ -38,20 +43,31 @@ export function ThreadHeroHeadline({
   const environmentIds = useMemo(() => [thread.environmentId], [thread.environmentId]);
   const directory = useProjectLabelDirectory(environmentIds);
   const folderId = threadProjectFolderId(thread);
-  const folder =
+  const filed =
     folderId === null
       ? null
       : (directory.byKey.get(projectLabelKey(thread.environmentId, folderId)) ?? null);
+  // Work names its repository's project when its filing does not hold it.
+  const folder = isChat
+    ? filed
+    : workThreadDisplayProject({
+        filed,
+        repository:
+          isScratch || project === null
+            ? null
+            : { environmentId: project.environmentId, projectId: project.id },
+        folderByRepository: directory.folderByRepository,
+      });
   // Fixed when the screen opens, so the line holds still while the user types.
   const greeting = useChatGreeting(thread.environmentId);
   const headingRef = useRef<HTMLHeadingElement>(null);
-  const measureRef = useRef<HTMLSpanElement>(null);
-  useHeroHeadlineMotion(headingRef, measureRef, isChat ? `chat:${thread.id}` : "heading");
+  useHeroHeadlineMotion(headingRef, isChat ? "chat" : "work");
 
   // The new-Work screen's sentence, read-only: both halves always named.
+  const repositoryNameOf = useRepositoryNames();
   const breadcrumb = workHeroBreadcrumb({
     projectName: folder?.label.name ?? null,
-    repositoryName: project?.title ?? null,
+    repositoryName: project ? repositoryNameOf(project) : null,
     hasRepository: !isScratch,
   });
   const headingLabel = isChat
@@ -63,12 +79,21 @@ export function ThreadHeroHeadline({
       crumb={breadcrumb.repository}
       icon={
         project ? (
-          <ProjectFavicon
-            project={project}
-            // Sized in em to the heading, like the hero's other inline icons.
-            className="inline-block size-[0.78em] align-[-0.06em] me-[0.28em]"
-            fallback={<RepositoryBadge name={project.title} size="inline" />}
-          />
+          // The same icon the repository picker's row shows for it.
+          <span className="inline-flex size-[0.78em] align-[-0.06em] me-[0.28em] items-center justify-center">
+            <RepositoryRowIcon
+              local={project}
+              {...linkedRepositoryIcon(
+                directory.folderByRepository.get(
+                  scopedRepositoryKey(project.environmentId, project.id),
+                ) ?? null,
+                project.id,
+              )}
+              environmentId={project.environmentId}
+              // Sized in em to the heading, like the hero's other inline icons.
+              className="size-full"
+            />
+          </span>
         ) : null
       }
     />
@@ -78,7 +103,7 @@ export function ThreadHeroHeadline({
       crumb={breadcrumb.project}
       icon={
         <ProjectFolderIcon
-          color={folder?.label.color}
+          project={folder}
           className="inline-block"
           style={HERO_INLINE_ICON_STYLE}
         />
@@ -90,15 +115,10 @@ export function ThreadHeroHeadline({
     <div className="@container flex w-full flex-col items-center">
       <h1
         ref={headingRef}
+        style={{ fontSize: "clamp(var(--text-xl), 3cqw, var(--text-3xl))" }}
         aria-label={headingLabel}
-        className="group/hero-headline relative w-full origin-bottom text-balance text-center font-normal text-xl text-foreground tracking-tight @xl:text-2xl @2xl:text-3xl"
+        className="group/hero-headline relative w-full origin-bottom text-balance text-center font-normal text-xl text-foreground tracking-tight"
       >
-        {/* The greeting and its project on one line, to tell whether they fit. */}
-        <span
-          ref={measureRef}
-          aria-hidden
-          className="pointer-events-none invisible absolute start-0 top-0 whitespace-pre"
-        />
         {/* The new-thread screen's slot, so moving between it and here cross-fades. */}
         <FadeSwap
           group="draft-heading"
@@ -106,11 +126,8 @@ export function ThreadHeroHeadline({
         >
           {isChat ? (
             <>
-              <span
-                data-hero-greeting=""
-                className="inline-block max-w-full group-data-stacked/hero-headline:block"
-              >
-                <ChatGreetingText text={greeting} />
+              <span data-hero-greeting="" className="inline">
+                {greeting}
               </span>
               <ComposerProjectPicker
                 appearance="hero"

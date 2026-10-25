@@ -7,7 +7,7 @@ import {
   type ProviderInstanceId,
   type ProjectLabelId,
   type ThreadId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Vault from "../vault/Vault.ts";
 import { cliAdapter, cliAdapters } from "./CliAdapters.ts";
 import {
@@ -20,7 +20,7 @@ import {
   type AccountKeyInput,
   type AccountsListInput,
   type AccountUpdateInput,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";

@@ -1,25 +1,25 @@
+import {
+  SettingsListToolbar,
+  SettingsListSearch,
+  SettingsListFilter,
+  SettingsListEmpty,
+} from "./SettingsList";
 import { OverlayPresence } from "~/components/ui/overlay-presence";
-import type { AgentId, ProjectLabelId } from "@t3tools/contracts";
+import type { AgentId, ProjectLabelId } from "@cogenly/contracts";
 import { BrainIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { useAgents } from "../../agents/agentsClient";
 import { FACT_STATUS_FILTERS, filterFacts, type FactStatusFilter } from "../../memory/facts.logic";
 import { FactEditorDialog, FactList, factInputFromDraft } from "../../memory/FactList";
+import { peerSyncIndicator, pendingFor } from "../../machines/peerSync.logic";
+import { useSyncPeers } from "../../machines/usePeerSync";
 import { useFactActions, useFactNavigation, useFacts } from "../../memory/useFacts";
 import { sortProjectLabels } from "../../projectLabels/projectLabels.logic";
 import { useEnvironmentProjectLabels } from "../../projectLabels/useProjectLabels";
-import { SearchInput } from "../ui/search-input";
-import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
+import { PeerSyncRow } from "./PeerSyncRow";
 import { useSettingsScope } from "./SettingsScopeContext";
-import {
-  SettingsEmpty,
-  SettingsPageContainer,
-  SettingsRow,
-  SettingsSection,
-  SettingsSectionAction,
-  SettingsToolbar,
-} from "./settingsLayout";
+import { SettingsRow, SettingsSection, SettingsSectionAction } from "./settingsLayout";
 
 const ALL = "all";
 
@@ -45,7 +45,11 @@ export function MemorySettings() {
     ...(labelId === ALL ? {} : { labelId: labelId as ProjectLabelId }),
     ...(agentId === ALL ? {} : { agentId: agentId as AgentId }),
   });
-  const actions = useFactActions(environmentId, list.refresh);
+  const syncPeers = useSyncPeers(environmentId, "fact");
+  const actions = useFactActions(environmentId, () => {
+    list.refresh();
+    syncPeers.refresh();
+  });
   const navigation = useFactNavigation(environmentId);
   const facts = useMemo(
     () => filterFacts(list.facts, { status, query }),
@@ -55,8 +59,9 @@ export function MemorySettings() {
   const filtered = labelId !== ALL || agentId !== ALL || status !== "current" || query !== "";
 
   return (
-    <SettingsPageContainer>
+    <>
       <SettingsSection
+        footer="Chats tagged with a confirmed project, and agents allowed to read that project, use its confirmed facts as context. Proposals are never used until you confirm them. Private facts stay with you and the agent they belong to."
         id="memory"
         title="Memory"
         headerAction={
@@ -68,82 +73,49 @@ export function MemorySettings() {
             Remember something
           </SettingsSectionAction>
         }
-        footer="Chats tagged with a confirmed project, and agents allowed to read that project, use its confirmed facts as context. Proposals are never used until you confirm them. Private facts stay with you and the agent they belong to."
       >
         {environmentId === null ? (
-          <SettingsRow title="Choose an environment to see what it remembers." />
+          <SettingsRow title="Choose a machine to see what it remembers." />
         ) : (
           <>
-            <SettingsToolbar>
-              <SearchInput
-                frameClassName="min-w-40 flex-1"
-                aria-label="Search memory"
-                placeholder="Search memory"
-                value={query}
-                onChange={(event) => setQuery(event.currentTarget.value)}
-                clearLabel="Clear memory search"
-                onClear={() => setQuery("")}
+            <SettingsListToolbar>
+              <SettingsListSearch label="Search memory" value={query} onValueChange={setQuery} />
+              <SettingsListFilter
+                label="Project"
+                value={labelId}
+                onValueChange={setLabelId}
+                options={[
+                  { value: ALL, label: "All projects" },
+                  ...sortedLabels.map((label) => ({ value: label.id, label: label.name })),
+                ]}
               />
-              <Select value={labelId} onValueChange={(value) => setLabelId(value ?? ALL)}>
-                <SelectTrigger size="sm" aria-label="Project">
-                  <SelectValue>
-                    {labelId === ALL
-                      ? "All projects"
-                      : (labels.find((label) => label.id === labelId)?.name ?? "Project")}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectPopup align="end" alignItemWithTrigger={false}>
-                  <SelectItem value={ALL}>All projects</SelectItem>
-                  {sortedLabels.map((label) => (
-                    <SelectItem key={label.id} value={label.id}>
-                      {label.name}
-                    </SelectItem>
-                  ))}
-                </SelectPopup>
-              </Select>
               {agents.length > 0 ? (
-                <Select value={agentId} onValueChange={(value) => setAgentId(value ?? ALL)}>
-                  <SelectTrigger size="sm" aria-label="Agent">
-                    <SelectValue>
-                      {agentId === ALL ? "All agents" : (agentName(agentId) ?? "Agent")}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectPopup align="end" alignItemWithTrigger={false}>
-                    <SelectItem value={ALL}>All agents</SelectItem>
-                    {agents.map((agent) => (
-                      <SelectItem key={agent.id} value={agent.id}>
-                        {agent.name}
-                      </SelectItem>
-                    ))}
-                  </SelectPopup>
-                </Select>
+                <SettingsListFilter
+                  label="Agent"
+                  value={agentId}
+                  onValueChange={setAgentId}
+                  options={[
+                    { value: ALL, label: "All agents" },
+                    ...agents.map((agent) => ({ value: agent.id, label: agent.name })),
+                  ]}
+                />
               ) : null}
-              <Select
+              <SettingsListFilter
+                label="Status"
                 value={status}
-                onValueChange={(value) =>
-                  setStatus((value as FactStatusFilter | null) ?? "current")
-                }
-              >
-                <SelectTrigger size="sm" aria-label="Status">
-                  <SelectValue>
-                    {FACT_STATUS_FILTERS.find((option) => option.value === status)?.label}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectPopup align="end" alignItemWithTrigger={false}>
-                  {FACT_STATUS_FILTERS.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectPopup>
-              </Select>
-            </SettingsToolbar>
+                onValueChange={(value) => {
+                  const option = FACT_STATUS_FILTERS.find((option) => option.value === value);
+                  if (option) setStatus(option.value);
+                }}
+                options={FACT_STATUS_FILTERS}
+              />
+            </SettingsListToolbar>
             {list.error !== null ? (
               <SettingsRow title="Could not load memory" description={list.error} />
             ) : !list.isLoaded ? (
               <SettingsRow title="Loading memory…" role="status" />
             ) : facts.length === 0 ? (
-              <SettingsEmpty
+              <SettingsListEmpty
                 icon={<BrainIcon />}
                 title={filtered ? "Nothing matches" : "Nothing remembered yet"}
                 description={
@@ -165,11 +137,27 @@ export function MemorySettings() {
           </>
         )}
       </SettingsSection>
+      {syncPeers.peers.length > 0 ? (
+        <SettingsSection id="memory-machines" title="Paired machines">
+          {syncPeers.peers.map((peer) => (
+            <PeerSyncRow
+              key={peer.environmentId}
+              machine={peer.label}
+              indicator={peerSyncIndicator({
+                machine: peer.label,
+                online: peer.online,
+                pending: pendingFor(peer, "fact"),
+              })}
+            />
+          ))}
+        </SettingsSection>
+      ) : null}
       <OverlayPresence when={creating && environmentId}>
         {(environmentId) => (
           <FactEditorDialog
             title="Remember something"
             description="Saved as confirmed. You can correct or forget it later."
+            environmentId={environmentId}
             labels={labels}
             initial={{
               subject: "",
@@ -185,6 +173,6 @@ export function MemorySettings() {
           />
         )}
       </OverlayPresence>
-    </SettingsPageContainer>
+    </>
   );
 }

@@ -4,7 +4,7 @@ import { COPY_FEEDBACK_MS, createCopyFeedback, type CopyStatus } from "./copyFee
 import {
   COMPOSER_CONTEXT_CLIPBOARD_MIME,
   encodeComposerContextClipboardHtml,
-} from "@t3tools/shared/composerContextClipboard";
+} from "@cogenly/shared/composerContextClipboard";
 
 export class ClipboardApiUnavailableError extends Schema.TaggedError<ClipboardApiUnavailableError>()(
   "ClipboardApiUnavailableError",

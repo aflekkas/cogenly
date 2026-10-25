@@ -15,6 +15,8 @@ import {
   sessionHasLegacyPermissions,
 } from "./auth.ts";
 
+const decodeGrantScopes = Schema.decodeUnknownSync(AuthGrantScopes);
+
 describe("authorization grants", () => {
   it("decodes legacy review credentials without offering them in new grants", () => {
     expect(Schema.decodeUnknownSync(AuthEnvironmentScopes)(["review:write"])).toEqual([
@@ -43,7 +45,7 @@ describe("authorization grants", () => {
 
   it("never offers peer scopes to clients", () => {
     for (const scope of AuthPeerScopes) {
-      expect(() => Schema.decodeUnknownSync(AuthGrantScopes)([scope])).toThrow();
+      expect(() => decodeGrantScopes([scope])).toThrow();
       expect(AuthAdministrativeScopes).not.toContain(scope);
       expect(authScopeResponse([scope]).scopes).toEqual([]);
     }

@@ -1,39 +1,29 @@
-# Settings and repository overrides
+# Settings and project overrides
 
-On web and desktop, the "Applying settings for …" sentence at the top of Settings pages picks
-the repository and environment a change applies to. Pages that only hold device preferences, such as
-Appearance, don't show it. They start at **All repositories** and **All environments**
-and stay selected as you move between categories or search for a setting.
+Settings apply to every machine you have paired: change one on your laptop and your server
+gets it too. The "Settings for …" sentence at the top of a Settings page starts at
+**All projects**. Choose a project there to override a setting for that project only; the
+override covers every repository in the project, on every machine. Pages that only hold device
+preferences, such as Appearance, don't show the sentence. The choice stays selected as you move
+between categories or search for a setting.
 
-Preferences saved on this device, such as appearance, confirmations and browser profiles, always
-show and ignore the selection. Everything else is stored on a server. Choose one environment to
-edit its settings, or leave **All environments** to edit every connected environment at once.
-Offline environments keep their current values; this is a bulk edit, not a synced global default.
+A layers icon beside a row's title shows where the value comes from: the built-in default, the
+value for all projects, the repository's `cogenly.json`, or the project's override. With a project
+selected, an overridden row says **Overrides All projects** and its reset arrow returns it to the
+value for all projects. Settings a project cannot override are shown read-only while a project is
+selected.
 
-Choose a repository to override settings for it on the selected environments. A layers icon beside
-each server row's title shows where the value comes from: the built-in default, the environment,
-or a repository override. Click it to see that chain on every selected environment. An override can
-be reset to inherit again. Settings that cannot be overridden by a repository are shown read-only
-while a repository is selected.
+Changing a value for all projects never touches a project's own override. When projects override
+the setting you are editing, the layers icon counts them and lists each one with its value: click a
+project to open it, or **Reset all** to make them follow All projects again.
 
-When the selected environments disagree, the control shows **Mixed** in place of a value and the
-layers icon turns amber. Picking a value applies it to every selected environment.
-
-Changing an environment value never touches a repository's own override. When repositories override the
-setting you are editing, the layers icon counts them and the chain lists each one with its value:
-click a repository to jump to it, or **Reset all** to make those repositories follow the environment
-again.
-
-Providers and diagnostics are per machine: they show one environment at a time, the primary
-one until you pick another. Every other setting fans out to the selection.
-
-With a repository selected, a provider's switch in **Settings → Providers** turns it on or off for
-that repository only, in either direction: a provider off on the machine can be used in one repository,
-and one on everywhere can be kept out of another. That repository's model pickers follow the switch,
-and no new turn there can start on a provider it turned off, including queued messages and
-follow-ups from delegated tasks. A turn already running when the switch flips finishes. A delegated
-task's result still lands in its parent thread, which sees it on its next turn. Reset returns the repository to the
-machine's setting. Every other provider setting stays per machine.
+Some settings belong to one machine, such as project actions, where its projects folder is,
+its background activity, or its device hub. On a page with other settings these rows say which machine they change, such
+as "on MacBook", and you can switch the machine there. Pages about one machine's own state,
+Providers, Machines, Storage and Diagnostics, ask for a machine instead of a project: they show
+your primary machine until you pick another. If projects still have their own provider switch or
+worktree cleanup, a layers icon beside the provider's switch or the Worktrees heading lists them,
+and **Reset all** returns them to the machine's setting.
 
 ## Worktree branch names
 
@@ -41,7 +31,7 @@ New worktree branches are named when the worktree is created: a short slug
 from your first message under a `c/` prefix, such as `c/fix-login-redirect`.
 The worktree folder is named by that slug and never moves.
 
-In **Settings → Source Control → Worktree branch naming**, choose a static prefix,
+In **Settings → Source control → Worktree branch naming**, choose a static prefix,
 a model-selected semantic prefix such as `feat/` or `fix/`, or custom instructions
 for the complete name. The static prefix defaults to `c/`; a trailing slash is
 optional, and an empty prefix adds nothing. Invalid characters in a static prefix
@@ -49,8 +39,8 @@ are replaced with hyphens. Custom instructions are appended to
 the naming prompt and can specify issue IDs, namespaces, and casing.
 
 These settings apply when a client names a worktree branch with a temporary
-name and Cogenly renames it. Select a repository
-to override its environment defaults. Worktree directories keep their original names.
+name and Cogenly renames it. Select a project
+to override them for it. Worktree directories keep their original names.
 If generation fails, or a custom name is invalid or already taken, the temporary
 branch name remains.
 
@@ -89,74 +79,76 @@ than** on the task.
 
 ## Defaults and inheritance
 
-General contains the model and workspace for new threads. Integrations controls agent browser
-access. Source Control contains automatic pull, the default pull request merge method and text
-generation. The same rows edit environment defaults or repository overrides depending on the
-repository crumb.
+Models holds the default model for new threads and the text generation model. New threads holds
+the workspace, submodules and start-from-origin defaults, and where added repositories go.
+Integrations controls agent browser access and computer use. Source control contains automatic pull, the default
+pull request merge method and the model that writes commit messages and pull requests. The same rows
+edit the value for all projects or a project's override, depending on the project chosen at the top.
 
-The Repository category, shown while a repository is selected, holds the repository's name, icon, actions,
-checkouts and removal. Actions belong to a repository: editing them creates the repository's own list
-on each selected environment, and reset returns to the environment's shared list. A repository's
-`cogenly.json` actions can be imported there.
+With a project selected, New threads also holds the project's actions. Editing them gives the
+project its own list on the selected machine's repositories, and reset returns to that machine's
+list for all projects. Actions never sync between machines; configure them separately on each one.
+A repository's `cogenly.json` actions can be imported there.
+
+The Repository page, opened from a repository in the sidebar, sits under Projects and holds that
+repository's name, icon, checkouts and removal.
 
 Settings a repository can also declare in `cogenly.json`, such as the workspace for new threads,
-resolve in one order: a repository override, then the environment setting, then `cogenly.json`, then the
-built-in default. Leave a setting on **Inherit** to let the next tier decide. A repository that
-still has a `t3.json` and no `cogenly.json` is read the same way; rename the file when convenient.
-Browser access changes apply when an agent session next starts.
+resolve in one order: a project override, then the value for all projects, then `cogenly.json`,
+then the built-in default. Leave a setting on **Inherit** to let the next tier decide. A repository
+that still has a `t3.json` and no `cogenly.json` is read the same way; rename the file when
+convenient. Browser access and computer use changes apply when an agent session next starts.
 
 New worktrees initialize git submodules recursively. If that step is slow because the repository
-declares many nested submodules, set **Submodules** in **Settings → General** (with the repository
+declares many nested submodules, set **Submodules** in **Settings → New threads** (with a project
 selected to override it there) to **Top level only** to stop at the ones the repository declares
 itself, or **Skip** to leave them for a setup script. It resolves in the same order as the
 workspace default: a `"worktreeSubmodules"` value in the `cogenly.json` of the branch being checked out
-applies when the repository and environment are both on **Inherit**.
+applies when the project and All projects are both on **Inherit**.
 
 ## Worktree location
 
-New worktrees go in the `worktrees` folder of the Cogenly home directory. To put them somewhere else,
+New worktrees go in the `.worktrees` folder of the repository's project folder. A repository in no
+project uses the `worktrees` folder of the Cogenly home directory. To put them somewhere else,
 such as another drive, set **Settings → Storage → Worktree location** to an absolute path like
 `D:\worktrees` or `~/worktrees`. The setting is per machine. Existing worktrees stay where they
 are, and cleanup covers both the default folder and the custom one.
 
 ## Storage cleanup
 
-Open **Settings → Storage** to enable automatic cleanup on one machine or all connected
-environments. Policies are off by default and run on the server at startup, when changed, and
-hourly. Offline machines keep their existing policies.
+Open **Settings → Storage** and pick a machine to see allocated disk usage and preview cleanup.
+Volume usage counts shared blocks once. APFS clones and reflinks make exact per-category disk use unavailable without deletion; those category sizes are shown as unknown, with file counts. Cleanup reports the change in available volume space instead of adding directory sizes.
 
-Select a repository to set **Automatic worktree cleanup** to **Inherit**, **Off**, or **Custom**.
-Inherit follows each machine's rules; Off keeps that repository's worktrees until you remove them
-manually. Custom applies separate worktree rules to the selected repository or checkout. Browser
-captures and log retention remain machine-wide.
+Completed delegated tasks release their separate worktrees when safe. Settled and archived Work
+threads keep theirs for 7 days by default. Active-thread retention is off until you choose an
+inactivity period. Branches, conversation history and checkpoints stay. Starting another turn
+recreates a removed checkout from its branch and runs the project's setup script.
 
-Worktrees can be removed after a chosen number of inactive days, after a thread settles, after
-merging, or when they have no commits beyond the default branch. Set settled retention to 0 days
-to remove a worktree at the next cleanup after settlement. Only Cogenly-managed worktrees are eligible.
-Active sessions and shared worktrees prevent removal. **Keep worktrees with local changes** defaults
-to **Uncommitted changes**, which protects tracked edits and untracked files but deletes ignored
-files such as `.env` and build output. **Any local files** also protects ignored files other than
-`node_modules`. **Edited tracked files** protects only tracked edits and allows untracked and
-ignored files to be deleted. Branches and thread history stay; starting another turn recreates the checkout.
-Merge cleanup requires a merged pull request whose commits are included in the remote default
-branch. A squash or rebase merge on GitHub also counts when the pull request targeted the default
-branch and the worktree is still at the pull request's last commit.
+Cleanup keeps worktrees with edits, untracked files, stashes, live sessions, running processes,
+pending work or other live thread references. Unknown ignored files such as a real `.env` also
+block removal. **Keep ignored local files too** additionally protects ignored build output and
+dev data copies. Rebuildable dependencies and isolated dev data are otherwise removed with the
+checkout. Cleanup never deletes the branch or an unreferenced worktree folder.
 
-Enable **Delete worktrees with deleted threads** to remove safe worktrees after their last
-thread is deleted, including archived threads and worktrees left by earlier deletions. The
-server waits for sessions and terminals to stop and retries skipped worktrees after restart.
-Existing prompts for deleting a worktree manually remain available when this policy is off.
+Optional dependency pruning removes ignored `node_modules`, `.turbo` and `dist` from idle
+worktrees after the chosen period. It is off by default: package stores often share these files,
+so removing them may reclaim little disk space. Project setup runs before the next turn.
 
-Choose **Delete now** to run the enabled rules immediately. The latest results show which
-worktrees were removed or kept and why, plus any failures.
-Results also list folders in the worktree folder that no thread uses, with their sizes; cleanup never removes them, so remove them manually if you want.
+Cleanup runs at startup, hourly, when its rules change, and after delegated task completion.
+Choose **Preview cleanup**, review eligible items and blockers, then **Clean up now**. Execution
+checks safety again. Project cleanup overrides still apply to Work thread retention.
 
-Browser captures and rotated logs have separate retention periods. Expired capture links stop
-working. Current logs, message attachments, and browser profiles are kept.
+Nightly backups keep the newest two complete snapshots by default. Storage shows backup files and the database file size; **Clean up now** uses the same backup retention. Cleanup keeps conversation history and does not compact the database.
+
+Browser captures and inactive rotated logs expire after 14 days by default. Current logs,
+message attachments and browser profiles are kept. Expired capture links stop working.
+Agents can use `storage_status` and `storage_cleanup` (dry run by default). On the machine,
+`cogenly doctor --storage` reports usage, `--dry-run` previews cleanup, and `--fix` applies it
+through the running server.
 
 ## Repository icons
 
-Select the repository and open Repository to choose an icon, emoji, monogram, or image. The choice applies to
+Open the repository's Repository page from the sidebar to choose an icon, emoji, monogram, or image. The choice applies to
 every checkout in the repository group and appears on connected clients. Choose **Automatic** to let
 Cogenly detect an icon again.
 
@@ -168,8 +160,8 @@ from the icon palette, derived from the saved repository name. For example, `Neb
 
 ## Keep the default branch current
 
-In Source Control, enable **Automatically pull** to keep the default-branch checkout up to date
-with its configured upstream. Choose an environment to set the default or a repository to override it.
+In Source control, enable **Automatically pull** to keep the default-branch checkout up to date
+with its configured upstream. Leave **All projects** to set the default or choose a project to override it.
 Cogenly only pulls when it can fast-forward and the checkout has no changed files, untracked files,
 or local commits. It skips checkouts on another branch or without an upstream. If a checkout has
 local work, resolve it yourself before automatic pulls can resume.

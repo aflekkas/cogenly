@@ -4,13 +4,13 @@ import {
   HTML_RENDER_DEFAULT_FONTS,
   type HtmlRenderFontFace,
   type HtmlRenderTheme,
-} from "@t3tools/shared/htmlRender";
-import interLatinExtUrl from "@t3tools/shared/fonts/inter-latin-ext-wght-normal.woff2?url";
-import interLatinUrl from "@t3tools/shared/fonts/inter-latin-wght-normal.woff2?url";
+} from "@cogenly/shared/htmlRender";
+import interLatinExtUrl from "@cogenly/shared/fonts/inter-latin-ext-wght-normal.woff2?url";
+import interLatinUrl from "@cogenly/shared/fonts/inter-latin-wght-normal.woff2?url";
 import {
   T3_CODE_LIGHT_THEME_COLORS,
   T3_CODE_DARK_THEME_COLORS,
-} from "@t3tools/shared/themePalettes";
+} from "@cogenly/shared/themePalettes";
 import { useEffect, useMemo, useState } from "react";
 import { useTheme } from "./useTheme";
 

@@ -18,7 +18,9 @@ import {
   type ServerRemoveKeybindingInput,
   type ServerUpsertKeybindingInput,
   type ServerConfigIssue,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
+import { ServerSettingsService } from "./serverSettings.ts";
+import * as Option from "effect/Option";
 import * as Array from "effect/Array";
 import * as Cache from "effect/Cache";
 import * as Cause from "effect/Cause";
@@ -41,15 +43,15 @@ import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as Semaphore from "effect/Semaphore";
 import * as ServerConfig from "./config.ts";
-import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
-import { fromJsonStringPretty, fromLenientJson } from "@t3tools/shared/schemaJson";
+import { writeFileStringAtomically } from "@cogenly/shared/atomicWrite";
+import { fromJsonStringPretty, fromLenientJson } from "@cogenly/shared/schemaJson";
 import {
   DEFAULT_KEYBINDINGS,
   mergeWithDefaultKeybindings,
   compileResolvedKeybindingRule,
   compileResolvedKeybindingsConfig,
   parseKeybindingShortcut,
-} from "@t3tools/shared/keybindings";
+} from "@cogenly/shared/keybindings";
 
 export {
   DEFAULT_KEYBINDINGS,
@@ -290,6 +292,9 @@ export class Keybindings extends Context.Service<
      */
     readonly streamChanges: Stream.Stream<KeybindingsChangeEvent>;
 
+    /** Reconcile the local file with the universal shared setting. */
+    readonly reconcileSharedKeybindings: Effect.Effect<void, KeybindingsConfigError>;
+
     /**
      * Upsert a keybinding rule and persist the resulting configuration.
      *
@@ -313,6 +318,8 @@ const make = Effect.gen(function* () {
   const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
+  const settings = yield* Effect.serviceOption(ServerSettingsService);
+  let sharedBase: readonly KeybindingRule[] | undefined;
   const upsertSemaphore = yield* Semaphore.make(1);
   const resolvedConfigCacheKey = "resolved" as const;
   const changesPubSub = yield* PubSub.unbounded<KeybindingsChangeEvent>();
@@ -515,8 +522,53 @@ const make = Effect.gen(function* () {
 
   const loadConfigStateFromCacheOrDisk = Cache.get(resolvedConfigCache, resolvedConfigCacheKey);
 
+  // Run while holding the file write lock. SettingsSync owns replication; this
+  // bridge keeps keybindings.json and every existing keybinding entry point intact.
+  const reconcileSharedUnlocked = (localEdit = false) =>
+    Effect.gen(function* () {
+      if (Option.isNone(settings)) return;
+      const config = yield* loadRuntimeCustomKeybindingsConfig();
+      if (config.issues.length > 0) return;
+      const local = config.keybindings;
+      const same = (left: readonly KeybindingRule[], right: readonly KeybindingRule[]) =>
+        left.length === right.length &&
+        left.every((rule, index) => isSameKeybindingRule(rule, right[index]!));
+      let received: readonly KeybindingRule[] | undefined;
+      yield* settings.value
+        .updateStoredSettings((current) => {
+          const remote = current.sharedKeybindings;
+          if (localEdit || (sharedBase !== undefined && !same(local, sharedBase)))
+            return { ...current, sharedKeybindings: local };
+          if (remote !== null) {
+            received = remote;
+            return null;
+          }
+          return sharedBase === undefined && !same(local, DEFAULT_KEYBINDINGS)
+            ? { ...current, sharedKeybindings: local }
+            : null;
+        })
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new KeybindingsConfigError({
+                configPath: keybindingsConfigPath,
+                detail: "failed to reconcile shared keybindings",
+                cause,
+              }),
+          ),
+        );
+      if (received !== undefined && !same(local, received)) {
+        yield* writeConfigAtomically(received);
+        yield* Cache.invalidate(resolvedConfigCache, resolvedConfigCacheKey);
+        yield* loadConfigStateFromCacheOrDisk.pipe(Effect.flatMap(emitChange));
+      }
+      sharedBase = received ?? local;
+    });
+  const reconcileSharedKeybindings = upsertSemaphore.withPermits(1)(reconcileSharedUnlocked());
+
   const revalidateAndEmit = upsertSemaphore.withPermits(1)(
     Effect.gen(function* () {
+      yield* reconcileSharedUnlocked();
       yield* Cache.invalidate(resolvedConfigCache, resolvedConfigCacheKey);
       const configState = yield* loadConfigStateFromCacheOrDisk;
       yield* emitChange(configState);
@@ -693,6 +745,15 @@ const make = Effect.gen(function* () {
     const startup = Effect.gen(function* () {
       yield* startWatcher;
       yield* syncDefaultKeybindingsOnStartup;
+      yield* reconcileSharedKeybindings;
+      if (Option.isSome(settings)) {
+        yield* settings.value.streamChanges.pipe(
+          Stream.runForEach(() =>
+            reconcileSharedKeybindings.pipe(Effect.ignoreCause({ log: true })),
+          ),
+          Effect.forkIn(watcherScope),
+        );
+      }
       yield* Cache.invalidate(resolvedConfigCache, resolvedConfigCacheKey);
       yield* loadConfigStateFromCacheOrDisk;
     });
@@ -710,6 +771,7 @@ const make = Effect.gen(function* () {
     start,
     ready: Deferred.await(startedDeferred),
     syncDefaultKeybindingsOnStartup,
+    reconcileSharedKeybindings,
     loadConfigState: loadConfigStateFromCacheOrDisk,
     getSnapshot: loadConfigStateFromCacheOrDisk,
     get streamChanges() {
@@ -743,6 +805,7 @@ const make = Effect.gen(function* () {
             });
           }
           yield* writeConfigAtomically(cappedConfig);
+          yield* reconcileSharedUnlocked(true);
           const nextResolved = mergeWithDefaultKeybindings(
             compileResolvedKeybindingsConfig(cappedConfig),
           );
@@ -764,6 +827,7 @@ const make = Effect.gen(function* () {
           const target = keybindingRuleFromRemoveInput(input);
           const nextConfig = customConfig.filter((entry) => !isSameKeybindingRule(entry, target));
           yield* writeConfigAtomically(nextConfig);
+          yield* reconcileSharedUnlocked(true);
           const nextResolved = mergeWithDefaultKeybindings(
             compileResolvedKeybindingsConfig(nextConfig),
           );

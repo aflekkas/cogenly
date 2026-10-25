@@ -1,13 +1,13 @@
-import { scopeProjectRef } from "@t3tools/client-runtime/environment";
+import { scopeProjectRef } from "@cogenly/client-runtime/environment";
 import {
   getNewProjectRepository,
   type NewProjectPublishTarget,
-} from "@t3tools/client-runtime/operations/projects";
+} from "@cogenly/client-runtime/operations/projects";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
-import type { EnvironmentId, ProjectLabelId } from "@t3tools/contracts";
+} from "@cogenly/client-runtime/state/runtime";
+import type { EnvironmentId, ProjectLabelId, ScopedProjectRef } from "@cogenly/contracts";
 import { useCallback } from "react";
 
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
@@ -90,6 +90,8 @@ export function useNewProject() {
       readonly name: string;
       readonly publishTo: NewProjectPublishTarget | null;
       readonly projectLabelId?: ProjectLabelId;
+      /** Opens the new repository; a new thread draft in it by default. */
+      readonly open?: (projectRef: ScopedProjectRef) => Promise<unknown>;
     }): Promise<boolean> => {
       const result = await createNew({
         environmentId: input.environmentId,
@@ -161,7 +163,7 @@ export function useNewProject() {
         return null;
       });
       if (project === null) return true;
-      await handleNewThread(projectRef).catch((error: unknown) => {
+      await (input.open ?? handleNewThread)(projectRef).catch((error: unknown) => {
         toastManager.add(
           stackedThreadToast({
             type: "error",

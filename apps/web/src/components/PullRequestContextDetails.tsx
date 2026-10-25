@@ -1,4 +1,4 @@
-import type { PullRequestContextMetadata } from "@t3tools/contracts";
+import type { PullRequestContextMetadata } from "@cogenly/contracts";
 import { ArrowRightIcon } from "lucide-react";
 
 export function PullRequestContextDetails({ metadata }: { metadata: PullRequestContextMetadata }) {

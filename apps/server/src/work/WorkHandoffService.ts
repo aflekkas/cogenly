@@ -19,7 +19,7 @@ import {
   type OrchestrationV2ThreadLaunchWorkspaceStrategy,
   type OrchestrationV2ThreadProjection,
   type Project,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -51,6 +51,7 @@ export interface WorkHandoffActor {
 /** A chat agent's request to hand work off as a task card. */
 export interface WorkTaskHandoffInput {
   /** Stable across retries: one request makes one card and at most one Work thread. */
+  readonly machine?: import("@cogenly/contracts").EnvironmentId | undefined;
   readonly commandId: CommandId;
   readonly sourceThreadId: ThreadId;
   readonly mode: WorkTaskMode;
@@ -62,6 +63,8 @@ export interface WorkTaskHandoffInput {
   readonly modelSelection?: ModelSelection | undefined;
   /** The chat run asking, so the card sits after its turn. */
   readonly runId?: RunId | undefined;
+  /** Settle the Work thread once the task completes; a failed one stays. */
+  readonly settleWhenDone?: boolean | undefined;
 }
 
 /** The card brief: the scope, cut to what a card carries. */
@@ -157,6 +160,7 @@ const make = Effect.gen(function* () {
           ? startInput
           : {
               ...startInput,
+              machine: startInput.machine ?? proposed.machine,
               title: startInput.title ?? proposed.title,
               scopeSummary: startInput.scopeSummary ?? proposed.brief,
               ...((startInput.workspace ?? proposed.workspace) === undefined
@@ -166,6 +170,25 @@ const make = Effect.gen(function* () {
                 ? {}
                 : { modelSelection: startInput.modelSelection ?? proposed.modelSelection }),
             };
+      if (input.machine === undefined && input.projectFolderId != null)
+        yield* launches
+          .validateProjectRepository({
+            projectId: input.targetProjectId,
+            projectFolderId: input.projectFolderId,
+          })
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new WorkHandoffError({
+                  sourceThreadId: input.sourceThreadId,
+                  stage: "resolve-project",
+                  ...(cause._tag === "ProjectRepositoryMismatchError"
+                    ? { repositoryMismatch: cause }
+                    : {}),
+                  cause,
+                }),
+            ),
+          );
       const task: WorkTask | undefined =
         newTask ??
         (proposed === undefined
@@ -242,8 +265,10 @@ const make = Effect.gen(function* () {
       const result = yield* launches
         .launch({
           commandId: input.commandId,
+          ...(input.machine === undefined ? {} : { machine: input.machine }),
           ...(actor?.threadId === undefined ? {} : { threadId: actor.threadId }),
           projectId: input.targetProjectId,
+          ...(input.projectFolderId == null ? {} : { projectFolderId: input.projectFolderId }),
           title: input.title ?? source.thread.title,
           ...(input.title === undefined ? { generateTitle: true } : {}),
           surface: "work" as const,
@@ -259,6 +284,8 @@ const make = Effect.gen(function* () {
           runtimeMode: actor?.runtimeMode ?? source.thread.runtimeMode,
           interactionMode: actor?.interactionMode ?? source.thread.interactionMode,
           workspaceStrategy,
+          handoffContext,
+          handoffSummary: scopeSummary,
           createdBy: origin === "agent" || actor?.createdByAgent === true ? "agent" : "user",
           creationSource: origin === "agent" || actor?.createdByAgent === true ? "mcp" : "web",
           initialMessage: {
@@ -273,6 +300,13 @@ const make = Effect.gen(function* () {
               new WorkHandoffError({
                 sourceThreadId: input.sourceThreadId,
                 stage: "launch",
+                ...(cause._tag === "ProjectRepositoryMismatchError"
+                  ? { repositoryMismatch: cause }
+                  : {}),
+                ...(cause._tag === "ThreadManagementProviderInstanceDisabledError"
+                  ? { disabledProviderInstanceId: cause.instanceId }
+                  : {}),
+                machineOffline: Launch.remoteLaunchFailure(cause)?.reason === "offline",
                 cause,
               }),
           ),
@@ -618,9 +652,11 @@ const make = Effect.gen(function* () {
       title: input.title.trim().slice(0, 200),
       brief: cardBrief(input.brief),
       targetProjectId,
+      ...(input.machine === undefined ? {} : { machine: input.machine }),
       ...(input.workspace === undefined ? {} : { workspace: input.workspace }),
       ...(input.modelSelection === undefined ? {} : { modelSelection: input.modelSelection }),
       ...(input.runId === undefined ? {} : { runId: input.runId }),
+      ...(input.settleWhenDone === true ? { settleWhenDone: true } : {}),
       createdAt: now,
       updatedAt: now,
     };
@@ -653,6 +689,7 @@ const make = Effect.gen(function* () {
         commandId: input.commandId,
         sourceThreadId: input.sourceThreadId,
         targetProjectId,
+        ...(input.machine === undefined ? {} : { machine: input.machine }),
         title: task.title,
         scopeSummary: input.brief.trim().slice(0, 16000),
         ...(input.workspace === undefined ? {} : { workspace: input.workspace }),

@@ -13,7 +13,7 @@ import type {
   PreviewAnnotationPayload,
   PreviewAnnotationRect,
   PreviewAnnotationScreenshot,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 
 /** Same storage cap the web pipeline enforces on desktop picks. */
 export const PICK_HTML_PREVIEW_MAX_CHARS = 4000;

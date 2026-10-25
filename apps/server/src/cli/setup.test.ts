@@ -1,4 +1,4 @@
-import type { T3ImportJob, T3ImportReport, T3ImportStatus } from "@t3tools/contracts";
+import type { T3ImportJob, T3ImportReport, T3ImportStatus } from "@cogenly/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";

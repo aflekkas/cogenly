@@ -6,6 +6,12 @@ import { ChevronsUpDownIcon, XIcon } from "lucide-react";
 import { cn } from "~/lib/utils";
 import { Input } from "~/components/ui/input";
 import { ScrollArea } from "~/components/ui/scroll-area";
+import {
+  SEARCH_LIST_GROUP_LABEL_CLASS,
+  searchListEmptyVariants,
+  searchListListVariants,
+  searchListRowVariants,
+} from "~/components/ui/search-list";
 
 const Autocomplete = AutocompletePrimitive.Root;
 
@@ -120,22 +126,19 @@ function AutocompletePopup({
   );
 }
 
+/** A row. Its look comes from `searchListRowVariants`; build its content from the `SearchListRow*` slots. */
 function AutocompleteItem({
   className,
   children,
-  highlightStates = true,
+  highlight = "hover",
   ...props
 }: AutocompletePrimitive.Item.Props & {
-  /** Off when the caller paints the active row itself (see CommandItem). */
-  highlightStates?: boolean;
+  /** How the keyboard cursor paints; `none` when the caller paints the active row (see CommandItem). */
+  highlight?: "hover" | "cursor" | "none";
 }) {
   return (
     <AutocompletePrimitive.Item
-      className={cn(
-        "flex min-h-8 cursor-default select-none items-center gap-2 rounded-sm px-2 py-1 text-base outline-none data-disabled:pointer-events-none data-disabled:opacity-64 sm:min-h-7 sm:text-sm [&_svg:not([class*='text-'])]:text-muted-foreground",
-        highlightStates && "state-hover data-selected:state-selected",
-        className,
-      )}
+      className={cn(searchListRowVariants({ highlight }), className)}
       data-slot="autocomplete-item"
       {...props}
     >
@@ -154,12 +157,10 @@ function AutocompleteGroup({ className, ...props }: AutocompletePrimitive.Group.
   );
 }
 
-const GROUP_LABEL_CLASS_NAME = "px-2 py-1.5 font-medium text-muted-foreground text-xs";
-
 function AutocompleteGroupLabel({ className, ...props }: AutocompletePrimitive.GroupLabel.Props) {
   return (
     <AutocompletePrimitive.GroupLabel
-      className={cn(GROUP_LABEL_CLASS_NAME, className)}
+      className={cn(SEARCH_LIST_GROUP_LABEL_CLASS, className)}
       data-slot="autocomplete-group-label"
       {...props}
     />
@@ -170,7 +171,7 @@ function AutocompleteGroupLabel({ className, ...props }: AutocompletePrimitive.G
 function AutocompleteListHeading({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
-      className={cn(GROUP_LABEL_CLASS_NAME, className)}
+      className={cn(SEARCH_LIST_GROUP_LABEL_CLASS, className)}
       data-slot="autocomplete-group-label"
       role="presentation"
       {...props}
@@ -191,21 +192,22 @@ function AutocompleteListVirtualized({ className, ...props }: AutocompletePrimit
 function AutocompleteEmpty({ className, ...props }: AutocompletePrimitive.Empty.Props) {
   return (
     <AutocompletePrimitive.Empty
-      className={cn(
-        "not-empty:p-2 text-center text-base text-muted-foreground sm:text-sm",
-        className,
-      )}
+      className={cn(searchListEmptyVariants({ size: "popover" }), className)}
       data-slot="autocomplete-empty"
       {...props}
     />
   );
 }
 
-function AutocompleteList({ className, ...props }: AutocompletePrimitive.List.Props) {
+function AutocompleteList({
+  className,
+  size = "popover",
+  ...props
+}: AutocompletePrimitive.List.Props & { size?: "dialog" | "popover" }) {
   return (
     <ScrollArea scrollbarGutter scrollFade>
       <AutocompletePrimitive.List
-        className={cn("not-empty:scroll-py-1 not-empty:p-1", className)}
+        className={cn(searchListListVariants({ size }), className)}
         data-slot="autocomplete-list"
         {...props}
       />

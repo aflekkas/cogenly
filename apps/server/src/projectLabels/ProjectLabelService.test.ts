@@ -1,23 +1,45 @@
+import * as Config from "../config.ts";
+// @effect-diagnostics nodeBuiltinImport:off - the checkout-state test reads real folders on disk.
 import { layerIdentity as layerSharedIdentity } from "../sync/testkit.ts";
 import * as Projections from "../orchestration-v2/ProjectionStore.ts";
 import * as Facts from "../context/FactService.ts";
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { EventId, ProjectId, ProjectLabelId, ThreadId } from "@t3tools/contracts";
+import {
+  EventId,
+  ProjectId,
+  ProjectLabelId,
+  ThreadId,
+  type ProjectCloneSnapshot,
+  type ProjectLabelWithRepositories,
+} from "@cogenly/contracts";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Stream from "effect/Stream";
 import * as Queue from "effect/Queue";
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
+import * as GitHubRest from "@cogenly/source-control-github/server/GitHubRest";
 import * as Labels from "./ProjectLabelService.ts";
+import * as ProjectCloneTracker from "../project/ProjectCloneTracker.ts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
+import * as ProjectConfigFileLoader from "../project/ProjectConfigFileLoader.ts";
+import * as ProjectFaviconResolver from "../project/ProjectFaviconResolver.ts";
+import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 import * as Events from "../persistence/OrchestrationEventStore.ts";
 import * as Sqlite from "../persistence/Sqlite.ts";
 const database = Sqlite.layerMemory.pipe(Layer.provide(NodeServices.layer));
 const persistence = Events.layer.pipe(Layer.provideMerge(database));
 const layer = Labels.layer
   .pipe(Layer.provide(layerSharedIdentity))
-  .pipe(Layer.provideMerge(persistence), Layer.provide(NodeServices.layer));
+  .pipe(
+    Layer.provideMerge(persistence),
+    Layer.provide(Config.layerTest(process.cwd(), "/tmp/cogenly-project-label-tests")),
+    Layer.provide(NodeServices.layer),
+  );
 const threadId = ThreadId.make("chat");
 const repoA = ProjectId.make("repo-a"),
   repoB = ProjectId.make("repo-b");
@@ -28,6 +50,26 @@ const seed = Effect.gen(function* () {
   yield* sql`INSERT INTO orchestration_v2_projection_threads(thread_id, project_id, title, default_provider, runtime_mode, interaction_mode, created_at, updated_at, payload_json) VALUES (${threadId}, ${repoA}, 'Chat', 'codex', 'full-access', 'default', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z', '{}')`;
 });
 describe("project labels", () => {
+  it.effect("refuses mismatched filing and accepts the explicit link-then-file path", () =>
+    Effect.gen(function* () {
+      yield* seed;
+      const service = yield* Labels.ProjectLabelService;
+      const sql = yield* SqlClient.SqlClient;
+      const folder = (yield* service.create({ name: "Spawn Partners" })).label.id;
+      const error = yield* Effect.flip(service.moveThread({ threadId, folderId: folder }));
+      expect(error.reason).toBe("invalid_membership");
+      expect(error.message).toBe(
+        "repo-a is not in the Spawn Partners project. Add it to the project first, or start without a project.",
+      );
+      expect(yield* sql`SELECT 1 FROM thread_project_labels`).toEqual([]);
+      expect(yield* sql`SELECT 1 FROM label_repositories`).toEqual([]);
+      yield* service.linkRepository({ labelId: folder, repositoryId: repoA });
+      expect(yield* service.moveThread({ threadId, folderId: folder })).toMatchObject({
+        projectFolderId: folder,
+      });
+    }).pipe(Effect.provide(layer)),
+  );
+
   it.effect(
     "counts only visible chats and Work, preserving independent forks and excluding archives and child threads",
     () =>
@@ -113,7 +155,7 @@ describe("project labels", () => {
       // No identity resolver in this layer: the directory name still lands,
       // and the remote stays null (local-only) instead of guessing.
       expect((yield* service.read(label.id)).label.repositories).toEqual([
-        { repositoryId: repoA, remote: null, directoryName: "repo-a" },
+        { repositoryId: repoA, remote: null, directoryName: "repo-a", checkout: "missing" },
       ]);
       const sql = yield* SqlClient.SqlClient;
       expect(yield* sql`SELECT remote, directory_name FROM label_repositories`).toEqual([
@@ -130,16 +172,28 @@ describe("project labels", () => {
       const { label } = yield* service.create({ name: "Spawn" });
       yield* service.linkRepository({ labelId: label.id, repositoryId: repoB });
       expect((yield* service.read(label.id)).label.repositories).toEqual([
-        { repositoryId: repoB, remote: "github.com/spawn/repo-b", directoryName: "repo-b" },
+        {
+          repositoryId: repoB,
+          remote: "github.com/spawn/repo-b",
+          // No home owner linked: another owner's repository is `<owner>/<repo>`.
+          directoryName: "spawn/repo-b",
+          checkout: "missing",
+        },
       ]);
       // A link written before portable identity backfills from the remote
       // on read, and the backfill is stored.
       yield* sql`UPDATE label_repositories SET remote = NULL, directory_name = NULL WHERE repository_id = ${repoB}`;
       expect((yield* service.read(label.id)).label.repositories).toEqual([
-        { repositoryId: repoB, remote: "github.com/spawn/repo-b", directoryName: "repo-b" },
+        {
+          repositoryId: repoB,
+          remote: "github.com/spawn/repo-b",
+          // No home owner linked: another owner's repository is `<owner>/<repo>`.
+          directoryName: "spawn/repo-b",
+          checkout: "missing",
+        },
       ]);
       expect(yield* sql`SELECT remote, directory_name FROM label_repositories`).toEqual([
-        { remote: "github.com/spawn/repo-b", directory_name: "repo-b" },
+        { remote: "github.com/spawn/repo-b", directory_name: "spawn/repo-b" },
       ]);
       // A repository whose checkout has no remote stays local-only.
       yield* service.linkRepository({ labelId: label.id, repositoryId: repoA });
@@ -147,7 +201,12 @@ describe("project labels", () => {
         (yield* service.read(label.id)).label.repositories?.find(
           (link) => link.repositoryId === repoA,
         ),
-      ).toEqual({ repositoryId: repoA, remote: null, directoryName: "repo-a" });
+      ).toEqual({
+        repositoryId: repoA,
+        remote: null,
+        directoryName: "repo-a",
+        checkout: "missing",
+      });
     }).pipe(
       Effect.provide(
         Labels.layer.pipe(Layer.provide(layerSharedIdentity)).pipe(
@@ -186,6 +245,7 @@ describe("project labels", () => {
       yield* service.linkRepository({ labelId: a, repositoryId: repoA });
       expect((yield* service.getThreadLabels(threadId)).labels.map((t) => t.labelId)).toEqual([a]);
       expect((yield* service.list()).labels.find((l) => l.id === a)?.threadCount).toBe(1);
+      yield* service.linkRepository({ labelId: b, repositoryId: repoA });
       expect(yield* service.moveThread({ threadId, folderId: b })).toEqual({
         threadId,
         projectFolderId: b,
@@ -210,6 +270,7 @@ describe("project labels", () => {
           .pipe(Effect.flip)).reason,
       ).toBe("not_found");
       expect((yield* service.getThreadLabels(threadId)).labels[0]?.labelId).toBe(a);
+      yield* sql`UPDATE projection_projects SET workspace_root='/tmp/cogenly-project-label-tests/scratch' WHERE project_id=${repoA}`;
       // Chats do not inherit a folder even if they have a repository record.
       yield* sql`UPDATE orchestration_v2_projection_threads SET payload_json = '{"surface":"chat"}' WHERE thread_id = ${threadId}`;
       expect((yield* service.getThreadLabels(threadId)).labels).toEqual([]);
@@ -240,6 +301,8 @@ describe("project labels", () => {
   it.effect("re-homes chats with turns into a project, keeping the same thread", () =>
     Effect.gen(function* () {
       yield* seed;
+      const fixtureSql = yield* SqlClient.SqlClient;
+      yield* fixtureSql`UPDATE projection_projects SET workspace_root='/tmp/cogenly-project-label-tests/scratch' WHERE project_id=${repoA}`;
       const service = yield* Labels.ProjectLabelService;
       const sql = yield* SqlClient.SqlClient;
       const folder = (yield* service.create({ name: "Folder" })).label.id;
@@ -283,6 +346,8 @@ describe("project labels", () => {
   it.effect("refuses to move a thread while a run is active in it", () =>
     Effect.gen(function* () {
       yield* seed;
+      const fixtureSql = yield* SqlClient.SqlClient;
+      yield* fixtureSql`UPDATE projection_projects SET workspace_root='/tmp/cogenly-project-label-tests/scratch' WHERE project_id=${repoA}`;
       const service = yield* Labels.ProjectLabelService;
       const sql = yield* SqlClient.SqlClient;
       const folder = (yield* service.create({ name: "Folder" })).label.id;
@@ -310,6 +375,8 @@ describe("project labels", () => {
   it.effect("re-files an agent's conversation with turns instead of requiring a fork", () =>
     Effect.gen(function* () {
       yield* seed;
+      const fixtureSql = yield* SqlClient.SqlClient;
+      yield* fixtureSql`UPDATE projection_projects SET workspace_root='/tmp/cogenly-project-label-tests/scratch' WHERE project_id=${repoA}`;
       const service = yield* Labels.ProjectLabelService;
       const sql = yield* SqlClient.SqlClient;
       const first = (yield* service.create({ name: "First" })).label.id;
@@ -357,6 +424,8 @@ describe("project labels", () => {
     () =>
       Effect.gen(function* () {
         yield* seed;
+        const fixtureSql = yield* SqlClient.SqlClient;
+        yield* fixtureSql`UPDATE projection_projects SET workspace_root='/tmp/cogenly-project-label-tests/scratch' WHERE project_id=${repoA}`;
         const service = yield* Labels.ProjectLabelService;
         const sql = yield* SqlClient.SqlClient;
         const a = (yield* service.create({ name: "A" })).label.id;
@@ -432,6 +501,8 @@ describe("project labels", () => {
     Effect.scoped(
       Effect.gen(function* () {
         yield* seed;
+        const fixtureSql = yield* SqlClient.SqlClient;
+        yield* fixtureSql`UPDATE projection_projects SET workspace_root='/tmp/cogenly-project-label-tests/scratch' WHERE project_id=${repoA}`;
         const service = yield* Labels.ProjectLabelService;
         const list = yield* service.subscribe().pipe(Stream.toQueue({ capacity: 16 }));
         const thread = yield* service
@@ -453,6 +524,8 @@ describe("project labels", () => {
     Effect.scoped(
       Effect.gen(function* () {
         yield* seed;
+        const fixtureSql = yield* SqlClient.SqlClient;
+        yield* fixtureSql`UPDATE projection_projects SET workspace_root='/tmp/cogenly-project-label-tests/scratch' WHERE project_id=${repoA}`;
         const service = yield* Labels.ProjectLabelService;
         const a = (yield* service.create({ name: "A" })).label.id;
         const b = (yield* service.create({ name: "B" })).label.id;
@@ -530,8 +603,8 @@ describe("project labels", () => {
           projectFolderId: b,
           projectFolderSource: "repository",
         });
-        yield* folders.moveThread({ threadId, folderId: a });
         yield* folders.linkRepository({ labelId: a, repositoryId: repoA });
+        yield* folders.moveThread({ threadId, folderId: a });
         yield* folders.linkRepository({ labelId: b, repositoryId: repoA });
         expect((yield* projections.getThreadProjection(threadId)).thread).toMatchObject({
           projectFolderId: a,
@@ -581,7 +654,9 @@ describe("project labels", () => {
       yield* seed;
       const labels = yield* Labels.ProjectLabelService;
       const facts = yield* Facts.FactService.pipe(
-        Effect.provide(Facts.layer.pipe(Layer.provide(NodeServices.layer))),
+        Effect.provide(
+          Facts.layer.pipe(Layer.provide(layerSharedIdentity), Layer.provide(NodeServices.layer)),
+        ),
       );
       const label = (yield* labels.create({ name: "Context" })).label;
       const fact = (yield* facts.create({
@@ -598,4 +673,287 @@ describe("project labels", () => {
       expect((yield* facts.retract(fact.id)).fact.status).toBe("retracted");
     }).pipe(Effect.provide(layer)),
   );
+
+  describe("repository folder names", () => {
+    const remotes: Record<string, string> = {
+      "/checkouts/spawn-platform": "git@github.com:Spawn-Partners/platform.git",
+      "/checkouts/bartr-platform": "https://github.com/bartr-app/platform",
+    };
+    const repos = {
+      spawn: ProjectId.make("spawn-platform"),
+      bartr: ProjectId.make("bartr-platform"),
+      notes: ProjectId.make("notes"),
+    };
+    const naming = (viewer: string | null) =>
+      Labels.layer.pipe(Layer.provide(layerSharedIdentity)).pipe(
+        Layer.provideMerge(
+          Layer.succeed(RepositoryIdentityResolver.RepositoryIdentityResolver, {
+            resolve: (cwd) =>
+              Effect.succeed(
+                remotes[cwd] === undefined
+                  ? null
+                  : {
+                      canonicalKey: cwd,
+                      locator: {
+                        source: "git-remote" as const,
+                        remoteName: "origin",
+                        remoteUrl: remotes[cwd],
+                      },
+                      rootPath: cwd,
+                    },
+              ),
+          }),
+        ),
+        Layer.provideMerge(
+          Layer.mock(GitHubRest.GitHubRest)({
+            rest: () =>
+              Effect.succeed({
+                status: viewer === null ? 401 : 200,
+                headers: {},
+                body: JSON.stringify({ login: viewer }),
+                truncated: false,
+                invalidUtf8: false,
+              }),
+          }),
+        ),
+        Layer.provideMerge(persistence),
+        Layer.provide(NodeServices.layer),
+      );
+    const seedCheckouts = Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      for (const [id, root] of [
+        [repos.spawn, "/checkouts/spawn-platform"],
+        [repos.bartr, "/checkouts/bartr-platform"],
+        [repos.notes, "/checkouts/notes"],
+      ] as const)
+        yield* sql`INSERT INTO projection_projects(project_id, title, workspace_root, scripts_json, created_at, updated_at) VALUES (${id}, ${id}, ${root}, '[]', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`;
+    });
+    const folders = (label: ProjectLabelWithRepositories) =>
+      Object.fromEntries(
+        (label.repositories ?? []).map((link) => [link.repositoryId, link.directoryName]),
+      );
+
+    it.effect(
+      "names repositories after their remote under the home owner, whatever their folder",
+      () =>
+        Effect.gen(function* () {
+          yield* seedCheckouts;
+          const service = yield* Labels.ProjectLabelService;
+          const sql = yield* SqlClient.SqlClient;
+          const { label } = yield* service.create({ name: "Spawn Partners" });
+          yield* service.linkSource({
+            id: label.id,
+            link: { kind: "github-owner", owner: "Spawn-Partners" },
+          });
+          for (const repositoryId of Object.values(repos))
+            yield* service.linkRepository({ labelId: label.id, repositoryId });
+          // Two `platform`s from two owners never collide; the local-only one
+          // keeps its folder name.
+          expect(folders((yield* service.read(label.id)).label)).toEqual({
+            "spawn-platform": "platform",
+            "bartr-platform": "bartr-app/platform",
+            notes: "notes",
+          });
+          // Synced as derived, so every machine clones to the same place.
+          expect(
+            yield* sql`SELECT repository_id, directory_name FROM label_repositories ORDER BY repository_id`,
+          ).toEqual([
+            { repository_id: "bartr-platform", directory_name: "bartr-app/platform" },
+            { repository_id: "notes", directory_name: "notes" },
+            { repository_id: "spawn-platform", directory_name: "platform" },
+          ]);
+          // A stored name that disagrees (an older peer, a hand edit) is corrected on read.
+          yield* sql`UPDATE label_repositories SET directory_name = 'spawn-platform' WHERE repository_id = ${repos.spawn}`;
+          expect(folders((yield* service.read(label.id)).label)["spawn-platform"]).toBe("platform");
+        }).pipe(Effect.provide(naming(null))),
+    );
+
+    it.effect("re-derives every folder when the project's owner changes", () =>
+      Effect.gen(function* () {
+        yield* seedCheckouts;
+        const service = yield* Labels.ProjectLabelService;
+        const { label } = yield* service.create({ name: "Platform" });
+        const owner = (name: string) => ({
+          id: label.id,
+          link: { kind: "github-owner" as const, owner: name },
+        });
+        yield* service.linkSource(owner("Spawn-Partners"));
+        yield* service.linkRepository({ labelId: label.id, repositoryId: repos.spawn });
+        yield* service.linkRepository({ labelId: label.id, repositoryId: repos.bartr });
+        yield* service.unlinkSource(owner("Spawn-Partners"));
+        yield* service.linkSource(owner("bartr-app"));
+        expect(folders((yield* service.read(label.id)).label)).toEqual({
+          "spawn-platform": "spawn-partners/platform",
+          "bartr-platform": "platform",
+        });
+      }).pipe(Effect.provide(naming(null))),
+    );
+
+    it.effect("makes the connected account the home owner of a project that links none", () =>
+      Effect.gen(function* () {
+        yield* seedCheckouts;
+        const service = yield* Labels.ProjectLabelService;
+        const { label } = yield* service.create({ name: "Personal" });
+        yield* service.linkRepository({ labelId: label.id, repositoryId: repos.bartr });
+        const read = (yield* service.read(label.id)).label;
+        expect(read.sourceLinks).toContainEqual({ kind: "github-owner", owner: "bartr-app" });
+        expect(folders(read)).toEqual({ "bartr-platform": "platform" });
+      }).pipe(Effect.provide(naming("bartr-app"))),
+    );
+  });
+
+  it.effect("records a checkout's icon on its link, so the project syncs it", () => {
+    const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "label-icon-"));
+    NodeFS.mkdirSync(NodePath.join(root, ".git"));
+    NodeFS.mkdirSync(NodePath.join(root, "public"));
+    NodeFS.writeFileSync(NodePath.join(root, "public", "favicon.svg"), "<svg/>");
+    const withIcons = Labels.layer.pipe(Layer.provide(layerSharedIdentity)).pipe(
+      Layer.provideMerge(
+        Layer.succeed(RepositoryIdentityResolver.RepositoryIdentityResolver, {
+          resolve: (cwd) =>
+            Effect.succeed({
+              canonicalKey: cwd,
+              locator: {
+                source: "git-remote" as const,
+                remoteName: "origin",
+                remoteUrl: "https://github.com/spawn-partners/platform.git",
+              },
+              rootPath: cwd,
+            }),
+        }),
+      ),
+      Layer.provideMerge(
+        ProjectFaviconResolver.layer.pipe(
+          Layer.provide(WorkspacePaths.layer),
+          Layer.provide(ProjectConfigFileLoader.layer),
+        ),
+      ),
+      Layer.provideMerge(persistence),
+      Layer.provide(NodeServices.layer),
+    );
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const service = yield* Labels.ProjectLabelService;
+      const repositoryId = ProjectId.make("platform");
+      yield* sql`INSERT INTO projection_projects(project_id, title, workspace_root, scripts_json, created_at, updated_at) VALUES (${repositoryId}, 'platform', ${root}, '[]', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`;
+      const { label } = yield* service.create({ name: "Spawn" });
+      yield* service.linkRepository({ labelId: label.id, repositoryId });
+      const link = (yield* service.read(label.id)).label.repositories?.[0];
+      expect(link?.iconPath).toBe("public/favicon.svg");
+      const [document] = yield* sql<{
+        repositories: string;
+      }>`SELECT json_extract(fields_json, '$.repositories') AS repositories FROM shared_documents WHERE kind = 'project' AND id = ${label.id}`;
+      expect(JSON.parse(document?.repositories ?? "[]")).toEqual([
+        {
+          remote: "github.com/spawn-partners/platform",
+          // No owner linked and no GitHub account connected here.
+          directoryName: "spawn-partners/platform",
+          iconPath: "public/favicon.svg",
+        },
+      ]);
+    }).pipe(Effect.provide(withIcons));
+  });
+
+  it.effect("reports each linked repository's checkout state on this machine", () => {
+    const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "label-checkout-"));
+    const clones = new Map<ProjectId, ProjectCloneSnapshot>();
+    // The fake tracker's subscriber, handed over once the label stream listens.
+    const listening = Deferred.makeUnsafe<(clones: ReadonlyArray<ProjectCloneSnapshot>) => void>();
+    const snapshot = (projectId: ProjectId, phase: ProjectCloneSnapshot["phase"]) => ({
+      projectId,
+      remoteUrl: "https://github.com/org/repo.git",
+      destinationPath: NodePath.join(root, projectId),
+      repository: null,
+      phase,
+      stage: "receiving" as const,
+      percent: null,
+      detail: null,
+      error: null,
+      startedAt: "2026-01-01T00:00:00.000Z",
+      endedAt: null,
+      sequence: 0,
+    });
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const service = yield* Labels.ProjectLabelService;
+      const repos = {
+        ready: ProjectId.make("ready"),
+        plain: ProjectId.make("plain"),
+        missing: ProjectId.make("missing"),
+        cloning: ProjectId.make("cloning"),
+        failed: ProjectId.make("failed"),
+      };
+      NodeFS.mkdirSync(NodePath.join(root, "ready", ".git"), { recursive: true });
+      // A plain folder with files launches as it is, so it counts as ready.
+      NodeFS.mkdirSync(NodePath.join(root, "plain"));
+      NodeFS.writeFileSync(NodePath.join(root, "plain", "README.md"), "hi");
+      for (const repo of Object.values(repos))
+        yield* sql`INSERT INTO projection_projects(project_id, title, workspace_root, scripts_json, created_at, updated_at) VALUES (${repo}, ${repo}, ${NodePath.join(root, repo)}, '[]', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`;
+      const { label } = yield* service.create({ name: "Spawn" });
+      for (const repo of Object.values(repos))
+        yield* service.linkRepository({ labelId: label.id, repositoryId: repo });
+      // Linked from another machine and never cloned here.
+      yield* sql`INSERT INTO label_repositories(label_id, repository_id, remote, directory_name) VALUES (${label.id}, 'remote:github.com/org/elsewhere', 'github.com/org/elsewhere', 'elsewhere')`;
+      clones.set(repos.cloning, snapshot(repos.cloning, "running"));
+      clones.set(repos.failed, snapshot(repos.failed, "failed"));
+      const states = (labels: ReadonlyArray<ProjectLabelWithRepositories>) =>
+        Object.fromEntries(
+          (labels[0]?.repositories ?? []).map((link) => [link.repositoryId, link.checkout]),
+        );
+      expect(states((yield* service.list()).labels)).toEqual({
+        ready: "ready",
+        plain: "ready",
+        missing: "missing",
+        cloning: "cloning",
+        failed: "failed",
+        "remote:github.com/org/elsewhere": "not_cloned",
+      });
+
+      // A clone changing phase re-emits the list; progress ticks do not.
+      const updates = yield* Queue.unbounded<ReadonlyArray<ProjectLabelWithRepositories>>();
+      yield* service.subscribe().pipe(
+        Stream.runForEach((value) => Queue.offer(updates, value.labels)),
+        Effect.forkScoped,
+      );
+      yield* Queue.take(updates);
+      const emit = yield* Deferred.await(listening);
+      emit([...clones.values()]);
+      NodeFS.mkdirSync(NodePath.join(root, "cloning", ".git"), { recursive: true });
+      clones.delete(repos.cloning);
+      emit([...clones.values()]);
+      expect(states(yield* Queue.take(updates)).cloning).toBe("ready");
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        Labels.layer.pipe(Layer.provide(layerSharedIdentity)).pipe(
+          Layer.provideMerge(
+            Layer.succeed(
+              ProjectCloneTracker.ProjectCloneTracker,
+              ProjectCloneTracker.ProjectCloneTracker.of({
+                start: () => Effect.die("unused"),
+                cancel: () => Effect.succeed(false),
+                retry: () => Effect.succeed(false),
+                discard: () => Effect.void,
+                get: (projectId) => Effect.succeed(clones.get(projectId) ?? null),
+                stream: Stream.callback<ReadonlyArray<ProjectCloneSnapshot>>((mailbox) =>
+                  Effect.sync(() => {
+                    Queue.offerUnsafe(mailbox, [...clones.values()]);
+                  }).pipe(
+                    Effect.andThen(
+                      Deferred.succeed(listening, (next) => {
+                        Queue.offerUnsafe(mailbox, next);
+                      }),
+                    ),
+                  ),
+                ),
+              }),
+            ),
+          ),
+          Layer.provideMerge(persistence),
+          Layer.provide(NodeServices.layer),
+        ),
+      ),
+      Effect.ensuring(Effect.sync(() => NodeFS.rmSync(root, { recursive: true, force: true }))),
+    );
+  });
 });

@@ -4,17 +4,20 @@ import {
   SharedChangesApply,
   SharedChangesRead,
   type SharedDocumentChange,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Stream from "effect/Stream";
+import { agentFixture } from "../agents/agent.testkit.ts";
+import * as Facts from "../context/FactService.ts";
 import * as Machines from "../machines/Machines.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import { startMachine, pair, startProxy, awaitLinkState } from "../machines/testkit.ts";
 import * as SharedState from "./SharedState.ts";
 import { compareClock } from "./merge.ts";
 import * as SharedSync from "./SharedSync.ts";
+import * as SharedSyncStatus from "./SharedSyncStatus.ts";
 
 const project = {
   name: "Project",
@@ -205,7 +208,7 @@ describe("shared documents over the authenticated machine link", () => {
   );
 
   it.live(
-    "rejects a paired peer's spoofed author and absolute-path payload",
+    "refuses a paired peer's spoofed author, and never applies or relays an absolute path",
     () =>
       Effect.gen(function* () {
         const hub = yield* start("validate-hub", "cloud-server");
@@ -219,6 +222,7 @@ describe("shared documents over the authenticated machine link", () => {
           tombstone: null,
           updatedBy: spoke.environmentId,
         };
+        // An unreadable value is held back rather than stalling the link.
         expect(
           (yield* Effect.result(
             spoke.machines.call(hub.environmentId, SharedChangesApply, {
@@ -227,7 +231,7 @@ describe("shared documents over the authenticated machine link", () => {
               changes: [bad],
             }),
           ))._tag,
-        ).toBe("Failure");
+        ).toBe("Success");
         const forged = {
           ...bad,
           fields: { name: "Spoofed" },
@@ -246,6 +250,83 @@ describe("shared documents over the authenticated machine link", () => {
         expect(yield* hub.state.get("project", "label:bad")).toBeUndefined();
         const read = yield* spoke.machines.call(hub.environmentId, SharedChangesRead, { after: 0 });
         expect(read.changes).toEqual([]);
+      }).pipe(Effect.scoped),
+    20000,
+  );
+
+  it.live(
+    "a spoke's proposed fact reaches the hub, the hub's confirmation reaches the spoke",
+    () =>
+      Effect.gen(function* () {
+        const hub = yield* start("facts-hub", "cloud-server");
+        const spoke = yield* start("facts-spoke", "computer");
+        yield* pair(hub, spoke);
+        const agent = agentFixture();
+        yield* spoke.state.write("agent", agent.id, {
+          name: agent.name,
+          avatar: { seed: agent.avatar.seed },
+          instructions: agent.instructions,
+          responsibility: agent.responsibility,
+          permissions: agent.permissions,
+          notifyPolicy: agent.notifyPolicy,
+          modelSelection: { instanceId: "codex", model: "gpt-5" },
+          fallbackChain: [],
+          runtimeMode: agent.runtimeMode,
+          dailyRunCap: agent.dailyRunCap,
+          repositoryRemote: null,
+          ownerMachine: spoke.environmentId,
+          createdAt: agent.createdAt,
+        });
+        const factsOn = (machine: typeof hub) =>
+          machine
+            .run(Layer.build(Facts.layer))
+            .pipe(
+              Effect.flatMap((context) => Facts.FactService.pipe(Effect.provideContext(context))),
+            );
+        const statusOn = (machine: typeof hub) =>
+          machine
+            .run(Layer.build(SharedSyncStatus.layer))
+            .pipe(
+              Effect.flatMap((context) =>
+                SharedSyncStatus.SharedSyncStatus.pipe(Effect.provideContext(context)),
+              ),
+            );
+        const spokeFacts = yield* factsOn(spoke);
+        const hubFacts = yield* factsOn(hub);
+        const spokeStatus = yield* statusOn(spoke);
+        const principal = `agent:${agent.id}` as const;
+        const proposal = (yield* spokeFacts.create(
+          {
+            subject: "Preference",
+            text: "Deploys after standup",
+            labelIds: [],
+            visibility: "user",
+            agentId: agent.id,
+            sourceRefs: [],
+          },
+          principal,
+        )).fact;
+        const pending = (yield* spokeStatus.status({ kinds: ["fact"] })).peers;
+        expect(pending).toEqual([
+          expect.objectContaining({
+            environmentId: hub.environmentId,
+            relation: "hub",
+            kinds: [{ kind: "fact", pendingOutgoing: 1 }],
+          }),
+        ]);
+        yield* spoke.sync.sync(hub.environmentId);
+        expect((yield* spokeStatus.status({ kinds: ["fact"] })).peers[0]?.kinds).toEqual([
+          { kind: "fact", pendingOutgoing: 0 },
+        ]);
+        // What fact_search returns for the agent on the hub.
+        expect((yield* hubFacts.list({}, principal)).facts).toEqual([
+          expect.objectContaining({ id: proposal.id, status: "proposed" }),
+        ]);
+        yield* hubFacts.update({ id: proposal.id, status: "confirmed" });
+        yield* hub.sync.sync(spoke.environmentId);
+        expect((yield* spokeFacts.list({}, principal)).facts).toEqual([
+          expect.objectContaining({ id: proposal.id, status: "confirmed" }),
+        ]);
       }).pipe(Effect.scoped),
     20000,
   );

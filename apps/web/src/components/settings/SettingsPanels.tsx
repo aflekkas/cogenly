@@ -1,3 +1,12 @@
+import { matchesSettingsListQuery } from "./settingsList.logic";
+import {
+  SettingsList,
+  SettingsListItem,
+  SettingsListToolbar,
+  SettingsListSearch,
+  SettingsListFilter,
+  SettingsListEmpty,
+} from "./SettingsList";
 import { useDictationAvailable } from "~/dictation/dictationAvailability";
 import { SettingsGroup } from "./SettingsGroup";
 import { FoldedSettingsSection } from "./FoldedSettingsSection";
@@ -5,33 +14,29 @@ import { settingsScopeEnvironmentLabels } from "./settingsScopeAxis";
 import { useScopedSettingsWriteAllowed } from "./useScopedSettings";
 import { NotificationSettings } from "./NotificationSettings";
 import { ArchiveIcon, ArchiveX, CheckIcon, RotateCcwIcon, SettingsIcon } from "lucide-react";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { Link } from "@tanstack/react-router";
 import { useCallback, useMemo, useRef, useState } from "react";
 import {
   type BackgroundActivityProfile,
-  ProviderDriverKind,
-  type ProviderInstanceId,
   type ScopedThreadRef,
   type SidebarProjectGroupingMode,
-} from "@t3tools/contracts";
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { presentThreadShell } from "@t3tools/client-runtime/state/shell";
+} from "@cogenly/contracts";
+import { scopeThreadRef } from "@cogenly/client-runtime/environment";
+import { presentThreadShell } from "@cogenly/client-runtime/state/shell";
 import {
   isAtomCommandInterrupted,
   settlePromise,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@cogenly/client-runtime/state/runtime";
 import {
-  DEFAULT_PROJECTS_ROOT,
   DEFAULT_UNIFIED_SETTINGS,
   type ChatWidth,
   type EnvironmentIdentificationMode,
   type ResponseStreamingMode,
   type QuitConfirmationMode,
   SidebarProjectSortOrder,
-} from "@t3tools/contracts/settings";
-import { resolveServerBackgroundActivitySettings } from "@t3tools/shared/backgroundActivitySettings";
-import { createModelSelection } from "@t3tools/shared/model";
+} from "@cogenly/contracts/settings";
+import { resolveServerBackgroundActivitySettings } from "@cogenly/shared/backgroundActivitySettings";
 import * as Duration from "effect/Duration";
 import * as Equal from "effect/Equal";
 import * as Schema from "effect/Schema";
@@ -44,8 +49,6 @@ import {
   isDesktopUpdateButtonDisabled,
   resolveDesktopUpdateButtonAction,
 } from "../../components/desktopUpdate.logic";
-import { ProviderModelPicker } from "../chat/ProviderModelPicker";
-import { TraitsPicker } from "../chat/TraitsPicker";
 import { isElectron } from "../../env";
 import { buildHostedChannelSelectionUrl, type HostedAppChannel } from "../../hostedPairing";
 import { useTheme } from "../../hooks/useTheme";
@@ -66,25 +69,11 @@ import {
   useScopedSettingsMixed,
   useUpdateScopedSettings,
 } from "./useScopedSettings";
-import { useScopedModelDisabledReason } from "./useScopedModelAvailability";
 import { useSettingsScope } from "./SettingsScopeContext";
-import { ProjectDefaultsSettings } from "./ProjectDefaultsSettings";
 import { useThreadActions } from "../../hooks/useThreadActions";
 import { useDesktopUpdateState } from "../../state/desktopUpdate";
-import { usePrimaryEnvironmentId } from "../../state/environments";
-import {
-  getCustomModelOptionsByInstance,
-  resolveAppModelSelectionState,
-  selectsPlanAgent,
-} from "../../modelSelection";
-import {
-  applyProviderInstanceSettings,
-  deriveProviderInstanceEntries,
-  sortProviderInstanceEntries,
-} from "../../providerInstances";
 import { ensureLocalApi, readLocalApi } from "../../localApi";
 import { isMacPlatform } from "../../lib/utils";
-import { EMPTY_SERVER_PROVIDERS } from "../../state/server";
 import { useArchivedThreadSnapshots } from "../../lib/archivedThreadsState";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { Button } from "../ui/button";
@@ -97,7 +86,6 @@ import {
   DialogPopup,
   DialogTitle,
 } from "../ui/dialog";
-import { DraftInput } from "../ui/draft-input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
 import { ScopedSwitch } from "./ScopedSwitch";
@@ -120,26 +108,19 @@ import {
 } from "./SettingsPanels.logic";
 import {
   PolicyTooltip,
-  SETTINGS_PICKER_TRIGGER_CLASSNAME,
   SettingResetButton,
-  SettingsEmpty,
   SettingsNumberField,
-  SettingsPageContainer,
   SettingsRow,
   SettingsSection,
 } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
+import { RESPONSE_STREAMING_MODE_LABELS } from "./settingValueLabels";
 import { ProjectFavicon } from "../ProjectFavicon";
 
 const ENVIRONMENT_IDENTIFICATION_LABELS: Record<EnvironmentIdentificationMode, string> = {
   artwork: "Artwork",
   pill: "Version pill",
   none: "None",
-};
-
-const RESPONSE_STREAMING_MODE_LABELS: Record<ResponseStreamingMode, string> = {
-  turn: "Wait for the full response",
-  paragraph: "Show finished paragraphs",
 };
 
 const RESPONSE_STREAMING_MODE_DESCRIPTIONS: Record<ResponseStreamingMode, string> = {
@@ -193,7 +174,6 @@ const BACKGROUND_ACTIVITY_PROFILE_DESCRIPTIONS: Record<BackgroundActivityProfile
 
 const ADVANCED_BACKGROUND_ACTIVITY_DESCRIPTION = "Uses custom intervals.";
 
-const DEFAULT_DRIVER_KIND = ProviderDriverKind.make("codex");
 const BACKGROUND_ACTIVITY_BOOLEAN_OVERRIDES: ReadonlyArray<{
   readonly key:
     | "pauseWhenHostLocked"
@@ -373,6 +353,7 @@ function AboutVersionSection() {
       />
       {selectedHostedAppChannel ? (
         <SettingsRow
+          clientSetting
           {...searchableSetting("update-track")}
           description="Switches the hosted app release channel."
           control={
@@ -435,7 +416,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.chatWidth !== DEFAULT_UNIFIED_SETTINGS.chatWidth ? ["Chat width"] : []),
       ...(settings.environmentIdentificationMode !==
       DEFAULT_UNIFIED_SETTINGS.environmentIdentificationMode
-        ? ["Environment identification"]
+        ? ["Machine identification"]
         : []),
       ...(settings.timestampFormat !== DEFAULT_UNIFIED_SETTINGS.timestampFormat
         ? ["Time format"]
@@ -526,6 +507,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.enableAgentBrowserAccess !== DEFAULT_UNIFIED_SETTINGS.enableAgentBrowserAccess
         ? ["Agent browser access"]
         : []),
+      ...(settings.enableAgentComputerUse !== DEFAULT_UNIFIED_SETTINGS.enableAgentComputerUse
+        ? ["Computer use"]
+        : []),
     ],
     [
       isTextGenerationModelDirty,
@@ -540,6 +524,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.diffColorScheme,
       settings.chatWidth,
       settings.enableAgentBrowserAccess,
+      settings.enableAgentComputerUse,
       settings.confirmQuit,
       settings.confirmThreadArchive,
       settings.confirmThreadDelete,
@@ -647,6 +632,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       // name, so a user restoring defaults is told the agent regains access
       // rather than discovering it later.
       enableAgentBrowserAccess: DEFAULT_UNIFIED_SETTINGS.enableAgentBrowserAccess,
+      enableAgentComputerUse: DEFAULT_UNIFIED_SETTINGS.enableAgentComputerUse,
     });
     onRestored?.();
   }, [
@@ -689,6 +675,7 @@ function BackgroundActivityAdvancedDialog({
   const hostPowerMonitorIdleIntervalSeconds = durationToSeconds(
     resolvedBackgroundActivity.hostPowerMonitorIdleInterval,
   );
+
   const updateOverrides = (patch: Parameters<typeof backgroundActivityOverrideSettings>[2]) =>
     updateSettings(
       backgroundActivityOverrideSettings(
@@ -911,7 +898,7 @@ export function AppearanceSettingsPanel() {
   const { appearanceMode, setAppearanceMode } = useTheme();
   const { preferences, update } = useAppearancePreferences();
   return (
-    <SettingsPageContainer>
+    <>
       <SettingsSection id="appearance" title="Appearance">
         <SettingsRow
           {...searchableSetting("color-scheme")}
@@ -937,7 +924,7 @@ export function AppearanceSettingsPanel() {
         <AccentColorSettingRow />
         <SettingsRow
           {...searchableSetting("font-size")}
-          description="Scales text and spacing across the app on this device."
+          description="Scales text and spacing across the app."
           resetAction={
             preferences.fontSize !== DEFAULT_APPEARANCE_PREFERENCES.fontSize ? (
               <SettingResetButton
@@ -981,7 +968,7 @@ export function AppearanceSettingsPanel() {
         />
         <SettingsRow
           {...searchableSetting("usage-meters")}
-          description="Whether usage limit bars show quota remaining (draining) or quota used (filling up) on this device."
+          description="Whether usage limit bars show quota remaining (draining) or quota used (filling up)."
           resetAction={
             preferences.usageMeter !== DEFAULT_APPEARANCE_PREFERENCES.usageMeter ? (
               <SettingResetButton
@@ -1011,11 +998,11 @@ export function AppearanceSettingsPanel() {
             />
           }
         />
-        {/* Browser tabs follow this theme by default; the row is the same one
-            Integrations shows among the browser defaults. */}
+      </SettingsSection>
+      <SettingsSection id="browser-appearance" title="Browser on this device">
         <BrowserAppearanceSettingRow disabled={false} />
       </SettingsSection>
-    </SettingsPageContainer>
+    </>
   );
 }
 
@@ -1044,6 +1031,7 @@ function LegacyFeaturesSection() {
       headerPlacement="outside"
     >
       <SettingsRow
+        clientSetting
         {...searchableSetting("legacy-plan-mode")}
         description="Restore Build/Plan, /plan, /default, and Shift+Tab. Off uses build mode."
         control={
@@ -1057,6 +1045,7 @@ function LegacyFeaturesSection() {
         }
       />
       <SettingsRow
+        clientSetting
         {...searchableSetting("legacy-context-window-indicator")}
         description="Shows context window usage as a circular indicator in the composer."
         control={
@@ -1070,6 +1059,7 @@ function LegacyFeaturesSection() {
         }
       />
       <SettingsRow
+        clientSetting
         {...searchableSetting("legacy-sidebar")}
         description="Restore per-repository thread trees instead of the default flat sidebar."
         control={
@@ -1119,92 +1109,26 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
   ] as const;
   const settings = useScopedSettings();
   const updateSettings = useUpdateScopedSettings();
-  const navigate = useNavigate();
-  const { scope, environment, connectedEnvironments, target } = useSettingsScope();
-  // The representative environment supplies the provider list for pickers;
-  // a fanned-out model choice is validated against every target before it
-  // is written. Per-machine tuning (background activity overrides) still
-  // needs exactly one environment.
+  const { scope, environment, connectedEnvironments } = useSettingsScope();
+  // The representative environment is the machine machine-local rows such as
+  // background activity apply to, so per-machine tuning edits that machine.
   const environmentId = environment?.environmentId ?? null;
-  const isEnvironmentScope = scope.environmentIds.length === 1 && environmentId !== null;
-  const hasServerTargets = connectedEnvironments.length > 0;
+  const isEnvironmentScope = scope.kind !== "project" && environmentId !== null;
   const [backgroundActivityDialogOpen, setBackgroundActivityDialogOpen] = useState(false);
   const mixedResponseStreamingMode = useScopedSettingsMixed(["responseStreamingMode"]);
   const lastEnabledProjectGroupingMode = useRef<SidebarProjectGroupingMode>(
     readLastEnabledProjectGroupingMode(),
   );
-  const serverProviders = environment?.serverConfig?.providers ?? EMPTY_SERVER_PROVIDERS;
   const supportsRestartContinuation =
     connectedEnvironments.length > 0 &&
     connectedEnvironments.every(
       (target) => target.serverConfig?.environment.capabilities.threadRestartContinuation === true,
     );
 
-  const textGenerationProviders = serverProviders.filter(
-    (provider) => provider.supportsTextGeneration !== false,
-  );
-  const textGenerationModelSelection = resolveAppModelSelectionState(
-    settings,
-    textGenerationProviders,
-  );
-  const textGenInstanceId = textGenerationModelSelection.instanceId;
-  const textGenModel = textGenerationModelSelection.model;
-  const textGenModelOptions = textGenerationModelSelection.options;
-  const textGenerationModelInstanceEntries = sortProviderInstanceEntries(
-    applyProviderInstanceSettings(
-      deriveProviderInstanceEntries(textGenerationProviders),
-      settings,
-      target?.projectId ?? null,
-    ),
-  );
-  const hasTextGenerationProvider = textGenerationModelInstanceEntries.some(
-    (entry) => entry.enabled && entry.isAvailable,
-  );
-  const textGenInstanceEntry = textGenerationModelInstanceEntries.find(
-    (entry) => entry.instanceId === textGenInstanceId,
-  );
-  const textGenProvider: ProviderDriverKind =
-    textGenInstanceEntry?.driverKind ?? DEFAULT_DRIVER_KIND;
-  const textGenerationModelOptionsByInstance = getCustomModelOptionsByInstance(
-    settings,
-    textGenerationProviders,
-    textGenInstanceId,
-    textGenModel,
-  );
-  const isTextGenerationModelDirty = !Equal.equals(
-    settings.textGenerationModelSelection ?? null,
-    DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection ?? null,
-  );
-  const textGenerationModelDisabledReason = useScopedModelDisabledReason(
-    settings,
-    textGenerationModelInstanceEntries,
-  );
   const resolvedBackgroundActivity = resolveServerBackgroundActivitySettings(settings);
   const activeBackgroundActivityProfile = resolvedBackgroundActivity.profile;
   const backgroundActivityProfileOption = resolveBackgroundActivityProfileOption(settings);
   const mixedBackgroundActivity = useScopedSettingsMixed(["backgroundActivity"]);
-  const mixedAddProjectBaseDirectory = useScopedSettingsMixed(["addProjectBaseDirectory"]);
-  const mixedProjectsRoot = useScopedSettingsMixed(["projectsRoot"]);
-  const primaryEnvironmentId = usePrimaryEnvironmentId();
-  // The native folder picker browses this device, so it only offers a path
-  // when the settings being edited are this device's server.
-  const canPickProjectsRoot =
-    isEnvironmentScope &&
-    environmentId === primaryEnvironmentId &&
-    typeof window !== "undefined" &&
-    window.desktopBridge !== undefined;
-  const pickProjectsRoot = async () => {
-    const api = readLocalApi();
-    if (!api) return;
-    const current = settings.projectsRoot.trim();
-    const picked = await api.dialogs
-      .pickFolder(
-        current.length > 0 && !current.startsWith("~") ? { initialPath: current } : undefined,
-      )
-      .catch(() => null);
-    if (picked) updateSettings({ projectsRoot: picked });
-  };
-  const mixedTextGenerationModel = useScopedSettingsMixed(["textGenerationModelSelection"]);
   const backgroundActivityDescription =
     backgroundActivityProfileOption === "advanced"
       ? `${ADVANCED_BACKGROUND_ACTIVITY_DESCRIPTION} Shared policy: ${
@@ -1217,12 +1141,12 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
   );
 
   return (
-    <SettingsPageContainer>
-      <ProjectDefaultsSettings category="general" />
+    <>
       <SettingsSection id="organization" title="Organization">
         <SettingsRow
+          clientSetting
           {...searchableSetting("project-grouping")}
-          description="Combine matching repositories across environments."
+          description="Combine matching repositories across machines."
           resetAction={
             settings.sidebarProjectGroupingMode !==
             DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode ? (
@@ -1256,6 +1180,7 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
           }
         />
         <SettingsRow
+          clientSetting
           {...searchableSetting("project-order")}
           description="Order of repositories in the sidebar repository picker and command palette."
           resetAction={
@@ -1330,6 +1255,7 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
         />
 
         <SettingsRow
+          clientSetting
           {...searchableSetting("working-shelf")}
           description="Fold working and monitoring threads into a Working section. They return to the top of the inbox when they need you."
           resetAction={
@@ -1360,6 +1286,7 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
       <SettingsSection id="behavior" title="Behavior">
         <NotificationSettings />
         <SettingsRow
+          clientSetting
           {...searchableSetting("in-app-notifications")}
           description="Show a toast when another thread finishes, fails, or needs input or approval while this app has focus."
           control={
@@ -1371,6 +1298,7 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
           }
         />
         <SettingsRow
+          clientSetting
           {...searchableSetting("time-format")}
           description="System default follows your browser or OS clock preference."
           resetAction={
@@ -1460,6 +1388,7 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
           }
         />
         <SettingsRow
+          clientSetting
           {...searchableSetting("skills-in-slash-menu")}
           description="Also include skills in the / command menu. Skills always appear when you type $."
           resetAction={
@@ -1486,6 +1415,7 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
         />
 
         <SettingsRow
+          clientSetting
           {...searchableSetting("composer-rich-text")}
           description="Show formatted Markdown as you type."
           resetAction={
@@ -1514,6 +1444,7 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
 
         {dictationSupported ? (
           <SettingsRow
+            clientSetting
             {...searchableSetting("composer-dictation")}
             description="Show the composer's mic button and its shortcut. Speech is transcribed on this Mac."
             resetAction={
@@ -1539,6 +1470,7 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
         ) : null}
 
         <SettingsRow
+          clientSetting
           {...searchableSetting("send-shortcut")}
           description="Choose when Enter sends a prompt or inserts a new line"
           resetAction={
@@ -1586,6 +1518,7 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
         />
 
         <SettingsRow
+          clientSetting
           {...searchableSetting("follow-up-behavior")}
           description={
             "Steer the current run with follow-ups or queue them until the agent finishes. " +
@@ -1661,10 +1594,10 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
           {...searchableSetting("continue-threads-after-server-update")}
           serverScoped
           settingKeys={["continueThreadsAfterServerUpdate"]}
-          description="Automatically resume interrupted threads after an update, crash, or machine restart on the selected environments."
+          description="Automatically resume interrupted threads after an update, crash, or machine restart across your machines."
           status={
             !supportsRestartContinuation
-              ? "All selected connected environments must support restart continuation."
+              ? "Every connected machine must support restart continuation."
               : undefined
           }
           resetAction={
@@ -1759,7 +1692,7 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
                   <SelectItem hideIndicator value="advanced" disabled={!isEnvironmentScope}>
                     {isEnvironmentScope
                       ? BACKGROUND_ACTIVITY_PROFILE_OPTION_LABELS.advanced
-                      : `${BACKGROUND_ACTIVITY_PROFILE_OPTION_LABELS.advanced} (one environment)`}
+                      : `${BACKGROUND_ACTIVITY_PROFILE_OPTION_LABELS.advanced} (one machine)`}
                   </SelectItem>
                 </SelectPopup>
               </Select>
@@ -1789,105 +1722,9 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
         />
       </SettingsSection>
 
-      <SettingsSection id="projects-and-threads" title="Repositories & threads">
-        <SettingsRow
-          serverScoped
-          settingKeys={["newWorktreesStartFromOrigin"]}
-          {...searchableSetting("start-from-origin")}
-          description="Creates the worktree from the latest matching branch on origin instead of your local branch."
-          resetAction={
-            settings.newWorktreesStartFromOrigin !==
-            DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin ? (
-              <SettingResetButton
-                label="new worktrees start from origin"
-                onClick={() =>
-                  updateSettings({
-                    newWorktreesStartFromOrigin:
-                      DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <ScopedSwitch
-              settingKeys={["newWorktreesStartFromOrigin"]}
-              checked={settings.newWorktreesStartFromOrigin}
-              onCheckedChange={(checked) =>
-                updateSettings({ newWorktreesStartFromOrigin: Boolean(checked) })
-              }
-              aria-label="Start new worktrees from origin by default"
-            />
-          }
-        />
-        <SettingsRow
-          serverScoped
-          settingKeys={["addProjectBaseDirectory"]}
-          {...searchableSetting("add-project-starts-in")}
-          description='Leave empty to use "~/" when the Add Repository browser opens.'
-          resetAction={
-            settings.addProjectBaseDirectory !==
-            DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory ? (
-              <SettingResetButton
-                label="add repository base directory"
-                onClick={() =>
-                  updateSettings({
-                    addProjectBaseDirectory: DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <DraftInput
-              size="sm"
-              className="w-full sm:w-72"
-              value={mixedAddProjectBaseDirectory ? "" : settings.addProjectBaseDirectory}
-              onCommit={(next) => updateSettings({ addProjectBaseDirectory: next })}
-              placeholder={mixedAddProjectBaseDirectory ? "Mixed" : "~/"}
-              spellCheck={false}
-              aria-label="Add repository base directory"
-            />
-          }
-        />
-        <SettingsRow
-          serverScoped
-          settingKeys={["projectsRoot"]}
-          {...searchableSetting("projects-folder")}
-          description="Where new and cloned repositories go, in a folder per project. Existing repositories stay where they are."
-          resetAction={
-            settings.projectsRoot !== DEFAULT_UNIFIED_SETTINGS.projectsRoot ? (
-              <SettingResetButton
-                label="projects folder"
-                onClick={() =>
-                  updateSettings({ projectsRoot: DEFAULT_UNIFIED_SETTINGS.projectsRoot })
-                }
-              />
-            ) : null
-          }
-          control={
-            <div className="flex w-full items-center gap-2 sm:w-auto">
-              <DraftInput
-                size="sm"
-                className="w-full sm:w-56"
-                value={mixedProjectsRoot ? "" : settings.projectsRoot}
-                onCommit={(next) => updateSettings({ projectsRoot: next })}
-                placeholder={mixedProjectsRoot ? "Mixed" : DEFAULT_PROJECTS_ROOT}
-                spellCheck={false}
-                aria-label="Projects folder"
-              />
-              {canPickProjectsRoot ? (
-                <Button size="sm" variant="outline" onClick={() => void pickProjectsRoot()}>
-                  Change…
-                </Button>
-              ) : null}
-            </div>
-          }
-        />
-      </SettingsSection>
-
       <SettingsSection id="confirmations" title="Confirmations">
         <SettingsRow
+          clientSetting
           {...searchableSetting("archive-confirmation")}
           description="Require a second click on the inline archive action before a thread is archived."
           resetAction={
@@ -1914,6 +1751,7 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
         />
 
         <SettingsRow
+          clientSetting
           {...searchableSetting("delete-confirmation")}
           description="Ask before deleting a thread and its chat history."
           resetAction={
@@ -1941,6 +1779,7 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
 
         {isElectron ? (
           <SettingsRow
+            clientSetting
             {...searchableSetting("quit-confirmation")}
             description="Hold mode also quits on two quick presses."
             resetAction={
@@ -1982,117 +1821,7 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
         ) : null}
       </SettingsSection>
 
-      <SettingsSection id="text-generation" title="Text generation">
-        <SettingsRow
-          serverScoped
-          settingKeys={["textGenerationModelSelection"]}
-          {...searchableSetting("text-generation-model")}
-          description="Used for thread titles and other generated text on connected devices with this provider. Source control can override it."
-          resetAction={
-            hasServerTargets && isTextGenerationModelDirty ? (
-              <SettingResetButton
-                label="text generation model"
-                onClick={() =>
-                  updateSettings({
-                    textGenerationModelSelection:
-                      DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            !hasServerTargets ? (
-              <span className="text-sm text-muted-foreground">
-                Connect an environment to choose its text generation model.
-              </span>
-            ) : !hasTextGenerationProvider ? (
-              <span className="text-sm text-muted-foreground">
-                No text generation providers available.
-              </span>
-            ) : (
-              <div className="flex flex-wrap items-center justify-end gap-1.5">
-                <ProviderModelPicker
-                  environmentId={environmentId}
-                  activeInstanceId={textGenInstanceId}
-                  model={textGenModel}
-                  lockedProvider={null}
-                  instanceEntries={textGenerationModelInstanceEntries}
-                  modelOptionsByInstance={textGenerationModelOptionsByInstance}
-                  triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
-                  {...(mixedTextGenerationModel ? { triggerLabel: "Mixed" } : {})}
-                  getModelDisabledReason={textGenerationModelDisabledReason}
-                  {...(environmentId
-                    ? {
-                        onOpenProviderSetup: (instanceId: ProviderInstanceId) => {
-                          void navigate({
-                            to: "/settings/providers",
-                            search: { environmentId, instanceId },
-                          });
-                        },
-                      }
-                    : {})}
-                  onInstanceModelChange={(instanceId, model) => {
-                    const reason = textGenerationModelDisabledReason(instanceId, model);
-                    if (reason) {
-                      toastManager.add({
-                        type: "error",
-                        title: "Text generation model not saved",
-                        description: reason,
-                      });
-                      return;
-                    }
-                    updateSettings({
-                      textGenerationModelSelection: resolveAppModelSelectionState(
-                        {
-                          ...settings,
-                          textGenerationModelSelection: createModelSelection(instanceId, model),
-                        },
-                        textGenerationProviders,
-                      ),
-                    });
-                  }}
-                />
-                {textGenInstanceEntry ? (
-                  <TraitsPicker
-                    provider={textGenProvider}
-                    models={
-                      // Use the exact instance's models (rather than the
-                      // first-kind-match) so a custom text-gen instance like
-                      // `codex_personal` gets its own model list, not the
-                      // default Codex one.
-                      textGenInstanceEntry?.models ?? []
-                    }
-                    model={textGenModel}
-                    prompt=""
-                    onPromptChange={() => {}}
-                    modelOptions={textGenModelOptions}
-                    allowPromptInjectedEffort={false}
-                    planModeEnabled={
-                      settings.planModeEnabled || selectsPlanAgent(textGenModelOptions)
-                    }
-                    triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
-                    onModelOptionsChange={(nextOptions) => {
-                      updateSettings({
-                        textGenerationModelSelection: resolveAppModelSelectionState(
-                          {
-                            ...settings,
-                            textGenerationModelSelection: createModelSelection(
-                              textGenInstanceId,
-                              textGenModel,
-                              nextOptions,
-                            ),
-                          },
-                          textGenerationProviders,
-                        ),
-                      });
-                    }}
-                  />
-                ) : null}
-              </div>
-            )
-          }
-        />
+      <SettingsSection id="greetings" title="Greetings">
         <SettingsRow
           serverScoped
           settingKeys={["aiGreetings"]}
@@ -2123,31 +1852,14 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
         {isElectron || HOSTED_APP_CHANNEL ? (
           <AboutVersionSection />
         ) : (
-          <SettingsRow
-            id={searchableSetting("app-version").id}
-            title={<AboutVersionTitle />}
-            description="Current version of the application."
-          />
+          <>
+            <SettingsRow
+              id={searchableSetting("app-version").id}
+              title={<AboutVersionTitle />}
+              description="Current version of the application."
+            />
+          </>
         )}
-        <SettingsRow
-          {...searchableSetting("diagnostics")}
-          description={
-            isEnvironmentScope
-              ? "Inspect processes, resource use, and logs on this environment."
-              : "Inspect processes, resource use, and logs on one environment at a time."
-          }
-          control={
-            <Button
-              render={
-                <Link to="/settings/diagnostics" search={{ machine: environmentId ?? undefined }} />
-              }
-              size="sm"
-              variant="outline"
-            >
-              View diagnostics
-            </Button>
-          }
-        />
         <SettingsRow
           {...searchableSetting("open-source-licenses")}
           description="Notices for dependencies, assets, and optional tools used by Cogenly."
@@ -2165,11 +1877,13 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
 
       <LegacyFeaturesSection />
       <RestoreDefaultsSection onRestored={onRestored} />
-    </SettingsPageContainer>
+    </>
   );
 }
 
 export function ArchivedThreadsPanel() {
+  const [query, setQuery] = useState("");
+  const [projectFilter, setProjectFilter] = useState("all");
   const { scope, groups: projectGroups, environments } = useSettingsScope();
   const { unarchiveThread, confirmAndDeleteThread } = useThreadActions();
   const {
@@ -2181,7 +1895,7 @@ export function ArchivedThreadsPanel() {
 
   const { groups: archivedGroups, hasMultipleEnvironments } = useMemo(() => {
     const selectedProjectKeys =
-      scope.kind === "project" || scope.kind === "checkout"
+      scope.kind === "project"
         ? new Set(scope.members.map((member) => `${member.environmentId}:${member.id}`))
         : null;
     const projectsByEnvironmentAndId = new Map(
@@ -2319,90 +2033,82 @@ export function ArchivedThreadsPanel() {
     [confirmAndDeleteThread, refreshArchivedThreads, unarchiveThread],
   );
 
+  const shownGroups = archivedGroups
+    .filter((group) => projectFilter === "all" || group.key === projectFilter)
+    .map((group) => ({
+      ...group,
+      threads: group.threads.filter((thread) => matchesSettingsListQuery(query, [thread.title])),
+    }))
+    .filter((group) => group.threads.length > 0);
+
   return (
-    <SettingsPageContainer>
-      {archivedGroups.length === 0 ? (
-        <SettingsSection
-          id={isLoadingArchive ? undefined : searchableSetting("archive").id}
-          title={searchableSetting("archive").title}
-        >
-          {isLoadingArchive ? (
-            <SettingsRow title="Loading archived threads…" role="status" />
-          ) : archiveError ? (
-            <SettingsRow title="Could not load archived threads" description={archiveError} />
-          ) : (
-            <SettingsEmpty
-              icon={<ArchiveIcon />}
-              title="No archived threads"
-              description="Archived threads will appear here."
+    <>
+      <SettingsSection id={searchableSetting("archive").id} title="Archive">
+        <SettingsListToolbar>
+          <SettingsListSearch label="Search archive" value={query} onValueChange={setQuery} />
+          <SettingsListFilter
+            label="Project"
+            value={projectFilter}
+            onValueChange={setProjectFilter}
+            options={[
+              { value: "all", label: "All projects" },
+              ...archivedGroups.map((group) => ({ value: group.key, label: group.title })),
+            ]}
+          />
+        </SettingsListToolbar>
+        {shownGroups.length === 0 ? (
+          isLoadingArchive || archiveError ? (
+            <SettingsRow
+              title={
+                isLoadingArchive ? "Loading archived threads" : "Could not load archived threads"
+              }
+              description={archiveError ?? "Checking connected machines."}
+              role={isLoadingArchive ? "status" : undefined}
             />
-          )}
-        </SettingsSection>
-      ) : (
-        archivedGroups.map(({ key, project, title, threads: projectThreads }, index) => (
-          <SettingsSection
-            key={key}
-            id={index === 0 ? searchableSetting("archive").id : undefined}
-            title={title}
-            icon={<ProjectFavicon project={project} />}
-          >
-            {projectThreads.map((thread) => (
+          ) : (
+            <SettingsListEmpty
+              icon={<ArchiveIcon />}
+              title={query || projectFilter !== "all" ? "Nothing matches" : "No archived threads"}
+              description={
+                query || projectFilter !== "all"
+                  ? "Try another search or project."
+                  : "Archived threads will appear here."
+              }
+            />
+          )
+        ) : (
+          shownGroups.map(({ key, project, title, threads: projectThreads }) => (
+            <div key={key}>
               <SettingsRow
-                key={`${thread.environmentId}:${thread.id}`}
-                onContextMenu={(event) => {
-                  event.preventDefault();
-                  void (async () => {
-                    const result = await settlePromise(() =>
-                      handleArchivedThreadContextMenu(
-                        scopeThreadRef(thread.environmentId, thread.id),
-                        {
-                          x: event.clientX,
-                          y: event.clientY,
-                        },
-                      ),
-                    );
-                    if (result._tag === "Failure") {
-                      const error = squashAtomCommandFailure(result);
-                      toastManager.add(
-                        stackedThreadToast({
-                          type: "error",
-                          title: "Archived thread action failed",
-                          description:
-                            error instanceof Error ? error.message : "An error occurred.",
-                        }),
-                      );
-                    }
-                  })();
-                }}
-                title={thread.title}
-                description={
-                  <span className={hasMultipleEnvironments ? "block truncate" : undefined}>
-                    {hasMultipleEnvironments ? `${thread.environmentLabel} · ` : null}
-                    Archived {formatRelativeTimeLabel(thread.archivedAt ?? thread.createdAt)}
-                    {" \u00b7 Created "}
-                    {formatRelativeTimeLabel(thread.createdAt)}
+                title={
+                  <span className="flex items-center gap-2">
+                    <ProjectFavicon project={project} />
+                    {title}
                   </span>
                 }
-                control={
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
+              />
+              <SettingsList>
+                {projectThreads.map((thread) => (
+                  <SettingsListItem
+                    key={`${thread.environmentId}:${thread.id}`}
+                    onContextMenu={(event) => {
+                      event.preventDefault();
                       void (async () => {
-                        const result = await unarchiveThread(
-                          scopeThreadRef(thread.environmentId, thread.id),
+                        const result = await settlePromise(() =>
+                          handleArchivedThreadContextMenu(
+                            scopeThreadRef(thread.environmentId, thread.id),
+                            {
+                              x: event.clientX,
+                              y: event.clientY,
+                            },
+                          ),
                         );
-                        if (result._tag === "Success") {
-                          refreshArchivedThreads();
-                          return;
-                        }
-                        if (!isAtomCommandInterrupted(result)) {
+                        if (result._tag === "Failure") {
                           const error = squashAtomCommandFailure(result);
                           toastManager.add(
                             stackedThreadToast({
                               type: "error",
-                              title: "Failed to unarchive thread",
+                              title: "Archived thread action failed",
                               description:
                                 error instanceof Error ? error.message : "An error occurred.",
                             }),
@@ -2410,16 +2116,55 @@ export function ArchivedThreadsPanel() {
                         }
                       })();
                     }}
-                  >
-                    <ArchiveX className="size-3.5" />
-                    <span>Unarchive</span>
-                  </Button>
-                }
-              />
-            ))}
-          </SettingsSection>
-        ))
-      )}
-    </SettingsPageContainer>
+                    title={thread.title}
+                    description={
+                      <span className={hasMultipleEnvironments ? "block truncate" : undefined}>
+                        {hasMultipleEnvironments ? `${thread.environmentLabel} · ` : null}
+                        Archived {formatRelativeTimeLabel(thread.archivedAt ?? thread.createdAt)}
+                        {" \u00b7 Created "}
+                        {formatRelativeTimeLabel(thread.createdAt)}
+                      </span>
+                    }
+                    control={
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="xs"
+                        className="shrink-0"
+                        onClick={() => {
+                          void (async () => {
+                            const result = await unarchiveThread(
+                              scopeThreadRef(thread.environmentId, thread.id),
+                            );
+                            if (result._tag === "Success") {
+                              refreshArchivedThreads();
+                              return;
+                            }
+                            if (!isAtomCommandInterrupted(result)) {
+                              const error = squashAtomCommandFailure(result);
+                              toastManager.add(
+                                stackedThreadToast({
+                                  type: "error",
+                                  title: "Failed to unarchive thread",
+                                  description:
+                                    error instanceof Error ? error.message : "An error occurred.",
+                                }),
+                              );
+                            }
+                          })();
+                        }}
+                      >
+                        <ArchiveX className="size-3.5" />
+                        <span>Unarchive</span>
+                      </Button>
+                    }
+                  />
+                ))}
+              </SettingsList>
+            </div>
+          ))
+        )}
+      </SettingsSection>
+    </>
   );
 }

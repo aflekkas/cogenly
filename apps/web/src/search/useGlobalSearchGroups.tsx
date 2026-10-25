@@ -1,6 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import type { EnvironmentId, SearchKind, ThreadId } from "@t3tools/contracts";
+import { scopeThreadRef } from "@cogenly/client-runtime/environment";
+import type { EnvironmentId, SearchKind, ThreadId } from "@cogenly/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import * as Cause from "effect/Cause";
 import * as Option from "effect/Option";
@@ -281,7 +281,7 @@ export function useGlobalSearchGroups(input: {
         items: group.results.map(toItem),
       }));
     }
-    if (environmentIds.length === 0) return [status("Connect an environment to search it.")];
+    if (environmentIds.length === 0) return [status("Connect a machine to search it.")];
     if (stale || settled.some((entry) => entry.waiting)) return [status("Searching everything…")];
     if (settled.every((entry) => entry.failed)) {
       const error = settled[0]?.error;

@@ -23,7 +23,7 @@ const isPersistentPartition = (partition: string) => partition.startsWith("persi
 export class SitePermissions extends Context.Service<
   SitePermissions,
   { readonly controller: SitePermissionsController }
->()("@t3tools/desktop/preview/SitePermissions") {}
+>()("@cogenly/desktop/preview/SitePermissions") {}
 
 export const make = Effect.gen(function* SitePermissionsMake() {
   const environment = yield* DesktopEnvironment.DesktopEnvironment;

@@ -1,10 +1,11 @@
+import * as StorageCleanup from "../storageCleanup.ts";
 import {
   EnvironmentId,
   ProjectLabelId,
   ProviderInstanceId,
   ThreadId,
   WorkTaskId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -58,6 +59,7 @@ import * as DesktopAppControl from "../environment/DesktopAppControl.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as ThreadCommandExecutor from "../orchestration-v2/ThreadCommandExecutor.ts";
 import * as MachineSecurity from "../security/MachineSecurity.ts";
+import * as MachineHealth from "../health/MachineHealth.ts";
 import * as Integrations from "../integrations/Integrations.ts";
 import * as AgentStore from "../agents/AgentStore.ts";
 import { liveThreadShell } from "./McpToolAccess.testkit.ts";
@@ -108,7 +110,9 @@ const serverLayer = Layer.mergeAll(
     ),
   ),
 ).pipe(
-  Layer.provideMerge(McpServer.McpServer.layer),
+  Layer.provideMerge(
+    Layer.merge(McpServer.McpServer.layer, Layer.mock(StorageCleanup.StorageCleanup)({})),
+  ),
   Layer.provideMerge(threadLayers),
   Layer.provideMerge(
     Layer.mock(TerminalMcpService.TerminalMcpService)({
@@ -122,8 +126,8 @@ const serverLayer = Layer.mergeAll(
           nextOffset: 0,
           truncated: false,
         }),
-      write: () => neverCall("terminal service"),
-      kill: () => neverCall("terminal service"),
+      write: () => Effect.succeed({}),
+      kill: () => Effect.succeed({}),
     }),
   ),
   Layer.provideMerge(
@@ -164,6 +168,7 @@ const serverLayer = Layer.mergeAll(
       Layer.mock(ServerEnvironment.ServerEnvironment)({}),
       Layer.mock(ThreadCommandExecutor.ThreadCommandExecutor)({}),
       Layer.mock(MachineSecurity.MachineSecurity)({}),
+      Layer.mock(MachineHealth.MachineHealth)({}),
       Layer.mock(ChildProcessSpawner.ChildProcessSpawner)({}),
       Layer.mock(Integrations.Integrations)({
         list: () => Effect.succeed({ integrations: [] }),
@@ -303,9 +308,6 @@ const refusalOf = (text: string) =>
 
 describe("conversation-mode MCP boundary", () => {
   it.effect.each([
-    ["terminal_run", { command: "echo chat-probe" }],
-    ["terminal_write", { terminalId: "terminal-probe", input: "x" }],
-    ["terminal_kill", { terminalId: "terminal-probe" }],
     ["worktree_handoff", { branch: "probe/chat" }],
     ["delegate_task", { task: "probe task" }],
     ["create_threads", { threads: [{}] }],
@@ -324,6 +326,7 @@ describe("conversation-mode MCP boundary", () => {
     ["project_delete", { projectId: "project:probe" }],
     ["project_clone", { repository: "acme/probe" }],
     ["environment_add", { ssh: "probe-host" }],
+    ["cli_command_change", { action: "install" }],
     ["environment_preferences_update", { enableAgentTerminals: true }],
   ] as const)("%s refuses a chat-surface caller", ([tool, args]) =>
     callText(tool, chatThreadId, args).pipe(
@@ -335,13 +338,24 @@ describe("conversation-mode MCP boundary", () => {
     ),
   );
 
-  it.effect("terminal_run still serves a work-surface caller", () =>
-    callText("terminal_run", workThreadId, { command: "echo work-probe" }).pipe(
+  it.effect.each([chatThreadId, workThreadId])("terminal_run serves %s", (threadId) =>
+    callText("terminal_run", threadId, { command: "git log --oneline -5" }).pipe(
       Effect.map((text) => {
         assert.equal(
           (JSON.parse(text) as { terminalId: string }).terminalId,
           "terminal-conversation",
         );
+      }),
+    ),
+  );
+
+  it.effect.each([
+    ["terminal_write", { terminalId: "terminal-conversation", input: "q" }],
+    ["terminal_kill", { terminalId: "terminal-conversation" }],
+  ] as const)("%s serves a chat-surface caller", ([tool, args]) =>
+    callText(tool, chatThreadId, args).pipe(
+      Effect.map((text) => {
+        assert.deepEqual(JSON.parse(text), {});
       }),
     ),
   );

@@ -40,8 +40,9 @@ The composer banners are the reference.
 - Consumers are a few lines of slots, and the slots carry the styling:
   [`ComposerActivityStatus.tsx`](../../apps/web/src/components/chat/ComposerActivityStatus.tsx).
 
-Settings pages compose the pieces in
-[`settingsLayout.tsx`](../../apps/web/src/components/settings/settingsLayout.tsx): a page container,
+The settings route owns the single content frame and scroller for every page, including Projects.
+Pages return sections without setting width or padding. They compose the pieces in
+[`settingsLayout.tsx`](../../apps/web/src/components/settings/settingsLayout.tsx):
 sections with a header and actions, rows, and the shared toolbar, note, empty, refresh and fold
 pieces. A settings card, row, empty state or header button styled by hand drifts from the rest;
 add a prop or a piece there instead.

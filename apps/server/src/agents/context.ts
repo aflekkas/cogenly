@@ -1,4 +1,4 @@
-import type { ModelSelection } from "@t3tools/contracts";
+import type { ModelSelection } from "@cogenly/contracts";
 
 export const CONVERSATION_RECENT_MESSAGES = 20;
 export const CONVERSATION_SESSION_RUNS = 40;

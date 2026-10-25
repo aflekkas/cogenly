@@ -6,10 +6,11 @@ import {
   IntegrationName,
   ProviderInstanceId,
   ThreadId,
+  integrationCatalogEntry,
   type Integration,
   type IntegrationCreateInput,
   type OrchestrationV2ThreadShell,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
@@ -17,6 +18,7 @@ import * as Stream from "effect/Stream";
 import * as AgentStore from "../../../agents/AgentStore.ts";
 import type { SignInOrigin } from "../../../integrations/SignInOrigin.ts";
 import * as Integrations from "../../../integrations/Integrations.ts";
+import { catalogSetupFor } from "../../../integrations/IntegrationSetup.ts";
 import * as Threads from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as Invocation from "../../McpInvocationContext.ts";
 import * as Access from "../../McpToolAccess.ts";
@@ -114,23 +116,18 @@ const addIntegration = Effect.fn("test.addIntegration")(function* (
     }),
     Layer.mock(Integrations.Integrations)({
       create: () => Effect.succeed({ integration }),
-      list: () =>
-        Effect.succeed({
-          integrations: [
-            {
-              integration,
-              status: integration.auth ? ("needs_sign_in" as const) : ("unknown" as const),
-              toolCount: null,
-            },
-          ],
-        }),
-      beginSignIn: (id, origin) =>
+      prepareSignIn: (id, origin) =>
         Effect.sync(() => {
           signIns.push({ id, origin });
-          return {
-            authorizationUrl: "https://mcp.linear.app/authorize?state=s",
-            redirectUri: "http://127.0.0.1:3773/oauth/integrations/callback",
-          };
+          return integration.auth
+            ? {
+                integration,
+                signIn: {
+                  authorizationUrl: "https://mcp.linear.app/authorize?state=s",
+                  redirectUri: "http://127.0.0.1:3773/oauth/integrations/callback",
+                },
+              }
+            : { integration };
         }),
     }),
     Layer.mock(AgentStore.AgentStore)({ forThread: () => Effect.succeed(null) }),
@@ -151,6 +148,7 @@ it.effect("integration_add hands an agent the sign-in link for an OAuth server",
     expect(result).toMatchObject({
       signIn: { authorizationUrl: "https://mcp.linear.app/authorize?state=s" },
     });
+    // The link returns to the origin the agent's MCP request reached, as an agent's.
     expect(signIns).toEqual([
       {
         id: "integration:linear",
@@ -160,7 +158,7 @@ it.effect("integration_add hands an agent the sign-in link for an OAuth server",
 
     const plain = yield* addIntegration({});
     expect(plain.result).not.toHaveProperty("signIn");
-    expect(plain.signIns).toHaveLength(0);
+    expect(plain.result).not.toHaveProperty("nextStep");
   }),
 );
 
@@ -216,13 +214,13 @@ it.effect("integration_add connects a catalog entry and relays its sign-in link"
       redirectUri: "https://cogenly.example.com/oauth/integrations/callback",
     };
     const { result, requests } = yield* addFromCatalog(
-      { catalogId: "notion", accountLabel: " work ", region: "default" },
+      { catalogId: "notion", accountLabel: " work " },
       () => Effect.succeed({ integration, signIn }),
     );
     expect(result).toEqual({ integration, signIn });
     expect(requests).toEqual([
       [
-        { catalogId: "notion", accountLabel: "work", inputs: { region: "default" } },
+        { catalogId: "notion", accountLabel: "work", inputs: {} },
         {
           origin: { origin: "https://cogenly.example.com", fromAgent: true },
           addedByAgent: { id: "thread:live", name: "Coding agent" },
@@ -233,21 +231,52 @@ it.effect("integration_add connects a catalog entry and relays its sign-in link"
   }),
 );
 
-it.effect("integration_add tells the agent the next step a catalog entry needs", () =>
+it.effect("integration_add relays the setup step Settings shows, with a link to it", () =>
   Effect.gen(function* () {
-    const { result } = yield* addFromCatalog({ catalogId: "intercom" }, () =>
+    const setup = catalogSetupFor({ entry: integrationCatalogEntry("github")!, mode: "api_key" })!;
+    const { result } = yield* addFromCatalog({ catalogId: "github", accountLabel: "Work" }, () =>
+      Effect.succeed({ setup }),
+    );
+    expect(result).toMatchObject({
+      setup: { type: "api_key", catalogId: "github", label: "Personal access token" },
+      settingsUrl: "https://cogenly.example.com/settings/integrations?setup=github",
+    });
+    const nextStep = (result as { nextStep: string }).nextStep;
+    expect(nextStep).toContain("https://github.com/settings/personal-access-tokens/new");
+    expect(nextStep).toContain("integration_test");
+    expect(nextStep).toContain("request_secret");
+    expect(nextStep).toContain("apiKey {{credential:<item>.value}}");
+  }),
+);
+
+it.effect("integration_add passes on a catalog request's missing input", () =>
+  Effect.gen(function* () {
+    const { result } = yield* addFromCatalog({ catalogId: "google-workspace" }, () =>
       Effect.fail(
         new IntegrationError({
           operation: "connect from catalog",
           reason: "invalid_request",
-          cause: 'Ask the user where their Intercom workspace is hosted, then pass region: "us".',
+          cause: "Pass accountLabel to name this Google account.",
         }),
       ),
     );
     expect(result).toMatchObject({
       code: "invalid_request",
-      message: 'Ask the user where their Intercom workspace is hosted, then pass region: "us".',
+      message: "Pass accountLabel to name this Google account.",
     });
+  }),
+);
+
+it.effect("integration failures read the same as the setup step Settings shows", () =>
+  Effect.gen(function* () {
+    const { result } = yield* addFromCatalog({ catalogId: "linear" }, () =>
+      Effect.fail(new IntegrationError({ operation: "sign in", reason: "local_runtime_missing" })),
+    );
+    expect(result).toMatchObject({
+      code: "invalid_request",
+      message: expect.stringContaining("Install uv"),
+    });
+    expect((result as { message: string }).message).toContain("request_secret");
   }),
 );
 

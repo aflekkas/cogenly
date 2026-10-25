@@ -7,7 +7,7 @@ import {
   type ServerSelfUpdateProgressEvent,
   type ServerSelfUpdateResult,
   WS_METHODS,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Cause from "effect/Cause";
 import * as Duration from "effect/Duration";
 import * as Deferred from "effect/Deferred";
@@ -22,7 +22,7 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 import { AsyncResult, Atom } from "effect/reactivity";
-import { applyModelEffortDefaults } from "@t3tools/shared/model";
+import { applyModelEffortDefaults } from "@cogenly/shared/model";
 
 import {
   createAtomCommandScheduler,
@@ -53,7 +53,6 @@ import { followStreamInEnvironment } from "./runtime.ts";
 import {
   applyServerConfigProjection,
   type ServerConfigProjection,
-  withoutUsageLimitSources,
 } from "./serverConfigProjection.ts";
 
 // Exported server state includes this type in its inferred public return type.
@@ -101,7 +100,7 @@ export class ServerUpdateResumeTimeoutError extends Schema.TaggedError<ServerUpd
   },
 ) {
   override get message(): string {
-    return `The server did not resume on t3@${this.targetVersion}.`;
+    return `The server did not resume on Cogenly ${this.targetVersion}.`;
   }
 }
 
@@ -112,7 +111,7 @@ export class ServerUpdateProgressIncompleteError extends Schema.TaggedError<Serv
   },
 ) {
   override get message(): string {
-    return `The t3@${this.targetVersion} update ended before the server accepted the restart.`;
+    return `The Cogenly ${this.targetVersion} update ended before the server accepted the restart.`;
   }
 }
 
@@ -125,7 +124,7 @@ export class ServerUpdateTerminalError extends Schema.TaggedError<ServerUpdateTe
   },
 ) {
   override get message(): string {
-    return this.reason ?? `The t3@${this.targetVersion} update ${this.status}.`;
+    return this.reason ?? `The Cogenly ${this.targetVersion} update ${this.status}.`;
   }
 }
 
@@ -372,7 +371,6 @@ const cachedConfigSnapshotEvent = (config: ServerConfig): ServerConfigStreamEven
 });
 
 export interface ServerConfigSubscriptionOptions {
-  readonly usageLimitSources?: boolean;
   readonly usageLimitsCommand?: boolean;
 }
 
@@ -396,8 +394,8 @@ export const makeEnvironmentServerConfigState = Effect.fn("EnvironmentServerConf
       // Stripped on load as well as on save: a cache written by an earlier
       // build can still carry published themes.
       Option.map(cachedConfig, (cached) => ({
-        config: withoutUsageLimitSources(cached),
-        latestEvent: cachedConfigSnapshotEvent(withoutUsageLimitSources(cached)),
+        config: cached,
+        latestEvent: cachedConfigSnapshotEvent(cached),
         source: "cache" as const,
       })),
     );
@@ -407,7 +405,7 @@ export const makeEnvironmentServerConfigState = Effect.fn("EnvironmentServerConf
     const persist = Effect.fn("EnvironmentServerConfigState.persist")(function* (
       config: ServerConfig,
     ) {
-      return yield* cache.saveServerConfig(environmentId, withoutUsageLimitSources(config)).pipe(
+      return yield* cache.saveServerConfig(environmentId, config).pipe(
         Effect.as(true),
         Effect.catch((error) =>
           Effect.logWarning("Could not persist cached server configuration.").pipe(
@@ -446,7 +444,6 @@ export const makeEnvironmentServerConfigState = Effect.fn("EnvironmentServerConf
     yield* runCachePersistence(persistence, persistPending).pipe(Effect.forkScoped);
 
     yield* subscribe(WS_METHODS.subscribeServerConfig, {
-      ...(subscription.usageLimitSources === true ? { usageLimitSources: true } : {}),
       ...(subscription.usageLimitsCommand === true ? { usageLimitsCommand: true } : {}),
     }).pipe(
       Stream.runForEach((event) =>
@@ -652,7 +649,6 @@ export function createServerEnvironmentAtoms<R, E>(
      * receives the payload.
      */
     /** Whether this surface renders quota from configured usage-limit sources. */
-    readonly usageLimitSources?: boolean;
     readonly usageLimitsCommand?: boolean;
   },
 ) {
@@ -667,7 +663,6 @@ export function createServerEnvironmentAtoms<R, E>(
     runtime
       .atom(
         serverConfigStateChanges(environmentId, {
-          ...(options.usageLimitSources === true ? { usageLimitSources: true } : {}),
           ...(options.usageLimitsCommand === true ? { usageLimitsCommand: true } : {}),
         }),
       )
@@ -990,6 +985,11 @@ export function createServerEnvironmentAtoms<R, E>(
 
   return {
     configValueAtom,
+    storageStatus: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:storage-status",
+      tag: WS_METHODS.serverGetStorageStatus,
+      concurrency: { mode: "singleFlight", key: ({ environmentId }) => environmentId },
+    }),
     runStorageCleanup: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:run-storage-cleanup",
       tag: WS_METHODS.serverRunStorageCleanup,
@@ -1139,6 +1139,18 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:projectLabels:updateProjectLabel",
       tag: WS_METHODS.projectLabelsUpdate,
     }),
+    mergeProjectLabels: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:projectLabels:mergeProjectLabels",
+      tag: WS_METHODS.projectLabelsMerge,
+    }),
+    dismissProjectLabelDuplicate: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:projectLabels:dismissProjectLabelDuplicate",
+      tag: WS_METHODS.projectLabelsDismissDuplicate,
+    }),
+    undismissProjectLabelDuplicate: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:projectLabels:undismissProjectLabelDuplicate",
+      tag: WS_METHODS.projectLabelsUndismissDuplicate,
+    }),
     deleteProjectLabel: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:projectLabels:deleteProjectLabel",
       tag: WS_METHODS.projectLabelsDelete,
@@ -1197,9 +1209,63 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:projectLabels:cloneProjectLabelRepository",
       tag: WS_METHODS.projectLabelsCloneRepository,
     }),
+    /** Clone a repository the project links onto this machine; returns once the clone runs. */
+    checkoutProjectLabelRepository: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:projectLabels:checkoutProjectLabelRepository",
+      tag: WS_METHODS.projectLabelsCheckoutRepository,
+    }),
+    /** Delete this machine's checkout of a linked repository; the link stays. */
+    removeProjectLabelCheckout: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:projectLabels:removeProjectLabelCheckout",
+      tag: WS_METHODS.projectLabelsRemoveCheckout,
+    }),
+    /** Move a linked repository's checkout into `<project>/repos/<directoryName>`. */
+    adoptProjectLabelRepository: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:projectLabels:adoptProjectLabelRepository",
+      tag: WS_METHODS.projectLabelsAdoptRepository,
+    }),
+    /** Project folders no project claims; refresh after adopting or removing one. */
+    projectOrphanFolders: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:projectLabels:orphanFolders",
+      tag: WS_METHODS.projectLabelsListOrphanFolders,
+    }),
+    /** Make an orphan folder a project of the same name, keeping its contents. */
+    adoptProjectOrphanFolder: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:projectLabels:adoptProjectOrphanFolder",
+      tag: WS_METHODS.projectLabelsAdoptOrphanFolder,
+    }),
+    /** Delete an orphan folder that holds only an empty skeleton. */
+    removeProjectOrphanFolder: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:projectLabels:removeProjectOrphanFolder",
+      tag: WS_METHODS.projectLabelsRemoveOrphanFolder,
+    }),
     moveThreadProjectFolder: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:projectLabels:moveThreadProjectFolder",
       tag: WS_METHODS.projectLabelsMoveThread,
+    }),
+    /** Hand a project's repositories, threads and agents to another paired machine. */
+    moveProjectToMachine: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:projectLabels:moveProjectToMachine",
+      tag: WS_METHODS.projectLabelsMoveToMachine,
+    }),
+    /** The machines this environment is paired with, live: a fresh list after every change. */
+    machineProviders: createEnvironmentGuardedRpcQueryAtomFamily(runtime, {
+      label: "environment-data:machines:providers",
+      tag: WS_METHODS.machinesCatalog,
+    }),
+    machinesLive: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+      label: "environment-data:machines:live",
+      tag: WS_METHODS.machinesSubscribe,
+    }),
+    /** Copy the conversation to a paired machine in the same repository. */
+    forkThreadToMachine: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:machines:forkThreadToMachine",
+      tag: WS_METHODS.machinesForkThread,
+    }),
+    /** Hand threads to another paired machine; answers once it runs them, with skips. */
+    moveThreadsToMachine: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:machines:moveThreadsToMachine",
+      tag: WS_METHODS.machinesMoveThreads,
     }),
     /** Move a chat with turns into a project by forking it; returns the new chat. */
     forkThreadToProject: createEnvironmentRpcCommand(runtime, {

@@ -6,13 +6,13 @@ import {
   EnvironmentId,
   type ProjectCloneSnapshot,
   WS_METHODS,
-} from "@t3tools/contracts";
-import { mediaMimeTypeFromExtension } from "@t3tools/shared/filePreview";
-import { isWindowsAbsolutePath } from "@t3tools/shared/path";
+} from "@cogenly/contracts";
+import { mediaMimeTypeFromExtension } from "@cogenly/shared/filePreview";
+import { isWindowsAbsolutePath } from "@cogenly/shared/path";
 import {
   getProjectFaviconResourceKey,
   isProjectFaviconFallbackUrl,
-} from "@t3tools/shared/projectFavicon";
+} from "@cogenly/shared/projectFavicon";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
@@ -208,6 +208,54 @@ export function createAssetEnvironmentAtoms<R, E>(
       readonly resources: ReadonlyArray<AssetResource>;
     }) => createUrlsFamily(JSON.stringify([target.environmentId, target.resources])),
   };
+}
+
+/** A linked repository's icon on one environment, by its normalized remote. */
+export interface RepositoryIconTarget {
+  readonly environmentId: EnvironmentId;
+  readonly remote: string;
+  /** The recorded icon path, so a newly recorded icon asks again. */
+  readonly iconPath: string | null;
+}
+
+/**
+ * A linked repository's icon URL, cloned on that environment or not (the
+ * server's RepositoryIconResolver decides which icon). Null while loading,
+ * on failure, and when the server has none, so callers show their own mark.
+ * Keeps its last URL while the environment reconnects.
+ */
+export function createRepositoryIconUrlAtomFamily(input: {
+  readonly createUrl: (target: {
+    readonly environmentId: EnvironmentId;
+    readonly input: { readonly resource: AssetResource };
+  }) => Atom.Atom<AsyncResult.AsyncResult<AssetCreateUrlResult, unknown>>;
+  readonly preparedConnection: (
+    environmentId: EnvironmentId,
+  ) => Atom.Atom<Option.Option<{ readonly httpBaseUrl: string }>>;
+}) {
+  const decodeKey = Schema.decodeUnknownSync(
+    Schema.Tuple([EnvironmentId, Schema.String, Schema.NullOr(Schema.String)]),
+  );
+  const family = Atom.family((key: string) => {
+    const [environmentId, remote, iconPath] = decodeKey(JSON.parse(key));
+    const resource = {
+      _tag: "repository-icon" as const,
+      remote,
+      ...(iconPath ? { path: iconPath } : {}),
+    };
+    const request = input.createUrl({ environmentId, input: { resource } });
+    return Atom.make((get): string | null => {
+      const connection = get(input.preparedConnection(environmentId));
+      const state = assetUrlStateFromResult(
+        get(request),
+        Option.isSome(connection) ? connection.value.httpBaseUrl : null,
+      );
+      if (state._tag !== "Success") return Option.getOrNull(get.self<string | null>());
+      return isProjectFaviconFallbackUrl(state.url) ? null : state.url;
+    }).pipe(Atom.setIdleTTL(ASSET_URL_IDLE_TTL_MS));
+  });
+  return (target: RepositoryIconTarget) =>
+    family(JSON.stringify([target.environmentId, target.remote, target.iconPath]));
 }
 
 /**

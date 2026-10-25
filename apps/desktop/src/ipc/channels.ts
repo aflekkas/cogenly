@@ -50,7 +50,6 @@ export const SSH_PASSWORD_PROMPT_CHANNEL = "desktop:ssh-password-prompt";
 export const RESOLVE_SSH_PASSWORD_PROMPT_CHANNEL = "desktop:resolve-ssh-password-prompt";
 export const GET_SERVER_EXPOSURE_STATE_CHANNEL = "desktop:get-server-exposure-state";
 export const SET_SERVER_EXPOSURE_MODE_CHANNEL = "desktop:set-server-exposure-mode";
-export const SET_TAILSCALE_SERVE_ENABLED_CHANNEL = "desktop:set-tailscale-serve-enabled";
 export const GET_ADVERTISED_ENDPOINTS_CHANNEL = "desktop:get-advertised-endpoints";
 export const GET_WSL_STATE_CHANNEL = "desktop:get-wsl-state";
 export const SET_WSL_BACKEND_ENABLED_CHANNEL = "desktop:set-wsl-backend-enabled";
@@ -104,6 +103,7 @@ export const PREVIEW_SITE_PERMISSION_PROMPT_CHANNEL = "desktop:preview-site-perm
 export const MAC_PERMISSION_HELPER_CHANNEL = "desktop:mac-permission-helper";
 
 export const CHECK_SYSTEM_PERMISSION_CHANNEL = "desktop:check-system-permission";
+export const RELAUNCH_APP_CHANNEL = "desktop:relaunch-app";
 export const DICTATION_IS_AVAILABLE_CHANNEL = "desktop:dictation-is-available";
 export const DICTATION_REQUEST_MICROPHONE_CHANNEL = "desktop:dictation-request-microphone";
 export const DICTATION_STREAM_START_CHANNEL = "desktop:dictation-stream-start";

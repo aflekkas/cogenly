@@ -1,4 +1,4 @@
-import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { scopedThreadKey, scopeThreadRef } from "@cogenly/client-runtime/environment";
 import {
   NodeId,
   resolveEnvironmentMachineKind,
@@ -7,8 +7,8 @@ import {
   type OrchestrationV2Subagent,
   type ProviderDriverKind,
   type ServerProvider,
-} from "@t3tools/contracts";
-import { canDetachThreadProviderSession } from "@t3tools/client-runtime/state/thread-workflows";
+} from "@cogenly/contracts";
+import { canDetachThreadProviderSession } from "@cogenly/client-runtime/state/thread-workflows";
 import { useNavigate } from "@tanstack/react-router";
 import * as DateTime from "effect/DateTime";
 import {
@@ -476,8 +476,8 @@ function ThreadDetailsMenuContent(props: {
   return (
     <div className="flex flex-col">
       <ThreadDetailsSection
-        headingId="thread-details-environment-heading"
-        title="Environment"
+        headingId="thread-details-machine-heading"
+        title="Machine"
         separated={false}
       >
         <ThreadDetailsRow

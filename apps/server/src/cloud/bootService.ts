@@ -1,4 +1,4 @@
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as HostProcess from "@cogenly/shared/HostProcess";
 import * as Config from "effect/Config";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -12,8 +12,9 @@ import * as Path from "effect/Path";
 import { HttpClient } from "effect/http";
 import * as Schema from "effect/Schema";
 
-import { CLI_RELEASE_BASE_URL_ENV } from "@t3tools/shared/cliRelease";
+import { CLI_RELEASE_BASE_URL_ENV } from "@cogenly/shared/cliRelease";
 
+import * as ReadOnlySandbox from "../terminal/ReadOnlySandbox.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import { normalizeTimeZoneSetting } from "../scheduling/serverTimeZone.ts";
 import {
@@ -22,6 +23,7 @@ import {
   pinnedRuntimePaths,
   PinnedRuntimeInstallError,
   resolveCheckoutRuntime,
+  resolvePinnedRuntimeEntry,
 } from "./pinnedRuntime.ts";
 import {
   SERVICE_LAUNCHER_PROTOCOL,
@@ -573,7 +575,7 @@ export class BootServiceDowngradeRefusedError extends Schema.TaggedError<BootSer
   },
 ) {
   override get message(): string {
-    return `Refusing to replace t3@${this.installedVersion} with older t3@${this.targetVersion}. Run the command again with --allow-downgrade to continue.`;
+    return `Refusing to replace cogenly@${this.installedVersion} with older cogenly@${this.targetVersion}. Run the command again with --allow-downgrade to continue.`;
   }
 }
 
@@ -647,6 +649,7 @@ export class BootService extends Context.Service<
     readonly withStopped: <A, E, R>(
       operation: Effect.Effect<A, E, R>,
     ) => Effect.Effect<A, E | BootServiceError, R>;
+    readonly provisionSandbox: Effect.Effect<void>;
     readonly uninstall: Effect.Effect<boolean, BootServiceError>;
     readonly status: Effect.Effect<BootServiceStatus, BootServiceError>;
   }
@@ -678,6 +681,16 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const runner = yield* ProcessRunner.ProcessRunner;
+  const environment = yield* HostProcess.Environment;
+  const provisionSandbox = ReadOnlySandbox.provisionLocal.pipe(
+    Effect.provideService(FileSystem.FileSystem, fs),
+    Effect.provideService(Path.Path, path),
+    Effect.provideService(ProcessRunner.ProcessRunner, runner),
+    Effect.provideService(HostProcess.Platform, platform),
+    Effect.provideService(HostProcess.Architecture, arch),
+    Effect.provideService(HostProcess.UserId, uid),
+    Effect.provideService(HostProcess.Environment, environment),
+  );
   const host = input.host ?? { execPath: hostExecPath };
   const environmentPath = bootServicePath({
     installerPath,
@@ -736,10 +749,15 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
     ).pipe(Effect.mapError((cause) => new BootServiceInstallError({ cause })));
   // The executable hosts the launcher as a hidden subcommand of itself, so
   // the unit runs the pinned runtime directly.
-  const planFor = (timeZoneOverride?: string): BootServicePlan => {
+  // `entryPath` is the pinned executable on disk: `cogenly`, or `t3` when the
+  // version predates the rename (see resolvePinnedRuntimeEntry).
+  const planFor = (
+    timeZoneOverride?: string,
+    entryPath: string = runtimePaths.entryPath,
+  ): BootServicePlan => {
     const timeZone = normalizeTimeZoneSetting(timeZoneOverride) ?? configuredTimeZone;
     return {
-      program: [runtimePaths.entryPath, "__service-launcher"],
+      program: [entryPath, "__service-launcher"],
       baseDir: input.baseDir,
       logPath,
       unitPath,
@@ -866,7 +884,7 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
     readonly timeZone?: string;
   }) {
     const manager = yield* requireManager;
-    const plan = planFor(options?.timeZone);
+    yield* provisionSandbox;
     yield* fs
       .makeDirectory(input.logsDir, { recursive: true })
       .pipe(Effect.mapError((cause) => new BootServiceInstallError({ cause })));
@@ -877,7 +895,7 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
     }
 
     // Prepare every immutable artifact before stopping the installed unit.
-    yield* ensurePinnedRuntimeInstalled({
+    const pinned = yield* ensurePinnedRuntimeInstalled({
       baseDir: input.baseDir,
       version: input.cliVersion,
       fs,
@@ -930,6 +948,7 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
           : new BootServiceInstallError({ cause: error }),
       ),
     );
+    const plan = planFor(options?.timeZone, pinned.entryPath);
     const installed = yield* fs
       .exists(unitPath)
       .pipe(Effect.mapError((cause) => new BootServiceInstallError({ cause })));
@@ -1122,9 +1141,11 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
     if (!(yield* fs.exists(unitPath))) {
       return { supported: true, installed: false, current: false, unitPath, logPath };
     }
+    const runtimeEntry = (yield* resolvePinnedRuntimeEntry(fs, path, runtimePaths, platform))
+      .entryPath;
     const [unit, runtimeEntryExists, runtimeSentinel, stateText] = yield* Effect.all([
       fs.readFileString(unitPath),
-      fs.exists(runtimePaths.entryPath),
+      fs.exists(runtimeEntry),
       fs.readFileString(runtimePaths.sentinelPath).pipe(Effect.option),
       fs.readFileString(statePath).pipe(Effect.option),
     ]);
@@ -1155,7 +1176,10 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
       problems,
       current:
         problems.length === 0 &&
-        normalizeUnit(unit) === normalizeUnit(detectedManager.render(planFor())) &&
+        // A unit that still names `<version>/t3` (written before the rename)
+        // reads as stale, so the next install or update rewrites it.
+        normalizeUnit(unit) ===
+          normalizeUnit(detectedManager.render(planFor(undefined, runtimeEntry))) &&
         runtimeEntryExists &&
         Option.isSome(runtimeSentinel) &&
         runtimeSentinel.value.trim() === input.cliVersion &&
@@ -1194,7 +1218,15 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
       return { unitPath: manager.unitPath, contents: manager.render(planFor(options?.timeZone)) };
     });
 
-  return BootService.of({ install, restart, withStopped, uninstall, status, print });
+  return BootService.of({
+    install,
+    restart,
+    withStopped,
+    uninstall,
+    status,
+    print,
+    provisionSandbox,
+  });
 });
 
 export const layer = (input: {

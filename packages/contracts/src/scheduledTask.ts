@@ -1,3 +1,4 @@
+import { ProjectLabelId } from "./projectLabel.ts";
 import { AgentId } from "./agent.ts";
 import * as Schema from "effect/Schema";
 
@@ -37,12 +38,14 @@ export type ScheduledTaskWebhookEndpoint = typeof ScheduledTaskWebhookEndpoint.T
 export const ScheduledTask = Schema.Struct({
   id: ScheduledTaskId,
   ownerMachine: Schema.optionalKey(EnvironmentId),
+  machine: Schema.optionalKey(Schema.NullOr(EnvironmentId)),
   agentId: Schema.optional(Schema.NullOr(AgentId)),
   title: TrimmedNonEmptyString,
   prompt: TrimmedNonEmptyString,
   enabled: Schema.Boolean,
   schedule: ScheduledTaskSchedule,
   projectId: ProjectId,
+  projectFolderId: Schema.optional(Schema.NullOr(ProjectLabelId)),
   threadId: Schema.NullOr(ThreadId),
   workspaceStrategy: OrchestrationV2ThreadLaunchWorkspaceStrategy,
   modelSelection: ModelSelection,
@@ -74,6 +77,7 @@ export type ScheduledTaskListResult = typeof ScheduledTaskListResult.Type;
 export const ScheduledTaskUpsertInput = Schema.Struct({
   id: Schema.optional(ScheduledTaskId),
   ownerMachine: Schema.optionalKey(EnvironmentId),
+  machine: Schema.optionalKey(Schema.NullOr(EnvironmentId)),
   agentId: Schema.optional(Schema.NullOr(AgentId)),
   requireExisting: Schema.optional(Schema.Boolean).annotate({
     description: "Reject the save if the task no longer exists, for edits from a client form.",
@@ -84,6 +88,7 @@ export const ScheduledTaskUpsertInput = Schema.Struct({
   enabled: Schema.Boolean,
   schedule: ScheduledTaskUpsertSchedule,
   projectId: ProjectId,
+  projectFolderId: Schema.optional(Schema.NullOr(ProjectLabelId)),
   threadId: Schema.optional(Schema.NullOr(ThreadId)),
   workspaceStrategy: OrchestrationV2ThreadLaunchWorkspaceStrategy,
   modelSelection: ModelSelection,

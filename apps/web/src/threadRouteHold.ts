@@ -1,4 +1,4 @@
-import type { EnvironmentThreadState } from "@t3tools/client-runtime/state/threads";
+import type { EnvironmentThreadState } from "@cogenly/client-runtime/state/threads";
 import * as Option from "effect/Option";
 
 import type { ThreadRouteTarget } from "./threadRoutes";
@@ -15,7 +15,7 @@ export const THREAD_ROUTE_HOLD_MAX_MS = 180;
  * Whether a thread can open complete: its detail is loaded or settled
  * (deleted, failed), the timeline has painted it before this session, or
  * there is nothing to load. An unknown shell holds nothing, so a missing
- * thread reaches its redirect at once.
+ * thread says it is gone at once.
  */
 export function isThreadRouteContentReady(input: {
   readonly state: Pick<EnvironmentThreadState, "data" | "status" | "error">;

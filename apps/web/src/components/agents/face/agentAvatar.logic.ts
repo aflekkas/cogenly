@@ -1,4 +1,4 @@
-import type { AgentAvatar } from "@t3tools/contracts";
+import type { AgentAvatar } from "@cogenly/contracts";
 
 import { agentAppearance } from "./agentFace.logic";
 import { EXPRESSIONS, EXPRESSION_BY_ID, type ExpressionId } from "./engine/expressions";

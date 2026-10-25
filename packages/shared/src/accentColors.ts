@@ -1,4 +1,4 @@
-import type { AppearanceAccent } from "@t3tools/contracts";
+import type { AppearanceAccent } from "@cogenly/contracts";
 
 /**
  * The accent presets (Settings → Appearance → Accent color): one base per

@@ -3,7 +3,7 @@ import type {
   DesktopDictationBridge,
   DesktopDictationResult,
   DesktopDictationStreamEvent,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 
 import type { DictationCaptureHandlers, DictationMicrophone } from "./browserDictationMicrophone";
 

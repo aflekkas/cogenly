@@ -1319,7 +1319,7 @@ const PROVIDER_REQUIREMENT = new Map<
       missing:
         "No GitHub credential on the server. Set GH_TOKEN, or install the GitHub CLI (https://cli.github.com/) and run `gh auth login`.",
       unauthenticated:
-        "GitHub has no working credential for this host. Run `gh auth login`, or check the account and hosts in Settings → Source Control.",
+        "GitHub has no working credential for this host. Run `gh auth login`, or check the account and hosts in Settings → Source control.",
     },
   ],
 ]);

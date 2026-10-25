@@ -1,4 +1,4 @@
-import { EnvironmentId, PreviewTabId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import { EnvironmentId, PreviewTabId, ProviderInstanceId, ThreadId } from "@cogenly/contracts";
 import { expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { NodeCrypto } from "@effect/platform-node";

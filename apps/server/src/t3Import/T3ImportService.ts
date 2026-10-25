@@ -38,9 +38,9 @@ import {
   T3ImportError,
   T3_IMPORT_RUNNING_NOTE,
   T3_IMPORT_STATUS_HEARTBEAT_MS,
-} from "@t3tools/contracts";
-import { normalizeProjectPathForComparison } from "@t3tools/shared/path";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+} from "@cogenly/contracts";
+import { normalizeProjectPathForComparison } from "@cogenly/shared/path";
+import * as HostProcess from "@cogenly/shared/HostProcess";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";

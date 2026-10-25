@@ -1,5 +1,5 @@
-import { IntegrationError } from "@t3tools/contracts";
-import { isLoopbackHost } from "@t3tools/shared/preview";
+import { IntegrationError } from "@cogenly/contracts";
+import { isLoopbackHost } from "@cogenly/shared/preview";
 import * as Effect from "effect/Effect";
 
 export interface SignInOrigin {

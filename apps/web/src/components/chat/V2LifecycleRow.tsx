@@ -1,11 +1,11 @@
 import { ThreadHoverCardPopup } from "../ThreadHoverCard";
 import { AgentElapsed } from "./AgentElapsed";
-import { projectedSubagentsToRuntime } from "@t3tools/client-runtime/state/subagentRuntime";
+import { projectedSubagentsToRuntime } from "@cogenly/client-runtime/state/subagentRuntime";
 import { createContext, use, useMemo, useState, type ReactNode } from "react";
 import { useThreadShell, useProject } from "../../state/entities";
 import { SubagentTooltipContent } from "./SubagentTooltipContent";
 import { useAtomValue } from "@effect/atom-react";
-import { scopeThreadRef, scopeProjectRef } from "@t3tools/client-runtime/environment";
+import { scopeThreadRef, scopeProjectRef } from "@cogenly/client-runtime/environment";
 import { environmentThreadDetails } from "../../state/threads";
 import * as DateTime from "effect/DateTime";
 import { WorkLogRow } from "./WorkLog";
@@ -26,10 +26,10 @@ import {
   resolveHandoffEndpoints,
   type HandoffEndpoints,
   type HandoffTimelineRun,
-} from "@t3tools/client-runtime/handoff";
-import { formatSubagentDisplayTitle } from "@t3tools/client-runtime/state/subagent-display";
+} from "@cogenly/client-runtime/handoff";
+import { formatSubagentDisplayTitle } from "@cogenly/client-runtime/state/subagent-display";
 import {
-  ProviderDriverKind,
+  type ProviderDriverKind,
   type OrchestrationV2Notification,
   type OrchestrationV2TurnItem,
   type OrchestrationV2Subagent,
@@ -40,8 +40,8 @@ import {
   type NodeId,
   type OrchestrationV2DelegatedTaskFailure,
   type ScopedThreadRef,
-} from "@t3tools/contracts";
-import type { TimestampFormat } from "@t3tools/contracts/settings";
+} from "@cogenly/contracts";
+import type { TimestampFormat } from "@cogenly/contracts/settings";
 import {
   ArrowRightLeftIcon,
   ArrowRightIcon,
@@ -61,9 +61,8 @@ import {
   createTooltipHandle,
   type TooltipHandle,
 } from "../ui/tooltip";
-import { getProviderInstanceEntry } from "../../providerInstances";
 import { formatShortTimestamp, formatUpcomingTimestamp } from "../../timestampFormat";
-import { getTriggerDisplayModelName } from "./providerIconUtils";
+import { resolveHandoffEndpointDisplay } from "./handoffEndpoint.logic";
 import { ProviderInstanceIcon, providerTextColor } from "./ProviderInstanceIcon";
 import { cn } from "~/lib/utils";
 import { TimelineSystemDivider } from "./TimelineSystemDivider";
@@ -84,7 +83,7 @@ export function isV2LifecycleItem(item: OrchestrationV2TurnItem): boolean {
   return LIFECYCLE_TYPES.has(item.type);
 }
 
-export type { HandoffTimelineRun } from "@t3tools/client-runtime/handoff";
+export type { HandoffTimelineRun } from "@cogenly/client-runtime/handoff";
 
 export function V2LifecycleRow(props: {
   readonly item: OrchestrationV2TurnItem;
@@ -300,18 +299,40 @@ const NOTIFICATION_OUTCOME_LABEL: Record<OrchestrationV2Notification["outcome"],
 
 const DELEGATED_FAILURE_LABEL: Record<OrchestrationV2DelegatedTaskFailure["kind"], string> = {
   rate_limit: "rate limit",
+  usage_limit: "usage limit",
   provider_error: "provider error",
   interrupted_by_restart: "interrupted by restart",
   crashed: "crashed",
 };
 
-/** Why a delegated child stopped, with its limit reset in the user's own time. */
+/**
+ * Why a delegated child stopped, with its limit reset in the user's own time,
+ * or what the server did about a stop it is recovering on its own.
+ */
 function delegatedFailureLabel(
   failure: OrchestrationV2DelegatedTaskFailure,
+  providers: ReadonlyArray<ServerProvider>,
   timestampFormat: TimestampFormat,
 ): string {
-  const reset = failure.resetAt ? formatUpcomingTimestamp(failure.resetAt, timestampFormat) : "";
-  return `Stopped: ${DELEGATED_FAILURE_LABEL[failure.kind]}${reset ? `, resets ${reset}` : ""}`;
+  const kind = DELEGATED_FAILURE_LABEL[failure.kind];
+  const recovery = failure.recovery;
+  switch (recovery?.type) {
+    case "handed_off": {
+      const provider = providers.find((entry) => entry.instanceId === recovery.providerInstanceId);
+      return `Hit a ${kind}, handed off to ${provider?.displayName ?? recovery.providerInstanceId}`;
+    }
+    case "resuming_at_reset":
+    case "retrying":
+      return `Hit a ${kind}, resumes ${formatUpcomingTimestamp(recovery.at, timestampFormat)}`;
+    case "resuming_after_restart":
+      return "Resuming after restart";
+    case undefined: {
+      const reset = failure.resetAt
+        ? formatUpcomingTimestamp(failure.resetAt, timestampFormat)
+        : "";
+      return `Stopped: ${kind}${reset ? `, resets ${reset}` : ""}`;
+    }
+  }
 }
 
 /** A notification about one subagent, drawn as that subagent's card. Renders `fallback` when the parent has no record of it. */
@@ -365,7 +386,11 @@ export function SubagentNotificationLink(props: {
             event: {
               status: NOTIFICATION_OUTCOME_STATUS[props.outcome],
               label: props.failure
-                ? delegatedFailureLabel(props.failure, props.timestampFormat)
+                ? delegatedFailureLabel(
+                    props.failure,
+                    props.providerStatuses,
+                    props.timestampFormat,
+                  )
                 : NOTIFICATION_OUTCOME_LABEL[props.outcome],
               timestamp: formatShortTimestamp(props.createdAt, props.timestampFormat),
             },
@@ -784,21 +809,8 @@ function HandoffEndpoint(props: {
   readonly instanceId: ProviderInstanceId;
   readonly model?: string | undefined;
 }) {
-  const entry = getProviderInstanceEntry(props.providers, props.instanceId);
-  const model = props.model?.trim();
-  const providerModel =
-    model === undefined || model.length === 0
-      ? undefined
-      : entry?.models.find((candidate) => candidate.slug === model);
-  const label =
-    providerModel !== undefined
-      ? getTriggerDisplayModelName(providerModel)
-      : model !== undefined && model.length > 0
-        ? model
-        : (entry?.displayName ?? props.instanceId);
-  const labelColor = providerTextColor(
-    entry?.driverKind ?? ProviderDriverKind.make(props.instanceId),
-  );
+  const { label, providerName, driverKind, accentColor } = resolveHandoffEndpointDisplay(props);
+  const labelColor = providerTextColor(driverKind);
   return (
     <Tooltip>
       <TooltipTrigger
@@ -808,10 +820,10 @@ function HandoffEndpoint(props: {
             className="inline-flex min-w-0 items-center gap-1 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
           >
             <ProviderInstanceIcon
-              driverKind={entry?.driverKind ?? ProviderDriverKind.make(props.instanceId)}
-              displayName={entry?.displayName ?? props.instanceId}
-              accentColor={entry?.accentColor}
-              showBadge={entry?.accentColor !== undefined}
+              driverKind={driverKind}
+              displayName={providerName}
+              accentColor={accentColor}
+              showBadge={accentColor !== undefined}
               badgeClassName="size-1.5"
               iconClassName="size-3"
             />
@@ -825,7 +837,7 @@ function HandoffEndpoint(props: {
         }
       />
       <TooltipPopup>
-        {entry?.displayName ?? props.instanceId} · {label}
+        {providerName} · {label}
       </TooltipPopup>
     </Tooltip>
   );

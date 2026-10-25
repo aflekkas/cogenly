@@ -1,6 +1,6 @@
-import { remapComposerContextAttachments } from "@t3tools/shared/composerContextReferences";
+import { remapComposerContextAttachments } from "@cogenly/shared/composerContextReferences";
 import { appendUserInputAttachmentPaths } from "../provider/userInputAttachments.ts";
-import type { ChatAttachment, OrchestrationV2Command } from "@t3tools/contracts";
+import type { ChatAttachment, OrchestrationV2Command } from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { resolveAttachmentPath } from "../attachmentStore.ts";
@@ -19,6 +19,7 @@ function dispatchWasNotAccepted(
   error: Orchestrator.OrchestratorV2Error | ThreadManagement.ThreadManagementError,
 ) {
   switch (error._tag) {
+    case "ProjectRepositoryMismatchError":
     case "OrchestratorCommandRejectedError":
     case "OrchestratorProjectionError":
     case "OrchestratorProviderAdapterError":
@@ -66,7 +67,7 @@ export const dispatchCommand = Effect.fn("ThreadMessageIntake.dispatchCommand")(
     // rollback boundary: any failure before dispatch removes every new copy.
     const claimedPaths: string[] = [];
     const prepared = yield* Effect.gen(function* () {
-      const attachmentsByQuestionId: import("@t3tools/contracts").UserInputAttachments = {};
+      const attachmentsByQuestionId: import("@cogenly/contracts").UserInputAttachments = {};
       for (const [questionId, attachments] of Object.entries(incomingByQuestionId)) {
         const claimed = yield* AttachmentClaims.claimPendingAttachments({
           threadId: command.threadId,
@@ -225,7 +226,10 @@ export const launchThread = Effect.fn("ThreadMessageIntake.launchThread")(functi
         ),
       ),
       Effect.tapError((error) => {
-        if (error._tag === "ThreadManagementProviderInstanceDisabledError") {
+        if (
+          error._tag === "ThreadManagementProviderInstanceDisabledError" ||
+          error._tag === "ProjectRepositoryMismatchError"
+        ) {
           return AttachmentClaims.releaseClaimedAttachments(claimed.claimedPaths);
         }
         // Project/receipt reads precede message dispatch. The create-thread error
@@ -233,9 +237,12 @@ export const launchThread = Effect.fn("ThreadMessageIntake.launchThread")(functi
         // The initial message's own dispatch can still find the instance newly
         // disabled, which wraps the same tag handled above instead of surfacing
         // it directly, so the guard below also recognizes it.
+        // A launch on another machine took its own copies of the files if it
+        // took the launch at all, so these are never the only ones.
         const notAccepted =
           error.operation === "resolve-project" ||
           error.operation === "read-receipt" ||
+          error.operation === "launch-remote" ||
           ((error.operation === "create-thread" || error.operation === "dispatch-message") &&
             (isOrchestratorError(error.cause) || isThreadManagementError(error.cause)) &&
             // Projection errors under create-thread can occur after the message commit.

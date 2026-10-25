@@ -1,5 +1,5 @@
 import { Toolbar } from "@base-ui/react/toolbar";
-import { type ProviderInstanceId } from "@t3tools/contracts";
+import { type ProviderInstanceId } from "@cogenly/contracts";
 import { memo, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { SparklesIcon, StarIcon, type LucideIcon } from "lucide-react";
 import { ProviderInstanceIcon, providerTextColor } from "./ProviderInstanceIcon";

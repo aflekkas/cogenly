@@ -1,5 +1,5 @@
 {
-  "name": "@t3tools/source-control-github",
+  "name": "@cogenly/source-control-github",
   "private": true,
   "type": "module",
   "exports": {
@@ -78,17 +78,17 @@
     "generate": "graphqlgen"
   },
   "dependencies": {
-    "@t3tools/contracts": "workspace:*",
-    "@t3tools/provider-core": "workspace:*",
-    "@t3tools/shared": "workspace:*",
-    "@t3tools/source-control-core": "workspace:*",
+    "@cogenly/contracts": "workspace:*",
+    "@cogenly/provider-core": "workspace:*",
+    "@cogenly/shared": "workspace:*",
+    "@cogenly/source-control-core": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {
+    "@cogenly/source-control-testing": "workspace:*",
     "@effect/graphql-generator": "catalog:",
     "@effect/platform-node": "catalog:",
     "@effect/vitest": "catalog:",
-    "@t3tools/source-control-testing": "workspace:*",
     "@types/node": "catalog:",
     "vite-plus": "catalog:"
   }

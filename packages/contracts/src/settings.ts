@@ -18,14 +18,13 @@ import {
   TrimmedNonEmptyString,
   TrimmedString,
 } from "./baseSchemas.ts";
-import { UsageLimitSourceId } from "./usageLimitSourceId.ts";
 import {
   EnvironmentMachineKind,
   MachineRole,
   ThreadEnvMode,
   WorktreeSubmodules,
 } from "./environment.ts";
-import { KeybindingShortcut } from "./keybindings.ts";
+import { KeybindingsConfig } from "./keybindings.ts";
 import {
   CustomModelSetting,
   DEFAULT_TEXT_GENERATION_MODEL,
@@ -51,6 +50,7 @@ import {
   ProviderDriverKind,
 } from "./providerInstance.ts";
 import { PullRequestMergeMethod } from "./pullRequest.ts";
+import { MachineHealthSettings, MachineHealthSettingsPatch } from "./machineHealthSettings.ts";
 
 // ── Client Settings (local-only) ───────────────────────────────
 
@@ -376,6 +376,347 @@ export type ClientSettings = typeof ClientSettingsSchema.Type;
 
 export const DEFAULT_CLIENT_SETTINGS: ClientSettings = Schema.decodeSync(ClientSettingsSchema)({});
 
+/** Portable client preferences keep a local cache, but each has its own shared field. */
+export const UNIVERSAL_CLIENT_SETTING_BINDINGS = {
+  notificationMode: "clientNotificationMode",
+  inAppNotificationsEnabled: "clientInAppNotificationsEnabled",
+  diffColorScheme: "clientDiffColorScheme",
+  chatWidth: "clientChatWidth",
+  confirmQuit: "clientConfirmQuit",
+  confirmThreadArchive: "clientConfirmThreadArchive",
+  confirmThreadDelete: "clientConfirmThreadDelete",
+  confirmThreadUnpin: "clientConfirmThreadUnpin",
+  diffFilesCollapsed: "clientDiffFilesCollapsed",
+  diffIgnoreWhitespace: "clientDiffIgnoreWhitespace",
+  diffLayout: "clientDiffLayout",
+  environmentIdentificationMode: "clientEnvironmentIdentificationMode",
+  fontSizeInterface: "clientFontSizeInterface",
+  fontSizePrompt: "clientFontSizePrompt",
+  fontSizeCode: "clientFontSizeCode",
+  fontSizeTerminal: "clientFontSizeTerminal",
+  fontSmoothing: "clientFontSmoothing",
+  persistComposerContextStrip: "clientPersistComposerContextStrip",
+  planModeEnabled: "clientPlanModeEnabled",
+  contextWindowMeterEnabled: "clientContextWindowMeterEnabled",
+  composerRichTextEnabled: "clientComposerRichTextEnabled",
+  dictationEnabled: "clientDictationEnabled",
+  sendShortcut: "clientSendShortcut",
+  followUpBehavior: "clientFollowUpBehavior",
+  proactivePanelsEnabled: "clientProactivePanelsEnabled",
+  showSkillsInSlashMenu: "clientShowSkillsInSlashMenu",
+  legacySidebarEnabled: "clientLegacySidebarEnabled",
+  sidebarWorkingShelfEnabled: "clientSidebarWorkingShelfEnabled",
+  sidebarProjectGroupingMode: "clientSidebarProjectGroupingMode",
+  sidebarProjectSortOrder: "clientSidebarProjectSortOrder",
+  sidebarThreadSortOrder: "clientSidebarThreadSortOrder",
+  sidebarThreadPreviewCount: "clientSidebarThreadPreviewCount",
+  timestampFormat: "clientTimestampFormat",
+  wordWrap: "clientWordWrap",
+} as const;
+
+export const UniversalClientPreferenceValues = Schema.Struct({
+  clientAppearanceMode: Schema.NullOr(Schema.Literals(["light", "dark", "system"])),
+  clientAppearanceAccent: Schema.NullOr(
+    Schema.Literals(["orange", "blue", "violet", "green", "pink", "teal", "amber", "red"]),
+  ),
+  clientAppearanceFontSize: Schema.NullOr(Schema.Literals(["small", "default", "large"])),
+  clientAppearanceMotion: Schema.NullOr(Schema.Literals(["system", "reduce"])),
+  clientAppearanceUsageMeter: Schema.NullOr(Schema.Literals(["remaining", "used"])),
+  clientNotificationMode: Schema.NullOr(ClientSettingsSchema.fields.notificationMode),
+  clientInAppNotificationsEnabled: Schema.NullOr(
+    ClientSettingsSchema.fields.inAppNotificationsEnabled,
+  ),
+  clientDiffColorScheme: Schema.NullOr(ClientSettingsSchema.fields.diffColorScheme),
+  clientChatWidth: Schema.NullOr(ClientSettingsSchema.fields.chatWidth),
+  clientConfirmQuit: Schema.NullOr(ClientSettingsSchema.fields.confirmQuit),
+  clientConfirmThreadArchive: Schema.NullOr(ClientSettingsSchema.fields.confirmThreadArchive),
+  clientConfirmThreadDelete: Schema.NullOr(ClientSettingsSchema.fields.confirmThreadDelete),
+  clientConfirmThreadUnpin: Schema.NullOr(ClientSettingsSchema.fields.confirmThreadUnpin),
+  clientDiffFilesCollapsed: Schema.NullOr(ClientSettingsSchema.fields.diffFilesCollapsed),
+  clientDiffIgnoreWhitespace: Schema.NullOr(ClientSettingsSchema.fields.diffIgnoreWhitespace),
+  clientDiffLayout: Schema.NullOr(ClientSettingsSchema.fields.diffLayout),
+  clientEnvironmentIdentificationMode: Schema.NullOr(
+    ClientSettingsSchema.fields.environmentIdentificationMode,
+  ),
+  clientFontSizeInterface: Schema.NullOr(ClientSettingsSchema.fields.fontSizeInterface),
+  clientFontSizePrompt: Schema.NullOr(ClientSettingsSchema.fields.fontSizePrompt),
+  clientFontSizeCode: Schema.NullOr(ClientSettingsSchema.fields.fontSizeCode),
+  clientFontSizeTerminal: Schema.NullOr(ClientSettingsSchema.fields.fontSizeTerminal),
+  clientFontSmoothing: Schema.NullOr(ClientSettingsSchema.fields.fontSmoothing),
+  clientPersistComposerContextStrip: Schema.NullOr(
+    ClientSettingsSchema.fields.persistComposerContextStrip,
+  ),
+  clientPlanModeEnabled: Schema.NullOr(ClientSettingsSchema.fields.planModeEnabled),
+  clientContextWindowMeterEnabled: Schema.NullOr(
+    ClientSettingsSchema.fields.contextWindowMeterEnabled,
+  ),
+  clientComposerRichTextEnabled: Schema.NullOr(ClientSettingsSchema.fields.composerRichTextEnabled),
+  clientDictationEnabled: Schema.NullOr(ClientSettingsSchema.fields.dictationEnabled),
+  clientSendShortcut: Schema.NullOr(ClientSettingsSchema.fields.sendShortcut),
+  clientFollowUpBehavior: Schema.NullOr(ClientSettingsSchema.fields.followUpBehavior),
+  clientProactivePanelsEnabled: Schema.NullOr(ClientSettingsSchema.fields.proactivePanelsEnabled),
+  clientShowSkillsInSlashMenu: Schema.NullOr(ClientSettingsSchema.fields.showSkillsInSlashMenu),
+  clientLegacySidebarEnabled: Schema.NullOr(ClientSettingsSchema.fields.legacySidebarEnabled),
+  clientSidebarWorkingShelfEnabled: Schema.NullOr(
+    ClientSettingsSchema.fields.sidebarWorkingShelfEnabled,
+  ),
+  clientSidebarProjectGroupingMode: Schema.NullOr(
+    ClientSettingsSchema.fields.sidebarProjectGroupingMode,
+  ),
+  clientSidebarProjectSortOrder: Schema.NullOr(ClientSettingsSchema.fields.sidebarProjectSortOrder),
+  clientSidebarThreadSortOrder: Schema.NullOr(ClientSettingsSchema.fields.sidebarThreadSortOrder),
+  clientSidebarThreadPreviewCount: Schema.NullOr(
+    ClientSettingsSchema.fields.sidebarThreadPreviewCount,
+  ),
+  clientTimestampFormat: Schema.NullOr(ClientSettingsSchema.fields.timestampFormat),
+  clientWordWrap: Schema.NullOr(ClientSettingsSchema.fields.wordWrap),
+});
+export const UNIVERSAL_CLIENT_PREFERENCE_KEYS = Object.keys(
+  UniversalClientPreferenceValues.fields,
+) as Array<keyof typeof UniversalClientPreferenceValues.fields>;
+const UniversalClientPreferenceDefaults = {
+  clientAppearanceMode: UniversalClientPreferenceValues.fields.clientAppearanceMode.pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  clientAppearanceAccent: UniversalClientPreferenceValues.fields.clientAppearanceAccent.pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  clientAppearanceFontSize: UniversalClientPreferenceValues.fields.clientAppearanceFontSize.pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  clientAppearanceMotion: UniversalClientPreferenceValues.fields.clientAppearanceMotion.pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  clientAppearanceUsageMeter:
+    UniversalClientPreferenceValues.fields.clientAppearanceUsageMeter.pipe(
+      Schema.withDecodingDefault(Effect.succeed(null)),
+    ),
+  clientNotificationMode: UniversalClientPreferenceValues.fields.clientNotificationMode.pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  clientInAppNotificationsEnabled:
+    UniversalClientPreferenceValues.fields.clientInAppNotificationsEnabled.pipe(
+      Schema.withDecodingDefault(Effect.succeed(null)),
+    ),
+  clientDiffColorScheme: UniversalClientPreferenceValues.fields.clientDiffColorScheme.pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  clientChatWidth: UniversalClientPreferenceValues.fields.clientChatWidth.pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  clientConfirmQuit: UniversalClientPreferenceValues.fields.clientConfirmQuit.pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  clientConfirmThreadArchive:
+    UniversalClientPreferenceValues.fields.clientConfirmThreadArchive.pipe(
+      Schema.withDecodingDefault(Effect.succeed(null)),
+    ),
+  clientConfirmThreadDelete: UniversalClientPreferenceValues.fields.clientConfirmThreadDelete.pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  clientConfirmThreadUnpin: UniversalClientPreferenceValues.fields.clientConfirmThreadUnpin.pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  clientDiffFilesCollapsed: UniversalClientPreferenceValues.fields.clientDiffFilesCollapsed.pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  clientDiffIgnoreWhitespace:
+    UniversalClientPreferenceValues.fields.clientDiffIgnoreWhitespace.pipe(
+      Schema.withDecodingDefault(Effect.succeed(null)),
+    ),
+  clientDiffLayout: UniversalClientPreferenceValues.fields.clientDiffLayout.pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  clientEnvironmentIdentificationMode:
+    UniversalClientPreferenceValues.fields.clientEnvironmentIdentificationMode.pipe(
+      Schema.withDecodingDefault(Effect.succeed(null)),
+    ),
+  clientFontSizeInterface: UniversalClientPreferenceValues.fields.clientFontSizeInterface.pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  clientFontSizePrompt: UniversalClientPreferenceValues.fields.clientFontSizePrompt.pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  clientFontSizeCode: UniversalClientPreferenceValues.fields.clientFontSizeCode.pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  clientFontSizeTerminal: UniversalClientPreferenceValues.fields.clientFontSizeTerminal.pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  clientFontSmoothing: UniversalClientPreferenceValues.fields.clientFontSmoothing.pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  clientPersistComposerContextStrip:
+    UniversalClientPreferenceValues.fields.clientPersistComposerContextStrip.pipe(
+      Schema.withDecodingDefault(Effect.succeed(null)),
+    ),
+  clientPlanModeEnabled: UniversalClientPreferenceValues.fields.clientPlanModeEnabled.pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  clientContextWindowMeterEnabled:
+    UniversalClientPreferenceValues.fields.clientContextWindowMeterEnabled.pipe(
+      Schema.withDecodingDefault(Effect.succeed(null)),
+    ),
+  clientComposerRichTextEnabled:
+    UniversalClientPreferenceValues.fields.clientComposerRichTextEnabled.pipe(
+      Schema.withDecodingDefault(Effect.succeed(null)),
+    ),
+  clientDictationEnabled: UniversalClientPreferenceValues.fields.clientDictationEnabled.pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  clientSendShortcut: UniversalClientPreferenceValues.fields.clientSendShortcut.pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  clientFollowUpBehavior: UniversalClientPreferenceValues.fields.clientFollowUpBehavior.pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  clientProactivePanelsEnabled:
+    UniversalClientPreferenceValues.fields.clientProactivePanelsEnabled.pipe(
+      Schema.withDecodingDefault(Effect.succeed(null)),
+    ),
+  clientShowSkillsInSlashMenu:
+    UniversalClientPreferenceValues.fields.clientShowSkillsInSlashMenu.pipe(
+      Schema.withDecodingDefault(Effect.succeed(null)),
+    ),
+  clientLegacySidebarEnabled:
+    UniversalClientPreferenceValues.fields.clientLegacySidebarEnabled.pipe(
+      Schema.withDecodingDefault(Effect.succeed(null)),
+    ),
+  clientSidebarWorkingShelfEnabled:
+    UniversalClientPreferenceValues.fields.clientSidebarWorkingShelfEnabled.pipe(
+      Schema.withDecodingDefault(Effect.succeed(null)),
+    ),
+  clientSidebarProjectGroupingMode:
+    UniversalClientPreferenceValues.fields.clientSidebarProjectGroupingMode.pipe(
+      Schema.withDecodingDefault(Effect.succeed(null)),
+    ),
+  clientSidebarProjectSortOrder:
+    UniversalClientPreferenceValues.fields.clientSidebarProjectSortOrder.pipe(
+      Schema.withDecodingDefault(Effect.succeed(null)),
+    ),
+  clientSidebarThreadSortOrder:
+    UniversalClientPreferenceValues.fields.clientSidebarThreadSortOrder.pipe(
+      Schema.withDecodingDefault(Effect.succeed(null)),
+    ),
+  clientSidebarThreadPreviewCount:
+    UniversalClientPreferenceValues.fields.clientSidebarThreadPreviewCount.pipe(
+      Schema.withDecodingDefault(Effect.succeed(null)),
+    ),
+  clientTimestampFormat: UniversalClientPreferenceValues.fields.clientTimestampFormat.pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  clientWordWrap: UniversalClientPreferenceValues.fields.clientWordWrap.pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+};
+export const UniversalClientPreferencePatch = Schema.Struct({
+  clientAppearanceMode: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientAppearanceMode,
+  ),
+  clientAppearanceAccent: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientAppearanceAccent,
+  ),
+  clientAppearanceFontSize: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientAppearanceFontSize,
+  ),
+  clientAppearanceMotion: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientAppearanceMotion,
+  ),
+  clientAppearanceUsageMeter: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientAppearanceUsageMeter,
+  ),
+  clientNotificationMode: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientNotificationMode,
+  ),
+  clientInAppNotificationsEnabled: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientInAppNotificationsEnabled,
+  ),
+  clientDiffColorScheme: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientDiffColorScheme,
+  ),
+  clientChatWidth: Schema.optionalKey(UniversalClientPreferenceValues.fields.clientChatWidth),
+  clientConfirmQuit: Schema.optionalKey(UniversalClientPreferenceValues.fields.clientConfirmQuit),
+  clientConfirmThreadArchive: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientConfirmThreadArchive,
+  ),
+  clientConfirmThreadDelete: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientConfirmThreadDelete,
+  ),
+  clientConfirmThreadUnpin: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientConfirmThreadUnpin,
+  ),
+  clientDiffFilesCollapsed: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientDiffFilesCollapsed,
+  ),
+  clientDiffIgnoreWhitespace: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientDiffIgnoreWhitespace,
+  ),
+  clientDiffLayout: Schema.optionalKey(UniversalClientPreferenceValues.fields.clientDiffLayout),
+  clientEnvironmentIdentificationMode: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientEnvironmentIdentificationMode,
+  ),
+  clientFontSizeInterface: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientFontSizeInterface,
+  ),
+  clientFontSizePrompt: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientFontSizePrompt,
+  ),
+  clientFontSizeCode: Schema.optionalKey(UniversalClientPreferenceValues.fields.clientFontSizeCode),
+  clientFontSizeTerminal: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientFontSizeTerminal,
+  ),
+  clientFontSmoothing: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientFontSmoothing,
+  ),
+  clientPersistComposerContextStrip: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientPersistComposerContextStrip,
+  ),
+  clientPlanModeEnabled: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientPlanModeEnabled,
+  ),
+  clientContextWindowMeterEnabled: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientContextWindowMeterEnabled,
+  ),
+  clientComposerRichTextEnabled: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientComposerRichTextEnabled,
+  ),
+  clientDictationEnabled: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientDictationEnabled,
+  ),
+  clientSendShortcut: Schema.optionalKey(UniversalClientPreferenceValues.fields.clientSendShortcut),
+  clientFollowUpBehavior: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientFollowUpBehavior,
+  ),
+  clientProactivePanelsEnabled: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientProactivePanelsEnabled,
+  ),
+  clientShowSkillsInSlashMenu: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientShowSkillsInSlashMenu,
+  ),
+  clientLegacySidebarEnabled: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientLegacySidebarEnabled,
+  ),
+  clientSidebarWorkingShelfEnabled: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientSidebarWorkingShelfEnabled,
+  ),
+  clientSidebarProjectGroupingMode: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientSidebarProjectGroupingMode,
+  ),
+  clientSidebarProjectSortOrder: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientSidebarProjectSortOrder,
+  ),
+  clientSidebarThreadSortOrder: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientSidebarThreadSortOrder,
+  ),
+  clientSidebarThreadPreviewCount: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientSidebarThreadPreviewCount,
+  ),
+  clientTimestampFormat: Schema.optionalKey(
+    UniversalClientPreferenceValues.fields.clientTimestampFormat,
+  ),
+  clientWordWrap: Schema.optionalKey(UniversalClientPreferenceValues.fields.clientWordWrap),
+});
+
 // ── Server Settings (server-authoritative) ────────────────────
 
 /** A binary path setting that decodes empty input to the provider's default executable. */
@@ -581,21 +922,6 @@ export const ClaudeSettings = makeProviderSettingsSchema(
 );
 export type ClaudeSettings = typeof ClaudeSettings.Type;
 
-/**
- * A read-only quota source outside this environment's provider CLIs. The
- * only kind today is a CLIProxyAPI hub, whose management API reports the
- * windows of every pooled account. The key travels in settings for now, like
- * provider environment secrets; it is redacted before reaching a client.
- */
-export const UsageLimitSourceConfig = Schema.Struct({
-  kind: Schema.Literal("cliproxy"),
-  label: Schema.optional(TrimmedNonEmptyString),
-  url: TrimmedNonEmptyString,
-  managementKey: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed("")), secretSetting),
-  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
-});
-export type UsageLimitSourceConfig = typeof UsageLimitSourceConfig.Type;
-
 /** A GitHub host name, lowercased on decode so `GitHub.com` and `github.com` are one entry. */
 export const GitHubHost = TrimmedNonEmptyString.pipe(
   Schema.decodeTo(Schema.String, SchemaTransformation.toLowerCase()),
@@ -748,6 +1074,7 @@ export const PROJECT_SCOPED_SERVER_SETTING_KEYS = [
   "defaultProjectScripts",
   "enableAgentBrowserAccess",
   "enableAgentDeviceAccess",
+  "enableAgentComputerUse",
   "textGenerationModelSelection",
   "sourceControlWriterModelSelection",
   "reviewGuideModelSelection",
@@ -762,6 +1089,11 @@ export const PROJECT_SCOPED_SERVER_SETTING_KEYS = [
   "responseStreamingMode",
 ] as const;
 export type ProjectScopedServerSettingKey = (typeof PROJECT_SCOPED_SERVER_SETTING_KEYS)[number];
+
+/** Executable definitions require configuration on each destination machine. */
+export function isMachineLocalProjectSettingKey(key: string): boolean {
+  return key === "defaultProjectScripts";
+}
 
 export const ProjectProviderInstanceOverride = Schema.Struct({
   enabled: Schema.optionalKey(Schema.Boolean),
@@ -793,6 +1125,7 @@ export const ProjectSettingsOverrides = Schema.Struct({
   defaultProjectScripts: Schema.optionalKey(Schema.Array(ProjectScript)),
   enableAgentBrowserAccess: Schema.optionalKey(Schema.Boolean),
   enableAgentDeviceAccess: Schema.optionalKey(Schema.Boolean),
+  enableAgentComputerUse: Schema.optionalKey(Schema.Boolean),
   textGenerationModelSelection: Schema.optionalKey(ModelSelection),
   sourceControlWriterModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
   reviewGuideModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
@@ -855,7 +1188,8 @@ export function shouldRecommendDatabaseCompaction(status: DatabaseStorageStatus)
 }
 
 export const StorageCleanupReportEntry = Schema.Struct({
-  kind: Schema.Literals(["worktree", "browser-artifacts", "logs"]),
+  agentCreated: Schema.optionalKey(Schema.Boolean),
+  kind: Schema.Literals(["worktree", "dependencies", "browser-artifacts", "logs", "backups"]),
   outcome: Schema.Literals(["removed", "kept", "failed"]),
   reason: Schema.String,
   path: Schema.NullOr(Schema.String),
@@ -866,6 +1200,9 @@ export const StorageCleanupReportEntry = Schema.Struct({
 });
 export type StorageCleanupReportEntry = typeof StorageCleanupReportEntry.Type;
 export const StorageCleanupReport = Schema.Struct({
+  dryRun: Schema.optionalKey(Schema.Boolean),
+  unsavedAgentWorktrees: Schema.optionalKey(Schema.Number),
+  spaceMeasurement: Schema.optionalKey(Schema.Literals(["volume-change", "unknown"])),
   trigger: Schema.Literals(["automatic", "manual"]),
   startedAt: Schema.String,
   finishedAt: Schema.String,
@@ -876,12 +1213,36 @@ export const StorageCleanupReport = Schema.Struct({
 });
 export type StorageCleanupReport = typeof StorageCleanupReport.Type;
 
+export const StorageVolume = Schema.Struct({
+  id: Schema.String,
+  path: Schema.String,
+  totalBytes: Schema.Number,
+  usedBytes: Schema.Number,
+  availableBytes: Schema.Number,
+  sharedBlocksMayExist: Schema.Boolean,
+});
+export type StorageVolume = typeof StorageVolume.Type;
+export const StorageStatus = Schema.Struct({
+  measuredAt: Schema.String,
+  volumes: Schema.Array(StorageVolume),
+  databaseBytes: Schema.NullOr(Schema.Number),
+  categories: Schema.Array(
+    Schema.Struct({
+      category: Schema.String,
+      bytes: Schema.NullOr(Schema.Number),
+      files: Schema.Number,
+    }),
+  ),
+  complete: Schema.Boolean,
+});
+export type StorageStatus = typeof StorageStatus.Type;
+
 /** Built-in nightly backups of the Cogenly home, owned by the server. */
 export const AutomaticBackupsSettings = Schema.Struct({
   enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   /** How many nightly backup directories to keep under `<home>/backups/`. */
   retentionCount: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 30 })).pipe(
-    Schema.withDecodingDefault(Effect.succeed(7)),
+    Schema.withDecodingDefault(Effect.succeed(2)),
   ),
 });
 export type AutomaticBackupsSettings = typeof AutomaticBackupsSettings.Type;
@@ -892,26 +1253,26 @@ export const StorageCleanupSettings = Schema.Struct({
   ),
   worktreeAfterDays: StorageRetentionDays.pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   worktreeSettledAfterDays: SettledWorktreeRetentionDays.pipe(
-    Schema.withDecodingDefault(Effect.succeed(null)),
+    Schema.withDecodingDefault(Effect.succeed(7)),
   ),
   worktreeOnMerge: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   worktreeOnDelete: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   worktreeUnchanged: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   browserArtifactsAfterDays: StorageRetentionDays.pipe(
+    Schema.withDecodingDefault(Effect.succeed(14)),
+  ),
+  logsAfterDays: StorageRetentionDays.pipe(Schema.withDecodingDefault(Effect.succeed(14))),
+  dependenciesAfterDays: StorageRetentionDays.pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
-  logsAfterDays: StorageRetentionDays.pipe(Schema.withDecodingDefault(Effect.succeed(null))),
 });
 export type StorageCleanupSettings = typeof StorageCleanupSettings.Type;
 
-/**
- * The projects-root default before project workspaces: `~/Cogenly`. Kept for
- * clients to show as an example path. The live default is empty, which the
- * server resolves to `<Cogenly home>/projects`.
- */
-export const DEFAULT_PROJECTS_ROOT = "~/Cogenly";
-
 export const ServerSettings = Schema.Struct({
+  ...UniversalClientPreferenceDefaults,
+  sharedKeybindings: Schema.NullOr(KeybindingsConfig).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
   // Null means no client has migrated this preference yet; an empty value is
   // authoritative so another device cannot resurrect cleared preferences.
   favorites: Schema.NullOr(ModelFavorites).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
@@ -922,6 +1283,10 @@ export const ServerSettings = Schema.Struct({
   worktreeCleanup: WorktreeCleanup.pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   automaticBackups: AutomaticBackupsSettings.pipe(
     Schema.withDecodingDefault(Effect.succeed(Schema.decodeSync(AutomaticBackupsSettings)({}))),
+  ),
+  /** Machine health: the optional canary and external alert channels. */
+  health: MachineHealthSettings.pipe(
+    Schema.withDecodingDefault(Effect.succeed(Schema.decodeSync(MachineHealthSettings)({}))),
   ),
   storageCleanup: StorageCleanupSettings.pipe(
     Schema.withDecodingDefault(Effect.succeed(Schema.decodeSync(StorageCleanupSettings)({}))),
@@ -964,6 +1329,10 @@ export const ServerSettings = Schema.Struct({
   projectAgentBrowserAccessOverrides: Schema.Record(ProjectId, Schema.Boolean).pipe(
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
+  /** Off restores CLI-native MCP configuration; otherwise Cogenly owns integrations. */
+  useProviderConnectors: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  /** The owner reviewed the one-time native-definition import offer. */
+  nativeMcpImportReviewed: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   defaultAutoPull: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   defaultProjectScripts: Schema.Array(ProjectScript).pipe(
     Schema.withDecodingDefault(Effect.succeed([])),
@@ -1004,6 +1373,14 @@ export const ServerSettings = Schema.Struct({
    * unaffected. On by default; helpers only install when a device is first needed.
    */
   enableAgentDeviceAccess: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  /**
+   * Whether agents may drive this machine's own apps through the `computer_*`
+   * MCP tools (screenshots, clicks, typing, the accessibility tree). Gated
+   * like `enableAgentBrowserAccess`: server-authoritative and applied when the
+   * provider session is prepared. On by default; macOS still needs its
+   * one-time Accessibility and Screen Recording grants.
+   */
+  enableAgentComputerUse: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   /**
    * Whether this server may install and run Cogenly's device helper processes.
    * Kept separate from agent access so a user can turn off agent control and
@@ -1153,11 +1530,6 @@ export const ServerSettings = Schema.Struct({
   sourceControlHosts: Schema.Record(Schema.String, SourceControlHostSettings).pipe(
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
-  // Keyed by a user-chosen id so a source keeps its rows across edits. Entries
-  // this build cannot decode round-trip untouched, as provider instances do.
-  usageLimitSources: Schema.Record(UsageLimitSourceId, UsageLimitSourceConfig).pipe(
-    Schema.withDecodingDefault(Effect.succeed({})),
-  ),
   /**
    * Exact model ID to the model its usage counts as, such as a preview slug to
    * its released name. The mapped model is priced and reported as its target.
@@ -1169,6 +1541,54 @@ export const ServerSettings = Schema.Struct({
 export type ServerSettings = typeof ServerSettings.Type;
 
 export const DEFAULT_SERVER_SETTINGS: ServerSettings = Schema.decodeSync(ServerSettings)({});
+
+/**
+ * Server settings that are the same on every paired machine: preferences and
+ * policies, never paths, credentials, machine identity or resource limits.
+ * Paired machines replicate them, and clients write them to every machine
+ * they reach. Every other `ServerSettings` key is machine-local.
+ */
+export const UNIVERSAL_SERVER_SETTING_KEYS = [
+  "aiGreetings",
+  ...UNIVERSAL_CLIENT_PREFERENCE_KEYS,
+  "sharedKeybindings",
+  "favorites",
+  "providerModelPreferences",
+  "modelEffortDefaults",
+  "defaultModelSelection",
+  "textGenerationModelSelection",
+  "sourceControlWriterModelSelection",
+  "reviewGuideModelSelection",
+  "defaultRuntimeMode",
+  "responseStreamingMode",
+  "enableAgentTerminals",
+  "continueThreadsAfterServerUpdate",
+  "snoozeLimitedThreads",
+  "autoResumeLimitedThreads",
+  "enableAgentBrowserAccess",
+  "enableAgentDeviceAccess",
+  "enableAgentComputerUse",
+  "defaultAutoPull",
+  "defaultThreadEnvMode",
+  "newWorktreesStartFromOrigin",
+  "worktreeSubmodules",
+  "branchNamingMode",
+  "branchNamePrefix",
+  "branchNameInstructions",
+  "removeAgentCreditsOnMerge",
+  "sourceControlWritingStyle",
+  "reviewGuidesEnabled",
+  "reviewGuideInstructions",
+  "pullRequestMergeMethod",
+  "useProviderConnectors",
+] as const satisfies ReadonlyArray<keyof ServerSettings>;
+export type UniversalServerSettingKey = (typeof UNIVERSAL_SERVER_SETTING_KEYS)[number];
+
+const UNIVERSAL_KEYS: ReadonlySet<string> = new Set(UNIVERSAL_SERVER_SETTING_KEYS);
+/** Whether a server setting key follows the user to every paired machine. */
+export function isUniversalServerSettingKey(key: string): key is UniversalServerSettingKey {
+  return UNIVERSAL_KEYS.has(key);
+}
 
 /**
  * Read the legacy `enabled` flag embedded in a provider instance config
@@ -1314,6 +1734,10 @@ const ModelSelectionPatch = Schema.Struct({
 });
 
 export const ServerSettingsPatch = Schema.Struct({
+  ...UniversalClientPreferencePatch.fields,
+  sharedKeybindings: Schema.optionalKey(Schema.NullOr(KeybindingsConfig)),
+  /** Seeds legacy browser preferences only while each destination field is still unset. */
+  migrateClientPreferences: Schema.optionalKey(UniversalClientPreferencePatch),
   setModelFavorites: Schema.optionalKey(
     Schema.Array(Schema.Struct({ ...ModelFavorite.fields, favorite: Schema.Boolean })),
   ),
@@ -1366,6 +1790,7 @@ export const ServerSettingsPatch = Schema.Struct({
       ),
     }),
   ),
+  health: Schema.optionalKey(MachineHealthSettingsPatch),
   storageCleanup: Schema.optionalKey(
     Schema.Struct({
       worktreeKeepWhen: Schema.optionalKey(WorktreeKeepWhen),
@@ -1376,6 +1801,7 @@ export const ServerSettingsPatch = Schema.Struct({
       worktreeUnchanged: Schema.optionalKey(Schema.Boolean),
       browserArtifactsAfterDays: Schema.optionalKey(StorageRetentionDays),
       logsAfterDays: Schema.optionalKey(StorageRetentionDays),
+      dependenciesAfterDays: Schema.optionalKey(StorageRetentionDays),
     }),
   ),
   worktreesDirectory: Schema.optionalKey(TrimmedString),
@@ -1388,6 +1814,8 @@ export const ServerSettingsPatch = Schema.Struct({
   projectAgentBrowserAccessOverrides: Schema.optionalKey(
     Schema.Record(ProjectId, Schema.NullOr(Schema.Boolean)),
   ),
+  useProviderConnectors: Schema.optionalKey(Schema.Boolean),
+  nativeMcpImportReviewed: Schema.optionalKey(Schema.Boolean),
   defaultAutoPull: Schema.optionalKey(Schema.Boolean),
   defaultProjectScripts: Schema.optionalKey(Schema.Array(ProjectScript)),
   projectScriptOverrides: Schema.optionalKey(
@@ -1414,6 +1842,7 @@ export const ServerSettingsPatch = Schema.Struct({
     Schema.Record(ProjectId, Schema.NullOr(ProjectSettingsOverrides)),
   ),
   enableAgentDeviceAccess: Schema.optionalKey(Schema.Boolean),
+  enableAgentComputerUse: Schema.optionalKey(Schema.Boolean),
   enableDeviceSupport: Schema.optionalKey(Schema.Boolean),
   deviceOnboardingCompleted: Schema.optionalKey(Schema.Boolean),
   deviceHosts: Schema.optionalKey(SshDeviceHostConfigs),
@@ -1474,12 +1903,6 @@ export const ServerSettingsPatch = Schema.Struct({
   // patches risk leaving driver-specific config in a half-merged state.
   // The web UI sends a fully-formed map every time it edits this field.
   providerInstances: Schema.optionalKey(Schema.Record(ProviderInstanceId, ProviderInstanceConfig)),
-  // Per-entry, unlike `providerInstances`: a client only ever adds or removes
-  // one source, and sending the whole map races another edit that has not
-  // echoed back yet. `null` removes; the server merges into its current map.
-  usageLimitSources: Schema.optionalKey(
-    Schema.Record(UsageLimitSourceId, Schema.NullOr(UsageLimitSourceConfig)),
-  ),
   /** Each entry replaces one model's mapping; `null` removes it. */
   usageModelAliases: Schema.optionalKey(
     Schema.Record(TrimmedNonEmptyString, Schema.NullOr(TrimmedNonEmptyString)),
@@ -1495,7 +1918,7 @@ export function requiredScopesForServerSettingsPatch(
   let changesSettings = false;
   for (const [key, value] of Object.entries(patch)) {
     if (value === undefined) continue;
-    if (key === "providers" || key === "providerInstances" || key === "usageLimitSources") {
+    if (key === "providers" || key === "providerInstances") {
       changesProviders = true;
     } else {
       changesSettings = true;

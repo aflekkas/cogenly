@@ -1,8 +1,9 @@
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as HostProcess from "@cogenly/shared/HostProcess";
 import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
@@ -56,6 +57,7 @@ export interface LocalMcpSpec {
   /** Environment fields rebuilt whenever a bind failure retires the port. */
   readonly portEnvironment?: Readonly<Record<string, string>>;
   readonly path?: string;
+  readonly idleTimeoutMs?: number;
 }
 
 export interface LocalMcpStatus {
@@ -76,6 +78,8 @@ interface Account {
   ready: Deferred.Deferred<Connection, LocalMcpError>;
   status: LocalMcpStatus;
   supervising: boolean;
+  inFlight: number;
+  idleFiber?: Fiber.Fiber<void> | undefined;
 }
 
 export class LocalMcpRunner extends Context.Service<
@@ -142,6 +146,7 @@ const make = (
   options: { readonly restartDelayMs?: number; readonly requestTimeoutMs?: number } = {},
 ) =>
   Effect.gen(function* () {
+    const serviceScope = yield* Scope.Scope;
     const platform = yield* HostProcess.Platform;
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const fs = yield* FileSystem.FileSystem;
@@ -237,12 +242,31 @@ const make = (
           const account = accounts.get(id);
           if (!account) return;
           accounts.delete(id);
+          if (account.idleFiber) yield* Fiber.interrupt(account.idleFiber);
           yield* Deferred.fail(account.ready, error(account.spec, "not_running"));
           yield* Scope.close(account.scope, Exit.void);
           yield* fs.remove(ownerFile(account.spec), { force: true }).pipe(Effect.ignore);
           yield* changed(account, "stopped");
         }),
       );
+    const scheduleIdle = (account: Account) =>
+      Effect.gen(function* () {
+        if (account.idleFiber) yield* Fiber.interrupt(account.idleFiber);
+        if (account.inFlight !== 0 || account.spec.idleTimeoutMs === undefined) return;
+        const id = account.spec.id;
+        account.idleFiber = yield* Effect.forkIn(
+          Effect.sleep(account.spec.idleTimeoutMs).pipe(
+            Effect.andThen(
+              Effect.gen(function* () {
+                if (accounts.get(id) !== account || account.inFlight !== 0) return;
+                account.idleFiber = undefined;
+                yield* stop(id);
+              }),
+            ),
+          ),
+          serviceScope,
+        );
+      });
     yield* Effect.addFinalizer(() => Effect.forEach([...accounts.keys()], stop, { discard: true }));
 
     const httpPost = (spec: LocalMcpSpec, method: string, params: unknown, sessionId?: string) =>
@@ -344,7 +368,7 @@ const make = (
                 Effect.mapError((cause) => error(spec, "start_failed", cause)),
               );
               const output = (stream: typeof child.stderr) => {
-                const redactor = createOutputRedactor(spec.secrets);
+                const redactor = createOutputRedactor(() => spec.secrets);
                 const retain = (text: string) =>
                   Effect.gen(function* () {
                     attemptOutput = (attemptOutput + text).slice(-4000);
@@ -490,6 +514,7 @@ const make = (
               }
               yield* changed(account, "running");
               yield* Deferred.succeed(account.ready, connection);
+              yield* scheduleIdle(account);
               yield* child.exitCode;
             }),
           ).pipe(Effect.result);
@@ -542,6 +567,7 @@ const make = (
               spec,
               scope,
               supervising: false,
+              inFlight: 0,
               ready: yield* Deferred.make<Connection, LocalMcpError>(),
               status: { state: "starting", version: spec.version, stderrTail: "" },
             };
@@ -594,8 +620,16 @@ const make = (
         Effect.gen(function* () {
           const account = accounts.get(id);
           if (!account) return yield* new LocalMcpError({ reason: "not_running", runtime: "" });
+          account.inFlight++;
+          if (account.idleFiber) yield* Fiber.interrupt(account.idleFiber);
           return yield* Deferred.await(account.ready).pipe(
             Effect.flatMap((connection) => connection.rpc(method, params)),
+            Effect.ensuring(
+              Effect.gen(function* () {
+                account.inFlight--;
+                yield* scheduleIdle(account);
+              }),
+            ),
           );
         }),
       stop,

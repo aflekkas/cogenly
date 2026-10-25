@@ -1,9 +1,9 @@
-import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
-import type { ProjectIconColor } from "@t3tools/contracts";
+import type { EnvironmentProject } from "@cogenly/client-runtime/state/shell";
+import type { EnvironmentId, ProjectIconColor } from "@cogenly/contracts";
 import {
   getProjectFaviconResourceKey,
   isProjectFaviconFallbackUrl,
-} from "@t3tools/shared/projectFavicon";
+} from "@cogenly/shared/projectFavicon";
 import {
   BoxesIcon,
   BoxIcon,
@@ -18,7 +18,7 @@ import {
 import type { IconName } from "lucide-react/dynamic";
 import { lazy, type ReactNode, Suspense, useState } from "react";
 import { useAtomValue } from "@effect/atom-react";
-import { projectFaviconUrlAtom } from "../state/assets";
+import { projectFaviconUrlAtom, repositoryIconUrlAtom } from "../state/assets";
 import {
   deriveProjectIdentity,
   resolveProjectIconSource,
@@ -59,7 +59,7 @@ export type ProjectFaviconProject = Pick<
  * A project's icon. Resolution order lives in `resolveProjectIconSource`:
  * the icon picked in project settings, then the repository's favicon, then a
  * neutral glyph. `fallback` replaces that glyph where a surface has its own
- * mark for a repository without an icon (Work's tinted repository badge).
+ * mark for a repository without an icon (`RepositoryRowIcon`'s remote icon).
  */
 export function ProjectFavicon(input: {
   project: ProjectFaviconProject;
@@ -138,6 +138,38 @@ export function ProjectFavicon(input: {
         />
       </Suspense>
     </span>
+  );
+}
+
+/**
+ * A linked repository's icon by its remote, whether or not it is cloned on
+ * that machine: the server's repository icon resolver picks a checkout's
+ * favicon, else the icon a machine with a checkout recorded, else the
+ * owner's GitHub avatar. `fallback` shows while it loads and when there is none.
+ */
+export function RepositoryRemoteIcon(input: {
+  readonly environmentId: EnvironmentId;
+  readonly remote: string;
+  readonly iconPath: string | null;
+  readonly className?: string | undefined;
+  readonly fallback: ReactNode;
+}) {
+  const url = useAtomValue(
+    repositoryIconUrlAtom({
+      environmentId: input.environmentId,
+      remote: input.remote,
+      iconPath: input.iconPath,
+    }),
+  );
+  if (url === null) return input.fallback;
+  return (
+    <ProjectFaviconImage
+      key={`${input.environmentId}|${input.remote}|${input.iconPath ?? ""}`}
+      src={url}
+      className={input.className}
+      fallbackProjectName={input.remote}
+      fallback={input.fallback}
+    />
   );
 }
 

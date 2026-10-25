@@ -1,4 +1,4 @@
-import { ImageSearchError } from "@t3tools/contracts";
+import { ImageSearchError } from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";

@@ -1,13 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { EnvironmentId, ProviderInstanceId } from "@t3tools/contracts";
+import { EnvironmentId, ProviderInstanceId } from "@cogenly/contracts";
 
 import { ProviderSettingsPanel } from "../components/settings/ProviderSettingsPanel";
 import { useSettingsScope } from "../components/settings/SettingsScopeContext";
 
 /**
- * Providers are machine state, so the page shows one environment at a time:
- * the chosen one from the settings scope selector.
- * A project crumb narrows candidates to where that project is registered.
+ * Providers are machine state, so the page shows one machine at a time: the
+ * one picked in the scope sentence.
  */
 function SettingsProvidersRoute() {
   const target = Route.useSearch();
@@ -17,7 +16,7 @@ function SettingsProvidersRoute() {
       <p className="p-8 text-sm text-muted-foreground">
         {scope.kind === "environment"
           ? `Reconnect ${scope.label} to set up its providers.`
-          : "Connect an environment to set up its providers."}
+          : "Connect a machine to set up its providers."}
       </p>
     );
   }
@@ -25,13 +24,6 @@ function SettingsProvidersRoute() {
     <ProviderSettingsPanel
       environmentId={environment.environmentId}
       {...(target.instanceId ? { instanceId: target.instanceId } : {})}
-      projectIds={
-        scope.kind === "project" || scope.kind === "checkout"
-          ? scope.members
-              .filter((member) => member.environmentId === environment.environmentId)
-              .map((member) => member.id)
-          : []
-      }
       scoped
     />
   );

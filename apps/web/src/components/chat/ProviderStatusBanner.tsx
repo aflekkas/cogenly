@@ -1,4 +1,4 @@
-import { type ProviderInstanceId, type ServerProvider } from "@t3tools/contracts";
+import { type ProviderInstanceId, type ServerProvider } from "@cogenly/contracts";
 import { memo } from "react";
 import { InfoIcon, XIcon } from "lucide-react";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "../ui/alert";
@@ -57,7 +57,7 @@ export function getProviderStatusMessage(status: ServerProvider): string {
   if (status.message) return status.message;
   const providerName = status.displayName?.trim() || formatProviderDriverKindLabel(status.driver);
   if (!status.installed && hasProviderSetup(status)) {
-    return `Open provider setup to install ${formatProviderDriverKindLabel(status.driver)} on this environment.`;
+    return `Open provider setup to install ${formatProviderDriverKindLabel(status.driver)} on this machine.`;
   }
   if (status.auth.status === "unauthenticated") {
     if (hasProviderSetup(status)) {

@@ -5,7 +5,15 @@ import {
   ProjectLabelCloneRepositoryInput,
   ProjectCloneStartResult,
   ProjectLabelCreateInput,
+  ProjectFoldersReconcileInput,
+  ProjectFoldersReconcileResult,
+  ProjectLabelAdoptRepositoryInput,
+  ProjectLabelAdoptRepositoryResult,
+  ProjectLabelRemoveCheckoutInput,
+  ProjectLabelRemoveCheckoutResult,
   ProjectLabelDeleteResult,
+  ProjectLabelMergeInput,
+  ProjectLabelDismissDuplicateInput,
   ProjectLabelListResult,
   ProjectLabelKey,
   ProjectLabelMutationResult,
@@ -16,12 +24,13 @@ import {
   MoveThreadProjectFolderInput,
   ThreadProjectFolderResult,
   ThreadProjectLabelsResult,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Path from "effect/Path";
 import { Tool, Toolkit } from "effect/ai";
 import * as Labels from "../../../projectLabels/ProjectLabelService.ts";
 import * as Clones from "../../../project/ProjectCloneTracker.ts";
+import * as Checkout from "../../../project/RepositoryCheckout.ts";
 import * as Projects from "../../../project/ProjectService.ts";
 import * as Identities from "../../../project/RepositoryIdentityResolver.ts";
 import * as Settings from "../../../serverSettings.ts";
@@ -44,7 +53,7 @@ export const ProjectLabelsToolkit = Toolkit.make(
     parameters: Tool.EmptyParams,
     success: ProjectLabelListResult,
     description:
-      "List project folders, their repositories (each with its normalized remote in repositories[].remote, null for a local-only repository, and its directoryName under the project folder), project chat (projectChatThreadId) and effective thread counts. Archived folders carry archivedAt. Folders provide context only and never grant access.",
+      "List project folders, their repositories (each with its normalized remote in repositories[].remote, null for a local-only repository, its directoryName under the project folder, and checkout: ready, not_cloned, missing, cloning or failed on this machine), project chat (projectChatThreadId) and effective thread counts. Archived folders carry archivedAt. Folders provide context only and never grant access.",
   })
     .annotate(Tool.Readonly, true)
     .annotate(Tool.Destructive, false),
@@ -53,7 +62,7 @@ export const ProjectLabelsToolkit = Toolkit.make(
     parameters: ProjectLabelKey,
     success: ProjectLabelMutationResult,
     description:
-      "Read one project folder and its repositories. This does not authorize reading any repository or thread.",
+      "Read one project folder and its repositories. Each repository carries checkout: its state on this machine (ready, not_cloned for one linked from another machine, missing, cloning, failed). This does not authorize reading any repository or thread.",
   })
     .annotate(Tool.Readonly, true)
     .annotate(Tool.Destructive, false),
@@ -84,7 +93,7 @@ export const ProjectLabelsToolkit = Toolkit.make(
     parameters: ProjectLabelCreateInput,
     success: ProjectLabelMutationResult,
     description:
-      "Create a project folder with a name, and optionally a color (gray, red, amber, green, teal, blue, violet or pink; not hex), description and instructions. Folders organize threads and repositories; they provide context only and never grant access.",
+      'Create a project folder with a name, and optionally a color (gray, red, amber, green, teal, blue, violet or pink; not hex), description and instructions. Folders organize threads and repositories; they provide context only and never grant access. Create one only when the user asks for a project to group work in. Getting one repository onto a machine, even phrased as "set it up as a project", needs none: clone it with project_clone (outside any project) and register it with project_create, and ask when unsure which the user means.',
   }).annotate(Tool.Destructive, false),
   Tool.make("project_label_update", {
     ...shared,
@@ -92,6 +101,27 @@ export const ProjectLabelsToolkit = Toolkit.make(
     success: ProjectLabelMutationResult,
     description:
       "Change what the Projects page shows for a project: rename it, set its color (gray, red, amber, green, teal, blue, violet or pink; not hex), description, or instructions (standing guidance for every agent in the project). Omitted fields are preserved; null clears color or description; an empty string clears instructions.",
+  }).annotate(Tool.Destructive, false),
+  Tool.make("project_label_merge", {
+    ...shared,
+    parameters: ProjectLabelMergeInput,
+    success: ProjectLabelMutationResult,
+    description:
+      "Merge sourceId into targetId: move all repositories, source links, threads (including the project chat), agents, schedules, memory labels, settings and local project files into the target. Keep the target's instructions and append different source instructions. Files with conflicting names are renamed, never overwritten. The source project is removed on every paired machine. This cannot be undone automatically; confirm the source and target with the user first.",
+  }).annotate(Tool.Destructive, true),
+  Tool.make("project_label_dismiss_duplicate", {
+    ...shared,
+    parameters: ProjectLabelDismissDuplicateInput,
+    success: ProjectLabelMutationResult,
+    description:
+      "Keep two possible duplicate projects separate. Dismiss the suggestion for id and otherId on every paired machine; both projects and all their contents remain.",
+  }).annotate(Tool.Destructive, false),
+  Tool.make("project_label_undismiss_duplicate", {
+    ...shared,
+    parameters: ProjectLabelDismissDuplicateInput,
+    success: ProjectLabelMutationResult,
+    description:
+      "Restore the possible-duplicate suggestion for id and otherId on every paired machine after keeping them separate. Both projects and their contents remain.",
   }).annotate(Tool.Destructive, false),
   Tool.make("project_label_delete", {
     ...shared,
@@ -149,10 +179,11 @@ export const ProjectLabelsToolkit = Toolkit.make(
     parameters: ProjectLabelCloneRepositoryInput,
     success: ProjectCloneStartResult,
     description:
-      "Clone a repository into a project folder. The destination resolves under the projects root, progress runs on the project-clone subscription, and the repository is filed in the folder. Starts the tracked clone and returns immediately. A clone that fails or is cancelled removes its repository again, so nothing half-made stays filed; clone again to retry. When a checkout of the repository is already on this machine, file it with project_label_link_repository instead of cloning a second copy.",
+      "Clone a repository into an existing project folder; it never creates a project (project_clone clones outside any project). The destination resolves under the projects root, progress runs on the project-clone subscription, and the repository is filed in the folder. Starts the tracked clone and returns immediately. A clone that fails or is cancelled removes its repository again, so nothing half-made stays filed; clone again to retry. Passing the remote of a repository the project already links (checkout not_cloned, missing or failed in project_label_read) clones that one onto this machine under its synced directory name instead, and keeps its record on failure so a retry resumes it. When a checkout of the repository is already on this machine, file it with project_label_link_repository instead of cloning a second copy.",
     dependencies: [
       ...shared.dependencies,
       Clones.ProjectCloneTracker,
+      Checkout.RepositoryCheckout,
       Projects.ProjectService,
       Identities.RepositoryIdentityResolver,
       Settings.ServerSettingsService,
@@ -164,4 +195,27 @@ export const ProjectLabelsToolkit = Toolkit.make(
   })
     .annotate(Tool.Destructive, true)
     .annotate(Tool.OpenWorld, true),
+  Tool.make("project_label_remove_checkout", {
+    ...shared,
+    parameters: ProjectLabelRemoveCheckoutInput,
+    success: ProjectLabelRemoveCheckoutResult,
+    description:
+      "Delete this machine's checkout of a repository the project links, keeping the link, the repository record and its threads: checkout then reads missing, and project_label_clone_repository with its remote brings it back. Refused for a repository with no remote, while a turn runs in it, or while it holds work found nowhere else (other worktrees, uncommitted or stashed changes, unpushed commits). Confirm with the user first.",
+    dependencies: [...shared.dependencies, Checkout.RepositoryCheckout],
+  }).annotate(Tool.Destructive, true),
+  Tool.make("project_label_move_repository", {
+    ...shared,
+    parameters: ProjectLabelAdoptRepositoryInput,
+    success: ProjectLabelAdoptRepositoryResult,
+    description:
+      "Move a linked repository's checkout on this machine into its place in the project folder, <project>/repos/<directoryName> (repos/<repo> for the project's own GitHub owner, repos/<owner>/<repo> for any other), renaming a checkout kept elsewhere under another folder name. Its worktrees are repaired and its record and threads follow. Refused while a turn runs in it or a worktree lives inside it; returns moved:false when it is already in place.",
+    dependencies: [...shared.dependencies, Checkout.RepositoryCheckout],
+  }).annotate(Tool.Destructive, false),
+  Tool.make("project_folders_reconcile", {
+    ...shared,
+    parameters: ProjectFoldersReconcileInput,
+    success: ProjectFoldersReconcileResult,
+    description:
+      "Find and settle folders under the projects root that no project claims (left by a deleted project, or made by hand). action 'list' returns them; 'adopt' with dirName makes the folder a project of the same name, keeping everything in it; 'remove' with dirName deletes it only when it holds nothing but the empty skeleton Cogenly made (removed:false otherwise). Every action returns the orphans that remain. Confirm adopt and remove with the user first.",
+  }).annotate(Tool.Destructive, true),
 );

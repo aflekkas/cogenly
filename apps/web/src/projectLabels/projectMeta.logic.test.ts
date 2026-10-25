@@ -3,22 +3,26 @@ import {
   ProjectId,
   ProjectLabelId,
   type ProjectLabelWithRepositories,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import { projectLabelKey, type EnvironmentProjectLabel } from "./projectLabels.logic";
 import {
   composerProjectFolderId,
+  draftWorkProject,
   groupRepositoriesByProject,
   heroProjectSuffix,
   isPickableRepository,
   projectDefaultRepository,
-  repositoriesInProject,
+  projectHoldsRepository,
+  projectSwitchRepository,
   threadProjectMeta,
   toggleCollapsedGroup,
   workDraftFolderId,
   workHeroBreadcrumb,
   workHeroLine,
+  projectDroppedNote,
+  workThreadDisplayProject,
 } from "./projectMeta.logic";
 
 const env = "env" as EnvironmentId;
@@ -271,41 +275,165 @@ describe("projectDefaultRepository", () => {
 });
 
 describe("workDraftFolderId", () => {
-  const folderByRepository = new Map([
-    [`${env}:platform`, spawn],
-    [`${other}:platform`, remote],
-  ]);
   const repository = (projectId: string, environmentId: EnvironmentId = env) => ({
     environmentId,
     projectId: ProjectId.make(projectId),
   });
+  const file = (
+    repositoryRef: ReturnType<typeof repository>,
+    project: EnvironmentProjectLabel | null,
+  ) => workDraftFolderId({ repository: repositoryRef, project, byKey });
 
-  it("records nothing when Work follows its repository's own project", () => {
-    expect(
-      workDraftFolderId({ repository: repository("platform"), project: spawn, folderByRepository }),
-    ).toBeNull();
-    expect(
-      workDraftFolderId({ repository: repository("loose"), project: null, folderByRepository }),
-    ).toBeNull();
+  it("keeps the draft's project when a repository in it is picked", () => {
+    // The repository's own project stays filed, so the pick never drops it.
+    expect(file(repository("platform"), spawn)).toBe(spawn.label.id);
+    // A repository just cloned here, which no project lists yet.
+    expect(file(repository("just-cloned"), spawn)).toBe(spawn.label.id);
   });
 
-  it("files Work in a project that is not its repository's", () => {
-    expect(
-      workDraftFolderId({ repository: repository("loose"), project: mind, folderByRepository }),
-    ).toBe(mind.label.id);
-    expect(
-      workDraftFolderId({ repository: repository("platform"), project: bartr, folderByRepository }),
-    ).toBe(bartr.label.id);
+  it("records nothing without a project", () => {
+    expect(file(repository("loose"), null)).toBeNull();
   });
 
-  it("drops a project on another machine than the repository", () => {
+  it("keeps a synced project on the repository's machine, and drops one that machine lacks", () => {
+    const synced = folder(other, "spawn", "Spawn Partners");
+    const withSynced = new Map([...byKey, [synced.key, synced] as const]);
     expect(
       workDraftFolderId({
-        repository: repository("loose", other),
-        project: mind,
-        folderByRepository,
+        repository: repository("platform", other),
+        project: spawn,
+        byKey: withSynced,
       }),
-    ).toBeNull();
+    ).toBe(spawn.label.id);
+    expect(file(repository("loose", other), mind)).toBeNull();
+  });
+});
+
+const ref = (projectId: string, environmentId: EnvironmentId = env) => ({
+  environmentId,
+  projectId: ProjectId.make(projectId),
+});
+const folderByRepository = new Map([
+  [`${env}:platform`, spawn],
+  [`${env}:shared`, spawn],
+  [`${other}:platform`, remote],
+]);
+
+describe("projectHoldsRepository", () => {
+  it("reads the project as the repository's machine has it", () => {
+    expect(projectHoldsRepository(spawn, ref("platform"))).toBe(true);
+    expect(projectHoldsRepository(spawn, ref("cogenly"))).toBe(false);
+    // The same id on another machine is another checkout.
+    expect(projectHoldsRepository(spawn, ref("platform", other))).toBe(false);
+    const synced: EnvironmentProjectLabel = {
+      ...spawn,
+      copies: [
+        { environmentId: env, label: spawn.label },
+        { environmentId: other, label: { ...spawn.label, repositoryIds: [ProjectId.make("vps")] } },
+      ],
+    };
+    expect(projectHoldsRepository(synced, ref("vps", other))).toBe(true);
+    expect(projectHoldsRepository(synced, ref("platform", other))).toBe(false);
+  });
+});
+
+describe("projectSwitchRepository", () => {
+  const items = ["platform", "shared", "cogenly"].map((name) => ({ name, refs: [ref(name)] }));
+  const pick = (project: EnvironmentProjectLabel, current: string | null, list = items) => {
+    const next = projectSwitchRepository({
+      project,
+      current: current === null ? null : ref(current),
+      items: list,
+      refsOf: (item) => item.refs,
+    });
+    return next.kind === "select" ? `select:${next.item.name}` : next.kind;
+  };
+  const solo = folder(env, "solo", "Solo", ["platform"]);
+
+  it("keeps the repository while the project holds it", () => {
+    expect(pick(spawn, "shared")).toBe("keep");
+  });
+
+  it("never keeps a repository from outside the project", () => {
+    // The bug: Spawn Partners picked over cogenly, which is in no project.
+    expect(pick(spawn, "cogenly")).not.toBe("keep");
+    expect(pick(solo, "cogenly")).toBe("select:platform");
+  });
+
+  it("selects the project's only repository", () => {
+    expect(pick(solo, null)).toBe("select:platform");
+  });
+
+  it("runs in the project folder when the project has several, which is what would run", () => {
+    expect(pick(spawn, "cogenly")).toBe("project-folder");
+    // One linked repository not on this machine yet is not one to select here.
+    const elsewhere = folder(env, "elsewhere", "Elsewhere", ["not-here"]);
+    expect(pick(elsewhere, "cogenly")).toBe("project-folder");
+  });
+
+  it("runs in the project folder when the project has no repository", () => {
+    expect(pick(mind, "cogenly")).toBe("project-folder");
+    expect(pick(mind, null)).toBe("project-folder");
+  });
+});
+
+describe("draftWorkProject", () => {
+  const draft = (
+    pending: EnvironmentProjectLabel | null,
+    repository: string | null,
+    pendingRepositoryId?: string | null,
+  ) =>
+    draftWorkProject({
+      pending,
+      pendingRepositoryId:
+        pendingRepositoryId == null ? pendingRepositoryId : ProjectId.make(pendingRepositoryId),
+      repository: repository === null ? null : ref(repository),
+      folderByRepository,
+    });
+
+  it("follows the repository's own project without a pick, or none", () => {
+    expect(draft(null, "platform")).toEqual({ project: spawn, stale: false });
+    expect(draft(null, "cogenly")).toEqual({ project: null, stale: false });
+  });
+
+  it("keeps a pick that holds the repository", () => {
+    expect(draft(spawn, "shared")).toEqual({ project: spawn, stale: false });
+  });
+
+  it("marks a pick that does not hold the repository stale", () => {
+    expect(draft(spawn, "cogenly")).toEqual({ project: spawn, stale: true });
+  });
+
+  it("trusts a pick filed with this repository while its link lands", () => {
+    expect(draft(spawn, "just-linked", "just-linked").stale).toBe(false);
+    // Filed with another repository, it does not carry over.
+    expect(draft(spawn, "cogenly", "platform").stale).toBe(true);
+  });
+
+  it("lets any project hold Work without a repository", () => {
+    expect(draft(mind, null)).toEqual({ project: mind, stale: false });
+  });
+});
+
+describe("workThreadDisplayProject", () => {
+  const shown = (filed: EnvironmentProjectLabel | null, repository: string | null) =>
+    workThreadDisplayProject({
+      filed,
+      repository: repository === null ? null : ref(repository),
+      folderByRepository,
+    })?.label.name ?? null;
+
+  it("names the filing while it holds the repository", () => {
+    expect(shown(spawn, "platform")).toBe("Spawn Partners");
+  });
+
+  it("names the repository's own project, or none, instead of a filing without it", () => {
+    expect(shown(mind, "platform")).toBe("Spawn Partners");
+    expect(shown(spawn, "cogenly")).toBeNull();
+  });
+
+  it("names the filing for Work in its project's folder", () => {
+    expect(shown(mind, null)).toBe("SOSC 14100 Mind");
   });
 });
 
@@ -316,29 +444,14 @@ describe("toggleCollapsedGroup", () => {
   });
 });
 
-describe("repositoriesInProject", () => {
-  const repo = (name: string, environmentId: EnvironmentId = env) => ({
-    name,
-    refs: [{ environmentId, projectId: ProjectId.make(name) }],
-  });
-  const items = [repo("loose"), repo("platform"), repo("shared"), repo("platform", other)];
-  const scope = (project: EnvironmentProjectLabel | null) =>
-    repositoriesInProject({ items, refsOf: (item) => item.refs, project, projects }).map(
-      (item) => `${item.refs[0]?.environmentId}:${item.name}`,
-    );
-
-  it("lists only the picked project's repositories, on its machine", () => {
-    expect(scope(spawn)).toEqual(["env:platform", "env:shared"]);
-    expect(scope(bartr)).toEqual(["env:shared"]);
-    expect(scope(remote)).toEqual(["other:platform"]);
-  });
-
-  it("lists nothing for a project without repositories", () => {
-    expect(scope(mind)).toEqual([]);
-  });
-
-  it("lists only repositories in no project without one", () => {
-    expect(scope(null)).toEqual(["env:loose"]);
+describe("projectDroppedNote", () => {
+  it("says why a project pick did not stick on a machine that needs a repository", () => {
+    expect(projectDroppedNote("Spawn Partners", "Contabo VPS")).toEqual({
+      title: "Not in Spawn Partners",
+      description:
+        "Contabo VPS can't run Work without a repository. Pick a repository from Spawn Partners to work in it.",
+    });
+    expect(projectDroppedNote("Bartr", null).description).toMatch(/^This machine can't/);
   });
 });
 
@@ -376,6 +489,13 @@ describe("workHeroLine", () => {
 
   it("leaves chats without one", () => {
     expect(line({ isChat: true, hasProject: true }).projectFolderRow).toBe("hidden");
+  });
+
+  it("checks the project folder for a project draft with no repository chosen", () => {
+    expect(line({ hasProject: true, hasRepository: false })).toEqual({
+      projectFolderRow: "selected",
+      projectFolderRowLabel: "No repository (project folder)",
+    });
   });
 });
 
@@ -415,6 +535,15 @@ describe("workHeroBreadcrumb", () => {
     expect(
       workHeroBreadcrumb({ projectName: "  ", repositoryName: null, hasRepository: false }).label,
     ).toBe("What should we build in No project / no repository?");
+  });
+
+  it("names the project folder, never a placeholder to choose, while no repository is picked", () => {
+    const crumb = workHeroBreadcrumb({
+      projectName: "Spawn Partners",
+      repositoryName: null,
+      hasRepository: false,
+    });
+    expect(crumb.repository).toEqual({ text: "project folder", placeholder: true });
   });
 
   it("holds a placeholder while the repository is unknown", () => {

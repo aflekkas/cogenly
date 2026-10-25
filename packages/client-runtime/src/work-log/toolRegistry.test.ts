@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest";
 
-import type { OrchestrationV2TurnItem } from "@t3tools/contracts";
+import type { OrchestrationV2TurnItem } from "@cogenly/contracts";
 
 import {
   normalizeWorkLogToolKey,
@@ -173,6 +173,57 @@ describe("resolveWorkLogTool", () => {
         expect(resolveWorkLogTool({ toolName: `cogenly.${key}`, status })?.label).toMatch(/\S/);
       }
     }
+  });
+});
+
+describe("computer use", () => {
+  const row = (
+    tool: string,
+    input: Record<string, unknown> = {},
+    output: unknown = { frontmostApp: "Dia" },
+    status: "completed" | "failed" | "inProgress" = "completed",
+  ) => resolveWorkLogTool({ toolName: tool, input, output, status });
+
+  it("names what each action did and the app it left in front, for Claude and Codex", () => {
+    // Claude keeps MCP results as text blocks; the wire keeps only the compact fields.
+    const claude = [{ type: "text", text: JSON.stringify({ frontmostApp: "Dia" }) }];
+    expect(row("mcp__cogenly__computer_click", { x: 1, y: 2 }, claude)).toMatchObject({
+      key: "computer_click",
+      icon: "computer",
+      label: "Clicked in Dia",
+      source: "registry",
+    });
+    expect(row("cogenly.computer_key", { key: "cmd+," })?.label).toBe("Pressed cmd+, in Dia");
+    expect(row("cogenly.computer_type", { text: "secret" })?.label).toBe("Typed text in Dia");
+    expect(row("cogenly.computer_open_app", { app: "Dia" })?.label).toBe("Opened Dia");
+    expect(row("cogenly.computer_ui", { app: "Dia" })?.label).toBe("Read Dia's controls");
+    expect(row("cogenly.computer_ui")?.label).toBe("Read the front app's controls");
+    expect(row("cogenly.computer_scroll", { x: 1, y: 2, dy: 3 })?.label).toBe(
+      "Scrolled down in Dia",
+    );
+    expect(row("cogenly.computer_screenshot")?.label).toBe("Took a screenshot");
+  });
+
+  it("reads running and failed calls without an app it never reached", () => {
+    expect(row("cogenly.computer_click", {}, undefined, "inProgress")?.label).toBe("Clicking");
+    expect(row("cogenly.computer_click", {}, { isError: true }, "failed")?.label).toBe(
+      "Failed to click",
+    );
+    expect(row("cogenly.computer_screenshot", {}, undefined, "failed")?.label).toBe(
+      "Failed to take a screenshot",
+    );
+  });
+
+  it("collapses a run of actions into one row", () => {
+    const click = {
+      toolName: "cogenly.computer_click",
+      input: {},
+      output: { frontmostApp: "Dia" },
+      status: "completed" as const,
+    };
+    const key = { ...click, toolName: "cogenly.computer_key", input: { key: "return" } };
+    expect(workLogToolGroupLabel([click, key])).toBe("Clicked in Dia · Pressed return in Dia");
+    expect(workLogToolGroupLabel([click, key, click, key])).toBe("Used Dia ×4");
   });
 });
 

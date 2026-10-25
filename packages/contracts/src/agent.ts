@@ -171,6 +171,7 @@ export const AgentMarkReadInput = Schema.Struct({ agentId: AgentId, lastReadMess
 export type AgentMarkReadInput = typeof AgentMarkReadInput.Type;
 export const AgentMarkReadResult = Schema.Struct({ agent: AgentListItem });
 export const AgentMutationResult = Schema.Struct({ agent: Agent });
+export type AgentMutationResult = typeof AgentMutationResult.Type;
 /** Deletes identity, triggers and memory, stops active work, and retains thread history. */
 export const AgentDeleteResult = Schema.Struct({ deleted: Schema.Boolean });
 /**

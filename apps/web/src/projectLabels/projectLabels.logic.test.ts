@@ -3,14 +3,17 @@ import {
   ProjectId,
   ProjectLabelId,
   type ProjectLabelWithRepositories,
-} from "@t3tools/contracts";
+  type ProjectSourceLink,
+} from "@cogenly/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  chatAddRepositoryTarget,
   isProjectLabelArchived,
   partitionArchivedProjectLabels,
   priorFiling,
   projectFolderChangeKind,
+  projectIconSource,
   projectLabelKey,
   repositoryFolderMove,
   scopedRepositoryKey,
@@ -74,6 +77,18 @@ describe("threadFolderState", () => {
     expect(state.options.map((entry) => entry.label.name)).toEqual(["Bartr", "Spawn Partners"]);
   });
 
+  it("lists every project but blocks those without the thread's repository, saying why", () => {
+    const repository = { projectId: ProjectId.make("server"), name: "platform" };
+    const state = threadFolderState(thread(null), directory, repository);
+    expect(state.options.map((entry) => entry.label.name)).toEqual(["Bartr", "Spawn Partners"]);
+    expect([...state.blocked]).toEqual([[bartr.key, "Doesn't include platform"]]);
+    expect(state.inRepository).toBe(true);
+    // A chat in its machine's folder can go anywhere.
+    const chat = threadFolderState(thread(null), directory);
+    expect(chat.blocked.size).toBe(0);
+    expect(chat.inRepository).toBe(false);
+  });
+
   it("lets only an explicit filing be removed; Work in its repository's folder cannot", () => {
     expect(threadFolderState(thread("spawn", "repository"), directory)).toMatchObject({
       current: spawn,
@@ -116,11 +131,12 @@ describe("threadFolderState", () => {
       byKey: new Map([bartr, remote, home].map((entry) => [entry.key, entry] as const)),
     };
     const chat = { ...thread("spawn", "explicit"), id: "project-chat:spawn" };
-    expect(threadFolderState(chat, withHome)).toMatchObject({
-      current: home,
-      removable: false,
-      options: [],
-    });
+    const state = threadFolderState(chat, withHome);
+    expect(state).toMatchObject({ current: home, removable: false, projectHome: true });
+    // Every other project is listed, each saying why it can't take the chat.
+    expect(state.options).toHaveLength(2);
+    expect([...state.blocked.entries()]).toEqual([[bartr.key, "Stays in Spawn Partners"]]);
+    expect(state.blocked.has(home.key)).toBe(false);
     // Any other thread in the project still moves as usual.
     const sibling = { ...thread("spawn", "explicit"), id: "thread:sibling" };
     expect(threadFolderState(sibling, withHome).options).toHaveLength(2);
@@ -138,6 +154,24 @@ describe("partitionArchivedProjectLabels", () => {
   });
 });
 
+describe("chatAddRepositoryTarget", () => {
+  it("files the added repository in the chat's own project", () => {
+    expect(chatAddRepositoryTarget(thread("spawn", "explicit"), directory.byKey)).toEqual({
+      environmentId: env,
+      labelId: spawn.label.id,
+    });
+  });
+
+  it("files nowhere for a chat with no project, an unknown one or an archived one", () => {
+    expect(chatAddRepositoryTarget(thread(null), directory.byKey)).toBeNull();
+    expect(chatAddRepositoryTarget(thread("gone", "explicit"), directory.byKey)).toBeNull();
+    const archived = archive(spawn);
+    expect(
+      chatAddRepositoryTarget(thread("spawn", "explicit"), new Map([[archived.key, archived]])),
+    ).toBeNull();
+  });
+});
+
 describe("workThreadFolder", () => {
   const work = (
     projectId: string,
@@ -150,8 +184,22 @@ describe("workThreadFolder", () => {
     expect(workThreadFolder(work("server", null), directory)).toBe(spawn);
   });
 
-  it("keeps an explicit filing over the repository's project", () => {
+  it("keeps an explicit filing for Work in its project's folder", () => {
     expect(workThreadFolder(work("server", "bartr", "explicit"), directory)).toBe(bartr);
+  });
+
+  it("never names a filing with a repository it does not hold: the repository's project, or none", () => {
+    const inRepository = () => true;
+    expect(workThreadFolder(work("server", "bartr", "explicit"), directory, inRepository)).toBe(
+      spawn,
+    );
+    // cogenly in no project, filed in Spawn Partners: shown in no project.
+    expect(
+      workThreadFolder(work("cogenly", "spawn", "explicit"), directory, inRepository),
+    ).toBeNull();
+    expect(workThreadFolder(work("server", "spawn", "explicit"), directory, inRepository)).toBe(
+      spawn,
+    );
   });
 
   it("drops a repository project the repository has left, and names none without one", () => {
@@ -216,5 +264,33 @@ describe("projectFolderChangeKind", () => {
     expect(projectFolderChangeKind(chat({ surface: "builder", latestRun: run }), folder)).toBe(
       "move",
     );
+  });
+});
+
+describe("projectIconSource", () => {
+  const owner = (name: string): ProjectSourceLink => ({ kind: "github-owner", owner: name });
+
+  it("shows the linked GitHub owner's avatar, through its owner remote", () => {
+    expect(projectIconSource({ sourceLinks: [owner("Spawn-Partners")] })).toEqual({
+      kind: "owner-avatar",
+      remote: "github.com/Spawn-Partners",
+    });
+  });
+
+  it("picks the home owner when several are linked, so every machine shows the same one", () => {
+    expect(projectIconSource({ sourceLinks: [owner("zeta"), owner("Acme")] })).toEqual({
+      kind: "owner-avatar",
+      remote: "github.com/Acme",
+    });
+  });
+
+  it("falls back to the folder without an owner link", () => {
+    expect(projectIconSource({ sourceLinks: [] })).toEqual({ kind: "folder" });
+    expect(projectIconSource({})).toEqual({ kind: "folder" });
+    expect(
+      projectIconSource({
+        sourceLinks: [{ kind: "github-repo", owner: "acme", repo: "site" }],
+      }),
+    ).toEqual({ kind: "folder" });
   });
 });

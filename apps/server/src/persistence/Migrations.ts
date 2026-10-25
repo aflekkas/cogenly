@@ -1,3 +1,17 @@
+import Migration0104 from "./Migrations/104_RepoMcpTrust.ts";
+import Migration0103 from "./Migrations/103_ProjectMergeFiles.ts";
+import Migration0102 from "./Migrations/102_ScheduledTaskProjectFolder.ts";
+import Migration0091 from "./Migrations/091_MessageItemLookupIndexes.ts";
+import Migration0092 from "./Migrations/092_RepositoryIconPath.ts";
+import Migration0093 from "./Migrations/093_ThreadReplication.ts";
+import Migration0094 from "./Migrations/094_ForwardCompatibleSync.ts";
+import Migration0095 from "./Migrations/095_SharedFacts.ts";
+import Migration0096 from "./Migrations/096_VaultSync.ts";
+import Migration0097 from "./Migrations/097_VaultSharingAuthorization.ts";
+import Migration0098 from "./Migrations/098_SharedSettings.ts";
+import Migration0099 from "./Migrations/099_SharedIntegrations.ts";
+import Migration0100 from "./Migrations/100_ReplicaRawFields.ts";
+import Migration0101 from "./Migrations/101_ScheduledTaskMachine.ts";
 /**
  * Migration runner with an inline loader.
  *
@@ -10,7 +24,6 @@
 
 import * as Migrator from "effect/sql/Migrator";
 import Migration0090 from "./Migrations/090_SharedBootstrap.ts";
-import Migration0091 from "./Migrations/091_MessageItemLookupIndexes.ts";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import { reconcileV2PreviewMigration } from "./reconcileV2PreviewMigration.ts";
@@ -210,6 +223,19 @@ export const migrationEntries = [
   [89, "SharedDocuments", Migration0089],
   [90, "SharedBootstrap", Migration0090],
   [91, "MessageItemLookupIndexes", Migration0091],
+  [92, "RepositoryIconPath", Migration0092],
+  [93, "ThreadReplication", Migration0093],
+  [94, "ForwardCompatibleSync", Migration0094],
+  [95, "SharedFacts", Migration0095],
+  [96, "VaultSync", Migration0096],
+  [97, "VaultSharingAuthorization", Migration0097],
+  [98, "SharedSettings", Migration0098],
+  [99, "SharedIntegrations", Migration0099],
+  [100, "ReplicaRawFields", Migration0100],
+  [101, "ScheduledTaskMachine", Migration0101],
+  [102, "ScheduledTaskProjectFolder", Migration0102],
+  [103, "ProjectMergeFiles", Migration0103],
+  [104, "RepoMcpTrust", Migration0104],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

@@ -4,7 +4,7 @@ import {
   ProjectId,
   type ProjectLabelId,
   ProviderInstanceId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -12,14 +12,17 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
-import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
+import * as ProviderAdapter from "@cogenly/provider-core/server/ProviderAdapter";
 import {
   buildIntegrationsContextLine,
   buildProjectManifest,
-} from "@t3tools/provider-core/server/runtimeInstructions";
+} from "@cogenly/provider-core/server/runtimeInstructions";
+import { buildMachineHealthContextLine } from "@cogenly/provider-core/server/machineHealthContext";
+import * as HealthAlertsState from "../health/HealthAlertsState.ts";
 import { availableToConnect } from "../integrations/IntegrationCatalog.ts";
 import * as Integrations from "../integrations/Integrations.ts";
 import * as ProjectFiles from "../projectLabels/ProjectFiles.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import * as ProjectStore from "./ProjectStore.ts";
 
 /**
@@ -67,15 +70,26 @@ export class RuntimePolicyV2 extends Context.Service<RuntimePolicyV2, RuntimePol
  * IMPLEMENTATIONS
  */
 /**
- * Chat-surface threads run in conversation mode: adapters offer
- * conversation-only tools (no file writes, no shell) plus a conversational
- * system prompt. Builder threads are conversations too. Every other thread
- * keeps the full work toolset.
+ * Chat-surface threads run in conversation mode: adapters drop native file
+ * writes, shell and delegation, and add a conversational system prompt.
+ * Builders share those native restrictions but get setup instructions and
+ * cannot run terminal commands. Every other thread keeps the work toolset.
  */
 const conversationModeFor = (
   thread: OrchestrationV2AppThread,
-): Pick<ProviderAdapter.ProviderAdapterV2RuntimePolicy, "conversationMode"> =>
-  thread.surface === "chat" || thread.surface === "builder" ? { conversationMode: true } : {};
+): Pick<ProviderAdapter.ProviderAdapterV2RuntimePolicy, "conversationMode" | "builderMode"> =>
+  thread.surface === "chat" || thread.surface === "builder"
+    ? { conversationMode: true, ...(thread.surface === "builder" ? { builderMode: true } : {}) }
+    : {};
+
+/**
+ * A chat or an agent's conversation filed in a project works in the project
+ * folder, even when the thread keeps a scratch worktree path from before it
+ * was filed. The provider cwd and the agent terminal root both follow this.
+ */
+export const worksInProjectFolder = (
+  thread: Pick<OrchestrationV2AppThread, "surface" | "agent">,
+): boolean => thread.surface === "chat" || thread.agent?.role === "conversation";
 
 /**
  * Whether a provider session opened in `previousCwd` must give way to a
@@ -112,7 +126,9 @@ export const layer: Layer.Layer<RuntimePolicyV2> = Layer.succeed(RuntimePolicyV2
 export const layerFromProjectStore: Layer.Layer<
   RuntimePolicyV2,
   never,
-  ProjectStore.ProjectStoreV2 | ProviderInstanceRegistry.ProviderInstanceRegistry
+  | ProjectStore.ProjectStoreV2
+  | ProviderInstanceRegistry.ProviderInstanceRegistry
+  | Integrations.Integrations
 > = Layer.effect(
   RuntimePolicyV2,
   Effect.gen(function* () {
@@ -120,32 +136,50 @@ export const layerFromProjectStore: Layer.Layer<
     // Optional so layers without the project-files service (unit tests over a
     // memory database) still resolve; production always provides it.
     const files = yield* Effect.serviceOption(ProjectFiles.ProjectFiles);
-    // Optional like ProjectFiles: unit layers without the gateway still
-    // resolve, and production always provides it.
-    const integrationsService = yield* Effect.serviceOption(Integrations.Integrations);
+    // Required, not optional: as an optional service the production runtime
+    // silently never received it and turns lost the integrations line.
+    const integrationsService = yield* Integrations.Integrations;
+    const serverSettings = yield* Effect.serviceOption(ServerSettings.ServerSettingsService);
+    // Unreadable settings keep the default: native servers stay off. The import
+    // offer is only a prompt; leaving it unreviewed does not restore them.
+    const useProviderConnectors = Option.isNone(serverSettings)
+      ? Effect.succeed(false)
+      : serverSettings.value.getSettings.pipe(
+          Effect.map((settings) => settings.useProviderConnectors),
+          Effect.orElseSucceed(() => false),
+        );
     // The integrations line is best-effort turn context too: any failure
     // resolves to no line rather than failing the turn.
     const noIntegrations = { integrations: [], available: [] };
     const integrationsFor = (labelId: ProjectLabelId | null) =>
-      Option.isNone(integrationsService)
-        ? Effect.succeed(noIntegrations)
-        : integrationsService.value.contextIntegrations(labelId).pipe(
-            Effect.map((found) => ({
-              integrations: found.map((integration) => ({
-                name: integration.name,
-                status: integration.status,
-                displayName: integration.displayName,
-                hint: integration.hint,
-                accountLabel: integration.accountLabel,
-              })),
-              available: availableToConnect(found),
-            })),
-            Effect.catch(() => Effect.succeed(noIntegrations)),
-          );
+      integrationsService.contextIntegrations(labelId).pipe(
+        Effect.map((found) => ({
+          integrations: found.map((integration) => ({
+            name: integration.name,
+            status: integration.status,
+            displayName: integration.displayName,
+            hint: integration.hint,
+            accountLabel: integration.accountLabel,
+          })),
+          available: availableToConnect(found),
+        })),
+        Effect.orElseSucceed(() => noIntegrations),
+      );
+    // Best-effort like the integrations line: open health alerts, here and on
+    // paired machines. TODO(machines-context): move into the machines context
+    // block once it lands.
+    const healthAlerts = yield* Effect.serviceOption(HealthAlertsState.HealthAlertsState);
+    const machineHealthLine = Option.isNone(healthAlerts)
+      ? Effect.succeed(null)
+      : healthAlerts.value.current.pipe(
+          Effect.map((snapshot) => buildMachineHealthContextLine(snapshot.open)),
+          Effect.catchCause(() => Effect.succeed(null)),
+        );
     // The project context is best-effort turn context from the derived index:
     // any failure resolves to no folder rather than failing the turn.
     const projectFor = (
       thread: OrchestrationV2AppThread,
+      providerConnectorsHidden: boolean,
     ): Effect.Effect<
       | { readonly dir: string; readonly manifest: string; readonly labelId: ProjectLabelId }
       | undefined,
@@ -170,6 +204,7 @@ export const layerFromProjectStore: Layer.Layer<
                 projectChat: folder.projectChatThreadId === thread.id,
                 integrations,
                 availableIntegrations: available,
+                providerConnectorsHidden,
               }),
             };
           }).pipe(
@@ -182,14 +217,14 @@ export const layerFromProjectStore: Layer.Layer<
           );
     return RuntimePolicyV2.of({
       resolve: Effect.fn("RuntimePolicyV2.resolve")(function* (input) {
-        const project = yield* projectFor(input.thread);
+        const providerConnectors = yield* useProviderConnectors;
+        const project = yield* projectFor(input.thread, !providerConnectors);
         // A chat or an agent's conversation filed in a project runs with the
         // project dir as its working directory, even when the thread keeps a
         // scratch worktree path from before it was filed. Unfiled ones keep
         // scratch, and Work in a repo still runs in that repo's worktree.
         const cwd =
-          (input.thread.surface === "chat" || input.thread.agent?.role === "conversation") &&
-          project !== undefined
+          worksInProjectFolder(input.thread) && project !== undefined
             ? project.dir
             : (input.thread.worktreePath ??
               (yield* projects.get(input.thread.projectId).pipe(
@@ -221,17 +256,28 @@ export const layerFromProjectStore: Layer.Layer<
         const standaloneLine = buildIntegrationsContextLine(
           standalone.integrations,
           standalone.available,
+          !providerConnectors,
         );
+        const manifest =
+          project !== undefined
+            ? project.manifest
+            : standaloneLine.length > 0
+              ? standaloneLine
+              : undefined;
+        const healthLine = yield* machineHealthLine;
+        const projectManifest =
+          healthLine === null
+            ? manifest
+            : manifest === undefined
+              ? healthLine
+              : `${manifest}\n${healthLine}`;
         return ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
           runtimeMode: "full-access",
           interactionMode: input.thread.interactionMode,
           cwd,
           ...conversationModeFor(input.thread),
-          ...(project !== undefined
-            ? { projectManifest: project.manifest }
-            : standaloneLine.length > 0
-              ? { projectManifest: standaloneLine }
-              : {}),
+          ...(providerConnectors ? { useProviderConnectors: true } : {}),
+          ...(projectManifest === undefined ? {} : { projectManifest }),
         });
       }),
     });

@@ -1,18 +1,25 @@
-import { latestRootProviderFailure } from "@t3tools/shared/orchestrationV2ThreadError";
+import {
+  latestExecutedRun,
+  latestRootProviderFailure,
+  runRanAfter,
+} from "@cogenly/shared/orchestrationV2ThreadError";
 import {
   CommandId,
+  limitRecoveryResumeAt,
   MessageId,
+  type OrchestrationV2AppThread,
   type NodeId,
   type OrchestrationV2ConversationMessage,
   type OrchestrationV2DelegatedTaskFailure,
+  type OrchestrationV2DelegatedTaskRecovery,
   type OrchestrationV2Notification,
   type OrchestrationV2Run,
   type OrchestrationV2Subagent,
   type OrchestrationV2TurnItem,
   type RunId,
   type ThreadId,
-} from "@t3tools/contracts";
-import { reportLabel } from "@t3tools/provider-core/server/notification";
+} from "@cogenly/contracts";
+import { reportLabel } from "@cogenly/provider-core/server/notification";
 import * as Effect from "effect/Effect";
 
 import * as ThreadManagementService from "./ThreadManagementService.ts";
@@ -49,7 +56,7 @@ export function classifyDelegatedTaskFailure(input: {
     const failure = latestRootProviderFailure(run, turnItems);
     if (failure?.class === "usage_limit") {
       return {
-        kind: "rate_limit",
+        kind: failure.limitKind === "rate_limit" ? "rate_limit" : "usage_limit",
         message: shortMessage(failure.message),
         resetAt: failure.resetAt ?? null,
       };
@@ -80,6 +87,7 @@ export function classifyDelegatedTaskFailure(input: {
 
 const KIND_LABEL: Record<OrchestrationV2DelegatedTaskFailure["kind"], string> = {
   rate_limit: "rate limit",
+  usage_limit: "usage limit",
   provider_error: "provider error",
   interrupted_by_restart: "interrupted by a restart",
   crashed: "crashed",
@@ -88,8 +96,10 @@ const KIND_LABEL: Record<OrchestrationV2DelegatedTaskFailure["kind"], string> = 
 function suggestedAction(failure: OrchestrationV2DelegatedTaskFailure): string {
   switch (failure.kind) {
     case "rate_limit":
+      return `Cogenly retried it and no other provider instance could take it. Continue it on another instance with thread_limit_handoff (threadId ${failure.childThreadId}) once one has headroom, or retry it later. Ask the user before switching accounts.`;
+    case "usage_limit":
       return failure.resetAt
-        ? `Resume it after ${failure.resetAt}, when the limit resets. Do not retry before then, and ask the user before resuming.`
+        ? `No other provider instance had headroom. Continue it with thread_limit_handoff (threadId ${failure.childThreadId}) when one does, or resume it after ${failure.resetAt}, when the limit resets. Ask the user before resuming.`
         : "Resume it once the usage limit resets. Ask the user before resuming.";
     case "interrupted_by_restart":
       return "Check its thread for partial work, then retry or continue it if the work is still needed.";
@@ -99,11 +109,18 @@ function suggestedAction(failure: OrchestrationV2DelegatedTaskFailure): string {
   }
 }
 
+// A follow-up's id is new to the parent, so name the subagent and the task it continued.
+function followUpNote(failure: OrchestrationV2DelegatedTaskFailure): string {
+  return failure.followUpOf === undefined
+    ? ""
+    : ` It was a follow-up of task ${failure.followUpOf}: a later message to subagent "${failure.title}" (thread ${failure.childThreadId}) started it, and the earlier result of ${failure.followUpOf} is unchanged.`;
+}
+
 function failureLine(failure: OrchestrationV2DelegatedTaskFailure): string {
   const partial = failure.partialWork
     ? ` It may have left partial work in thread ${failure.childThreadId}.`
     : "";
-  return `Delegated task ${failure.taskId} ("${failure.title}") stopped: ${KIND_LABEL[failure.kind]}. ${failure.message}${partial} Suggested: ${suggestedAction(failure)}`;
+  return `Delegated task ${failure.taskId} ("${failure.title}") stopped: ${KIND_LABEL[failure.kind]}.${followUpNote(failure)} ${failure.message}${partial} Suggested: ${suggestedAction(failure)}`;
 }
 
 /** The parent's turn input and timeline record for one or more failed child runs. */
@@ -136,6 +153,208 @@ export function delegatedTaskFailureNotice(
     },
   };
 }
+
+const TERMINAL_RUN_STATUSES: ReadonlySet<OrchestrationV2Run["status"]> = new Set([
+  "completed",
+  "failed",
+  "cancelled",
+  "interrupted",
+  "rolled_back",
+]);
+
+/**
+ * Why a delegated child's latest work stopped short, and what the server is
+ * doing about it, as task_status reports it: a limit stop (and its retry,
+ * handoff, or resume at reset) or a restart (and its continuation). Both are
+ * null once the child finished or nothing interrupted it.
+ */
+export function delegatedTaskStop(input: {
+  readonly thread: Pick<OrchestrationV2AppThread, "limitRecovery">;
+  readonly runs: ReadonlyArray<OrchestrationV2Run>;
+  /** Error items of the child's recent runs. */
+  readonly turnItems: ReadonlyArray<OrchestrationV2TurnItem>;
+  /** A restart cut the result run and its continuation is still pending. */
+  readonly awaitingRestart: boolean;
+}): {
+  readonly stoppedOn: "rate_limit" | "usage_limit" | "restart" | null;
+  readonly recovery: OrchestrationV2DelegatedTaskRecovery | null;
+} {
+  const latest = latestExecutedRun(input.runs);
+  const none = { stoppedOn: null, recovery: null } as const;
+  if (latest === null) return none;
+  const limitKind = (run: OrchestrationV2Run) => {
+    const failure = latestRootProviderFailure(run, input.turnItems);
+    return failure?.class !== "usage_limit"
+      ? null
+      : failure.limitKind === "rate_limit"
+        ? ("rate_limit" as const)
+        : ("usage_limit" as const);
+  };
+  const recovery = input.thread.limitRecovery;
+  if (latest.status === "failed") {
+    const kind = limitKind(latest);
+    if (kind === null) return none;
+    const armed = recovery?.runId === latest.id && recovery.autoResume ? recovery : null;
+    const at = armed === null ? null : limitRecoveryResumeAt(armed);
+    return {
+      stoppedOn: kind,
+      recovery:
+        armed === null || at === null
+          ? null
+          : armed.retryAttempt !== undefined
+            ? { type: "retrying", at, attempt: armed.retryAttempt }
+            : { type: "resuming_at_reset", at },
+    };
+  }
+  if (TERMINAL_RUN_STATUSES.has(latest.status)) {
+    return input.awaitingRestart
+      ? { stoppedOn: "restart", recovery: { type: "resuming_after_restart" } }
+      : none;
+  }
+  if (latest.restartContinuationOfRunId !== undefined) {
+    return { stoppedOn: "restart", recovery: { type: "resuming_after_restart" } };
+  }
+  // A running continuation of a limit stop: a handoff, or a retry or resume.
+  const handoff = latest.userMessageId.startsWith("limit-handoff:");
+  if (!handoff && !latest.userMessageId.startsWith("limit-resume:")) return none;
+  const source = input.runs
+    .filter((run) => run.status === "failed" && run.id !== latest.id && runRanAfter(latest, run))
+    .reduce<OrchestrationV2Run | undefined>(
+      (newest, run) => (newest === undefined || runRanAfter(run, newest) ? run : newest),
+      undefined,
+    );
+  const kind = source === undefined ? null : limitKind(source);
+  if (kind === null) return none;
+  if (handoff) {
+    return {
+      stoppedOn: kind,
+      recovery: {
+        type: "handed_off",
+        providerInstanceId: latest.providerInstanceId,
+        model: latest.modelSelection.model,
+      },
+    };
+  }
+  return {
+    stoppedOn: kind,
+    recovery:
+      recovery?.runId === source?.id && recovery?.retryAttempt !== undefined
+        ? {
+            type: "retrying",
+            at: limitRecoveryResumeAt(recovery),
+            attempt: recovery.retryAttempt,
+          }
+        : recovery?.runId === source?.id && recovery !== null && recovery !== undefined
+          ? { type: "resuming_at_reset", at: limitRecoveryResumeAt(recovery) }
+          : null,
+  };
+}
+
+function recoveryLine(
+  failure: OrchestrationV2DelegatedTaskFailure,
+  recovery: OrchestrationV2DelegatedTaskRecovery,
+): string {
+  const stop = `Delegated task ${failure.taskId} ("${failure.title}") hit a ${KIND_LABEL[failure.kind]}.${followUpNote(failure)} ${failure.message}`;
+  switch (recovery.type) {
+    case "handed_off":
+      return `${stop} Cogenly handed it off to provider instance ${recovery.providerInstanceId} (${recovery.model}) with its context and re-ran the stopped request. It is still running; no action is needed.`;
+    case "resuming_at_reset":
+      return `${stop} No other provider instance had headroom, so Cogenly will resume it automatically at ${recovery.at}, when the limit resets. It is still pending; do not retry or re-delegate it.`;
+    case "retrying":
+      return `${stop} Cogenly retries it automatically at ${recovery.at} (attempt ${recovery.attempt}). No action is needed.`;
+    case "resuming_after_restart":
+      return `${stop} Cogenly resumes it after the restart. No action is needed.`;
+  }
+}
+
+/** The parent's timeline record for a child stop the server is recovering on its own. */
+export function delegatedTaskRecoveryNotice(
+  failure: OrchestrationV2DelegatedTaskFailure & {
+    readonly recovery: OrchestrationV2DelegatedTaskRecovery;
+  },
+): { readonly text: string; readonly notification: OrchestrationV2Notification } {
+  const text = `${recoveryLine(failure, failure.recovery)} Use task_status for details.`;
+  const summary =
+    failure.recovery.type === "handed_off"
+      ? `Agent "${failure.title}" hit a ${KIND_LABEL[failure.kind]}: handed off`
+      : `Agent "${failure.title}" hit a ${KIND_LABEL[failure.kind]}: resumes automatically`;
+  return {
+    text,
+    notification: {
+      source: {
+        kind: "delegated_task",
+        taskIds: [failure.taskId],
+        childThreadId: failure.childThreadId,
+      },
+      outcome: "updated",
+      summary,
+      detail: text,
+      delegatedFailures: [failure],
+    },
+  };
+}
+
+/**
+ * Tells a delegated child's parent that its child stopped on a limit and what
+ * the server did about it (handed it off, or resumes it at the reset). It
+ * queues behind the parent's turn like a failure notice, but reports a stop
+ * that is not the task's result: the task stays running. Ids derive from the
+ * child run and the recovery, so a repeated sweep sends it once.
+ */
+export const deliverDelegatedTaskRecoveryNotice = Effect.fn(
+  "DelegatedTaskFailureNotice.deliverRecovery",
+)(function* (input: {
+  readonly childThreadId: ThreadId;
+  readonly childRunId: RunId;
+  readonly recovery: OrchestrationV2DelegatedTaskRecovery;
+}) {
+  const threads = yield* ThreadManagementService.ThreadManagementService;
+  const child = yield* threads.getThreadRecords(input.childThreadId, ["runs", "turnItems"], {
+    turnItemRunIds: [input.childRunId],
+    turnItemTypes: ["error"],
+  });
+  const { lineage, forkedFrom } = child.thread;
+  if (lineage.relationshipToParent !== "subagent" || lineage.parentThreadId === null) return;
+  const run = child.runs.find((candidate) => candidate.id === input.childRunId);
+  if (run === undefined) return;
+  const failure = latestRootProviderFailure(run, child.turnItems);
+  if (failure?.class !== "usage_limit") return;
+  const parent = yield* threads.getThreadRecords(lineage.parentThreadId, ["subagents"]);
+  if (parent.thread.archivedAt !== null || parent.thread.deletedAt !== null) return;
+  const taskId = run.delegatedTaskId ?? (forkedFrom?.type === "node" ? forkedFrom.nodeId : null);
+  const task = parent.subagents.find(
+    (candidate) =>
+      candidate.id === taskId &&
+      candidate.origin === "app_owned" &&
+      candidate.childThreadId === input.childThreadId,
+  );
+  if (task === undefined || task.result !== null) return;
+  const notice = delegatedTaskRecoveryNotice({
+    taskId: task.id,
+    childThreadId: input.childThreadId,
+    childRunId: run.id,
+    title: reportLabel(task.title?.trim() || task.prompt) ?? "Delegated task",
+    kind: failure.limitKind === "rate_limit" ? "rate_limit" : "usage_limit",
+    message: shortMessage(failure.message),
+    resetAt: failure.resetAt ?? null,
+    partialWork: run.startedAt !== null,
+    recovery: input.recovery,
+    ...(task.followUpOf === undefined ? {} : { followUpOf: task.followUpOf }),
+  });
+  const key = `${task.id}:${run.id}:${input.recovery.type}`;
+  yield* threads.dispatch({
+    type: "message.dispatch",
+    commandId: CommandId.make(`command:delegated-task-recovery:${key}`),
+    threadId: lineage.parentThreadId,
+    messageId: MessageId.make(`message:delegated-task-recovery:${key}`),
+    text: notice.text,
+    notification: notice.notification,
+    attachments: [],
+    dispatchMode: { type: "queue_after_active" },
+    createdBy: "agent",
+    creationSource: "server",
+  });
+});
 
 const failureKey = (failure: Pick<OrchestrationV2DelegatedTaskFailure, "taskId" | "childRunId">) =>
   `${failure.taskId}:${failure.childRunId}`;
@@ -199,6 +418,7 @@ export const deliverDelegatedTaskFailureNotice = Effect.fn("DelegatedTaskFailure
       title: reportLabel(task.title?.trim() || task.prompt) ?? "Delegated task",
       ...classified,
       partialWork: run.startedAt !== null,
+      ...(task.followUpOf === undefined ? {} : { followUpOf: task.followUpOf }),
     };
     const key = failureKey(failure);
 

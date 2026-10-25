@@ -1,5 +1,5 @@
 import { OverlayPresence } from "~/components/ui/overlay-presence";
-import type { AgentId, EnvironmentId, ProjectLabelWithRepositories } from "@t3tools/contracts";
+import type { AgentId, EnvironmentId, ProjectLabelWithRepositories } from "@cogenly/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { PlusIcon } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -75,6 +75,7 @@ export function AgentFactsSection(props: {
           <FactEditorDialog
             title={`Remember for ${agent.name}`}
             description={`Saved as confirmed and owned by ${agent.name}. Untagged facts stay private to you and ${agent.name}.`}
+            environmentId={agent.environmentId}
             labels={props.labels}
             initial={null}
             saveLabel="Remember"

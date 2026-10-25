@@ -1,4 +1,4 @@
-import { SourceControlProviderKind } from "@t3tools/contracts";
+import { SourceControlProviderKind } from "@cogenly/contracts";
 import * as Arr from "effect/Array";
 import * as Cache from "effect/Cache";
 import * as Clock from "effect/Clock";
@@ -44,11 +44,11 @@ import {
   type ThreadPullRequestKey,
   type VcsCreateWorktreeInput,
   type VcsCreateWorktreeResult,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import {
   hasProjectSettingsOverrides,
   resolveProjectSettings,
-} from "@t3tools/shared/projectSettings";
+} from "@cogenly/shared/projectSettings";
 import {
   detectSourceControlProviderFromGitRemoteUrl,
   mergeGitStatusParts,
@@ -56,21 +56,21 @@ import {
   resolveAutoFeatureBranchName,
   sanitizeBranchFragment,
   sanitizeFeatureBranchName,
-} from "@t3tools/shared/git";
+} from "@cogenly/shared/git";
 import {
   canonicalRepositoryKey,
   getChangeRequestTerminologyForKind,
   isSshRemoteUrl,
   type ChangeRequestTerminology,
-} from "@t3tools/shared/sourceControl";
-import { parseChangeRequestUrl } from "@t3tools/shared/changeRequestUrl";
+} from "@cogenly/shared/sourceControl";
+import { parseChangeRequestUrl } from "@cogenly/shared/changeRequestUrl";
 import {
   normalizeThreadPullRequestKey,
   threadPullRequestKeyOf,
-} from "@t3tools/shared/threadPullRequests";
+} from "@cogenly/shared/threadPullRequests";
 
-import { GitManagerError, GitPullRequestMaterializationError } from "@t3tools/contracts";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import { GitManagerError, GitPullRequestMaterializationError } from "@cogenly/contracts";
+import * as HostProcess from "@cogenly/shared/HostProcess";
 
 import * as ServerConfig from "../config.ts";
 import * as ProjectLabelFolders from "../projectLabels/ProjectLabelFolders.ts";
@@ -89,11 +89,11 @@ import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import { extractBranchNameFromRemoteRef } from "./remoteRefs.ts";
 import { detachStackFrame } from "./detachStackFrame.ts";
 import * as ServerSettings from "../serverSettings.ts";
-import type { GitManagerServiceError } from "@t3tools/contracts";
+import type { GitManagerServiceError } from "@cogenly/contracts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
-import * as SourceControlProvider from "@t3tools/source-control-core/server/SourceControlProvider";
+import * as SourceControlProvider from "@cogenly/source-control-core/server/SourceControlProvider";
 import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
-import type { ChangeRequest } from "@t3tools/contracts";
+import type { ChangeRequest } from "@cogenly/contracts";
 
 export interface GitActionProgressReporter {
   readonly publish: (event: GitActionProgressEvent) => Effect.Effect<void, never>;
@@ -772,10 +772,10 @@ export const make = Effect.gen(function* () {
     Effect.map((settings) => settings.worktreesDirectory),
     Effect.orElseSucceed(() => ""),
   );
-  // New worktrees live beside their repository: inside its project folder
-  // when the repository belongs to a project, or beside an unfiled
-  // repository under the projects root. An explicit worktreesDirectory
-  // setting wins; anything unresolvable keeps the driver's default.
+  // New worktrees of a repository in a project live in the project's
+  // `.worktrees/`, mirroring its place under `repos/`; a repository in no
+  // project keeps the driver's default (`<Cogenly home>/worktrees`). An
+  // explicit worktreesDirectory setting wins.
   const resolveLocalWorktreeParent = Effect.fnUntraced(function* (cwd: string) {
     if (Option.isNone(sql) || Option.isNone(serverConfig)) return undefined;
     const settings = yield* serverSettingsService.getSettings.pipe(
@@ -790,18 +790,29 @@ export const make = Effect.gen(function* () {
       path,
     );
     let projectDir: string | null = null;
+    let repositoryDirectoryName: string | null = null;
     const project = yield* projects.findActiveByWorkspaceRoot(path.resolve(cwd)).pipe(
       Effect.map(Option.getOrNull),
       Effect.orElseSucceed(() => null),
     );
     if (project !== null) {
-      const rows = yield* sql.value<{ labelId: string; name: string }>`
-        SELECT l.label_id AS "labelId", l.name AS name
+      const rows = yield* sql.value<{
+        labelId: string;
+        name: string;
+        directoryName: string | null;
+      }>`
+        SELECT l.label_id AS "labelId", l.name AS name, r.directory_name AS "directoryName"
         FROM label_repositories r JOIN project_labels l ON l.label_id = r.label_id
         WHERE r.repository_id = ${project.projectId}
-      `.pipe(Effect.orElseSucceed(() => [] as ReadonlyArray<{ labelId: string; name: string }>));
+      `.pipe(
+        Effect.orElseSucceed(
+          () =>
+            [] as ReadonlyArray<{ labelId: string; name: string; directoryName: string | null }>,
+        ),
+      );
       const label = rows[0];
       if (label !== undefined) {
+        repositoryDirectoryName = label.directoryName;
         const ref = { id: ProjectLabelId.make(label.labelId), name: label.name };
         projectDir = Option.isSome(labelFolders)
           ? yield* labelFolders.value.dirForLabel(ref).pipe(
@@ -815,9 +826,8 @@ export const make = Effect.gen(function* () {
       resolveWorktreeParentDirectory({
         setting: "",
         defaultDir: config.worktreesDir,
-        repoCwd: cwd,
         projectDir,
-        projectsRoot,
+        repositoryDirectoryName,
         path,
         home,
       }) ?? undefined

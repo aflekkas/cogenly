@@ -1,5 +1,6 @@
 import {
   AccountId,
+  AuthAccessReadScope,
   AuthAccessWriteScope,
   AuthPeerScopes,
   AuthStandardClientScopes,
@@ -23,7 +24,7 @@ import {
   AuthTerminalOperateScope,
   WS_METHODS,
   WsRpcGroup,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -38,6 +39,19 @@ import {
 import * as RpcAuthorization from "./RpcAuthorization.ts";
 
 describe("RPC authorization scopes", () => {
+  it.each([
+    WS_METHODS.projectLabelsMerge,
+    WS_METHODS.projectLabelsDismissDuplicate,
+    WS_METHODS.projectLabelsUndismissDuplicate,
+  ])("requires the operate grant for %s on server and client", (method) => {
+    expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationOperateScope);
+    expect(clientRpcRequiredScopes(method, {})).toEqual([AuthOrchestrationOperateScope]);
+  });
+  it("requires orchestration read access for generated chat greetings", () => {
+    expect(requiredScopeForRpcMethod(WS_METHODS.serverGetChatGreeting)).toBe(
+      AuthOrchestrationReadScope,
+    );
+  });
   it("requires orchestration read access for global search", () => {
     expect(requiredScopeForRpcMethod(WS_METHODS.searchQuery)).toBe(AuthOrchestrationReadScope);
   });
@@ -70,6 +84,9 @@ describe("RPC authorization scopes", () => {
   });
 
   it("requires operate access to create a project's chat", () => {
+    expect(requiredScopeForRpcMethod(WS_METHODS.projectLabelsMergeFileStatus)).toBe(
+      AuthOrchestrationReadScope,
+    );
     expect(requiredScopeForRpcMethod(WS_METHODS.projectLabelsEnsureProjectChat)).toBe(
       AuthOrchestrationOperateScope,
     );
@@ -115,6 +132,39 @@ describe("RPC authorization scopes", () => {
       expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationOperateScope);
       expect(clientRpcRequiredScopes(method, {})).toEqual([AuthOrchestrationOperateScope]);
     }
+    // Sharing makes another machine a holder of every shared secret: access
+    // management, which standard clients and agents do not have.
+    expect(requiredScopeForRpcMethod(WS_METHODS.vaultSetPeerSharing)).toBe(AuthAccessWriteScope);
+    expect(clientRpcRequiredScopes(WS_METHODS.vaultSetPeerSharing, {})).toEqual([
+      AuthAccessWriteScope,
+    ]);
+    expect(requiredScopeForRpcMethod(WS_METHODS.vaultSharingStatus)).toBe(AuthAccessReadScope);
+    expect(clientRpcRequiredScopes(WS_METHODS.vaultSharingStatus, {})).toEqual([
+      AuthAccessReadScope,
+    ]);
+    expect(AuthStandardClientScopes).not.toContain(AuthAccessWriteScope);
+  });
+
+  it("guards integration secret forms, the runtime installer and the sources feed, on the client too", () => {
+    for (const method of [
+      WS_METHODS.integrationsPreviewNative,
+      WS_METHODS.integrationsImportNative,
+      WS_METHODS.integrationsSaveOAuthClient,
+      WS_METHODS.integrationsSaveApiKey,
+    ]) {
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationOperateScope);
+      expect(clientRpcRequiredScopes(method, {})).toEqual([AuthOrchestrationOperateScope]);
+    }
+    expect(requiredScopeForRpcMethod(WS_METHODS.integrationsInstallRuntime)).toBe(
+      AuthProvidersManageScope,
+    );
+    expect(clientRpcRequiredScopes(WS_METHODS.integrationsInstallRuntime, {})).toEqual([
+      AuthProvidersManageScope,
+    ]);
+    expect(requiredScopeForRpcMethod(WS_METHODS.integrationsSubscribeSources)).toBe(
+      AuthOrchestrationReadScope,
+    );
+    expect(AuthStandardClientScopes).toContain(AuthOrchestrationReadScope);
   });
 
   it("keeps machine pairing behind access management, which standard clients lack", () => {
@@ -123,6 +173,11 @@ describe("RPC authorization scopes", () => {
       WS_METHODS.machinesCreatePeerGrant,
       WS_METHODS.machinesJoinHub,
       WS_METHODS.machinesUnpair,
+      // Setup installs software and exposes the server; its status carries sign-in links.
+      WS_METHODS.machinesSetupStatus,
+      WS_METHODS.machinesSetupSubscribe,
+      WS_METHODS.machinesSetupRunStep,
+      WS_METHODS.machinesSetupDisableServe,
     ]) {
       expect(requiredScopeForRpcMethod(method)).toBe(AuthAccessWriteScope);
       expect(clientRpcRequiredScopes(method, {})).toEqual([AuthAccessWriteScope]);
@@ -225,6 +280,37 @@ describe("RPC authorization scopes", () => {
     expect(requiredScopeForRpcMethod(WS_METHODS.subscribeProjectClones)).toBe(
       AuthOrchestrationReadScope,
     );
+  });
+
+  it("requires operate access to move threads or a project to another machine, on the client too", () => {
+    for (const method of [
+      WS_METHODS.machinesMoveThreads,
+      WS_METHODS.machinesMoveAllThreads,
+      WS_METHODS.projectLabelsMoveToMachine,
+    ]) {
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationOperateScope);
+      expect(clientRpcRequiredScopes(method, {})).toEqual([AuthOrchestrationOperateScope]);
+    }
+  });
+
+  it.each([WS_METHODS.projectLabelsAdoptOrphanFolder, WS_METHODS.projectLabelsRemoveOrphanFolder])(
+    "requires operate access for %s, on the client too, while listing orphans is a read",
+    (method) => {
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationOperateScope);
+      expect(clientRpcRequiredScopes(method, {})).toEqual([AuthOrchestrationOperateScope]);
+      expect(requiredScopeForRpcMethod(WS_METHODS.projectLabelsListOrphanFolders)).toBe(
+        AuthOrchestrationReadScope,
+      );
+    },
+  );
+
+  it.each([
+    WS_METHODS.projectLabelsCheckoutRepository,
+    WS_METHODS.projectLabelsRemoveCheckout,
+    WS_METHODS.projectLabelsAdoptRepository,
+  ])("requires source control writes for %s, on the client too", (method) => {
+    expect(requiredScopeForRpcMethod(method)).toBe(AuthSourceControlWriteScope);
+    expect(clientRpcRequiredScopes(method, {})).toEqual([AuthSourceControlWriteScope]);
   });
 
   it("separates viewing pull request file progress from writing it", () => {

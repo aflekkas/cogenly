@@ -4,15 +4,15 @@ import type {
   VcsRef,
   ProjectId,
   WorktreeSubmodules,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Schema from "effect/Schema";
-import { sanitizeNewRefName } from "@t3tools/shared/git";
+import { sanitizeNewRefName } from "@cogenly/shared/git";
 import { toSortableTimestamp } from "../lib/threadSort";
 export {
   dedupeRemoteBranchesWithLocalMatches,
   deriveLocalBranchNameFromRemoteRef,
   sanitizeNewRefName,
-} from "@t3tools/shared/git";
+} from "@cogenly/shared/git";
 
 export interface EnvironmentOption {
   environmentId: EnvironmentId;
@@ -21,6 +21,11 @@ export interface EnvironmentOption {
   label: string;
   isPrimary: boolean;
   machine: EnvironmentMachineKind;
+  /**
+   * Set for a machine reached only through the draft environment's pairing:
+   * the launch goes to that environment, naming this machine to run it.
+   */
+  pairedMachine?: { readonly online: boolean };
 }
 
 export const EnvMode = Schema.Literals(["local", "worktree"]);
@@ -51,6 +56,13 @@ export function resolveEnvironmentOptionLabel(input: {
   }
 
   return runtimeLabel ?? savedLabel ?? input.environmentId;
+}
+
+/** A "Run on" choice's tooltip: its label, and whether a paired machine is offline. */
+export function resolveEnvironmentOptionTitle(
+  option: Pick<EnvironmentOption, "label" | "pairedMachine">,
+): string {
+  return option.pairedMachine?.online === false ? `${option.label} (offline)` : option.label;
 }
 
 // A remote (non-primary) environment is always surfaced, even when it is the

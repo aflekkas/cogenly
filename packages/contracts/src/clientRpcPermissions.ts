@@ -1,9 +1,11 @@
 import * as Schema from "effect/Schema";
 import { GitPreparePullRequestThreadInput } from "./git.ts";
 import {
+  AuthAccessReadScope,
   AuthAccessWriteScope,
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
+  AuthProvidersManageScope,
   AuthSettingsWriteScope,
   AuthSourceControlWriteScope,
   type AuthEnvironmentScope,
@@ -48,6 +50,9 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.projectCloneCancel]: AuthSourceControlWriteScope,
   [WS_METHODS.projectCloneRetry]: AuthSourceControlWriteScope,
   [WS_METHODS.projectLabelsCloneRepository]: AuthSourceControlWriteScope,
+  [WS_METHODS.projectLabelsCheckoutRepository]: AuthSourceControlWriteScope,
+  [WS_METHODS.projectLabelsRemoveCheckout]: AuthSourceControlWriteScope,
+  [WS_METHODS.projectLabelsAdoptRepository]: AuthSourceControlWriteScope,
   [WS_METHODS.vcsPull]: AuthSourceControlWriteScope,
   [WS_METHODS.gitRunStackedAction]: AuthSourceControlWriteScope,
   [WS_METHODS.gitPreparePullRequestThread]: AuthSourceControlWriteScope,
@@ -59,6 +64,9 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
 
   [WS_METHODS.projectLabelsCreate]: AuthOrchestrationOperateScope,
   [WS_METHODS.projectLabelsUpdate]: AuthOrchestrationOperateScope,
+  [WS_METHODS.projectLabelsMerge]: AuthOrchestrationOperateScope,
+  [WS_METHODS.projectLabelsUndismissDuplicate]: AuthOrchestrationOperateScope,
+  [WS_METHODS.projectLabelsDismissDuplicate]: AuthOrchestrationOperateScope,
   [WS_METHODS.projectLabelsDelete]: AuthOrchestrationOperateScope,
   [WS_METHODS.projectLabelsArchive]: AuthOrchestrationOperateScope,
   [WS_METHODS.projectLabelsUnarchive]: AuthOrchestrationOperateScope,
@@ -67,11 +75,21 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.projectLabelsLinkSource]: AuthOrchestrationOperateScope,
   [WS_METHODS.projectLabelsUnlinkSource]: AuthOrchestrationOperateScope,
   [WS_METHODS.projectLabelsMoveThread]: AuthOrchestrationOperateScope,
+  [WS_METHODS.projectLabelsMoveToMachine]: AuthOrchestrationOperateScope,
+  [WS_METHODS.machinesMoveThreads]: AuthOrchestrationOperateScope,
+  [WS_METHODS.machinesForkThread]: AuthOrchestrationOperateScope,
+  [WS_METHODS.machinesMoveAllThreads]: AuthOrchestrationOperateScope,
+  [WS_METHODS.machinesPreviewMoveThreads]: AuthOrchestrationOperateScope,
+  [WS_METHODS.machinesPreviewMoveAllThreads]: AuthOrchestrationOperateScope,
+  [WS_METHODS.projectLabelsPreviewMoveToMachine]: AuthOrchestrationOperateScope,
+  [WS_METHODS.machinesAdoptThreads]: AuthAccessWriteScope,
   [WS_METHODS.projectLabelsForkThreadToProject]: AuthOrchestrationOperateScope,
   [WS_METHODS.projectLabelsSetThreadLabels]: AuthOrchestrationOperateScope,
   [WS_METHODS.projectLabelsAddResource]: AuthOrchestrationOperateScope,
   [WS_METHODS.projectLabelsRemoveResource]: AuthOrchestrationOperateScope,
   [WS_METHODS.projectLabelsEnsureProjectChat]: AuthOrchestrationOperateScope,
+  [WS_METHODS.projectLabelsAdoptOrphanFolder]: AuthOrchestrationOperateScope,
+  [WS_METHODS.projectLabelsRemoveOrphanFolder]: AuthOrchestrationOperateScope,
   [WS_METHODS.workStart]: AuthOrchestrationOperateScope,
   [WS_METHODS.agentsRequestApproval]: AuthOrchestrationOperateScope,
   [WS_METHODS.agentsApprove]: AuthOrchestrationOperateScope,
@@ -79,6 +97,10 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   // Seeing what a thread waits on is a read; deciding it is agents.approve / agents.reject.
   [WS_METHODS.threadApprovalsSubscribe]: AuthOrchestrationReadScope,
   [WS_METHODS.agentsStartWork]: AuthOrchestrationOperateScope,
+  [WS_METHODS.integrationsPreviewNative]: AuthOrchestrationOperateScope,
+  [WS_METHODS.integrationsImportNative]: AuthOrchestrationOperateScope,
+  [WS_METHODS.repoMcpTrustSubscribe]: AuthOrchestrationReadScope,
+  [WS_METHODS.repoMcpTrustRespond]: AuthOrchestrationOperateScope,
   [WS_METHODS.integrationsList]: AuthOrchestrationReadScope,
   // Creating or changing an integration hands agents a new credentialed
   // upstream, and testing one spends a resolved credential on the network.
@@ -90,8 +112,21 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   // Signing in grants agents a new upstream account.
   [WS_METHODS.integrationsBeginSignIn]: AuthOrchestrationOperateScope,
   [WS_METHODS.integrationsConnectFromCatalog]: AuthOrchestrationOperateScope,
+  // Saving a client secret or key writes the vault and the integration, like vault.create.
+  [WS_METHODS.integrationsSaveOAuthClient]: AuthOrchestrationOperateScope,
+  [WS_METHODS.integrationsSaveApiKey]: AuthOrchestrationOperateScope,
+  // Installing uv puts software on this machine, like installing a provider CLI.
+  [WS_METHODS.integrationsInstallRuntime]: AuthProvidersManageScope,
+  // The composer's Sources picker runs for every paired client that can read threads.
+  [WS_METHODS.integrationsSubscribeSources]: AuthOrchestrationReadScope,
   [WS_METHODS.machineSecurityStatus]: AuthOrchestrationReadScope,
+  [WS_METHODS.machineSandboxSetup]: AuthSettingsWriteScope,
+  [WS_METHODS.computerUseStatus]: AuthOrchestrationReadScope,
+  // Only opens System Settings on the server's Mac; the user still flips the switch there.
+  [WS_METHODS.computerUseRequestPermission]: AuthOrchestrationOperateScope,
   [WS_METHODS.machinesList]: AuthOrchestrationReadScope,
+  [WS_METHODS.syncStatus]: AuthOrchestrationReadScope,
+  [WS_METHODS.machinesCatalog]: AuthOrchestrationReadScope,
   [WS_METHODS.machinesSubscribe]: AuthOrchestrationReadScope,
   [WS_METHODS.machinesUpdate]: AuthSettingsWriteScope,
   // Pairing hands another server a standing credential to this one, or makes
@@ -100,6 +135,18 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.machinesCreatePeerGrant]: AuthAccessWriteScope,
   [WS_METHODS.machinesJoinHub]: AuthAccessWriteScope,
   [WS_METHODS.machinesUnpair]: AuthAccessWriteScope,
+  // Setup installs software and puts this server on the tailnet, and its
+  // status carries the one-time Tailscale sign-in link: access management too.
+  [WS_METHODS.machinesSetupStatus]: AuthAccessWriteScope,
+  [WS_METHODS.machinesSetupSubscribe]: AuthAccessWriteScope,
+  [WS_METHODS.machinesSetupRunStep]: AuthAccessWriteScope,
+  [WS_METHODS.machinesSetupDisableServe]: AuthAccessWriteScope,
+  [WS_METHODS.machinesHealth]: AuthOrchestrationReadScope,
+  [WS_METHODS.machinesHealthSubscribe]: AuthOrchestrationReadScope,
+  [WS_METHODS.machinesHealthAlertsSubscribe]: AuthOrchestrationReadScope,
+  [WS_METHODS.machinesHealthRetrySync]: AuthOrchestrationOperateScope,
+  // Sends a message from the owner's Slack or Google account.
+  [WS_METHODS.machinesHealthTestAlertChannels]: AuthSettingsWriteScope,
   [WS_METHODS.factsCreate]: AuthOrchestrationOperateScope,
   [WS_METHODS.factsUpdate]: AuthOrchestrationOperateScope,
   [WS_METHODS.factsSupersede]: AuthOrchestrationOperateScope,
@@ -136,6 +183,10 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.vaultCreate]: AuthOrchestrationOperateScope,
   [WS_METHODS.vaultUpdate]: AuthOrchestrationOperateScope,
   [WS_METHODS.vaultDelete]: AuthOrchestrationOperateScope,
+  // Sharing makes another machine able to decrypt every shared item: access
+  // management, like pairing. Agents have no tool for it.
+  [WS_METHODS.vaultSetPeerSharing]: AuthAccessWriteScope,
+  [WS_METHODS.vaultSharingStatus]: AuthAccessReadScope,
   [ORCHESTRATION_V2_WS_METHODS.stopWorkflow]: AuthOrchestrationOperateScope,
   // Continuing on another provider starts a turn, like sending a message.
   [ORCHESTRATION_V2_WS_METHODS.acceptUsageLimitHandoff]: AuthOrchestrationOperateScope,

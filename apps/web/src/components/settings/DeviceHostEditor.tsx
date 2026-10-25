@@ -1,6 +1,6 @@
 import { useState } from "react";
 import * as Option from "effect/Option";
-import type { SshDeviceHostConfig } from "@t3tools/contracts";
+import type { SshDeviceHostConfig } from "@cogenly/contracts";
 import { CheckIcon, MonitorIcon, XIcon } from "lucide-react";
 import { Button, InlineButton } from "../ui/button";
 import { DisclosureChevron } from "../ui/disclosure";
@@ -52,7 +52,7 @@ export function DeviceHostEditor({
     targets.length === 1 ||
     (expandedChecks?.key === connectionKey ? expandedChecks.open : failed > 0);
   const checkSummary = checking
-    ? "Checking environments…"
+    ? "Checking machines…"
     : results
       ? failed
         ? `${failed} of ${targets.length} failed`
@@ -82,7 +82,7 @@ export function DeviceHostEditor({
           <DialogDescription>
             {targets.length === 1
               ? `Connect from ${targets[0]?.label}.`
-              : `Connect from ${targets.length} selected environments.`}{" "}
+              : `Connect from ${targets.length} selected machines.`}{" "}
             Hosts on the same machine are skipped.
           </DialogDescription>
         </DialogHeader>
@@ -147,7 +147,7 @@ export function DeviceHostEditor({
               </label>
             </div>
             <p className="mt-2 text-xs text-muted-foreground">
-              Optional. Resolved separately on each environment.
+              Optional. Resolved separately on each machine.
             </p>
           </details>
           <Collapsible

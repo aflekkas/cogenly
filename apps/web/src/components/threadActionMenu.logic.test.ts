@@ -1,4 +1,4 @@
-import type { ContextMenuItem } from "@t3tools/contracts";
+import type { ContextMenuItem } from "@cogenly/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import { threadCapabilities, type ThreadKind } from "../threadCapabilities";
@@ -6,6 +6,7 @@ import {
   buildDraftActionMenuItems,
   buildRepositoryActionMenuItems,
   buildThreadActionMenuItems,
+  machineMenuItems,
   type ThreadActionMenuState,
 } from "./threadActionMenu.logic";
 
@@ -132,7 +133,7 @@ describe("buildThreadActionMenuItems per thread kind", () => {
     const archive = buildThreadActionMenuItems(stateFor("work", { isRunning: true })).find(
       (item) => item.id === "archive",
     );
-    expect(archive).toMatchObject({ disabled: true, label: "Archive Thread (Stop It First)" });
+    expect(archive).toMatchObject({ disabled: true, label: "Archive thread (stop it first)" });
   });
 
   it("ends Delete with an ellipsis only when it asks first", () => {
@@ -174,7 +175,7 @@ describe("buildThreadActionMenuItems per thread kind", () => {
     ).not.toContain("pin");
   });
 
-  it("offers Regenerate Title after Rename when the server supports it, waiting while it runs", () => {
+  it("offers Regenerate title after Rename when the server supports it, waiting while it runs", () => {
     const withRegeneration = (kind: ThreadKind, isRegeneratingTitle = false) => {
       const base = stateFor(kind, { isRegeneratingTitle });
       return buildThreadActionMenuItems({
@@ -187,7 +188,7 @@ describe("buildThreadActionMenuItems per thread kind", () => {
       expect(items.indexOf("regenerate-title")).toBe(items.indexOf("rename") + 1);
     }
     const pending = withRegeneration("work", true).find((item) => item.id === "regenerate-title");
-    expect(pending).toMatchObject({ label: "Regenerating Title…", disabled: true });
+    expect(pending).toMatchObject({ label: "Regenerating title…", disabled: true });
     expect(ids(buildThreadActionMenuItems(stateFor("work")))).not.toContain("regenerate-title");
     expect(ids(withRegeneration("agentConversation"))).not.toContain("regenerate-title");
   });
@@ -198,7 +199,7 @@ describe("buildThreadActionMenuItems per thread kind", () => {
   });
 });
 
-describe("Move to folder in the thread action menu", () => {
+describe("Move to project in the thread action menu", () => {
   const folderItems = (menuState: ThreadActionMenuState) =>
     buildThreadActionMenuItems(menuState).filter((item) => item.id === "move-folder");
   const base = stateFor("chat").folder!;
@@ -229,6 +230,24 @@ describe("Move to folder in the thread action menu", () => {
     expect(ids(items)).toContain("move-folder:bartr");
   });
 
+  it("lists a project that doesn't include Work's repository, disabled with why, and no new project", () => {
+    const items = folderItems(
+      stateFor("work", {
+        folder: {
+          ...base,
+          inRepository: true,
+          options: [
+            { id: "bartr", name: "Bartr", blockedReason: "Doesn't include platform" },
+            { id: "spawn", name: "Spawn", color: "violet" },
+          ],
+        },
+      }),
+    );
+    const bartr = items[0]?.children?.find((child) => child.id === "move-folder:bartr");
+    expect(bartr).toMatchObject({ label: "Bartr (Doesn't include platform)", disabled: true });
+    expect(ids(items)).not.toContain("new-folder");
+  });
+
   it("disables moves without permission but still opens the folder", () => {
     const items = folderItems(stateFor("chat", { folder: { ...base, canMove: false } }));
     const move = items.find((item) => item.id === "move-folder");
@@ -247,9 +266,9 @@ describe("Move to folder in the thread action menu", () => {
   });
 
   it("names the submenu for what picking does: a chat with turns forks", () => {
-    expect(folderItems(stateFor("chat"))[0]?.label).toBe("Move to Folder");
+    expect(folderItems(stateFor("chat"))[0]?.label).toBe("Move to project…");
     expect(folderItems(stateFor("chat", { folder: { ...base, forks: true } }))[0]?.label).toBe(
-      "Fork into Project",
+      "Fork into project…",
     );
   });
 
@@ -312,11 +331,11 @@ describe("buildRepositoryActionMenuItems", () => {
       buildRepositoryActionMenuItems({ folder: { key: "env:spawn", name: "Spawn" } }).map(
         (item) => item.label,
       ),
-    ).toEqual(["New Thread", "Open Spawn", "Repository Settings"]);
+    ).toEqual(["New thread", "Open Spawn", "Repository settings"]);
   });
 });
 
-describe("Move to folder options", () => {
+describe("Move to project options", () => {
   it("lead each project with its folder in the project's color", () => {
     const move = buildThreadActionMenuItems(stateFor("chat")).find(
       (item) => item.id === "move-folder",
@@ -329,5 +348,64 @@ describe("Move to folder options", () => {
       ["folder", "var(--color-gray-500)", false],
       ["folder", "var(--color-violet-500)", true],
     ]);
+  });
+});
+
+describe("Move to machine", () => {
+  const vps = { environmentId: "vps", name: "VPS", online: true };
+  const mini = { environmentId: "mini", name: "Mac mini", online: false };
+
+  it("is absent on a standalone machine", () => {
+    expect(ids(buildThreadActionMenuItems(stateFor("chat")))).not.toContain("move-machine");
+    expect(machineMenuItems({ targets: [], canMove: true })).toEqual([]);
+  });
+
+  it("names the one paired machine directly, with a bulk count", () => {
+    expect(
+      machineMenuItems({ targets: [vps], canMove: true }, " (3)").map((item) => [
+        item.id,
+        item.label,
+        item.disabled,
+      ]),
+    ).toEqual([["move-machine:vps", "Move to VPS (3)", false]]);
+  });
+
+  it("lists several machines in a submenu, offline ones disabled", () => {
+    const [submenu] = machineMenuItems({ targets: [mini, vps], canMove: true });
+    expect(submenu?.id).toBe("move-machine");
+    expect(submenu?.children?.map((item) => [item.label, item.disabled])).toEqual([
+      ["Mac mini (offline)", true],
+      ["VPS", false],
+    ]);
+  });
+
+  it("stays disabled for a client without the move permission", () => {
+    const items = buildThreadActionMenuItems(
+      stateFor("work", { machines: { targets: [vps], canMove: false } }),
+    );
+    expect(items.find((item) => item.id === "move-machine:vps")?.disabled).toBe(true);
+  });
+});
+
+describe("Fork to machine", () => {
+  const targets = [
+    { environmentId: "vps", name: "VPS", online: true },
+    { environmentId: "mini", name: "Mac mini", online: false },
+  ];
+  it("offers the same destinations as Move, preserving offline and permission states", () => {
+    const menu = (canFork: boolean, canOperate = true) =>
+      buildThreadActionMenuItems(
+        stateFor("work", { canOperate, machines: { targets, canMove: true, canFork } }),
+      ).find((item) => item.id === "fork-machine");
+    expect(menu(true)?.children?.map((item) => [item.label, item.disabled])).toEqual([
+      ["VPS", false],
+      ["Mac mini (offline)", true],
+    ]);
+    expect(menu(false)?.disabled).toBe(true);
+    expect(menu(true, false)?.disabled).toBe(true);
+    const direct = buildThreadActionMenuItems(
+      stateFor("chat", { machines: { targets: [targets[0]!], canMove: true, canFork: true } }),
+    ).find((item) => item.id === "fork-machine:vps");
+    expect(direct?.label).toBe("Fork to VPS");
   });
 });

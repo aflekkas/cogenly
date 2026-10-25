@@ -4,9 +4,9 @@ import {
   type ProviderDriverKind,
   type ServerProvider,
   type ServerProviderCompatibilityAdvisory,
-} from "@t3tools/contracts";
-import { satisfiesSemverRange } from "@t3tools/shared/semver";
-import { normalizeDriverVersion } from "@t3tools/provider-core/server/driver";
+} from "@cogenly/contracts";
+import { satisfiesSemverRange } from "@cogenly/shared/semver";
+import { normalizeDriverVersion } from "@cogenly/provider-core/server/driver";
 import * as Schema from "effect/Schema";
 import packageJson from "../../package.json" with { type: "json" };
 import { BUILT_IN_DRIVERS } from "./builtInDrivers.ts";

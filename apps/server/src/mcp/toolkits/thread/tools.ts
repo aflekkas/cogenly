@@ -20,8 +20,8 @@ import {
   ProjectId,
   ProviderInstanceId,
   UsageLimitHandoffRecommendation,
-} from "@t3tools/contracts";
-import { SNOOZE_PRESET_KEYS } from "@t3tools/shared/snooze";
+} from "@cogenly/contracts";
+import { SNOOZE_PRESET_KEYS } from "@cogenly/shared/snooze";
 import * as Crypto from "effect/Crypto";
 import * as Schema from "effect/Schema";
 import { Tool, Toolkit } from "effect/ai";
@@ -303,13 +303,21 @@ const transferResult = Schema.Struct({ sequence: NonNegativeInt, targetThreadId:
 const ThreadForkTool = Tool.make("thread_fork", {
   ...commandTool,
   description:
-    "Fork a thread from a stable run or checkpoint using the existing fork command. Omit threadId to fork this thread. The fork inherits the source configuration. Acceptance does not mean a provider turn has completed.",
+    "Fork a conversation, leaving the original unchanged. Omit threadId for this thread. Use a stable clientRequestId across retries. Set machine to this, vps, auto, a machine name or ID to fork on a paired machine in the same repository, cloned there on demand. Cross-machine forks use a portable context handoff and the source's pushed branch/commit. If uncommitted or unpushed work is reported, tell the user and obtain their choice before retrying with allowLastPushed:true; those changes remain on the source. Omit sourcePoint to use the latest finished turn for a cross-machine fork. Acceptance does not start a provider turn.",
   parameters: Schema.Struct({
     threadId: Schema.optional(ThreadId),
-    sourcePoint: OrchestrationV2ThreadForkSourcePoint,
+    clientRequestId: Schema.optional(TrimmedNonEmptyString),
+    sourcePoint: Schema.optional(OrchestrationV2ThreadForkSourcePoint),
+    machine: Schema.optional(TrimmedNonEmptyString),
+    allowLastPushed: Schema.optional(Schema.Boolean),
     title: Schema.optional(TrimmedNonEmptyString),
   }),
-  success: transferResult,
+  success: Schema.Struct({
+    ...transferResult.fields,
+    branch: Schema.optional(Schema.NullOr(Schema.String)),
+    commit: Schema.optional(Schema.NullOr(Schema.String)),
+    usedLastPushed: Schema.optional(Schema.Boolean),
+  }),
 }).annotate(Tool.Destructive, true);
 const ThreadMergeBackTool = Tool.make("thread_merge_back", {
   ...commandTool,

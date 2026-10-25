@@ -1,10 +1,11 @@
-import type { LinkContextRecord, UserInputQuestion } from "@t3tools/contracts";
-import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
-import { formatThreadLink } from "@t3tools/shared/threadLinks";
+import type { LinkContextRecord, UserInputQuestion } from "@cogenly/contracts";
+import { replaceComposerContextReferences } from "@cogenly/shared/composerContextReferences";
+import { formatThreadLink } from "@cogenly/shared/threadLinks";
 
 /**
  * Question responses carry text, so thread and agent chips become thread links with the actual
- * thread IDs, and a project folder chip becomes its name.
+ * thread IDs, a project folder chip becomes its name, and a source chip names the integration
+ * the agent calls.
  */
 export function projectPendingUserInputAnswer(
   answer: unknown,
@@ -21,6 +22,8 @@ export function projectPendingUserInputAnswer(
         return formatThreadLink(record.conversationThreadId, reference.label);
       case "project-folder":
         return reference.label;
+      case "integration":
+        return `${reference.label} (integration "${record.name}")`;
       default:
         return reference.source;
     }

@@ -8,20 +8,20 @@ import {
   ProviderThreadId,
   RunId,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Base64Url from "effect/encoding/Base64Url";
 import * as Hex from "effect/encoding/Hex";
-import * as KeyedLock from "@t3tools/shared/KeyedLock";
+import * as KeyedLock from "@cogenly/shared/KeyedLock";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 
 import { isGitImport, parseTurnDiffFilesFromNumstat } from "../checkpointing/Diffs.ts";
 import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
-import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import * as IdAllocator from "@cogenly/provider-core/server/IdAllocator";
 
 const CHECKPOINT_REFS_PREFIX = "refs/t3/orchestration-v2/checkpoints";
 const ROOT_CHECKPOINT_SCOPE_NAME = "root";
@@ -143,6 +143,11 @@ export interface CheckpointServiceV2Shape {
     readonly appRunOrdinal: number | null;
     readonly capturedAt: DateTime.Utc;
   }) => Effect.Effect<OrchestrationV2Checkpoint, CheckpointServiceV2Error>;
+  /** Read-only preflight before rollback can create a worktree or open a provider. */
+  readonly assertRestorable: (input: {
+    readonly scope: OrchestrationV2CheckpointScope;
+    readonly checkpoint: OrchestrationV2Checkpoint;
+  }) => Effect.Effect<void, CheckpointServiceV2Error>;
   readonly restore: (input: {
     readonly scope: OrchestrationV2CheckpointScope;
     readonly checkpoint: OrchestrationV2Checkpoint;
@@ -509,6 +514,22 @@ export const layer: Layer.Layer<
         ),
       );
 
+    const assertRestorable: CheckpointServiceV2Shape["assertRestorable"] = (input) =>
+      Effect.gen(function* () {
+        const exists = yield* checkpointStore
+          .hasCheckpointRef({
+            cwd: input.scope.cwd,
+            checkpointRef: input.checkpoint.ref,
+          })
+          .pipe(Effect.orElseSucceed(() => false));
+        if (input.checkpoint.status !== "ready" || !exists)
+          return yield* new CheckpointRestoreError({
+            scopeId: input.scope.id,
+            checkpointId: input.checkpoint.id,
+            cause: "Checkpoint ref is unavailable on this machine.",
+          });
+      });
+
     const restore: CheckpointServiceV2Shape["restore"] = (input) =>
       withWorkspaceLock(
         input.scope.cwd,
@@ -580,6 +601,7 @@ export const layer: Layer.Layer<
       captureBaseline,
       materializeBaselineCheckpoint,
       capture,
+      assertRestorable,
       restore,
       deleteStaleRefs,
     } satisfies CheckpointServiceV2Shape);

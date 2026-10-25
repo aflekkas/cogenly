@@ -1,5 +1,5 @@
-import type { ThreadId, VisualStateError } from "@t3tools/contracts";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import type { ThreadId, VisualStateError } from "@cogenly/contracts";
+import * as HostProcess from "@cogenly/shared/HostProcess";
 import {
   clampHtmlRenderHeight,
   HTML_RENDER_APP_FONT_FILES,
@@ -13,13 +13,13 @@ import {
   injectHtmlRenderBootstrap,
   type HtmlRenderFontFace,
   type HtmlRenderReference,
-} from "@t3tools/shared/htmlRender";
+} from "@cogenly/shared/htmlRender";
 import * as NodeModule from "node:module";
 import {
   T3_CODE_DARK_THEME_COLORS,
   T3_CODE_LIGHT_THEME_COLORS,
   type ThemeAppearance,
-} from "@t3tools/shared/themePalettes";
+} from "@cogenly/shared/themePalettes";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -409,7 +409,7 @@ const make = Effect.gen(function* () {
     const fonts = yield* Effect.forEach(HTML_RENDER_APP_FONT_FILES, (font) =>
       Effect.gen(function* () {
         const packaged = yield* Effect.try(() =>
-          requireShared.resolve(`@t3tools/shared/fonts/${font.file}`),
+          requireShared.resolve(`@cogenly/shared/fonts/${font.file}`),
         ).pipe(Effect.option);
         const bytes = Option.isSome(packaged)
           ? yield* fileSystem.readFile(packaged.value).pipe(Effect.option)

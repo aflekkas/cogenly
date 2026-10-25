@@ -13,27 +13,28 @@ import type {
   ExecutionEnvironmentCapabilities,
   ServerSettings,
   ServerSettingsPatch,
-} from "@t3tools/contracts";
-import { isModelSelectionProviderEnabled } from "@t3tools/shared/serverSettings";
+} from "@cogenly/contracts";
+import { UNIVERSAL_SERVER_SETTING_KEYS } from "@cogenly/contracts";
+import { isModelSelectionProviderEnabled } from "@cogenly/shared/serverSettings";
 import * as Equal from "effect/Equal";
 import * as Struct from "effect/Struct";
 
 import type { EnvironmentConnectionPhase } from "../connection/presentation.ts";
 
 /** Server keys that hold a user preference rather than machine config. */
-const SHARED_SERVER_SETTING_KEYS = [
-  "continueThreadsAfterServerUpdate",
-  "autoResumeLimitedThreads",
-  "snoozeLimitedThreads",
-  "aiGreetings",
-  "newWorktreesStartFromOrigin",
-  "sourceControlWritingStyle",
-  "textGenerationModelSelection",
-] as const satisfies ReadonlyArray<keyof ServerSettings & keyof ServerSettingsPatch>;
+const SHARED_SERVER_SETTING_KEYS = UNIVERSAL_SERVER_SETTING_KEYS;
 
 export type SharedServerSettingKey = (typeof SHARED_SERVER_SETTING_KEYS)[number];
 
-const SHARED_KEY_SET = new Set<string>(SHARED_SERVER_SETTING_KEYS);
+const SHARED_KEY_SET = new Set<string>([
+  ...SHARED_SERVER_SETTING_KEYS,
+  "migrateClientPreferences",
+  "migrateModelPreferences",
+  "setModelFavorites",
+  "setModelsHidden",
+  "setProviderModelOrder",
+  "setModelEffortDefault",
+]);
 
 /** Split a server patch into the keys every environment should receive and the primary-only rest. */
 export function splitSharedServerPatch(patch: ServerSettingsPatch): {
@@ -90,8 +91,16 @@ export function pickSharedServerSettings(
   settings: ServerSettings,
   capabilities?: Pick<ExecutionEnvironmentCapabilities, "threadRestartContinuation">,
 ): ServerSettingsPatch {
+  const { favorites, providerModelPreferences, ...preferences } = Struct.pick(
+    settings,
+    SHARED_SERVER_SETTING_KEYS,
+  );
   return filterSharedServerPatch(
-    Struct.pick(settings, SHARED_SERVER_SETTING_KEYS),
+    {
+      ...preferences,
+      ...(favorites === null ? {} : { favorites }),
+      ...(providerModelPreferences === null ? {} : { providerModelPreferences }),
+    },
     capabilities,
     settings,
   );

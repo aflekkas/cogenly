@@ -1,4 +1,4 @@
-import type { AppearanceAccent } from "@t3tools/contracts";
+import type { AppearanceAccent } from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 

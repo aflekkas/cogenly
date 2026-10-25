@@ -5,7 +5,7 @@ import {
   ThreadId,
   VaultItemMetadata,
   VaultSecretFields,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { NodeCrypto } from "@effect/platform-node";
@@ -161,6 +161,16 @@ describe("Vault service", () => {
         approved: false,
       });
       expect(resolved.value).toBe("octo-user");
+      expect(
+        yield* vault
+          .resolveSecretByName({
+            name: "GitHub",
+            field: "password",
+            destinationHost: "evil.test",
+            approved: true,
+          })
+          .pipe(Effect.flip),
+      ).toMatchObject({ reason: "domain_not_allowed" });
 
       const usage = yield* vault.listUsage({ itemId: item.id });
       expect(usage.usage.map((entry) => entry.outcome)).toContain("allowed");
@@ -178,6 +188,62 @@ describe("Vault service", () => {
         .pipe(Effect.flip);
       expect(afterDelete.reason).toBe("not_found");
     }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("a local policy update preserves a peer revision arriving before its transaction", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      let peerProjection: ReturnType<Vault.Vault["Service"]["applySynced"]> | undefined;
+      const intercepted = new Proxy(sql, {
+        get(target, property, receiver) {
+          if (property !== "withTransaction") return Reflect.get(target, property, receiver);
+          return <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+            Effect.suspend(() => {
+              const projection = peerProjection;
+              peerProjection = undefined;
+              return projection
+                ? projection.pipe(Effect.andThen(sql.withTransaction(effect)))
+                : sql.withTransaction(effect);
+            });
+        },
+      });
+      yield* Effect.gen(function* () {
+        const vault = yield* Vault.Vault;
+        const { item } = yield* vault.create({
+          name: "Sign-in",
+          type: "api_key",
+          secretFields: { value: "old-token" },
+        });
+        peerProjection = vault.applySynced({
+          itemId: item.id,
+          sourceLabel: "Peer",
+          extras: {},
+          payload: {
+            name: item.name,
+            type: item.type,
+            scopeProjectId: null,
+            allowedDomains: [],
+            createdAt: item.createdAt,
+            updatedAt: item.updatedAt,
+            secretFields: { value: "peer-token", password: "peer-refresh" },
+            attachment: { client: "peer-client" },
+          },
+        });
+        const policy = { mode: "allow" as const, allowedAgentIds: [], allowedDomains: [] };
+        const updated = yield* vault.update({ id: item.id, policy });
+        expect(updated.item.policy).toEqual(policy);
+        expect(updated.item.fields).toEqual(["password", "value"]);
+        expect(yield* vault.credentialRevision(item.id)).toBe(2);
+        expect(yield* vault.getSyncAttachment(item.id)).toEqual({ client: "peer-client" });
+        expect(
+          yield* vault.use({ itemId: item.id, field: "value", caller: { kind: "server" } }),
+        ).toMatchObject({ status: "allowed", value: "peer-token" });
+      }).pipe(
+        Effect.provide(
+          Vault.layer.pipe(Layer.provide(Layer.succeed(SqlClient.SqlClient, intercepted))),
+        ),
+      );
+    }).pipe(Effect.provide(dependencies)),
   );
 
   it.effect("thread project scope filters lists and both id and name use", () =>

@@ -16,6 +16,7 @@ export const MachineSecurityState = Schema.Literals([
 export type MachineSecurityState = typeof MachineSecurityState.Type;
 
 export const MachineSecurityCheckId = Schema.Literals([
+  "chat-terminal-sandbox",
   "cogenly-bind",
   "listening-sockets",
   "sshd",
@@ -60,3 +61,10 @@ export const MachineSecurityStatus = Schema.Struct({
   summary: Schema.String,
 });
 export type MachineSecurityStatus = typeof MachineSecurityStatus.Type;
+
+export const ChatSandboxSetupResult = Schema.Struct({
+  available: Schema.Boolean,
+  message: Schema.String,
+  command: Schema.NullOr(Schema.String),
+});
+export type ChatSandboxSetupResult = typeof ChatSandboxSetupResult.Type;

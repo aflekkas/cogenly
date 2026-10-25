@@ -3,7 +3,7 @@ import {
   type ProjectId,
   type ProjectLabelId,
   type ScopedProjectRef,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { ThreadContextDragGhost } from "./chat/ThreadContextDragGhost";
 import {
   dropThreadContext,
@@ -14,41 +14,41 @@ import { discardComposerDraft } from "../lib/discardComposerDraft";
 import { requestCustomSnooze } from "./CustomSnoozeDialog";
 import { WorkRowStatusMarker } from "./work/WorkRowStatusMarker";
 import { useAtomValue } from "@effect/atom-react";
-import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
+import { replaceComposerContextReferences } from "@cogenly/shared/composerContextReferences";
 import * as Schema from "effect/Schema";
-import { canSnooze, threadWokeAt } from "@t3tools/client-runtime/state/thread-settled";
-import { createInboxReturnTracker } from "@t3tools/client-runtime/state/thread-inbox";
-import { formatDiffCount } from "@t3tools/client-runtime/diff-count";
+import { canSnooze, threadWokeAt } from "@cogenly/client-runtime/state/thread-settled";
+import { createInboxReturnTracker } from "@cogenly/client-runtime/state/thread-inbox";
+import { formatDiffCount } from "@cogenly/client-runtime/diff-count";
 import {
   planPinnedReorder,
   resolveSettledThreadTimestamp,
   sortActiveThreadsByOrderKey,
   sortSettledThreads,
-} from "@t3tools/client-runtime/state/thread-sort";
+} from "@cogenly/client-runtime/state/thread-sort";
 import {
   threadSearchMatchKey,
   type EnvironmentThreadSearchMatch,
-} from "@t3tools/client-runtime/state/thread-search";
+} from "@cogenly/client-runtime/state/thread-search";
 import {
   resolveThreadProviderStack,
   threadRuntimeCanArchive,
   type EnvironmentThreadShell,
-} from "@t3tools/client-runtime/state/models";
+} from "@cogenly/client-runtime/state/models";
 import {
   parseScopedThreadKey,
   scopeProjectRef,
   scopeThreadRef,
   scopedThreadKey,
-} from "@t3tools/client-runtime/environment";
+} from "@cogenly/client-runtime/environment";
 import {
   AuthOrchestrationOperateScope,
   DEFAULT_SERVER_SETTINGS,
   type EnvironmentMachineKind,
   type ScopedThreadRef,
   type ThreadId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 
-import type { TimestampFormat } from "@t3tools/contracts/settings";
+import type { TimestampFormat } from "@cogenly/contracts/settings";
 import {
   AlarmClockIcon,
   AlarmClockOffIcon,
@@ -105,7 +105,7 @@ import {
   isAtomCommandInterrupted,
   settlePromise,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@cogenly/client-runtime/state/runtime";
 import { isElectron } from "../env";
 import {
   resolveShortcutCommand,
@@ -164,14 +164,15 @@ import {
 } from "../threadRoutes";
 import { formatRelativeTimeLabel, parseTimestampDate } from "../timestampFormat";
 import type { SidebarThreadSummary } from "../types";
-import { isScratchProject } from "@t3tools/client-runtime/state/projects";
-import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
+import { isScratchProject } from "@cogenly/client-runtime/state/projects";
+import type { EnvironmentProject } from "@cogenly/client-runtime/state/shell";
 import { cn } from "~/lib/utils";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
 import {
   buildDraftActionMenuItems,
   buildRepositoryActionMenuItems,
   buildThreadActionMenuItems,
+  machineMenuItems,
   threadActionRequiresOperate,
 } from "./threadActionMenu.logic";
 import {
@@ -213,7 +214,7 @@ import {
 import { createSidebarListMotion } from "./Sidebar.motion";
 import { ThreadWorktreeIndicator } from "./ThreadStatusIndicators";
 import { resolveSnoozePresets, snoozeWakeLabel, type SnoozePreset } from "./Sidebar.snooze";
-import { ProjectFavicon, type ProjectFaviconProject } from "./ProjectFavicon";
+import { ProjectFavicon } from "./ProjectFavicon";
 import { ThreadSearchMatchExcerpt } from "./ThreadSearchMatch";
 import { makeWorkspaceFileDropHandlers } from "./chat/workspaceFileDrop";
 import { ProviderIconStack } from "./chat/ProviderIconStack";
@@ -245,7 +246,7 @@ import { useSidebarRowActionsOverlap } from "./sidebar/useSidebarRowActionsOverl
 import { SidebarShelfBar, type SidebarShelf } from "./sidebar/SidebarShelfBar";
 import { useSegmentSelection } from "./sidebar/sidebarSegments.logic";
 import { SIDEBAR_MODE_ICONS } from "./sidebar/modes/SidebarModeSwitcher";
-import { RepositoryBadge } from "./sidebar/modes/RepositoryBadge";
+import { RepositoryRowIcon, type RepositoryIconLocal } from "../projectLabels/RepositorySourceRows";
 import { SidebarRenameField } from "./sidebar/SidebarRenameField";
 import {
   projectLabelKey,
@@ -262,7 +263,18 @@ import { openCreateProjectDialog } from "../projectLabels/CreateProjectDialogHos
 import { usePendingProjectFolderStore } from "../projectLabels/pendingProjectFolders";
 import { useMoveThreadToFolder } from "../projectLabels/useMoveThreadToFolder";
 import { useProjectLabelDirectory } from "../projectLabels/useProjectLabels";
-import { ProjectFolderIcon } from "../projectLabels/ProjectFolderMark";
+import { useThreadRepository } from "../projectLabels/useThreadRepository";
+import { useRepositoryNames } from "../projectLabels/useRepositoryNames";
+import { ProjectFolderIcon, type ProjectIconProject } from "../projectLabels/ProjectFolderMark";
+import {
+  machineIconKind,
+  machineMoveTargetsForThreads,
+  threadOwnerMachine,
+  threadsRunOnName,
+} from "../machines/machines.logic";
+import { useMachineDirectory } from "../machines/useMachines";
+import { useMoveThreadsToMachine } from "../machines/useMoveToMachine";
+import { useForkToMachine } from "../machines/useForkToMachine";
 import {
   SidebarChatProjectLine,
   useChatProjectMetaAnimates,
@@ -296,7 +308,7 @@ import {
   type ThreadCapabilities,
 } from "../threadCapabilities";
 import { agentViewKey, requestAgentView } from "../agents/agentViewIntent";
-import { formatThreadLink } from "@t3tools/shared/threadLinks";
+import { formatThreadLink } from "@cogenly/shared/threadLinks";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuShortcut, MenuTrigger } from "./ui/menu";
 import { SidebarChatStatusSlot } from "./sidebar/SidebarChatStatusSlot";
 import {
@@ -327,7 +339,7 @@ import {
   workGroupSectionKey,
 } from "./sidebar/workCards.logic";
 import { SidebarListRevealSentinel, useSidebarListReveal } from "./sidebar/SidebarListReveal";
-import { useSidebarListAnchor } from "./sidebar/useSidebarListAnchor";
+import { SidebarListColumn } from "./sidebar/SidebarListColumn";
 import { SidebarShortcutSlot } from "./sidebar/SidebarShortcutSlot";
 import { sidebarListEdge } from "./sidebar/sidebarListAnchor.logic";
 import { useSidebarLayout } from "../appearancePreferences";
@@ -348,6 +360,8 @@ const EMPTY_PROVIDER_ENTRIES: ReadonlyMap<string, ProviderInstanceEntry> = new M
 interface SidebarRowFolder {
   readonly name: string;
   readonly color: string | undefined;
+  /** The project itself, for its icon. */
+  readonly icon: ProjectIconProject;
 }
 /** An unsent Work draft the list files with the cards. */
 interface WorkDraftEntry {
@@ -594,7 +608,7 @@ type SidebarSweepAction = "settle" | "unsettle" | "unsnooze";
 function WorkCardLabel(props: {
   readonly folder: SidebarRowFolder | null;
   readonly repositoryName: string | null;
-  readonly project: ProjectFaviconProject | null;
+  readonly project: RepositoryIconLocal | null;
   /** The card sits under its project's heading, so the line names the repository alone. */
   readonly projectInHeading?: boolean | undefined;
   /** Right-click on the line opens its repository's menu, not the thread's. */
@@ -608,13 +622,15 @@ function WorkCardLabel(props: {
   return (
     <span className="flex min-w-0 flex-1 items-center gap-1.5" onContextMenu={props.onContextMenu}>
       {props.repositoryName && props.project ? (
-        <ProjectFavicon
-          project={props.project}
+        // The icon its repository picker row shows.
+        <RepositoryRowIcon
+          local={props.project}
+          remote={null}
+          environmentId={props.project.environmentId}
           className="size-4 shrink-0"
-          fallback={<RepositoryBadge name={props.repositoryName} />}
         />
       ) : props.folder ? (
-        <ProjectFolderIcon color={props.folder.color} className="size-4" />
+        <ProjectFolderIcon project={props.folder.icon} className="size-4" />
       ) : (
         // The same mark as "No project" in the pickers and palette.
         <MessageSquareDashedIcon aria-hidden className="size-4 shrink-0 text-secondary-label" />
@@ -683,7 +699,7 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
   repositoryName?: string | null;
   /** Under its project's heading the card names the repository alone. */
   projectInHeading?: boolean | undefined;
-  project: ProjectFaviconProject | null;
+  project: RepositoryIconLocal | null;
   projectDisplayName: string | null;
   isActive: boolean;
   /** Chats rows are text only: the draft's first line and a muted "Draft". */
@@ -709,10 +725,20 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
     promptPreview.length > 0
       ? promptPreview
       : `${attachmentCount} attachment${attachmentCount === 1 ? "" : "s"}`;
+  const labelEnvironmentIds = useConnectedEnvironmentIds();
+  const directory = useProjectLabelDirectory(labelEnvironmentIds);
+  const pendingFolder = usePendingProjectFolderStore(
+    (state) =>
+      state.byThreadId[useComposerDraftStore.getState().getDraftSession(draftId)?.threadId ?? ""],
+  );
+  const folderName = pendingFolder
+    ? directory.byKey.get(projectLabelKey(pendingFolder.environmentId, pendingFolder.folderId))
+        ?.label.name
+    : null;
   const accessibility = resolveSidebarRowAccessibility({
     title: preview,
     statusLabel: "Unsent draft",
-    projectDisplayName: props.projectDisplayName,
+    projectDisplayName: folderName ?? props.folder?.name ?? props.projectDisplayName,
     isActive: props.isActive,
   });
   const handleActivate = useCallback(() => onNavigate(draftId), [draftId, onNavigate]);
@@ -863,7 +889,7 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
 const SidebarWorkDraftCard = memo(function SidebarWorkDraftCard(props: {
   draftId: DraftId;
   branch: string | null;
-  project: ProjectFaviconProject | null;
+  project: RepositoryIconLocal | null;
   projectDisplayName: string | null;
   environmentId: EnvironmentId;
   threadId: ThreadId;
@@ -2597,16 +2623,19 @@ export default function Sidebar() {
     () => new Map(projects.map((project) => [`${project.environmentId}:${project.id}`, project])),
     [projects],
   );
+  // Repositories read as the repository pickers name them, never by folder.
+  const repositoryNameOf = useRepositoryNames();
   const projectDisplayNameByKey = useMemo(
     () =>
       new Map(
         projectGroups.flatMap((group) =>
           group.memberProjects.map(
-            (project) => [`${project.environmentId}:${project.id}`, group.displayName] as const,
+            (project) =>
+              [`${project.environmentId}:${project.id}`, repositoryNameOf(project)] as const,
           ),
         ),
       ),
-    [projectGroups],
+    [projectGroups, repositoryNameOf],
   );
 
   const nowMinute = useNowMinute();
@@ -2627,12 +2656,42 @@ export default function Sidebar() {
     ) {
       return null;
     }
-    return projectDisplayNameByKey.get(projectKey) ?? project.title;
+    return projectDisplayNameByKey.get(projectKey) ?? repositoryNameOf(project);
   };
+  // The repository a thread works in, which move menus keep it with.
+  const threadRepositoryOf = useThreadRepository();
+  // Whether Work runs in a real repository, not a machine's or a project's folder.
+  const workInRepository = useCallback(
+    (thread: { readonly environmentId: EnvironmentId; readonly projectId: ProjectId }) => {
+      const project = projectByKey.get(`${thread.environmentId}:${thread.projectId}`);
+      return (
+        project !== undefined &&
+        !isScratchProject(project, serverConfigs.get(thread.environmentId)?.scratchWorkspaceRoot)
+      );
+    },
+    [projectByKey, serverConfigs],
+  );
   // Project folders hold chats and Work, across environments.
   const labelEnvironmentIds = useConnectedEnvironmentIds();
   const projectLabelDirectory = useProjectLabelDirectory(labelEnvironmentIds);
   const moveThreadToFolder = useMoveThreadToFolder();
+  // Paired machines per environment: where a replica runs, and where threads can move.
+  const machineDirectory = useMachineDirectory(labelEnvironmentIds);
+  const moveThreadsToMachine = useMoveThreadsToMachine();
+  const forkToMachine = useForkToMachine();
+  // The machine a row names: the paired machine that runs a replica, else its environment.
+  const runsOnFor = (thread: Pick<EnvironmentThreadShell, "environmentId" | "source">) => {
+    const owner = threadOwnerMachine(
+      machineDirectory.get(thread.environmentId) ?? null,
+      thread.source.ownerMachine,
+    );
+    return owner
+      ? { label: owner.name, machine: machineIconKind(owner) }
+      : {
+          label: environmentLabelById.get(thread.environmentId) ?? null,
+          machine: environmentMachineById.get(thread.environmentId) ?? "server",
+        };
+  };
   // Chats | Work | Agents: the list below shows one mode's threads at a time.
   const sidebarModes = useSidebarModeState({
     threads,
@@ -2649,36 +2708,39 @@ export default function Sidebar() {
   const modeListsThreads = sidebarMode === "chats" || sidebarMode === "tasks";
   // Rows name their folder in the hover card. One object per folder, so
   // memoized rows keep the same prop while the directory holds.
-  const folderFor = useMemo(() => {
+  // Work cards name their project: an explicit filing, else the project their
+  // repository is in now, so filing a repository shows on its Work at once.
+  // One stable object per project, under every machine's key for it, so
+  // memoized cards skip unchanged renders.
+  const rowFolderByKey = useMemo(() => {
+    const byEntry = new Map(
+      projectLabelDirectory.labels.map(
+        (entry) =>
+          [entry, { name: entry.label.name, color: entry.label.color, icon: entry }] as const,
+      ),
+    );
     const byKey = new Map<string, SidebarRowFolder>();
-    for (const entry of projectLabelDirectory.labels) {
-      byKey.set(entry.key, { name: entry.label.name, color: entry.label.color });
+    for (const [key, entry] of projectLabelDirectory.byKey) {
+      const folder = byEntry.get(entry);
+      if (folder) byKey.set(key, folder);
     }
-    return (thread: SidebarThreadSummary): SidebarRowFolder | null => {
+    return byKey;
+  }, [projectLabelDirectory]);
+  const folderFor = useCallback(
+    (thread: SidebarThreadSummary): SidebarRowFolder | null => {
       const folderId = threadProjectFolderId(thread);
       return folderId === null
         ? null
-        : (byKey.get(projectLabelKey(thread.environmentId, folderId)) ?? null);
-    };
-  }, [projectLabelDirectory]);
-  // Work cards name their project: an explicit filing, else the project their
-  // repository is in now, so filing a repository shows on its Work at once.
-  // One stable object per project, so memoized cards skip unchanged renders.
-  const rowFolderByKey = useMemo(
-    () =>
-      new Map(
-        projectLabelDirectory.labels.map(
-          (entry) => [entry.key, { name: entry.label.name, color: entry.label.color }] as const,
-        ),
-      ),
-    [projectLabelDirectory],
+        : (rowFolderByKey.get(projectLabelKey(thread.environmentId, folderId)) ?? null);
+    },
+    [rowFolderByKey],
   );
   const workFolderFor = useCallback(
     (thread: SidebarThreadSummary): SidebarRowFolder | null => {
-      const entry = workThreadFolder(thread, projectLabelDirectory);
+      const entry = workThreadFolder(thread, projectLabelDirectory, workInRepository);
       return entry ? (rowFolderByKey.get(entry.key) ?? null) : null;
     },
-    [projectLabelDirectory, rowFolderByKey],
+    [projectLabelDirectory, rowFolderByKey, workInRepository],
   );
   const repositoryFolderFor = useCallback(
     (environmentId: EnvironmentId, projectId: ProjectId): SidebarRowFolder | null => {
@@ -3407,7 +3469,7 @@ export default function Sidebar() {
     },
     [updateThreadMetadata],
   );
-  // The rename field's regenerate button and the row menu's Regenerate Title:
+  // The rename field's regenerate button and the row menu's Regenerate title:
   // drop the typed title and let the agent name the thread again.
   const regenerateThreadTitle = useCallback(
     (threadRef: ScopedThreadRef) => {
@@ -4068,7 +4130,9 @@ export default function Sidebar() {
     const groups = groupWorkCards(cards, (card) => {
       if (card.kind === "thread") {
         const thread = threadByKey.get(card.key);
-        return projectOf(thread && workThreadFolder(thread, projectLabelDirectory));
+        return projectOf(
+          thread && workThreadFolder(thread, projectLabelDirectory, workInRepository),
+        );
       }
       const { draft } = card;
       const picked = pendingFolderByThreadId[draft.threadId];
@@ -4093,6 +4157,7 @@ export default function Sidebar() {
     threadByKey,
     workDrafts,
     workDrag,
+    workInRepository,
   ]);
   const workRowsRef = useRef(workRows);
   workRowsRef.current = workRows;
@@ -4202,29 +4267,25 @@ export default function Sidebar() {
     [sidebarListItems],
   );
   const sidebarListHasRows = sidebarListItems.length + visibleDraftSessionCount > 0;
-  const sidebarModeListRef = useRef<HTMLDivElement | null>(null);
   // Each list (a mode and its filter, or search) keeps its own place against
   // its edge: read down from the dock in the top layout, while in the bottom
   // layout Work's active lists and Agents open on their last rows by the dock.
+  // The column (SidebarListColumn) anchors it in a child layout effect, so the
+  // scroll settles before the list motion below measures rows.
   const agentListFilter = useAgentListFilter();
-  // The list's rows also sit against this edge when they don't fill the column.
+  const sidebarModeListKey = isSearchingThreads
+    ? "search"
+    : sidebarMode === "tasks"
+      ? `tasks:${openShelf ?? "active"}`
+      : sidebarMode === "agents"
+        ? `agents:${agentListFilter}`
+        : sidebarMode;
   const sidebarModeListEdge = sidebarListEdge({
     layout: sidebarLayout,
     searching: isSearchingThreads,
     mode: sidebarMode,
     shelf: openShelf ?? null,
   });
-  useSidebarListAnchor(
-    sidebarModeListRef,
-    isSearchingThreads
-      ? "search"
-      : sidebarMode === "tasks"
-        ? `tasks:${openShelf ?? "active"}`
-        : sidebarMode === "agents"
-          ? `agents:${agentListFilter}`
-          : sidebarMode,
-    sidebarModeListEdge,
-  );
   const listMotionModeRef = useRef(sidebarMode);
   const listMotionShelfRef = useRef(openShelf);
   const listMotionRevealRef = useRef({ chats: chatVisibleCount, settled: settledVisibleCount });
@@ -4398,6 +4459,29 @@ export default function Sidebar() {
         supportedCount: titleRegenerationThreads.length,
         actionableCount: regeneratableTitleThreads.length,
       });
+      // Move to machine goes through one environment, so a selection spanning
+      // environments does not offer it.
+      const moveEnvironmentId = selectedThreads.every(
+        (thread) => thread.environmentId === selectedThreads[0]?.environmentId,
+      )
+        ? (selectedThreads[0]?.environmentId ?? null)
+        : null;
+      const moveMachineList =
+        moveEnvironmentId === null ? null : (machineDirectory.get(moveEnvironmentId) ?? null);
+      const moveOwners = selectedThreads.map((thread) => thread.source.ownerMachine);
+      const moveTargets = machineMoveTargetsForThreads(moveMachineList, moveOwners);
+      const machineItems = machineMenuItems(
+        {
+          targets: moveTargets,
+          canMove:
+            moveEnvironmentId !== null &&
+            appAtomRegistry.get(
+              serverEnvironment.moveThreadsToMachine.permissionAtom(moveEnvironmentId),
+            ) &&
+            canOperateThreads(selectedThreads),
+        },
+        ` (${count})`,
+      );
       const snoozePresets = resolveSnoozePresets(new Date(), timestampFormat);
       const clicked = await settlePromise(() =>
         api.contextMenu.show(
@@ -4444,8 +4528,9 @@ export default function Sidebar() {
                 ]
               : []),
             ...(offersMarkUnread
-              ? [{ id: "mark-unread", label: `Mark as Unread (${count})` }]
+              ? [{ id: "mark-unread", label: `Mark as unread (${count})` }]
               : []),
+            ...machineItems,
             ...(offersDelete
               ? [
                   {
@@ -4477,6 +4562,21 @@ export default function Sidebar() {
             : selectedThreads;
       if (clicked.value === "settle" && actionTargets.length === 0) return;
       if (clicked.value !== "mark-unread" && !checkThreadOperations(actionTargets)) return;
+      if (clicked.value.startsWith("move-machine:")) {
+        const clickedId = clicked.value;
+        const target = moveTargets.find(
+          (candidate) => `move-machine:${candidate.environmentId}` === clickedId,
+        );
+        if (!target || moveEnvironmentId === null) return;
+        clearSelection();
+        await moveThreadsToMachine({
+          environmentId: moveEnvironmentId,
+          threadIds: selectedThreads.map((thread) => thread.id),
+          target,
+          fromName: threadsRunOnName(moveMachineList, moveOwners),
+        });
+        return;
+      }
       if (clicked.value?.startsWith("snooze:")) {
         const preset =
           clicked.value === "snooze:custom"
@@ -4703,7 +4803,15 @@ export default function Sidebar() {
         const isSnoozed = snoozedThreadKeysRef.current.has(threadKey);
         // Presets resolve at menu-open time (same as the popover).
         const snoozePresets = resolveSnoozePresets(new Date(), timestampFormat);
-        const folderState = threadFolderState(thread, projectLabelDirectory);
+        const folderState = threadFolderState(
+          thread,
+          projectLabelDirectory,
+          threadRepositoryOf(thread),
+        );
+        const machineList = machineDirectory.get(thread.environmentId) ?? null;
+        const machineTargets = machineMoveTargetsForThreads(machineList, [
+          thread.source.ownerMachine,
+        ]);
         setSidebarContextMenuTarget(threadKey);
         const clicked = await settlePromise(() =>
           api.contextMenu.show(
@@ -4758,11 +4866,23 @@ export default function Sidebar() {
                   id: entry.label.id,
                   name: entry.label.name,
                   color: entry.label.color,
+                  blockedReason: folderState.blocked.get(entry.key),
                 })),
+                // A project's own chat can't go into a new project either.
+                inRepository: folderState.inRepository || folderState.projectHome,
                 canMove: appAtomRegistry.get(
                   serverEnvironment.moveThreadProjectFolder.permissionAtom(thread.environmentId),
                 ),
                 forks: threadForksIntoProjects(thread),
+              },
+              machines: {
+                targets: machineTargets,
+                canFork: appAtomRegistry.get(
+                  serverEnvironment.forkThreadToMachine.permissionAtom(thread.environmentId),
+                ),
+                canMove: appAtomRegistry.get(
+                  serverEnvironment.moveThreadsToMachine.permissionAtom(thread.environmentId),
+                ),
               },
             }),
             position,
@@ -4795,7 +4915,11 @@ export default function Sidebar() {
               : (folderState.options.find(
                   (entry) => entry.label.id === clickedId.slice("move-folder:".length),
                 ) ?? null);
-          if (clickedId !== "remove-folder" && target === null) return;
+          if (
+            clickedId !== "remove-folder" &&
+            (target === null || folderState.blocked.has(target.key))
+          )
+            return;
           await moveThreadToFolder({
             thread,
             folder: target && { id: target.label.id, name: target.label.name },
@@ -4804,6 +4928,31 @@ export default function Sidebar() {
           return;
         }
         if (threadActionRequiresOperate(clicked.value) && !checkThreadOperations([thread])) return;
+        if (clickedId.startsWith("fork-machine:")) {
+          const target = machineTargets.find(
+            (candidate) => `fork-machine:${candidate.environmentId}` === clickedId,
+          );
+          if (target)
+            await forkToMachine({
+              environmentId: thread.environmentId,
+              sourceThreadId: thread.id,
+              target,
+            });
+          return;
+        }
+        if (clickedId.startsWith("move-machine:")) {
+          const target = machineTargets.find(
+            (candidate) => `move-machine:${candidate.environmentId}` === clickedId,
+          );
+          if (!target) return;
+          await moveThreadsToMachine({
+            environmentId: thread.environmentId,
+            threadIds: [thread.id],
+            target,
+            fromName: threadsRunOnName(machineList, [thread.source.ownerMachine]),
+          });
+          return;
+        }
         if (clicked.value?.startsWith("snooze:")) {
           const preset =
             clicked.value === "snooze:custom"
@@ -4970,10 +5119,8 @@ export default function Sidebar() {
         const api = readLocalApi();
         if (!api) return;
         const folder =
-          projectLabelDirectory.labels.find(
-            (entry) =>
-              entry.environmentId === projectRef.environmentId &&
-              entry.label.repositoryIds.includes(projectRef.projectId),
+          projectLabelDirectory.folderByRepository.get(
+            scopedRepositoryKey(projectRef.environmentId, projectRef.projectId),
           ) ?? null;
         const clicked = await settlePromise(() =>
           api.contextMenu.show(
@@ -5223,11 +5370,7 @@ export default function Sidebar() {
           ) : null
         }
       >
-        <SidebarGroup
-          ref={sidebarModeListRef}
-          className={sidebarModeListEdge === "bottom" ? "flex-1 justify-end" : "flex-1"}
-          role="presentation"
-        >
+        <SidebarListColumn listKey={sidebarModeListKey} edge={sidebarModeListEdge}>
           {isSearchingThreads ? (
             threadSearchResults.length > 0 ? (
               <TooltipProvider
@@ -5245,6 +5388,7 @@ export default function Sidebar() {
                     const threadKey = scopedThreadKey(
                       scopeThreadRef(thread.environmentId, thread.id),
                     );
+                    const runsOn = runsOnFor(thread);
                     return (
                       <SidebarSearchResultRow
                         isSettled={settledThreadKeys.has(threadKey)}
@@ -5262,10 +5406,8 @@ export default function Sidebar() {
                             `${thread.environmentId}:${thread.projectId}`,
                           ) ?? null
                         }
-                        environmentLabel={environmentLabelById.get(thread.environmentId) ?? null}
-                        environmentMachine={
-                          environmentMachineById.get(thread.environmentId) ?? "server"
-                        }
+                        environmentLabel={runsOn.label}
+                        environmentMachine={runsOn.machine}
                         providerEntryByInstanceId={
                           providerEntriesByEnvironment.get(thread.environmentId) ??
                           EMPTY_PROVIDER_ENTRIES
@@ -5394,6 +5536,7 @@ export default function Sidebar() {
                     const isCard =
                       sidebarMode === "tasks" || section === "active" || section === "working";
                     const rowVariant = isCard ? "card" : "slim";
+                    const runsOn = runsOnFor(thread);
                     return (
                       <SidebarThreadRow
                         // Fade between card and compact rows.
@@ -5436,10 +5579,8 @@ export default function Sidebar() {
                         wokeAt={threadWokeAt(thread, { now: snoozeNow })}
                         isActive={routeThreadKey === threadKey}
                         jumpLabel={showJumpHints ? (jumpLabelByKey.get(threadKey) ?? null) : null}
-                        environmentLabel={environmentLabelById.get(thread.environmentId) ?? null}
-                        environmentMachine={
-                          environmentMachineById.get(thread.environmentId) ?? "server"
-                        }
+                        environmentLabel={runsOn.label}
+                        environmentMachine={runsOn.machine}
                         project={
                           projectByKey.get(`${thread.environmentId}:${thread.projectId}`) ?? null
                         }
@@ -5506,7 +5647,7 @@ export default function Sidebar() {
                           count={group.cards.length}
                           icon={
                             groupFolder ? (
-                              <ProjectFolderIcon color={groupFolder.color} className="size-3.5" />
+                              <ProjectFolderIcon project={groupFolder.icon} className="size-3.5" />
                             ) : undefined
                           }
                           collapse={{
@@ -5739,7 +5880,7 @@ export default function Sidebar() {
               }
             />
           ) : null}
-        </SidebarGroup>
+        </SidebarListColumn>
       </SidebarContent>
       <SidebarChromeFooter utilityMenu={!navRailVisible} />
     </>

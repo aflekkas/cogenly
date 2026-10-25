@@ -2,7 +2,7 @@ import {
   type AuthEnvironmentScope,
   type AuthSessionState,
   sessionGrantsScope,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { AsyncResult } from "effect/reactivity";
 
 /**

@@ -10,6 +10,7 @@ import {
   type KeyboardEvent,
 } from "react";
 import {
+  ActivityIcon,
   ArchiveIcon,
   BlocksIcon,
   BotIcon,
@@ -24,8 +25,11 @@ import {
   KeyboardIcon,
   KeyRoundIcon,
   Link2Icon,
+  MessageSquarePlusIcon,
+  MonitorSmartphoneIcon,
   PaletteIcon,
   Settings2Icon,
+  SparklesIcon,
 } from "lucide-react";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 
@@ -34,13 +38,21 @@ import { useLegacySidebarEnabled } from "../../hooks/useSettings";
 import { SidebarContent, SidebarFooter, SidebarGroup, useSidebar } from "../ui/sidebar";
 import { SidebarUtilityMenu } from "../sidebar/SidebarChrome";
 import { useSidebarLayout } from "../../appearancePreferences";
-import { SidebarList, SidebarRowSubtitle, sidebarRowClassName } from "../sidebar/SidebarList";
+import {
+  SidebarGroupHeader,
+  SidebarList,
+  SidebarRowSubtitle,
+  sidebarRowClassName,
+} from "../sidebar/SidebarList";
+import { SidebarListColumn } from "../sidebar/SidebarListColumn";
 import { SidebarSearchDock, type SidebarDockAction } from "../sidebar/SidebarSearchDock";
+import { sidebarListEdge } from "../sidebar/sidebarListAnchor.logic";
 import { scrollToSettingsTarget } from "./settingsLayout";
 import {
   searchSettings,
-  isSettingsOverviewVisible,
+  SETTINGS_NAV_GROUPS,
   SETTINGS_SECTION_LABELS,
+  settingsNavPathFor,
   type SettingsPath,
   type SettingsSearchItem,
 } from "./settingsSearch";
@@ -62,7 +74,9 @@ const SETTINGS_SECTION_ICONS: Readonly<
   Record<SettingsPath, ComponentType<{ className?: string }>>
 > = {
   "/settings/general": Settings2Icon,
-  "/settings/diagnostics": Settings2Icon,
+  "/settings/diagnostics": ActivityIcon,
+  "/settings/models": SparklesIcon,
+  "/settings/new-threads": MessageSquarePlusIcon,
   "/settings/appearance": PaletteIcon,
   "/settings/projects": PanelsTopLeftIcon,
   "/settings/project-tags": FolderIcon,
@@ -77,20 +91,9 @@ const SETTINGS_SECTION_ICONS: Readonly<
   "/settings/data": DatabaseIcon,
   "/settings/import": ImportIcon,
   "/settings/connections": Link2Icon,
+  "/settings/machines": MonitorSmartphoneIcon,
   "/settings/archived": ArchiveIcon,
 };
-
-const SETTINGS_NAV_ITEMS: ReadonlyArray<{
-  label: string;
-  to: SettingsPath;
-  icon: ComponentType<{ className?: string }>;
-}> = (Object.keys(SETTINGS_SECTION_LABELS) as SettingsPath[])
-  .filter((to) => to !== "/settings/diagnostics")
-  .map((to) => ({
-    to,
-    label: SETTINGS_SECTION_LABELS[to],
-    icon: SETTINGS_SECTION_ICONS[to],
-  }));
 
 const SETTINGS_ICON_CLASS_NAME = "size-4 shrink-0 text-sidebar-muted-foreground";
 const NO_DOCK_ACTIONS: ReadonlyArray<SidebarDockAction> = [];
@@ -100,20 +103,24 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
   const currentHash = useLocation({ select: (location) => location.hash });
   const currentSearch = useLocation({ select: (location) => location.search });
   const scopeSearch = useMemo(() => validateSettingsScopeSearch(currentSearch), [currentSearch]);
-  const navItems = SETTINGS_NAV_ITEMS.filter(
-    (item) => item.to !== "/settings/projects" || isSettingsOverviewVisible(scopeSearch),
-  );
-  const activeNavIndex = navItems.findIndex(
-    (item) =>
-      // Open source licenses is a detail page of General.
-      (item.to === "/settings/general" && pathname === "/settings/open-source-licenses") ||
-      pathname === item.to ||
-      pathname.startsWith(`${item.to}/`),
-  );
+  // Detail pages (Repository, Open source licenses) highlight their parent.
+  const activeNavPath = settingsNavPathFor(pathname);
   const { isMobile, setOpenMobile, open, setOpen } = useSidebar();
   const legacySidebarEnabled = useLegacySidebarEnabled();
   const navRailVisible = !isMobile && !legacySidebarEnabled;
   const sidebarLayout = useSidebarLayout();
+  const searchEdge = sidebarListEdge({
+    layout: sidebarLayout,
+    searching: true,
+    mode: "settings",
+    shelf: null,
+  });
+  const sectionsEdge = sidebarListEdge({
+    layout: sidebarLayout,
+    searching: false,
+    mode: "settings",
+    shelf: null,
+  });
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
   const [activeResultIndex, setActiveResultIndex] = useState(0);
@@ -282,10 +289,7 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
         {isSearching ? (
           // Results sit by the dock, like thread search in the other tabs:
           // reading down from it, or stacked up against it in the bottom layout.
-          <SidebarGroup
-            className={sidebarLayout === "bottom" ? "flex-1 justify-end" : "flex-1"}
-            role="presentation"
-          >
+          <SidebarListColumn listKey="settings:search" edge={searchEdge}>
             {hasResults ? (
               <SidebarList
                 id="settings-search-results"
@@ -335,39 +339,45 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
                 No settings found
               </p>
             )}
-          </SidebarGroup>
+          </SidebarListColumn>
         ) : (
-          // The sections read down from the top of the column in either
-          // layout. Each is a plain sidebar row
-          // that carries its own selected fill, as a chat row does.
-          <SidebarGroup>
+          // The sections read down from the dock, grouped under static
+          // headings, or in the bottom layout stack up against it in the same
+          // reading order. Each is a plain sidebar row that carries its own
+          // selected fill, as a chat row does.
+          <SidebarListColumn listKey="settings:sections" edge={sectionsEdge}>
             <SidebarList aria-label="Settings sections">
-              {navItems.map((item, index) => {
-                const Icon = item.icon;
-                const isActive = index === activeNavIndex;
-                return (
-                  <li key={item.to} className="list-none">
-                    <button
-                      type="button"
-                      aria-current={isActive ? "page" : undefined}
-                      className={sidebarRowClassName({ selected: isActive })}
-                      onClick={() => handleSectionClick(item.to)}
-                    >
-                      <Icon className={SETTINGS_ICON_CLASS_NAME} />
-                      <span
-                        className={cn(
-                          "min-w-0 flex-1 truncate text-sm",
-                          isActive ? "text-foreground" : "text-foreground/80",
-                        )}
+              {SETTINGS_NAV_GROUPS.flatMap((group) => [
+                ...(group.label === null
+                  ? []
+                  : [<SidebarGroupHeader key={`group:${group.label}`} label={group.label} />]),
+                ...group.paths.map((to) => {
+                  const Icon = SETTINGS_SECTION_ICONS[to];
+                  const isActive = to === activeNavPath;
+                  return (
+                    <li key={to} className="list-none">
+                      <button
+                        type="button"
+                        aria-current={isActive ? "page" : undefined}
+                        className={sidebarRowClassName({ selected: isActive })}
+                        onClick={() => handleSectionClick(to)}
                       >
-                        {item.label}
-                      </span>
-                    </button>
-                  </li>
-                );
-              })}
+                        <Icon className={SETTINGS_ICON_CLASS_NAME} />
+                        <span
+                          className={cn(
+                            "min-w-0 flex-1 truncate text-sm",
+                            isActive ? "text-foreground" : "text-foreground/80",
+                          )}
+                        >
+                          {SETTINGS_SECTION_LABELS[to]}
+                        </span>
+                      </button>
+                    </li>
+                  );
+                }),
+              ])}
             </SidebarList>
-          </SidebarGroup>
+          </SidebarListColumn>
         )}
       </SidebarContent>
       {/* Beside the navigation rail (which carries Settings, Usage and Updates)

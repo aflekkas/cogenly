@@ -3,16 +3,16 @@ import type {
   OrchestrationV2ProviderThread,
   OrchestrationV2Run,
   OrchestrationV2ThreadProjection,
-} from "@t3tools/contracts";
-import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
-import { ContextHandoffBudgetError } from "@t3tools/provider-core/server/failure";
+} from "@cogenly/contracts";
+import type * as ProviderAdapter from "@cogenly/provider-core/server/ProviderAdapter";
+import { ContextHandoffBudgetError } from "@cogenly/provider-core/server/failure";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import {
   historyCost,
   renderHistory,
   selectHistory,
-} from "@t3tools/provider-core/server/handoffBudget";
+} from "@cogenly/provider-core/server/handoffBudget";
 
 /**
  * The handoffs a run's provider turn must deliver: its own, plus those prepared

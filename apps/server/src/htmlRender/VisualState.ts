@@ -5,8 +5,8 @@ import {
   VisualStateError,
   type ThreadId,
   type VisualState,
-} from "@t3tools/contracts";
-import { visualStateJsonBytes } from "@t3tools/shared/htmlRender";
+} from "@cogenly/contracts";
+import { visualStateJsonBytes } from "@cogenly/shared/htmlRender";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";

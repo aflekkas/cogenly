@@ -1,4 +1,4 @@
-import type { PreviewAnnotationPayload, PreviewAnnotationRect } from "@t3tools/contracts";
+import type { PreviewAnnotationPayload, PreviewAnnotationRect } from "@cogenly/contracts";
 
 /** Page CSS px size of a streamed tab. */
 export interface PageSize {

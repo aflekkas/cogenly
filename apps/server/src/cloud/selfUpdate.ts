@@ -5,8 +5,8 @@ import {
   type ServerSelfUpdateProgressStage,
   type ServerSelfUpdateResult,
   type ThreadId,
-} from "@t3tools/contracts";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+} from "@cogenly/contracts";
+import * as HostProcess from "@cogenly/shared/HostProcess";
 import * as Cause from "effect/Cause";
 import * as Config from "effect/Config";
 import * as Context from "effect/Context";
@@ -24,10 +24,11 @@ import {
   CLI_RELEASE_BASE_URL_ENV,
   CLI_RELEASES_PUBLISHED,
   CLI_RELEASES_UNAVAILABLE_MESSAGE,
-} from "@t3tools/shared/cliRelease";
+} from "@cogenly/shared/cliRelease";
 
 import * as ServerConfig from "../config.ts";
 import * as DesktopAppUpdate from "../desktopUpdate/DesktopAppUpdate.ts";
+import * as ReadOnlySandbox from "../terminal/ReadOnlySandbox.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import {
   ensurePinnedRuntimeInstalled,
@@ -182,6 +183,17 @@ export const make = Effect.fn("cloud.server_self_update.make")(function* () {
   const path = yield* Path.Path;
   const platform = yield* HostProcess.Platform;
   const arch = yield* HostProcess.Architecture;
+  const environment = yield* HostProcess.Environment;
+  const uid = yield* HostProcess.UserId;
+  const provisionSandbox = ReadOnlySandbox.provisionLocal.pipe(
+    Effect.provideService(FileSystem.FileSystem, fs),
+    Effect.provideService(Path.Path, path),
+    Effect.provideService(ProcessRunner.ProcessRunner, runner),
+    Effect.provideService(HostProcess.Platform, platform),
+    Effect.provideService(HostProcess.Architecture, arch),
+    Effect.provideService(HostProcess.Environment, environment),
+    Effect.provideService(HostProcess.UserId, uid),
+  );
   // Archive-distributed targets download from GitHub Releases. The client is
   // optional so callers without one (tests, npm-only hosts) still construct.
   const httpClient = yield* HttpClient.HttpClient;
@@ -314,11 +326,12 @@ export const make = Effect.fn("cloud.server_self_update.make")(function* () {
         Effect.mapError((error) =>
           error._tag === "PinnedRuntimePreflightBlockedError"
             ? failWith(error.reason, error)
-            : failWith(`Could not prepare t3@${targetVersion}.`, error),
+            : failWith(`Could not prepare cogenly@${targetVersion}.`, error),
         ),
       );
 
       yield* reportProgress("installing");
+      yield* provisionSandbox;
       const updateId = yield* Effect.uninterruptible(
         launcher.requestUpdate({ targetVersion, dbPath: serverConfig.dbPath }).pipe(
           Effect.mapError((error) =>

@@ -8,19 +8,14 @@ import {
   thirdPartyLicenseEntryKey,
   type ThirdPartyLicenseEntry,
   type ThirdPartyLicenseManifest,
-} from "@t3tools/shared/thirdPartyLicenses";
+} from "@cogenly/shared/thirdPartyLicenses";
 
 import { Button } from "../ui/button";
 import { DisclosureChevron } from "../ui/disclosure";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { SearchInput } from "../ui/search-input";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import {
-  SettingsEmpty,
-  SettingsPageContainer,
-  SettingsRow,
-  SettingsSection,
-} from "./settingsLayout";
+import { SettingsEmpty, SettingsRow, SettingsSection } from "./settingsLayout";
 
 type LicenseManifestState =
   | { readonly status: "loading" }
@@ -242,7 +237,7 @@ export function OpenSourceLicensesPanel() {
   const retry = useCallback(() => setRequestVersion((value) => value + 1), []);
 
   return (
-    <SettingsPageContainer>
+    <>
       <SettingsSection
         title="Third-party notices"
         headerAction={
@@ -282,6 +277,6 @@ export function OpenSourceLicensesPanel() {
           <SettingsRow title="Loading open-source notices…" role="status" />
         )}
       </SettingsSection>
-    </SettingsPageContainer>
+    </>
   );
 }

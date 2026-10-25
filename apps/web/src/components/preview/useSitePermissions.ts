@@ -6,7 +6,7 @@ import type {
   SitePermissionPromptAnswer,
   SitePermissionSetting,
   SitePermissionsState,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { useCallback, useEffect, useState } from "react";
 
 import { previewBridge } from "./previewBridge";

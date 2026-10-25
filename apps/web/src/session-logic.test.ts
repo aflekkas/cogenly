@@ -16,8 +16,8 @@ import {
   type OrchestrationV2ExecutionNode,
   type OrchestrationV2RunAttempt,
   type OrchestrationV2TurnItem,
-} from "@t3tools/contracts";
-import type { ThreadRuntimeSummary } from "@t3tools/client-runtime/state/shell";
+} from "@cogenly/contracts";
+import type { ThreadRuntimeSummary } from "@cogenly/client-runtime/state/shell";
 import { deriveMessagesTimelineRows } from "./components/chat/MessagesTimeline.logic";
 import * as DateTime from "effect/DateTime";
 import { workEntryLabel } from "./components/chat/MessagesTimeline.logic";
@@ -1360,6 +1360,57 @@ describe("HTML renders in the timeline", () => {
       entry.kind === "message" && entry.message.role === "user" ? entry : { ...entry, attempt },
     );
     expect(rowsFor(entries, true)).toEqual(["message", "turn-fold", "attempt-fold", "html-render"]);
+  });
+
+  it("follows a refused computer call with its permission prompt, through the turn fold", () => {
+    const entries = turn({
+      ...base("click", 2),
+      status: "failed",
+      type: "dynamic_tool",
+      toolName: "mcp__cogenly__computer_click",
+      input: { x: 1, y: 2 },
+      output: { isError: true },
+    });
+    const index = entries.findIndex((entry) => entry.id === "click");
+    expect(entries[index + 1]).toMatchObject({
+      kind: "computer-use-permission",
+      permission: "accessibility",
+      runId,
+    });
+    expect(rowsFor(entries, false)).toEqual([
+      "message",
+      "turn-fold",
+      "computer-use-permission",
+      "message",
+    ]);
+  });
+
+  it("moves the one permission prompt to the latest refused call as calls append", () => {
+    const click = (id: string, second: number): OrchestrationV2TurnItem => ({
+      ...base(id, second),
+      status: "failed",
+      type: "dynamic_tool",
+      toolName: "cogenly.computer_click",
+      input: {},
+    });
+    const first = [command("before", 0), click("click-1", 1)].map(visible);
+    const previous = deriveTimelineEntriesFromVisibleTurnItemsWithState({
+      visibleTurnItems: first,
+      optimisticMessages: [],
+    });
+    const next = deriveTimelineEntriesFromVisibleTurnItemsWithState(
+      {
+        visibleTurnItems: [...first, visible(click("click-2", 2))],
+        optimisticMessages: [],
+      },
+      previous,
+    );
+    expect(next.entries.map((entry) => entry.id)).toEqual([
+      "before",
+      "click-1",
+      "click-2",
+      "computer-use-permission:click-2",
+    ]);
   });
 
   it.each([

@@ -1,14 +1,14 @@
 import type { ElementType } from "react";
-import type { SourceControlProviderInfo } from "@t3tools/contracts";
-import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
+import type { SourceControlProviderInfo } from "@cogenly/contracts";
+import { sourceControlClients } from "@cogenly/client-runtime/source-control-clients";
 import type {
   ChangeRequestTerminology,
   SourceControlClientDefinition,
-} from "@t3tools/client-runtime/source-control-clients";
+} from "@cogenly/client-runtime/source-control-clients";
 import { GitHubIcon } from "./components/Icons";
 import { PullRequestGlyph } from "~/components/changeRequestIcons";
 
-export type { ChangeRequestTerminology } from "@t3tools/client-runtime/source-control-clients";
+export type { ChangeRequestTerminology } from "@cogenly/client-runtime/source-control-clients";
 
 type SourceControlIcon = ElementType<{ className?: string }>;
 

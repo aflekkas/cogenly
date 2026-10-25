@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { ProjectId } from "@t3tools/contracts";
+import { ProjectId } from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -79,7 +79,8 @@ describe("local shared document captures", () => {
           { id: a, repositories: "[]" },
           {
             id: b,
-            repositories: '[{"remote":"github.com/org/repo","directoryName":"clone-one"}]',
+            // Synced under the name its remote derives, not the checkout's folder.
+            repositories: '[{"remote":"github.com/org/repo","directoryName":"org/repo"}]',
           },
         ].sort((left, right) => left.id.localeCompare(right.id)),
       );

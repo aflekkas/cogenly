@@ -7,12 +7,12 @@ import {
   type ProviderInstanceId,
   type ProviderOptionSelection,
   type ServerProviderModel,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import {
   type CustomModelDefinition,
   findReasoningEffortDescriptor,
   normalizeCustomModelSlug,
-} from "@t3tools/shared/model";
+} from "@cogenly/shared/model";
 
 import { cn } from "../../lib/utils";
 import { sortModelsForProviderInstance } from "../../modelOrdering";
@@ -463,7 +463,6 @@ export function ProviderModelsSection({
     <Tooltip>
       <TooltipTrigger render={<span className="flex shrink-0 items-center" />}>
         <Switch
-          size="sm"
           checked={!isHidden}
           disabled={!canWritePreferences || model.isCustom}
           onCheckedChange={(checked) => setHidden(model.slug, !checked)}

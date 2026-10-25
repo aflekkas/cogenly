@@ -1,15 +1,16 @@
-import { worktreeSetupAgentStarted } from "@t3tools/client-runtime/worktree-setup";
-export { worktreeSetupAgentStarted } from "@t3tools/client-runtime/worktree-setup";
-import { isLiveSubagentTurnItem } from "@t3tools/client-runtime/state/subagentRuntime";
+import { terminalRunItem, terminalRunSandboxed } from "./terminalRunResult.logic";
+import { worktreeSetupAgentStarted } from "@cogenly/client-runtime/worktree-setup";
+export { worktreeSetupAgentStarted } from "@cogenly/client-runtime/worktree-setup";
+import { isLiveSubagentTurnItem } from "@cogenly/client-runtime/state/subagentRuntime";
 import * as DateTime from "effect/DateTime";
 import * as Equal from "effect/Equal";
 import {
   assistantCitationLabel,
   collectAssistantCitations,
-} from "@t3tools/shared/assistantCitations";
+} from "@cogenly/shared/assistantCitations";
 import { shallow } from "zustand/vanilla/shallow";
-import { renderCodexDirectivesForCopy } from "@t3tools/shared/codexMarkdownDirectives";
-import { reasoningPlainText } from "@t3tools/client-runtime/work-log/reasoning-text";
+import { renderCodexDirectivesForCopy } from "@cogenly/shared/codexMarkdownDirectives";
+import { reasoningPlainText } from "@cogenly/client-runtime/work-log/reasoning-text";
 import {
   resolveWorkLogNotice,
   readToolRecord,
@@ -17,14 +18,14 @@ import {
   workLogToolGroupLabel,
   type WorkLogToolCallInput,
   type WorkLogToolIcon,
-} from "@t3tools/client-runtime/work-log/tool-registry";
+} from "@cogenly/client-runtime/work-log/tool-registry";
 import {
   liveActivityToolStatus,
   resolveWorkEntryTool,
   toolGroupIcon,
   workEntryToolCall,
   summarizeToolGroup,
-} from "@t3tools/client-runtime/work-log/presentation";
+} from "@cogenly/client-runtime/work-log/presentation";
 import {
   deriveRevertTurnCountByUserMessageId,
   formatDuration,
@@ -45,6 +46,7 @@ import {
   type TurnDiffSummary,
 } from "../../types";
 import {
+  type ComputerUsePermission,
   type MessageId,
   type WorktreeSetupSnapshot,
   type OrchestrationV2ProjectedTurnItem,
@@ -53,18 +55,18 @@ import {
   RunId,
   type ThreadId,
   type TurnItemId,
-} from "@t3tools/contracts";
-import type { ThreadRunSummary } from "@t3tools/client-runtime/state/shell";
+} from "@cogenly/contracts";
+import type { ThreadRunSummary } from "@cogenly/client-runtime/state/shell";
 import {
   resolveT3McpToolDefinition,
   resolveT3McpToolPresentation,
   type T3McpToolPresentation,
-} from "@t3tools/shared/t3McpToolPresentation";
-import { compactDynamicToolOutput } from "@t3tools/shared/toolOutput";
-import { htmlRenderReferencesEqual, type HtmlRenderReference } from "@t3tools/shared/htmlRender";
-import { mcpAppReferencesEqual, type McpAppReference } from "@t3tools/shared/mcpApp";
-import { collectToolFilePaths } from "@t3tools/shared/toolActivity";
-import { isWindowsAbsolutePath } from "@t3tools/shared/path";
+} from "@cogenly/shared/t3McpToolPresentation";
+import { compactDynamicToolOutput } from "@cogenly/shared/toolOutput";
+import { htmlRenderReferencesEqual, type HtmlRenderReference } from "@cogenly/shared/htmlRender";
+import { mcpAppReferencesEqual, type McpAppReference } from "@cogenly/shared/mcpApp";
+import { collectToolFilePaths } from "@cogenly/shared/toolActivity";
+import { isWindowsAbsolutePath } from "@cogenly/shared/path";
 
 function timelineEntryRunId(entry: TimelineEntry): RunId | null {
   if (entry.kind === "message") {
@@ -73,7 +75,13 @@ function timelineEntryRunId(entry: TimelineEntry): RunId | null {
   if (entry.kind === "proposed-plan") {
     return entry.proposedPlan.runId;
   }
-  if (entry.kind === "html-render" || entry.kind === "mcp-app") return entry.runId;
+  if (
+    entry.kind === "html-render" ||
+    entry.kind === "mcp-app" ||
+    entry.kind === "computer-use-permission"
+  ) {
+    return entry.runId;
+  }
   return entry.kind === "work" ? (entry.entry.runId ?? null) : null;
 }
 
@@ -603,6 +611,7 @@ type MessagesTimelineRowContent =
       /** A provider-supplied image icon, such as an integration's logo. */
       toolIcon?: WorkLogEntry["toolIcon"];
       hasFailure: boolean;
+      sandboxed: boolean;
     }
   | {
       kind: "turn-fold";
@@ -691,6 +700,12 @@ type MessagesTimelineRowContent =
       itemId: TurnItemId;
       revision: string;
       mcpApp: McpAppReference;
+    }
+  | {
+      kind: "computer-use-permission";
+      id: string;
+      createdAt: string;
+      permission: ComputerUsePermission;
     };
 
 export interface StableMessagesTimelineRowsState {
@@ -920,9 +935,11 @@ function deriveSupersededAttemptFolds(
       completeAttemptIds.has(entry.attempt.id) ||
       unfoldedRunIds.has(entry.attempt.runId) ||
       (entry.kind === "message" && entry.message.role === "user") ||
-      // A published page stays visible, as it does when its turn folds.
+      // A published page stays visible, as it does when its turn folds, and
+      // so does a permission the user still has to grant.
       entry.kind === "html-render" ||
       entry.kind === "mcp-app" ||
+      entry.kind === "computer-use-permission" ||
       timelineEntryIsPersistentResourceCard(entry) ||
       // A steer supersedes the attempt but leaves its children running.
       liveSubagentEntryIds.has(entry.id) ||
@@ -2004,6 +2021,10 @@ export function deriveMessagesTimelineRows(input: {
                 : summarizeToolGroup(visibleGroupedEntries).summary,
             summaryIcon: toolGroupIcon(visibleGroupedEntries) ?? "wrench",
             ...(groupToolIcon ? { toolIcon: groupToolIcon } : {}),
+            sandboxed: visibleGroupedEntries.some((entry) => {
+              const terminal = terminalRunItem(entry.structuredPayload);
+              return terminal !== null && terminalRunSandboxed(terminal.output);
+            }),
             hasFailure:
               latestToolEntry !== undefined &&
               workEntryDisplayIndicatesToolFailure(latestToolEntry),
@@ -2053,6 +2074,16 @@ export function deriveMessagesTimelineRows(input: {
         itemId: timelineEntry.itemId,
         revision: timelineEntry.revision,
         mcpApp: timelineEntry.mcpApp,
+      });
+      continue;
+    }
+
+    if (timelineEntry.kind === "computer-use-permission") {
+      nextRows.push({
+        kind: "computer-use-permission",
+        id: timelineEntry.id,
+        createdAt: timelineEntry.createdAt,
+        permission: timelineEntry.permission,
       });
       continue;
     }
@@ -2608,6 +2639,11 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
       );
     }
 
+    case "computer-use-permission": {
+      const bc = b as typeof a;
+      return a.createdAt === bc.createdAt && a.permission === bc.permission;
+    }
+
     case "event":
       return (
         a.projectedItem === (b as typeof a).projectedItem &&
@@ -2651,6 +2687,7 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
         a.summary === bw.summary &&
         a.summaryIcon === bw.summaryIcon &&
         Equal.equals(a.toolIcon, bw.toolIcon) &&
+        a.sandboxed === bw.sandboxed &&
         a.hasFailure === bw.hasFailure
       );
     }

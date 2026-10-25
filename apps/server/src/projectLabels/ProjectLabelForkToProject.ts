@@ -6,7 +6,7 @@ import {
   type ForkThreadToProjectResult,
   type OrchestrationV2AppThread,
   ProjectLabelError,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import type * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 

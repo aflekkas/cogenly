@@ -5,10 +5,10 @@ import * as Layer from "effect/Layer";
 import * as Redacted from "effect/Redacted";
 import { ChildProcessSpawner } from "effect/process";
 
-import { DEFAULT_SERVER_SETTINGS } from "@t3tools/contracts";
-import type * as SourceControlHost from "@t3tools/source-control-core/server/SourceControlHost";
-import { applyServerSettingsPatch } from "@t3tools/shared/serverSettings";
-import * as TestSourceControlHost from "@t3tools/source-control-testing/TestSourceControlHost";
+import { DEFAULT_SERVER_SETTINGS } from "@cogenly/contracts";
+import type * as SourceControlHost from "@cogenly/source-control-core/server/SourceControlHost";
+import { applyServerSettingsPatch } from "@cogenly/shared/serverSettings";
+import * as TestSourceControlHost from "@cogenly/source-control-testing/TestSourceControlHost";
 import * as GitHubCredentials from "./GitHubCredentials.ts";
 
 const TOKEN_VARIABLES = [
@@ -102,7 +102,7 @@ describe("GitHubCredentials", () => {
       const error = yield* Effect.flip(credentials.get("github.com"));
       expect(error._tag).toBe("GitHubHostDisabledError");
       expect(error.message).toBe(
-        "GitHub host github.com is turned off in Settings → Source Control.",
+        "GitHub host github.com is turned off in Settings → Source control.",
       );
       expect(calls).toEqual([]);
     }).pipe(Effect.provide(layer));

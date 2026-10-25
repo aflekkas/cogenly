@@ -1,4 +1,4 @@
-import type { VcsRef } from "@t3tools/contracts";
+import type { VcsRef } from "@cogenly/contracts";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import { useCallback, useEffect, useId, useRef, type ComponentProps, type ReactNode } from "react";
 
@@ -169,6 +169,7 @@ export function BranchPicker({
                 {...(getItemType ? { getItemType } : {})}
                 renderItem={({ item, index }) => renderItem(item, index)}
                 estimatedItemSize={28}
+                recycleItems={false}
                 drawDistance={336}
                 onLayout={() => {
                   trackBranchListScrollElement();

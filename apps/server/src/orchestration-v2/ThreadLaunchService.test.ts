@@ -1,6 +1,10 @@
+import * as Sqlite from "../persistence/Sqlite.ts";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as SqlClient from "effect/sql/SqlClient";
 import { describe, expect, it } from "@effect/vitest";
 import {
   CommandId,
+  EnvironmentId,
   MessageId,
   ProjectId,
   ProjectLabelError,
@@ -9,13 +13,15 @@ import {
   RunId,
   RuntimeMode,
   ThreadId,
+  ThreadRemoteError,
   type OrchestrationV2ThreadProjection,
-} from "@t3tools/contracts";
-import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+} from "@cogenly/contracts";
+import * as IdAllocator from "@cogenly/provider-core/server/IdAllocator";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import * as GitWorkflow from "../git/GitWorkflowService.ts";
@@ -31,6 +37,7 @@ import * as ServerSettings from "../serverSettings.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import * as CommandReceiptStore from "./CommandReceiptStore.ts";
+import * as RemoteThreadLaunch from "./RemoteThreadLaunch.ts";
 import * as ThreadLaunch from "./ThreadLaunchService.ts";
 import * as ThreadManagement from "./ThreadManagementService.ts";
 import { userFacingDispatchErrorMessage } from "./UserFacingErrors.ts";
@@ -49,6 +56,7 @@ type Step =
 
 function harness(
   options: {
+    readonly repositoryMismatch?: boolean;
     readonly labelMissing?: boolean;
     readonly labelArchived?: boolean;
     readonly checkoutFails?: boolean;
@@ -65,6 +73,16 @@ function harness(
     runs: [{ id: runId, status: options.runPreparing === true ? "preparing" : "running" }],
     messages: [],
   } as unknown as OrchestrationV2ThreadProjection;
+  const database = Sqlite.layerMemory;
+  const preparedDatabase = Layer.effectDiscard(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`INSERT INTO project_labels(label_id, name, created_at, updated_at) VALUES (${folderId}, 'Spawn Partners', '2026-01-01', '2026-01-01')`;
+      yield* sql`INSERT INTO projection_projects(project_id, title, workspace_root, scripts_json, created_at, updated_at) VALUES (${projectId}, 'cogenly', '/repos/cogenly', '[]', '2026-01-01', '2026-01-01')`;
+      if (!options.repositoryMismatch)
+        yield* sql`INSERT INTO label_repositories(label_id, repository_id) VALUES (${folderId}, ${projectId})`;
+    }),
+  ).pipe(Layer.provideMerge(database));
   const layer = ThreadLaunch.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
@@ -186,7 +204,11 @@ function harness(
       ),
     ),
   );
-  return { steps, createdWorktreePaths, layer };
+  return {
+    steps,
+    createdWorktreePaths,
+    layer: layer.pipe(Layer.provide(preparedDatabase), Layer.provide(NodeServices.layer)),
+  };
 }
 
 const launchInput = (overrides: Partial<ThreadLaunch.ThreadLaunchInput> = {}) =>
@@ -210,6 +232,23 @@ const launchInput = (overrides: Partial<ThreadLaunch.ThreadLaunchInput> = {}) =>
   }) satisfies ThreadLaunch.ThreadLaunchInput;
 
 describe("ThreadLaunchService project filing", () => {
+  it.effect(
+    "rejects a repository outside the explicit project before creating or filing a thread",
+    () => {
+      const { steps, layer } = harness({ repositoryMismatch: true });
+      return Effect.gen(function* () {
+        const launches = yield* ThreadLaunch.ThreadLaunchService;
+        const error = yield* Effect.flip(
+          launches.launch(launchInput({ projectFolderId: folderId })),
+        );
+        expect(userFacingDispatchErrorMessage(error)).toBe(
+          "cogenly is not in the Spawn Partners project. Add it to the project first, or start without a project.",
+        );
+        expect(steps).toEqual([]);
+      }).pipe(Effect.provide(layer));
+    },
+  );
+
   it.effect("files a chat in its project while it is turnless, before the first message", () => {
     const { steps, layer } = harness();
     return Effect.gen(function* () {
@@ -351,5 +390,80 @@ describe("ThreadLaunchService project filing", () => {
       );
       expect(steps).toEqual([{ kind: "read-label", id: folderId }]);
     }).pipe(Effect.provide(layer));
+  });
+});
+
+describe("ThreadLaunchService on a chosen machine", () => {
+  const laptop = EnvironmentId.make("env:laptop");
+  /** A harness whose machine link answers every launch with `answer`. */
+  const onMachine = (
+    answer: (
+      input: ThreadLaunch.ThreadLaunchInput,
+    ) => Effect.Effect<Option.Option<ThreadLaunch.ThreadLaunchResult>, ThreadRemoteError>,
+  ) => {
+    const { steps, layer } = harness();
+    const asked: Array<ThreadLaunch.ThreadLaunchInput> = [];
+    const run = <A, E>(
+      effect: Effect.Effect<
+        A,
+        E,
+        ThreadLaunch.ThreadLaunchService | RemoteThreadLaunch.RemoteThreadLaunch
+      >,
+    ) =>
+      Effect.gen(function* () {
+        const registry = yield* RemoteThreadLaunch.RemoteThreadLaunch;
+        yield* registry.register((machine, input) => {
+          expect(machine).toBe(laptop);
+          asked.push(input);
+          return answer(input);
+        });
+        return yield* effect;
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(layer.pipe(Layer.provideMerge(RemoteThreadLaunch.layer))),
+      );
+    return { steps, asked, run };
+  };
+
+  it.effect("hands the launch to the machine link and creates nothing here", () => {
+    const remote = { threadId, projection: {} as never, resumed: false };
+    const { steps, asked, run } = onMachine(() => Effect.succeedSome(remote));
+    return run(
+      Effect.gen(function* () {
+        const launches = yield* ThreadLaunch.ThreadLaunchService;
+        expect(yield* launches.launch(launchInput({ machine: laptop }))).toBe(remote);
+        expect(steps).toEqual([]);
+        // The machine is the link's business; the launch it carries is the same.
+        expect(asked).toEqual([launchInput()]);
+      }),
+    );
+  });
+
+  it.effect("launches here when the named machine is this one", () => {
+    const { steps, run } = onMachine(() => Effect.succeedNone);
+    return run(
+      Effect.gen(function* () {
+        const launches = yield* ThreadLaunch.ThreadLaunchService;
+        yield* launches.launch(launchInput({ machine: laptop }));
+        expect(steps.map((step) => step.kind)).toEqual(["dispatch", "dispatch"]);
+      }),
+    );
+  });
+
+  it.effect("fails with the machine's own reason when it is offline", () => {
+    const offline = new ThreadRemoteError({
+      reason: "offline",
+      detail: "Laptop is offline. Launch on this machine instead, or try again when it reconnects.",
+    });
+    const { steps, run } = onMachine(() => Effect.fail(offline));
+    return run(
+      Effect.gen(function* () {
+        const launches = yield* ThreadLaunch.ThreadLaunchService;
+        const error = yield* Effect.flip(launches.launch(launchInput({ machine: laptop })));
+        expect(error.message).toBe(offline.detail);
+        expect(ThreadLaunch.remoteLaunchFailure(error)?.reason).toBe("offline");
+        expect(steps).toEqual([]);
+      }),
+    );
   });
 });

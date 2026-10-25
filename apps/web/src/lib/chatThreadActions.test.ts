@@ -1,10 +1,10 @@
-import { scopeProjectRef } from "@t3tools/client-runtime/environment";
+import { scopeProjectRef } from "@cogenly/client-runtime/environment";
 import {
   EnvironmentId,
   ProjectId,
   ProviderInstanceId,
   type ModelSelection,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { describe, expect, it, vi } from "vite-plus/test";
 import {
   resolveThreadActionProjectRef,

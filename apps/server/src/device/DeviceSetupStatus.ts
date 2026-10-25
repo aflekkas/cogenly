@@ -12,7 +12,7 @@ import type {
   DeviceSetupPlatformStatus,
   DeviceSetupStatus,
   DeviceSummary,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 
 const RETRY = "Call device_setup to re-check.";
 const RESTART_SERVER =

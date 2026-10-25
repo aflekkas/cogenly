@@ -1,5 +1,5 @@
 import { ThreadFindTimelineContext } from "./ThreadFindProvider";
-import { shouldPreserveAssistantLineBreaks } from "@t3tools/shared/markdownPipeline";
+import { shouldPreserveAssistantLineBreaks } from "@cogenly/shared/markdownPipeline";
 import { MarkdownFindContext, useFindRevealRef } from "./markdownFindContext";
 import { useChatCanvas } from "./ChatCanvasContext";
 import { useTimelineMinimapClearance } from "./useTimelineMinimapClearance";
@@ -21,7 +21,7 @@ import {
   type TimelineRestoreTarget,
 } from "./timelineRestoreWait";
 import { PullRequestGlyph } from "../changeRequestIcons";
-import type { WorktreeSetupSnapshot } from "@t3tools/contracts";
+import type { WorktreeSetupSnapshot } from "@cogenly/contracts";
 import { ReadOnlySourcePreview } from "../files/AttachmentFilePreview";
 import { useRightPanelStore } from "~/rightPanelStore";
 import { useOpenLink } from "~/browser/useOpenLink";
@@ -31,7 +31,7 @@ import {
   getQuestionAnswerText,
   getQuestionTextPreview,
   hasQuestionAnswer,
-} from "@t3tools/client-runtime/work-log/user-input";
+} from "@cogenly/client-runtime/work-log/user-input";
 import {
   deriveTimelineMinimapItems,
   resolveTimelineMinimapPreview,
@@ -58,13 +58,13 @@ import {
   type RunId,
   ThreadId,
   type ToolActivityIcon,
-} from "@t3tools/contracts";
-import { parseScopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { resolveUserMessagePresentation } from "@t3tools/client-runtime/user-message";
+} from "@cogenly/contracts";
+import { parseScopedThreadKey, scopeThreadRef } from "@cogenly/client-runtime/environment";
+import { resolveUserMessagePresentation } from "@cogenly/client-runtime/user-message";
 import { Link } from "@tanstack/react-router";
-import { canForkProjectedAssistantItem } from "@t3tools/client-runtime/state/thread-workflows";
-import { notificationChildThreadId } from "@t3tools/client-runtime/state/thread-execution";
-import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
+import { canForkProjectedAssistantItem } from "@cogenly/client-runtime/state/thread-workflows";
+import { notificationChildThreadId } from "@cogenly/client-runtime/state/thread-execution";
+import { replaceComposerContextReferences } from "@cogenly/shared/composerContextReferences";
 import {
   liveActivityToolStatus,
   liveThoughtLine,
@@ -72,8 +72,8 @@ import {
   workEntryToolCall,
   resolveViewedImageAsset,
   workEntryViewedImagePath,
-} from "@t3tools/client-runtime/work-log/presentation";
-import { quietReasoningMarkdown } from "@t3tools/client-runtime/work-log/reasoning-text";
+} from "@cogenly/client-runtime/work-log/presentation";
+import { quietReasoningMarkdown } from "@cogenly/client-runtime/work-log/reasoning-text";
 import {
   resolveWorkLogNotice,
   resolveWorkLogTool,
@@ -82,19 +82,19 @@ import {
   type WorkLogToolIcon,
   type WorkLogToolPresentation,
   type WorkLogToolTarget,
-} from "@t3tools/client-runtime/work-log/tool-registry";
-import { resolveWorkGroupScrollAnchor } from "@t3tools/client-runtime/work-log/scroll-anchor";
-import { turnItemHasDetail } from "@t3tools/client-runtime/work-log/item-detail";
-import { formatAttachmentSize } from "@t3tools/client-runtime/state/attachments";
+} from "@cogenly/client-runtime/work-log/tool-registry";
+import { resolveWorkGroupScrollAnchor } from "@cogenly/client-runtime/work-log/scroll-anchor";
+import { turnItemHasDetail } from "@cogenly/client-runtime/work-log/item-detail";
+import { formatAttachmentSize } from "@cogenly/client-runtime/state/attachments";
 import { observeResize } from "~/lib/observeResize";
 
 const NOOP_USE_ARTIFACT_TEMPLATE = () => {};
 const NOOP_OPEN_ATTACHMENT = (_attachment: ChatFileAttachment) => {};
 
-import { toolActivityFaviconUrl } from "@t3tools/shared/favicon";
-import { formatDuration } from "@t3tools/shared/orchestrationTiming";
-import { getProjectFaviconCacheKey } from "@t3tools/shared/projectFavicon";
-import { claudeSkillInvocation } from "@t3tools/shared/toolActivity";
+import { toolActivityFaviconUrl } from "@cogenly/shared/favicon";
+import { formatDuration } from "@cogenly/shared/orchestrationTiming";
+import { getProjectFaviconCacheKey } from "@cogenly/shared/projectFavicon";
+import { claudeSkillInvocation } from "@cogenly/shared/toolActivity";
 import {
   createContext,
   memo,
@@ -126,7 +126,7 @@ import {
   workEntrySignalsSevereFailure,
   workLogEntryIsToolLike,
 } from "../../session-logic";
-import type { CodexArtifactTemplate } from "@t3tools/shared/codexArtifactTemplates";
+import type { CodexArtifactTemplate } from "@cogenly/shared/codexArtifactTemplates";
 import {
   type ChatMessage,
   type ChatFileAttachment,
@@ -148,6 +148,7 @@ import remarkGfm from "remark-gfm";
 import type { Root, RootContent } from "mdast";
 import {
   AgentContextChip,
+  IntegrationContextChip,
   ProjectFolderContextChip,
   ThreadContextChip,
 } from "../ThreadContextChip";
@@ -199,8 +200,10 @@ import type {
   ComposerContextId,
   ComposerContextRecord,
   KnownComposerContextRecord,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
+import { Badge } from "../ui/badge";
 import { Button, InlineButton } from "../ui/button";
+import { terminalRunItem, terminalRunSandboxed } from "./terminalRunResult.logic";
 import { useAssetUrlRefresh, useAssetUrls, useAssetUrlState } from "../../assets/assetUrls";
 import { MediaVideoPlayer } from "../media/MediaVideoPlayer";
 import {
@@ -212,7 +215,7 @@ import {
 import { ProposedPlanCard } from "./ProposedPlanCard";
 import { HtmlRenderFrame } from "./HtmlRenderFrame";
 import { VisualSubmitChip } from "./VisualSubmitChip";
-import { readVisualSubmitMessage } from "@t3tools/shared/htmlRender";
+import { readVisualSubmitMessage } from "@cogenly/shared/htmlRender";
 import { McpAppFrame } from "./McpAppFrame";
 import { useThreadShell } from "../../state/entities";
 import { StartWorkPicker, useCanStartWork } from "../work/StartWork";
@@ -308,12 +311,12 @@ import {
 import {
   collectComposerContextReferences,
   formatComposerContextReference,
-} from "@t3tools/shared/composerContextReferences";
+} from "@cogenly/shared/composerContextReferences";
 import {
   COMPOSER_CONTEXT_CLIPBOARD_MIME,
   encodeComposerContextClipboardHtml,
   encodeComposerContextFragment,
-} from "@t3tools/shared/composerContextClipboard";
+} from "@cogenly/shared/composerContextClipboard";
 import { chatMarkdownClipboardPayload } from "../../markdown-clipboard";
 import { ContextChip, ContextChipLabel, type ContextChipKind } from "../ContextChip";
 import { createContextPresentationRegistry } from "../contextPresentationRegistry";
@@ -321,7 +324,7 @@ import { useOpenPrLink } from "~/lib/openPullRequestLink";
 import { useClientSettings } from "~/hooks/useSettings";
 import type { ChatMarkdownContextReference } from "../ChatMarkdown";
 import { cn } from "~/lib/utils";
-import { type TimestampFormat } from "@t3tools/contracts/settings";
+import { type TimestampFormat } from "@cogenly/contracts/settings";
 import {
   formatChatTimestampTooltip,
   formatDayAwareTimestamp,
@@ -339,11 +342,12 @@ import {
   type HandoffTimelineRun,
 } from "./V2LifecycleRow";
 import { SecretRequestCard } from "./SecretRequestCard";
+import { ComputerUsePermissionCard } from "./ComputerUsePermissionCard";
 import { TimelineSystemDivider } from "./TimelineSystemDivider";
 import {
   isWorkHandoffThread,
   WorkHandoffMarkersAfterRow,
-  workNotificationLabel,
+  WorkReportCard,
 } from "../work/WorkHandoffMarkers";
 
 import { SkillChipIcon, SkillInlineText } from "./SkillInlineText";
@@ -1981,6 +1985,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
                 getItemType={getItemType}
                 renderItem={renderItem}
                 estimatedItemSize={90}
+                // Rows hold their own disclosure state, so a container is never reused for another row.
+                recycleItems={false}
                 initialScrollAtEnd={
                   !findActive && citationRequest === null && rememberedPosition?.atEnd !== false
                 }
@@ -2522,7 +2528,8 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
         activityEnter && ARRIVAL_FADE_CLASS,
         // Commentary (non-terminal assistant) rows carry no metadata row, so
         // they sit closer to the work that follows them.
-        isWorkLogRow || isSubagentGroup
+        // A permission prompt owns its spacing: it renders nothing once granted.
+        isWorkLogRow || isSubagentGroup || row.kind === "computer-use-permission"
           ? undefined
           : row.kind === "turn-fold" || row.kind === "working"
             ? "pb-1.5"
@@ -2598,6 +2605,9 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       {row.kind === "proposed-plan" ? <ProposedPlanTimelineRow row={row} /> : null}
       {row.kind === "html-render" ? <HtmlRenderTimelineRow row={row} /> : null}
       {row.kind === "mcp-app" ? <McpAppTimelineRow row={row} /> : null}
+      {row.kind === "computer-use-permission" ? (
+        <ComputerUsePermissionTimelineRow row={row} />
+      ) : null}
       {row.kind === "working" ? <WorkingTimelineRow row={row} /> : null}
       {row.kind === "worktree-setup" ? <WorktreeSetupTimelineRow row={row} /> : null}
       {row.kind === "event" ? <V2EventTimelineRow row={row} /> : null}
@@ -3720,6 +3730,22 @@ function McpAppTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mcp-app
   );
 }
 
+function ComputerUsePermissionTimelineRow({
+  row,
+}: {
+  row: Extract<TimelineRow, { kind: "computer-use-permission" }>;
+}) {
+  const ctx = use(TimelineRowCtx);
+  return (
+    <div className="min-w-0 px-1">
+      <ComputerUsePermissionCard
+        environmentId={ctx.activeThreadEnvironmentId}
+        permission={row.permission}
+      />
+    </div>
+  );
+}
+
 type V2EventTone = "muted" | "warning" | "danger" | "success";
 
 /** Event rows take their icon from the registry, like every other row. */
@@ -4781,6 +4807,7 @@ function WorkGroupToggleTimelineRow({
       label={row.summary}
       iconName={row.summaryIcon}
       toolIcon={row.toolIcon}
+      sandboxed={row.sandboxed}
       failed={row.hasFailure}
       expanded={row.expanded}
       createdAt={row.createdAt}
@@ -4791,6 +4818,7 @@ function WorkGroupToggleTimelineRow({
 }
 
 function WorkGroupHeader(props: {
+  sandboxed?: boolean;
   label: string;
   iconName: WorkEntryIconName;
   toolIcon?: ToolActivityIcon | undefined;
@@ -4815,7 +4843,16 @@ function WorkGroupHeader(props: {
           muted
         />
       }
-      label={props.label}
+      label={
+        props.sandboxed ? (
+          <span>
+            {props.label}
+            <span className="ml-2 text-2xs text-muted-foreground">Sandboxed · read-only</span>
+          </span>
+        ) : (
+          props.label
+        )
+      }
       active={props.active && !props.failed}
       trailing={
         <TimelineRowTimestamp createdAt={props.createdAt} timestampFormat={props.timestampFormat} />
@@ -5121,6 +5158,21 @@ const userMessageContextPresentationRegistry = createContextPresentationRegistry
       render: (record, context) =>
         record.kind === "project-folder" ? (
           <ProjectFolderContextChip record={record} copyMarkdown={context.copyMarkdown} />
+        ) : (
+          <UnavailableUserMessageContextChip {...context} />
+        ),
+    },
+    {
+      kind: "integration",
+      canRender: (record) => record.kind === "integration",
+      // A sent message shows the account it named, not today's sign-in state.
+      render: (record, context) =>
+        record.kind === "integration" ? (
+          <IntegrationContextChip
+            record={record}
+            environmentId={null}
+            copyMarkdown={context.copyMarkdown}
+          />
         ) : (
           <UnavailableUserMessageContextChip {...context} />
         ),
@@ -6192,8 +6244,8 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
   const notifiedSubagentThreadId = notification
     ? notificationChildThreadId(notification.source)
     : undefined;
-  // A Work session this chat handed off reports back as Work, matching its
-  // "Continued in Work" row, not as a subagent.
+  // A Work session this chat handed off reports back as Work, on the
+  // "Handed off to Work" card's look, not as a subagent.
   const notifiedThread = useThreadShell(
     notifiedSubagentThreadId
       ? scopeThreadRef(ctx.activeThreadEnvironmentId, notifiedSubagentThreadId)
@@ -6216,6 +6268,24 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
     }
     setExpanded(next);
   };
+  if (notifiedWork && notification && notifiedThread && notifiedSubagentThreadId) {
+    return (
+      <div
+        data-v2-item-type="notification"
+        data-v2-item-visibility={workEntry.projectedItem?.visibility}
+        className="py-1"
+      >
+        <WorkReportCard
+          entryId={workEntry.id}
+          createdAt={workEntry.createdAt}
+          threadId={notifiedSubagentThreadId}
+          title={notifiedThread.title}
+          outcome={notification.outcome}
+          onOpenThread={ctx.onOpenThread}
+        />
+      </div>
+    );
+  }
   const failureItem = workEntry.projectedItem?.item;
   if (failureItem?.type === "error" && failureItem.status === "failed") {
     const warning = failureItem.failure.class === "usage_limit";
@@ -6302,19 +6372,18 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
       ? workEntry.toolLifecycleStatus === "inProgress"
         ? "Thinking"
         : "Thought"
-      : notifiedWork && notification && notifiedThread
-        ? workNotificationLabel(notifiedThread.title, notification.outcome)
-        : questionHeading || (displayLabel ?? workEntryLabel(workEntry));
+      : questionHeading || (displayLabel ?? workEntryLabel(workEntry));
   const answerPreview =
     workEntry.questionAnswer && hasQuestionAnswer(workEntry.questionAnswer)
       ? getQuestionAnswerPreview(workEntry.questionAnswer)
       : null;
   const viewedImagePath = workEntryViewedImagePath(workEntry);
   const payload = workEntry.structuredPayload;
-  const terminalRunCall =
-    registryTool?.key === "terminal_run" && payload?.type === "dynamic_tool"
-      ? terminalRunToolCall(payload.input, payload.output, workEntry.createdAt)
-      : null;
+  const terminalRun = terminalRunItem(payload);
+  const terminalRunCall = terminalRun
+    ? terminalRunToolCall(terminalRun.input, terminalRun.output, workEntry.createdAt)
+    : null;
+  const sandboxed = terminalRun !== null && terminalRunSandboxed(terminalRun.output);
   const skill =
     payload?.type === "dynamic_tool"
       ? claudeSkillInvocation(payload.toolName, payload.input)
@@ -6435,16 +6504,12 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
           role={showFailedIndicator ? "img" : undefined}
           aria-label={showFailedIndicator ? "Tool call failed" : undefined}
         >
-          {notifiedWork ? (
-            <HammerIcon aria-hidden className="block size-4 shrink-0 text-icon-muted" />
-          ) : (
-            <ToolActivityIconView
-              icon={entryToolIcon}
-              fallbackName={entryIconName}
-              className={cn("block shrink-0 stroke-2", quietNotice ? "size-3.5" : "size-4")}
-              muted
-            />
-          )}
+          <ToolActivityIconView
+            icon={entryToolIcon}
+            fallbackName={entryIconName}
+            className={cn("block shrink-0 stroke-2", quietNotice ? "size-3.5" : "size-4")}
+            muted
+          />
         </span>
       }
       label={
@@ -6513,6 +6578,11 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
               Open chat
             </button>
           ) : null}
+          {sandboxed ? (
+            <Badge variant="outline" size="sm" title="Ran in the chat's read-only sandbox">
+              Sandboxed · read-only
+            </Badge>
+          ) : null}
           {terminalRunCall && ctx.onShowTerminalRun ? (
             <InlineButton
               aria-label="Show this command in the terminal panel"
@@ -6527,14 +6597,14 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
           ) : null}
           {notifiedSubagentThreadId ? (
             <InlineButton
-              aria-label={notifiedWork ? "Open Work" : "Open subagent thread"}
+              aria-label="Open subagent thread"
               onClick={(event) => {
                 event.stopPropagation();
                 ctx.onOpenThread(notifiedSubagentThreadId);
               }}
               onKeyDown={stopRowToggle}
             >
-              {notifiedWork ? "Open Work" : "Open subagent"}
+              Open subagent
             </InlineButton>
           ) : null}
           {showFailedIndicator &&
@@ -6602,7 +6672,7 @@ function terminalRunToolCall(
 function QuestionAnswerHistory({
   answer,
 }: {
-  answer: import("@t3tools/contracts").UserInputAttachmentAnswerPayload;
+  answer: import("@cogenly/contracts").UserInputAttachmentAnswerPayload;
 }) {
   const { activeThreadEnvironmentId } = use(TimelineRowCtx);
   const attachments = useMemo(() => Object.values(answer.attachmentsByQuestionId).flat(), [answer]);

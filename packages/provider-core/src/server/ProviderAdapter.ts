@@ -1,4 +1,4 @@
-import type { OrchestrationV2HistoricalMessage } from "@t3tools/contracts";
+import type { OrchestrationV2HistoricalMessage } from "@cogenly/contracts";
 import {
   ChatAttachment,
   CheckpointId,
@@ -33,7 +33,7 @@ import {
   RunId,
   ThreadId,
   TurnItemId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Context from "effect/Context";
 import * as Schema from "effect/Schema";
 import type * as Effect from "effect/Effect";
@@ -58,12 +58,20 @@ export const ProviderAdapterV2RuntimePolicy = Schema.Struct({
    * Absent or false keeps the full work toolset.
    */
   conversationMode: Schema.optional(Schema.Boolean),
+  /** Agent setup conversations have their own prompt and cannot run commands. */
+  builderMode: Schema.optional(Schema.Boolean),
   /**
    * Compact `<project_manifest>` block for threads filed in a project folder.
    * Absent when the thread has no project. Adapters append it to the turn
    * context next to the other runtime instructions.
    */
   projectManifest: Schema.optional(Schema.String),
+  /**
+   * True when the user lets the provider's own connectors and MCP servers for
+   * Cogenly catalog services reach agents too. Absent or false: adapters keep
+   * those duplicates out of the sessions they open.
+   */
+  useProviderConnectors: Schema.optional(Schema.Boolean),
 });
 export type ProviderAdapterV2RuntimePolicy = typeof ProviderAdapterV2RuntimePolicy.Type;
 
@@ -720,4 +728,4 @@ export class ProviderAdapterV2 extends Context.Service<
       input: ProviderAdapterV2OpenSessionInput,
     ) => Effect.Effect<ProviderAdapterV2SessionRuntime, ProviderAdapterV2Error, Scope.Scope>;
   }
->()("@t3tools/provider-core/server/ProviderAdapter/ProviderAdapterV2") {}
+>()("@cogenly/provider-core/server/ProviderAdapter/ProviderAdapterV2") {}

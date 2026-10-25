@@ -1,5 +1,6 @@
 import * as Option from "effect/Option";
-import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
+import type { EnvironmentConnectionPhase } from "@cogenly/client-runtime/connection";
+import type { EnvironmentThreadShell } from "@cogenly/client-runtime/state/shell";
 import {
   type AssetCreateUrlInput,
   type AssetCreateUrlResult,
@@ -24,21 +25,21 @@ import {
   type ThreadId,
   type RunId,
   type WorktreeSetupSnapshot,
-} from "@t3tools/contracts";
-import { worktreeSetupAgentStarted } from "@t3tools/client-runtime/worktree-setup";
+} from "@cogenly/contracts";
+import { worktreeSetupAgentStarted } from "@cogenly/client-runtime/worktree-setup";
 import * as DateTime from "effect/DateTime";
-import { resolveAssetUrl } from "@t3tools/client-runtime/state/assets";
+import { resolveAssetUrl } from "@cogenly/client-runtime/state/assets";
 import {
   squashAtomCommandFailure,
   type AtomCommandResult,
-} from "@t3tools/client-runtime/state/runtime";
-import { videoMimeType } from "@t3tools/shared/video";
+} from "@cogenly/client-runtime/state/runtime";
+import { videoMimeType } from "@cogenly/shared/video";
 import {
   appendCodexArtifactTemplateUsePrompt,
   codexArtifactTemplateUsePrompt,
   type CodexArtifactTemplate,
-} from "@t3tools/shared/codexArtifactTemplates";
-import { presentThreadShell } from "@t3tools/client-runtime/state/shell";
+} from "@cogenly/shared/codexArtifactTemplates";
+import { presentThreadShell } from "@cogenly/client-runtime/state/shell";
 import { type ChatMessage, isImageAttachment, type SessionPhase, type Thread } from "../types";
 import { type ComposerImageAttachment, type DraftThreadState } from "../composerDraftStore";
 import * as Schema from "effect/Schema";
@@ -122,7 +123,7 @@ export function shouldDockDraftHeroForSubmission(input: {
 export {
   findRecordedWorktreeSetup,
   resolveVisibleWorktreeSetup,
-} from "@t3tools/client-runtime/worktree-setup";
+} from "@cogenly/client-runtime/worktree-setup";
 
 /** Keep setup visible across local dispatch, durable preparation, and the live stream. */
 export function resolveWorktreeSetupProgress(input: {
@@ -353,6 +354,26 @@ export function scheduleEnvironmentReconnectWarning(showWarning: () => void): ()
   return () => globalThis.clearTimeout(timeoutId);
 }
 
+/**
+ * Whether the composer should read as connecting rather than disconnected: the
+ * environment has not connected yet and no attempt has failed, or it dropped
+ * and is still inside the reconnect grace. Only after that does it say so.
+ */
+export function isEnvironmentStillConnecting(input: {
+  readonly phase: EnvironmentConnectionPhase;
+  readonly reconnectWarningGraceElapsed: boolean;
+}): boolean {
+  switch (input.phase) {
+    case "available":
+    case "connecting":
+      return true;
+    case "reconnecting":
+      return !input.reconnectWarningGraceElapsed;
+    default:
+      return false;
+  }
+}
+
 export function hasEnvironmentReconnectWarningGraceElapsed(
   activeEnvironmentId: EnvironmentId | null,
   elapsedEnvironmentId: EnvironmentId | null,
@@ -473,11 +494,44 @@ export function resolveServerThreadError(input: {
 }
 
 /** Use the same enabled instance for the composer, provider status, and chat actions. */
+/**
+ * The driver a thread's conversation ran on: its active provider thread, else
+ * the newest native item it recorded. A provider subagent's thread has no
+ * provider thread of its own, only items. Lets the composer stay with the
+ * thread's provider when the exact instance that ran it is missing from this
+ * environment's catalog.
+ */
+export function resolveThreadDriverKind(
+  projection: {
+    readonly thread: { readonly activeProviderThreadId: string | null };
+    readonly providerThreads: ReadonlyArray<{
+      readonly id: string;
+      readonly driver: ProviderDriverKind;
+    }>;
+    readonly turnItems: ReadonlyArray<{
+      readonly nativeItemRef: { readonly driver: ProviderDriverKind } | null;
+    }>;
+  } | null,
+): ProviderDriverKind | null {
+  if (projection === null) return null;
+  const active = projection.providerThreads.find(
+    (thread) => thread.id === projection.thread.activeProviderThreadId,
+  );
+  return (
+    active?.driver ??
+    projection.providerThreads.at(-1)?.driver ??
+    projection.turnItems.findLast((item) => item.nativeItemRef !== null)?.nativeItemRef?.driver ??
+    null
+  );
+}
+
 export function resolveComposerProviderSelection(input: {
   entries: ReadonlyArray<ProviderInstanceEntry>;
   candidateInstanceIds: ReadonlyArray<ProviderInstanceId | null | undefined>;
   lockedProvider: ProviderDriverKind | null;
   lockedInstanceId: ProviderInstanceId | null | undefined;
+  /** The driver the thread ran on, for when its instance is not in `entries`. */
+  threadDriverKind?: ProviderDriverKind | null | undefined;
 }) {
   const requestedInstanceId = input.candidateInstanceIds.find(
     (candidate) => candidate != null && candidate !== NO_PROVIDER_MODEL_SELECTION.instanceId,
@@ -485,6 +539,7 @@ export function resolveComposerProviderSelection(input: {
   const requestedDriverKind =
     input.lockedProvider ??
     input.entries.find((entry) => entry.instanceId === requestedInstanceId)?.driverKind ??
+    input.threadDriverKind ??
     input.entries[0]?.driverKind ??
     ProviderDriverKind.make("unconfigured");
   const lockedContinuationGroupKey = input.lockedProvider
@@ -584,7 +639,7 @@ export async function resolveFileAttachmentUrl(input: {
   });
   if (result._tag === "Failure") throw squashAtomCommandFailure(result);
   const url = resolveAssetUrl(input.httpBaseUrl, result.value.relativeUrl);
-  if (url === null) throw new Error("The environment returned an invalid attachment URL.");
+  if (url === null) throw new Error("The machine returned an invalid attachment URL.");
   return url;
 }
 
@@ -612,7 +667,7 @@ export async function prepareRevertedMessageAttachments(input: {
       });
       if (result._tag === "Failure") throw squashAtomCommandFailure(result);
       const url = resolveAssetUrl(input.httpBaseUrl, result.value.relativeUrl);
-      if (url === null) throw new Error("The environment returned an invalid attachment URL.");
+      if (url === null) throw new Error("The machine returned an invalid attachment URL.");
       const response = await fetch(url, { signal: AbortSignal.timeout(30_000) });
       if (!response.ok) throw new Error(`Could not restore attachment: ${attachment.name}`);
       return new File([await response.blob()], attachment.name, { type: attachment.mimeType });
@@ -854,6 +909,24 @@ export function threadShellHasStarted(
     shell &&
     (shell.latestRun !== null || shell.latestUserMessageAt !== null || shell.runtime !== null),
   );
+}
+
+/**
+ * Whether the timeline is still waiting for its rows: the detail is loading,
+ * or the shell says the thread has messages while none have arrived yet (a
+ * replica catching up after a move, a thread opened through another machine).
+ * A running thread shows its working row, and trimmed history its load
+ * control, so neither waits.
+ */
+export function timelineAwaitsRows(input: {
+  readonly detailLoading: boolean;
+  readonly shellStarted: boolean;
+  readonly rowCount: number;
+  readonly isWorking: boolean;
+  readonly hasHistoryToLoad: boolean;
+}): boolean {
+  if (input.detailLoading) return true;
+  return input.shellStarted && input.rowCount === 0 && !input.isWorking && !input.hasHistoryToLoad;
 }
 
 // Imported history has no session until its first prompt. Resolve its instance

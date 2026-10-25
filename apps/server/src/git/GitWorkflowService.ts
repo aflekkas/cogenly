@@ -4,6 +4,7 @@ import * as Layer from "effect/Layer";
 
 import {
   GitManagerError,
+  type ThreadRemoteError,
   GitCommandError,
   type VcsSwitchRefInput,
   type VcsSwitchRefResult,
@@ -26,15 +27,27 @@ import {
   type VcsStatusLocalResult,
   type VcsStatusRemoteResult,
   type VcsStatusResult,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 
 import * as GitManager from "./GitManager.ts";
+import { forkSource, forkCheckout } from "./forkRepository.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 
 export class GitWorkflowService extends Context.Service<
   GitWorkflowService,
   {
+    readonly forkSource: (input: {
+      readonly cwd: string;
+      readonly remote: string;
+      readonly allowLastPushed?: boolean;
+    }) => Effect.Effect<import("@cogenly/contracts").ThreadForkRepository, ThreadRemoteError>;
+    readonly forkCheckout: (input: {
+      readonly cwd: string;
+      readonly remote: string;
+      readonly branch: string | null;
+      readonly commit: string;
+    }) => Effect.Effect<{ branch: string | null; worktreePath: string }, ThreadRemoteError>;
     readonly isRepository: (cwd: string) => Effect.Effect<boolean, GitManagerServiceError>;
     readonly hasCommit: (input: {
       readonly cwd: string;
@@ -284,6 +297,10 @@ export const make = Effect.gen(function* () {
       ensureGit(operation, input.cwd).pipe(Effect.andThen(run(input)));
 
   return GitWorkflowService.of({
+    forkSource: (input) =>
+      forkSource(input).pipe(Effect.provideService(GitVcsDriver.GitVcsDriver, git)),
+    forkCheckout: (input) =>
+      forkCheckout(input).pipe(Effect.provideService(GitVcsDriver.GitVcsDriver, git)),
     isRepository: (cwd) =>
       registry.detect({ cwd }).pipe(
         Effect.map((handle) => handle?.kind === "git"),

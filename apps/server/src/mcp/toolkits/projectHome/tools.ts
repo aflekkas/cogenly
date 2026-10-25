@@ -9,7 +9,7 @@ import {
   ProjectRepositoryChangeInput,
   ProjectSourceChangeInput,
   ProjectTargetInput,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { Tool, Toolkit } from "effect/ai";
 
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
@@ -39,7 +39,7 @@ const receipt =
 export const ProjectHomeToolkit = Toolkit.make(
   Tool.make("project_overview", {
     ...shared,
-    description: `Show the project's configuration: name, instructions, repositories (with ids), linked GitHub sources and its project chat. ${target}`,
+    description: `Show the project's configuration: name, instructions, repositories (with ids and checkout, their state on this machine: ready, not_cloned, missing, cloning or failed), linked GitHub sources and its project chat. ${target}`,
     parameters: ProjectTargetInput,
     success: ProjectOverviewResult,
   })

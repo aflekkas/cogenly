@@ -4,12 +4,12 @@ import { DeviceHostAvailability } from "../device/DeviceHostAvailability";
 import { useAtomValue } from "@effect/atom-react";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
-import { AuthSettingsWriteScope } from "@t3tools/contracts";
+import { AuthSettingsWriteScope } from "@cogenly/contracts";
 import { readEnvironmentScope, useEnvironmentScope } from "../../state/session";
 import { Tooltip, TooltipTrigger, TooltipPopup } from "../ui/tooltip";
 import { AppleIcon, AndroidIcon } from "../Icons";
 import { Spinner } from "../ui/spinner";
-import type { EnvironmentId, SshDeviceHostConfig } from "@t3tools/contracts";
+import type { EnvironmentId, SshDeviceHostConfig } from "@cogenly/contracts";
 import { randomUUID } from "../../lib/utils";
 import { useMemo, useState } from "react";
 import { deviceEnvironment } from "../../state/device";
@@ -36,10 +36,25 @@ import { useHostConnectionChecks } from "./useHostConnectionChecks";
 import { deviceHostConnectionKey } from "./deviceHostConnectionChecks";
 import { settingsScopeEnvironmentLabel, settingsScopeEnvironmentLabels } from "./settingsScopeAxis";
 
+/** Device hosts are machine-local: the list belongs to the machine `environmentId`. */
 export function DeviceHostsSettings(props: { environmentId: EnvironmentId | null }) {
-  const { scope, environments, connectedEnvironments } = useSettingsScope();
+  const scopeContext = useSettingsScope();
+  const environments = useMemo(
+    () =>
+      scopeContext.environments.filter(
+        (environment) => environment.environmentId === props.environmentId,
+      ),
+    [props.environmentId, scopeContext.environments],
+  );
+  const connectedEnvironments = useMemo(
+    () =>
+      scopeContext.connectedEnvironments.filter(
+        (environment) => environment.environmentId === props.environmentId,
+      ),
+    [props.environmentId, scopeContext.connectedEnvironments],
+  );
   const canConfigure = useEnvironmentScope(props.environmentId, AuthSettingsWriteScope);
-  const projectScope = scope.kind === "project" || scope.kind === "checkout";
+  const projectScope = scopeContext.scope.kind === "project";
   const update = useAtomCommand(serverEnvironment.updateSettings, { reportFailure: false });
   const [editing, setEditing] = useState<SshDeviceHostConfig | null>(null);
   const [originalHost, setOriginalHost] = useState<SshDeviceHostConfig | null>(null);
@@ -68,7 +83,7 @@ export function DeviceHostsSettings(props: { environmentId: EnvironmentId | null
       const results = await Promise.allSettled(
         environments.map(async (environment) => {
           if (environment.connection.phase !== "connected" || !environment.serverConfig) {
-            throw new Error("Environment disconnected");
+            throw new Error("Machine disconnected");
           }
           if (!readEnvironmentScope(environment.environmentId, AuthSettingsWriteScope)) {
             throw new Error("This connection cannot change device settings.");
@@ -97,7 +112,7 @@ export function DeviceHostsSettings(props: { environmentId: EnvironmentId | null
       } else {
         toastManager.add({
           type: "error",
-          title: "Device hosts not saved on all environments",
+          title: "Device hosts not saved on all machines",
           description: `Could not update ${failed.map((environment) => environment.label).join(", ")}.`,
         });
       }
@@ -115,11 +130,11 @@ export function DeviceHostsSettings(props: { environmentId: EnvironmentId | null
       toastManager.add({
         type: failed.length ? "error" : "success",
         title: failed.length
-          ? `${host.label}: ${failed.length} of ${targets.length} environments failed`
+          ? `${host.label}: ${failed.length} of ${targets.length} machines failed`
           : `${host.label}: connection checks passed`,
         description: failed.length
           ? `Could not connect from ${failed.map((target) => target.label).join(", ")}.`
-          : "Connected or already available locally on each selected environment.",
+          : "Connected or already available locally on each selected machine.",
       });
       return results;
     },
@@ -135,7 +150,7 @@ export function DeviceHostsSettings(props: { environmentId: EnvironmentId | null
       title="Device hosts"
       serverScoped
       settingKeys={["deviceHosts"]}
-      description="Add remote machines with simulator or emulator runtimes installed, and the selected environments will connect over SSH and set up device tools automatically."
+      description="Add remote machines with simulator or emulator runtimes installed, and this machine will connect over SSH and set up device tools automatically."
       control={
         <Button
           size="sm"
@@ -155,7 +170,7 @@ export function DeviceHostsSettings(props: { environmentId: EnvironmentId | null
       <div className="pt-3 pb-2">
         {!props.environmentId ? (
           <p className="text-sm text-muted-foreground">
-            Connect a selected environment to manage device hosts.
+            Connect a selected machine to manage device hosts.
           </p>
         ) : (
           <>

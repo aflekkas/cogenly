@@ -51,7 +51,7 @@ export interface AgentScopeCommand {
   readonly args: ReadonlyArray<string>;
 }
 
-export const AgentScope = Context.Reference<AgentScopeShape>("@t3tools/shared/AgentScope", {
+export const AgentScope = Context.Reference<AgentScopeShape>("@cogenly/shared/AgentScope", {
   defaultValue: () => ({
     wrap: ({ command, args }) => Effect.succeed({ command, args }),
     oomKilled: () => Effect.succeed(false),

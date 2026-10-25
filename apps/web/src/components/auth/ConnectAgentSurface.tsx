@@ -4,9 +4,9 @@ import {
   AuthMcpApprovalError,
   AuthMcpClientAccess,
   type AuthMcpAuthorizationRequest,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { Radio as RadioPrimitive } from "@base-ui/react/radio";
-import { isLoopbackHost } from "@t3tools/shared/preview";
+import { isLoopbackHost } from "@cogenly/shared/preview";
 import { EyeIcon, LockOpenIcon, type LucideIcon } from "lucide-react";
 import type * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -54,7 +54,7 @@ type Loaded =
   | { readonly status: "invalid"; readonly message: string }
   | { readonly status: "ready"; readonly details: AuthMcpApprovalDetails };
 
-const UNREACHABLE = "Could not reach this environment. Try again.";
+const UNREACHABLE = "Could not reach this machine. Try again.";
 const isApprovalError = Schema.is(AuthMcpApprovalError);
 
 type Answer<A> =
@@ -168,7 +168,7 @@ export function ConnectAgentSurface() {
       <AuthSurfaceShell>
         <ConnectAgentHeading
           title="Checking the sign-in request"
-          description="One moment while this environment verifies the agent's request."
+          description="One moment while this machine verifies the agent's request."
         />
         <Spinner className="mt-6" size="lg" tone="muted" />
       </AuthSurfaceShell>

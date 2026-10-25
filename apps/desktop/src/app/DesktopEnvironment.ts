@@ -3,7 +3,7 @@ import type {
   DesktopAppStageLabel,
   DesktopRuntimeArch,
   DesktopRuntimeInfo,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Config from "effect/Config";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -16,7 +16,8 @@ import * as DesktopConfig from "./DesktopConfig.ts";
 import { resolveLinuxDesktopEntryName } from "./DesktopEarlyElectronStartup.ts";
 import { resolveDesktopBaseDir, resolveDesktopStateDir } from "./DesktopStatePaths.ts";
 import { isStagingDesktopVersion } from "../updates/updateChannels.ts";
-import type { OtlpProtocol } from "@t3tools/shared/observability";
+import type { OtlpProtocol } from "@cogenly/shared/observability";
+import { TAILSCALE_SERVE_PREFERENCE_FILE } from "@cogenly/tailscale";
 
 export interface MakeDesktopEnvironmentInput {
   readonly dirname: string;
@@ -50,6 +51,8 @@ export class DesktopEnvironment extends Context.Service<
     readonly clientSettingsPath: string;
     readonly savedEnvironmentRegistryPath: string;
     readonly serverSettingsPath: string;
+    /** The backend's saved Tailscale Serve preference, which Private access on Settings → Machines writes. */
+    readonly tailscaleServePreferencePath: string;
     readonly logDir: string;
     readonly browserArtifactsDir: string;
     readonly rootDir: string;
@@ -91,7 +94,7 @@ export class DesktopEnvironment extends Context.Service<
     readonly resolvePickFolderDefaultPath: (rawOptions: unknown) => Option.Option<string>;
     readonly resolveResourcePathCandidates: (fileName: string) => readonly string[];
   }
->()("@t3tools/desktop/app/DesktopEnvironment") {}
+>()("@cogenly/desktop/app/DesktopEnvironment") {}
 
 const APP_BASE_NAME = "Cogenly";
 
@@ -211,6 +214,7 @@ const make = Effect.fn("desktop.environment.make")(function* (
     clientSettingsPath: path.join(stateDir, "client-settings.json"),
     savedEnvironmentRegistryPath: path.join(stateDir, "saved-environments.json"),
     serverSettingsPath: path.join(stateDir, "settings.json"),
+    tailscaleServePreferencePath: path.join(stateDir, TAILSCALE_SERVE_PREFERENCE_FILE),
     logDir: path.join(stateDir, "logs"),
     browserArtifactsDir: path.join(stateDir, "browser-artifacts"),
     rootDir,

@@ -15,7 +15,7 @@ import { composerFloatingLayerProps } from "./composerEventScope";
 import {
   alternateComposerDispatchAction,
   resolveComposerDispatchMode,
-} from "@t3tools/client-runtime/state/composer-dispatch";
+} from "@cogenly/client-runtime/state/composer-dispatch";
 
 interface PendingActionState {
   questionIndex: number;
@@ -292,7 +292,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   const submitStatus = showStop
     ? null
     : isEnvironmentUnavailable
-      ? "Environment disconnected"
+      ? "Machine disconnected"
       : (sendDisabledReason ??
         (isConnecting
           ? "Connecting"

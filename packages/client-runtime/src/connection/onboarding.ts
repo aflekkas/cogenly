@@ -1,6 +1,6 @@
-import type { DesktopSshEnvironmentTarget, EnvironmentId } from "@t3tools/contracts";
-import { defaultSshEnvironmentName } from "@t3tools/shared/environmentLinks";
-import { resolveRemotePairingTarget } from "@t3tools/shared/remote";
+import type { DesktopSshEnvironmentTarget, EnvironmentId } from "@cogenly/contracts";
+import { defaultSshEnvironmentName } from "@cogenly/shared/environmentLinks";
+import { resolveRemotePairingTarget } from "@cogenly/shared/remote";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -79,7 +79,7 @@ export class ConnectionOnboarding extends Context.Service<
       input: BearerConnectionUpdateInput,
     ) => Effect.Effect<void, ConnectionAttemptError | Persistence.ConnectionPersistenceError>;
   }
->()("@t3tools/client-runtime/connection/onboarding/ConnectionOnboarding") {}
+>()("@cogenly/client-runtime/connection/onboarding/ConnectionOnboarding") {}
 
 const resolvePairingTarget = Effect.fn("clientRuntime.connection.onboarding.resolvePairingTarget")(
   function* (input: PairingConnectionInput) {

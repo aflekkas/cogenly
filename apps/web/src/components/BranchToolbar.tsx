@@ -2,8 +2,8 @@ import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
 import { readLocalApi } from "../localApi";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { COMPOSER_CONTEXT_TOOLTIP, ComposerContextLabel } from "./ComposerContextLabel";
-import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
-import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import { scopeProjectRef, scopeThreadRef } from "@cogenly/client-runtime/environment";
+import type { EnvironmentId, ThreadId } from "@cogenly/contracts";
 import {
   ChevronDownIcon,
   FolderGit2Icon,
@@ -33,6 +33,7 @@ import {
   resolveContextStripLabelsCompact,
   resolveCurrentWorkspaceLabel,
   resolveEnvModeLabel,
+  resolveEnvironmentOptionTitle,
   resolveLockedWorkspaceLabel,
   resolvePreviousWorktreeLabel,
   resolvePreviousWorktreeSeed,
@@ -42,7 +43,10 @@ import {
   BranchToolbarBranchSelector,
   type BranchToolbarBranchSelectorHandle,
 } from "./BranchToolbarBranchSelector";
-import { BranchToolbarEnvironmentSelector } from "./BranchToolbarEnvironmentSelector";
+import {
+  BranchToolbarEnvironmentSelector,
+  EnvironmentOptionContent,
+} from "./BranchToolbarEnvironmentSelector";
 import { BranchToolbarEnvModeSelector } from "./BranchToolbarEnvModeSelector";
 import { PreviousWorktreeItemContent } from "./PreviousWorktreeItemContent";
 import { ThreadDetailsControl } from "./chat/ThreadDetailsControl";
@@ -97,6 +101,11 @@ interface BranchToolbarProps {
   envLocked: boolean;
   onComposerFocusRequest?: () => void;
   availableEnvironments?: readonly EnvironmentOption[];
+  /**
+   * The "Run on" choice shown as selected: a paired machine picked for the
+   * draft, or the one running the thread. Defaults to `environmentId`.
+   */
+  runOnEnvironmentId?: EnvironmentId;
   onEnvironmentChange?: (environmentId: EnvironmentId) => void;
   composerControlsHostRef?: (element: HTMLDivElement | null) => void;
   contextStripVisible?: boolean;
@@ -246,7 +255,8 @@ const RunContextSelector = memo(function RunContextSelector({
           )}
         </TooltipTrigger>
         <TooltipPopup {...(isPanel ? {} : COMPOSER_CONTEXT_TOOLTIP)}>
-          {autoEnvironmentLabel ?? activeEnvironment?.label ?? "Run on"}
+          {autoEnvironmentLabel ??
+            (activeEnvironment ? resolveEnvironmentOptionTitle(activeEnvironment) : "Run on")}
         </TooltipPopup>
       </Tooltip>
       {workspaceIcon}
@@ -352,10 +362,7 @@ const RunContextSelector = memo(function RunContextSelector({
                     value={env.environmentId}
                     closeOnClick
                   >
-                    <span className="flex min-w-0 items-center gap-1.5">
-                      <EnvironmentMachineIcon kind={env.machine} className="size-3" />
-                      <span className="min-w-0 truncate">{env.label}</span>
-                    </span>
+                    <EnvironmentOptionContent option={env} />
                   </MenuRadioItem>
                 ))}
               </MenuRadioGroup>
@@ -613,6 +620,7 @@ export const BranchToolbar = memo(function BranchToolbar({
   envLocked,
   onComposerFocusRequest,
   availableEnvironments,
+  runOnEnvironmentId = environmentId,
   onEnvironmentChange,
   composerControlsHostRef,
   contextStripVisible = true,
@@ -698,7 +706,7 @@ export const BranchToolbar = memo(function BranchToolbar({
     availableEnvironments && availableEnvironments.length > 1 && onEnvironmentChange,
   );
   const activeEnvironmentOption =
-    availableEnvironments?.find((env) => env.environmentId === environmentId) ?? null;
+    availableEnvironments?.find((env) => env.environmentId === runOnEnvironmentId) ?? null;
   const showEnvironmentIndicator = shouldShowEnvironmentIndicator({
     activeEnvironment: activeEnvironmentOption,
     canPickEnvironment: showEnvironmentPicker,
@@ -737,7 +745,7 @@ export const BranchToolbar = memo(function BranchToolbar({
             onAutoEnvironment={onAutoEnvironment}
             envLocked={envLocked}
             envModeLocked={envModeLocked}
-            environmentId={environmentId}
+            environmentId={runOnEnvironmentId}
             availableEnvironments={availableEnvironments}
             showEnvironmentPicker={showEnvironmentPicker}
             showEnvironmentIndicator={activeEnvironmentOption !== null}
@@ -790,7 +798,7 @@ export const BranchToolbar = memo(function BranchToolbar({
             onAutoEnvironment={onAutoEnvironment}
             envLocked={envLocked}
             envModeLocked={envModeLocked}
-            environmentId={environmentId}
+            environmentId={runOnEnvironmentId}
             availableEnvironments={availableEnvironments}
             showEnvironmentPicker={showEnvironmentPicker}
             showEnvironmentIndicator={showEnvironmentIndicator}
@@ -818,7 +826,7 @@ export const BranchToolbar = memo(function BranchToolbar({
                 autoEnvironmentLabel={autoEnvironmentLabel}
                 onAutoEnvironment={onAutoEnvironment}
                 envLocked={envLocked}
-                environmentId={environmentId}
+                environmentId={runOnEnvironmentId}
                 availableEnvironments={availableEnvironments}
                 {...(showEnvironmentPicker && onEnvironmentChange ? { onEnvironmentChange } : {})}
               />

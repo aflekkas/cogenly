@@ -28,19 +28,19 @@ import {
   type ReviewDiffFileStat,
   type ReviewDiffPreviewSource,
   type VcsRef,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import {
   dedupeRemoteBranchesWithLocalMatches,
   freeWorktreeFolderSlug,
   normalizeGitRemoteUrl,
   worktreeFolderSlug,
-} from "@t3tools/shared/git";
-import * as HostProcess from "@t3tools/shared/HostProcess";
-import { compactTraceAttributes } from "@t3tools/shared/observability";
-import { decodeJsonResult } from "@t3tools/shared/schemaJson";
-import { resolveSpawnCommand } from "@t3tools/shared/shell";
-import { parseT3ProjectFile } from "@t3tools/shared/t3ProjectFile";
-import { resolveProjectFileBackedSetting } from "@t3tools/shared/projectSettings";
+} from "@cogenly/shared/git";
+import * as HostProcess from "@cogenly/shared/HostProcess";
+import { compactTraceAttributes } from "@cogenly/shared/observability";
+import { decodeJsonResult } from "@cogenly/shared/schemaJson";
+import { resolveSpawnCommand } from "@cogenly/shared/shell";
+import { parseT3ProjectFile } from "@cogenly/shared/t3ProjectFile";
+import { resolveProjectFileBackedSetting } from "@cogenly/shared/projectSettings";
 import { gitCommandDuration, gitCommandsTotal, withMetrics } from "../observability/Metrics.ts";
 import * as GitVcsDriver from "./GitVcsDriver.ts";
 import { resolveWorktreesDirectory } from "../worktreesDirectory.ts";

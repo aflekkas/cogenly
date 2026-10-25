@@ -1,3 +1,4 @@
+import { requestLaunchMachine } from "~/machines/LaunchMachineDialog";
 import { useNavigate } from "@tanstack/react-router";
 import type {
   EnvironmentId,
@@ -5,8 +6,8 @@ import type {
   ProjectId,
   ProjectLabelId,
   ThreadId,
-} from "@t3tools/contracts";
-import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+} from "@cogenly/contracts";
+import { squashAtomCommandFailure } from "@cogenly/client-runtime/state/runtime";
 import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 import { FolderIcon, XIcon } from "lucide-react";
@@ -271,7 +272,13 @@ export function AgentBuilder({
         }),
         kickoff: true,
       };
-      const contact = await client.save(thread.environmentId, draft, first);
+      const machine = proposal.machine ?? (await requestLaunchMachine(thread.environmentId, true));
+      if (machine === null) return;
+      const contact = await client.save(
+        thread.environmentId,
+        { ...draft, ownerMachine: machine },
+        first,
+      );
       await finish(contact, rest);
     } catch (cause) {
       if (cause instanceof AgentCreatedWithoutTriggerError) {
@@ -737,11 +744,7 @@ function BuilderProjectPicker(props: {
       trigger={<Button type="button" variant="ghost-muted" size="xs" />}
     >
       <span key={current?.key ?? "none"} className="swap-motion flex min-w-0 items-center gap-1">
-        {current ? (
-          <ProjectFolderIcon color={current.label.color} className="size-3.5" />
-        ) : (
-          <FolderIcon />
-        )}
+        {current ? <ProjectFolderIcon project={current} className="size-3.5" /> : <FolderIcon />}
         <span className="min-w-0 truncate">{current ? current.label.name : "No project"}</span>
       </span>
     </AgentProjectPicker>

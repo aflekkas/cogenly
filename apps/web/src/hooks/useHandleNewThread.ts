@@ -3,19 +3,21 @@ import {
   scopedProjectKey,
   scopeProjectRef,
   scopeThreadRef,
-} from "@t3tools/client-runtime/environment";
+} from "@cogenly/client-runtime/environment";
 import {
   DEFAULT_SERVER_SETTINGS,
   type ScopedProjectRef,
   type ThreadId,
   type ThreadSurface,
-} from "@t3tools/contracts";
-import { isScratchProject } from "@t3tools/client-runtime/state/projects";
+} from "@cogenly/contracts";
+import { isScratchProject } from "@cogenly/client-runtime/state/projects";
 import { useParams, useRouter } from "@tanstack/react-router";
+import { create } from "zustand";
 import { useCallback, useMemo } from "react";
 import {
   composerDraftHasUserContent,
   markPromotedDraftThreadByRef,
+  surfaceDraftKey,
   type DraftId,
   type DraftThreadEnvMode,
   type DraftThreadState,
@@ -28,7 +30,7 @@ import {
   getProjectOrderKey,
   selectProjectGroupingSettings,
 } from "../logicalProject";
-import { resolveNewThreadEnvMode, resolveProjectSettings } from "@t3tools/shared/projectSettings";
+import { resolveNewThreadEnvMode, resolveProjectSettings } from "@cogenly/shared/projectSettings";
 import {
   readProject,
   readProjects,
@@ -47,7 +49,11 @@ import { environmentServerConfigsAtom } from "../state/server";
 import { resolveThreadRouteTarget } from "../threadRoutes";
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
 import { workPrefersNewWorktree } from "../components/work/work.logic";
+import { usePendingProjectFolderStore } from "../projectLabels/pendingProjectFolders";
 import { useClientSettings } from "./useSettings";
+
+/** Pending draft setup must clear the previous thread header before its async config read. */
+export const useNewThreadPending = create(() => ({ count: 0 }));
 
 interface NewThreadWorkspaceOptions {
   branch?: string | null;
@@ -77,7 +83,7 @@ export function useNewThreadHandler() {
     return resolveThreadRouteTarget(currentRouteParams);
   }, [router]);
 
-  return useCallback(
+  const openNewThread = useCallback(
     (
       projectRef: ScopedProjectRef,
       options?: {
@@ -219,14 +225,35 @@ export function useNewThreadHandler() {
           ),
         });
       };
-      const logicalProjectKey = project
-        ? deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings)
-        : scopedProjectKey(projectRef);
+      // Each surface keeps its own draft per project: a Work draft never
+      // reuses (and re-files) the chat draft of the same project.
+      const logicalProjectKey = surfaceDraftKey(
+        project
+          ? deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings)
+          : scopedProjectKey(projectRef),
+        surface,
+      );
+      // Opening a repository's draft picks that repository, so the draft
+      // follows its project: a reused draft drops the project it was left in,
+      // which may not hold the repository. A caller filing it in a project
+      // (the Work hero) does so once this resolves.
+      const forgetLeftProject = (opened: { draftId: DraftId; threadId: ThreadId } | null) => {
+        if (opened !== null && !startsInScratch) {
+          usePendingProjectFolderStore.getState().clearPending(opened.threadId);
+        }
+        return opened;
+      };
       const hasBranchOption = options?.branch !== undefined;
       const hasWorktreePathOption = options?.worktreePath !== undefined;
       const hasEnvModeOption = options?.envMode !== undefined;
       const hasStartFromOriginOption = options?.startFromOrigin !== undefined;
-      const storedDraftThread = getDraftSessionByLogicalProjectKey(logicalProjectKey);
+      const mappedDraftThread = getDraftSessionByLogicalProjectKey(logicalProjectKey);
+      // A draft tracked before surfaces split may be the other surface's: it
+      // is not this surface's draft, so it is neither reused nor retired.
+      const storedDraftThread =
+        mappedDraftThread !== null && (mappedDraftThread.surface ?? surface) === surface
+          ? mappedDraftThread
+          : null;
       const storedDraftThreadRef = storedDraftThread
         ? scopeThreadRef(storedDraftThread.environmentId, storedDraftThread.threadId)
         : null;
@@ -383,7 +410,7 @@ export function useNewThreadHandler() {
             replace: options?.replace ?? false,
           });
           return opened;
-        })();
+        })().then(forgetLeftProject);
       }
 
       if (
@@ -411,10 +438,12 @@ export function useNewThreadHandler() {
           interactionMode: latestActiveDraftThread.interactionMode,
           ...pickExplicitWorkspaceOptions(options),
         });
-        return Promise.resolve({
-          draftId: currentRouteTarget.draftId,
-          threadId: latestActiveDraftThread.threadId,
-        });
+        return Promise.resolve(
+          forgetLeftProject({
+            draftId: currentRouteTarget.draftId,
+            threadId: latestActiveDraftThread.threadId,
+          }),
+        );
       }
 
       const draftId = newDraftId();
@@ -436,7 +465,7 @@ export function useNewThreadHandler() {
           // winner. An invested draft this invocation deliberately declined
           // to reuse is still mapped at this point — reusing it here would
           // silently undo mint-fresh semantics.
-          racedDraft.draftId !== storedDraftThread?.draftId &&
+          racedDraft.draftId !== mappedDraftThread?.draftId &&
           readThreadShell(scopeThreadRef(racedDraft.environmentId, racedDraft.threadId)) === null
         ) {
           // Same remap the reuse paths above perform: point the draft at the
@@ -460,7 +489,7 @@ export function useNewThreadHandler() {
             params: { draftId: racedDraft.draftId },
             replace: options?.replace ?? false,
           });
-          return { draftId: racedDraft.draftId, threadId: racedDraft.threadId };
+          return forgetLeftProject({ draftId: racedDraft.draftId, threadId: racedDraft.threadId });
         }
         setLogicalProjectDraftThreadId(logicalProjectKey, projectRef, draftId, {
           threadId,
@@ -494,6 +523,17 @@ export function useNewThreadHandler() {
       })();
     },
     [environmentServerConfigs, getCurrentRouteTarget, projectGroupingSettings, router],
+  );
+  return useCallback(
+    async (...args: Parameters<typeof openNewThread>) => {
+      useNewThreadPending.setState((state) => ({ count: state.count + 1 }));
+      try {
+        return await openNewThread(...args);
+      } finally {
+        useNewThreadPending.setState((state) => ({ count: state.count - 1 }));
+      }
+    },
+    [openNewThread],
   );
 }
 

@@ -1,9 +1,10 @@
 import type {
   AgentEventFilter,
   AgentEventKind,
+  EnvironmentId,
   ProjectId,
   ProjectLabelWithRepositories,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { FolderGit2Icon, PlusIcon } from "lucide-react";
 import type { ComponentType, ReactNode } from "react";
 import { Button } from "~/components/ui/button";
@@ -54,6 +55,7 @@ function CompactField({ label, children }: { label: string; children: ReactNode 
 export function EventTriggerFields({
   value,
   onChange,
+  environmentId,
   labels,
   repositories,
   onManageProjects,
@@ -61,6 +63,8 @@ export function EventTriggerFields({
 }: {
   value: EventTriggerValue;
   onChange: (value: { event: AgentEventKind; filter?: EventTriggerValue["filter"] }) => void;
+  /** The agent's environment, which `labels` belong to. */
+  environmentId: EnvironmentId;
   /** Projects the filter may name: the agent's readable scope. */
   labels: ReadonlyArray<ProjectLabelWithRepositories>;
   /** Repositories the filter may name: the agent's readable scope. */
@@ -120,6 +124,7 @@ export function EventTriggerFields({
               </span>
             ))}
           <ProjectLabelPicker
+            environmentId={environmentId}
             labels={labels}
             selectedIds={labelIds}
             onManage={onManageProjects}

@@ -2,6 +2,7 @@ import type {
   NodeId,
   OrchestrationV2ProviderFailure,
   OrchestrationV2ProviderFailureClass,
+  OrchestrationV2ProviderLimitKind,
   OrchestrationV2ProviderRetry,
   OrchestrationV2TurnItem,
   ProviderDriverKind,
@@ -9,7 +10,7 @@ import type {
   ProviderTurnId,
   RunId,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Cause from "effect/Cause";
 
@@ -182,6 +183,7 @@ export function makeProviderFailure(input: {
   readonly class?: OrchestrationV2ProviderFailureClass;
   readonly retryable?: boolean | null;
   readonly resetAt?: string | null;
+  readonly limitKind?: OrchestrationV2ProviderLimitKind;
 }): OrchestrationV2ProviderFailure {
   const rawMessage = input.message ?? causeMessage(input.cause) ?? DEFAULT_PROVIDER_FAILURE_MESSAGE;
   const message = boundedText(rawMessage, MAX_PROVIDER_FAILURE_MESSAGE_LENGTH);
@@ -201,6 +203,9 @@ export function makeProviderFailure(input: {
     input.resetAt != null &&
     Number.isFinite(Date.parse(input.resetAt))
       ? { resetAt: DateTime.formatIso(DateTime.makeUnsafe(input.resetAt)) }
+      : {}),
+    ...(input.class === "usage_limit" && input.limitKind !== undefined
+      ? { limitKind: input.limitKind }
       : {}),
   };
 }
@@ -232,7 +237,12 @@ export function makeProviderFailureTurnItem(input: {
     parentItemId: null,
     ordinal: input.itemOrdinal,
     status: "failed",
-    title: input.failure.class === "usage_limit" ? "Usage limit reached" : "Provider error",
+    title:
+      input.failure.class !== "usage_limit"
+        ? "Provider error"
+        : input.failure.limitKind === "rate_limit"
+          ? "Rate limited"
+          : "Usage limit reached",
     startedAt: input.retryStartedAt ?? input.occurredAt,
     completedAt: input.occurredAt,
     updatedAt: input.occurredAt,

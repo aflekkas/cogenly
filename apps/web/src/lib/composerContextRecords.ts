@@ -1,13 +1,16 @@
 import {
+  COMPOSER_CONTEXT_LABEL_MAX_CHARS,
   COMPOSER_CONTEXT_REVIEW_DIFF_MAX_CHARS,
   COMPOSER_CONTEXT_REVIEW_TEXT_MAX_CHARS,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import type {
   ComposerContextId,
   ComposerContextRecord,
   EnvironmentId,
   FileContextRecord,
   ImageContextRecord,
+  IntegrationContextRecord,
+  IntegrationSource,
   KnownComposerContextRecord,
   LinkContextRecord,
   AgentContextRecord,
@@ -21,14 +24,15 @@ import type {
   TerminalContextRecord,
   ThreadContextRecord,
   ThreadId,
-} from "@t3tools/contracts";
-import { upgradeLegacyContextMessage } from "@t3tools/shared/composerContextLegacy";
-import { encodeComposerContextFragment } from "@t3tools/shared/composerContextClipboard";
+} from "@cogenly/contracts";
+import { integrationSourceChipLabel } from "@cogenly/client-runtime/composerThreadItems";
+import { upgradeLegacyContextMessage } from "@cogenly/shared/composerContextLegacy";
+import { encodeComposerContextFragment } from "@cogenly/shared/composerContextClipboard";
 import {
   collectComposerContextReferences,
   sanitizeComposerContextLabel,
   toKindScopedComposerContextId,
-} from "@t3tools/shared/composerContextReferences";
+} from "@cogenly/shared/composerContextReferences";
 
 import {
   type ComposerContextReference,
@@ -204,6 +208,28 @@ export function projectFolderContextRecord(input: {
     environmentId: input.environmentId,
     projectFolderId: input.projectFolderId,
     name: label,
+  };
+}
+
+/**
+ * One record per integration: picking the same source twice reuses the chip. The chip reads
+ * "Gmail · work"; the record snapshots the account so the agent can call it by `name`.
+ */
+export function integrationContextRecord(source: IntegrationSource): IntegrationContextRecord {
+  const label = sanitizeComposerContextLabel(integrationSourceChipLabel(source), "integration");
+  // Display snapshots share the label's bound; the source's own strings are unbounded.
+  const clamp = (value: string) => value.slice(0, COMPOSER_CONTEXT_LABEL_MAX_CHARS);
+  return {
+    version: 1,
+    kind: "integration",
+    contextId: toKindScopedComposerContextId("integration", source.id),
+    label,
+    integrationId: source.id,
+    name: source.name,
+    serviceName: clamp(source.serviceName),
+    displayName: clamp(source.displayName),
+    accountLabel: source.accountLabel === null ? null : clamp(source.accountLabel),
+    icon: source.icon,
   };
 }
 

@@ -112,9 +112,9 @@ it.layer(layerTest)("ProjectFaviconResolver", (it) => {
         const cwd = yield* makeWorkspace({
           "assets/icon.png": "",
           "build/icon.png": "",
-          "apps/marketing/public/favicon.ico": "",
+          "apps/website/public/favicon.ico": "",
         });
-        expect(yield* resolveRelative(cwd)).toBe("apps/marketing/public/favicon.ico");
+        expect(yield* resolveRelative(cwd)).toBe("apps/website/public/favicon.ico");
       }),
     );
 

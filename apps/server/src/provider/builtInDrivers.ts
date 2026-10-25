@@ -1,11 +1,11 @@
-import { GrokDriver, type GrokDriverEnv } from "@t3tools/provider-grok/server";
-import { MuseDriver, type MuseDriverEnv } from "@t3tools/provider-muse/server";
+import { GrokDriver, type GrokDriverEnv } from "@cogenly/provider-grok/server";
+import { MuseDriver, type MuseDriverEnv } from "@cogenly/provider-muse/server";
 import { ClaudeDriver, type ClaudeDriverEnv } from "./Drivers/ClaudeDriver.ts";
 import { CodexDriver, type CodexDriverEnv } from "./Drivers/CodexDriver.ts";
 import type {
   AnyProviderDriver,
   ProviderUsageReaderEnv,
-} from "@t3tools/provider-core/server/driver";
+} from "@cogenly/provider-core/server/driver";
 
 export type BuiltInDriversEnv = ClaudeDriverEnv | CodexDriverEnv | MuseDriverEnv | GrokDriverEnv;
 

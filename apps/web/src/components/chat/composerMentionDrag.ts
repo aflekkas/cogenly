@@ -1,5 +1,5 @@
-import { PullRequestContextMetadata } from "@t3tools/contracts";
-import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
+import { PullRequestContextMetadata } from "@cogenly/contracts";
+import { serializeComposerFileLink } from "@cogenly/shared/composerTrigger";
 import { Option, Schema } from "effect";
 
 /**

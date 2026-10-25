@@ -108,14 +108,17 @@ The chat keeps a **Work started** line for each session it handed off. The sessi
 header shows the chat or agent it came from and its status, such as **Running**,
 **Needs input**, or **Ready for review**. You don't need to return to the chat.
 
-The chat's agent can also hand work off itself when you ask for something that needs
-commands or files, such as changing a repository or uninstalling an app. It picks a
+The chat's agent can also hand work off itself when you ask for something that changes
+things, such as editing a repository or uninstalling an app, or that runs for a long
+time. Lookups stay in the chat. It picks a
 repository, or **No project** for work on this machine, and shows a task card in the
 chat. A card it only proposes waits for **Approve**; **Edit** lets you change where it
 runs and what it's told first, and **Dismiss** can be undone with **Restore**. When you
 clearly asked for the action, the agent may start the task right away. Either way the
 card follows the task, has **Stop** while it runs, and when the task ends the chat's
-agent tells you how it went.
+agent tells you how it went. For a task whose result is all you need, the agent can ask
+for its Work thread to settle once it completes, so it doesn't linger in your list; a
+task that fails stays active. Un-settle the thread to continue there.
 
 ## Start a thread
 
@@ -143,9 +146,31 @@ or waiting on you. Older chats load as you scroll, and search covers all of them
 repositories from **Work** or the command palette.
 
 A chat is a conversation; Work is a coding session in a repository. Chats run in
-conversation mode: the agent answers directly and can't edit files or run shell
-commands itself; it hands that work to a task instead. So a chat's
-menu has **Start Work…**, rename, **Mark unread**, projects, copy and **Delete**,
+conversation mode: the agent answers directly and looks things up itself. It can run
+quick read-only commands, such as searching files, reading git history or querying
+`gh`, from the chat's project folder (or its own folder when it has no project), and
+each command shows in the conversation. It doesn't edit repositories, install
+anything or run long builds from a chat; it hands that work to a task instead.
+Chat commands need full-access mode and the `enableAgentTerminals` preference. They also require a working local sandbox:
+macOS uses the built-in `sandbox-exec`. On Linux, Cogenly installs the distro's
+`bubblewrap` package during installation, updates, and background service setup
+when running as root or with passwordless sudo. If elevation needs a password,
+it prints the exact command to run. On Ubuntu/Debian:
+`sudo apt-get update && sudo apt-get install -y bubblewrap`.
+Settings → Machines → Health offers **Fix** for a missing or blocked sandbox;
+`cogenly health --fix` and `cogenly security setup` do the same. After installation,
+Cogenly checks confinement again and enables chat commands without a restart.
+Hosts that block user namespaces or seccomp keep chat commands off.
+On Windows or when the sandbox probe fails, commands are unavailable in chats;
+use Work for command-based tasks.
+
+The sandbox prevents local file writes except in a fresh private temporary folder.
+It stays in effect for child processes and further input to the same terminal.
+Network access remains available for lookups. The sandbox does **not** prevent
+remote writes: chat agents are instructed never to run commands that change
+remote state, such as sending messages, changing issues or pushing commits.
+
+A chat's menu has **Start Work…**, rename, **Mark unread**, projects, copy and **Delete**,
 which always asks first, while settling, snoozing, archiving, repository settings
 and the branch and worktree controls, the right panel with its browser and device, and the
 terminal panel belong to Work. When a
@@ -327,24 +352,36 @@ repositories. A project can hold several repositories, but each repository and e
 thread is in at most one project. Work goes in its repository's project unless you move
 it. Projects are context only; they never change what an agent can access.
 
+If two projects created separately on paired machines have the same name, choose
+**Merge** to move their contents into one project, or **Keep separate** to dismiss the
+suggestion on every machine. Merging removes the source project everywhere and cannot
+be undone automatically; files with conflicting names are kept under new names.
+
 A new task's heading reads "What should we build in _project_ / _repository_?". Pick
 the project there or in the composer's project control, and the task moves to that
 project's most recently used repository, or to the project's folder when it has none.
-The repository menu lists only the project's own repositories (with **No project**,
-only repositories in no project); **No repository (project folder)** runs the task in
-the project's own folder instead. Under **On GitHub** it also lists the project's GitHub
-repositories that aren't in the project yet: pick one to clone it in. A clone that fails or
-is cancelled adds nothing, and you can retry it from the same row. **Manage repositories…**
-opens the project's page, where you can remove a repository from the project.
+The repository menu lists every repository in the project, on the machine the task runs on
+(with **No project**, that machine's repositories). A repository the project has but this
+machine doesn't reads **Clone to set up**: pick it to clone it here, and the task moves to it
+once the clone lands. The command palette's **New thread in...** lists the same repositories
+under **Not cloned here**; picking one clones it. A repository not cloned here still shows
+its icon once any machine with a checkout has found it, or its owner's GitHub avatar until
+then. A repository's **⋯** menu can remove it from this machine (the project
+keeps it, so you can clone it again here or on another machine), move its folder into the
+project's folder, or take it out of the project. **Add repository…** lists this machine's
+other repositories and the project's GitHub repositories to clone in. **No repository
+(project folder)** runs the task in the project's own folder instead. **Manage
+repositories…** opens the project's page, which lists the same repositories.
 
 Manage projects in **Settings → Projects** (or **Open projects** in the command palette,
 or `mod+alt+4`). It shows every project as a card; open one for its page with its
 repositories, recent chats and Work, agents, files and GitHub org. The GitHub org (the
 button beside the project's name) is where agents and the repository picker look for its
 repositories; **Sources** lists any other repositories it reaches. Use **Add repository** to bring one in
-(a repository already in another project asks before it moves), the remove button on a
-repository row to take it out, and the **⋯** menu to rename, recolor, describe or delete
-the project. Deleting a project keeps its chats, Work and repositories; they are just no
+from this machine or GitHub (a repository already in another project asks before it moves),
+click a **Clone to set up** row to clone it on this machine, a repository row's **⋯** menu
+to remove it from this machine or the project, and the page's **⋯** menu to rename,
+recolor, describe or delete the project. Deleting a project keeps its chats, Work and repositories; they are just no
 longer in a folder. Start one with **New project** on the page or in the command palette.
 
 You can also ask an agent in any chat or Work to set a project up or change it: add a
@@ -365,9 +402,9 @@ name. Neither you nor an agent can add threads or repositories to it until you
 unarchive it, though you can still move threads out. **Archived** at the top of
 Settings → Projects lists them; choose **Unarchive** to bring one back.
 
-To file a thread, right-click it and choose **Move to folder**, or run **Move to folder…** from the command palette. Choose
-**Remove from folder** to take it out; Work then falls back to its repository's
-project. A filed chat also gets
+To file a thread, right-click it and choose **Move to project…**, run **Move to project…**
+from the command palette, or pick a project in the composer. Choose **Remove from
+project** to take it out; Work then falls back to its repository's project. A filed chat also gets
 [project context](./memory-and-export.md#project-context-in-chats).
 
 **Chats** stays one list of titles by date. **Work** is one list of cards in the order you
@@ -423,9 +460,12 @@ retry and the normal snooze choices.
 On web and desktop, use **Agents** to follow work delegated to subagents.
 Stop on a thread also stops the subagents it delegated to.
 
-Subagent threads started by the agent can't take messages; message the parent
-thread instead. When such a subagent needs an approval or an answer, the parent
-thread asks for it.
+You can message a subagent from its own thread. While it runs, a subagent the
+agent started with its own tools takes your message once its current work ends;
+one started with `delegate_task` takes it the way any running thread does. When
+your message produces a new result after the subagent reported, the parent
+thread is told it has an updated result. When a subagent the agent started with
+its own tools needs an approval or an answer, the parent thread asks for it.
 
 Expand a tool call in the conversation to see its full command and output.
 Summaries shorten shell wrappers and can still describe the latest call after it

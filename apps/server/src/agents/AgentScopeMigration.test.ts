@@ -1,11 +1,11 @@
 import { expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import * as NodeSqlite from "@t3tools/shared/nodeSqliteClient";
+import * as NodeSqlite from "@cogenly/shared/nodeSqliteClient";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
-import { Agent } from "@t3tools/contracts";
+import { Agent } from "@cogenly/contracts";
 import { runMigrations } from "../persistence/Migrations.ts";
 import { agentFixture } from "./agent.testkit.ts";
 

@@ -20,8 +20,9 @@ import {
   type MachineUpdateInput,
   type PeerCallError,
   type PeerChannel,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -95,7 +96,10 @@ const make = Effect.gen(function* () {
     const joined = yield* hubLink.view;
     if (Option.isSome(joined)) {
       const view = joined.value;
-      const hubOnline = view.status === "online";
+      // Session expiry can happen while offline, without a socket event.
+      const expired =
+        DateTime.toEpochMillis(view.link.expiresAt) <= DateTime.toEpochMillis(yield* DateTime.now);
+      const hubOnline = !expired && view.status === "online";
       const fromHub = view.machines.find((machine) => machine.relation === "this");
       const hubMachine: MachineInfo = {
         ...(fromHub === undefined
@@ -112,7 +116,7 @@ const make = Effect.gen(function* () {
         online: hubOnline,
         lastSeenAt: hubOnline ? null : view.link.lastSeenAt,
         pairedAt: view.link.pairedAt,
-        pairing: view.status === "revoked" ? "revoked" : "paired",
+        pairing: expired || view.status === "revoked" ? "revoked" : "paired",
       };
       // Other spokes are known only through the hub; offline with it.
       const peers = view.machines
@@ -126,7 +130,7 @@ const make = Effect.gen(function* () {
       const link: MachineLinkState = {
         _tag: "spoke",
         hubEnvironmentId: view.link.hubEnvironmentId,
-        status: view.status,
+        status: expired ? "revoked" : view.status,
         route: view.route,
         lastError: view.lastError,
       };

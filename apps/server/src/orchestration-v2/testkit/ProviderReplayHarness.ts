@@ -1,13 +1,17 @@
+import * as WorktreeLifecycle from "../../workspace/WorktreeLifecycle.ts";
+import * as Membership from "../../projectLabels/ProjectRepositoryMembership.ts";
 import { layerIdentity as layerSharedIdentity } from "../../sync/testkit.ts";
+import * as ServerEnvironment from "../../environment/ServerEnvironment.ts";
 import * as AgentStore from "../../agents/AgentStore.ts";
-import * as OtelEnvironment from "@t3tools/shared/otelEnvironment";
-import { DEFAULT_SIGNAL_EXPORT } from "@t3tools/shared/observability";
+import * as OtelEnvironment from "@cogenly/shared/otelEnvironment";
+import { DEFAULT_SIGNAL_EXPORT } from "@cogenly/shared/observability";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import type {
+  EnvironmentId,
   ProviderDriverKind,
   ProviderReplayTranscript,
   ResponseStreamingMode,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -22,7 +26,7 @@ import * as ServerConfig from "../../config.ts";
 import * as SqlitePersistence from "../../persistence/Sqlite.ts";
 import * as ServerSettings from "../../serverSettings.ts";
 import * as ThreadManagementService from "../ThreadManagementService.ts";
-import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
+import * as McpProviderSessions from "@cogenly/provider-core/server/McpProviderSessions";
 import * as McpSessionRegistryTestkit from "../../mcp/McpSessionRegistry.testkit.ts";
 import * as VcsDriverRegistry from "../../vcs/VcsDriverRegistry.ts";
 import * as GitVcsDriver from "../../vcs/GitVcsDriver.ts";
@@ -37,13 +41,15 @@ import * as EffectOutbox from "../EffectOutbox.ts";
 import * as EffectWorker from "../EffectWorker.ts";
 import * as EventSink from "../EventSink.ts";
 import * as EventStore from "../EventStore.ts";
-import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import * as IdAllocator from "@cogenly/provider-core/server/IdAllocator";
+import type * as RemoteThreadLaunch from "../RemoteThreadLaunch.ts";
+import type * as RemoteThreadCommands from "../RemoteThreadCommands.ts";
 import * as Orchestrator from "../Orchestrator.ts";
 import * as ProjectionStore from "../ProjectionStore.ts";
 import * as ProjectStore from "../ProjectStore.ts";
 import * as ProviderAdapterRegistry from "../ProviderAdapterRegistry.ts";
 import * as ProviderAuthService from "../../provider/ProviderAuthService.ts";
-import * as ProviderContinuationRequests from "@t3tools/provider-core/server/ProviderContinuationRequests";
+import * as ProviderContinuationRequests from "@cogenly/provider-core/server/ProviderContinuationRequests";
 import * as ProviderContinuationService from "../ProviderContinuationService.ts";
 import * as ProviderEventIngestor from "../ProviderEventIngestor.ts";
 import * as ProviderRuntimeRecoveryService from "../ProviderRuntimeRecoveryService.ts";
@@ -51,6 +57,7 @@ import * as ProviderSessionManager from "../ProviderSessionManager.ts";
 import * as CommandOutputRecorder from "./CommandOutputRecorder.ts";
 import * as ProviderSwitchService from "../ProviderSwitchService.ts";
 import * as ProviderTurnControlService from "../ProviderTurnControlService.ts";
+import * as MachinesTurnContext from "../MachinesTurnContext.ts";
 import * as ProviderTurnStartService from "../ProviderTurnStartService.ts";
 import * as ProviderTurnStartServiceTestkit from "../ProviderTurnStartService.testkit.ts";
 import * as McpAppModelContext from "../../mcpApps/McpAppModelContext.ts";
@@ -71,7 +78,7 @@ import {
 import {
   makeProviderReplayGate,
   type ProviderReplayGate,
-} from "@t3tools/provider-testing/replayGate";
+} from "@cogenly/provider-testing/replayGate";
 
 export function makeReplayServerConfig(
   scenario: string,
@@ -199,6 +206,11 @@ export function runOrchestratorV2ProviderReplayScenario<
       MigrationError | PlatformError.PlatformError | SqlError
     >;
     readonly runEffectWorker?: boolean;
+    readonly machinesContext?: string;
+    readonly environmentId?: EnvironmentId;
+    readonly remoteServices?: Layer.Layer<
+      RemoteThreadLaunch.RemoteThreadLaunch | RemoteThreadCommands.RemoteThreadCommands
+    >;
     // Start continuation runs for provider wake turns, as the live runtime does.
     // Off by default: most fixtures record no wake turn.
     readonly runContinuationWorker?: boolean;
@@ -245,6 +257,11 @@ export function layerProviderReplay<Transcript extends ProviderReplayTranscript,
       MigrationError | PlatformError.PlatformError | SqlError
     >;
     readonly runEffectWorker?: boolean;
+    readonly machinesContext?: string;
+    readonly environmentId?: EnvironmentId;
+    readonly remoteServices?: Layer.Layer<
+      RemoteThreadLaunch.RemoteThreadLaunch | RemoteThreadCommands.RemoteThreadCommands
+    >;
     // Start continuation runs for provider wake turns, as the live runtime does.
     // Off by default: most fixtures record no wake turn.
     readonly runContinuationWorker?: boolean;
@@ -282,7 +299,12 @@ export function layerWithRegistry<Error>(
       MigrationError | PlatformError.PlatformError | SqlError
     >;
     readonly runEffectWorker?: boolean;
+    readonly machinesContext?: string;
     readonly responseStreamingMode?: ResponseStreamingMode;
+    readonly environmentId?: EnvironmentId;
+    readonly remoteServices?: Layer.Layer<
+      RemoteThreadLaunch.RemoteThreadLaunch | RemoteThreadCommands.RemoteThreadCommands
+    >;
     // Start continuation runs for provider wake turns, as the live runtime does.
     // Off by default: most fixtures record no wake turn.
     readonly runContinuationWorker?: boolean;
@@ -409,6 +431,7 @@ export function layerWithRegistry<Error>(
     ),
   );
   const layerProviderTurnStartServiceProvided = ProviderTurnStartService.layer.pipe(
+    Layer.provide(Layer.mock(WorktreeLifecycle.WorktreeLifecycle)({ prepare: () => Effect.void })),
     Layer.provide(
       Layer.mergeAll(
         AgentStore.layer.pipe(
@@ -417,6 +440,12 @@ export function layerWithRegistry<Error>(
           Layer.orDie,
         ),
         layerContextHandoffServiceProvided,
+        options.machinesContext === undefined
+          ? MachinesTurnContext.layer
+          : Layer.succeed(MachinesTurnContext.MachinesTurnContext, {
+              read: Effect.succeed(options.machinesContext),
+              register: () => Effect.void,
+            }),
         layerEventSinkProvided,
         IdAllocator.layer,
         layerStores,
@@ -468,6 +497,17 @@ export function layerWithRegistry<Error>(
     }),
   );
   const layerOrchestratorProvided = Orchestrator.layer.pipe(
+    Layer.provide(
+      Membership.layer.pipe(Layer.provide(Layer.merge(layerDatabase, layerServerConfig))),
+    ),
+    Layer.provide(
+      options.environmentId === undefined
+        ? Layer.empty
+        : Layer.succeed(ServerEnvironment.ServerEnvironmentIdentity, {
+            getEnvironmentId: Effect.succeed(options.environmentId),
+          }),
+    ),
+    Layer.provide(options.remoteServices ?? Layer.empty),
     Layer.provide(
       Layer.mergeAll(
         layerCheckpointServiceProvided,

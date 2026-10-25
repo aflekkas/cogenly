@@ -1,5 +1,5 @@
 /** Context menu actions for workspace files. */
-import { type ContextMenuItem, type EnvironmentId, type ScopedThreadRef } from "@t3tools/contracts";
+import { type ContextMenuItem, type EnvironmentId, type ScopedThreadRef } from "@cogenly/contracts";
 import { useRightPanelStore } from "./rightPanelStore";
 import { useCallback, useMemo } from "react";
 
@@ -12,7 +12,7 @@ import { readLocalApi } from "./localApi";
 import { serverEnvironment } from "./state/server";
 import { shellEnvironment } from "./state/shell";
 import { useAtomCommand } from "./state/use-atom-command";
-import { resolvePathLinkTarget } from "@t3tools/shared/fileLinks";
+import { resolvePathLinkTarget } from "@cogenly/shared/fileLinks";
 import { toastManager } from "./components/ui/toast";
 import { useAtomValue } from "@effect/atom-react";
 

@@ -11,8 +11,8 @@
  *
  * @module greeting/ChatGreetingService
  */
-import type { ChatGreetingBucket, ChatGreetingInput, ChatGreetingResult } from "@t3tools/contracts";
-import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
+import type { ChatGreetingBucket, ChatGreetingInput, ChatGreetingResult } from "@cogenly/contracts";
+import { writeFileStringAtomically } from "@cogenly/shared/atomicWrite";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";

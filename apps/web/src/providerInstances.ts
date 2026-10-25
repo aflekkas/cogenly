@@ -25,7 +25,7 @@ import {
   type ServerProviderModel,
   type ServerSettings,
   type ServerProviderState,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import {
   nextProviderInstanceAccentColor,
   normalizeProviderAccentColor,
@@ -33,8 +33,8 @@ import {
   resolveProviderInstanceAccentColors,
   resolveProviderInstanceDisplayName,
   shouldShowInstanceBadge,
-} from "@t3tools/client-runtime/state/provider-instance-display";
-import { defaultClientModelForDriver, isClientPickerVisible } from "@t3tools/provider-core/client";
+} from "@cogenly/client-runtime/state/provider-instance-display";
+import { defaultClientModelForDriver, isClientPickerVisible } from "@cogenly/provider-core/client";
 
 import { providerClients } from "./components/settings/providerDriverMeta";
 

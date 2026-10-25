@@ -1,4 +1,4 @@
-import type { EnvironmentId, ProjectLabelId, ProjectResource } from "@t3tools/contracts";
+import type { EnvironmentId, ProjectLabelId, ProjectResource } from "@cogenly/contracts";
 
 import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";

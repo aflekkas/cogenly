@@ -1,7 +1,7 @@
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { isScratchProject } from "@t3tools/client-runtime/state/projects";
-import { deriveWorkStatus } from "@t3tools/client-runtime/state/work-status";
-import type { ScopedThreadRef, ThreadId } from "@t3tools/contracts";
+import { scopeThreadRef } from "@cogenly/client-runtime/environment";
+import { isScratchProject } from "@cogenly/client-runtime/state/projects";
+import { deriveWorkStatus } from "@cogenly/client-runtime/state/work-status";
+import type { ScopedThreadRef, ThreadId } from "@cogenly/contracts";
 import { BotIcon, MessageSquareIcon } from "lucide-react";
 import { useMemo } from "react";
 

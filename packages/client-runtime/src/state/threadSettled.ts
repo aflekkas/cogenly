@@ -1,6 +1,6 @@
 // @effect-diagnostics globalDate:off -- UI snooze presets use local calendar boundaries and Intl labels.
 import * as DateTime from "effect/DateTime";
-import { localTimeZone, snoozePresetTimes, type SnoozePresetKey } from "@t3tools/shared/snooze";
+import { localTimeZone, snoozePresetTimes, type SnoozePresetKey } from "@cogenly/shared/snooze";
 
 import type { PendingSubagentRequest } from "./models.ts";
 
@@ -247,7 +247,7 @@ function snoozeTimeOfDayLabel(date: Date): string {
 
 /**
  * Shared "snooze until" choices for every client, in the device's zone. The
- * times come from `@t3tools/shared/snooze`, which the agent's snooze tool
+ * times come from `@cogenly/shared/snooze`, which the agent's snooze tool
  * resolves through too.
  */
 export function resolveSnoozePresets(now: Date): ReadonlyArray<SnoozePreset> {

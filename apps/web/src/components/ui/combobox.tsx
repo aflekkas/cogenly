@@ -8,7 +8,15 @@ import { observeResize } from "~/lib/observeResize";
 import { cn } from "~/lib/utils";
 import { Input } from "~/components/ui/input";
 import { ScrollArea } from "~/components/ui/scroll-area";
-import { SearchField, searchFieldInputClassName } from "~/components/ui/search-input";
+import { searchFieldInputClassName } from "~/components/ui/search-input";
+import {
+  SEARCH_LIST_GROUP_LABEL_CLASS,
+  SearchListRowIcon,
+  SearchListSearch,
+  searchListEmptyVariants,
+  searchListListVariants,
+  searchListRowVariants,
+} from "~/components/ui/search-list";
 
 const ComboboxContext = React.createContext<{
   chipsRef: React.RefObject<Element | null> | null;
@@ -109,26 +117,22 @@ function ComboboxInput({
 }
 
 /**
- * The search row at the top of a combobox popup. Like the command palette's
- * header it is borderless and flush with the popup, with a hairline under it,
- * so there is no second radius to clash with the popup's. Its inset matches
- * the list's (list padding plus row padding), so the search icon sits in the
- * same column as every row's leading icon.
+ * The search row at the top of a combobox popup: the shared search-list
+ * header, borderless and flush with the popup with a hairline under it, so
+ * there is no second radius to clash with the popup's.
  */
 function ComboboxSearchInput({
   className,
   ...props
 }: Omit<ComboboxPrimitive.Input.Props, "size" | "className"> & { className?: string }) {
   return (
-    <div className="min-w-0 shrink-0 border-b border-border px-3.5" data-slot="combobox-search">
-      <SearchField size="sm" variant="bare" className="h-9">
-        <ComboboxPrimitive.Input
-          data-slot="combobox-input"
-          className={cn(searchFieldInputClassName, className)}
-          {...props}
-        />
-      </SearchField>
-    </div>
+    <SearchListSearch size="popover">
+      <ComboboxPrimitive.Input
+        data-slot="combobox-input"
+        className={cn(searchFieldInputClassName, className)}
+        {...props}
+      />
+    </SearchListSearch>
   );
 }
 
@@ -233,6 +237,10 @@ function ComboboxPopup({
   );
 }
 
+/**
+ * A picker row; build its content from the `SearchListRow*` slots. Its look
+ * is `searchListRowVariants`, with the chosen value painted selected.
+ */
 function ComboboxItem({
   className,
   children,
@@ -250,48 +258,28 @@ function ComboboxItem({
   return (
     <ComboboxPrimitive.Item
       className={cn(
-        "flex min-h-8 in-data-[side=none]:min-w-[calc(var(--anchor-width)+1.25rem)] cursor-pointer items-center rounded-sm px-2 py-1 text-base outline-none state-hover data-selected:state-selected data-disabled:pointer-events-none data-disabled:cursor-not-allowed data-disabled:opacity-64 sm:min-h-7 sm:text-sm [&_svg:not([class*='size-'])]:size-4.5 sm:[&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0",
-        tone === "action" && "text-muted-foreground",
-        // The hairline spans the popup, not just the row, and sits centered in the gap above the row.
-        divider &&
-          "relative mt-3 before:absolute before:-inset-x-1.5 before:-top-1.5 before:h-px before:bg-border",
+        searchListRowVariants({ highlight: "hover", tone, divider }),
+        "in-data-[side=none]:min-w-[calc(var(--anchor-width)+1.25rem)] [&_svg:not([class*='size-'])]:size-4.5 sm:[&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0",
         className,
       )}
       data-slot="combobox-item"
       {...props}
     >
       {/* Children lay out as one row: a label that truncates, then any trailing meta. */}
-      <div
-        className="flex min-w-0 flex-1 items-center gap-2 [&_svg:not([class*='text-'])]:text-muted-foreground"
-        data-slot="combobox-item-content"
-      >
+      <div className="flex min-w-0 flex-1 items-center gap-2" data-slot="combobox-item-content">
         {children}
       </div>
     </ComboboxPrimitive.Item>
   );
 }
 
-/**
- * A fixed leading column for a row's icon or badge, so a 14px repository
- * badge and a 16px icon put their labels on the same line.
- */
-function ComboboxItemIcon({ className, ...props }: React.ComponentProps<"span">) {
-  return (
-    <span
-      className={cn("flex size-4 shrink-0 items-center justify-center", className)}
-      data-slot="combobox-item-icon"
-      {...props}
-    />
-  );
-}
+/** The shared row's leading column (`SearchListRowIcon`), under the name the pickers use. */
+const ComboboxItemIcon = SearchListRowIcon;
 
 function ComboboxEmpty({ className, ...props }: ComboboxPrimitive.Empty.Props) {
   return (
     <ComboboxPrimitive.Empty
-      className={cn(
-        "not-empty:px-3.5 not-empty:py-3 text-center text-base text-muted-foreground sm:text-sm",
-        className,
-      )}
+      className={cn(searchListEmptyVariants({ size: "popover" }), className)}
       data-slot="combobox-empty"
       {...props}
     />
@@ -304,7 +292,7 @@ function ComboboxList({ className, ...props }: ComboboxPrimitive.List.Props) {
   return (
     <ScrollArea scrollbarGutter scrollFade>
       <ComboboxPrimitive.List
-        className={cn("not-empty:scroll-py-1.5 not-empty:p-1.5", className)}
+        className={cn(searchListListVariants({ size: "popover" }), className)}
         data-slot="combobox-list"
         {...props}
       />
@@ -355,17 +343,11 @@ function ComboboxGroup({ className, ...props }: ComboboxPrimitive.Group.Props) {
   );
 }
 
-/**
- * A group's header: a quiet section line on the row-icon column, optionally
- * led by a mark. Never filled, so it cannot read as a selected row.
- */
+/** A group's header: the shared quiet text line. Never filled, so it cannot read as a selected row. */
 function ComboboxGroupLabel({ className, ...props }: ComboboxPrimitive.GroupLabel.Props) {
   return (
     <ComboboxPrimitive.GroupLabel
-      className={cn(
-        "flex min-w-0 items-center gap-2 px-2 pt-1.5 pb-1 font-medium text-muted-foreground text-xs",
-        className,
-      )}
+      className={cn(SEARCH_LIST_GROUP_LABEL_CLASS, className)}
       data-slot="combobox-group-label"
       {...props}
     />
@@ -381,15 +363,10 @@ const ComboboxCollection = ComboboxPrimitive.Collection;
  */
 function ComboboxGroupToggle({
   open,
-  icon,
   className,
   children,
   ...props
-}: Omit<React.ComponentProps<"button">, "type"> & {
-  open: boolean;
-  /** The group's leading mark, on the row-icon column. */
-  icon?: React.ReactNode;
-}) {
+}: Omit<React.ComponentProps<"button">, "type"> & { open: boolean }) {
   return (
     <ComboboxPrimitive.GroupLabel
       render={
@@ -399,7 +376,7 @@ function ComboboxGroupToggle({
           className={cn(
             // A section label, not a row: no fill at rest or on hover, only
             // the text lifting a step and a ring for the keyboard.
-            "flex w-full min-w-0 cursor-pointer items-center gap-2 rounded-sm px-2 pt-1.5 pb-1 text-left font-medium text-muted-foreground text-xs outline-none transition-colors duration-(--motion-duration-fast) ease-standard hover:text-secondary-label focus-visible:text-secondary-label focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+            "flex w-full min-w-0 cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-left font-medium text-muted-foreground text-xs outline-none transition-colors duration-(--motion-duration-fast) ease-standard hover:text-secondary-label focus-visible:text-secondary-label focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
             className,
           )}
           {...props}
@@ -407,9 +384,6 @@ function ComboboxGroupToggle({
       }
       data-slot="combobox-group-toggle"
     >
-      {icon ? (
-        <span className="flex size-4 shrink-0 items-center justify-center">{icon}</span>
-      ) : null}
       <span className="min-w-0 flex-1 truncate">{children}</span>
       <ChevronRightIcon
         aria-hidden

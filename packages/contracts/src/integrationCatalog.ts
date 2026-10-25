@@ -5,20 +5,17 @@ import type { Integration } from "./integration.ts";
  * The default integrations catalog: services Cogenly knows how to connect, so
  * Settings and agents ask only for what each one needs. One list for the
  * server (connectFromCatalog), Settings (the catalog grid) and the per-turn
- * "also available to connect" line.
+ * "also available to connect" line. Anything else is a custom MCP server.
  */
 
 export const IntegrationCatalogId = Schema.Literals([
   "google-workspace",
+  "slack",
+  "github",
   "linear",
   "notion",
-  "github",
-  "atlassian",
-  "intercom",
   "wispr-flow",
-  "slack",
   "fathom",
-  "figma",
 ]);
 export type IntegrationCatalogId = typeof IntegrationCatalogId.Type;
 
@@ -37,12 +34,6 @@ export interface IntegrationCatalogAuthMode {
   readonly label: string;
 }
 
-export interface IntegrationCatalogRegion {
-  readonly id: string;
-  readonly label: string;
-  readonly url: string;
-}
-
 interface IntegrationCatalogBase {
   readonly id: IntegrationCatalogId;
   readonly name: string;
@@ -57,9 +48,9 @@ interface IntegrationCatalogBase {
 export type IntegrationCatalogEntry =
   | (IntegrationCatalogBase & {
       readonly kind: "remote";
-      /** The first is the only one when the service has no regions. */
-      readonly regions: readonly [IntegrationCatalogRegion, ...IntegrationCatalogRegion[]];
-      /** The first mode that needs no inputs is the default. */
+      /** The service's MCP endpoint. */
+      readonly url: string;
+      /** The first mode is the default. */
       readonly auth: readonly [IntegrationCatalogAuthMode, ...IntegrationCatalogAuthMode[]];
       /** Space-separated OAuth scopes to ask for, when the server's advertised set is wrong. */
       readonly oauthScope?: string;
@@ -69,12 +60,6 @@ export type IntegrationCatalogEntry =
   | (IntegrationCatalogBase & {
       readonly kind: "local-preset";
       readonly preset: "google-workspace";
-    })
-  | (IntegrationCatalogBase & {
-      readonly kind: "unavailable";
-      readonly url: string;
-      /** Why it cannot be connected yet. */
-      readonly reason: string;
     });
 
 /** User scopes the Slack MCP server's tools use (docs.slack.dev/ai/slack-mcp-server). */
@@ -113,15 +98,47 @@ export const SLACK_MCP_USER_SCOPES = [
 
 const SIGN_IN = { kind: "oauth", label: "Sign in" } as const;
 
+/**
+ * Endpoints as probed on 2026-10-24. Linear, Notion, Wispr Flow and Fathom
+ * register clients automatically, so they sign in with one click. GitHub
+ * (authorization server github.com/login/oauth) and Slack do not, so they
+ * take a token or the owner's own app.
+ */
 export const INTEGRATION_CATALOG: ReadonlyArray<IntegrationCatalogEntry> = [
   {
     id: "google-workspace",
     name: "Google Workspace",
-    description: "Read and send Gmail, manage Calendar, and work in Drive, Docs and Sheets.",
+    description: "Read and send Gmail, manage Calendar, and work in Drive and Docs.",
     icon: "google-workspace",
     docsAnchor: "connect-google",
     kind: "local-preset",
     preset: "google-workspace",
+  },
+  {
+    id: "slack",
+    name: "Slack",
+    description: "Search and read channels and threads, and send messages as you.",
+    icon: "slack",
+    docsAnchor: "connect-slack",
+    kind: "remote",
+    url: "https://mcp.slack.com/mcp",
+    auth: [{ kind: "oauth_app", label: "Your Slack app" }],
+    oauthScope: SLACK_MCP_USER_SCOPES.join(" "),
+    tokenHost: "slack.com",
+  },
+  {
+    id: "github",
+    name: "GitHub",
+    description: "Work with repositories, issues, pull requests and Actions.",
+    icon: "github",
+    docsAnchor: "connect-github",
+    kind: "remote",
+    url: "https://api.githubcopilot.com/mcp/",
+    auth: [
+      { kind: "api_key", label: "Personal access token" },
+      { kind: "oauth_app", label: "Your OAuth app" },
+    ],
+    tokenHost: "github.com",
   },
   {
     id: "linear",
@@ -130,7 +147,7 @@ export const INTEGRATION_CATALOG: ReadonlyArray<IntegrationCatalogEntry> = [
     icon: "linear",
     docsAnchor: "default-integrations",
     kind: "remote",
-    regions: [{ id: "default", label: "Linear", url: "https://mcp.linear.app/mcp" }],
+    url: "https://mcp.linear.app/mcp",
     auth: [SIGN_IN, { kind: "api_key", label: "API key" }],
   },
   {
@@ -140,45 +157,8 @@ export const INTEGRATION_CATALOG: ReadonlyArray<IntegrationCatalogEntry> = [
     icon: "notion",
     docsAnchor: "default-integrations",
     kind: "remote",
-    regions: [{ id: "default", label: "Notion", url: "https://mcp.notion.com/mcp" }],
+    url: "https://mcp.notion.com/mcp",
     auth: [SIGN_IN],
-  },
-  {
-    id: "github",
-    name: "GitHub",
-    description: "Work with repositories, issues, pull requests and Actions.",
-    icon: "github",
-    docsAnchor: "default-integrations",
-    kind: "remote",
-    regions: [{ id: "default", label: "GitHub", url: "https://api.githubcopilot.com/mcp/" }],
-    auth: [
-      { kind: "api_key", label: "Personal access token" },
-      { kind: "oauth_app", label: "Your OAuth app" },
-    ],
-    tokenHost: "github.com",
-  },
-  {
-    id: "atlassian",
-    name: "Atlassian",
-    description: "Search and update Jira issues and Confluence pages.",
-    icon: "atlassian",
-    docsAnchor: "default-integrations",
-    kind: "remote",
-    regions: [{ id: "default", label: "Atlassian", url: "https://mcp.atlassian.com/v1/mcp" }],
-    auth: [SIGN_IN],
-  },
-  {
-    id: "intercom",
-    name: "Intercom",
-    description: "Look up conversations, contacts and companies. Mostly read-only.",
-    icon: "intercom",
-    docsAnchor: "default-integrations",
-    kind: "remote",
-    regions: [
-      { id: "us", label: "United States", url: "https://mcp.intercom.com/mcp" },
-      { id: "eu", label: "Europe", url: "https://mcp.eu.intercom.com/mcp" },
-    ],
-    auth: [SIGN_IN, { kind: "api_key", label: "Access token" }],
   },
   {
     id: "wispr-flow",
@@ -187,20 +167,8 @@ export const INTEGRATION_CATALOG: ReadonlyArray<IntegrationCatalogEntry> = [
     icon: "wispr-flow",
     docsAnchor: "default-integrations",
     kind: "remote",
-    regions: [{ id: "default", label: "Wispr Flow", url: "https://api.wisprflow.ai/connect/mcp" }],
+    url: "https://api.wisprflow.ai/connect/mcp",
     auth: [SIGN_IN],
-  },
-  {
-    id: "slack",
-    name: "Slack",
-    description: "Search and read channels and threads, and send messages as you.",
-    icon: "slack",
-    docsAnchor: "connect-slack",
-    kind: "remote",
-    regions: [{ id: "default", label: "Slack", url: "https://mcp.slack.com/mcp" }],
-    auth: [{ kind: "oauth_app", label: "Your Slack app" }],
-    oauthScope: SLACK_MCP_USER_SCOPES.join(" "),
-    tokenHost: "slack.com",
   },
   {
     id: "fathom",
@@ -209,18 +177,8 @@ export const INTEGRATION_CATALOG: ReadonlyArray<IntegrationCatalogEntry> = [
     icon: "fathom",
     docsAnchor: "default-integrations",
     kind: "remote",
-    regions: [{ id: "default", label: "Fathom", url: "https://api.fathom.ai/mcp" }],
+    url: "https://api.fathom.ai/mcp",
     auth: [SIGN_IN],
-  },
-  {
-    id: "figma",
-    name: "Figma",
-    description: "Read designs, components and variables.",
-    icon: "figma",
-    docsAnchor: "default-integrations",
-    kind: "unavailable",
-    url: "https://mcp.figma.com/mcp",
-    reason: "Figma only admits clients it has approved, so Cogenly can't connect yet.",
   },
 ];
 
@@ -236,7 +194,8 @@ const comparableUrl = (url: string): string | undefined => {
 /**
  * The catalog entry an integration was connected from: the Google preset for
  * a managed Google account, otherwise the entry whose endpoint it points at,
- * so integrations added by hand group under their service too.
+ * so integrations added by hand group under their service too. Anything else,
+ * including accounts of services the catalog no longer lists, is custom.
  */
 export function integrationCatalogEntryFor(
   integration: Pick<Integration, "transport" | "url" | "local">,
@@ -248,8 +207,7 @@ export function integrationCatalogEntryFor(
   const url = comparableUrl(integration.url);
   if (url === undefined) return undefined;
   return INTEGRATION_CATALOG.find(
-    (entry) =>
-      entry.kind === "remote" && entry.regions.some((region) => comparableUrl(region.url) === url),
+    (entry) => entry.kind === "remote" && comparableUrl(entry.url) === url,
   );
 }
 
@@ -257,10 +215,9 @@ export function integrationCatalogEntryFor(
 export function integrationCatalogInputs(
   entry: IntegrationCatalogEntry,
   auth: IntegrationCatalogAuthKind | undefined,
-): ReadonlyArray<"region" | "apiKey" | "clientId" | "clientSecret"> {
+): ReadonlyArray<"apiKey" | "clientId" | "clientSecret"> {
   if (entry.kind !== "remote") return [];
   return [
-    ...(entry.regions.length > 1 ? (["region"] as const) : []),
     ...(auth === "api_key" ? (["apiKey"] as const) : []),
     ...(auth === "oauth_app" ? (["clientId", "clientSecret"] as const) : []),
   ];

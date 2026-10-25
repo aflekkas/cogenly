@@ -1,5 +1,5 @@
 import { requestAgentCreation } from "../../../agents/AgentsCreateHost";
-import type { EnvironmentId, ScheduledTaskId } from "@t3tools/contracts";
+import type { EnvironmentId, ScheduledTaskId } from "@cogenly/contracts";
 import { useRouter } from "@tanstack/react-router";
 import { useCallback } from "react";
 

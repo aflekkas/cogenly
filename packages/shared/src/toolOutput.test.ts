@@ -53,6 +53,28 @@ describe("compactDynamicToolOutput", () => {
     expect(compactDynamicToolOutput({ matches: [] })).toEqual({ resultCount: 0 });
   });
 
+  it("keeps the app a computer action left in front, for Claude text blocks and Codex objects", () => {
+    const result = { frontmostApp: "Dia" };
+    expect(compactDynamicToolOutput([{ type: "text", text: JSON.stringify(result) }])).toEqual(
+      result,
+    );
+    expect(compactDynamicToolOutput({ structuredContent: result })).toEqual(result);
+    expect(compactDynamicToolOutput({ frontmostApp: null })).toBeUndefined();
+  });
+
+  it("keeps a terminal run's read-only sandbox, dropping its output", () => {
+    const result = { terminalId: "t", output: "hello\r\n", exitCode: 0, sandbox: "read-only" };
+    // Codex reports the object; Claude MCP sends text blocks and structured content.
+    expect(compactDynamicToolOutput(result)).toEqual({ sandbox: "read-only" });
+    expect(compactDynamicToolOutput([{ type: "text", text: JSON.stringify(result) }])).toEqual({
+      sandbox: "read-only",
+    });
+    expect(compactDynamicToolOutput({ structuredContent: result })).toEqual({
+      sandbox: "read-only",
+    });
+    expect(compactDynamicToolOutput({ ...result, sandbox: undefined })).toBeUndefined();
+  });
+
   it("keeps a read thread's identity when its transcript is over the parse budget", () => {
     const thread = { threadId: "thread-1", title: "Weekly “checks”", projectId: "p" };
     const messages = Array.from({ length: 40 }, () => "x".repeat(1_000));

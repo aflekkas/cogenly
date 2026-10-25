@@ -19,10 +19,11 @@ export function NotificationSettings() {
 
   return (
     <SettingsRow
+      clientSetting
       {...searchableSetting("thread-notifications")}
       description={
         permissionMessage ??
-        "System alerts when a thread finishes, fails, or needs input or approval. Applies to this device while Cogenly is open."
+        "Alerts when a thread finishes, fails, or needs input or approval. Your preference is shared; each device needs notification permission."
       }
       control={
         <Select

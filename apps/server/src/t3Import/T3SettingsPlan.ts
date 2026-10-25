@@ -16,7 +16,7 @@ import {
   type ServerSettingsPatch,
   type T3ImportProviderBinding,
   type T3ImportSettingChange,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 

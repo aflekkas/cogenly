@@ -9,6 +9,7 @@ import { describe, expect, it } from "@effect/vitest";
 import { vi } from "vite-plus/test";
 import {
   AuthOrchestrationOperateScope,
+  AuthAccessWriteScope,
   AuthOrchestrationReadScope,
   AuthSettingsWriteScope,
   AuthSourceControlWriteScope,
@@ -17,7 +18,7 @@ import {
   ScheduledTaskId,
   WS_METHODS,
   type AuthSessionState,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -65,6 +66,46 @@ const setup = Effect.gen(function* () {
 });
 
 describe("command permissions", () => {
+  it.effect.each([
+    WS_METHODS.projectLabelsMerge,
+    WS_METHODS.projectLabelsDismissDuplicate,
+    WS_METHODS.projectLabelsUndismissDuplicate,
+    WS_METHODS.repoMcpTrustRespond,
+  ])("%s checks the destination environment's operate grant", (method) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const registry = yield* setup;
+        const command = createCommandPermissions(runtime, method);
+        registry.set(sessions(env), AsyncResult.success(grant(false)));
+        registry.set(sessions(other), AsyncResult.success(grant(true)));
+        expect(registry.get(command.permissionAtom(env))).toBe(false);
+        expect(yield* command.authorize(registry, env).pipe(Effect.flip)).toMatchObject({
+          requiredScope: AuthOrchestrationOperateScope,
+        });
+        registry.set(sessions(env), AsyncResult.success(grant(true)));
+        expect(registry.get(command.permissionAtom(env))).toBe(true);
+        yield* command.authorize(registry, env);
+      }),
+    ),
+  );
+
+  it.effect("forks on a paired machine only with the request environment's operate grant", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const registry = yield* setup;
+        const fork = createCommandPermissions(runtime, WS_METHODS.machinesForkThread);
+        registry.set(sessions(env), AsyncResult.success(grant(false)));
+        registry.set(sessions(other), AsyncResult.success(grant(true)));
+        expect(registry.get(fork.permissionAtom(env))).toBe(false);
+        expect(yield* fork.authorize(registry, env).pipe(Effect.flip)).toMatchObject({
+          requiredScope: AuthOrchestrationOperateScope,
+        });
+        registry.set(sessions(env), AsyncResult.success(grant(true)));
+        expect(registry.get(fork.permissionAtom(env))).toBe(true);
+        yield* fork.authorize(registry, env);
+      }),
+    ),
+  );
   it.effect("executes guarded read queries only with the destination read grant", () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -225,6 +266,9 @@ describe("command permissions", () => {
     WS_METHODS.projectLabelsLinkRepository,
     WS_METHODS.projectLabelsUnlinkRepository,
     WS_METHODS.projectLabelsMoveThread,
+    WS_METHODS.machinesPreviewMoveThreads,
+    WS_METHODS.machinesPreviewMoveAllThreads,
+    WS_METHODS.projectLabelsPreviewMoveToMachine,
     WS_METHODS.projectLabelsForkThreadToProject,
     WS_METHODS.projectLabelsSetThreadLabels,
     WS_METHODS.projectLabelsAddResource,
@@ -271,30 +315,56 @@ describe("command permissions", () => {
     ),
   );
 
-  it.effect("requires the destination settings grant to run storage cleanup", () =>
+  it.effect("requires access management authority to recover lost-machine threads", () =>
     Effect.scoped(
       Effect.gen(function* () {
         const registry = yield* setup;
-        const cleanup = createCommandPermissions(runtime, WS_METHODS.serverRunStorageCleanup);
+        const recovery = createCommandPermissions(runtime, WS_METHODS.machinesAdoptThreads);
         registry.set(sessions(env), AsyncResult.success(grant(true)));
-        expect(registry.get(cleanup.permissionAtom(env))).toBe(false);
-        expect((yield* cleanup.authorize(registry, env).pipe(Effect.flip))._tag).toBe(
-          "EnvironmentAuthorizationError",
-        );
+        expect(registry.get(recovery.permissionAtom(env))).toBe(false);
+        expect(yield* recovery.authorize(registry, env).pipe(Effect.flip)).toMatchObject({
+          requiredScope: AuthAccessWriteScope,
+        });
         registry.set(
           sessions(env),
           AsyncResult.success({
-            ...grant(true),
-            scopes: [AuthSettingsWriteScope],
-            permissions: [AuthSettingsWriteScope],
+            ...grant(false),
+            scopes: [AuthAccessWriteScope],
+            permissions: [AuthAccessWriteScope],
           }),
         );
-        expect(registry.get(cleanup.permissionAtom(env))).toBe(true);
-        yield* cleanup.authorize(registry, env);
-        registry.set(sessions(other), AsyncResult.success(grant(false)));
-        expect(registry.get(cleanup.permissionAtom(other))).toBe(false);
+        expect(registry.get(recovery.permissionAtom(env))).toBe(true);
+        yield* recovery.authorize(registry, env);
       }),
     ),
+  );
+
+  it.effect.each([WS_METHODS.serverRunStorageCleanup, WS_METHODS.machineSandboxSetup])(
+    "%s requires the destination settings grant",
+    (method) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const registry = yield* setup;
+          const cleanup = createCommandPermissions(runtime, method);
+          registry.set(sessions(env), AsyncResult.success(grant(true)));
+          expect(registry.get(cleanup.permissionAtom(env))).toBe(false);
+          expect((yield* cleanup.authorize(registry, env).pipe(Effect.flip))._tag).toBe(
+            "EnvironmentAuthorizationError",
+          );
+          registry.set(
+            sessions(env),
+            AsyncResult.success({
+              ...grant(true),
+              scopes: [AuthSettingsWriteScope],
+              permissions: [AuthSettingsWriteScope],
+            }),
+          );
+          expect(registry.get(cleanup.permissionAtom(env))).toBe(true);
+          yield* cleanup.authorize(registry, env);
+          registry.set(sessions(other), AsyncResult.success(grant(false)));
+          expect(registry.get(cleanup.permissionAtom(other))).toBe(false);
+        }),
+      ),
   );
 
   it.effect("requires the destination settings grant to check OTLP endpoints", () =>
@@ -489,6 +559,81 @@ it.effect(
         );
         expect(registry.get(prepare.permissionAtom(env, input))).toBe(true);
         yield* prepare.authorize(registry, env, input);
+      }),
+    ),
+);
+
+it.effect("gates cloning a project's linked repository here on the source control grant", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const registry = yield* setup;
+      const checkout = createCommandPermissions(
+        runtime,
+        WS_METHODS.projectLabelsCheckoutRepository,
+      );
+      registry.set(
+        sessions(env),
+        AsyncResult.success({
+          ...grant(false),
+          scopes: [AuthOrchestrationOperateScope],
+          permissions: [AuthOrchestrationOperateScope],
+        }),
+      );
+      expect(registry.get(checkout.permissionAtom(env))).toBe(false);
+      expect((yield* checkout.authorize(registry, env).pipe(Effect.flip)).requiredPermission).toBe(
+        AuthSourceControlWriteScope,
+      );
+      registry.set(
+        sessions(env),
+        AsyncResult.success({
+          ...grant(false),
+          scopes: [AuthSourceControlWriteScope],
+          permissions: [AuthSourceControlWriteScope],
+        }),
+      );
+      expect(registry.get(checkout.permissionAtom(env))).toBe(true);
+    }),
+  ),
+);
+
+it.effect(
+  "gates removing and moving checkouts on source control, and orphan folders on operate",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const registry = yield* setup;
+        const sourceControl = [
+          WS_METHODS.projectLabelsRemoveCheckout,
+          WS_METHODS.projectLabelsAdoptRepository,
+        ].map((method) => createCommandPermissions(runtime, method));
+        const operate = [
+          WS_METHODS.projectLabelsAdoptOrphanFolder,
+          WS_METHODS.projectLabelsRemoveOrphanFolder,
+        ].map((method) => createCommandPermissions(runtime, method));
+        const holding = (
+          scope: typeof AuthOrchestrationOperateScope | typeof AuthSourceControlWriteScope,
+        ) =>
+          registry.set(
+            sessions(env),
+            AsyncResult.success({ ...grant(false), scopes: [scope], permissions: [scope] }),
+          );
+        holding(AuthOrchestrationOperateScope);
+        for (const command of sourceControl) {
+          expect(registry.get(command.permissionAtom(env))).toBe(false);
+          expect(
+            (yield* command.authorize(registry, env).pipe(Effect.flip)).requiredPermission,
+          ).toBe(AuthSourceControlWriteScope);
+        }
+        for (const command of operate) expect(registry.get(command.permissionAtom(env))).toBe(true);
+        holding(AuthSourceControlWriteScope);
+        for (const command of sourceControl)
+          expect(registry.get(command.permissionAtom(env))).toBe(true);
+        for (const command of operate) {
+          expect(registry.get(command.permissionAtom(env))).toBe(false);
+          expect(
+            (yield* command.authorize(registry, env).pipe(Effect.flip)).requiredPermission,
+          ).toBe(AuthOrchestrationOperateScope);
+        }
       }),
     ),
 );

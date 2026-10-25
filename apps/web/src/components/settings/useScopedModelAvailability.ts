@@ -1,4 +1,4 @@
-import type { ProviderInstanceId, UnifiedSettings } from "@t3tools/contracts";
+import type { ProviderInstanceId, UnifiedSettings } from "@cogenly/contracts";
 import { useCallback } from "react";
 
 import { mergeEnvironmentSettings } from "../../hooks/useSettings";
@@ -47,7 +47,7 @@ export function useScopedModelDisabledReason(
           entry.driverKind !== sourceEntry?.driverKind ||
           !options?.some((option) => option.slug === model && !option.isUnavailable)
         ) {
-          return `This model is unavailable on ${environment?.label ?? "a selected environment"}. Select that environment to choose its model separately.`;
+          return `This model is unavailable on ${environment?.label ?? "one of your machines"}.`;
         }
       }
       return null;

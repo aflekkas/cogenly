@@ -1,4 +1,4 @@
-import { planPinnedReorder } from "@t3tools/client-runtime/state/thread-sort";
+import { planPinnedReorder } from "@cogenly/client-runtime/state/thread-sort";
 
 import type { SidebarLayout } from "~/appearancePreferences";
 

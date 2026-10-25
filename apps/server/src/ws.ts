@@ -1,3 +1,4 @@
+import * as RepoMcpTrust from "./integrations/RepoMcpTrust.ts";
 import * as AccountConnections from "./accounts/AccountConnections.ts";
 import * as AccountAccess from "./accounts/AccountAccess.ts";
 import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
@@ -10,24 +11,35 @@ import * as GlobalSearch from "./search/GlobalSearch.ts";
 import * as Facts from "./context/FactService.ts";
 import * as Integrations from "./integrations/Integrations.ts";
 import * as Machines from "./machines/Machines.ts";
+import * as SharedSyncStatus from "./sync/SharedSyncStatus.ts";
+import * as ProjectMove from "./threadSync/ProjectMove.ts";
+import * as ThreadTransfer from "./threadSync/ThreadTransfer.ts";
+import * as ThreadFork from "./threadSync/ThreadFork.ts";
 import * as MachineSecurity from "./security/MachineSecurity.ts";
+import * as ComputerUseService from "./computerUse/ComputerUseService.ts";
+import * as MachineHealth from "./health/MachineHealth.ts";
+import * as HealthAlerts from "./health/HealthAlerts.ts";
+import * as MachineSetup from "./tailscale/MachineSetup.ts";
 import * as VisualStates from "./htmlRender/VisualState.ts";
 import * as Retrieval from "./context/ContextRetrievalService.ts";
 import * as Exports from "./export/ExportService.ts";
 import * as ProjectLabels from "./projectLabels/ProjectLabelService.ts";
 import * as ProjectLabelClone from "./projectLabels/ProjectLabelCloneRepository.ts";
+import * as RepositoryCheckout from "./project/RepositoryCheckout.ts";
+import * as RepositoryIconResolver from "./project/RepositoryIconResolver.ts";
+import { resolveProjectsRootDirectory } from "./project/ProjectsRoot.ts";
 import * as ProjectLabelFolders from "./projectLabels/ProjectLabelFolders.ts";
 import * as ProjectLabelFork from "./projectLabels/ProjectLabelForkToProject.ts";
 import * as ProjectFiles from "./projectLabels/ProjectFiles.ts";
 import * as ProjectHome from "./projectLabels/ProjectHome.ts";
 import * as ProjectLabelOwnerSearch from "./projectLabels/ProjectOwnerRepositorySearch.ts";
-import * as GitHubRest from "@t3tools/source-control-github/server/GitHubRest";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as GitHubRest from "@cogenly/source-control-github/server/GitHubRest";
+import * as HostProcess from "@cogenly/shared/HostProcess";
 import * as WorkHandoff from "./work/WorkHandoffService.ts";
 import * as AgentWorkspace from "./agents/AgentWorkspaceService.ts";
 import * as Agents from "./agents/AgentService.ts";
 import * as AgentStore from "./agents/AgentStore.ts";
-import { OrchestrationDispatchCommandError, ProjectLabelError } from "@t3tools/contracts";
+import { OrchestrationDispatchCommandError, ProjectLabelError } from "@cogenly/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Orchestrator from "./orchestration-v2/Orchestrator.ts";
 
@@ -116,8 +128,8 @@ import {
   type PullRequestRef,
   WS_METHODS,
   WsRpcGroup,
-} from "@t3tools/contracts";
-import { resolveServerBackgroundActivitySettings } from "@t3tools/shared/backgroundActivitySettings";
+} from "@cogenly/contracts";
+import { resolveServerBackgroundActivitySettings } from "@cogenly/shared/backgroundActivitySettings";
 import {
   HttpRouter,
   HttpServerRequest,
@@ -140,6 +152,7 @@ import * as ThreadMessageIntake from "./orchestration-v2/ThreadMessageIntake.ts"
 import * as ScheduledTasks from "./scheduledTasks/ScheduledTaskService.ts";
 import * as SecretRequests from "./secrets/SecretRequests.ts";
 import * as Vault from "./vault/Vault.ts";
+import * as VaultSync from "./vault/VaultSync.ts";
 import * as Accounts from "./accounts/Accounts.ts";
 import {
   archivedShellStreamItemFromThreadShell,
@@ -182,7 +195,7 @@ import { userFacingDispatchErrorMessage } from "./orchestration-v2/UserFacingErr
 import * as ProviderRegistry from "./provider/ProviderRegistry.ts";
 import * as ProviderInstanceRegistry from "./provider/ProviderInstanceRegistry.ts";
 import * as ModelManifest from "./provider/ModelManifest.ts";
-import * as ProviderLatestVersions from "@t3tools/provider-core/server/ProviderLatestVersions";
+import * as ProviderLatestVersions from "@cogenly/provider-core/server/ProviderLatestVersions";
 import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
 import * as ProviderAuthService from "./provider/ProviderAuthService.ts";
 import { makeProviderInstallation } from "./provider/providerInstallation.ts";
@@ -259,18 +272,15 @@ import * as VcsProjectConfig from "./vcs/VcsProjectConfig.ts";
 import * as PairingGrantStore from "./auth/PairingGrantStore.ts";
 import * as SessionStore from "./auth/SessionStore.ts";
 import { failEnvironmentAuthInvalid, failEnvironmentInternal } from "./auth/http.ts";
-import * as RelayClient from "@t3tools/shared/relayClient";
-import {
-  sameUsageLimitCommandCoverage,
-  withUsageLimitsCommands,
-} from "@t3tools/shared/usageLimits";
+import * as RelayClient from "@cogenly/shared/relayClient";
+import { withUsageLimitsCommands } from "@cogenly/shared/usageLimits";
 import * as AgentSessionScanner from "./project/AgentSessionScanner.ts";
 import * as AgentSessionImporter from "./project/AgentSessionImporter.ts";
 import * as T3Import from "./t3Import/T3ImportService.ts";
-import * as UsageLimitSources from "./usage/UsageLimitSources.ts";
 
 const CONFIG_DISCOVERY_TIMEOUT = Duration.seconds(5);
 const isProviderUploadFeedbackError = Schema.is(ProviderUploadFeedbackError);
+const isProjectLabelError = Schema.is(ProjectLabelError);
 
 const resolveDiscoveryForConfig = <A, E, R>(
   discovery: Effect.Effect<A, E, R>,
@@ -1087,13 +1097,23 @@ const makeWsRpcHandlers = (
     const agentStore = yield* AgentStore.AgentStore;
     const facts = yield* Facts.FactService;
     const integrations = yield* Integrations.Integrations;
+    const repoMcpTrust = yield* RepoMcpTrust.RepoMcpTrust;
     const machines = yield* Machines.Machines;
+    const syncStatus = yield* SharedSyncStatus.SharedSyncStatus;
+    const threadTransfer = yield* ThreadTransfer.ThreadTransfer;
+    const threadFork = yield* ThreadFork.ThreadFork;
+    const projectMove = yield* ProjectMove.ProjectMove;
     const machineSecurity = yield* MachineSecurity.MachineSecurity;
+    const computerUse = yield* ComputerUseService.ComputerUse;
+    const machineSetup = yield* MachineSetup.MachineSetup;
+    const machineHealth = yield* MachineHealth.MachineHealth;
+    const healthAlerts = yield* HealthAlerts.HealthAlerts;
     const visualStates = yield* VisualStates.VisualStateService;
     const retrieval = yield* Retrieval.ContextRetrievalService;
     const scheduledTasks = yield* ScheduledTasks.ScheduledTaskService;
     const secretRequests = yield* SecretRequests.SecretRequests;
     const vault = yield* Vault.Vault;
+    const vaultSync = yield* VaultSync.VaultSync;
     const accounts = yield* Accounts.Accounts;
     const accountConnections = yield* AccountConnections.AccountConnections;
     const accountAccess = yield* AccountAccess.AccountAccess;
@@ -1121,9 +1141,10 @@ const makeWsRpcHandlers = (
           );
     const usage = yield* UsageService.UsageService;
     const chatGreetings = yield* ChatGreetingService.ChatGreetingService;
-    const usageLimitSources = yield* UsageLimitSources.UsageLimitSources;
     const worktreeSetupTracker = yield* WorktreeSetupTracker.WorktreeSetupTracker;
     const projectCloneTracker = yield* ProjectCloneTracker.ProjectCloneTracker;
+    const repositoryCheckout = yield* RepositoryCheckout.RepositoryCheckout;
+    const repositoryIcons = yield* RepositoryIconResolver.RepositoryIconResolver;
     const repositoryIdentityResolver = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
     const agentSessionScanner = yield* AgentSessionScanner.AgentSessionScanner;
     const agentSessionImporter = yield* AgentSessionImporter.AgentSessionImporter;
@@ -1231,7 +1252,7 @@ const makeWsRpcHandlers = (
         const keybindingsConfig = yield* keybindings.loadConfigState;
         const currentProviders = yield* providerRegistry.getProviders;
         const providers = options.usageLimitsCommand
-          ? withUsageLimitsCommands(currentProviders, yield* usageLimitSources.current)
+          ? withUsageLimitsCommands(currentProviders)
           : currentProviders;
         const settings = ServerSettings.redactServerSettingsForClient(
           yield* serverSettings.getSettings,
@@ -1268,6 +1289,7 @@ const makeWsRpcHandlers = (
             otlpLogsEnabled: config.otlpLogsUrl !== undefined,
           },
           settings,
+          defaultProjectsRoot: resolveProjectsRootDirectory("", home, config.baseDir, path),
           shellResumeCompletionMarker: true,
           threadResumeCompletionMarker: true,
           threadSnapshotPagination: true,
@@ -1548,6 +1570,7 @@ const makeWsRpcHandlers = (
                       }),
                   createdBy: "user",
                   creationSource: input.creationSource ?? "web",
+                  ...(input.machine === undefined ? {} : { machine: input.machine }),
                 }).pipe(Effect.provide(intakeContext)),
               )
               .pipe(
@@ -1575,16 +1598,29 @@ const makeWsRpcHandlers = (
                       message: cause.message,
                       cause,
                     }),
-                  ThreadLaunchError: (cause) =>
+                  ProjectRepositoryMismatchError: (cause) =>
                     new OrchestrationV2ThreadLaunchError({
                       commandId: input.commandId,
                       projectId: input.projectId,
-                      // A refused project pick (missing or archived) says why.
-                      message: Schema.is(ProjectLabelError)(cause.cause)
-                        ? cause.cause.message
-                        : "Failed to launch thread",
+                      message: cause.message,
                       cause,
                     }),
+                  ThreadLaunchError: (cause) => {
+                    // Another machine's refusal, or its absence, says why in its own words.
+                    const remote = ThreadLaunchService.remoteLaunchFailure(cause);
+                    return new OrchestrationV2ThreadLaunchError({
+                      commandId: input.commandId,
+                      projectId: input.projectId,
+                      // A refused project pick (missing or archived) says why.
+                      message:
+                        remote?.message ??
+                        (isProjectLabelError(cause.cause)
+                          ? cause.cause.message
+                          : "Failed to launch thread"),
+                      ...(remote?.reason === "offline" ? { machineOffline: true } : {}),
+                      cause,
+                    });
+                  },
                   ServerRuntimeStartupError: (cause) =>
                     new OrchestrationV2ThreadLaunchError({
                       commandId: input.commandId,
@@ -1628,6 +1664,11 @@ const makeWsRpcHandlers = (
       [WS_METHODS.projectLabelsSubscribe]: () => projectLabels.subscribe(),
       [WS_METHODS.projectLabelsCreate]: (input) => projectLabels.create(input),
       [WS_METHODS.projectLabelsUpdate]: (input) => projectLabels.update(input),
+      [WS_METHODS.projectLabelsMergeFileStatus]: () => projectLabels.mergeFileStatus(),
+      [WS_METHODS.projectLabelsMerge]: (input) => projectLabels.merge(input),
+      [WS_METHODS.projectLabelsUndismissDuplicate]: (input) =>
+        projectLabels.undismissDuplicate(input),
+      [WS_METHODS.projectLabelsDismissDuplicate]: (input) => projectLabels.dismissDuplicate(input),
       [WS_METHODS.projectLabelsDelete]: (input) => projectLabels.delete(input.id),
       [WS_METHODS.projectLabelsArchive]: (input) => projectLabels.archive(input.id),
       [WS_METHODS.projectLabelsUnarchive]: (input) => projectLabels.unarchive(input.id),
@@ -1640,6 +1681,7 @@ const makeWsRpcHandlers = (
       [WS_METHODS.projectLabelsSubscribeConfirmedThreadLabels]: () =>
         projectLabels.subscribeConfirmedThreadLabels(),
       [WS_METHODS.projectLabelsMoveThread]: (input) => projectLabels.moveThread(input),
+      [WS_METHODS.projectLabelsMoveToMachine]: (input) => projectMove.move(input),
       [WS_METHODS.projectLabelsForkThreadToProject]: (input) =>
         ProjectLabelFork.forkThreadToProject(input, {
           labels: projectLabels,
@@ -1677,6 +1719,16 @@ const makeWsRpcHandlers = (
           folders: projectLabelFolders,
           refreshGitStatus,
         }),
+      [WS_METHODS.projectLabelsCheckoutRepository]: (input) =>
+        repositoryCheckout.checkoutRepository(input),
+      [WS_METHODS.projectLabelsRemoveCheckout]: (input) => repositoryCheckout.removeCheckout(input),
+      [WS_METHODS.projectLabelsAdoptRepository]: (input) =>
+        repositoryCheckout.adoptRepository(input),
+      [WS_METHODS.projectLabelsListOrphanFolders]: () => projectLabels.listOrphanFolders(),
+      [WS_METHODS.projectLabelsAdoptOrphanFolder]: (input) =>
+        projectLabels.adoptOrphanFolder(input),
+      [WS_METHODS.projectLabelsRemoveOrphanFolder]: (input) =>
+        projectLabels.removeOrphanFolder(input),
       [WS_METHODS.workStart]: (input) => workHandoff.start(input),
       [WS_METHODS.agentsApprovalsList]: (input) => agentWorkspace.listApprovals(input),
       [WS_METHODS.agentsRequestApproval]: (input) =>
@@ -1686,6 +1738,10 @@ const makeWsRpcHandlers = (
       [WS_METHODS.threadApprovalsSubscribe]: () => agentWorkspace.subscribeThreadApprovals,
       [WS_METHODS.agentsStartWork]: (input) => agentWorkspace.startWork(input),
       [WS_METHODS.agentsActivity]: (input) => agentWorkspace.activity(input.agentId),
+      [WS_METHODS.integrationsPreviewNative]: () => integrations.previewNative(),
+      [WS_METHODS.integrationsImportNative]: () => integrations.importNative(),
+      [WS_METHODS.repoMcpTrustSubscribe]: ({ threadId }) => repoMcpTrust.subscribe(threadId),
+      [WS_METHODS.repoMcpTrustRespond]: (input) => repoMcpTrust.respond(input),
       [WS_METHODS.integrationsList]: () => integrations.list({ includeProcessOutput: true }),
       // The owner's own Settings writes approve the vault items their headers reference.
       [WS_METHODS.integrationsCreate]: (input) =>
@@ -1702,14 +1758,47 @@ const makeWsRpcHandlers = (
           origin: { origin: requestOrigin },
         }),
       [WS_METHODS.integrationsSubscribe]: () => integrations.subscribe(),
+      [WS_METHODS.integrationsSaveOAuthClient]: (input) =>
+        integrations.saveOAuthClient(input, { origin: { origin: requestOrigin } }),
+      [WS_METHODS.integrationsSaveApiKey]: (input) =>
+        integrations.saveApiKey(input, { origin: { origin: requestOrigin } }),
+      [WS_METHODS.integrationsInstallRuntime]: (input) =>
+        integrations.installRuntime(input.runtime),
+      [WS_METHODS.integrationsSubscribeSources]: () => integrations.subscribeSources(),
       [WS_METHODS.machineSecurityStatus]: () => machineSecurity.status,
+      [WS_METHODS.machineSandboxSetup]: () => machineHealth.setupSandbox,
+      [WS_METHODS.computerUseStatus]: () => computerUse.status(),
+      [WS_METHODS.computerUseRequestPermission]: (input) =>
+        computerUse.requestPermission(input.permission),
       [WS_METHODS.machinesList]: () => machines.list,
+      [WS_METHODS.syncStatus]: (input) => syncStatus.status(input),
+      [WS_METHODS.machinesCatalog]: (input) => threadLaunch.providers(input.machine),
       [WS_METHODS.machinesSubscribe]: () => machines.subscribe,
       [WS_METHODS.machinesUpdate]: (input) => machines.update(input),
       [WS_METHODS.machinesPrepareJoin]: () => machines.prepareJoin,
       [WS_METHODS.machinesCreatePeerGrant]: (input) => machines.createPeerGrant(input),
       [WS_METHODS.machinesJoinHub]: (input) => machines.joinHub(input),
       [WS_METHODS.machinesUnpair]: (input) => machines.unpair(input),
+      [WS_METHODS.machinesForkThread]: (input) => threadFork.fork(input),
+      [WS_METHODS.machinesMoveThreads]: (input) => threadTransfer.move(input),
+      [WS_METHODS.machinesMoveAllThreads]: (input) => threadTransfer.moveAllFrom(input),
+      [WS_METHODS.machinesPreviewMoveThreads]: (input) =>
+        threadTransfer.move({ ...input, dryRun: true }),
+      [WS_METHODS.machinesPreviewMoveAllThreads]: (input) =>
+        threadTransfer.moveAllFrom({ ...input, dryRun: true }),
+      [WS_METHODS.projectLabelsPreviewMoveToMachine]: (input) =>
+        projectMove.move({ ...input, dryRun: true }),
+      [WS_METHODS.machinesAdoptThreads]: (input) => threadTransfer.adoptFrom(input),
+      [WS_METHODS.machinesSetupStatus]: () => machineSetup.status,
+      [WS_METHODS.machinesSetupSubscribe]: () => machineSetup.subscribe,
+      [WS_METHODS.machinesSetupRunStep]: (input) => machineSetup.runStep(input.step),
+      [WS_METHODS.machinesSetupDisableServe]: () => machineSetup.disableServe,
+      [WS_METHODS.machinesHealth]: (input) => machineHealth.reportFor(input),
+      [WS_METHODS.machinesHealthSubscribe]: (input) => machineHealth.subscribe(input),
+      [WS_METHODS.machinesHealthAlertsSubscribe]: () => healthAlerts.subscribe,
+      [WS_METHODS.machinesHealthRetrySync]: (input) =>
+        machineHealth.retrySync(input).pipe(Effect.as({})),
+      [WS_METHODS.machinesHealthTestAlertChannels]: () => healthAlerts.testChannels,
       [WS_METHODS.factsList]: (input) => facts.list(input),
       [WS_METHODS.factsCreate]: (input) => facts.create(input),
       [WS_METHODS.visualStateGet]: (input) =>
@@ -1781,6 +1870,8 @@ const makeWsRpcHandlers = (
       [WS_METHODS.vaultUpdate]: (input) => vault.update(input),
       [WS_METHODS.vaultDelete]: (input) => vault.delete(input),
       [WS_METHODS.vaultUsage]: (input) => vault.listUsage(input),
+      [WS_METHODS.vaultSetPeerSharing]: (input) => vaultSync.setPeerSharing(input),
+      [WS_METHODS.vaultSharingStatus]: () => vaultSync.sharingStatus,
       [WS_METHODS.secretsAnswerRequest]: (input) =>
         Effect.annotateCurrentSpan({ "orchestration_v2.thread_id": input.threadId }).pipe(
           Effect.andThen(secretRequests.answer(input)),
@@ -1818,13 +1909,6 @@ const makeWsRpcHandlers = (
                 }),
               { concurrency: "unbounded", discard: true },
             );
-          }
-          // An untargeted refresh is "re-read everything's status", which
-          // includes quota from configured usage-limit sources. Awaited,
-          // not forked: the RPC scope closes on return and would
-          // interrupt a fork before the hub answered.
-          if (input.instanceId === undefined) {
-            yield* usageLimitSources.refresh;
           }
           let providers = yield* input.cwd !== undefined && input.instanceId !== undefined
             ? providerRegistry.refreshWorkspaceSnapshot({
@@ -1920,7 +2004,6 @@ const makeWsRpcHandlers = (
       [WS_METHODS.serverUpdateProvider]: (input) => providerMaintenanceRunner.updateProvider(input),
       [WS_METHODS.providerConsumeResetCredit]: (input) =>
         Effect.gen(function* () {
-          if ("sourceId" in input) return yield* usageLimitSources.consumeResetCredit(input);
           const instance = yield* providerInstances.getInstance(input.instanceId);
           // A disabled instance must not spend anything on its account.
           if (instance === undefined || !instance.enabled) {
@@ -2005,7 +2088,9 @@ const makeWsRpcHandlers = (
           const keybindingsConfig = yield* keybindings.removeKeybindingRule(rule);
           return { keybindings: keybindingsConfig, issues: [] };
         }),
-      [WS_METHODS.serverRunStorageCleanup]: () => storageCleanup.runNow,
+      [WS_METHODS.serverRunStorageCleanup]: (input) =>
+        input.dryRun === true ? storageCleanup.preview : storageCleanup.runNow,
+      [WS_METHODS.serverGetStorageStatus]: () => storageCleanup.status,
       [WS_METHODS.serverGetStorageCleanupReport]: () => storageCleanup.reports,
       [WS_METHODS.serverGetDatabaseStorage]: () => databaseStorage.status,
       [WS_METHODS.serverGetSettings]: (_input) =>
@@ -2352,6 +2437,12 @@ const makeWsRpcHandlers = (
               workspaceRoot: input.resource.cwd,
             });
           }
+          if (input.resource._tag === "repository-icon") {
+            return yield* issueAssetUrl({
+              resource: input.resource,
+              repositoryIcon: yield* repositoryIcons.resolve(input.resource.remote),
+            });
+          }
           if (input.resource._tag === "project-favicon") {
             const project = yield* projectStore.findActiveByWorkspaceRoot(input.resource.cwd).pipe(
               Effect.mapError(
@@ -2595,22 +2686,10 @@ const makeWsRpcHandlers = (
                 },
               })),
             );
-            const providerStatuses = Stream.zipLatestWith(
-              // The registry stream carries changes only. Seed it with the current
-              // providers so a source refresh that lands before any provider change
-              // still pairs up and reaches the client.
-              Stream.concat(
-                Stream.fromEffect(providerRegistry.getProviders),
-                providerRegistry.streamChanges,
+            const providerStatuses = providerRegistry.streamChanges.pipe(
+              Stream.map((providers) =>
+                usageLimitsCommand ? withUsageLimitsCommands(providers) : providers,
               ),
-              usageLimitSources.streamChanges.pipe(
-                // Quota updates already have their own stream. Republish the model
-                // catalog only when the set of providers offered the command changes.
-                Stream.changesWith(usageLimitsCommand ? sameUsageLimitCommandCoverage : () => true),
-              ),
-              (providers, sources) =>
-                usageLimitsCommand ? withUsageLimitsCommands(providers, sources) : providers,
-            ).pipe(
               // Both sides replay their current value, so the first pairing normally
               // repeats the snapshot the client already holds. Compare against that
               // snapshot rather than dropping blindly: a refresh that landed between
@@ -2634,16 +2713,6 @@ const makeWsRpcHandlers = (
             // already-shipped client decodes this stream against the old
             // event union and its whole config subscription dies on an
             // unknown member.
-            const usageLimitSourceUpdates =
-              input.usageLimitSources === true
-                ? usageLimitSources.streamChanges.pipe(
-                    Stream.map((sources) => ({
-                      version: 1 as const,
-                      type: "usageLimitSourcesUpdated" as const,
-                      payload: { sources },
-                    })),
-                  )
-                : Stream.empty;
             const settingsUpdates = serverSettings.streamChanges.pipe(
               Stream.map((settings) => ServerSettings.redactServerSettingsForClient(settings)),
               Stream.map((settings) => ({
@@ -2655,10 +2724,7 @@ const makeWsRpcHandlers = (
 
             const liveUpdates = Stream.merge(
               keybindingsUpdates,
-              Stream.merge(
-                providerStatuses,
-                Stream.merge(settingsUpdates, usageLimitSourceUpdates),
-              ),
+              Stream.merge(providerStatuses, settingsUpdates),
             );
 
             return Stream.concat(
@@ -2740,11 +2806,16 @@ type WsRpcHandlersEffect = ReturnType<typeof makeWsRpcHandlers>;
 type WsRpcHandlers = Effect.Success<WsRpcHandlersEffect>;
 type WsRpcHandlerKeysA = Extract<keyof WsRpcHandlers, `p${string}`>;
 type WsRpcHandlerKeysB = Extract<keyof WsRpcHandlers, `s${string}`>;
+type WsRpcHandlerKeysC = Extract<keyof WsRpcHandlers, `m${string}` | `a${string}`>;
 /** Resolve in smaller groups to stay within the RPC conditional type's instantiation budget. */
 type WsRpcHandlerServices =
   | RpcGroup.HandlersServices<WsRpcs, Pick<WsRpcHandlers, WsRpcHandlerKeysA>>
   | RpcGroup.HandlersServices<WsRpcs, Pick<WsRpcHandlers, WsRpcHandlerKeysB>>
-  | RpcGroup.HandlersServices<WsRpcs, Omit<WsRpcHandlers, WsRpcHandlerKeysA | WsRpcHandlerKeysB>>;
+  | RpcGroup.HandlersServices<WsRpcs, Pick<WsRpcHandlers, WsRpcHandlerKeysC>>
+  | RpcGroup.HandlersServices<
+      WsRpcs,
+      Omit<WsRpcHandlers, WsRpcHandlerKeysA | WsRpcHandlerKeysB | WsRpcHandlerKeysC>
+    >;
 
 const layerWsRpc = (
   ...args: Parameters<typeof makeWsRpcHandlers>
@@ -2786,9 +2857,18 @@ type WsRequestServices =
   | Exports.ExportService
   | ExternalLauncher.ExternalLauncher
   | Facts.FactService
+  | RepoMcpTrust.RepoMcpTrust
   | Integrations.Integrations
   | Machines.Machines
+  | SharedSyncStatus.SharedSyncStatus
+  | ThreadFork.ThreadFork
+  | ThreadTransfer.ThreadTransfer
+  | ProjectMove.ProjectMove
   | MachineSecurity.MachineSecurity
+  | ComputerUseService.ComputerUse
+  | MachineSetup.MachineSetup
+  | MachineHealth.MachineHealth
+  | HealthAlerts.HealthAlerts
   | FileSystem.FileSystem
   | GitHubRest.GitHubRest
   | GitWorkflowService.GitWorkflowService
@@ -2816,6 +2896,8 @@ type WsRequestServices =
   | ProjectLabels.ProjectLabelService
   | ProjectService.ProjectService
   | ProjectStore.ProjectStoreV2
+  | RepositoryCheckout.RepositoryCheckout
+  | RepositoryIconResolver.RepositoryIconResolver
   | ProviderAuthService.ProviderAuthService
   | ProviderInstanceRegistry.ProviderInstanceRegistry
   | ProviderLatestVersions.ProviderLatestVersions
@@ -2832,6 +2914,7 @@ type WsRequestServices =
   | AccountConnections.AccountConnections
   | Accounts.Accounts
   | Vault.Vault
+  | VaultSync.VaultSync
   | ServerConfig.ServerConfig
   | ServerEnvironment.ServerEnvironment
   | ServerLifecycleEvents.ServerLifecycleEvents
@@ -2846,7 +2929,6 @@ type WsRequestServices =
   | ThreadManagementService.ThreadManagementService
   | ThreadSearch.ThreadSearch
   | TraceDiagnostics.TraceDiagnostics
-  | UsageLimitSources.UsageLimitSources
   | UsageService.UsageService
   | ChatGreetingService.ChatGreetingService
   | VcsProcess.VcsProcess

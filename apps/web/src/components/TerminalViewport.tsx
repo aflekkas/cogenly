@@ -2,14 +2,14 @@ import { useRightPanelStore } from "../rightPanelStore";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@cogenly/client-runtime/state/runtime";
 import {
   INITIAL_TERMINAL_OUTPUT_CURSOR,
   readTerminalOutputUpdate,
   type TerminalOutputCursor,
   type TerminalOutputUpdate,
   type TerminalSessionState,
-} from "@t3tools/client-runtime/state/terminal";
+} from "@cogenly/client-runtime/state/terminal";
 import {
   AuthPreviewOperateScope,
   AuthOrchestrationOperateScope,
@@ -18,7 +18,7 @@ import {
   type ProviderInstanceId,
   type ScopedThreadRef,
   type ThreadId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, type ReactNode } from "react";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
 import { readTextFromClipboard, writeTextToClipboard } from "~/hooks/useCopyToClipboard";
@@ -33,7 +33,7 @@ import {
   type GhosttyTerminalSurfaceOptions,
 } from "~/terminal/ghostty/surface";
 import { type GhosttyColor, type GhosttyTheme } from "~/terminal/ghostty/core";
-import { resolvePathLinkTarget, splitFilePathPosition } from "@t3tools/shared/fileLinks";
+import { resolvePathLinkTarget, splitFilePathPosition } from "@cogenly/shared/fileLinks";
 import { isTerminalUrl } from "../terminal-links";
 import {
   isTerminalClearShortcut,

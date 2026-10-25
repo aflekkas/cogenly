@@ -10,7 +10,7 @@ import {
   type DesktopAppActivationRequest,
   type DesktopAppActivationResponse,
   EnvironmentId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
 
 import * as DesktopAppControl from "./DesktopAppControl.ts";
@@ -109,5 +109,52 @@ describe("DesktopAppControl.addEnvironment", () => {
       ).pipe(Effect.flip);
       expect(error._tag).toBe("DesktopAppControlUnreachableError");
     }).pipe(Effect.provide(NodeServices.layer)),
+  );
+});
+
+describe("DesktopAppControl.cliCommand", () => {
+  const cliCommand = (
+    address: string,
+    input: Parameters<DesktopAppControl.DesktopAppControl["Service"]["cliCommand"]>[0],
+  ) =>
+    DesktopAppControl.DesktopAppControl.pipe(
+      Effect.flatMap((control) => control.cliCommand(input)),
+      Effect.provide(DesktopAppControl.layerAt({ address })),
+    );
+  const state = {
+    supported: true,
+    status: "installed",
+    installedPath: "/usr/local/bin/cogenly",
+    appPath: "/Applications/Cogenly.app",
+    upToDate: true,
+    onPath: true,
+    userDirectory: "/Users/me/.local/bin",
+    userDirectoryOnPath: false,
+    systemDirectory: "/usr/local/bin",
+    recommendedLocation: "system",
+  } as const;
+
+  it.effect("asks the desktop app to install and returns the state after it", () =>
+    Effect.gen(function* () {
+      const desktop = yield* fakeDesktop(() => ({ version: 1, ok: true, cliCommand: state }));
+      const result = yield* cliCommand(desktop.address, { action: "install", location: "system" });
+      expect(result).toEqual(state);
+      expect(desktop.received).toEqual([
+        expect.objectContaining({ type: "cli-command", action: "install", location: "system" }),
+      ]);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("reports an answer to a different request", () =>
+    Effect.gen(function* () {
+      const desktop = yield* fakeDesktop(() => ({
+        version: 1,
+        ok: true,
+        environmentId: EnvironmentId.make("environment-vps"),
+        label: "VPS",
+      }));
+      const error = yield* cliCommand(desktop.address, { action: "status" }).pipe(Effect.flip);
+      expect(error.message).toContain("answered a different request");
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });

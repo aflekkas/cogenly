@@ -1,4 +1,4 @@
-import { createExportAtoms } from "@t3tools/client-runtime/state/exports";
+import { createExportAtoms } from "@cogenly/client-runtime/state/exports";
 import { connectionAtomRuntime } from "../connection/runtime";
 
 /** Portable workspace exports: create, validate, and list recent bundles. */

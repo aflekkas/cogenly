@@ -1,5 +1,5 @@
 import { OverlayPresence } from "~/components/ui/overlay-presence";
-import type { DesktopSshPasswordPromptRequest } from "@t3tools/contracts";
+import type { DesktopSshPasswordPromptRequest } from "@cogenly/contracts";
 import { useEffect, useId, useRef, useState } from "react";
 
 import { Button } from "../ui/button";

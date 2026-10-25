@@ -2,8 +2,8 @@ import {
   combineTerminalSessionState,
   EMPTY_TERMINAL_BUFFER_STATE,
   type KnownTerminalSession,
-} from "@t3tools/client-runtime/state/terminal";
-import { EnvironmentId, ThreadId, type TerminalSummary } from "@t3tools/contracts";
+} from "@cogenly/client-runtime/state/terminal";
+import { EnvironmentId, ThreadId, type TerminalSummary } from "@cogenly/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {

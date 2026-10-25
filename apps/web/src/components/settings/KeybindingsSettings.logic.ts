@@ -5,11 +5,11 @@ import {
   type KeybindingWhenNode,
   type ResolvedKeybindingRule,
   type ResolvedKeybindingsConfig,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import {
   DEFAULT_RESOLVED_KEYBINDINGS,
   parseKeybindingWhenExpression,
-} from "@t3tools/shared/keybindings";
+} from "@cogenly/shared/keybindings";
 
 import { shortcutKeyFromEvent } from "../../keybindings";
 import { isMacPlatform } from "../../lib/utils";
@@ -349,7 +349,7 @@ export function commandLabel(command: KeybindingCommand): string {
   if (command === "thread.steerQueuedMessage") return "Queue: Send First Queued Message as Steer";
   if (command === "thread.editQueuedMessage") return "Queue: Edit Last Queued Message";
   if (command === "thread.sendAllQueuedMessages") return "Queue: Send All Queued Messages Now";
-  if (command === "thread.copyReference") return "Pull Request: Copy Link or Thread ID";
+  if (command === "thread.copyReference") return "Pull request: copy link or thread ID";
   // The mode id stays `tasks`; users know it as Work.
   if (command === "sidebar.mode.tasks") return "Sidebar: Mode: Work";
   if (command === "view.reopenClosed") return "Reopen Closed Tab";

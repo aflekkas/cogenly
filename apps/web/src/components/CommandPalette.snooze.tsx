@@ -1,4 +1,4 @@
-import type { TimestampFormat } from "@t3tools/contracts/settings";
+import type { TimestampFormat } from "@cogenly/contracts/settings";
 import type { ReactNode } from "react";
 
 import type { CommandPaletteGroup, CommandPaletteActionItem } from "./CommandPalette.logic";

@@ -1,4 +1,4 @@
-import { EnvironmentId, ProjectLabelId } from "@t3tools/contracts";
+import { EnvironmentId, ProjectLabelId } from "@cogenly/contracts";
 import { createFileRoute } from "@tanstack/react-router";
 
 import { AgentBuilder } from "../agents/AgentBuilder";

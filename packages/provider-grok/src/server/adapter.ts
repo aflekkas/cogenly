@@ -1,4 +1,4 @@
-import type { ServerProviderUsageLimits } from "@t3tools/contracts";
+import type { ServerProviderUsageLimits } from "@cogenly/contracts";
 import {
   ProviderDriverKind,
   type ModelSelection,
@@ -16,10 +16,10 @@ import {
   type ProviderInstanceId,
   type RuntimeRequestId,
   type ServerProviderModel,
-} from "@t3tools/contracts";
-import { COGENLY_ORCHESTRATION_INSTRUCTIONS } from "@t3tools/provider-core/server/orchestrationInstructions";
-import { AgentScope } from "@t3tools/shared/AgentScope";
-import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
+} from "@cogenly/contracts";
+import { COGENLY_ORCHESTRATION_INSTRUCTIONS } from "@cogenly/provider-core/server/orchestrationInstructions";
+import { AgentScope } from "@cogenly/shared/AgentScope";
+import { getModelSelectionStringOptionValue } from "@cogenly/shared/model";
 import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
@@ -31,22 +31,22 @@ import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 
-import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
-import * as McpProviderSession from "@t3tools/provider-core/server/mcpSession";
-import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
-import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
-import type * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
-import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
+import * as IdAllocator from "@cogenly/provider-core/server/IdAllocator";
+import * as McpProviderSession from "@cogenly/provider-core/server/mcpSession";
+import * as McpProviderSessions from "@cogenly/provider-core/server/McpProviderSessions";
+import * as ProviderAdapter from "@cogenly/provider-core/server/ProviderAdapter";
+import type * as ProviderEventLoggers from "@cogenly/provider-core/server/ProviderEventLoggers";
+import * as ProviderHost from "@cogenly/provider-core/server/ProviderHost";
 import {
   isProviderNativeImageAttachment,
   providerMessageTextWithAttachmentPaths,
-} from "@t3tools/provider-core/server/attachmentPrompt";
-import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
+} from "@cogenly/provider-core/server/attachmentPrompt";
+import { makeProviderFailure } from "@cogenly/provider-core/server/failure";
 import {
-  CONVERSATION_MODE_INSTRUCTIONS,
   buildRuntimeInstructions,
-} from "@t3tools/provider-core/server/runtimeInstructions";
-import { turnScopedSelectionTransition } from "@t3tools/provider-core/server/selectionTransition";
+  conversationModeInstructions,
+} from "@cogenly/provider-core/server/runtimeInstructions";
+import { turnScopedSelectionTransition } from "@cogenly/provider-core/server/selectionTransition";
 
 import type { GrokSettings } from "../settings.ts";
 import {
@@ -1283,15 +1283,24 @@ export const makeGrokAdapterV2 = Effect.fn("makeGrokAdapterV2")(function* (
         const blocks = yield* promptBlocks(turnInput.message);
         yield* setModel(turnInput.modelSelection);
         const mcp = yield* mcpSessions.read(turnInput.threadId);
+        const mcpAttached = mcp !== undefined && host.initializeResult.agentCapabilities.mcpHttp;
+        // Conversations decline Grok's own execute tool, so their lookups
+        // run through the Cogenly terminal when the credential grants it.
         const instructions =
           buildRuntimeInstructions({ harness: "Grok Build", model: session.model ?? undefined }) +
           (turnInput.runtimePolicy.conversationMode === true
-            ? `\n${CONVERSATION_MODE_INSTRUCTIONS}`
+            ? `\n${conversationModeInstructions({
+                terminal: McpProviderSession.terminalToolsAuthorized({
+                  ...turnInput.runtimePolicy,
+                  enabled: mcpAttached && McpProviderSession.terminalToolsAvailable(mcp),
+                }),
+                builder: turnInput.runtimePolicy.builderMode,
+              })}`
             : "") +
           (turnInput.runtimePolicy.projectManifest === undefined
             ? ""
             : `\n${turnInput.runtimePolicy.projectManifest}`) +
-          (mcp && host.initializeResult.agentCapabilities.mcpHttp
+          (mcpAttached
             ? `\n${COGENLY_ORCHESTRATION_INSTRUCTIONS.replaceAll("T3", "Cogenly")}`
             : "");
         // ACP has no turn ids; each run attempt is its own turn.

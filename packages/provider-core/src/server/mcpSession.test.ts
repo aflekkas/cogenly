@@ -1,7 +1,14 @@
-import { EnvironmentId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import {
+  defaultAgentPermissions,
+  EnvironmentId,
+  ProviderInstanceId,
+  ThreadId,
+} from "@cogenly/contracts";
 import { describe, expect, it } from "vite-plus/test";
 import {
   terminalToolsAvailable,
+  terminalToolsAuthorized,
+  terminalLaunchPolicy,
   withAgentDeviceEnvironment,
   type McpProviderSessionConfig,
 } from "./mcpSession.ts";
@@ -55,5 +62,85 @@ describe("terminalToolsAvailable", () => {
     // shell: absent must not read as available.
     expect(terminalToolsAvailable(config())).toBe(false);
     expect(terminalToolsAvailable(undefined)).toBe(false);
+  });
+});
+
+describe("terminalToolsAuthorized", () => {
+  const base = { enabled: true, runtimeMode: "full-access", interactionMode: "default" } as const;
+  it("withholds commands for plan, disabled and builder turns", () => {
+    expect(terminalToolsAuthorized(base)).toBe(true);
+    expect(terminalToolsAuthorized({ ...base, interactionMode: "plan" })).toBe(false);
+    expect(terminalToolsAuthorized({ ...base, enabled: false })).toBe(false);
+    expect(terminalToolsAuthorized({ ...base, builderMode: true })).toBe(false);
+  });
+  it("requires every sensitive grant for persistent agents", () => {
+    expect(terminalToolsAuthorized({ ...base, agentPermissions: defaultAgentPermissions })).toBe(
+      false,
+    );
+    const granted = {
+      ...defaultAgentPermissions,
+      send: true,
+      create_pr: true,
+      merge: true,
+      deploy: true,
+      delete: true,
+    };
+    expect(terminalToolsAuthorized({ ...base, agentPermissions: granted })).toBe(true);
+    for (const grant of [
+      "read",
+      "execute",
+      "send",
+      "create_pr",
+      "merge",
+      "deploy",
+      "delete",
+    ] as const) {
+      expect(
+        terminalToolsAuthorized({ ...base, agentPermissions: { ...granted, [grant]: false } }),
+      ).toBe(false);
+    }
+  });
+});
+
+describe("terminal launch policy", () => {
+  const base = { enabled: true, runtimeMode: "full-access", interactionMode: "default" } as const;
+  it("fails closed for chats without a successful probe", () => {
+    expect(terminalLaunchPolicy({ ...base, chatMode: true })).toBeNull();
+    expect(
+      terminalToolsAuthorized({ ...base, chatMode: true, readOnlySandboxAvailable: false }),
+    ).toBe(false);
+    expect(terminalLaunchPolicy({ ...base, chatMode: true, readOnlySandboxAvailable: true })).toBe(
+      "readOnlyLookup",
+    );
+    expect(
+      terminalLaunchPolicy({
+        ...base,
+        chatMode: true,
+        readOnlySandboxAvailable: true,
+        enabled: false,
+      }),
+    ).toBeNull();
+  });
+  it("keeps Work, scheduled Work and fully granted persistent agents unrestricted", () => {
+    expect(terminalLaunchPolicy(base)).toBe("unrestricted");
+    expect(
+      terminalLaunchPolicy({ ...base, chatMode: false, readOnlySandboxAvailable: false }),
+    ).toBe("unrestricted");
+    expect(
+      terminalLaunchPolicy({
+        ...base,
+        chatMode: true,
+        agentPermissions: {
+          ...defaultAgentPermissions,
+          read: true,
+          execute: true,
+          send: true,
+          create_pr: true,
+          merge: true,
+          deploy: true,
+          delete: true,
+        },
+      }),
+    ).toBe("unrestricted");
   });
 });

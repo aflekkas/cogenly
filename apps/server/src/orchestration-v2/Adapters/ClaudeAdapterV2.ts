@@ -1,10 +1,11 @@
+import * as RepoMcpTrust from "../../integrations/RepoMcpTrust.ts";
 import { makeProviderTextDeltaCoalescer } from "./ProviderTextDeltaCoalescer.ts";
 import { claudeTaskOutputRoot, tailClaudeTaskOutput } from "./ClaudeTaskOutputTail.ts";
 import {
   dynamicToolTitle,
   formatReadToolLabel,
   formatSearchToolLabel,
-} from "@t3tools/shared/toolActivity";
+} from "@cogenly/shared/toolActivity";
 import { field, text } from "../unknownField.ts";
 import { readWorkflowAgentAnswers } from "../workflowAgentAnswers.ts";
 import {
@@ -14,7 +15,7 @@ import {
   parseClaudeWorkflowRunHandles,
 } from "./claudeWorkflowProgress.ts";
 
-import { isWorkspaceImagePreviewPath } from "@t3tools/shared/filePreview";
+import { isWorkspaceImagePreviewPath } from "@cogenly/shared/filePreview";
 import { normalizeClaudeTurnTokenUsage } from "../../provider/ClaudeTurnTokenUsage.ts";
 import {
   type CanUseTool,
@@ -45,14 +46,14 @@ import type {
 } from "@anthropic-ai/claude-agent-sdk/sdk-tools";
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- the SDK takes a Node ChildProcess for the CLI.
 import * as NodeChildProcess from "node:child_process";
-import { parseCliArgs } from "@t3tools/shared/cliArgs";
-import { AgentScope } from "@t3tools/shared/AgentScope";
-import * as HostProcess from "@t3tools/shared/HostProcess";
-import { applyClaudePromptEffortPrefix } from "@t3tools/shared/model";
+import { parseCliArgs } from "@cogenly/shared/cliArgs";
+import { AgentScope } from "@cogenly/shared/AgentScope";
+import * as HostProcess from "@cogenly/shared/HostProcess";
+import { applyClaudePromptEffortPrefix } from "@cogenly/shared/model";
 import {
   CLAUDE_RESUME_COMPACTION_NEVER_ANSWER,
   formatClaudeResumeCompactionQuestion,
-} from "@t3tools/shared/claudeCompaction";
+} from "@cogenly/shared/claudeCompaction";
 import {
   type ChatAttachment,
   ClaudeSettings,
@@ -86,7 +87,7 @@ import {
   type ProviderThreadId,
   type RunId,
   type ThreadId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
@@ -117,9 +118,15 @@ import {
   type CompiledClaudeModelSelection,
 } from "../../claudeModelOptions.ts";
 import * as ServerConfig from "../../config.ts";
-import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
-import { signalProcessGroup } from "@t3tools/provider-core/server/processGroup";
+import { expandHomePath } from "@cogenly/provider-core/server/pathExpansion";
+import { signalProcessGroup } from "@cogenly/provider-core/server/processGroup";
 import {
+  type ClaudeRepoMcpServer,
+  nativeMcpContextLine,
+  readClaudeRepoMcpServers,
+} from "../../integrations/NativeMcpPolicy.ts";
+import {
+  claudeManagedMcpServerNames,
   claudeSessionTranscriptExists,
   claudeSignedOutMessage,
   makeClaudeEnvironment,
@@ -137,50 +144,51 @@ import {
   boundProviderEventForLogging,
   shouldPersistProviderEvent,
 } from "../../provider/EventNdjsonLogger.ts";
-import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
+import * as ProviderEventLoggers from "@cogenly/provider-core/server/ProviderEventLoggers";
 import {
   claudeRateLimitEventToUpdate,
   type ClaudeScopedLimitNames,
 } from "../../provider/claudeUsageLimits.ts";
-import type { ManagedServerProvider } from "@t3tools/provider-core/server/snapshot";
-import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
+import type { ManagedServerProvider } from "@cogenly/provider-core/server/snapshot";
+import { mergeProviderInstanceEnvironment } from "@cogenly/provider-core/server/instanceEnvironment";
 import {
   COGENLY_BROWSER_TOOL_INSTRUCTIONS,
+  cogenlyComputerUseInstructions,
   COGENLY_ORCHESTRATION_INSTRUCTIONS,
-} from "@t3tools/provider-core/server/orchestrationInstructions";
+} from "@cogenly/provider-core/server/orchestrationInstructions";
 import {
-  CONVERSATION_MODE_INSTRUCTIONS,
   buildRuntimeInstructions,
-} from "@t3tools/provider-core/server/runtimeInstructions";
+  conversationModeInstructions,
+} from "@cogenly/provider-core/server/runtimeInstructions";
 import {
   mcpToolPresentation,
   normalizeMcpText,
-} from "@t3tools/provider-core/server/mcpToolPresentation";
-import * as McpProviderSession from "@t3tools/provider-core/server/mcpSession";
-import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
-import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+} from "@cogenly/provider-core/server/mcpToolPresentation";
+import * as McpProviderSession from "@cogenly/provider-core/server/mcpSession";
+import * as McpProviderSessions from "@cogenly/provider-core/server/McpProviderSessions";
+import * as IdAllocator from "@cogenly/provider-core/server/IdAllocator";
 import {
   makeProviderFailure,
   makeProviderRetryTurnItem,
-} from "@t3tools/provider-core/server/failure";
-import { turnScopedSelectionTransition } from "@t3tools/provider-core/server/selectionTransition";
-import { providerMessageTextWithAttachmentPaths } from "@t3tools/provider-core/server/attachmentPrompt";
-import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
+} from "@cogenly/provider-core/server/failure";
+import { turnScopedSelectionTransition } from "@cogenly/provider-core/server/selectionTransition";
+import { providerMessageTextWithAttachmentPaths } from "@cogenly/provider-core/server/attachmentPrompt";
+import * as ProviderAdapter from "@cogenly/provider-core/server/ProviderAdapter";
 import {
   ProviderAdapterDriverCreateError,
   type ProviderAdapterDriver,
   type ProviderAdapterDriverCreateInput,
-} from "@t3tools/provider-core/server/adapterDriver";
+} from "@cogenly/provider-core/server/adapterDriver";
 import {
   type BackgroundWorkReport,
   backgroundWorkNotification,
-} from "@t3tools/provider-core/server/notification";
-import * as ProviderContinuationRequests from "@t3tools/provider-core/server/ProviderContinuationRequests";
+} from "@cogenly/provider-core/server/notification";
+import * as ProviderContinuationRequests from "@cogenly/provider-core/server/ProviderContinuationRequests";
 import {
   makeSubagentChildThread,
   makeSubagentConversationArtifacts,
   subagentThreadTitle,
-} from "@t3tools/provider-core/server/subagentProjection";
+} from "@cogenly/provider-core/server/subagentProjection";
 
 export const CLAUDE_PROVIDER = ProviderDriverKind.make("claudeAgent");
 export const CLAUDE_AGENT_SDK_QUERY_PROTOCOL = "claude-agent-sdk.query" as const;
@@ -397,6 +405,10 @@ export const CLAUDE_CONVERSATION_DISALLOWED_TOOLS: ReadonlyArray<string> = [
   "Bash",
   "BashOutput",
   "KillShell",
+  "Agent",
+  "Task",
+  "TaskOutput",
+  "TaskStop",
 ];
 
 function claudeAgentSdkQueryToolsForSdk(
@@ -1105,6 +1117,7 @@ function claudeLiveSelectionFlagSettings(
   };
 }
 
+/** Real turns isolate native MCP configuration unless the owner restores it. */
 export function makeClaudeQueryOptions(input: {
   readonly modelSelection: ModelSelection;
   readonly nativeThreadId: string;
@@ -1124,11 +1137,20 @@ export function makeClaudeQueryOptions(input: {
   readonly mcpServers?: ClaudeQueryOptions["mcpServers"];
   /** The turn's MCP session carries the collaborative browser tools. */
   readonly browserToolsAvailable?: boolean;
+  /** The turn's MCP session carries the computer-use tools; the platform of the machine they drive. */
+  readonly computerUsePlatform?: string;
   readonly tools?: ClaudeAgentSdkQueryTools;
   readonly allowedTools?: ReadonlyArray<string>;
   readonly disallowedTools?: ReadonlyArray<string>;
   /** Chat-surface turns: appends the conversation-mode instructions. */
   readonly conversationMode?: boolean;
+  readonly builderMode?: boolean;
+  /**
+   * The turn's MCP credential grants the Cogenly terminal tools, so shell
+   * commands go through terminal_run. Absent: inferred from a disallowed Bash.
+   */
+  readonly terminalToolsAvailable?: boolean;
+  readonly runtimePolicy?: ProviderAdapter.ProviderAdapterV2RuntimePolicy;
   /** Threads filed in a project: appends the project manifest block. */
   readonly projectManifest?: string;
   readonly permissionMode?: PermissionMode;
@@ -1136,6 +1158,18 @@ export function makeClaudeQueryOptions(input: {
   readonly onUserDialog?: ClaudeQueryOptions["onUserDialog"];
   readonly supportedDialogKinds?: ClaudeQueryOptions["supportedDialogKinds"];
   readonly allowDangerouslySkipPermissions?: boolean;
+  /** True restores Claude's native MCP configuration. */
+  readonly useProviderConnectors?: boolean;
+  readonly managedMcpConfig?: boolean;
+  /** Servers an administrator's `managed-mcp.json` defines, named in the prompt. */
+  readonly managedMcpServerNames?: ReadonlyArray<string>;
+  /**
+   * The repo's `.mcp.json` servers (`readClaudeRepoMcpServers`). Strict MCP
+   * mode ignores the file, so they join the explicit config; Cogenly's own
+   * servers win a shared name.
+   */
+  readonly repoMcpServers?: Readonly<Record<string, ClaudeRepoMcpServer>>;
+  readonly repoMcpWaiting?: ReadonlyArray<string>;
 }): ClaudeAgentSdkQueryOptions {
   const compiledSelection = compileClaudeModelSelection(input.modelSelection);
   const {
@@ -1143,6 +1177,10 @@ export function makeClaudeQueryOptions(input: {
     "dangerously-skip-permissions": _launchArgSkipPermissions,
     ...extraArgs
   } = input.settings === undefined ? {} : parseCliArgs(input.settings.launchArgs).flags;
+  if (input.useProviderConnectors !== true) {
+    delete extraArgs["mcp-config"];
+    delete extraArgs["strict-mcp-config"];
+  }
   const requestThinkingSummaries =
     compiledSelection.settings.alwaysThinkingEnabled !== false &&
     extraArgs["thinking-display"] !== "omitted";
@@ -1153,6 +1191,16 @@ export function makeClaudeQueryOptions(input: {
     ? { resume: input.nativeThreadId }
     : { sessionId: input.nativeThreadId };
   const selectedTools = input.tools ?? CLAUDE_CODE_PRESET_TOOLS;
+  // Conversation turns lose Bash independently. Advertise MCP commands only
+  // when both the session and the current turn policy permit them.
+  const terminalTools = McpProviderSession.terminalToolsAuthorized({
+    runtimeMode: input.runtimePolicy?.runtimeMode ?? "full-access",
+    interactionMode: input.runtimePolicy?.interactionMode ?? "default",
+    builderMode: input.runtimePolicy?.builderMode ?? input.builderMode,
+    enabled:
+      input.terminalToolsAvailable ??
+      (input.conversationMode !== true && input.disallowedTools?.includes("Bash") === true),
+  });
   const selectionSettings =
     Object.keys(compiledSelection.settings).length === 0
       ? undefined
@@ -1163,13 +1211,35 @@ export function makeClaudeQueryOptions(input: {
       : typeof input.sdkSettings === "object" && input.sdkSettings !== null
         ? ({ ...input.sdkSettings, ...selectionSettings } as ClaudeSdkSettings)
         : selectionSettings;
-  const effectiveQuerySettings =
+  const compactedQuerySettings =
     input.settings?.autoCompactWindow === undefined || input.settings.autoCompactWindow.length === 0
       ? querySettings
       : ({
           ...(typeof querySettings === "object" && querySettings !== null ? querySettings : {}),
           autoCompactWindow: Number(input.settings.autoCompactWindow),
         } as ClaudeSdkSettings);
+  const effectiveQuerySettings =
+    input.repoMcpWaiting === undefined
+      ? compactedQuerySettings
+      : {
+          ...(typeof compactedQuerySettings === "object" && compactedQuerySettings !== null
+            ? compactedQuerySettings
+            : {}),
+          enableAllProjectMcpServers: false,
+          enabledMcpjsonServers: Object.keys(input.repoMcpServers ?? {}),
+          disabledMcpjsonServers: [...input.repoMcpWaiting],
+        };
+  const repoMcpServers = input.repoMcpServers ?? {};
+  const sessionMcpServers =
+    Object.keys(repoMcpServers).length === 0
+      ? input.mcpServers
+      : { ...repoMcpServers, ...input.mcpServers };
+  const nativeMcpContext = nativeMcpContextLine({
+    repoFile: ".mcp.json",
+    repo: Object.keys(repoMcpServers).filter((name) => !(name in (input.mcpServers ?? {}))),
+    managed: input.managedMcpServerNames,
+    waiting: input.repoMcpWaiting,
+  });
   const options: ClaudeAgentSdkQueryOptions = {
     model: compiledSelection.apiModelId,
     tools: claudeAgentSdkQueryToolsForSdk(selectedTools),
@@ -1207,22 +1277,34 @@ export function makeClaudeQueryOptions(input: {
     ...(input.settings?.binaryPath
       ? { pathToClaudeCodeExecutable: input.settings.binaryPath }
       : {}),
-    ...(input.environment === undefined ? {} : { env: input.environment }),
-    ...(input.mcpServers === undefined ? {} : { mcpServers: input.mcpServers }),
+    ...(input.useProviderConnectors === true
+      ? input.environment === undefined
+        ? {}
+        : { env: input.environment }
+      : {
+          ...(input.managedMcpConfig ? {} : { strictMcpConfig: true }),
+          env: { ...input.environment, ENABLE_CLAUDEAI_MCP_SERVERS: "false" },
+        }),
+    ...(sessionMcpServers === undefined ? {} : { mcpServers: sessionMcpServers }),
     systemPrompt: {
       type: "preset" as const,
       preset: "claude_code" as const,
       append:
         buildRuntimeInstructions({ harness: "Claude Code" }) +
-        (input.conversationMode === true ? `\n${CONVERSATION_MODE_INSTRUCTIONS}` : "") +
+        (input.conversationMode === true
+          ? `\n${conversationModeInstructions({ terminal: terminalTools, builder: input.builderMode })}`
+          : "") +
         (input.projectManifest === undefined ? "" : `\n${input.projectManifest}`) +
+        (nativeMcpContext === undefined ? "" : `\n${nativeMcpContext}`) +
         (input.mcpServers === undefined ? "" : COGENLY_ORCHESTRATION_INSTRUCTIONS) +
         (input.mcpServers !== undefined && input.browserToolsAvailable === true
           ? COGENLY_BROWSER_TOOL_INSTRUCTIONS
           : "") +
-        // Conversation turns have no shell at all, so they never route
-        // commands through the terminal tools.
-        (input.conversationMode === true || !input.disallowedTools?.includes("Bash")
+        // Chats get this too: "change that setting in another app" is a conversational ask.
+        (input.mcpServers !== undefined && input.computerUsePlatform !== undefined
+          ? cogenlyComputerUseInstructions(input.computerUsePlatform)
+          : "") +
+        (!terminalTools
           ? ""
           : "\nUse mcp__cogenly__terminal_run for every shell command so the owner sees it live. Use background=true for servers, terminal_read for output, terminal_write for stdin, and terminal_kill to stop. A command that may take more than about a minute, or may prompt (logins, cloud CLIs, installs, builds, test suites), runs with background=true and is polled with terminal_read, so the user's messages aren't blocked while it runs. Terminals and their children are killed when this thread settles."),
     },
@@ -1258,9 +1340,12 @@ export const CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS: ReadonlyArray<string> = [
   "mcp__cogenly__thread_search",
   "mcp__cogenly__preview_list",
   "mcp__cogenly__environment_read",
+  "mcp__cogenly__storage_status",
+  "mcp__cogenly__cli_command_status",
   "mcp__cogenly__queue_list",
   "mcp__cogenly__queue_read",
   "mcp__cogenly__machine_security_status",
+  "mcp__cogenly__machine_health",
   "mcp__cogenly__terminal_read",
   "mcp__cogenly__terminal_list",
   "mcp__cogenly__html_preview",
@@ -1273,14 +1358,17 @@ export const CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS: ReadonlyArray<string> = [
   "mcp__cogenly__device_setup_status",
 ];
 
-// Chat-surface turns get the read-only tools plus the handoff draft, the
-// read-only memory tools, and the project and thread organizers, so a
-// conversation can propose Work, recall facts, set up projects, and snooze or
-// settle threads by talking. Project folders and thread lifecycle are metadata
-// only, so they stay conversational; clones and launches still need an
-// approval.
+// Chat-surface turns get the read-only tools plus the terminal, the handoff
+// draft, the read-only memory tools, and the project and thread organizers, so
+// a conversation can look things up, propose Work, recall facts, set up
+// projects, and snooze or settle threads by talking. Project folders and thread
+// lifecycle are metadata only, so they stay conversational; clones and
+// launches still need an approval.
 export const CLAUDE_CONVERSATION_T3_MCP_ALLOWED_TOOLS: ReadonlyArray<string> = [
   ...CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS,
+  "mcp__cogenly__terminal_run",
+  "mcp__cogenly__terminal_write",
+  "mcp__cogenly__terminal_kill",
   "mcp__cogenly__work_propose_handoff",
   "mcp__cogenly__work_task",
   "mcp__cogenly__memory_read",
@@ -1327,7 +1415,7 @@ export function claudeMcpQueryOverrides(input: {
   readonly mcpSession: McpProviderSession.McpProviderSessionConfig | undefined;
   readonly readOnlySandbox: boolean;
   readonly allowedTools?: ReadonlyArray<string>;
-  /** Chat-surface turns: read-only tools plus the handoff draft and memory reads. */
+  /** Chat-surface turns: read-only tools plus the terminal, the handoff draft and memory reads. */
   readonly conversationMode?: boolean;
 }): {
   readonly allowedTools?: ReadonlyArray<string>;
@@ -1906,8 +1994,10 @@ export function claudeEffectiveQueryPolicyKey(
     readonly mcpServers?: ClaudeQueryOptions["mcpServers"];
     readonly disallowedTools?: ReadonlyArray<string>;
   },
+  terminalAuthorized?: boolean,
 ): string {
   return JSON.stringify({
+    terminalAuthorized,
     runtimePolicy: claudeRuntimeQueryPolicyKey({
       ...queryPolicy,
       ...(mcpOverrides.allowedTools === undefined
@@ -2778,6 +2868,49 @@ function isClaudeTaskNotificationOriginResult(message: SDKMessage): message is S
   return message.type === "result" && message.origin?.kind === "task-notification";
 }
 
+/** A 429 that resets within this window is a short-term throttle, not an exhausted quota. */
+const CLAUDE_RATE_LIMIT_RETRY_MAX_MS = 15 * 60_000;
+const CLAUDE_RATE_LIMIT_RETRY_MIN_MS = 30_000;
+const CLAUDE_RATE_LIMIT_RETRY_DEFAULT_MS = 60_000;
+
+/**
+ * Splits a Claude limit stop into a short-term rate limit or an exhausted
+ * quota. Only a rejected usage window (a `rate_limit_event`) or a blocking
+ * limit proves the quota is spent; a bare 429 after the CLI used up its own
+ * retries is a throttle, so it gets a near reset (the CLI's last backoff,
+ * which honors retry-after) that the server retries at.
+ */
+export function classifyClaudeLimitFailure(input: {
+  readonly failure: OrchestrationV2ProviderFailure;
+  readonly windowRejected: boolean;
+  readonly windowResetAt: string | null;
+  readonly retryDelayMs: number | undefined;
+  readonly completedAt: DateTime.Utc;
+}): OrchestrationV2ProviderFailure {
+  if (input.windowRejected || input.failure.limitKind === "quota") {
+    return {
+      ...input.failure,
+      limitKind: "quota",
+      resetAt: input.windowResetAt ?? input.failure.resetAt ?? null,
+    };
+  }
+  if (input.failure.limitKind === "rate_limit" && input.failure.resetAt) return input.failure;
+  const delayMs = Math.min(
+    CLAUDE_RATE_LIMIT_RETRY_MAX_MS,
+    Math.max(
+      CLAUDE_RATE_LIMIT_RETRY_MIN_MS,
+      input.retryDelayMs ?? CLAUDE_RATE_LIMIT_RETRY_DEFAULT_MS,
+    ),
+  );
+  return {
+    ...input.failure,
+    limitKind: "rate_limit",
+    resetAt: DateTime.formatIso(
+      DateTime.makeUnsafe(DateTime.toEpochMillis(input.completedAt) + delayMs),
+    ),
+  };
+}
+
 function providerFailureFromResult(
   message: SDKResultMessage,
   completedAt: DateTime.Utc,
@@ -2808,6 +2941,7 @@ function providerFailureFromResult(
         code: "api_error_429",
         retryable: true,
         resetAt: DateTime.formatIso(DateTime.makeUnsafe(resetMs)),
+        limitKind: seconds * 1_000 <= CLAUDE_RATE_LIMIT_RETRY_MAX_MS ? "rate_limit" : "quota",
       });
     }
   }
@@ -2863,6 +2997,7 @@ function providerFailureFromApiRetry(message: SDKAPIRetryMessage): Orchestration
           ? "transport_error"
           : "provider_error",
     retryable: true,
+    ...(message.error_status === 429 ? { limitKind: "rate_limit" as const } : {}),
   });
 }
 
@@ -3044,6 +3179,9 @@ interface ActiveClaudeTurnContext {
   readonly rejectedRateLimitTypes: Set<string>;
   readonly rateLimitResetTimes: Map<string, string | null>;
   latestAssistantRateLimited: boolean;
+  // The CLI's last backoff for a 429 (it honors retry-after), so a turn that
+  // ends rate limited retries no sooner than the API asked.
+  rateLimitRetryDelayMs: number | undefined;
   // Usage of the results that steers ended, oldest first. The final result's
   // usage covers only its own segment, so the turn bills these as well.
   readonly steeredSegmentUsage: Array<SDKResultMessage["usage"]>;
@@ -3445,6 +3583,7 @@ export function claudeProposedPlan(input: unknown): string | null {
 }
 
 export interface ClaudeAdapterV2Options {
+  readonly repoMcpTrust?: RepoMcpTrust.RepoMcpTrust["Service"];
   readonly instanceId: ProviderInstanceId;
   readonly settings: ClaudeSettings;
   readonly environment: NodeJS.ProcessEnv;
@@ -3468,6 +3607,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
   adapterOptions: ClaudeAdapterV2Options,
 ) {
   const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
+  const repoTrust = Option.fromUndefinedOr(adapterOptions.repoMcpTrust);
   const { attachmentsDir, fileSystem, path, crypto, idAllocator, queryRunner } = adapterOptions;
   // Subagent model names and effort levels, including the instance's custom models.
   const subagentModelCatalog = scopeClaudeModelCatalog(
@@ -7183,6 +7323,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               retryDelayMs: Math.max(0, Math.trunc(message.retry_delay_ms)),
             };
             const failure = providerFailureFromApiRetry(message);
+            if (message.error_status === 429) {
+              context.rateLimitRetryDelayMs = retry.retryDelayMs ?? undefined;
+            }
             const itemOrdinal =
               previous?.itemOrdinal ??
               (yield* resolveItemOrdinal(context, `terminal-failure:${context.providerTurnId}`));
@@ -7912,12 +8055,17 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             // can't grant a permission, so show the CLI's own text instead.
             const permissionDenied =
               message.subtype === "success" && message.api_error_status === 403;
+            const windowRejected =
+              context.rejectedRateLimitTypes.size > 0 ||
+              message.terminal_reason === "blocking_limit";
             const failureHint = permissionDenied
               ? message.result
               : (context.authenticationFailureMessage ??
-                (usageLimited
-                  ? "Claude usage limit reached. Send the message again once the limit resets."
-                  : undefined));
+                (!usageLimited
+                  ? undefined
+                  : windowRejected
+                    ? "Claude usage limit reached. Send the message again once the limit resets."
+                    : "Claude API rate limit reached. Try again later."));
             const resetTimes = Array.from(context.rateLimitResetTimes.values());
             const resetAt =
               resetTimes.length > 0 && resetTimes.every((time) => time !== null)
@@ -7928,7 +8076,13 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               : providerFailureFromResult(message, completedAt, failureHint, usageLimited);
             const terminalFailure =
               resultFailure?.class === "usage_limit"
-                ? { ...resultFailure, resetAt: resetAt ?? resultFailure.resetAt ?? null }
+                ? classifyClaudeLimitFailure({
+                    failure: resultFailure,
+                    windowRejected,
+                    windowResetAt: resetAt,
+                    retryDelayMs: context.rateLimitRetryDelayMs,
+                    completedAt,
+                  })
                 : resultFailure;
             yield* finalizeActiveTurn({
               context,
@@ -8443,15 +8597,56 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               ? {}
               : { allowedTools: queryPolicy.allowedTools }),
           });
-          // Chat-surface turns lose file writes and the shell on top of the
-          // MCP read-only set, whatever the terminal attachment grants.
+          // Chat-surface turns lose file writes and the native shell whatever
+          // the terminal attachment grants; they run commands through
+          // terminal_run, which the user sees.
           const disallowedTools = Array.from(
             new Set([
               ...(mcpOverrides.disallowedTools ?? []),
               ...(conversationMode ? CLAUDE_CONVERSATION_DISALLOWED_TOOLS : []),
             ]),
           );
-          const queryPolicyKey = claudeEffectiveQueryPolicyKey(queryPolicy, mcpOverrides);
+          const repoDefinitions =
+            turnInput.runtimePolicy.cwd == null
+              ? {}
+              : yield* readClaudeRepoMcpServers(turnInput.runtimePolicy.cwd).pipe(
+                  Effect.provideService(FileSystem.FileSystem, fileSystem),
+                  Effect.provideService(Path.Path, path),
+                );
+          const repoReview =
+            turnInput.runtimePolicy.cwd == null || Option.isNone(repoTrust)
+              ? {
+                  allowedNames: Object.keys(repoDefinitions).filter(
+                    (name) => !("command" in repoDefinitions[name]!),
+                  ),
+                  waitingNames: Object.keys(repoDefinitions).filter(
+                    (name) => "command" in repoDefinitions[name]!,
+                  ),
+                }
+              : yield* repoTrust.value.review({
+                  cwd: turnInput.runtimePolicy.cwd,
+                  threadId: turnInput.threadId,
+                  definitions: repoDefinitions,
+                });
+          const repoMcpServers = Object.fromEntries(
+            Object.entries(repoDefinitions).filter(([name]) =>
+              repoReview.allowedNames.includes(name),
+            ),
+          );
+          const repoPolicyKey = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))({
+            repoDefinitions,
+            repoReview,
+          }).pipe(Effect.orDie);
+          const queryPolicyKey =
+            repoPolicyKey +
+            claudeEffectiveQueryPolicyKey(
+              queryPolicy,
+              mcpOverrides,
+              McpProviderSession.terminalToolsAuthorized({
+                ...turnInput.runtimePolicy,
+                enabled: McpProviderSession.terminalToolsAvailable(mcpSession),
+              }),
+            );
           const compiledSelection = compileClaudeModelSelection(turnInput.modelSelection);
           const resumeSessionAt = yield* getNativeConversationHeadId(turnInput.providerThread);
           const existing = yield* Ref.get(queryContext);
@@ -8545,6 +8740,11 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             turnInput.nativeThreadHasTurns ?? turnInput.providerTurnOrdinal > 1;
           const shouldResume =
             resumeSessionAt !== undefined || openedWithResume || hasPersistedProviderTurn;
+          const managedMcpServerNames = yield* claudeManagedMcpServerNames().pipe(
+            Effect.provideService(FileSystem.FileSystem, fileSystem),
+          );
+          // Read when the process opens: worktrees and other machines get the
+          // servers of whatever checkout they run in.
           const queryOptions = makeClaudeQueryOptions({
             modelSelection: turnInput.modelSelection,
             nativeThreadId,
@@ -8554,8 +8754,16 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             attachmentsDir,
             settings: adapterOptions.settings,
             environment: adapterOptions.environment,
+            ...(managedMcpServerNames === undefined
+              ? {}
+              : { managedMcpConfig: true, managedMcpServerNames }),
+            repoMcpServers,
+            repoMcpWaiting: repoReview.waitingNames,
             tools: queryPolicy.tools ?? CLAUDE_CODE_PRESET_TOOLS,
             ...(conversationMode ? { conversationMode } : {}),
+            runtimePolicy: turnInput.runtimePolicy,
+            builderMode: turnInput.runtimePolicy.builderMode === true,
+            terminalToolsAvailable: McpProviderSession.terminalToolsAvailable(mcpSession),
             ...(turnInput.runtimePolicy.projectManifest === undefined
               ? {}
               : { projectManifest: turnInput.runtimePolicy.projectManifest }),
@@ -8568,6 +8776,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             ...(mcpSession?.browserToolsAvailable === true && !conversationMode
               ? { browserToolsAvailable: true }
               : {}),
+            ...(mcpSession?.capabilities?.has("computer") === true
+              ? { computerUsePlatform: yield* HostProcess.Platform }
+              : {}),
             ...(disallowedTools.length === 0 ? {} : { disallowedTools }),
             permissionMode: queryPolicy.permissionMode,
             ...(queryPolicy.allowDangerouslySkipPermissions === undefined
@@ -8578,6 +8789,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             canUseTool,
             onUserDialog,
             supportedDialogKinds: ["resume_return"],
+            ...(turnInput.runtimePolicy.useProviderConnectors === true
+              ? { useProviderConnectors: true }
+              : {}),
           });
           const querySession = yield* queryRunner
             .open({
@@ -8913,6 +9127,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               rejectedRateLimitTypes: new Set(),
               rateLimitResetTimes: new Map(),
               latestAssistantRateLimited: false,
+              rateLimitRetryDelayMs: undefined,
               steeredSegmentUsage: [],
               subagentsByTaskId: new Map(),
               subagentsByToolUseId: new Map(),
@@ -9781,6 +9996,7 @@ export type ClaudeAdapterV2DriverEnv =
   | Crypto.Crypto
   | FileSystem.FileSystem
   | IdAllocator.IdAllocatorV2
+  | RepoMcpTrust.RepoMcpTrust
   | McpProviderSessions.McpProviderSessions
   | Path.Path
   | ServerConfig.ServerConfig;
@@ -9806,6 +10022,7 @@ export const createClaudeAdapterV2 = Effect.fn("ClaudeAdapterV2Driver.create")(
       claudeEnvironment,
     );
     return yield* makeClaudeAdapterV2({
+      repoMcpTrust: yield* RepoMcpTrust.RepoMcpTrust,
       instanceId,
       settings: { ...config, enabled, binaryPath },
       environment: claudeEnvironment,

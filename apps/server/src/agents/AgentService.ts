@@ -1,4 +1,6 @@
-import { isT3ImportCommandId } from "../t3Import/T3ImportCommandIds.ts";
+import { ProjectRepositoryMismatchError } from "@cogenly/contracts";
+import * as Membership from "../projectLabels/ProjectRepositoryMembership.ts";
+import { isReplayedCommandId } from "../orchestration-v2/ReplayedCommandIds.ts";
 import * as Access from "./AgentAccessScope.ts";
 import { canReceiveAgentEvent } from "./agentEventPolicy.ts";
 import { agentKickoffText } from "./builderPrompt.ts";
@@ -26,13 +28,15 @@ import {
   type AgentSendInput,
   type AgentWorkRun,
   type ScheduledTask,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Schema from "effect/Schema";
+import * as RemoteLaunch from "../orchestration-v2/RemoteThreadLaunch.ts";
 import * as SharedState from "../sync/SharedState.ts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import * as Stream from "effect/Stream";
@@ -61,10 +65,16 @@ import {
 const encodeEventContext = Schema.encodeEffect(Schema.fromJsonString(AgentEventContext));
 const encodeEventSchedule = Schema.encodeEffect(Schema.fromJsonString(ScheduledTaskSchedule));
 const isAgentError = Schema.is(AgentError);
+const isProjectRepositoryMismatch = Schema.is(ProjectRepositoryMismatchError);
 const failure = (cause: unknown) =>
   isAgentError(cause)
     ? cause
-    : new AgentError({ message: "Could not complete agent operation.", cause });
+    : new AgentError({
+        message: isProjectRepositoryMismatch(cause)
+          ? cause.message
+          : "Could not complete agent operation.",
+        cause,
+      });
 export class AgentService extends Context.Service<
   AgentService,
   {
@@ -73,7 +83,10 @@ export class AgentService extends Context.Service<
     readonly markRead: (
       input: AgentMarkReadInput,
     ) => Effect.Effect<{ agent: AgentListItem }, AgentError>;
-    readonly upsert: (input: AgentUpsertInput) => Effect.Effect<{ agent: Agent }, AgentError>;
+    readonly upsert: (
+      input: AgentUpsertInput,
+      creationId?: AgentId,
+    ) => Effect.Effect<{ agent: Agent }, AgentError>;
     /** Re-file the agent's conversation in a project folder, or unfile it with null. */
     readonly setProject: (
       input: AgentSetProjectInput,
@@ -90,7 +103,7 @@ export class AgentService extends Context.Service<
     readonly send: (input: AgentSendInput) => Effect.Effect<
       {
         threadId: ThreadId;
-        runId: import("@t3tools/contracts").RunId;
+        runId: import("@cogenly/contracts").RunId;
         delivery: Threads.ThreadManagementSendResult["delivery"];
       },
       AgentError
@@ -111,6 +124,7 @@ export class AgentService extends Context.Service<
 const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const shared = yield* SharedState.SharedState;
+  const remoteLaunch = yield* Effect.serviceOption(RemoteLaunch.RemoteThreadLaunch);
   const store = yield* Store.AgentStore;
   const launch = yield* ThreadLaunch.ThreadLaunchService;
   const threads = yield* Threads.ThreadManagementService;
@@ -118,6 +132,7 @@ const make = Effect.gen(function* () {
   const events = yield* EventSink.EventSinkV2;
   const scheduler = yield* Scheduler.Scheduler;
   const sql = yield* SqlClient.SqlClient;
+  const membership = yield* Membership.ProjectRepositoryMembership;
   const folders = yield* Folders.ManagedProjectFolders;
   const labels = yield* Labels.ProjectLabelService;
   const access = yield* Access.AgentAccessScope;
@@ -139,7 +154,7 @@ const make = Effect.gen(function* () {
             message:
               cause.reason === "not_found"
                 ? "That project no longer exists."
-                : cause.reason === "archived"
+                : cause.reason === "archived" || cause.reason === "invalid_membership"
                   ? cause.message
                   : "Could not move the agent to that project.",
             cause,
@@ -166,6 +181,7 @@ const make = Effect.gen(function* () {
     if ((yield* projections.getThreadShell(agent.conversationThreadId)) !== null) return;
     const projectId = agent.projectId ?? (yield* folders.ensureScratchProject).projectId;
     yield* launch.launch({
+      ...(agent.projectFolderId === null ? {} : { projectFolderId: agent.projectFolderId }),
       agent: { id: agent.id, role: "conversation" },
       commandId: CommandId.make(`agent-create:${agent.id}`),
       threadId: agent.conversationThreadId,
@@ -441,7 +457,7 @@ const make = Effect.gen(function* () {
               Stream.filter(
                 (stored) =>
                   stored.event.type === "message.updated" &&
-                  !isT3ImportCommandId(stored.commandId) &&
+                  !isReplayedCommandId(stored.commandId) &&
                   stored.event.payload.role === "assistant" &&
                   !stored.event.payload.streaming,
               ),
@@ -472,16 +488,39 @@ const make = Effect.gen(function* () {
           );
         }),
       ),
-    upsert: (input) =>
+    upsert: (input, creationId) =>
       Effect.gen(function* () {
         const at = DateTime.formatIso(yield* DateTime.now);
-        const existing = input.id === undefined ? null : yield* store.get(input.id);
+        const existing =
+          input.id === undefined
+            ? creationId === undefined
+              ? null
+              : yield* store.get(creationId).pipe(Effect.orElseSucceed(() => null))
+            : yield* store.get(input.id);
         const ownerMachine =
           input.ownerMachine ?? existing?.ownerMachine ?? (yield* shared.defaultOwner);
         const ownsAgent = ownerMachine === shared.environmentId;
-        const id = existing?.id ?? AgentId.make(`agent:${yield* crypto.randomUUIDv4()}`);
+        const id =
+          existing?.id ?? creationId ?? AgentId.make(`agent:${yield* crypto.randomUUIDv4()}`);
+        if (existing === null && !ownsAgent) {
+          if (Option.isNone(remoteLaunch))
+            return yield* new AgentError({
+              message: "That machine is unavailable. Create the agent on this machine instead.",
+            });
+          yield* remoteLaunch.value
+            .createAgent(ownerMachine, input, id)
+            .pipe(Effect.mapError((cause) => new AgentError({ message: cause.message, cause })));
+          yield* changed;
+          return { agent: yield* store.get(id) };
+        }
         const conversationThreadId =
           existing?.conversationThreadId ?? ThreadId.make(`agent-conversation:${id}`);
+        if (ownsAgent) {
+          const folderId =
+            input.projectFolderId === undefined ? existing?.projectFolderId : input.projectFolderId;
+          if (input.projectId !== null)
+            yield* membership.validate({ projectId: input.projectId, projectFolderId: folderId });
+        }
         if (existing === null && ownsAgent) {
           if (input.projectId === null)
             return yield* new AgentError({ message: "Choose a project to create an agent." });
@@ -493,6 +532,7 @@ const make = Effect.gen(function* () {
             commandId: CommandId.make(`agent-create:${id}`),
             threadId: conversationThreadId,
             projectId: input.projectId,
+            ...(input.projectFolderId == null ? {} : { projectFolderId: input.projectFolderId }),
             title: input.name,
             modelSelection: input.modelSelection,
             runtimeMode: input.runtimeMode,
@@ -615,6 +655,10 @@ const make = Effect.gen(function* () {
         const threadId = ThreadId.make(`agent-builder:${key}`);
         yield* launch.launch({
           surface: "builder",
+          ...(input.machine === undefined ? {} : { machine: input.machine }),
+          ...(input.projectFolderId === undefined
+            ? {}
+            : { projectFolderId: input.projectFolderId }),
           commandId: CommandId.make(`agent-builder:${key}`),
           threadId,
           projectId,
@@ -633,8 +677,7 @@ const make = Effect.gen(function* () {
         });
         // Builder threads are not gated, so filing after launch is direct; the
         // proposed agent defaults to this project.
-        if (input.projectFolderId !== undefined)
-          yield* fileConversation(threadId, input.projectFolderId);
+        // ThreadLaunchService files it on its owner before its first turn.
         return { threadId, projectId };
       }).pipe(Effect.mapError(failure)),
     recordProposal: (input) =>
@@ -801,6 +844,7 @@ const make = Effect.gen(function* () {
             commandId: CommandId.make(id),
             threadId: workThreadId,
             projectId: agent.projectId ?? task.projectId,
+            ...(agent.projectFolderId === null ? {} : { projectFolderId: agent.projectFolderId }),
             title: `${agent.name}: ${task.title}`,
             modelSelection: usedSelection,
             runtimeMode: agent.runtimeMode,
@@ -822,8 +866,14 @@ const make = Effect.gen(function* () {
           yield* store.finishRun(
             id,
             "failed",
-            "I could not start this job. Open its work details to inspect it.",
+            result.failure._tag === "ProjectRepositoryMismatchError"
+              ? result.failure.message
+              : "I could not start this job. Open its work details to inspect it.",
           );
+          if (result.failure._tag === "ProjectRepositoryMismatchError") {
+            yield* changed;
+            return yield* result.failure;
+          }
         }
         yield* changed;
         return true;
@@ -832,5 +882,6 @@ const make = Effect.gen(function* () {
   });
 });
 export const layer = Layer.effect(AgentService, make)
+  .pipe(Layer.provide(Membership.layer))
   .pipe(Layer.provide(SharedState.layer))
   .pipe(Layer.provide(Access.layer));

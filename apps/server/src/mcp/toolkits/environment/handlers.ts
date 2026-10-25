@@ -1,12 +1,20 @@
-import { OrchestratorMcpFailure, type ServerSettings } from "@t3tools/contracts";
+import {
+  type MachineHealthError,
+  OrchestratorMcpFailure,
+  UNIVERSAL_CLIENT_PREFERENCE_KEYS,
+  type ServerSettings,
+} from "@cogenly/contracts";
+import * as Struct from "effect/Struct";
 import * as Effect from "effect/Effect";
 import * as DesktopAppControl from "../../../environment/DesktopAppControl.ts";
 import * as Environment from "../../../environment/ServerEnvironment.ts";
+import * as MachineHealth from "../../../health/MachineHealth.ts";
 import * as ThreadCommandExecutor from "../../../orchestration-v2/ThreadCommandExecutor.ts";
 import * as Settings from "../../../serverSettings.ts";
 import * as MachineSecurity from "../../../security/MachineSecurity.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
+import * as StorageCleanup from "../../../storageCleanup.ts";
 import { readCaller, unavailable } from "../../threadAccess.ts";
 import { EnvironmentToolkit } from "./tools.ts";
 
@@ -16,6 +24,7 @@ export function preferences(settings: ServerSettings) {
     newWorktreesStartFromOrigin,
     enableAgentTerminals,
     enableProviderUpdateChecks,
+    useProviderConnectors,
     projectsRoot,
     modelEffortDefaults,
     backgroundActivity,
@@ -23,10 +32,13 @@ export function preferences(settings: ServerSettings) {
   } = settings;
   const characters = Array.from(sourceControlWritingStyle.customInstructions);
   return {
+    ...Struct.pick(settings, UNIVERSAL_CLIENT_PREFERENCE_KEYS),
+    sharedKeybindings: settings.sharedKeybindings,
     defaultThreadEnvMode,
     newWorktreesStartFromOrigin,
     enableAgentTerminals,
     enableProviderUpdateChecks,
+    useProviderConnectors,
     projectsRoot,
     modelEffortDefaults,
     backgroundActivity: { profile: backgroundActivity.profile },
@@ -60,9 +72,61 @@ export const addEnvironmentFailure = (error: DesktopAppControl.DesktopAppControl
     message: error.message,
   });
 
+const healthFailure = (error: MachineHealthError) =>
+  new OrchestratorMcpFailure({
+    code: error.reason === "not-paired" ? "invalid_request" : "orchestration_error",
+    message:
+      error.reason === "not-paired"
+        ? `${error.message} machines_list shows the paired machines.`
+        : error.message,
+  });
+/** How an agent hears why the desktop app did not read or change its `cogenly` command. */
+export const cliCommandFailure = (error: DesktopAppControl.DesktopAppControlError) =>
+  error._tag === "DesktopAppControlUnreachableError"
+    ? new OrchestratorMcpFailure({
+        code: "capability_denied",
+        message:
+          "The cogenly command is installed by the Cogenly desktop app on the computer this agent runs on, and none answered here. Ask the user to open the desktop app and try again, or to use Settings → General → About → cogenly command.",
+      })
+    : addEnvironmentFailure(error);
+
+const cliCommand = (input: {
+  readonly action: "status" | "install" | "uninstall";
+  readonly location?: "user" | "system" | undefined;
+}) =>
+  DesktopAppControl.DesktopAppControl.pipe(
+    Effect.flatMap((control) => control.cliCommand(input)),
+    Effect.mapError(cliCommandFailure),
+  );
+
 export const layer = McpToolAccess.toLayer(EnvironmentToolkit, {
+  storage_status: McpToolAccess.reads(() =>
+    StorageCleanup.StorageCleanup.pipe(
+      Effect.flatMap((storage) => storage.status),
+      Effect.mapError(unavailable),
+    ),
+  ),
+  storage_cleanup: McpToolAccess.writesEnvironmentAsWork((input) =>
+    StorageCleanup.StorageCleanup.pipe(
+      Effect.flatMap((storage) => (input.dryRun !== false ? storage.preview : storage.runNow)),
+      Effect.mapError(unavailable),
+    ),
+  ),
+  cli_command_status: McpToolAccess.reads(() => cliCommand({ action: "status" })),
+  // Writes a launcher into the user's own PATH folder; a /usr/local/bin install also
+  // needs the user to approve macOS's admin prompt. Full-access work callers only.
+  cli_command_change: McpToolAccess.writesEnvironmentAsWork((input) => cliCommand(input)),
   machine_security_status: McpToolAccess.reads(() =>
     MachineSecurity.MachineSecurity.pipe(Effect.flatMap((security) => security.status)),
+  ),
+  machine_health_fix: McpToolAccess.writesEnvironmentAsWork(() =>
+    MachineHealth.MachineHealth.pipe(Effect.flatMap((health) => health.setupSandbox)),
+  ),
+  machine_health: McpToolAccess.reads((input) =>
+    MachineHealth.MachineHealth.pipe(
+      Effect.flatMap((health) => health.reportFor(input)),
+      Effect.mapError(healthFailure),
+    ),
   ),
   environment_read: McpToolAccess.reads(() =>
     Effect.gen(function* () {

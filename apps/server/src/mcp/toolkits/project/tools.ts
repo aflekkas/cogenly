@@ -1,3 +1,4 @@
+import { ProjectLabelId } from "@cogenly/contracts";
 import { McpAttachmentInput } from "../attachment/input.ts";
 import {
   NonNegativeInt,
@@ -16,7 +17,7 @@ import {
   OrchestratorMcpFailure,
   SourceControlCloneRepositoryInput,
   SourceControlCloneRepositoryResult,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as FileSystem from "effect/FileSystem";
 import * as ServerConfig from "../../../config.ts";
 import * as ServerSettings from "../../../serverSettings.ts";
@@ -91,7 +92,7 @@ const ProjectDeleteTool = Tool.make("project_delete", {
 const ProjectCloneTool = Tool.make("project_clone", {
   ...shared,
   description:
-    "Clone a repository using the app's source-control service. This only clones; register the returned cwd with project_create. An existing destination is not adopted or removed on failure.",
+    "Clone a repository using the app's source-control service, outside any project: without destinationPath it lands in <projects root>/Repositories/<repo>, and no project is created. This only clones; register the returned cwd with project_create. To clone into an existing project, use project_label_clone_repository. An existing destination is not adopted or removed on failure.",
   parameters: SourceControlCloneRepositoryInput,
   success: SourceControlCloneRepositoryResult,
   dependencies: [
@@ -106,7 +107,9 @@ const ThreadLaunchTool = Tool.make("thread_launch", {
   description:
     'Create an ordinary TOP-LEVEL thread with an explicit workspace binding before its agent starts. Use this when the user requests independent work, a new thread, or a PR stack in its own worktree; use delegate_task for child subagents. Set workspaceStrategy to {type:"worktree",baseRef:"parent-branch",branch:"new-branch",startFromOrigin:false} for a new worktree based on local commits, or {type:"existing_worktree",worktreePath:"/absolute/path",branch:"existing-branch"} to use an existing checkout. For upstream commits, set startFromOrigin:true. Omitted workspaceStrategy means the project root, NOT the caller\'s worktree. Omit projectId/modelSelection/modes to inherit those settings from the calling thread; a caller outside a Cogenly thread must pass projectId and gets the project\'s default model. Set scratch:true instead of projectId for a thread without a project: it runs in a fresh folder of its own, outside any repository. Put the task in message. Do not ask the agent to create its own worktree via shell: that does not update the thread binding. Each call creates a new launch with no retry key; retain threadId and use thread_read/thread_wait to follow preparation. To link a thread for the user, write `[title](cogenly-thread://v1/<threadId>)` with the threadId exactly as returned, not URL-encoded; Cogenly shows the thread\'s current title. After errors or lost responses, inspect thread_list before retrying. Attachments must be pending uploads. The new thread may not run with broader runtime or interaction modes than the caller: the calling Cogenly thread\'s own modes, or the permission mode an outside agent was approved with.',
   parameters: Schema.Struct({
+    machine: Schema.optional(TrimmedNonEmptyString),
     projectId: Schema.optional(ProjectId),
+    projectFolderId: Schema.optional(ProjectLabelId),
     scratch: Schema.optional(
       Schema.Boolean.annotate({
         description:

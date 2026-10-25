@@ -4,7 +4,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
-import { VaultField } from "@t3tools/contracts";
+import { VaultField } from "@cogenly/contracts";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as Vault from "../vault/Vault.ts";
@@ -135,4 +135,73 @@ const makeVault = Effect.gen(function* () {
 export const layer: Layer.Layer<IntegrationCredentials, never, Vault.Vault> = Layer.effect(
   IntegrationCredentials,
   makeVault,
+);
+
+/** A secret typed into Settings, stored under one environment-wide vault item name. */
+export interface IntegrationSecretInput {
+  readonly item: string;
+  readonly type: "login" | "api_key";
+  readonly fields: {
+    readonly username?: string;
+    readonly password?: string;
+    readonly value?: string;
+  };
+  /** Hosts the secret may be sent to. */
+  readonly domains: ReadonlyArray<string>;
+  readonly label: string;
+}
+
+/**
+ * Writes the secrets Settings collects for an integration (an app's client
+ * secret, an API key). Saving again replaces the item of that name, fields
+ * and domains alike, so a fixed item never keeps a stale field.
+ */
+export class IntegrationSecrets extends Context.Service<
+  IntegrationSecrets,
+  {
+    readonly save: (
+      input: IntegrationSecretInput,
+    ) => Effect.Effect<void, IntegrationCredentialError>;
+  }
+>()("cogenly-server/integrations/IntegrationCredentials/IntegrationSecrets") {}
+
+export const secretsLayer: Layer.Layer<IntegrationSecrets, never, Vault.Vault> = Layer.effect(
+  IntegrationSecrets,
+  Effect.gen(function* () {
+    const vault = yield* Vault.Vault;
+    return IntegrationSecrets.of({
+      save: (input) =>
+        Effect.gen(function* () {
+          const { items } = yield* vault.list({});
+          const existing = items.find(
+            (item) => item.name === input.item && item.scopeProjectId === null,
+          );
+          if (existing === undefined) {
+            yield* vault.create({
+              name: input.item,
+              type: input.type,
+              label: input.label,
+              scopeProjectId: null,
+              allowedDomains: [...input.domains],
+              secretFields: input.fields,
+            });
+            return;
+          }
+          // An empty string removes a field, e.g. the JSON value an older Google item held.
+          yield* vault.update({
+            id: existing.id,
+            type: input.type,
+            label: input.label,
+            allowedDomains: [...input.domains],
+            secretFields: {
+              username: input.fields.username ?? "",
+              password: input.fields.password ?? "",
+              value: input.fields.value ?? "",
+            },
+          });
+        }).pipe(
+          Effect.mapError((cause) => new IntegrationCredentialError({ ref: input.item, cause })),
+        ),
+    });
+  }),
 );

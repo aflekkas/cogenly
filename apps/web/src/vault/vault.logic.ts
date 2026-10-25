@@ -4,12 +4,13 @@ import type {
   VaultCreateInput,
   VaultItemId,
   VaultItemMetadata,
+  VaultItemPortability,
   VaultItemType,
   VaultPolicy,
   VaultSecretFields,
   VaultUpdateInput,
   VaultUsageEntry,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 
 export const VAULT_TYPE_LABELS: Readonly<Record<VaultItemType, string>> = {
   login: "Login",
@@ -74,6 +75,11 @@ export interface VaultDraft {
   readonly policyMode: VaultPolicyMode;
   readonly policyAgentIds: ReadonlyArray<AgentId>;
   readonly policyDomains: string;
+  /**
+   * The owner's own choice; a rule can still keep a `shared` item here. Null
+   * when the server predates vault sync, so saving leaves it alone.
+   */
+  readonly portability: VaultItemPortability | null;
 }
 
 const EMPTY_SECRETS: Record<VaultSecretKey, string> = {
@@ -103,7 +109,18 @@ export function vaultDraftFromItem(
     policyMode: item?.policy.mode ?? "ask",
     policyAgentIds: item?.policy.allowedAgentIds ?? [],
     policyDomains: item?.policy.allowedDomains.join(", ") ?? "",
+    portability: vaultOwnerPortability(item),
   };
+}
+
+/**
+ * What the owner chose for an item. The server reports a reason only when a
+ * rule, not the owner, keeps it here, so an item with a reason was left shared.
+ */
+function vaultOwnerPortability(item: VaultItemMetadata | null): VaultItemPortability | null {
+  if (item === null) return "shared";
+  if (item.portability === undefined) return null;
+  return item.portabilityReason === undefined ? item.portability : "shared";
 }
 
 /** Hosts from free text: comma, space or newline separated; schemes, paths and ports dropped. */
@@ -175,6 +192,7 @@ export function vaultCreateInput(draft: VaultDraft): VaultCreateInput {
     ...(hasLabel(draft.type) && label ? { label } : {}),
     allowedDomains: vaultTypeHasDomains(draft.type) ? parseDomainList(draft.allowedDomains) : [],
     policy: vaultPolicyFromDraft(draft),
+    ...(draft.portability === "machine" ? { portability: "machine" } : {}),
     secretFields: typedSecrets(draft),
   };
 }
@@ -192,6 +210,7 @@ export function vaultUpdateInput(id: VaultItemId, draft: VaultDraft): VaultUpdat
       ? { allowedDomains: parseDomainList(draft.allowedDomains) }
       : {}),
     policy: vaultPolicyFromDraft(draft),
+    ...(draft.portability === null ? {} : { portability: draft.portability }),
     ...(Object.keys(secrets).length > 0 ? { secretFields: secrets } : {}),
   };
 }

@@ -15,7 +15,7 @@ import {
   findEsmImportsOfExternalPackages,
 } from "../../../scripts/lib/cli-executable-imports.ts";
 import { isRuntimeExternalCliDependency } from "../../../scripts/lib/cli-external-packages.ts";
-import { resolveSpawnCommand } from "@t3tools/shared/shell";
+import { resolveSpawnCommand } from "@cogenly/shared/shell";
 import {
   ServerCliBuildAssetMissingError,
   ServerCliCommandExitError,
@@ -170,7 +170,7 @@ const buildExeCmd = Command.make(
         });
       }
       yield* Effect.log(
-        "[cli] Built dist-exe/t3 (expects client/, resource-monitor/, and the runtime-external node_modules beside it; scripts/build-cli-archive.ts assembles that tree)",
+        "[cli] Built dist-exe/cogenly (expects client/, resource-monitor/, and the runtime-external node_modules beside it; scripts/build-cli-archive.ts assembles that tree)",
       );
     }),
 ).pipe(

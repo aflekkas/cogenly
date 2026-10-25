@@ -22,9 +22,14 @@ import {
 } from "./sitePermissions.ts";
 
 import type {
-  DesktopAppActivationRequest,
   DesktopAppActivationResponse,
+  DesktopAppRendererRequest,
 } from "./desktopAppActivation.ts";
+import type {
+  DesktopCliCommandChangeResult,
+  DesktopCliCommandInstallInput,
+  DesktopCliCommandState,
+} from "./cliCommand.ts";
 
 export interface ContextMenuItem<T extends string = string> {
   id: T;
@@ -214,22 +219,6 @@ export const DesktopUpdateStateSchema = Schema.Struct({
   manualDownloadUrl: Schema.optionalKey(Schema.String),
 });
 
-/** The desktop app's `t3` command on PATH, managed from Settings. */
-export const DesktopCliCommandStateSchema = Schema.Struct({
-  /** Only installed builds have a launcher to put on PATH. */
-  supported: Schema.Boolean,
-  /** The `t3` the app installed, or null when it is not installed. */
-  installedPath: Schema.NullOr(Schema.String),
-  /** Whether a new terminal finds it; false when the folder is not on PATH yet. */
-  onPath: Schema.Boolean,
-  /**
-   * Another `t3` a new terminal runs instead, earlier on PATH. Install refuses
-   * while it is there, since a link behind it would never run.
-   */
-  shadowedBy: Schema.optionalKey(Schema.String),
-});
-export type DesktopCliCommandState = typeof DesktopCliCommandStateSchema.Type;
-
 export interface DesktopUpdateActionResult {
   accepted: boolean;
   completed: boolean;
@@ -398,16 +387,12 @@ export interface DesktopServerExposureState {
   mode: DesktopServerExposureMode;
   endpointUrl: string | null;
   advertisedHost: string | null;
-  tailscaleServeEnabled: boolean;
-  tailscaleServePort: number;
 }
 
 export const DesktopServerExposureStateSchema = Schema.Struct({
   mode: DesktopServerExposureModeSchema,
   endpointUrl: Schema.NullOr(Schema.String),
   advertisedHost: Schema.NullOr(Schema.String),
-  tailscaleServeEnabled: Schema.Boolean,
-  tailscaleServePort: Schema.Number,
 });
 
 export interface PickFolderOptions {
@@ -1036,7 +1021,7 @@ export const DesktopPreviewRecordingSaveInputSchema = Schema.Struct({
 export const SystemSettingsPaneSchema = Schema.Literals(["full-disk-access", "microphone"]);
 export type SystemSettingsPane = typeof SystemSettingsPaneSchema.Type;
 
-/** Mirrors VoiceTranscriptionErrorCode in @t3tools/client-runtime/voice-input. */
+/** Mirrors VoiceTranscriptionErrorCode in @cogenly/client-runtime/voice-input. */
 export const DesktopDictationErrorCodeSchema = Schema.Literals([
   "unavailable",
   "unsupported-locale",
@@ -1149,10 +1134,6 @@ export interface DesktopBridge {
   resolveSshPasswordPrompt: (requestId: string, password: string | null) => Promise<void>;
   getServerExposureState: () => Promise<DesktopServerExposureState>;
   setServerExposureMode: (mode: DesktopServerExposureMode) => Promise<DesktopServerExposureState>;
-  setTailscaleServeEnabled: (input: {
-    readonly enabled: boolean;
-    readonly port?: number;
-  }) => Promise<DesktopServerExposureState>;
   getAdvertisedEndpoints: () => Promise<readonly AdvertisedEndpoint[]>;
   getWslState: () => Promise<DesktopWslState>;
   setWslBackendEnabled: (enabled: boolean) => Promise<DesktopWslState>;
@@ -1190,6 +1171,8 @@ export interface DesktopBridge {
   dictation?: DesktopDictationBridge;
   /** Present when the desktop shell can perform an ordered plain-text paste. */
   pasteAsText?: () => Promise<void>;
+  /** Quit and reopen the desktop app. Optional: older desktop builds lack it. */
+  relaunchApp?: () => Promise<void>;
   onMenuAction: (listener: (action: string) => void) => () => void;
   /**
    * Quit-confirmation hint pushes. Optional: older desktop builds never emit
@@ -1204,11 +1187,11 @@ export interface DesktopBridge {
   downloadUpdate: () => Promise<DesktopUpdateActionResult>;
   installUpdate: () => Promise<DesktopUpdateActionResult>;
   onUpdateState: (listener: (state: DesktopUpdateState) => void) => () => void;
-  /** Settings → `t3` command. Optional: older desktop builds lack it. */
+  /** Settings → `cogenly` command. Optional: older desktop builds lack it. */
   cliCommand?: {
     getState: () => Promise<DesktopCliCommandState>;
-    install: () => Promise<DesktopCliCommandState>;
-    uninstall: () => Promise<DesktopCliCommandState>;
+    install: (input?: DesktopCliCommandInstallInput) => Promise<DesktopCliCommandChangeResult>;
+    uninstall: () => Promise<DesktopCliCommandChangeResult>;
   };
   /** Present when the desktop shell accepts `t3 app` activation requests. */
   /**
@@ -1222,7 +1205,7 @@ export interface DesktopBridge {
   appActivation?: {
     setReady: (ready: boolean) => Promise<void>;
     complete: (response: DesktopAppActivationResponse) => Promise<void>;
-    onRequest: (listener: (request: DesktopAppActivationRequest) => void) => () => void;
+    onRequest: (listener: (request: DesktopAppRendererRequest) => void) => () => void;
   };
   /**
    * Desktop-only preview surface. Present iff the renderer is hosted by the

@@ -1,7 +1,7 @@
-import { TextGenerationError, type ModelSelection } from "@t3tools/contracts";
+import { TextGenerationError, type ModelSelection } from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import type { Runner } from "@t3tools/provider-core/server/textGenerationOperations";
+import type { Runner } from "@cogenly/provider-core/server/textGenerationOperations";
 
 interface WorkScopeSummaryInput {
   readonly cwd: string;

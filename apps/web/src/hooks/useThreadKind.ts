@@ -1,5 +1,5 @@
-import { isScratchProject } from "@t3tools/client-runtime/state/projects";
-import type { EnvironmentId, ThreadSurface } from "@t3tools/contracts";
+import { isScratchProject } from "@cogenly/client-runtime/state/projects";
+import type { EnvironmentId, ThreadSurface } from "@cogenly/contracts";
 import { useRouter } from "@tanstack/react-router";
 import { useCallback } from "react";
 

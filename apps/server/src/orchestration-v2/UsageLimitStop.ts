@@ -2,11 +2,103 @@
  * The usage-limit stop a thread is in, and the recovery updates that act on
  * it. Pure: the recovery worker, the thread service and the MCP tools share it.
  */
-import type {
-  OrchestrationV2LimitRecoveryUpdate,
-  OrchestrationV2ThreadShell,
-} from "@t3tools/contracts";
+import {
+  limitRecoveryResumeAt,
+  MAX_RATE_LIMIT_RETRIES,
+  type OrchestrationV2AppThread,
+  type OrchestrationV2LimitRecovery,
+  type OrchestrationV2LimitRecoveryUpdate,
+  type OrchestrationV2Run,
+  type OrchestrationV2ThreadShell,
+  type OrchestrationV2TurnItem,
+} from "@cogenly/contracts";
+import {
+  latestExecutedRun,
+  latestRootProviderFailure,
+} from "@cogenly/shared/orchestrationV2ThreadError";
 import * as DateTime from "effect/DateTime";
+
+/**
+ * Prefix of the command a handoff uses to cancel a scheduled resume before it
+ * continues the thread elsewhere. That cancel is not the end of a delegated
+ * child's recovery, so the parent is not handed the limit as its result.
+ */
+export const LIMIT_HANDOFF_CANCEL_COMMAND_PREFIX = "limit-handoff-cancel:";
+
+/** Prefix of the message a handoff continues a stopped thread on another instance with. */
+export const LIMIT_HANDOFF_COMMAND_PREFIX = "limit-handoff:";
+
+/** Prefix of the command the recovery sweep arms a stop with, before any choice for it. */
+export const LIMIT_ARM_COMMAND_PREFIX = "limit-arm:";
+
+export { MAX_RATE_LIMIT_RETRIES };
+/** Retries further apart than this start a new chain. */
+const RATE_LIMIT_RETRY_CHAIN_MS = 30 * 60_000;
+
+/** Backoff before retry `attempt` (from 1): 1, 2, 4, 8, then 15 minutes. */
+export function rateLimitRetryBackoffMs(attempt: number): number {
+  return Math.min(15 * 60_000, 60_000 * 2 ** Math.max(0, attempt - 1));
+}
+
+/**
+ * The retry a fresh rate-limit stop would be, counting the server's retries of
+ * the stops just before it, or null once they are used up.
+ */
+export function nextRateLimitRetry(input: {
+  readonly previous: OrchestrationV2LimitRecovery | null | undefined;
+  readonly runId: string;
+  readonly resetAt: string;
+  readonly stoppedAtMs: number;
+}): { readonly retryAttempt: number; readonly retryAt?: string } | null {
+  const { previous } = input;
+  const chained =
+    previous?.retryAttempt !== undefined &&
+    previous.runId !== input.runId &&
+    input.stoppedAtMs - Date.parse(limitRecoveryResumeAt(previous)) <= RATE_LIMIT_RETRY_CHAIN_MS;
+  const retryAttempt = chained ? previous!.retryAttempt! + 1 : 1;
+  if (retryAttempt > MAX_RATE_LIMIT_RETRIES) return null;
+  const retryAtMs = input.stoppedAtMs + rateLimitRetryBackoffMs(retryAttempt);
+  return retryAtMs > Date.parse(input.resetAt)
+    ? { retryAttempt, retryAt: DateTime.formatIso(DateTime.makeUnsafe(retryAtMs)) }
+    : { retryAttempt };
+}
+
+/**
+ * Whether a delegated child's failed run still waits on the server to recover
+ * it (retry, hand off, or resume at the reset), so its parent must not take
+ * the failure as the task's result yet. An undecided stop counts: the
+ * recovery sweep decides it within seconds, and recording "no" releases it.
+ */
+export function limitRecoveryPending(input: {
+  readonly thread: Pick<
+    OrchestrationV2AppThread,
+    "archivedAt" | "deletedAt" | "settledOverride" | "limitRecovery"
+  >;
+  readonly runs: ReadonlyArray<OrchestrationV2Run>;
+  readonly turnItems: ReadonlyArray<OrchestrationV2TurnItem>;
+  readonly run: OrchestrationV2Run;
+}): boolean {
+  const { thread, run } = input;
+  if (
+    run.status !== "failed" ||
+    thread.archivedAt !== null ||
+    thread.deletedAt !== null ||
+    thread.settledOverride === "settled" ||
+    latestExecutedRun(input.runs)?.id !== run.id
+  )
+    return false;
+  const failure = latestRootProviderFailure(run, input.turnItems);
+  if (failure?.class !== "usage_limit" || !failure.resetAt) return false;
+  const resetMs = Date.parse(failure.resetAt);
+  if (
+    !Number.isFinite(resetMs) ||
+    resetMs <= DateTime.toEpochMillis(run.completedAt ?? run.requestedAt)
+  )
+    return false;
+  const recovery = thread.limitRecovery;
+  if (recovery?.runId !== run.id || recovery.resetAt !== failure.resetAt) return true;
+  return recovery.autoResume;
+}
 
 export type LimitStopShell = Pick<
   OrchestrationV2ThreadShell,

@@ -1,4 +1,4 @@
-import { type ThreadId, type OrchestrationV2ThreadShell } from "@t3tools/contracts";
+import { type ThreadId, type OrchestrationV2ThreadShell } from "@cogenly/contracts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";

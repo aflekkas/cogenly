@@ -1,5 +1,5 @@
 import { ProcessSignalActions } from "./ProcessSignalActions";
-import { AuthEnvironmentMaintainScope } from "@t3tools/contracts";
+import { AuthEnvironmentMaintainScope } from "@cogenly/contracts";
 import { RefreshIcon } from "~/components/ui/refresh-icon";
 import {
   ActivityIcon,
@@ -25,14 +25,14 @@ import type {
   ResourceTelemetrySourceHealth,
   ResourceTelemetrySourceStatus,
   ServerProcessSignal,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@cogenly/client-runtime/state/runtime";
 
 import {
   useResourceTelemetry,
@@ -575,8 +575,8 @@ function ProcessTable({
               <th className="px-3 py-2 text-right font-semibold">Memory</th>
               <th className="px-3 py-2 text-right font-semibold">Read/s</th>
               <th className="px-3 py-2 text-right font-semibold">Write/s</th>
-              <th className="px-3 py-2 text-right font-semibold">Read Total</th>
-              <th className="px-3 py-2 text-right font-semibold">Write Total</th>
+              <th className="px-3 py-2 text-right font-semibold">Read total</th>
+              <th className="px-3 py-2 text-right font-semibold">Write total</th>
               <th className="px-3 py-2 text-right font-semibold">PID</th>
               <th className="px-2 py-2 text-right font-semibold sm:pr-4">Kill</th>
             </tr>
@@ -676,7 +676,7 @@ function HistoryProcessTable({
               <th className="px-3 py-2 font-semibold">Category</th>
               <th className="px-3 py-2 text-right font-semibold">CPU Time</th>
               <th className="px-3 py-2 text-right font-semibold">Peak CPU</th>
-              <th className="px-3 py-2 text-right font-semibold">Peak Mem</th>
+              <th className="px-3 py-2 text-right font-semibold">Peak mem</th>
               <th className="px-3 py-2 text-right font-semibold">Read</th>
               <th className="px-3 py-2 text-right font-semibold">Write</th>
               <th className="px-3 py-2 text-right font-semibold">Samples</th>
@@ -759,8 +759,8 @@ function AttributionTable({ entries }: { entries: ReadonlyArray<ResourceAttribut
           <tr>
             <th className="px-4 py-2 font-semibold sm:pl-5">Component</th>
             <th className="px-3 py-2 font-semibold">Operation</th>
-            <th className="px-3 py-2 text-right font-semibold">Logical Read</th>
-            <th className="px-3 py-2 text-right font-semibold">Logical Write</th>
+            <th className="px-3 py-2 text-right font-semibold">Logical read</th>
+            <th className="px-3 py-2 text-right font-semibold">Logical write</th>
             <th className="px-3 py-2 text-right font-semibold">Count</th>
             <th className="px-3 py-2 text-right font-semibold sm:pr-5">Time</th>
           </tr>

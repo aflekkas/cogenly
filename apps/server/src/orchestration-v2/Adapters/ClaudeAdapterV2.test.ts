@@ -7,7 +7,7 @@ import {
   ProviderInstanceId,
   type ProviderApprovalDecision,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { assert, describe, it } from "@effect/vitest";
 import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
@@ -15,7 +15,7 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Schema from "effect/Schema";
 import { Tool } from "effect/ai";
-import * as McpProviderSession from "@t3tools/provider-core/server/mcpSession";
+import * as McpProviderSession from "@cogenly/provider-core/server/mcpSession";
 import { PreviewControlsToolkit } from "../../mcp/toolkits/previewControls/tools.ts";
 import { HtmlToolkit } from "../../mcp/toolkits/html/tools.ts";
 import { ImageToolkit } from "../../mcp/toolkits/images/tools.ts";
@@ -27,7 +27,7 @@ import { WorktreeToolkit } from "../../mcp/toolkits/worktree/tools.ts";
 import { TerminalToolkit } from "../../mcp/toolkits/terminal/tools.ts";
 import { ThreadToolkit } from "../../mcp/toolkits/thread/tools.ts";
 import { OrchestratorToolkit } from "../../mcp/toolkits/orchestrator/tools.ts";
-import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
+import * as ProviderAdapter from "@cogenly/provider-core/server/ProviderAdapter";
 import * as ClaudeAdapterV2 from "./ClaudeAdapterV2.ts";
 
 const decodeRuntimeMode = Schema.decodeUnknownSync(RuntimeMode);
@@ -255,24 +255,156 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
     },
   );
 
-  it("appends conversation instructions and drops the terminal routing for chat mode", () => {
+  const chatAppend = (terminalToolsAvailable: boolean) => {
     const options = ClaudeAdapterV2.makeClaudeQueryOptions({
       modelSelection: CLAUDE_TEST_MODEL_SELECTION,
       nativeThreadId: "chat-thread",
       resume: false,
       cwd: "/workspace",
       conversationMode: true,
+      terminalToolsAvailable,
       disallowedTools: [...ClaudeAdapterV2.CLAUDE_CONVERSATION_DISALLOWED_TOOLS],
     });
-    const append =
-      typeof options.systemPrompt === "object" && "append" in options.systemPrompt
-        ? String(options.systemPrompt.append ?? "")
-        : "";
+    return typeof options.systemPrompt === "object" && "append" in options.systemPrompt
+      ? String(options.systemPrompt.append ?? "")
+      : "";
+  };
+
+  it("does not promise commands in a plan-mode conversation", () => {
+    const options = ClaudeAdapterV2.makeClaudeQueryOptions({
+      modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+      nativeThreadId: "plan-chat",
+      resume: false,
+      cwd: "/workspace",
+      conversationMode: true,
+      terminalToolsAvailable: true,
+      runtimePolicy: {
+        runtimeMode: "full-access",
+        interactionMode: "plan",
+        cwd: "/workspace",
+        conversationMode: true,
+      },
+    });
+    const text = JSON.stringify(options.systemPrompt);
+    assert.include(text, "you cannot run commands");
+    assert.notInclude(text, "terminal_run");
+  });
+
+  it("lets chat mode look things up through terminal_run when the credential grants it", () => {
+    const append = chatAppend(true);
     assert.include(append, "<conversation_mode>");
-    assert.include(append, "Start Work");
+    assert.include(append, "Look things up yourself with the cogenly terminal_run tool");
+    assert.include(append, "Use mcp__cogenly__terminal_run for every shell command");
+    assert.include(append, "work_task");
     assert.include(append, "image_search");
     assert.include(append, "<how_cogenly_works>");
+    assert.notInclude(append, "you cannot run commands");
+  });
+
+  it("tells chat mode it has no commands when agent terminals are off", () => {
+    const append = chatAppend(false);
+    assert.include(append, "<conversation_mode>");
+    assert.include(append, "you cannot run commands");
+    assert.include(append, "Start Work");
     assert.notInclude(append, "terminal_run");
+  });
+});
+
+describe("ClaudeAdapterV2 native MCP isolation", () => {
+  const options = (extra = {}) =>
+    ClaudeAdapterV2.makeClaudeQueryOptions({
+      modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+      nativeThreadId: "connector-thread",
+      resume: false,
+      cwd: "/workspace",
+      settings: AUTO_COMPACT_CLAUDE_SETTINGS,
+      environment: { KEEP: "yes", ENABLE_CLAUDEAI_MCP_SERVERS: "true" },
+      ...extra,
+    });
+  it("uses strict configuration and disables claude.ai servers for real turns", () => {
+    const result = options();
+    assert.equal(result.strictMcpConfig, true);
+    assert.equal(result.env?.ENABLE_CLAUDEAI_MCP_SERVERS, "false");
+    assert.equal(result.env?.KEEP, "yes");
+  });
+  it("drops the rejected strict flag for administrator-managed MCP configuration", () => {
+    const result = options({ managedMcpConfig: true });
+    assert.isUndefined(result.strictMcpConfig);
+    assert.equal(result.env?.ENABLE_CLAUDEAI_MCP_SERVERS, "false");
+  });
+  it("restores the provider's native configuration with the setting off", () => {
+    const result = options({ useProviderConnectors: true });
+    assert.isUndefined(result.strictMcpConfig);
+    assert.equal(result.env?.ENABLE_CLAUDEAI_MCP_SERVERS, "true");
+  });
+
+  const cogenly = { type: "http" as const, url: "http://127.0.0.1:1/mcp" };
+  const repoMcpServers = {
+    "repo-tools": { command: "node", args: ["${REPO}/tools.mjs"] },
+    cogenly: { type: "http" as const, url: "https://repo.example/mcp" },
+  };
+  const promptOf = (result: ReturnType<typeof options>) =>
+    typeof result.systemPrompt === "object" && "append" in result.systemPrompt
+      ? String(result.systemPrompt.append)
+      : "";
+
+  it("passes only Cogenly's server and the repo's .mcp.json servers in strict mode", () => {
+    const result = options({ mcpServers: { cogenly }, repoMcpServers });
+    assert.equal(result.strictMcpConfig, true);
+    // Cogenly's server, which carries integrations, browser, devices and computer use, wins its name.
+    assert.deepEqual(result.mcpServers, {
+      "repo-tools": repoMcpServers["repo-tools"],
+      cogenly,
+    });
+    assert.include(promptOf(result), "MCP servers from this repo (.mcp.json): repo-tools.");
+    // A user's --mcp-config launch argument is native configuration too.
+    const launched = options({
+      mcpServers: { cogenly },
+      settings: { ...AUTO_COMPACT_CLAUDE_SETTINGS, launchArgs: "--mcp-config /home/me/mcp.json" },
+    });
+    assert.notProperty(launched.extraArgs ?? {}, "mcp-config");
+  });
+
+  it.each([false, true])(
+    "does not let Claude's native config bypass pending repo trust (connectors=%s)",
+    (useProviderConnectors) => {
+      const result = options({
+        useProviderConnectors,
+        repoMcpServers: { web: { type: "http", url: "https://example.com/mcp" } },
+        repoMcpWaiting: ["untrusted-local"],
+      });
+      assert.include(result.settings, { enableAllProjectMcpServers: false });
+      assert.deepEqual(
+        (result.settings as { disabledMcpjsonServers: string[] }).disabledMcpjsonServers,
+        ["untrusted-local"],
+      );
+      assert.notProperty(result.mcpServers ?? {}, "untrusted-local");
+      assert.include(promptOf(result), "waiting on the user's trust: untrusted-local");
+    },
+  );
+
+  it("keeps reviewed repo servers alongside administrator-managed servers", () => {
+    const result = options({
+      mcpServers: { cogenly },
+      repoMcpServers,
+      managedMcpConfig: true,
+      managedMcpServerNames: ["corp-search"],
+    });
+    assert.isUndefined(result.strictMcpConfig);
+    assert.deepEqual(result.mcpServers, { ...repoMcpServers, cogenly });
+    assert.include(promptOf(result), "Administrator-managed MCP servers");
+    assert.include(promptOf(result), "corp-search");
+    assert.include(promptOf(result), "MCP servers from this repo");
+  });
+
+  it("keeps repo servers explicit when native configuration is restored", () => {
+    const result = options({
+      mcpServers: { cogenly },
+      repoMcpServers,
+      useProviderConnectors: true,
+    });
+    assert.deepEqual(result.mcpServers, { ...repoMcpServers, cogenly });
+    assert.include(promptOf(result), "MCP servers from this repo");
   });
 });
 
@@ -384,7 +516,7 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
     ]);
   });
 
-  it("adds the handoff draft, memory reads, and project and thread organizers to conversation-mode tools", () => {
+  it("adds the terminal, handoff draft, memory reads, and project and thread organizers to conversation-mode tools", () => {
     const threadId = ThreadId.make("thread-claude-mcp-conversation");
     const mcpSession = mcpSessionFor(threadId);
     const overrides = ClaudeAdapterV2.claudeMcpQueryOverrides({
@@ -395,6 +527,9 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
 
     assert.deepEqual(overrides.allowedTools, [
       ...ClaudeAdapterV2.CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS,
+      "mcp__cogenly__terminal_run",
+      "mcp__cogenly__terminal_write",
+      "mcp__cogenly__terminal_kill",
       "mcp__cogenly__work_propose_handoff",
       "mcp__cogenly__work_task",
       "mcp__cogenly__memory_read",
@@ -421,8 +556,6 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
     ]);
     assert.isFalse(overrides.allowedTools?.includes(ClaudeAdapterV2.CLAUDE_T3_MCP_TOOL_WILDCARD));
     for (const mutating of [
-      "mcp__cogenly__terminal_run",
-      "mcp__cogenly__terminal_write",
       "mcp__cogenly__work_start",
       "mcp__cogenly__thread_launch",
       "mcp__cogenly__worktree_handoff",
@@ -434,7 +567,7 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
   });
 
   it("disallows file writes and the shell for conversation turns", () => {
-    for (const tool of ["Edit", "Write", "MultiEdit", "NotebookEdit", "Bash"]) {
+    for (const tool of ["Edit", "Write", "MultiEdit", "NotebookEdit", "Bash", "Agent", "Task"]) {
       assert.include(ClaudeAdapterV2.CLAUDE_CONVERSATION_DISALLOWED_TOOLS, tool);
     }
   });

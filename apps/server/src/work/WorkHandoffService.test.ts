@@ -1,3 +1,4 @@
+import * as Path from "effect/Path";
 import * as EventSink from "../orchestration-v2/EventSink.ts";
 import * as DateTime from "effect/DateTime";
 import * as AgentEventReactor from "../agents/AgentEventReactor.ts";
@@ -22,15 +23,15 @@ import {
   OrchestrationV2AppThreadJson,
   ProviderDriverKind,
   type OrchestrationV2ThreadProjection,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Deferred from "effect/Deferred";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
-import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
-import * as Ids from "@t3tools/provider-core/server/IdAllocator";
+import * as ProviderAdapter from "@cogenly/provider-core/server/ProviderAdapter";
+import * as Ids from "@cogenly/provider-core/server/IdAllocator";
 import * as AgentStore from "../agents/AgentStore.ts";
 import * as Work from "./WorkHandoffService.ts";
 import { workTaskReportFor } from "./WorkTaskReportReactor.ts";
@@ -156,6 +157,7 @@ const makeHarness = (
     scratch?: boolean;
     /** Whether the target repository is under git; defaults to true. */
     git?: boolean;
+    disabledProvider?: boolean;
   } = {},
 ) =>
   Effect.gen(function* () {
@@ -195,7 +197,15 @@ const makeHarness = (
         getThreadShell: orchestrator.getThreadShell,
         getThreadEventSequence: orchestrator.getThreadEventSequence,
         streamStoredEventsFrom: orchestrator.streamStoredEventsFrom,
-        assertProviderInstanceEnabled: () => Effect.void,
+        assertProviderInstanceEnabled: (request) =>
+          options.disabledProvider
+            ? Effect.fail(
+                new Threads.ThreadManagementProviderInstanceDisabledError({
+                  projectId: request.projectId,
+                  instanceId: request.instanceId,
+                }),
+              )
+            : Effect.void,
       }),
       Layer.mock(Projects.ProjectService)({
         getById: (id) =>
@@ -283,7 +293,7 @@ const makeHarness = (
       Settings.layerTest(),
       Ids.layer,
     );
-    const launches = Launch.layer.pipe(Layer.provide(boundaries));
+    const launches = Launch.layer.pipe(Layer.provide(boundaries), Layer.provide(Path.layer));
     const work = Work.layer.pipe(Layer.provide(Layer.merge(launches, boundaries)));
     return { orchestrator, finished, worktrees, work };
   });
@@ -1033,6 +1043,7 @@ it.effect("proposes a task card that waits, dismisses and restores, then starts 
           title: "Fix audit",
           brief: "Implement booking-audit validation with focused tests.",
           targetProjectId: targetId,
+          settleWhenDone: true,
         },
         { origin: "chat", createdByAgent: true },
       );
@@ -1044,6 +1055,7 @@ it.effect("proposes a task card that waits, dismisses and restores, then starts 
         status: "proposed",
         requestedMode: "propose",
         targetProjectId: targetId,
+        settleWhenDone: true,
       });
 
       const dismiss = (dismissed: boolean, id: string) =>
@@ -1079,6 +1091,8 @@ it.effect("proposes a task card that waits, dismisses and restores, then starts 
         threadId: started.threadId,
         brief: approve.scopeSummary,
         title: "Fix audit",
+        // The user's approval keeps the agent's request to settle when done.
+        settleWhenDone: true,
       });
       const work = yield* h.orchestrator.getThreadProjection(started.threadId);
       expect(work.thread.title).toBe("Fix audit");
@@ -1150,6 +1164,22 @@ it.effect("starts a task in No project at once and reports its result back to th
         .pipe(Effect.flip);
       expect(again).toBeTruthy();
       yield* (yield* Worker.OrchestrationEffectWorkerV2).drain();
+    }).pipe(Effect.provide(h.work));
+  }).pipe(Effect.provide(runtime)),
+);
+
+it.effect("preserves the disabled provider instance when Work launch is refused", () =>
+  Effect.gen(function* () {
+    const h = yield* makeHarness({ disabledProvider: true });
+    yield* h.orchestrator.dispatch(create(sourceId));
+    yield* Effect.gen(function* () {
+      const service = yield* Work.WorkHandoffService;
+      const error = yield* Effect.flip(service.start(input));
+      expect(error.stage).toBe("launch");
+      expect(error.disabledProviderInstanceId).toBe(selection.instanceId);
+      expect(
+        (yield* h.orchestrator.getThreadProjection(sourceId)).thread.workHandoffs ?? [],
+      ).toHaveLength(0);
     }).pipe(Effect.provide(h.work));
   }).pipe(Effect.provide(runtime)),
 );

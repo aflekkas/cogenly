@@ -1,6 +1,6 @@
 "use client";
 
-import type { SitePermissionPrompt, SitePermissionPromptAnswer } from "@t3tools/contracts";
+import type { SitePermissionPrompt, SitePermissionPromptAnswer } from "@cogenly/contracts";
 
 import { Button } from "~/components/ui/button";
 import { useLastPresent } from "~/components/ui/overlay-presence";

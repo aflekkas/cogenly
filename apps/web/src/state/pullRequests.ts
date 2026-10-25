@@ -1,9 +1,9 @@
 import { useAtomValue } from "@effect/atom-react";
 
-import { createEnvironmentRpcQueryAtomFamily } from "@t3tools/client-runtime/state/runtime";
-import { WS_METHODS } from "@t3tools/contracts";
+import { createEnvironmentRpcQueryAtomFamily } from "@cogenly/client-runtime/state/runtime";
+import { WS_METHODS } from "@cogenly/contracts";
 
-import type { EnvironmentId, PullRequestListInput } from "@t3tools/contracts";
+import type { EnvironmentId, PullRequestListInput } from "@cogenly/contracts";
 
 import * as Option from "effect/Option";
 

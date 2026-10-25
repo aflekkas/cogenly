@@ -1,5 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
-import type { AgentApproval, EnvironmentId, ThreadId } from "@t3tools/contracts";
+import type { AgentApproval, EnvironmentId, ThreadId } from "@cogenly/contracts";
 import { Atom } from "effect/reactivity";
 import { KeyRoundIcon } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -82,7 +82,9 @@ export function useThreadApprovalBannerItems(
                 disabled={disabled}
                 onClick={() => void decide(approval.id, "approve")}
               >
-                Allow in this thread
+                {approval.actionKind === "vault_use"
+                  ? "Allow in this thread"
+                  : "Approve integration"}
               </Button>
             </>
           ),

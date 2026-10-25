@@ -21,29 +21,29 @@ import {
   ServerSettings,
   type ServerSettingsPatch,
   sessionGrantsScope,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import {
   type ClientSettingsPatch,
   type ClientSettings,
   DEFAULT_CLIENT_SETTINGS,
   type EnvironmentIdentificationMode,
   type UnifiedSettings,
-} from "@t3tools/contracts/settings";
-import { safeErrorLogAttributes } from "@t3tools/client-runtime/errors";
+} from "@cogenly/contracts/settings";
+import { safeErrorLogAttributes } from "@cogenly/client-runtime/errors";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@cogenly/client-runtime/state/runtime";
 import {
   filterSharedServerPatch,
   splitSharedServerPatch,
   supportsSharedSettingsSync,
-} from "@t3tools/client-runtime/state/shared-settings";
+} from "@cogenly/client-runtime/state/shared-settings";
 import { ensureLocalApi } from "~/localApi";
 import {
   modelPreferencesMigrationPatch,
   resolveModelPreferences,
-} from "@t3tools/shared/serverSettings";
+} from "@cogenly/shared/serverSettings";
 import * as Struct from "effect/Struct";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
@@ -669,7 +669,7 @@ function useUpdateSettingsTarget(environmentId: EnvironmentId | null) {
         toastManager.add({
           type: "warning",
           title: "Setting not saved",
-          description: `This connection lacks permission to change settings on ${environments.find((target) => target.environmentId === environmentId)?.label ?? "the selected environment"}.`,
+          description: `This connection lacks permission to change settings on ${environments.find((target) => target.environmentId === environmentId)?.label ?? "the selected machine"}.`,
         });
       }
       if (Object.keys(serverPatch).length > 0 && canWriteServerPatch) {
@@ -756,8 +756,7 @@ function useUpdateSettingsTarget(environmentId: EnvironmentId | null) {
                 .map(({ label }) => label);
               toastManager.add({
                 type: "error",
-                title:
-                  saved.length > 0 ? "Setting saved on some environments" : "Setting not saved",
+                title: saved.length > 0 ? "Setting saved on some machines" : "Setting not saved",
                 description: [
                   ...failures,
                   ...(saved.length > 0 ? [`Saved on ${saved.join(", ")}.`] : []),

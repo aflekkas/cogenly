@@ -1,6 +1,6 @@
 "use client";
 
-import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { scopeProjectRef, scopeThreadRef } from "@cogenly/client-runtime/environment";
 import {
   canCreateProjectInEnvironment,
   getCloneDestinationBrowsePath,
@@ -20,22 +20,22 @@ import {
   sortAddProjectProviderSources,
   type AddProjectRemoteSource,
   type AddProjectRemoteSourceReadiness,
-} from "@t3tools/client-runtime/operations/projects";
-import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
-import { connectionStatusText } from "@t3tools/client-runtime/connection";
-import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
-import { resolveThreadReferenceCopyTarget } from "@t3tools/shared/threadReference";
+} from "@cogenly/client-runtime/operations/projects";
+import { sourceControlClients } from "@cogenly/client-runtime/source-control-clients";
+import { connectionStatusText } from "@cogenly/client-runtime/connection";
+import { threadSearchMatchKey } from "@cogenly/client-runtime/state/thread-search";
+import { resolveThreadReferenceCopyTarget } from "@cogenly/shared/threadReference";
 import {
   canPreloadBrowsePath,
   createBrowseNavigationCoordinator,
   filterFilesystemBrowseEntries,
   getFilesystemBrowsePath,
-} from "@t3tools/client-runtime/state/filesystem";
+} from "@cogenly/client-runtime/state/filesystem";
 import {
   isAtomCommandInterrupted,
   settlePromise,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@cogenly/client-runtime/state/runtime";
 import {
   AuthOrchestrationOperateScope,
   AuthSourceControlWriteScope,
@@ -46,13 +46,14 @@ import {
   type EnvironmentMachineKind,
   type FilesystemBrowseResult,
   type ProjectId,
+  type ScopedProjectRef,
   type ScopedThreadRef,
   type SourceControlDiscoveryResult,
   SourceControlProviderKind,
   type SourceControlRepositoryInfo,
   PRIMARY_LOCAL_ENVIRONMENT_ID,
   resolveEnvironmentMachineKind,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { useLocation, useNavigate, useParams, useRouter } from "@tanstack/react-router";
 import {
   AlarmClockIcon,
@@ -75,17 +76,20 @@ import {
   ListTodoIcon,
   MessageSquareIcon,
   MonitorIcon,
+  MonitorSmartphoneIcon,
   MoonIcon,
   RotateCcwIcon,
   SettingsIcon,
   SquarePenIcon,
+  SquareTerminalIcon,
   SunIcon,
   FolderMinusIcon,
   TextSearchIcon,
   TimerOffIcon,
 } from "lucide-react";
 import { requestThreadFindOpen } from "./chat/threadFindActionBus";
-import { effectiveSnoozed } from "@t3tools/client-runtime/state/thread-settled";
+import { cliCommandDirectory, useDesktopCliCommand } from "../desktopCliCommand";
+import { effectiveSnoozed } from "@cogenly/client-runtime/state/thread-settled";
 import { useThreadActions } from "../hooks/useThreadActions";
 import {
   buildSnoozeGroups,
@@ -99,11 +103,28 @@ import {
 } from "./chat/usageLimitRecovery.logic";
 import { ProjectFolderIcon } from "../projectLabels/ProjectFolderMark";
 import {
+  chatAddRepositoryTarget,
+  possibleDuplicateProjects,
   priorFiling,
+  projectLabelKey,
+  projectLabelsOn,
   threadFolderState,
   threadForksIntoProjects,
+  threadProjectFolderId,
 } from "../projectLabels/projectLabels.logic";
-import { useMoveThreadToFolder } from "../projectLabels/useMoveThreadToFolder";
+import { useMergeDuplicateProjects } from "../projectLabels/useMergeDuplicateProjects";
+import { useThreadRepository } from "../projectLabels/useThreadRepository";
+import { cloneableRepositoryRows } from "../projectLabels/repositoryPicker.logic";
+import { useRepositoryNames } from "../projectLabels/useRepositoryNames";
+import { ProjectFolderRowIcon, RepositoryRowIcon } from "../projectLabels/RepositorySourceRows";
+import {
+  reportProjectFolderFailure,
+  useMoveThreadToFolder,
+} from "../projectLabels/useMoveThreadToFolder";
+import { machineMoveTargetsForThreads, threadsRunOnName } from "../machines/machines.logic";
+import { useEnvironmentMachineList } from "../machines/useMachines";
+import { useMoveThreadsToMachine } from "../machines/useMoveToMachine";
+import { useForkToMachine } from "../machines/useForkToMachine";
 import {
   useEnvironmentProjectLabels,
   useProjectLabelDirectory,
@@ -162,7 +183,7 @@ import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 import { useGlobalSearchGroups } from "../search/useGlobalSearchGroups";
 import { useScratchProject } from "../hooks/useScratchProject";
 import { useNewProject } from "../hooks/useNewProject";
-import { isScratchProject } from "@t3tools/client-runtime/state/projects";
+import { isScratchProject } from "@cogenly/client-runtime/state/projects";
 import { isPickableRepository } from "../projectLabels/projectMeta.logic";
 import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
 import { useProjects, useServerConfigs, useThreadShells, waitForProject } from "../state/entities";
@@ -181,6 +202,7 @@ import {
 } from "../lib/projectPaths";
 import {
   type CommandPaletteAddProjectTarget,
+  type CommandPaletteStartWorkHandoff,
   onOpenCommandPalette,
   openCommandPalette,
 } from "../commandPaletteBus";
@@ -216,6 +238,8 @@ import {
   enumerateCommandPaletteItems,
   findHighlightedCommandPaletteItem,
   type CommandPaletteActionItem,
+  type CommandPaletteGroup,
+  type CommandPaletteAddProjectRequest,
   type CommandPaletteOpenIntent,
   type CommandPaletteProject,
   type CommandPaletteSubmenuItem,
@@ -250,6 +274,7 @@ import {
 } from "./ThreadCommandSubtitle";
 import { ThreadRowLeadingStatus, ThreadRowTrailingStatus } from "./ThreadStatusIndicators";
 import { primaryServerKeybindingsAtom, primaryServerProvidersAtom } from "../state/server";
+import { Atom } from "effect/reactivity";
 import {
   applyProviderInstanceSettings,
   deriveProviderInstanceEntries,
@@ -351,7 +376,7 @@ function buildPaletteRemoteSourceReadiness(
           ...entry,
           hint: entry.hint.replace(
             "Open Source Control settings",
-            "Open Settings -> Source Control",
+            "Open Settings → Source control",
           ),
         };
   };
@@ -411,8 +436,12 @@ export function CommandPalette({ children }: { children: ReactNode }) {
     [],
   );
   const openAddProject = useCallback(
-    (into?: CommandPaletteAddProjectTarget) =>
-      dispatch({ _tag: "OpenAddProject", ...(into ? { into } : {}) }),
+    (request: CommandPaletteAddProjectRequest) =>
+      dispatch({
+        _tag: "OpenAddProject",
+        ...(request.into ? { into: request.into } : {}),
+        ...(request.startWorkFrom ? { startWorkFrom: request.startWorkFrom } : {}),
+      }),
     [],
   );
   const openNewThreadIn = useCallback(() => dispatch({ _tag: "OpenNewThreadIn" }), []);
@@ -528,7 +557,10 @@ export function CommandPalette({ children }: { children: ReactNode }) {
         } else if (detail.open === "snooze" && detail.threadRef) {
           dispatch({ _tag: "OpenSnooze", threadRef: detail.threadRef });
         } else if (detail.open === "add-project") {
-          openAddProject(detail.into);
+          openAddProject({
+            ...(detail.into ? { into: detail.into } : {}),
+            ...(detail.startWorkFrom ? { startWorkFrom: detail.startWorkFrom } : {}),
+          });
         } else if (detail.query !== undefined) {
           dispatch({
             _tag: "OpenSearch",
@@ -681,6 +713,7 @@ function OpenCommandPaletteDialog(props: {
   const desktopLocalBootstraps = useDesktopLocalBootstraps();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const availableSettingsSearchItems = useAvailableSettingsSearchItems();
+  const cliCommand = useDesktopCliCommand();
   const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread } =
     useHandleNewThread();
   const paletteRouteTarget = useParams({
@@ -712,10 +745,20 @@ function OpenCommandPaletteDialog(props: {
     [activeThread],
   );
   const activeFolderDirectory = useProjectLabelDirectory(activeFolderEnvironmentIds);
+  const threadRepositoryOf = useThreadRepository();
   const canMoveActiveThread = useAtomValue(
     serverEnvironment.moveThreadProjectFolder.permissionAtom(activeThread?.environmentId ?? null),
   );
   const moveThreadToFolder = useMoveThreadToFolder();
+  const activeMachineList = useEnvironmentMachineList(activeThread?.environmentId ?? null);
+  const canMoveActiveThreadToMachine = useAtomValue(
+    serverEnvironment.moveThreadsToMachine.permissionAtom(activeThread?.environmentId ?? null),
+  );
+  const moveThreadsToMachine = useMoveThreadsToMachine();
+  const forkToMachine = useForkToMachine();
+  const canForkToMachine = useAtomValue(
+    serverEnvironment.forkThreadToMachine.permissionAtom(activeThread?.environmentId ?? null),
+  );
   const { snoozeThread, unsnoozeThread } = useThreadActions();
   const canOperateActiveThread = useEnvironmentScope(
     activeThread?.environmentId ?? null,
@@ -755,6 +798,7 @@ function OpenCommandPaletteDialog(props: {
   const threads = useThreadShells();
   const serverConfigs = useServerConfigs();
   const startWork = useStartWork();
+  const repositoryNameOf = useRepositoryNames();
   /** Every place a chat can start Work, as palette rows; picking one starts it. */
   const startWorkItems = useCallback(
     (threadRef: ScopedThreadRef): CommandPaletteActionItem[] => {
@@ -767,6 +811,7 @@ function OpenCommandPaletteDialog(props: {
         repositories: listWorkRepositories(projects, threadRef.environmentId, scratchWorkspaceRoot),
         sourceProjectId: source?.projectId ?? null,
         canRunWithoutRepository: scratchWorkspaceRoot != null,
+        nameOf: repositoryNameOf,
       }).map((choice) => ({
         kind: "action" as const,
         value: `start-work:${choice.value}`,
@@ -775,14 +820,22 @@ function OpenCommandPaletteDialog(props: {
         icon: <WorkPickerChoiceIcon choice={choice} className={ITEM_ICON_CLASS} />,
         run: async () => {
           if (choice.value === ADD_REPOSITORY) {
-            openCommandPalette({ open: "add-project" });
+            // The repository it adds joins the chat's project and starts this chat's Work.
+            const into = source
+              ? chatAddRepositoryTarget(source, activeFolderDirectory.byKey)
+              : null;
+            openCommandPalette({
+              open: "add-project",
+              startWorkFrom: { threadRef },
+              ...(into ? { into } : {}),
+            });
             return;
           }
           await startWork({ threadRef, choice: choice.value, announce: true });
         },
       }));
     },
-    [projects, serverConfigs, startWork, threads],
+    [activeFolderDirectory.byKey, projects, repositoryNameOf, serverConfigs, startWork, threads],
   );
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { appearanceMode, setAppearanceMode } = useTheme();
@@ -846,6 +899,10 @@ function OpenCommandPaletteDialog(props: {
   const [addProjectCloneFlow, setAddProjectCloneFlow] = useState<AddProjectCloneFlow | null>(null);
   // The project an Add repository flow opened from a project group files into.
   const [addProjectInto, setAddProjectInto] = useState<CommandPaletteAddProjectTarget | null>(null);
+  // The chat whose Work the added repository starts, when Start Work opened the flow.
+  const [addProjectHandoff, setAddProjectHandoff] = useState<CommandPaletteStartWorkHandoff | null>(
+    null,
+  );
   // The name step of New project: while set, the palette input is the name.
   const [newProjectFlow, setNewProjectFlow] = useState<{
     readonly environmentId: EnvironmentId;
@@ -886,11 +943,8 @@ function OpenCommandPaletteDialog(props: {
             environment.environmentId,
             {
               kind: isLocal ? "local" : "remote",
-              label: isPrimary
-                ? "Local"
-                : isLocal
-                  ? `${environment.label} (Local)`
-                  : environment.label,
+              // The machine's name, wherever it runs.
+              label: environment.label,
               machine: resolveEnvironmentMachineKind(environment.serverConfig),
             },
           ] as const;
@@ -957,11 +1011,12 @@ function OpenCommandPaletteDialog(props: {
   );
   const pickerProjects = useMemo(
     () =>
-      projectPickerEntries.map(({ group, targetProject }) => ({
+      projectPickerEntries.map(({ targetProject }) => ({
         ...targetProject,
-        displayName: group.displayName,
+        // Named as the repository pickers name it, never by its folder.
+        displayName: repositoryNameOf(targetProject),
       })),
-    [projectPickerEntries],
+    [projectPickerEntries, repositoryNameOf],
   );
   const projectGroupByTargetKey = useMemo(
     () =>
@@ -985,6 +1040,7 @@ function OpenCommandPaletteDialog(props: {
             isPrimary,
             environmentId: environment.environmentId,
             runtimeLabel: environment.label,
+            savedLabel: environment.entry.target.label,
           }),
           isPrimary,
           machine: resolveEnvironmentMachineKind(environment.serverConfig),
@@ -1374,25 +1430,17 @@ function OpenCommandPaletteDialog(props: {
         },
         renderDescription: (project) => {
           const location = projectEnvironmentLocationById.get(project.environmentId) ?? {
-            kind: "remote",
+            kind: "remote" as const,
             label: "Remote",
             machine: "server" as const,
           };
           return (
-            <span className="flex min-w-0 items-center gap-1">
-              <span className="inline-flex min-w-0 items-center gap-1">
-                {location.kind === "remote" ? (
-                  <EnvironmentMachineIcon
-                    aria-hidden
-                    kind={location.machine}
-                    className={COMMAND_PALETTE_META_ICON_CLASS}
-                  />
-                ) : null}
-                <span className="truncate">{location.label}</span>
-              </span>
-              <CommandPaletteMetaDot />
-              <span className="truncate">{project.workspaceRoot}</span>
-            </span>
+            <ProjectSearchDescription
+              environmentLabels={[]}
+              grouped={false}
+              location={location}
+              workspaceRoot={project.workspaceRoot}
+            />
           );
         },
         icon: projectFaviconIcon,
@@ -1433,7 +1481,7 @@ function OpenCommandPaletteDialog(props: {
           "none",
         ],
         title: "No repository",
-        icon: <MessageSquareDashedIcon className={ITEM_ICON_CLASS} />,
+        icon: <ProjectFolderRowIcon className={ITEM_ICON_CLASS} />,
         shortcutCommand: "chat.newWithoutProject" as const,
         // Picking where to start new Work, so this is Work without a repository.
         run: () => startScratchThread(scratchTargetEnvironmentId, { surface: "work" }),
@@ -1450,6 +1498,94 @@ function OpenCommandPaletteDialog(props: {
     scratchWorkspaceRootFor,
     startScratchThread,
   ]);
+
+  // Repositories a project links that are not cloned on their project's
+  // machine: picking one clones it there, like "Clone to set up" in the
+  // repository pickers. Shown only where this connection may clone.
+  const cloneEnvironmentIds = useMemo(
+    () => environments.map((environment) => environment.environmentId),
+    [environments],
+  );
+  const repositoryDirectory = useProjectLabelDirectory(cloneEnvironmentIds);
+  const mergeDuplicates = useMergeDuplicateProjects();
+  const cloneableEnvironmentIds = useAtomValue(
+    useMemo(
+      () =>
+        Atom.make(
+          (get) =>
+            new Set(
+              cloneEnvironmentIds.filter((environmentId) =>
+                get(serverEnvironment.checkoutProjectLabelRepository.permissionAtom(environmentId)),
+              ),
+            ),
+        ),
+      [cloneEnvironmentIds],
+    ),
+  );
+  const checkoutRepository = useAtomCommand(serverEnvironment.checkoutProjectLabelRepository, {
+    label: "clone repository to this machine",
+    reportFailure: false,
+  });
+  const repositoryCloneItems = useMemo(
+    (): CommandPaletteActionItem[] =>
+      // Each machine's own copy of a project, so every machine it is not cloned on offers it.
+      cloneableRepositoryRows(
+        [...cloneableEnvironmentIds].flatMap((environmentId) =>
+          projectLabelsOn(repositoryDirectory.active, environmentId),
+        ),
+      ).flatMap((row) => {
+        const { project, remote } = row;
+        if (project === null || remote === null) return [];
+        const location = projectEnvironmentLocationById.get(project.environmentId);
+        return [
+          {
+            kind: "action" as const,
+            value: `clone-repository:${project.environmentId}:${project.key}:${row.key}`,
+            searchTerms: [row.name, remote, project.label.name, "clone", "set up"],
+            title: row.name,
+            description: [
+              "Clone to set up",
+              project.label.name,
+              ...(location?.kind === "remote" ? [location.label] : []),
+            ].join(" · "),
+            icon: (
+              <RepositoryRowIcon
+                local={null}
+                remote={remote}
+                environmentId={project.environmentId}
+                iconPath={row.iconPath}
+                className={ITEM_ICON_CLASS}
+              />
+            ),
+            // The clone's progress, and its failure, show in the clone toast.
+            run: async () => {
+              const result = await checkoutRepository({
+                environmentId: project.environmentId,
+                input: { labelId: project.label.id, remote },
+              });
+              if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+                reportProjectFolderFailure(`Could not clone ${row.name}`, result);
+              }
+            },
+          },
+        ];
+      }),
+    [
+      checkoutRepository,
+      cloneableEnvironmentIds,
+      projectEnvironmentLocationById,
+      repositoryDirectory.active,
+    ],
+  );
+  const newThreadInGroups = useMemo(
+    (): CommandPaletteGroup[] => [
+      { value: "projects", label: "Repositories", items: projectThreadItems },
+      ...(repositoryCloneItems.length > 0
+        ? [{ value: "clone", label: "Not cloned here", items: repositoryCloneItems }]
+        : []),
+    ],
+    [projectThreadItems, repositoryCloneItems],
+  );
 
   const allThreadItems = useMemo(
     () =>
@@ -1481,10 +1617,18 @@ function OpenCommandPaletteDialog(props: {
               ? thread.source.surface === "chat"
               : threadProject !== null &&
                 isScratchProject(threadProject, scratchWorkspaceRootFor(thread.environmentId));
+          // The project the thread is filed in, named as in the sidebar; a chat
+          // filed nowhere names none rather than its scratch workspace.
+          const folderId = threadProjectFolderId(thread);
+          const folderName =
+            folderId === null
+              ? null
+              : (repositoryDirectory.byKey.get(projectLabelKey(thread.environmentId, folderId))
+                  ?.label.name ?? null);
           return (
             <ThreadCommandSubtitle
-              project={isChatThread ? null : threadProject}
-              projectTitle={projectTitle ?? null}
+              project={isChatThread || folderName !== null ? null : threadProject}
+              projectTitle={folderName ?? (isChatThread ? null : (projectTitle ?? null))}
               environmentLabel={
                 projectEnvironmentLocationById.get(thread.environmentId)?.label ?? "Remote"
               }
@@ -1530,6 +1674,7 @@ function OpenCommandPaletteDialog(props: {
       projectEnvironmentLocationById,
       projectTitleById,
       providerEntryByEnvironmentAndInstanceId,
+      repositoryDirectory.byKey,
       threadContentMatchByKey,
       threadSearch.query,
       threadSearchQuery,
@@ -1571,6 +1716,7 @@ function OpenCommandPaletteDialog(props: {
     if (viewStack.length <= 1) {
       setAddProjectEnvironmentId(null);
       setAddProjectInto(null);
+      setAddProjectHandoff(null);
     } else if (newProjectFlow?.sourcesEnvironmentId) {
       // The machine switcher may have moved off the sources view's machine.
       setAddProjectEnvironmentId(newProjectFlow.sourcesEnvironmentId);
@@ -1724,12 +1870,12 @@ function OpenCommandPaletteDialog(props: {
                       openSourceControlSettings();
                     }}
                   >
-                    Setup Required
+                    Setup required
                   </Button>
                 }
               />
               <TooltipPopup align="end" side="left">
-                {disabledHint ?? "Open Settings -> Source Control to configure this provider."}
+                {disabledHint ?? "Open Settings → Source control to configure this provider."}
               </TooltipPopup>
             </Tooltip>
           </span>
@@ -1785,8 +1931,8 @@ function OpenCommandPaletteDialog(props: {
         toastManager.add(
           stackedThreadToast({
             type: "error",
-            title: "Environment unavailable",
-            description: `${environment?.label ?? "The selected environment"} is not connected.`,
+            title: "Machine unavailable",
+            description: `${environment?.label ?? "The selected machine"} is not connected.`,
           }),
         );
         return;
@@ -1821,11 +1967,12 @@ function OpenCommandPaletteDialog(props: {
     value,
     searchTerms: [option.label, option.environmentId, option.isPrimary ? "this device" : ""],
     title: option.label,
-    description: option.isConnected
+    // Named by the machine, never its environment ID.
+    ...(option.isConnected
       ? option.isPrimary
-        ? "This device"
-        : option.environmentId
-      : option.status,
+        ? { description: "This machine" }
+        : {}
+      : { description: option.status }),
     disabled: !option.isConnected,
     icon: <EnvironmentMachineIcon kind={option.machine} className={ITEM_ICON_CLASS} />,
     keepOpen: true,
@@ -1848,7 +1995,7 @@ function OpenCommandPaletteDialog(props: {
     () => [
       {
         value: "environments",
-        label: "Environments",
+        label: "Machines",
         items: addProjectEnvironmentItems,
       },
     ],
@@ -1910,7 +2057,15 @@ function OpenCommandPaletteDialog(props: {
     }
     clearOpenIntent();
     const into = openIntent.into ?? null;
+    const handoff = openIntent.startWorkFrom ?? null;
+    setAddProjectHandoff(handoff);
     if (into === null) {
+      // Work starts in a repository on the chat's machine, so there is no machine to choose.
+      if (handoff !== null) {
+        setAddProjectInto(null);
+        startAddProjectSourceSelection(handoff.threadRef.environmentId);
+        return;
+      }
       openAddProjectFlow();
       return;
     }
@@ -1932,9 +2087,16 @@ function OpenCommandPaletteDialog(props: {
     // projectThreadItems already lists the current project first.
     pushPaletteView({
       addonIcon: <SquarePenIcon className={ADDON_ICON_CLASS} />,
-      groups: [{ value: "projects", label: "Repositories", items: projectThreadItems }],
+      groups: newThreadInGroups,
     });
-  }, [clearOpenIntent, browseNavigation, openIntent, projectThreadItems, pushPaletteView]);
+  }, [
+    clearOpenIntent,
+    browseNavigation,
+    newThreadInGroups,
+    openIntent,
+    projectThreadItems,
+    pushPaletteView,
+  ]);
 
   useLayoutEffect(() => {
     if (openIntent?.kind !== "start-work") return;
@@ -1978,8 +2140,9 @@ function OpenCommandPaletteDialog(props: {
   const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
 
   if (projects.length > 0) {
+    const preferredEntry = projectPickerEntries.find((entry) => entry.isPreferred);
     const activeProjectTitle =
-      projectPickerEntries.find((entry) => entry.isPreferred)?.group.displayName ??
+      (preferredEntry ? repositoryNameOf(preferredEntry.targetProject) : null) ??
       (currentProjectId ? (projectTitleById.get(currentProjectId) ?? null) : null);
 
     if (activeProjectTitle) {
@@ -2037,7 +2200,7 @@ function OpenCommandPaletteDialog(props: {
       title: "New thread in...",
       icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
       addonIcon: <SquarePenIcon className={ADDON_ICON_CLASS} />,
-      groups: [{ value: "projects", label: "Repositories", items: projectThreadItems }],
+      groups: newThreadInGroups,
     });
   }
 
@@ -2097,8 +2260,26 @@ function OpenCommandPaletteDialog(props: {
       await navigate({ to: "/settings/project-tags" });
     },
   });
+  // Same-name projects created apart: merge them, after the confirm that says what happens.
+  for (const pair of possibleDuplicateProjects(repositoryDirectory.labels)) {
+    if (pair.environmentId === null) continue;
+    actionItems.push({
+      kind: "action",
+      value: `action:merge-duplicate-projects:${pair.key}`,
+      searchTerms: ["merge projects", "duplicate project", pair.into.label.name],
+      title: `Merge duplicate projects: ${pair.into.label.name}`,
+      icon: <ProjectFolderIcon project={pair.into} className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        await mergeDuplicates.mergePair(pair);
+      },
+    });
+  }
   if (activeThread && (activeCapabilities?.projectFolder ?? true)) {
-    const folderState = threadFolderState(activeThread, activeFolderDirectory);
+    const folderState = threadFolderState(
+      activeThread,
+      activeFolderDirectory,
+      threadRepositoryOf(activeThread),
+    );
     const thread = activeThread;
     const previous = priorFiling(folderState);
     // Chats re-home into a project in place; forks are explicit only.
@@ -2115,7 +2296,7 @@ function OpenCommandPaletteDialog(props: {
           "folder",
           "project",
         ],
-        title: forks ? "Fork into project…" : "Move to folder…",
+        title: forks ? "Fork into project…" : "Move to project…",
         icon: <FolderIcon className={ITEM_ICON_CLASS} />,
         addonIcon: <FolderIcon className={ADDON_ICON_CLASS} />,
         disabled: !canMoveActiveThread,
@@ -2128,15 +2309,24 @@ function OpenCommandPaletteDialog(props: {
               value: `move-folder:${entry.key}`,
               searchTerms: [entry.label.name],
               title: entry.label.name,
-              icon: <ProjectFolderIcon color={entry.label.color} className="size-4" />,
-              disabled: entry.key === folderState.current?.key,
+              icon: <ProjectFolderIcon project={entry} className="size-4" />,
+              disabled:
+                entry.key === folderState.current?.key || folderState.blocked.has(entry.key),
               ...(entry.key === folderState.current?.key
                 ? {
                     titleTrailingContent: (
                       <span className="text-xs text-muted-foreground/70">Current</span>
                     ),
                   }
-                : {}),
+                : folderState.blocked.has(entry.key)
+                  ? {
+                      titleTrailingContent: (
+                        <span className="text-xs text-muted-foreground/70">
+                          {folderState.blocked.get(entry.key)}
+                        </span>
+                      ),
+                    }
+                  : {}),
               run: async () => {
                 await moveThreadToFolder({
                   thread,
@@ -2154,7 +2344,8 @@ function OpenCommandPaletteDialog(props: {
         kind: "action",
         value: "action:remove-thread-from-folder",
         searchTerms: ["remove from folder", "remove from project", "unfile", "folder"],
-        title: `Remove from ${folderState.current.label.name}`,
+        title: "Remove from project",
+        description: folderState.current.label.name,
         icon: <FolderMinusIcon className={ITEM_ICON_CLASS} />,
         disabled: !canMoveActiveThread,
         run: async () => {
@@ -2162,6 +2353,47 @@ function OpenCommandPaletteDialog(props: {
             thread,
             folder: null,
             previous,
+          });
+        },
+      });
+    }
+  }
+
+  // One item per paired machine; none on a standalone machine.
+  if (activeThread) {
+    const thread = activeThread;
+    const owners = [thread.source.ownerMachine];
+    for (const target of machineMoveTargetsForThreads(activeMachineList, owners)) {
+      actionItems.push({
+        kind: "action",
+        value: `action:fork-thread-to-machine:${target.environmentId}`,
+        searchTerms: ["fork", "copy conversation", "machine", target.name],
+        title: `Fork to ${target.name}`,
+        ...(target.online ? {} : { description: "Offline" }),
+        icon: <EnvironmentMachineIcon kind={target.icon} className={ITEM_ICON_CLASS} />,
+        disabled: !canForkToMachine || !canOperateActiveThread || !target.online,
+        run: async () => {
+          await forkToMachine({
+            environmentId: thread.environmentId,
+            sourceThreadId: thread.id,
+            target,
+          });
+        },
+      });
+      actionItems.push({
+        kind: "action",
+        value: `action:move-thread-to-machine:${target.environmentId}`,
+        searchTerms: ["move to machine", "move thread", "machine", "hand off", target.name],
+        title: `Move thread to ${target.name}`,
+        ...(target.online ? {} : { description: "Offline" }),
+        icon: <EnvironmentMachineIcon kind={target.icon} className={ITEM_ICON_CLASS} />,
+        disabled: !canMoveActiveThreadToMachine || !canOperateActiveThread || !target.online,
+        run: async () => {
+          await moveThreadsToMachine({
+            environmentId: thread.environmentId,
+            threadIds: [thread.id],
+            target,
+            fromName: threadsRunOnName(activeMachineList, owners),
           });
         },
       });
@@ -2546,6 +2778,50 @@ function OpenCommandPaletteDialog(props: {
 
   actionItems.push({
     kind: "action",
+    value: "action:add-machine",
+    searchTerms: ["add machine", "pair", "computer", "laptop", "server", "tailscale", "sync"],
+    title: "Add a machine",
+    icon: <MonitorSmartphoneIcon className={ITEM_ICON_CLASS} />,
+    run: async () => {
+      await navigate({ to: "/settings/machines", search: { add: true } });
+    },
+  });
+
+  // Desktop only. Installs where Settings recommends: ~/.local/bin, or /usr/local/bin with
+  // an admin prompt when ~/.local/bin is off PATH. Settings offers the other choice.
+  if (cliCommand) {
+    const { state, change } = cliCommand;
+    const cliSearchTerms = ["cogenly", "cli", "command line tool", "terminal", "shell", "path"];
+    if (state.status !== "installed" || !state.upToDate) {
+      const directory = cliCommandDirectory(state, state.recommendedLocation);
+      actionItems.push({
+        kind: "action",
+        value: "action:install-cli-command",
+        searchTerms: ["install", ...cliSearchTerms],
+        title: "Install cogenly command line tool",
+        description:
+          state.recommendedLocation === "system"
+            ? `${directory}, asks for your password`
+            : directory,
+        icon: <SquareTerminalIcon className={ITEM_ICON_CLASS} />,
+        run: () => change("install"),
+      });
+    }
+    if (state.installedPath !== null) {
+      actionItems.push({
+        kind: "action",
+        value: "action:uninstall-cli-command",
+        searchTerms: ["uninstall", "remove", ...cliSearchTerms],
+        title: "Uninstall cogenly command line tool",
+        description: state.installedPath,
+        icon: <SquareTerminalIcon className={ITEM_ICON_CLASS} />,
+        run: () => change("uninstall"),
+      });
+    }
+  }
+
+  actionItems.push({
+    kind: "action",
     value: "action:settings",
     searchTerms: ["settings", "preferences", "configuration", "keybindings"],
     title: "Open settings",
@@ -2664,6 +2940,30 @@ function OpenCommandPaletteDialog(props: {
         : allThreadItems,
   });
 
+  // Opens a repository the add flow brought in: the Work of the chat that
+  // asked for it (on that chat's machine), else a new draft in it.
+  const openAddedRepository = useCallback(
+    async (projectRef: ScopedProjectRef): Promise<unknown> => {
+      const handoff = addProjectHandoff;
+      if (handoff === null || handoff.threadRef.environmentId !== projectRef.environmentId) {
+        return handleNewThread(projectRef);
+      }
+      setAddProjectHandoff(null);
+      // The "Run on" dialog comes next; with the palette still open over it,
+      // dismissing either one cancelled the Work without a word.
+      setOpen(false);
+      return startWork({
+        threadRef: handoff.threadRef,
+        choice: projectRef.projectId,
+        ...(handoff.throughMessageId === undefined
+          ? {}
+          : { throughMessageId: handoff.throughMessageId }),
+        announce: true,
+      });
+    },
+    [addProjectHandoff, handleNewThread, setOpen, startWork],
+  );
+
   // Files a repository the add flow brought in under the project it was
   // opened from. The repository is in place either way, so a failure only says so.
   const fileIntoAddProjectTarget = useCallback(
@@ -2700,8 +3000,8 @@ function OpenCommandPaletteDialog(props: {
         toastManager.add(
           stackedThreadToast({
             type: "error",
-            title: "Environment unavailable",
-            description: `${environment?.label ?? "The selected environment"} is not connected.`,
+            title: "Machine unavailable",
+            description: `${environment?.label ?? "The selected machine"} is not connected.`,
           }),
         );
         return;
@@ -2744,7 +3044,9 @@ function OpenCommandPaletteDialog(props: {
           existing.id,
           clientSettings.sidebarThreadSortOrder,
         );
-        if (latestThread && latestThread.settledOverride !== "settled") {
+        // A chat handing off to Work starts it there rather than reopening older work.
+        const handsOff = addProjectHandoff?.threadRef.environmentId === existing.environmentId;
+        if (!handsOff && latestThread && latestThread.settledOverride !== "settled") {
           await navigate({
             to: "/$environmentId/$threadId",
             params: buildThreadRouteParams(
@@ -2753,7 +3055,7 @@ function OpenCommandPaletteDialog(props: {
           });
         } else {
           const navigationResult = await settlePromise(() =>
-            handleNewThread(scopeProjectRef(existing.environmentId, existing.id)),
+            openAddedRepository(scopeProjectRef(existing.environmentId, existing.id)),
           );
           if (navigationResult._tag === "Failure") {
             const error = squashAtomCommandFailure(navigationResult);
@@ -2810,7 +3112,7 @@ function OpenCommandPaletteDialog(props: {
       await fileIntoAddProjectTarget(input.environmentId, projectId);
 
       const navigationResult = await settlePromise(() =>
-        handleNewThread(scopeProjectRef(input.environmentId, projectId)),
+        openAddedRepository(scopeProjectRef(input.environmentId, projectId)),
       );
       if (navigationResult._tag === "Failure") {
         const error = squashAtomCommandFailure(navigationResult);
@@ -2826,7 +3128,8 @@ function OpenCommandPaletteDialog(props: {
       setOpen(false);
     },
     [
-      handleNewThread,
+      addProjectHandoff,
+      openAddedRepository,
       createProject,
       fileIntoAddProjectTarget,
       environments,
@@ -2885,6 +3188,7 @@ function OpenCommandPaletteDialog(props: {
         ...(addProjectInto !== null && addProjectInto.environmentId === newProjectFlow.environmentId
           ? { projectLabelId: addProjectInto.labelId }
           : {}),
+        open: openAddedRepository,
       });
       if (created) setOpen(false);
     } finally {
@@ -2910,8 +3214,8 @@ function OpenCommandPaletteDialog(props: {
       toastManager.add(
         stackedThreadToast({
           type: "error",
-          title: "Environment unavailable",
-          description: `${browseEnvironment?.label ?? "The selected environment"} is not connected.`,
+          title: "Machine unavailable",
+          description: `${browseEnvironment?.label ?? "The selected machine"} is not connected.`,
         }),
       );
       return;
@@ -3141,7 +3445,7 @@ function OpenCommandPaletteDialog(props: {
     // stream a moment so the draft opens with its project resolved instead of
     // flashing the project picker.
     await waitForProject(projectRef, 3_000).catch(() => null);
-    const navigationResult = await settlePromise(() => handleNewThread(projectRef));
+    const navigationResult = await settlePromise(() => openAddedRepository(projectRef));
     if (navigationResult._tag === "Failure") {
       const error = squashAtomCommandFailure(navigationResult);
       toastManager.add(
@@ -3306,7 +3610,7 @@ function OpenCommandPaletteDialog(props: {
       ? null
       : {
           value: "new-project-machines",
-          label: "Environments",
+          label: "Machines",
           items: newProjectEnvironmentOptions.map((option) => ({
             ...buildEnvironmentItem(
               option,
@@ -4086,9 +4390,10 @@ function ProjectSearchDescription(props: {
   readonly workspaceRoot: string;
 }) {
   if (!props.grouped) {
+    // The machine tag stays whole (up to half the row); the path gives way.
     return (
       <span className="flex min-w-0 items-center gap-1">
-        <span className="inline-flex min-w-0 items-center gap-1">
+        <span className="inline-flex max-w-1/2 shrink-0 items-center gap-1">
           {props.location.kind === "remote" ? (
             <EnvironmentMachineIcon
               aria-hidden
@@ -4099,7 +4404,7 @@ function ProjectSearchDescription(props: {
           <span className="truncate">{props.location.label}</span>
         </span>
         <CommandPaletteMetaDot />
-        <span className="truncate">{props.workspaceRoot}</span>
+        <span className="min-w-0 truncate">{props.workspaceRoot}</span>
       </span>
     );
   }

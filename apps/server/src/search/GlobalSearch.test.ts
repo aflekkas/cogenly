@@ -1,7 +1,7 @@
 import { layerIdentity as layerSharedIdentity } from "../sync/testkit.ts";
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
+import { EnvironmentId, ProjectId, ThreadId } from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -87,7 +87,7 @@ const commitment = Effect.fnUntraced(function* (
 
 describe("global search", () => {
   it.effect(
-    "filters threads by their effective folder with explicit filing overriding repository defaults",
+    "reads historical explicit filing ahead of repository defaults while refusing new mismatches",
     () =>
       Effect.gen(function* () {
         yield* seed;
@@ -98,8 +98,15 @@ describe("global search", () => {
         yield* folders.linkRepository({ labelId: a, repositoryId: repo });
         yield* thread("derived", repo, "Quartz derived", { surface: "work" });
         yield* thread("explicit", repo, "Quartz explicit", { surface: "work" });
-        yield* thread("chat", repo, "Quartz chat", { surface: "chat" });
-        yield* folders.moveThread({ threadId: ThreadId.make("explicit"), folderId: b });
+        yield* thread("chat", "scratch", "Quartz chat", { surface: "chat" });
+        const refused = yield* folders
+          .moveThread({ threadId: ThreadId.make("explicit"), folderId: b })
+          .pipe(Effect.flip);
+        expect(refused.reason).toBe("invalid_membership");
+        // Existing history and replica imports retain their explicit filing even
+        // when the repository no longer belongs to that project.
+        const sql = yield* SqlClient.SqlClient;
+        yield* sql`INSERT INTO thread_project_labels(thread_id, label_id) VALUES ('explicit', ${b})`;
         expect(
           (yield* search.query({ query: "quartz", labelId: a })).results.map((r) => r.id),
         ).toEqual(["derived"]);
@@ -309,7 +316,7 @@ describe("global search", () => {
         const label = (yield* labels.create({ name: "Filter" })).label;
         yield* thread("older", repo, "Quartz design", {}, "2024-01-01T00:00:00.000Z");
         yield* thread("newer", repo, "Quartz design", {}, "2026-01-01T00:00:00.000Z");
-        yield* thread("body", repo, "Long transcript");
+        yield* thread("body", "scratch", "Long transcript");
         yield* message("noise", "body", "Words ".repeat(200) + "quartz");
         yield* message("duplicate", "newer", "quartz");
         const results = (yield* search.query({ query: "quartz" })).results;
@@ -346,6 +353,8 @@ describe("global search", () => {
         const store = yield* Store.AgentStore;
         const allowed = (yield* labels.create({ name: "Quartz allowed" })).label;
         const blocked = (yield* labels.create({ name: "Quartz blocked" })).label;
+        yield* labels.linkRepository({ labelId: allowed.id, repositoryId: other });
+        yield* labels.linkRepository({ labelId: blocked.id, repositoryId: repo });
         const agent = { ...agentFixture(), instructions: "Quartz instructions" };
         yield* thread(agent.conversationThreadId, repo);
         yield* store.save(agent);
@@ -370,7 +379,7 @@ describe("global search", () => {
         const caller = scope(agent.conversationThreadId);
         yield* message("agent-message", agent.conversationThreadId, "Moonstone context");
         expect((yield* search.query({ query: "moonstone" }, caller)).results[0]?.id).toBe(agent.id);
-        // No project link or grant is needed: every repository and project is in reach.
+        // No project scope grant is needed: every repository and project is in reach.
         const results = (yield* search.query({ query: "quartz" }, caller)).results;
         expect(results.map((r) => r.id).sort()).toEqual(
           [

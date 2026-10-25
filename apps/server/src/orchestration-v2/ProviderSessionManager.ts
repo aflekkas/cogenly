@@ -1,6 +1,9 @@
-import { AgentScope } from "@t3tools/shared/AgentScope";
-import * as KeyedLock from "@t3tools/shared/KeyedLock";
-import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+import * as ReadOnlySandbox from "../terminal/ReadOnlySandbox.ts";
+import * as AgentStore from "../agents/AgentStore.ts";
+import { terminalToolsAuthorized } from "@cogenly/provider-core/server/mcpSession";
+import { AgentScope } from "@cogenly/shared/AgentScope";
+import * as KeyedLock from "@cogenly/shared/KeyedLock";
+import { resolveProjectSettings } from "@cogenly/shared/projectSettings";
 import {
   isOrchestrationV2WorkActive,
   ModelSelection,
@@ -12,7 +15,7 @@ import {
   ProviderSessionId,
   ThreadId,
   type ProviderThreadId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -42,14 +45,14 @@ import {
 } from "../observability/Metrics.ts";
 import { ProviderWorkspaceMissingError } from "../provider/Errors.ts";
 import * as ProjectService from "../project/ProjectService.ts";
-import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
+import * as McpProviderSessions from "@cogenly/provider-core/server/McpProviderSessions";
 import * as ServerSettings from "../serverSettings.ts";
 import * as McpSessionRegistry from "../mcp/McpSessionRegistry.ts";
 import * as EventSink from "./EventSink.ts";
 import * as CommandOutputHub from "./CommandOutputHub.ts";
-import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import * as IdAllocator from "@cogenly/provider-core/server/IdAllocator";
 import * as ProviderEventIngestor from "./ProviderEventIngestor.ts";
-import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
+import * as ProviderAdapter from "@cogenly/provider-core/server/ProviderAdapter";
 import * as ProviderAdapterRegistry from "./ProviderAdapterRegistry.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 
@@ -358,6 +361,8 @@ export const layerWithOptions = (
        * becoming "on" would violate the user's stated choice, whereas the
        * reverse costs an agent one toolset and is visible immediately (#7083).
        */
+      const agents = yield* Effect.serviceOption(AgentStore.AgentStore);
+      const sandbox = yield* Effect.serviceOption(ReadOnlySandbox.ReadOnlySandbox);
       const serverSettings = yield* Effect.serviceOption(ServerSettings.ServerSettingsService);
       const projectService = yield* Effect.serviceOption(ProjectService.ProjectService);
       const eventSink = yield* EventSink.EventSinkV2;
@@ -368,7 +373,8 @@ export const layerWithOptions = (
       const agentScope = yield* AgentScope;
       const agentAccessSettings = Effect.fn("ProviderSessionManagerV2.agentAccessSettings")(
         function* (threadId: ThreadId) {
-          if (Option.isNone(serverSettings)) return { browser: true, device: false };
+          if (Option.isNone(serverSettings))
+            return { browser: true, device: false, computer: false };
           return yield* Effect.gen(function* () {
             const settings = yield* serverSettings.value.getSettings;
             const thread = yield* projectionStore.getThread(threadId);
@@ -379,7 +385,10 @@ export const layerWithOptions = (
             const deviceOverridden = entries.some(
               (entry) => entry.enableAgentDeviceAccess !== undefined,
             );
-            if (browserOverridden || deviceOverridden) {
+            const computerOverridden = entries.some(
+              (entry) => entry.enableAgentComputerUse !== undefined,
+            );
+            if (browserOverridden || deviceOverridden || computerOverridden) {
               const project = Option.isSome(projectService)
                 ? yield* projectService.value.getById(thread.projectId)
                 : Option.none();
@@ -387,19 +396,21 @@ export const layerWithOptions = (
                 return {
                   browser: browserOverridden ? false : settings.enableAgentBrowserAccess,
                   device: deviceOverridden ? false : settings.enableAgentDeviceAccess,
+                  computer: computerOverridden ? false : settings.enableAgentComputerUse,
                 };
             }
             const effective = resolveProjectSettings(settings, thread.projectId).settings;
             return {
               browser: effective.enableAgentBrowserAccess,
               device: effective.enableAgentDeviceAccess,
+              computer: effective.enableAgentComputerUse,
             };
           }).pipe(
             Effect.catch((cause) =>
               Effect.logWarning(
-                "Could not resolve agent access; withholding browser and device tools.",
+                "Could not resolve agent access; withholding browser, device and computer tools.",
                 { threadId, cause },
-              ).pipe(Effect.as({ browser: false, device: false })),
+              ).pipe(Effect.as({ browser: false, device: false, computer: false })),
             ),
           );
         },
@@ -494,19 +505,45 @@ export const layerWithOptions = (
                 // the credential it started with, so a thread that detaches and
                 // re-attaches across a workspace handoff must come back to the
                 // same token or the process's tool calls fail auth.
-                const { browser: browserToolsAvailable, device: deviceToolsAvailable } =
-                  yield* agentAccessSettings(threadId);
-                const terminalToolsAvailable = Option.isNone(serverSettings)
+                const {
+                  browser: browserToolsAvailable,
+                  device: deviceToolsAvailable,
+                  computer: computerToolsAvailable,
+                } = yield* agentAccessSettings(threadId);
+                const terminalsEnabled = Option.isNone(serverSettings)
                   ? true
                   : yield* serverSettings.value.getSettings.pipe(
                       Effect.map((settings) => settings.enableAgentTerminals),
                       Effect.orElseSucceed(() => false),
                     );
+                const terminalToolsAvailable = yield* Effect.gen(function* () {
+                  const terminalThread = yield* projectionStore.getThread(threadId);
+                  const agent = Option.isSome(agents)
+                    ? yield* agents.value
+                        .forThread(threadId)
+                        .pipe(Effect.orElseSucceed(() => undefined))
+                    : terminalThread.agent === undefined
+                      ? null
+                      : undefined;
+                  return (
+                    agent !== undefined &&
+                    terminalToolsAuthorized({
+                      enabled: terminalsEnabled,
+                      ...terminalThread,
+                      builderMode: terminalThread.surface === "builder",
+                      agentPermissions: agent?.permissions,
+                      chatMode: terminalThread.surface === "chat",
+                      readOnlySandboxAvailable:
+                        Option.isSome(sandbox) && sandbox.value.status.available,
+                    })
+                  );
+                }).pipe(Effect.orElseSucceed(() => false));
                 const capabilities = new Set<
                   import("../mcp/McpInvocationContext.ts").McpCapability
                 >(["orchestration", "worktree", "pull-requests"]);
                 if (browserToolsAvailable) capabilities.add("preview");
                 if (deviceToolsAvailable) capabilities.add("device");
+                if (computerToolsAvailable) capabilities.add("computer");
                 const existing = yield* mcpSessions.read(threadId);
                 if (existing !== undefined) {
                   // Reserve before the async resolve so a release cannot
@@ -532,6 +569,7 @@ export const layerWithOptions = (
                     // credential reuse: rotate so the new scope reflects it.
                     resolved.capabilities.has("preview") === browserToolsAvailable &&
                     resolved.capabilities.has("device") === deviceToolsAvailable &&
+                    resolved.capabilities.has("computer") === computerToolsAvailable &&
                     existing.terminalToolsAvailable === terminalToolsAvailable
                   ) {
                     return { mcpCredentialId: existing.providerSessionId, issued: false };

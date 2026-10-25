@@ -1,9 +1,10 @@
 import type {
   EnvironmentId,
+  MessageId,
   ProjectLabelId,
   PullRequestLinkedThreadsResult,
   ScopedThreadRef,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 
 export interface CommandPaletteLinkedThreads {
   readonly environmentId: EnvironmentId;
@@ -20,6 +21,13 @@ export interface CommandPaletteAddProjectTarget {
   readonly labelId: ProjectLabelId;
 }
 
+/** A chat handing off to Work, kept through an Add repository flow it opened. */
+export interface CommandPaletteStartWorkHandoff {
+  readonly threadRef: ScopedThreadRef;
+  /** The last chat message the Work carries over; absent means the whole chat. */
+  readonly throughMessageId?: MessageId;
+}
+
 export interface CommandPaletteOpenDetail {
   readonly open?: "add-project" | "new-thread-in" | "start-work" | "snooze";
   /**
@@ -28,6 +36,11 @@ export interface CommandPaletteOpenDetail {
    * repositories are filed in it.
    */
   readonly into?: CommandPaletteAddProjectTarget;
+  /**
+   * With `open: "add-project"`: the added repository starts this chat's Work
+   * instead of opening a new draft in it.
+   */
+  readonly startWorkFrom?: CommandPaletteStartWorkHandoff;
   /** With `open: "start-work"`: the chat that hands off. With `open: "snooze"`: the thread to snooze. */
   readonly threadRef?: ScopedThreadRef;
   readonly query?: string;

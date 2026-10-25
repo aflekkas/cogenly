@@ -19,7 +19,7 @@ import {
   type ProjectId,
   type T3ImportProgress,
   type T3ImportSkippedEvent,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";

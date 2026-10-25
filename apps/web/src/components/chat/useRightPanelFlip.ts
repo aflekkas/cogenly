@@ -1,5 +1,5 @@
-import { scopedThreadKey } from "@t3tools/client-runtime/environment";
-import type { ScopedThreadRef } from "@t3tools/contracts";
+import { scopedThreadKey } from "@cogenly/client-runtime/environment";
+import type { ScopedThreadRef } from "@cogenly/contracts";
 import { useEffect, useLayoutEffect, useRef } from "react";
 
 import {

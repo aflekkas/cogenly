@@ -1,4 +1,4 @@
-import { createMcpAppEnvironmentAtoms } from "@t3tools/client-runtime/state/mcp-apps";
+import { createMcpAppEnvironmentAtoms } from "@cogenly/client-runtime/state/mcp-apps";
 
 import { connectionAtomRuntime } from "../connection/runtime";
 

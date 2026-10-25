@@ -2,6 +2,7 @@ import { expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   AgentId,
+  CommandId,
   EventId,
   MessageId,
   NodeId,
@@ -13,8 +14,8 @@ import {
   RunId,
   ThreadId,
   type OrchestrationV2Run,
-} from "@t3tools/contracts";
-import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+} from "@cogenly/contracts";
+import * as IdAllocator from "@cogenly/provider-core/server/IdAllocator";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -46,6 +47,77 @@ const recoveryRuntime = (continueThreadsAfterServerUpdate: boolean) =>
     Layer.provide(NodeServices.layer),
   );
 const runtime = recoveryRuntime(true);
+
+it.effect("startup keeps the turn start it queues for a continuation a second restart cut", () =>
+  Effect.gen(function* () {
+    const sink = yield* EventSink.EventSinkV2;
+    const outbox = yield* EffectOutbox.EffectOutboxV2;
+    const recovery = yield* Recovery.ProviderRuntimeRecoveryService;
+    const at = yield* DateTime.now;
+    const threadId = ThreadId.make("thread:twice-restarted");
+    const thread = idleThreadProjection(liveThreadShell(threadId)).thread;
+    const attemptId = RunAttemptId.make("attempt:continuation");
+    // The first restart's continuation: dispatched, but cut before its turn began.
+    const continuation: OrchestrationV2Run = {
+      id: RunId.make("run:continuation"),
+      threadId,
+      ordinal: 2,
+      providerInstanceId: thread.providerInstanceId,
+      modelSelection: thread.modelSelection,
+      providerThreadId: null,
+      userMessageId: MessageId.make("message:restart-continuation:run:cut"),
+      rootNodeId: NodeId.make("node:continuation"),
+      activeAttemptId: attemptId,
+      status: "starting",
+      requestedAt: at,
+      startedAt: null,
+      completedAt: null,
+      checkpointId: null,
+      contextHandoffId: null,
+      restartContinuationOfRunId: RunId.make("run:cut"),
+    };
+    yield* sink.writeWithEffects({
+      commandId: CommandId.make("command:restart-continuation:run:cut"),
+      events: [
+        {
+          id: EventId.make("event:create-twice"),
+          type: "thread.created",
+          threadId,
+          occurredAt: at,
+          payload: thread,
+        },
+        {
+          id: EventId.make("event:continuation"),
+          type: "run.updated",
+          threadId,
+          runId: continuation.id,
+          occurredAt: at,
+          payload: continuation,
+        },
+      ],
+      // The previous process's start for it, which the restart cancels.
+      effects: [
+        {
+          id: "effect:old-start",
+          commandId: CommandId.make("command:restart-continuation:run:cut"),
+          threadId,
+          request: { type: "provider-turn.start", runId: continuation.id },
+        },
+      ],
+    });
+
+    yield* recovery.recover;
+
+    // Without a live start the run would stay `starting`, a delegated task
+    // "running", forever.
+    const claimed = yield* outbox.claimNext({ workerId: "test", leaseDurationMs: 60_000 });
+    expect(Option.getOrUndefined(claimed)).toMatchObject({
+      request: { type: "provider-turn.start", runId: continuation.id },
+      commandId: expect.stringContaining("command:restart-revive:startup:"),
+    });
+    expect(Option.getOrUndefined(yield* outbox.get("effect:old-start"))?.status).toBe("cancelled");
+  }).pipe(Effect.provide(runtime)),
+);
 
 it.effect.each(["starting", "running", "queued"] as const)(
   "startup fails an interrupted agent %s run with a persisted restart reason, once",
@@ -433,4 +505,88 @@ it.effect("startup keeps the interrupted outcome when resuming is turned off", (
     });
     expect(state.continuation).toBeUndefined();
   }).pipe(Effect.provide(recoveryRuntime(false))),
+);
+
+it.effect("startup leaves a delegated child's queued server notices deliverable", () =>
+  Effect.gen(function* () {
+    const sink = yield* EventSink.EventSinkV2;
+    const projections = yield* Projections.ProjectionStoreV2;
+    const recovery = yield* Recovery.ProviderRuntimeRecoveryService;
+    const at = yield* DateTime.now;
+    const threadId = ThreadId.make("thread:child-notice");
+    const base = idleThreadProjection(liveThreadShell(threadId)).thread;
+    const run: OrchestrationV2Run = {
+      id: RunId.make("run:notice"),
+      threadId,
+      ordinal: 1,
+      providerInstanceId: base.providerInstanceId,
+      modelSelection: base.modelSelection,
+      providerThreadId: null,
+      userMessageId: MessageId.make("message:notice"),
+      rootNodeId: null,
+      activeAttemptId: null,
+      status: "queued",
+      queuePosition: 1,
+      requestedAt: at,
+      startedAt: null,
+      completedAt: null,
+      checkpointId: null,
+      contextHandoffId: null,
+    };
+    yield* sink.write({
+      events: [
+        {
+          id: EventId.make("event:notice-thread"),
+          type: "thread.created",
+          threadId,
+          occurredAt: at,
+          payload: {
+            ...base,
+            lineage: {
+              parentThreadId: ThreadId.make("thread:parent"),
+              rootThreadId: ThreadId.make("thread:parent"),
+              relationshipToParent: "subagent",
+            },
+          },
+        },
+        {
+          id: EventId.make("event:notice-message"),
+          type: "message.updated",
+          threadId,
+          occurredAt: at,
+          payload: {
+            id: run.userMessageId,
+            threadId,
+            runId: run.id,
+            nodeId: null,
+            role: "user",
+            text: "A server task finished",
+            attachments: [],
+            createdBy: "agent",
+            creationSource: "server",
+            streaming: false,
+            createdAt: at,
+            updatedAt: at,
+            notification: {
+              source: { kind: "system" },
+              outcome: "completed",
+              summary: "Task finished",
+            },
+          },
+        },
+        {
+          id: EventId.make("event:notice-run"),
+          type: "run.created",
+          threadId,
+          runId: run.id,
+          occurredAt: at,
+          payload: run,
+        },
+      ],
+    });
+    yield* recovery.recover;
+    expect((yield* projections.getThreadRecords(threadId, ["runs"])).runs[0]?.queueHeld).not.toBe(
+      true,
+    );
+  }).pipe(Effect.provide(runtime)),
 );

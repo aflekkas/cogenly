@@ -1,25 +1,25 @@
-import { findErrorTraceId } from "@t3tools/client-runtime/errors";
+import { findErrorTraceId } from "@cogenly/client-runtime/errors";
 import { writeTextToClipboard } from "~/hooks/useCopyToClipboard";
 import {
   type EnvironmentConnectionPresentation,
   RelayConnectionRegistration,
   RelayConnectionTarget,
   orchestrationProtocolCompatibilityError,
-} from "@t3tools/client-runtime/connection";
-import { relayOfflineReasonMessage } from "@t3tools/client-runtime/relay";
+} from "@cogenly/client-runtime/connection";
+import { relayOfflineReasonMessage } from "@cogenly/client-runtime/relay";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@cogenly/client-runtime/state/runtime";
 import {
   type EnvironmentId,
   resolveEnvironmentMachineKind,
   type ServerConfig,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import type {
   RelayClientEnvironmentRecord,
   RelayEnvironmentStatusResponse,
-} from "@t3tools/contracts/relay";
+} from "@cogenly/contracts/relay";
 import * as Option from "effect/Option";
 import { type ReactNode, useCallback, useEffect, useEffectEvent, useState } from "react";
 
@@ -167,7 +167,7 @@ export function CloudEnvironmentConnectRows({
         type: "success",
         title: savedWithoutRelay.has(environment.environmentId)
           ? "Cogenly Connect route added"
-          : "Environment added",
+          : "Machine added",
         description: savedWithoutRelay.has(environment.environmentId)
           ? `${environment.label} falls back to Cogenly Connect when its other routes are unreachable.`
           : `Connecting to ${environment.label} through Cogenly Connect.`,
@@ -179,12 +179,12 @@ export function CloudEnvironmentConnectRows({
     }
     const cause = squashAtomCommandFailure(result);
     const message =
-      cause instanceof Error ? cause.message : "Could not connect the Cogenly Connect environment.";
+      cause instanceof Error ? cause.message : "Could not connect the Cogenly Connect machine.";
     const traceId = findErrorTraceId(cause);
     console.error("[t3-connect] Could not connect environment", { message, traceId, cause });
     toastManager.add({
       type: "error",
-      title: "Could not connect environment",
+      title: "Could not connect machine",
       description: message,
       data: traceId
         ? {
@@ -292,7 +292,7 @@ export function CloudEnvironmentConnectRows({
   }
 
   if (standalone && visibleEnvironments.length === 0) {
-    // A failed or offline discovery is not "no environments" — misreporting it
+    // A failed or offline discovery is not "no machines" — misreporting it
     // as empty would read as the user's devices having disappeared.
     const discoveryProblem = environmentsState.offline
       ? "You appear to be offline."
@@ -301,7 +301,7 @@ export function CloudEnvironmentConnectRows({
       return (
         <div className={ITEM_ROW_CLASSNAME}>
           <p className="text-sm font-medium text-destructive">
-            Could not load Cogenly Connect environments
+            Could not load Cogenly Connect machines
           </p>
           <p className="mt-1 text-xs text-muted-foreground">{discoveryProblem}</p>
           <Button

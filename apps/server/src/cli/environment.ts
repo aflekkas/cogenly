@@ -11,7 +11,7 @@ import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import { EnvironmentId } from "@t3tools/contracts";
+import { EnvironmentId } from "@cogenly/contracts";
 import { Command, Flag } from "effect/cli";
 
 import * as DesktopAppControl from "../environment/DesktopAppControl.ts";

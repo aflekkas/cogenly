@@ -20,6 +20,7 @@ import {
 import { VaultField } from "./vault.ts";
 
 export const AgentStartWorkInput = Schema.Struct({
+  projectFolderId: Schema.optional(Schema.NullOr(ProjectLabelId)),
   agentId: AgentId,
   commandId: Schema.optional(CommandId),
   sourceThreadId: Schema.optional(ThreadId),
@@ -62,10 +63,12 @@ export const AgentApprovalAction = Schema.Union([
   }),
   Schema.Struct({
     actionKind: Schema.Literal("integration_add"),
+    threadId: Schema.optional(ThreadId),
     payload: IntegrationAddInput,
   }),
   Schema.Struct({
     actionKind: Schema.Literal("integration_update"),
+    threadId: Schema.optional(ThreadId),
     payload: Schema.Struct({
       ...IntegrationUpdateInput.fields,
       // Freeze the entire credential destination the owner reviews. Omitted

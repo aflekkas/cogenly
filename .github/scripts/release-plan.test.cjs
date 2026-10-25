@@ -2,6 +2,7 @@ const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const {
   cliArchiveAssets,
+  legacyCliArchiveAssets,
   mergeChecksums,
   assertReleaseAssets,
   releasePlan,
@@ -102,6 +103,11 @@ test("a big release lists the newest entries per group and counts the rest", () 
 
 test("every release names the Linux server archives the installers download", () => {
   assert.deepEqual(cliArchiveAssets("1.2.3"), [
+    "cogenly-1.2.3-linux-x64.tar.gz",
+    "cogenly-1.2.3-linux-arm64.tar.gz",
+  ]);
+  // The same archives under the names installs from before the rename fetch.
+  assert.deepEqual(legacyCliArchiveAssets("1.2.3"), [
     "t3-1.2.3-linux-x64.tar.gz",
     "t3-1.2.3-linux-arm64.tar.gz",
   ]);
@@ -109,13 +115,16 @@ test("every release names the Linux server archives the installers download", ()
 
 test("per-job checksum files merge into one SHA256SUMS with bare names", () => {
   const mac = `${"a".repeat(64)}  ./Cogenly-1.2.3-arm64.zip\n${"b".repeat(64)}  ./latest-mac.yml\n`;
-  const x64 = `${"C".repeat(64)}  t3-1.2.3-linux-x64.tar.gz\n`;
-  const arm = `${"d".repeat(64)} *t3-1.2.3-linux-arm64.tar.gz\n`;
+  // Each Linux job checksums its archive under both names.
+  const x64 = `${"C".repeat(64)}  cogenly-1.2.3-linux-x64.tar.gz\n${"C".repeat(64)}  t3-1.2.3-linux-x64.tar.gz\n`;
+  const arm = `${"d".repeat(64)} *cogenly-1.2.3-linux-arm64.tar.gz\n${"d".repeat(64)} *t3-1.2.3-linux-arm64.tar.gz\n`;
   const merged = mergeChecksums([mac, x64, arm]);
   assert.equal(
     merged,
     [
       `${"a".repeat(64)}  Cogenly-1.2.3-arm64.zip`,
+      `${"d".repeat(64)}  cogenly-1.2.3-linux-arm64.tar.gz`,
+      `${"c".repeat(64)}  cogenly-1.2.3-linux-x64.tar.gz`,
       `${"b".repeat(64)}  latest-mac.yml`,
       `${"d".repeat(64)}  t3-1.2.3-linux-arm64.tar.gz`,
       `${"c".repeat(64)}  t3-1.2.3-linux-x64.tar.gz`,
@@ -126,4 +135,35 @@ test("per-job checksum files merge into one SHA256SUMS with bare names", () => {
   assert.throws(() => assertReleaseAssets(mergeChecksums([mac, x64]), "1.2.3"), /linux-arm64/);
   assert.throws(() => mergeChecksums([x64, `${"e".repeat(64)}  t3-1.2.3-linux-x64.tar.gz`]));
   assert.throws(() => mergeChecksums(["not a checksum"]));
+});
+
+test("a release needs both archive names, and they must be the same bytes", () => {
+  const sums = (entries) =>
+    mergeChecksums([entries.map(([digest, name]) => `${digest.repeat(64)}  ${name}`).join("\n")]);
+  const both = [
+    ["a", "cogenly-1.2.3-linux-x64.tar.gz"],
+    ["a", "t3-1.2.3-linux-x64.tar.gz"],
+    ["b", "cogenly-1.2.3-linux-arm64.tar.gz"],
+    ["b", "t3-1.2.3-linux-arm64.tar.gz"],
+  ];
+  assert.doesNotThrow(() => assertReleaseAssets(sums(both), "1.2.3"));
+  // Only the new names: installs from before the rename would find nothing.
+  assert.throws(
+    () =>
+      assertReleaseAssets(sums(both.filter(([, name]) => name.startsWith("cogenly-"))), "1.2.3"),
+    /t3-1\.2\.3-linux-x64\.tar\.gz, t3-1\.2\.3-linux-arm64\.tar\.gz/,
+  );
+  // Only the old names: current installers would find nothing.
+  assert.throws(
+    () => assertReleaseAssets(sums(both.filter(([, name]) => name.startsWith("t3-"))), "1.2.3"),
+    /cogenly-1\.2\.3-linux-x64/,
+  );
+  assert.throws(
+    () =>
+      assertReleaseAssets(
+        sums([...both.slice(0, 3), ["c", "t3-1.2.3-linux-arm64.tar.gz"]]),
+        "1.2.3",
+      ),
+    /t3-1\.2\.3-linux-arm64\.tar\.gz must be the same archive/,
+  );
 });

@@ -1,4 +1,4 @@
-import type { AuthSessionState } from "@t3tools/contracts";
+import type { AuthSessionState } from "@cogenly/contracts";
 import * as Cause from "effect/Cause";
 import * as Option from "effect/Option";
 import { AsyncResult } from "effect/reactivity";

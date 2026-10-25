@@ -1,7 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import type { EnvironmentId, ProjectLabelId, ThreadId } from "@t3tools/contracts";
-import { CheckIcon, FolderIcon, FolderMinusIcon, PlusIcon } from "lucide-react";
+import type { EnvironmentId, ProjectLabelId, ThreadId } from "@cogenly/contracts";
+import { FolderIcon, PlusIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import {
@@ -14,7 +13,6 @@ import {
   Combobox,
   ComboboxEmpty,
   ComboboxItem,
-  ComboboxItemIcon,
   ComboboxList,
   ComboboxPopup,
   ComboboxSearchInput,
@@ -22,27 +20,26 @@ import {
 } from "../components/ui/combobox";
 import { InlineButton } from "../components/ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
-import { type DraftId, useComposerDraftStore } from "../composerDraftStore";
+import type { DraftId } from "../composerDraftStore";
 import { cn } from "../lib/utils";
-import { useThreadShell } from "../state/entities";
 import { serverEnvironment } from "../state/server";
 import { openCreateProjectDialog } from "./CreateProjectDialogHost";
-import { setPendingProjectFolder, usePendingProjectFolderStore } from "./pendingProjectFolders";
+import { setPendingProjectFolder } from "./pendingProjectFolders";
 import {
   PROJECT_LABEL_COLORS,
   isProjectChatThread,
   priorFiling,
-  projectLabelKey,
-  scopedRepositoryKey,
+  projectLabelsOn,
+  type EnvironmentProjectLabel,
   threadFolderState,
   threadForksIntoProjects,
   threadProjectFolderId,
 } from "./projectLabels.logic";
-import { composerProjectFolderId } from "./projectMeta.logic";
 import { HeroProjectSuffixText } from "./HeroProjectSuffix";
 import { HERO_INLINE_ICON_STYLE, ProjectFolderIcon } from "./ProjectFolderMark";
+import { ProjectPickerRow } from "./ProjectPickerRow";
+import { useComposerProjectFolder } from "./useComposerProjectFolder";
 import { useMoveThreadToFolder } from "./useMoveThreadToFolder";
-import { useProjectLabelDirectory } from "./useProjectLabels";
 import { pickNoProjectForWork } from "./workNoProjectPicks";
 import { WorkHeroCrumbText } from "../components/chat/WorkHeroSentence";
 
@@ -52,9 +49,10 @@ type ProjectOption =
       readonly key: string;
       readonly id: ProjectLabelId;
       readonly name: string;
-      readonly color: string | undefined;
+      readonly project: EnvironmentProjectLabel;
     }
-  | { readonly kind: "none"; readonly key: "none" }
+  /** "No project" while in none; "Remove from project", the way out, while in one. */
+  | { readonly kind: "none"; readonly key: "none"; readonly label: string }
   | { readonly kind: "new"; readonly key: "new" }
   | { readonly kind: "create"; readonly key: "create"; readonly name: string };
 
@@ -63,7 +61,7 @@ function optionText(option: ProjectOption): string {
     case "project":
       return option.name;
     case "none":
-      return "No project";
+      return option.label;
     case "new":
       return "New project";
     case "create":
@@ -77,22 +75,14 @@ export function useComposerProjectPickerState(
   threadId: ThreadId | null,
   draftId: DraftId | null,
 ) {
-  const environmentIds = useMemo(() => [environmentId], [environmentId]);
-  const directory = useProjectLabelDirectory(environmentIds);
-  const thread = useThreadShell(
-    useMemo(
-      () => (threadId === null ? null : scopeThreadRef(environmentId, threadId)),
-      [environmentId, threadId],
-    ),
-  );
+  const { directory, thread, draftSurface, isWorkDraft, current } = useComposerProjectFolder({
+    environmentId,
+    threadId,
+    draftId,
+  });
   const canMove = useAtomValue(
     serverEnvironment.moveThreadProjectFolder.permissionAtom(environmentId),
   );
-  const draft = useComposerDraftStore((store) =>
-    draftId === null ? undefined : store.draftThreadsByThreadKey[draftId],
-  );
-  const draftSurface = draft?.surface;
-  const isWorkDraft = thread === null && draftSurface === "work";
   // Chats, and Work drafts: existing Work follows its repository (moved from
   // its row's menu), and an agent's conversation belongs to the agent.
   const surface = thread ? thread.source.surface : draftSurface;
@@ -107,7 +97,8 @@ export function useComposerProjectPickerState(
   return {
     directory,
     thread,
-    draft,
+    draftSurface,
+    current,
     isWorkDraft,
     canPickProject: canMove && (isChat || isWorkDraft),
   };
@@ -138,15 +129,11 @@ export function ComposerProjectPicker(props: {
   readonly appearance?: "toolbar" | "hero" | "headline";
 }) {
   const { environmentId, threadId } = props;
-  const { directory, thread, draft, isWorkDraft, canPickProject } = useComposerProjectPickerState(
+  const { directory, thread, isWorkDraft, current, canPickProject } = useComposerProjectPickerState(
     environmentId,
     threadId,
     props.draftId,
   );
-  const pending = usePendingProjectFolderStore((state) => {
-    const entry = state.byThreadId[threadId];
-    return entry?.environmentId === environmentId ? entry : null;
-  });
   const canCreate = useAtomValue(
     serverEnvironment.createProjectLabel.permissionAtom(environmentId),
   );
@@ -158,33 +145,24 @@ export function ComposerProjectPicker(props: {
   const projects = useMemo(
     // Archived projects are not offered; one the thread is already in still
     // names itself as `current`.
-    () => directory.active.filter((entry) => entry.environmentId === environmentId),
+    () => projectLabelsOn(directory.active, environmentId),
     [directory.active, environmentId],
   );
-  // The project a Work draft's repository is in, which it follows unless another is picked.
-  const repositoryFolder =
-    isWorkDraft && draft
-      ? (directory.folderByRepository.get(scopedRepositoryKey(environmentId, draft.projectId)) ??
-        null)
-      : null;
-  const currentId =
-    composerProjectFolderId({
-      pendingFolderId: pending?.folderId ?? null,
-      threadFolderId: thread ? threadProjectFolderId(thread) : null,
-    }) ??
-    repositoryFolder?.label.id ??
-    null;
-  const current =
-    currentId === null
-      ? null
-      : (directory.byKey.get(projectLabelKey(environmentId, currentId)) ?? null);
-
   const options = useMemo((): ProjectOption[] => {
     // "No project" is a choice like any project, so it leads the list;
     // creating one is the lone action at the end. For Work it moves the draft
     // to a repository in no project (DraftHeroHeadline).
     const needle = query.trim().toLowerCase();
-    const result: ProjectOption[] = needle === "" ? [{ kind: "none", key: "none" }] : [];
+    const result: ProjectOption[] =
+      needle === ""
+        ? [
+            {
+              kind: "none",
+              key: "none",
+              label: current === null ? "No project" : "Remove from project",
+            },
+          ]
+        : [];
     for (const entry of projects) {
       if (needle !== "" && !entry.label.name.toLowerCase().includes(needle)) continue;
       result.push({
@@ -192,7 +170,7 @@ export function ComposerProjectPicker(props: {
         key: entry.key,
         id: entry.label.id,
         name: entry.label.name,
-        color: entry.label.color,
+        project: entry,
       });
     }
     if (canCreate) {
@@ -202,15 +180,11 @@ export function ComposerProjectPicker(props: {
       }
     }
     return result;
-  }, [canCreate, projects, query]);
+  }, [canCreate, current, projects, query]);
 
   const isHeadline = props.appearance === "headline";
   const headlineIcon = (
-    <ProjectFolderIcon
-      color={current?.label.color}
-      className="inline-block"
-      style={HERO_INLINE_ICON_STYLE}
-    />
+    <ProjectFolderIcon project={current} className="inline-block" style={HERO_INLINE_ICON_STYLE} />
   );
   if (!canPickProject) {
     // The Work hero still names its project when it cannot be changed here.
@@ -281,6 +255,10 @@ export function ComposerProjectPicker(props: {
   const triggerLabel = current ? `Project: ${current.label.name}` : "No project";
   const isHero = props.appearance === "hero";
   const inSentence = isHero || isHeadline;
+  const isChosen = (option: ProjectOption) =>
+    option.kind === "project"
+      ? option.id === current?.label.id
+      : option.kind === "none" && current === null;
 
   const picker = (
     <Combobox
@@ -309,6 +287,7 @@ export function ComposerProjectPicker(props: {
           render={
             <InlineButton
               tone="picker"
+              weight="normal"
               className="pointer-events-auto min-w-0 max-w-64 shrink align-baseline"
             />
           }
@@ -319,12 +298,10 @@ export function ComposerProjectPicker(props: {
           </span>
         </ComboboxTrigger>
       ) : isHero ? (
-        // Stays mounted without a project, empty and out of reach, so the
-        // name can fade out and the greeting glide back to centre. On its own
-        // line under a stacked heading, it is a size smaller.
+        // The headline owns the fade; the suffix only renders its reserved name slot.
         <ComboboxTrigger
           disabled={props.disabled}
-          aria-label={current ? `In ${current.label.name}. Change project` : undefined}
+          aria-label={current ? `In ${current.label.name}. Move to project` : undefined}
           aria-hidden={current === null || undefined}
           tabIndex={current === null ? -1 : undefined}
           data-hero-project-suffix=""
@@ -332,13 +309,17 @@ export function ComposerProjectPicker(props: {
             <button
               type="button"
               className={cn(
-                "group/hero-suffix pointer-events-auto inline-block cursor-pointer rounded-sm align-baseline text-foreground group-data-stacked/hero-headline:text-base outline-none focus-visible:outline-2 focus-visible:outline-ring",
+                "group/hero-suffix pointer-events-auto inline-block max-w-full cursor-pointer rounded-sm align-baseline text-foreground outline-none focus-visible:outline-2 focus-visible:outline-ring",
                 current === null && "pointer-events-none",
               )}
             />
           }
         >
-          <HeroProjectSuffixText name={current?.label.name ?? null} color={current?.label.color} />
+          <HeroProjectSuffixText
+            name={current?.label.name ?? null}
+            project={current ?? null}
+            open={open}
+          />
         </ComboboxTrigger>
       ) : (
         <Tooltip>
@@ -354,7 +335,7 @@ export function ComposerProjectPicker(props: {
           >
             {current ? (
               <ProjectFolderIcon
-                color={current.label.color}
+                project={current}
                 className={props.size === "xs" ? "size-3" : "size-4"}
               />
             ) : (
@@ -369,7 +350,7 @@ export function ComposerProjectPicker(props: {
             <ComposerControlChevron size={props.size} />
           </TooltipTrigger>
           <TooltipPopup side="top">
-            {forks ? "Fork into a project" : current ? "Change project" : "Add to a project"}
+            {forks ? "Fork into project…" : "Move to project…"}
           </TooltipPopup>
         </Tooltip>
       )}
@@ -399,37 +380,7 @@ export function ComposerProjectPicker(props: {
               divider={(option.kind === "new" || option.kind === "create") && options.length > 1}
               disabled={busy || (option.kind === "create" && option.name.length > 200)}
             >
-              {option.kind === "project" ? (
-                <>
-                  <ComboboxItemIcon>
-                    <ProjectFolderIcon color={option.color} className="size-4" />
-                  </ComboboxItemIcon>
-                  <span className="min-w-0 flex-1 truncate">{option.name}</span>
-                  {option.id === current?.label.id ? <CheckIcon className="ml-auto" /> : null}
-                </>
-              ) : option.kind === "new" ? (
-                <>
-                  <ComboboxItemIcon>
-                    <PlusIcon />
-                  </ComboboxItemIcon>
-                  <span className="min-w-0 flex-1 truncate">New project…</span>
-                </>
-              ) : option.kind === "none" ? (
-                <>
-                  <ComboboxItemIcon>
-                    <FolderMinusIcon className="text-muted-foreground" />
-                  </ComboboxItemIcon>
-                  <span className="min-w-0 flex-1 truncate">No project</span>
-                  {current === null ? <CheckIcon className="ml-auto" /> : null}
-                </>
-              ) : (
-                <>
-                  <ComboboxItemIcon>
-                    <PlusIcon />
-                  </ComboboxItemIcon>
-                  <span className="min-w-0 flex-1 truncate">New project “{option.name}”…</span>
-                </>
-              )}
+              <ProjectOptionRow option={option} chosen={isChosen(option)} />
             </ComboboxItem>
           )}
         </ComboboxList>
@@ -437,4 +388,18 @@ export function ComposerProjectPicker(props: {
     </Combobox>
   );
   return picker;
+}
+
+function ProjectOptionRow(props: { readonly option: ProjectOption; readonly chosen: boolean }) {
+  const { option, chosen } = props;
+  switch (option.kind) {
+    case "project":
+      return <ProjectPickerRow project={option.project} label={option.name} chosen={chosen} />;
+    case "none":
+      return <ProjectPickerRow project={null} label={option.label} chosen={chosen} />;
+    case "new":
+      return <ProjectPickerRow icon={<PlusIcon />} label="New project…" />;
+    case "create":
+      return <ProjectPickerRow icon={<PlusIcon />} label={`New project “${option.name}”…`} />;
+  }
 }

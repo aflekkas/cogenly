@@ -9,7 +9,7 @@ import {
   IntegrationAddToolInput,
   IntegrationUpdateByNameInput,
   type AgentPermissions,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -88,7 +88,75 @@ const make = Effect.gen(function* () {
           return { handled: false };
         }
         const actor = yield* actorFor(scope);
-        if (!actor) return { handled: false };
+        if (!actor) {
+          // Every model caller needs owner approval to install or change host code,
+          // including ordinary chats whose terminals cannot write locally.
+          if (name !== "integration_add" && name !== "integration_update")
+            return { handled: false };
+          let action:
+            | Extract<AgentApprovalAction, { actionKind: "integration_add" | "integration_update" }>
+            | undefined;
+          if (name === "integration_add") {
+            const tool = yield* decodeIntegrationAddTool(input);
+            if (tool.transport !== "stdio" && tool.command === undefined) return { handled: false };
+            action = { actionKind: "integration_add", payload: yield* decodeIntegrationAdd(input) };
+          } else {
+            const update = yield* decodeIntegrationUpdate(input);
+            if (integrations._tag === "None")
+              return yield* denied("Integrations are unavailable.", "agent_policy_unavailable");
+            const current = (yield* integrations.value.list()).integrations.find(
+              ({ integration }) => integration.name === update.name,
+            )?.integration;
+            const files = yield* Effect.serviceOption(ProjectFiles.ProjectFiles);
+            const folder =
+              scope.thread && Option.isSome(files)
+                ? yield* files.value.folderForThread(scope.thread.threadId)
+                : null;
+            if (
+              !current ||
+              !Integrations.integrationVisibleTo(
+                { ...current, enabled: true },
+                folder?.labelId ?? null,
+              )
+            )
+              return yield* denied(
+                "No connected integration with that name exists.",
+                "invalid_request",
+              );
+            if (!Integrations.integrationExecutableChanged(current, update))
+              return { handled: false };
+            action = {
+              actionKind: "integration_update",
+              payload: {
+                ...update,
+                id: current.id,
+                url: update.url ?? current.url,
+                transport: update.transport ?? current.transport,
+                headers: update.headers ?? current.headers,
+                command: update.command ?? current.command,
+                auth: update.auth === undefined ? (current.auth ?? null) : update.auth,
+              },
+            };
+          }
+          if (!scope.thread)
+            return yield* denied(
+              "Executable integration proposals need a live Cogenly thread for owner approval.",
+              "agent_approval_required",
+            );
+          yield* readCaller().pipe(
+            Effect.tap(assertLiveCaller),
+            Effect.provideService(McpInvocationContext, scope),
+            Effect.provideService(Threads.ThreadManagementService, threads),
+          );
+          const { approval } = yield* workspace.requestThreadIntegrationApproval(
+            scope.thread.threadId,
+            action,
+          );
+          return yield* denied(
+            `Executable integration proposal awaiting owner approval: ${approval.id}`,
+            "agent_approval_required",
+          );
+        }
         const resolved = yield* access.resolve(actor.agent.id);
         const { agent } = resolved;
         const params = yield* inputRecord(input ?? {});
@@ -187,6 +255,7 @@ const make = Effect.gen(function* () {
               : {}),
             agentId: agent.id,
             projectId: (isWorkStart ? params.targetProjectId : params.projectId) ?? agent.projectId,
+            projectFolderId: params.projectFolderId,
             title: params.title,
             prompt: isWorkStart ? params.scopeSummary : (params.message ?? params.title),
             workspaceStrategy: isWorkStart
@@ -280,6 +349,9 @@ const make = Effect.gen(function* () {
             url: update.url ?? current.url,
             transport: update.transport ?? current.transport,
             headers: update.headers ?? current.headers,
+            ...((update.command ?? current.command)
+              ? { command: update.command ?? current.command }
+              : {}),
             // A client secret reference is part of the destination too.
             auth: update.auth === undefined ? (current.auth ?? null) : update.auth,
           };
@@ -350,7 +422,7 @@ const make = Effect.gen(function* () {
         if (!agent.permissions[grant]) return yield* denied(`This agent has no ${grant} grant.`);
         // Arbitrary shell/browser/device writes can send, merge, deploy or delete.
         // They cannot safely be reduced to an execute grant by parsing model text.
-        // Adding a project (create or clone) is ordinary execute work for an agent.
+        // Computer use and adding a project (create or clone) use the ordinary execute grant.
         if (
           /^(terminal_|preview_(?!close$|list$)|device_(?!setup_status$)|project_(?:update|delete)$)/.test(
             name,

@@ -1,5 +1,5 @@
-import { normalizeGitRemoteUrl } from "@t3tools/shared/git";
-import { SharedRepositoryRemote } from "@t3tools/contracts";
+import { normalizeGitRemoteUrl } from "@cogenly/shared/git";
+import { SharedRepositoryRemote } from "@cogenly/contracts";
 import * as Schema from "effect/Schema";
 
 const isSharedRemote = Schema.is(SharedRepositoryRemote);

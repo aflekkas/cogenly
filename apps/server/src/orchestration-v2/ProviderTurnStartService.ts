@@ -1,10 +1,11 @@
 import { withAutomaticCompaction } from "./AutomaticCompaction.ts";
 import * as AgentStore from "../agents/AgentStore.ts";
 import { agentSessionSeedItems, shouldRotateAgentSession } from "../agents/context.ts";
-import { modelSelectionsEqual } from "@t3tools/shared/model";
-import { projectComposerContextForProvider } from "@t3tools/shared/composerContextReferences";
+import { modelSelectionsEqual } from "@cogenly/shared/model";
+import { projectComposerContextForProvider } from "@cogenly/shared/composerContextReferences";
 import {
   CommandId,
+  isProviderNativeSubagentThread,
   latestProviderTurnForAttempt,
   type OrchestrationV2DomainEvent,
   type OrchestrationV2ExecutionNode,
@@ -14,23 +15,20 @@ import {
   type OrchestrationV2TurnItem,
   RunId,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Context from "effect/Context";
-import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
-import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Predicate from "effect/Predicate";
 import * as Schema from "effect/Schema";
 
 import { withWorkspaceLease } from "../workspace/workspaceLease.ts";
-import * as GitWorkflowService from "../git/GitWorkflowService.ts";
-import * as ProjectService from "../project/ProjectService.ts";
+import * as WorktreeLifecycle from "../workspace/WorktreeLifecycle.ts";
 import * as ProviderAuthService from "../provider/ProviderAuthService.ts";
 import * as EventSink from "./EventSink.ts";
+import * as MachinesTurnContext from "./MachinesTurnContext.ts";
 import * as ContextHandoffService from "./ContextHandoffService.ts";
 import {
   DEFAULT_HANDOFF_TOKEN_CAP,
@@ -40,13 +38,13 @@ import {
   contextUsageForHandoff,
   historicalMessage,
   latestNativeContextUsage,
-} from "@t3tools/provider-core/server/handoffBudget";
+} from "@cogenly/provider-core/server/handoffBudget";
 import { deliverContextHandoffs, handoffsAwaitingRun } from "./ContextHandoffDelivery.ts";
-import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
-import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import * as ProviderAdapter from "@cogenly/provider-core/server/ProviderAdapter";
+import * as IdAllocator from "@cogenly/provider-core/server/IdAllocator";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ProviderSessionManager from "./ProviderSessionManager.ts";
-import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
+import { makeProviderFailure } from "@cogenly/provider-core/server/failure";
 import * as RunExecutionService from "./RunExecutionService.ts";
 import * as RuntimePolicy from "./RuntimePolicy.ts";
 import {
@@ -97,13 +95,12 @@ export const layer: Layer.Layer<
   ProviderTurnStartServiceV2,
   never,
   | AgentStore.AgentStore
+  | MachinesTurnContext.MachinesTurnContext
   | EventSink.EventSinkV2
   | ContextHandoffService.ContextHandoffServiceV2
   | IdAllocator.IdAllocatorV2
-  | FileSystem.FileSystem
   | Path.Path
-  | GitWorkflowService.GitWorkflowService
-  | ProjectService.ProjectService
+  | WorktreeLifecycle.WorktreeLifecycle
   | ProviderAuthService.ProviderAuthService
   | ProjectionStore.ProjectionStoreV2
   | ProviderSessionManager.ProviderSessionManagerV2
@@ -113,13 +110,12 @@ export const layer: Layer.Layer<
   ProviderTurnStartServiceV2,
   Effect.gen(function* () {
     const agentStore = yield* AgentStore.AgentStore;
+    const machinesTurnContext = yield* MachinesTurnContext.MachinesTurnContext;
     const eventSink = yield* EventSink.EventSinkV2;
     const contextHandoffService = yield* ContextHandoffService.ContextHandoffServiceV2;
     const idAllocator = yield* IdAllocator.IdAllocatorV2;
-    const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
-    const gitWorkflow = yield* GitWorkflowService.GitWorkflowService;
-    const projects = yield* ProjectService.ProjectService;
+    const worktrees = yield* WorktreeLifecycle.WorktreeLifecycle;
     const providerAuth = yield* ProviderAuthService.ProviderAuthService;
     const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
     const providerSessions = yield* ProviderSessionManager.ProviderSessionManagerV2;
@@ -451,43 +447,6 @@ export const layer: Layer.Layer<
           return;
         }
       }
-      const { worktreePath, branch } = projection.thread;
-      if (worktreePath !== null && branch !== null) {
-        const exists = yield* fileSystem
-          .exists(worktreePath)
-          .pipe(Effect.orElseSucceed(() => true));
-        if (!exists) {
-          const project = yield* projects.getById(projection.thread.projectId).pipe(
-            Effect.map(Option.getOrUndefined),
-            Effect.orElseSucceed(() => undefined),
-          );
-          if (project !== undefined) {
-            yield* Effect.logWarning("provider turn start recreating missing worktree", {
-              threadId: projection.thread.id,
-              worktreePath,
-              branch,
-            });
-            yield* gitWorkflow.pruneWorktrees({ cwd: project.workspaceRoot }).pipe(
-              Effect.andThen(
-                gitWorkflow.createWorktree({
-                  cwd: project.workspaceRoot,
-                  refName: branch,
-                  path: worktreePath,
-                }),
-              ),
-              Effect.catchCause((cause) =>
-                Cause.hasInterruptsOnly(cause)
-                  ? Effect.failCause(cause)
-                  : Effect.logWarning("provider turn start failed to recreate worktree", {
-                      threadId: projection.thread.id,
-                      worktreePath,
-                      cause: Cause.pretty(cause),
-                    }),
-              ),
-            );
-          }
-        }
-      }
       const selectInheritedBackgroundItems = (
         current: ProjectionStore.ProjectionRuntimeRecoveryState,
       ): ReturnType<typeof RunExecutionService.selectInheritedBackgroundTurnItems> =>
@@ -811,7 +770,11 @@ export const layer: Layer.Layer<
             }),
           );
           // An agent's first session on another provider gets the same seed as a rotation.
-          return created === undefined || !rotateAgentSession
+          // So does a provider-native subagent's first turn of its own: its provider kept
+          // that conversation inside the parent's session.
+          const seedsNativeSubagent =
+            isProviderNativeSubagentThread(projection.thread) && previousAgentRun === undefined;
+          return created === undefined || !(rotateAgentSession || seedsNativeSubagent)
             ? created
             : yield* seedFreshSession(created);
         }
@@ -821,8 +784,28 @@ export const layer: Layer.Layer<
             handoff.delivery?.nativeThreadId === providerThread.nativeThreadRef?.nativeId &&
             handoff.delivery?.status === "pending",
         );
+        // The parent can run a provider-native subagent again after the child's own
+        // last turn began, even while it runs. Claude keeps that work in the parent's
+        // session, so the child's own session never saw it and starts fresh from the
+        // whole transcript. Codex runs it on the child's own native thread, which has it.
+        const previousStartedAt = previousAgentRun?.startedAt ?? null;
+        const missedNativeWork =
+          isProviderNativeSubagentThread(projection.thread) && previousStartedAt !== null
+            ? (yield* projectionStore
+                .getThreadRecords(input.threadId, ["nodes"], { omitSettledLeafNodes: true })
+                .pipe(
+                  Effect.mapError((cause) => new ProviderTurnStartError({ runId, cause })),
+                )).nodes.some(
+                (node) =>
+                  node.kind === "root_turn" &&
+                  node.runId === null &&
+                  node.providerThreadId !== providerThread.id &&
+                  node.startedAt !== null &&
+                  DateTime.isGreaterThan(node.startedAt, previousStartedAt),
+              )
+            : false;
         const resumed = yield* Effect.result(
-          uncertainDelivery || rotateAgentSession || cwdChanged
+          uncertainDelivery || rotateAgentSession || cwdChanged || missedNativeWork
             ? Effect.fail(
                 new ProviderAdapter.ProviderAdapterTurnStartError({
                   driver: session.driver,
@@ -851,7 +834,9 @@ export const layer: Layer.Layer<
             ? "uncertain_history_delivery"
             : cwdChanged
               ? "cwd_changed"
-              : "resume_failed",
+              : missedNativeWork
+                ? "missed_native_subagent_work"
+                : "resume_failed",
           errorTag: resumed.failure._tag,
         });
         const replacement = yield* loadFromProvider(
@@ -1044,15 +1029,22 @@ export const layer: Layer.Layer<
       const turnContext = yield* agentStore
         .context(input.threadId, runId)
         .pipe(Effect.mapError((cause) => new ProviderTurnStartError({ runId, cause })));
-      const userText = [
-        turnContext,
-        projectComposerContextForProvider({
-          text: message.text,
-          records: message.context?.records ?? [],
-        }),
-      ]
-        .filter(Boolean)
-        .join("\n\n");
+      // Per turn, in the user message: a machine going offline then changes
+      // only the newest turn and never invalidates the cached prefix.
+      const machinesContext = yield* machinesTurnContext.read;
+      const slashCommand = message.text.trimStart().startsWith("/");
+      const userText = slashCommand
+        ? message.text.trimStart()
+        : [
+            turnContext,
+            machinesContext,
+            projectComposerContextForProvider({
+              text: message.text,
+              records: message.context?.records ?? [],
+            }),
+          ]
+            .filter(Boolean)
+            .join("\n\n");
       // Delivered once: this run's provider turn marks the work as told. A
       // restart continuation is prompted by its own text or resumes natively.
       const noteContinuation = isRestartNoteContinuation(
@@ -1230,7 +1222,7 @@ export const layer: Layer.Layer<
                 ];
           const delivery = yield* deliverContextHandoffs({
             handoffs: [...effectiveHandoffs, ...retryHandoff],
-            deferInline: compact,
+            deferInline: compact || slashCommand,
             providerThread: target,
             budget: Effect.gen(function* () {
               return handoffBudget({
@@ -1280,7 +1272,7 @@ export const layer: Layer.Layer<
           });
           if (!(yield* isCurrentAttemptInStatus("running"))) return;
           const start = compact ? session.compactThread! : session.startTurn;
-          const context = [delivery.context, restartNote]
+          const context = [delivery.context, slashCommand ? "" : restartNote]
             .filter((part) => part !== "")
             .join("\n\n");
           // A note continuation has no turn to resume; its text is the prompt.
@@ -1474,6 +1466,7 @@ export const layer: Layer.Layer<
         shouldStartProviderTurn: runControls.shouldStartProviderTurn,
         shouldFinalizeRun: runControls.shouldFinalizeRun,
         hasUnpairedRunInterruptRequest: runControls.hasUnpairedRunInterruptRequest,
+        rawUserText: message.text,
         message: {
           messageId: message.id,
           text: userText,
@@ -1497,6 +1490,24 @@ export const layer: Layer.Layer<
         Effect.gen(function* () {
           // Storage cleanup removes worktrees under the same lease. Only startup
           // holds it; the provider turn runs after it is released.
+          const { thread: preparing, runs } = yield* projectionStore.getThreadRecords(
+            input.threadId,
+            ["runs"],
+          );
+          if (
+            preparing.worktreePath !== null &&
+            preparing.branch !== null &&
+            runs.some((run) => run.id === input.runId && run.status === "starting")
+          ) {
+            // Setup opens a terminal, which acquires its own workspace lease.
+            // The durable starting run protects the checkout while setup runs.
+            yield* worktrees.prepare({
+              threadId: input.threadId,
+              projectId: preparing.projectId,
+              worktreePath: preparing.worktreePath,
+              branch: preparing.branch,
+            });
+          }
           const { thread } = yield* projectionStore.getThreadRecords(input.threadId, []);
           const providerTurn = yield* thread.worktreePath === null
             ? start(input)
