@@ -91,7 +91,8 @@ export type ComposerCommandItem =
 type ComposerMenuGroup = ComposerMentionGroup | "files";
 
 /**
- * Each `@` section's heading and its rows' leading mark. A new `@` item kind adds its group here
+ * Each `@` section's heading and its rows' leading mark (headings stay text-only, like every
+ * searchable list's). A new `@` item kind adds its group here
  * (and to `ComposerCommandItem`); its rows then render through `ComposerCommandMenuItem`.
  */
 const MENU_GROUP_PRESENTATION: Record<ComposerMenuGroup, { label: string; icon: LucideIcon }> = {
@@ -144,7 +145,7 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
       <ComposerBanner.Surface
         ref={listRef}
         {...panel.panelProps}
-        className="panel-height-motion min-h-0 w-full **:data-[slot=command-item]:rounded-lg **:data-[slot=scroll-area-scrollbar]:data-[orientation=vertical]:my-4"
+        className="panel-height-motion min-h-0 w-full **:data-[slot=scroll-area-scrollbar]:data-[orientation=vertical]:my-4"
         data-composer-command-drawer="true"
       >
         <div
@@ -162,11 +163,10 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
               {sections.map((section, index) => {
                 const presentation =
                   showHeadings && section.group ? MENU_GROUP_PRESENTATION[section.group] : null;
-                const Icon = presentation?.icon;
                 return (
                   <CommandGroup key={section.group ?? `section-${index}`}>
-                    {presentation && Icon ? (
-                      <CommandGroupLabel icon={<Icon />}>{presentation.label}</CommandGroupLabel>
+                    {presentation ? (
+                      <CommandGroupLabel>{presentation.label}</CommandGroupLabel>
                     ) : null}
                     {section.items.map((item) => (
                       <ComposerCommandMenuItem

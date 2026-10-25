@@ -11,7 +11,6 @@ import { ScrollArea } from "~/components/ui/scroll-area";
 import { searchFieldInputClassName } from "~/components/ui/search-input";
 import {
   SEARCH_LIST_GROUP_LABEL_CLASS,
-  SearchListGroupLabelContent,
   SearchListRowIcon,
   SearchListSearch,
   searchListEmptyVariants,
@@ -240,7 +239,7 @@ function ComboboxPopup({
 
 /**
  * A picker row; build its content from the `SearchListRow*` slots. Its look
- * is `searchListRowVariants` (compact, with the chosen value painted selected).
+ * is `searchListRowVariants`, with the chosen value painted selected.
  */
 function ComboboxItem({
   className,
@@ -259,7 +258,7 @@ function ComboboxItem({
   return (
     <ComboboxPrimitive.Item
       className={cn(
-        searchListRowVariants({ density: "compact", highlight: "hover", tone, divider }),
+        searchListRowVariants({ highlight: "hover", tone, divider }),
         "in-data-[side=none]:min-w-[calc(var(--anchor-width)+1.25rem)] [&_svg:not([class*='size-'])]:size-4.5 sm:[&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0",
         className,
       )}
@@ -344,24 +343,14 @@ function ComboboxGroup({ className, ...props }: ComboboxPrimitive.Group.Props) {
   );
 }
 
-/**
- * A group's header: a quiet section line on the row-icon column, optionally
- * led by a mark (`icon`). Never filled, so it cannot read as a selected row.
- */
-function ComboboxGroupLabel({
-  className,
-  icon,
-  children,
-  ...props
-}: ComboboxPrimitive.GroupLabel.Props & { icon?: React.ReactNode }) {
+/** A group's header: the shared quiet text line. Never filled, so it cannot read as a selected row. */
+function ComboboxGroupLabel({ className, ...props }: ComboboxPrimitive.GroupLabel.Props) {
   return (
     <ComboboxPrimitive.GroupLabel
       className={cn(SEARCH_LIST_GROUP_LABEL_CLASS, className)}
       data-slot="combobox-group-label"
       {...props}
-    >
-      <SearchListGroupLabelContent icon={icon}>{children}</SearchListGroupLabelContent>
-    </ComboboxPrimitive.GroupLabel>
+    />
   );
 }
 
@@ -374,15 +363,10 @@ const ComboboxCollection = ComboboxPrimitive.Collection;
  */
 function ComboboxGroupToggle({
   open,
-  icon,
   className,
   children,
   ...props
-}: Omit<React.ComponentProps<"button">, "type"> & {
-  open: boolean;
-  /** The group's leading mark, on the row-icon column. */
-  icon?: React.ReactNode;
-}) {
+}: Omit<React.ComponentProps<"button">, "type"> & { open: boolean }) {
   return (
     <ComboboxPrimitive.GroupLabel
       render={
@@ -400,9 +384,6 @@ function ComboboxGroupToggle({
       }
       data-slot="combobox-group-toggle"
     >
-      {icon ? (
-        <span className="flex size-4 shrink-0 items-center justify-center">{icon}</span>
-      ) : null}
       <span className="min-w-0 flex-1 truncate">{children}</span>
       <ChevronRightIcon
         aria-hidden
