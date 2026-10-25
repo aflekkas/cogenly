@@ -44,7 +44,9 @@ import {
   SidebarRowSubtitle,
   sidebarRowClassName,
 } from "../sidebar/SidebarList";
+import { SidebarListColumn } from "../sidebar/SidebarListColumn";
 import { SidebarSearchDock, type SidebarDockAction } from "../sidebar/SidebarSearchDock";
+import { sidebarListEdge } from "../sidebar/sidebarListAnchor.logic";
 import { scrollToSettingsTarget } from "./settingsLayout";
 import {
   searchSettings,
@@ -107,6 +109,18 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
   const legacySidebarEnabled = useLegacySidebarEnabled();
   const navRailVisible = !isMobile && !legacySidebarEnabled;
   const sidebarLayout = useSidebarLayout();
+  const searchEdge = sidebarListEdge({
+    layout: sidebarLayout,
+    searching: true,
+    mode: "settings",
+    shelf: null,
+  });
+  const sectionsEdge = sidebarListEdge({
+    layout: sidebarLayout,
+    searching: false,
+    mode: "settings",
+    shelf: null,
+  });
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
   const [activeResultIndex, setActiveResultIndex] = useState(0);
@@ -275,10 +289,7 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
         {isSearching ? (
           // Results sit by the dock, like thread search in the other tabs:
           // reading down from it, or stacked up against it in the bottom layout.
-          <SidebarGroup
-            className={sidebarLayout === "bottom" ? "flex-1 justify-end" : "flex-1"}
-            role="presentation"
-          >
+          <SidebarListColumn listKey="settings:search" edge={searchEdge}>
             {hasResults ? (
               <SidebarList
                 id="settings-search-results"
@@ -328,12 +339,13 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
                 No settings found
               </p>
             )}
-          </SidebarGroup>
+          </SidebarListColumn>
         ) : (
           // The sections read down from the dock, grouped under static
-          // headings. Each is a plain sidebar row that carries its own
+          // headings, or in the bottom layout stack up against it in the same
+          // reading order. Each is a plain sidebar row that carries its own
           // selected fill, as a chat row does.
-          <SidebarGroup>
+          <SidebarListColumn listKey="settings:sections" edge={sectionsEdge}>
             <SidebarList aria-label="Settings sections">
               {SETTINGS_NAV_GROUPS.flatMap((group) => [
                 ...(group.label === null
@@ -365,7 +377,7 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
                 }),
               ])}
             </SidebarList>
-          </SidebarGroup>
+          </SidebarListColumn>
         )}
       </SidebarContent>
       {/* Beside the navigation rail (which carries Settings, Usage and Updates)

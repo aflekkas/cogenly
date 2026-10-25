@@ -339,7 +339,7 @@ import {
   workGroupSectionKey,
 } from "./sidebar/workCards.logic";
 import { SidebarListRevealSentinel, useSidebarListReveal } from "./sidebar/SidebarListReveal";
-import { useSidebarListAnchor } from "./sidebar/useSidebarListAnchor";
+import { SidebarListColumn } from "./sidebar/SidebarListColumn";
 import { sidebarListEdge } from "./sidebar/sidebarListAnchor.logic";
 import { useSidebarLayout } from "../appearancePreferences";
 import { useAgentListFilter } from "../agents/agentListFilter";
@@ -4281,27 +4281,25 @@ export default function Sidebar() {
     [sidebarListItems],
   );
   const sidebarListHasRows = sidebarListItems.length + visibleDraftSessionCount > 0;
-  const sidebarModeListRef = useRef<HTMLDivElement | null>(null);
   // Each list (a mode and its filter, or search) keeps its own place against
   // its edge: read down from the dock in the top layout, while in the bottom
   // layout Work's active lists and Agents open on their last rows by the dock.
+  // The column (SidebarListColumn) anchors it in a child layout effect, so the
+  // scroll settles before the list motion below measures rows.
   const agentListFilter = useAgentListFilter();
-  useSidebarListAnchor(
-    sidebarModeListRef,
-    isSearchingThreads
-      ? "search"
-      : sidebarMode === "tasks"
-        ? `tasks:${openShelf ?? "active"}`
-        : sidebarMode === "agents"
-          ? `agents:${agentListFilter}`
-          : sidebarMode,
-    sidebarListEdge({
-      layout: sidebarLayout,
-      searching: isSearchingThreads,
-      mode: sidebarMode,
-      shelf: openShelf ?? null,
-    }),
-  );
+  const sidebarModeListKey = isSearchingThreads
+    ? "search"
+    : sidebarMode === "tasks"
+      ? `tasks:${openShelf ?? "active"}`
+      : sidebarMode === "agents"
+        ? `agents:${agentListFilter}`
+        : sidebarMode;
+  const sidebarModeListEdge = sidebarListEdge({
+    layout: sidebarLayout,
+    searching: isSearchingThreads,
+    mode: sidebarMode,
+    shelf: openShelf ?? null,
+  });
   const listMotionModeRef = useRef(sidebarMode);
   const listMotionShelfRef = useRef(openShelf);
   const listMotionRevealRef = useRef({ chats: chatVisibleCount, settled: settledVisibleCount });
@@ -5386,11 +5384,7 @@ export default function Sidebar() {
           ) : null
         }
       >
-        <SidebarGroup
-          ref={sidebarModeListRef}
-          className={sidebarLayout === "bottom" ? "flex-1 justify-end" : "flex-1"}
-          role="presentation"
-        >
+        <SidebarListColumn listKey={sidebarModeListKey} edge={sidebarModeListEdge}>
           {isSearchingThreads ? (
             threadSearchResults.length > 0 ? (
               <TooltipProvider
@@ -5899,7 +5893,7 @@ export default function Sidebar() {
               }
             />
           ) : null}
-        </SidebarGroup>
+        </SidebarListColumn>
       </SidebarContent>
       <SidebarChromeFooter utilityMenu={!navRailVisible} />
     </>
