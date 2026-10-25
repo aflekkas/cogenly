@@ -11,13 +11,7 @@ import {
   WorkHandoffError,
 } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
-import {
-  ChevronLeftIcon,
-  ChevronRightIcon,
-  FolderGit2Icon,
-  FolderPlusIcon,
-  MessageSquareDashedIcon,
-} from "lucide-react";
+import { ChevronLeftIcon, ChevronRightIcon, FolderPlusIcon } from "lucide-react";
 import * as Schema from "effect/Schema";
 import { type ReactElement, type ReactNode, useCallback, useMemo, useRef, useState } from "react";
 import { create } from "zustand";
@@ -28,7 +22,13 @@ import {
   type EnvironmentProjectLabel,
   scopedRepositoryKey,
 } from "~/projectLabels/projectLabels.logic";
-import { ManageRepositoriesRowContent } from "~/projectLabels/RepositorySourceRows";
+import { linkedRepositoryIcon } from "~/projectLabels/repositoryPicker.logic";
+import {
+  ManageRepositoriesRowContent,
+  ProjectFolderRowIcon,
+  RepositoryPickerRow,
+  RepositoryRowIcon,
+} from "~/projectLabels/RepositorySourceRows";
 import { useProjectLabelDirectory } from "~/projectLabels/useProjectLabels";
 import {
   RepositoryPickerGroupContent,
@@ -64,7 +64,6 @@ import {
   ComboboxTrigger,
   useComboboxFilter,
 } from "../ui/combobox";
-import { ProjectFavicon } from "../ProjectFavicon";
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
@@ -246,6 +245,8 @@ type StartWorkRow =
       readonly value: string;
       readonly label: string;
       readonly choice: WorkPickerChoice;
+      /** The project a repository row's repository is in, for its icon. */
+      readonly project: EnvironmentProjectLabel | null;
     };
 type StartWorkItem = StartWorkRow | RepositoryPickerItem;
 
@@ -262,11 +263,15 @@ const PROJECTS_GROUP = "projects";
 const ACTIONS_GROUP = "actions";
 const MANAGE_GROUP = "manage";
 
-const choiceItem = (choice: WorkPickerChoice): StartWorkItem => ({
+const choiceItem = (
+  choice: WorkPickerChoice,
+  project: EnvironmentProjectLabel | null = null,
+): StartWorkItem => ({
   kind: "choice",
   value: `choice:${choice.value}`,
   label: choice.label,
   choice,
+  project,
 });
 
 /**
@@ -369,16 +374,18 @@ export function StartWorkPicker(props: {
       const repositoryRows =
         trimmed.length === 0
           ? []
-          : projectGroups.flatMap((group) => group.choices.filter((c) => matches(c.label)));
+          : projectGroups.flatMap((group) =>
+              group.choices
+                .filter((c) => matches(c.label))
+                .map((choice) => choiceItem(choice, group.project ?? null)),
+            );
       const actionRows = extras
         .filter((choice) => choice.value !== ADD_REPOSITORY || trimmed.length === 0)
         .filter((choice) => matches(choice.label))
-        .map(choiceItem);
+        .map((choice) => choiceItem(choice));
       return [
         ...(projectRows.length > 0 ? [{ value: PROJECTS_GROUP, items: projectRows }] : []),
-        ...(repositoryRows.length > 0
-          ? [{ value: "repositories", items: repositoryRows.map(choiceItem) }]
-          : []),
+        ...(repositoryRows.length > 0 ? [{ value: "repositories", items: repositoryRows }] : []),
         ...(actionRows.length > 0 ? [{ value: ACTIONS_GROUP, items: actionRows }] : []),
       ];
     }
@@ -484,6 +491,17 @@ export function StartWorkPicker(props: {
       case "project":
       case "all-projects":
       case "choice": {
+        // A repository row found by search reads like the project's own list.
+        if (item.kind === "choice" && item.choice.repository !== undefined) {
+          return (
+            <RepositoryPickerRow
+              key={item.value}
+              item={item}
+              icon={<WorkPickerChoiceIcon choice={item.choice} project={item.project} />}
+              name={item.label}
+            />
+          );
+        }
         const isAdd = item.kind === "choice" && item.choice.value === ADD_REPOSITORY;
         return (
           <ComboboxItem
@@ -495,7 +513,7 @@ export function StartWorkPicker(props: {
           >
             <ComboboxItemIcon>
               {item.kind === "project" ? (
-                <ProjectFolderIcon color={item.group.project?.label.color} className="size-4" />
+                <ProjectFolderIcon project={item.group.project} className="size-4" />
               ) : item.kind === "all-projects" ? (
                 <ChevronLeftIcon className="size-4" />
               ) : (
@@ -623,21 +641,31 @@ export function StartWorkPicker(props: {
   );
 }
 
-/** A picker row's leading mark: the repository icon, or the no-repository and add icons. */
+/**
+ * A picker row's leading mark: the shared repository icon (resolved through
+ * the link `project` holds, when given), or the no-repository and add icons.
+ */
 export function WorkPickerChoiceIcon({
   choice,
+  project = null,
   className,
 }: {
   readonly choice: WorkPickerChoice;
+  readonly project?: EnvironmentProjectLabel | null;
   readonly className?: string;
 }) {
   if (choice.value === ADD_REPOSITORY) return <FolderPlusIcon className={className ?? "size-4"} />;
   if (choice.value === NO_REPOSITORY) {
-    return <MessageSquareDashedIcon className={className ?? "size-4"} />;
+    return <ProjectFolderRowIcon {...(className === undefined ? {} : { className })} />;
   }
-  return choice.repository ? (
-    <ProjectFavicon project={choice.repository} className={className ?? "size-4"} />
-  ) : (
-    <FolderGit2Icon className={className ?? "size-4"} />
+  const { remote, iconPath } = linkedRepositoryIcon(project, choice.value);
+  return (
+    <RepositoryRowIcon
+      local={choice.repository ?? null}
+      remote={remote}
+      environmentId={choice.repository?.environmentId ?? project?.environmentId ?? null}
+      iconPath={iconPath}
+      {...(className === undefined ? {} : { className })}
+    />
   );
 }

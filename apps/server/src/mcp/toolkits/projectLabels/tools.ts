@@ -91,7 +91,7 @@ export const ProjectLabelsToolkit = Toolkit.make(
     parameters: ProjectLabelCreateInput,
     success: ProjectLabelMutationResult,
     description:
-      "Create a project folder with a name, and optionally a color (gray, red, amber, green, teal, blue, violet or pink; not hex), description and instructions. Folders organize threads and repositories; they provide context only and never grant access.",
+      'Create a project folder with a name, and optionally a color (gray, red, amber, green, teal, blue, violet or pink; not hex), description and instructions. Folders organize threads and repositories; they provide context only and never grant access. Create one only when the user asks for a project to group work in. Getting one repository onto a machine, even phrased as "set it up as a project", needs none: clone it with project_clone (outside any project) and register it with project_create, and ask when unsure which the user means.',
   }).annotate(Tool.Destructive, false),
   Tool.make("project_label_update", {
     ...shared,
@@ -156,7 +156,7 @@ export const ProjectLabelsToolkit = Toolkit.make(
     parameters: ProjectLabelCloneRepositoryInput,
     success: ProjectCloneStartResult,
     description:
-      "Clone a repository into a project folder. The destination resolves under the projects root, progress runs on the project-clone subscription, and the repository is filed in the folder. Starts the tracked clone and returns immediately. A clone that fails or is cancelled removes its repository again, so nothing half-made stays filed; clone again to retry. Passing the remote of a repository the project already links (checkout not_cloned, missing or failed in project_label_read) clones that one onto this machine under its synced directory name instead, and keeps its record on failure so a retry resumes it. When a checkout of the repository is already on this machine, file it with project_label_link_repository instead of cloning a second copy.",
+      "Clone a repository into an existing project folder; it never creates a project (project_clone clones outside any project). The destination resolves under the projects root, progress runs on the project-clone subscription, and the repository is filed in the folder. Starts the tracked clone and returns immediately. A clone that fails or is cancelled removes its repository again, so nothing half-made stays filed; clone again to retry. Passing the remote of a repository the project already links (checkout not_cloned, missing or failed in project_label_read) clones that one onto this machine under its synced directory name instead, and keeps its record on failure so a retry resumes it. When a checkout of the repository is already on this machine, file it with project_label_link_repository instead of cloning a second copy.",
     dependencies: [
       ...shared.dependencies,
       Clones.ProjectCloneTracker,

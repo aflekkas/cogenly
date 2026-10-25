@@ -415,6 +415,21 @@ const make = Effect.gen(function* () {
       return { label, link, repositoryName: link.directoryName ?? fallbackName };
     });
 
+  /** Clones a record's empty folder in place, unless its clone runs or something is there. */
+  const resumeRecord = (
+    project: { readonly id: ProjectId; readonly title: string; readonly workspaceRoot: string },
+    repositoryName: string,
+    remote: string,
+  ) =>
+    Effect.gen(function* () {
+      const clone = yield* clones.get(project.id);
+      const ready =
+        clone?.phase !== "running" &&
+        ((yield* hasOwnCheckout(project.workspaceRoot)) ||
+          (yield* entriesOf(project.workspaceRoot)).length > 0);
+      if (!ready) yield* startInPlace(project, repositoryName, remote);
+    });
+
   const checkoutRepository: RepositoryCheckout["Service"]["checkoutRepository"] = (input) =>
     checkoutLock.withPermits(1)(
       Effect.gen(function* () {
@@ -432,17 +447,37 @@ const make = Effect.gen(function* () {
               repositoryName,
               reason: "not_found",
             });
-          const clone = yield* clones.get(link.repositoryId);
-          const ready =
-            clone?.phase !== "running" &&
-            ((yield* hasOwnCheckout(project.workspaceRoot)) ||
-              (yield* entriesOf(project.workspaceRoot)).length > 0);
-          if (!ready) yield* startInPlace(project, repositoryName, remote);
+          yield* resumeRecord(project, repositoryName, remote);
           return { repositoryId: link.repositoryId };
         }
 
         const { dir } = yield* folders.ensureForLabel(label).pipe(Effect.mapError(fail));
         const destination = projectRepositoryDirectory(dir, repositoryName, path);
+        // A record already at the destination is one an earlier checkout made
+        // before binding it failed: bind that one rather than make a second.
+        const earlier = Option.getOrUndefined(
+          yield* projects.getByWorkspaceRoot(destination).pipe(Effect.mapError(fail)),
+        );
+        if (earlier !== undefined) {
+          if (yield* hasOwnCheckout(destination)) {
+            const identity = Option.isSome(identities)
+              ? yield* identities.value.resolve(destination, { refresh: true })
+              : null;
+            const found = normalizeRepositoryRemote(identity?.locator.remoteUrl);
+            if (found !== null && found !== normalizeRepositoryRemote(remote))
+              return yield* new RepositoryCheckoutError({
+                repositoryId: link.repositoryId,
+                repositoryName,
+                reason: "destination_taken",
+                detail: destination,
+              });
+          }
+          yield* resumeRecord(earlier, repositoryName, remote);
+          yield* labels
+            .bindRepositoryCheckout({ labelId: label.id, remote, repositoryId: earlier.id })
+            .pipe(Effect.mapError(fail));
+          return { repositoryId: earlier.id };
+        }
         if (yield* insideOtherCheckout(destination, dir))
           return yield* new RepositoryCheckoutError({
             repositoryId: link.repositoryId,

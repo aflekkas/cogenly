@@ -60,6 +60,14 @@ const isSafeIconPath = (iconPath: string) =>
   !iconPath.startsWith("/") &&
   iconPath.split("/").every((part) => part.length > 0 && part !== "." && part !== "..");
 
+/** A GitHub owner's own "remote", as clients ask for a project's owner avatar. */
+const GITHUB_OWNER_REMOTE = /^github\.com\/([a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?)$/i;
+
+const ownerAvatar = (owner: string): RepositoryIcon => ({
+  kind: "avatar",
+  url: `https://github.com/${encodeURIComponent(owner)}.png?size=96`,
+});
+
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const fileSystem = yield* FileSystem.FileSystem;
@@ -144,16 +152,17 @@ const make = Effect.gen(function* () {
   const resolve: RepositoryIconResolver["Service"]["resolve"] = Effect.fn(
     "RepositoryIconResolver.resolve",
   )(function* (remote) {
+    // `github.com/<owner>` alone names an owner, not a repository: a project
+    // linked to that owner shows its avatar.
+    const owner = GITHUB_OWNER_REMOTE.exec(remote)?.[1];
+    if (owner !== undefined) return ownerAvatar(owner);
     const local = yield* fromCheckout(remote);
     if (local !== null) return { kind: "file", path: local };
     const parts = repositoryRemoteParts(remote);
     if (parts?.host !== "github.com" || !parts.owner || parts.owner.includes("/")) return null;
     const synced = yield* fromSyncedPath(remote, parts.owner, parts.name);
     if (synced !== null) return { kind: "file", path: synced };
-    return {
-      kind: "avatar",
-      url: `https://github.com/${encodeURIComponent(parts.owner)}.png?size=96`,
-    };
+    return ownerAvatar(parts.owner);
   });
 
   return RepositoryIconResolver.of({ resolve });

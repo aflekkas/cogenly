@@ -78,7 +78,7 @@ export function ThreadHeroHeadline({
       crumb={breadcrumb.project}
       icon={
         <ProjectFolderIcon
-          color={folder?.label.color}
+          project={folder}
           className="inline-block"
           style={HERO_INLINE_ICON_STYLE}
         />

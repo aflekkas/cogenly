@@ -40,6 +40,7 @@ export const SignInAttachment = Schema.Struct({
   registration: Schema.optional(OAuthClientRegistration),
   /** Access token expiry in epoch milliseconds; null when the server gave none. */
   expiresAt: Schema.NullOr(Schema.Number),
+  refreshAt: Schema.optional(Schema.NullOr(Schema.Number)),
   /** Environment id of the only machine that may call the token endpoint. */
   refreshOwner: Schema.String,
 });

@@ -107,7 +107,7 @@ export function AgentProjectPicker(props: {
             <ComboboxItem key={option.key} value={option}>
               {option.kind === "folder" ? (
                 <>
-                  <ProjectFolderIcon color={option.folder.label.color} className="size-4" />
+                  <ProjectFolderIcon project={option.folder} className="size-4" />
                   <span className="min-w-0 flex-1 truncate">{option.folder.label.name}</span>
                   {option.folder.key === current?.key ? <CheckIcon className="ml-auto" /> : null}
                 </>

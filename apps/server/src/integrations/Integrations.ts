@@ -58,6 +58,8 @@ const OAuthState = Schema.Struct({
   expiresAt: Schema.optional(Schema.NullOr(Schema.Number)),
   /** The only machine that refreshes this grant; absent means this one. */
   refreshOwner: Schema.optional(Schema.String),
+  /** When to refresh it, set when it was issued; absent on state from before it was kept. */
+  refreshAt: Schema.optional(Schema.NullOr(Schema.Number)),
 });
 type OAuthState = typeof OAuthState.Type;
 const oauthStateKey = Schema.encodeSync(Schema.fromJsonString(OAuthState));
@@ -299,7 +301,7 @@ export interface SignInCallback {
 /** A pending sign-in lives this long, and only this many at once. */
 const SIGN_IN_TTL_MS = 10 * 60_000;
 const MAX_PENDING_SIGN_INS = 64;
-/** Refresh this long before the access token expires. */
+/** Refresh at most this long before the access token expires. */
 const REFRESH_SKEW_MS = 60_000;
 
 /**
@@ -313,6 +315,17 @@ export const refreshWaitMessage = (error: IntegrationError): string | undefined 
   error.operation === REFRESH_WAIT_OPERATION && typeof error.cause === "string"
     ? error.cause
     : undefined;
+
+/**
+ * When a token issued at `issuedAtMs` is due a refresh: a minute before it
+ * expires, or halfway through a lifetime shorter than two minutes, so a
+ * short-lived token is not refreshed on every call. Null when it never expires.
+ */
+export function tokenRefreshAt(expiresAt: number | null, issuedAtMs: number | null): number | null {
+  if (expiresAt === null) return null;
+  const lifetime = issuedAtMs === null ? Infinity : Math.max(0, expiresAt - issuedAtMs);
+  return expiresAt - Math.min(REFRESH_SKEW_MS, lifetime / 2);
+}
 
 export class Integrations extends Context.Service<
   Integrations,
@@ -480,6 +493,7 @@ const signInAttachment = (
     readonly server: OAuth.OAuthServer;
     readonly registration: OAuth.OAuthClientRegistration | undefined;
     readonly expiresAt: number | null;
+    readonly refreshAt?: number | null;
     readonly refreshOwner: string;
   },
 ): Tokens.SignInAttachment => ({
@@ -489,6 +503,7 @@ const signInAttachment = (
   server: state.server,
   ...(state.registration === undefined ? {} : { registration: state.registration }),
   expiresAt: state.expiresAt,
+  refreshAt: state.refreshAt ?? tokenRefreshAt(state.expiresAt, null),
   refreshOwner: state.refreshOwner,
 });
 
@@ -580,6 +595,7 @@ const make = (options: IntegrationsOptions = {}) =>
         readonly refreshOwner: string;
         readonly server: OAuth.OAuthServer | undefined;
         readonly registration: OAuth.OAuthClientRegistration | undefined;
+        readonly refreshAt: number | null;
       }
     >();
     /** One adoption pass at a time; each is idempotent. */
@@ -864,6 +880,10 @@ const make = (options: IntegrationsOptions = {}) =>
           registration: attachment === undefined ? state.registration : attachment.registration,
           expiresAt: attachment === undefined ? (state.expiresAt ?? null) : attachment.expiresAt,
           refreshOwner: attachment?.refreshOwner ?? state.refreshOwner ?? peers.self,
+          refreshAt:
+            attachment === undefined
+              ? (state.refreshAt ?? tokenRefreshAt(state.expiresAt ?? null, null))
+              : (attachment.refreshAt ?? tokenRefreshAt(attachment.expiresAt, null)),
         };
         liveTokens.set(integration.id, loaded);
         return loaded;
@@ -929,7 +949,7 @@ const make = (options: IntegrationsOptions = {}) =>
         }
         const nowMs = yield* Clock.currentTimeMillis;
         const expired = live.expiresAt !== null && live.expiresAt <= nowMs;
-        const expiring = live.expiresAt !== null && live.expiresAt - REFRESH_SKEW_MS <= nowMs;
+        const expiring = live.refreshAt !== null && live.refreshAt <= nowMs;
         if (live.refreshOwner !== peers.self) {
           if (live.accessToken !== rejected && !expired) return live.accessToken;
           // Nothing can renew a grant without a refresh token, so waiting would never end.
@@ -978,6 +998,7 @@ const make = (options: IntegrationsOptions = {}) =>
           });
         }
         const tokens = refreshed.success;
+        const refreshAt = tokenRefreshAt(tokens.expiresAt, nowMs);
         // Through the vault, the new tokens reseal and reach every machine sharing it.
         const written = yield* tokenStore.write({
           itemId: live.itemId,
@@ -989,6 +1010,7 @@ const make = (options: IntegrationsOptions = {}) =>
             server: live.server,
             registration: live.registration,
             expiresAt: tokens.expiresAt,
+            refreshAt,
             refreshOwner: live.refreshOwner,
           }),
         });
@@ -1001,6 +1023,7 @@ const make = (options: IntegrationsOptions = {}) =>
           registration: live.registration,
           expiresAt: tokens.expiresAt,
           refreshOwner: live.refreshOwner,
+          refreshAt,
         });
         yield* persistState(id, (current) => ({
           ...current,
@@ -1008,6 +1031,7 @@ const make = (options: IntegrationsOptions = {}) =>
           tokenItemId: written.itemId,
           expiresAt: tokens.expiresAt,
           refreshOwner: live.refreshOwner,
+          refreshAt,
         }));
         return tokens.accessToken;
       });
@@ -1031,7 +1055,7 @@ const make = (options: IntegrationsOptions = {}) =>
           attachment.refreshOwner !== peers.self ||
           current.refreshToken === undefined ||
           attachment.expiresAt === null ||
-          attachment.expiresAt - REFRESH_SKEW_MS > nowMs
+          (attachment.refreshAt ?? tokenRefreshAt(attachment.expiresAt, null)!) > nowMs
         )
           return;
         const refreshed = yield* protocol
@@ -1060,7 +1084,11 @@ const make = (options: IntegrationsOptions = {}) =>
           label: signIn.item.label ?? signIn.item.name,
           host: signIn.item.allowedDomains[0] ?? "",
           tokens: { ...refreshed.success, clientSecret: current.clientSecret },
-          attachment: { ...attachment, expiresAt: refreshed.success.expiresAt },
+          attachment: {
+            ...attachment,
+            expiresAt: refreshed.success.expiresAt,
+            refreshAt: tokenRefreshAt(refreshed.success.expiresAt, nowMs),
+          },
         });
       });
 
@@ -1544,7 +1572,7 @@ const make = (options: IntegrationsOptions = {}) =>
             hasAccessToken &&
             hasRefreshToken &&
             attachment.expiresAt !== null &&
-            attachment.expiresAt - REFRESH_SKEW_MS <= nowMs,
+            (attachment.refreshAt ?? tokenRefreshAt(attachment.expiresAt, null)!) <= nowMs,
         );
         if (due.length === 0) return;
         const all = yield* rows();
@@ -1606,9 +1634,34 @@ const make = (options: IntegrationsOptions = {}) =>
         ),
         Effect.ignore,
       );
+      // A failed check outlives a process that crashed and came back: once it
+      // runs again, probe it, so its status is not `error` until the next call.
+      const probing = new Set<IntegrationId>();
+      const reprobe = Effect.gen(function* () {
+        const checked = yield* Ref.get(checks);
+        for (const integration of yield* rows()) {
+          const check = checked.get(integration.id);
+          if (
+            integration.transport !== "local" ||
+            !integration.enabled ||
+            check === undefined ||
+            check.ok ||
+            check.updatedAt !== integration.updatedAt ||
+            probing.has(integration.id) ||
+            (yield* local.value.status(integration.id))?.state !== "running"
+          )
+            continue;
+          probing.add(integration.id);
+          yield* fetchTools(integration).pipe(
+            Effect.ignore,
+            Effect.ensuring(Effect.sync(() => probing.delete(integration.id))),
+            Effect.forkScoped,
+          );
+        }
+      }).pipe(Effect.ignore);
       // Process restarts and finished Google sign-ins reach Settings like any other change.
       yield* local.value.changes.pipe(
-        Stream.runForEach(() => notify),
+        Stream.runForEach(() => notify.pipe(Effect.andThen(reprobe))),
         Effect.forkScoped,
       );
     }
@@ -2172,6 +2225,7 @@ const make = (options: IntegrationsOptions = {}) =>
                   server: pending.server,
                   registration: pending.registration,
                   expiresAt: tokens.expiresAt,
+                  refreshAt: tokenRefreshAt(tokens.expiresAt, nowMs),
                   refreshOwner,
                 }),
               });
@@ -2184,6 +2238,7 @@ const make = (options: IntegrationsOptions = {}) =>
                 refreshOwner,
                 server: pending.server,
                 registration: pending.registration,
+                refreshAt: tokenRefreshAt(tokens.expiresAt, nowMs),
               });
               yield* persistState(
                 integration.id,
@@ -2195,6 +2250,7 @@ const make = (options: IntegrationsOptions = {}) =>
                     : { registration: pending.registration }),
                   tokenItemId: itemId,
                   expiresAt: tokens.expiresAt,
+                  refreshAt: tokenRefreshAt(tokens.expiresAt, nowMs),
                   refreshOwner,
                 }),
                 new URL(pending.redirectUri).origin,

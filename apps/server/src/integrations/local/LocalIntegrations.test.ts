@@ -660,6 +660,44 @@ describe("managed Google integrations", () => {
     }).pipe(Effect.scoped, Effect.provide(testLayer(specs)));
   });
 
+  it.live("probes an account again once its crashed process restarts, clearing the error", () => {
+    const specs: Array<Runner.LocalMcpSpec> = [];
+    return Effect.gen(function* () {
+      yield* runMigrations();
+      const gateway = yield* Integrations.Integrations;
+      const fs = yield* FileSystem.FileSystem;
+      const { integration } = yield* gateway.create({
+        preset: "google-workspace",
+        accountLabel: "work",
+        callbackOrigin: "https://cogenly.example.com",
+      });
+      yield* fs.writeFileString(
+        `${specs[0]!.env.WORKSPACE_MCP_CREDENTIALS_DIR}/work.json`,
+        JSON.stringify({ refresh_token: "grant" }),
+      );
+      const statuses = yield* gateway.subscribe().pipe(
+        Stream.map((listed) => listed.integrations[0]?.status),
+        Stream.toQueue({ capacity: "unbounded" }),
+      );
+      const crashed = yield* gateway
+        .callTool(integration.name, "crash", {}, undefined)
+        .pipe(Effect.result);
+      expect(crashed._tag).toBe("Failure");
+      // No further call: the restart alone brings it back to connected.
+      yield* Stream.fromQueue(statuses).pipe(
+        Stream.filter((status) => status === "error"),
+        Stream.take(1),
+        Stream.runDrain,
+      );
+      yield* Stream.fromQueue(statuses).pipe(
+        Stream.filter((status) => status === "connected"),
+        Stream.take(1),
+        Stream.runDrain,
+      );
+      expect((yield* gateway.list()).integrations[0]?.status).toBe("connected");
+    }).pipe(Effect.scoped, Effect.provide(testLayer(specs)));
+  });
+
   it.live("removing an account erases its grants while disabling preserves them", () => {
     const specs: Array<Runner.LocalMcpSpec> = [];
     return Effect.gen(function* () {

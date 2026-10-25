@@ -33,6 +33,7 @@ import {
   isProjectChatThread,
   priorFiling,
   projectLabelKey,
+  type EnvironmentProjectLabel,
   scopedRepositoryKey,
   threadFolderState,
   threadForksIntoProjects,
@@ -52,7 +53,7 @@ type ProjectOption =
       readonly key: string;
       readonly id: ProjectLabelId;
       readonly name: string;
-      readonly color: string | undefined;
+      readonly project: EnvironmentProjectLabel;
     }
   | { readonly kind: "none"; readonly key: "none" }
   | { readonly kind: "new"; readonly key: "new" }
@@ -192,7 +193,7 @@ export function ComposerProjectPicker(props: {
         key: entry.key,
         id: entry.label.id,
         name: entry.label.name,
-        color: entry.label.color,
+        project: entry,
       });
     }
     if (canCreate) {
@@ -206,11 +207,7 @@ export function ComposerProjectPicker(props: {
 
   const isHeadline = props.appearance === "headline";
   const headlineIcon = (
-    <ProjectFolderIcon
-      color={current?.label.color}
-      className="inline-block"
-      style={HERO_INLINE_ICON_STYLE}
-    />
+    <ProjectFolderIcon project={current} className="inline-block" style={HERO_INLINE_ICON_STYLE} />
   );
   if (!canPickProject) {
     // The Work hero still names its project when it cannot be changed here.
@@ -338,7 +335,7 @@ export function ComposerProjectPicker(props: {
             />
           }
         >
-          <HeroProjectSuffixText name={current?.label.name ?? null} color={current?.label.color} />
+          <HeroProjectSuffixText name={current?.label.name ?? null} project={current ?? null} />
         </ComboboxTrigger>
       ) : (
         <Tooltip>
@@ -354,7 +351,7 @@ export function ComposerProjectPicker(props: {
           >
             {current ? (
               <ProjectFolderIcon
-                color={current.label.color}
+                project={current}
                 className={props.size === "xs" ? "size-3" : "size-4"}
               />
             ) : (
@@ -402,7 +399,7 @@ export function ComposerProjectPicker(props: {
               {option.kind === "project" ? (
                 <>
                   <ComboboxItemIcon>
-                    <ProjectFolderIcon color={option.color} className="size-4" />
+                    <ProjectFolderIcon project={option.project} className="size-4" />
                   </ComboboxItemIcon>
                   <span className="min-w-0 flex-1 truncate">{option.name}</span>
                   {option.id === current?.label.id ? <CheckIcon className="ml-auto" /> : null}

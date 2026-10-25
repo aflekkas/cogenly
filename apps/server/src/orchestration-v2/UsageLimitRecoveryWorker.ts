@@ -23,7 +23,11 @@ import { deliverDelegatedTaskRecoveryNotice } from "./DelegatedTaskFailureNotice
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ThreadManagement from "./ThreadManagementService.ts";
 import * as UsageLimitHandoff from "./UsageLimitHandoff.ts";
-import { MAX_RATE_LIMIT_RETRIES, nextRateLimitRetry } from "./UsageLimitStop.ts";
+import {
+  LIMIT_ARM_COMMAND_PREFIX,
+  MAX_RATE_LIMIT_RETRIES,
+  nextRateLimitRetry,
+} from "./UsageLimitStop.ts";
 
 export { limitAutoResumeUpdate, limitRecoveryStatus } from "./UsageLimitStop.ts";
 
@@ -62,7 +66,7 @@ export function limitRecoveryCommand(
     if (resetMs <= nowMs || (!autoResume && !snooze)) return null;
     return {
       type: "thread.metadata.update",
-      commandId: CommandId.make(`limit-arm:${identity}`),
+      commandId: CommandId.make(`${LIMIT_ARM_COMMAND_PREFIX}${identity}`),
       threadId: thread.id,
       limitRecovery: {
         runId: thread.latestRunId,
@@ -209,15 +213,14 @@ const makeSweep = Effect.gen(function* () {
   const arm = (
     thread: ProjectionStore.ProjectionLimitRecoveryCandidate,
     limitRecovery: OrchestrationV2LimitRecoveryUpdate,
-  ) =>
-    threads.dispatch({
-      type: "thread.metadata.update",
-      commandId: CommandId.make(
-        `limit-arm:${thread.id}:${limitRecovery.runId}:${Date.parse(limitRecovery.resetAt)}`,
-      ),
-      threadId: thread.id,
-      limitRecovery,
-    });
+  ) => {
+    const commandId = CommandId.make(
+      `${LIMIT_ARM_COMMAND_PREFIX}${thread.id}:${limitRecovery.runId}:${Date.parse(limitRecovery.resetAt)}`,
+    );
+    return threads
+      .dispatch({ type: "thread.metadata.update", commandId, threadId: thread.id, limitRecovery })
+      .pipe(Effect.as(commandId));
+  };
 
   // A delegated child has no user to pick an instance: it takes the best
   // candidate it has not already stopped on in this streak, the same ranking
@@ -288,19 +291,14 @@ const makeSweep = Effect.gen(function* () {
             }),
           ),
         );
-      const handedOff = yield* handOff(thread);
-      if (handedOff !== null) {
-        yield* notify({
-          type: "handed_off",
-          providerInstanceId: handedOff.instanceId,
-          model: handedOff.modelSelection.model,
-        });
-        return;
-      }
+      // The handoff queues its parent notice in the same commit (see Orchestrator).
+      if ((yield* handOff(thread)) !== null) return;
       // Nothing has headroom. A spent quota waits for its reset; a rate limit
       // that outlasted its retries stops, and its parent gets the failure.
-      yield* arm(thread, { runId, resetAt, autoResume: resume });
-      if (resume) yield* notify({ type: "resuming_at_reset", at: resetAt });
+      const armId = yield* arm(thread, { runId, resetAt, autoResume: resume });
+      // A choice that landed mid-sweep keeps its own outcome; the arm left it be.
+      if (resume && (yield* threads.getThreadShell(thread.id))?.limitRecovery?.requestId === armId)
+        yield* notify({ type: "resuming_at_reset", at: resetAt });
     });
 
   return Effect.fn("UsageLimitRecoveryWorker.sweep")(function* () {

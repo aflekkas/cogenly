@@ -263,7 +263,7 @@ import { openCreateProjectDialog } from "../projectLabels/CreateProjectDialogHos
 import { usePendingProjectFolderStore } from "../projectLabels/pendingProjectFolders";
 import { useMoveThreadToFolder } from "../projectLabels/useMoveThreadToFolder";
 import { useProjectLabelDirectory } from "../projectLabels/useProjectLabels";
-import { ProjectFolderIcon } from "../projectLabels/ProjectFolderMark";
+import { ProjectFolderIcon, type ProjectIconProject } from "../projectLabels/ProjectFolderMark";
 import {
   machineIconKind,
   machineMoveTargetsForThreads,
@@ -356,6 +356,8 @@ const EMPTY_PROVIDER_ENTRIES: ReadonlyMap<string, ProviderInstanceEntry> = new M
 interface SidebarRowFolder {
   readonly name: string;
   readonly color: string | undefined;
+  /** The project itself, for its icon. */
+  readonly icon: ProjectIconProject;
 }
 /** An unsent Work draft the list files with the cards. */
 interface WorkDraftEntry {
@@ -639,7 +641,7 @@ function WorkCardLabel(props: {
           fallback={<RepositoryBadge name={props.repositoryName} />}
         />
       ) : props.folder ? (
-        <ProjectFolderIcon color={props.folder.color} className="size-4" />
+        <ProjectFolderIcon project={props.folder.icon} className="size-4" />
       ) : (
         // The same mark as "No project" in the pickers and palette.
         <MessageSquareDashedIcon aria-hidden className="size-4 shrink-0 text-secondary-label" />
@@ -2691,7 +2693,7 @@ export default function Sidebar() {
   const folderFor = useMemo(() => {
     const byKey = new Map<string, SidebarRowFolder>();
     for (const entry of projectLabelDirectory.labels) {
-      byKey.set(entry.key, { name: entry.label.name, color: entry.label.color });
+      byKey.set(entry.key, { name: entry.label.name, color: entry.label.color, icon: entry });
     }
     return (thread: SidebarThreadSummary): SidebarRowFolder | null => {
       const folderId = threadProjectFolderId(thread);
@@ -2707,7 +2709,8 @@ export default function Sidebar() {
     () =>
       new Map(
         projectLabelDirectory.labels.map(
-          (entry) => [entry.key, { name: entry.label.name, color: entry.label.color }] as const,
+          (entry) =>
+            [entry.key, { name: entry.label.name, color: entry.label.color, icon: entry }] as const,
         ),
       ),
     [projectLabelDirectory],
@@ -5602,7 +5605,7 @@ export default function Sidebar() {
                           count={group.cards.length}
                           icon={
                             groupFolder ? (
-                              <ProjectFolderIcon color={groupFolder.color} className="size-3.5" />
+                              <ProjectFolderIcon project={groupFolder.icon} className="size-3.5" />
                             ) : undefined
                           }
                           collapse={{

@@ -5,11 +5,13 @@
  * Folders are context only and never grant access. They live per
  * environment, so every key here is scoped by environment id.
  */
-import type {
-  EnvironmentId,
-  ProjectId,
-  ProjectLabelId,
-  ProjectLabelWithRepositories,
+import {
+  projectHomeOwner,
+  type EnvironmentId,
+  type ProjectId,
+  type ProjectLabelId,
+  type ProjectLabelWithRepositories,
+  type ProjectSourceLink,
 } from "@t3tools/contracts";
 
 import {
@@ -55,6 +57,22 @@ export function projectLabelPaletteColor(color: string | null | undefined): Proj
 /** CSS color for a stored label color. */
 export function projectLabelColorValue(color: string | undefined): string {
   return `var(--color-${projectLabelPaletteColor(color)}-500)`;
+}
+
+/**
+ * Where a project's icon comes from: the avatar of the GitHub owner it links
+ * (its home owner, so every machine shows the same one, resolved like a
+ * repository's owner avatar through the `github.com/<owner>` remote), else
+ * the folder in its colour. A project has no icon of its own to pick; one
+ * would come first here.
+ */
+export function projectIconSource(label: {
+  readonly sourceLinks?: ReadonlyArray<ProjectSourceLink> | undefined;
+}): { readonly kind: "owner-avatar"; readonly remote: string } | { readonly kind: "folder" } {
+  const owner = projectHomeOwner(label.sourceLinks ?? []);
+  return owner === null
+    ? { kind: "folder" }
+    : { kind: "owner-avatar", remote: `github.com/${owner}` };
 }
 
 export function sortProjectLabels<T extends { readonly label: { readonly name: string } }>(

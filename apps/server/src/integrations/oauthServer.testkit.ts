@@ -40,6 +40,7 @@ export interface MockAuthServer {
   refreshes: number;
   /** Refresh tokens answer invalid_grant, as after the user revokes access. */
   revoked: boolean;
+  tokenLifetimeSeconds?: number;
   omitPkce?: boolean;
   requireIssuer?: boolean;
   /** Registered clients get a secret and authenticate with client_secret_post. */
@@ -89,7 +90,7 @@ export const startMockAuthServer = Effect.gen(function* () {
       access_token: accessToken,
       refresh_token: refreshToken,
       token_type: "Bearer",
-      expires_in: 3600,
+      expires_in: mock.tokenLifetimeSeconds ?? 3600,
     };
   };
   const form = (request: HttpServerRequest.HttpServerRequest) =>

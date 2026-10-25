@@ -3,6 +3,7 @@ import {
   ProjectId,
   ProjectLabelId,
   type ProjectLabelWithRepositories,
+  type ProjectSourceLink,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -11,6 +12,7 @@ import {
   partitionArchivedProjectLabels,
   priorFiling,
   projectFolderChangeKind,
+  projectIconSource,
   projectLabelKey,
   repositoryFolderMove,
   scopedRepositoryKey,
@@ -216,5 +218,33 @@ describe("projectFolderChangeKind", () => {
     expect(projectFolderChangeKind(chat({ surface: "builder", latestRun: run }), folder)).toBe(
       "move",
     );
+  });
+});
+
+describe("projectIconSource", () => {
+  const owner = (name: string): ProjectSourceLink => ({ kind: "github-owner", owner: name });
+
+  it("shows the linked GitHub owner's avatar, through its owner remote", () => {
+    expect(projectIconSource({ sourceLinks: [owner("Spawn-Partners")] })).toEqual({
+      kind: "owner-avatar",
+      remote: "github.com/Spawn-Partners",
+    });
+  });
+
+  it("picks the home owner when several are linked, so every machine shows the same one", () => {
+    expect(projectIconSource({ sourceLinks: [owner("zeta"), owner("Acme")] })).toEqual({
+      kind: "owner-avatar",
+      remote: "github.com/Acme",
+    });
+  });
+
+  it("falls back to the folder without an owner link", () => {
+    expect(projectIconSource({ sourceLinks: [] })).toEqual({ kind: "folder" });
+    expect(projectIconSource({})).toEqual({ kind: "folder" });
+    expect(
+      projectIconSource({
+        sourceLinks: [{ kind: "github-repo", owner: "acme", repo: "site" }],
+      }),
+    ).toEqual({ kind: "folder" });
   });
 });

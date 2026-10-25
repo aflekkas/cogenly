@@ -106,7 +106,12 @@ import { CommandReceiptStoreV2 } from "./CommandReceiptStore.ts";
 import { ContextHandoffServiceV2 } from "./ContextHandoffService.ts";
 import { notificationTurnItem } from "@t3tools/provider-core/server/notification";
 import { isRestartContinuationSource, runOutcome } from "./RestartBackgroundNote.ts";
-import { LIMIT_HANDOFF_CANCEL_COMMAND_PREFIX, limitRecoveryPending } from "./UsageLimitStop.ts";
+import {
+  LIMIT_ARM_COMMAND_PREFIX,
+  LIMIT_HANDOFF_CANCEL_COMMAND_PREFIX,
+  LIMIT_HANDOFF_COMMAND_PREFIX,
+  limitRecoveryPending,
+} from "./UsageLimitStop.ts";
 import {
   isBufferedProviderNotification,
   isUndeliveredMailboxSteer,
@@ -2869,6 +2874,14 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
 
     const now = yield* DateTime.now;
     if (command.type === "thread.metadata.update" && command.limitRecovery != null) {
+      // The recovery sweep arms a stop it read as unrecorded. A choice that
+      // landed since (a "Don't resume" mid-sweep) wins over that stale read.
+      if (
+        String(command.commandId).startsWith(LIMIT_ARM_COMMAND_PREFIX) &&
+        thread.limitRecovery?.runId === command.limitRecovery.runId &&
+        thread.limitRecovery.resetAt === command.limitRecovery.resetAt
+      )
+        return;
       const projection = yield* loadProjectionForCommand(
         command,
         ["runs", "runtimeRequests", "turnItems"],
@@ -4697,6 +4710,50 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             commandType: command.type,
             cause: "This thread can no longer be resumed from that run.",
           });
+        }
+        // The recovery sweep hands off a stop it read as unrecorded. A choice
+        // that landed since (a "Don't resume" mid-sweep) stands; only the
+        // handoff's own cancel of a scheduled resume may precede it.
+        const recovery = projection.thread.limitRecovery;
+        if (
+          command.createdBy === "system" &&
+          String(command.commandId).startsWith(LIMIT_HANDOFF_COMMAND_PREFIX) &&
+          recovery?.runId === source.id &&
+          !String(recovery.requestId ?? "").startsWith(LIMIT_HANDOFF_CANCEL_COMMAND_PREFIX)
+        ) {
+          return yield* new OrchestratorDispatchError({
+            commandId: command.commandId,
+            commandType: command.type,
+            cause: "A recovery choice was made for this stop.",
+          });
+        }
+        // A delegated child's parent hears where its task went, committed with
+        // the handoff so a stop between the two cannot lose the notice.
+        const { lineage } = projection.thread;
+        const target = command.modelSelection ?? projection.thread.modelSelection;
+        if (
+          String(command.commandId).startsWith(LIMIT_HANDOFF_COMMAND_PREFIX) &&
+          lineage.relationshipToParent === "subagent" &&
+          lineage.parentThreadId !== null &&
+          limited?.class === "usage_limit"
+        ) {
+          const key = `${command.threadId}:${source.id}:${target.instanceId}`;
+          const notice: PendingOrchestrationEffectV2 = {
+            id: `effect:delegated-task-recovery:${key}`,
+            commandId: CommandId.make(`command:delegated-task-recovery-effect:${key}`),
+            threadId: lineage.parentThreadId!,
+            request: {
+              type: "delegated-task.recovery-notice",
+              childThreadId: command.threadId,
+              childRunId: source.id,
+              recovery: {
+                type: "handed_off",
+                providerInstanceId: target.instanceId,
+                model: target.model,
+              },
+            },
+          };
+          yield* Ref.update(effects, (existing) => [...existing, notice]);
         }
       }
       if (command.usageLimitContinuationOfRunId !== undefined) {

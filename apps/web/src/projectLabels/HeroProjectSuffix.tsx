@@ -3,13 +3,25 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { cn } from "../lib/utils";
 import { PANEL_MOTION_EASING } from "../lib/panelFlip";
 import { PANEL_ANIMATION_DURATION } from "../panelAnimations";
-import { HERO_INLINE_ICON_STYLE, ProjectFolderIcon } from "./ProjectFolderMark";
+import {
+  HERO_INLINE_ICON_STYLE,
+  ProjectFolderIcon,
+  type ProjectIconProject,
+} from "./ProjectFolderMark";
+import { projectIconSource } from "./projectLabels.logic";
 
 interface Layer {
   readonly key: number;
   readonly name: string | null;
-  readonly color: string | undefined;
+  readonly project: ProjectIconProject | null;
 }
+
+/** What the icon shows, so only a change to it swaps the icon. */
+const iconKey = (project: ProjectIconProject | null) => {
+  if (project === null) return "";
+  const source = projectIconSource(project.label);
+  return `${project.label.color ?? ""}|${source.kind === "owner-avatar" ? source.remote : ""}`;
+};
 
 /**
  * The chat hero's " · in <project>" tail. Its width glides to fit the new
@@ -24,17 +36,17 @@ interface Layer {
  */
 export function HeroProjectSuffixText(props: {
   readonly name: string | null;
-  /** The project's label color, for its folder icon. */
-  readonly color: string | undefined;
+  /** The project, for its icon. */
+  readonly project: ProjectIconProject | null;
 }) {
-  const [shown, setShown] = useState<Layer>({ key: 0, name: props.name, color: props.color });
+  const [shown, setShown] = useState<Layer>({ key: 0, name: props.name, project: props.project });
   const [leaving, setLeaving] = useState<Layer | null>(null);
   if (props.name !== shown.name) {
     setLeaving(shown.name === null ? null : shown);
-    setShown({ key: shown.key + 1, name: props.name, color: props.color });
-  } else if (props.color !== shown.color) {
-    // A recolor keeps the name in place; only the icon follows.
-    setShown({ ...shown, color: props.color });
+    setShown({ key: shown.key + 1, name: props.name, project: props.project });
+  } else if (iconKey(props.project) !== iconKey(shown.project)) {
+    // A recolor or a new owner keeps the name in place; only the icon follows.
+    setShown({ ...shown, project: props.project });
   }
   const boxRef = useRef<HTMLSpanElement>(null);
   const layerRef = useRef<HTMLSpanElement>(null);
@@ -64,7 +76,7 @@ export function HeroProjectSuffixText(props: {
           className="pointer-events-none absolute start-0 top-0 opacity-0 transition-opacity duration-(--motion-duration-base) ease-standard starting:opacity-100"
           onTransitionEnd={() => setLeaving(null)}
         >
-          <SuffixContent name={leaving.name} color={leaving.color} />
+          <SuffixContent name={leaving.name} project={leaving.project} />
         </span>
       ) : null}
       <span
@@ -77,7 +89,7 @@ export function HeroProjectSuffixText(props: {
             "transition-opacity duration-(--motion-duration-base) ease-standard starting:opacity-0",
         )}
       >
-        <SuffixContent name={shown.name} color={shown.color} />
+        <SuffixContent name={shown.name} project={shown.project} />
       </span>
     </span>
   );
@@ -87,7 +99,7 @@ export function HeroProjectSuffixText(props: {
 // project's folder and name in the heading's color, underlined quietly.
 function SuffixContent(props: {
   readonly name: string | null;
-  readonly color: string | undefined;
+  readonly project: ProjectIconProject | null;
 }) {
   if (props.name === null) return null;
   return (
@@ -101,7 +113,7 @@ function SuffixContent(props: {
       {"in "}
       <span className="underline decoration-foreground/30 decoration-from-font underline-offset-4 transition-colors duration-(--motion-duration-fast) group-hover/hero-suffix:decoration-foreground group-data-popup-open/hero-suffix:decoration-foreground">
         <ProjectFolderIcon
-          color={props.color}
+          project={props.project}
           className="inline-block"
           style={HERO_INLINE_ICON_STYLE}
         />

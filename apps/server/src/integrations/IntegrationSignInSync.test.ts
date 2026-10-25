@@ -271,6 +271,34 @@ describe("web integration sign-ins across paired machines", () => {
       }).pipe(Effect.scoped, http),
   );
 
+  for (const hasDefinition of [false, true]) {
+    it.effect(
+      `short-lived shared tokens refresh halfway through with definition=${hasDefinition}`,
+      () =>
+        Effect.gen(function* () {
+          const { hub, spoke } = yield* sharedPair;
+          const mock = yield* startMockAuthServer;
+          mock.tokenLifetimeSeconds = 60;
+          const integration = yield* addLinear(spoke, mock);
+          if (hasDefinition) yield* copyDefinition(spoke, hub, integration.id);
+          yield* signIn(spoke, integration.id, "spawn");
+          yield* settle(hub, [spoke]);
+          yield* hub.integrations.adoptSyncedSignIns();
+          yield* TestClock.adjust(Duration.seconds(15));
+          yield* hub.integrations.refreshSharedSignIns;
+          expect(mock.refreshes).toBe(0);
+          yield* TestClock.adjust(Duration.seconds(16));
+          yield* hub.integrations.refreshSharedSignIns;
+          expect(mock.refreshes).toBe(1);
+          yield* hub.integrations.refreshSharedSignIns;
+          expect(mock.refreshes).toBe(1);
+          yield* settle(hub, [spoke]);
+          yield* whoami(spoke);
+          expect(mock.refreshes).toBe(1);
+        }).pipe(Effect.scoped, http),
+    );
+  }
+
   it.effect("a cached token gives way to a new revision of its item", () =>
     Effect.gen(function* () {
       const { spoke } = yield* sharedPair;

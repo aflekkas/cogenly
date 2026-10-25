@@ -47,7 +47,9 @@ import { ComposerProjectPicker } from "~/projectLabels/ComposerProjectPicker";
 import {
   ManageRepositoriesRowContent,
   ProjectFolderRowIcon,
+  RepositoryRowIcon,
 } from "~/projectLabels/RepositorySourceRows";
+import { linkedRepositoryIcon } from "~/projectLabels/repositoryPicker.logic";
 import {
   RepositoryPickerGroupContent,
   useRepositoryPicker,
@@ -78,7 +80,6 @@ import {
 } from "../ui/combobox";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { InlineButton } from "../ui/button";
-import { ProjectFavicon } from "../ProjectFavicon";
 import { RepositoryBadge } from "../sidebar/modes/RepositoryBadge";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 
@@ -612,13 +613,16 @@ export function DraftHeroHeadline({
           >
             {!breadcrumb.repository.placeholder && activeProjectDisplayName ? (
               activeProject ? (
-                // Work's mark for a repository: its icon, else its initials badge.
-                <ProjectFavicon
-                  project={activeProject}
-                  // Sized in em to the heading, like the hero's other inline icons.
-                  className="inline-block size-[0.78em] align-[-0.06em] me-[0.28em]"
-                  fallback={<RepositoryBadge name={breadcrumb.repository.text} size="inline" />}
-                />
+                // The same icon the picker's row shows for it.
+                <span className="inline-flex size-[0.78em] align-[-0.06em] me-[0.28em] items-center justify-center">
+                  <RepositoryRowIcon
+                    local={activeProject}
+                    {...linkedRepositoryIcon(repositoryFolder, activeProject.id)}
+                    environmentId={activeProject.environmentId}
+                    // Sized in em to the heading, like the hero's other inline icons.
+                    className="size-full"
+                  />
+                </span>
               ) : (
                 <RepositoryBadge name={breadcrumb.repository.text} size="inline" />
               )

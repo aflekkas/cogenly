@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
 
 import { cn } from "~/lib/utils";
-import { ProjectFolderIcon } from "~/projectLabels/ProjectFolderMark";
+import { ProjectFolderIcon, type ProjectIconProject } from "~/projectLabels/ProjectFolderMark";
 
 export interface SidebarChatProject {
   readonly name: string;
   readonly color: string | undefined;
+  /** The project itself, for its icon. */
+  readonly icon: ProjectIconProject;
 }
 
 /**
@@ -38,7 +40,7 @@ export function SidebarChatProjectLine(props: {
         visible ? "h-4 opacity-100" : "h-0 opacity-0",
       )}
     >
-      <ProjectFolderIcon color={shown.color} />
+      <ProjectFolderIcon project={shown.icon} />
       <span className="min-w-0 flex-1 truncate">{shown.name}</span>
     </span>
   );
