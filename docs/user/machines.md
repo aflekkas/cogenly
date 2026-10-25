@@ -215,6 +215,42 @@ If a machine shows the wrong name or kind, fix it on that machine with
 `cogenly machines rename "Work laptop"` or `cogenly machines rename --kind
 cloud-server`. `--reset` goes back to the detected name and kind.
 
+## Machine health
+
+Each machine reports the state of what it depends on: the server and its
+scheduler, the database, free disk space, provider sign-ins and usage limits,
+paired machines and sync, integrations, scheduled tasks, runs stuck far longer
+than any real one, the background service, and Tailscale Serve. Each problem
+names what to fix and, where Cogenly can do it, offers the fix: sign in, run a
+task now, open a stuck thread, or retry sync. A paired machine that can't be
+reached is shown from what this machine last saw of it.
+
+From a terminal on the machine, run `cogenly health` (or `cogenly doctor
+--health`). Add `--machine <environment-id>` to read a paired machine,
+and `--json` for structured output. The command exits with status 1 when a
+check fails, so a cron job or uptime monitor can use it. Agents read the same
+report with `machine_health`.
+
+A scheduled task that says it succeeded only means its turn started. To prove
+the whole path works, turn on the health canary in your hub's health section
+under Settings → Machines. It runs a one-line prompt on the cheapest available
+model at the interval you choose (60 minutes by default), in a new chat that is
+archived once it passes, and the canary check fails when a run errors, takes
+longer than 10 minutes, or hasn't passed in two and a half intervals. Each run
+uses a small amount of your provider's usage. The canary runs only on the machine
+that turned it on.
+
+## Health alerts
+
+Cogenly alerts you when something a machine depends on breaks, such as a
+provider that needs sign-in, a failed scheduled task, or a paired machine that
+hasn't been reachable for 10 minutes. A problem has to last about two minutes
+before it alerts, and it alerts once when it starts and once when it clears.
+To also get alerts as a Slack DM or an email, turn the channel on in
+Settings → Machines, choose the connected Slack or Google integration, and send
+a test. Channels are set per machine, so set them on your laptop too if you want
+to hear when the hub itself goes down.
+
 ## Unpair a machine
 
 Use its name or environment ID from the list:

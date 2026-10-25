@@ -24,6 +24,11 @@ import { SidebarProviderUpdatePill } from "./SidebarProviderUpdatePill";
 import { SidebarUpdateArchitectureWarning, SidebarUpdatePill } from "./SidebarUpdatePill";
 import { observeResize } from "~/lib/observeResize";
 import { settingsReturnHref } from "./modes/spaceRouteMemory";
+import {
+  MACHINE_NEEDS_ATTENTION_LABEL,
+  useMachineHealthAttentionTone,
+} from "../../machines/machineHealthAlertsStore";
+import { BadgeDot } from "../ui/badge-dot";
 
 export const SidebarChromeHeader = memo(function SidebarChromeHeader({
   isElectron,
@@ -155,6 +160,7 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
     select: (location) =>
       location.pathname === "/settings" || location.pathname.startsWith("/settings/"),
   });
+  const machineAttention = useMachineHealthAttentionTone();
   const closeMobileSidebar = useCallback(() => {
     if (isMobile) {
       setOpenMobile(false);
@@ -184,9 +190,18 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
       ) : (
         <>
           <SidebarMenuItem className="min-w-0 flex-1">
-            <SidebarMenuButton aria-label="Settings" onClick={handleSettingsClick}>
+            <SidebarMenuButton
+              aria-label={
+                machineAttention === null
+                  ? "Settings"
+                  : `Settings, ${MACHINE_NEEDS_ATTENTION_LABEL}`
+              }
+              onClick={handleSettingsClick}
+            >
               <SettingsIcon />
               <span>Settings</span>
+              {/* Without the rail (mobile, legacy sidebar), the machine-health dot sits here. */}
+              <BadgeDot tone={machineAttention} size="md" className="ml-auto" />
             </SidebarMenuButton>
           </SidebarMenuItem>
           <SidebarUtilityItem

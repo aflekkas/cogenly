@@ -35,6 +35,7 @@ import { RunningThreadKeepAlive } from "../components/desktop/RunningThreadKeepA
 import { DesktopUpdateLaunchNotice } from "../components/sidebar/updateEverythingRun";
 import { LegacyThreadMigrationToast } from "../components/LegacyThreadMigrationToast";
 import { ThreadNotificationCoordinator } from "../components/ThreadNotificationCoordinator";
+import { MachineHealthAlertCoordinator } from "../components/MachineHealthAlertCoordinator";
 import { ThreadReadCoordinator } from "../components/ThreadReadCoordinator";
 import { ReopenClosedViewShortcut } from "../components/ReopenClosedViewShortcut";
 import { ProjectCloneToastCoordinator } from "../components/ProjectCloneToastCoordinator";
@@ -224,6 +225,7 @@ function RootRouteView() {
         <ConnectOnboardingDialog />
         <SshPasswordPromptDialog />
         <ThreadNotificationCoordinator />
+        <MachineHealthAlertCoordinator />
         <ThreadReadCoordinator />
         <ReopenClosedViewShortcut />
         <ConfirmDialogHost />

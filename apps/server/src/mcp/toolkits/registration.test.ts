@@ -67,6 +67,7 @@ import * as Machines from "../../machines/Machines.ts";
 import * as ProjectMove from "../../threadSync/ProjectMove.ts";
 import * as ThreadTransfer from "../../threadSync/ThreadTransfer.ts";
 import * as MachineSetup from "../../tailscale/MachineSetup.ts";
+import * as MachineHealth from "../../health/MachineHealth.ts";
 import * as McpHttpServer from "../McpHttpServer.ts";
 import * as McpSessionRegistry from "../McpSessionRegistry.ts";
 import * as PreviewAutomationBroker from "../PreviewAutomationBroker.ts";
@@ -222,6 +223,7 @@ const layerStubServices = Layer.mergeAll(
   Layer.mock(ThreadTransfer.ThreadTransfer)({}),
   Layer.mock(ProjectMove.ProjectMove)({}),
   Layer.mock(MachineSetup.MachineSetup)({}),
+  Layer.mock(MachineHealth.MachineHealth)({}),
   Layer.mock(ProjectionStore.ProjectionStoreV2)({}),
   Layer.mock(DeviceService.DeviceService)({
     list: Effect.succeed({
@@ -624,6 +626,7 @@ const smokeCases = [
       "environment_add",
       "environment_preferences_update",
       "environment_read",
+      "machine_health",
       "machine_security_status",
     ],
     tool: "environment_read",

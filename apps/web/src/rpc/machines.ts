@@ -40,4 +40,28 @@ export const machinesRpc = {
   }),
   /** Targets the joining machine; `input.hubEnvironmentId` names the always-on one. */
   pairWith: createMachinePairingCommand(connectionAtomRuntime),
+  /**
+   * One machine's health report, live. `input.environmentId` names a paired
+   * machine, which the viewed server reads over the peer link.
+   */
+  health: createEnvironmentRpcSubscriptionAtomFamily(connectionAtomRuntime, {
+    label: "machines:health",
+    tag: "machines.healthSubscribe",
+    idleTtlMs: 30_000,
+  }),
+  /** The server's open alerts, merged with its paired machines', then each transition. */
+  healthAlerts: createEnvironmentRpcSubscriptionAtomFamily(connectionAtomRuntime, {
+    label: "machines:healthAlerts",
+    tag: "machines.healthAlertsSubscribe",
+  }),
+  /** Retries sync between the target server and `input.environmentId`. */
+  healthRetrySync: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "machines:healthRetrySync",
+    tag: "machines.healthRetrySync",
+  }),
+  /** Sends a test alert through each enabled external channel of the target server. */
+  healthTestAlertChannels: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "machines:healthTestAlertChannels",
+    tag: "machines.healthTestAlertChannels",
+  }),
 };

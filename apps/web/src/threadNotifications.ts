@@ -19,6 +19,47 @@ export function hasDesktopNotifications(mode: NotificationMode) {
   return mode === "notifications" || mode === "notifications-and-sound";
 }
 
+/**
+ * A desktop notification for something that happened while the window was in
+ * the background: only when `mode` asks for notifications, the window is not
+ * focused, and the browser (or Electron) has permission. A click focuses the
+ * window and runs `onClick`. Returns null when nothing was shown.
+ */
+export function showBackgroundNotification(
+  mode: NotificationMode,
+  options: {
+    readonly title: string;
+    readonly body: string;
+    readonly tag: string;
+    readonly onClick: () => void;
+  },
+): Notification | null {
+  if (
+    !hasDesktopNotifications(mode) ||
+    (document.visibilityState === "visible" && document.hasFocus()) ||
+    typeof Notification === "undefined" ||
+    Notification.permission !== "granted"
+  ) {
+    return null;
+  }
+  try {
+    const notification = new Notification(options.title, {
+      body: options.body,
+      tag: options.tag,
+      silent: true,
+    });
+    notification.addEventListener("click", () => {
+      notification.close();
+      window.focus();
+      options.onClick();
+    });
+    return notification;
+  } catch {
+    // Some browsers expose Notification but reject desktop presentation.
+    return null;
+  }
+}
+
 let originalFavicon: HTMLLinkElement | undefined;
 let badgeFavicon: HTMLLinkElement | undefined;
 

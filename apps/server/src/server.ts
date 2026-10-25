@@ -40,6 +40,10 @@ import * as HubLink from "./machines/HubLink.ts";
 import * as MachineIdentity from "./machines/MachineIdentity.ts";
 import * as Machines from "./machines/Machines.ts";
 import * as MachineSecurity from "./security/MachineSecurity.ts";
+import * as MachineHealth from "./health/MachineHealth.ts";
+import * as HealthCanary from "./health/HealthCanary.ts";
+import * as HealthAlerts from "./health/HealthAlerts.ts";
+import * as HealthAlertsState from "./health/HealthAlertsState.ts";
 import * as MachineSetup from "./tailscale/MachineSetup.ts";
 import * as TailscaleHost from "./tailscale/TailscaleHost.ts";
 import * as TailscaleServeMode from "./tailscale/TailscaleServeMode.ts";
@@ -594,53 +598,73 @@ const layerVaultSync = VaultSync.layer.pipe(
   Layer.provide(SharedState.layer),
 );
 
+// One instance for every transport: it remembers sign-ins and approvals in progress.
+const layerMachineSetup = MachineSetup.layer.pipe(
+  Layer.provide(TailscaleHost.layer),
+  Layer.provide(MachineIdentity.layer),
+);
+
+const layerPairedMachines = Layer.mergeAll(
+  SharedSync.layer.pipe(Layer.provide(SharedState.layer)),
+  SharedSyncStatus.layer,
+  // Vault items shared with paired machines, end-to-end encrypted over the same documents.
+  layerVaultSync,
+  // Web integration sign-ins ride the vault: who refreshes them, and renewing them in time.
+  IntegrationSyncBinding.layer.pipe(
+    Layer.provide(layerVaultSync),
+    Layer.provide(RuntimeLayer.layerVaultSyncCapture),
+    Layer.provide(RuntimeLayer.layerIntegrationSyncPeers),
+  ),
+  // Same reference as turn start's, which reads the block.
+  MachinesTurnContextLive.layer.pipe(Layer.provide(MachinesTurnContext.layer)),
+  // The orchestrator's own sink, so replicated events reach the same
+  // subscribers, and its forwarder registry, so routing sees its commands.
+  // Its launcher registry, so a launch naming another machine reaches it.
+  Layer.mergeAll(ProjectMove.layer, ThreadLaunchRouting.layer, ThreadFork.layer).pipe(
+    Layer.provide(SharedSync.layer.pipe(Layer.provide(SharedState.layer))),
+    Layer.provideMerge(ThreadTransfer.layer),
+    Layer.provideMerge(ThreadRouting.layer),
+    Layer.provideMerge(ThreadSync.layer),
+    Layer.provide(ThreadReplication.layer),
+    Layer.provide(ProjectLabelFolders.layer),
+    Layer.provide(RemoteThreadCommands.layer),
+    Layer.provide(RemoteThreadLaunch.layer),
+    // Agents follow their conversation; the same layer as SharedSync's.
+    Layer.provide(SharedState.layer),
+    Layer.provide(
+      Layer.mergeAll(
+        RuntimeLayer.layerEventSink,
+        EventStoreV2.layerFromOrchestrationEventStore,
+        ProjectionStoreV2.layer,
+        ProjectStore.layer,
+      ),
+    ),
+  ),
+).pipe(
+  Layer.provideMerge(layerMachines),
+  Layer.provide(ServerEnvironment.layerIdentity),
+  Layer.provide(Scheduler.layer),
+);
+
+// Machine health reports on the paired machines and their sync, so it sits
+// above that group. Alerts read paired machines' alerts over the link; their
+// state layer is the same reference turn context reads in the orchestration
+// runtime. Scheduler and identity are the same references the group uses.
+const layerMachineHealth = HealthAlerts.layer.pipe(
+  Layer.provide(HealthAlertsState.layer),
+  Layer.provideMerge(MachineHealth.layer),
+  Layer.provide(HealthCanary.layer),
+  Layer.provide(layerMachineSetup),
+  Layer.provide(Scheduler.layer),
+  Layer.provide(ServerEnvironment.layerIdentity),
+  Layer.provideMerge(layerPairedMachines),
+);
+
 const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   AgentAwarenessRelay.layer,
   MachineSecurity.layer,
-  // One instance for every transport: it remembers sign-ins and approvals in progress.
-  MachineSetup.layer.pipe(Layer.provide(TailscaleHost.layer), Layer.provide(MachineIdentity.layer)),
-  // Paired machines: shared configuration, then thread logs, over one link.
-  Layer.mergeAll(
-    SharedSync.layer.pipe(Layer.provide(SharedState.layer)),
-    SharedSyncStatus.layer,
-    // Vault items shared with paired machines, end-to-end encrypted over the same documents.
-    layerVaultSync,
-    // Web integration sign-ins ride the vault: who refreshes them, and renewing them in time.
-    IntegrationSyncBinding.layer.pipe(
-      Layer.provide(layerVaultSync),
-      Layer.provide(RuntimeLayer.layerVaultSyncCapture),
-      Layer.provide(RuntimeLayer.layerIntegrationSyncPeers),
-    ),
-    // Same reference as turn start's, which reads the block.
-    MachinesTurnContextLive.layer.pipe(Layer.provide(MachinesTurnContext.layer)),
-    // The orchestrator's own sink, so replicated events reach the same
-    // subscribers, and its forwarder registry, so routing sees its commands.
-    // Its launcher registry, so a launch naming another machine reaches it.
-    Layer.mergeAll(ProjectMove.layer, ThreadLaunchRouting.layer, ThreadFork.layer).pipe(
-      Layer.provide(SharedSync.layer.pipe(Layer.provide(SharedState.layer))),
-      Layer.provideMerge(ThreadTransfer.layer),
-      Layer.provideMerge(ThreadRouting.layer),
-      Layer.provideMerge(ThreadSync.layer),
-      Layer.provide(ThreadReplication.layer),
-      Layer.provide(ProjectLabelFolders.layer),
-      Layer.provide(RemoteThreadCommands.layer),
-      Layer.provide(RemoteThreadLaunch.layer),
-      // Agents follow their conversation; the same layer as SharedSync's.
-      Layer.provide(SharedState.layer),
-      Layer.provide(
-        Layer.mergeAll(
-          RuntimeLayer.layerEventSink,
-          EventStoreV2.layerFromOrchestrationEventStore,
-          ProjectionStoreV2.layer,
-          ProjectStore.layer,
-        ),
-      ),
-    ),
-  ).pipe(
-    Layer.provideMerge(layerMachines),
-    Layer.provide(ServerEnvironment.layerIdentity),
-    Layer.provide(Scheduler.layer),
-  ),
+  layerMachineSetup,
+  layerMachineHealth,
   // Universal settings and project overrides follow the user to paired machines.
   SettingsSync.layer.pipe(
     Layer.provide(SharedState.layer),

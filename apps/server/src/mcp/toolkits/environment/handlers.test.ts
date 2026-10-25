@@ -2,9 +2,12 @@ import { expect, it } from "@effect/vitest";
 import {
   DEFAULT_SERVER_SETTINGS,
   EnvironmentId,
+  MachineHealthError,
+  type MachineHealthReport,
   ProviderInstanceId,
   ThreadId,
 } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -13,6 +16,7 @@ import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
 import * as DesktopAppControl from "../../../environment/DesktopAppControl.ts";
 import * as ServerEnvironment from "../../../environment/ServerEnvironment.ts";
+import * as MachineHealth from "../../../health/MachineHealth.ts";
 import * as ThreadCommandExecutor from "../../../orchestration-v2/ThreadCommandExecutor.ts";
 import * as ThreadManagement from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as Settings from "../../../serverSettings.ts";
@@ -70,6 +74,8 @@ const mcpClient = McpSchema.McpServerClient.of({
 /** The environment toolkit on an MCP server whose desktop app records what it was asked. */
 const makeServer = (
   addEnvironment: DesktopAppControl.DesktopAppControl["Service"]["addEnvironment"],
+  reportFor: MachineHealth.MachineHealth["Service"]["reportFor"] = () =>
+    Effect.die("machine_health is not exercised here"),
 ) =>
   McpHttpServer.toolkitRegistration(EnvironmentToolkit, EnvironmentHandlers.layer).pipe(
     Layer.provideMerge(McpServer.McpServer.layer),
@@ -88,6 +94,7 @@ const makeServer = (
         Layer.succeed(MachineSecurity.MachineSecurity, {
           status: Effect.die("machine_security_status is not exercised here"),
         }),
+        Layer.mock(MachineHealth.MachineHealth)({ reportFor }),
         Layer.mock(ChildProcessSpawner.ChildProcessSpawner)({}),
       ),
     ),
@@ -163,6 +170,58 @@ it.effect("environment_add says when no desktop app runs beside this environment
   ),
 );
 
+const vpsReport: MachineHealthReport = {
+  environmentId: EnvironmentId.make("environment-vps"),
+  machineName: "Contabo VPS",
+  status: "warn",
+  observedAt: DateTime.makeUnsafe("2026-10-24T09:00:00.000Z"),
+  serverVersion: "0.3.0",
+  uptimeSeconds: 60,
+  reachable: true,
+  checks: [],
+};
+
+it.effect.each([
+  [
+    "reads a paired machine",
+    () => Effect.succeed(vpsReport),
+    { machineName: "Contabo VPS", observedAt: "2026-10-24T09:00:00.000Z" },
+  ],
+  [
+    "says when the machine is not paired",
+    () => Effect.fail(new MachineHealthError({ reason: "not-paired" })),
+    { code: "invalid_request", message: expect.stringContaining("machines_list") },
+  ],
+] as const)("machine_health for a read-only client %s", ([, reportFor, expected]) =>
+  Effect.gen(function* () {
+    const asked: Array<unknown> = [];
+    const text = yield* McpServer.McpServer.pipe(
+      Effect.flatMap((server) =>
+        server.callTool({
+          name: "machine_health",
+          arguments: { environmentId: "environment-vps" },
+        }),
+      ),
+      Effect.map(({ content }) =>
+        content.map((part) => (part.type === "text" ? part.text : "")).join(""),
+      ),
+      Effect.provideService(McpInvocationContext.McpInvocationContext, readOnlyClient),
+      Effect.provideService(McpSchema.McpServerClient, mcpClient),
+      Effect.provide(
+        makeServer(
+          () => Effect.die("unused"),
+          (input) => {
+            asked.push(input);
+            return reportFor();
+          },
+        ),
+      ),
+    );
+    expect(asked).toEqual([{ environmentId: "environment-vps" }]);
+    expect(JSON.parse(text)).toMatchObject(expected);
+  }),
+);
+
 it.effect("environment_preferences_update saves local and shared settings", () =>
   Effect.gen(function* () {
     const patches: Array<unknown> = [];
@@ -196,6 +255,7 @@ it.effect("environment_preferences_update saves local and shared settings", () =
             pairMachines: () => Effect.die("unused"),
           }),
           Layer.succeed(MachineSecurity.MachineSecurity, { status: Effect.die("unused") }),
+          Layer.mock(MachineHealth.MachineHealth)({}),
           Layer.mock(ChildProcessSpawner.ChildProcessSpawner)({}),
         ),
       ),

@@ -10,6 +10,7 @@ import * as ThreadReplication from "./threadReplication.ts";
 import * as SharedDocuments from "./sharedDocument.ts";
 import * as MachineSecurity from "./machineSecurity.ts";
 import * as MachineSetup from "./machineSetup.ts";
+import * as MachineHealth from "./machineHealth.ts";
 import * as Work from "./work.ts";
 import * as Vault from "./vault.ts";
 import * as Accounts from "./accounts.ts";
@@ -657,6 +658,12 @@ export const WS_METHODS = {
   machinesSetupSubscribe: "machines.setupSubscribe",
   machinesSetupRunStep: "machines.setupRunStep",
   machinesSetupDisableServe: "machines.setupDisableServe",
+  // Health of this machine and its paired machines, and alerts when it turns bad
+  machinesHealth: "machines.health",
+  machinesHealthSubscribe: "machines.healthSubscribe",
+  machinesHealthAlertsSubscribe: "machines.healthAlertsSubscribe",
+  machinesHealthRetrySync: "machines.healthRetrySync",
+  machinesHealthTestAlertChannels: "machines.healthTestAlertChannels",
 
   // Cloud environment methods
   cloudGetRelayClientStatus: "cloud.getRelayClientStatus",
@@ -2398,6 +2405,43 @@ const WsMachinesSetupDisableServeRpc = Rpc.make(WS_METHODS.machinesSetupDisableS
   error: machineSetupErrors,
 });
 
+const machineHealthErrors = Schema.Union([
+  MachineHealth.MachineHealthError,
+  EnvironmentAuthorizationError,
+]);
+/** This machine's health, or a paired machine's read over the peer link. */
+const WsMachinesHealthRpc = Rpc.make(WS_METHODS.machinesHealth, {
+  payload: MachineHealth.MachineHealthInput,
+  success: MachineHealth.MachineHealthReport,
+  error: machineHealthErrors,
+});
+/** The report, then a fresh one whenever it changes. */
+const WsMachinesHealthSubscribeRpc = Rpc.make(WS_METHODS.machinesHealthSubscribe, {
+  payload: MachineHealth.MachineHealthInput,
+  success: MachineHealth.MachineHealthReport,
+  error: machineHealthErrors,
+  stream: true,
+});
+/** Open alerts for this machine and the machines it is paired with, then each transition. */
+const WsMachinesHealthAlertsSubscribeRpc = Rpc.make(WS_METHODS.machinesHealthAlertsSubscribe, {
+  payload: Schema.Struct({}),
+  success: MachineHealth.MachineHealthAlertsSnapshot,
+  error: machineHealthErrors,
+  stream: true,
+});
+/** Retries held or failed sync with one paired machine now. */
+const WsMachinesHealthRetrySyncRpc = Rpc.make(WS_METHODS.machinesHealthRetrySync, {
+  payload: MachineHealth.MachineHealthRetrySyncInput,
+  success: Schema.Struct({}),
+  error: machineHealthErrors,
+});
+/** Sends a test message through each enabled external alert channel. */
+const WsMachinesHealthTestAlertChannelsRpc = Rpc.make(WS_METHODS.machinesHealthTestAlertChannels, {
+  payload: Schema.Struct({}),
+  success: MachineHealth.MachineHealthChannelTestResult,
+  error: machineHealthErrors,
+});
+
 const WsFactsListRpc = Rpc.make(WS_METHODS.factsList, {
   payload: Facts.FactListInput,
   success: Facts.FactListResult,
@@ -2834,6 +2878,11 @@ export const WsRpcGroup = RpcGroup.make(
   WsMachinesSetupSubscribeRpc,
   WsMachinesSetupRunStepRpc,
   WsMachinesSetupDisableServeRpc,
+  WsMachinesHealthRpc,
+  WsMachinesHealthSubscribeRpc,
+  WsMachinesHealthAlertsSubscribeRpc,
+  WsMachinesHealthRetrySyncRpc,
+  WsMachinesHealthTestAlertChannelsRpc,
   WsFactsListRpc,
   WsFactsCreateRpc,
   WsFactsUpdateRpc,

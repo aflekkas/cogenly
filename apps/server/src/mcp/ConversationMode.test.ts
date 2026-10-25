@@ -58,6 +58,7 @@ import * as DesktopAppControl from "../environment/DesktopAppControl.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as ThreadCommandExecutor from "../orchestration-v2/ThreadCommandExecutor.ts";
 import * as MachineSecurity from "../security/MachineSecurity.ts";
+import * as MachineHealth from "../health/MachineHealth.ts";
 import * as Integrations from "../integrations/Integrations.ts";
 import * as AgentStore from "../agents/AgentStore.ts";
 import { liveThreadShell } from "./McpToolAccess.testkit.ts";
@@ -164,6 +165,7 @@ const serverLayer = Layer.mergeAll(
       Layer.mock(ServerEnvironment.ServerEnvironment)({}),
       Layer.mock(ThreadCommandExecutor.ThreadCommandExecutor)({}),
       Layer.mock(MachineSecurity.MachineSecurity)({}),
+      Layer.mock(MachineHealth.MachineHealth)({}),
       Layer.mock(ChildProcessSpawner.ChildProcessSpawner)({}),
       Layer.mock(Integrations.Integrations)({
         list: () => Effect.succeed({ integrations: [] }),

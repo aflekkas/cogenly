@@ -19,6 +19,7 @@ import {
   hasNotificationSound,
   playNotificationSound,
   setNotificationBadge,
+  showBackgroundNotification,
   unlockNotificationAudio,
 } from "../threadNotifications";
 import { resolveSidebarThreadStatus } from "./Sidebar.logic";
@@ -234,31 +235,17 @@ function EnvironmentNotifications({
         });
         continue;
       }
-      if (
-        !hasDesktopNotifications(mode) ||
-        (document.visibilityState === "visible" && document.hasFocus()) ||
-        typeof Notification === "undefined" ||
-        Notification.permission !== "granted"
-      )
-        continue;
-      try {
-        const notification = new Notification(title, {
-          body: thread.title,
-          tag: `${environmentId}:${thread.id}`,
-          silent: true,
-        });
-        onNotification(environmentId, notification);
-        notification.addEventListener("click", () => {
-          notification.close();
-          window.focus();
+      const notification = showBackgroundNotification(mode, {
+        title,
+        body: thread.title,
+        tag: `${environmentId}:${thread.id}`,
+        onClick: () =>
           void navigate({
             to: "/$environmentId/$threadId",
             params: { environmentId, threadId: thread.id },
-          });
-        });
-      } catch {
-        // Some browsers expose Notification but reject desktop presentation.
-      }
+          }),
+      });
+      if (notification) onNotification(environmentId, notification);
     }
     previous.current = next;
   }, [
