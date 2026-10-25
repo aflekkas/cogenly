@@ -17,9 +17,6 @@ export const PROJECT_CONFIG_FILE_NAMES = [
   LEGACY_PROJECT_CONFIG_FILE_NAME,
 ] as const;
 
-/** Public URL of the published JSON Schema for {@link T3ProjectFile}. */
-export const T3_PROJECT_FILE_SCHEMA_URL = "https://t3.codes/schema/t3.json";
-
 const T3_PROJECT_FILE_PATH_MAX_LENGTH = 512;
 const T3_PROJECT_FILE_MAX_SCRIPTS = 50;
 
