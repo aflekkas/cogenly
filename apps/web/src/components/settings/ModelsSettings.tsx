@@ -17,6 +17,7 @@ import {
   sortProviderInstanceEntries,
 } from "../../providerInstances";
 import { EMPTY_SERVER_PROVIDERS } from "../../state/server";
+import { InlineButton } from "../ui/button";
 import { toastManager } from "../ui/toast";
 import { ProjectDefaultsSettings } from "./ProjectDefaultsSettings";
 import { useSettingsScope } from "./SettingsScopeContext";
@@ -38,13 +39,24 @@ const DEFAULT_DRIVER_KIND = ProviderDriverKind.make("codex");
 
 /** Settings → Models: which models new threads and generated text use. */
 export function ModelsSettingsPanel() {
+  const navigate = useNavigate();
   return (
-    <>
-      <SettingsSection id="models" title="Defaults">
-        <ProjectDefaultsSettings category="models" />
-        <TextGenerationModelRow />
-      </SettingsSection>
-    </>
+    <SettingsSection
+      id="models"
+      title="Defaults"
+      footer={
+        <>
+          To hide, reorder or add models, open a provider in{" "}
+          <InlineButton tone="muted" onClick={() => void navigate({ to: "/settings/providers" })}>
+            Providers
+          </InlineButton>
+          .
+        </>
+      }
+    >
+      <ProjectDefaultsSettings category="models" />
+      <TextGenerationModelRow />
+    </SettingsSection>
   );
 }
 
@@ -103,7 +115,7 @@ function TextGenerationModelRow() {
       serverScoped
       settingKeys={["textGenerationModelSelection"]}
       {...searchableSetting("text-generation-model")}
-      description="Used for thread titles and other generated text on connected devices with this provider. Source control can override it."
+      description="Writes thread titles, greetings and other short text. Source control can pick its own."
       resetAction={
         hasServerTargets && isTextGenerationModelDirty ? (
           <SettingResetButton
@@ -118,13 +130,9 @@ function TextGenerationModelRow() {
       }
       control={
         !hasServerTargets ? (
-          <span className="text-sm text-muted-foreground">
-            Connect a machine to choose its text generation model.
-          </span>
+          <span className="text-sm text-muted-foreground">Connect a machine to choose one</span>
         ) : !hasTextGenerationProvider ? (
-          <span className="text-sm text-muted-foreground">
-            No text generation providers available.
-          </span>
+          <span className="text-sm text-muted-foreground">No providers available</span>
         ) : (
           <div className="flex flex-wrap items-center justify-end gap-1.5">
             <ProviderModelPicker

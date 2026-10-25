@@ -148,13 +148,13 @@ export function ProjectDefaultsSettings({
       description={
         isProjectScope
           ? "Model for new threads in this project."
-          : "Default model for new threads. Projects can override it."
+          : "Used for new chats and threads."
       }
       status={
         unavailable || mixedModel || modelSource === "project"
           ? undefined
           : settings.defaultModelSelection === null
-            ? "Automatic"
+            ? "Automatic: the first available model until you pick one"
             : undefined
       }
       resetAction={
