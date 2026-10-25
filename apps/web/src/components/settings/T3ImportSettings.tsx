@@ -64,7 +64,7 @@ function T3ImportGate({ environmentId }: { environmentId: EnvironmentId | null }
           <SettingsRow
             title={
               environmentId === null
-                ? "Choose an environment to import into."
+                ? "Choose a machine to import into."
                 : "This connection needs permission to change settings to import."
             }
           />

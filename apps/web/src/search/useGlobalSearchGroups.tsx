@@ -281,7 +281,7 @@ export function useGlobalSearchGroups(input: {
         items: group.results.map(toItem),
       }));
     }
-    if (environmentIds.length === 0) return [status("Connect an environment to search it.")];
+    if (environmentIds.length === 0) return [status("Connect a machine to search it.")];
     if (stale || settled.some((entry) => entry.waiting)) return [status("Searching everything…")];
     if (settled.every((entry) => entry.failed)) {
       const error = settled[0]?.error;

@@ -214,7 +214,7 @@ export function SourceControlWritingSettingsSection() {
                   value={allInstructions ?? ""}
                   onChange={(event) => setAllInstructions(event.target.value)}
                   rows={4}
-                  aria-label="Custom source control instructions for all selected environments"
+                  aria-label="Custom source control instructions for all selected machines"
                   placeholder="Write the instructions each selected machine should use."
                 />
                 <Button
@@ -309,11 +309,11 @@ export function SourceControlWritingSettingsSection() {
         serverScoped
         settingKeys={["sourceControlWriterModelSelection"]}
         {...searchableSetting("source-control-writer-model")}
-        description="Model for source control text and branch or bookmark names. Off uses the environment's text generation model."
+        description="Model for source control text and branch or bookmark names. Off uses the text generation model."
         control={
           !hasServerTargets ? (
             <span className="text-sm text-muted-foreground">
-              Connect an environment to choose its source control writer model.
+              Connect a machine to choose its source control writer model.
             </span>
           ) : (
             <div className="flex flex-wrap items-center justify-end gap-2">

@@ -41,7 +41,7 @@ export function useResourceTelemetry(
   });
   const retry = useCallback(async () => {
     if (environmentId === null) {
-      throw new Error("No environment is selected.");
+      throw new Error("No machine is selected.");
     }
     if (
       !readEnvironmentScope(environmentId, AuthEnvironmentMaintainScope) ||

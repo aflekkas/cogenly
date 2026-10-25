@@ -88,7 +88,7 @@ export class ThreadSettlementUnsupportedError extends Schema.TaggedError<ThreadS
   },
 ) {
   override get message(): string {
-    return "This environment's server does not support settling yet. Update the server to use Settle.";
+    return "This machine's server does not support settling yet. Update the server to use Settle.";
   }
 }
 
@@ -100,7 +100,7 @@ export class ThreadSnoozeUnsupportedError extends Schema.TaggedError<ThreadSnooz
   },
 ) {
   override get message(): string {
-    return "This environment's server does not support snoozing yet. Update the server to use Snooze.";
+    return "This machine's server does not support snoozing yet. Update the server to use Snooze.";
   }
 }
 
@@ -124,7 +124,7 @@ export class ThreadPinningUnsupportedError extends Schema.TaggedError<ThreadPinn
   },
 ) {
   override get message(): string {
-    return "This environment's server does not support pinning yet. Update the server to use Pin.";
+    return "This machine's server does not support pinning yet. Update the server to use Pin.";
   }
 }
 

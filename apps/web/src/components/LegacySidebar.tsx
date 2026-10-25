@@ -1449,7 +1449,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
                           }?`,
                           `Path: ${member.workspaceRoot}`,
                           ...(member.environmentLabel
-                            ? [`Environment: ${member.environmentLabel}`]
+                            ? [`Machine: ${member.environmentLabel}`]
                             : []),
                           "This permanently clears conversation history for those threads and any archived threads.",
                           "This removes only this repository entry.",
@@ -1459,7 +1459,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
                           `Remove repository "${member.title}"?`,
                           `Path: ${member.workspaceRoot}`,
                           ...(member.environmentLabel
-                            ? [`Environment: ${member.environmentLabel}`]
+                            ? [`Machine: ${member.environmentLabel}`]
                             : []),
                           "This permanently clears any archived conversation history.",
                           "This removes only this repository entry.",
@@ -1510,7 +1510,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       const message = [
         `Remove repository "${member.title}"?`,
         `Path: ${member.workspaceRoot}`,
-        ...(member.environmentLabel ? [`Environment: ${member.environmentLabel}`] : []),
+        ...(member.environmentLabel ? [`Machine: ${member.environmentLabel}`] : []),
         "This permanently clears any archived conversation history.",
         "This removes only this repository entry.",
       ].join("\n");
@@ -1962,7 +1962,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           toastManager.add(
             stackedThreadToast({
               type: "error",
-              title: "Could not choose environment",
+              title: "Could not choose machine",
               description: error instanceof Error ? error.message : "An error occurred.",
             }),
           );
@@ -2354,7 +2354,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
             <TooltipPopup side="top">
               {project.allRemoteMembersAreDesktopLocal
                 ? `Local sandbox: ${project.remoteEnvironmentLabels.join(", ")}`
-                : `Remote environment: ${project.remoteEnvironmentLabels.join(", ")}`}
+                : `Remote machine: ${project.remoteEnvironmentLabels.join(", ")}`}
             </TooltipPopup>
           </Tooltip>
         )}

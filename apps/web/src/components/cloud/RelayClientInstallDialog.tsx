@@ -69,8 +69,8 @@ export function RelayClientInstallDialog() {
           </DialogTitle>
           <DialogDescription>
             {isInstalling
-              ? "Cogenly is preparing this environment for secure access through Cogenly Connect."
-              : "Cogenly needs the relay client to make this environment available through Cogenly Connect."}
+              ? "Cogenly is preparing this machine for secure access through Cogenly Connect."
+              : "Cogenly needs the relay client to make this machine available through Cogenly Connect."}
           </DialogDescription>
         </DialogHeader>
         <DialogPanel scrollFade={false}>

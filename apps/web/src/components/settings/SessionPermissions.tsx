@@ -32,7 +32,7 @@ export function SessionPermissions({
     </div>
   ) : (
     <p className="py-3 text-xs text-muted-foreground">
-      Permissions not checked. Connect to this environment to view this session’s permissions.
+      Permissions not checked. Connect to this machine to view this session’s permissions.
     </p>
   );
 }

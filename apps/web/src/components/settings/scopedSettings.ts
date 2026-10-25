@@ -552,7 +552,7 @@ export function planProjectOverridesClear(
     hasClientWrite: false,
     serverWrites,
     unavailableReason:
-      serverWrites.length > 0 ? null : "Connect the environments to reset these overrides.",
+      serverWrites.length > 0 ? null : "Connect the machines to reset these overrides.",
   };
 }
 
@@ -629,7 +629,7 @@ export async function persistScopedSettingsPatch(
       return [
         {
           ...environment,
-          message: "This environment does not support this setting. Update Cogenly on it.",
+          message: "This machine does not support this setting. Update Cogenly on it.",
         },
       ];
     }

@@ -112,7 +112,7 @@ export function MobileClientsUserProfilePage() {
   return (
     <ClerkUserProfilePage
       title="Mobile clients"
-      description="Mobile devices that get notifications from your environments."
+      description="Mobile devices that get notifications from your machines."
       action={
         <ClerkUserProfileRefreshButton
           isPending={devicesState.isPending}

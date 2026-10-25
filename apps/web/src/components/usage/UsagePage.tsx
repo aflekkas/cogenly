@@ -147,7 +147,7 @@ export function UsagePage() {
         <ScrollArea className="min-h-0 flex-1" viewportTabIndex={-1}>
           <PageContent>
             {environments.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Connect an environment to see limits.</p>
+              <p className="text-sm text-muted-foreground">Connect a machine to see limits.</p>
             ) : (
               <UsageLimitsSection selectedEnvironmentIds={selectedEnvironmentIds} now={limitsNow} />
             )}
@@ -159,7 +159,7 @@ export function UsagePage() {
 }
 
 /**
- * "All environments" and individual environments are exclusive: picking one
+ * "All machines" and individual environments are exclusive: picking one
  * out of "All" narrows to it, and clearing the last one, or picking every one,
  * goes back to "All".
  */
@@ -177,10 +177,10 @@ function LimitsEnvironmentFilter({
     (environment) => selectedEnvironmentIds?.has(environment.environmentId) === true,
   );
   const label = allSelected
-    ? "All environments"
+    ? "All machines"
     : selected.length === 1
       ? selected[0]!.label
-      : `${selected.length} environments`;
+      : `${selected.length} machines`;
 
   return (
     <Menu>
@@ -197,7 +197,7 @@ function LimitsEnvironmentFilter({
           closeOnClick={false}
           onCheckedChange={() => onSelectionChange(null)}
         >
-          All environments
+          All machines
         </MenuCheckboxItem>
         <MenuSeparator />
         {environments.map((environment) => (

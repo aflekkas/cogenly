@@ -457,8 +457,8 @@ function ThreadDetailsMenuContent(props: {
   return (
     <div className="flex flex-col">
       <ThreadDetailsSection
-        headingId="thread-details-environment-heading"
-        title="Environment"
+        headingId="thread-details-machine-heading"
+        title="Machine"
         separated={false}
       >
         <ThreadDetailsRow

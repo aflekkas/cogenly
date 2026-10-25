@@ -47,7 +47,7 @@ export function TelemetryExportSettings() {
     return (
       <SettingsSection title="OpenTelemetry export" id="telemetry-export">
         <SettingsScopeNotice target="environment">
-          Choose one environment to configure its telemetry exports.
+          Choose one machine to configure its telemetry exports.
         </SettingsScopeNotice>
       </SettingsSection>
     );

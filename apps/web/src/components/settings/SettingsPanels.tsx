@@ -418,7 +418,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.chatWidth !== DEFAULT_UNIFIED_SETTINGS.chatWidth ? ["Chat width"] : []),
       ...(settings.environmentIdentificationMode !==
       DEFAULT_UNIFIED_SETTINGS.environmentIdentificationMode
-        ? ["Environment identification"]
+        ? ["Machine identification"]
         : []),
       ...(settings.timestampFormat !== DEFAULT_UNIFIED_SETTINGS.timestampFormat
         ? ["Time format"]
@@ -1244,7 +1244,7 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
         <SettingsRow
           clientSetting
           {...searchableSetting("project-grouping")}
-          description="Combine matching repositories across environments."
+          description="Combine matching repositories across machines."
           resetAction={
             settings.sidebarProjectGroupingMode !==
             DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode ? (
@@ -1695,7 +1695,7 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
           description="Automatically resume interrupted threads after an update, crash, or machine restart across your machines."
           status={
             !supportsRestartContinuation
-              ? "All selected connected environments must support restart continuation."
+              ? "Every connected machine must support restart continuation."
               : undefined
           }
           resetAction={
@@ -1790,7 +1790,7 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
                   <SelectItem hideIndicator value="advanced" disabled={!isEnvironmentScope}>
                     {isEnvironmentScope
                       ? BACKGROUND_ACTIVITY_PROFILE_OPTION_LABELS.advanced
-                      : `${BACKGROUND_ACTIVITY_PROFILE_OPTION_LABELS.advanced} (one environment)`}
+                      : `${BACKGROUND_ACTIVITY_PROFILE_OPTION_LABELS.advanced} (one machine)`}
                   </SelectItem>
                 </SelectPopup>
               </Select>
@@ -2126,7 +2126,7 @@ export function ArchivedThreadsPanel() {
             }
             description={
               isLoadingArchive
-                ? "Checking connected environments."
+                ? "Checking connected machines."
                 : (archiveError ?? "Archived threads will appear here.")
             }
           />

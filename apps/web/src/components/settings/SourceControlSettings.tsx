@@ -474,14 +474,14 @@ function EmptySourceControlDiscovery({
   const hasError = error !== null;
 
   return (
-    <SettingsSection id={searchableSetting("source-control").id} title="Server environment">
+    <SettingsSection id={searchableSetting("source-control").id} title="Server machine">
       <Empty>
         <EmptyMedia>
           <PullRequestGlyph.pullRequest />
         </EmptyMedia>
         <EmptyHeader>
           <EmptyTitle>
-            {hasError ? "Could not scan the server environment" : "Nothing detected yet"}
+            {hasError ? "Could not scan the server machine" : "Nothing detected yet"}
           </EmptyTitle>
           <EmptyDescription>
             {hasError
@@ -549,7 +549,7 @@ export function SourceControlSettingsPanel() {
             variant="ghost-muted"
             onClick={handleScan}
             disabled={discovery.isPending}
-            aria-label="Rescan server environment"
+            aria-label="Rescan server machine"
           >
             <RefreshIcon refreshing={discovery.isPending} />
           </Button>
@@ -563,9 +563,9 @@ export function SourceControlSettingsPanel() {
     <SettingsPageContainer>
       <ProjectDefaultsSettings category="source-control" />
       {environmentId === null ? (
-        <SettingsSection id={searchableSetting("source-control").id} title="Server environment">
+        <SettingsSection id={searchableSetting("source-control").id} title="Server machine">
           <p className="px-4 py-3 text-sm text-muted-foreground">
-            Connect an environment to inspect its version control tools and hosting integrations.
+            Connect a machine to inspect its version control tools and hosting integrations.
           </p>
         </SettingsSection>
       ) : isInitialScanPending ? (

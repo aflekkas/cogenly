@@ -54,7 +54,7 @@ export function DesktopAppActivationCoordinator() {
         resolveHost: (alias) => {
           const bridge = window.desktopBridge;
           if (bridge === undefined) {
-            return Promise.reject(new Error("SSH environments need the desktop app."));
+            return Promise.reject(new Error("SSH machines need the desktop app."));
           }
           return bridge.resolveSshHost(alias);
         },

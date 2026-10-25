@@ -1246,7 +1246,7 @@ export function ProviderInstanceCard({
         <SettingsSection title="Models">
           <div className="px-3 py-3 sm:px-4">
             <p className="mb-3 text-xs text-muted-foreground">
-              Model preferences and custom models are saved on the selected environment and shared
+              Model preferences and custom models are saved on the selected machine and shared
               across connected devices.
             </p>
             <ProviderModelsSection

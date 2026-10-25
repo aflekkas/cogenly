@@ -583,7 +583,7 @@ export function makeBrowserGitHubRoutingPermissions(
         return Effect.fail(
           new ConnectionBlockedError({
             reason: "configuration",
-            detail: "This environment does not have a saved connection endpoint.",
+            detail: "This machine does not have a saved connection endpoint.",
           }),
         );
       return write(
