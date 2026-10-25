@@ -1,3 +1,10 @@
+import Migration0091 from "./Migrations/091_MessageItemLookupIndexes.ts";
+import Migration0092 from "./Migrations/092_RepositoryIconPath.ts";
+import Migration0093 from "./Migrations/093_ThreadReplication.ts";
+import Migration0094 from "./Migrations/094_ForwardCompatibleSync.ts";
+import Migration0095 from "./Migrations/095_SharedFacts.ts";
+import Migration0096 from "./Migrations/096_VaultSync.ts";
+import Migration0097 from "./Migrations/097_VaultSharingAuthorization.ts";
 /**
  * Migration runner with an inline loader.
  *
@@ -10,8 +17,6 @@
 
 import * as Migrator from "effect/sql/Migrator";
 import Migration0090 from "./Migrations/090_SharedBootstrap.ts";
-import Migration0091 from "./Migrations/091_MessageItemLookupIndexes.ts";
-import Migration0092 from "./Migrations/092_RepositoryIconPath.ts";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import { reconcileV2PreviewMigration } from "./reconcileV2PreviewMigration.ts";
@@ -212,6 +217,11 @@ export const migrationEntries = [
   [90, "SharedBootstrap", Migration0090],
   [91, "MessageItemLookupIndexes", Migration0091],
   [92, "RepositoryIconPath", Migration0092],
+  [93, "ThreadReplication", Migration0093],
+  [94, "ForwardCompatibleSync", Migration0094],
+  [95, "SharedFacts", Migration0095],
+  [96, "VaultSync", Migration0096],
+  [97, "VaultSharingAuthorization", Migration0097],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

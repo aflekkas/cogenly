@@ -10,6 +10,9 @@ import * as GlobalSearch from "./search/GlobalSearch.ts";
 import * as Facts from "./context/FactService.ts";
 import * as Integrations from "./integrations/Integrations.ts";
 import * as Machines from "./machines/Machines.ts";
+import * as SharedSyncStatus from "./sync/SharedSyncStatus.ts";
+import * as ProjectMove from "./threadSync/ProjectMove.ts";
+import * as ThreadTransfer from "./threadSync/ThreadTransfer.ts";
 import * as MachineSecurity from "./security/MachineSecurity.ts";
 import * as MachineSetup from "./tailscale/MachineSetup.ts";
 import * as VisualStates from "./htmlRender/VisualState.ts";
@@ -144,6 +147,7 @@ import * as ThreadMessageIntake from "./orchestration-v2/ThreadMessageIntake.ts"
 import * as ScheduledTasks from "./scheduledTasks/ScheduledTaskService.ts";
 import * as SecretRequests from "./secrets/SecretRequests.ts";
 import * as Vault from "./vault/Vault.ts";
+import * as VaultSync from "./vault/VaultSync.ts";
 import * as Accounts from "./accounts/Accounts.ts";
 import {
   archivedShellStreamItemFromThreadShell,
@@ -1091,6 +1095,9 @@ const makeWsRpcHandlers = (
     const facts = yield* Facts.FactService;
     const integrations = yield* Integrations.Integrations;
     const machines = yield* Machines.Machines;
+    const syncStatus = yield* SharedSyncStatus.SharedSyncStatus;
+    const threadTransfer = yield* ThreadTransfer.ThreadTransfer;
+    const projectMove = yield* ProjectMove.ProjectMove;
     const machineSecurity = yield* MachineSecurity.MachineSecurity;
     const machineSetup = yield* MachineSetup.MachineSetup;
     const visualStates = yield* VisualStates.VisualStateService;
@@ -1098,6 +1105,7 @@ const makeWsRpcHandlers = (
     const scheduledTasks = yield* ScheduledTasks.ScheduledTaskService;
     const secretRequests = yield* SecretRequests.SecretRequests;
     const vault = yield* Vault.Vault;
+    const vaultSync = yield* VaultSync.VaultSync;
     const accounts = yield* Accounts.Accounts;
     const accountConnections = yield* AccountConnections.AccountConnections;
     const accountAccess = yield* AccountAccess.AccountAccess;
@@ -1646,6 +1654,7 @@ const makeWsRpcHandlers = (
       [WS_METHODS.projectLabelsSubscribeConfirmedThreadLabels]: () =>
         projectLabels.subscribeConfirmedThreadLabels(),
       [WS_METHODS.projectLabelsMoveThread]: (input) => projectLabels.moveThread(input),
+      [WS_METHODS.projectLabelsMoveToMachine]: (input) => projectMove.move(input),
       [WS_METHODS.projectLabelsForkThreadToProject]: (input) =>
         ProjectLabelFork.forkThreadToProject(input, {
           labels: projectLabels,
@@ -1720,12 +1729,15 @@ const makeWsRpcHandlers = (
       [WS_METHODS.integrationsSubscribe]: () => integrations.subscribe(),
       [WS_METHODS.machineSecurityStatus]: () => machineSecurity.status,
       [WS_METHODS.machinesList]: () => machines.list,
+      [WS_METHODS.syncStatus]: (input) => syncStatus.status(input),
       [WS_METHODS.machinesSubscribe]: () => machines.subscribe,
       [WS_METHODS.machinesUpdate]: (input) => machines.update(input),
       [WS_METHODS.machinesPrepareJoin]: () => machines.prepareJoin,
       [WS_METHODS.machinesCreatePeerGrant]: (input) => machines.createPeerGrant(input),
       [WS_METHODS.machinesJoinHub]: (input) => machines.joinHub(input),
       [WS_METHODS.machinesUnpair]: (input) => machines.unpair(input),
+      [WS_METHODS.machinesMoveThreads]: (input) => threadTransfer.move(input),
+      [WS_METHODS.machinesMoveAllThreads]: (input) => threadTransfer.moveAllFrom(input),
       [WS_METHODS.machinesSetupStatus]: () => machineSetup.status,
       [WS_METHODS.machinesSetupSubscribe]: () => machineSetup.subscribe,
       [WS_METHODS.machinesSetupRunStep]: (input) => machineSetup.runStep(input.step),
@@ -1801,6 +1813,8 @@ const makeWsRpcHandlers = (
       [WS_METHODS.vaultUpdate]: (input) => vault.update(input),
       [WS_METHODS.vaultDelete]: (input) => vault.delete(input),
       [WS_METHODS.vaultUsage]: (input) => vault.listUsage(input),
+      [WS_METHODS.vaultSetPeerSharing]: (input) => vaultSync.setPeerSharing(input),
+      [WS_METHODS.vaultSharingStatus]: () => vaultSync.sharingStatus,
       [WS_METHODS.secretsAnswerRequest]: (input) =>
         Effect.annotateCurrentSpan({ "orchestration_v2.thread_id": input.threadId }).pipe(
           Effect.andThen(secretRequests.answer(input)),
@@ -2765,7 +2779,7 @@ type WsRpcHandlersEffect = ReturnType<typeof makeWsRpcHandlers>;
 type WsRpcHandlers = Effect.Success<WsRpcHandlersEffect>;
 type WsRpcHandlerKeysA = Extract<keyof WsRpcHandlers, `p${string}`>;
 type WsRpcHandlerKeysB = Extract<keyof WsRpcHandlers, `s${string}`>;
-type WsRpcHandlerKeysC = Extract<keyof WsRpcHandlers, `m${string}`>;
+type WsRpcHandlerKeysC = Extract<keyof WsRpcHandlers, `m${string}` | `a${string}`>;
 /** Resolve in smaller groups to stay within the RPC conditional type's instantiation budget. */
 type WsRpcHandlerServices =
   | RpcGroup.HandlersServices<WsRpcs, Pick<WsRpcHandlers, WsRpcHandlerKeysA>>
@@ -2818,6 +2832,9 @@ type WsRequestServices =
   | Facts.FactService
   | Integrations.Integrations
   | Machines.Machines
+  | SharedSyncStatus.SharedSyncStatus
+  | ThreadTransfer.ThreadTransfer
+  | ProjectMove.ProjectMove
   | MachineSecurity.MachineSecurity
   | MachineSetup.MachineSetup
   | FileSystem.FileSystem
@@ -2865,6 +2882,7 @@ type WsRequestServices =
   | AccountConnections.AccountConnections
   | Accounts.Accounts
   | Vault.Vault
+  | VaultSync.VaultSync
   | ServerConfig.ServerConfig
   | ServerEnvironment.ServerEnvironment
   | ServerLifecycleEvents.ServerLifecycleEvents

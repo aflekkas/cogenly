@@ -15,11 +15,11 @@ import { runMigrations } from "../persistence/Migrations.ts";
 import { agentFixture } from "../agents/agent.testkit.ts";
 
 const database = Sqlite.layerMemory.pipe(Layer.provide(NodeServices.layer));
-const layer = Layer.mergeAll(
-  Facts.layer,
-  Retrieval.layer,
-  Store.layer.pipe(Layer.provide(layerSharedIdentity)),
-).pipe(Layer.provideMerge(database), Layer.provide(NodeServices.layer));
+const layer = Layer.mergeAll(Facts.layer, Retrieval.layer, Store.layer).pipe(
+  Layer.provide(layerSharedIdentity),
+  Layer.provideMerge(database),
+  Layer.provide(NodeServices.layer),
+);
 const a = ProjectLabelId.make("a"),
   b = ProjectLabelId.make("b");
 const threadId = ThreadId.make("chat");

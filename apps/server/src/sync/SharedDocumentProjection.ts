@@ -12,6 +12,12 @@ import * as SqlClient from "effect/sql/SqlClient";
 import { compareClock } from "./merge.ts";
 import { nextScheduledRunAt } from "../scheduledTasks/Schedule.ts";
 import { decodeAgent, decodeProject, decodeSchedule } from "./documentSchemas.ts";
+import {
+  linkArrivedProject,
+  projectFact,
+  projectWaitingFacts,
+  readFactConfiguration,
+} from "./FactProjection.ts";
 
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const json = Schema.decodeUnknownEffect(
@@ -56,6 +62,7 @@ export const readConfiguration = Effect.fn("SharedState.readConfiguration")(func
   id: string,
 ) {
   const sql = yield* SqlClient.SqlClient;
+  if (kind === "fact") return yield* readFactConfiguration(id);
   if (kind === "project") {
     const rows = yield* sql<{
       name: string;
@@ -267,8 +274,12 @@ export const projectDocument = Effect.fn("SharedState.projectDocument")(function
   preserveLocalBindings = false,
   changedFields?: ReadonlyArray<string>,
 ) {
+  // Vault documents project asynchronously through VaultSync, which needs
+  // this machine's keys; see docs/internals/vault-sync.md.
+  if (document.kind === "vault") return;
   const sql = yield* SqlClient.SqlClient;
   const { kind, id, fields } = document;
+  if (kind === "fact") return yield* projectFact(document);
   const at = DateTime.formatIso(yield* DateTime.now);
   if (kind === "project")
     yield* sql`INSERT INTO shared_repository_checkouts(remote,repository_id,directory_name) SELECT r.remote,r.repository_id,r.directory_name FROM label_repositories r JOIN projection_projects p ON p.project_id=r.repository_id WHERE r.remote IS NOT NULL AND p.deleted_at IS NULL GROUP BY r.remote ON CONFLICT(remote) DO UPDATE SET repository_id=excluded.repository_id,directory_name=excluded.directory_name`;
@@ -311,6 +322,7 @@ export const projectDocument = Effect.fn("SharedState.projectDocument")(function
     )
       yield* reconcileRepositories();
     yield* sql`INSERT OR IGNORE INTO shared_possible_duplicates(kind,first_id,second_id) SELECT 'project',min(label_id,${id}),max(label_id,${id}) FROM project_labels WHERE lower(trim(name))=lower(trim(${f.name})) AND label_id<>${id}`;
+    yield* linkArrivedProject(id);
     return;
   }
   const remote = typeof fields.repositoryRemote === "string" ? fields.repositoryRemote : null;
@@ -351,6 +363,7 @@ export const projectDocument = Effect.fn("SharedState.projectDocument")(function
       yield* Schema.decodeUnknownEffect(Agent)(payload),
     );
     yield* sql`INSERT INTO agents(agent_id,conversation_thread_id,payload_json,enabled,daily_run_cap,owner_machine) VALUES (${id},${payload.conversationThreadId},${encoded},1,${f.dailyRunCap},${f.ownerMachine}) ON CONFLICT(agent_id) DO UPDATE SET payload_json=excluded.payload_json,daily_run_cap=excluded.daily_run_cap,owner_machine=excluded.owner_machine`;
+    yield* projectWaitingFacts(id);
     return;
   }
   const decoded = yield* Effect.result(decodeSchedule(fields));

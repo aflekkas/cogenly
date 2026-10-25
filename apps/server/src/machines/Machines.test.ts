@@ -16,6 +16,7 @@ import {
 } from "@t3tools/contracts";
 
 import * as Effect from "effect/Effect";
+import * as DateTime from "effect/DateTime";
 import * as Fiber from "effect/Fiber";
 
 import * as Deferred from "effect/Deferred";
@@ -733,6 +734,26 @@ describe("machines", () => {
         }
       }).pipe(Effect.scoped),
     30_000,
+  );
+
+  it.live("an expired saved peer session is revoked even before a connection change", () =>
+    Effect.gen(function* () {
+      const hub = yield* startMachine("hub", "cloud-server");
+      const spoke = yield* startMachine("laptop", "computer");
+      yield* pair(hub, spoke);
+      const link = yield* spoke.run(readHubLink).pipe(Effect.map(Option.getOrThrow));
+      yield* spoke.run(writeHubLink({ ...link, expiresAt: DateTime.makeUnsafe(0) }));
+      const view = yield* spoke.machines.list;
+      assert.strictEqual(
+        view.machines.find((machine) => machine.relation === "hub")?.pairing,
+        "revoked",
+      );
+      assert.strictEqual(
+        view.machines.find((machine) => machine.relation === "hub")?.online,
+        false,
+      );
+      assert.strictEqual(view.link._tag === "spoke" && view.link.status, "revoked");
+    }).pipe(Effect.scoped),
   );
 
   it.live(

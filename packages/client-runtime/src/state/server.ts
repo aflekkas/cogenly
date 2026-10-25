@@ -1231,6 +1231,21 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:projectLabels:moveThreadProjectFolder",
       tag: WS_METHODS.projectLabelsMoveThread,
     }),
+    /** Hand a project's repositories, threads and agents to another paired machine. */
+    moveProjectToMachine: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:projectLabels:moveProjectToMachine",
+      tag: WS_METHODS.projectLabelsMoveToMachine,
+    }),
+    /** The machines this environment is paired with, live: a fresh list after every change. */
+    machinesLive: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+      label: "environment-data:machines:live",
+      tag: WS_METHODS.machinesSubscribe,
+    }),
+    /** Hand threads to another paired machine; answers once it runs them, with skips. */
+    moveThreadsToMachine: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:machines:moveThreadsToMachine",
+      tag: WS_METHODS.machinesMoveThreads,
+    }),
     /** Move a chat with turns into a project by forking it; returns the new chat. */
     forkThreadToProject: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:projectLabels:forkThreadToProject",

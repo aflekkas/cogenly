@@ -284,6 +284,7 @@ import { WizardPopup } from "./ui/wizard";
 import { BranchToolbar, type BranchToolbarHandle } from "./BranchToolbar";
 import { makeWorkspaceFileDropHandlers } from "./chat/workspaceFileDrop";
 import { ThreadHeaderTitle } from "./chat/ThreadLineageBreadcrumb";
+import { ThreadOwnerBadge } from "../machines/ThreadOwnerBadge";
 import { resolveThreadOrigin } from "./chat/threadLineage.logic";
 import { isEditableFocused } from "../lib/editableFocus";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
@@ -9372,6 +9373,12 @@ export default function ChatView(props: ChatViewProps) {
           ) : (
             <h2 className="sr-only">{activeThread.title}</h2>
           )}
+          {isServerThread && activeThreadShell ? (
+            <ThreadOwnerBadge
+              environmentId={activeThreadShell.environmentId}
+              ownerMachine={activeThreadShell.source.ownerMachine}
+            />
+          ) : null}
           {threadDetailsControl && !threadDetailsInTitlebarCluster ? (
             <span key="header" className="swap-motion ms-auto flex h-full shrink-0 items-center">
               {threadDetailsControl}

@@ -6,6 +6,8 @@ import * as T3Import from "./t3Import.ts";
 import * as ProjectLabels from "./projectLabel.ts";
 import * as Integrations from "./integration.ts";
 import * as Machines from "./machine.ts";
+import * as ThreadReplication from "./threadReplication.ts";
+import * as SharedDocuments from "./sharedDocument.ts";
 import * as MachineSecurity from "./machineSecurity.ts";
 import * as MachineSetup from "./machineSetup.ts";
 import * as Work from "./work.ts";
@@ -531,6 +533,8 @@ export const WS_METHODS = {
   projectLabelsSubscribeThreadLabels: "projectLabels.subscribeThreadLabels",
   projectLabelsSubscribeConfirmedThreadLabels: "projectLabels.subscribeConfirmedThreadLabels",
   projectLabelsMoveThread: "projectLabels.moveThread",
+  // Hand a project's threads, agents and repositories to another paired machine.
+  projectLabelsMoveToMachine: "projectLabels.moveToMachine",
   projectLabelsForkThreadToProject: "projectLabels.forkThreadToProject",
   projectLabelsSetThreadLabels: "projectLabels.setThreadLabels",
   projectLabelsLinkSource: "projectLabels.linkSource",
@@ -606,6 +610,9 @@ export const WS_METHODS = {
   vaultUpdate: "vault.update",
   vaultDelete: "vault.delete",
   vaultUsage: "vault.usage",
+  // Sharing this vault with directly paired machines (owner decision, never agents)
+  vaultSetPeerSharing: "vault.setPeerSharing",
+  vaultSharingStatus: "vault.sharingStatus",
   scheduledTasksListWebhookDeliveries: "scheduledTasks.listWebhookDeliveries",
   scheduledTasksGetWebhookDelivery: "scheduledTasks.getWebhookDelivery",
 
@@ -627,7 +634,12 @@ export const WS_METHODS = {
   machinesCreatePeerGrant: "machines.createPeerGrant",
   machinesJoinHub: "machines.joinHub",
   machinesUnpair: "machines.unpair",
+  // Hand threads to another paired machine, which runs them from then on.
+  machinesMoveThreads: "machines.moveThreads",
+  machinesMoveAllThreads: "machines.moveAllThreads",
   machineSecurityStatus: "machines.securityStatus",
+  // What each paired machine has yet to receive from this one
+  syncStatus: "sync.status",
   // Getting this machine ready to pair (Tailscale and Serve)
   machinesSetupStatus: "machines.setupStatus",
   machinesSetupSubscribe: "machines.setupSubscribe",
@@ -1989,6 +2001,22 @@ const WsProjectLabelsSubscribeConfirmedThreadLabelsRpc = Rpc.make(
     stream: true,
   },
 );
+// Moves are answered once the target runs the threads; skipped threads say why.
+const WsMachinesMoveThreadsRpc = Rpc.make(WS_METHODS.machinesMoveThreads, {
+  payload: ThreadReplication.ThreadMoveInput,
+  success: ThreadReplication.ThreadMoveResult,
+  error: Schema.Union([ThreadReplication.ThreadRemoteError, EnvironmentAuthorizationError]),
+});
+const WsMachinesMoveAllThreadsRpc = Rpc.make(WS_METHODS.machinesMoveAllThreads, {
+  payload: ThreadReplication.ThreadMoveAllInput,
+  success: ThreadReplication.ThreadMoveResult,
+  error: Schema.Union([ThreadReplication.ThreadRemoteError, EnvironmentAuthorizationError]),
+});
+const WsProjectLabelsMoveToMachineRpc = Rpc.make(WS_METHODS.projectLabelsMoveToMachine, {
+  payload: ThreadReplication.ProjectMoveInput,
+  success: ThreadReplication.ProjectMoveResult,
+  error: Schema.Union([ThreadReplication.ThreadRemoteError, EnvironmentAuthorizationError]),
+});
 const WsProjectLabelsMoveThreadRpc = Rpc.make(WS_METHODS.projectLabelsMoveThread, {
   payload: ProjectLabels.MoveThreadProjectFolderInput,
   success: ProjectLabels.ThreadProjectFolderResult,
@@ -2214,6 +2242,11 @@ const WsMachineSecurityStatusRpc = Rpc.make(WS_METHODS.machineSecurityStatus, {
   payload: Schema.Struct({}),
   success: MachineSecurity.MachineSecurityStatus,
   error: machineErrors,
+});
+const WsSyncStatusRpc = Rpc.make(WS_METHODS.syncStatus, {
+  payload: SharedDocuments.SharedSyncStatusInput,
+  success: SharedDocuments.SharedSyncStatusResult,
+  error: Schema.Union([SharedDocuments.SharedStateError, EnvironmentAuthorizationError]),
 });
 const WsMachinesListRpc = Rpc.make(WS_METHODS.machinesList, {
   payload: Schema.Struct({}),
@@ -2535,6 +2568,16 @@ const WsVaultUsageRpc = Rpc.make(WS_METHODS.vaultUsage, {
   success: Vault.VaultUsageListResult,
   error: Schema.Union([Vault.VaultError, EnvironmentAuthorizationError]),
 });
+const WsVaultSetPeerSharingRpc = Rpc.make(WS_METHODS.vaultSetPeerSharing, {
+  payload: Vault.VaultSetPeerSharingInput,
+  success: Vault.VaultSharingStatus,
+  error: Schema.Union([Vault.VaultError, EnvironmentAuthorizationError]),
+});
+const WsVaultSharingStatusRpc = Rpc.make(WS_METHODS.vaultSharingStatus, {
+  payload: Schema.Struct({}),
+  success: Vault.VaultSharingStatus,
+  error: Schema.Union([Vault.VaultError, EnvironmentAuthorizationError]),
+});
 
 const WsScheduledTasksListWebhookDeliveriesRpc = Rpc.make(
   WS_METHODS.scheduledTasksListWebhookDeliveries,
@@ -2644,6 +2687,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectLabelsSubscribeThreadLabelsRpc,
   WsProjectLabelsSubscribeConfirmedThreadLabelsRpc,
   WsProjectLabelsMoveThreadRpc,
+  WsProjectLabelsMoveToMachineRpc,
+  WsMachinesMoveThreadsRpc,
+  WsMachinesMoveAllThreadsRpc,
   WsProjectLabelsForkThreadToProjectRpc,
   WsProjectLabelsSetThreadLabelsRpc,
   WsProjectLabelsLinkSourceRpc,
@@ -2679,6 +2725,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsIntegrationsConnectFromCatalogRpc,
   WsIntegrationsSubscribeRpc,
   WsMachineSecurityStatusRpc,
+  WsSyncStatusRpc,
   WsMachinesListRpc,
   WsMachinesSubscribeRpc,
   WsMachinesUpdateRpc,
@@ -2738,6 +2785,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsVaultUpdateRpc,
   WsVaultDeleteRpc,
   WsVaultUsageRpc,
+  WsVaultSetPeerSharingRpc,
+  WsVaultSharingStatusRpc,
   WsScheduledTasksListWebhookDeliveriesRpc,
   WsScheduledTasksGetWebhookDeliveryRpc,
   WsServerReportClientActivityRpc,

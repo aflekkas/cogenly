@@ -1,4 +1,4 @@
-import { isT3ImportCommandId } from "../t3Import/T3ImportCommandIds.ts";
+import { isReplayedCommandId } from "../orchestration-v2/ReplayedCommandIds.ts";
 import * as Access from "./AgentAccessScope.ts";
 import { canReceiveAgentEvent } from "./agentEventPolicy.ts";
 import { agentKickoffText } from "./builderPrompt.ts";
@@ -441,7 +441,7 @@ const make = Effect.gen(function* () {
               Stream.filter(
                 (stored) =>
                   stored.event.type === "message.updated" &&
-                  !isT3ImportCommandId(stored.commandId) &&
+                  !isReplayedCommandId(stored.commandId) &&
                   stored.event.payload.role === "assistant" &&
                   !stored.event.payload.streaming,
               ),

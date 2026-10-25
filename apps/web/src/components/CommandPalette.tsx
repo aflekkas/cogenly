@@ -110,6 +110,9 @@ import {
   reportProjectFolderFailure,
   useMoveThreadToFolder,
 } from "../projectLabels/useMoveThreadToFolder";
+import { machineMoveTargetsForThreads, threadsRunOnName } from "../machines/machines.logic";
+import { useEnvironmentMachineList } from "../machines/useMachines";
+import { useMoveThreadsToMachine } from "../machines/useMoveToMachine";
 import {
   useEnvironmentProjectLabels,
   useProjectLabelDirectory,
@@ -724,6 +727,11 @@ function OpenCommandPaletteDialog(props: {
     serverEnvironment.moveThreadProjectFolder.permissionAtom(activeThread?.environmentId ?? null),
   );
   const moveThreadToFolder = useMoveThreadToFolder();
+  const activeMachineList = useEnvironmentMachineList(activeThread?.environmentId ?? null);
+  const canMoveActiveThreadToMachine = useAtomValue(
+    serverEnvironment.moveThreadsToMachine.permissionAtom(activeThread?.environmentId ?? null),
+  );
+  const moveThreadsToMachine = useMoveThreadsToMachine();
   const { snoozeThread, unsnoozeThread } = useThreadActions();
   const canOperateActiveThread = useEnvironmentScope(
     activeThread?.environmentId ?? null,
@@ -2263,6 +2271,31 @@ function OpenCommandPaletteDialog(props: {
             thread,
             folder: null,
             previous,
+          });
+        },
+      });
+    }
+  }
+
+  // One item per paired machine; none on a standalone machine.
+  if (activeThread) {
+    const thread = activeThread;
+    const owners = [thread.source.ownerMachine];
+    for (const target of machineMoveTargetsForThreads(activeMachineList, owners)) {
+      actionItems.push({
+        kind: "action",
+        value: `action:move-thread-to-machine:${target.environmentId}`,
+        searchTerms: ["move to machine", "move thread", "machine", "hand off", target.name],
+        title: `Move thread to ${target.name}`,
+        ...(target.online ? {} : { description: "Offline" }),
+        icon: <EnvironmentMachineIcon kind={target.icon} className={ITEM_ICON_CLASS} />,
+        disabled: !canMoveActiveThreadToMachine || !canOperateActiveThread || !target.online,
+        run: async () => {
+          await moveThreadsToMachine({
+            environmentId: thread.environmentId,
+            threadIds: [thread.id],
+            target,
+            fromName: threadsRunOnName(activeMachineList, owners),
           });
         },
       });

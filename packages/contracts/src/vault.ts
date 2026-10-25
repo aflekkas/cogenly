@@ -1,7 +1,9 @@
 import * as Schema from "effect/Schema";
 
 import { AgentId } from "./agent.ts";
-import { IsoDateTime, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { AuthSyncReplicateScope } from "./auth.ts";
+import { EnvironmentId, IsoDateTime, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { makePeerChannel } from "./machine.ts";
 import { ProjectLabelId } from "./projectLabel.ts";
 
 /**
@@ -67,6 +69,20 @@ export const defaultVaultPolicy: VaultPolicy = {
   allowedDomains: [],
 };
 
+/**
+ * Whether an item may copy to machines this one shares its vault with.
+ * `machine` keeps it here; machines that already have it keep their copy.
+ */
+export const VaultItemPortability = Schema.Literals(["shared", "machine"]);
+export type VaultItemPortability = typeof VaultItemPortability.Type;
+
+/**
+ * Why an item the owner left `shared` stays on this machine anyway: a local
+ * integration runs with it, or its account credential is machine-only.
+ */
+export const VaultPortabilityReason = Schema.Literals(["local_integration", "machine_credential"]);
+export type VaultPortabilityReason = typeof VaultPortabilityReason.Type;
+
 const vaultItemFields = {
   name: TrimmedNonEmptyString.check(Schema.isMaxLength(200)),
   type: VaultItemType,
@@ -94,6 +110,10 @@ export const VaultItemMetadata = Schema.Struct({
    * stays encrypted. Absent on non-card and legacy card-shaped items.
    */
   cardLast4: Schema.optional(Schema.String.check(Schema.isMaxLength(4))),
+  /** Effective portability; absent from servers that predate vault sync. */
+  portability: Schema.optional(VaultItemPortability),
+  /** Set when a rule, not the owner, keeps the item on this machine. */
+  portabilityReason: Schema.optional(VaultPortabilityReason),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -104,6 +124,8 @@ export const VaultCreateInput = Schema.Struct({
   scopeProjectId: Schema.optional(Schema.NullOr(ProjectLabelId)),
   policy: Schema.optional(VaultPolicy),
   allowedDomains: Schema.optional(vaultItemFields.allowedDomains),
+  /** Defaults to `shared`. */
+  portability: Schema.optional(VaultItemPortability),
   secretFields: VaultSecretFields,
 });
 export type VaultCreateInput = typeof VaultCreateInput.Type;
@@ -116,6 +138,7 @@ export const VaultUpdateInput = Schema.Struct({
   label: Schema.optional(Schema.NullOr(TrimmedNonEmptyString.check(Schema.isMaxLength(200)))),
   allowedDomains: Schema.optional(vaultItemFields.allowedDomains),
   policy: Schema.optional(VaultPolicy),
+  portability: Schema.optional(VaultItemPortability),
   /** Merged into the stored fields; an empty string removes that field. */
   secretFields: Schema.optional(VaultSecretFields),
 });
@@ -166,6 +189,60 @@ export type VaultUsageListInput = typeof VaultUsageListInput.Type;
 export const VaultUsageListResult = Schema.Struct({ usage: Schema.Array(VaultUsageEntry) });
 export type VaultUsageListResult = typeof VaultUsageListResult.Type;
 
+/**
+ * Vault sharing with one directly paired machine (docs/internals/vault-sync.md).
+ * `waiting_for_peer`: this machine shares, the other has not turned it on, so
+ * nothing is released to it or accepted from it yet.
+ * `key_changed`: the other machine now presents a different vault key than the
+ * one pinned here. Re-pairing clears the pin; the UI tells the owner to do that.
+ */
+export const VaultPeerSharingState = Schema.Literals([
+  "not_shared",
+  "waiting_for_peer",
+  "shared",
+  "key_changed",
+]);
+export type VaultPeerSharingState = typeof VaultPeerSharingState.Type;
+
+export const VaultPeerSharing = Schema.Struct({
+  environmentId: EnvironmentId,
+  label: Schema.String,
+  online: Schema.Boolean,
+  state: VaultPeerSharingState,
+  /** Whether the other machine shares with this one; null when it could not be asked. */
+  peerSharing: Schema.NullOr(Schema.Boolean),
+  /** Synced items whose current revision this machine has passed to that peer. */
+  itemsShared: Schema.Int,
+});
+export type VaultPeerSharing = typeof VaultPeerSharing.Type;
+
+export const VaultSharingStatus = Schema.Struct({
+  peers: Schema.Array(VaultPeerSharing),
+  /** Synced items this machine can read. */
+  itemsShared: Schema.Int,
+  /** Synced items here that no trusted machine has made readable for this one yet. */
+  itemsWaiting: Schema.Int,
+});
+export type VaultSharingStatus = typeof VaultSharingStatus.Type;
+
+export const VaultSetPeerSharingInput = Schema.Struct({
+  environmentId: EnvironmentId,
+  enabled: Schema.Boolean,
+});
+export type VaultSetPeerSharingInput = typeof VaultSetPeerSharingInput.Type;
+
+/**
+ * A directly paired machine's vault public key, asked of that machine itself
+ * over the authenticated link and never relayed. `sharing` says whether the
+ * responder shares its vault with the caller.
+ */
+export const VaultPeerKey = makePeerChannel({
+  name: "vault.peerKey.v1",
+  scope: AuthSyncReplicateScope,
+  payload: Schema.Struct({}),
+  success: Schema.Struct({ publicKey: Schema.String, sharing: Schema.Boolean }),
+});
+
 const VAULT_FAILURE_MESSAGES = {
   storage: "Could not access the vault store.",
   crypto: "Could not decrypt this vault item on this machine.",
@@ -176,6 +253,10 @@ const VAULT_FAILURE_MESSAGES = {
   field_missing: "That vault item has no such field.",
   domain_not_allowed: "This vault item may not be used on that domain.",
   approval_required: "Waiting on you: this vault use needs owner approval.",
+  peer_unavailable: "Vault sharing needs that machine paired directly with this one and online.",
+  peer_key_invalid: "That machine did not present a valid vault key.",
+  peer_key_changed:
+    "That machine's vault key changed. Unpair it and pair again, then turn sharing back on.",
 } as const;
 
 export const VaultFailureReason = Schema.Literals(

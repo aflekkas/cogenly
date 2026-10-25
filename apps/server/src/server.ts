@@ -176,6 +176,15 @@ import * as UsageService from "./usage/UsageService.ts";
 import * as Scheduler from "./scheduling/Scheduler.ts";
 import * as SharedState from "./sync/SharedState.ts";
 import * as SharedSync from "./sync/SharedSync.ts";
+import * as SharedSyncStatus from "./sync/SharedSyncStatus.ts";
+import * as VaultSync from "./vault/VaultSync.ts";
+import * as IntegrationSyncBinding from "./integrations/IntegrationSyncBinding.ts";
+import * as ThreadReplication from "./threadSync/ThreadReplication.ts";
+import * as ThreadRouting from "./threadSync/ThreadRouting.ts";
+import * as ThreadTransfer from "./threadSync/ThreadTransfer.ts";
+import * as ProjectMove from "./threadSync/ProjectMove.ts";
+import * as RemoteThreadCommands from "./orchestration-v2/RemoteThreadCommands.ts";
+import * as ThreadSync from "./threadSync/ThreadSync.ts";
 import * as RuntimeLayer from "./orchestration-v2/runtimeLayer.ts";
 import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
 import * as ProjectLabelFolders from "./projectLabels/ProjectLabelFolders.ts";
@@ -572,14 +581,50 @@ const layerProviderInstallationRefresh = Layer.effectDiscard(
   }),
 );
 
+const layerVaultSync = VaultSync.layer.pipe(
+  Layer.provide(RuntimeLayer.layerVaultProvided),
+  Layer.provide(RuntimeLayer.layerVaultSyncCapture),
+  Layer.provide(SharedState.layer),
+);
+
 const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   AgentAwarenessRelay.layer,
   MachineSecurity.layer,
   // One instance for every transport: it remembers sign-ins and approvals in progress.
   MachineSetup.layer.pipe(Layer.provide(TailscaleHost.layer), Layer.provide(MachineIdentity.layer)),
-  SharedSync.layer.pipe(
+  // Paired machines: shared configuration, then thread logs, over one link.
+  Layer.mergeAll(
+    SharedSync.layer.pipe(Layer.provide(SharedState.layer)),
+    SharedSyncStatus.layer,
+    // Vault items shared with paired machines, end-to-end encrypted over the same documents.
+    layerVaultSync,
+    // Web integration sign-ins ride the vault: who refreshes them, and renewing them in time.
+    IntegrationSyncBinding.layer.pipe(
+      Layer.provide(layerVaultSync),
+      Layer.provide(RuntimeLayer.layerVaultSyncCapture),
+      Layer.provide(RuntimeLayer.layerIntegrationSyncPeers),
+    ),
+    // The orchestrator's own sink, so replicated events reach the same
+    // subscribers, and its forwarder registry, so routing sees its commands.
+    ProjectMove.layer.pipe(
+      Layer.provideMerge(ThreadTransfer.layer),
+      Layer.provideMerge(ThreadRouting.layer),
+      Layer.provideMerge(ThreadSync.layer),
+      Layer.provide(ThreadReplication.layer),
+      Layer.provide(RemoteThreadCommands.layer),
+      // Agents follow their conversation; the same layer as SharedSync's.
+      Layer.provide(SharedState.layer),
+      Layer.provide(
+        Layer.mergeAll(
+          RuntimeLayer.layerEventSink,
+          EventStoreV2.layerFromOrchestrationEventStore,
+          ProjectionStoreV2.layer,
+          ProjectStore.layer,
+        ),
+      ),
+    ),
+  ).pipe(
     Layer.provideMerge(layerMachines),
-    Layer.provide(SharedState.layer),
     Layer.provide(ServerEnvironment.layerIdentity),
     Layer.provide(Scheduler.layer),
   ),

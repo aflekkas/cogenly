@@ -172,6 +172,7 @@ import {
   buildDraftActionMenuItems,
   buildRepositoryActionMenuItems,
   buildThreadActionMenuItems,
+  machineMenuItems,
   threadActionRequiresOperate,
 } from "./threadActionMenu.logic";
 import {
@@ -263,6 +264,14 @@ import { usePendingProjectFolderStore } from "../projectLabels/pendingProjectFol
 import { useMoveThreadToFolder } from "../projectLabels/useMoveThreadToFolder";
 import { useProjectLabelDirectory } from "../projectLabels/useProjectLabels";
 import { ProjectFolderIcon } from "../projectLabels/ProjectFolderMark";
+import {
+  machineIconKind,
+  machineMoveTargetsForThreads,
+  threadOwnerMachine,
+  threadsRunOnName,
+} from "../machines/machines.logic";
+import { useMachineDirectory } from "../machines/useMachines";
+import { useMoveThreadsToMachine } from "../machines/useMoveToMachine";
 import {
   SidebarChatProjectLine,
   useChatProjectMetaAnimates,
@@ -2647,6 +2656,22 @@ export default function Sidebar() {
   const labelEnvironmentIds = useConnectedEnvironmentIds();
   const projectLabelDirectory = useProjectLabelDirectory(labelEnvironmentIds);
   const moveThreadToFolder = useMoveThreadToFolder();
+  // Paired machines per environment: where a replica runs, and where threads can move.
+  const machineDirectory = useMachineDirectory(labelEnvironmentIds);
+  const moveThreadsToMachine = useMoveThreadsToMachine();
+  // The machine a row names: the paired machine that runs a replica, else its environment.
+  const runsOnFor = (thread: Pick<EnvironmentThreadShell, "environmentId" | "source">) => {
+    const owner = threadOwnerMachine(
+      machineDirectory.get(thread.environmentId) ?? null,
+      thread.source.ownerMachine,
+    );
+    return owner
+      ? { label: owner.name, machine: machineIconKind(owner) }
+      : {
+          label: environmentLabelById.get(thread.environmentId) ?? null,
+          machine: environmentMachineById.get(thread.environmentId) ?? "server",
+        };
+  };
   // Chats | Work | Agents: the list below shows one mode's threads at a time.
   const sidebarModes = useSidebarModeState({
     threads,
@@ -4410,6 +4435,29 @@ export default function Sidebar() {
         supportedCount: titleRegenerationThreads.length,
         actionableCount: regeneratableTitleThreads.length,
       });
+      // Move to Machine goes through one environment, so a selection spanning
+      // environments does not offer it.
+      const moveEnvironmentId = selectedThreads.every(
+        (thread) => thread.environmentId === selectedThreads[0]?.environmentId,
+      )
+        ? (selectedThreads[0]?.environmentId ?? null)
+        : null;
+      const moveMachineList =
+        moveEnvironmentId === null ? null : (machineDirectory.get(moveEnvironmentId) ?? null);
+      const moveOwners = selectedThreads.map((thread) => thread.source.ownerMachine);
+      const moveTargets = machineMoveTargetsForThreads(moveMachineList, moveOwners);
+      const machineItems = machineMenuItems(
+        {
+          targets: moveTargets,
+          canMove:
+            moveEnvironmentId !== null &&
+            appAtomRegistry.get(
+              serverEnvironment.moveThreadsToMachine.permissionAtom(moveEnvironmentId),
+            ) &&
+            canOperateThreads(selectedThreads),
+        },
+        ` (${count})`,
+      );
       const snoozePresets = resolveSnoozePresets(new Date(), timestampFormat);
       const clicked = await settlePromise(() =>
         api.contextMenu.show(
@@ -4458,6 +4506,7 @@ export default function Sidebar() {
             ...(offersMarkUnread
               ? [{ id: "mark-unread", label: `Mark as Unread (${count})` }]
               : []),
+            ...machineItems,
             ...(offersDelete
               ? [
                   {
@@ -4489,6 +4538,21 @@ export default function Sidebar() {
             : selectedThreads;
       if (clicked.value === "settle" && actionTargets.length === 0) return;
       if (clicked.value !== "mark-unread" && !checkThreadOperations(actionTargets)) return;
+      if (clicked.value.startsWith("move-machine:")) {
+        const clickedId = clicked.value;
+        const target = moveTargets.find(
+          (candidate) => `move-machine:${candidate.environmentId}` === clickedId,
+        );
+        if (!target || moveEnvironmentId === null) return;
+        clearSelection();
+        await moveThreadsToMachine({
+          environmentId: moveEnvironmentId,
+          threadIds: selectedThreads.map((thread) => thread.id),
+          target,
+          fromName: threadsRunOnName(moveMachineList, moveOwners),
+        });
+        return;
+      }
       if (clicked.value?.startsWith("snooze:")) {
         const preset =
           clicked.value === "snooze:custom"
@@ -4716,6 +4780,10 @@ export default function Sidebar() {
         // Presets resolve at menu-open time (same as the popover).
         const snoozePresets = resolveSnoozePresets(new Date(), timestampFormat);
         const folderState = threadFolderState(thread, projectLabelDirectory);
+        const machineList = machineDirectory.get(thread.environmentId) ?? null;
+        const machineTargets = machineMoveTargetsForThreads(machineList, [
+          thread.source.ownerMachine,
+        ]);
         setSidebarContextMenuTarget(threadKey);
         const clicked = await settlePromise(() =>
           api.contextMenu.show(
@@ -4776,6 +4844,12 @@ export default function Sidebar() {
                 ),
                 forks: threadForksIntoProjects(thread),
               },
+              machines: {
+                targets: machineTargets,
+                canMove: appAtomRegistry.get(
+                  serverEnvironment.moveThreadsToMachine.permissionAtom(thread.environmentId),
+                ),
+              },
             }),
             position,
           ),
@@ -4816,6 +4890,19 @@ export default function Sidebar() {
           return;
         }
         if (threadActionRequiresOperate(clicked.value) && !checkThreadOperations([thread])) return;
+        if (clickedId.startsWith("move-machine:")) {
+          const target = machineTargets.find(
+            (candidate) => `move-machine:${candidate.environmentId}` === clickedId,
+          );
+          if (!target) return;
+          await moveThreadsToMachine({
+            environmentId: thread.environmentId,
+            threadIds: [thread.id],
+            target,
+            fromName: threadsRunOnName(machineList, [thread.source.ownerMachine]),
+          });
+          return;
+        }
         if (clicked.value?.startsWith("snooze:")) {
           const preset =
             clicked.value === "snooze:custom"
@@ -5257,6 +5344,7 @@ export default function Sidebar() {
                     const threadKey = scopedThreadKey(
                       scopeThreadRef(thread.environmentId, thread.id),
                     );
+                    const runsOn = runsOnFor(thread);
                     return (
                       <SidebarSearchResultRow
                         isSettled={settledThreadKeys.has(threadKey)}
@@ -5274,10 +5362,8 @@ export default function Sidebar() {
                             `${thread.environmentId}:${thread.projectId}`,
                           ) ?? null
                         }
-                        environmentLabel={environmentLabelById.get(thread.environmentId) ?? null}
-                        environmentMachine={
-                          environmentMachineById.get(thread.environmentId) ?? "server"
-                        }
+                        environmentLabel={runsOn.label}
+                        environmentMachine={runsOn.machine}
                         providerEntryByInstanceId={
                           providerEntriesByEnvironment.get(thread.environmentId) ??
                           EMPTY_PROVIDER_ENTRIES
@@ -5405,6 +5491,7 @@ export default function Sidebar() {
                     const isCard =
                       sidebarMode === "tasks" || section === "active" || section === "working";
                     const rowVariant = isCard ? "card" : "slim";
+                    const runsOn = runsOnFor(thread);
                     return (
                       <SidebarThreadRow
                         // Fade between card and compact rows.
@@ -5447,10 +5534,8 @@ export default function Sidebar() {
                         wokeAt={threadWokeAt(thread, { now: snoozeNow })}
                         isActive={routeThreadKey === threadKey}
                         jumpLabel={showJumpHints ? (jumpLabelByKey.get(threadKey) ?? null) : null}
-                        environmentLabel={environmentLabelById.get(thread.environmentId) ?? null}
-                        environmentMachine={
-                          environmentMachineById.get(thread.environmentId) ?? "server"
-                        }
+                        environmentLabel={runsOn.label}
+                        environmentMachine={runsOn.machine}
                         project={
                           projectByKey.get(`${thread.environmentId}:${thread.projectId}`) ?? null
                         }

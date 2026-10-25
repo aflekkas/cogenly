@@ -1,6 +1,7 @@
 import * as Schema from "effect/Schema";
 import { GitPreparePullRequestThreadInput } from "./git.ts";
 import {
+  AuthAccessReadScope,
   AuthAccessWriteScope,
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
@@ -70,6 +71,9 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.projectLabelsLinkSource]: AuthOrchestrationOperateScope,
   [WS_METHODS.projectLabelsUnlinkSource]: AuthOrchestrationOperateScope,
   [WS_METHODS.projectLabelsMoveThread]: AuthOrchestrationOperateScope,
+  [WS_METHODS.projectLabelsMoveToMachine]: AuthOrchestrationOperateScope,
+  [WS_METHODS.machinesMoveThreads]: AuthOrchestrationOperateScope,
+  [WS_METHODS.machinesMoveAllThreads]: AuthOrchestrationOperateScope,
   [WS_METHODS.projectLabelsForkThreadToProject]: AuthOrchestrationOperateScope,
   [WS_METHODS.projectLabelsSetThreadLabels]: AuthOrchestrationOperateScope,
   [WS_METHODS.projectLabelsAddResource]: AuthOrchestrationOperateScope,
@@ -97,6 +101,7 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.integrationsConnectFromCatalog]: AuthOrchestrationOperateScope,
   [WS_METHODS.machineSecurityStatus]: AuthOrchestrationReadScope,
   [WS_METHODS.machinesList]: AuthOrchestrationReadScope,
+  [WS_METHODS.syncStatus]: AuthOrchestrationReadScope,
   [WS_METHODS.machinesSubscribe]: AuthOrchestrationReadScope,
   [WS_METHODS.machinesUpdate]: AuthSettingsWriteScope,
   // Pairing hands another server a standing credential to this one, or makes
@@ -147,6 +152,10 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.vaultCreate]: AuthOrchestrationOperateScope,
   [WS_METHODS.vaultUpdate]: AuthOrchestrationOperateScope,
   [WS_METHODS.vaultDelete]: AuthOrchestrationOperateScope,
+  // Sharing makes another machine able to decrypt every shared item: access
+  // management, like pairing. Agents have no tool for it.
+  [WS_METHODS.vaultSetPeerSharing]: AuthAccessWriteScope,
+  [WS_METHODS.vaultSharingStatus]: AuthAccessReadScope,
   [ORCHESTRATION_V2_WS_METHODS.stopWorkflow]: AuthOrchestrationOperateScope,
   // Continuing on another provider starts a turn, like sending a message.
   [ORCHESTRATION_V2_WS_METHODS.acceptUsageLimitHandoff]: AuthOrchestrationOperateScope,

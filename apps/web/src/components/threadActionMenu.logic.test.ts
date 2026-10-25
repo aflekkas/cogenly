@@ -6,6 +6,7 @@ import {
   buildDraftActionMenuItems,
   buildRepositoryActionMenuItems,
   buildThreadActionMenuItems,
+  machineMenuItems,
   type ThreadActionMenuState,
 } from "./threadActionMenu.logic";
 
@@ -329,5 +330,41 @@ describe("Move to folder options", () => {
       ["folder", "var(--color-gray-500)", false],
       ["folder", "var(--color-violet-500)", true],
     ]);
+  });
+});
+
+describe("Move to Machine", () => {
+  const vps = { environmentId: "vps", name: "VPS", online: true };
+  const mini = { environmentId: "mini", name: "Mac mini", online: false };
+
+  it("is absent on a standalone machine", () => {
+    expect(ids(buildThreadActionMenuItems(stateFor("chat")))).not.toContain("move-machine");
+    expect(machineMenuItems({ targets: [], canMove: true })).toEqual([]);
+  });
+
+  it("names the one paired machine directly, with a bulk count", () => {
+    expect(
+      machineMenuItems({ targets: [vps], canMove: true }, " (3)").map((item) => [
+        item.id,
+        item.label,
+        item.disabled,
+      ]),
+    ).toEqual([["move-machine:vps", "Move to VPS (3)", false]]);
+  });
+
+  it("lists several machines in a submenu, offline ones disabled", () => {
+    const [submenu] = machineMenuItems({ targets: [mini, vps], canMove: true });
+    expect(submenu?.id).toBe("move-machine");
+    expect(submenu?.children?.map((item) => [item.label, item.disabled])).toEqual([
+      ["Mac mini (Offline)", true],
+      ["VPS", false],
+    ]);
+  });
+
+  it("stays disabled for a client without the move permission", () => {
+    const items = buildThreadActionMenuItems(
+      stateFor("work", { machines: { targets: [vps], canMove: false } }),
+    );
+    expect(items.find((item) => item.id === "move-machine:vps")?.disabled).toBe(true);
   });
 });

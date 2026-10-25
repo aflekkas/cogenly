@@ -1569,6 +1569,8 @@ export function threadShellFromProjection(
     projectId: projection.thread.projectId,
     projectFolderId: projection.thread.projectFolderId ?? null,
     projectFolderSource: projection.thread.projectFolderSource ?? null,
+    // Omitted for this machine's own threads, which are most of a shell snapshot.
+    ...(projection.thread.ownerMachine ? { ownerMachine: projection.thread.ownerMachine } : {}),
     title: projection.thread.title,
     providerInstanceId: projection.thread.providerInstanceId,
     modelSelection: projection.thread.modelSelection,
@@ -1884,6 +1886,7 @@ function shellFromState(input: {
     projectId: input.state.thread.projectId,
     projectFolderId: input.state.thread.projectFolderId ?? null,
     projectFolderSource: input.state.thread.projectFolderSource ?? null,
+    ...(input.state.thread.ownerMachine ? { ownerMachine: input.state.thread.ownerMachine } : {}),
     title: input.state.thread.title,
     providerInstanceId: input.state.thread.providerInstanceId,
     modelSelection: input.state.thread.modelSelection,
@@ -1956,6 +1959,11 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
   ProjectionStoreV2,
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
+
+    // Recovery, usage-limit resume and pull request polling act only on threads
+    // this machine runs. A replica records another machine's run as it is there.
+    const locallyOwned = (threadId: Statement.Fragment) =>
+      sql`NOT EXISTS (SELECT 1 FROM thread_owners owner WHERE owner.thread_id = ${threadId} AND owner.local = 0)`;
 
     // For run upserts: a snapshot without `path` keeps the value another event recorded there.
     const keepRecordedRunField = (payload: Statement.Fragment, path: string) => sql`
@@ -2902,7 +2910,9 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             '$.projectFolderSource', CASE
               WHEN EXISTS (SELECT 1 FROM thread_project_labels WHERE thread_id = ${threadId}) THEN 'explicit'
               WHEN EXISTS (SELECT 1 FROM effective_thread_project_folders WHERE thread_id = ${threadId} AND folder_id IS NOT NULL) THEN 'repository'
-              ELSE NULL END) AS payload_json
+              ELSE NULL END,
+            '$.ownerMachine',
+              (SELECT owner_env FROM thread_owners WHERE thread_id = ${threadId} AND local = 0)) AS payload_json
           FROM orchestration_v2_projection_threads
           WHERE thread_id = ${threadId}
           LIMIT 1
@@ -3810,6 +3820,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             ON previous.run_id = json_extract(t.payload_json, '$.limitRecovery.runId')
             AND previous.thread_id = t.thread_id
           WHERE t.deleted_at IS NULL
+            AND ${locallyOwned(sql`t.thread_id`)}
             AND json_extract(t.payload_json, '$.archivedAt') IS NULL
             AND json_extract(t.payload_json, '$.settledOverride') IS NOT 'settled'
             AND json_extract(item.payload_json, '$.failure.class') = 'usage_limit'
@@ -4023,6 +4034,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         const rows = yield* sql<{ readonly thread_id: string }>`
           SELECT thread_id FROM orchestration_v2_projection_threads
           WHERE deleted_at IS NULL
+            AND ${locallyOwned(sql`thread_id`)}
             AND thread_id IN (${candidates})
             ${kind === "queued-runs" ? sql`AND archived_at IS NULL` : sql``}
           ORDER BY updated_at ASC, thread_id ASC
@@ -5532,7 +5544,9 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 '$.projectFolderSource', CASE
                   WHEN EXISTS (SELECT 1 FROM thread_project_labels e WHERE e.thread_id = t.thread_id) THEN 'explicit'
                   WHEN EXISTS (SELECT 1 FROM effective_thread_project_folders f WHERE f.thread_id = t.thread_id AND f.folder_id IS NOT NULL) THEN 'repository'
-                  ELSE NULL END) AS payload_json,
+                  ELSE NULL END,
+                '$.ownerMachine',
+                  (SELECT o.owner_env FROM thread_owners o WHERE o.thread_id = t.thread_id AND o.local = 0)) AS payload_json,
               CASE
                 WHEN json_extract(t.payload_json, '$.forkedFrom.type') = 'run'
                   THEN json_extract(t.payload_json, '$.forkedFrom.threadId')
@@ -5862,6 +5876,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           SELECT payload_json
           FROM orchestration_v2_projection_threads
           WHERE deleted_at IS NULL${threadId === undefined ? sql`` : sql` AND thread_id = ${threadId}`}
+            AND ${locallyOwned(sql`thread_id`)}
             AND json_extract(payload_json, '$.archivedAt') IS NULL
             AND json_array_length(payload_json, '$.pullRequests') > 0
           ORDER BY updated_at ASC, thread_id ASC

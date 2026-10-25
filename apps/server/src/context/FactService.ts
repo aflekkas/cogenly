@@ -1,4 +1,6 @@
 import * as Access from "../agents/AgentAccessScope.ts";
+import { factDocumentId } from "../sync/documentSchemas.ts";
+import * as SharedState from "../sync/SharedState.ts";
 import {
   AgentId,
   Fact,
@@ -61,6 +63,7 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const access = yield* Access.AgentAccessScope;
   const crypto = yield* Crypto.Crypto;
+  const shared = yield* SharedState.SharedState;
   const now = DateTime.now.pipe(Effect.map(DateTime.formatIso));
   const owner = (principal: ContextPrincipal) =>
     principal === "user" ? undefined : AgentId.make(principal.slice(6));
@@ -132,8 +135,33 @@ const make = Effect.gen(function* () {
         fact,
       });
       yield* sql`INSERT INTO fact_history(fact_id,payload_json) VALUES (${fact.id},${history})`;
+      // Paired machines receive the change from the same transaction.
+      yield* shared.capture("fact", factDocumentId(fact.id));
       return { fact };
     });
+  /** The fact as projected, which may hide it behind an identical one. */
+  const projected = (id: FactId) =>
+    sql<{ payload_json: string }>`SELECT payload_json FROM facts WHERE id = ${id}`.pipe(
+      Effect.flatMap((rows) => decode(rows[0]?.payload_json ?? "")),
+      Effect.map((fact) => ({ fact })),
+    );
+  /**
+   * Copies hidden behind a fact (made on another machine, or proposed again)
+   * follow it out of use, so they do not resurface once it is gone. Read them
+   * before changing the fact: its projection re-places them.
+   */
+  const twinsOf = (id: FactId) =>
+    sql<{ payload_json: string }>`SELECT payload_json FROM facts WHERE duplicate_of = ${id}`.pipe(
+      Effect.flatMap((rows) => Effect.forEach(rows, (row) => decode(row.payload_json))),
+    );
+  const retire = (
+    twins: ReadonlyArray<Fact>,
+    change: (twin: Fact) => Fact,
+    who: ContextPrincipal,
+  ) =>
+    Effect.forEach(twins, (twin) =>
+      now.pipe(Effect.flatMap((updatedAt) => persist({ ...change(twin), updatedAt }, who))),
+    );
   const create = (input: FactCreateInput, principal: ContextPrincipal) =>
     Effect.gen(function* () {
       if (input.visibility === "labels" && !input.labelIds.length)
@@ -161,7 +189,10 @@ const make = Effect.gen(function* () {
           yield* authorizeWrite(fact, principal);
           if (fact.status === "superseded")
             return yield* new FactError({ operation: "retract", reason: "invalid_state" });
-          return yield* persist({ ...fact, status: "retracted", updatedAt: yield* now }, principal);
+          const twins = yield* twinsOf(id);
+          yield* persist({ ...fact, status: "retracted", updatedAt: yield* now }, principal);
+          yield* retire(twins, (twin) => ({ ...twin, status: "retracted" }), principal);
+          return yield* projected(id);
         }),
       )
       .pipe(Effect.mapError(failure("retract")));
@@ -184,7 +215,11 @@ const make = Effect.gen(function* () {
         );
       }).pipe(Effect.mapError(failure("list"))),
     create: (input, principal = "user") =>
-      sql.withTransaction(create(input, principal)).pipe(Effect.mapError(failure("create"))),
+      sql
+        .withTransaction(
+          create(input, principal).pipe(Effect.flatMap(({ fact }) => projected(fact.id))),
+        )
+        .pipe(Effect.mapError(failure("create"))),
     update: (input) =>
       sql
         .withTransaction(
@@ -199,7 +234,8 @@ const make = Effect.gen(function* () {
                 (previous.supersededBy !== undefined && previous.supersededBy !== fact.id)
               )
                 return yield* new FactError({ operation: "confirm", reason: "invalid_state" });
-              if (previous.status !== "superseded")
+              if (previous.status !== "superseded") {
+                const twins = yield* twinsOf(previous.id);
                 yield* persist(
                   {
                     ...previous,
@@ -209,8 +245,17 @@ const make = Effect.gen(function* () {
                   },
                   "user",
                 );
+                yield* retire(
+                  twins,
+                  (twin) => ({ ...twin, status: "superseded", supersededBy: fact.id }),
+                  "user",
+                );
+              }
             }
-            return yield* persist({ ...fact, status: input.status, updatedAt: yield* now }, "user");
+            const hidden = input.status === "retracted" ? yield* twinsOf(fact.id) : [];
+            yield* persist({ ...fact, status: input.status, updatedAt: yield* now }, "user");
+            yield* retire(hidden, (twin) => ({ ...twin, status: "retracted" }), "user");
+            return yield* projected(fact.id);
           }),
         )
         .pipe(Effect.mapError(failure("update"))),
@@ -222,13 +267,14 @@ const make = Effect.gen(function* () {
             if (old.status === "superseded" || old.status === "retracted")
               return yield* new FactError({ operation: "supersede", reason: "invalid_state" });
             yield* authorizeWrite(old, principal);
+            const twins = yield* twinsOf(old.id);
             const result = yield* create(input.replacement, principal);
             // A proposed correction cannot erase confirmed knowledge. Confirmation atomically
             // activates the replacement and links the old fact; superseded proposals retain their chain.
             const supersedes =
               old.status === "proposed" && old.supersedes !== undefined ? old.supersedes : old.id;
-            const replacement = yield* persist({ ...result.fact, supersedes }, principal);
-            if (old.status !== "confirmed" || result.fact.status === "confirmed")
+            yield* persist({ ...result.fact, supersedes }, principal);
+            if (old.status !== "confirmed" || result.fact.status === "confirmed") {
               yield* persist(
                 {
                   ...old,
@@ -238,7 +284,13 @@ const make = Effect.gen(function* () {
                 },
                 principal,
               );
-            return replacement;
+              yield* retire(
+                twins.filter((twin) => twin.id !== result.fact.id),
+                (twin) => ({ ...twin, status: "superseded", supersededBy: result.fact.id }),
+                principal,
+              );
+            }
+            return yield* projected(result.fact.id);
           }),
         )
         .pipe(Effect.mapError(failure("supersede"))),
@@ -256,5 +308,7 @@ const make = Effect.gen(function* () {
       ),
   });
 });
-export const layer: Layer.Layer<FactService, never, SqlClient.SqlClient | Crypto.Crypto> =
-  Layer.effect(FactService, make).pipe(Layer.provide(Access.layer));
+export const layer = Layer.effect(FactService, make).pipe(
+  Layer.provide(Access.layer),
+  Layer.provide(SharedState.layer),
+);

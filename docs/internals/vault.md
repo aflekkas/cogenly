@@ -2,8 +2,10 @@
 
 Encrypted credential storage. Browser fill keeps values out of model context;
 Accounts can separately authorize portable token exposure to agent terminals.
-Built single-machine first; credential replication still needs the re-wrap
-work described below. User guide:
+Items replicate to machines the owner shares with; see
+[vault sync](./vault-sync.md). Disabling sharing clears authorization but keeps
+the peer key pinned until unpairing; toggling sharing cannot accept a changed key.
+User guide:
 [docs/user/vault.md](../user/vault.md).
 
 ## Key hierarchy
@@ -21,10 +23,9 @@ work described below. User guide:
   the HKDF salt) and stored as a list in `wrapped_keys_json`. Adding a
   machine later is a new wrapped-key entry; the ciphertext is untouched and
   a hub can relay items it cannot open.
-- Caveat for sync: rotating a secret creates a new data key wrapped only for
-  the machine that made the change, so peers cannot open that revision until
-  a re-wrap pass runs. Metadata-only edits keep the existing data key and
-  wrapped keys.
+- These local rows are always wrapped for this machine only. A synced item
+  arrives as a separate sealed document and is stored again here under this
+  machine's own key ([vault sync](./vault-sync.md)).
 
 ## What is plaintext and what is not
 
@@ -64,8 +65,15 @@ written and read only by the gateway ([IntegrationTokens.ts](../../apps/server/s
 Each secret gets its own field (access token `value`, refresh token
 `password`, a registered client's secret `username`) because scrubbing matches
 exact field values: a JSON blob in one field would leave the tokens inside it
-unscrubbed. Expiry and the client registration are not secret and stay with the
-integration.
+unscrubbed. Expiry, server metadata, client registration and refresh ownership
+travel in the item's sealed sync attachment. The gateway reads them with all
+token fields and their revision from one vault-row snapshot; writes return
+the revision committed with those tokens. A replacement sign-in updates the
+refresher's server and client metadata even while it remains signed in. A client
+authentication mismatch does not revoke the shared grant; only `invalid_grant`
+does, and an obsolete refusal first retries a newer token revision. At startup,
+legacy web sign-ins gain their missing attachment from persisted OAuth state
+before vault capture; existing refresh ownership stays on the same machine.
 
 Accounts reference vault items without copying their encrypted identities. The
 legacy backfill reads metadata only and preserves item ids and encrypted

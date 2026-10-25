@@ -714,17 +714,31 @@ export function createEnvironmentCommand<R, ER, Input, A, E>(
   });
 }
 
-/** Protected reads authorize against the destination session when the query runs. */
+/**
+ * Protected reads authorize against the destination session when the query runs.
+ * `permissionAtom` says whether the session holds the read's grant, so a view can
+ * skip a read it would only be refused.
+ */
 export function createEnvironmentGuardedRpcQueryAtomFamily<
   R,
   ER,
   TTag extends Extract<EnvironmentUnaryRpcTag, ClientGuardedReadRpcTag>,
 >(
   runtime: Atom.AtomRuntime<EnvironmentRegistry.EnvironmentRegistry | R, ER>,
-  options: { readonly label: string; readonly tag: TTag },
+  options: {
+    readonly label: string;
+    readonly tag: TTag;
+    readonly staleTimeMs?: number;
+    readonly refreshTrigger?: (target: {
+      readonly environmentId: EnvironmentIdType;
+      readonly input: EnvironmentRpcInput<TTag>;
+    }) => Atom.Atom<unknown> | undefined;
+  },
 ) {
-  return createEnvironmentQueryAtomFamily(runtime, {
+  const query = createEnvironmentQueryAtomFamily(runtime, {
     label: options.label,
+    ...(options.staleTimeMs === undefined ? {} : { staleTimeMs: options.staleTimeMs }),
+    ...(options.refreshTrigger === undefined ? {} : { refreshTrigger: options.refreshTrigger }),
     execute: (input: EnvironmentRpcInput<TTag>) =>
       Effect.gen(function* () {
         const registry = yield* AtomRegistry.AtomRegistry;
@@ -735,6 +749,9 @@ export function createEnvironmentGuardedRpcQueryAtomFamily<
           }),
         );
       }),
+  });
+  return Object.assign(query, {
+    permissionAtom: createCommandPermissions(runtime, options.tag).permissionAtom,
   });
 }
 

@@ -1,13 +1,32 @@
-import type { AgentId, EnvironmentId, VaultItemMetadata } from "@t3tools/contracts";
+import type {
+  AgentId,
+  EnvironmentId,
+  SharedSyncPeerStatus,
+  VaultItemMetadata,
+  VaultPeerSharing,
+} from "@t3tools/contracts";
 import { HistoryIcon, KeyRoundIcon, PencilIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 
+import { AnimatedHeight } from "~/components/AnimatedHeight";
 import { useAgents } from "../../agents/agentsClient";
 import { requestConfirmDialog } from "../../confirmDialog";
+import {
+  peerSyncIndicator,
+  pendingFor,
+  vaultItemsWaitingText,
+  vaultPortabilityExplanation,
+} from "../../machines/peerSync.logic";
+import { useSyncPeers } from "../../machines/usePeerSync";
 import { sortProjectLabels } from "../../projectLabels/projectLabels.logic";
 import { useEnvironmentProjectLabels } from "../../projectLabels/useProjectLabels";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
-import { useVaultActions, useVaultItems, useVaultUsage } from "../../vault/useVault";
+import {
+  useVaultActions,
+  useVaultItems,
+  useVaultSharing,
+  useVaultUsage,
+} from "../../vault/useVault";
 import { VaultItemDialog } from "../../vault/VaultItemDialog";
 import { VaultUsageList } from "../../vault/VaultUsageList";
 import {
@@ -29,6 +48,10 @@ import {
   EmptyTitle,
 } from "../ui/empty";
 import { OverlayPresence } from "../ui/overlay-presence";
+import { Spinner } from "../ui/spinner";
+import { Switch } from "../ui/switch";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { PeerSyncRow } from "./PeerSyncRow";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
 
@@ -56,10 +79,15 @@ export function VaultSettings() {
   );
   const list = useVaultItems(environmentId);
   const activity = useVaultUsage(environmentId);
+  const syncPeers = useSyncPeers(environmentId, "vault");
   const actions = useVaultActions(environmentId, () => {
     list.refresh();
     activity.refresh();
+    syncPeers.refresh();
   });
+  const sharing = useVaultSharing(environmentId, syncPeers.refresh);
+  // A standalone machine shows nothing about sharing: there is no one to share with.
+  const paired = (sharing.status?.peers.length ?? 0) > 0 || syncPeers.peers.length > 0;
   const [editing, setEditing] = useState<Editing | null>(null);
   const items = useMemo(() => sortVaultItems(list.items), [list.items]);
   const lastUsed = useMemo(() => lastUsedByItem(activity.usage), [activity.usage]);
@@ -116,6 +144,7 @@ export function VaultSettings() {
                 lastUsedAt={lastUsed.get(item.id) ?? null}
                 agentName={agentName}
                 canWrite={actions.canWrite}
+                paired={paired}
                 onEdit={() => setEditing({ kind: "edit", item })}
                 onDelete={async () => {
                   const message = `Delete “${item.name}”?\nAgents can no longer use it. Its usage log stays.`;
@@ -129,6 +158,9 @@ export function VaultSettings() {
           </ul>
         )}
       </SettingsSection>
+      {environmentId !== null && paired ? (
+        <VaultSharingSection sharing={sharing} syncPeers={syncPeers.peers} />
+      ) : null}
       {environmentId !== null && items.length > 0 ? (
         <SettingsSection id="vault-activity" title="All activity">
           <div className="px-3 py-3 sm:px-4">
@@ -154,6 +186,7 @@ export function VaultSettings() {
             defaultScopeProjectId={null}
             labels={sortedLabels}
             agents={agents}
+            paired={paired}
             onClose={() => setEditing(null)}
             onSave={async (draft) => {
               const saved =
@@ -177,6 +210,7 @@ function VaultItemRow(props: {
   readonly lastUsedAt: string | null;
   readonly agentName: (id: AgentId) => string | undefined;
   readonly canWrite: boolean;
+  readonly paired: boolean;
   readonly onEdit: () => void;
   readonly onDelete: () => Promise<void>;
 }) {
@@ -194,6 +228,16 @@ function VaultItemRow(props: {
           <Badge size="sm" variant="outline">
             {VAULT_TYPE_LABELS[item.type]}
           </Badge>
+          {props.paired && item.portability === "machine" ? (
+            <Tooltip>
+              <TooltipTrigger delay={300} render={<Badge size="sm" variant="outline" />}>
+                This machine only
+              </TooltipTrigger>
+              <TooltipPopup side="top">
+                {vaultPortabilityExplanation(item.portabilityReason)}
+              </TooltipPopup>
+            </Tooltip>
+          ) : null}
           {label ? <span className="truncate text-xs text-muted-foreground">{label}</span> : null}
           {cardLast4 ? (
             <span className="truncate text-xs text-muted-foreground">{cardLast4}</span>
@@ -250,6 +294,97 @@ function VaultItemRow(props: {
         <ItemUsage environmentId={props.environmentId} item={item} agentName={props.agentName} />
       ) : null}
     </li>
+  );
+}
+
+/**
+ * Settings → Vault → Paired machines: each directly paired machine, how its
+ * vault sharing stands, and the switch for this side of it. Only rendered while
+ * the machine has someone to share with.
+ */
+function VaultSharingSection(props: {
+  readonly sharing: ReturnType<typeof useVaultSharing>;
+  readonly syncPeers: ReadonlyArray<SharedSyncPeerStatus>;
+}) {
+  const { sharing } = props;
+  const waiting = vaultItemsWaitingText(sharing.status?.itemsWaiting ?? 0);
+  return (
+    <div className="space-y-2.5">
+      <SettingsSection id="vault-machines" title="Paired machines">
+        {!sharing.canRead ? (
+          <SettingsRow
+            title="Vault sharing"
+            description="This connection can't see vault sharing. Reconnect with full access to manage it."
+          />
+        ) : sharing.status === null ? (
+          sharing.error !== null ? (
+            <SettingsRow title="Couldn't load vault sharing" description={sharing.error} />
+          ) : (
+            <SettingsRow title="Loading paired machines…" role="status" />
+          )
+        ) : (
+          sharing.status.peers.map((peer) => (
+            <VaultPeerRow
+              key={peer.environmentId}
+              peer={peer}
+              pending={pendingFor(
+                props.syncPeers.find((entry) => entry.environmentId === peer.environmentId),
+                "vault",
+              )}
+              canWrite={sharing.canWrite}
+              onShare={(enabled) => sharing.setPeerSharing(peer, enabled)}
+            />
+          ))
+        )}
+      </SettingsSection>
+      <AnimatedHeight>
+        {waiting ? <p className="px-3 text-xs text-muted-foreground sm:px-4">{waiting}</p> : null}
+      </AnimatedHeight>
+    </div>
+  );
+}
+
+function VaultPeerRow(props: {
+  readonly peer: VaultPeerSharing;
+  readonly pending: number;
+  readonly canWrite: boolean;
+  readonly onShare: (enabled: boolean) => Promise<void>;
+}) {
+  const { peer } = props;
+  const [busy, setBusy] = useState(false);
+  const shared = peer.state !== "not_shared";
+  // Turning sharing on asks the other machine for its key, so it must be online.
+  // Turning it off is local, and is what to do for a lost machine.
+  const blockedOffline = !shared && !peer.online;
+  const description = !props.canWrite
+    ? "This connection can't change vault sharing."
+    : blockedOffline
+      ? `${peer.label} is offline. You can share once it's back.`
+      : `Turn this on here and on ${peer.label}. Then ${peer.label} can read the items shared from here.`;
+  return (
+    <PeerSyncRow
+      machine={peer.label}
+      indicator={peerSyncIndicator({
+        machine: peer.label,
+        online: peer.online,
+        pending: props.pending,
+        sharing: peer.state,
+      })}
+      description={description}
+    >
+      <span className="text-xs text-muted-foreground">Share vault</span>
+      <Switch
+        size="sm"
+        checked={shared}
+        disabled={!props.canWrite || busy || blockedOffline}
+        aria-label={`Share vault with ${peer.label}`}
+        onCheckedChange={(checked) => {
+          setBusy(true);
+          void props.onShare(checked).finally(() => setBusy(false));
+        }}
+      />
+      {busy ? <Spinner /> : null}
+    </PeerSyncRow>
   );
 }
 

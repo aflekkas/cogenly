@@ -443,6 +443,10 @@
       "types": "./src/state/vault.ts",
       "default": "./src/state/vault.ts"
     },
+    "./state/sync": {
+      "types": "./src/state/sync.ts",
+      "default": "./src/state/sync.ts"
+    },
     "./machines/pair": {
       "types": "./src/machines/pairMachines.ts",
       "default": "./src/machines/pairMachines.ts"
