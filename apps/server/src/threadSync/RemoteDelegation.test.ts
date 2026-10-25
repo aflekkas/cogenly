@@ -8,7 +8,14 @@ import * as ServerConfig from "../config.ts";
 import { pair } from "../machines/testkit.ts";
 import { startThreadMachine } from "./testkit.ts";
 
-it.live.each(["complete", "cancel", "limit", "stopping", "attach-refused"] as const)(
+it.live.each([
+  "complete",
+  "cancel",
+  "limit",
+  "stopping",
+  "attach-refused",
+  "slow-progress",
+] as const)(
   "remote delegation: %s, owner execution, replicated results, parent wake and idempotent retry",
   (outcome) =>
     Effect.gen(function* () {
@@ -248,6 +255,20 @@ it.live.each(["complete", "cancel", "limit", "stopping", "attach-refused"] as co
         Stream.take(1),
         Stream.runDrain,
       );
+      if (outcome === "slow-progress") {
+        // The peer read remains in flight until a parent command finishes.
+        // Holding the parent lock across this read deadlocks both operations.
+        yield* hub.remoteLaunch.registerResultPending(() =>
+          parent
+            .dispatch({
+              type: "thread.metadata.update",
+              commandId: CommandId.make("during-peer-progress"),
+              threadId: parentId,
+              title: "Still responsive",
+            })
+            .pipe(Effect.as(false), Effect.orDie),
+        );
+      }
       yield* laptop.sync.sync(hub.environmentId);
       yield* parent.streamStoredEventsFrom({ afterSequence: 0, threadId: parentId }).pipe(
         Stream.filter(
