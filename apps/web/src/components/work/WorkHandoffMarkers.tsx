@@ -304,7 +304,7 @@ function WorkHandoffCardFrame(props: {
             aria-description={status ? STATUS_VISUAL[status].label : undefined}
             onClick={() => props.onOpenThread(threadId)}
             className={cn(
-              "group/work-handoff flex w-full min-w-0 cursor-pointer items-center gap-2.5 rounded-xl border border-border bg-background px-3 py-2 text-left state-hover state-fade focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70",
+              "group/work-handoff flex w-full min-w-0 cursor-pointer items-center gap-2.5 rounded-xl border border-border bg-background px-3 py-2 text-left state-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70",
               props.className,
             )}
           />
