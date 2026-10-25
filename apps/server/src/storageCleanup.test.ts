@@ -335,8 +335,12 @@ const runStorageTest = <A, E>(
     const test = yield* makeStorage(box);
     return yield* body(test).pipe(Effect.provide(test.layer));
   }).pipe(
-    Effect.provide(Inspection.layer.pipe(Layer.provideMerge(infrastructure(box)))),
-    Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" })),
+    Effect.provide(
+      Layer.mergeAll(
+        Inspection.layer.pipe(Layer.provideMerge(infrastructure(box))),
+        NodeSqliteClient.layer({ filename: ":memory:" }),
+      ),
+    ),
     Effect.scoped,
   );
 };
