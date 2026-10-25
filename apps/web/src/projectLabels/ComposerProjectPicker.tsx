@@ -316,7 +316,11 @@ export function ComposerProjectPicker(props: {
             />
           }
         >
-          <HeroProjectSuffixText name={current?.label.name ?? null} project={current ?? null} />
+          <HeroProjectSuffixText
+            name={current?.label.name ?? null}
+            project={current ?? null}
+            open={open}
+          />
         </ComboboxTrigger>
       ) : (
         <Tooltip>
