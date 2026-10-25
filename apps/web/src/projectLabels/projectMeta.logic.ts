@@ -242,14 +242,13 @@ export function projectDefaultRepository<Item>(input: {
 /**
  * What a Work draft's repository becomes when `project` is picked for it: the
  * current one while the project links it, else the project's only repository,
- * else none picked yet ("Choose a repository") when it links several, or Work
- * in the project's folder when it links none. A repository from outside the
- * project never stays.
+ * else Work in the project's folder, which is what would run, whether it links
+ * several (the user can still pick one) or none. A repository from outside
+ * the project never stays.
  */
 export type ProjectSwitchRepository<Item> =
   | { readonly kind: "keep" }
   | { readonly kind: "select"; readonly item: Item }
-  | { readonly kind: "choose" }
   | { readonly kind: "project-folder" };
 
 export function projectSwitchRepository<Item>(input: {
@@ -267,9 +266,8 @@ export function projectSwitchRepository<Item>(input: {
   const members = input.items.filter((item) => holdsRepository(project, input.refsOf(item)));
   // Linked repositories not on any machine here yet count too: the picker clones them.
   const linked = Math.max(projectRepositoryCount(project), members.length);
-  if (linked === 0) return { kind: "project-folder" };
   if (linked === 1 && members.length === 1) return { kind: "select", item: members[0]! };
-  return { kind: "choose" };
+  return { kind: "project-folder" };
 }
 
 /**
@@ -375,15 +373,11 @@ export function workHeroLine(input: {
   readonly hasRepository: boolean;
   /** Whether this machine can host Work without a repository. */
   readonly canStartWithoutRepository: boolean;
-  /** The project has several repositories and none is picked yet. */
-  readonly repositoryUnchosen?: boolean;
 }): WorkHeroLine {
   const projectFolderRowLabel = input.hasProject
     ? "No repository (project folder)"
     : "No repository";
   if (input.isChat) return { projectFolderRow: "hidden", projectFolderRowLabel };
-  if (input.repositoryUnchosen === true)
-    return { projectFolderRow: "offered", projectFolderRowLabel };
   if (!input.hasRepository) return { projectFolderRow: "selected", projectFolderRowLabel };
   return {
     projectFolderRow: input.canStartWithoutRepository ? "offered" : "hidden",
@@ -409,8 +403,6 @@ export function workHeroBreadcrumb(input: {
   readonly repositoryName: string | null;
   /** False for Work in the no-project home, which runs without a repository. */
   readonly hasRepository: boolean;
-  /** The project has several repositories and none is picked yet. */
-  readonly repositoryUnchosen?: boolean;
 }): {
   readonly project: WorkHeroCrumb;
   readonly repository: WorkHeroCrumb;
@@ -420,13 +412,11 @@ export function workHeroBreadcrumb(input: {
   const project: WorkHeroCrumb = projectName
     ? { text: projectName, placeholder: false }
     : { text: "No project", placeholder: true };
-  const repository: WorkHeroCrumb = input.repositoryUnchosen
-    ? { text: "Choose a repository", placeholder: true }
-    : !input.hasRepository
-      ? { text: projectName ? "project folder" : "no repository", placeholder: true }
-      : input.repositoryName
-        ? { text: input.repositoryName, placeholder: false }
-        : { text: "a repository", placeholder: true };
+  const repository: WorkHeroCrumb = !input.hasRepository
+    ? { text: projectName ? "project folder" : "no repository", placeholder: true }
+    : input.repositoryName
+      ? { text: input.repositoryName, placeholder: false }
+      : { text: "a repository", placeholder: true };
   return {
     project,
     repository,

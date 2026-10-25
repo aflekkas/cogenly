@@ -27,8 +27,6 @@ export interface PendingProjectFolder {
    * picked before the link reaches this client; the pick still holds.
    */
   readonly repositoryId?: ProjectId | null;
-  /** The project has several repositories and none is picked yet ("Choose a repository"). */
-  readonly awaitingRepository?: boolean;
 }
 
 interface PendingProjectFolderState {

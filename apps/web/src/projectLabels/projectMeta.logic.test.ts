@@ -363,11 +363,11 @@ describe("projectSwitchRepository", () => {
     expect(pick(solo, null)).toBe("select:platform");
   });
 
-  it("leaves the repository to be chosen when the project has several", () => {
-    expect(pick(spawn, "cogenly")).toBe("choose");
-    // One linked repository not on this machine yet is still a choice to make here.
+  it("runs in the project folder when the project has several, which is what would run", () => {
+    expect(pick(spawn, "cogenly")).toBe("project-folder");
+    // One linked repository not on this machine yet is not one to select here.
     const elsewhere = folder(env, "elsewhere", "Elsewhere", ["not-here"]);
-    expect(pick(elsewhere, "cogenly")).toBe("choose");
+    expect(pick(elsewhere, "cogenly")).toBe("project-folder");
   });
 
   it("runs in the project folder when the project has no repository", () => {
@@ -479,10 +479,11 @@ describe("workHeroLine", () => {
     expect(line({ isChat: true, hasProject: true }).projectFolderRow).toBe("hidden");
   });
 
-  it("offers it unchecked while the project's repository is still to be chosen", () => {
-    expect(
-      line({ hasProject: true, hasRepository: false, repositoryUnchosen: true }).projectFolderRow,
-    ).toBe("offered");
+  it("checks the project folder for a project draft with no repository chosen", () => {
+    expect(line({ hasProject: true, hasRepository: false })).toEqual({
+      projectFolderRow: "selected",
+      projectFolderRowLabel: "No repository (project folder)",
+    });
   });
 });
 
@@ -524,14 +525,13 @@ describe("workHeroBreadcrumb", () => {
     ).toBe("What should we build in No project / no repository?");
   });
 
-  it("asks for a repository while none of the project's is picked", () => {
+  it("names the project folder, never a placeholder to choose, while no repository is picked", () => {
     const crumb = workHeroBreadcrumb({
       projectName: "Spawn Partners",
       repositoryName: null,
       hasRepository: false,
-      repositoryUnchosen: true,
     });
-    expect(crumb.repository).toEqual({ text: "Choose a repository", placeholder: true });
+    expect(crumb.repository).toEqual({ text: "project folder", placeholder: true });
   });
 
   it("holds a placeholder while the repository is unknown", () => {

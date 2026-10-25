@@ -279,17 +279,11 @@ export function DraftHeroHeadline({
   });
   const workProject = isChatDraft ? null : draftProject.project;
   const workProjectKey = workProject?.key ?? null;
-  const repositoryUnchosen =
-    !isChatDraft &&
-    isScratchDraft &&
-    pendingProject !== null &&
-    pendingFolder?.awaitingRepository === true;
   const heroLine = workHeroLine({
     isChat: isChatDraft,
     hasProject: workProject !== null,
     hasRepository: !isScratchDraft,
     canStartWithoutRepository: scratchWorkspaceRoot !== null,
-    repositoryUnchosen,
   });
   const showProjectFolderRow = heroLine.projectFolderRow !== "hidden";
   // What a project pick moves the draft to: the logical projects' repositories.
@@ -346,7 +340,6 @@ export function DraftHeroHeadline({
       selectedRow?.name ??
       (activeProject ? repositoryNameOf(activeProject) : activeProjectDisplayName),
     hasRepository: !isScratchDraft,
-    repositoryUnchosen,
   });
   const noRepositoryItem = useMemo(
     (): HeroRow => ({
@@ -430,16 +423,12 @@ export function DraftHeroHeadline({
   // `folder` is the project the Work lands in; the draft keeps it
   // (workDraftFolderId), so a pick never drops the project. Callers only pass
   // a folder that holds `project` (or is linking it now), or Work without a
-  // repository; `awaitingRepository` leaves the repository to be chosen.
-  // `onUnavailable` runs when the draft could not move.
+  // repository. `onUnavailable` runs when the draft could not move.
   const selectProject = (
     project: (typeof projects)[number],
     logicalProjectKey: string,
     folder: EnvironmentProjectLabel | null,
-    options?: {
-      readonly awaitingRepository?: boolean;
-      readonly onUnavailable?: () => void;
-    },
+    options?: { readonly onUnavailable?: () => void },
   ) => {
     if (!draftId) {
       return;
@@ -463,7 +452,6 @@ export function DraftHeroHeadline({
               environmentId: project.environmentId,
               folderId,
               repositoryId: isNoProjectHome(project) ? null : project.id,
-              ...(options?.awaitingRepository === true ? { awaitingRepository: true } : {}),
             },
       );
     const leavingThreadId = draftThread?.threadId ?? null;
@@ -514,10 +502,7 @@ export function DraftHeroHeadline({
   // when this machine cannot host Work without a repository.
   const startScratch = async (
     folder: EnvironmentProjectLabel | null = workProject,
-    options?: {
-      readonly awaitingRepository?: boolean;
-      readonly onUnavailable?: () => void;
-    },
+    options?: { readonly onUnavailable?: () => void },
   ): Promise<void> => {
     if (isScratchDraft) {
       if (!draftThread || isChatDraft || activeProject === null) return;
@@ -534,7 +519,6 @@ export function DraftHeroHeadline({
               environmentId: activeProject.environmentId,
               folderId,
               repositoryId: null,
-              ...(options?.awaitingRepository === true ? { awaitingRepository: true } : {}),
             },
       );
       return;
@@ -769,12 +753,11 @@ export function DraftHeroHeadline({
   );
   // A project picked for this Work draft, in the hero or the toolbar, moves it
   // into the project (projectSwitchRepository): the current repository while
-  // the project holds it, else its only one, else "Choose a repository", or
-  // its folder when it has none. A draft whose project does not hold its
-  // repository (left from before this rule) is moved the same way. When the
-  // draft cannot move, it leaves the project instead: a repository never pairs
-  // with a project outside it. "No project" moves it to the most recently
-  // active repository in no project.
+  // the project holds it, else its only one, else the project's folder. A
+  // draft whose project does not hold its repository (left from before this
+  // rule) is moved the same way. When the draft cannot move, it leaves the
+  // project instead: a repository never pairs with a project outside it. "No
+  // project" moves it to the most recently active repository in no project.
   const noProjectPicked = useWorkNoProjectPicked(draftThread?.threadId);
   // The project move last started, so a re-render while it lands does not repeat it.
   const projectMoveRef = useRef<string | null>(null);
@@ -834,9 +817,6 @@ export function DraftHeroHeadline({
           selectProject(member, entry.group.projectKey, project, { onUnavailable: leaveProject });
           return;
         }
-        case "choose":
-          void startScratch(project, { awaitingRepository: true, onUnavailable: leaveProject });
-          return;
         case "project-folder":
           void startScratch(project, { onUnavailable: leaveProject });
           return;
