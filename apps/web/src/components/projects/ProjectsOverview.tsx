@@ -137,12 +137,13 @@ function ProjectTile(props: {
         {description ? (
           <span className="line-clamp-2 text-xs/relaxed text-muted-foreground">{description}</span>
         ) : null}
-        <span className="mt-auto flex min-w-0 items-center gap-3 pt-1 text-xs text-muted-foreground">
-          <span className="min-w-0 truncate tabular-nums">{props.summary}</span>
+        {/* Counts and machines get a line each and wrap rather than truncate. */}
+        <span className="mt-auto flex min-w-0 flex-col gap-0.5 pt-1 text-xs text-muted-foreground">
+          <span className="min-w-0 break-words tabular-nums">{props.summary}</span>
           {props.machinesLabel ? (
-            <span className="ms-auto flex min-w-0 items-center gap-1">
-              <LaptopMinimalIcon aria-hidden className="size-3 shrink-0" />
-              <span className="truncate">{props.machinesLabel}</span>
+            <span className="flex min-w-0 items-start gap-1">
+              <LaptopMinimalIcon aria-hidden className="mt-0.5 size-3 shrink-0" />
+              <span className="min-w-0 break-words">{props.machinesLabel}</span>
             </span>
           ) : null}
         </span>

@@ -204,6 +204,7 @@ export const makePeerReports = Effect.fn("MachineHealth.makePeerReports")(functi
         name: machine.name,
         online: machine.online,
         lastSeenAt: machine.lastSeenAt,
+        pairedAt: machine.pairedAt,
         pairing: machine.pairing,
         now,
       });

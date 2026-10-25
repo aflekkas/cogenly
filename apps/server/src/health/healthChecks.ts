@@ -29,11 +29,16 @@ import { formatAgo, peerReachabilityItem, peerReachabilityKey } from "./peerReac
 
 const GB = 1024 ** 3;
 
-/** Free space on the state volume below either of these warns. */
-export const DISK_WARN_FREE_BYTES = 5 * GB;
+/**
+ * Free space on the state volume warns only when it is small in both senses,
+ * so a big disk with tens of gigabytes left stays quiet.
+ */
+export const DISK_WARN_FREE_BYTES = 10 * GB;
 const DISK_WARN_FREE_RATIO = 0.1;
-/** Free space below either of these fails: SQLite writes start failing soon after. */
+/** Under this always fails: SQLite writes start failing soon after. */
 export const DISK_FAIL_FREE_BYTES = 1 * GB;
+/** Under both of these also fails. */
+export const DISK_FAIL_LOW_FREE_BYTES = 5 * GB;
 const DISK_FAIL_FREE_RATIO = 0.03;
 
 /** The scheduler ticks every 5 seconds; this much silence means its loop stopped. */
@@ -207,9 +212,10 @@ export function diskCheck(input: {
 }): MachineHealthCheck {
   const ratio = input.totalBytes > 0 ? input.freeBytes / input.totalBytes : 1;
   const status: MachineHealthStatus =
-    input.freeBytes < DISK_FAIL_FREE_BYTES || ratio < DISK_FAIL_FREE_RATIO
+    input.freeBytes < DISK_FAIL_FREE_BYTES ||
+    (input.freeBytes < DISK_FAIL_LOW_FREE_BYTES && ratio < DISK_FAIL_FREE_RATIO)
       ? "fail"
-      : input.freeBytes < DISK_WARN_FREE_BYTES || ratio < DISK_WARN_FREE_RATIO
+      : input.freeBytes < DISK_WARN_FREE_BYTES && ratio < DISK_WARN_FREE_RATIO
         ? "warn"
         : "ok";
   const summary = `${formatBytes(input.freeBytes)} free of ${formatBytes(input.totalBytes)}`;
@@ -359,6 +365,7 @@ export function machineLinksCheck(input: {
       name: peer.name,
       online: peer.online,
       lastSeenAt: peer.lastSeenAt,
+      pairedAt: peer.pairedAt,
       pairing: peer.pairing,
       now: input.now,
     });
@@ -661,7 +668,7 @@ export function bootServiceCheck(input: {
     item({
       key: "boot-service:managed",
       status: "warn",
-      title: "This server isn't running as a background service",
+      title: "This machine isn't running Cogenly as a background service",
       detail:
         "It won't come back after a crash or reboot. Run `cogenly service install` on this machine.",
     }),

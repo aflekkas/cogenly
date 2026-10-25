@@ -60,6 +60,7 @@ import { Spinner } from "../ui/spinner";
 import { Switch } from "../ui/switch";
 import { createIntegrationStatusFade } from "./integrationStatusMotion";
 import {
+  isConnectingReport,
   alertChannelIntegrations,
   canaryIntervalOptions,
   canaryMachineId,
@@ -157,13 +158,19 @@ export function MachineHealthSections({
   );
 }
 
-function StatusBadge({ status }: { readonly status: MachineHealthStatus }) {
+function StatusBadge({ status }: { readonly status: MachineHealthStatus | "connecting" }) {
   const node = useStatusFade<HTMLSpanElement>(status);
   return (
     <span ref={node} className="flex">
-      <Badge size="sm" variant={HEALTH_STATUS_BADGE_VARIANTS[status]}>
-        {HEALTH_STATUS_LABELS[status]}
-      </Badge>
+      {status === "connecting" ? (
+        <Badge size="sm" variant="outline">
+          Connecting…
+        </Badge>
+      ) : (
+        <Badge size="sm" variant={HEALTH_STATUS_BADGE_VARIANTS[status]}>
+          {HEALTH_STATUS_LABELS[status]}
+        </Badge>
+      )}
     </span>
   );
 }
@@ -189,8 +196,9 @@ function MachineHealthSection({
     }),
   );
   const report = query.data;
-  const overall: MachineHealthStatus | null =
-    report === null ? null : report.reachable ? report.status : "fail";
+  const connecting = report !== null && isConnectingReport(report, machine.online);
+  const overall: MachineHealthStatus | "connecting" | null =
+    report === null ? null : connecting ? "connecting" : report.reachable ? report.status : "fail";
   const context: MachineHealthActionContext = {
     originEnvironmentId: machine.environmentId,
     viaEnvironmentId: viewed.environmentId,
@@ -220,6 +228,12 @@ function MachineHealthSection({
             role="status"
           />
         )
+      ) : connecting ? (
+        <SettingsRow
+          title={`Connecting to ${machine.name}…`}
+          description="It hasn't checked in yet. This usually takes a few seconds."
+          role="status"
+        />
       ) : (
         <HealthReportRows report={report} machine={machine} viewed={viewed} context={context} />
       )}

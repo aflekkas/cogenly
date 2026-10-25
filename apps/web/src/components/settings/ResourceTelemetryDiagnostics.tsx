@@ -592,8 +592,8 @@ function ProcessTable({
               <th className="px-3 py-2 text-right font-semibold">Memory</th>
               <th className="px-3 py-2 text-right font-semibold">Read/s</th>
               <th className="px-3 py-2 text-right font-semibold">Write/s</th>
-              <th className="px-3 py-2 text-right font-semibold">Read Total</th>
-              <th className="px-3 py-2 text-right font-semibold">Write Total</th>
+              <th className="px-3 py-2 text-right font-semibold">Read total</th>
+              <th className="px-3 py-2 text-right font-semibold">Write total</th>
               <th className="px-3 py-2 text-right font-semibold">PID</th>
               <th className="px-2 py-2 text-right font-semibold sm:pr-4">Kill</th>
             </tr>
@@ -693,7 +693,7 @@ function HistoryProcessTable({
               <th className="px-3 py-2 font-semibold">Category</th>
               <th className="px-3 py-2 text-right font-semibold">CPU Time</th>
               <th className="px-3 py-2 text-right font-semibold">Peak CPU</th>
-              <th className="px-3 py-2 text-right font-semibold">Peak Mem</th>
+              <th className="px-3 py-2 text-right font-semibold">Peak mem</th>
               <th className="px-3 py-2 text-right font-semibold">Read</th>
               <th className="px-3 py-2 text-right font-semibold">Write</th>
               <th className="px-3 py-2 text-right font-semibold">Samples</th>
@@ -776,8 +776,8 @@ function AttributionTable({ entries }: { entries: ReadonlyArray<ResourceAttribut
           <tr>
             <th className="px-4 py-2 font-semibold sm:pl-5">Component</th>
             <th className="px-3 py-2 font-semibold">Operation</th>
-            <th className="px-3 py-2 text-right font-semibold">Logical Read</th>
-            <th className="px-3 py-2 text-right font-semibold">Logical Write</th>
+            <th className="px-3 py-2 text-right font-semibold">Logical read</th>
+            <th className="px-3 py-2 text-right font-semibold">Logical write</th>
             <th className="px-3 py-2 text-right font-semibold">Count</th>
             <th className="px-3 py-2 text-right font-semibold sm:pr-5">Time</th>
           </tr>

@@ -55,12 +55,13 @@ describe("MachineHealth.reportFor", () => {
 
         const offline = yield* reportFor({ environmentId: hub.environmentId });
         assert.isFalse(offline.reachable);
-        assert.strictEqual(offline.status, "warn");
+        // Just dropped, so still within the connect grace.
+        assert.strictEqual(offline.status, "unknown");
         assert.deepStrictEqual(
           offline.checks.map((check) => [check.id, check.items.map((item) => item.key)]),
           [["machine-links", [`machine-links:reachable:${hub.environmentId}`]]],
         );
-        assert.match(offline.checks[0]?.items[0]?.title ?? "", /^hub hasn't been reachable for /);
+        assert.strictEqual(offline.checks[0]?.items[0]?.title, "Connecting to hub…");
 
         const unknown = yield* reportFor({
           environmentId: EnvironmentId.make("env-unpaired"),

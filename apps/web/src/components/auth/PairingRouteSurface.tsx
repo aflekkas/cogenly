@@ -172,7 +172,7 @@ export function HostedPairingRouteSurface() {
   const [message, setMessage] = useState(() =>
     hostedPairingRequestRef.current
       ? "Connecting to this backend."
-      : "This pairing link is missing its backend host or token.",
+      : "This pairing link is missing its machine address or code.",
   );
   const [canRetry, setCanRetry] = useState(false);
   const submitAttemptedRef = useRef(false);
@@ -183,7 +183,7 @@ export function HostedPairingRouteSurface() {
 
     if (!request) {
       setStatus("error");
-      setMessage("This pairing link is missing its backend host or token.");
+      setMessage("This pairing link is missing its machine address or code.");
       setCanRetry(false);
       return;
     }

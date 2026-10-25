@@ -31,16 +31,25 @@ export function formatAgo(milliseconds: number): string {
 }
 
 /**
+ * Quiet this briefly after pairing or after last being seen reads as still
+ * connecting, not as a problem. Matches the alerts' open debounce.
+ */
+export const PEER_CONNECT_GRACE = Duration.minutes(2);
+
+/**
  * The reachability item for one paired machine, or null when it is online and
- * paired. Offline under ten minutes warns, ten minutes or more fails, and a
- * revoked pairing fails. A machine never seen since pairing fails: pairing
- * brings it online, so not seeing it at all means it never connected.
+ * paired. Within the connect grace of pairing or of last being seen it is
+ * `unknown` ("Connecting to …"); after that, offline under ten minutes warns,
+ * ten minutes or more fails, and a revoked pairing fails. A machine never seen
+ * since pairing fails once the grace is over: pairing brings it online, so not
+ * seeing it at all means it never connected.
  */
 export function peerReachabilityItem(input: {
   readonly environmentId: EnvironmentId;
   readonly name: string;
   readonly online: boolean;
   readonly lastSeenAt: DateTime.Utc | null;
+  readonly pairedAt: DateTime.Utc | null;
   readonly pairing: MachineInfo["pairing"];
   readonly now: DateTime.Utc;
 }): MachineHealthItem | null {
@@ -58,6 +67,22 @@ export function peerReachabilityItem(input: {
     };
   }
   if (input.online) return null;
+  const nowMs = DateTime.toEpochMillis(input.now);
+  const quietSince = input.lastSeenAt ?? input.pairedAt;
+  if (
+    quietSince !== null &&
+    nowMs - DateTime.toEpochMillis(quietSince) < Duration.toMillis(PEER_CONNECT_GRACE)
+  ) {
+    return {
+      key,
+      status: "unknown",
+      title: `Connecting to ${input.name}…`,
+      detail: "It hasn't checked in yet. This usually takes a few seconds.",
+      since: null,
+      target,
+      fix: null,
+    };
+  }
   if (input.lastSeenAt === null) {
     return {
       key,
@@ -69,13 +94,14 @@ export function peerReachabilityItem(input: {
       fix: null,
     };
   }
-  const offlineMs = DateTime.toEpochMillis(input.now) - DateTime.toEpochMillis(input.lastSeenAt);
+  const offlineMs = nowMs - DateTime.toEpochMillis(input.lastSeenAt);
   const failed = offlineMs >= Duration.toMillis(PEER_OFFLINE_FAIL_AFTER);
   return {
     key,
     status: failed ? "fail" : "warn",
     title: `${input.name} hasn't been reachable for ${formatAgo(offlineMs)}`,
-    detail: `Last seen ${DateTime.formatIso(input.lastSeenAt)}.`,
+    // Clients show `since` in their own time format; this stays free of timestamps.
+    detail: "It may be asleep, offline or restarting.",
     // When it went quiet, kept across the warn-to-fail step so it reads as one outage.
     since: input.lastSeenAt,
     target,

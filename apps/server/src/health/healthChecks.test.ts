@@ -18,6 +18,7 @@ import * as Duration from "effect/Duration";
 
 import {
   DISK_FAIL_FREE_BYTES,
+  DISK_FAIL_LOW_FREE_BYTES,
   DISK_WARN_FREE_BYTES,
   SCHEDULED_TASK_OVERDUE_GRACE_MS,
   SCHEDULED_TASK_STUCK_AFTER_MS,
@@ -38,6 +39,7 @@ import {
   worstStatus,
 } from "./healthChecks.ts";
 import {
+  PEER_CONNECT_GRACE,
   PEER_OFFLINE_FAIL_AFTER,
   peerReachabilityItem,
   unreachableReport,
@@ -48,6 +50,7 @@ const now = DateTime.makeUnsafe(NOW_MS);
 const ago = (ms: number) => DateTime.makeUnsafe(NOW_MS - ms);
 const iso = (ms: number) => DateTime.formatIso(ago(ms));
 const minutes = (count: number) => count * 60_000;
+const seconds = (count: number) => count * 1000;
 const GB = 1024 ** 3;
 
 const self = EnvironmentId.make("env-self");
@@ -121,19 +124,27 @@ describe("serverCheck", () => {
 });
 
 describe("diskCheck", () => {
-  it("applies the absolute and relative thresholds", () => {
+  it("warns only when free space is small in bytes and in share", () => {
     const total = 1000 * GB;
     assert.strictEqual(statusOf(diskCheck({ freeBytes: 500 * GB, totalBytes: total })), "ok");
-    // Plenty of bytes but under 10% of a large disk.
-    assert.strictEqual(statusOf(diskCheck({ freeBytes: 90 * GB, totalBytes: total })), "warn");
-    // Under 3% fails even with many gigabytes left.
-    assert.strictEqual(statusOf(diskCheck({ freeBytes: 20 * GB, totalBytes: total })), "fail");
-    // Small disk: the byte floors decide.
+    // Tens of gigabytes on a big disk stay quiet, even under 10% (36.6 GB of 460 GB).
+    assert.strictEqual(statusOf(diskCheck({ freeBytes: 90 * GB, totalBytes: total })), "ok");
+    assert.strictEqual(statusOf(diskCheck({ freeBytes: 36.6 * GB, totalBytes: 460 * GB })), "ok");
+    assert.strictEqual(statusOf(diskCheck({ freeBytes: 20 * GB, totalBytes: total })), "ok");
+    // Under 10 GB and under 10% warns.
+    assert.strictEqual(statusOf(diskCheck({ freeBytes: 8 * GB, totalBytes: total })), "warn");
+    // Under 10 GB but a large share of a small disk stays quiet.
     assert.strictEqual(
       statusOf(diskCheck({ freeBytes: DISK_WARN_FREE_BYTES - 1, totalBytes: 40 * GB })),
-      "warn",
+      "ok",
     );
-    const full = diskCheck({ freeBytes: DISK_FAIL_FREE_BYTES - 1, totalBytes: 40 * GB });
+    // Under 5 GB and under 3% fails.
+    assert.strictEqual(
+      statusOf(diskCheck({ freeBytes: DISK_FAIL_LOW_FREE_BYTES - 1, totalBytes: total })),
+      "fail",
+    );
+    // Under 1 GB fails whatever the share.
+    const full = diskCheck({ freeBytes: DISK_FAIL_FREE_BYTES - 1, totalBytes: 8 * GB });
     assert.strictEqual(full.status, "fail");
     assert.strictEqual(full.items[0]?.key, "disk:free");
   });
@@ -229,7 +240,13 @@ describe("providersCheck", () => {
 });
 
 describe("peerReachabilityItem", () => {
-  const peer = { environmentId: vps, name: "Contabo VPS", pairing: "paired" as const, now };
+  const peer = {
+    environmentId: vps,
+    name: "Contabo VPS",
+    pairing: "paired" as const,
+    pairedAt: null,
+    now,
+  };
 
   it("is null while the peer is online", () => {
     assert.isNull(peerReachabilityItem({ ...peer, online: true, lastSeenAt: null }));
@@ -260,6 +277,33 @@ describe("peerReachabilityItem", () => {
       peerReachabilityItem({ ...peer, online: false, lastSeenAt: null })?.status,
       "fail",
     );
+  });
+
+  it("reads as connecting, not failing, within the grace of pairing or last being seen", () => {
+    const justPaired = peerReachabilityItem({
+      ...peer,
+      online: false,
+      lastSeenAt: null,
+      pairedAt: ago(seconds(5)),
+    });
+    assert.strictEqual(justPaired?.status, "unknown");
+    assert.strictEqual(justPaired?.title, "Connecting to Contabo VPS…");
+    assert.strictEqual(
+      peerReachabilityItem({ ...peer, online: false, lastSeenAt: ago(seconds(30)) })?.status,
+      "unknown",
+    );
+    const neverCameUp = peerReachabilityItem({
+      ...peer,
+      online: false,
+      lastSeenAt: null,
+      pairedAt: ago(Duration.toMillis(PEER_CONNECT_GRACE)),
+    });
+    assert.strictEqual(neverCameUp?.status, "fail");
+  });
+
+  it("keeps timestamps out of the detail", () => {
+    const item = peerReachabilityItem({ ...peer, online: false, lastSeenAt: ago(minutes(3)) });
+    assert.notMatch(item?.detail ?? "", /\d{4}-\d{2}-\d{2}T/);
   });
 
   it("builds an unreachable report around the item", () => {
