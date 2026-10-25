@@ -1,6 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentId, ProjectLabelId, ThreadId } from "@cogenly/contracts";
-import { FolderIcon, FolderMinusIcon, PlusIcon } from "lucide-react";
+import { FolderIcon, PlusIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import {
@@ -18,13 +18,6 @@ import {
   ComboboxSearchInput,
   ComboboxTrigger,
 } from "../components/ui/combobox";
-import {
-  SearchListRowCheck,
-  SearchListRowIcon,
-  SearchListRowLabel,
-  SearchListRowText,
-  SearchListRowTrailing,
-} from "../components/ui/search-list";
 import { InlineButton } from "../components/ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 import type { DraftId } from "../composerDraftStore";
@@ -44,6 +37,7 @@ import {
 } from "./projectLabels.logic";
 import { HeroProjectSuffixText } from "./HeroProjectSuffix";
 import { HERO_INLINE_ICON_STYLE, ProjectFolderIcon } from "./ProjectFolderMark";
+import { ProjectPickerRow } from "./ProjectPickerRow";
 import { useComposerProjectFolder } from "./useComposerProjectFolder";
 import { useMoveThreadToFolder } from "./useMoveThreadToFolder";
 import { pickNoProjectForWork } from "./workNoProjectPicks";
@@ -316,7 +310,7 @@ export function ComposerProjectPicker(props: {
             <button
               type="button"
               className={cn(
-                "group/hero-suffix pointer-events-auto inline-block cursor-pointer rounded-sm align-baseline text-foreground group-data-stacked/hero-headline:text-base outline-none focus-visible:outline-2 focus-visible:outline-ring",
+                "pointer-events-auto inline-block cursor-pointer rounded-sm align-baseline text-foreground group-data-stacked/hero-headline:text-base outline-none focus-visible:outline-2 focus-visible:outline-ring",
                 current === null && "pointer-events-none",
               )}
             />
@@ -394,34 +388,15 @@ export function ComposerProjectPicker(props: {
 }
 
 function ProjectOptionRow(props: { readonly option: ProjectOption; readonly chosen: boolean }) {
-  const { option } = props;
-  const icon =
-    option.kind === "project" ? (
-      <ProjectFolderIcon project={option.project} className="size-4" />
-    ) : option.kind === "none" ? (
-      <FolderMinusIcon />
-    ) : (
-      <PlusIcon />
-    );
-  const label =
-    option.kind === "project"
-      ? option.name
-      : option.kind === "none"
-        ? option.label
-        : option.kind === "new"
-          ? "New project…"
-          : `New project “${option.name}”…`;
-  return (
-    <>
-      <SearchListRowIcon>{icon}</SearchListRowIcon>
-      <SearchListRowText>
-        <SearchListRowLabel>{label}</SearchListRowLabel>
-      </SearchListRowText>
-      {props.chosen ? (
-        <SearchListRowTrailing>
-          <SearchListRowCheck />
-        </SearchListRowTrailing>
-      ) : null}
-    </>
-  );
+  const { option, chosen } = props;
+  switch (option.kind) {
+    case "project":
+      return <ProjectPickerRow project={option.project} label={option.name} chosen={chosen} />;
+    case "none":
+      return <ProjectPickerRow project={null} label={option.label} chosen={chosen} />;
+    case "new":
+      return <ProjectPickerRow icon={<PlusIcon />} label="New project…" />;
+    case "create":
+      return <ProjectPickerRow icon={<PlusIcon />} label={`New project “${option.name}”…`} />;
+  }
 }

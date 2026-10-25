@@ -3,7 +3,7 @@ import type {
   ProjectLabelId,
   ProjectLabelWithRepositories,
 } from "@cogenly/contracts";
-import { CheckIcon, PlusIcon, Settings2Icon } from "lucide-react";
+import { PlusIcon, Settings2Icon } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 
 import { Button } from "../components/ui/button";
@@ -17,7 +17,7 @@ import {
   ComboboxTrigger,
 } from "../components/ui/combobox";
 import { isProjectLabelArchived, sortProjectLabels } from "./projectLabels.logic";
-import { ProjectFolderIcon } from "./ProjectFolderMark";
+import { ProjectPickerRow } from "./ProjectPickerRow";
 import { ProjectTag } from "./ProjectTag";
 
 /**
@@ -93,13 +93,12 @@ export function ProjectLabelPicker(props: {
         </ComboboxEmpty>
         <ComboboxList>
           {(label: ProjectLabelWithRepositories) => (
-            <ComboboxItem key={label.id} value={label}>
-              <ProjectFolderIcon
+            <ComboboxItem key={label.id} value={label} hideIndicator>
+              <ProjectPickerRow
                 project={{ environmentId: props.environmentId, label }}
-                className="size-4"
+                label={label.name}
+                chosen={selected.has(label.id)}
               />
-              <span className="min-w-0 flex-1 truncate">{label.name}</span>
-              {selected.has(label.id) ? <CheckIcon className="ml-auto" /> : null}
             </ComboboxItem>
           )}
         </ComboboxList>
