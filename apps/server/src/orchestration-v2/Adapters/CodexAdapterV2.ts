@@ -1,4 +1,8 @@
-import { codexNativeMcpNames, codexNativeMcpOffArgs } from "../../integrations/NativeMcpPolicy.ts";
+import {
+  codexNativeMcpNames,
+  codexNativeMcpOffArgs,
+  requireCodexNativeMcpEnumeration,
+} from "../../integrations/NativeMcpPolicy.ts";
 import { revertCodexThread } from "../../provider/CodexThreadRevert.ts";
 import { historyResponseItems } from "@t3tools/provider-core/server/handoffBudget";
 import {
@@ -1383,7 +1387,7 @@ export interface CodexProviderDuplicates {
   readonly mcpServerNames: ReadonlyArray<string>;
 }
 
-// Config keys are dotted paths; Codex names MCP servers with [A-Za-z0-9_-].
+// App ids use simple config paths; MCP names are literal keys in a combined table.
 const CODEX_CONFIG_KEY_SEGMENT = /^[A-Za-z0-9_-]+$/;
 
 /**
@@ -1403,11 +1407,7 @@ export function codexProviderDuplicates(input: {
     appIds: input.apps.filter((app) => CODEX_CONFIG_KEY_SEGMENT.test(app.id)).map((app) => app.id),
     mcpServerNames: servers
       .filter(
-        ([name, server]) =>
-          CODEX_CONFIG_KEY_SEGMENT.test(name) &&
-          typeof server === "object" &&
-          server !== null &&
-          name !== "cogenly",
+        ([name, server]) => typeof server === "object" && server !== null && name !== "cogenly",
       )
       .map(([name]) => name),
   };
@@ -1435,36 +1435,30 @@ export function codexThreadRuntimeParams(input: {
       ...(input.runtimePolicy?.useProviderConnectors === true
         ? {}
         : { "features.plugins": false, "features.apps": false }),
-      // Dotted keys change only `enabled`, leaving the rest of each entry as
-      // the user configured it. Codex hands a thread's config to the
-      // subagents it spawns, so they lose the duplicates too.
-      ...Object.fromEntries([
-        ...(duplicates?.appIds ?? []).map((id) => [`apps.${id}.enabled`, false]),
-        ...(duplicates?.mcpServerNames ?? []).map((name) => [`mcp_servers.${name}.enabled`, false]),
-      ]),
-      ...(mcpSession === undefined
-        ? {}
-        : {
-            // Codex gates both exec_command and write_stdin on ShellTool before UnifiedExec.
-            // https://github.com/openai/codex/blob/main/codex-rs/core/src/tools/spec_plan.rs#L1234-L1260
-            // The native shell is disabled only when the credential
-            // explicitly grants the Cogenly terminal tools; an absent flag
-            // keeps the shell so the agent can still run commands.
-            ...(McpProviderSession.terminalToolsAvailable(mcpSession)
-              ? { "features.shell_tool": false }
-              : {}),
-            mcp_servers: {
+      // The combined table preserves literal dots and quotes in MCP names.
+      // Codex merges it with the configured transports and passes it to subagents.
+      ...Object.fromEntries((duplicates?.appIds ?? []).map((id) => [`apps.${id}.enabled`, false])),
+      mcp_servers: {
+        ...Object.fromEntries(
+          (duplicates?.mcpServerNames ?? []).map((name) => [name, { enabled: false }]),
+        ),
+        ...(mcpSession === undefined
+          ? {}
+          : {
               cogenly: {
                 enabled: true,
                 url: mcpSession.endpoint,
                 tool_timeout_sec: CODEX_T3_MCP_TOOL_TIMEOUT_SEC,
                 default_tools_approval_mode: "approve",
-                http_headers: {
-                  Authorization: mcpSession.authorizationHeader,
-                },
+                http_headers: { Authorization: mcpSession.authorizationHeader },
               },
-            },
-          }),
+            }),
+      },
+      // Codex gates both exec_command and write_stdin on ShellTool before UnifiedExec.
+      // Disable it only when the session explicitly grants Cogenly's terminal tools.
+      ...(mcpSession !== undefined && McpProviderSession.terminalToolsAvailable(mcpSession)
+        ? { "features.shell_tool": false }
+        : {}),
     },
   };
 }
@@ -1684,6 +1678,7 @@ export const layerAppServerClientFactory: Layer.Layer<
                   const names = yield* Effect.try(() => codexNativeMcpNames(json));
                   return codexNativeMcpOffArgs(names);
                 }).pipe(
+                  (read) => requireCodexNativeMcpEnumeration("launch", read),
                   Effect.mapError(
                     (cause) =>
                       new ProviderAdapter.ProviderAdapterOpenSessionError({
@@ -1976,16 +1971,6 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
         // project's config.toml can add servers). Read once per app-server;
         // a part that failed is retried by the next thread instead of cached.
         const providerDuplicatesByCwd = new Map<string, CodexProviderDuplicates>();
-        const providerDuplicatesPart = <A, E>(part: string, read: Effect.Effect<A, E>) =>
-          read.pipe(
-            Effect.timeout("8 seconds"),
-            Effect.asSome,
-            Effect.catch(() =>
-              Effect.logWarning(
-                `Could not read Codex ${part}; project MCP configuration could not be checked.`,
-              ).pipe(Effect.as(Option.none<A>())),
-            ),
-          );
         const providerDuplicatesFor = Effect.fnUntraced(function* (
           runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy | undefined,
         ) {
@@ -1994,15 +1979,34 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
           const known = providerDuplicatesByCwd.get(cwd ?? "");
           if (known !== undefined) return known;
           yield* ensureInitialized;
-          const config = yield* providerDuplicatesPart(
-            "MCP config",
-            client.request("config/read", cwd === undefined ? {} : { cwd }),
+          const config = yield* requireCodexNativeMcpEnumeration(
+            "thread",
+            client
+              .request("config/read", cwd === undefined ? {} : { cwd })
+              .pipe(Effect.timeout("8 seconds")),
+          ).pipe(
+            Effect.tapError((error) =>
+              DateTime.now.pipe(
+                Effect.flatMap((updatedAt) =>
+                  Queue.offer(events, {
+                    type: "provider_session.updated",
+                    driver: CODEX_PROVIDER,
+                    providerSession: {
+                      ...session,
+                      status: "error",
+                      lastError: error.message,
+                      updatedAt,
+                    },
+                  }),
+                ),
+              ),
+            ),
           );
           const duplicates = codexProviderDuplicates({
             apps: [],
-            mcpServers: Option.isSome(config) ? config.value.config["mcp_servers"] : undefined,
+            mcpServers: config.config["mcp_servers"],
           });
-          if (Option.isSome(config)) providerDuplicatesByCwd.set(cwd ?? "", duplicates);
+          providerDuplicatesByCwd.set(cwd ?? "", duplicates);
           return duplicates;
         });
         const now = yield* DateTime.now;

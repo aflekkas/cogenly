@@ -1388,14 +1388,31 @@ describe("Codex provider connector duplicates", () => {
     });
     assert.equal(config["apps.connector_2128aebfecb84f64a069897515042a44.enabled"], false);
     assert.equal(config["apps.asdk_app_69a1d78e929881919bba0dbda1f6436d.enabled"], false);
-    assert.equal(config["mcp_servers.linear.enabled"], false);
-    assert.equal(config["mcp_servers.notion-sse.enabled"], false);
+    assert.deepInclude(config.mcp_servers, { linear: { enabled: false } });
+    assert.deepInclude(config.mcp_servers, { "notion-sse": { enabled: false } });
     assert.equal(config["apps.connector_68de829bf7648191acd70a907364c67c.enabled"], false);
     assert.equal(config["features.plugins"], false);
     assert.equal(config["features.apps"], false);
-    assert.equal(config["mcp_servers.spawn-prod-followups.enabled"], false);
-    assert.equal(config["mcp_servers.node_repl.enabled"], false);
+    assert.deepInclude(config.mcp_servers, { "spawn-prod-followups": { enabled: false } });
+    assert.deepInclude(config.mcp_servers, { node_repl: { enabled: false } });
     assert.equal(config["apps._default.default_tools_approval_mode"], "approve");
+  });
+
+  it("disables literal dotted and quoted MCP names alongside Cogenly", () => {
+    const names = ["plain", "local.tools", 'quoted"name'];
+    const found = CodexAdapterV2.codexProviderDuplicates({
+      apps: [],
+      mcpServers: Object.fromEntries(names.map((name) => [name, { command: "fixture" }])),
+    });
+    assert.deepEqual(found.mcpServerNames, names);
+    const params = CodexAdapterV2.codexThreadRuntimeParams({
+      mcpSession: undefined,
+      providerDuplicates: found,
+    });
+    assert.deepEqual(
+      params.config.mcp_servers,
+      Object.fromEntries(names.map((name) => [name, { enabled: false }])),
+    );
   });
 
   it("keeps every provider connector when the user opts in", () => {
