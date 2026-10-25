@@ -82,7 +82,6 @@ import { ServerBrowserSurface, type ServerBrowserHandle } from "~/browser/Server
 import { pickMarkers } from "~/browser/serverBrowserPick";
 import { cn } from "~/lib/utils";
 import { useBrowserSurfaceStore } from "~/browser/browserSurfaceStore";
-import { floatingPreviewTabKey } from "./floatingBrowserPreview.logic";
 import {
   showBrowserTabInPanel,
   useFloatingBrowserPreviewStore,
@@ -315,24 +314,12 @@ export function PreviewView({
     return showBrowserTabInPanel(threadRefRef.current, tabId);
   }, [tabId, threadKey, visible]);
 
-  // Take control from the floating card: it opened the panel on this tab, and
-  // control changes hands once this panel's stream reports who drives.
-  const floatingTabKey = tabId ? floatingPreviewTabKey(threadKey, tabId) : null;
-  const takeControlRequested = useFloatingBrowserPreviewStore(
-    (state) => floatingTabKey !== null && state.takeControlKey === floatingTabKey,
-  );
-  useEffect(() => {
-    if (!takeControlRequested || !floatingTabKey || !visible) return;
-    if (!isServerTab) {
-      useFloatingBrowserPreviewStore.getState().clearTakeControl(floatingTabKey);
-      return;
-    }
-    if (!serverTabControl) return;
-    useFloatingBrowserPreviewStore.getState().clearTakeControl(floatingTabKey);
-    if (serverTabControl.canOperate && serverTabControl.controller !== "you") {
-      serverSurfaceRef.current?.takeControl();
-    }
-  }, [floatingTabKey, isServerTab, serverTabControl, takeControlRequested, visible]);
+  // The way back after the mini preview's x: the thread's card floats again,
+  // and closing the panel moves this tab into it right away.
+  const showMiniPreview = useCallback(() => {
+    useFloatingBrowserPreviewStore.getState().restore(threadRefRef.current);
+    useRightPanelStore.getState().close(threadRefRef.current);
+  }, []);
 
   const navigateToResolvedUrl = useCallback(
     async (resolvedUrl: string) => {
@@ -932,6 +919,7 @@ export function PreviewView({
               deviceToolbarVisible={viewport._tag !== "fill"}
               onToggleDeviceToolbar={handleToggleDeviceToolbar}
               nativePictureInPicture={desktopOverlay?.pictureInPicture ?? false}
+              onShowMiniPreview={showMiniPreview}
             />
           ) : null
         }

@@ -94,6 +94,8 @@ interface Props {
   profileName: string | undefined;
   /** Reopens the tab in the other browser it can run in. */
   move?: { readonly label: string; readonly onMove: () => void };
+  /** Floats the tab in the chat's mini preview, bringing it back after its x. */
+  onShowMiniPreview: () => void;
 }
 
 const MenuTriggerButton = () => (
@@ -178,6 +180,7 @@ export function PreviewMoreMenu({
   nativePictureInPicture,
   profileName,
   move,
+  onShowMiniPreview,
 }: Props) {
   const zoomLabel = `${Math.round(zoomFactor * 100)}%`;
   const disabled = !enabled;
@@ -208,6 +211,7 @@ export function PreviewMoreMenu({
               : "Open separate preview window"}
           </MenuItem>
         ) : null}
+        <MenuItem onClick={onShowMiniPreview}>Show mini preview</MenuItem>
         {move ? <MenuItem onClick={move.onMove}>{move.label}</MenuItem> : null}
         <MenuItem onClick={onToggleDeviceToolbar} disabled={disabled}>
           {deviceToolbarVisible ? "Hide device toolbar" : "Show device toolbar"}

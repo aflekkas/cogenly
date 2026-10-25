@@ -63,6 +63,10 @@ const buttonVariants = cva(
         link: "border-transparent link",
         "media-close":
           "[--control-icon-color:currentColor] border-transparent bg-black/65 text-white shadow-sm ring-1 ring-white/20 [:hover,[data-pressed]]:bg-black/80 focus-visible:ring-white",
+        // An opaque control over live content, such as the browser mini preview's
+        // close: nothing behind it shows through.
+        "media-solid":
+          "[--control-icon-color:currentColor] border-border bg-popover text-popover-foreground shadow-sm [:hover,[data-pressed]]:bg-[color-mix(in_srgb,var(--popover),var(--foreground)_8%)]",
         "media-navigation":
           "[--control-icon-color:currentColor] absolute top-1/2 z-20 -translate-y-1/2 border-transparent text-white/90 [:hover,[data-pressed]]:bg-white/10 [:hover,[data-pressed]]:text-white focus-visible:ring-white focus-visible:ring-offset-transparent",
         outline:
