@@ -132,16 +132,24 @@ const readKeychainSecret = Effect.fn("ChromiumKeys.readKeychainSecret")(function
  * distinguish a missing key, denied access, and an unavailable keyring without
  * parsing localized error messages. Stdout is the unmodified secret.
  */
-export const readLinuxSecret = Effect.fn("ChromiumKeys.readLinuxSecret")(function* (
-  application: string,
-) {
+const readLinuxSecret = Effect.fn("ChromiumKeys.readLinuxSecret")(function* (application: string) {
   return yield* Effect.scoped(
     Effect.gen(function* () {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const environment = yield* HostProcess.Environment;
       const helper = yield* LinuxBrowserSecretPath;
       if (helper === undefined) {
-        return yield* new ChromiumKeyError({ reason: "keychainUnavailable" });
+        const secret = yield* spawner
+          .string(
+            ChildProcess.make("secret-tool", ["lookup", "application", application], {
+              stdin: "ignore",
+              stderr: "ignore",
+              env: environment,
+            }),
+          )
+          .pipe(Effect.mapError(() => new ChromiumKeyError({ reason: "keychainUnavailable" })));
+        if (!secret.trim()) return yield* new ChromiumKeyError({ reason: "keychainItemMissing" });
+        return secret.replace(/\n$/, "");
       }
       const handle = yield* spawner
         .spawn(ChildProcess.make(helper, [application], { stdin: "ignore", env: environment }))
@@ -196,7 +204,7 @@ const WINDOWS_DPAPI_SCRIPT =
   "$plain=[Security.Cryptography.ProtectedData]::Unprotect($encrypted,$null,[Security.Cryptography.DataProtectionScope]::CurrentUser);" +
   "[Console]::Out.Write([Convert]::ToBase64String($plain))";
 
-export const decodeWindowsWrappedKey = Effect.fn("ChromiumKeys.decodeWindowsWrappedKey")(function* (
+const decodeWindowsWrappedKey = Effect.fn("ChromiumKeys.decodeWindowsWrappedKey")(function* (
   contents: string,
 ) {
   const state = yield* decodeWindowsLocalState(contents).pipe(
@@ -216,7 +224,7 @@ export const decodeWindowsWrappedKey = Effect.fn("ChromiumKeys.decodeWindowsWrap
 });
 
 /** Unwraps a key with the current Windows user's DPAPI identity. */
-export const unwrapWindowsDpapiKey = Effect.fn("ChromiumKeys.unwrapWindowsDpapiKey")(function* (
+const unwrapWindowsDpapiKey = Effect.fn("ChromiumKeys.unwrapWindowsDpapiKey")(function* (
   wrapped: Buffer,
 ) {
   const environment = yield* HostProcess.Environment;

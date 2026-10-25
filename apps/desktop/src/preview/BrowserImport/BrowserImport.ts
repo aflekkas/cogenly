@@ -24,10 +24,20 @@ import { ChildProcessSpawner } from "effect/process";
 import * as HostProcess from "@cogenly/shared/HostProcess";
 
 import * as BrowserSession from "../BrowserSession.ts";
-import { ChromiumCookieReadError, readChromiumCookies } from "./ChromiumCookies.ts";
-import type { CookieReadResult } from "./CookieDatabase.ts";
-import { FirefoxCookieReadError, readFirefoxCookies } from "./FirefoxCookies.ts";
-import { readSafariCookies, safariAccessDenied, SafariCookieReadError } from "./SafariCookies.ts";
+import {
+  ChromiumCookieReadError,
+  readChromiumCookies,
+} from "@cogenly/shared/browserCookies/ChromiumCookies";
+import type { CookieReadResult } from "@cogenly/shared/browserCookies/CookieDatabase";
+import {
+  FirefoxCookieReadError,
+  readFirefoxCookies,
+} from "@cogenly/shared/browserCookies/FirefoxCookies";
+import {
+  readSafariCookies,
+  safariAccessDenied,
+  SafariCookieReadError,
+} from "@cogenly/shared/browserCookies/SafariCookies";
 import {
   BROWSER_IMPORT_SOURCES,
   resolveCookieDatabase,
@@ -37,7 +47,7 @@ import {
   sourcePathContext,
   type BrowserImportPathContext,
   type BrowserImportSourceDefinition,
-} from "./Sources.ts";
+} from "@cogenly/shared/browserCookies/Sources";
 
 export class BrowserImportFailedError extends Schema.TaggedError<BrowserImportFailedError>()(
   "BrowserImportFailedError",
@@ -140,7 +150,9 @@ export const writeCookies = Effect.fn("BrowserImport.writeCookies")(function* (
       catch: (cause) => new BrowserCookieWriteError({ url: cookie.url, name: cookie.name, cause }),
     }).pipe(
       Effect.as(true),
-      Effect.tapError((error) => Effect.logDebug(error.message, { cause: error.cause })),
+      Effect.tapError(() =>
+        Effect.logDebug("An imported cookie was rejected by the desktop browser."),
+      ),
       Effect.catchTags({ BrowserCookieWriteError: () => Effect.succeed(false) }),
     );
     if (written) {
@@ -157,9 +169,7 @@ export const writeCookies = Effect.fn("BrowserImport.writeCookies")(function* (
   // session and land on disk at the next scheduled write.
   if (imported > 0) {
     yield* Effect.tryPromise(() => session.cookies.flushStore()).pipe(
-      Effect.tapError((error) =>
-        Effect.logWarning("Imported cookies could not be flushed to disk", { cause: error.cause }),
-      ),
+      Effect.tapError(() => Effect.logWarning("Imported cookies could not be flushed to disk")),
       Effect.ignore,
     );
   }
@@ -290,25 +300,26 @@ export const make = Effect.gen(function* BrowserImportMake() {
             });
 
     const result = yield* read.pipe(
+      Effect.withTracerEnabled(false),
       Effect.scoped,
       Effect.provide(platformServices),
       Effect.catchTags({
         ChromiumCookieReadError: (cause) =>
           Effect.fail(
-            new BrowserImportFailedError({ sourceId: definition.id, reason: cause.reason, cause }),
+            new BrowserImportFailedError({ sourceId: definition.id, reason: cause.reason }),
           ),
         // Firefox has one failure mode — its plaintext database would not open
         // — so its error carries no reason of its own and the user-facing one
         // is supplied here.
-        FirefoxCookieReadError: (cause) =>
+        FirefoxCookieReadError: () =>
           Effect.fail(
-            new BrowserImportFailedError({ sourceId: definition.id, reason: "readFailed", cause }),
+            new BrowserImportFailedError({ sourceId: definition.id, reason: "readFailed" }),
           ),
         // Safari's reasons are already user-facing: a TCC refusal is the Full
         // Disk Access prompt, anything else is a read failure.
         SafariCookieReadError: (cause) =>
           Effect.fail(
-            new BrowserImportFailedError({ sourceId: definition.id, reason: cause.reason, cause }),
+            new BrowserImportFailedError({ sourceId: definition.id, reason: cause.reason }),
           ),
       }),
     );

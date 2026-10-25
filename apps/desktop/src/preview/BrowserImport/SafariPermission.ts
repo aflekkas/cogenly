@@ -1,12 +1,12 @@
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
-import { safariAccessGranted } from "./SafariCookies.ts";
+import { safariAccessGranted } from "@cogenly/shared/browserCookies/SafariCookies";
 import {
   BROWSER_IMPORT_SOURCES,
   resolveCookieDatabase,
   listSourceProfiles,
   sourcePathContext,
-} from "./Sources.ts";
+} from "@cogenly/shared/browserCookies/Sources";
 
 export const safariPermissionCheck = Effect.gen(function* () {
   const context = yield* sourcePathContext;

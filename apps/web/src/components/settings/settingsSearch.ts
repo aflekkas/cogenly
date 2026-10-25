@@ -703,6 +703,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["xcode android studio sdk avd runtime"],
   },
   {
+    id: "browser-cookie-import",
+    title: "Import sign-ins from another browser",
+    to: "/settings/integrations",
+    targetId: "browser-cookie-import",
+    searchTerms: ["cookies chrome dia arc safari firefox logins sessions"],
+  },
+  {
     id: "browser-profiles",
     title: "Browser profiles",
     to: "/settings/integrations",

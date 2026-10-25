@@ -72,6 +72,15 @@ export function createPreviewEnvironmentAtoms<R, E>(
       scheduler: lifecycleScheduler,
       concurrency: lifecycleConcurrency,
     }),
+    cookieSources: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:browser:cookie-sources",
+      tag: WS_METHODS.browserCookieSources,
+    }),
+    importCookies: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:browser:import-cookies",
+      tag: WS_METHODS.browserImportCookies,
+      concurrency: { mode: "singleFlight", key: ({ environmentId }) => environmentId },
+    }),
     clearProfile: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:preview:clear-profile",
       tag: WS_METHODS.previewClearProfile,

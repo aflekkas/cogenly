@@ -238,6 +238,37 @@ export const make = Effect.gen(function* () {
     Effect.sync(() => {
       const command = decodeCommand(line);
       if (Option.isNone(command)) return;
+      if (command.value.type === "clearProfile") {
+        const { environmentId, profileId, requestId } = command.value;
+        runFork(
+          browserSession.clearProfileData(environmentId, profileId).pipe(
+            Effect.flatMap((success) =>
+              PubSub.publish(outbox, { type: "browserStorageResult", requestId, success }),
+            ),
+            Effect.asVoid,
+          ),
+        );
+        return;
+      }
+      if (command.value.type === "importCookie") {
+        const { environmentId, profileId, cookie, requestId } = command.value;
+        runFork(
+          browserSession
+            .importCookie(environmentId, profileId, {
+              ...cookie,
+              domain: cookie.domain,
+              expirationDate: cookie.expirationDate,
+            })
+            .pipe(
+              Effect.flatMap((success) =>
+                PubSub.publish(outbox, { type: "browserStorageResult", requestId, success }),
+              ),
+              Effect.asVoid,
+              Effect.withTracerEnabled(false),
+            ),
+        );
+        return;
+      }
       const tab = tabs.get(keyOf(command.value));
       if (command.value.type === "permission") {
         const { threadId, tabId, requestId, change } = command.value;

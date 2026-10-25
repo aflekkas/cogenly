@@ -9,6 +9,7 @@ import { describe, expect, it } from "@effect/vitest";
 import { vi } from "vite-plus/test";
 import {
   AuthOrchestrationOperateScope,
+  AuthPreviewOperateScope,
   AuthAccessWriteScope,
   AuthOrchestrationReadScope,
   AuthSettingsWriteScope,
@@ -66,6 +67,41 @@ const setup = Effect.gen(function* () {
 });
 
 describe("command permissions", () => {
+  it.effect.each([
+    WS_METHODS.browserCookieSources,
+    WS_METHODS.browserImportCookies,
+    WS_METHODS.previewClearProfile,
+  ])("%s checks the destination browser grant for cookie imports", (method) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const registry = yield* setup;
+        const command = createCommandPermissions(runtime, method);
+        registry.set(sessions(env), AsyncResult.success(grant(false)));
+        registry.set(
+          sessions(other),
+          AsyncResult.success({
+            ...grant(false),
+            scopes: [AuthPreviewOperateScope],
+            permissions: [AuthPreviewOperateScope],
+          }),
+        );
+        expect(registry.get(command.permissionAtom(env))).toBe(false);
+        expect(yield* command.authorize(registry, env).pipe(Effect.flip)).toMatchObject({
+          requiredScope: AuthOrchestrationOperateScope,
+        });
+        registry.set(
+          sessions(env),
+          AsyncResult.success({
+            ...grant(false),
+            scopes: [AuthPreviewOperateScope],
+            permissions: [AuthPreviewOperateScope],
+          }),
+        );
+        expect(registry.get(command.permissionAtom(env))).toBe(true);
+        yield* command.authorize(registry, env);
+      }),
+    ),
+  );
   it.effect.each([
     WS_METHODS.projectLabelsMerge,
     WS_METHODS.projectLabelsDismissDuplicate,

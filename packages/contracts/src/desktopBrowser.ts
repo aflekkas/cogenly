@@ -1,6 +1,8 @@
 import * as Schema from "effect/Schema";
 
 import { TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { BrowserProfileId } from "./browserProfile.ts";
+import { LocalImportedBrowserCookie } from "./browserCookies.ts";
 import {
   SitePermission,
   SitePermissionChangeResult,
@@ -24,6 +26,11 @@ const TabKey = {
 
 /** Desktop -> server. */
 export const DesktopBrowserEvent = Schema.Union([
+  Schema.Struct({
+    type: Schema.Literal("browserStorageResult"),
+    requestId: Schema.String,
+    success: Schema.Boolean,
+  }),
   /** A desktop `<webview>` for this server tab is attached and can be driven. */
   Schema.Struct({ type: Schema.Literal("attached"), ...TabKey }),
   /** Its `<webview>` went away: closed, crashed, swapped, or devtools took the debugger. */
@@ -51,6 +58,20 @@ export type DesktopBrowserPointerBox = typeof DesktopBrowserPointerBox.Type;
 
 /** Server -> desktop. */
 export const DesktopBrowserCommand = Schema.Union([
+  Schema.Struct({
+    type: Schema.Literal("clearProfile"),
+    requestId: Schema.String,
+    environmentId: TrimmedNonEmptyString,
+    profileId: BrowserProfileId,
+  }),
+  /** Only the server this desktop spawned can send these over its inherited local pipe. */
+  Schema.Struct({
+    type: Schema.Literal("importCookie"),
+    requestId: Schema.String,
+    environmentId: TrimmedNonEmptyString,
+    profileId: BrowserProfileId,
+    cookie: LocalImportedBrowserCookie,
+  }),
   /** One CDP message for the tab's relay. */
   Schema.Struct({ type: Schema.Literal("cdp"), ...TabKey, message: Schema.String }),
   /** The server stopped driving this tab, so the relay can drop its sessions. */
