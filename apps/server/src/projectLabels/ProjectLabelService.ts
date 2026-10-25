@@ -101,6 +101,9 @@ export class ProjectLabelService extends Context.Service<
     readonly dismissDuplicate: (
       input: ProjectLabelDismissDuplicateInput,
     ) => Effect.Effect<{ label: ProjectLabelWithRepositories }, ProjectLabelError>;
+    readonly undismissDuplicate: (
+      input: ProjectLabelDismissDuplicateInput,
+    ) => Effect.Effect<{ label: ProjectLabelWithRepositories }, ProjectLabelError>;
     readonly delete: (id: ProjectLabelId) => Effect.Effect<{ deleted: boolean }, ProjectLabelError>;
     /** Project folders no project claims (see ProjectLabelFolders.listOrphans). */
     readonly listOrphanFolders: () => Effect.Effect<ProjectOrphanFoldersResult, ProjectLabelError>;
@@ -1014,6 +1017,27 @@ const make = Effect.gen(function* () {
           const dismissed = yield* decodeDuplicateIds(previous?.fields.dismissedDuplicateIds ?? []);
           yield* shared.write("project", first!, {
             dismissedDuplicateIds: [...new Set([...dismissed, second!])],
+          });
+          return yield* get(input.id);
+        }),
+      ),
+    undismissDuplicate: (input) =>
+      mutate(
+        "undismissDuplicate",
+        input,
+        Effect.gen(function* () {
+          if (input.id === input.otherId)
+            return yield* new ProjectLabelError({
+              operation: "undismissDuplicate",
+              reason: "same_project",
+            });
+          yield* get(input.id);
+          yield* get(input.otherId);
+          const [first, second] = [input.id, input.otherId].sort();
+          const previous = yield* shared.get("project", first!);
+          const dismissed = yield* decodeDuplicateIds(previous?.fields.dismissedDuplicateIds ?? []);
+          yield* shared.write("project", first!, {
+            dismissedDuplicateIds: dismissed.filter((id) => id !== second),
           });
           return yield* get(input.id);
         }),

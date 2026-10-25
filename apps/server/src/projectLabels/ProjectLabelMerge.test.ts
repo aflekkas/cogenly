@@ -282,6 +282,26 @@ describe("project merge", () => {
       }).pipe(Effect.provide(makeLayer("duplicates"))),
   );
 
+  it.effect("restores only the selected duplicate pair, in either id order", () =>
+    Effect.gen(function* () {
+      const labels = yield* Labels.ProjectLabelService;
+      const first = (yield* labels.create({ name: "Same" })).label;
+      const second = (yield* labels.create({ name: "Same" })).label;
+      const third = (yield* labels.create({ name: "Same" })).label;
+      yield* labels.dismissDuplicate({ id: first.id, otherId: second.id });
+      yield* labels.dismissDuplicate({ id: first.id, otherId: third.id });
+      expect((yield* labels.read(first.id)).label.possibleDuplicateIds).toEqual([]);
+      yield* labels.undismissDuplicate({ id: second.id, otherId: first.id });
+      expect((yield* labels.read(first.id)).label.possibleDuplicateIds).toEqual([second.id]);
+      expect((yield* labels.read(second.id)).label.possibleDuplicateIds).toContain(first.id);
+      yield* labels.undismissDuplicate({ id: first.id, otherId: second.id });
+      expect((yield* labels.read(first.id)).label.possibleDuplicateIds).toEqual([second.id]);
+      expect(
+        yield* Effect.flip(labels.undismissDuplicate({ id: first.id, otherId: first.id })),
+      ).toMatchObject({ reason: "same_project" });
+    }).pipe(Effect.provide(makeLayer("undismiss"))),
+  );
+
   it.effect.each(
     ["repos/platform", "platform", ".worktrees", "worktrees"].flatMap((layout) =>
       [false, true].map((gitFile) => ({ layout, gitFile })),
@@ -521,6 +541,9 @@ describe("project merge", () => {
       yield* labels.dismissDuplicate({ id: source.id, otherId: target.id });
       yield* sync;
       expect((yield* peerLabels.read(source.id)).label.possibleDuplicateIds).toEqual([]);
+      yield* labels.undismissDuplicate({ id: target.id, otherId: source.id });
+      yield* sync;
+      expect((yield* peerLabels.read(source.id)).label.possibleDuplicateIds).toEqual([target.id]);
       yield* two(seed);
       const peerSql = yield* two(SqlClient.SqlClient);
       yield* peerSql`INSERT INTO thread_project_labels(thread_id,label_id) VALUES ('replica',${source.id})`;

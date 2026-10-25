@@ -1147,6 +1147,10 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:projectLabels:dismissProjectLabelDuplicate",
       tag: WS_METHODS.projectLabelsDismissDuplicate,
     }),
+    undismissProjectLabelDuplicate: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:projectLabels:undismissProjectLabelDuplicate",
+      tag: WS_METHODS.projectLabelsUndismissDuplicate,
+    }),
     deleteProjectLabel: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:projectLabels:deleteProjectLabel",
       tag: WS_METHODS.projectLabelsDelete,
