@@ -2,7 +2,7 @@ import { describe, expect, it } from "@effect/vitest";
 import { EnvironmentId, type SharedDocumentChange } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import { normalizeRepositoryRemote } from "../project/RepositoryRemote.ts";
-import { checkIntegrity, factDocumentId, validateChange } from "./documentSchemas.ts";
+import { checkIntegrity, factDocumentId, splitChange, validateChange } from "./documentSchemas.ts";
 
 const node = EnvironmentId.make("local");
 const change = (kind: SharedDocumentChange["kind"], fields: SharedDocumentChange["fields"]) => ({
@@ -40,6 +40,59 @@ describe("shared configuration schemas", () => {
         ).toBe("Failure");
     }),
   );
+  it.effect("a local settings write carries only universal keys and project overrides", () =>
+    Effect.gen(function* () {
+      const write = (
+        kind: "settings" | "project-settings",
+        id: string,
+        fields: SharedDocumentChange["fields"],
+      ) => Effect.result(validateChange({ ...change(kind, fields), id }));
+      expect((yield* write("settings", "universal", { branchNamePrefix: "feat" }))._tag).toBe(
+        "Success",
+      );
+      expect(
+        (yield* write("project-settings", "label-one", {
+          defaultAutoPull: { value: true },
+          branchNamePrefix: null,
+        }))._tag,
+      ).toBe("Success");
+      for (const [kind, fields] of [
+        // Machine-local keys never travel.
+        ["settings", { projectsRoot: "/srv/projects" }],
+        ["project-settings", { projectsRoot: { value: "/srv" } }],
+        // Overrides are `null` or `{ value }`, with values the schema accepts.
+        ["project-settings", { defaultAutoPull: true }],
+        ["project-settings", { defaultAutoPull: { value: "yes" } }],
+      ] as const)
+        expect(
+          (yield* write(kind, kind === "settings" ? "universal" : "label-one", fields))._tag,
+        ).toBe("Failure");
+      expect(
+        (yield* Effect.result(
+          validateChange({
+            ...change("settings", {}),
+            id: "universal",
+            tombstone: { wall: 1, logical: 0, node },
+          }),
+        ))._tag,
+      ).toBe("Failure");
+    }),
+  );
+  it("a newer build's settings keep their unknown keys and hold values this build cannot read", () => {
+    const { accepted, deferred } = splitChange({
+      ...change("project-settings", {
+        defaultAutoPull: { value: true },
+        branchNamingMode: { value: "lunar" },
+        accentTheme: { value: "dark" },
+      }),
+      id: "label-one",
+    });
+    expect(deferred).toBe(true);
+    expect(accepted?.fields).toEqual({
+      defaultAutoPull: { value: true },
+      accentTheme: { value: "dark" },
+    });
+  });
   it.effect.each(["bad%id", "has space", "x".repeat(201)])(
     "rejects invalid new document id %s",
     (id) =>
@@ -76,6 +129,39 @@ describe("shared configuration schemas", () => {
           })),
         }),
       );
+    }),
+  );
+  it.effect("integration fields validate web endpoints and exclude local credentials", () =>
+    Effect.gen(function* () {
+      yield* validateChange(
+        change("integration", {
+          name: "linear",
+          transport: "http",
+          url: "https://mcp.linear.app/mcp",
+          auth: { type: "oauth", scope: "read" },
+          enabled: true,
+        }),
+      );
+      for (const fields of [
+        { transport: "local" },
+        { url: "file:///bin/sh" },
+        { url: "https://user:password@example.com/mcp" },
+        { headers: { authorization: "private" } },
+        { approvedCredentialItems: ["secret"] },
+      ])
+        expect((yield* Effect.result(validateChange(change("integration", fields))))._tag).toBe(
+          "Failure",
+        );
+      const split = splitChange(
+        change("integration", {
+          transport: "local",
+          url: "file:///bin/sh",
+          enabled: true,
+          nextVersionOption: "kept",
+        }),
+      );
+      expect(split.deferred).toBe(true);
+      expect(split.accepted?.fields).toEqual({ enabled: true, nextVersionOption: "kept" });
     }),
   );
   it.effect.each([

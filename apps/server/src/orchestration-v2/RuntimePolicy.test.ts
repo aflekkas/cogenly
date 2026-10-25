@@ -19,6 +19,7 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
 import type { ProviderInstance } from "@t3tools/provider-core/server/driver";
+import * as Integrations from "../integrations/Integrations.ts";
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
 import * as ProjectFiles from "../projectLabels/ProjectFiles.ts";
 import * as ProjectStore from "./ProjectStore.ts";
@@ -95,6 +96,10 @@ const layerTest = RuntimePolicy.layerFromProjectStore.pipe(
       streamChanges: Stream.empty,
       subscribeChanges: Effect.never,
     }),
+  ),
+  // No accounts connected; the production gateway path is covered in runtimeLayer.test.ts.
+  Layer.provide(
+    Layer.mock(Integrations.Integrations)({ contextIntegrations: () => Effect.succeed([]) }),
   ),
   Layer.provide(
     Layer.mock(ProjectStore.ProjectStoreV2)({
@@ -264,7 +269,8 @@ it.layer(layerTest)("RuntimePolicyV2", (it) => {
         thread: makeThread({ now, worktreePath: null, surface: "chat" }),
         modelSelection,
       });
-      assert.isUndefined(resolved.projectManifest);
+      // Only the standalone integrations line (catalog entries to connect) remains.
+      assert.notInclude(resolved.projectManifest ?? "", "<project_manifest>");
     }),
   );
 

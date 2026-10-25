@@ -30,8 +30,9 @@ restart from the update button when you are ready. A server still restarting
 finishes on its own, and the button keeps showing it after the desktop app
 restarts.
 
-Server updates appear only after that version is published to npm. Remote
-desktop apps do not wait for npm. The confirmation lists each machine it skips
+Server updates appear only after that version's GitHub release is published.
+Servers run by a desktop app do not wait for it, because they update with that
+app. The confirmation lists each machine it skips
 and why, such as a machine that is offline or needs a manual update. Use the
 notice or **Settings → Connections** for those.
 
@@ -59,10 +60,8 @@ terminal commands. Saved threads, settings, and project files remain.
 
 **Settings → General → Continue threads after restarts** is on by default.
 It resumes supported active threads after an update, crash, or machine
-restart. Changes are saved to connected environments that support this setting;
-update older servers first. If a supported environment was offline or has a
-different value, use **Apply to all** in Settings after it connects.
-Cogenly must start again on that machine;
+restart. It applies to every paired machine; servers too old to support it need
+an update first. Cogenly must start again on that machine;
 the setting does not enable automatic startup. Terminal commands may still be
 interrupted, and threads without saved provider resume state need a new message.
 A thread that finished its turn to wait on a monitor, subagent, or background task
@@ -96,8 +95,7 @@ The offered action depends on how the server runs:
 | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Update server**          | Keep the client open while it installs and reconnects. Supported background services update remotely. For a desktop-hosted server, this also closes and relaunches the desktop app on the host. |
 | **Update the desktop app** | Update the desktop app on the machine running the server, then reopen it if needed.                                                                                                             |
-| **Copy update command**    | Run the command on the named host to update the detected global npm install, then restart the server with your usual options.                                                                   |
-| **Copy relaunch command**  | Stop the command-line server on its host and relaunch with the copied command, keeping your usual subcommand and options. This does not update an installed `cogenly` command.                  |
+| **Copy update command**    | Run the copied `cogenly update` command on the named host, as described below.                                                                                                                  |
 
 On the host, run:
 
@@ -121,7 +119,7 @@ update can roll back to the previous version. If the update still fails:
 
 1. Retry the offered action once.
 2. Check that you updated the server's machine, not only the device you are using.
-3. For a command-line server, stop it and relaunch the exact version shown in the notice.
+3. For a command-line server, run `cogenly update` with the exact version shown in the notice.
 
 Only one server can use a Cogenly home directory at a time. If startup reports that
 another server owns it, stop that server before retrying, or use a separate home

@@ -1,3 +1,4 @@
+import { codexNativeMcpNames, codexNativeMcpOffArgs } from "../../integrations/NativeMcpPolicy.ts";
 import { revertCodexThread } from "../../provider/CodexThreadRevert.ts";
 import { historyResponseItems } from "@t3tools/provider-core/server/handoffBudget";
 import {
@@ -1374,21 +1375,73 @@ export const CODEX_THREAD_CONFIG = {
 // that limit so the server's own wait timeout ends a long call.
 const CODEX_T3_MCP_TOOL_TIMEOUT_SEC = 65 * 60;
 
+/**
+ * Native connectors disabled for a thread; stdio servers are included.
+ */
+export interface CodexProviderDuplicates {
+  readonly appIds: ReadonlyArray<string>;
+  readonly mcpServerNames: ReadonlyArray<string>;
+}
+
+// Config keys are dotted paths; Codex names MCP servers with [A-Za-z0-9_-].
+const CODEX_CONFIG_KEY_SEGMENT = /^[A-Za-z0-9_-]+$/;
+
+/**
+ * Picks the duplicates from `app/list` and the effective `mcp_servers`
+ * config. Apps match by the service name ChatGPT shows, servers by the origin
+ * of their URL; stdio servers carry neither and are kept.
+ */
+export function codexProviderDuplicates(input: {
+  readonly apps: ReadonlyArray<{ readonly id: string; readonly name: string }>;
+  readonly mcpServers: unknown;
+}): CodexProviderDuplicates {
+  const servers =
+    typeof input.mcpServers === "object" && input.mcpServers !== null
+      ? Object.entries(input.mcpServers)
+      : [];
+  return {
+    appIds: input.apps.filter((app) => CODEX_CONFIG_KEY_SEGMENT.test(app.id)).map((app) => app.id),
+    mcpServerNames: servers
+      .filter(
+        ([name, server]) =>
+          CODEX_CONFIG_KEY_SEGMENT.test(name) &&
+          typeof server === "object" &&
+          server !== null &&
+          name !== "cogenly",
+      )
+      .map(([name]) => name),
+  };
+}
+
 export function codexThreadRuntimeParams(input: {
   readonly mcpSession: McpProviderSession.McpProviderSessionConfig | undefined;
   readonly modelSelection?: { readonly model: string };
   readonly runtimePolicy?: ProviderAdapter.ProviderAdapterV2RuntimePolicy;
+  /** Turned off for this thread unless the runtime policy lets provider connectors through. */
+  readonly providerDuplicates?: CodexProviderDuplicates | undefined;
 }): {
   readonly cwd?: string;
   readonly model?: string;
   readonly config: Readonly<Record<string, Schema.Json>>;
 } {
   const { mcpSession } = input;
+  const duplicates =
+    input.runtimePolicy?.useProviderConnectors === true ? undefined : input.providerDuplicates;
   return {
     ...(input.runtimePolicy?.cwd == null ? {} : { cwd: input.runtimePolicy.cwd }),
     ...(input.modelSelection === undefined ? {} : { model: input.modelSelection.model }),
     config: {
       ...CODEX_THREAD_CONFIG,
+      ...(input.runtimePolicy?.useProviderConnectors === true
+        ? {}
+        : { "features.plugins": false, "features.apps": false }),
+      // Dotted keys change only `enabled`, leaving the rest of each entry as
+      // the user configured it. Codex hands a thread's config to the
+      // subagents it spawns, so they lose the duplicates too.
+      ...Object.fromEntries([
+        ...(duplicates?.appIds ?? []).map((id) => [`apps.${id}.enabled`, false]),
+        ...(duplicates?.mcpServerNames ?? []).map((name) => [`mcp_servers.${name}.enabled`, false]),
+      ]),
       ...(mcpSession === undefined
         ? {}
         : {
@@ -1402,6 +1455,7 @@ export function codexThreadRuntimeParams(input: {
               : {}),
             mcp_servers: {
               cogenly: {
+                enabled: true,
                 url: mcpSession.endpoint,
                 tool_timeout_sec: CODEX_T3_MCP_TOOL_TIMEOUT_SEC,
                 default_tools_approval_mode: "approve",
@@ -1574,6 +1628,7 @@ function redactCodexProtocolValue(value: unknown): unknown {
 function isSensitiveCodexProtocolKey(key: string): boolean {
   const normalized = key.replace(/[^a-z0-9]/gi, "").toLowerCase();
   return (
+    ["env", "httpheaders", "headers"].includes(normalized) ||
     normalized.endsWith("authorization") ||
     normalized.endsWith("apikey") ||
     normalized.endsWith("token") ||
@@ -1601,11 +1656,46 @@ export const layerAppServerClientFactory: Layer.Layer<
             ...codexAppServerEnvironment(input.environment),
             ...(input.settings.homePath ? { CODEX_HOME: input.settings.homePath } : {}),
           };
+          const launchArgs = resolveCodexLaunchArgs(input.settings.launchArgs, input.environment);
+          const nativeOffArgs =
+            input.runtimePolicy?.useProviderConnectors === true
+              ? []
+              : yield* Effect.gen(function* () {
+                  const listing = yield* resolveSpawnCommand(
+                    input.settings.binaryPath || "codex",
+                    [
+                      ...codexAppServerArgs(launchArgs).slice(1),
+                      ...codexNativeMcpOffArgs([]),
+                      "mcp",
+                      "list",
+                      "--json",
+                    ],
+                    { env: environment },
+                  );
+                  const json = yield* spawner
+                    .string(
+                      ChildProcess.make(listing.command, listing.args, {
+                        env: environment,
+                        shell: listing.shell,
+                        ...(input.runtimePolicy?.cwd ? { cwd: input.runtimePolicy.cwd } : {}),
+                      }),
+                    )
+                    .pipe(Effect.timeout("10 seconds"));
+                  const names = yield* Effect.try(() => codexNativeMcpNames(json));
+                  return codexNativeMcpOffArgs(names);
+                }).pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new ProviderAdapter.ProviderAdapterOpenSessionError({
+                        driver: CODEX_PROVIDER,
+                        providerSessionId: input.providerSessionId,
+                        cause,
+                      }),
+                  ),
+                );
           const command = yield* makeCodexAppServerSpawnCommand({
             command: input.settings.binaryPath || "codex",
-            args: codexAppServerArgs(
-              resolveCodexLaunchArgs(input.settings.launchArgs, input.environment),
-            ),
+            args: [...codexAppServerArgs(launchArgs), ...nativeOffArgs],
             env: environment,
             threadId: input.threadId,
           }).pipe(Effect.provideService(AgentScope, agentScope));
@@ -1882,6 +1972,39 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             yield* Ref.set(initialized, true);
           }),
         );
+        // Native MCP servers, per thread cwd (a
+        // project's config.toml can add servers). Read once per app-server;
+        // a part that failed is retried by the next thread instead of cached.
+        const providerDuplicatesByCwd = new Map<string, CodexProviderDuplicates>();
+        const providerDuplicatesPart = <A, E>(part: string, read: Effect.Effect<A, E>) =>
+          read.pipe(
+            Effect.timeout("8 seconds"),
+            Effect.asSome,
+            Effect.catch(() =>
+              Effect.logWarning(
+                `Could not read Codex ${part}; project MCP configuration could not be checked.`,
+              ).pipe(Effect.as(Option.none<A>())),
+            ),
+          );
+        const providerDuplicatesFor = Effect.fnUntraced(function* (
+          runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy | undefined,
+        ) {
+          if (runtimePolicy?.useProviderConnectors === true) return undefined;
+          const cwd = runtimePolicy?.cwd ?? undefined;
+          const known = providerDuplicatesByCwd.get(cwd ?? "");
+          if (known !== undefined) return known;
+          yield* ensureInitialized;
+          const config = yield* providerDuplicatesPart(
+            "MCP config",
+            client.request("config/read", cwd === undefined ? {} : { cwd }),
+          );
+          const duplicates = codexProviderDuplicates({
+            apps: [],
+            mcpServers: Option.isSome(config) ? config.value.config["mcp_servers"] : undefined,
+          });
+          if (Option.isSome(config)) providerDuplicatesByCwd.set(cwd ?? "", duplicates);
+          return duplicates;
+        });
         const now = yield* DateTime.now;
         const session = providerSession({
           providerSessionId: input.providerSessionId,
@@ -6092,14 +6215,20 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             }),
           ensureThread: (threadInput) =>
             ensureInitialized.pipe(
-              Effect.andThen(mcpSessions.read(threadInput.threadId)),
-              Effect.flatMap((mcpSession) =>
+              Effect.andThen(
+                Effect.all([
+                  mcpSessions.read(threadInput.threadId),
+                  providerDuplicatesFor(threadInput.runtimePolicy),
+                ]),
+              ),
+              Effect.flatMap(([mcpSession, providerDuplicates]) =>
                 client.request(
                   "thread/start",
                   codexThreadRuntimeParams({
                     mcpSession,
                     modelSelection: threadInput.modelSelection,
                     runtimePolicy: threadInput.runtimePolicy,
+                    providerDuplicates,
                   }),
                 ),
               ),
@@ -6139,6 +6268,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                   ...(threadInput.runtimePolicy === undefined
                     ? {}
                     : { runtimePolicy: threadInput.runtimePolicy }),
+                  providerDuplicates: yield* providerDuplicatesFor(threadInput.runtimePolicy),
                 }),
               });
               const response = yield* ensureInitialized.pipe(
@@ -6863,6 +6993,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                     mcpSession: yield* readMcpSession(threadInput.providerThread.appThreadId),
                     modelSelection: input.modelSelection,
                     runtimePolicy: input.runtimePolicy,
+                    providerDuplicates: yield* providerDuplicatesFor(input.runtimePolicy),
                   }),
                 });
               }
@@ -6916,6 +7047,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                       ...(threadInput.runtimePolicy === undefined
                         ? {}
                         : { runtimePolicy: threadInput.runtimePolicy }),
+                      providerDuplicates: yield* providerDuplicatesFor(threadInput.runtimePolicy),
                     }),
                   }),
                 ),

@@ -129,6 +129,28 @@ describe("RPC authorization scopes", () => {
     expect(AuthStandardClientScopes).not.toContain(AuthAccessWriteScope);
   });
 
+  it("guards integration secret forms, the runtime installer and the sources feed, on the client too", () => {
+    for (const method of [
+      WS_METHODS.integrationsPreviewNative,
+      WS_METHODS.integrationsImportNative,
+      WS_METHODS.integrationsSaveOAuthClient,
+      WS_METHODS.integrationsSaveApiKey,
+    ]) {
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationOperateScope);
+      expect(clientRpcRequiredScopes(method, {})).toEqual([AuthOrchestrationOperateScope]);
+    }
+    expect(requiredScopeForRpcMethod(WS_METHODS.integrationsInstallRuntime)).toBe(
+      AuthProvidersManageScope,
+    );
+    expect(clientRpcRequiredScopes(WS_METHODS.integrationsInstallRuntime, {})).toEqual([
+      AuthProvidersManageScope,
+    ]);
+    expect(requiredScopeForRpcMethod(WS_METHODS.integrationsSubscribeSources)).toBe(
+      AuthOrchestrationReadScope,
+    );
+    expect(AuthStandardClientScopes).toContain(AuthOrchestrationReadScope);
+  });
+
   it("keeps machine pairing behind access management, which standard clients lack", () => {
     for (const method of [
       WS_METHODS.machinesPrepareJoin,

@@ -18,6 +18,7 @@ import {
   type ServerProvider,
   ServerSettings,
   type ServerSettingsPatch,
+  UNIVERSAL_CLIENT_PREFERENCE_KEYS,
 } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -430,6 +431,7 @@ export function applyServerSettingsPatch(
   const selectionPatch = patch.textGenerationModelSelection;
   const {
     migrateModelPreferences,
+    migrateClientPreferences,
     setModelFavorites,
     setModelsHidden,
     setProviderModelOrder,
@@ -535,6 +537,11 @@ export function applyServerSettingsPatch(
     };
   }
   const next = deepMerge(current, patchForMerge);
+  for (const key of UNIVERSAL_CLIENT_PREFERENCE_KEYS) {
+    const legacy = migrateClientPreferences?.[key];
+    if (current[key] === null && patch[key] === undefined && legacy !== undefined)
+      Object.assign(next, { [key]: legacy });
+  }
   const nextWithReplacementsBase = {
     ...next,
     favorites,

@@ -1,4 +1,9 @@
-import { OrchestratorMcpFailure, type ServerSettings } from "@t3tools/contracts";
+import {
+  OrchestratorMcpFailure,
+  UNIVERSAL_CLIENT_PREFERENCE_KEYS,
+  type ServerSettings,
+} from "@t3tools/contracts";
+import * as Struct from "effect/Struct";
 import * as Effect from "effect/Effect";
 import * as DesktopAppControl from "../../../environment/DesktopAppControl.ts";
 import * as Environment from "../../../environment/ServerEnvironment.ts";
@@ -16,6 +21,7 @@ export function preferences(settings: ServerSettings) {
     newWorktreesStartFromOrigin,
     enableAgentTerminals,
     enableProviderUpdateChecks,
+    useProviderConnectors,
     projectsRoot,
     modelEffortDefaults,
     backgroundActivity,
@@ -23,10 +29,13 @@ export function preferences(settings: ServerSettings) {
   } = settings;
   const characters = Array.from(sourceControlWritingStyle.customInstructions);
   return {
+    ...Struct.pick(settings, UNIVERSAL_CLIENT_PREFERENCE_KEYS),
+    sharedKeybindings: settings.sharedKeybindings,
     defaultThreadEnvMode,
     newWorktreesStartFromOrigin,
     enableAgentTerminals,
     enableProviderUpdateChecks,
+    useProviderConnectors,
     projectsRoot,
     modelEffortDefaults,
     backgroundActivity: { profile: backgroundActivity.profile },

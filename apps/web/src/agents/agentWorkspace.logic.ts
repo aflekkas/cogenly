@@ -264,6 +264,46 @@ export interface ApprovalDescription {
 const excerpt = (text: string, max = 240) =>
   text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text;
 
+/** The exact executable and credential mappings the owner is authorizing. */
+function describeIntegrationApproval(
+  action: Extract<
+    AgentApproval["action"],
+    { actionKind: "integration_add" | "integration_update" }
+  >,
+): ApprovalDescription {
+  const input = action.payload;
+  if ("preset" in input)
+    return {
+      title: `Connect Google · ${input.accountLabel}`,
+      details: [
+        "Gmail, Calendar, Drive, Docs and Sheets, run by Cogenly",
+        ...(input.callbackOrigin === undefined
+          ? []
+          : [`Sign-in returns to ${input.callbackOrigin}`]),
+      ],
+    };
+  return {
+    title:
+      "id" in input
+        ? `Change integration ${input.id}`
+        : `Connect ${input.displayName} (${input.name})`,
+    details: [
+      input.url,
+      `${input.transport} · Headers: ${Object.keys(input.headers).join(", ") || "none"}`,
+      ...Object.values(input.headers).flatMap((value) =>
+        [...value.matchAll(/\{\{credential:([^}]*)\}\}/g)].map((match) => `Vault: ${match[1]}`),
+      ),
+      ...(input.command
+        ? [
+            `Command: ${[input.command.command, ...input.command.args].map((part) => JSON.stringify(part)).join(" ")}`,
+            `Environment: ${JSON.stringify(input.command.env)}`,
+            "Approving allows this command to run on this environment.",
+          ]
+        : []),
+    ],
+  };
+}
+
 /** Plain language for what approving would do, so a decision never needs the raw payload. */
 export function describeApproval(
   approval: Pick<AgentApproval, "action">,
@@ -307,31 +347,8 @@ export function describeApproval(
         ],
       };
     case "integration_add":
-      return "preset" in action.payload
-        ? {
-            title: `Connect Google · ${action.payload.accountLabel}`,
-            details: [
-              "Gmail, Calendar, Drive, Docs and Sheets, run by Cogenly",
-              ...(action.payload.callbackOrigin === undefined
-                ? []
-                : [`Sign-in returns to ${action.payload.callbackOrigin}`]),
-            ],
-          }
-        : {
-            title: `Connect ${action.payload.displayName} (${action.payload.name})`,
-            details: [action.payload.url],
-          };
     case "integration_update":
-      return {
-        title: `Change integration ${action.payload.id}`,
-        details: [
-          action.payload.url,
-          `${action.payload.transport} · Headers: ${Object.keys(action.payload.headers).join(", ") || "none"}`,
-          ...Object.values(action.payload.headers).flatMap((value) =>
-            [...value.matchAll(/\{\{credential:([^}]*)\}\}/g)].map((match) => `Vault: ${match[1]}`),
-          ),
-        ],
-      };
+      return describeIntegrationApproval(action);
   }
 }
 
@@ -355,6 +372,8 @@ export function describeThreadApproval(
   approval: Pick<AgentApproval, "action">,
 ): ApprovalDescription | null {
   const action = approval.action;
+  if (action.actionKind === "integration_add" || action.actionKind === "integration_update")
+    return describeIntegrationApproval(action);
   if (action.actionKind !== "vault_use") return null;
   const { vaultItemName, field, domain, processExposure } = action.payload;
   if (processExposure !== undefined) {

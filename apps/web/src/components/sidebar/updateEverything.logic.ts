@@ -131,7 +131,6 @@ export function collectServerUpdateTargets(
       environmentId: machine.environmentId,
       serverLabel: machine.label,
       selfUpdate,
-      installation: config.environment.capabilities.serverInstallation,
       desktopAppUpdate,
       threadContinuation: supportsServerUpdateThreadContinuation(config),
       continueThreadsAfterServerUpdate: config.settings.continueThreadsAfterServerUpdate ?? false,

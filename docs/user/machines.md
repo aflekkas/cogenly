@@ -4,8 +4,13 @@ Pair your Cogenly servers to use one Cogenly across them. Choose an always-on
 machine as the hub; your other computers connect out to it. Each machine can
 join one hub. Paired machines sync project names, instructions, archive state,
 repository remotes and source links, agent profiles, fallback chains and
-scheduled-task configuration, and every conversation. Changes made while a
-machine is offline catch up when it reconnects.
+scheduled-task configuration, and every conversation. They also sync your
+settings and each project's own settings, including appearance, keybindings,
+notification preferences and composer behavior. Settings that describe one machine
+stay on it: provider setup and sign-ins, folders such as the projects root,
+storage and backups, background activity, and devices. Changes made while a
+machine is offline catch up when it reconnects. A machine on an older version
+keeps syncing and picks up anything newer once it updates.
 
 Agents and schedules run only on their owner machine. New ones default to the
 hub; existing ones keep the machine they were created on until you
@@ -20,11 +25,7 @@ a clone. Pick it, and it clones into the project's folder on this machine;
 [moving a project](#move-threads-and-projects) clones all of them there. A
 repository's folder is named after the repository, so it lands in the same
 place everywhere. Removing a repository from one machine frees the disk space
-and keeps it in the project, so you can clone it back later. Memory follows you
-to every paired machine too (see [Memory](./memory-and-export.md#memory)).
-Vault items sync only once you turn on sharing; see
-[Vault on several machines](vault.md#vault-on-several-machines). Settings,
-resource files and integrations do not sync yet. Matching
+and keeps it in the project, so you can clone it back later. Memory, settings and web integration definitions sync between paired machines. Share the vault to sync web sign-ins too; see [Vault on several machines](vault.md#vault-on-several-machines). Local integrations, including Google Workspace, sign in on each machine. Resource files stay local. Matching
 project names are kept separately until you choose how to combine them.
 
 ## Your conversations on every machine
@@ -121,6 +122,7 @@ Cogenly's port, Cogenly uses it. If you set `COGENLY_TAILSCALE_SERVE=1` in a
 systemd drop-in, `cogenly doctor` moves that setting into Cogenly.
 
 Turn private access off or back on any time in Settings → Machines with the Private access switch on this machine.
+It is the only Tailscale Serve switch in Cogenly; Settings → Connections links to it.
 
 On the computer joining, prepare its key:
 

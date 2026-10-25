@@ -4,7 +4,8 @@
 
 Inline context references let a user message point at a typed payload from an exact position in
 its prose: an image, a file, a terminal excerpt, a picked page element, a preview annotation, a
-review comment, a file mention, or a skill. This document covers the wire contract and the pure
+review comment, a file mention, a skill, a thread, an agent, a project folder, or an integration
+account picked as a source. This document covers the wire contract and the pure
 codecs. Editor, rendering, and clipboard behaviour land in later PRs and get their own sections
 here as they arrive.
 
@@ -59,7 +60,9 @@ links, so a context link is never mistaken for a mention.
 
 `projectComposerContextForProvider({ text, records })` builds what the provider reads:
 
-1. Every reference becomes an in-place marker: `[Image: shot.png; ref=ctx_1]`.
+1. Every reference becomes an in-place marker: `[Image: shot.png; ref=ctx_1]`. A source marker
+   is named from its record, not the editable label (`[Source: Google Workspace (work); ref=…]`),
+   so two accounts of one service never read alike; its entry gives the `integration_call` name.
 2. A trailing `<t3_context version="1">` envelope holds one `<context kind id>` entry per unique
    referenced id, in first-reference order. Records that are never referenced are not emitted.
    A referenced id with no record becomes `<context … unavailable="true"/>`. Mention and skill

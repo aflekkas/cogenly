@@ -362,7 +362,7 @@ function buildPaletteRemoteSourceReadiness(
           ...entry,
           hint: entry.hint.replace(
             "Open Source Control settings",
-            "Open Settings -> Source Control",
+            "Open Settings → Source control",
           ),
         };
   };
@@ -1831,7 +1831,7 @@ function OpenCommandPaletteDialog(props: {
                 }
               />
               <TooltipPopup align="end" side="left">
-                {disabledHint ?? "Open Settings -> Source Control to configure this provider."}
+                {disabledHint ?? "Open Settings → Source control to configure this provider."}
               </TooltipPopup>
             </Tooltip>
           </span>
@@ -1950,7 +1950,7 @@ function OpenCommandPaletteDialog(props: {
     () => [
       {
         value: "environments",
-        label: "Environments",
+        label: "Machines",
         items: addProjectEnvironmentItems,
       },
     ],
@@ -3451,7 +3451,7 @@ function OpenCommandPaletteDialog(props: {
       ? null
       : {
           value: "new-project-machines",
-          label: "Environments",
+          label: "Machines",
           items: newProjectEnvironmentOptions.map((option) => ({
             ...buildEnvironmentItem(
               option,

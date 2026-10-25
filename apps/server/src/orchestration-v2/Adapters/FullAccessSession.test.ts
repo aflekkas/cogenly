@@ -362,6 +362,19 @@ it.effect("starts a legacy Codex thread with full access and auto-approves nativ
         switch (method) {
           case "initialize":
             return {};
+          case "app/list":
+            return {
+              data: [
+                { id: "connector_gmail", name: "Gmail", isAccessible: true },
+                { id: "connector_spotify", name: "Spotify", isAccessible: true },
+              ],
+              nextCursor: null,
+            };
+          case "config/read":
+            return {
+              config: { mcp_servers: { linear: { url: "https://mcp.linear.app/mcp" } } },
+              origins: {},
+            };
           case "thread/start":
             return { thread: { id: "native-codex", createdAt: 1, updatedAt: 1 } };
           case "turn/start":
@@ -467,6 +480,14 @@ it.effect("starts a legacy Codex thread with full access and auto-approves nativ
       "config.mcp_servers.cogenly.default_tools_approval_mode",
       "approve",
     );
+    // Codex's own Gmail app and Linear server duplicate Cogenly integrations.
+    const threadStart = requests.find(({ method }) => method === "thread/start");
+    assert.isDefined(threadStart);
+    const threadConfig = (threadStart.payload as { readonly config: Record<string, unknown> })
+      .config;
+    assert.equal(threadConfig["apps.connector_gmail.enabled"], false);
+    assert.equal(threadConfig["mcp_servers.linear.enabled"], false);
+    assert.notProperty(threadConfig, "apps.connector_spotify.enabled");
     for (const method of [
       "item/commandExecution/requestApproval",
       "item/fileChange/requestApproval",

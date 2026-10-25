@@ -526,3 +526,29 @@ describe("describeRunAction", () => {
     );
   });
 });
+
+it("shows exact executable arguments and environment mappings in thread approvals", () => {
+  const command = {
+    command: "/bin/sh",
+    args: ["-c", "printf 'synthetic value'"],
+    env: { API_KEY: "{{credential:fixture.value}}" },
+  };
+  const description = describeThreadApproval({
+    action: {
+      actionKind: "integration_add",
+      threadId: ThreadId.make("thread:fixture"),
+      payload: {
+        name: "worker",
+        displayName: "Worker",
+        transport: "stdio",
+        url: "https://localhost",
+        headers: {},
+        scope: { type: "all" },
+        hint: "",
+        command,
+      },
+    },
+  });
+  expect(description?.details).toContain(`Command: "/bin/sh" "-c" "printf 'synthetic value'"`);
+  expect(description?.details).toContain(`Environment: ${JSON.stringify(command.env)}`);
+});

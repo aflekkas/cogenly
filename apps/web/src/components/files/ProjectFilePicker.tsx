@@ -10,6 +10,7 @@ import { PierreEntryIcon } from "../chat/PierreEntryIcon";
 import { CommandPaletteContent } from "../CommandPaletteContent";
 import { type CommandPaletteActionItem } from "../CommandPalette.logic";
 import { CommandPaletteResults } from "../CommandPaletteResults";
+import { SearchListEmpty } from "../ui/search-list";
 import {
   getProjectFilePickerMatches,
   PROJECT_FILE_PICKER_RESULT_LIMIT,
@@ -61,9 +62,7 @@ function EmptyProjectFilePicker() {
       testId="project-file-picker"
       value=""
     >
-      <div className="py-10 text-center text-sm text-muted-foreground">
-        Open a repository to search its files.
-      </div>
+      <SearchListEmpty size="dialog">Open a repository to search its files.</SearchListEmpty>
     </CommandPaletteContent>
   );
 }

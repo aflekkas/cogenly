@@ -64,6 +64,12 @@ export const ProviderAdapterV2RuntimePolicy = Schema.Struct({
    * context next to the other runtime instructions.
    */
   projectManifest: Schema.optional(Schema.String),
+  /**
+   * True when the user lets the provider's own connectors and MCP servers for
+   * Cogenly catalog services reach agents too. Absent or false: adapters keep
+   * those duplicates out of the sessions they open.
+   */
+  useProviderConnectors: Schema.optional(Schema.Boolean),
 });
 export type ProviderAdapterV2RuntimePolicy = typeof ProviderAdapterV2RuntimePolicy.Type;
 

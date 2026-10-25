@@ -175,6 +175,8 @@ import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as UsageService from "./usage/UsageService.ts";
 import * as Scheduler from "./scheduling/Scheduler.ts";
 import * as SharedState from "./sync/SharedState.ts";
+import * as IntegrationSync from "./sync/IntegrationSync.ts";
+import * as SettingsSync from "./sync/SettingsSync.ts";
 import * as SharedSync from "./sync/SharedSync.ts";
 import * as SharedSyncStatus from "./sync/SharedSyncStatus.ts";
 import * as VaultSync from "./vault/VaultSync.ts";
@@ -628,6 +630,11 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
     Layer.provide(ServerEnvironment.layerIdentity),
     Layer.provide(Scheduler.layer),
   ),
+  // Universal settings and project overrides follow the user to paired machines.
+  SettingsSync.layer.pipe(
+    Layer.provide(SharedState.layer),
+    Layer.provide(ServerEnvironment.layerIdentity),
+  ),
   // Asks Cogenly Connect to deliver webhooks it held while this environment was offline.
   HeldHooksWaker.layer,
   layerThreadSettlementWorker,
@@ -686,7 +693,17 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   Layer.effectDiscard(ProjectSettingsOverrideSweep.sweep),
 ).pipe(
   // Core Services
-  Layer.provideMerge(layerOrchestrationApplication),
+  Layer.provideMerge(
+    layerOrchestrationApplication.pipe(
+      Layer.provide(
+        IntegrationSync.layer.pipe(
+          Layer.provideMerge(layerMachines),
+          Layer.provide(SharedState.layer),
+          Layer.provide(ServerEnvironment.layerIdentity),
+        ),
+      ),
+    ),
+  ),
   Layer.provideMerge(RuntimeLayer.layerEventInfrastructure),
   Layer.provideMerge(Layer.merge(ProjectStore.layer, ThreadSearch.layer)),
   Layer.provideMerge(layerServerSettings),
@@ -698,8 +715,13 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   Layer.provideMerge(Layer.mergeAll(layerTerminal, layerPreview, layerDevice)),
   Layer.provideMerge(layerPersistence),
   // Both read a user-owned file out of the state directory and stream changes
-  // to clients; neither depends on the other.
-  Layer.provideMerge(Layer.mergeAll(Keybindings.layer, UsageLimitSources.layer)),
+  // to clients. Keybindings mirrors its portable list through server settings.
+  Layer.provideMerge(
+    Layer.mergeAll(
+      Keybindings.layer.pipe(Layer.provide(layerServerSettings)),
+      UsageLimitSources.layer,
+    ),
+  ),
   Layer.provideMerge(ProviderRegistry.layer),
   // The instance registry is the new routing keystone — text generation,
   // adapter lookup, and runtime ingestion all resolve `ProviderInstanceId`

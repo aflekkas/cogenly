@@ -148,6 +148,7 @@ import remarkGfm from "remark-gfm";
 import type { Root, RootContent } from "mdast";
 import {
   AgentContextChip,
+  IntegrationContextChip,
   ProjectFolderContextChip,
   ThreadContextChip,
 } from "../ThreadContextChip";
@@ -5103,6 +5104,21 @@ const userMessageContextPresentationRegistry = createContextPresentationRegistry
       render: (record, context) =>
         record.kind === "project-folder" ? (
           <ProjectFolderContextChip record={record} copyMarkdown={context.copyMarkdown} />
+        ) : (
+          <UnavailableUserMessageContextChip {...context} />
+        ),
+    },
+    {
+      kind: "integration",
+      canRender: (record) => record.kind === "integration",
+      // A sent message shows the account it named, not today's sign-in state.
+      render: (record, context) =>
+        record.kind === "integration" ? (
+          <IntegrationContextChip
+            record={record}
+            environmentId={null}
+            copyMarkdown={context.copyMarkdown}
+          />
         ) : (
           <UnavailableUserMessageContextChip {...context} />
         ),

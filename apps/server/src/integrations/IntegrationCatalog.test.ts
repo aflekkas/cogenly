@@ -20,16 +20,16 @@ const ready = (resolution: ReturnType<typeof resolve>) => {
 };
 
 describe("resolveCatalogConnect", () => {
-  it("ignores Google callback origins supplied by agents", () => {
+  it("keeps an explicit reachable Google callback origin supplied by an agent", () => {
     const resolved = resolveCatalogConnect(
       {
         catalogId: "google-workspace",
         accountLabel: "work",
-        inputs: { callbackOrigin: "https://attacker.example" },
+        inputs: { callbackOrigin: "https://vps.example" },
       },
-      { existingNames: new Set(), requestOrigin: "https://attacker.example", fromAgent: true },
+      { existingNames: new Set(), requestOrigin: "https://vps.example", fromAgent: true },
     );
-    expect(ready(resolved).input).not.toHaveProperty("callbackOrigin");
+    expect(ready(resolved).input).toHaveProperty("callbackOrigin", "https://vps.example");
   });
 
   it("signs in to a remote OAuth service under an unused name per account", () => {
@@ -68,27 +68,20 @@ describe("resolveCatalogConnect", () => {
     // A pasted token is never accepted.
     expect(resolve({ catalogId: "github", inputs: { apiKey: "ghp_secret" } })).toMatchObject({
       _tag: "needs",
+      mode: "api_key",
       message: expect.stringContaining("request_secret"),
     });
-  });
-
-  it("asks for the region before choosing an endpoint", () => {
-    expect(resolve({ catalogId: "intercom" })).toMatchObject({
-      _tag: "needs",
-      message: expect.stringContaining('"eu" (Europe)'),
-    });
-    expect(ready(resolve({ catalogId: "intercom", inputs: { region: "eu" } })).input).toMatchObject(
-      { url: "https://mcp.eu.intercom.com/mcp", auth: { type: "oauth" } },
-    );
-    expect(ready(resolve({ catalogId: "intercom", inputs: { region: "us" } })).input).toMatchObject(
-      { url: "https://mcp.intercom.com/mcp" },
-    );
   });
 
   it("connects Slack only through the user's app, asking for its scopes", () => {
     expect(resolve({ catalogId: "slack" })).toMatchObject({
       _tag: "needs",
+      mode: "oauth_app",
       message: expect.stringContaining('domains: ["slack.com"]'),
+    });
+    // Each account's secret gets its own vault item.
+    expect(resolve({ catalogId: "slack", accountLabel: "Acme" })).toMatchObject({
+      message: expect.stringContaining('{name: "slack-acme-client-secret"'),
     });
     expect(
       ready(
@@ -136,28 +129,53 @@ describe("resolveCatalogConnect", () => {
     ).toMatchObject({ name: "google-work-2", callbackOrigin: "https://cogenly.example.com" });
   });
 
-  it("refuses an entry that is not available yet", () => {
-    expect(resolve({ catalogId: "figma" })).toMatchObject({
-      _tag: "needs",
-      message: expect.stringContaining("Figma isn't available yet"),
-    });
+  it("refuses a catalog id it no longer lists", () => {
+    expect(
+      resolveCatalogConnect(
+        { catalogId: "atlassian" } as unknown as IntegrationCatalogConnectInput,
+        {
+          existingNames: new Set(),
+          requestOrigin: undefined,
+        },
+      ),
+    ).toMatchObject({ _tag: "needs" });
+  });
+});
+
+describe("INTEGRATION_CATALOG", () => {
+  it("lists exactly the core services, each on its probed endpoint", () => {
+    expect(
+      INTEGRATION_CATALOG.map((entry) => [
+        entry.id,
+        entry.kind === "remote" ? entry.url : entry.preset,
+        entry.kind === "remote" ? entry.auth.map((auth) => auth.kind) : [],
+      ]),
+    ).toEqual([
+      ["google-workspace", "google-workspace", []],
+      ["slack", "https://mcp.slack.com/mcp", ["oauth_app"]],
+      ["github", "https://api.githubcopilot.com/mcp/", ["api_key", "oauth_app"]],
+      ["linear", "https://mcp.linear.app/mcp", ["oauth", "api_key"]],
+      ["notion", "https://mcp.notion.com/mcp", ["oauth"]],
+      ["wispr-flow", "https://api.wisprflow.ai/connect/mcp", ["oauth"]],
+      ["fathom", "https://api.fathom.ai/mcp", ["oauth"]],
+    ]);
   });
 });
 
 describe("availableToConnect", () => {
-  it("names connectable entries without an integration, never unavailable ones", () => {
+  it("names catalog entries without an integration", () => {
     const available = availableToConnect([
       { transport: "http", url: "https://mcp.linear.app/mcp" },
       { transport: "http", url: "https://example.com/mcp" },
+      // A service the catalog dropped is custom, so it reserves nothing.
+      { transport: "http", url: "https://mcp.atlassian.com/v1/mcp" },
     ]);
     expect(available).toEqual([
       "google-workspace (Gmail, Calendar, Drive)",
-      "notion",
-      "github",
-      "atlassian",
-      "intercom",
-      "wispr-flow",
       "slack",
+      "github",
+      "notion",
+      "wispr-flow",
       "fathom",
     ]);
   });
@@ -168,7 +186,8 @@ describe("integrationCatalogEntryFor", () => {
     const remote = (url: string) => integrationCatalogEntryFor({ transport: "http", url })?.id;
     expect(remote("https://mcp.linear.app/mcp/")).toBe("linear");
     expect(remote("https://api.githubcopilot.com/mcp")).toBe("github");
-    expect(remote("https://mcp.eu.intercom.com/mcp")).toBe("intercom");
+    expect(remote("https://mcp.atlassian.com/v1/mcp")).toBeUndefined();
+    expect(remote("https://mcp.eu.intercom.com/mcp")).toBeUndefined();
     expect(remote("https://example.com/mcp")).toBeUndefined();
     expect(
       integrationCatalogEntryFor({
@@ -179,7 +198,6 @@ describe("integrationCatalogEntryFor", () => {
     ).toBe("google-workspace");
     // Every connectable remote endpoint maps back to its own entry.
     for (const entry of INTEGRATION_CATALOG)
-      if (entry.kind === "remote")
-        for (const region of entry.regions) expect(remote(region.url)).toBe(entry.id);
+      if (entry.kind === "remote") expect(remote(entry.url)).toBe(entry.id);
   });
 });

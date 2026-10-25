@@ -22,6 +22,8 @@ import {
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import { IntegrationFields } from "./integrationDocument.ts";
+import { PROJECT_SETTINGS_CODECS, UNIVERSAL_SETTINGS_CODECS } from "./settingsDocument.ts";
 
 const decodeWire = Schema.decodeUnknownEffect(SharedDocumentChangeWire);
 const isPortableId = Schema.is(SharedDocumentId);
@@ -250,6 +252,9 @@ const FIELD_CODECS: Readonly<Record<SharedDocumentKind, FieldCodecs>> = {
   schedule: codecs(ScheduleFields.fields),
   fact: codecs(FactFields.fields),
   vault: { get: vaultCodecFor, has: (key) => vaultCodecFor(key) !== undefined },
+  integration: codecs(IntegrationFields.fields),
+  settings: UNIVERSAL_SETTINGS_CODECS,
+  "project-settings": PROJECT_SETTINGS_CODECS,
 };
 const isKnownKind = Schema.is(SharedDocumentKind);
 const invalid = (cause?: unknown) => new SharedStateError({ reason: "invalid-document", cause });
@@ -280,6 +285,9 @@ export const checkIntegrity = (change: SharedDocumentChangeWire) =>
       Object.values(change.clocks).some((clock) => clock.node !== change.updatedBy) ||
       (change.tombstone && change.tombstone.node !== change.updatedBy)
     )
+      return yield* invalid();
+    // Settings documents are never deleted: a reset is a field value.
+    if ((change.kind === "settings" || change.kind === "project-settings") && change.tombstone)
       return yield* invalid();
   });
 

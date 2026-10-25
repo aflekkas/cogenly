@@ -1,5 +1,7 @@
 import * as Schema from "effect/Schema";
+import * as SchemaTransformation from "effect/SchemaTransformation";
 
+import { IntegrationCatalogId } from "./integrationCatalog.ts";
 import {
   EnvironmentId,
   ForwardCompatibleArray,
@@ -30,6 +32,7 @@ export const COMPOSER_CONTEXT_KINDS = [
   "thread",
   "agent",
   "project-folder",
+  "integration",
 ] as const;
 export type KnownComposerContextKind = (typeof COMPOSER_CONTEXT_KINDS)[number];
 
@@ -278,11 +281,43 @@ export const ProjectFolderContextRecord = Schema.Struct({
 });
 export type ProjectFolderContextRecord = typeof ProjectFolderContextRecord.Type;
 
+const isIntegrationCatalogId = Schema.is(IntegrationCatalogId);
+/** A catalog icon; one the catalog has since dropped reads as none rather than losing the record. */
+const ContextIntegrationIcon = Schema.NullOr(Schema.String.check(Schema.isMaxLength(64))).pipe(
+  Schema.decodeTo(
+    Schema.NullOr(IntegrationCatalogId),
+    SchemaTransformation.transform({
+      decode: (icon) => (icon !== null && isIntegrationCatalogId(icon) ? icon : null),
+      encode: (icon) => icon,
+    }),
+  ),
+);
+
+/**
+ * A connected integration account picked as a source. The agent reaches it
+ * with `integration_call` by `name` (the integration slug); the names are a
+ * display snapshot.
+ */
+export const IntegrationContextRecord = Schema.Struct({
+  ...recordBase,
+  kind: Schema.Literal("integration"),
+  integrationId: LinkedEntityId,
+  /** The slug `integration_call` and `integration_tools` take. */
+  name: TrimmedNonEmptyString.check(Schema.isMaxLength(64)),
+  /** The service, e.g. "Google Workspace" or a custom server's display name. */
+  serviceName: ContextLabel,
+  displayName: ContextLabel,
+  accountLabel: Schema.NullOr(ContextLabel),
+  icon: ContextIntegrationIcon,
+});
+export type IntegrationContextRecord = typeof IntegrationContextRecord.Type;
+
 /** `@` picks that point at something on the server instead of carrying a payload. */
 export const LinkContextRecord = Schema.Union([
   ThreadContextRecord,
   AgentContextRecord,
   ProjectFolderContextRecord,
+  IntegrationContextRecord,
 ]);
 export type LinkContextRecord = typeof LinkContextRecord.Type;
 
@@ -325,6 +360,7 @@ export const KnownComposerContextRecord = Schema.Union([
   ThreadContextRecord,
   AgentContextRecord,
   ProjectFolderContextRecord,
+  IntegrationContextRecord,
 ]);
 export type KnownComposerContextRecord = typeof KnownComposerContextRecord.Type;
 

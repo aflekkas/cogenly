@@ -1,5 +1,6 @@
 import {
   IntegrationError,
+  IntegrationScope,
   VaultItemId,
   type VaultField,
   type VaultItemMetadata,
@@ -43,6 +44,14 @@ export const SignInAttachment = Schema.Struct({
   refreshAt: Schema.optional(Schema.NullOr(Schema.Number)),
   /** Environment id of the only machine that may call the token endpoint. */
   refreshOwner: Schema.String,
+  /** The definition authorized with this grant; adoption cannot broaden it. */
+  authorization: Schema.optional(
+    Schema.Struct({
+      url: Schema.String,
+      scope: IntegrationScope,
+      oauthScope: Schema.optional(Schema.String),
+    }),
+  ),
 });
 export type SignInAttachment = typeof SignInAttachment.Type;
 const decodeAttachment = Schema.decodeUnknownOption(SignInAttachment);

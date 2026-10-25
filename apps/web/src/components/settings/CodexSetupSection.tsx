@@ -385,7 +385,7 @@ function ManagedCodexSetup({
       setError(
         handoffQuery.data?.phase === "auth"
           ? (handoffQuery.data.state.message ?? "ChatGPT sign-in could not finish. Try again.")
-          : "ChatGPT sign-in on the primary environment was interrupted. Try again.",
+          : "ChatGPT sign-in on the primary machine was interrupted. Try again.",
       );
       setHandoff(null);
     }

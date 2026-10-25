@@ -26,6 +26,7 @@ import type {
   ChatAttachment as ContractChatAttachment,
   ChatFileAttachment,
   EnvironmentId,
+  IntegrationSource,
   ModelSelection,
   ProjectId,
   PullRequestListInput,
@@ -227,6 +228,7 @@ import {
   linkContextReference,
   agentContextRecord,
   projectFolderContextRecord,
+  integrationContextRecord,
 } from "~/lib/composerContextRecords";
 import { matchComposerMentionItems } from "@t3tools/client-runtime/composerThreadItems";
 import { useAgents } from "~/agents/agentsClient";
@@ -262,6 +264,7 @@ import {
   composerSuggestionOptionId,
 } from "./ComposerCommandMenu";
 import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
+import { ComposerSourcesPicker, useComposerSources } from "./ComposerSourcesPicker";
 import { ComposerImageThumbnail } from "./ComposerImageThumbnail";
 import { ImageMarkupDialog } from "./ImageMarkupDialog";
 import {
@@ -384,6 +387,7 @@ import {
   ComposerProjectPicker,
   useComposerProjectPickerState,
 } from "../../projectLabels/ComposerProjectPicker";
+import { useComposerProjectFolder } from "../../projectLabels/useComposerProjectFolder";
 import type { ReviewCommentContext } from "../../reviewCommentContext";
 
 function ComposerVideoThumbnail({ file }: { file: File }) {
@@ -2487,6 +2491,35 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const { labels: mentionProjectFolders } = useEnvironmentProjectLabels(
     isPathTrigger ? environmentId : null,
   );
+  // Sources are kept to the thread's project, the same set its agent can call.
+  const { currentId: composerProjectLabelId } = useComposerProjectFolder({
+    environmentId,
+    threadId: activeThreadId,
+    draftId: routeKind === "draft" ? draftId : null,
+  });
+  const { sources: mentionSources } = useComposerSources(
+    isPathTrigger ? environmentId : null,
+    composerProjectLabelId,
+  );
+  // The Sources picker opens from its toolbar button, or from the overflow menu once the
+  // button has folded away; then it sits on the overflow trigger (`anchor`).
+  const [sourcesPicker, setSourcesPicker] = useState<{
+    readonly open: boolean;
+    readonly anchor: HTMLElement | null;
+  }>({ open: false, anchor: null });
+  const restingOverflowRef = useRef<HTMLDivElement>(null);
+  const onSourcesPickerOpenChange = (open: boolean) => {
+    setSourcesPicker((current) => (open ? { ...current, open } : { open: false, anchor: null }));
+  };
+  const onSourcesPickerOpenChangeStable = useStableCallback(onSourcesPickerOpenChange);
+  const openSourcesFromOverflow = () => {
+    // A frame later, so the closing overflow menu hands focus back before the picker
+    // takes it for its search field.
+    window.requestAnimationFrame(() => {
+      setSourcesPicker({ open: true, anchor: restingOverflowRef.current });
+    });
+  };
+  const openSourcesFromOverflowStable = useStableCallback(openSourcesFromOverflow);
   const mentionItems = useMemo(
     () =>
       composerTrigger?.kind !== "path"
@@ -2513,6 +2546,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               name: folder.name,
               updatedAt: folder.updatedAt,
             })),
+            sources: mentionSources,
             environmentId,
             excludeThreadId: activeThreadId,
             query: composerTrigger.query,
@@ -2524,6 +2558,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       environmentThreadShells,
       mentionAgents,
       mentionProjectFolders,
+      mentionSources,
       resolveThreadKind,
     ],
   );
@@ -2882,7 +2917,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         : "No pull requests found in this repository.";
     }
     return composerTriggerKind === "path"
-      ? "No matching tasks, chats, agents, projects or files."
+      ? "No matching tasks, chats, agents, projects, sources or files."
       : "No matching command.";
   }, [
     composerTrigger,
@@ -3330,7 +3365,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               ? previewAnnotationContextRecord(existing.record)
               : existing?.kind === "thread" ||
                   existing?.kind === "agent" ||
-                  existing?.kind === "project-folder"
+                  existing?.kind === "project-folder" ||
+                  existing?.kind === "integration"
                 ? existing.record
                 : existing
                   ? (uploadedContextRecordFromDraft(existing) ?? undefined)
@@ -3384,6 +3420,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         case "project-folder": {
           // The agent can only follow links on its own server; a pasted foreign one is dropped.
           if (record.environmentId !== environmentId) break;
+          addComposerDraftThreadContexts(attachmentDraftTarget, [record], {
+            appendReference: false,
+          });
+          rewritten.set(record.contextId, record.contextId);
+          break;
+        }
+        case "integration": {
+          // An integration id names an account on one server; one pasted from another is dropped.
+          if (sourceEnvironmentId !== null && sourceEnvironmentId !== environmentId) break;
           addComposerDraftThreadContexts(attachmentDraftTarget, [record], {
             appendReference: false,
           });
@@ -4089,8 +4134,57 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       }
       return;
     }
+    if (item.type === "integration") {
+      if (trigger.kind !== "path") return;
+      if (
+        insertIntegrationSource(item.source, {
+          text: snapshot.value,
+          rangeStart: trigger.rangeStart,
+          rangeEnd: trigger.rangeEnd,
+        })
+      ) {
+        setComposerHighlightedItemId(null);
+      }
+      return;
+    }
   };
   const onSelectComposerItemStable = useStableCallback(onSelectComposerItem);
+
+  /**
+   * The one way a source enters the draft, from the Sources picker or `@`: its chip at the
+   * caret (or in place of the `@` query) and its record beside it. Picking a source the draft
+   * already holds adds another chip for the same record.
+   */
+  const insertIntegrationSource = (
+    source: IntegrationSource,
+    replace?: { text: string; rangeStart: number; rangeEnd: number },
+  ): boolean => {
+    const record = integrationContextRecord(source);
+    const replacement = `${formatInlineContextReference(linkContextReference(record))} `;
+    if (!replace) {
+      if (insertComposerText(replacement, "cursor", { ensureLeadingBoundary: true })) {
+        addComposerDraftThreadContexts(attachmentDraftTarget, [record], { appendReference: false });
+        return true;
+      }
+      // The editor is not taking input (connecting, a question pending): the store appends
+      // the chip to the draft, as it does for context from other panels.
+      addComposerDraftThreadContexts(attachmentDraftTarget, [record]);
+      return false;
+    }
+    const rangeEnd = extendReplacementRangeForTrailingSpace(
+      replace.text,
+      replace.rangeEnd,
+      replacement,
+    );
+    const applied = applyPromptReplacement(replace.rangeStart, rangeEnd, replacement, {
+      expectedText: replace.text.slice(replace.rangeStart, rangeEnd),
+    });
+    if (applied) {
+      addComposerDraftThreadContexts(attachmentDraftTarget, [record], { appendReference: false });
+    }
+    return applied;
+  };
+  const insertIntegrationSourceStable = useStableCallback(insertIntegrationSource);
 
   const onComposerMenuItemHighlighted = (itemId: string | null) => {
     setComposerHighlightedItemId(itemId);
@@ -4577,11 +4671,22 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const restingProviderTraitsPicker = renderProviderTraitsPicker({
     ...providerTraitsPickerInput,
     size: composerControlsCollapsed ? "xs" : "sm",
-    // Traits is the first block, so it hides once every block after it has.
+    // Traits is the first block, so it hides once every block after it has
+    // (mode, then project and sources for a thread).
     hidden:
       composerControlsHidden ||
       restingHiddenBlockCount > (planModeUiEnabled ? 1 : 0) + (showProjectPicker ? 1 : 0),
   });
+  // Sources is the last block, so it is the first to fold. A picker whose trigger folds away
+  // (or unfolds, when it sits on the overflow trigger) closes rather than float off nothing.
+  const sourcesBlockFolded = restingHiddenBlockCount > 0;
+  const sourcesPickerOpen =
+    sourcesPicker.open &&
+    !composerControlsHidden &&
+    (sourcesPicker.anchor === null ? !sourcesBlockFolded : sourcesBlockFolded);
+  if (sourcesPicker.open && !sourcesPickerOpen) {
+    setSourcesPicker({ open: false, anchor: null });
+  }
   const restingBlockDefs = [
     ...(providerTraitsPicker
       ? [
@@ -4624,6 +4729,22 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   disabled={isSendBusy}
                 />
               </>
+            ),
+          },
+          {
+            // Last, so it folds first; the overflow menu then offers it.
+            id: "sources",
+            content: (
+              <ComposerSourcesPicker
+                environmentId={environmentId}
+                projectLabelId={composerProjectLabelId}
+                size={composerControlsCollapsed ? "xs" : "sm"}
+                disabled={isSendBusy}
+                open={sourcesPickerOpen}
+                anchor={sourcesPicker.anchor}
+                onOpenChange={onSourcesPickerOpenChangeStable}
+                onPick={insertIntegrationSourceStable}
+              />
             ),
           },
         ]
@@ -4777,6 +4898,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           );
         })}
         <div
+          ref={restingOverflowRef}
           data-resting-controls-overflow
           aria-hidden={hiddenRestingBlockIds.length === 0 || undefined}
           inert={hiddenRestingBlockIds.length === 0 || undefined}
@@ -4795,6 +4917,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               hiddenRestingBlockIds.includes("traits") ? providerTraitsMenuContent : undefined
             }
             onToggleInteractionMode={toggleInteractionMode}
+            {...(hiddenRestingBlockIds.includes("sources")
+              ? { onOpenSources: openSourcesFromOverflowStable }
+              : {})}
           />
         </div>
       </>

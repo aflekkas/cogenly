@@ -20,6 +20,7 @@ import {
 import { availableToConnect } from "../integrations/IntegrationCatalog.ts";
 import * as Integrations from "../integrations/Integrations.ts";
 import * as ProjectFiles from "../projectLabels/ProjectFiles.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import * as ProjectStore from "./ProjectStore.ts";
 
 /**
@@ -112,7 +113,9 @@ export const layer: Layer.Layer<RuntimePolicyV2> = Layer.succeed(RuntimePolicyV2
 export const layerFromProjectStore: Layer.Layer<
   RuntimePolicyV2,
   never,
-  ProjectStore.ProjectStoreV2 | ProviderInstanceRegistry.ProviderInstanceRegistry
+  | ProjectStore.ProjectStoreV2
+  | ProviderInstanceRegistry.ProviderInstanceRegistry
+  | Integrations.Integrations
 > = Layer.effect(
   RuntimePolicyV2,
   Effect.gen(function* () {
@@ -120,32 +123,41 @@ export const layerFromProjectStore: Layer.Layer<
     // Optional so layers without the project-files service (unit tests over a
     // memory database) still resolve; production always provides it.
     const files = yield* Effect.serviceOption(ProjectFiles.ProjectFiles);
-    // Optional like ProjectFiles: unit layers without the gateway still
-    // resolve, and production always provides it.
-    const integrationsService = yield* Effect.serviceOption(Integrations.Integrations);
+    // Required, not optional: as an optional service the production runtime
+    // silently never received it and turns lost the integrations line.
+    const integrationsService = yield* Integrations.Integrations;
+    const serverSettings = yield* Effect.serviceOption(ServerSettings.ServerSettingsService);
+    // Unreadable settings keep the default: provider duplicates stay hidden.
+    const useProviderConnectors = Option.isNone(serverSettings)
+      ? Effect.succeed(false)
+      : serverSettings.value.getSettings.pipe(
+          Effect.map(
+            (settings) => settings.useProviderConnectors || !settings.nativeMcpImportReviewed,
+          ),
+          Effect.orElseSucceed(() => false),
+        );
     // The integrations line is best-effort turn context too: any failure
     // resolves to no line rather than failing the turn.
     const noIntegrations = { integrations: [], available: [] };
     const integrationsFor = (labelId: ProjectLabelId | null) =>
-      Option.isNone(integrationsService)
-        ? Effect.succeed(noIntegrations)
-        : integrationsService.value.contextIntegrations(labelId).pipe(
-            Effect.map((found) => ({
-              integrations: found.map((integration) => ({
-                name: integration.name,
-                status: integration.status,
-                displayName: integration.displayName,
-                hint: integration.hint,
-                accountLabel: integration.accountLabel,
-              })),
-              available: availableToConnect(found),
-            })),
-            Effect.catch(() => Effect.succeed(noIntegrations)),
-          );
+      integrationsService.contextIntegrations(labelId).pipe(
+        Effect.map((found) => ({
+          integrations: found.map((integration) => ({
+            name: integration.name,
+            status: integration.status,
+            displayName: integration.displayName,
+            hint: integration.hint,
+            accountLabel: integration.accountLabel,
+          })),
+          available: availableToConnect(found),
+        })),
+        Effect.orElseSucceed(() => noIntegrations),
+      );
     // The project context is best-effort turn context from the derived index:
     // any failure resolves to no folder rather than failing the turn.
     const projectFor = (
       thread: OrchestrationV2AppThread,
+      providerConnectorsHidden: boolean,
     ): Effect.Effect<
       | { readonly dir: string; readonly manifest: string; readonly labelId: ProjectLabelId }
       | undefined,
@@ -170,6 +182,7 @@ export const layerFromProjectStore: Layer.Layer<
                 projectChat: folder.projectChatThreadId === thread.id,
                 integrations,
                 availableIntegrations: available,
+                providerConnectorsHidden,
               }),
             };
           }).pipe(
@@ -182,7 +195,8 @@ export const layerFromProjectStore: Layer.Layer<
           );
     return RuntimePolicyV2.of({
       resolve: Effect.fn("RuntimePolicyV2.resolve")(function* (input) {
-        const project = yield* projectFor(input.thread);
+        const providerConnectors = yield* useProviderConnectors;
+        const project = yield* projectFor(input.thread, !providerConnectors);
         // A chat or an agent's conversation filed in a project runs with the
         // project dir as its working directory, even when the thread keeps a
         // scratch worktree path from before it was filed. Unfiled ones keep
@@ -221,12 +235,14 @@ export const layerFromProjectStore: Layer.Layer<
         const standaloneLine = buildIntegrationsContextLine(
           standalone.integrations,
           standalone.available,
+          !providerConnectors,
         );
         return ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
           runtimeMode: "full-access",
           interactionMode: input.thread.interactionMode,
           cwd,
           ...conversationModeFor(input.thread),
+          ...(providerConnectors ? { useProviderConnectors: true } : {}),
           ...(project !== undefined
             ? { projectManifest: project.manifest }
             : standaloneLine.length > 0

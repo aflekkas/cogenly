@@ -1,7 +1,7 @@
 # Welcome wizard
 
-Cogenly shows a setup flow when you open a new installation or connect to the
-hosted app for the first time. Existing workspaces skip this flow.
+Cogenly shows a setup flow when you open a new installation for the first time.
+Existing workspaces skip this flow.
 
 ## This computer is set up for you
 
@@ -10,9 +10,11 @@ computer, setup uses that computer right away. It is already connected, so
 setup goes straight to checking your agents. Add more computers later in
 **Settings → Connections**.
 
-## Connect a computer (hosted app)
+## Connect a computer
 
-The hosted app has no computer of its own, so setup starts by connecting one.
+When the app has no computer of its own, such as a desktop app with its
+[local environment turned off](./remote-access.md#using-the-desktop-app-as-a-remote-only),
+setup starts by connecting one.
 Select one or more computers to set up.
 
 - **Cogenly Connect** connects computers that are signed in to your account.

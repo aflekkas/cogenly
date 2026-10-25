@@ -16,3 +16,13 @@ it("withholds a credential prefix if a process exits partway through printing it
   const redactor = createOutputRedactor(["secret-client-value"]);
   expect(redactor.push("failure: secret-client") + redactor.flush()).toBe("failure: [redacted]");
 });
+
+it("redacts refreshed tokens added after a process starts, including split output", () => {
+  const secrets = ["initial-secret"];
+  const redactor = createOutputRedactor(() => secrets);
+  secrets.push("new-refresh-token");
+  const text =
+    redactor.push("refreshed new-refresh-") + redactor.push("token done") + redactor.flush();
+  expect(text).not.toContain("new-refresh-token");
+  expect(text).toContain("[redacted]");
+});

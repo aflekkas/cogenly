@@ -141,7 +141,7 @@ function DataSettingsPanel({ environmentId }: { environmentId: EnvironmentId | n
 
   const disabledReason =
     environmentId === null
-      ? "Choose an environment to export."
+      ? "Choose a machine to export."
       : !canExport
         ? "This connection needs permission to change settings to export."
         : null;
@@ -212,8 +212,7 @@ function DataSettingsPanel({ environmentId }: { environmentId: EnvironmentId | n
                 <span className="block">{summarizeExportCounts(result.counts)}</span>
               </>
             ) : (
-              (disabledReason ??
-              "Saved as JSON Lines in the environment's exports folder, on the machine it runs on.")
+              (disabledReason ?? "Saved as JSON Lines in the exports folder on that machine.")
             ))
           }
           control={

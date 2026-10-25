@@ -57,7 +57,7 @@ If a server is already running, generate a fresh link without restarting it:
 cogenly pair
 ```
 
-Scan the QR code on your phone or paste the pairing URL into **Add environment**
+Scan the QR code on your phone or paste the pairing URL into **Connect a machine**
 in the receiving app. Connection settings are under **Settings → Connections**
 on web and desktop. A loopback address
 such as `127.0.0.1` reaches only the device opening the link.
@@ -124,8 +124,10 @@ unavailable or all eligible machines are full, choose a machine manually to cont
 
 ### Tailscale HTTPS
 
-Join both devices to the same tailnet. In the desktop app, enable **Tailscale
-HTTPS** in **Settings → Connections**. Turn it off there to remove that route.
+Join both devices to the same tailnet. On web or desktop, turn on **Private access**
+for the machine in **Settings → Machines**, and turn it off there to remove that
+route. It is the only Tailscale switch: the desktop app's earlier Tailscale HTTPS
+switch moved into it, so a machine that had it on keeps private access.
 
 To start a command-line server with Tailscale HTTPS:
 
@@ -150,18 +152,9 @@ tailscale serve --https=443 off
 If that port is already in use, choose another with
 `--tailscale-serve-port`. See `cogenly pair --help` for other pairing options.
 
-### Hosted web app
-
-[app.t3.codes](https://app.t3.codes) needs an HTTPS endpoint. It connects directly
-to your server; a hosted pairing link does not make an unreachable backend
-reachable or convert HTTP to HTTPS.
-
-For a plain HTTP LAN endpoint, use the direct pairing URL in a browser that can
-open it, or pair from the desktop app.
-
 ## Desktop-managed SSH
 
-In the desktop app, open **Settings → Connections → Add environment**, choose
+In the desktop app, open **Settings → Connections → Connect a machine**, choose
 **SSH**, and enter a host or SSH alias such as `user@example.com`. Cogenly starts
 or reuses a server there, opens the port forward, and pairs for you. Projects,
 provider credentials, and agent work stay on the remote machine.
@@ -270,7 +263,7 @@ sudo cogenly browser setup
 The server shows the exact line for how you started it, such as
 `sudo cogenly browser setup`, and keeps your `PATH` when Node is installed only
 for your user. Where `cogenly` is not on your `PATH`, such as with only the
-desktop app installed, it names the full path of the app's own `t3` instead. It allows Chrome's sandbox with an AppArmor profile and installs
+desktop app installed, it names the full path of the app's own `cogenly` instead. It allows Chrome's sandbox with an AppArmor profile and installs
 any missing libraries with apt. It is safe to run again. Without `sudo`, it
 only reports what it would change.
 
@@ -323,9 +316,9 @@ permissions.
 
 To change an existing client's permissions, create a fresh pairing link with the
 scopes it needs. In a browser opened directly on the environment, open that link
-to replace the browser's current grant. For a saved remote environment
-in web or desktop, use **Add Environment** with the fresh link or code; pairing
-the same environment replaces its saved grant. Reconnecting alone does not change
+to replace the browser's current grant. For a saved remote machine
+in web or desktop, use **Connect a machine** with the fresh link or code;
+connecting the same machine again replaces its saved grant. Reconnecting alone does not change
 permissions.
 
 Grouping checkouts does not combine their permissions. Shared project settings
@@ -394,8 +387,8 @@ when SSH closes, see [background-service troubleshooting](./background-service.m
 | HTTP 403 without a recognized error                       | Check relay access, proxies, and firewall rules. Keep any Cloudflare Ray ID for a bug report.                                                              |
 | HTTP 408, 429, or 5xx                                     | Check network and relay availability. Startup retries temporary failures for up to ten minutes.                                                            |
 
-After fixing a permanent rejection, restart the host's server. On Linux, use
-`systemctl --user restart t3code.service` for the background service. For a
+After fixing a permanent rejection, restart the host's server. Use
+`cogenly service restart` for the background service. For a
 foreground server, stop it and run `cogenly serve` again with your usual options.
 Include the diagnostic message and trace ID when reporting a persistent failure.
 

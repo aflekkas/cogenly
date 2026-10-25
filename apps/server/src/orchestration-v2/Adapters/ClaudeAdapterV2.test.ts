@@ -276,6 +276,35 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
   });
 });
 
+describe("ClaudeAdapterV2 native MCP isolation", () => {
+  const options = (extra = {}) =>
+    ClaudeAdapterV2.makeClaudeQueryOptions({
+      modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+      nativeThreadId: "connector-thread",
+      resume: false,
+      cwd: "/workspace",
+      settings: AUTO_COMPACT_CLAUDE_SETTINGS,
+      environment: { KEEP: "yes", ENABLE_CLAUDEAI_MCP_SERVERS: "true" },
+      ...extra,
+    });
+  it("uses strict configuration and disables claude.ai servers for real turns", () => {
+    const result = options();
+    assert.equal(result.strictMcpConfig, true);
+    assert.equal(result.env?.ENABLE_CLAUDEAI_MCP_SERVERS, "false");
+    assert.equal(result.env?.KEEP, "yes");
+  });
+  it("drops the rejected strict flag for administrator-managed MCP configuration", () => {
+    const result = options({ managedMcpConfig: true });
+    assert.isUndefined(result.strictMcpConfig);
+    assert.equal(result.env?.ENABLE_CLAUDEAI_MCP_SERVERS, "false");
+  });
+  it("restores the provider's native configuration with the setting off", () => {
+    const result = options({ useProviderConnectors: true });
+    assert.isUndefined(result.strictMcpConfig);
+    assert.equal(result.env?.ENABLE_CLAUDEAI_MCP_SERVERS, "true");
+  });
+});
+
 describe("ClaudeAdapterV2 MCP query overrides", () => {
   const T3_MCP_SERVERS = {
     cogenly: {

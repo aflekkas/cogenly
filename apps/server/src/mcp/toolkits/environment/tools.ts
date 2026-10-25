@@ -5,6 +5,8 @@ import {
   OrchestratorMcpFailure,
   ServerSettings,
   ServerSettingsPatch,
+  UniversalClientPreferenceValues,
+  UniversalClientPreferencePatch,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import { Tool, Toolkit } from "effect/ai";
@@ -19,10 +21,13 @@ import * as Settings from "../../../serverSettings.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 
 const PreferenceFields = {
+  ...UniversalClientPreferenceValues.fields,
+  sharedKeybindings: ServerSettings.fields.sharedKeybindings,
   defaultThreadEnvMode: ServerSettings.fields.defaultThreadEnvMode,
   newWorktreesStartFromOrigin: ServerSettings.fields.newWorktreesStartFromOrigin,
   enableAgentTerminals: ServerSettings.fields.enableAgentTerminals,
   enableProviderUpdateChecks: ServerSettings.fields.enableProviderUpdateChecks,
+  useProviderConnectors: ServerSettings.fields.useProviderConnectors,
   projectsRoot: ServerSettings.fields.projectsRoot,
   modelEffortDefaults: ServerSettings.fields.modelEffortDefaults,
   backgroundActivity: Schema.Struct({ profile: BackgroundActivityProfileSelection }),
@@ -47,7 +52,7 @@ const shared = {
 const EnvironmentReadTool = Tool.make("environment_read", {
   ...shared,
   description:
-    "Read this server's identity and selected environment preferences, including the projects root. Provider/model availability is exposed by orchestrator_capabilities. Writing instructions are limited to 4,000 characters.",
+    "Read this server's identity and selected preferences. The projects root, provider update checks and background activity belong to this machine; the rest are universal across paired machines. Provider/model availability is exposed by orchestrator_capabilities. Writing instructions are limited to 4,000 characters.",
   success: Schema.Struct({
     environmentId: ExecutionEnvironmentDescriptor.fields.environmentId,
     label: Schema.String,
@@ -61,13 +66,16 @@ const EnvironmentReadTool = Tool.make("environment_read", {
 const EnvironmentPreferencesTool = Tool.make("environment_preferences_update", {
   ...shared,
   description:
-    "Update selected environment-wide preferences through normal settings persistence and notifications. Requires a live full-access/default calling thread. Omitted fields are preserved; empty customInstructions clears them. setModelEffortDefault sets the reasoning effort a model starts at ({ provider: instance id, model: slug, option: { id: the model's effort option id from orchestrator_capabilities, e.g. reasoningEffort or effort, value } }); option null restores the model's own default. projectsRoot sets where new project folders and their repositories go; empty restores the default, <Cogenly home>/projects. Existing project folders are not moved.",
+    "Update selected preferences through normal settings persistence and notifications. Requires a live full-access/default calling thread. defaultThreadEnvMode, setModelEffortDefault, newWorktreesStartFromOrigin, enableAgentTerminals, sourceControlWritingStyle and useProviderConnectors are universal: they reach every paired machine. The client-prefixed appearance, notifications, confirmation, composer, sidebar and diff preferences, and sharedKeybindings, are universal too. sharedKeybindings is the complete ordered list of { key, command, when? } rules; use mod for the platform modifier. enableProviderUpdateChecks, backgroundActivity and projectsRoot apply to this machine only. Omitted fields are preserved; empty customInstructions clears them. setModelEffortDefault sets the reasoning effort a model starts at ({ provider: instance id, model: slug, option: { id: the model's effort option id from orchestrator_capabilities, e.g. reasoningEffort or effort, value } }); option null restores the model's own default. projectsRoot sets where new project folders and their repositories go on this machine; empty restores the default, <Cogenly home>/projects. Existing project folders are not moved. useProviderConnectors (off by default) restores provider-native MCP servers, plugins and apps; it applies to new agent sessions.",
   parameters: Schema.Struct({
+    ...UniversalClientPreferencePatch.fields,
+    sharedKeybindings: ServerSettingsPatch.fields.sharedKeybindings,
     defaultThreadEnvMode: ServerSettingsPatch.fields.defaultThreadEnvMode,
     setModelEffortDefault: ServerSettingsPatch.fields.setModelEffortDefault,
     newWorktreesStartFromOrigin: ServerSettingsPatch.fields.newWorktreesStartFromOrigin,
     enableAgentTerminals: ServerSettingsPatch.fields.enableAgentTerminals,
     enableProviderUpdateChecks: ServerSettingsPatch.fields.enableProviderUpdateChecks,
+    useProviderConnectors: ServerSettingsPatch.fields.useProviderConnectors,
     backgroundActivity: Schema.optionalKey(Schema.Struct({ profile: BackgroundActivityProfile })),
     sourceControlWritingStyle: ServerSettingsPatch.fields.sourceControlWritingStyle,
     projectsRoot: ServerSettingsPatch.fields.projectsRoot,

@@ -18,7 +18,8 @@ import {
 import { DIALOG_BACKDROP_CLASS, DIALOG_POPUP_CLASS } from "~/components/ui/dialog-styles";
 import { Button } from "~/components/ui/button";
 import { useAnimatedPanelHeight } from "~/components/ui/animated-panel-height";
-import { SearchField, searchFieldInputClassName } from "~/components/ui/search-input";
+import { searchFieldInputClassName } from "~/components/ui/search-input";
+import { SearchListRowShortcut, SearchListSearch } from "~/components/ui/search-list";
 
 /** Closes with its exit motion when an OverlayPresence around it empties. */
 function CommandDialog<Payload>({
@@ -151,33 +152,20 @@ function CommandInput({
   ref?: React.Ref<HTMLInputElement>;
 }) {
   return (
-    <div className="px-[var(--command-shell-inset)] py-1.5">
-      <SearchField
-        size="lg"
-        variant="bare"
-        {...(startAddon ? { icon: startAddon } : {})}
-        {...(className ? { className } : {})}
-      >
-        <AutocompletePrimitive.Input
-          autoFocus
-          className={cn(searchFieldInputClassName, "text-base")}
-          data-slot="autocomplete-input"
-          placeholder={placeholder}
-          {...props}
-        />
-      </SearchField>
-    </div>
+    <SearchListSearch size="dialog" icon={startAddon} className={className}>
+      <AutocompletePrimitive.Input
+        autoFocus
+        className={cn(searchFieldInputClassName, "text-base")}
+        data-slot="autocomplete-input"
+        placeholder={placeholder}
+        {...props}
+      />
+    </SearchListSearch>
   );
 }
 
-function CommandList({ className, ...props }: React.ComponentProps<typeof AutocompleteList>) {
-  return (
-    <AutocompleteList
-      className={cn("not-empty:scroll-py-2 not-empty:p-2", className)}
-      data-slot="command-list"
-      {...props}
-    />
-  );
+function CommandList(props: Omit<React.ComponentProps<typeof AutocompleteList>, "size">) {
+  return <AutocompleteList size="dialog" data-slot="command-list" {...props} />;
 }
 
 // Pair with a LegendList child; the list owns scrolling and spacing.
@@ -232,26 +220,24 @@ function CommandCollection({ ...props }: React.ComponentProps<typeof Autocomplet
   return <AutocompleteCollection data-slot="command-collection" {...props} />;
 }
 
-// Pass `active` when the palette tracks the highlighted row itself; the
-// primitive's hover and keyboard highlight are then ignored so the two never
-// disagree, and the row shows the active surface instead.
+/**
+ * A command row; build its content from the `SearchListRow*` slots. Pass `active` when the host
+ * tracks the highlighted row itself; the primitive's hover and keyboard highlight are then ignored
+ * so the two never disagree, and the row shows the active surface instead.
+ */
 function CommandItem({
   className,
   active,
   ...props
-}: React.ComponentProps<typeof AutocompleteItem> & { active?: boolean }) {
+}: Omit<React.ComponentProps<typeof AutocompleteItem>, "highlight" | "density"> & {
+  active?: boolean;
+}) {
   return (
     <AutocompleteItem
-      // The palette's highlighted row is its cursor, so it takes the selected
-      // state rather than the hover one.
-      highlightStates={false}
-      className={cn(
-        "py-1.5",
-        active === undefined
-          ? "data-highlighted:state-selected data-selected:state-selected"
-          : cn("cursor-pointer", active && "state-selected"),
-        className,
-      )}
+      density="comfortable"
+      // Nothing is chosen in a command list, so its cursor takes the selected fill.
+      highlight={active === undefined ? "cursor" : "none"}
+      className={cn(active && "state-selected", className)}
       data-active={active || undefined}
       data-slot="command-item"
       {...props}
@@ -259,18 +245,7 @@ function CommandItem({
   );
 }
 
-function CommandShortcut({ className, ...props }: React.ComponentProps<"kbd">) {
-  return (
-    <kbd
-      className={cn(
-        "ms-auto font-medium font-sans text-secondary-label text-xs tracking-widest",
-        className,
-      )}
-      data-slot="command-shortcut"
-      {...props}
-    />
-  );
-}
+const CommandShortcut = SearchListRowShortcut;
 
 function CommandFooter({ className, ...props }: React.ComponentProps<"div">) {
   return (

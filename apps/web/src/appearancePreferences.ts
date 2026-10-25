@@ -2,8 +2,9 @@ import { APPEARANCE_ACCENTS, type AppearanceAccent } from "@t3tools/contracts";
 import { useCallback, useSyncExternalStore } from "react";
 
 /**
- * Device-local appearance preferences beside the color scheme (theme.ts):
- * accent color, font size and reduced motion. Stored in localStorage like the
+ * Locally cached appearance preferences beside the color scheme (theme.ts):
+ * accent color, font size and reduced motion. SharedClientPreferencesSync keeps
+ * them in step across paired machines. Stored in localStorage like the
  * color scheme and applied as attributes on <html> (data-accent,
  * data-font-size, data-reduce-motion), which index.css reads. index.html's
  * boot script applies the same attributes before first paint, so keep the

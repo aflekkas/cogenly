@@ -8,10 +8,9 @@ import { GitHubIcon, type Icon } from "./Icons";
  * `currentColor`; the rest carry their brand colors. All are decorative: the
  * service name next to them is the label.
  *
- * Sources: Simple Icons (CC0) for Linear, Notion, Atlassian, Intercom, Slack
- * (split into its four brand colors) and Fathom; Google's "G" and Figma's
- * logo from their Wikimedia Commons files; Wispr Flow's bars from the logo on
- * wisprflow.ai.
+ * Sources: Simple Icons (CC0) for Linear, Notion, Slack (split into its four
+ * brand colors) and Fathom; Google's "G" from its Wikimedia Commons file;
+ * Wispr Flow's bars from the logo on wisprflow.ai.
  */
 
 export const GoogleLogo: Icon = (props) => (
@@ -48,23 +47,6 @@ export const NotionLogo: Icon = (props) => (
 );
 
 export const GitHubLogo: Icon = (props) => <GitHubIcon aria-hidden="true" {...props} />;
-
-export const AtlassianLogo: Icon = (props) => (
-  <svg viewBox="0 0 24 24" aria-hidden="true" {...props}>
-    {/* Atlassian's lighter brand blue reads on both light and dark surfaces. */}
-    <path
-      fill="#2684FF"
-      d="M7.12 11.084a.683.683 0 00-1.16.126L.075 22.974a.703.703 0 00.63 1.018h8.19a.678.678 0 00.63-.39c1.767-3.65.696-9.203-2.406-12.52zM11.434.386a15.515 15.515 0 00-.906 15.317l3.95 7.9a.703.703 0 00.628.388h8.19a.703.703 0 00.63-1.017L12.63.38a.664.664 0 00-1.196.006z"
-    />
-  </svg>
-);
-
-// Intercom's brand cyan disappears on light surfaces, so the mark follows the text color.
-export const IntercomLogo: Icon = (props) => (
-  <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" {...props}>
-    <path d="M21 0H3C1.343 0 0 1.343 0 3v18c0 1.658 1.343 3 3 3h18c1.658 0 3-1.342 3-3V3c0-1.657-1.342-3-3-3zm-5.801 4.399c0-.44.36-.8.802-.8.44 0 .8.36.8.8v10.688c0 .442-.36.801-.8.801-.443 0-.802-.359-.802-.801V4.399zM11.2 3.994c0-.44.357-.799.8-.799s.8.359.8.799v11.602c0 .44-.357.8-.8.8s-.8-.36-.8-.8V3.994zm-4 .405c0-.44.359-.8.799-.8.443 0 .802.36.802.8v10.688c0 .442-.36.801-.802.801-.44 0-.799-.359-.799-.801V4.399zM3.199 6c0-.442.36-.8.802-.8.44 0 .799.358.799.8v7.195c0 .441-.359.8-.799.8-.443 0-.802-.36-.802-.8V6zM20.52 18.202c-.123.105-3.086 2.593-8.52 2.593-5.433 0-8.397-2.486-8.521-2.593-.335-.288-.375-.792-.086-1.128.285-.334.79-.375 1.125-.09.047.041 2.693 2.211 7.481 2.211 4.848 0 7.456-2.186 7.479-2.207.334-.289.839-.25 1.128.086.289.336.25.84-.086 1.128zm.281-5.007c0 .441-.36.8-.801.8-.441 0-.801-.36-.801-.8V6c0-.442.361-.8.801-.8.441 0 .801.357.801.8v7.195z" />
-  </svg>
-);
 
 // The five bars of the Flow logo, without its wordmark, centered in a square box.
 export const WisprFlowLogo: Icon = (props) => (
@@ -104,33 +86,13 @@ export const FathomLogo: Icon = (props) => (
   </svg>
 );
 
-// Figma's logo is 2:3; the wider box keeps it centered at the same height as the others.
-export const FigmaLogo: Icon = (props) => (
-  <svg viewBox="-50 0 300 300" aria-hidden="true" {...props}>
-    <path
-      fill="#0ACF83"
-      d="M50 300c27.6 0 50-22.4 50-50v-50H50c-27.6 0-50 22.4-50 50s22.4 50 50 50z"
-    />
-    <path fill="#A259FF" d="M0 150c0-27.6 22.4-50 50-50h50v100H50c-27.6 0-50-22.4-50-50z" />
-    <path fill="#F24E1E" d="M0 50C0 22.4 22.4 0 50 0h50v100H50C22.4 100 0 77.6 0 50z" />
-    <path fill="#FF7262" d="M100 0h50c27.6 0 50 22.4 50 50s-22.4 50-50 50h-50V0z" />
-    <path
-      fill="#1ABCFE"
-      d="M200 150c0 27.6-22.4 50-50 50s-50-22.4-50-50 22.4-50 50-50 50 22.4 50 50z"
-    />
-  </svg>
-);
-
 /** The logo for each catalog entry's `icon`. */
 export const INTEGRATION_LOGOS: Readonly<Record<IntegrationCatalogId, Icon>> = {
   "google-workspace": GoogleLogo,
+  slack: SlackLogo,
+  github: GitHubLogo,
   linear: LinearLogo,
   notion: NotionLogo,
-  github: GitHubLogo,
-  atlassian: AtlassianLogo,
-  intercom: IntercomLogo,
   "wispr-flow": WisprFlowLogo,
-  slack: SlackLogo,
   fathom: FathomLogo,
-  figma: FigmaLogo,
 };

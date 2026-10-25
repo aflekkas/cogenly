@@ -53,6 +53,30 @@ describe("fallbackTextGenerationModelSelection", () => {
 });
 
 describe("serverSettings helpers", () => {
+  it("legacy client migration seeds only unset fields and preserves explicit edits", () => {
+    const current = {
+      ...DEFAULT_SERVER_SETTINGS,
+      clientAppearanceAccent: "green" as const,
+      clientWordWrap: false,
+    };
+    const migrated = applyServerSettingsPatch(current, {
+      migrateClientPreferences: {
+        clientAppearanceAccent: "blue",
+        clientAppearanceMode: "light",
+        clientWordWrap: true,
+      },
+    });
+    expect(migrated.clientAppearanceAccent).toBe("green");
+    expect(migrated.clientAppearanceMode).toBe("light");
+    expect(migrated.clientWordWrap).toBe(false);
+    expect(
+      applyServerSettingsPatch(migrated, {
+        clientAppearanceMode: "dark",
+        migrateClientPreferences: { clientAppearanceMode: "system" },
+      }).clientAppearanceMode,
+    ).toBe("dark");
+  });
+
   it("sets and clears one model's default effort without touching others", () => {
     const codex = ProviderInstanceId.make("codex");
     const set = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {

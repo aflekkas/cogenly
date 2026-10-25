@@ -36,10 +36,25 @@ import { useHostConnectionChecks } from "./useHostConnectionChecks";
 import { deviceHostConnectionKey } from "./deviceHostConnectionChecks";
 import { settingsScopeEnvironmentLabel, settingsScopeEnvironmentLabels } from "./settingsScopeAxis";
 
+/** Device hosts are machine-local: the list belongs to the machine `environmentId`. */
 export function DeviceHostsSettings(props: { environmentId: EnvironmentId | null }) {
-  const { scope, environments, connectedEnvironments } = useSettingsScope();
+  const scopeContext = useSettingsScope();
+  const environments = useMemo(
+    () =>
+      scopeContext.environments.filter(
+        (environment) => environment.environmentId === props.environmentId,
+      ),
+    [props.environmentId, scopeContext.environments],
+  );
+  const connectedEnvironments = useMemo(
+    () =>
+      scopeContext.connectedEnvironments.filter(
+        (environment) => environment.environmentId === props.environmentId,
+      ),
+    [props.environmentId, scopeContext.connectedEnvironments],
+  );
   const canConfigure = useEnvironmentScope(props.environmentId, AuthSettingsWriteScope);
-  const projectScope = scope.kind === "project" || scope.kind === "checkout";
+  const projectScope = scopeContext.scope.kind === "project";
   const update = useAtomCommand(serverEnvironment.updateSettings, { reportFailure: false });
   const [editing, setEditing] = useState<SshDeviceHostConfig | null>(null);
   const [originalHost, setOriginalHost] = useState<SshDeviceHostConfig | null>(null);
@@ -68,7 +83,7 @@ export function DeviceHostsSettings(props: { environmentId: EnvironmentId | null
       const results = await Promise.allSettled(
         environments.map(async (environment) => {
           if (environment.connection.phase !== "connected" || !environment.serverConfig) {
-            throw new Error("Environment disconnected");
+            throw new Error("Machine disconnected");
           }
           if (!readEnvironmentScope(environment.environmentId, AuthSettingsWriteScope)) {
             throw new Error("This connection cannot change device settings.");
@@ -135,7 +150,7 @@ export function DeviceHostsSettings(props: { environmentId: EnvironmentId | null
       title="Device hosts"
       serverScoped
       settingKeys={["deviceHosts"]}
-      description="Add remote machines with simulator or emulator runtimes installed, and the selected environments will connect over SSH and set up device tools automatically."
+      description="Add remote machines with simulator or emulator runtimes installed, and this machine will connect over SSH and set up device tools automatically."
       control={
         <Button
           size="sm"

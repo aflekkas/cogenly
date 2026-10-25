@@ -1711,6 +1711,8 @@ const makeWsRpcHandlers = (
       [WS_METHODS.threadApprovalsSubscribe]: () => agentWorkspace.subscribeThreadApprovals,
       [WS_METHODS.agentsStartWork]: (input) => agentWorkspace.startWork(input),
       [WS_METHODS.agentsActivity]: (input) => agentWorkspace.activity(input.agentId),
+      [WS_METHODS.integrationsPreviewNative]: () => integrations.previewNative(),
+      [WS_METHODS.integrationsImportNative]: () => integrations.importNative(),
       [WS_METHODS.integrationsList]: () => integrations.list({ includeProcessOutput: true }),
       // The owner's own Settings writes approve the vault items their headers reference.
       [WS_METHODS.integrationsCreate]: (input) =>
@@ -1727,6 +1729,13 @@ const makeWsRpcHandlers = (
           origin: { origin: requestOrigin },
         }),
       [WS_METHODS.integrationsSubscribe]: () => integrations.subscribe(),
+      [WS_METHODS.integrationsSaveOAuthClient]: (input) =>
+        integrations.saveOAuthClient(input, { origin: { origin: requestOrigin } }),
+      [WS_METHODS.integrationsSaveApiKey]: (input) =>
+        integrations.saveApiKey(input, { origin: { origin: requestOrigin } }),
+      [WS_METHODS.integrationsInstallRuntime]: (input) =>
+        integrations.installRuntime(input.runtime),
+      [WS_METHODS.integrationsSubscribeSources]: () => integrations.subscribeSources(),
       [WS_METHODS.machineSecurityStatus]: () => machineSecurity.status,
       [WS_METHODS.machinesList]: () => machines.list,
       [WS_METHODS.syncStatus]: (input) => syncStatus.status(input),

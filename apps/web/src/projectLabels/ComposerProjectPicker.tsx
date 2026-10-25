@@ -1,7 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { EnvironmentId, ProjectLabelId, ThreadId } from "@t3tools/contracts";
-import { CheckIcon, FolderIcon, FolderMinusIcon, PlusIcon } from "lucide-react";
+import { FolderIcon, FolderMinusIcon, PlusIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import {
@@ -14,36 +13,38 @@ import {
   Combobox,
   ComboboxEmpty,
   ComboboxItem,
-  ComboboxItemIcon,
   ComboboxList,
   ComboboxPopup,
   ComboboxSearchInput,
   ComboboxTrigger,
 } from "../components/ui/combobox";
+import {
+  SearchListRowCheck,
+  SearchListRowIcon,
+  SearchListRowLabel,
+  SearchListRowText,
+  SearchListRowTrailing,
+} from "../components/ui/search-list";
 import { InlineButton } from "../components/ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
-import { type DraftId, useComposerDraftStore } from "../composerDraftStore";
+import type { DraftId } from "../composerDraftStore";
 import { cn } from "../lib/utils";
-import { useThreadShell } from "../state/entities";
 import { serverEnvironment } from "../state/server";
 import { openCreateProjectDialog } from "./CreateProjectDialogHost";
-import { setPendingProjectFolder, usePendingProjectFolderStore } from "./pendingProjectFolders";
+import { setPendingProjectFolder } from "./pendingProjectFolders";
 import {
   PROJECT_LABEL_COLORS,
   isProjectChatThread,
   priorFiling,
-  projectLabelKey,
   type EnvironmentProjectLabel,
-  scopedRepositoryKey,
   threadFolderState,
   threadForksIntoProjects,
   threadProjectFolderId,
 } from "./projectLabels.logic";
-import { composerProjectFolderId } from "./projectMeta.logic";
 import { HeroProjectSuffixText } from "./HeroProjectSuffix";
 import { HERO_INLINE_ICON_STYLE, ProjectFolderIcon } from "./ProjectFolderMark";
+import { useComposerProjectFolder } from "./useComposerProjectFolder";
 import { useMoveThreadToFolder } from "./useMoveThreadToFolder";
-import { useProjectLabelDirectory } from "./useProjectLabels";
 import { pickNoProjectForWork } from "./workNoProjectPicks";
 import { WorkHeroCrumbText } from "../components/chat/WorkHeroSentence";
 
@@ -78,22 +79,14 @@ export function useComposerProjectPickerState(
   threadId: ThreadId | null,
   draftId: DraftId | null,
 ) {
-  const environmentIds = useMemo(() => [environmentId], [environmentId]);
-  const directory = useProjectLabelDirectory(environmentIds);
-  const thread = useThreadShell(
-    useMemo(
-      () => (threadId === null ? null : scopeThreadRef(environmentId, threadId)),
-      [environmentId, threadId],
-    ),
-  );
+  const { directory, thread, draftSurface, isWorkDraft, current } = useComposerProjectFolder({
+    environmentId,
+    threadId,
+    draftId,
+  });
   const canMove = useAtomValue(
     serverEnvironment.moveThreadProjectFolder.permissionAtom(environmentId),
   );
-  const draft = useComposerDraftStore((store) =>
-    draftId === null ? undefined : store.draftThreadsByThreadKey[draftId],
-  );
-  const draftSurface = draft?.surface;
-  const isWorkDraft = thread === null && draftSurface === "work";
   // Chats, and Work drafts: existing Work follows its repository (moved from
   // its row's menu), and an agent's conversation belongs to the agent.
   const surface = thread ? thread.source.surface : draftSurface;
@@ -108,7 +101,8 @@ export function useComposerProjectPickerState(
   return {
     directory,
     thread,
-    draft,
+    draftSurface,
+    current,
     isWorkDraft,
     canPickProject: canMove && (isChat || isWorkDraft),
   };
@@ -139,15 +133,8 @@ export function ComposerProjectPicker(props: {
   readonly appearance?: "toolbar" | "hero" | "headline";
 }) {
   const { environmentId, threadId } = props;
-  const { directory, thread, draft, isWorkDraft, canPickProject } = useComposerProjectPickerState(
-    environmentId,
-    threadId,
-    props.draftId,
-  );
-  const pending = usePendingProjectFolderStore((state) => {
-    const entry = state.byThreadId[threadId];
-    return entry?.environmentId === environmentId ? entry : null;
-  });
+  const { directory, thread, draftSurface, isWorkDraft, current, canPickProject } =
+    useComposerProjectPickerState(environmentId, threadId, props.draftId);
   const canCreate = useAtomValue(
     serverEnvironment.createProjectLabel.permissionAtom(environmentId),
   );
@@ -162,24 +149,6 @@ export function ComposerProjectPicker(props: {
     () => directory.active.filter((entry) => entry.environmentId === environmentId),
     [directory.active, environmentId],
   );
-  // The project a Work draft's repository is in, which it follows unless another is picked.
-  const repositoryFolder =
-    isWorkDraft && draft
-      ? (directory.folderByRepository.get(scopedRepositoryKey(environmentId, draft.projectId)) ??
-        null)
-      : null;
-  const currentId =
-    composerProjectFolderId({
-      pendingFolderId: pending?.folderId ?? null,
-      threadFolderId: thread ? threadProjectFolderId(thread) : null,
-    }) ??
-    repositoryFolder?.label.id ??
-    null;
-  const current =
-    currentId === null
-      ? null
-      : (directory.byKey.get(projectLabelKey(environmentId, currentId)) ?? null);
-
   const options = useMemo((): ProjectOption[] => {
     // "No project" is a choice like any project, so it leads the list;
     // creating one is the lone action at the end. For Work it moves the draft
@@ -278,6 +247,10 @@ export function ComposerProjectPicker(props: {
   const triggerLabel = current ? `Project: ${current.label.name}` : "No project";
   const isHero = props.appearance === "hero";
   const inSentence = isHero || isHeadline;
+  const isChosen = (option: ProjectOption) =>
+    option.kind === "project"
+      ? option.id === current?.label.id
+      : option.kind === "none" && current === null;
 
   const picker = (
     <Combobox
@@ -396,37 +369,7 @@ export function ComposerProjectPicker(props: {
               divider={(option.kind === "new" || option.kind === "create") && options.length > 1}
               disabled={busy || (option.kind === "create" && option.name.length > 200)}
             >
-              {option.kind === "project" ? (
-                <>
-                  <ComboboxItemIcon>
-                    <ProjectFolderIcon project={option.project} className="size-4" />
-                  </ComboboxItemIcon>
-                  <span className="min-w-0 flex-1 truncate">{option.name}</span>
-                  {option.id === current?.label.id ? <CheckIcon className="ml-auto" /> : null}
-                </>
-              ) : option.kind === "new" ? (
-                <>
-                  <ComboboxItemIcon>
-                    <PlusIcon />
-                  </ComboboxItemIcon>
-                  <span className="min-w-0 flex-1 truncate">New project…</span>
-                </>
-              ) : option.kind === "none" ? (
-                <>
-                  <ComboboxItemIcon>
-                    <FolderMinusIcon className="text-muted-foreground" />
-                  </ComboboxItemIcon>
-                  <span className="min-w-0 flex-1 truncate">No project</span>
-                  {current === null ? <CheckIcon className="ml-auto" /> : null}
-                </>
-              ) : (
-                <>
-                  <ComboboxItemIcon>
-                    <PlusIcon />
-                  </ComboboxItemIcon>
-                  <span className="min-w-0 flex-1 truncate">New project “{option.name}”…</span>
-                </>
-              )}
+              <ProjectOptionRow option={option} chosen={isChosen(option)} />
             </ComboboxItem>
           )}
         </ComboboxList>
@@ -434,4 +377,37 @@ export function ComposerProjectPicker(props: {
     </Combobox>
   );
   return picker;
+}
+
+function ProjectOptionRow(props: { readonly option: ProjectOption; readonly chosen: boolean }) {
+  const { option } = props;
+  const icon =
+    option.kind === "project" ? (
+      <ProjectFolderIcon project={option.project} className="size-4" />
+    ) : option.kind === "none" ? (
+      <FolderMinusIcon />
+    ) : (
+      <PlusIcon />
+    );
+  const label =
+    option.kind === "project"
+      ? option.name
+      : option.kind === "none"
+        ? "No project"
+        : option.kind === "new"
+          ? "New project…"
+          : `New project “${option.name}”…`;
+  return (
+    <>
+      <SearchListRowIcon>{icon}</SearchListRowIcon>
+      <SearchListRowText>
+        <SearchListRowLabel>{label}</SearchListRowLabel>
+      </SearchListRowText>
+      {props.chosen ? (
+        <SearchListRowTrailing>
+          <SearchListRowCheck />
+        </SearchListRowTrailing>
+      ) : null}
+    </>
+  );
 }

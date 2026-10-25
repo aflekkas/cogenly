@@ -34,6 +34,10 @@ export interface DesktopSettings {
   readonly mainWindowBounds: DesktopWindowBounds | null;
   readonly mainWindowMaximized: boolean;
   readonly serverExposureMode: DesktopServerExposureMode;
+  /**
+   * The retired desktop Tailscale HTTPS switch. Startup moves it into Private
+   * access on Settings → Machines and clears it (see tailscaleServeMigration).
+   */
   readonly tailscaleServeEnabled: boolean;
   readonly tailscaleServePort: number;
   readonly updateChannel: DesktopUpdateChannel;
@@ -177,6 +181,7 @@ export class DesktopAppSettings extends Context.Service<
     readonly setServerExposureMode: (
       mode: DesktopServerExposureMode,
     ) => Effect.Effect<DesktopSettingsChange, DesktopSettingsWriteError>;
+    /** Only clears the retired switch once it has moved into Private access. */
     readonly setTailscaleServe: (input: {
       readonly enabled: boolean;
       readonly port: Option.Option<number>;

@@ -5,6 +5,7 @@ import {
   AuthAccessWriteScope,
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
+  AuthProvidersManageScope,
   AuthSettingsWriteScope,
   AuthSourceControlWriteScope,
   type AuthEnvironmentScope,
@@ -88,6 +89,8 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   // Seeing what a thread waits on is a read; deciding it is agents.approve / agents.reject.
   [WS_METHODS.threadApprovalsSubscribe]: AuthOrchestrationReadScope,
   [WS_METHODS.agentsStartWork]: AuthOrchestrationOperateScope,
+  [WS_METHODS.integrationsPreviewNative]: AuthOrchestrationOperateScope,
+  [WS_METHODS.integrationsImportNative]: AuthOrchestrationOperateScope,
   [WS_METHODS.integrationsList]: AuthOrchestrationReadScope,
   // Creating or changing an integration hands agents a new credentialed
   // upstream, and testing one spends a resolved credential on the network.
@@ -99,6 +102,13 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   // Signing in grants agents a new upstream account.
   [WS_METHODS.integrationsBeginSignIn]: AuthOrchestrationOperateScope,
   [WS_METHODS.integrationsConnectFromCatalog]: AuthOrchestrationOperateScope,
+  // Saving a client secret or key writes the vault and the integration, like vault.create.
+  [WS_METHODS.integrationsSaveOAuthClient]: AuthOrchestrationOperateScope,
+  [WS_METHODS.integrationsSaveApiKey]: AuthOrchestrationOperateScope,
+  // Installing uv puts software on this machine, like installing a provider CLI.
+  [WS_METHODS.integrationsInstallRuntime]: AuthProvidersManageScope,
+  // The composer's Sources picker runs for every paired client that can read threads.
+  [WS_METHODS.integrationsSubscribeSources]: AuthOrchestrationReadScope,
   [WS_METHODS.machineSecurityStatus]: AuthOrchestrationReadScope,
   [WS_METHODS.machinesList]: AuthOrchestrationReadScope,
   [WS_METHODS.syncStatus]: AuthOrchestrationReadScope,

@@ -1,6 +1,11 @@
 import { loopbackHttpsPolicy } from "./https.testkit.ts";
 import { describe, expect, it } from "@effect/vitest";
-import { IntegrationName, VaultItemId, type IntegrationId } from "@t3tools/contracts";
+import {
+  IntegrationName,
+  ProjectLabelId,
+  VaultItemId,
+  type IntegrationId,
+} from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
 import * as Option from "effect/Option";
@@ -296,6 +301,32 @@ describe("web integration sign-ins across paired machines", () => {
           yield* whoami(spoke);
           expect(mock.refreshes).toBe(1);
         }).pipe(Effect.scoped, http),
+    );
+  }
+
+  for (const change of ["endpoint", "project scope"] as const) {
+    it.effect(`a peer cannot restore a cleared grant after changing its ${change}`, () =>
+      Effect.gen(function* () {
+        const { hub, spoke } = yield* sharedPair;
+        const mock = yield* startMockAuthServer;
+        const integration = yield* addLinear(spoke, mock);
+        yield* spoke.integrations.update({
+          id: integration.id,
+          scope: { type: "projects", labelIds: [ProjectLabelId.make("label:original")] },
+        });
+        yield* copyDefinition(spoke, hub, integration.id);
+        yield* signIn(spoke, integration.id, "spawn");
+        yield* settle(hub, [spoke]);
+        yield* hub.integrations.adoptSyncedSignIns();
+        expect((yield* oauthStateOf(hub, integration.id))?.signedIn).toBe(true);
+        // IntegrationSync drops the local grant when a peer changes its destination or widens scope.
+        if (change === "endpoint")
+          yield* hub.sql`UPDATE integrations SET payload_json = json_set(json_remove(payload_json, '$.oauthState'), '$.url', ${mock.base + "/other-mcp"}) WHERE id = ${integration.id}`;
+        else
+          yield* hub.sql`UPDATE integrations SET payload_json = json_set(json_remove(payload_json, '$.oauthState'), '$.scope', json('{"type":"all"}')) WHERE id = ${integration.id}`;
+        yield* hub.integrations.adoptSyncedSignIns();
+        expect((yield* oauthStateOf(hub, integration.id))?.signedIn).not.toBe(true);
+      }).pipe(Effect.scoped, http),
     );
   }
 

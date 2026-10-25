@@ -195,7 +195,10 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
 
   return (
     <>
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
+      <div
+        id="project-folders"
+        className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground"
+      >
         <PageContent width="wide" className="pb-0">
           <div className="flex w-full min-w-0 items-center gap-3">
             <p className="min-w-0 flex-1 truncate text-sm text-muted-foreground">

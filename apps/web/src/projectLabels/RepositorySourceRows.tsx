@@ -20,7 +20,14 @@ import {
 } from "~/components/ProjectFavicon";
 import { cn } from "~/lib/utils";
 import { Button } from "~/components/ui/button";
-import { ComboboxItem, ComboboxItemIcon } from "~/components/ui/combobox";
+import { ComboboxItem } from "~/components/ui/combobox";
+import {
+  SearchListRowDescription,
+  SearchListRowIcon,
+  SearchListRowLabel,
+  SearchListRowText,
+  SearchListRowTrailing,
+} from "~/components/ui/search-list";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "~/components/ui/menu";
 import { Spinner } from "~/components/ui/spinner";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
@@ -230,23 +237,20 @@ export function RepositoryPickerRow<Item>(props: {
         tone={props.tone ?? "default"}
         divider={props.divider ?? false}
       >
-        <ComboboxItemIcon>{props.icon}</ComboboxItemIcon>
-        <TruncatedWithTooltip
-          text={props.name}
-          tooltip={props.tooltip ?? props.name}
-          className={cn("min-w-0 text-sm", props.detail ? "shrink" : "flex-1")}
-        />
-        {props.detail ? (
+        <SearchListRowIcon>{props.icon}</SearchListRowIcon>
+        <SearchListRowText layout="inline">
           <TruncatedWithTooltip
-            text={props.detail}
-            className="min-w-0 flex-1 text-xs text-muted-foreground"
+            part="label"
+            text={props.name}
+            tooltip={props.tooltip ?? props.name}
           />
-        ) : null}
+          {props.detail ? <TruncatedWithTooltip part="description" text={props.detail} /> : null}
+        </SearchListRowText>
         {props.trailing || props.menu ? (
-          <span className="ml-auto flex shrink-0 items-center gap-1">
+          <SearchListRowTrailing>
             {props.trailing}
             {props.menu}
-          </span>
+          </SearchListRowTrailing>
         ) : null}
       </ComboboxItem>
       {props.below}
@@ -350,23 +354,37 @@ export function GitHubRepositoryRow<Item>(props: {
 export function ShowMoreRemoteRow<Item>(props: { readonly item: Item; readonly hidden: number }) {
   return (
     <ComboboxItem hideIndicator value={props.item} tone="action">
-      <ComboboxItemIcon>
-        <ChevronDownIcon aria-hidden className="size-3.5" />
-      </ComboboxItemIcon>
-      <span className="min-w-0 flex-1 truncate text-sm">{`Show ${props.hidden} more`}</span>
+      <PickerRowContent
+        icon={<ChevronDownIcon aria-hidden className="size-3.5" />}
+        label={`Show ${props.hidden} more`}
+      />
     </ComboboxItem>
   );
 }
 
-/** One line that truncates, with the full text in a tooltip. */
+/** A picker row that is an icon and a label, such as "Add repository…" or "Back". */
+export function PickerRowContent(props: { readonly icon: ReactNode; readonly label: ReactNode }) {
+  return (
+    <>
+      <SearchListRowIcon>{props.icon}</SearchListRowIcon>
+      <SearchListRowText>
+        <SearchListRowLabel>{props.label}</SearchListRowLabel>
+      </SearchListRowText>
+    </>
+  );
+}
+
+/** A row's label or description, truncated, with the full text in a tooltip. */
 function TruncatedWithTooltip(props: {
+  readonly part: "label" | "description";
   readonly text: string;
   readonly tooltip?: string;
-  readonly className: string;
 }) {
   return (
     <Tooltip>
-      <TooltipTrigger render={<span className={cn("truncate", props.className)} />}>
+      <TooltipTrigger
+        render={props.part === "label" ? <SearchListRowLabel /> : <SearchListRowDescription />}
+      >
         {props.text}
       </TooltipTrigger>
       <TooltipPopup side="top">{props.tooltip ?? props.text}</TooltipPopup>
@@ -437,12 +455,7 @@ function RemoteCloneStatus(props: {
 /** The "Manage repositories…" row's look, shared by every repository picker. */
 export function ManageRepositoriesRowContent() {
   return (
-    <>
-      <ComboboxItemIcon>
-        <Settings2Icon className="size-4" />
-      </ComboboxItemIcon>
-      <span className="min-w-0 flex-1 truncate text-sm">Manage repositories…</span>
-    </>
+    <PickerRowContent icon={<Settings2Icon className="size-4" />} label="Manage repositories…" />
   );
 }
 

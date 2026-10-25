@@ -22,7 +22,7 @@ export const IntegrationName = TrimmedNonEmptyString.check(
 export type IntegrationName = typeof IntegrationName.Type;
 
 /** Local endpoints are allocated by Cogenly, never taken from user-entered URLs. */
-export const IntegrationTransport = Schema.Literals(["http", "local"]);
+export const IntegrationTransport = Schema.Literals(["http", "local", "stdio"]);
 export type IntegrationTransport = typeof IntegrationTransport.Type;
 
 /** The account is the integration's `accountLabel`, as for remote integrations. */
@@ -32,6 +32,14 @@ export const LocalIntegrationConfig = Schema.Struct({
   callbackOrigin: TrimmedNonEmptyString.check(Schema.isMaxLength(2000)),
 });
 export type LocalIntegrationConfig = typeof LocalIntegrationConfig.Type;
+
+/** A server-owned stdio process. Secret environment values are vault references. */
+export const IntegrationCommand = Schema.Struct({
+  command: TrimmedNonEmptyString.check(Schema.isMaxLength(2000)),
+  args: Schema.Array(Schema.String.check(Schema.isMaxLength(4000))).check(Schema.isMaxLength(100)),
+  env: Schema.Record(Schema.String, Schema.String.check(Schema.isMaxLength(4000))),
+});
+export type IntegrationCommand = typeof IntegrationCommand.Type;
 
 /** All projects, or only the listed project folders (by label id). */
 export const IntegrationScope = Schema.Union([
@@ -73,6 +81,7 @@ const integrationFields = {
   displayName: TrimmedNonEmptyString.check(Schema.isMaxLength(200)),
   transport: IntegrationTransport,
   local: Schema.optional(LocalIntegrationConfig),
+  command: Schema.optional(IntegrationCommand),
   url: TrimmedNonEmptyString.check(Schema.isMaxLength(2000)),
   headers: IntegrationHeaders,
   enabled: Schema.Boolean,
@@ -130,8 +139,6 @@ export type IntegrationAddInput = typeof IntegrationAddInput.Type;
  * `{{credential:<item>.<field>}}` vault references, never values.
  */
 export const IntegrationCatalogInputs = Schema.Struct({
-  /** A region id, for services hosted per region (Intercom: us or eu). */
-  region: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(40))),
   /** The auth mode; inferred from the other inputs when omitted. */
   auth: Schema.optional(IntegrationCatalogAuthKind),
   /** Vault reference to an API key or token, sent as a bearer token. */
@@ -162,7 +169,6 @@ export type IntegrationCatalogConnectInput = typeof IntegrationCatalogConnectInp
  */
 export const IntegrationAddToolInput = Schema.Struct({
   catalogId: Schema.optional(IntegrationCatalogId),
-  region: IntegrationCatalogInputs.fields.region,
   apiKey: IntegrationCatalogInputs.fields.apiKey,
   clientId: IntegrationCatalogInputs.fields.clientId,
   clientSecret: IntegrationCatalogInputs.fields.clientSecret,
@@ -171,6 +177,7 @@ export const IntegrationAddToolInput = Schema.Struct({
   displayName: Schema.optional(integrationFields.displayName),
   transport: Schema.optional(IntegrationTransport),
   local: integrationFields.local,
+  command: integrationFields.command,
   url: Schema.optional(integrationFields.url),
   headers: Schema.optional(IntegrationHeaders),
   enabled: Schema.optional(Schema.Boolean),
@@ -184,6 +191,7 @@ export type IntegrationAddToolInput = typeof IntegrationAddToolInput.Type;
 
 export const IntegrationUpdateInput = Schema.Struct({
   id: IntegrationId,
+  command: Schema.optional(IntegrationCommand),
   displayName: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(200))),
   transport: Schema.optional(IntegrationTransport),
   url: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(2000))),
@@ -215,12 +223,93 @@ export const IntegrationConnectionStatus = Schema.Literals([
 ]);
 export type IntegrationConnectionStatus = typeof IntegrationConnectionStatus.Type;
 
+/** A definition that arrived from another machine, set by machine sync. */
+export const IntegrationSyncedFrom = Schema.Struct({
+  machineLabel: Schema.String.check(Schema.isMaxLength(200)),
+});
+export type IntegrationSyncedFrom = typeof IntegrationSyncedFrom.Type;
+
+/** One step of a guided setup, in plain words, with where to do it and what to paste. */
+export const IntegrationSetupStep = Schema.Struct({
+  text: Schema.String,
+  /** The exact console page for this step. */
+  url: Schema.optional(Schema.String),
+  /** A value to copy into the service, such as the redirect URI or the scopes. */
+  copy: Schema.optional(Schema.Struct({ label: Schema.String, value: Schema.String })),
+});
+export type IntegrationSetupStep = typeof IntegrationSetupStep.Type;
+
+const setupActionBase = {
+  /** A short heading, e.g. "Sign in to Linear". */
+  title: Schema.String,
+  /** One or two plain sentences on what is wrong or missing. */
+  message: Schema.String,
+  /** The account this is for; absent before one exists. */
+  integrationId: Schema.optional(IntegrationId),
+  catalogId: Schema.optional(IntegrationCatalogId),
+};
+
+/**
+ * The one next thing a person (or an agent, through Settings) does to make an
+ * integration usable. Settings renders it inline on the row; agents get the
+ * same action in plain words with a Settings link.
+ *
+ * - `sign_in`: one click, `integrations.beginSignIn`.
+ * - `oauth_client`: create an app with the service by following `steps`, then
+ *   enter its client id and secret (`integrations.saveOAuthClient`).
+ * - `api_key`: create a key or token at `url`, then enter it (`integrations.saveApiKey`).
+ * - `install_runtime`: a program Cogenly runs is missing; `integrations.installRuntime`
+ *   when `canInstall`, otherwise `command` by hand.
+ * - `retry`: something failed that may pass on its own; `button` says which control retries.
+ * - `fix`: the definition needs a change; `button` says which control fixes it.
+ */
+export const IntegrationSetupAction = Schema.Union([
+  Schema.Struct({ type: Schema.Literal("sign_in"), ...setupActionBase }),
+  Schema.Struct({
+    type: Schema.Literal("oauth_client"),
+    ...setupActionBase,
+    steps: Schema.Array(IntegrationSetupStep),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("api_key"),
+    ...setupActionBase,
+    /** What the service calls it, e.g. "Personal access token". */
+    label: Schema.String,
+    /** Where to create one. */
+    url: Schema.optional(Schema.String),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("install_runtime"),
+    ...setupActionBase,
+    runtime: Schema.Literal("uv"),
+    canInstall: Schema.Boolean,
+    /** The command a person runs instead, e.g. `brew install uv`. */
+    command: Schema.String,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("retry"),
+    ...setupActionBase,
+    button: Schema.Literals(["test", "sign_in"]),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("fix"),
+    ...setupActionBase,
+    button: Schema.Literals(["edit", "enable"]),
+  }),
+]);
+export type IntegrationSetupAction = typeof IntegrationSetupAction.Type;
+
 /** What clients and `integrations_list` see: never resolved credentials, and literal header values masked. */
 export const IntegrationSummary = Schema.Struct({
+  /** Present when the definition stays local; safe to show without exposing the URL. */
+  notSyncedReason: Schema.optional(Schema.String),
   integration: Integration,
   status: IntegrationConnectionStatus,
   toolCount: Schema.NullOr(Schema.Number),
   message: Schema.optional(Schema.String),
+  /** The next action for an account that is not connected: needs sign-in or an error. */
+  setup: Schema.optional(IntegrationSetupAction),
+  syncedFrom: Schema.optional(IntegrationSyncedFrom),
   checkedAt: Schema.optional(IsoDateTime),
   callbackHost: Schema.optional(Schema.String),
   /** The process behind a `local` integration, which Cogenly runs. */
@@ -260,12 +349,124 @@ export const IntegrationMutationResult = Schema.Struct({
 });
 export type IntegrationMutationResult = typeof IntegrationMutationResult.Type;
 
+/**
+ * Connecting from the catalog, or saving its credentials: the integration
+ * (absent when nothing could be created yet), its sign-in link, or the next
+ * action when something has to happen first.
+ */
+export const IntegrationConnectResult = Schema.Struct({
+  integration: Schema.optional(Integration),
+  signIn: Schema.optional(IntegrationSignIn),
+  setup: Schema.optional(IntegrationSetupAction),
+});
+export type IntegrationConnectResult = typeof IntegrationConnectResult.Type;
+
+const secretInputTarget = {
+  catalogId: IntegrationCatalogId,
+  /** The account to update; omit to connect a new one. */
+  integrationId: Schema.optional(IntegrationId),
+  /** Names a new account, e.g. "work"; Google needs one to connect. */
+  accountLabel: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(80))),
+  scope: Schema.optional(IntegrationScope),
+};
+
+/**
+ * An app's client id and secret, typed into Settings. The server stores the
+ * secret in the vault and the integration references it; the value never
+ * appears in an integration, an event or a result.
+ */
+const oauthClientSecretFields = {
+  clientId: TrimmedNonEmptyString.check(Schema.isMaxLength(500)),
+  clientSecret: TrimmedNonEmptyString.check(Schema.isMaxLength(8192)),
+};
+export const IntegrationSaveOAuthClientInput = Schema.Union([
+  Schema.Struct({ ...secretInputTarget, ...oauthClientSecretFields }),
+  // A custom server already exists when discovery asks for a manual client.
+  Schema.Struct({
+    ...secretInputTarget,
+    catalogId: Schema.optional(IntegrationCatalogId),
+    integrationId: IntegrationId,
+    ...oauthClientSecretFields,
+  }),
+]);
+export type IntegrationSaveOAuthClientInput = typeof IntegrationSaveOAuthClientInput.Type;
+
+/** An API key or token typed into Settings, stored in the vault like a client secret. */
+export const IntegrationSaveApiKeyInput = Schema.Struct({
+  ...secretInputTarget,
+  apiKey: TrimmedNonEmptyString.check(Schema.isMaxLength(8192)),
+});
+export type IntegrationSaveApiKeyInput = typeof IntegrationSaveApiKeyInput.Type;
+
+/** A program a managed integration runs; only uv (for Google's uvx) today. */
+export const IntegrationRuntime = Schema.Literal("uv");
+export type IntegrationRuntime = typeof IntegrationRuntime.Type;
+
+export const IntegrationInstallRuntimeInput = Schema.Struct({ runtime: IntegrationRuntime });
+export type IntegrationInstallRuntimeInput = typeof IntegrationInstallRuntimeInput.Type;
+
+export const IntegrationInstallRuntimeResult = Schema.Struct({
+  installed: Schema.Boolean,
+  /** What happened, in plain words; on failure, the installer's last output lines. */
+  message: Schema.String,
+});
+export type IntegrationInstallRuntimeResult = typeof IntegrationInstallRuntimeResult.Type;
+
+/**
+ * A connected account as the composer's Sources picker shows it: no headers,
+ * no OAuth state. `name` is what `integration_call` takes; `scope` lets the
+ * client keep a thread's picker to its project.
+ */
+export const IntegrationSource = Schema.Struct({
+  id: IntegrationId,
+  name: IntegrationName,
+  displayName: Schema.String,
+  icon: Schema.NullOr(IntegrationCatalogId),
+  /** The catalog service's name, or the display name of a custom server. */
+  serviceName: Schema.String,
+  accountLabel: Schema.NullOr(Schema.String),
+  status: Schema.Literals(["connected", "needs_sign_in", "error"]),
+  message: Schema.optional(Schema.String),
+  scope: IntegrationScope,
+  syncedFrom: Schema.optional(IntegrationSyncedFrom),
+});
+export type IntegrationSource = typeof IntegrationSource.Type;
+
+export const IntegrationSourcesResult = Schema.Struct({
+  sources: Schema.Array(IntegrationSource),
+});
+export type IntegrationSourcesResult = typeof IntegrationSourcesResult.Type;
+
+/**
+ * `integration_add` and `integration_update` for agents: what the Settings
+ * call returns, plus the next action in plain words and a Settings link the
+ * user can open.
+ */
+export const IntegrationAgentResult = Schema.Struct({
+  ...IntegrationConnectResult.fields,
+  nextStep: Schema.optional(Schema.String),
+  settingsUrl: Schema.optional(Schema.String),
+});
+export type IntegrationAgentResult = typeof IntegrationAgentResult.Type;
+
+export const IntegrationAgentListResult = Schema.Struct({
+  integrations: Schema.Array(
+    Schema.Struct({
+      ...IntegrationSummary.fields,
+      nextStep: Schema.optional(Schema.String),
+      settingsUrl: Schema.optional(Schema.String),
+    }),
+  ),
+});
+export type IntegrationAgentListResult = typeof IntegrationAgentListResult.Type;
+
 export const IntegrationDeleteResult = Schema.Struct({ deleted: Schema.Boolean });
 export type IntegrationDeleteResult = typeof IntegrationDeleteResult.Type;
 
 export const IntegrationTestResult = Schema.Struct({
   /** Server time when this test began; later subscription outcomes supersede it. */
   checkedAt: Schema.optional(IsoDateTime),
+  reason: Schema.optional(Schema.String),
   status: IntegrationConnectionStatus,
   toolCount: Schema.Number,
   message: Schema.String,
@@ -287,6 +488,7 @@ export class IntegrationError extends Schema.TaggedError<IntegrationError>()("In
     "invalid_request",
     "approval_required",
     "sign_in_required",
+    "scope_missing",
     /** The server has no dynamic client registration; the owner must supply a client id. */
     "client_id_required",
     /** The Google preset needs the owner's OAuth client in the vault. */
@@ -335,6 +537,7 @@ export const IntegrationCallResult = Schema.Struct({
 export type IntegrationCallResult = typeof IntegrationCallResult.Type;
 
 export const IntegrationUpdateByNameInput = Schema.Struct({
+  command: Schema.optional(IntegrationCommand),
   name: IntegrationName,
   callbackOrigin: GoogleWorkspaceAddInput.fields.callbackOrigin,
   displayName: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(200))),
@@ -351,3 +554,22 @@ export type IntegrationUpdateByNameInput = typeof IntegrationUpdateByNameInput.T
 
 export const IntegrationRemoveInput = Schema.Struct({ name: IntegrationName });
 export type IntegrationRemoveInput = typeof IntegrationRemoveInput.Type;
+
+export const IntegrationSetupGuideInput = Schema.Struct({ service: TrimmedNonEmptyString });
+export const IntegrationSetupGuideResult = Schema.Struct({
+  service: Schema.String,
+  instructions: Schema.String,
+});
+
+export const IntegrationNativeImportPreview = Schema.Struct({
+  definitions: Schema.Array(IntegrationCreateInput),
+  reconnect: Schema.Array(Schema.String),
+  warnings: Schema.Array(Schema.String),
+});
+export type IntegrationNativeImportPreview = typeof IntegrationNativeImportPreview.Type;
+export const IntegrationNativeImportResult = Schema.Struct({
+  imported: Schema.Array(Schema.String),
+  reconnect: Schema.Array(Schema.String),
+  warnings: Schema.Array(Schema.String),
+});
+export type IntegrationNativeImportResult = typeof IntegrationNativeImportResult.Type;

@@ -1,20 +1,24 @@
 /** Keep the possible start of a credential across arbitrary chunks, including newlines. */
-export const createOutputRedactor = (secrets: ReadonlyArray<string>) => {
-  const values = [
-    ...new Set(
-      secrets
-        .filter(Boolean)
-        .flatMap((secret) => [
-          secret,
-          encodeURIComponent(secret),
-          JSON.stringify(secret).slice(1, -1),
-          Buffer.from(secret).toString("base64"),
-        ]),
-    ),
-  ].toSorted((a, b) => b.length - a.length);
-  const longest = Math.max(1, ...values.map((value) => value.length));
+export const createOutputRedactor = (
+  secrets: ReadonlyArray<string> | (() => ReadonlyArray<string>),
+) => {
+  const valuesFor = () =>
+    [
+      ...new Set(
+        (typeof secrets === "function" ? secrets() : secrets)
+          .filter(Boolean)
+          .flatMap((secret) => [
+            secret,
+            encodeURIComponent(secret),
+            JSON.stringify(secret).slice(1, -1),
+            Buffer.from(secret).toString("base64"),
+          ]),
+      ),
+    ].toSorted((a, b) => b.length - a.length);
   let pending = "";
   const drain = (final: boolean) => {
+    const values = valuesFor();
+    const longest = Math.max(1, ...values.map((value) => value.length));
     const limit = final ? pending.length : Math.max(0, pending.length - longest + 1);
     let result = "";
     let offset = 0;

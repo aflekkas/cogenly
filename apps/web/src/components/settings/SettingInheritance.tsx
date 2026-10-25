@@ -1,5 +1,6 @@
 import {
   DEFAULT_SERVER_SETTINGS,
+  isUniversalServerSettingKey,
   PROJECT_FILE_BACKED_SETTINGS,
   type ProjectFileBackedSettingKey,
   resolveEnvironmentMachineKind,
@@ -83,14 +84,16 @@ function formatValue(key: keyof ServerSettings, value: unknown): string {
 
 /**
  * The layers a setting resolves through for one target, top-down: the
- * project override when the target is a project, the environment's value,
- * the checkout's cogenly.json for file-backed keys, and the built-in default. The
- * first layer that is set wins. Same order as `resolveProjectSettings`.
+ * project override when the target is a project's repository, the value for
+ * all projects (a machine-local key's is the machine's), the repository's
+ * cogenly.json for file-backed keys, and the built-in default. The first
+ * layer that is set wins. Same order as `resolveProjectSettings`.
  */
 export function settingInheritanceLayers(
   target: ScopedSettingsTarget,
   environmentSettings: ServerSettings,
   key: keyof ServerSettings,
+  projectLabel = "This project",
 ): readonly InheritanceLayer[] {
   const environmentValue = environmentSettings[key];
   const source = isProjectScopedSettingKey(key) ? target.sources[key] : "environment";
@@ -100,7 +103,7 @@ export function settingInheritanceLayers(
   if (target.projectId !== null && isProjectScopedSettingKey(key)) {
     layers.push({
       key: "project",
-      label: "Repository",
+      label: projectLabel,
       value: source === "project" ? formatValue(key, target.settings[key]) : "Inherits",
       effective: source === "project",
       set: source === "project",
@@ -108,7 +111,7 @@ export function settingInheritanceLayers(
   }
   layers.push({
     key: "environment",
-    label: target.label,
+    label: isUniversalServerSettingKey(key) ? "All projects" : target.label,
     value: environmentSet ? formatValue(key, environmentValue) : "Inherits",
     effective: source === "environment" && environmentSet,
     set: environmentSet,
@@ -155,10 +158,14 @@ export type SettingInheritanceState =
  * the setting's value comes from on each selected target. It sits inline so
  * narrowing to a project does not add a caption line to every row.
  */
-export interface SettingOverridingProject extends ProjectOverrideEntry {
+export interface SettingOverridingProject {
+  /** The project folder id, or a fixed id for repositories in no project. */
+  readonly id: string;
   readonly label: string;
-  /** Jumps the breadcrumb to this project so its override can be edited. */
-  readonly open: () => void;
+  /** The folder's repository entries holding the override, on every environment. */
+  readonly entries: readonly ProjectOverrideEntry[];
+  /** Selects this project so its override can be edited; absent where it cannot be. */
+  readonly open?: (() => void) | undefined;
 }
 
 export function SettingInheritance({
@@ -178,7 +185,7 @@ export function SettingInheritance({
     "environmentId" | "label" | "displayUrl" | "serverConfig"
   >[];
   keys: readonly (keyof ServerSettings)[];
-  /** At environment scope: projects whose own value hides the environment's. */
+  /** At All projects: projects whose own value replaces the one for all projects. */
   overridingProjects?: readonly SettingOverridingProject[];
   onClearOverrides?: (entries: readonly ProjectOverrideEntry[]) => void;
 }) {
@@ -186,10 +193,27 @@ export function SettingInheritance({
   const key = keys[0];
   if (!key || targets.length === 0) return null;
   const hasMultipleEnvironments = new Set(targets.map((target) => target.environmentId)).size > 1;
+  const projectLabel =
+    scopeContext?.scope.kind === "project" ? scopeContext.scope.label : "This project";
+  // A universal value is the same on every machine, so its chain names no machine.
+  const showsMachine = !isUniversalServerSettingKey(key) || targets[0]?.projectId != null;
   const overrideSummary =
     overridingProjects.length > 0
-      ? `${summary} · ${overridingProjects.length} project ${overridingProjects.length === 1 ? "override" : "overrides"}`
+      ? `${summary} · ${projectOverridesSummary(overridingProjects)}`
       : summary;
+  const overrideValue = (project: SettingOverridingProject) => {
+    if (!isProjectScopedSettingKey(key)) return null;
+    for (const entry of project.entries) {
+      const overrides = environments.find(
+        (environment) => environment.environmentId === entry.environmentId,
+      )?.serverConfig?.settings.projectSettingsOverrides;
+      const entryOverrides = overrides?.[entry.projectId];
+      if (entryOverrides && Object.hasOwn(entryOverrides, key)) {
+        return formatValue(key, entryOverrides[key]);
+      }
+    }
+    return null;
+  };
   const chains = targets.flatMap((target) => {
     const environment = environments.find(
       (candidate) => candidate.environmentId === target.environmentId,
@@ -202,15 +226,18 @@ export function SettingInheritance({
     const secondary = [labels.secondary, path?.split(/[\\/]/).filter(Boolean).slice(-2).join("/")]
       .filter(Boolean)
       .join(" · ");
-    const layers = settingInheritanceLayers(target, environment.serverConfig.settings, key);
+    const layers = settingInheritanceLayers(
+      target,
+      environment.serverConfig.settings,
+      key,
+      projectLabel,
+    );
     const winningLayer = layers.find((layer) => layer.effective);
     return [
       {
         id: `${target.environmentId}:${target.projectId ?? ""}`,
         target,
         label: [labels.primary, secondary].filter(Boolean).join(" · "),
-        machineLabel: [labels.primary, labels.secondary].filter(Boolean).join(" · "),
-        overrides: environment.serverConfig.settings.projectSettingsOverrides,
         machine: resolveEnvironmentMachineKind(environment.serverConfig),
         layers,
         winningLayer,
@@ -228,8 +255,6 @@ export function SettingInheritance({
         target.environmentId === scopeContext?.target?.environmentId &&
         target.projectId === scopeContext?.target?.projectId,
     ) ?? chains[0];
-  const machineLabelFor = (environmentId: string) =>
-    chains.find((entry) => entry.target.environmentId === environmentId)?.machineLabel ?? "";
   const groups: (typeof chains)[] = [];
   for (const chain of hasMultipleEnvironments && primary
     ? [primary, ...chains.filter((entry) => entry !== primary)]
@@ -271,7 +296,7 @@ export function SettingInheritance({
           {groups.map((members) => {
             const first = members[0];
             if (!first) return null;
-            const { id, target, machine, layers, winningLayer } = first;
+            const { id, machine, layers, winningLayer } = first;
             const chain = (
               <ol role="list" className="text-sm">
                 {layers.map((layer) => (
@@ -288,7 +313,7 @@ export function SettingInheritance({
                         layer.effective ? "font-medium text-foreground" : "text-muted-foreground",
                       )}
                     >
-                      {layer.key === "environment" ? "Environment" : layer.label}
+                      {layer.label}
                     </span>
                     <span
                       className={cn(
@@ -313,14 +338,14 @@ export function SettingInheritance({
             );
             return (
               <section key={id} className="px-3 py-2.5">
-                {!hasMultipleEnvironments ? (
+                {!hasMultipleEnvironments && showsMachine ? (
                   <h4 className="flex items-center gap-1.5 pb-1.5 text-xs font-medium text-muted-foreground">
                     <EnvironmentMachineIcon
                       aria-hidden
                       kind={machine}
                       className="size-3.5 shrink-0"
                     />
-                    <span className="min-w-0 truncate">{target.label}</span>
+                    <span className="min-w-0 truncate">{first.label}</span>
                   </h4>
                 ) : null}
                 {hasMultipleEnvironments && groups.length > 1 ? (
@@ -340,9 +365,7 @@ export function SettingInheritance({
                             {winningLayer?.value}
                           </span>
                           <span className="text-xs text-muted-foreground">
-                            {winningLayer?.key === "environment"
-                              ? "Environment"
-                              : winningLayer?.label}
+                            {winningLayer?.label}
                           </span>
                           <DisclosureChevron />
                         </span>
@@ -377,90 +400,126 @@ export function SettingInheritance({
                     ) : null}
                   </>
                 )}
-                {(() => {
-                  const overriding = overridingProjects.filter((project) =>
-                    members.some((member) => member.target.environmentId === project.environmentId),
-                  );
-                  if (overriding.length === 0) return null;
-                  const foldOverrides = hasMultipleEnvironments && overriding.length > 3;
-                  const header = (
-                    <div className="flex items-center justify-between gap-3 px-2 text-xs text-muted-foreground">
-                      {foldOverrides ? (
-                        <CollapsibleTrigger render={<InlineButton tone="muted" />}>
-                          <DisclosureChevron />
-                          Overridden by
-                        </CollapsibleTrigger>
-                      ) : (
-                        <span>Overridden by</span>
-                      )}
-                      {onClearOverrides ? (
-                        <InlineButton onClick={() => onClearOverrides(overriding)}>
-                          Reset {overriding.length === 1 ? "it" : "all"}
-                        </InlineButton>
-                      ) : null}
-                    </div>
-                  );
-                  const projects = (
-                    <ul
-                      role="list"
-                      className={cn(
-                        "mt-0.5 text-sm",
-                        foldOverrides && "scroll-fade-y max-h-48 overflow-y-auto",
-                      )}
-                    >
-                      {overriding.map((project) => (
-                        <li
-                          key={`${project.environmentId}:${project.projectId}`}
-                          className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 px-2 py-1"
-                        >
-                          <span className="flex min-w-0 flex-col items-start">
-                            <InlineButton
-                              className="min-w-0 max-w-full justify-start"
-                              onClick={project.open}
-                            >
-                              <span className="truncate">{project.label}</span>
-                            </InlineButton>
-                            {hasMultipleEnvironments ? (
-                              <span className="max-w-full truncate text-xs text-muted-foreground">
-                                {machineLabelFor(project.environmentId)}
-                              </span>
-                            ) : null}
-                          </span>
-                          <span className="max-w-32 truncate text-muted-foreground tabular-nums">
-                            {isProjectScopedSettingKey(key)
-                              ? formatValue(
-                                  key,
-                                  members.find(
-                                    (member) =>
-                                      member.target.environmentId === project.environmentId,
-                                  )?.overrides[project.projectId]?.[key],
-                                )
-                              : null}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  );
-                  return (
-                    <div className="mt-2 border-t border-border/60 pt-2">
-                      {foldOverrides ? (
-                        <Collapsible>
-                          {header}
-                          <CollapsiblePanel>{projects}</CollapsiblePanel>
-                        </Collapsible>
-                      ) : (
-                        <>
-                          {header}
-                          {projects}
-                        </>
-                      )}
-                    </div>
-                  );
-                })()}
               </section>
             );
           })}
+          {overridingProjects.length > 0 ? (
+            <ProjectOverridesList
+              projects={overridingProjects}
+              valueFor={overrideValue}
+              {...(onClearOverrides ? { onClear: onClearOverrides } : {})}
+            />
+          ) : null}
         </div>
+      </PopoverPopup>
+    </Popover>
+  );
+}
+
+/** "N projects override this", for a tooltip or label. */
+export function projectOverridesSummary(projects: readonly SettingOverridingProject[]) {
+  return `${projects.length} ${projects.length === 1 ? "project overrides" : "projects override"} this`;
+}
+
+/**
+ * The projects whose own value replaces the one being edited, each with its
+ * value, and a reset that clears them on every machine holding them.
+ */
+function ProjectOverridesList({
+  projects,
+  valueFor,
+  onClear,
+}: {
+  projects: readonly SettingOverridingProject[];
+  valueFor: (project: SettingOverridingProject) => string | null;
+  onClear?: (entries: readonly ProjectOverrideEntry[]) => void;
+}) {
+  return (
+    <section className="px-3 py-2.5">
+      <Collapsible defaultOpen={projects.length <= 3}>
+        <div className="flex items-center justify-between gap-3 px-2 text-xs text-muted-foreground">
+          {projects.length > 3 ? (
+            <CollapsibleTrigger render={<InlineButton tone="muted" />}>
+              <DisclosureChevron />
+              Overridden by
+            </CollapsibleTrigger>
+          ) : (
+            <span>Overridden by</span>
+          )}
+          {onClear ? (
+            <InlineButton onClick={() => onClear(projects.flatMap((project) => project.entries))}>
+              Reset {projects.length === 1 ? "it" : "all"}
+            </InlineButton>
+          ) : null}
+        </div>
+        <CollapsiblePanel>
+          <ul role="list" className="scroll-fade-y mt-0.5 max-h-48 overflow-y-auto text-sm">
+            {projects.map((project) => (
+              <li
+                key={project.id}
+                className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 px-2 py-1"
+              >
+                {project.open ? (
+                  <InlineButton className="min-w-0 max-w-full justify-start" onClick={project.open}>
+                    <span className="truncate">{project.label}</span>
+                  </InlineButton>
+                ) : (
+                  <span className="min-w-0 truncate">{project.label}</span>
+                )}
+                <span className="max-w-32 truncate text-muted-foreground tabular-nums">
+                  {valueFor(project)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </CollapsiblePanel>
+      </Collapsible>
+    </section>
+  );
+}
+
+/**
+ * The project overrides of a setting edited outside the settings rows (a
+ * provider's switch, worktree cleanup on Storage): the same layers indicator,
+ * opening only the list of overriding projects. Renders nothing without one.
+ */
+export function ProjectOverridesPopover({
+  projects,
+  valueFor,
+  onClear,
+}: {
+  projects: readonly SettingOverridingProject[];
+  valueFor: (project: SettingOverridingProject) => string | null;
+  onClear?: (entries: readonly ProjectOverrideEntry[]) => void;
+}) {
+  if (projects.length === 0) return null;
+  const summary = projectOverridesSummary(projects);
+  return (
+    <Popover>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <PopoverTrigger
+              render={
+                <Button
+                  size="icon-micro"
+                  variant="ghost-muted"
+                  aria-label={`${summary}. Show the projects`}
+                />
+              }
+            />
+          }
+        >
+          <LayersIcon className="size-3" />
+        </TooltipTrigger>
+        <TooltipPopup side="top">{summary}</TooltipPopup>
+      </Tooltip>
+      <PopoverPopup align="start" width="md" padding="none">
+        <ProjectOverridesList
+          projects={projects}
+          valueFor={valueFor}
+          {...(onClear ? { onClear } : {})}
+        />
       </PopoverPopup>
     </Popover>
   );

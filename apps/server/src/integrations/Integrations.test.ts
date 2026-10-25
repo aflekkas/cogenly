@@ -1,7 +1,16 @@
-import { loopbackHttpsPolicy } from "./https.testkit.ts";
+import { loopbackHttpsFetch, loopbackHttpsPolicy } from "./https.testkit.ts";
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { EnvironmentId, IntegrationName, ProjectLabelId } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  IntegrationId,
+  IntegrationName,
+  ProjectLabelId,
+  ThreadId,
+  SLACK_MCP_USER_SCOPES,
+  integrationCatalogEntryFor,
+  type Integration,
+} from "@t3tools/contracts";
 import { NodeCrypto } from "@effect/platform-node";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -53,7 +62,7 @@ interface FakeUpstream {
 }
 
 /** A real in-process HTTP MCP server speaking streamable-HTTP JSON-RPC. */
-const fakeUpstreamWith = (redirectTo?: string) =>
+const fakeUpstreamWith = (redirectTo?: string, denyListScope = false) =>
   Effect.acquireRelease(
     Effect.sync(() => {
       const seen: FakeUpstream["seen"] = [];
@@ -84,6 +93,18 @@ const fakeUpstreamWith = (redirectTo?: string) =>
             reply(
               { jsonrpc: "2.0", id: body.id, result: { protocolVersion: "2025-03-26" } },
               { "mcp-session-id": "session-1" },
+            );
+          } else if (body.method === "tools/list" && denyListScope) {
+            response.writeHead(403, {
+              "content-type": "application/json",
+              "www-authenticate": 'Bearer error="insufficient_scope"',
+            });
+            response.end(
+              JSON.stringify({
+                jsonrpc: "2.0",
+                id: body.id,
+                error: { code: -32000, message: "insufficient_scope: required read scope missing" },
+              }),
             );
           } else if (body.method === "tools/list") {
             reply({
@@ -176,10 +197,25 @@ const noTokensLayer = Layer.succeed(Tokens.IntegrationTokens, {
   syncedChanges: Stream.never,
 });
 
-const layerWith = (options: Integrations.IntegrationsOptions = {}) =>
+/** Secrets Settings saved, readable back through `credentialsLayer` like vault items. */
+const savedSecrets: Array<Credentials.IntegrationSecretInput> = [];
+const secretsLayer = Layer.succeed(Credentials.IntegrationSecrets, {
+  save: (input) =>
+    Effect.sync(() => {
+      savedSecrets.push(input);
+      for (const [field, value] of Object.entries(input.fields))
+        if (value !== undefined) secrets.set(`${input.item}.${field}`, value);
+    }),
+});
+
+const layerWith = (
+  options: Integrations.IntegrationsOptions = {},
+  policy: typeof loopbackHttpsPolicy = loopbackHttpsPolicy,
+) =>
   Integrations.layerWith(options).pipe(
-    Layer.provide(Layer.succeed(IntegrationEndpointPolicy, loopbackHttpsPolicy)),
+    Layer.provide(Layer.succeed(IntegrationEndpointPolicy, policy)),
     Layer.provide(credentialsLayer),
+    Layer.provide(secretsLayer),
     Layer.provide(noTokensLayer),
     Layer.provide(IntegrationSyncPeers.layerFor("env:test")),
     Layer.provideMerge(database),
@@ -307,7 +343,7 @@ describe("Integrations gateway", () => {
           { ...createInput(original.url), headers: { authorization: "Bearer LITERAL-TOKEN" } },
           { approveCredentials: true },
         );
-        const hold = { holdStoredSecrets: true };
+        const hold = { fromAgent: true };
         for (const change of [
           { url: other.url },
           { url: other.url, headers: { authorization: Integrations.HEADER_MASK } },
@@ -405,6 +441,70 @@ describe("Integrations gateway", () => {
             ),
             Layer.provide(NodeServices.layer),
           ),
+        ),
+      ),
+    ),
+  );
+
+  it.effect("a thread's executable proposal stays unstartable until approved once", () =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      const service = yield* Integrations.Integrations;
+      const workspace = yield* Workspace.AgentWorkspaceService;
+      const sql = yield* SqlClient.SqlClient;
+      const threadId = ThreadId.make("thread:executable");
+      yield* sql`INSERT INTO orchestration_v2_projection_threads(thread_id, project_id, title, default_provider, runtime_mode, interaction_mode, created_at, updated_at, payload_json) VALUES (${threadId}, 'project:1', 'Thread', 'codex', 'full-access', 'default', '2026-10-01T00:00:00.000Z', '2026-10-01T00:00:00.000Z', '{}')`;
+      const payload = {
+        ...createInput("https://localhost", "worker"),
+        transport: "stdio" as const,
+        headers: {},
+        command: {
+          command: "fixture",
+          args: ["--synthetic"],
+          env: { KEY: "{{credential:fixture.value}}" },
+        },
+      };
+      expect((yield* service.create(payload, { fromAgent: true }).pipe(Effect.flip)).reason).toBe(
+        "approval_required",
+      );
+      const proposal = { actionKind: "integration_add" as const, payload };
+      const { approval } = yield* workspace.requestThreadIntegrationApproval(threadId, proposal);
+      expect(
+        (yield* workspace.requestThreadIntegrationApproval(threadId, proposal)).approval.id,
+      ).toBe(approval.id);
+      expect((yield* workspace.listThreadApprovals(threadId)).approvals).toHaveLength(1);
+      expect((yield* service.list()).integrations).toHaveLength(0);
+      yield* workspace.approve(approval.id);
+      yield* workspace.approve(approval.id);
+      expect((yield* workspace.listThreadApprovals(threadId)).approvals).toHaveLength(0);
+      const [created] = (yield* service.list()).integrations;
+      expect(created?.integration.command).toEqual(payload.command);
+      expect(
+        (yield* service
+          .update(
+            { id: created!.integration.id, command: { ...payload.command, args: ["changed"] } },
+            { fromAgent: true },
+          )
+          .pipe(Effect.flip)).reason,
+      ).toBe("approval_required");
+      // Direct owner edits retain their existing authority.
+      yield* service.update({
+        id: created!.integration.id,
+        command: { ...payload.command, args: ["owner"] },
+      });
+    }).pipe(
+      Effect.provide(
+        Workspace.layer.pipe(
+          Layer.provideMerge(layerWith()),
+          Layer.provide(
+            Layer.mergeAll(
+              Layer.mock(AgentStore.AgentStore)({}),
+              Layer.mock(Agents.AgentService)({}),
+              Layer.mock(Work.WorkHandoffService)({}),
+              Layer.mock(Schedules.ScheduledTaskService)({}),
+            ),
+          ),
+          Layer.provide(NodeServices.layer),
         ),
       ),
     ),
@@ -973,35 +1073,328 @@ describe("Default catalog", () => {
     }).pipe(Effect.provide(layerWith())),
   );
 
-  it.effect("uses the chosen region's endpoint", () =>
+  it.effect("returns the setup step, and creates nothing, while a key or app is missing", () =>
     Effect.gen(function* () {
       yield* runMigrations();
       const service = yield* Integrations.Integrations;
-      const { integration } = yield* service.connectFromCatalog(
-        {
-          catalogId: "intercom",
-          inputs: { region: "eu", apiKey: "{{credential:intercom.value}}" },
-        },
-        owner,
-      );
-      expect(integration.url).toBe("https://mcp.eu.intercom.com/mcp");
-    }).pipe(Effect.provide(layerWith())),
-  );
-
-  it.effect("creates nothing until a missing input is supplied, and says which", () =>
-    Effect.gen(function* () {
-      yield* runMigrations();
-      const service = yield* Integrations.Integrations;
-      const result = yield* service
-        .connectFromCatalog({ catalogId: "intercom" }, owner)
-        .pipe(Effect.result);
-      expect(result).toMatchObject({
-        _tag: "Failure",
-        failure: { reason: "invalid_request", cause: expect.stringContaining("region") },
+      const github = yield* service.connectFromCatalog({ catalogId: "github" }, owner);
+      expect(github).toEqual({
+        setup: expect.objectContaining({
+          type: "api_key",
+          catalogId: "github",
+          label: "Personal access token",
+          url: "https://github.com/settings/personal-access-tokens/new",
+        }),
       });
+      const slack = yield* service.connectFromCatalog(
+        { catalogId: "slack", accountLabel: "Acme" },
+        { ...owner, origin: { origin: "https://cogenly.example.com" } },
+      );
+      expect(slack.setup?.type).toBe("oauth_client");
+      const manifest =
+        slack.setup?.type === "oauth_client" ? slack.setup.steps[0]?.copy?.value : undefined;
+      expect(manifest).toContain("https://cogenly.example.com/oauth/integrations/callback");
+      // Any other missing input is still the caller's to fix.
+      const unlabeled = yield* service
+        .connectFromCatalog({ catalogId: "google-workspace" }, owner)
+        .pipe(Effect.flip);
+      expect(unlabeled).toMatchObject({ reason: "invalid_request" });
       expect((yield* service.list()).integrations).toHaveLength(0);
     }).pipe(Effect.provide(layerWith())),
   );
+});
+
+/** Every request leaves the test process only for loopback fixtures, or for `routes`. */
+const routedPolicy =
+  (routes: Record<string, { target: string }>): typeof loopbackHttpsPolicy =>
+  (raw) => {
+    const route = routes[new URL(raw).origin];
+    if (route !== undefined)
+      return Effect.succeed(((_input, init) =>
+        loopbackHttpsFetch(route.target, init)) satisfies typeof globalThis.fetch);
+    return loopbackHttpsPolicy(raw).pipe(
+      Effect.map(
+        (fetch) =>
+          fetch ??
+          ((() => Promise.reject(new Error("offline in tests"))) satisfies typeof globalThis.fetch),
+      ),
+    );
+  };
+
+describe("Services the catalog dropped", () => {
+  const atlassian = { target: "" };
+
+  it.effect("keep working as custom integrations, with no catalog entry", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* runMigrations();
+        const upstream = yield* fakeUpstream;
+        atlassian.target = upstream.url;
+        const sql = yield* SqlClient.SqlClient;
+        const service = yield* Integrations.Integrations;
+        // Exactly what connecting the old Atlassian entry stored.
+        const stored = {
+          id: IntegrationId.make("integration:atlassian-1"),
+          name: IntegrationName.make("atlassian"),
+          displayName: "Atlassian",
+          transport: "http",
+          url: "https://mcp.atlassian.com/v1/mcp",
+          headers: { Authorization: "Bearer {{credential:gmail.apiKey}}" },
+          credentialOrigin: "https://mcp.atlassian.com",
+          approvedCredentialItems: ["gmail"],
+          enabled: true,
+          scope: { type: "all" },
+          hint: "",
+          createdAt: "2026-09-01T00:00:00.000Z",
+          updatedAt: "2026-09-01T00:00:00.000Z",
+          deletedAt: null,
+        };
+        yield* sql`INSERT INTO integrations(id, name, payload_json, deleted_at, updated_at) VALUES (${stored.id}, ${stored.name}, ${JSON.stringify(stored)}, NULL, ${stored.updatedAt})`;
+
+        const [summary] = (yield* service.list()).integrations;
+        expect(summary?.integration).toMatchObject({ name: "atlassian", displayName: "Atlassian" });
+        expect(integrationCatalogEntryFor(summary!.integration)).toBeUndefined();
+        const result = yield* service.callTool(stored.name, "echo", { text: "hi" }, null);
+        expect(result.content).toEqual([{ type: "text", text: '{"text":"hi"}' }]);
+        expect(upstream.seen.at(-1)?.authorization).toBe("Bearer SECRET-VALUE-123");
+        // It is listed as a source, with no catalog icon.
+        const [sources] = yield* service.subscribeSources().pipe(Stream.take(1), Stream.runCollect);
+        expect(sources?.sources).toEqual([
+          {
+            id: "integration:atlassian-1",
+            name: "atlassian",
+            displayName: "Atlassian",
+            icon: null,
+            serviceName: "Atlassian",
+            accountLabel: null,
+            status: "connected",
+            scope: { type: "all" },
+          },
+        ]);
+      }),
+    ).pipe(Effect.provide(layerWith({}, routedPolicy({ "https://mcp.atlassian.com": atlassian })))),
+  );
+});
+
+describe("Settings secret forms", () => {
+  const offline = layerWith({}, routedPolicy({}));
+  const nowhere = { origin: { origin: "https://cogenly.example.com" } };
+
+  it.effect("store an API key in the vault and reference it, per account", () =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      savedSecrets.length = 0;
+      const service = yield* Integrations.Integrations;
+      const first = yield* service.saveApiKey(
+        { catalogId: "linear", apiKey: "lin_api_FIRST-SECRET" },
+        nowhere,
+      );
+      const second = yield* service.saveApiKey(
+        { catalogId: "linear", accountLabel: "Work", apiKey: "lin_api_SECOND-SECRET" },
+        nowhere,
+      );
+      expect(first.integration).toMatchObject({
+        name: "linear",
+        headers: { Authorization: "Bearer {{credential:linear-api-key.value}}" },
+        approvedCredentialItems: ["linear-api-key"],
+      });
+      expect(second.integration).toMatchObject({
+        name: "linear-work",
+        accountLabel: "Work",
+        headers: { Authorization: "Bearer {{credential:linear-work-api-key.value}}" },
+      });
+      expect(savedSecrets).toEqual([
+        expect.objectContaining({
+          item: "linear-api-key",
+          type: "api_key",
+          domains: ["mcp.linear.app"],
+        }),
+        expect.objectContaining({ item: "linear-work-api-key", domains: ["mcp.linear.app"] }),
+      ]);
+      // The values live only in the vault.
+      const visible = JSON.stringify([first, second, yield* service.list()]);
+      expect(visible).not.toContain("FIRST-SECRET");
+      expect(visible).not.toContain("SECOND-SECRET");
+
+      // Saving again for an existing account rewires that account only.
+      const again = yield* service.saveApiKey(
+        { catalogId: "linear", integrationId: first.integration!.id, apiKey: "lin_api_NEW" },
+        nowhere,
+      );
+      expect(again.integration?.name).toBe("linear");
+      expect(savedSecrets.at(-1)?.item).toBe("linear-api-key");
+      // A form for one service cannot rewrite another's account.
+      expect(
+        yield* service
+          .saveApiKey(
+            { catalogId: "github", integrationId: first.integration!.id, apiKey: "x" },
+            nowhere,
+          )
+          .pipe(Effect.flip),
+      ).toMatchObject({ reason: "invalid_request" });
+    }).pipe(Effect.provide(offline)),
+  );
+
+  it.effect(
+    "save a custom server's manual OAuth client privately without replacing its account",
+    () =>
+      Effect.gen(function* () {
+        savedSecrets.length = 0;
+        const service = yield* Integrations.Integrations;
+        const { integration } = yield* service.create({
+          ...createInput("https://mcp.custom.test/mcp", "custom-work"),
+          headers: {},
+          auth: { type: "oauth", scope: "read" },
+        });
+        const result = yield* service.saveOAuthClient(
+          {
+            integrationId: integration.id,
+            clientId: "custom-client",
+            clientSecret: "custom-PRIVATE-SECRET",
+          },
+          nowhere,
+        );
+        expect(result.integration).toMatchObject({
+          id: integration.id,
+          name: "custom-work",
+          auth: {
+            type: "oauth",
+            scope: "read",
+            clientId: "custom-client",
+            clientSecret: "{{credential:custom-work-client-secret.value}}",
+          },
+          approvedCredentialItems: ["custom-work-client-secret"],
+        });
+        expect(savedSecrets).toEqual([
+          expect.objectContaining({
+            item: "custom-work-client-secret",
+            fields: { value: "custom-PRIVATE-SECRET" },
+            domains: ["mcp.custom.test"],
+          }),
+        ]);
+        expect(result.setup).toMatchObject({ type: "retry", button: "sign_in" });
+        const listed = yield* service.list();
+        expect(listed.integrations).toHaveLength(1);
+        expect(JSON.stringify([result, listed])).not.toContain("custom-PRIVATE-SECRET");
+
+        const { integration: plain } = yield* service.create(
+          createInput("https://plain.custom.test/mcp", "plain"),
+        );
+        expect(
+          yield* service
+            .saveOAuthClient(
+              { integrationId: plain.id, clientId: "id", clientSecret: "secret" },
+              nowhere,
+            )
+            .pipe(Effect.flip),
+        ).toMatchObject({ reason: "invalid_request" });
+        expect(savedSecrets).toHaveLength(1);
+      }).pipe(Effect.provide(offline)),
+  );
+
+  it.effect("store an app's client secret and point the account's sign-in at it", () =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      savedSecrets.length = 0;
+      const service = yield* Integrations.Integrations;
+      const result = yield* service.saveOAuthClient(
+        {
+          catalogId: "slack",
+          accountLabel: "Acme",
+          clientId: "123.456",
+          clientSecret: "slack-CLIENT-SECRET",
+        },
+        nowhere,
+      );
+      expect(result.integration).toMatchObject({
+        name: "slack-acme",
+        auth: {
+          type: "oauth",
+          clientId: "123.456",
+          clientSecret: "{{credential:slack-acme-client-secret.value}}",
+          scope: SLACK_MCP_USER_SCOPES.join(" "),
+        },
+      });
+      expect(savedSecrets).toEqual([
+        expect.objectContaining({
+          item: "slack-acme-client-secret",
+          domains: ["slack.com"],
+          fields: { value: "slack-CLIENT-SECRET" },
+        }),
+      ]);
+      // Slack is unreachable here, so the account is saved with the step that retries sign-in.
+      expect(result.setup).toMatchObject({ type: "retry", button: "sign_in" });
+      expect(JSON.stringify([result, yield* service.list()])).not.toContain("slack-CLIENT-SECRET");
+
+      // Google's client is one shared item, in the preset's login shape.
+      yield* service.saveOAuthClient(
+        {
+          catalogId: "google-workspace",
+          clientId: "google-id.apps.googleusercontent.com",
+          clientSecret: "GOCSPX-secret",
+        },
+        nowhere,
+      );
+      expect(savedSecrets.at(-1)).toEqual({
+        item: "google-oauth-client",
+        type: "login",
+        fields: { username: "google-id.apps.googleusercontent.com", password: "GOCSPX-secret" },
+        domains: ["accounts.google.com"],
+        label: "Google OAuth client",
+      });
+    }).pipe(Effect.provide(offline)),
+  );
+});
+
+describe("integrationSource", () => {
+  const base = {
+    id: IntegrationId.make("integration:1"),
+    name: IntegrationName.make("google-work"),
+    displayName: "Google",
+    transport: "local" as const,
+    local: { preset: "google-workspace" as const, version: "2.1.2", callbackOrigin: "x" },
+    url: "https://accounts.google.com",
+    headers: { Authorization: "Bearer {{credential:never-shown.value}}" },
+    enabled: true,
+    scope: { type: "projects" as const, labelIds: [ProjectLabelId.make("label:1")] },
+    hint: "",
+    accountLabel: "work",
+    createdAt: "2026-10-01T00:00:00.000Z" as Integration["createdAt"],
+    updatedAt: "2026-10-01T00:00:00.000Z" as Integration["updatedAt"],
+    deletedAt: null,
+  };
+
+  it("names the service and account, and reads anything unusable as sign-in or error", () => {
+    expect(
+      Integrations.integrationSource({
+        integration: base,
+        status: "needs_sign_in",
+        toolCount: null,
+        syncedFrom: { machineLabel: "Studio Mac" },
+      }),
+    ).toEqual({
+      id: "integration:1",
+      name: "google-work",
+      displayName: "Google",
+      icon: "google-workspace",
+      serviceName: "Google Workspace",
+      accountLabel: "work",
+      status: "needs_sign_in",
+      scope: base.scope,
+      syncedFrom: { machineLabel: "Studio Mac" },
+    });
+    expect(
+      Integrations.integrationSource({
+        integration: base,
+        status: "disconnected",
+        toolCount: null,
+        message: "The server could not be reached.",
+      }),
+    ).toMatchObject({ status: "error", message: "The server could not be reached." });
+    expect(
+      Integrations.integrationSource({ integration: base, status: "unknown", toolCount: null }),
+    ).not.toHaveProperty("message");
+  });
 });
 
 describe("Integration credential destinations", () => {
@@ -1027,12 +1420,19 @@ describe("Integration credential destinations", () => {
             allowedDomains: ["127.0.0.1"],
             secretFields: { value: "scoped-credential" },
           });
-          yield* service.create({ ...createInput(upstream.url), headers: tokenHeaders });
+          const { integration } = yield* service.create({
+            ...createInput(upstream.url),
+            headers: tokenHeaders,
+          });
           expect((yield* service.listTools(IntegrationName.make("gmail"), a)).tools).toHaveLength(
             1,
           );
           const calls = upstream.seen.length;
           for (const scope of [b, null]) {
+            expect(yield* service.testConnection(integration.id, scope)).toMatchObject({
+              status: "disconnected",
+              reason: "credential_unresolved",
+            });
             for (const operation of [
               service.listTools(IntegrationName.make("gmail"), scope).pipe(Effect.asVoid),
               service
@@ -1129,3 +1529,22 @@ describe("Integration credential destinations", () => {
     ),
   );
 });
+
+it.effect(
+  "verification reports missing scopes separately from authentication and reachability",
+  () =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      const upstream = yield* fakeUpstreamWith(undefined, true);
+      const gateway = yield* Integrations.Integrations;
+      const { integration } = yield* gateway.create(createInput(upstream.url));
+      expect(yield* gateway.testConnection(integration.id)).toMatchObject({
+        status: "disconnected",
+        reason: "scope_missing",
+        toolCount: 0,
+      });
+      expect((yield* gateway.list()).integrations[0]?.message).toContain(
+        "missing a required scope",
+      );
+    }).pipe(Effect.scoped, Effect.provide(layerWith())),
+);

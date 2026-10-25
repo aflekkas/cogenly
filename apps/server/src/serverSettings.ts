@@ -216,6 +216,16 @@ export class ServerSettingsService extends Context.Service<
       patch?: ServerSettingsPatch,
     ) => Effect.Effect<ServerSettings, ServerSettingsError>;
 
+    /**
+     * Replace stored settings from the latest stored snapshot, before secrets
+     * are materialized or the text generation provider is resolved. Returning
+     * null leaves the file untouched. For SettingsSync, which writes whole
+     * values that a patch's deep merge could not express.
+     */
+    readonly updateStoredSettings: (
+      update: (current: ServerSettings) => ServerSettings | null,
+    ) => Effect.Effect<ServerSettings, ServerSettingsError>;
+
     /** Run an effect against a settings snapshot while settings writes are paused. */
     readonly withSettingsSnapshot: <A, E, R>(
       use: (settings: ServerSettings) => Effect.Effect<A, E, R>,
@@ -285,6 +295,20 @@ const makeTest = (overrides: DeepPartial<ServerSettings> = {}) =>
             const patched = applyServerSettingsPatch(currentSettings, patch);
             return applyProviderInstanceMutation(patched, mutation);
           }),
+        ),
+      updateStoredSettings: (update) =>
+        writeSemaphore.withPermits(1)(
+          Ref.get(currentSettingsRef).pipe(
+            Effect.flatMap((current) => {
+              const next = update(current);
+              return next === null
+                ? Effect.succeed(current)
+                : normalizeServerSettings(next).pipe(
+                    Effect.tap((settings) => Ref.set(currentSettingsRef, settings)),
+                  );
+            }),
+            Effect.map(resolveTextGenerationProvider),
+          ),
         ),
       withSettingsSnapshot: (use) =>
         writeSemaphore.withPermits(1)(getSettings.pipe(Effect.flatMap(use))),
@@ -1099,12 +1123,15 @@ const make = Effect.gen(function* () {
   };
 
   const updateAndPersistSettings = (
-    update: (current: ServerSettings) => Effect.Effect<ServerSettings, ServerSettingsError>,
+    update: (current: ServerSettings) => Effect.Effect<ServerSettings | null, ServerSettingsError>,
   ): Effect.Effect<ServerSettings, ServerSettingsError> =>
     writeSemaphore.withPermits(1)(
       Effect.gen(function* () {
         const current = yield* getSettingsFromCache;
         const updated = yield* update(current);
+        if (updated === null) {
+          return resolveTextGenerationProvider(yield* materializeSettingsSecrets(current));
+        }
         const persisted = yield* persistSettingsSecrets(current, updated);
         const next = yield* normalizeServerSettings(persisted.settings);
         const materialized = yield* Effect.uninterruptibleMask(() =>
@@ -1263,6 +1290,8 @@ const make = Effect.gen(function* () {
           return applyProviderInstanceMutation(patched, mutation);
         }),
       ),
+    updateStoredSettings: (update) =>
+      updateAndPersistSettings((current) => Effect.succeed(update(current))),
     withSettingsSnapshot,
     get streamChanges() {
       return materializeChanges(Stream.fromPubSub(changesPubSub));

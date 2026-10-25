@@ -11,6 +11,9 @@ import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
+import * as SqlClient from "effect/sql/SqlClient";
+import * as Schema from "effect/Schema";
+import { StoredIntegration } from "./StoredIntegration.ts";
 import * as TestClock from "effect/testing/TestClock";
 import { FetchHttpClient, HttpRouter } from "effect/http";
 
@@ -37,13 +40,22 @@ import {
 const database = Sqlite.layerMemory.pipe(Layer.provide(NodeServices.layer));
 
 /** The gateway over the real vault, as in production. */
-const gatewayLayer = () => {
+const decodeStored = Schema.decodeUnknownEffect(Schema.fromJsonString(StoredIntegration));
+
+const gatewayLayer = (
+  wrapTokens?: (tokens: Tokens.IntegrationTokens["Service"]) => Tokens.IntegrationTokens["Service"],
+) => {
   const stored = new Map<string, Uint8Array>();
   return Integrations.layer.pipe(
     // The mock servers listen on loopback, which production refuses.
     Layer.provide(Layer.succeed(IntegrationEndpointPolicy, loopbackHttpsPolicy)),
     Layer.provideMerge(Credentials.layer),
-    Layer.provideMerge(Tokens.layer),
+    Layer.provideMerge(
+      Layer.effect(
+        Tokens.IntegrationTokens,
+        Effect.map(Tokens.IntegrationTokens, (tokens) => wrapTokens?.(tokens) ?? tokens),
+      ).pipe(Layer.provide(Tokens.layer)),
+    ),
     Layer.provideMerge(IntegrationSyncPeers.layerFor("env:test")),
     Layer.provideMerge(Vault.layer),
     Layer.provide(
@@ -181,36 +193,32 @@ describe("Integration OAuth sign-in", () => {
       ).pipe(Effect.provide(gatewayLayer())),
   );
 
-  it.effect(
-    "only the owner can reauthorize an account, and sign-in records agent-link provenance",
-    () =>
-      Effect.scoped(
-        Effect.gen(function* () {
-          yield* runMigrations();
-          const mock = yield* startMockAuthServer;
-          const integration = yield* addLinear(mock, "linear");
-          const service = yield* Integrations.Integrations;
-          const first = yield* service.beginSignIn(integration.id, {
-            origin: COGENLY_ORIGIN,
-            fromAgent: true,
-          });
-          yield* service.completeSignIn(yield* consent(first.authorizationUrl, "owner"));
-          expect((yield* statusOf(integration.id))?.integration.provenance?.signedInViaAgent).toBe(
-            true,
-          );
-          mock.revoked = true;
-          mock.accessTokens.clear();
-          yield* whoami("linear").pipe(Effect.result);
-          expect(
-            yield* service
-              .beginSignIn(integration.id, { origin: COGENLY_ORIGIN, fromAgent: true })
-              .pipe(Effect.result),
-          ).toMatchObject({ _tag: "Failure", failure: { reason: "approval_required" } });
-          expect(
-            yield* service.beginSignIn(integration.id, { origin: COGENLY_ORIGIN }),
-          ).toHaveProperty("authorizationUrl");
-        }),
-      ).pipe(Effect.provide(gatewayLayer())),
+  it.effect("agents can request renewed consent, and sign-in records agent-link provenance", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* runMigrations();
+        const mock = yield* startMockAuthServer;
+        const integration = yield* addLinear(mock, "linear");
+        const service = yield* Integrations.Integrations;
+        const first = yield* service.beginSignIn(integration.id, {
+          origin: COGENLY_ORIGIN,
+          fromAgent: true,
+        });
+        yield* service.completeSignIn(yield* consent(first.authorizationUrl, "owner"));
+        expect((yield* statusOf(integration.id))?.integration.provenance?.signedInViaAgent).toBe(
+          true,
+        );
+        mock.revoked = true;
+        mock.accessTokens.clear();
+        yield* whoami("linear").pipe(Effect.result);
+        expect(
+          yield* service.beginSignIn(integration.id, { origin: COGENLY_ORIGIN, fromAgent: true }),
+        ).toHaveProperty("authorizationUrl");
+        expect(
+          yield* service.beginSignIn(integration.id, { origin: COGENLY_ORIGIN }),
+        ).toHaveProperty("authorizationUrl");
+      }),
+    ).pipe(Effect.provide(gatewayLayer())),
   );
 
   it.effect("retains each account's browser origin across service restarts", () =>
@@ -229,10 +237,11 @@ describe("Integration OAuth sign-in", () => {
           Integrations.Integrations,
         );
         expect(
-          yield* restarted
-            .beginSignIn(integration.id, { origin: "http://localhost:3000", fromAgent: true })
-            .pipe(Effect.result),
-        ).toMatchObject({ _tag: "Failure", failure: { reason: "approval_required" } });
+          yield* restarted.beginSignIn(integration.id, {
+            origin: "http://localhost:3000",
+            fromAgent: true,
+          }),
+        ).toHaveProperty("authorizationUrl");
         const link = yield* restarted.beginSignIn(integration.id, { origin: COGENLY_ORIGIN });
         expect(link.redirectUri).toBe(`${COGENLY_ORIGIN}${CALLBACK_PATH}`);
         expect(JSON.stringify(yield* restarted.list())).not.toContain("browserOrigin");
@@ -292,6 +301,96 @@ describe("Integration OAuth sign-in", () => {
             expect((yield* statusOf(integration.id))?.status).toBe("needs_sign_in");
         }),
       ).pipe(Effect.provide(gatewayLayer())),
+  );
+
+  it.effect.each([
+    ["refresh", "url"],
+    ["refresh", "delete"],
+    ["sign_in", "url"],
+    ["sign_in", "delete"],
+    ["refresh", "cosmetic"],
+    ["refresh", "disable"],
+    ["sign_in", "cosmetic"],
+    ["sign_in", "disable"],
+  ] as const)("grant commit respects a peer edit: %s", ([operation, mutation]) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const entered = yield* Deferred.make<void>();
+        const resume = yield* Deferred.make<void>();
+        let blocked = false;
+        yield* Effect.gen(function* () {
+          yield* runMigrations();
+          const mock = yield* startMockAuthServer;
+          const integration = yield* addLinear(mock, "linear");
+          const service = yield* Integrations.Integrations;
+          if (operation === "refresh") {
+            yield* signIn(integration.id, "owner");
+            yield* TestClock.adjust("3590 seconds");
+          }
+          const link =
+            operation === "sign_in"
+              ? yield* service.beginSignIn(integration.id, { origin: COGENLY_ORIGIN })
+              : undefined;
+          const callback = link ? yield* consent(link.authorizationUrl, "owner") : undefined;
+          blocked = true;
+          const pending = callback
+            ? service.completeSignIn(callback).pipe(Effect.asVoid)
+            : service.callTool(integration.name, "whoami", {}, null).pipe(Effect.asVoid);
+          const completion = yield* pending.pipe(Effect.result, Effect.forkScoped);
+          yield* Deferred.await(entered);
+          // Shared definitions materialize directly in SQL, outside the local
+          // OAuth lock. Change exactly that persisted boundary while vault I/O
+          // is in flight, after the service has validated its old definition.
+          const sql = yield* SqlClient.SqlClient;
+          const at = "2026-01-02T00:00:00.000Z";
+          if (mutation === "url")
+            yield* sql`UPDATE integrations SET payload_json=json_remove(json_set(payload_json,'$.url','https://changed.example/mcp','$.updatedAt',${at}),'$.oauthState'),updated_at=${at} WHERE id=${integration.id}`;
+          else if (mutation === "cosmetic")
+            yield* sql`UPDATE integrations SET payload_json=json_set(payload_json,'$.displayName','Renamed by peer','$.updatedAt',${at}),updated_at=${at} WHERE id=${integration.id}`;
+          else if (mutation === "disable")
+            yield* sql`UPDATE integrations SET payload_json=json_set(payload_json,'$.enabled',json('false'),'$.updatedAt',${at}),updated_at=${at} WHERE id=${integration.id}`;
+          else
+            yield* sql`UPDATE integrations SET payload_json=json_remove(json_set(payload_json,'$.deletedAt',${at},'$.updatedAt',${at}),'$.oauthState'),deleted_at=${at},updated_at=${at} WHERE id=${integration.id}`;
+          yield* Deferred.succeed(resume, undefined);
+          const result = yield* Fiber.join(completion);
+          const rejected = mutation === "url" || mutation === "delete";
+          expect(result._tag).toBe(
+            rejected || (mutation === "disable" && operation === "refresh") ? "Failure" : "Success",
+          );
+          const rows = yield* sql<{
+            payload_json: string;
+          }>`SELECT payload_json FROM integrations WHERE id=${integration.id}`;
+          const stored = yield* decodeStored(rows[0]!.payload_json);
+          if (rejected) expect(stored.oauthState).toBeUndefined();
+          else expect(stored.oauthState?.signedIn).toBe(true);
+          expect(stored.url).toBe(
+            mutation === "url" ? "https://changed.example/mcp" : integration.url,
+          );
+          expect((yield* (yield* Vault.Vault).list({})).items).toHaveLength(rejected ? 0 : 1);
+          if (!rejected) {
+            blocked = false;
+            if (mutation === "disable")
+              yield* service.update({ id: integration.id, enabled: true });
+            const call = yield* service.callTool(integration.name, "whoami", {}, null);
+            expect(call.isError).not.toBe(true);
+          }
+        }).pipe(
+          Effect.provide(
+            gatewayLayer((tokens) => ({
+              ...tokens,
+              write: (input) =>
+                Effect.gen(function* () {
+                  if (blocked) {
+                    yield* Deferred.succeed(entered, undefined);
+                    yield* Deferred.await(resume);
+                  }
+                  return yield* tokens.write(input);
+                }),
+            })),
+          ),
+        );
+      }),
+    ),
   );
 
   it.effect("discovers, registers, exchanges a PKCE code and calls with the token", () =>

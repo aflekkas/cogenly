@@ -42,6 +42,8 @@ it("keeps Google MCP on stdio with a callback-only loopback host", () => {
     clientSecret: "secret",
     environment: {},
   });
+  expect(spec.secrets).not.toContain("id");
+  expect(spec.secrets).toContain("secret");
   expect(spec.transport).toBe("stdio");
   expect(spec.args).toContain("stdio");
   expect(spec.args).not.toContain("streamable-http");

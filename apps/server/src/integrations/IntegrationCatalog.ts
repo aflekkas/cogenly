@@ -14,6 +14,7 @@ import {
 import { isLoopbackHost } from "@t3tools/shared/preview";
 
 import { parseCredentialRef } from "./IntegrationCredentials.ts";
+import { secretItemName } from "./IntegrationSetup.ts";
 
 /**
  * Turns a catalog connect request into the integration it creates, or the
@@ -22,8 +23,15 @@ import { parseCredentialRef } from "./IntegrationCredentials.ts";
  */
 export type CatalogResolution =
   | { readonly _tag: "ready"; readonly input: IntegrationAddInput; readonly signsIn: boolean }
-  /** `message` tells an agent what to do next, e.g. ask for the region or store a secret. */
-  | { readonly _tag: "needs"; readonly message: string };
+  /**
+   * `message` tells an agent what to do next, e.g. store a secret. `mode` is
+   * the auth mode whose inputs are missing, which Settings turns into a setup action.
+   */
+  | {
+      readonly _tag: "needs";
+      readonly message: string;
+      readonly mode?: IntegrationCatalogAuthKind;
+    };
 
 /** Exactly one `{{credential:<item>.<field>}}`, as the gateway accepts a client secret. */
 const isCredentialReference = (value: string | undefined) => {
@@ -48,6 +56,23 @@ const uniqueName = (base: string, taken: ReadonlySet<string>) => {
 };
 
 /**
+ * The name connecting `entry` gives a new account: `linear`, `linear-work`,
+ * `google-personal`, with a number when it is taken. Settings names the
+ * account's vault items after it before the account exists.
+ */
+export const catalogIntegrationName = (
+  entry: IntegrationCatalogEntry,
+  accountLabel: string | undefined,
+  existingNames: ReadonlySet<string>,
+) =>
+  entry.kind === "local-preset"
+    ? uniqueName(`google-${slug(accountLabel ?? "") || "account"}`, existingNames)
+    : uniqueName(
+        accountLabel === undefined ? entry.id : `${entry.id}-${slug(accountLabel) || "account"}`,
+        existingNames,
+      );
+
+/**
  * Google's redirect URI is registered on one origin. A browser's or agent's
  * public origin is a good guess; loopback is left to the server's configured
  * default, which matches the `localhost` URI the docs ask users to register.
@@ -69,15 +94,16 @@ const storeHint = (item: string, host: string, as: string) =>
 const inputsHelp = (
   entry: Extract<IntegrationCatalogEntry, { kind: "remote" }>,
   mode: IntegrationCatalogAuthKind,
+  accountLabel: string | undefined,
 ) => {
-  const docs = `See docs/user/integrations.md#${entry.docsAnchor}; the user can also connect it in Settings → Integrations.`;
+  const docs = `Read integration_setup_guide with service "${entry.id}" and perform setup yourself.`;
   if (mode === "api_key") {
     const label = entry.auth.find((auth) => auth.kind === mode)?.label ?? "API key";
-    const host = new URL(entry.regions[0].url).hostname;
-    return `${entry.name} needs the user's ${label}. ${storeHint(`${entry.id}-api-key`, host, "apiKey")} ${docs}`;
+    const host = new URL(entry.url).hostname;
+    return `${entry.name} needs the user's ${label}. ${storeHint(secretItemName(entry.id, "api-key", accountLabel), host, "apiKey")} ${docs}`;
   }
-  const host = entry.tokenHost ?? new URL(entry.regions[0].url).hostname;
-  return `${entry.name} needs an OAuth app the user creates with ${entry.name}. Ask for its client ID and pass it as clientId; for its client secret: ${storeHint(`${entry.id}-client-secret`, host, "clientSecret")} ${docs}`;
+  const host = entry.tokenHost ?? new URL(entry.url).hostname;
+  return `${entry.name} needs an OAuth app the user creates with ${entry.name}. Ask for its client ID and pass it as clientId; for its client secret: ${storeHint(secretItemName(entry.id, "client-secret", accountLabel), host, "clientSecret")} ${docs}`;
 };
 
 /**
@@ -88,9 +114,7 @@ export const availableToConnect = (
   connected: ReadonlyArray<Pick<Integration, "transport" | "url" | "local">>,
 ): Array<string> => {
   const used = new Set(connected.map((integration) => integrationCatalogEntryFor(integration)?.id));
-  return INTEGRATION_CATALOG.filter(
-    (entry) => entry.kind !== "unavailable" && !used.has(entry.id),
-  ).map((entry) =>
+  return INTEGRATION_CATALOG.filter((entry) => !used.has(entry.id)).map((entry) =>
     entry.kind === "local-preset" ? `${entry.id} (Gmail, Calendar, Drive)` : entry.id,
   );
 };
@@ -105,7 +129,6 @@ export const catalogRequest = (
   catalogId: input.catalogId,
   ...(input.accountLabel?.trim() ? { accountLabel: input.accountLabel.trim() } : {}),
   inputs: {
-    ...(input.region === undefined ? {} : { region: input.region }),
     ...(input.apiKey === undefined ? {} : { apiKey: input.apiKey }),
     ...(input.clientId === undefined ? {} : { clientId: input.clientId }),
     ...(input.clientSecret === undefined ? {} : { clientSecret: input.clientSecret }),
@@ -126,8 +149,6 @@ export const resolveCatalogConnect = (
 ): CatalogResolution => {
   const entry = integrationCatalogEntry(request.catalogId);
   if (entry === undefined) return { _tag: "needs", message: "That catalog entry doesn't exist." };
-  if (entry.kind === "unavailable")
-    return { _tag: "needs", message: `${entry.name} isn't available yet. ${entry.reason}` };
   const inputs = request.inputs ?? {};
   const accountLabel = request.accountLabel?.trim() || undefined;
   const scope = request.scope ?? { type: "all" as const };
@@ -139,31 +160,19 @@ export const resolveCatalogConnect = (
         message:
           'Pass accountLabel to name this Google account, e.g. "personal" or "work"; each Google account is its own integration.',
       };
-    const callbackOrigin = context.fromAgent
-      ? undefined
-      : (publicOrigin(context.requestOrigin) ?? inputs.callbackOrigin);
+    const callbackOrigin = inputs.callbackOrigin ?? publicOrigin(context.requestOrigin);
     return {
       _tag: "ready",
       signsIn: true,
       input: {
         preset: entry.preset,
         accountLabel,
-        name: uniqueName(`google-${slug(accountLabel) || "account"}`, context.existingNames),
+        name: catalogIntegrationName(entry, accountLabel, context.existingNames),
         ...(callbackOrigin === undefined ? {} : { callbackOrigin }),
         scope,
       },
     };
   }
-
-  const region =
-    entry.regions.length === 1
-      ? entry.regions[0]
-      : entry.regions.find((candidate) => candidate.id === inputs.region);
-  if (region === undefined)
-    return {
-      _tag: "needs",
-      message: `Ask the user where their ${entry.name} workspace is hosted, then pass region: ${entry.regions.map((candidate) => `"${candidate.id}" (${candidate.label})`).join(" or ")}.`,
-    };
 
   const mode =
     inputs.auth ??
@@ -172,32 +181,34 @@ export const resolveCatalogConnect = (
       : inputs.clientId !== undefined || inputs.clientSecret !== undefined
         ? "oauth_app"
         : entry.auth.find((auth) => auth.kind === "oauth")?.kind);
-  if (mode === undefined) return { _tag: "needs", message: inputsHelp(entry, entry.auth[0].kind) };
+  if (mode === undefined)
+    return {
+      _tag: "needs",
+      mode: entry.auth[0].kind,
+      message: inputsHelp(entry, entry.auth[0].kind, accountLabel),
+    };
   if (!entry.auth.some((auth) => auth.kind === mode))
     return {
       _tag: "needs",
-      message: `${entry.name} connects with: ${entry.auth.map((auth) => auth.label).join(", ")}.${entry.auth[0].kind === "oauth" ? " Omit apiKey, clientId and clientSecret to sign in." : ` ${inputsHelp(entry, entry.auth[0].kind)}`}`,
+      message: `${entry.name} connects with: ${entry.auth.map((auth) => auth.label).join(", ")}.${entry.auth[0].kind === "oauth" ? " Omit apiKey, clientId and clientSecret to sign in." : ` ${inputsHelp(entry, entry.auth[0].kind, accountLabel)}`}`,
     };
   if (mode === "api_key" && !isCredentialReference(inputs.apiKey))
-    return { _tag: "needs", message: inputsHelp(entry, mode) };
+    return { _tag: "needs", mode, message: inputsHelp(entry, mode, accountLabel) };
   if (
     mode === "oauth_app" &&
     (inputs.clientId === undefined || !isCredentialReference(inputs.clientSecret))
   )
-    return { _tag: "needs", message: inputsHelp(entry, mode) };
+    return { _tag: "needs", mode, message: inputsHelp(entry, mode, accountLabel) };
 
   const oauthScope = entry.oauthScope === undefined ? {} : { scope: entry.oauthScope };
   return {
     _tag: "ready",
     signsIn: mode !== "api_key",
     input: {
-      name: uniqueName(
-        accountLabel === undefined ? entry.id : `${entry.id}-${slug(accountLabel) || "account"}`,
-        context.existingNames,
-      ),
+      name: catalogIntegrationName(entry, accountLabel, context.existingNames),
       displayName: entry.name,
       transport: "http",
-      url: region.url,
+      url: entry.url,
       headers: mode === "api_key" ? { Authorization: `Bearer ${inputs.apiKey!.trim()}` } : {},
       scope,
       hint: "",

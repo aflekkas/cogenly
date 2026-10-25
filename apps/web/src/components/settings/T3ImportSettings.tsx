@@ -369,15 +369,16 @@ function IntroSection({
         description={
           <>
             Each project's full history, subagent threads included, as chats you can continue here.
-            Keybindings and default models come too. Sign-ins and tokens are never copied, so
-            providers ask you to sign in again. <T3ImportLearnMoreLink />
+            Keybindings, default models and favorite models come too; the models also reach your
+            paired machines. Sign-ins and tokens are never copied, so providers ask you to sign in
+            again. <T3ImportLearnMoreLink />
           </>
         }
       />
       {selectable && source.projects.length > 0 ? (
         <SettingsRow
           title="Projects"
-          description="Projects already in Cogenly are merged, not duplicated."
+          description="Each comes over as a repository. A folder that is already a repository in Cogenly gets the threads, not a duplicate."
         >
           <ul className="flex flex-col gap-0.5 pt-1 pb-2" aria-label="T3 Code projects">
             {source.projects.map((project) => (
@@ -489,11 +490,11 @@ function StageSection({
           {view.report.settings.length > 0 ? (
             <SettingsSection id="t3-import-settings" title="Settings">
               <SettingsRow
-                title="Import keybindings and default models"
-                description="Untick to leave this environment's settings as they are."
+                title="Import keybindings, default models and favorites"
+                description="Untick to leave this machine's settings as they are."
                 control={
                   <Checkbox
-                    aria-label="Import keybindings and default models"
+                    aria-label="Import keybindings, default models and favorites"
                     checked={includeSettings}
                     disabled={busy}
                     onCheckedChange={(checked) => onIncludeSettingsChange(checked === true)}

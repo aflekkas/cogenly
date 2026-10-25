@@ -120,6 +120,7 @@ import * as ServerConfig from "../../config.ts";
 import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 import { signalProcessGroup } from "@t3tools/provider-core/server/processGroup";
 import {
+  hasClaudeManagedMcpConfig,
   claudeSessionTranscriptExists,
   claudeSignedOutMessage,
   makeClaudeEnvironment,
@@ -1105,6 +1106,7 @@ function claudeLiveSelectionFlagSettings(
   };
 }
 
+/** Real turns isolate native MCP configuration unless the owner restores it. */
 export function makeClaudeQueryOptions(input: {
   readonly modelSelection: ModelSelection;
   readonly nativeThreadId: string;
@@ -1136,6 +1138,9 @@ export function makeClaudeQueryOptions(input: {
   readonly onUserDialog?: ClaudeQueryOptions["onUserDialog"];
   readonly supportedDialogKinds?: ClaudeQueryOptions["supportedDialogKinds"];
   readonly allowDangerouslySkipPermissions?: boolean;
+  /** True restores Claude's native MCP configuration. */
+  readonly useProviderConnectors?: boolean;
+  readonly managedMcpConfig?: boolean;
 }): ClaudeAgentSdkQueryOptions {
   const compiledSelection = compileClaudeModelSelection(input.modelSelection);
   const {
@@ -1143,6 +1148,10 @@ export function makeClaudeQueryOptions(input: {
     "dangerously-skip-permissions": _launchArgSkipPermissions,
     ...extraArgs
   } = input.settings === undefined ? {} : parseCliArgs(input.settings.launchArgs).flags;
+  if (input.useProviderConnectors !== true) {
+    delete extraArgs["mcp-config"];
+    delete extraArgs["strict-mcp-config"];
+  }
   const requestThinkingSummaries =
     compiledSelection.settings.alwaysThinkingEnabled !== false &&
     extraArgs["thinking-display"] !== "omitted";
@@ -1163,13 +1172,14 @@ export function makeClaudeQueryOptions(input: {
       : typeof input.sdkSettings === "object" && input.sdkSettings !== null
         ? ({ ...input.sdkSettings, ...selectionSettings } as ClaudeSdkSettings)
         : selectionSettings;
-  const effectiveQuerySettings =
+  const compactedQuerySettings =
     input.settings?.autoCompactWindow === undefined || input.settings.autoCompactWindow.length === 0
       ? querySettings
       : ({
           ...(typeof querySettings === "object" && querySettings !== null ? querySettings : {}),
           autoCompactWindow: Number(input.settings.autoCompactWindow),
         } as ClaudeSdkSettings);
+  const effectiveQuerySettings = compactedQuerySettings;
   const options: ClaudeAgentSdkQueryOptions = {
     model: compiledSelection.apiModelId,
     tools: claudeAgentSdkQueryToolsForSdk(selectedTools),
@@ -1207,7 +1217,14 @@ export function makeClaudeQueryOptions(input: {
     ...(input.settings?.binaryPath
       ? { pathToClaudeCodeExecutable: input.settings.binaryPath }
       : {}),
-    ...(input.environment === undefined ? {} : { env: input.environment }),
+    ...(input.useProviderConnectors === true
+      ? input.environment === undefined
+        ? {}
+        : { env: input.environment }
+      : {
+          ...(input.managedMcpConfig ? {} : { strictMcpConfig: true }),
+          env: { ...input.environment, ENABLE_CLAUDEAI_MCP_SERVERS: "false" },
+        }),
     ...(input.mcpServers === undefined ? {} : { mcpServers: input.mcpServers }),
     systemPrompt: {
       type: "preset" as const,
@@ -8616,6 +8633,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             attachmentsDir,
             settings: adapterOptions.settings,
             environment: adapterOptions.environment,
+            managedMcpConfig: yield* hasClaudeManagedMcpConfig().pipe(
+              Effect.provideService(FileSystem.FileSystem, fileSystem),
+            ),
             tools: queryPolicy.tools ?? CLAUDE_CODE_PRESET_TOOLS,
             ...(conversationMode ? { conversationMode } : {}),
             ...(turnInput.runtimePolicy.projectManifest === undefined
@@ -8640,6 +8660,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             canUseTool,
             onUserDialog,
             supportedDialogKinds: ["resume_return"],
+            ...(turnInput.runtimePolicy.useProviderConnectors === true
+              ? { useProviderConnectors: true }
+              : {}),
           });
           const querySession = yield* queryRunner
             .open({

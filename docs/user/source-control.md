@@ -6,7 +6,7 @@ Repositories on other hosts continue to work as plain Git repositories.
 ## Connect an account
 
 Install Git and configure authentication on the machine running your Cogenly server. For a remote
-environment, do this on the remote machine. After signing in, open **Settings → Source Control**
+environment, do this on the remote machine. After signing in, open **Settings → Source control**
 and choose **Rescan**.
 
 ### GitHub
@@ -14,7 +14,7 @@ and choose **Rescan**.
 Cogenly talks to GitHub's API directly and only needs a token. Any of these works, in this
 order of precedence:
 
-1. A token saved in **Settings → Source Control → GitHub**. It is kept in the server's secret
+1. A token saved in **Settings → Source control → GitHub**. It is kept in the server's secret
    store, and works without the GitHub CLI.
 2. `GH_TOKEN` (`GH_ENTERPRISE_TOKEN` with `GH_HOST` for GitHub Enterprise Server) in the
    server's environment.

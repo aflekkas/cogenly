@@ -29,6 +29,7 @@ import * as DesktopPreReadyPlatform from "./DesktopPreReadyPlatform.ts";
 import * as DesktopShutdown from "./DesktopShutdown.ts";
 import * as DesktopServerExposure from "../backend/DesktopServerExposure.ts";
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
+import { migrateDesktopTailscaleServe } from "../backend/tailscaleServeMigration.ts";
 import * as DesktopShellEnvironment from "../shell/DesktopShellEnvironment.ts";
 import * as DesktopState from "./DesktopState.ts";
 import * as DesktopRemoteUpdates from "../updates/DesktopRemoteUpdates.ts";
@@ -221,6 +222,24 @@ const bootstrap = Effect.gen(function* () {
       mode: settings.serverExposureMode,
     });
   }
+  // The retired desktop Tailscale HTTPS switch moves into Private access
+  // before the backend reads it.
+  yield* migrateDesktopTailscaleServe({
+    legacy: { enabled: settings.tailscaleServeEnabled, servePort: settings.tailscaleServePort },
+    preferencePath: environment.tailscaleServePreferencePath,
+    clearLegacy: desktopSettings.setTailscaleServe({ enabled: false, port: Option.none() }),
+  }).pipe(
+    Effect.tap((moved) =>
+      moved
+        ? logBootstrapInfo("bootstrap moved the desktop Tailscale HTTPS switch into Private access")
+        : Effect.void,
+    ),
+    Effect.catch((cause) =>
+      Effect.logWarning("Could not move the desktop Tailscale HTTPS switch into Private access", {
+        cause,
+      }),
+    ),
+  );
   const serverExposureState = yield* serverExposure.configureFromSettings({ port: backendPort });
   const backendConfig = yield* serverExposure.backendConfig;
   yield* logBootstrapInfo("bootstrap resolved backend endpoint", {
