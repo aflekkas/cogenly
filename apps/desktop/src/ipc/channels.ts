@@ -103,6 +103,7 @@ export const PREVIEW_SITE_PERMISSION_PROMPT_CHANNEL = "desktop:preview-site-perm
 export const MAC_PERMISSION_HELPER_CHANNEL = "desktop:mac-permission-helper";
 
 export const CHECK_SYSTEM_PERMISSION_CHANNEL = "desktop:check-system-permission";
+export const RELAUNCH_APP_CHANNEL = "desktop:relaunch-app";
 export const DICTATION_IS_AVAILABLE_CHANNEL = "desktop:dictation-is-available";
 export const DICTATION_REQUEST_MICROPHONE_CHANNEL = "desktop:dictation-request-microphone";
 export const DICTATION_STREAM_START_CHANNEL = "desktop:dictation-stream-start";

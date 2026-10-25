@@ -1171,6 +1171,8 @@ export interface DesktopBridge {
   dictation?: DesktopDictationBridge;
   /** Present when the desktop shell can perform an ordered plain-text paste. */
   pasteAsText?: () => Promise<void>;
+  /** Quit and reopen the desktop app. Optional: older desktop builds lack it. */
+  relaunchApp?: () => Promise<void>;
   onMenuAction: (listener: (action: string) => void) => () => void;
   /**
    * Quit-confirmation hint pushes. Optional: older desktop builds never emit

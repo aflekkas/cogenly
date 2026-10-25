@@ -173,6 +173,7 @@ const desktopBridge = {
   openSystemSettings: (pane: string) =>
     ipcRenderer.invoke(IpcChannels.OPEN_SYSTEM_SETTINGS_CHANNEL, pane),
   pasteAsText: () => ipcRenderer.invoke(IpcChannels.PASTE_AS_TEXT_CHANNEL, undefined),
+  relaunchApp: () => ipcRenderer.invoke(IpcChannels.RELAUNCH_APP_CHANNEL, undefined),
   ...(clientPlatform === "darwin"
     ? {
         dictation: {

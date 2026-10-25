@@ -17,6 +17,7 @@ import * as DesktopBackendConfiguration from "../../backend/DesktopBackendConfig
 import * as DesktopBackendPool from "../../backend/DesktopBackendPool.ts";
 import * as DesktopLocalEnvironmentAuth from "../../backend/DesktopLocalEnvironmentAuth.ts";
 import * as DesktopEnvironment from "../../app/DesktopEnvironment.ts";
+import * as DesktopLifecycle from "../../app/DesktopLifecycle.ts";
 import * as DesktopAppSettings from "../../settings/DesktopAppSettings.ts";
 import * as DesktopWslBackend from "../../wsl/DesktopWslBackend.ts";
 import * as DesktopWslEnvironment from "../../wsl/DesktopWslEnvironment.ts";
@@ -352,6 +353,21 @@ export const pasteAsText = DesktopIpc.makeIpcMethod({
     ) {
       focused.paste();
     }
+  }),
+});
+
+/**
+ * Quits and reopens the app, for the rare macOS privacy grant that only
+ * takes effect in a fresh process. Computer use offers it when a grant the
+ * user says they gave still reads as missing.
+ */
+export const relaunchApp = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.RELAUNCH_APP_CHANNEL,
+  payload: Schema.Undefined,
+  result: Schema.Void,
+  handler: Effect.fn("desktop.ipc.window.relaunchApp")(function* () {
+    const lifecycle = yield* DesktopLifecycle.DesktopLifecycle;
+    yield* lifecycle.relaunch("requested by the user");
   }),
 });
 
