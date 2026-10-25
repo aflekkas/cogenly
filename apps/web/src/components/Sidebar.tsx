@@ -214,7 +214,7 @@ import {
 import { createSidebarListMotion } from "./Sidebar.motion";
 import { ThreadWorktreeIndicator } from "./ThreadStatusIndicators";
 import { resolveSnoozePresets, snoozeWakeLabel, type SnoozePreset } from "./Sidebar.snooze";
-import { ProjectFavicon, type ProjectFaviconProject } from "./ProjectFavicon";
+import { ProjectFavicon } from "./ProjectFavicon";
 import { ThreadSearchMatchExcerpt } from "./ThreadSearchMatch";
 import { makeWorkspaceFileDropHandlers } from "./chat/workspaceFileDrop";
 import { ProviderIconStack } from "./chat/ProviderIconStack";
@@ -246,7 +246,7 @@ import { useSidebarRowActionsOverlap } from "./sidebar/useSidebarRowActionsOverl
 import { SidebarShelfBar, type SidebarShelf } from "./sidebar/SidebarShelfBar";
 import { useSegmentSelection } from "./sidebar/sidebarSegments.logic";
 import { SIDEBAR_MODE_ICONS } from "./sidebar/modes/SidebarModeSwitcher";
-import { RepositoryBadge } from "./sidebar/modes/RepositoryBadge";
+import { RepositoryRowIcon, type RepositoryIconLocal } from "../projectLabels/RepositorySourceRows";
 import { SidebarRenameField } from "./sidebar/SidebarRenameField";
 import {
   projectLabelKey,
@@ -623,7 +623,7 @@ type SidebarSweepAction = "settle" | "unsettle" | "unsnooze";
 function WorkCardLabel(props: {
   readonly folder: SidebarRowFolder | null;
   readonly repositoryName: string | null;
-  readonly project: ProjectFaviconProject | null;
+  readonly project: RepositoryIconLocal | null;
   /** The card sits under its project's heading, so the line names the repository alone. */
   readonly projectInHeading?: boolean | undefined;
   /** Right-click on the line opens its repository's menu, not the thread's. */
@@ -637,10 +637,12 @@ function WorkCardLabel(props: {
   return (
     <span className="flex min-w-0 flex-1 items-center gap-1.5" onContextMenu={props.onContextMenu}>
       {props.repositoryName && props.project ? (
-        <ProjectFavicon
-          project={props.project}
+        // The icon its repository picker row shows.
+        <RepositoryRowIcon
+          local={props.project}
+          remote={null}
+          environmentId={props.project.environmentId}
           className="size-4 shrink-0"
-          fallback={<RepositoryBadge name={props.repositoryName} />}
         />
       ) : props.folder ? (
         <ProjectFolderIcon project={props.folder.icon} className="size-4" />
@@ -712,7 +714,7 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
   repositoryName?: string | null;
   /** Under its project's heading the card names the repository alone. */
   projectInHeading?: boolean | undefined;
-  project: ProjectFaviconProject | null;
+  project: RepositoryIconLocal | null;
   projectDisplayName: string | null;
   isActive: boolean;
   /** Chats rows are text only: the draft's first line and a muted "Draft". */
@@ -892,7 +894,7 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
 const SidebarWorkDraftCard = memo(function SidebarWorkDraftCard(props: {
   draftId: DraftId;
   branch: string | null;
-  project: ProjectFaviconProject | null;
+  project: RepositoryIconLocal | null;
   projectDisplayName: string | null;
   environmentId: EnvironmentId;
   threadId: ThreadId;

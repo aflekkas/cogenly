@@ -81,7 +81,6 @@ import {
 } from "../ui/combobox";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { InlineButton } from "../ui/button";
-import { RepositoryBadge } from "../sidebar/modes/RepositoryBadge";
 import { resolveProjectSettings } from "@cogenly/shared/projectSettings";
 
 /** The draft heading's FadeSwap slot, which a replacing draft's heading picks up from. */
@@ -616,20 +615,18 @@ export function DraftHeroHeadline({
             )}
           >
             {!breadcrumb.repository.placeholder && activeProjectDisplayName ? (
-              activeProject ? (
-                // The same icon the picker's row shows for it.
-                <span className="inline-flex size-[0.78em] align-[-0.06em] me-[0.28em] items-center justify-center">
-                  <RepositoryRowIcon
-                    local={activeProject}
-                    {...linkedRepositoryIcon(repositoryFolder, activeProject.id)}
-                    environmentId={activeProject.environmentId}
-                    // Sized in em to the heading, like the hero's other inline icons.
-                    className="size-full"
-                  />
-                </span>
-              ) : (
-                <RepositoryBadge name={breadcrumb.repository.text} size="inline" />
-              )
+              // The same icon the picker's row shows for it.
+              <span className="inline-flex size-[0.78em] align-[-0.06em] me-[0.28em] items-center justify-center">
+                <RepositoryRowIcon
+                  local={activeProject}
+                  {...(activeProject
+                    ? linkedRepositoryIcon(repositoryFolder, activeProject.id)
+                    : { remote: null, iconPath: null })}
+                  environmentId={activeProject?.environmentId ?? null}
+                  // Sized in em to the heading, like the hero's other inline icons.
+                  className="size-full"
+                />
+              </span>
             ) : null}
             {breadcrumb.repository.text}
           </span>

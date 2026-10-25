@@ -59,7 +59,7 @@ export type ProjectFaviconProject = Pick<
  * A project's icon. Resolution order lives in `resolveProjectIconSource`:
  * the icon picked in project settings, then the repository's favicon, then a
  * neutral glyph. `fallback` replaces that glyph where a surface has its own
- * mark for a repository without an icon (Work's tinted repository badge).
+ * mark for a repository without an icon (`RepositoryRowIcon`'s remote icon).
  */
 export function ProjectFavicon(input: {
   project: ProjectFaviconProject;
