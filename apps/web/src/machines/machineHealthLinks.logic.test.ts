@@ -36,6 +36,12 @@ function context(
 }
 
 describe("healthFixAction", () => {
+  it("opens Storage on the machine whose disk is full", () => {
+    expect(healthItemActions({ fix: null, target: { _tag: "storage" } }, context([HUB]))).toEqual({
+      fix: null,
+      open: { kind: "open", label: "Open Storage", link: { kind: "storage", environmentId: HUB } },
+    });
+  });
   it("signs in on the origin machine's provider or integration screen", () => {
     expect(
       healthFixAction("sign-in", { _tag: "provider", instanceId: provider }, context([HUB])),

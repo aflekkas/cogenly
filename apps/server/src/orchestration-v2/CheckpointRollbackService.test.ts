@@ -13,6 +13,7 @@ import {
 import * as IdAllocator from "@cogenly/provider-core/server/IdAllocator";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
@@ -135,7 +136,7 @@ it.effect.each([
             }),
             Layer.mock(Sessions.ProviderSessionManagerV2)({ open: forbidden("provider") }),
             Layer.mock(RuntimePolicy.RuntimePolicyV2)({ resolve: forbidden("policy") }),
-            Layer.mock(Projects.ProjectStoreV2)({ get: forbidden("project") }),
+            Layer.mock(Projects.ProjectStoreV2)({ get: () => Effect.succeed(Option.none()) }),
             Layer.mock(EventSink.EventSinkV2)({ write: forbidden("write") }),
           ),
         ),

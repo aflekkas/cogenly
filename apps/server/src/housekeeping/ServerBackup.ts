@@ -24,6 +24,7 @@ import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
 
 import * as ServerConfig from "../config.ts";
 import { backupDatabase } from "../persistence/DatabaseBackup.ts";
@@ -103,6 +104,9 @@ export class ServerBackup extends Context.Service<
   {
     /** Back up now, regardless of the automatic schedule. Returns the new directory and what retention pruned. */
     readonly backupNow: Effect.Effect<BackupRunResult, ServerBackupError>;
+    readonly pruneBackups: (
+      dryRun: boolean,
+    ) => Effect.Effect<ReadonlyArray<string>, ServerBackupError>;
   }
 >()("cogenly-server/housekeeping/ServerBackup") {}
 
@@ -111,6 +115,7 @@ const make = Effect.gen(function* () {
   const settingsService = yield* ServerSettings.ServerSettingsService;
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
+  const backupLock = yield* Semaphore.make(1);
 
   const backupsDirectory = path.join(config.baseDir, "backups");
 
@@ -166,8 +171,24 @@ const make = Effect.gen(function* () {
 
   const pruneOldBackups = Effect.fn("ServerBackup.pruneOldBackups")(function* (
     keep: number,
+    dryRun = false,
   ): Effect.fn.Return<ReadonlyArray<string>, ServerBackupError> {
     if (!(yield* fs.exists(backupsDirectory).pipe(Effect.orElseSucceed(() => false)))) return [];
+    const canonical = yield* fs
+      .realPath(backupsDirectory)
+      .pipe(
+        Effect.mapError(
+          (cause) => new ServerBackupError({ operation: "list", path: backupsDirectory, cause }),
+        ),
+      );
+    const parent = yield* fs
+      .realPath(path.dirname(backupsDirectory))
+      .pipe(
+        Effect.mapError(
+          (cause) => new ServerBackupError({ operation: "list", path: backupsDirectory, cause }),
+        ),
+      );
+    if (canonical !== path.join(parent, path.basename(backupsDirectory))) return [];
     const names = yield* fs
       .readDirectory(backupsDirectory)
       .pipe(
@@ -175,14 +196,33 @@ const make = Effect.gen(function* () {
           (cause) => new ServerBackupError({ operation: "list", path: backupsDirectory, cause }),
         ),
       );
-    const entries = yield* Effect.forEach(names, (name) =>
+    const safeNames = yield* Effect.filter(names, (name) =>
+      fs.realPath(path.join(canonical, name)).pipe(
+        Effect.flatMap((real) =>
+          real === path.join(canonical, name)
+            ? fs.stat(real).pipe(Effect.map((stat) => stat.type === "Directory"))
+            : Effect.succeed(false),
+        ),
+        Effect.orElseSucceed(() => false),
+      ),
+    );
+    const entries = yield* Effect.forEach(safeNames, (name) =>
       fs.exists(path.join(backupsDirectory, name, "statev2.sqlite")).pipe(
         Effect.map((hasSnapshot) => ({ name, hasSnapshot })),
         Effect.orElseSucceed(() => ({ name, hasSnapshot: false })),
       ),
     );
     const plan = planBackupRetention(entries, keep);
+    const removed: string[] = [];
     for (const name of plan.remove) {
+      if (dryRun) continue;
+      const current = yield* settingsService.getSettings.pipe(
+        Effect.mapError(
+          (cause) =>
+            new ServerBackupError({ operation: "prune", path: config.settingsPath, cause }),
+        ),
+      );
+      if (current.automaticBackups.retentionCount !== keep) return removed;
       yield* fs.remove(path.join(backupsDirectory, name), { recursive: true }).pipe(
         Effect.mapError(
           (cause) =>
@@ -193,8 +233,9 @@ const make = Effect.gen(function* () {
             }),
         ),
       );
+      removed.push(name);
     }
-    return plan.remove;
+    return dryRun ? plan.remove : removed;
   });
 
   const backupNowImpl = Effect.fn("ServerBackup.backupNow")(function* () {
@@ -281,10 +322,9 @@ const make = Effect.gen(function* () {
 
   // `backupDatabase` reads FileSystem/Path from the environment; bind the
   // instances this layer was built with so callers need neither.
-  const backupNow = backupNowImpl().pipe(
-    Effect.provideService(FileSystem.FileSystem, fs),
-    Effect.provideService(Path.Path, path),
-  );
+  const backupNow = backupLock
+    .withPermit(backupNowImpl())
+    .pipe(Effect.provideService(FileSystem.FileSystem, fs), Effect.provideService(Path.Path, path));
 
   const latestBackupAt = Effect.gen(function* () {
     if (!(yield* fs.exists(backupsDirectory))) return null;
@@ -320,7 +360,21 @@ const make = Effect.gen(function* () {
     ),
   );
 
-  return ServerBackup.of({ backupNow });
+  const pruneBackups = (dryRun: boolean) =>
+    backupLock.withPermit(
+      Effect.gen(function* () {
+        const settings = yield* settingsService.getSettings.pipe(
+          Effect.mapError(
+            (cause) =>
+              new ServerBackupError({ operation: "list", path: config.settingsPath, cause }),
+          ),
+        );
+        return (yield* pruneOldBackups(settings.automaticBackups.retentionCount, dryRun)).map(
+          (name) => path.join(backupsDirectory, name),
+        );
+      }),
+    );
+  return ServerBackup.of({ backupNow, pruneBackups });
 });
 
 export const layer = Layer.effect(ServerBackup, make);

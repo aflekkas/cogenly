@@ -3,7 +3,7 @@
  *
  * No cron, no scheduled agent task, no provider turn. Each run:
  * - prunes log files older than `storageCleanup.logsAfterDays`, only when the
- *   user set one, and only files that really live under the logs directory;
+ *   configured retention allows it, and only files that really live under the logs directory;
  * - runs `PRAGMA optimize` and, when incremental auto_vacuum is on and free
  *   pages exist, a bounded `PRAGMA incremental_vacuum`.
  *
@@ -144,7 +144,11 @@ const make = Effect.gen(function* () {
         );
       if (stat.type === "Directory") {
         yield* collectLogFiles(logsRoot, target, into);
-      } else if (stat.type === "File" && stat.mtime._tag === "Some") {
+      } else if (
+        stat.type === "File" &&
+        stat.mtime._tag === "Some" &&
+        /\.(?:log|ndjson)\.\d+$/.test(name)
+      ) {
         into.push({ path: target, modifiedAtMs: stat.mtime.value.getTime() });
       }
     }

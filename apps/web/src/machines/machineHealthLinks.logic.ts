@@ -31,6 +31,7 @@ export type MachineHealthLink =
       readonly instanceId: ProviderInstanceId;
     }
   | { readonly kind: "integrations"; readonly environmentId: EnvironmentId }
+  | { readonly kind: "storage"; readonly environmentId: EnvironmentId }
   | {
       /** Settings → Machines as `viewedEnvironmentId` sees it, at `machineEnvironmentId`'s health. */
       readonly kind: "machineHealth";
@@ -100,6 +101,7 @@ const TARGET_LABELS = {
   provider: "Open provider",
   integration: "Open integration",
   machine: "View machine",
+  storage: "Open Storage",
 } as const satisfies Record<MachineHealthTarget["_tag"], string>;
 
 /** Opens the failing thing. */
@@ -110,6 +112,8 @@ export function healthTargetAction(
   const origin = context.originEnvironmentId;
   const label = TARGET_LABELS[target._tag];
   switch (target._tag) {
+    case "storage":
+      return { kind: "open", label, link: { kind: "storage", environmentId: origin } };
     case "thread":
       return {
         kind: "open",

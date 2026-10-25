@@ -985,6 +985,11 @@ export function createServerEnvironmentAtoms<R, E>(
 
   return {
     configValueAtom,
+    storageStatus: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:storage-status",
+      tag: WS_METHODS.serverGetStorageStatus,
+      concurrency: { mode: "singleFlight", key: ({ environmentId }) => environmentId },
+    }),
     runStorageCleanup: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:run-storage-cleanup",
       tag: WS_METHODS.serverRunStorageCleanup,

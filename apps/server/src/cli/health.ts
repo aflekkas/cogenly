@@ -72,6 +72,7 @@ export const runHealth = (flags: {
   readonly json: boolean;
   readonly fix?: boolean;
   readonly machine: Option.Option<string>;
+  readonly storage?: { readonly fix: boolean; readonly dryRun: boolean };
 }) =>
   Effect.gen(function* () {
     const config = yield* resolveCliAuthConfig(flags, yield* GlobalFlag.LogLevel);
@@ -90,9 +91,10 @@ export const runHealth = (flags: {
       });
     }
     const issued = yield* environmentAuth.issueSession({
-      scopes: flags.fix
-        ? [AuthOrchestrationReadScope, AuthSettingsWriteScope]
-        : [AuthOrchestrationReadScope],
+      scopes:
+        flags.fix || flags.storage?.fix || flags.storage?.dryRun
+          ? [AuthOrchestrationReadScope, AuthSettingsWriteScope]
+          : [AuthOrchestrationReadScope],
       label: "cogenly health cli",
     });
     yield* Effect.addFinalizer(() =>
@@ -109,6 +111,39 @@ export const runHealth = (flags: {
         Effect.provideContext(authContext),
       ),
     );
+    if (flags.storage !== undefined) {
+      const status = yield* client[WS_METHODS.serverGetStorageStatus]({});
+      yield* Console.log(
+        status.complete ? "Storage usage:" : "Storage measurement incomplete; try again.",
+      );
+      for (const volume of status.volumes)
+        yield* Console.log(
+          `  Volume ${volume.path}: ${(volume.usedBytes / 1024 ** 3).toFixed(2)} GiB used, ${(volume.availableBytes / 1024 ** 3).toFixed(2)} GiB available`,
+        );
+      if (status.databaseBytes !== null)
+        yield* Console.log(
+          `  Database file: ${(status.databaseBytes / 1024 ** 3).toFixed(2)} GiB. Cleanup keeps conversation history; no compaction is performed.`,
+        );
+      for (const category of status.categories) {
+        yield* Console.log(
+          `  ${category.category}: ${category.bytes === null ? "shared blocks; exact size unavailable" : `${(category.bytes / 1024 ** 3).toFixed(2)} GiB`}, ${category.files} files`,
+        );
+      }
+      if (flags.storage.fix || flags.storage.dryRun) {
+        const report = yield* client[WS_METHODS.serverRunStorageCleanup]({
+          dryRun: !flags.storage.fix || flags.storage.dryRun,
+        });
+        yield* Console.log(
+          `${report.dryRun ? "Dry run" : "Cleanup"}: ${report.counts.removed} ${report.dryRun ? "eligible" : "removed"}, ${report.counts.kept} kept, ${report.counts.failed} failed.`,
+        );
+        for (const entry of report.entries)
+          yield* Console.log(`  ${entry.path ?? entry.kind}: ${entry.reason}`);
+      } else
+        yield* Console.log(
+          "Use --dry-run to preview cleanup, or --fix to run it. Settings → Storage has the same controls.",
+        );
+      return;
+    }
     if (flags.fix) {
       if (Option.isSome(flags.machine))
         return yield* new HealthCliError({

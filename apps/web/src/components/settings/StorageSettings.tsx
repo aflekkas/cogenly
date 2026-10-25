@@ -2,9 +2,11 @@ import type {
   StorageCleanupReport,
   StorageCleanupSettings,
   WorktreeCleanupRules,
+  StorageStatus,
+  EnvironmentId,
 } from "@cogenly/contracts";
 import { resolveWorktreeCleanup } from "@cogenly/shared/projectSettings";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useAtomValue } from "@effect/atom-react";
 import { Atom } from "effect/reactivity";
 import {
@@ -19,7 +21,7 @@ import { Button } from "../ui/button";
 import { toastManager } from "../ui/toast";
 
 import { Input } from "../ui/input";
-import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
+import { Collapsible, CollapsiblePanel } from "../ui/collapsible";
 import { Switch } from "../ui/switch";
 import {
   NumberField,
@@ -167,12 +169,6 @@ function RetentionControl({
   );
 }
 
-const KEEP_WHEN_LABELS = {
-  "any-local-files": "Any local files",
-  "uncommitted-changes": "Uncommitted changes",
-  "tracked-changes": "Edited tracked files",
-} as const;
-
 /** One line for the last-run fold; identical results across machines collapse into one. */
 function lastRunSummary(
   entries: readonly { readonly label: string; readonly counts: string }[],
@@ -202,9 +198,13 @@ function CleanupResults({
             ? ((entry.threadId === null
                 ? entry.path
                 : entry.path?.split(/[\\/]/).findLast(Boolean)) ?? "Worktrees")
-            : entry.kind === "logs"
-              ? "Rotated logs"
-              : "Browser artifacts";
+            : entry.kind === "backups"
+              ? "Expired backup"
+              : entry.kind === "dependencies"
+                ? "Rebuildable dependencies"
+                : entry.kind === "logs"
+                  ? "Rotated logs"
+                  : "Browser artifacts";
         return (
           <SettingsRow
             key={`${entry.path ?? entry.kind}:${entry.threadId ?? index}`}
@@ -254,16 +254,26 @@ function CleanupSection() {
   useRelativeTimeTick(60_000);
   const { connectedEnvironments } = useSettingsScope();
   const [pending, setPending] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previews, setPreviews] = useState<ReadonlyArray<{
+    environmentId: EnvironmentId;
+    report: StorageCleanupReport;
+  }> | null>(null);
   const run = useAtomCommand(serverEnvironment.runStorageCleanup);
   const supported = connectedEnvironments.filter(
-    (environment) => environment.serverConfig?.environment.capabilities.storageCleanupRun === true,
+    (environment) =>
+      environment.serverConfig?.environment.capabilities.storageCleanupRun === true &&
+      environment.serverConfig.environment.capabilities.storageStatus === true,
   );
   const state = useAtomValue(
     useMemo(
       () =>
         Atom.make((get) =>
           connectedEnvironments.flatMap((environment) => {
-            if (environment.serverConfig?.environment.capabilities.storageCleanupRun !== true)
+            if (
+              environment.serverConfig?.environment.capabilities.storageCleanupRun !== true ||
+              environment.serverConfig.environment.capabilities.storageStatus !== true
+            )
               return [];
             const query = get(
               serverEnvironment.storageCleanupReport({
@@ -299,6 +309,7 @@ function CleanupSection() {
     return (
       settings.storageCleanup.browserArtifactsAfterDays !== null ||
       settings.storageCleanup.logsAfterDays !== null ||
+      settings.storageCleanup.dependenciesAfterDays !== null ||
       enabled(resolveWorktreeCleanup(settings, null)) ||
       Object.values(settings.projectSettingsOverrides).some(
         (override) =>
@@ -318,7 +329,7 @@ function CleanupSection() {
         ? `${report.counts.removed} removed, ${report.counts.kept} kept${report.counts.failed > 0 ? `, ${report.counts.failed} failed` : ""}`
         : "",
       description: report
-        ? `Last run ${formatRelativeTimeLabel(report.finishedAt)}. ${formatBytes(report.bytesFreed)} recovered.${report.counts.failed > 0 ? ` ${report.counts.failed} ${report.counts.failed === 1 ? "item" : "items"} couldn't be removed.` : ""}`
+        ? `Last run ${formatRelativeTimeLabel(report.finishedAt)}. ${report.spaceMeasurement === "volume-change" ? `${formatBytes(report.bytesFreed)} more volume space available.` : "Recovered space could not be measured."}${report.counts.failed > 0 ? ` ${report.counts.failed} ${report.counts.failed === 1 ? "item" : "items"} couldn't be removed.` : ""}`
         : query?.failed
           ? "Could not load the last run."
           : query?.loading
@@ -326,20 +337,28 @@ function CleanupSection() {
             : "Cleanup hasn't run yet.",
     };
   });
-  const deleteNow = async () => {
+  const deleteNow = async (dryRun: boolean) => {
     if (pending) return;
     setPending(true);
     try {
+      const reports: Array<{ environmentId: EnvironmentId; report: StorageCleanupReport }> = [];
       await Promise.all(
         supported
-          .filter((environment) =>
-            state.some(
-              (entry) => entry.environmentId === environment.environmentId && entry.allowed,
-            ),
+          .filter(
+            (environment) =>
+              (dryRun ||
+                previews?.some((preview) => preview.environmentId === environment.environmentId)) &&
+              state.some(
+                (entry) => entry.environmentId === environment.environmentId && entry.allowed,
+              ),
           )
           .map(async (environment) => {
-            const result = await run({ environmentId: environment.environmentId, input: {} });
+            const result = await run({
+              environmentId: environment.environmentId,
+              input: { dryRun },
+            });
             if (result._tag === "Success") {
+              reports.push({ environmentId: environment.environmentId, report: result.value });
               const failures = result.value.entries.filter((entry) => entry.outcome === "failed");
               if (failures.length > 0)
                 toastManager.add({
@@ -356,6 +375,8 @@ function CleanupSection() {
             }
           }),
       );
+      if (dryRun) setPreviews(reports);
+      setPreviewOpen(dryRun && reports.length > 0);
     } finally {
       setPending(false);
     }
@@ -368,7 +389,7 @@ function CleanupSection() {
           description={
             <span>
               {!hasRules
-                ? "Turn on a cleanup rule to use this."
+                ? "Completed delegated tasks clean up automatically when safe."
                 : summaries.map(({ environment, label, description }) => (
                     <span key={environment.environmentId} className="block">
                       {supported.length > 1 ? `${label}: ` : ""}
@@ -378,17 +399,72 @@ function CleanupSection() {
             </span>
           }
           control={
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={pending || !hasRules || !state.some((entry) => entry.allowed)}
-              onClick={() => void deleteNow()}
-            >
-              {pending ? "Deleting…" : "Delete now"}
-            </Button>
+            <div className="flex gap-2">
+              {previewOpen && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={pending}
+                  onClick={() => setPreviewOpen(false)}
+                >
+                  Cancel
+                </Button>
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={pending || !state.some((entry) => entry.allowed)}
+                onClick={() => void deleteNow(!previewOpen)}
+              >
+                {pending ? "Checking…" : !previewOpen ? "Preview cleanup" : "Clean up now"}
+              </Button>
+            </div>
           }
         />
       </SettingsGroup>
+      <Collapsible open={previewOpen}>
+        <CollapsiblePanel>
+          {previews !== null && (
+            <>
+              <SettingsNote>
+                Preview only. Safety is checked again when cleanup runs. Branches and checkpoints
+                are kept.
+              </SettingsNote>
+              <SettingsNote>
+                Shared blocks prevent reliable size estimates on APFS. Cleanup measures available
+                volume space before and after it runs; other disk activity can affect that
+                measurement.
+              </SettingsNote>
+              {previews.some(({ report }) => (report.unsavedAgentWorktrees ?? 0) > 0) && (
+                <SettingsNote>
+                  {previews.reduce(
+                    (total, { report }) => total + (report.unsavedAgentWorktrees ?? 0),
+                    0,
+                  )}{" "}
+                  agent worktrees have unsaved changes and will be kept.
+                </SettingsNote>
+              )}
+              {previews.map(({ environmentId, report }) => (
+                <CleanupResults
+                  key={environmentId}
+                  report={report}
+                  environmentLabel={
+                    connectedEnvironments.find(
+                      (environment) => environment.environmentId === environmentId,
+                    )?.label
+                  }
+                />
+              ))}
+            </>
+          )}
+        </CollapsiblePanel>
+      </Collapsible>
+      {summaries.some(({ report }) => (report?.unsavedAgentWorktrees ?? 0) > 0) && (
+        <SettingsNote>
+          {summaries.reduce((total, { report }) => total + (report?.unsavedAgentWorktrees ?? 0), 0)}{" "}
+          agent worktrees have unsaved changes and were kept.
+        </SettingsNote>
+      )}
       {summaries.some(({ report }) => report !== null) && (
         <FoldedSettingsSection
           id="storage-cleanup-last-run"
@@ -410,6 +486,105 @@ function CleanupSection() {
               ),
           )}
         </FoldedSettingsSection>
+      )}
+    </SettingsSection>
+  );
+}
+
+const STORAGE_LABELS: Record<string, string> = {
+  "agent-worktrees": "Agent worktrees",
+  "user-worktrees": "User worktrees",
+  dependencies: "Dependencies and build output",
+  "dev-data": "Dev data copies",
+  "browser-artifacts": "Browser artifacts",
+  logs: "Logs",
+  backups: "Backups",
+};
+
+function StorageUsage({ environmentId, label }: { environmentId: EnvironmentId; label: string }) {
+  const measure = useAtomCommand(serverEnvironment.storageStatus);
+  const [status, setStatus] = useState<StorageStatus | null>(null);
+  const [pending, setPending] = useState(false);
+  const refresh = async () => {
+    setPending(true);
+    try {
+      const result = await measure({ environmentId, input: {} });
+      if (result._tag === "Success") setStatus(result.value);
+    } finally {
+      setPending(false);
+    }
+  };
+  useEffect(() => {
+    let cancelled = false;
+    void measure({ environmentId, input: {} }).then((result) => {
+      if (!cancelled && result._tag === "Success") setStatus(result.value);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [environmentId, measure]);
+  return (
+    <SettingsSection id={`storage-usage-${environmentId}`} title={`Disk usage · ${label}`}>
+      <SettingsRow
+        title="Disk space"
+        description="Volume usage counts shared blocks once. APFS clones and reflinks prevent exact per-category sizes, so those sizes are left unknown. Cleanup measures actual volume space before and after it runs."
+        control={
+          <Button variant="outline" size="sm" disabled={pending} onClick={() => void refresh()}>
+            {pending ? "Measuring…" : "Refresh"}
+          </Button>
+        }
+      />
+      {status === null ? (
+        <SettingsNote>Measuring disk usage…</SettingsNote>
+      ) : (
+        <>
+          {!status.complete && (
+            <SettingsNote>Measurement could not finish. Refresh to try again.</SettingsNote>
+          )}
+          {status.volumes.map((volume) => (
+            <SettingsRow
+              key={volume.id}
+              title="Volume usage"
+              description={volume.path}
+              control={
+                <span className="text-sm tabular-nums">
+                  {formatBytes(volume.usedBytes)} used · {formatBytes(volume.availableBytes)}{" "}
+                  available
+                </span>
+              }
+            />
+          ))}
+          <SettingsRow
+            title="Database file"
+            description="Conversation history and indexes. Storage cleanup keeps this history and does not compact the database."
+            control={
+              <span className="text-sm tabular-nums">
+                {status.databaseBytes === null ? "Unavailable" : formatBytes(status.databaseBytes)}
+              </span>
+            }
+          />
+          {Object.entries(STORAGE_LABELS).map(([category, title]) => {
+            const usage = status.categories.find((entry) => entry.category === category);
+            return (
+              <SettingsRow
+                key={category}
+                title={title}
+                description={
+                  usage
+                    ? `${usage.files.toLocaleString()} files${usage.bytes === null ? " · Shares filesystem blocks" : ""}`
+                    : undefined
+                }
+                control={
+                  <span className="text-sm tabular-nums">
+                    {status.complete && usage?.bytes !== null
+                      ? formatBytes(usage?.bytes ?? 0)
+                      : "Unknown"}
+                  </span>
+                }
+              />
+            );
+          })}
+        </>
       )}
     </SettingsSection>
   );
@@ -450,6 +625,18 @@ export function StorageSettingsPanel() {
 
   return (
     <>
+      {connectedEnvironments
+        .filter(
+          (environment) =>
+            environment.serverConfig?.environment.capabilities.storageStatus === true,
+        )
+        .map((environment) => (
+          <StorageUsage
+            key={environment.environmentId}
+            environmentId={environment.environmentId}
+            label={environment.label}
+          />
+        ))}
       {connectedEnvironments
         .filter(
           (environment) =>
@@ -499,8 +686,8 @@ export function StorageSettingsPanel() {
               environment.serverConfig?.environment.capabilities.settledWorktreeCleanup === true,
           ) && (
             <SettingsRow
-              title="Delete settled worktrees"
-              description="Remove worktrees this many days after their thread settles. Set 0 days to remove them at the next cleanup. Branches and thread history are kept."
+              title="Delete settled or archived worktrees"
+              description="Remove safe worktrees this many days after their thread settles or is archived. Reopening recreates them from the retained branch. Completed delegated tasks clean up as soon as safe."
               serverScoped
               control={
                 <RetentionControl
@@ -536,47 +723,77 @@ export function StorageSettingsPanel() {
             />
           }
         />
-        {connectedEnvironments.every(
-          (environment) =>
-            environment.serverConfig?.environment.capabilities.storageCleanupRun === true,
-        ) && (
-          <SettingsRow
-            {...searchableSetting("storage-worktree-keep-when")}
-            description={
-              settings.worktreeKeepWhen === "any-local-files"
-                ? "Includes ignored files, except node_modules."
-                : settings.worktreeKeepWhen === "tracked-changes"
-                  ? "Deletes untracked and ignored files, including .env."
-                  : "Keeps edits and untracked files. Deletes ignored files, including .env."
-            }
-            serverScoped
-            control={
-              <Select
-                value={settings.worktreeKeepWhen}
-                onValueChange={(next) => {
-                  if (
-                    next === "any-local-files" ||
-                    next === "uncommitted-changes" ||
-                    next === "tracked-changes"
-                  )
-                    update({ worktreeKeepWhen: next });
-                }}
-              >
-                <SelectTrigger size="sm" aria-label="Keep worktrees with local changes">
-                  <SelectValue>{KEEP_WHEN_LABELS[settings.worktreeKeepWhen]}</SelectValue>
-                </SelectTrigger>
-                <SelectPopup align="end" alignItemWithTrigger={false}>
-                  <SelectItem value="any-local-files">Any local files</SelectItem>
-                  <SelectItem value="uncommitted-changes">Uncommitted changes</SelectItem>
-                  <SelectItem value="tracked-changes">Edited tracked files</SelectItem>
-                </SelectPopup>
-              </Select>
-            }
-          />
-        )}
+        <SettingsRow
+          title="Keep ignored local files too"
+          description="Edits, untracked files and stashes always block removal. Unknown ignored files such as .env are protected too. This also keeps ignored build output and dev data copies; node_modules can still be removed."
+          serverScoped
+          control={
+            <Switch
+              aria-label="Keep ignored local files too"
+              checked={settings.worktreeKeepWhen === "any-local-files"}
+              onCheckedChange={(keep) =>
+                update({ worktreeKeepWhen: keep ? "any-local-files" : "uncommitted-changes" })
+              }
+            />
+          }
+        />
       </SettingsSection>
 
+      <SettingsSection id="storage-backups" title="Backups">
+        <SettingsRow
+          title="Nightly backups"
+          description="Keep consistent snapshots of the database, settings and secrets. Cleanup removes backups beyond the retention count and keeps the newest complete copies."
+          serverScoped
+          control={
+            <Switch
+              aria-label="Nightly backups"
+              checked={scopedSettings.automaticBackups.enabled}
+              onCheckedChange={(enabled) => updateSettings({ automaticBackups: { enabled } })}
+            />
+          }
+        />
+        <SettingsRow
+          {...searchableSetting("storage-backups")}
+          title="Backups to keep"
+          description="Defaults to two complete copies. The same retention applies to Clean up now."
+          serverScoped
+          control={
+            <NumberField
+              value={scopedSettings.automaticBackups.retentionCount}
+              min={1}
+              max={30}
+              size="sm"
+              onValueCommitted={(value) => {
+                if (value !== null)
+                  updateSettings({
+                    automaticBackups: {
+                      retentionCount: Math.max(1, Math.min(30, Math.round(value))),
+                    },
+                  });
+              }}
+            >
+              <NumberFieldGroup>
+                <NumberFieldDecrement aria-label="Keep fewer backups" />
+                <NumberFieldInput aria-label="Backups to keep" />
+                <NumberFieldIncrement aria-label="Keep more backups" />
+              </NumberFieldGroup>
+            </NumberField>
+          }
+        />
+      </SettingsSection>
       <SettingsSection id="storage-artifacts" title="Artifacts and logs">
+        <SettingsRow
+          title="Prune idle dependencies"
+          description="Optionally remove ignored node_modules, .turbo and dist folders in idle worktrees after this many days. Setup runs before the next turn. Shared package files may free little space. Off by default."
+          serverScoped
+          control={
+            <RetentionControl
+              label="Prune idle dependencies"
+              value={settings.dependenciesAfterDays}
+              onChange={(dependenciesAfterDays) => update({ dependenciesAfterDays })}
+            />
+          }
+        />
         <SettingsRow
           title="Delete old browser artifacts"
           description="Delete saved browser captures after this many days. Older capture links will no longer open."
@@ -602,7 +819,9 @@ export function StorageSettingsPanel() {
           }
         />
       </SettingsSection>
-      <CleanupSection />
+      <CleanupSection
+        key={connectedEnvironments.map((environment) => environment.environmentId).join(":")}
+      />
     </>
   );
 }

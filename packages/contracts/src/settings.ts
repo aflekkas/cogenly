@@ -1188,7 +1188,8 @@ export function shouldRecommendDatabaseCompaction(status: DatabaseStorageStatus)
 }
 
 export const StorageCleanupReportEntry = Schema.Struct({
-  kind: Schema.Literals(["worktree", "browser-artifacts", "logs"]),
+  agentCreated: Schema.optionalKey(Schema.Boolean),
+  kind: Schema.Literals(["worktree", "dependencies", "browser-artifacts", "logs", "backups"]),
   outcome: Schema.Literals(["removed", "kept", "failed"]),
   reason: Schema.String,
   path: Schema.NullOr(Schema.String),
@@ -1199,6 +1200,9 @@ export const StorageCleanupReportEntry = Schema.Struct({
 });
 export type StorageCleanupReportEntry = typeof StorageCleanupReportEntry.Type;
 export const StorageCleanupReport = Schema.Struct({
+  dryRun: Schema.optionalKey(Schema.Boolean),
+  unsavedAgentWorktrees: Schema.optionalKey(Schema.Number),
+  spaceMeasurement: Schema.optionalKey(Schema.Literals(["volume-change", "unknown"])),
   trigger: Schema.Literals(["automatic", "manual"]),
   startedAt: Schema.String,
   finishedAt: Schema.String,
@@ -1209,12 +1213,36 @@ export const StorageCleanupReport = Schema.Struct({
 });
 export type StorageCleanupReport = typeof StorageCleanupReport.Type;
 
+export const StorageVolume = Schema.Struct({
+  id: Schema.String,
+  path: Schema.String,
+  totalBytes: Schema.Number,
+  usedBytes: Schema.Number,
+  availableBytes: Schema.Number,
+  sharedBlocksMayExist: Schema.Boolean,
+});
+export type StorageVolume = typeof StorageVolume.Type;
+export const StorageStatus = Schema.Struct({
+  measuredAt: Schema.String,
+  volumes: Schema.Array(StorageVolume),
+  databaseBytes: Schema.NullOr(Schema.Number),
+  categories: Schema.Array(
+    Schema.Struct({
+      category: Schema.String,
+      bytes: Schema.NullOr(Schema.Number),
+      files: Schema.Number,
+    }),
+  ),
+  complete: Schema.Boolean,
+});
+export type StorageStatus = typeof StorageStatus.Type;
+
 /** Built-in nightly backups of the Cogenly home, owned by the server. */
 export const AutomaticBackupsSettings = Schema.Struct({
   enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   /** How many nightly backup directories to keep under `<home>/backups/`. */
   retentionCount: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 30 })).pipe(
-    Schema.withDecodingDefault(Effect.succeed(7)),
+    Schema.withDecodingDefault(Effect.succeed(2)),
   ),
 });
 export type AutomaticBackupsSettings = typeof AutomaticBackupsSettings.Type;
@@ -1225,15 +1253,18 @@ export const StorageCleanupSettings = Schema.Struct({
   ),
   worktreeAfterDays: StorageRetentionDays.pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   worktreeSettledAfterDays: SettledWorktreeRetentionDays.pipe(
-    Schema.withDecodingDefault(Effect.succeed(null)),
+    Schema.withDecodingDefault(Effect.succeed(7)),
   ),
   worktreeOnMerge: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   worktreeOnDelete: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   worktreeUnchanged: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   browserArtifactsAfterDays: StorageRetentionDays.pipe(
+    Schema.withDecodingDefault(Effect.succeed(14)),
+  ),
+  logsAfterDays: StorageRetentionDays.pipe(Schema.withDecodingDefault(Effect.succeed(14))),
+  dependenciesAfterDays: StorageRetentionDays.pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
-  logsAfterDays: StorageRetentionDays.pipe(Schema.withDecodingDefault(Effect.succeed(null))),
 });
 export type StorageCleanupSettings = typeof StorageCleanupSettings.Type;
 
@@ -1770,6 +1801,7 @@ export const ServerSettingsPatch = Schema.Struct({
       worktreeUnchanged: Schema.optionalKey(Schema.Boolean),
       browserArtifactsAfterDays: Schema.optionalKey(StorageRetentionDays),
       logsAfterDays: Schema.optionalKey(StorageRetentionDays),
+      dependenciesAfterDays: Schema.optionalKey(StorageRetentionDays),
     }),
   ),
   worktreesDirectory: Schema.optionalKey(TrimmedString),

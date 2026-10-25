@@ -8,6 +8,8 @@ import {
   OrchestratorMcpFailure,
   ServerSettings,
   ServerSettingsPatch,
+  StorageStatus,
+  StorageCleanupReport,
   UniversalClientPreferenceValues,
   UniversalClientPreferencePatch,
 } from "@cogenly/contracts";
@@ -23,6 +25,7 @@ import * as ThreadCommandExecutor from "../../../orchestration-v2/ThreadCommandE
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as Settings from "../../../serverSettings.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
+import * as StorageCleanup from "../../../storageCleanup.ts";
 
 const PreferenceFields = {
   ...UniversalClientPreferenceValues.fields,
@@ -171,7 +174,27 @@ const MachineHealthFixTool = Tool.make("machine_health_fix", {
 })
   .annotate(Tool.Readonly, false)
   .annotate(Tool.Destructive, false);
+const StorageStatusTool = Tool.make("storage_status", {
+  ...shared,
+  dependencies: [...shared.dependencies, StorageCleanup.StorageCleanup],
+  description:
+    "Read actual volume usage and available space, database file size, and file counts for agent and user worktrees, dependencies, dev data, browser artifacts, logs and backups. On APFS or reflink filesystems, per-category bytes are null because directory sizes overcount shared blocks. Does not follow symlinks.",
+  success: StorageStatus,
+})
+  .annotate(Tool.Readonly, true)
+  .annotate(Tool.Destructive, false);
+const StorageCleanupTool = Tool.make("storage_cleanup", {
+  ...shared,
+  dependencies: [...shared.dependencies, StorageCleanup.StorageCleanup],
+  description:
+    "Preview or run this environment's configured storage cleanup. dryRun defaults to true and changes nothing; pass false to remove only eligible, safely preserved worktrees and expired artifacts/logs. Branches and checkpoints are kept. Kept entries explain blockers such as unsaved changes or running processes. Preview is advisory: execution rechecks safety.",
+  parameters: Schema.Struct({ dryRun: Schema.optionalKey(Schema.Boolean) }),
+  success: StorageCleanupReport,
+}).annotate(Tool.Destructive, true);
+
 export const EnvironmentToolkit = Toolkit.make(
+  StorageStatusTool,
+  StorageCleanupTool,
   EnvironmentReadTool,
   EnvironmentPreferencesTool,
   EnvironmentAddTool,

@@ -17,6 +17,7 @@ import {
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 
@@ -104,6 +105,7 @@ export const make = Effect.gen(function* () {
   const threads = yield* ThreadManagement.ThreadManagementService;
   const checkpointStore = yield* CheckpointStore.CheckpointStore;
   const crypto = yield* Crypto.Crypto;
+  const fs = yield* FileSystem.FileSystem;
 
   const getTurnDiff: CheckpointDiffQuery["Service"]["getTurnDiff"] = Effect.fn("getTurnDiff")(
     function* (input) {
@@ -208,7 +210,13 @@ export const make = Effect.gen(function* () {
       }
 
       const comparison = {
-        cwd: toScope.cwd,
+        // Checkpoint refs belong to the repository's common Git directory,
+        // so a retained checkpoint remains readable after checkout cleanup.
+        cwd:
+          !(yield* fs.exists(toScope.cwd).pipe(Effect.orElseSucceed(() => true))) &&
+          projection.repositoryCwd != null
+            ? projection.repositoryCwd
+            : toScope.cwd,
         fromCheckpointRef,
         toCheckpointRef: toCheckpoint.ref,
         fallbackFromToHead: false,

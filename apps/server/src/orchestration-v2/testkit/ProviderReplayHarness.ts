@@ -1,3 +1,4 @@
+import * as WorktreeLifecycle from "../../workspace/WorktreeLifecycle.ts";
 import * as Membership from "../../projectLabels/ProjectRepositoryMembership.ts";
 import { layerIdentity as layerSharedIdentity } from "../../sync/testkit.ts";
 import * as ServerEnvironment from "../../environment/ServerEnvironment.ts";
@@ -430,6 +431,7 @@ export function layerWithRegistry<Error>(
     ),
   );
   const layerProviderTurnStartServiceProvided = ProviderTurnStartService.layer.pipe(
+    Layer.provide(Layer.mock(WorktreeLifecycle.WorktreeLifecycle)({ prepare: () => Effect.void })),
     Layer.provide(
       Layer.mergeAll(
         AgentStore.layer.pipe(

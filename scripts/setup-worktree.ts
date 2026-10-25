@@ -25,11 +25,18 @@ const worktree = NodePath.dirname(import.meta.dirname);
 // through vp and leave stdin closed so other prompts fail instead of hanging.
 // Install exactly the locked dependencies so setup never rewrites the lockfile.
 // A stale lockfile must fail setup rather than silently resolving a new one.
-const install = NodeChildProcess.spawnSync("vp i --frozen-lockfile -- --yes", {
-  cwd: worktree,
-  shell: true,
-  stdio: ["ignore", "inherit", "inherit"],
-});
+// APFS clones share blocks while keeping package files independently writable.
+// Other supported filesystems use hardlinks from pnpm's default shared store.
+// oxlint-disable-next-line t3code/no-global-process-runtime -- Setup runs before dependencies are installed, so HostProcess is unavailable.
+const importMethod = process.platform === "darwin" ? "clone" : "hardlink";
+const install = NodeChildProcess.spawnSync(
+  `vp i --frozen-lockfile -- --yes --package-import-method=${importMethod}`,
+  {
+    cwd: worktree,
+    shell: true,
+    stdio: ["ignore", "inherit", "inherit"],
+  },
+);
 if (install.status !== 0) process.exit(install.status ?? 1);
 
 // Env files live as real files in the main checkout; worktrees only get

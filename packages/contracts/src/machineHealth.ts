@@ -42,6 +42,7 @@ export const MachineHealthTarget = Schema.Union([
   Schema.TaggedStruct("provider", { instanceId: ProviderInstanceId }),
   Schema.TaggedStruct("integration", { name: TrimmedNonEmptyString }),
   Schema.TaggedStruct("machine", { environmentId: EnvironmentId }),
+  Schema.TaggedStruct("storage", {}),
 ]);
 export type MachineHealthTarget = typeof MachineHealthTarget.Type;
 

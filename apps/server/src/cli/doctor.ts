@@ -114,12 +114,25 @@ export const doctorCommand = Command.make("doctor", {
     ),
     Flag.withDefault(false),
   ),
+  storage: Flag.Boolean("storage").pipe(
+    Flag.withDescription(
+      "Show the running server's disk usage; --dry-run previews storage cleanup, --fix runs it.",
+    ),
+    Flag.withDefault(false),
+  ),
 }).pipe(
   Command.withDescription(
     "Inspect this Cogenly data directory and repair it. Pauses and restarts the background service as needed.",
   ),
   Command.withHandler((flags) =>
     Effect.gen(function* () {
+      if (flags.storage)
+        return yield* runHealth({
+          baseDir: flags.baseDir,
+          json: false,
+          machine: Option.none(),
+          storage: { fix: flags.fix, dryRun: flags.dryRun },
+        });
       // Repairs pause the service the health report is read from, so --health only reads.
       if (flags.health)
         return yield* runHealth({ baseDir: flags.baseDir, json: false, machine: Option.none() });
