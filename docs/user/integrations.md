@@ -7,7 +7,9 @@ request the agent opens. Never paste credentials into a conversation.
 
 Settings → Integrations shows connected accounts, live connection status and
 which projects can use each account. **Connect with an agent** opens a new chat
-with a connection request ready to send. **Reconnect** renews a sign-in;
+that starts “Connect” for you to finish with the service's name; before your
+first connection, a suggested service such as Slack or Notion fills it in.
+**Reconnect** renews a sign-in;
 **Disconnect** stops access until you reconnect; **Remove** deletes the connection.
 Ask an agent to rename an account or change its project scope. Connect a service
 again to add another account, such as personal Gmail and work Gmail.

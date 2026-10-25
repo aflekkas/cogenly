@@ -5,6 +5,7 @@ import {
 } from "@cogenly/client-runtime/state/runtime";
 import { useAtomValue } from "@effect/atom-react";
 import {
+  INTEGRATION_CATALOG,
   integrationCatalogEntryFor,
   type EnvironmentId,
   type IntegrationNativeImportPreview,
@@ -52,9 +53,8 @@ function useConnectWithAgent(environmentId: EnvironmentId | null) {
   const [pending, setPending] = useState(false);
   return {
     pending,
-    connect: async (
-      request = "Help me connect an integration. Read integration_setup_guide and do the setup for me.",
-    ) => {
+    // Left open for the service's name; a suggested service fills it in.
+    connect: async (request = "Connect ") => {
       if (environmentId === null || pending) return;
       setPending(true);
       try {
@@ -80,6 +80,17 @@ export function IntegrationServicesSettings() {
   );
   const canWrite = useAtomValue(integrationsRpc.update.permissionAtom(environmentId));
   const agent = useConnectWithAgent(environmentId);
+  const connectDisabled = !canWrite || environmentId === null || agent.pending;
+  const connectButton = (
+    <Button
+      size="sm"
+      variant="outline"
+      disabled={connectDisabled}
+      onClick={() => void agent.connect()}
+    >
+      Connect with an agent
+    </Button>
+  );
   return (
     <>
       <SettingsSection {...searchableSetting("integration-services")}>
@@ -99,20 +110,35 @@ export function IntegrationServicesSettings() {
             />
           ))
         )}
-        <SettingsRow
-          {...searchableSetting("integration-add")}
-          description="Ask an agent to connect Gmail, Wispr Flow, or any MCP server. It handles setup and asks you for consent or secrets when needed."
-          control={
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={!canWrite || environmentId === null || agent.pending}
-              onClick={() => void agent.connect()}
-            >
-              Connect with an agent
-            </Button>
-          }
-        />
+        {query.data !== null && query.data.integrations.length === 0 ? (
+          <SettingsRow
+            id={searchableSetting("integration-add").id}
+            title="Connect your services"
+            description="Integrations let agents read and act in services like Gmail, Slack and Linear. An agent sets each one up with you and asks for sign-in or secrets when needed."
+            control={connectButton}
+          >
+            <div role="group" aria-label="Suggested services" className="flex flex-wrap gap-2 pb-3">
+              {INTEGRATION_CATALOG.map((entry) => (
+                <Button
+                  key={entry.id}
+                  size="sm"
+                  variant="outline"
+                  disabled={connectDisabled}
+                  onClick={() => void agent.connect(`Connect ${entry.name}`)}
+                >
+                  <IntegrationSourceIcon icon={entry.icon} />
+                  {entry.name}
+                </Button>
+              ))}
+            </div>
+          </SettingsRow>
+        ) : (
+          <SettingsRow
+            {...searchableSetting("integration-add")}
+            description="Ask an agent to connect Gmail, Wispr Flow, or any MCP server. It handles setup and asks you for consent or secrets when needed."
+            control={connectButton}
+          />
+        )}
       </SettingsSection>
       <SettingsSection title="Provider connectors" hideTitle>
         <ProviderConnectorsSettingRow
