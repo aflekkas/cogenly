@@ -53,6 +53,15 @@ describe("compactDynamicToolOutput", () => {
     expect(compactDynamicToolOutput({ matches: [] })).toEqual({ resultCount: 0 });
   });
 
+  it("keeps the app a computer action left in front, for Claude text blocks and Codex objects", () => {
+    const result = { frontmostApp: "Dia" };
+    expect(compactDynamicToolOutput([{ type: "text", text: JSON.stringify(result) }])).toEqual(
+      result,
+    );
+    expect(compactDynamicToolOutput({ structuredContent: result })).toEqual(result);
+    expect(compactDynamicToolOutput({ frontmostApp: null })).toBeUndefined();
+  });
+
   it("keeps a read thread's identity when its transcript is over the parse budget", () => {
     const thread = { threadId: "thread-1", title: "Weekly “checks”", projectId: "p" };
     const messages = Array.from({ length: 40 }, () => "x".repeat(1_000));

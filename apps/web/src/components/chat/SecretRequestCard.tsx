@@ -18,6 +18,7 @@ import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
+import { ThreadPromptCard } from "./ThreadPromptCard";
 import { WorkLogRow } from "./WorkLog";
 
 /**
@@ -104,11 +105,9 @@ function PendingSecretRequestForm(props: {
   // Same hierarchy as a chat card: what is asked, why, the field, then the
   // promise about where the value goes.
   return (
-    <form
+    <ThreadPromptCard
+      render={<form onSubmit={onSubmit} autoComplete="off" />}
       data-v2-item-type={item.type}
-      className="flex min-w-0 flex-col gap-3 rounded-xl border border-border/60 bg-card p-4"
-      onSubmit={onSubmit}
-      autoComplete="off"
       // A click anywhere on the card targets its field, so a paste that
       // follows lands here rather than with the composer.
       onPointerDown={(event) => {
@@ -174,6 +173,6 @@ function PendingSecretRequestForm(props: {
           Decline
         </Button>
       </div>
-    </form>
+    </ThreadPromptCard>
   );
 }

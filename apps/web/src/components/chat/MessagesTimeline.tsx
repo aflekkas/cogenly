@@ -340,6 +340,7 @@ import {
   type HandoffTimelineRun,
 } from "./V2LifecycleRow";
 import { SecretRequestCard } from "./SecretRequestCard";
+import { ComputerUsePermissionCard } from "./ComputerUsePermissionCard";
 import { TimelineSystemDivider } from "./TimelineSystemDivider";
 import {
   isWorkHandoffThread,
@@ -2505,7 +2506,8 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
         activityEnter && ARRIVAL_FADE_CLASS,
         // Commentary (non-terminal assistant) rows carry no metadata row, so
         // they sit closer to the work that follows them.
-        isWorkLogRow || isSubagentGroup
+        // A permission prompt owns its spacing: it renders nothing once granted.
+        isWorkLogRow || isSubagentGroup || row.kind === "computer-use-permission"
           ? undefined
           : row.kind === "turn-fold" || row.kind === "working"
             ? "pb-1.5"
@@ -2581,6 +2583,9 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       {row.kind === "proposed-plan" ? <ProposedPlanTimelineRow row={row} /> : null}
       {row.kind === "html-render" ? <HtmlRenderTimelineRow row={row} /> : null}
       {row.kind === "mcp-app" ? <McpAppTimelineRow row={row} /> : null}
+      {row.kind === "computer-use-permission" ? (
+        <ComputerUsePermissionTimelineRow row={row} />
+      ) : null}
       {row.kind === "working" ? <WorkingTimelineRow row={row} /> : null}
       {row.kind === "worktree-setup" ? <WorktreeSetupTimelineRow row={row} /> : null}
       {row.kind === "event" ? <V2EventTimelineRow row={row} /> : null}
@@ -3698,6 +3703,22 @@ function McpAppTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mcp-app
         onSendMessage={ctx.onSendAppMessage}
         awaitingUser={awaitingUser}
         onFullscreenChange={(fullscreen) => ctx.onAppFullscreenChange(row.id, fullscreen)}
+      />
+    </div>
+  );
+}
+
+function ComputerUsePermissionTimelineRow({
+  row,
+}: {
+  row: Extract<TimelineRow, { kind: "computer-use-permission" }>;
+}) {
+  const ctx = use(TimelineRowCtx);
+  return (
+    <div className="min-w-0 px-1">
+      <ComputerUsePermissionCard
+        environmentId={ctx.activeThreadEnvironmentId}
+        permission={row.permission}
       />
     </div>
   );

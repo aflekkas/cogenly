@@ -307,6 +307,8 @@ describe("searchSettings", () => {
     ["projects folder", "projects-folder", "/settings/new-threads"],
     ["live processes", "diagnostics", "/settings/diagnostics"],
     ["agent browser access", "agent-browser-access", "/settings/integrations"],
+    ["computer use", "agent-computer-use", "/settings/integrations"],
+    ["screen recording", "agent-computer-use", "/settings/integrations"],
     ["connect a machine", "remote-environments", "/settings/connections"],
     ["private access", "machines", "/settings/machines"],
     ["orphan folders", "project-folders", "/settings/project-tags"],

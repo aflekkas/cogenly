@@ -686,6 +686,15 @@ export const SETTINGS_SEARCH_ITEMS = [
     ],
   },
   {
+    id: "agent-computer-use",
+    title: "Computer use",
+    to: "/settings/integrations",
+    scope: "project-defaults",
+    searchTerms: [
+      "agent access allow disable enable control mac apps click type screenshot accessibility screen recording macos permission system settings privacy project override",
+    ],
+  },
+  {
     id: "device-hosts",
     title: "Device hosts",
     to: "/settings/integrations",

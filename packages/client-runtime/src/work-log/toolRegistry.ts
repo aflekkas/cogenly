@@ -879,6 +879,86 @@ const COGENLY_TOOLS: Readonly<Record<string, WorkLogToolDescriptor>> = {
   },
 };
 
+// Computer use. Every action returns the app it left in front, which the
+// compact wire output keeps, so a finished row says where it happened.
+function frontApp(call: WorkLogToolCall): string | undefined {
+  const app = call.status === "completed" ? text(call.output.frontmostApp) : undefined;
+  return app ? clip(app, 40) : undefined;
+}
+
+/** `what`, then where: the app the call named, else the one it left in front. */
+function inApp(what: string, call: WorkLogToolCall): string {
+  const named = text(call.input.app);
+  const app = named ? clip(named, 40) : frontApp(call);
+  return [what, app ? `in ${app}` : ""].filter(Boolean).join(" ");
+}
+
+function summarizeComputerCalls(calls: ReadonlyArray<WorkLogToolCall>): string {
+  if (calls.length <= 3) {
+    return calls.map((call) => resolveWorkLogTool(call)?.label ?? "Used the computer").join(" · ");
+  }
+  const apps = new Set(calls.flatMap((call) => frontApp(call) ?? []));
+  return `Used ${apps.size === 1 ? [...apps][0]! : "computer controls"} ×${calls.length}`;
+}
+
+function computerTool(
+  verb: Verb,
+  object: (call: WorkLogToolCall) => string,
+  priority: 0 | 1 = 0,
+): WorkLogToolDescriptor {
+  return {
+    icon: "computer",
+    verb,
+    object,
+    raw: "collapsed",
+    groupKey: "computer",
+    group: { style: "count", noun: ["computer action", "computer actions"] },
+    summarize: summarizeComputerCalls,
+    priority,
+  };
+}
+
+const COMPUTER_TOOLS: Readonly<Record<string, WorkLogToolDescriptor>> = {
+  computer_status: computerTool(["Checking", "Checked", "check"], () => "computer use status", 1),
+  computer_apps: computerTool(["Listing", "Listed", "list"], () => "running apps", 1),
+  computer_open_app: computerTool(["Opening", "Opened", "open"], (call) => {
+    const app = text(call.input.app);
+    return app ? clip(app, 40) : "an app";
+  }),
+  computer_ui: computerTool(
+    ["Reading", "Read", "read"],
+    (call) => {
+      const app = text(call.input.app);
+      return app ? `${clip(app, 40)}'s controls` : "the front app's controls";
+    },
+    1,
+  ),
+  computer_press: computerTool(["Pressing", "Pressed", "press"], (call) =>
+    inApp("a control", call),
+  ),
+  computer_click: computerTool(["Clicking", "Clicked", "click"], (call) =>
+    inApp(
+      call.input.count === 2
+        ? "twice"
+        : call.input.button === "right"
+          ? "with the right button"
+          : "",
+      call,
+    ),
+  ),
+  computer_type: computerTool(["Typing", "Typed", "type"], (call) => inApp("text", call)),
+  computer_key: computerTool(["Pressing", "Pressed", "press"], (call) => {
+    const key = text(call.input.key);
+    return inApp(key ? clip(key, 40) : "a key", call);
+  }),
+  computer_scroll: computerTool(["Scrolling", "Scrolled", "scroll"], (call) => {
+    const dy = call.input.dy;
+    return inApp(typeof dy === "number" && dy !== 0 ? (dy > 0 ? "down" : "up") : "", call);
+  }),
+  computer_drag: computerTool(["Dragging", "Dragged", "drag"], (call) => inApp("", call)),
+  computer_screenshot: computerTool(["Taking", "Took", "take"], () => "a screenshot", 1),
+};
+
 // Snooze and settle tools return a receipt; the row reads as it. Snooze
 // renders its wake time from `snoozedUntil` in the viewer's own zone, which
 // the environment's zone may not match.
@@ -975,6 +1055,7 @@ const THREAD_LIFECYCLE_TOOLS: Readonly<Record<string, WorkLogToolDescriptor>> = 
 export const WORK_LOG_TOOLS: Readonly<Record<string, WorkLogToolDescriptor>> = {
   ...NATIVE_TOOLS,
   ...COGENLY_TOOLS,
+  ...COMPUTER_TOOLS,
   ...PROJECT_TOOLS,
   ...THREAD_LIFECYCLE_TOOLS,
 };
@@ -1087,7 +1168,12 @@ export function normalizeWorkLogToolKey(toolName: string | null | undefined): st
   if (!name) return null;
   const prefixedTool = COGENLY_PREFIX.exec(name)?.groups?.tool;
   const tool = prefixedTool === undefined ? undefined : withoutLegacyToolPrefix(prefixedTool);
-  if (tool && (Object.hasOwn(COGENLY_TOOLS, tool) || Object.hasOwn(PROJECT_TOOLS, tool))) {
+  if (
+    tool &&
+    (Object.hasOwn(COGENLY_TOOLS, tool) ||
+      Object.hasOwn(COMPUTER_TOOLS, tool) ||
+      Object.hasOwn(PROJECT_TOOLS, tool))
+  ) {
     return tool;
   }
   return resolveT3McpToolId(name) ?? (tool ? tool : nativeToolKey(name));

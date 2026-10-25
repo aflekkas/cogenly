@@ -74,6 +74,7 @@ export type T3McpToolSummaryAction =
   | "read-pr-guide"
   | "browser"
   | "device"
+  | "computer"
   | "html-preview"
   | "html-render"
   | "image-search"
@@ -89,7 +90,7 @@ export type T3McpToolSummaryAction =
 export interface T3McpToolDefinition {
   readonly displayName: string;
   readonly labels: readonly [action: string, running: string, completed: string, detail: string];
-  readonly icon: "t3-code" | "browser" | "device" | "pull-request";
+  readonly icon: "t3-code" | "browser" | "device" | "computer" | "pull-request";
   readonly summaryAction: T3McpToolSummaryAction;
 }
 
@@ -297,6 +298,26 @@ const T3_MCP_TOOLS: Readonly<Record<string, T3McpToolDefinition>> = {
     "device",
   ),
   device_close: tool(["Close", "Closing", "Closed", "a device"], "device", "device"),
+  computer_status: tool(
+    ["Check", "Checking", "Checked", "computer use status"],
+    "computer",
+    "computer",
+  ),
+  computer_apps: tool(["List", "Listing", "Listed", "running apps"], "computer", "computer"),
+  computer_open_app: tool(["Open", "Opening", "Opened", "an app"], "computer", "computer"),
+  computer_ui: tool(["Read", "Reading", "Read", "an app's controls"], "computer", "computer"),
+  computer_press: tool(["Press", "Pressing", "Pressed", "a control"], "computer", "computer"),
+  computer_click: tool(["Click", "Clicking", "Clicked", "on screen"], "computer", "computer"),
+  computer_type: tool(["Type", "Typing", "Typed", "text"], "computer", "computer"),
+  computer_key: tool(["Press", "Pressing", "Pressed", "a key"], "computer", "computer"),
+  computer_scroll: tool(["Scroll", "Scrolling", "Scrolled", "on screen"], "computer", "computer"),
+  computer_drag: tool(["Drag", "Dragging", "Dragged", "on screen"], "computer", "computer"),
+  computer_screenshot: tool(
+    ["Take a screenshot of", "Taking a screenshot of", "Took a screenshot of", "the screen"],
+    "computer",
+    "computer",
+    "Screenshot the screen",
+  ),
   run_scheduled_task_now: tool(
     ["Run", "Running", "Requested a run of", "a scheduled task"],
     "schedule-run",
