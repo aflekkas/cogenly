@@ -8,6 +8,7 @@ import {
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  chatAddRepositoryTarget,
   isProjectLabelArchived,
   partitionArchivedProjectLabels,
   priorFiling,
@@ -150,6 +151,24 @@ describe("partitionArchivedProjectLabels", () => {
     expect(shelved).toEqual([archived]);
     expect(isProjectLabelArchived(archived.label)).toBe(true);
     expect(isProjectLabelArchived(spawn.label)).toBe(false);
+  });
+});
+
+describe("chatAddRepositoryTarget", () => {
+  it("files the added repository in the chat's own project", () => {
+    expect(chatAddRepositoryTarget(thread("spawn", "explicit"), directory.byKey)).toEqual({
+      environmentId: env,
+      labelId: spawn.label.id,
+    });
+  });
+
+  it("files nowhere for a chat with no project, an unknown one or an archived one", () => {
+    expect(chatAddRepositoryTarget(thread(null), directory.byKey)).toBeNull();
+    expect(chatAddRepositoryTarget(thread("gone", "explicit"), directory.byKey)).toBeNull();
+    const archived = archive(spawn);
+    expect(
+      chatAddRepositoryTarget(thread("spawn", "explicit"), new Map([[archived.key, archived]])),
+    ).toBeNull();
   });
 });
 

@@ -21,6 +21,7 @@ import { requestLaunchMachine } from "~/machines/LaunchMachineDialog";
 import { openCommandPalette } from "~/commandPaletteBus";
 import { ProjectPickerRow } from "~/projectLabels/ProjectPickerRow";
 import {
+  chatAddRepositoryTarget,
   type EnvironmentProjectLabel,
   projectLabelsOn,
   scopedRepositoryKey,
@@ -73,6 +74,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
   ADD_REPOSITORY,
   describeWorkStartFailure,
+  disabledWorkProviderMessage,
   groupWorkChoicesByProject,
   listWorkPickerChoices,
   listWorkRepositories,
@@ -128,6 +130,7 @@ export interface StartWorkRequest {
  */
 export function useStartWork(): (request: StartWorkRequest) => Promise<void> {
   const navigate = useNavigate();
+  const serverConfigs = useServerConfigs();
   const startWork = useAtomCommand(serverEnvironment.startWork, { reportFailure: false });
   const { openScratchProject } = useScratchProject();
   return useCallback(
@@ -174,6 +177,9 @@ export function useStartWork(): (request: StartWorkRequest) => Promise<void> {
         if (result._tag === "Failure") {
           if (isAtomCommandInterrupted(result)) return;
           const failure = squashAtomCommandFailure(result);
+          const disabledInstanceId = isWorkHandoffError(failure)
+            ? failure.disabledProviderInstanceId
+            : undefined;
           const described = describeWorkStartFailure(
             isWorkHandoffError(failure) ? failure.stage : null,
           );
@@ -184,7 +190,12 @@ export function useStartWork(): (request: StartWorkRequest) => Promise<void> {
             description:
               isWorkHandoffError(failure) && failure.machineOffline
                 ? "That machine is offline. Nothing was queued."
-                : described.message,
+                : disabledInstanceId !== undefined
+                  ? disabledWorkProviderMessage(
+                      disabledInstanceId,
+                      serverConfigs.get(machine)?.providers ?? [],
+                    )
+                  : described.message,
             ...(isWorkHandoffError(failure) && failure.machineOffline
               ? {
                   actionProps: {
@@ -200,7 +211,19 @@ export function useStartWork(): (request: StartWorkRequest) => Promise<void> {
                     },
                   },
                 }
-              : {}),
+              : disabledInstanceId !== undefined
+                ? {
+                    actionProps: {
+                      children: "Provider settings",
+                      onClick: () => {
+                        void navigate({
+                          to: "/settings/providers",
+                          search: { environmentId: machine, instanceId: disabledInstanceId },
+                        });
+                      },
+                    },
+                  }
+                : {}),
           });
           return;
         }
@@ -228,7 +251,7 @@ export function useStartWork(): (request: StartWorkRequest) => Promise<void> {
         setPending(key, false);
       }
     },
-    [navigate, openScratchProject, startWork],
+    [navigate, openScratchProject, startWork, serverConfigs],
   );
 }
 
@@ -374,6 +397,9 @@ export function StartWorkPicker(props: {
     () => ({ threadRef, ...(throughMessageId === undefined ? {} : { throughMessageId }) }),
     [threadRef, throughMessageId],
   );
+  // The top-level "Add repository" files the new repository in the chat's
+  // project, as the project's own "Add repository" does.
+  const addRepositoryInto = thread ? chatAddRepositoryTarget(thread, directory.byKey) : null;
   const closePicker = () => {
     setOpen(false);
     setQuery("");
@@ -516,7 +542,11 @@ export function StartWorkPicker(props: {
       case "choice":
         closePicker();
         if (item.choice.value === ADD_REPOSITORY) {
-          openCommandPalette({ open: "add-project", startWorkFrom });
+          openCommandPalette({
+            open: "add-project",
+            startWorkFrom,
+            ...(addRepositoryInto ? { into: addRepositoryInto } : {}),
+          });
           return;
         }
         void startWork({

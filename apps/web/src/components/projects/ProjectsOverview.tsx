@@ -220,7 +220,7 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
       >
         <PageContent width="wide" className="pb-0">
           <div className="flex w-full min-w-0 items-center gap-3">
-            <p className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
+            <p className="min-w-0 flex-1 text-sm text-muted-foreground">
               Repositories, chats, Work, files and agents grouped by effort. Agents can change any
               project from a thread.
             </p>

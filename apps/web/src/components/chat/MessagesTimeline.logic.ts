@@ -1,3 +1,4 @@
+import { terminalRunItem, terminalRunSandboxed } from "./terminalRunResult.logic";
 import { worktreeSetupAgentStarted } from "@cogenly/client-runtime/worktree-setup";
 export { worktreeSetupAgentStarted } from "@cogenly/client-runtime/worktree-setup";
 import { isLiveSubagentTurnItem } from "@cogenly/client-runtime/state/subagentRuntime";
@@ -610,6 +611,7 @@ type MessagesTimelineRowContent =
       /** A provider-supplied image icon, such as an integration's logo. */
       toolIcon?: WorkLogEntry["toolIcon"];
       hasFailure: boolean;
+      sandboxed: boolean;
     }
   | {
       kind: "turn-fold";
@@ -2019,6 +2021,10 @@ export function deriveMessagesTimelineRows(input: {
                 : summarizeToolGroup(visibleGroupedEntries).summary,
             summaryIcon: toolGroupIcon(visibleGroupedEntries) ?? "wrench",
             ...(groupToolIcon ? { toolIcon: groupToolIcon } : {}),
+            sandboxed: visibleGroupedEntries.some((entry) => {
+              const terminal = terminalRunItem(entry.structuredPayload);
+              return terminal !== null && terminalRunSandboxed(terminal.output);
+            }),
             hasFailure:
               latestToolEntry !== undefined &&
               workEntryDisplayIndicatesToolFailure(latestToolEntry),
@@ -2681,6 +2687,7 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
         a.summary === bw.summary &&
         a.summaryIcon === bw.summaryIcon &&
         Equal.equals(a.toolIcon, bw.toolIcon) &&
+        a.sandboxed === bw.sandboxed &&
         a.hasFailure === bw.hasFailure
       );
     }

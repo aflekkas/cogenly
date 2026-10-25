@@ -12,6 +12,7 @@ import {
 } from "@cogenly/contracts";
 import { isScratchProject } from "@cogenly/client-runtime/state/projects";
 import { useParams, useRouter } from "@tanstack/react-router";
+import { create } from "zustand";
 import { useCallback, useMemo } from "react";
 import {
   composerDraftHasUserContent,
@@ -51,6 +52,9 @@ import { workPrefersNewWorktree } from "../components/work/work.logic";
 import { usePendingProjectFolderStore } from "../projectLabels/pendingProjectFolders";
 import { useClientSettings } from "./useSettings";
 
+/** Pending draft setup must clear the previous thread header before its async config read. */
+export const useNewThreadPending = create(() => ({ count: 0 }));
+
 interface NewThreadWorkspaceOptions {
   branch?: string | null;
   worktreePath?: string | null;
@@ -79,7 +83,7 @@ export function useNewThreadHandler() {
     return resolveThreadRouteTarget(currentRouteParams);
   }, [router]);
 
-  return useCallback(
+  const openNewThread = useCallback(
     (
       projectRef: ScopedProjectRef,
       options?: {
@@ -519,6 +523,17 @@ export function useNewThreadHandler() {
       })();
     },
     [environmentServerConfigs, getCurrentRouteTarget, projectGroupingSettings, router],
+  );
+  return useCallback(
+    async (...args: Parameters<typeof openNewThread>) => {
+      useNewThreadPending.setState((state) => ({ count: state.count + 1 }));
+      try {
+        return await openNewThread(...args);
+      } finally {
+        useNewThreadPending.setState((state) => ({ count: state.count - 1 }));
+      }
+    },
+    [openNewThread],
   );
 }
 

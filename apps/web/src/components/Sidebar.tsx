@@ -741,10 +741,20 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
     promptPreview.length > 0
       ? promptPreview
       : `${attachmentCount} attachment${attachmentCount === 1 ? "" : "s"}`;
+  const labelEnvironmentIds = useConnectedEnvironmentIds();
+  const directory = useProjectLabelDirectory(labelEnvironmentIds);
+  const pendingFolder = usePendingProjectFolderStore(
+    (state) =>
+      state.byThreadId[useComposerDraftStore.getState().getDraftSession(draftId)?.threadId ?? ""],
+  );
+  const folderName = pendingFolder
+    ? directory.byKey.get(projectLabelKey(pendingFolder.environmentId, pendingFolder.folderId))
+        ?.label.name
+    : null;
   const accessibility = resolveSidebarRowAccessibility({
     title: preview,
     statusLabel: "Unsent draft",
-    projectDisplayName: props.projectDisplayName,
+    projectDisplayName: folderName ?? props.folder?.name ?? props.projectDisplayName,
     isActive: props.isActive,
   });
   const handleActivate = useCallback(() => onNavigate(draftId), [draftId, onNavigate]);

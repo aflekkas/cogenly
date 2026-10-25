@@ -381,6 +381,30 @@ export function threadProjectFolderId(thread: {
   return thread.source.projectFolderId ?? null;
 }
 
+/**
+ * Where a repository added from a chat's Start Work is filed: the chat's own
+ * project on the chat's machine, unless it has none or that project is archived.
+ */
+export function chatAddRepositoryTarget(
+  thread: {
+    readonly environmentId: EnvironmentId;
+    readonly source: { readonly projectFolderId?: ProjectLabelId | null | undefined };
+  },
+  byKey: ReadonlyMap<ProjectLabelKey, EnvironmentProjectLabel>,
+): { readonly environmentId: EnvironmentId; readonly labelId: ProjectLabelId } | null {
+  const folderId = threadProjectFolderId(thread);
+  if (folderId === null) return null;
+  const project = byKey.get(projectLabelKey(thread.environmentId, folderId));
+  if (
+    project === undefined ||
+    project.environmentId !== thread.environmentId ||
+    isProjectLabelArchived(project.label)
+  ) {
+    return null;
+  }
+  return { environmentId: project.environmentId, labelId: project.label.id };
+}
+
 export interface RepositoryFolderMove {
   /** The folder the repository is in now, if any. */
   readonly from: EnvironmentProjectLabel | null;

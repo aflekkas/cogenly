@@ -8,6 +8,7 @@ import {
   type MachineHealthCheckId,
   type MachineHealthReport,
   type MachineHealthStatus,
+  type MachineInfo,
   type MachineListResult,
 } from "@cogenly/contracts";
 
@@ -100,13 +101,61 @@ export function unreachableHeadline(
   return `${machineName} hasn't been reachable for ${formatHealthDuration(nowMs - sinceMs)}`;
 }
 
+/** The server's peer connect grace: this long after pairing or last being seen still reads as connecting. */
+export const MACHINE_CONNECT_GRACE_MS = 2 * 60_000;
+
 /**
- * A report built for an offline machine that is still within its connect
- * grace (just paired or just restarted): the server marks its reachability
- * `unknown`, so it reads "Connecting…" rather than failing.
+ * What a machine's health section shows. Within the connect grace (just
+ * paired, or an offline machine just seen) a missing, failed or unreachable
+ * report reads "Connecting…", including one the server built before the
+ * machine came online. Past the grace, a machine the list shows online never
+ * reads as failing or unreachable: its report just didn't arrive.
  */
-export function isConnectingReport(report: MachineHealthReport, online: boolean): boolean {
-  return !online && !report.reachable && report.status === "unknown";
+export type MachineHealthView =
+  | { readonly _tag: "checking" }
+  | { readonly _tag: "connecting" }
+  | { readonly _tag: "error" }
+  | {
+      readonly _tag: "report";
+      readonly overall: MachineHealthStatus;
+      /** How an unreachable report reads: offline, or online with no report yet. */
+      readonly unreachable: "offline" | "unanswered" | null;
+    };
+
+export function machineHealthView(input: {
+  readonly report: MachineHealthReport | null;
+  readonly failed: boolean;
+  readonly machine: {
+    readonly relation: MachineInfo["relation"];
+    readonly online: boolean;
+    readonly pairedAtMs: number | null;
+    readonly lastSeenAtMs: number | null;
+  };
+  readonly nowMs: number;
+}): MachineHealthView {
+  const { report, machine } = input;
+  const quietSince = machine.online
+    ? machine.pairedAtMs
+    : (machine.lastSeenAtMs ?? machine.pairedAtMs);
+  const inGrace =
+    machine.relation !== "this" &&
+    quietSince !== null &&
+    input.nowMs - quietSince < MACHINE_CONNECT_GRACE_MS;
+  if (report === null) {
+    if (inGrace) return { _tag: "connecting" };
+    return input.failed ? { _tag: "error" } : { _tag: "checking" };
+  }
+  if (report.reachable) return { _tag: "report", overall: report.status, unreachable: null };
+  // The server marks an offline machine inside its grace `unknown`.
+  if (inGrace || (!machine.online && report.status === "unknown")) return { _tag: "connecting" };
+  if (machine.online) {
+    return {
+      _tag: "report",
+      overall: report.status === "fail" ? "unknown" : report.status,
+      unreachable: "unanswered",
+    };
+  }
+  return { _tag: "report", overall: "fail", unreachable: "offline" };
 }
 
 /** "Up 4 days", from the server's uptime in seconds. */

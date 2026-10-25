@@ -6,6 +6,7 @@ import {
   ADD_REPOSITORY,
   anchorWorkHandoffs,
   describeWorkStartFailure,
+  disabledWorkProviderMessage,
   deriveWorkHandoffStatus,
   deriveWorkRowStatus,
   groupWorkChoicesByProject,
@@ -338,4 +339,13 @@ describe("deriveWorkHandoffStatus", () => {
       "stopped",
     );
   });
+});
+
+it("names a disabled provider even before its catalog entry arrives", () => {
+  expect(
+    disabledWorkProviderMessage(
+      "claude-personal" as import("@cogenly/contracts").ProviderInstanceId,
+      [],
+    ),
+  ).toContain("Claude Personal is turned off");
 });

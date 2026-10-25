@@ -103,6 +103,7 @@ import {
 } from "./chat/usageLimitRecovery.logic";
 import { ProjectFolderIcon } from "../projectLabels/ProjectFolderMark";
 import {
+  chatAddRepositoryTarget,
   possibleDuplicateProjects,
   priorFiling,
   projectLabelKey,
@@ -819,15 +820,22 @@ function OpenCommandPaletteDialog(props: {
         icon: <WorkPickerChoiceIcon choice={choice} className={ITEM_ICON_CLASS} />,
         run: async () => {
           if (choice.value === ADD_REPOSITORY) {
-            // The repository it adds starts this chat's Work.
-            openCommandPalette({ open: "add-project", startWorkFrom: { threadRef } });
+            // The repository it adds joins the chat's project and starts this chat's Work.
+            const into = source
+              ? chatAddRepositoryTarget(source, activeFolderDirectory.byKey)
+              : null;
+            openCommandPalette({
+              open: "add-project",
+              startWorkFrom: { threadRef },
+              ...(into ? { into } : {}),
+            });
             return;
           }
           await startWork({ threadRef, choice: choice.value, announce: true });
         },
       }));
     },
-    [projects, repositoryNameOf, serverConfigs, startWork, threads],
+    [activeFolderDirectory.byKey, projects, repositoryNameOf, serverConfigs, startWork, threads],
   );
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { appearanceMode, setAppearanceMode } = useTheme();
@@ -2049,8 +2057,15 @@ function OpenCommandPaletteDialog(props: {
     }
     clearOpenIntent();
     const into = openIntent.into ?? null;
-    setAddProjectHandoff(openIntent.startWorkFrom ?? null);
+    const handoff = openIntent.startWorkFrom ?? null;
+    setAddProjectHandoff(handoff);
     if (into === null) {
+      // Work starts in a repository on the chat's machine, so there is no machine to choose.
+      if (handoff !== null) {
+        setAddProjectInto(null);
+        startAddProjectSourceSelection(handoff.threadRef.environmentId);
+        return;
+      }
       openAddProjectFlow();
       return;
     }
@@ -2934,6 +2949,9 @@ function OpenCommandPaletteDialog(props: {
         return handleNewThread(projectRef);
       }
       setAddProjectHandoff(null);
+      // The "Run on" dialog comes next; with the palette still open over it,
+      // dismissing either one cancelled the Work without a word.
+      setOpen(false);
       return startWork({
         threadRef: handoff.threadRef,
         choice: projectRef.projectId,
@@ -2943,7 +2961,7 @@ function OpenCommandPaletteDialog(props: {
         announce: true,
       });
     },
-    [addProjectHandoff, handleNewThread, startWork],
+    [addProjectHandoff, handleNewThread, setOpen, startWork],
   );
 
   // Files a repository the add flow brought in under the project it was

@@ -303,6 +303,9 @@ const make = Effect.gen(function* () {
                 ...(cause._tag === "ProjectRepositoryMismatchError"
                   ? { repositoryMismatch: cause }
                   : {}),
+                ...(cause._tag === "ThreadManagementProviderInstanceDisabledError"
+                  ? { disabledProviderInstanceId: cause.instanceId }
+                  : {}),
                 machineOffline: Launch.remoteLaunchFailure(cause)?.reason === "offline",
                 cause,
               }),

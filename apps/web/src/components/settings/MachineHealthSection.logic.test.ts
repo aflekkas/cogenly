@@ -15,6 +15,8 @@ import {
   canaryMachineId,
   channelTestLines,
   healthHeadline,
+  machineHealthView,
+  MACHINE_CONNECT_GRACE_MS,
   unreachableHeadline,
 } from "./MachineHealthSection.logic";
 
@@ -174,5 +176,73 @@ describe("channelTestLines", () => {
       { channel: "Slack", state: "failed", text: "not_in_channel" },
       { channel: "Email", state: "skipped", text: "Off or not set up, so nothing was sent." },
     ]);
+  });
+});
+
+describe("machineHealthView", () => {
+  const nowMs = 1_000_000;
+  const peer = {
+    relation: "spoke" as const,
+    online: true,
+    pairedAtMs: nowMs - 10_000,
+    lastSeenAtMs: null,
+  };
+  const report: MachineHealthReport = {
+    environmentId: env("peer"),
+    machineName: "MacBook",
+    status: "fail",
+    observedAt: DateTime.makeUnsafe(nowMs),
+    serverVersion: "0.3.0",
+    uptimeSeconds: 0,
+    reachable: false,
+    checks: [],
+  };
+
+  it.each([true, false])(
+    "shows Connecting for an unreachable peer during grace (online=%s)",
+    (online) => {
+      expect(
+        machineHealthView({ report, failed: false, machine: { ...peer, online }, nowMs }),
+      ).toEqual({ _tag: "connecting" });
+    },
+  );
+
+  it.each([true, false])("shows Connecting with no report during grace (failed=%s)", (failed) => {
+    expect(machineHealthView({ report: null, failed, machine: peer, nowMs })).toEqual({
+      _tag: "connecting",
+    });
+  });
+
+  it("never describes an online peer as unreachable after grace", () => {
+    expect(
+      machineHealthView({
+        report,
+        failed: false,
+        machine: peer,
+        nowMs: nowMs + MACHINE_CONNECT_GRACE_MS,
+      }),
+    ).toEqual({ _tag: "report", overall: "unknown", unreachable: "unanswered" });
+  });
+
+  it("shows failure for an offline peer after grace", () => {
+    expect(
+      machineHealthView({
+        report,
+        failed: false,
+        machine: { ...peer, online: false },
+        nowMs: nowMs + MACHINE_CONNECT_GRACE_MS,
+      }),
+    ).toEqual({ _tag: "report", overall: "fail", unreachable: "offline" });
+  });
+
+  it("preserves a received report's actual health during grace", () => {
+    expect(
+      machineHealthView({
+        report: { ...report, reachable: true },
+        failed: false,
+        machine: peer,
+        nowMs,
+      }),
+    ).toEqual({ _tag: "report", overall: "fail", unreachable: null });
   });
 });
