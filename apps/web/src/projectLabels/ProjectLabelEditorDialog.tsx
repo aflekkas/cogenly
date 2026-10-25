@@ -57,9 +57,20 @@ export function useEnvironmentRepositories(environmentId: EnvironmentId | null) 
   }, [environmentId, projects, serverConfigs]);
 }
 
+/** What the delete confirm says: what goes, what stays, and Archive as the way to undo. */
+function deleteProjectMessage(name: string): string {
+  return (
+    `Delete ${name}?\n` +
+    `This removes the project on every machine, along with its instructions, description and GitHub links. ` +
+    `Its chats, Work and repositories are kept, just no longer in a project. ` +
+    `Its folder may stay on disk, listed under Folders outside any project.\n` +
+    `To hide it and bring it back later, archive it instead.`
+  );
+}
+
 /**
- * Deletes a folder after the confirmation that says its contents are only
- * unfiled. Resolves true once it is gone.
+ * Deletes a project after the confirmation that says what is lost and what
+ * stays. Resolves true once it is gone.
  */
 export function useDeleteProjectFolder() {
   const deleteLabel = useAtomCommand(serverEnvironment.deleteProjectLabel, {
@@ -71,7 +82,7 @@ export function useDeleteProjectFolder() {
       environmentId: EnvironmentId,
       label: { readonly id: ProjectLabelId; readonly name: string },
     ): Promise<boolean> => {
-      const message = `Delete ${label.name}?\nIts chats, Work and repositories are kept, just no longer in a folder.`;
+      const message = deleteProjectMessage(label.name);
       const confirmed =
         (await requestConfirmDialog(message, { variant: "destructive" })) ??
         window.confirm(message);
