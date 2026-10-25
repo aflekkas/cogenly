@@ -110,7 +110,6 @@ Keep `typescript`, `@effect/tsgo`, and the `effect-tsgo patch` prepare step: edi
 still use them for Effect quick fixes and refactors. Keep `@effect/tsgo` on the
 effect-tsgo version that tsc-rs ports (see the tsc-rs README), or the two disagree
 on rule names.
-Marketing keeps `astro check` for Astro files.
 
 CI owns the full suite; see
 [ci.yml](../../.github/workflows/ci.yml) for its current jobs.
