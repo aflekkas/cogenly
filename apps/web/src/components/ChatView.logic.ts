@@ -1,4 +1,5 @@
 import * as Option from "effect/Option";
+import type { EnvironmentConnectionPhase } from "@cogenly/client-runtime/connection";
 import type { EnvironmentThreadShell } from "@cogenly/client-runtime/state/shell";
 import {
   type AssetCreateUrlInput,
@@ -351,6 +352,26 @@ export function resolveDraftPromotionNavigationTarget(input: {
 export function scheduleEnvironmentReconnectWarning(showWarning: () => void): () => void {
   const timeoutId = globalThis.setTimeout(showWarning, ENVIRONMENT_RECONNECT_WARNING_GRACE_MS);
   return () => globalThis.clearTimeout(timeoutId);
+}
+
+/**
+ * Whether the composer should read as connecting rather than disconnected: the
+ * environment has not connected yet and no attempt has failed, or it dropped
+ * and is still inside the reconnect grace. Only after that does it say so.
+ */
+export function isEnvironmentStillConnecting(input: {
+  readonly phase: EnvironmentConnectionPhase;
+  readonly reconnectWarningGraceElapsed: boolean;
+}): boolean {
+  switch (input.phase) {
+    case "available":
+    case "connecting":
+      return true;
+    case "reconnecting":
+      return !input.reconnectWarningGraceElapsed;
+    default:
+      return false;
+  }
 }
 
 export function hasEnvironmentReconnectWarningGraceElapsed(

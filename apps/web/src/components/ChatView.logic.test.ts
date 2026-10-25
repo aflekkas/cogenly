@@ -6,6 +6,7 @@ import {
   resolveComposerInteractionMode,
   resolveComposerProviderSelection,
   resolveThreadDriverKind,
+  isEnvironmentStillConnecting,
   resolveDraftHeroState,
   resolveEmptyServerThreadHero,
   resolveWorktreeSetupProgress,
@@ -1349,6 +1350,33 @@ describe("resolveComposerProviderSelection", () => {
 
     expect(select(claude.driverKind)).toBe(claude.instanceId);
     expect(select(null)).toBe(codex.instanceId);
+  });
+});
+
+describe("isEnvironmentStillConnecting", () => {
+  it("reads a first connection as connecting, however long it takes", () => {
+    for (const phase of ["available", "connecting"] as const) {
+      expect(isEnvironmentStillConnecting({ phase, reconnectWarningGraceElapsed: true })).toBe(
+        true,
+      );
+    }
+  });
+
+  it("reads a reconnect as connecting only inside the grace", () => {
+    expect(
+      isEnvironmentStillConnecting({ phase: "reconnecting", reconnectWarningGraceElapsed: false }),
+    ).toBe(true);
+    expect(
+      isEnvironmentStillConnecting({ phase: "reconnecting", reconnectWarningGraceElapsed: true }),
+    ).toBe(false);
+  });
+
+  it("reads a failed or offline environment as disconnected at once", () => {
+    for (const phase of ["error", "offline", "unsupported"] as const) {
+      expect(isEnvironmentStillConnecting({ phase, reconnectWarningGraceElapsed: false })).toBe(
+        false,
+      );
+    }
   });
 });
 

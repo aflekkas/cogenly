@@ -1492,6 +1492,11 @@ export interface ChatComposerProps {
     readonly label: string;
     readonly connection: EnvironmentConnectionPresentation;
   } | null;
+  /**
+   * The unavailable environment is still connecting and nothing has failed:
+   * send stays blocked, but the composer reads "Connecting", not disconnected.
+   */
+  environmentConnecting?: boolean;
 
   // Pending approvals / inputs
   activePendingApproval: PendingApproval | null;
@@ -1668,6 +1673,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     sendDisabledReason: externalSendDisabledReason,
     isPreparingWorktree,
     environmentUnavailable,
+    environmentConnecting = false,
     pendingUserInputs: incomingPendingUserInputs,
     activePendingProgress: incomingPendingProgress,
     activePendingResolvedAnswers,
@@ -2086,8 +2092,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // stays blocked either way; only the chrome waits, keeping the picker with
   // the thread's own selection instead of swapping in the setup button and
   // back once the catalog lands.
-  const providerCatalogPending = noProviderAvailable && !providerCatalogKnown;
+  // An environment still connecting has not reported its providers either.
+  const providerCatalogPending =
+    noProviderAvailable && (!providerCatalogKnown || environmentConnecting);
   const showProviderUnavailable = noProviderAvailable && !providerCatalogPending;
+  // What the send button says while send is blocked: "Connecting" until the
+  // environment or its catalog arrives, "disconnected" only once that failed.
+  const sendWaitsForConnection = isConnecting || environmentConnecting || providerCatalogPending;
+  const sendBlockedByEnvironment =
+    (environmentUnavailable !== null && !environmentConnecting) ||
+    showProviderUnavailable ||
+    projectSelectionRequired;
   const providerSetupInstanceId = noProviderAvailable
     ? (unavailableProviderInstanceId ??
       (lockedProvider === null
@@ -6026,12 +6041,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                             promptHasText={false}
                             isSendBusy={isSendBusy}
                             sendDisabledReason={sendDisabledReason}
-                            isConnecting={isConnecting}
-                            isEnvironmentUnavailable={
-                              environmentUnavailable !== null ||
-                              noProviderAvailable ||
-                              projectSelectionRequired
-                            }
+                            isConnecting={sendWaitsForConnection}
+                            isEnvironmentUnavailable={sendBlockedByEnvironment}
                             isPreparingWorktree={false}
                             hasSendableContent={false}
                             preserveComposerFocusOnPointerDown
@@ -6604,12 +6615,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       promptHasText={false}
                       isSendBusy={isSendBusy}
                       sendDisabledReason={sendDisabledReason}
-                      isConnecting={isConnecting}
-                      isEnvironmentUnavailable={
-                        environmentUnavailable !== null ||
-                        noProviderAvailable ||
-                        projectSelectionRequired
-                      }
+                      isConnecting={sendWaitsForConnection}
+                      isEnvironmentUnavailable={sendBlockedByEnvironment}
                       isPreparingWorktree={false}
                       hasSendableContent={false}
                       preserveComposerFocusOnPointerDown
@@ -6741,12 +6748,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     promptHasText={prompt.trim().length > 0}
                     isSendBusy={isSendBusy}
                     sendDisabledReason={sendDisabledReason}
-                    isConnecting={isConnecting}
-                    isEnvironmentUnavailable={
-                      environmentUnavailable !== null ||
-                      noProviderAvailable ||
-                      projectSelectionRequired
-                    }
+                    isConnecting={sendWaitsForConnection}
+                    isEnvironmentUnavailable={sendBlockedByEnvironment}
                     isPreparingWorktree={isPreparingWorktree}
                     hasSendableContent={composerSendState.hasSendableContent}
                     canResume={showResumeAction}
