@@ -1092,3 +1092,14 @@ describe("ServerSettings machine identity", () => {
     expect(() => decodeServerSettingsPatch({ machineName: "   " })).toThrow();
   });
 });
+
+describe("retired usage hubs", () => {
+  it("discards old hub configuration without losing other saved settings", () => {
+    const settings = decodeServerSettings({
+      enableAgentBrowserAccess: false,
+      usageLimitSources: { old: { kind: "cliproxy", url: "http://old", managementKey: "old-key" } },
+    });
+    expect(settings.enableAgentBrowserAccess).toBe(false);
+    expect(settings).not.toHaveProperty("usageLimitSources");
+  });
+});

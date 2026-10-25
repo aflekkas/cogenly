@@ -69,7 +69,7 @@ function AccountChip({ email }: { readonly email: string }) {
 
 /**
  * The same mark the model picker uses for a native instance (provider glyph
- * with the instance's colored dot); hub accounts have no instance, so they get the chip.
+ * with the instance's colored dot).
  */
 function AccountAvatar({
   account,
@@ -162,7 +162,7 @@ function SegmentPopover({
   const where =
     account.environments.length > 0
       ? account.environments.map((environment) => environment.label).join(", ")
-      : account.sourceLabel;
+      : null;
   const credits =
     redeem && account.limits.resetCredits?.availableCount ? account.limits.resetCredits : null;
   return (

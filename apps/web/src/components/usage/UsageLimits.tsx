@@ -334,7 +334,7 @@ export function ResetCredits({
 }
 
 /**
- * Subscription quota across every connected environment's providers and hubs,
+ * Subscription quota across every connected environment's providers,
  * pooled per provider. The page advances `now` on explicit refresh rather than
  * ticking: a live clock would repaint the page for no decision-changing gain.
  */

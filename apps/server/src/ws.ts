@@ -271,14 +271,10 @@ import * as PairingGrantStore from "./auth/PairingGrantStore.ts";
 import * as SessionStore from "./auth/SessionStore.ts";
 import { failEnvironmentAuthInvalid, failEnvironmentInternal } from "./auth/http.ts";
 import * as RelayClient from "@cogenly/shared/relayClient";
-import {
-  sameUsageLimitCommandCoverage,
-  withUsageLimitsCommands,
-} from "@cogenly/shared/usageLimits";
+import { withUsageLimitsCommands } from "@cogenly/shared/usageLimits";
 import * as AgentSessionScanner from "./project/AgentSessionScanner.ts";
 import * as AgentSessionImporter from "./project/AgentSessionImporter.ts";
 import * as T3Import from "./t3Import/T3ImportService.ts";
-import * as UsageLimitSources from "./usage/UsageLimitSources.ts";
 
 const CONFIG_DISCOVERY_TIMEOUT = Duration.seconds(5);
 const isProviderUploadFeedbackError = Schema.is(ProviderUploadFeedbackError);
@@ -1141,7 +1137,6 @@ const makeWsRpcHandlers = (
             Effect.orElseSucceed(() => null),
           );
     const usage = yield* UsageService.UsageService;
-    const usageLimitSources = yield* UsageLimitSources.UsageLimitSources;
     const worktreeSetupTracker = yield* WorktreeSetupTracker.WorktreeSetupTracker;
     const projectCloneTracker = yield* ProjectCloneTracker.ProjectCloneTracker;
     const repositoryCheckout = yield* RepositoryCheckout.RepositoryCheckout;
@@ -1253,7 +1248,7 @@ const makeWsRpcHandlers = (
         const keybindingsConfig = yield* keybindings.loadConfigState;
         const currentProviders = yield* providerRegistry.getProviders;
         const providers = options.usageLimitsCommand
-          ? withUsageLimitsCommands(currentProviders, yield* usageLimitSources.current)
+          ? withUsageLimitsCommands(currentProviders)
           : currentProviders;
         const settings = ServerSettings.redactServerSettingsForClient(
           yield* serverSettings.getSettings,
@@ -1905,13 +1900,6 @@ const makeWsRpcHandlers = (
               { concurrency: "unbounded", discard: true },
             );
           }
-          // An untargeted refresh is "re-read everything's status", which
-          // includes quota from configured usage-limit sources. Awaited,
-          // not forked: the RPC scope closes on return and would
-          // interrupt a fork before the hub answered.
-          if (input.instanceId === undefined) {
-            yield* usageLimitSources.refresh;
-          }
           let providers = yield* input.cwd !== undefined && input.instanceId !== undefined
             ? providerRegistry.refreshWorkspaceSnapshot({
                 instanceId: input.instanceId,
@@ -2006,7 +1994,6 @@ const makeWsRpcHandlers = (
       [WS_METHODS.serverUpdateProvider]: (input) => providerMaintenanceRunner.updateProvider(input),
       [WS_METHODS.providerConsumeResetCredit]: (input) =>
         Effect.gen(function* () {
-          if ("sourceId" in input) return yield* usageLimitSources.consumeResetCredit(input);
           const instance = yield* providerInstances.getInstance(input.instanceId);
           // A disabled instance must not spend anything on its account.
           if (instance === undefined || !instance.enabled) {
@@ -2686,22 +2673,10 @@ const makeWsRpcHandlers = (
                 },
               })),
             );
-            const providerStatuses = Stream.zipLatestWith(
-              // The registry stream carries changes only. Seed it with the current
-              // providers so a source refresh that lands before any provider change
-              // still pairs up and reaches the client.
-              Stream.concat(
-                Stream.fromEffect(providerRegistry.getProviders),
-                providerRegistry.streamChanges,
+            const providerStatuses = providerRegistry.streamChanges.pipe(
+              Stream.map((providers) =>
+                usageLimitsCommand ? withUsageLimitsCommands(providers) : providers,
               ),
-              usageLimitSources.streamChanges.pipe(
-                // Quota updates already have their own stream. Republish the model
-                // catalog only when the set of providers offered the command changes.
-                Stream.changesWith(usageLimitsCommand ? sameUsageLimitCommandCoverage : () => true),
-              ),
-              (providers, sources) =>
-                usageLimitsCommand ? withUsageLimitsCommands(providers, sources) : providers,
-            ).pipe(
               // Both sides replay their current value, so the first pairing normally
               // repeats the snapshot the client already holds. Compare against that
               // snapshot rather than dropping blindly: a refresh that landed between
@@ -2725,16 +2700,6 @@ const makeWsRpcHandlers = (
             // already-shipped client decodes this stream against the old
             // event union and its whole config subscription dies on an
             // unknown member.
-            const usageLimitSourceUpdates =
-              input.usageLimitSources === true
-                ? usageLimitSources.streamChanges.pipe(
-                    Stream.map((sources) => ({
-                      version: 1 as const,
-                      type: "usageLimitSourcesUpdated" as const,
-                      payload: { sources },
-                    })),
-                  )
-                : Stream.empty;
             const settingsUpdates = serverSettings.streamChanges.pipe(
               Stream.map((settings) => ServerSettings.redactServerSettingsForClient(settings)),
               Stream.map((settings) => ({
@@ -2746,10 +2711,7 @@ const makeWsRpcHandlers = (
 
             const liveUpdates = Stream.merge(
               keybindingsUpdates,
-              Stream.merge(
-                providerStatuses,
-                Stream.merge(settingsUpdates, usageLimitSourceUpdates),
-              ),
+              Stream.merge(providerStatuses, settingsUpdates),
             );
 
             return Stream.concat(
@@ -2953,7 +2915,6 @@ type WsRequestServices =
   | ThreadManagementService.ThreadManagementService
   | ThreadSearch.ThreadSearch
   | TraceDiagnostics.TraceDiagnostics
-  | UsageLimitSources.UsageLimitSources
   | UsageService.UsageService
   | VcsProcess.VcsProcess
   | VcsProvisioningService.VcsProvisioningService
