@@ -188,7 +188,7 @@ export function HtmlRenderFrame(props: {
                         toastManager.add({
                           type: "error",
                           title: "Page unavailable",
-                          description: "Reconnect to the environment and try again.",
+                          description: "Reconnect to the machine and try again.",
                         });
                     }}
                   />

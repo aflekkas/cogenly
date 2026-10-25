@@ -700,7 +700,7 @@ function DeviceIntegrationControls({
       const results = await Promise.allSettled(
         targets.map(async (environment) => {
           if (environment.connection.phase !== "connected" || !environment.serverConfig) {
-            throw new Error("Environment disconnected");
+            throw new Error("Machine disconnected");
           }
           if (!readEnvironmentScope(environment.environmentId, AuthSettingsWriteScope)) {
             throw new Error("This connection cannot change device settings.");
@@ -1026,7 +1026,7 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
   const removeProfile = async (id: string) => {
     if (!settingsHydrated || importInFlightRef.current) return;
     if (!removalAvailable) {
-      setProfileRemovalError("Connect to an environment before removing this profile.");
+      setProfileRemovalError("Connect to a machine before removing this profile.");
       return;
     }
     setProfileRemovalError(null);
@@ -1262,7 +1262,7 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
                     </MenuItem>
                   ))}
                   {primaryEnvironment == null ? (
-                    <MenuItem disabled>Connect to an environment to import cookies</MenuItem>
+                    <MenuItem disabled>Connect to a machine to import cookies</MenuItem>
                   ) : null}
                 </>
               )}
@@ -1372,8 +1372,8 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
                       <MenuSeparator />
                       <MenuItem disabled>
                         {environmentsReady
-                          ? "Connect to an environment to clear profile data"
-                          : "Checking environments…"}
+                          ? "Connect to a machine to clear profile data"
+                          : "Checking machines…"}
                       </MenuItem>
                     </>
                   ) : null}
@@ -1406,7 +1406,7 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
             ) : null}
             {!removalAvailable ? (
               <p className="text-sm text-muted-foreground">
-                Connect to an environment to remove this profile and its data.
+                Connect to a machine to remove this profile and its data.
               </p>
             ) : null}
           </AlertDialogHeader>

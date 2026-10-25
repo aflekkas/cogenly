@@ -292,7 +292,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   const submitStatus = showStop
     ? null
     : isEnvironmentUnavailable
-      ? "Environment disconnected"
+      ? "Machine disconnected"
       : (sendDisabledReason ??
         (isConnecting
           ? "Connecting"

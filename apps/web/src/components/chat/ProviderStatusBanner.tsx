@@ -57,7 +57,7 @@ export function getProviderStatusMessage(status: ServerProvider): string {
   if (status.message) return status.message;
   const providerName = status.displayName?.trim() || formatProviderDriverKindLabel(status.driver);
   if (!status.installed && hasProviderSetup(status)) {
-    return `Open provider setup to install ${formatProviderDriverKindLabel(status.driver)} on this environment.`;
+    return `Open provider setup to install ${formatProviderDriverKindLabel(status.driver)} on this machine.`;
   }
   if (status.auth.status === "unauthenticated") {
     if (hasProviderSetup(status)) {

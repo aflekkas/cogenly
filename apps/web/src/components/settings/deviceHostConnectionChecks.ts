@@ -46,7 +46,7 @@ export async function checkDeviceHostConnections(
     targets.map(async (target) => {
       report(target.environmentId, { status: "pending" });
       try {
-        if (!target.connected) throw new Error("Environment disconnected");
+        if (!target.connected) throw new Error("Machine disconnected");
         const result = await probe(target.environmentId, host);
         report(
           target.environmentId,

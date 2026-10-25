@@ -3255,7 +3255,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     };
     const sourceConnection = readPreparedConnection(sourceEnvironmentId);
     if (!sourceConnection) {
-      fail("The environment it came from is not connected.");
+      fail("The machine it came from is not connected.");
       return;
     }
     const result = await createAssetUrl({
@@ -5453,7 +5453,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             isEnvironmentRequestInvalidError(error) &&
             error.reason === "thread_transcript_too_large"
               ? "This thread exceeds the attachment size limit. Try a shorter thread."
-              : "Check that its environment is connected and up to date, then try again.",
+              : "Check that its machine is connected and up to date, then try again.",
         });
       } finally {
         toastManager.close(loadingToast);
@@ -5625,7 +5625,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         if (target === "remote") {
           toastManager.add({
             type: "error",
-            title: "Folders can't be dropped into remote environments",
+            title: "Folders can't be dropped onto remote machines",
           });
           return;
         }

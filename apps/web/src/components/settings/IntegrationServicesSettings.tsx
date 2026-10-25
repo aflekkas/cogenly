@@ -95,7 +95,7 @@ export function IntegrationServicesSettings() {
     <>
       <SettingsSection {...searchableSetting("integration-services")}>
         {environmentId === null ? (
-          <SettingsRow title="Choose an environment to see its integrations." />
+          <SettingsRow title="Choose a machine to see its integrations." />
         ) : query.error !== null && query.data === null ? (
           <SettingsRow title="Couldn't load integrations" description={query.error} />
         ) : query.data === null ? (

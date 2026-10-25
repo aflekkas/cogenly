@@ -2135,7 +2135,7 @@ export default function ChatView(props: ChatViewProps) {
       toastManager.add(
         stackedThreadToast({
           type: "error",
-          title: "Could not reconnect environment",
+          title: "Could not reconnect machine",
           description: error instanceof Error ? error.message : "Failed to reconnect.",
         }),
       );
@@ -3106,7 +3106,7 @@ export default function ChatView(props: ChatViewProps) {
   const downloadFileAttachment = async (attachment: ChatFileAttachment) => {
     const connection = readPreparedConnection(environmentId);
     if (!connection) {
-      toastManager.add({ type: "error", title: "The environment is not connected." });
+      toastManager.add({ type: "error", title: "The machine is not connected." });
       return;
     }
 
@@ -6644,7 +6644,7 @@ export default function ChatView(props: ChatViewProps) {
           throw new Error("Wait for attachments to finish preparing before rewinding.");
         }
         const connection = readPreparedConnection(environmentId);
-        if (!connection) throw new Error("The environment is not connected.");
+        if (!connection) throw new Error("The machine is not connected.");
         const files = await prepareRevertedMessageAttachments({
           message,
           environmentId,
@@ -7007,7 +7007,7 @@ export default function ChatView(props: ChatViewProps) {
         ...stackedThreadToast({
           type: "warning",
           title: "Not connected: message not sent",
-          description: "Reconnecting to the environment. Try again once it is connected.",
+          description: "Reconnecting to the machine. Try again once it is connected.",
         }),
         id: `chat-send-environment-unavailable:${toastSlot}`,
       });

@@ -112,7 +112,7 @@ export function DeviceHostsSettings(props: { environmentId: EnvironmentId | null
       } else {
         toastManager.add({
           type: "error",
-          title: "Device hosts not saved on all environments",
+          title: "Device hosts not saved on all machines",
           description: `Could not update ${failed.map((environment) => environment.label).join(", ")}.`,
         });
       }
@@ -130,11 +130,11 @@ export function DeviceHostsSettings(props: { environmentId: EnvironmentId | null
       toastManager.add({
         type: failed.length ? "error" : "success",
         title: failed.length
-          ? `${host.label}: ${failed.length} of ${targets.length} environments failed`
+          ? `${host.label}: ${failed.length} of ${targets.length} machines failed`
           : `${host.label}: connection checks passed`,
         description: failed.length
           ? `Could not connect from ${failed.map((target) => target.label).join(", ")}.`
-          : "Connected or already available locally on each selected environment.",
+          : "Connected or already available locally on each selected machine.",
       });
       return results;
     },
@@ -170,7 +170,7 @@ export function DeviceHostsSettings(props: { environmentId: EnvironmentId | null
       <div className="pt-3 pb-2">
         {!props.environmentId ? (
           <p className="text-sm text-muted-foreground">
-            Connect a selected environment to manage device hosts.
+            Connect a selected machine to manage device hosts.
           </p>
         ) : (
           <>

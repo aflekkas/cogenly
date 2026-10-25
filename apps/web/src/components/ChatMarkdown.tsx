@@ -2326,13 +2326,13 @@ function useChatMarkdownState({
     (filePath: string) => {
       if (environmentId === null) {
         return Promise.resolve(
-          AsyncResult.failure<void, Error>(Cause.fail(new Error("No environment selected."))),
+          AsyncResult.failure<void, Error>(Cause.fail(new Error("No machine selected."))),
         );
       }
       if (!readEnvironmentScope(environmentId, AuthOrchestrationOperateScope)) {
         return Promise.resolve(
           AsyncResult.failure<void, Error>(
-            Cause.fail(new Error("This connection cannot reveal files on this environment.")),
+            Cause.fail(new Error("This connection cannot reveal files on this machine.")),
           ),
         );
       }
@@ -2446,7 +2446,7 @@ function useChatMarkdownState({
           AsyncResult.failure<void, BrowserPreviewUnavailableError>(
             Cause.fail(
               new BrowserPreviewUnavailableError({
-                message: "Environment is not connected.",
+                message: "Machine is not connected.",
               }),
             ),
           ),
