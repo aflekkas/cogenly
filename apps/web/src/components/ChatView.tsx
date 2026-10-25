@@ -1,3 +1,4 @@
+import { useNewThreadPending } from "../hooks/useHandleNewThread";
 import { OverlayPresence } from "~/components/ui/overlay-presence";
 import { ThreadFind, ThreadFindCanvas, type ThreadFindControls } from "./chat/ThreadFindProvider";
 import { usageLimitRecoveryBannerItem } from "./chat/UsageLimitRecoveryBanner";
@@ -1648,6 +1649,7 @@ export default function ChatView(props: ChatViewProps) {
       projectSettings.defaultModelSelection ?? NO_PROVIDER_MODEL_SELECTION;
     return buildLocalDraftThread(threadId, draftThread, defaultModelSelection);
   }, [draftThread, fallbackDraftProject, settings, threadId]);
+  const newThreadPending = useNewThreadPending((state) => state.count > 0);
   const isServerThread = serverThread !== null;
   const activeThread = isServerThread ? serverThread : localDraftThread;
   const serverLatestRun = useMemo(
@@ -9507,7 +9509,7 @@ export default function ChatView(props: ChatViewProps) {
             : null}
           {/* The title stays visible whether or not the sidebar shows the
               thread; a draft has none yet, so its heading is for screen readers. */}
-          {isServerThread ? (
+          {isServerThread && !newThreadPending ? (
             <ThreadHeaderTitle
               shell={activeThreadShell}
               title={activeThread.title}
@@ -9525,7 +9527,7 @@ export default function ChatView(props: ChatViewProps) {
           ) : (
             <h2 className="sr-only">{activeThread.title}</h2>
           )}
-          {threadDetailsControl && !threadDetailsInTitlebarCluster ? (
+          {!newThreadPending && threadDetailsControl && !threadDetailsInTitlebarCluster ? (
             <span key="header" className="swap-motion ms-auto flex h-full shrink-0 items-center">
               {threadDetailsControl}
             </span>
