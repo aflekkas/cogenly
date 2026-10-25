@@ -38,6 +38,7 @@ import {
   worstStatus,
 } from "./healthChecks.ts";
 import {
+  PEER_CONNECT_GRACE,
   PEER_OFFLINE_FAIL_AFTER,
   peerReachabilityItem,
   unreachableReport,
@@ -48,6 +49,7 @@ const now = DateTime.makeUnsafe(NOW_MS);
 const ago = (ms: number) => DateTime.makeUnsafe(NOW_MS - ms);
 const iso = (ms: number) => DateTime.formatIso(ago(ms));
 const minutes = (count: number) => count * 60_000;
+const seconds = (count: number) => count * 1000;
 const GB = 1024 ** 3;
 
 const self = EnvironmentId.make("env-self");
@@ -229,7 +231,13 @@ describe("providersCheck", () => {
 });
 
 describe("peerReachabilityItem", () => {
-  const peer = { environmentId: vps, name: "Contabo VPS", pairing: "paired" as const, now };
+  const peer = {
+    environmentId: vps,
+    name: "Contabo VPS",
+    pairing: "paired" as const,
+    pairedAt: null,
+    now,
+  };
 
   it("is null while the peer is online", () => {
     assert.isNull(peerReachabilityItem({ ...peer, online: true, lastSeenAt: null }));
@@ -260,6 +268,33 @@ describe("peerReachabilityItem", () => {
       peerReachabilityItem({ ...peer, online: false, lastSeenAt: null })?.status,
       "fail",
     );
+  });
+
+  it("reads as connecting, not failing, within the grace of pairing or last being seen", () => {
+    const justPaired = peerReachabilityItem({
+      ...peer,
+      online: false,
+      lastSeenAt: null,
+      pairedAt: ago(seconds(5)),
+    });
+    assert.strictEqual(justPaired?.status, "unknown");
+    assert.strictEqual(justPaired?.title, "Connecting to Contabo VPS…");
+    assert.strictEqual(
+      peerReachabilityItem({ ...peer, online: false, lastSeenAt: ago(seconds(30)) })?.status,
+      "unknown",
+    );
+    const neverCameUp = peerReachabilityItem({
+      ...peer,
+      online: false,
+      lastSeenAt: null,
+      pairedAt: ago(Duration.toMillis(PEER_CONNECT_GRACE)),
+    });
+    assert.strictEqual(neverCameUp?.status, "fail");
+  });
+
+  it("keeps timestamps out of the detail", () => {
+    const item = peerReachabilityItem({ ...peer, online: false, lastSeenAt: ago(minutes(3)) });
+    assert.notMatch(item?.detail ?? "", /\d{4}-\d{2}-\d{2}T/);
   });
 
   it("builds an unreachable report around the item", () => {

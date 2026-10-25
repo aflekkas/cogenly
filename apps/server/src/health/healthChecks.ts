@@ -359,6 +359,7 @@ export function machineLinksCheck(input: {
       name: peer.name,
       online: peer.online,
       lastSeenAt: peer.lastSeenAt,
+      pairedAt: peer.pairedAt,
       pairing: peer.pairing,
       now: input.now,
     });

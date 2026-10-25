@@ -100,6 +100,15 @@ export function unreachableHeadline(
   return `${machineName} hasn't been reachable for ${formatHealthDuration(nowMs - sinceMs)}`;
 }
 
+/**
+ * A report built for an offline machine that is still within its connect
+ * grace (just paired or just restarted): the server marks its reachability
+ * `unknown`, so it reads "Connecting…" rather than failing.
+ */
+export function isConnectingReport(report: MachineHealthReport, online: boolean): boolean {
+  return !online && !report.reachable && report.status === "unknown";
+}
+
 /** "Up 4 days", from the server's uptime in seconds. */
 export function uptimeLabel(uptimeSeconds: number): string | null {
   return Number.isFinite(uptimeSeconds) && uptimeSeconds >= 60
