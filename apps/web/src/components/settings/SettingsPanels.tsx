@@ -355,6 +355,7 @@ function AboutVersionSection() {
       />
       {selectedHostedAppChannel ? (
         <SettingsRow
+          clientSetting
           {...searchableSetting("update-track")}
           description="Switches the hosted app release channel."
           control={
@@ -1125,6 +1126,7 @@ function LegacyFeaturesSection() {
         <CollapsiblePanel>
           <SettingsGroup>
             <SettingsRow
+              clientSetting
               {...searchableSetting("legacy-plan-mode")}
               description="Restore Build/Plan, /plan, /default, and Shift+Tab. Off uses build mode."
               control={
@@ -1138,6 +1140,7 @@ function LegacyFeaturesSection() {
               }
             />
             <SettingsRow
+              clientSetting
               {...searchableSetting("legacy-context-window-indicator")}
               description="Shows context window usage as a circular indicator in the composer."
               control={
@@ -1151,6 +1154,7 @@ function LegacyFeaturesSection() {
               }
             />
             <SettingsRow
+              clientSetting
               {...searchableSetting("legacy-sidebar")}
               description="Restore per-repository thread trees instead of the default flat sidebar."
               control={
@@ -1238,6 +1242,7 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
     <SettingsPageContainer>
       <SettingsSection id="organization" title="Organization">
         <SettingsRow
+          clientSetting
           {...searchableSetting("project-grouping")}
           description="Combine matching repositories across environments."
           resetAction={
@@ -1273,6 +1278,7 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
           }
         />
         <SettingsRow
+          clientSetting
           {...searchableSetting("project-order")}
           description="Order of repositories in the sidebar repository picker and command palette."
           resetAction={
@@ -1347,6 +1353,7 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
         />
 
         <SettingsRow
+          clientSetting
           {...searchableSetting("working-shelf")}
           description="Fold working and monitoring threads into a Working section. They return to the top of the inbox when they need you."
           resetAction={
@@ -1377,6 +1384,7 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
       <SettingsSection id="behavior" title="Behavior">
         <NotificationSettings />
         <SettingsRow
+          clientSetting
           {...searchableSetting("in-app-notifications")}
           description="Show a toast when another thread finishes, fails, or needs input or approval while this app has focus."
           control={
@@ -1388,6 +1396,7 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
           }
         />
         <SettingsRow
+          clientSetting
           {...searchableSetting("time-format")}
           description="System default follows your browser or OS clock preference."
           resetAction={
@@ -1477,6 +1486,7 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
           }
         />
         <SettingsRow
+          clientSetting
           {...searchableSetting("skills-in-slash-menu")}
           description="Also include skills in the / command menu. Skills always appear when you type $."
           resetAction={
@@ -1503,6 +1513,7 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
         />
 
         <SettingsRow
+          clientSetting
           {...searchableSetting("composer-rich-text")}
           description="Show formatted Markdown as you type."
           resetAction={
@@ -1531,6 +1542,7 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
 
         {dictationSupported ? (
           <SettingsRow
+            clientSetting
             {...searchableSetting("composer-dictation")}
             description="Show the composer's mic button and its shortcut. Speech is transcribed on this Mac."
             resetAction={
@@ -1556,6 +1568,7 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
         ) : null}
 
         <SettingsRow
+          clientSetting
           {...searchableSetting("send-shortcut")}
           description="Choose when Enter sends a prompt or inserts a new line"
           resetAction={
@@ -1603,6 +1616,7 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
         />
 
         <SettingsRow
+          clientSetting
           {...searchableSetting("follow-up-behavior")}
           description={
             "Steer the current run with follow-ups or queue them until the agent finishes. " +
@@ -1808,6 +1822,7 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
 
       <SettingsSection id="confirmations" title="Confirmations">
         <SettingsRow
+          clientSetting
           {...searchableSetting("archive-confirmation")}
           description="Require a second click on the inline archive action before a thread is archived."
           resetAction={
@@ -1834,6 +1849,7 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
         />
 
         <SettingsRow
+          clientSetting
           {...searchableSetting("delete-confirmation")}
           description="Ask before deleting a thread and its chat history."
           resetAction={
@@ -1861,6 +1877,7 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
 
         {isElectron ? (
           <SettingsRow
+            clientSetting
             {...searchableSetting("quit-confirmation")}
             description="Hold mode also quits on two quick presses."
             resetAction={
