@@ -152,7 +152,7 @@ function ProviderConnectorsSettingRow({
       <SettingsRow
         serverScoped
         {...searchableSetting("provider-connectors")}
-        description="Agents use Cogenly's integrations instead of the provider's native MCP servers and apps. Turn off to restore native configuration. Applies to new provider sessions; Muse and administrator-managed Claude servers may remain available."
+        description="Agents use the integrations connected here, not the MCP servers, connectors and plugins set up in Claude or Codex. Servers your organization manages for Claude stay on. Turn off to let agents use both. Applies to new agent sessions."
         settingKeys={["useProviderConnectors"]}
         control={
           <ScopedSwitch
