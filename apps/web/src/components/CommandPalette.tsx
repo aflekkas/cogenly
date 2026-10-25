@@ -104,9 +104,11 @@ import { ProjectFolderIcon } from "../projectLabels/ProjectFolderMark";
 import {
   possibleDuplicateProjects,
   priorFiling,
+  projectLabelKey,
   projectLabelsOn,
   threadFolderState,
   threadForksIntoProjects,
+  threadProjectFolderId,
 } from "../projectLabels/projectLabels.logic";
 import { useMergeDuplicateProjects } from "../projectLabels/useMergeDuplicateProjects";
 import { useThreadRepository } from "../projectLabels/useThreadRepository";
@@ -918,11 +920,8 @@ function OpenCommandPaletteDialog(props: {
             environment.environmentId,
             {
               kind: isLocal ? "local" : "remote",
-              label: isPrimary
-                ? "Local"
-                : isLocal
-                  ? `${environment.label} (Local)`
-                  : environment.label,
+              // The machine's name, wherever it runs.
+              label: environment.label,
               machine: resolveEnvironmentMachineKind(environment.serverConfig),
             },
           ] as const;
@@ -1594,10 +1593,18 @@ function OpenCommandPaletteDialog(props: {
               ? thread.source.surface === "chat"
               : threadProject !== null &&
                 isScratchProject(threadProject, scratchWorkspaceRootFor(thread.environmentId));
+          // The project the thread is filed in, named as in the sidebar; a chat
+          // filed nowhere names none rather than its scratch workspace.
+          const folderId = threadProjectFolderId(thread);
+          const folderName =
+            folderId === null
+              ? null
+              : (repositoryDirectory.byKey.get(projectLabelKey(thread.environmentId, folderId))
+                  ?.label.name ?? null);
           return (
             <ThreadCommandSubtitle
-              project={isChatThread ? null : threadProject}
-              projectTitle={projectTitle ?? null}
+              project={isChatThread || folderName !== null ? null : threadProject}
+              projectTitle={folderName ?? (isChatThread ? null : (projectTitle ?? null))}
               environmentLabel={
                 projectEnvironmentLocationById.get(thread.environmentId)?.label ?? "Remote"
               }
@@ -1643,6 +1650,7 @@ function OpenCommandPaletteDialog(props: {
       projectEnvironmentLocationById,
       projectTitleById,
       providerEntryByEnvironmentAndInstanceId,
+      repositoryDirectory.byKey,
       threadContentMatchByKey,
       threadSearch.query,
       threadSearchQuery,
