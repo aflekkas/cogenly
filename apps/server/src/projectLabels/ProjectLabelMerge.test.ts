@@ -191,7 +191,8 @@ describe("project merge", () => {
         link: { kind: "github-owner", owner: "source-owner" },
       });
       yield* labels.moveThread({ threadId: ThreadId.make("filed"), folderId: source.id });
-      yield* labels.moveThread({ threadId: ThreadId.make("replica"), folderId: source.id });
+      // A replica's filing arrives from its owner; local mutations must reject it.
+      yield* sql`INSERT INTO thread_project_labels(thread_id,label_id) VALUES ('replica',${source.id})`;
       yield* labels.setProjectChat({ id: source.id, threadId: ThreadId.make("home") });
       yield* labels.setProjectChat({ id: target.id, threadId: ThreadId.make("target-home") });
       yield* sql`INSERT INTO agents(agent_id,conversation_thread_id,payload_json,enabled) VALUES ('agent:merge','filed',${JSON.stringify({ projectFolderId: source.id })},1)`;
