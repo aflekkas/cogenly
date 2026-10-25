@@ -23,6 +23,13 @@ describe("sidebarListEdge", () => {
     expect(bottom("agents", null)).toBe("bottom");
   });
 
+  it("opens Settings' sections on the ones by the dock, in the bottom layout only", () => {
+    const settings = (layout: "top" | "bottom") =>
+      sidebarListEdge({ layout, searching: false, mode: "settings", shelf: null });
+    expect(settings("bottom")).toBe("bottom");
+    expect(settings("top")).toBe("top");
+  });
+
   it("runs Settled, Snoozed, Chats and search from the top in the bottom layout", () => {
     const bottom = (mode: string, shelf: string | null, searching = false) =>
       sidebarListEdge({ layout: "bottom", searching, mode, shelf });
@@ -30,6 +37,7 @@ describe("sidebarListEdge", () => {
     expect(bottom("tasks", "snoozed")).toBe("top");
     expect(bottom("chats", null)).toBe("top");
     expect(bottom("tasks", null, true)).toBe("top");
+    expect(bottom("settings", null, true)).toBe("top");
   });
 });
 

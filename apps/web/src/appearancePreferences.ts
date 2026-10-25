@@ -1,6 +1,8 @@
 import { APPEARANCE_ACCENTS, type AppearanceAccent } from "@cogenly/contracts";
 import { useCallback, useSyncExternalStore } from "react";
 
+import { crossfadeModeSwitch } from "./components/sidebar/modes/modeSwitchMotion";
+
 /**
  * Locally cached appearance preferences beside the color scheme (theme.ts):
  * accent color, font size and reduced motion. SharedClientPreferencesSync keeps
@@ -152,13 +154,18 @@ function subscribe(listener: () => void) {
   };
 }
 
-export function writeAppearancePreferences(patch: Partial<AppearancePreferences>): boolean {
+function persistAppearancePreferences(patch: Partial<AppearancePreferences>): boolean {
   const next = { ...readAppearancePreferences(), ...patch };
   try {
     window.localStorage.setItem(APPEARANCE_PREFERENCES_STORAGE_KEY, JSON.stringify(next));
   } catch {
     return false;
   }
+  return true;
+}
+
+export function writeAppearancePreferences(patch: Partial<AppearancePreferences>): boolean {
+  if (!persistAppearancePreferences(patch)) return false;
   notify();
   return true;
 }
@@ -169,10 +176,24 @@ export function useAppearancePreferences() {
     readAppearancePreferences,
     () => DEFAULT_APPEARANCE_PREFERENCES,
   );
-  const update = useCallback(
-    (patch: Partial<AppearancePreferences>) => writeAppearancePreferences(patch),
-    [],
-  );
+  const update = useCallback((patch: Partial<AppearancePreferences>) => {
+    // Switching the sidebar layout moves the dock and re-anchors every list:
+    // it crossfades, opacity only, instead of jumping or sliding there.
+    // Stored at once, so the caller learns whether it stuck; the sidebar
+    // re-renders inside the fade.
+    if (
+      patch.sidebarLayout !== undefined &&
+      patch.sidebarLayout !== readAppearancePreferences().sidebarLayout
+    ) {
+      if (!persistAppearancePreferences(patch)) return false;
+      crossfadeModeSwitch(() => {
+        notify();
+        return false;
+      });
+      return true;
+    }
+    return writeAppearancePreferences(patch);
+  }, []);
   return { preferences, update } as const;
 }
 

@@ -10,7 +10,7 @@ export type SidebarListEdge = "top" | "bottom";
 /**
  * Which edge the open sidebar list anchors to. In the top layout every list
  * reads down from the dock above it. In the bottom layout the lists that stack
- * up toward the dock (Work's active lists, Agents) anchor to it, while Chats,
+ * up toward the dock (Work's active lists, Agents, Settings' sections) anchor to it, while Chats,
  * search and Work's put-away shelves (Settled newest first, Snoozed soonest
  * wake first) still run from the top and page downward.
  */
