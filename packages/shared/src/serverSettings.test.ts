@@ -119,13 +119,14 @@ describe("serverSettings helpers", () => {
       }).storageCleanup,
     ).toEqual({
       worktreeAfterDays: null,
-      worktreeSettledAfterDays: null,
+      worktreeSettledAfterDays: 7,
       worktreeOnMerge: true,
       worktreeOnDelete: false,
       worktreeUnchanged: false,
       worktreeKeepWhen: "uncommitted-changes",
-      browserArtifactsAfterDays: null,
+      browserArtifactsAfterDays: 14,
       logsAfterDays: 30,
+      dependenciesAfterDays: null,
     });
   });
   it("replaces SSH host lists when saving, editing, and removing hosts", () => {
