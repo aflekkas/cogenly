@@ -431,6 +431,9 @@ const make = Effect.gen(function* () {
         const destinationLink = yield* fileSystem.readLink(to).pipe(Effect.option);
         if (
           info.type === "Directory" &&
+          !isWorktreesSegment(entry) &&
+          !(yield* fileSystem.exists(path.join(from, ".git"))) &&
+          !(yield* fileSystem.exists(path.join(to, ".git"))) &&
           Option.isNone(destinationLink) &&
           (yield* isDirectory(to))
         ) {

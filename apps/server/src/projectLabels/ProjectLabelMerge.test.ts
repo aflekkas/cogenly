@@ -1,3 +1,5 @@
+// @effect-diagnostics nodeBuiltinImport:off - regression tests use real git in isolated temporary folders.
+import * as NodeChildProcess from "node:child_process";
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
@@ -20,6 +22,13 @@ import * as Shared from "../sync/SharedState.ts";
 import { resolveProjectLabelId } from "../sync/ProjectMergeProjection.ts";
 import * as Folders from "./ProjectLabelFolders.ts";
 import * as Labels from "./ProjectLabelService.ts";
+
+const git = (cwd: string, args: ReadonlyArray<string>) =>
+  NodeChildProcess.execFileSync("git", [...args], {
+    cwd,
+    encoding: "utf8",
+    env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" },
+  }).trim();
 
 const at = "2026-01-01T00:00:00.000Z";
 const repoA = ProjectId.make("repo-a");
@@ -270,6 +279,62 @@ describe("project merge", () => {
             .reason,
         ).toBe("same_project");
       }).pipe(Effect.provide(makeLayer("duplicates"))),
+  );
+
+  it.effect.each(
+    ["repos/platform", "platform", ".worktrees", "worktrees"].flatMap((layout) =>
+      [false, true].map((gitFile) => ({ layout, gitFile })),
+    ),
+  )("keeps colliding $layout checkouts atomic (.git file: $gitFile)", ({ layout, gitFile }) =>
+    Effect.gen(function* () {
+      const labels = yield* Labels.ProjectLabelService;
+      const folders = yield* Folders.ProjectLabelFolders;
+      const fs = yield* FileSystem.FileSystem;
+      const source = (yield* labels.create({ name: "Source" })).label;
+      const target = (yield* labels.create({ name: "Target" })).label;
+      const from = (yield* folders.dirForLabel(source)).dir;
+      const to = (yield* folders.dirForLabel(target)).dir;
+      const seed = yield* fs.makeTempDirectoryScoped();
+      git(seed, ["init", "--initial-branch=main"]);
+      git(seed, [
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.com",
+        "commit",
+        "--allow-empty",
+        "-m",
+        "init",
+      ]);
+      for (const [root, branch] of [
+        [from, "source"],
+        [to, "target"],
+      ]) {
+        const checkout = `${root}/${layout}`;
+        yield* fs.makeDirectory(checkout, { recursive: true });
+        if (gitFile) git(seed, ["worktree", "add", checkout, "-b", branch!]);
+        else {
+          git(checkout, ["init", `--initial-branch=${branch}`]);
+          git(checkout, [
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.com",
+            "commit",
+            "--allow-empty",
+            "-m",
+            branch!,
+          ]);
+        }
+        yield* fs.writeFileString(`${checkout}/${branch}.txt`, branch!);
+      }
+      yield* labels.merge({ sourceId: source.id, targetId: target.id });
+      const moved = `${to}/${layout} (2)`;
+      expect(yield* fs.readFileString(`${moved}/source.txt`)).toBe("source");
+      expect(yield* fs.exists(`${to}/${layout}/source.txt`)).toBe(false);
+      expect(git(`${to}/${layout}`, ["branch", "--show-current"])).toBe("target");
+      expect(git(moved, ["branch", "--show-current"])).toBe("source");
+    }).pipe(Effect.provide(makeLayer(`atomic-${layout.replaceAll("/", "-")}-${gitFile}`))),
   );
 
   it.effect(
