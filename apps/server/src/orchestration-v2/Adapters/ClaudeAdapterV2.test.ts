@@ -375,6 +375,10 @@ describe("ClaudeAdapterV2 native MCP isolation", () => {
       });
       assert.include(result.settings, { enableAllProjectMcpServers: false });
       assert.deepEqual(
+        typeof result.settings === "object" ? result.settings.attribution : undefined,
+        { commit: "", pr: "", sessionUrl: false },
+      );
+      assert.deepEqual(
         (result.settings as { disabledMcpjsonServers: string[] }).disabledMcpjsonServers,
         ["untrusted-local"],
       );
