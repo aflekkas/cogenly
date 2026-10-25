@@ -432,6 +432,9 @@ function checkoutHarness(
   box: Pick<Box, "cloneCalls">,
   options?: {
     /** Runs the relocation reactor too. */
+    readonly beforeUpdate?: (
+      input: ProjectService.ProjectUpdateInput,
+    ) => Effect.Effect<void, ProjectService.ProjectServiceError>;
     readonly relocation?: boolean;
     /** Told about every workspace-root update, like the record's event. */
     readonly onMoved?: (projectId: ProjectId, workspaceRoot: string) => Effect.Effect<void>;
@@ -480,6 +483,7 @@ function checkoutHarness(
           ) as never,
         update: (input) =>
           Effect.gen(function* () {
+            if (options?.beforeUpdate) yield* options.beforeUpdate(input);
             if (input.workspaceRoot !== undefined) {
               yield* sql`UPDATE projection_projects SET workspace_root = ${input.workspaceRoot} WHERE project_id = ${input.projectId}`.pipe(
                 Effect.orDie,
@@ -1080,6 +1084,61 @@ describe("RepositoryCheckout.relocateProjectRepositories", () => {
 });
 
 describe("RepositoryCheckout relocation after a project folder rename", () => {
+  it.effect("rolls the checkout and its external worktrees back when repointing fails", () => {
+    const parent = tempRoot();
+    const projectDir = NodePath.join(parent, "Renamed");
+    const before = NodePath.join(parent, "Source", "repos", "platform");
+    const after = NodePath.join(projectDir, "repos", "platform");
+    const worktree = NodePath.join(parent, "external");
+    NodeFS.mkdirSync(before, { recursive: true });
+    git(before, ["init", "--initial-branch=main"]);
+    git(before, [
+      "-c",
+      "user.name=Test",
+      "-c",
+      "user.email=test@example.com",
+      "commit",
+      "--allow-empty",
+      "-m",
+      "init",
+    ]);
+    git(before, ["worktree", "add", worktree, "-b", "external"]);
+    NodeFS.renameSync(NodePath.join(parent, "Source"), projectDir);
+    return Effect.gen(function* () {
+      const labels = yield* ProjectLabelService.ProjectLabelService;
+      const sql = yield* SqlClient.SqlClient;
+      const repositoryId = ProjectId.make("repo:rollback");
+      yield* sql`INSERT INTO projection_projects(project_id,title,workspace_root,scripts_json,created_at,updated_at) VALUES (${repositoryId},'platform',${before},'[]','2026-01-01','2026-01-01')`;
+      const { label } = yield* labels.create({ name: "Renamed" });
+      yield* sql`INSERT INTO label_repositories(label_id,repository_id,directory_name) VALUES (${label.id},${repositoryId},'platform')`;
+      const checkouts = yield* RepositoryCheckout.RepositoryCheckout;
+      expect(yield* checkouts.relocateProjectRepositories(label.id)).toEqual({ moved: [] });
+      expect(yield* sql`SELECT workspace_root FROM projection_projects`).toEqual([
+        { workspace_root: before },
+      ]);
+      expect(NodeFS.existsSync(after)).toBe(false);
+      expect(git(worktree, ["rev-parse", "--git-common-dir"]).toString().trim()).toBe(
+        NodeFS.realpathSync(NodePath.join(before, ".git")),
+      );
+    }).pipe(
+      Effect.provide(
+        checkoutHarness(
+          projectDir,
+          { cloneCalls: 0 },
+          {
+            beforeUpdate: () =>
+              Effect.fail(
+                new ProjectService.ProjectOperationError({
+                  operation: "dispatch-project-command",
+                  cause: "injected failure",
+                }),
+              ),
+          },
+        ),
+      ),
+    );
+  });
+
   it.effect("points the record at the checkout's place in the renamed folder", () => {
     const parent = tempRoot();
     const projectDir = NodePath.join(parent, "Spawned");
@@ -1090,8 +1149,21 @@ describe("RepositoryCheckout relocation after a project folder rename", () => {
       // Before the rename the project folder was `Spawn`, now it is `Spawned`.
       const before = NodePath.join(parent, "Spawn", "repos", "platform");
       const after = NodePath.join(projectDir, "repos", "platform");
-      NodeFS.mkdirSync(after, { recursive: true });
-      git(after, ["init", "--initial-branch=main"]);
+      NodeFS.mkdirSync(before, { recursive: true });
+      git(before, ["init", "--initial-branch=main"]);
+      git(before, [
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.com",
+        "commit",
+        "--allow-empty",
+        "-m",
+        "init",
+      ]);
+      const worktree = NodePath.join(parent, "external-worktree");
+      git(before, ["worktree", "add", worktree, "-b", "external"]);
+      NodeFS.renameSync(NodePath.join(parent, "Spawn"), projectDir);
       const repositoryId = ProjectId.make("repo:platform");
       yield* sql`INSERT INTO projection_projects(project_id, title, workspace_root, scripts_json, created_at, updated_at) VALUES (${repositoryId}, 'platform', ${before}, '[]', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`;
       const { label } = yield* labels.create({ name: "Spawned" });
@@ -1102,6 +1174,12 @@ describe("RepositoryCheckout relocation after a project folder rename", () => {
       expect(yield* sql`SELECT workspace_root FROM projection_projects`).toEqual([
         { workspace_root: after },
       ]);
+      expect(git(worktree, ["rev-parse", "--git-common-dir"]).toString().trim()).toBe(
+        NodeFS.realpathSync(NodePath.join(after, ".git")),
+      );
+      expect(git(after, ["worktree", "list", "--porcelain"]).toString()).toContain(
+        NodeFS.realpathSync(worktree),
+      );
     }).pipe(Effect.provide(checkoutHarness(projectDir, { cloneCalls: 0 })));
   });
 });

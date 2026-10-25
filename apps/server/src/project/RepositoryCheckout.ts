@@ -885,6 +885,56 @@ const make = Effect.gen(function* () {
       }),
     );
 
+  // Used both after an explicit move and when the project folder moved around a checkout.
+  const repointMovedCheckout = Effect.fn("RepositoryCheckout.repointMovedCheckout")(function* <E>(
+    repositoryId: ProjectId,
+    repositoryName: string,
+    source: string,
+    destination: string,
+    move: (from: string, to: string) => Effect.Effect<void, E>,
+  ) {
+    const fail = storage(repositoryId, repositoryName);
+    const refuse = (detail: string) =>
+      new RepositoryCheckoutError({
+        repositoryId,
+        repositoryName,
+        reason: "move_failed",
+        detail,
+      });
+    // Linked worktrees point back at the main checkout's `.git`; repair
+    // rewrites both sides for the new location.
+    const repair = (at: string) =>
+      gitRun(at, "RepositoryCheckout.repairWorktrees", ["worktree", "repair"]).pipe(
+        Effect.mapError((cause) => refuse(cause.message)),
+        Effect.flatMap((result) =>
+          result.exitCode === 0
+            ? Effect.void
+            : Effect.fail(refuse(result.stderr.trim() || "git worktree repair failed")),
+        ),
+      );
+    // Anything failing after the rename puts the checkout back where the
+    // record still says it is, and its worktrees with it.
+    const rollback = fileSystem
+      .makeDirectory(path.dirname(source), { recursive: true })
+      .pipe(
+        Effect.andThen(move(destination, source)),
+        Effect.andThen(repair(source)),
+        Effect.ignoreCause({ log: true }),
+      );
+    yield* repair(destination).pipe(Effect.tapError(() => rollback));
+    const commandSuffix = yield* crypto.randomUUIDv4().pipe(Effect.mapError(fail));
+    yield* projects
+      .update({
+        commandId: CommandId.make(`repository-adopt:${repositoryId}:${commandSuffix}`),
+        projectId: repositoryId,
+        workspaceRoot: destination,
+      })
+      .pipe(
+        Effect.tapError(() => rollback),
+        Effect.mapError((cause) => refuse(cause.message)),
+      );
+  });
+
   const adoptLink = Effect.fn("RepositoryCheckout.adoptLink")(function* (
     label: ProjectLabelWithRepositories,
     repositoryId: ProjectId,
@@ -984,37 +1034,7 @@ const make = Effect.gen(function* () {
     yield* move(source, destination).pipe(
       Effect.mapError((cause) => refuse("move_failed", cause.message)),
     );
-    // Linked worktrees point back at the main checkout's `.git`; repair
-    // rewrites both sides for the new location.
-    const repair = (at: string) =>
-      gitRun(at, "RepositoryCheckout.repairWorktrees", ["worktree", "repair"]).pipe(
-        Effect.mapError((cause) => refuse("move_failed", cause.message)),
-        Effect.flatMap((result) =>
-          result.exitCode === 0
-            ? Effect.void
-            : Effect.fail(
-                refuse("move_failed", result.stderr.trim() || "git worktree repair failed"),
-              ),
-        ),
-      );
-    // Anything failing after the rename puts the checkout back where the
-    // record still says it is, and its worktrees with it.
-    const rollback = move(destination, source).pipe(
-      Effect.andThen(repair(source)),
-      Effect.ignoreCause({ log: true }),
-    );
-    yield* repair(destination).pipe(Effect.tapError(() => rollback));
-    const commandSuffix = yield* crypto.randomUUIDv4().pipe(Effect.mapError(fail));
-    yield* projects
-      .update({
-        commandId: CommandId.make(`repository-adopt:${repositoryId}:${commandSuffix}`),
-        projectId: repositoryId,
-        workspaceRoot: destination,
-      })
-      .pipe(
-        Effect.tapError(() => rollback),
-        Effect.mapError((cause) => refuse("move_failed", cause.message)),
-      );
+    yield* repointMovedCheckout(repositoryId, repositoryName, source, destination, move);
     if (Option.isSome(identities)) {
       yield* identities.value.resolve(source, { refresh: true }).pipe(Effect.ignore);
       yield* identities.value.resolve(destination, { refresh: true }).pipe(Effect.ignore);
@@ -1091,24 +1111,21 @@ const make = Effect.gen(function* () {
                   if (normalizeRepositoryRemote(identity?.locator.remoteUrl) !== link.remote)
                     continue;
                 }
-                const suffix = yield* crypto
-                  .randomUUIDv4()
-                  .pipe(Effect.orElseSucceed(() => "repoint"));
-                const repointed = yield* projects
-                  .update({
-                    commandId: CommandId.make(`repository-repoint:${link.repositoryId}:${suffix}`),
-                    projectId: link.repositoryId,
-                    workspaceRoot: candidate,
-                  })
-                  .pipe(
-                    Effect.as(true),
-                    Effect.catch((cause) =>
-                      Effect.logWarning("Project repository could not follow its renamed folder", {
-                        repositoryId: link.repositoryId,
-                        cause,
-                      }).pipe(Effect.as(false)),
-                    ),
-                  );
+                const repointed = yield* repointMovedCheckout(
+                  link.repositoryId,
+                  link.directoryName,
+                  project.workspaceRoot,
+                  candidate,
+                  (from, to) => fileSystem.rename(from, to),
+                ).pipe(
+                  Effect.as(true),
+                  Effect.catch((cause) =>
+                    Effect.logWarning("Project repository could not follow its renamed folder", {
+                      repositoryId: link.repositoryId,
+                      cause,
+                    }).pipe(Effect.as(false)),
+                  ),
+                );
                 if (repointed) moved.push(link.repositoryId);
                 break;
               }
