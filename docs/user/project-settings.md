@@ -81,7 +81,7 @@ than** on the task.
 
 Models holds the default model for new threads and the text generation model. New threads holds
 the workspace, submodules and start-from-origin defaults, and where added repositories go.
-Integrations controls agent browser access. Source control contains automatic pull, the default
+Integrations controls agent browser access and computer use. Source control contains automatic pull, the default
 pull request merge method and the model that writes commit messages and pull requests. The same rows
 edit the value for all projects or a project's override, depending on the project chosen at the top.
 
@@ -97,7 +97,7 @@ Settings a repository can also declare in `cogenly.json`, such as the workspace 
 resolve in one order: a project override, then the value for all projects, then `cogenly.json`,
 then the built-in default. Leave a setting on **Inherit** to let the next tier decide. A repository
 that still has a `t3.json` and no `cogenly.json` is read the same way; rename the file when
-convenient. Browser access changes apply when an agent session next starts.
+convenient. Browser access and computer use changes apply when an agent session next starts.
 
 New worktrees initialize git submodules recursively. If that step is slow because the repository
 declares many nested submodules, set **Submodules** in **Settings → New threads** (with a project
