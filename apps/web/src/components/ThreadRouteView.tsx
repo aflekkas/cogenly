@@ -3,6 +3,7 @@ import { useAgents, useAgentConversation } from "../agents/agentsClient";
 import { scopedThreadKey } from "@cogenly/client-runtime/environment";
 import type { ScopedThreadRef } from "@cogenly/contracts";
 import { useNavigate } from "@tanstack/react-router";
+import { MessageSquareOffIcon } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import ChatView from "./ChatView";
@@ -12,6 +13,7 @@ import {
   threadHasStarted,
 } from "./ChatView.logic";
 import { waitForDraftHeroTransition } from "./chat/draftHeroTransition";
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "./ui/empty";
 import { SidebarInset } from "./ui/sidebar";
 import { settleModeSwitchMainPane } from "./sidebar/modes/modeSwitchMotion";
 import {
@@ -21,7 +23,7 @@ import {
   useComposerDraftStore,
 } from "../composerDraftStore";
 import { useSidebarPendingFileDropStore } from "../sidebarPendingFileDropStore";
-import { useEnvironmentThreadRefs, useThreadRefs, useThreadShell } from "../state/entities";
+import { useThreadRefs, useThreadShell } from "../state/entities";
 import { useEnvironmentQuery } from "../state/query";
 import { environmentShell } from "../state/shell";
 import { useEnvironmentThread } from "../state/threads";
@@ -174,7 +176,6 @@ function ThreadRouteContent({
     serverThreadRef === null ? null : environmentShell.stateAtom(serverThreadRef.environmentId),
   );
   const serverThreadShell = serverThread;
-  const environmentThreadRefs = useEnvironmentThreadRefs(serverThreadRef?.environmentId ?? null);
   const bootstrapComplete = isThreadRouteSnapshotAuthoritative(shell.data?.status);
   const draftThread = useComposerDraftStore((store) =>
     serverThreadRef ? store.getDraftThreadByRef(serverThreadRef) : null,
@@ -198,9 +199,6 @@ function ThreadRouteContent({
   if (nextChatViewKey !== chatViewKey) {
     setChatViewKey(nextChatViewKey);
   }
-  const environmentHasDraftThreads = useComposerDraftStore((store) =>
-    serverThreadRef ? store.hasDraftThreadsInEnvironment(serverThreadRef.environmentId) : false,
-  );
   const renderState = resolveThreadRouteRenderState({
     bootstrapComplete,
     serverThreadExists: serverThreadShell !== null,
@@ -208,7 +206,6 @@ function ThreadRouteContent({
     draftThreadExists: draftThread !== null,
   });
   const serverThreadStarted = threadHasStarted(serverThreadShell);
-  const environmentHasAnyThreads = environmentThreadRefs.length > 0 || environmentHasDraftThreads;
 
   useEffect(() => {
     if (!inferredThreadRef || draftSession?.promotedTo) {
@@ -250,19 +247,17 @@ function ThreadRouteContent({
     }
     // Navigation already resolved onto this path, so a drop aimed here
     // passed its landing check; once the thread reads as missing it can
-    // never be attached, release it even when there is nowhere to redirect.
+    // never be attached, so release it. The route stays put and says the
+    // thread is gone: redirecting would open another thread in its place.
     if (renderState === "missing") {
       const { clearPendingFileDropsForThread } = useSidebarPendingFileDropStore.getState();
       clearPendingFileDropsForThread(target.threadRef);
-      if (environmentHasAnyThreads) {
-        void navigate({ to: "/", replace: true });
-      }
     }
-  }, [bootstrapComplete, environmentHasAnyThreads, navigate, renderState, retained, target]);
+  }, [bootstrapComplete, renderState, retained, target]);
 
   // The open agent left the agents list: deleted here, on another device, or
-  // by an agent over MCP. Land again like a missing thread does: the index
-  // opens the next agent, or the Agents empty state when none are left.
+  // by an agent over MCP. Land on the index, which opens the next agent, or
+  // the Agents empty state when none are left.
   useEffect(() => {
     if (!agentRemoved || retained) return;
     void navigate({ to: "/", replace: true });
@@ -308,6 +303,8 @@ function ThreadRouteContent({
         routeKind="server"
       />
     );
+  } else if (renderState === "missing") {
+    view = <MissingThreadState />;
   }
 
   // A hand-picked sidebar mode crossfades to the thread it lands on.
@@ -328,5 +325,20 @@ function ThreadRouteContent({
     >
       {view}
     </SidebarInset>
+  );
+}
+
+/** The route's thread is gone: deleted here, on another device, or by an agent. */
+function MissingThreadState() {
+  return (
+    <Empty>
+      <EmptyHeader>
+        <EmptyMedia>
+          <MessageSquareOffIcon />
+        </EmptyMedia>
+        <EmptyTitle>This thread was deleted</EmptyTitle>
+        <EmptyDescription>It no longer exists, so there is nothing to open here.</EmptyDescription>
+      </EmptyHeader>
+    </Empty>
   );
 }

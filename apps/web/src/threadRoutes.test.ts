@@ -1,6 +1,38 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { resolveAgentConversationRemoval } from "./threadRoutes";
+import { resolveAgentConversationRemoval, resolveThreadRouteRenderState } from "./threadRoutes";
+
+describe("resolveThreadRouteRenderState", () => {
+  const base = {
+    bootstrapComplete: true,
+    serverThreadExists: false,
+    serverThreadDeleted: false,
+    draftThreadExists: false,
+  };
+
+  it("reads a thread the live snapshot does not have as missing, not as another thread", () => {
+    expect(resolveThreadRouteRenderState(base)).toBe("missing");
+  });
+
+  it("reads a deleted thread as missing even while its shell lingers", () => {
+    expect(
+      resolveThreadRouteRenderState({
+        ...base,
+        serverThreadExists: true,
+        serverThreadDeleted: true,
+      }),
+    ).toBe("missing");
+  });
+
+  it("waits for the snapshot before calling an unknown thread missing", () => {
+    expect(resolveThreadRouteRenderState({ ...base, bootstrapComplete: false })).toBe("loading");
+  });
+
+  it("shows a thread that exists, or a draft still promoting onto it", () => {
+    expect(resolveThreadRouteRenderState({ ...base, serverThreadExists: true })).toBe("ready");
+    expect(resolveThreadRouteRenderState({ ...base, draftThreadExists: true })).toBe("ready");
+  });
+});
 
 /** Feeds each render's input through, carrying the latch like the route view does. */
 function renders(
