@@ -92,7 +92,7 @@ const ProjectDeleteTool = Tool.make("project_delete", {
 const ProjectCloneTool = Tool.make("project_clone", {
   ...shared,
   description:
-    "Clone a repository using the app's source-control service, outside any project: without destinationPath it lands in <projects root>/Repositories/<repo>, and no project is created. This only clones; register the returned cwd with project_create. To clone into an existing project, use project_label_clone_repository. An existing destination is not adopted or removed on failure.",
+    "Clone a repository using the app's source-control service, outside any project: without destinationPath it lands in <projects root>/Repositories/<repo>, and no project is created. This is the default for a single repository: don't create or suggest a project for it. This only clones; register the returned cwd with project_create. To clone into an existing project, use project_label_clone_repository. An existing destination is not adopted or removed on failure.",
   parameters: SourceControlCloneRepositoryInput,
   success: SourceControlCloneRepositoryResult,
   dependencies: [

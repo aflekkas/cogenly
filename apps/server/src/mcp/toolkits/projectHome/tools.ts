@@ -72,7 +72,7 @@ export const ProjectHomeToolkit = Toolkit.make(
     .annotate(Tool.OpenWorld, false),
   Tool.make("project_repository_add", {
     ...shared,
-    description: `Add an existing repository to the project by id (see project_list). To clone a GitHub repository into the project instead, use project_label_clone_repository. ${target} ${receipt}`,
+    description: `Add an existing repository to the project by id (see project_list). Use it for a project the user already has or asked for; a single repository needs no project. To clone a GitHub repository into the project instead, use project_label_clone_repository. ${target} ${receipt}`,
     parameters: ProjectRepositoryChangeInput,
     success: ProjectChangeReceipt,
   })
