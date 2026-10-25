@@ -205,6 +205,7 @@ export function runOrchestratorV2ProviderReplayScenario<
       MigrationError | PlatformError.PlatformError | SqlError
     >;
     readonly runEffectWorker?: boolean;
+    readonly machinesContext?: string;
     readonly environmentId?: EnvironmentId;
     readonly remoteServices?: Layer.Layer<
       RemoteThreadLaunch.RemoteThreadLaunch | RemoteThreadCommands.RemoteThreadCommands
@@ -255,6 +256,7 @@ export function layerProviderReplay<Transcript extends ProviderReplayTranscript,
       MigrationError | PlatformError.PlatformError | SqlError
     >;
     readonly runEffectWorker?: boolean;
+    readonly machinesContext?: string;
     readonly environmentId?: EnvironmentId;
     readonly remoteServices?: Layer.Layer<
       RemoteThreadLaunch.RemoteThreadLaunch | RemoteThreadCommands.RemoteThreadCommands
@@ -296,6 +298,7 @@ export function layerWithRegistry<Error>(
       MigrationError | PlatformError.PlatformError | SqlError
     >;
     readonly runEffectWorker?: boolean;
+    readonly machinesContext?: string;
     readonly responseStreamingMode?: ResponseStreamingMode;
     readonly environmentId?: EnvironmentId;
     readonly remoteServices?: Layer.Layer<
@@ -435,7 +438,12 @@ export function layerWithRegistry<Error>(
           Layer.orDie,
         ),
         layerContextHandoffServiceProvided,
-        MachinesTurnContext.layer,
+        options.machinesContext === undefined
+          ? MachinesTurnContext.layer
+          : Layer.succeed(MachinesTurnContext.MachinesTurnContext, {
+              read: Effect.succeed(options.machinesContext),
+              register: () => Effect.void,
+            }),
         layerEventSinkProvided,
         IdAllocator.layer,
         layerStores,
