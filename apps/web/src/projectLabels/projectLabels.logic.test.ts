@@ -130,11 +130,12 @@ describe("threadFolderState", () => {
       byKey: new Map([bartr, remote, home].map((entry) => [entry.key, entry] as const)),
     };
     const chat = { ...thread("spawn", "explicit"), id: "project-chat:spawn" };
-    expect(threadFolderState(chat, withHome)).toMatchObject({
-      current: home,
-      removable: false,
-      options: [],
-    });
+    const state = threadFolderState(chat, withHome);
+    expect(state).toMatchObject({ current: home, removable: false, projectHome: true });
+    // Every other project is listed, each saying why it can't take the chat.
+    expect(state.options).toHaveLength(2);
+    expect([...state.blocked.entries()]).toEqual([[bartr.key, "Stays in Spawn Partners"]]);
+    expect(state.blocked.has(home.key)).toBe(false);
     // Any other thread in the project still moves as usual.
     const sibling = { ...thread("spawn", "explicit"), id: "thread:sibling" };
     expect(threadFolderState(sibling, withHome).options).toHaveLength(2);

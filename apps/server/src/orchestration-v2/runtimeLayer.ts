@@ -370,7 +370,14 @@ export const layerProjectSetupScriptRunner = ProjectSetupScriptRunner.layer.pipe
 // subscriber. Layers memoize by identity, so providing this twice below
 // still constructs one service.
 const layerProjectLabelsProvided = ProjectLabels.layer.pipe(
-  Layer.provide(Layer.mergeAll(layerEventInfrastructure, ProjectLabelFolders.layer)),
+  Layer.provide(
+    Layer.mergeAll(
+      layerEventInfrastructure,
+      ProjectLabelFolders.layer,
+      // Same reference as thread sync's router, which registers the folder mover.
+      RemoteThreadCommands.layer,
+    ),
+  ),
 );
 const layerManagedProjectFoldersProvided = ManagedProjectFolders.layer.pipe(
   Layer.provide(layerProjectService),

@@ -3,7 +3,7 @@ import { scopeThreadRef } from "@cogenly/client-runtime/environment";
 import type { EnvironmentThreadShell } from "@cogenly/client-runtime/state/models";
 import type { ThreadId } from "@cogenly/contracts";
 import { ChevronLeftIcon, EllipsisIcon } from "lucide-react";
-import { useMemo, useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 
 import { cn } from "~/lib/utils";
 
@@ -64,10 +64,27 @@ const HEADER_TITLE_MAX_WIDTH_CLASS = "max-w-[min(40rem,calc(100%-10rem))]";
  * a deeper chain keeps its root and direct parent and folds the middle into a
  * "…" menu. Until the thread's shell loads, the title shows alone.
  */
-export function ThreadHeaderTitle(props: Parameters<typeof ThreadHeaderTitleContent>[0]) {
+export function ThreadHeaderTitle(
+  props: Parameters<typeof ThreadHeaderTitleContent>[0] & {
+    /**
+     * Shown right after the title, such as the "Runs on" chip. It shares the
+     * title's row wherever the title renders (the page's top bar or the fixed
+     * titlebar slot), so the title truncates before the two can overlap.
+     */
+    readonly trailing?: ReactNode;
+  },
+) {
+  const { trailing, ...titleProps } = props;
   return (
     <WorkspacePageTitle>
-      <ThreadHeaderTitleContent {...props} />
+      <div
+        className={cn("flex min-w-0 items-center", HEADER_TITLE_MAX_WIDTH_CLASS)}
+        // Leads the top bar, so it rides the pane's left edge when the sidebar toggles.
+        data-panel-flip="start"
+      >
+        <ThreadHeaderTitleContent {...titleProps} />
+        {trailing}
+      </div>
     </WorkspacePageTitle>
   );
 }
@@ -96,10 +113,7 @@ function ThreadHeaderTitleContent(props: {
         className={cn(
           titleSwap.fade && "swap-motion",
           "min-w-0 truncate text-sm font-medium text-foreground",
-          HEADER_TITLE_MAX_WIDTH_CLASS,
         )}
-        // Leads the top bar, so it rides the pane's left edge when the sidebar toggles.
-        data-panel-flip="start"
       >
         {props.title}
       </h2>
@@ -158,12 +172,8 @@ function ThreadHeaderTitleContent(props: {
       // Keyed by thread: a navigation mounts a fresh trail, shown at once.
       key={`${props.shell.environmentId}:${props.shell.id}`}
       aria-label="Thread lineage"
-      className={cn(
-        // Clickable through the desktop titlebar's drag strip it sits in.
-        "flex min-w-0 items-center text-xs [-webkit-app-region:no-drag]",
-        HEADER_TITLE_MAX_WIDTH_CLASS,
-      )}
-      data-panel-flip="start"
+      // Clickable through the desktop titlebar's drag strip it sits in.
+      className="flex min-w-0 items-center text-xs [-webkit-app-region:no-drag]"
     >
       <h2 className="sr-only">{props.title}</h2>
       {segments.root ? (

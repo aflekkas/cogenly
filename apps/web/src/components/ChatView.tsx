@@ -10,6 +10,8 @@ import {
   resolveServerThreadError,
   resolveVisibleWorktreeSetup,
   resolveWorktreeSetupProgress,
+  threadShellHasStarted,
+  timelineAwaitsRows,
 } from "./ChatView.logic";
 import * as DateTime from "effect/DateTime";
 import { restorePlanFollowUpComposer } from "./ChatView.logic";
@@ -3499,8 +3501,19 @@ export default function ChatView(props: ChatViewProps) {
       backgroundSubmissionPending,
       hasWorktreeSetupCard: worktreeSetup !== null,
     });
+  // The timeline's loading state: the detail is loading, or a thread with
+  // messages has shown none yet.
+  const timelineLoading =
+    isServerThread &&
+    timelineAwaitsRows({
+      detailLoading: threadDetailLoading,
+      shellStarted: threadShellHasStarted(activeThreadShell),
+      rowCount: timelineEntries.length,
+      isWorking,
+      hasHistoryToLoad: threadHistoryControls !== undefined,
+    });
   const embeddedEmptyStateVisible =
-    timelineEntries.length === 0 && !isWorking && !threadDetailLoading && !isDraftHeroState;
+    timelineEntries.length === 0 && !isWorking && !timelineLoading && !isDraftHeroState;
   const {
     attachTransitionGroup: attachDraftHeroTransitionGroup,
     attachComposerAnchor: attachDraftHeroComposerAnchor,
@@ -9500,16 +9513,18 @@ export default function ChatView(props: ChatViewProps) {
               title={activeThread.title}
               messagesCarried={workHandoffMessagesCarried}
               onOpenThread={onOpenRelatedThreadStable}
+              trailing={
+                activeThreadShell ? (
+                  <ThreadOwnerBadge
+                    environmentId={activeThreadShell.environmentId}
+                    ownerMachine={activeThreadShell.source.ownerMachine}
+                  />
+                ) : null
+              }
             />
           ) : (
             <h2 className="sr-only">{activeThread.title}</h2>
           )}
-          {isServerThread && activeThreadShell ? (
-            <ThreadOwnerBadge
-              environmentId={activeThreadShell.environmentId}
-              ownerMachine={activeThreadShell.source.ownerMachine}
-            />
-          ) : null}
           {threadDetailsControl && !threadDetailsInTitlebarCluster ? (
             <span key="header" className="swap-motion ms-auto flex h-full shrink-0 items-center">
               {threadDetailsControl}
@@ -9715,11 +9730,9 @@ export default function ChatView(props: ChatViewProps) {
                   onManualNavigation={cancelTimelineLiveFollowForUserNavigationStable}
                   cancelPositionRestoreRef={cancelPositionRestoreRef}
                   hideEmptyPlaceholder={
-                    isDraftHeroState ||
-                    threadDetailLoading ||
-                    embedded?.renderEmptyState !== undefined
+                    isDraftHeroState || timelineLoading || embedded?.renderEmptyState !== undefined
                   }
-                  loadingThread={threadDetailLoading && !isDraftHeroState}
+                  loadingThread={timelineLoading && !isDraftHeroState}
                   topFadeEnabled={!hasTimelineTopBanner}
                   {...(paintOnlyDisplayedTimeline || threadHistoryControls === undefined
                     ? {}

@@ -27,7 +27,12 @@ import {
   ThreadSurface,
   WorkOrigin,
 } from "./orchestrationV2.ts";
-import { ProjectLabelId } from "./projectLabel.ts";
+import {
+  MoveThreadProjectFolderInput,
+  ProjectLabelError,
+  ProjectLabelId,
+  ThreadProjectFolderResult,
+} from "./projectLabel.ts";
 import { ProviderInteractionMode, RuntimeMode } from "./providerPolicy.ts";
 import {
   ScheduledTaskUpsertInput,
@@ -158,6 +163,19 @@ export const ThreadAttachmentRead = makePeerChannel({
   payload: Schema.Struct({ attachmentId: ThreadAttachmentFile.fields.name }),
   success: Schema.NullOr(ThreadAttachmentFile),
   error: ThreadRemoteError,
+});
+
+/**
+ * File a thread another machine runs into a project folder (or unfile it),
+ * sent to that machine or relayed by the hub. A thread's filing replicates from
+ * its owner, so a replica that filed it locally would be overwritten.
+ */
+export const ThreadFolderMove = makePeerChannel({
+  name: "threads.folder.move.v1",
+  scope: AuthPeerDelegateScope,
+  payload: MoveThreadProjectFolderInput,
+  success: ThreadProjectFolderResult,
+  error: Schema.Union([ThreadRemoteError, ProjectLabelError]),
 });
 
 /** Threads one move request names, at most. Larger moves are split by the caller. */

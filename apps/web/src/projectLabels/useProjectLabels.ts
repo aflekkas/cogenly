@@ -1,4 +1,3 @@
-import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentId, ProjectLabelWithRepositories } from "@cogenly/contracts";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
@@ -7,6 +6,7 @@ import { useMemo } from "react";
 import { primaryEnvironmentIdAtom } from "../state/primaryEnvironment";
 import { useEnvironmentQuery } from "../state/query";
 import { serverEnvironment } from "../state/server";
+import { useAtomValueOverBuiltSources } from "../state/useAtomValueBuiltOutsideRender";
 import {
   partitionArchivedProjectLabels,
   unifyProjectLabels,
@@ -94,5 +94,16 @@ export function useProjectLabelDirectory(
           }).pipe(Atom.withLabel("project-label-directory")),
     [idsKey],
   );
-  return useAtomValue(atom);
+  // The live streams it reads are built outside render: opening a stream for
+  // an environment no one watched yet updates other components' atoms.
+  const sources = useMemo(
+    () =>
+      idsKey === ""
+        ? []
+        : (idsKey.split("\0") as EnvironmentId[]).map((environmentId) =>
+            serverEnvironment.projectLabelsLive({ environmentId, input: {} }),
+          ),
+    [idsKey],
+  );
+  return useAtomValueOverBuiltSources(atom, sources, EMPTY_DIRECTORY_ATOM);
 }

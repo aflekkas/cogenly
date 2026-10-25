@@ -403,6 +403,8 @@ export interface ThreadFolderState {
   readonly blocked: ReadonlyMap<ProjectLabelKey, string>;
   /** Whether the thread works in a repository, so a new project could not take it either. */
   readonly inRepository: boolean;
+  /** A project's own conversation: it stays in that project, so no move or new project takes it. */
+  readonly projectHome: boolean;
 }
 
 /** The repository a thread works in, for move menus; null for a machine's or a project's folder. */
@@ -419,7 +421,16 @@ export function isProjectChatThread(
   thread: { readonly id?: string; readonly environmentId: EnvironmentId },
   labels: ReadonlyArray<EnvironmentProjectLabel>,
 ): boolean {
-  return labels.some((entry) => {
+  return projectChatHome(thread, labels) !== undefined;
+}
+
+/** The project whose own conversation `thread` is, if any. */
+function projectChatHome(
+  thread: { readonly id?: string; readonly environmentId: EnvironmentId },
+  labels: ReadonlyArray<EnvironmentProjectLabel>,
+): EnvironmentProjectLabel | undefined {
+  if (thread.id === undefined) return undefined;
+  return labels.find((entry) => {
     const own = projectLabelOn(entry, thread.environmentId);
     return own?.label.projectChatThreadId != null && own.label.projectChatThreadId === thread.id;
   });
@@ -440,17 +451,20 @@ export function threadFolderState(
       ? null
       : (directory.byKey.get(projectLabelKey(thread.environmentId, folderId)) ?? null);
   const source = current === null ? null : (thread.source.projectFolderSource ?? null);
-  // A project's own conversation stays in its project: nowhere to move it.
-  const projectHome = thread.id !== undefined && isProjectChatThread(thread, directory.labels);
+  // A project's own conversation stays in its project: every other project is
+  // listed, disabled, so the menu says why rather than showing nothing.
+  const home = projectChatHome(thread, directory.labels);
+  const projectHome = home !== undefined;
   // An archived folder is never offered, though a thread already in one
   // still names it as `current`.
-  const options = projectHome
-    ? []
-    : projectLabelsOn(directory.labels, thread.environmentId).filter(
-        (entry) => !isProjectLabelArchived(entry.label),
-      );
+  const options = projectLabelsOn(directory.labels, thread.environmentId).filter(
+    (entry) => !isProjectLabelArchived(entry.label),
+  );
   const blocked = new Map<ProjectLabelKey, string>();
-  if (repository !== null) {
+  if (home !== undefined) {
+    for (const entry of options)
+      if (entry.key !== home.key) blocked.set(entry.key, `Stays in ${home.label.name}`);
+  } else if (repository !== null) {
     for (const entry of options) {
       if (!entry.label.repositoryIds.includes(repository.projectId))
         blocked.set(entry.key, `Doesn't include ${repository.name}`);
@@ -464,6 +478,7 @@ export function threadFolderState(
     options,
     blocked,
     inRepository: repository !== null,
+    projectHome,
   };
 }
 

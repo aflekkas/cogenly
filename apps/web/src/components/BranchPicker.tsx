@@ -169,6 +169,7 @@ export function BranchPicker({
                 {...(getItemType ? { getItemType } : {})}
                 renderItem={({ item, index }) => renderItem(item, index)}
                 estimatedItemSize={28}
+                recycleItems={false}
                 drawDistance={336}
                 onLayout={() => {
                   trackBranchListScrollElement();

@@ -2,6 +2,7 @@ import {
   CommandId,
   EventId,
   MessageId,
+  type MoveThreadProjectFolderInput,
   type OrchestrationV2DomainEvent,
   OrchestrationV2DomainEventJson,
   type OrchestrationV2ServerCommand,
@@ -236,14 +237,17 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
   const labels = Layer.unwrap(
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
+      const moveThread = ({ threadId, folderId }: MoveThreadProjectFolderInput) =>
+        Effect.gen(function* () {
+          yield* sql`DELETE FROM thread_project_labels WHERE thread_id = ${threadId}`;
+          if (folderId !== null)
+            yield* sql`INSERT INTO thread_project_labels(thread_id, label_id) VALUES (${threadId}, ${folderId})`;
+          return { threadId, projectFolderId: folderId };
+        }).pipe(Effect.orDie);
       return Layer.mock(ProjectLabelService.ProjectLabelService)({
         list: () => Effect.succeed({ labels: [] }),
-        moveThread: ({ threadId, folderId }) =>
-          Effect.gen(function* () {
-            if (folderId !== null)
-              yield* sql`INSERT OR IGNORE INTO thread_project_labels(thread_id, label_id) VALUES (${threadId}, ${folderId})`;
-            return { threadId, projectFolderId: folderId };
-          }).pipe(Effect.orDie),
+        moveThread,
+        moveLocalThread: moveThread,
         // Swaps the remote-only placeholder for the record, as the service does.
         bindRepositoryCheckout: ({ labelId, remote, repositoryId }) =>
           Effect.gen(function* () {

@@ -28,7 +28,11 @@ import {
   TerminalOutputBlock,
   useCommandOutputStreaming,
 } from "./CommandOutputPanel";
-import { parseTerminalRunResult, terminalRunResultSummary } from "./terminalRunResult.logic";
+import {
+  parseTerminalRunResult,
+  terminalRunItem,
+  terminalRunResultSummary,
+} from "./terminalRunResult.logic";
 import { resolveExternalWebLinkHref } from "./externalLinkContextMenu";
 import type { ExpandedImagePreview } from "./ExpandedImagePreview";
 import { ShellCommandBlock } from "./ShellCommandBlock";
@@ -549,7 +553,8 @@ export const V2ItemExpansion = memo(function V2ItemExpansion(props: {
     case "dynamic_tool": {
       // A command the agent ran reads like one: the command, then its output
       // as a terminal shows it, not the tool's JSON.
-      const terminalRun = tool?.key === "terminal_run" ? parseTerminalRunResult(item.output) : null;
+      const terminalRunCall = terminalRunItem(item);
+      const terminalRun = terminalRunCall ? parseTerminalRunResult(terminalRunCall.output) : null;
       if (terminalRun) {
         const call = toolCallLines({ args: item.input });
         const commandText = call.args?.find(([key]) => key === "command")?.[1];

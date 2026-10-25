@@ -1,6 +1,7 @@
 import { threadPullRequestSearchTerms } from "@cogenly/shared/threadPullRequests";
 import type {
   CommandPaletteAddProjectTarget,
+  CommandPaletteStartWorkHandoff,
   CommandPaletteLinkedThreads,
 } from "../commandPaletteBus";
 import {
@@ -64,9 +65,15 @@ export function browseInputEndPaddingClass(input: {
  */
 export type SearchOverlayMode = "command" | "files" | "content";
 
+/** Where an Add repository flow files the repository, and the Work it starts instead of a draft. */
+export interface CommandPaletteAddProjectRequest {
+  readonly into?: CommandPaletteAddProjectTarget;
+  readonly startWorkFrom?: CommandPaletteStartWorkHandoff;
+}
+
 export type CommandPaletteOpenIntent =
   | { readonly kind: "new-thread-in" }
-  | { readonly kind: "add-project"; readonly into?: CommandPaletteAddProjectTarget }
+  | ({ readonly kind: "add-project" } & CommandPaletteAddProjectRequest)
   | { readonly kind: "start-work"; readonly threadRef: ScopedThreadRef }
   | { readonly kind: "snooze"; readonly threadRef: ScopedThreadRef }
   | {
@@ -89,7 +96,7 @@ export type CommandPaletteUiAction =
       readonly query: string;
       readonly linkedThreads?: CommandPaletteLinkedThreads;
     }
-  | { readonly _tag: "OpenAddProject"; readonly into?: CommandPaletteAddProjectTarget }
+  | ({ readonly _tag: "OpenAddProject" } & CommandPaletteAddProjectRequest)
   | { readonly _tag: "OpenNewThreadIn" }
   | { readonly _tag: "OpenStartWork"; readonly threadRef: ScopedThreadRef }
   | { readonly _tag: "OpenSnooze"; readonly threadRef: ScopedThreadRef }
@@ -122,7 +129,11 @@ export function reduceCommandPaletteUiState(
       return {
         open: true,
         mode: "command",
-        openIntent: { kind: "add-project", ...(action.into ? { into: action.into } : {}) },
+        openIntent: {
+          kind: "add-project",
+          ...(action.into ? { into: action.into } : {}),
+          ...(action.startWorkFrom ? { startWorkFrom: action.startWorkFrom } : {}),
+        },
       };
     case "OpenNewThreadIn":
       return { open: true, mode: "command", openIntent: { kind: "new-thread-in" } };

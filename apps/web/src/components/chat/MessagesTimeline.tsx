@@ -203,7 +203,7 @@ import type {
 } from "@cogenly/contracts";
 import { Badge } from "../ui/badge";
 import { Button, InlineButton } from "../ui/button";
-import { parseTerminalRunResult } from "./terminalRunResult.logic";
+import { terminalRunItem, terminalRunSandboxed } from "./terminalRunResult.logic";
 import { useAssetUrlRefresh, useAssetUrls, useAssetUrlState } from "../../assets/assetUrls";
 import { MediaVideoPlayer } from "../media/MediaVideoPlayer";
 import {
@@ -1974,6 +1974,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
                 getItemType={getItemType}
                 renderItem={renderItem}
                 estimatedItemSize={90}
+                // Rows hold their own disclosure state, so a container is never reused for another row.
+                recycleItems={false}
                 initialScrollAtEnd={
                   !findActive && citationRequest === null && rememberedPosition?.atEnd !== false
                 }
@@ -6348,12 +6350,11 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
       : null;
   const viewedImagePath = workEntryViewedImagePath(workEntry);
   const payload = workEntry.structuredPayload;
-  const terminalRunCall =
-    registryTool?.key === "terminal_run" && payload?.type === "dynamic_tool"
-      ? terminalRunToolCall(payload.input, payload.output, workEntry.createdAt)
-      : null;
-  const terminalRunSandboxed =
-    terminalRunCall !== null && parseTerminalRunResult(terminalRunCall.output)?.sandboxed === true;
+  const terminalRun = terminalRunItem(payload);
+  const terminalRunCall = terminalRun
+    ? terminalRunToolCall(terminalRun.input, terminalRun.output, workEntry.createdAt)
+    : null;
+  const sandboxed = terminalRun !== null && terminalRunSandboxed(terminalRun.output);
   const skill =
     payload?.type === "dynamic_tool"
       ? claudeSkillInvocation(payload.toolName, payload.input)
@@ -6548,7 +6549,7 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
               Open chat
             </button>
           ) : null}
-          {terminalRunSandboxed ? (
+          {sandboxed ? (
             <Badge variant="outline" size="sm" title="Ran in the chat's read-only sandbox">
               Sandboxed · read-only
             </Badge>

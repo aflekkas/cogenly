@@ -16,6 +16,7 @@ import { useCallback, useMemo } from "react";
 import {
   composerDraftHasUserContent,
   markPromotedDraftThreadByRef,
+  surfaceDraftKey,
   type DraftId,
   type DraftThreadEnvMode,
   type DraftThreadState,
@@ -220,9 +221,14 @@ export function useNewThreadHandler() {
           ),
         });
       };
-      const logicalProjectKey = project
-        ? deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings)
-        : scopedProjectKey(projectRef);
+      // Each surface keeps its own draft per project: a Work draft never
+      // reuses (and re-files) the chat draft of the same project.
+      const logicalProjectKey = surfaceDraftKey(
+        project
+          ? deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings)
+          : scopedProjectKey(projectRef),
+        surface,
+      );
       // Opening a repository's draft picks that repository, so the draft
       // follows its project: a reused draft drops the project it was left in,
       // which may not hold the repository. A caller filing it in a project
@@ -237,7 +243,13 @@ export function useNewThreadHandler() {
       const hasWorktreePathOption = options?.worktreePath !== undefined;
       const hasEnvModeOption = options?.envMode !== undefined;
       const hasStartFromOriginOption = options?.startFromOrigin !== undefined;
-      const storedDraftThread = getDraftSessionByLogicalProjectKey(logicalProjectKey);
+      const mappedDraftThread = getDraftSessionByLogicalProjectKey(logicalProjectKey);
+      // A draft tracked before surfaces split may be the other surface's: it
+      // is not this surface's draft, so it is neither reused nor retired.
+      const storedDraftThread =
+        mappedDraftThread !== null && (mappedDraftThread.surface ?? surface) === surface
+          ? mappedDraftThread
+          : null;
       const storedDraftThreadRef = storedDraftThread
         ? scopeThreadRef(storedDraftThread.environmentId, storedDraftThread.threadId)
         : null;
@@ -449,7 +461,7 @@ export function useNewThreadHandler() {
           // winner. An invested draft this invocation deliberately declined
           // to reuse is still mapped at this point — reusing it here would
           // silently undo mint-fresh semantics.
-          racedDraft.draftId !== storedDraftThread?.draftId &&
+          racedDraft.draftId !== mappedDraftThread?.draftId &&
           readThreadShell(scopeThreadRef(racedDraft.environmentId, racedDraft.threadId)) === null
         ) {
           // Same remap the reuse paths above perform: point the draft at the

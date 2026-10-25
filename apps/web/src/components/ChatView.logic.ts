@@ -911,6 +911,24 @@ export function threadShellHasStarted(
   );
 }
 
+/**
+ * Whether the timeline is still waiting for its rows: the detail is loading,
+ * or the shell says the thread has messages while none have arrived yet (a
+ * replica catching up after a move, a thread opened through another machine).
+ * A running thread shows its working row, and trimmed history its load
+ * control, so neither waits.
+ */
+export function timelineAwaitsRows(input: {
+  readonly detailLoading: boolean;
+  readonly shellStarted: boolean;
+  readonly rowCount: number;
+  readonly isWorking: boolean;
+  readonly hasHistoryToLoad: boolean;
+}): boolean {
+  if (input.detailLoading) return true;
+  return input.shellStarted && input.rowCount === 0 && !input.isWorking && !input.hasHistoryToLoad;
+}
+
 // Imported history has no session until its first prompt. Resolve its instance
 // through the environment's provider catalog before locking to a driver.
 export function deriveLockedProvider(input: {

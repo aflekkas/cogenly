@@ -1455,6 +1455,18 @@ function logicalProjectDraftKey(logicalProjectKey: string): string {
 }
 
 /**
+ * The key a project's new-thread draft is tracked under for one surface. A
+ * chat draft and a Work draft in the same project (most often the no-project
+ * home both start in) are separate drafts with their own thread ids, so a
+ * project picked for one never lands on the other. Work keeps the plain key
+ * drafts were tracked under before surfaces split.
+ */
+export function surfaceDraftKey(logicalProjectKey: string, surface: ThreadSurface): string {
+  const key = logicalProjectDraftKey(logicalProjectKey);
+  return surface === "chat" && key.length > 0 ? `${key}#chat` : key;
+}
+
+/**
  * Runtime composer storage key for app-facing identities only.
  *
  * Draft sessions are keyed by `DraftId`. Real threads are keyed by

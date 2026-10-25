@@ -45,6 +45,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import * as GitHubRest from "@cogenly/source-control-github/server/GitHubRest";
 
 import * as SharedState from "../sync/SharedState.ts";
+import * as RemoteThreadCommands from "../orchestration-v2/RemoteThreadCommands.ts";
 import * as Events from "../persistence/OrchestrationEventStore.ts";
 import * as ProjectCloneTracker from "../project/ProjectCloneTracker.ts";
 import * as ProjectFaviconResolver from "../project/ProjectFaviconResolver.ts";
@@ -77,6 +78,10 @@ export class ProjectLabelService extends Context.Service<
      */
     readonly notifyCheckoutChanged: Effect.Effect<void>;
     readonly moveThread: (
+      input: MoveThreadProjectFolderInput,
+    ) => Effect.Effect<ThreadProjectFolderResult, ProjectLabelError>;
+    /** moveThread on this machine's own record, for a move its owner routing forwarded here. */
+    readonly moveLocalThread: (
       input: MoveThreadProjectFolderInput,
     ) => Effect.Effect<ThreadProjectFolderResult, ProjectLabelError>;
     readonly list: () => Effect.Effect<Labels, ProjectLabelError>;
@@ -235,6 +240,10 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const membership = yield* Membership.ProjectRepositoryMembership;
   const shared = yield* SharedState.SharedState;
+  // Absent on a server without the machine link (and in tests): every thread is local.
+  const remote = Option.getOrUndefined(
+    yield* Effect.serviceOption(RemoteThreadCommands.RemoteThreadCommands),
+  );
   const crypto = yield* Crypto.Crypto;
   const events = yield* Events.OrchestrationEventStore;
   const changes = yield* PubSub.sliding<void>(1);
@@ -744,7 +753,28 @@ const make = Effect.gen(function* () {
         return yield* get(input.id);
       }),
     );
+  // A thread another machine runs is filed there: its filing replicates from
+  // the owner, so a local one would be overwritten. The owner pushes the new
+  // filing back before it answers.
   const moveThread = (input: MoveThreadProjectFolderInput) =>
+    (remote === undefined ? Effect.succeedNone : remote.moveFolder(input)).pipe(
+      Effect.mapError((error) =>
+        isProjectLabelError(error)
+          ? error
+          : new ProjectLabelError({
+              operation: "moveThread",
+              reason: "remote",
+              detail: error.message,
+            }),
+      ),
+      Effect.flatMap((forwarded) =>
+        Option.isSome(forwarded)
+          ? PubSub.publish(changes, undefined).pipe(Effect.as(forwarded.value))
+          : moveLocalThread(input),
+      ),
+    );
+  /** Files a thread this machine runs; also what the owner runs for a forwarded move. */
+  const moveLocalThread = (input: MoveThreadProjectFolderInput) =>
     mutate(
       "moveThread",
       input,
@@ -824,6 +854,7 @@ const make = Effect.gen(function* () {
       ].includes(stored.event.type));
   return ProjectLabelService.of({
     moveThread,
+    moveLocalThread,
     notifyCheckoutChanged: PubSub.publish(changes, undefined).pipe(Effect.asVoid),
     subscribeChanges: PubSub.subscribe(changes).pipe(
       Effect.map((subscription) =>

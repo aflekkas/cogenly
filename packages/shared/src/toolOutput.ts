@@ -48,6 +48,8 @@ interface CompactToolOutput {
   resultCount?: number;
   /** The app a `computer_*` action left in front, so its work-log row can name it. */
   frontmostApp?: string;
+  /** A `terminal_run` that ran in a chat's read-only sandbox, which its row tags. */
+  sandbox?: "read-only";
 }
 
 function readResult(value: unknown, budget: ResultReadBudget, depth = 0): ResultEnvelope {
@@ -204,6 +206,7 @@ export function compactDynamicToolOutput(value: unknown): CompactToolOutput | un
     if (Array.isArray(hits)) output.resultCount = hits.length;
     const frontmostApp = boundedTitle(data.frontmostApp);
     if (frontmostApp !== undefined) output.frontmostApp = frontmostApp;
+    if (data.sandbox === "read-only") output.sandbox = "read-only";
 
     if (Array.isArray(data.threads)) {
       let complete = data.threads.length <= MAX_THREADS;

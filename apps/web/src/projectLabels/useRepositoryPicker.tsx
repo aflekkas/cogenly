@@ -12,7 +12,7 @@ import {
   useState,
 } from "react";
 
-import { openCommandPalette } from "../commandPaletteBus";
+import { type CommandPaletteStartWorkHandoff, openCommandPalette } from "../commandPaletteBus";
 import {
   ComboboxCollection,
   ComboboxGroupItems,
@@ -130,6 +130,8 @@ export function useRepositoryPicker(input: {
   readonly onPickUncloned?: (repositoryId: ProjectId) => void;
   /** The picker gives way to a dialog or another surface. */
   readonly onClose: () => void;
+  /** A chat starting Work: a repository the palette adds starts that Work. */
+  readonly startWorkFrom?: CommandPaletteStartWorkHandoff;
 }) {
   const { environmentId, open, query } = input;
   const trimmed = query.trim();
@@ -419,7 +421,10 @@ export function useRepositoryPicker(input: {
       case "add":
         if (project === null) {
           input.onClose();
-          openCommandPalette({ open: "add-project" });
+          openCommandPalette({
+            open: "add-project",
+            ...(input.startWorkFrom ? { startWorkFrom: input.startWorkFrom } : {}),
+          });
           return false;
         }
         setAddView(true);
@@ -433,14 +438,13 @@ export function useRepositoryPicker(input: {
         return true;
       case "add-other":
         input.onClose();
-        openCommandPalette(
-          project
-            ? {
-                open: "add-project",
-                into: { environmentId: project.environmentId, labelId: project.label.id },
-              }
-            : { open: "add-project" },
-        );
+        openCommandPalette({
+          open: "add-project",
+          ...(project
+            ? { into: { environmentId: project.environmentId, labelId: project.label.id } }
+            : {}),
+          ...(input.startWorkFrom ? { startWorkFrom: input.startWorkFrom } : {}),
+        });
         return false;
       case "add-option": {
         if (project === null) return true;

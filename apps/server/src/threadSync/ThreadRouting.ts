@@ -11,6 +11,7 @@ import {
   type EnvironmentId,
   EventId,
   type MachineListResult,
+  type MoveThreadProjectFolderInput,
   type OrchestrationV2ServerCommand,
   type PeerCallError,
   type PeerChannel,
@@ -18,6 +19,7 @@ import {
   ThreadAttachmentRead,
   type ThreadAttachmentFile,
   ThreadCommandForward,
+  ThreadFolderMove,
   type ThreadId,
   ThreadRemoteError,
 } from "@cogenly/contracts";
@@ -46,6 +48,7 @@ import * as EventStore from "../orchestration-v2/EventStore.ts";
 import { commandThreadId } from "../orchestration-v2/Orchestrator.ts";
 import * as RemoteThreadCommands from "../orchestration-v2/RemoteThreadCommands.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
+import * as ProjectLabels from "../projectLabels/ProjectLabelService.ts";
 import * as ThreadReplication from "./ThreadReplication.ts";
 import * as ThreadSync from "./ThreadSync.ts";
 
@@ -124,6 +127,7 @@ const make = Effect.gen(function* () {
   const channels = yield* PeerChannels.PeerChannels;
   const remoteCommands = yield* RemoteThreadCommands.RemoteThreadCommands;
   const threads = yield* ThreadManagement.ThreadManagementService;
+  const projectLabels = yield* ProjectLabels.ProjectLabelService;
   const eventStore = yield* EventStore.EventStoreV2;
   const sql = yield* SqlClient.SqlClient;
   const config = yield* ServerConfig.ServerConfig;
@@ -348,6 +352,67 @@ const make = Effect.gen(function* () {
       const relayed = yield* machines
         .call(owner.owner, ThreadCommandForward, { command, files })
         .pipe(Effect.timeout("2 minutes"), fromPeer(view, owner.owner));
+      yield* threadSync.sync(caller.environmentId).pipe(Effect.ignore);
+      return relayed;
+    }),
+  );
+
+  // Filing a thread into a project folder is the owner's to record, like a
+  // command: the filing replicates back to this machine before the owner answers.
+  const decodeFolderMoveError = Schema.decodeUnknownOption(ThreadFolderMove.error);
+  const callFolderMove = (
+    hop: EnvironmentId,
+    owner: EnvironmentId,
+    input: MoveThreadProjectFolderInput,
+  ) =>
+    Effect.gen(function* () {
+      const view = yield* topology;
+      return yield* machines.call(hop, ThreadFolderMove, input).pipe(
+        Effect.timeout("1 minute"),
+        Effect.mapError((error) => {
+          const refusal =
+            error._tag === "PeerCallError" && error.reason === "handler-failed"
+              ? decodeFolderMoveError(error.error)
+              : Option.none();
+          return Option.isSome(refusal)
+            ? refusal.value
+            : new ThreadRemoteError({
+                reason: "offline",
+                detail: `${machineName(view, owner)} did not answer.`,
+              });
+        }),
+      );
+    });
+
+  yield* remoteCommands.registerFolderMove((input) =>
+    Effect.gen(function* () {
+      const owner = yield* replication.owner(input.threadId);
+      if (owner === undefined || (owner.local && owner.handoff === null)) return Option.none();
+      if (owner.local)
+        return yield* new ThreadRemoteError({
+          reason: "moving",
+          detail: "This thread is moving to another machine. Try again when the move finishes.",
+        });
+      const hop = yield* nextHop(owner.owner);
+      return Option.some(yield* callFolderMove(hop, owner.owner, input));
+    }),
+  );
+
+  yield* channels.register(ThreadFolderMove, (input, caller) =>
+    Effect.gen(function* () {
+      const owner = yield* replication.owner(input.threadId);
+      if (owner === undefined || (owner.local && owner.handoff === null)) {
+        const result = yield* projectLabels.moveLocalThread(input);
+        // The caller's thread shows the new filing by the time it hears back.
+        yield* threadSync.sync(caller.environmentId).pipe(Effect.ignore);
+        return result;
+      }
+      if (owner.local) return yield* new ThreadRemoteError({ reason: "moving" });
+      const view = yield* topology;
+      // Only the hub relays, and only to the spoke that runs the thread.
+      if (view.link._tag !== "hub" || owner.owner === caller.environmentId)
+        return yield* new ThreadRemoteError({ reason: "not-owner" });
+      const relayed = yield* callFolderMove(owner.owner, owner.owner, input);
       yield* threadSync.sync(caller.environmentId).pipe(Effect.ignore);
       return relayed;
     }),

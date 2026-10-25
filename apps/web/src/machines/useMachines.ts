@@ -1,4 +1,3 @@
-import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentId, MachineListResult } from "@cogenly/contracts";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
@@ -6,6 +5,7 @@ import { useMemo } from "react";
 
 import { useEnvironmentQuery } from "../state/query";
 import { serverEnvironment } from "../state/server";
+import { useAtomValueOverBuiltSources } from "../state/useAtomValueBuiltOutsideRender";
 
 /** The machines one environment is paired with, live; null until the list arrives. */
 export function useEnvironmentMachineList(
@@ -50,5 +50,15 @@ export function useMachineDirectory(
           }).pipe(Atom.withLabel("machine-directory")),
     [idsKey],
   );
-  return useAtomValue(atom);
+  // Each environment's stream is built outside render (see useAtomValueOverBuiltSources).
+  const sources = useMemo(
+    () =>
+      idsKey === ""
+        ? []
+        : (idsKey.split("\0") as EnvironmentId[]).map((environmentId) =>
+            serverEnvironment.machinesLive({ environmentId, input: {} }),
+          ),
+    [idsKey],
+  );
+  return useAtomValueOverBuiltSources(atom, sources, EMPTY_DIRECTORY_ATOM);
 }

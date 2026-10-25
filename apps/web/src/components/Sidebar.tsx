@@ -4874,7 +4874,8 @@ export default function Sidebar() {
                   color: entry.label.color,
                   blockedReason: folderState.blocked.get(entry.key),
                 })),
-                inRepository: folderState.inRepository,
+                // A project's own chat can't go into a new project either.
+                inRepository: folderState.inRepository || folderState.projectHome,
                 canMove: appAtomRegistry.get(
                   serverEnvironment.moveThreadProjectFolder.permissionAtom(thread.environmentId),
                 ),
