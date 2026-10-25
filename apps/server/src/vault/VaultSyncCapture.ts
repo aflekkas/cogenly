@@ -65,6 +65,7 @@ const decodeRecord = Schema.decodeUnknownOption(
   Schema.fromJsonString(Schema.Record(Schema.String, Schema.Json)),
 );
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+const decodeClockJson = Schema.decodeEffect(Schema.fromJsonString(HybridClock));
 
 /** What a delete seals: a revision like any other, so only a holder can make one. */
 const DELETION = { deleted: true } as const;
@@ -353,9 +354,7 @@ const make = Effect.gen(function* () {
         sealed_digest: string | null;
       }>`SELECT clock_json, sealed_digest FROM vault_sync_applied WHERE item_id = ${document.id}`)[0];
       const previousClock = previous?.clock_json
-        ? yield* Schema.decodeEffect(Schema.fromJsonString(HybridClock))(previous.clock_json).pipe(
-            Effect.mapError(vaultError),
-          )
+        ? yield* decodeClockJson(previous.clock_json).pipe(Effect.mapError(vaultError))
         : undefined;
       // Losing trust in a peer or receiving an incomplete envelope cannot roll
       // back a revision already projected here, including an authenticated delete.
