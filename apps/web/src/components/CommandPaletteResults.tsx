@@ -139,6 +139,7 @@ export function CommandPaletteVirtualizedResults(props: CommandPaletteVirtualize
           )
         }
         estimatedItemSize={40}
+        recycleItems={false}
         drawDistance={400}
         contentContainerClassName="px-2"
         className="scroll-fade-y min-h-0 scroll-py-6 overflow-x-hidden overscroll-y-contain py-2 [&::-webkit-scrollbar-track]:my-2"

@@ -1974,6 +1974,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
                 getItemType={getItemType}
                 renderItem={renderItem}
                 estimatedItemSize={90}
+                // Rows hold their own disclosure state, so a container is never reused for another row.
+                recycleItems={false}
                 initialScrollAtEnd={
                   !findActive && citationRequest === null && rememberedPosition?.atEnd !== false
                 }
