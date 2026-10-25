@@ -451,3 +451,67 @@ it.live(
     }).pipe(Effect.scoped),
   60000,
 );
+
+it.live(
+  "first backfill preserves and relays filing until its project arrives",
+  () =>
+    Effect.gen(function* () {
+      const hub = yield* start("late-project-hub", "cloud-server");
+      const laptop = yield* start("late-project-owner", "computer");
+      const other = yield* start("late-project-other", "computer");
+      yield* pair(hub, laptop);
+      yield* pair(hub, other);
+      const folderId = ProjectLabelId.make("label:late");
+      yield* laptop.shared.write("project", folderId, {
+        name: "Late",
+        color: null,
+        description: null,
+        instructions: "",
+        archivedAt: null,
+        repositories: [],
+        sourceLinks: [],
+        createdAt: "2026-10-24T00:00:00.000Z",
+      });
+      const at = yield* DateTime.now;
+      yield* laptop.sink.write({ events: [thread("event:late-created", at)] });
+      yield* laptop.sql`INSERT INTO thread_project_labels(thread_id, label_id) VALUES (${threadId}, ${folderId})`;
+      yield* laptop.machines.call(
+        hub.environmentId,
+        ThreadReplicationApply,
+        yield* laptop.replication.readBatch({ events: 0, meta: 0 }, hub.environmentId, true),
+      );
+      expect(
+        (yield* hub.projections.getThreadProjection(threadId)).thread.projectFolderId,
+      ).toBeNull();
+      yield* hub.restartReplication;
+      yield* hub.machines.call(
+        other.environmentId,
+        ThreadReplicationApply,
+        yield* hub.replication.readBatch({ events: 0, meta: 0 }, other.environmentId, false),
+      );
+      // The hub must relay the owner's intent even while its own filing is unresolved.
+      const relayed = yield* hub.replication.readBatch(
+        { events: 0, meta: 0 },
+        other.environmentId,
+        false,
+      );
+      expect(relayed.meta).toContainEqual(expect.objectContaining({ threadId, folderId }));
+      const projectBatch = yield* laptop.shared.readBatch(0, hub.environmentId, true);
+      yield* hub.shared.receive(projectBatch, laptop.environmentId, false);
+      expect((yield* hub.projections.getThreadProjection(threadId)).thread.projectFolderId).toBe(
+        folderId,
+      );
+      const relayedProjects = yield* hub.shared.readBatch(0, other.environmentId, false);
+      yield* other.shared.receive(relayedProjects, hub.environmentId, true);
+      expect((yield* other.projections.getThreadProjection(threadId)).thread.projectFolderId).toBe(
+        folderId,
+      );
+      // A later explicit unfiling replaces the durable intent.
+      yield* laptop.sql`DELETE FROM thread_project_labels WHERE thread_id = ${threadId}`;
+      yield* laptop.sync.sync(hub.environmentId);
+      expect(
+        (yield* hub.projections.getThreadProjection(threadId)).thread.projectFolderId,
+      ).toBeNull();
+    }).pipe(Effect.scoped),
+  30000,
+);

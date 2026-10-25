@@ -1,4 +1,4 @@
-import { resolveProjectLabelId } from "../sync/ProjectMergeProjection.ts";
+import { projectReplicaFilings } from "./replicaFiling.ts";
 /**
  * ThreadReplication: copies thread event logs between paired machines. Each
  * thread has one owner, the only machine that appends its events; others
@@ -339,6 +339,10 @@ const make = Effect.gen(function* () {
     const folder = yield* sql<{
       readonly folder_id: string | null;
     }>`SELECT folder_id FROM effective_thread_project_folders WHERE thread_id = ${threadId} LIMIT 1`;
+    const retained =
+      row?.local === 0 && row.meta_extra_json !== null
+        ? Option.flatMap(decodeJsonOption(row.meta_extra_json), decodeMeta)
+        : Option.none();
     const source =
       row !== undefined && row.local === 0
         ? row.source_json === null
@@ -349,7 +353,11 @@ const make = Effect.gen(function* () {
       threadId: ThreadId.make(threadId),
       owner: row === undefined ? environmentId : EnvironmentId.make(row.owner_env),
       epoch: row?.epoch ?? 0,
-      folderId: folder[0]?.folder_id ? ProjectLabelId.make(folder[0].folder_id) : null,
+      folderId: Option.isSome(retained)
+        ? retained.value.folderId
+        : folder[0]?.folder_id
+          ? ProjectLabelId.make(folder[0].folder_id)
+          : null,
       source,
     } satisfies ThreadReplicaMeta;
   });
@@ -783,17 +791,9 @@ const make = Effect.gen(function* () {
           const current = yield* sql`SELECT 1 FROM thread_owners WHERE thread_id = ${meta.threadId}
             AND local = 0 AND owner_env = ${meta.owner} AND epoch = ${meta.epoch}`;
           if (current.length === 0) continue;
-          const filed = yield* sql<{
-            readonly label_id: string;
-          }>`SELECT label_id FROM thread_project_labels WHERE thread_id = ${meta.threadId}`;
-          const folderId = yield* resolveProjectLabelId(meta.folderId).pipe(
+          yield* projectReplicaFilings(meta.threadId).pipe(
             Effect.provideService(SqlClient.SqlClient, sql),
           );
-          if ((filed[0]?.label_id ?? null) === folderId) continue;
-          yield* sql`DELETE FROM thread_project_labels WHERE thread_id = ${meta.threadId}`;
-          if (folderId !== null)
-            yield* sql`INSERT INTO thread_project_labels(thread_id, label_id)
-                SELECT ${meta.threadId}, label_id FROM project_labels WHERE label_id = ${folderId}`;
         }
       }),
     );
@@ -1225,6 +1225,7 @@ const make = Effect.gen(function* () {
     }).pipe(Effect.orDie);
 
   yield* replayHeld;
+  yield* sql.withTransaction(projectReplicaFilings()).pipe(Effect.orDie);
   return ThreadReplication.of({
     environmentId,
     owner,

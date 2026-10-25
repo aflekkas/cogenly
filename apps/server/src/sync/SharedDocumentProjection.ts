@@ -1,3 +1,4 @@
+import { projectReplicaFilings } from "../threadSync/replicaFiling.ts";
 import {
   Agent,
   HybridClock,
@@ -308,6 +309,7 @@ export const projectDocument = Effect.fn("SharedState.projectDocument")(function
     if (kind === "project") {
       if (typeof fields.mergedInto === "string") {
         yield* projectPendingMerges();
+        yield* projectReplicaFilings();
         if (!preserveLocalBindings) yield* reconcileRepositories();
         return;
       }
@@ -350,6 +352,7 @@ export const projectDocument = Effect.fn("SharedState.projectDocument")(function
     yield* sql`INSERT OR IGNORE INTO shared_possible_duplicates(kind,first_id,second_id) SELECT 'project',min(label_id,${id}),max(label_id,${id}) FROM project_labels WHERE lower(trim(name))=lower(trim(${f.name})) AND label_id<>${id}`;
     yield* projectPendingMerges();
     yield* linkArrivedProject(id);
+    yield* projectReplicaFilings();
     return;
   }
   const remote = typeof fields.repositoryRemote === "string" ? fields.repositoryRemote : null;
