@@ -329,11 +329,6 @@ function MachineRow({
         isThis ? (
           <div className="flex items-center gap-2">
             <span className="text-xs text-muted-foreground">Private access</span>
-            {served === false ? (
-              <Badge size="sm" variant="outline">
-                Off
-              </Badge>
-            ) : null}
             <Switch
               checked={served === true}
               disabled={!canPrivateAccess || setup?.status === null || privateBusy}
