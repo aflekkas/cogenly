@@ -511,6 +511,7 @@ import {
   deriveComposerSendState,
   dismissBranchMismatchForSession,
   hasEnvironmentReconnectWarningGraceElapsed,
+  isEnvironmentStillConnecting,
   scheduleEnvironmentReconnectWarning,
   hasServerAcknowledgedLocalDispatch,
   isBranchMismatchDismissedForSession,
@@ -520,6 +521,7 @@ import {
   type LocalDispatchSnapshot,
   cloneComposerImageForRetry,
   deriveLockedProvider,
+  resolveThreadDriverKind,
   readFileAsDataUrl,
   resolveFileAttachmentUrl,
   prepareRevertedMessageAttachments,
@@ -2108,6 +2110,12 @@ export default function ChatView(props: ChatViewProps) {
       setReconnectWarningGraceElapsedEnvironmentId(activeReconnectingEnvironmentId),
     );
   }, [activeReconnectingEnvironmentId]);
+  const activeEnvironmentConnecting =
+    activeEnvironmentUnavailable &&
+    isEnvironmentStillConnecting({
+      phase: activeEnvironmentConnectionPhase,
+      reconnectWarningGraceElapsed,
+    });
   const activeEnvironmentUnavailableLabel = activeEnvironment?.label ?? null;
   const activeEnvironmentUnavailableState = useMemo<EnvironmentUnavailableState | null>(() => {
     if (!activeEnvironmentUnavailable || !activeEnvironmentUnavailableLabel || !activeEnvironment) {
@@ -2338,6 +2346,10 @@ export default function ChatView(props: ChatViewProps) {
     activeThread?.modelSelection.instanceId ??
     activeProjectDefaultModelSelection?.instanceId ??
     null;
+  const threadDriverKind = useMemo(
+    () => resolveThreadDriverKind(serverProjection),
+    [serverProjection],
+  );
   const lockedProvider = deriveLockedProvider({
     thread: activeThread,
     selectedProvider: selectedProviderByThreadId,
@@ -9889,6 +9901,7 @@ export default function ChatView(props: ChatViewProps) {
                                 : undefined
                             }
                             environmentUnavailable={activeEnvironmentUnavailableState}
+                            environmentConnecting={activeEnvironmentConnecting}
                             activePendingApproval={activePendingApproval}
                             pendingApprovals={pendingApprovals}
                             pendingUserInputs={pendingUserInputs}
@@ -9907,6 +9920,7 @@ export default function ChatView(props: ChatViewProps) {
                             providerCatalogKnown={serverConfig !== null}
                             activeProjectDefaultModelSelection={activeProjectDefaultModelSelection}
                             activeThreadModelSelection={activeThread?.modelSelection}
+                            activeThreadDriverKind={threadDriverKind}
                             onSendModelSelectionChange={onComposerSendModelSelectionChange}
                             activeProjectId={activeProject?.id ?? null}
                             activeContextWindow={activeContextWindow}

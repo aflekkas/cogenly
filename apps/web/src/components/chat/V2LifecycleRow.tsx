@@ -29,7 +29,7 @@ import {
 } from "@cogenly/client-runtime/handoff";
 import { formatSubagentDisplayTitle } from "@cogenly/client-runtime/state/subagent-display";
 import {
-  ProviderDriverKind,
+  type ProviderDriverKind,
   type OrchestrationV2Notification,
   type OrchestrationV2TurnItem,
   type OrchestrationV2Subagent,
@@ -61,9 +61,8 @@ import {
   createTooltipHandle,
   type TooltipHandle,
 } from "../ui/tooltip";
-import { getProviderInstanceEntry } from "../../providerInstances";
 import { formatShortTimestamp, formatUpcomingTimestamp } from "../../timestampFormat";
-import { getTriggerDisplayModelName } from "./providerIconUtils";
+import { resolveHandoffEndpointDisplay } from "./handoffEndpoint.logic";
 import { ProviderInstanceIcon, providerTextColor } from "./ProviderInstanceIcon";
 import { cn } from "~/lib/utils";
 import { TimelineSystemDivider } from "./TimelineSystemDivider";
@@ -810,21 +809,8 @@ function HandoffEndpoint(props: {
   readonly instanceId: ProviderInstanceId;
   readonly model?: string | undefined;
 }) {
-  const entry = getProviderInstanceEntry(props.providers, props.instanceId);
-  const model = props.model?.trim();
-  const providerModel =
-    model === undefined || model.length === 0
-      ? undefined
-      : entry?.models.find((candidate) => candidate.slug === model);
-  const label =
-    providerModel !== undefined
-      ? getTriggerDisplayModelName(providerModel)
-      : model !== undefined && model.length > 0
-        ? model
-        : (entry?.displayName ?? props.instanceId);
-  const labelColor = providerTextColor(
-    entry?.driverKind ?? ProviderDriverKind.make(props.instanceId),
-  );
+  const { label, providerName, driverKind, accentColor } = resolveHandoffEndpointDisplay(props);
+  const labelColor = providerTextColor(driverKind);
   return (
     <Tooltip>
       <TooltipTrigger
@@ -834,10 +820,10 @@ function HandoffEndpoint(props: {
             className="inline-flex min-w-0 items-center gap-1 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
           >
             <ProviderInstanceIcon
-              driverKind={entry?.driverKind ?? ProviderDriverKind.make(props.instanceId)}
-              displayName={entry?.displayName ?? props.instanceId}
-              accentColor={entry?.accentColor}
-              showBadge={entry?.accentColor !== undefined}
+              driverKind={driverKind}
+              displayName={providerName}
+              accentColor={accentColor}
+              showBadge={accentColor !== undefined}
               badgeClassName="size-1.5"
               iconClassName="size-3"
             />
@@ -851,7 +837,7 @@ function HandoffEndpoint(props: {
         }
       />
       <TooltipPopup>
-        {entry?.displayName ?? props.instanceId} · {label}
+        {providerName} · {label}
       </TooltipPopup>
     </Tooltip>
   );

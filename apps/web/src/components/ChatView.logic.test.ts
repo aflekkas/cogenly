@@ -5,6 +5,8 @@ import {
   resolveBackgroundDraftWorkspaceOptions,
   resolveComposerInteractionMode,
   resolveComposerProviderSelection,
+  resolveThreadDriverKind,
+  isEnvironmentStillConnecting,
   resolveDraftHeroState,
   resolveEmptyServerThreadHero,
   resolveWorktreeSetupProgress,
@@ -1329,6 +1331,89 @@ describe("resolveComposerProviderSelection", () => {
         selectedProvider: selected.instanceId,
         threadProvider: original.instanceId,
         providers: [original.snapshot, selected.snapshot],
+      }),
+    ).toBeNull();
+  });
+
+  it("keeps an unlocked thread on its own driver when the instance that ran it is missing", () => {
+    const codex = entry("codex");
+    const claude = entry("claudeAgent");
+    const missing = ProviderInstanceId.make("claude-personal");
+    const select = (threadDriverKind: ProviderDriverKind | null) =>
+      resolveComposerProviderSelection({
+        entries: [codex, claude],
+        candidateInstanceIds: [missing],
+        lockedProvider: null,
+        lockedInstanceId: missing,
+        threadDriverKind,
+      }).selectedProviderEntry?.instanceId;
+
+    expect(select(claude.driverKind)).toBe(claude.instanceId);
+    expect(select(null)).toBe(codex.instanceId);
+  });
+});
+
+describe("isEnvironmentStillConnecting", () => {
+  it("reads a first connection as connecting, however long it takes", () => {
+    for (const phase of ["available", "connecting"] as const) {
+      expect(isEnvironmentStillConnecting({ phase, reconnectWarningGraceElapsed: true })).toBe(
+        true,
+      );
+    }
+  });
+
+  it("reads a reconnect as connecting only inside the grace", () => {
+    expect(
+      isEnvironmentStillConnecting({ phase: "reconnecting", reconnectWarningGraceElapsed: false }),
+    ).toBe(true);
+    expect(
+      isEnvironmentStillConnecting({ phase: "reconnecting", reconnectWarningGraceElapsed: true }),
+    ).toBe(false);
+  });
+
+  it("reads a failed or offline environment as disconnected at once", () => {
+    for (const phase of ["error", "offline", "unsupported"] as const) {
+      expect(isEnvironmentStillConnecting({ phase, reconnectWarningGraceElapsed: false })).toBe(
+        false,
+      );
+    }
+  });
+});
+
+describe("resolveThreadDriverKind", () => {
+  const claude = ProviderDriverKind.make("claudeAgent");
+  const codex = ProviderDriverKind.make("codex");
+
+  it("reads the active provider thread's driver", () => {
+    expect(
+      resolveThreadDriverKind({
+        thread: { activeProviderThreadId: "pt-2" },
+        providerThreads: [
+          { id: "pt-1", driver: codex },
+          { id: "pt-2", driver: claude },
+        ],
+        turnItems: [],
+      }),
+    ).toBe(claude);
+  });
+
+  it("reads a provider subagent's driver from its native items", () => {
+    expect(
+      resolveThreadDriverKind({
+        thread: { activeProviderThreadId: null },
+        providerThreads: [],
+        turnItems: [{ nativeItemRef: { driver: claude } }, { nativeItemRef: null }],
+      }),
+    ).toBe(claude);
+  });
+
+  it("knows nothing about a thread without detail or history", () => {
+    expect(resolveThreadDriverKind(null)).toBeNull();
+    expect(
+      resolveThreadDriverKind({
+        thread: { activeProviderThreadId: null },
+        providerThreads: [],
+        turnItems: [],
       }),
     ).toBeNull();
   });

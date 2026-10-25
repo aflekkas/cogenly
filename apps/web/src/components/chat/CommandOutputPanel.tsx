@@ -33,30 +33,39 @@ export function CommandOutputPanel(props: {
       input: { threadId: props.threadId, itemId: props.itemId },
     }),
   );
+  const text = data?.output.text ?? "";
+  if (text.length === 0) {
+    if (error) return <div className="text-destructive">Couldn&apos;t load output: {error}</div>;
+    if (data === null) return <div className="text-muted-foreground italic">Loading output…</div>;
+    return data.running ? null : <div className="text-muted-foreground italic">No output.</div>;
+  }
+  return <TerminalOutputBlock text={text} truncated={data?.output.truncated === true} />;
+}
+
+/**
+ * Command output as a terminal shows it, with its colours. Keeps the end in
+ * view as output arrives until the reader scrolls up.
+ */
+export function TerminalOutputBlock(props: { readonly text: string; readonly truncated: boolean }) {
+  const { text } = props;
   const scrollRef = useRef<HTMLDivElement>(null);
   // Follow new output until the reader scrolls up; scrolling back down resumes.
   const followRef = useRef(true);
-  const text = data?.output.text ?? "";
   const { resolvedTheme } = useTheme();
   const spans = useMemo(
     () => terminalOutputSpans(text, TERMINAL_PALETTES[resolvedTheme]),
     [text, resolvedTheme],
   );
 
-  // This panel only re-renders when its output changes, so keep the end in view after each.
+  // This block only re-renders when its output changes, so keep the end in view after each.
   useLayoutEffect(() => {
     const element = scrollRef.current;
     if (element && followRef.current) element.scrollTop = element.scrollHeight;
   });
 
-  if (text.length === 0) {
-    if (error) return <div className="text-destructive">Couldn&apos;t load output: {error}</div>;
-    if (data === null) return <div className="text-muted-foreground italic">Loading output…</div>;
-    return data.running ? null : <div className="text-muted-foreground italic">No output.</div>;
-  }
   return (
     <div>
-      {data?.output.truncated ? (
+      {props.truncated ? (
         <div className="text-muted-foreground italic">Earlier output not shown</div>
       ) : null}
       <div

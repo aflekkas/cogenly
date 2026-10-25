@@ -1,4 +1,5 @@
 import * as Option from "effect/Option";
+import type { EnvironmentConnectionPhase } from "@cogenly/client-runtime/connection";
 import type { EnvironmentThreadShell } from "@cogenly/client-runtime/state/shell";
 import {
   type AssetCreateUrlInput,
@@ -353,6 +354,26 @@ export function scheduleEnvironmentReconnectWarning(showWarning: () => void): ()
   return () => globalThis.clearTimeout(timeoutId);
 }
 
+/**
+ * Whether the composer should read as connecting rather than disconnected: the
+ * environment has not connected yet and no attempt has failed, or it dropped
+ * and is still inside the reconnect grace. Only after that does it say so.
+ */
+export function isEnvironmentStillConnecting(input: {
+  readonly phase: EnvironmentConnectionPhase;
+  readonly reconnectWarningGraceElapsed: boolean;
+}): boolean {
+  switch (input.phase) {
+    case "available":
+    case "connecting":
+      return true;
+    case "reconnecting":
+      return !input.reconnectWarningGraceElapsed;
+    default:
+      return false;
+  }
+}
+
 export function hasEnvironmentReconnectWarningGraceElapsed(
   activeEnvironmentId: EnvironmentId | null,
   elapsedEnvironmentId: EnvironmentId | null,
@@ -473,11 +494,44 @@ export function resolveServerThreadError(input: {
 }
 
 /** Use the same enabled instance for the composer, provider status, and chat actions. */
+/**
+ * The driver a thread's conversation ran on: its active provider thread, else
+ * the newest native item it recorded. A provider subagent's thread has no
+ * provider thread of its own, only items. Lets the composer stay with the
+ * thread's provider when the exact instance that ran it is missing from this
+ * environment's catalog.
+ */
+export function resolveThreadDriverKind(
+  projection: {
+    readonly thread: { readonly activeProviderThreadId: string | null };
+    readonly providerThreads: ReadonlyArray<{
+      readonly id: string;
+      readonly driver: ProviderDriverKind;
+    }>;
+    readonly turnItems: ReadonlyArray<{
+      readonly nativeItemRef: { readonly driver: ProviderDriverKind } | null;
+    }>;
+  } | null,
+): ProviderDriverKind | null {
+  if (projection === null) return null;
+  const active = projection.providerThreads.find(
+    (thread) => thread.id === projection.thread.activeProviderThreadId,
+  );
+  return (
+    active?.driver ??
+    projection.providerThreads.at(-1)?.driver ??
+    projection.turnItems.findLast((item) => item.nativeItemRef !== null)?.nativeItemRef?.driver ??
+    null
+  );
+}
+
 export function resolveComposerProviderSelection(input: {
   entries: ReadonlyArray<ProviderInstanceEntry>;
   candidateInstanceIds: ReadonlyArray<ProviderInstanceId | null | undefined>;
   lockedProvider: ProviderDriverKind | null;
   lockedInstanceId: ProviderInstanceId | null | undefined;
+  /** The driver the thread ran on, for when its instance is not in `entries`. */
+  threadDriverKind?: ProviderDriverKind | null | undefined;
 }) {
   const requestedInstanceId = input.candidateInstanceIds.find(
     (candidate) => candidate != null && candidate !== NO_PROVIDER_MODEL_SELECTION.instanceId,
@@ -485,6 +539,7 @@ export function resolveComposerProviderSelection(input: {
   const requestedDriverKind =
     input.lockedProvider ??
     input.entries.find((entry) => entry.instanceId === requestedInstanceId)?.driverKind ??
+    input.threadDriverKind ??
     input.entries[0]?.driverKind ??
     ProviderDriverKind.make("unconfigured");
   const lockedContinuationGroupKey = input.lockedProvider

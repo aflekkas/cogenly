@@ -201,7 +201,9 @@ import type {
   ComposerContextRecord,
   KnownComposerContextRecord,
 } from "@cogenly/contracts";
+import { Badge } from "../ui/badge";
 import { Button, InlineButton } from "../ui/button";
+import { parseTerminalRunResult } from "./terminalRunResult.logic";
 import { useAssetUrlRefresh, useAssetUrls, useAssetUrlState } from "../../assets/assetUrls";
 import { MediaVideoPlayer } from "../media/MediaVideoPlayer";
 import {
@@ -6329,6 +6331,8 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
     registryTool?.key === "terminal_run" && payload?.type === "dynamic_tool"
       ? terminalRunToolCall(payload.input, payload.output, workEntry.createdAt)
       : null;
+  const terminalRunSandboxed =
+    terminalRunCall !== null && parseTerminalRunResult(terminalRunCall.output)?.sandboxed === true;
   const skill =
     payload?.type === "dynamic_tool"
       ? claudeSkillInvocation(payload.toolName, payload.input)
@@ -6522,6 +6526,11 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
             >
               Open chat
             </button>
+          ) : null}
+          {terminalRunSandboxed ? (
+            <Badge variant="outline" size="sm" title="Ran in the chat's read-only sandbox">
+              Sandboxed · read-only
+            </Badge>
           ) : null}
           {terminalRunCall && ctx.onShowTerminalRun ? (
             <InlineButton

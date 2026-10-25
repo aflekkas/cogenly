@@ -86,6 +86,26 @@ export function PairingRouteSurface({
     void submitCredential(token);
   }, [submitCredential]);
 
+  // A pairing link opened while this page already shows changes only the
+  // URL's hash, which mounts nothing, so take its token when the hash changes.
+  useEffect(() => {
+    const pairFromUrl = () => {
+      const token = peekPairingTokenFromUrl();
+      if (!token || token === autoPairTokenRef.current) return;
+      autoPairTokenRef.current = token;
+      autoSubmitAttemptedRef.current = true;
+      stripPairingTokenFromUrl();
+      setCredential(token);
+      void submitCredential(token);
+    };
+    window.addEventListener("hashchange", pairFromUrl);
+    window.addEventListener("popstate", pairFromUrl);
+    return () => {
+      window.removeEventListener("hashchange", pairFromUrl);
+      window.removeEventListener("popstate", pairFromUrl);
+    };
+  }, [submitCredential]);
+
   return (
     <StandalonePage tone="pairing">
       <StandalonePageHeader
