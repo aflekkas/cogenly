@@ -235,9 +235,10 @@ control too. When you're done, click **Agent** in the toolbar to hand the tab
 back. The agent also takes control back the next time it acts. Read-only
 connections can watch without changing the page.
 
-With the browser panel closed, the thread floats a small preview of the tab. Click it to open
-the tab, or click its **Agent** chip to see what the page is doing and take control. Drag the
-preview to move it and drag its corner grip to resize it.
+With the browser panel closed, the thread floats a small preview of its tab over the chat. Click
+it to open the tab, drag it to move it, and drag its corner grip to resize it. Its **×** hides
+the preview for that thread until you choose **Show mini preview** from the browser panel's
+**⋮** menu.
 
 When you use more than one environment, the toolbar names the machine whose
 browser runs the tab.

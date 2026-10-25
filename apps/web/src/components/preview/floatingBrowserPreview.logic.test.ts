@@ -5,22 +5,33 @@ import {
   anchorResizedFloatingPreview,
   clampFloatingPreviewPosition,
   DEFAULT_FLOATING_PREVIEW_CORNER,
-  FLOATING_PREVIEW_ASPECT,
+  clampFloatingPreviewToArea,
+  DEFAULT_FLOATING_PREVIEW_PAGE_ASPECT,
+  dismissFloatingPreviewThread,
+  FLOATING_PREVIEW_CARD_HEIGHT,
   FLOATING_PREVIEW_CARD_WIDTH,
+  FLOATING_PREVIEW_MAX_DISMISSED_THREADS,
+  FLOATING_PREVIEW_MAX_PAGE_ASPECT,
+  FLOATING_PREVIEW_MIN_PAGE_ASPECT,
+  FLOATING_PREVIEW_TITLE_HEIGHT,
   FLOATING_PREVIEW_MAX_WIDTH,
   FLOATING_PREVIEW_MIN_WIDTH,
   floatingPreviewCardSize,
   floatingPreviewCornerPosition,
+  floatingPreviewMinCardSize,
+  floatingPreviewPageAspect,
+  floatingPreviewPageFrame,
+  floatingPreviewPaneArea,
   floatingPreviewPaneFits,
   floatingPreviewResizeHandle,
-  floatingPreviewStatus,
   floatingPreviewTitle,
-  migratePersistedPosition,
+  migratePersistedFloatingPreview,
   nearestFloatingPreviewCorner,
   oppositeFloatingPreviewCorner,
   previewTabHasPage,
   resizeFloatingPreviewWidth,
   resolveFloatingPreviewDriver,
+  restoreFloatingPreviewThread,
   shouldShowFloatingPreview,
 } from "./floatingBrowserPreview.logic";
 
@@ -30,7 +41,7 @@ const page = (url: string, title = ""): PreviewNavStatus =>
 const visible = {
   targetKey: "thread-a\u0000tab-1",
   shownKeys: new Set<string>(),
-  dismissedKey: null,
+  dismissed: false,
   sessionsLoaded: true,
   navStatus: page("https://example.com/"),
   thumbnailAvailable: true,
@@ -57,7 +68,7 @@ describe("shouldShowFloatingPreview", () => {
     expect(shouldShowFloatingPreview({ ...visible, shownKeys: new Set([visible.targetKey]) })).toBe(
       false,
     );
-    expect(shouldShowFloatingPreview({ ...visible, dismissedKey: visible.targetKey })).toBe(false);
+    expect(shouldShowFloatingPreview({ ...visible, dismissed: true })).toBe(false);
     expect(shouldShowFloatingPreview({ ...visible, targetKey: null })).toBe(false);
     // A closed tab has no session, and a fresh tab has no page yet.
     expect(shouldShowFloatingPreview({ ...visible, navStatus: null })).toBe(false);
@@ -72,12 +83,6 @@ describe("shouldShowFloatingPreview", () => {
 
   it("leaves a tab in the desktop's separate preview window to that window", () => {
     expect(shouldShowFloatingPreview({ ...visible, poppedOut: true })).toBe(false);
-  });
-
-  it("dismissing one tab leaves another tab free to float", () => {
-    expect(shouldShowFloatingPreview({ ...visible, dismissedKey: "thread-a\u0000tab-2" })).toBe(
-      true,
-    );
   });
 });
 
@@ -168,29 +173,66 @@ describe("floating preview corners", () => {
   });
 });
 
-describe("migratePersistedPosition", () => {
+describe("migratePersistedFloatingPreview", () => {
   it("resets the old default corner, which v1 stored for a card nobody had moved", () => {
-    expect(migratePersistedPosition({ corner: "bottom-right", freePosition: null }, 1)).toEqual({
-      corner: null,
-      freePosition: null,
-    });
-  });
-
-  it("keeps a corner or free position the user chose", () => {
-    expect(migratePersistedPosition({ corner: "top-left", freePosition: null }, 1)).toEqual({
-      corner: "top-left",
-      freePosition: null,
-    });
     expect(
-      migratePersistedPosition({ corner: "bottom-right", freePosition: { x: 5, y: 9 } }, 1),
-    ).toEqual({ corner: "bottom-right", freePosition: { x: 5, y: 9 } });
+      migratePersistedFloatingPreview({ corner: "bottom-right", freePosition: null }, 1),
+    ).toEqual({ corner: null, freePosition: null, width: null, dismissedThreads: {} });
   });
 
-  it("leaves a current-version bottom-right choice alone", () => {
-    expect(migratePersistedPosition({ corner: "bottom-right", freePosition: null }, 2)).toEqual({
+  it("keeps a corner and width the user chose", () => {
+    expect(
+      migratePersistedFloatingPreview({ corner: "top-left", freePosition: null, width: 320 }, 2),
+    ).toEqual({ corner: "top-left", freePosition: null, width: 320, dismissedThreads: {} });
+  });
+
+  it("drops a pre-v3 free position, which was in window coordinates", () => {
+    expect(
+      migratePersistedFloatingPreview({ corner: "bottom-right", freePosition: { x: 5, y: 9 } }, 2)
+        .freePosition,
+    ).toBeNull();
+  });
+
+  it("keeps a current free position and the threads whose card was closed", () => {
+    const persisted = {
       corner: "bottom-right",
-      freePosition: null,
-    });
+      freePosition: { x: 5, y: 9 },
+      width: null,
+      dismissedThreads: { "env\u0000thread-a": true },
+    };
+    expect(migratePersistedFloatingPreview(persisted, 3)).toEqual(persisted);
+  });
+});
+
+describe("per-thread dismissal", () => {
+  const threadA = "env\u0000thread-a";
+  const threadB = "env\u0000thread-b";
+
+  it("closes one thread's card without touching another's", () => {
+    const dismissed = dismissFloatingPreviewThread({}, threadA);
+    expect(threadA in dismissed).toBe(true);
+    expect(threadB in dismissed).toBe(false);
+  });
+
+  it("brings a card back only for the thread restored", () => {
+    const both = dismissFloatingPreviewThread(dismissFloatingPreviewThread({}, threadA), threadB);
+    expect(Object.keys(restoreFloatingPreviewThread(both, threadA))).toEqual([threadB]);
+    // Restoring a thread that was never closed changes nothing.
+    const none = {};
+    expect(restoreFloatingPreviewThread(none, threadA)).toBe(none);
+  });
+
+  it("forgets the oldest closed threads past the cap, and refreshes one closed again", () => {
+    let dismissed = {};
+    for (let index = 0; index <= FLOATING_PREVIEW_MAX_DISMISSED_THREADS; index += 1) {
+      dismissed = dismissFloatingPreviewThread(dismissed, `thread-${index}`);
+    }
+    expect(Object.keys(dismissed)).toHaveLength(FLOATING_PREVIEW_MAX_DISMISSED_THREADS);
+    expect("thread-0" in dismissed).toBe(false);
+    dismissed = dismissFloatingPreviewThread(dismissed, "thread-1");
+    dismissed = dismissFloatingPreviewThread(dismissed, "thread-new");
+    expect("thread-1" in dismissed).toBe(true);
+    expect("thread-2" in dismissed).toBe(false);
   });
 });
 
@@ -203,13 +245,24 @@ describe("floating preview labels", () => {
 
 describe("floatingPreviewCardSize", () => {
   const roomy = { width: 2000, height: 1400 };
+  const title = FLOATING_PREVIEW_TITLE_HEIGHT;
 
-  it("starts at the default card and keeps its 16:10 shape at any width", () => {
+  it("starts at the default card: a 16:10 page area over the title strip", () => {
     expect(floatingPreviewCardSize(null, roomy, { bottom: 0 })).toEqual({
       width: FLOATING_PREVIEW_CARD_WIDTH,
-      height: Math.round(FLOATING_PREVIEW_CARD_WIDTH * FLOATING_PREVIEW_ASPECT),
+      height: FLOATING_PREVIEW_CARD_HEIGHT + title,
     });
-    expect(floatingPreviewCardSize(400, roomy, { bottom: 0 })).toEqual({ width: 400, height: 250 });
+    expect(floatingPreviewCardSize(400, roomy, { bottom: 0 })).toEqual({
+      width: 400,
+      height: 250 + title,
+    });
+  });
+
+  it("shapes the page area like the tab's viewport", () => {
+    expect(floatingPreviewCardSize(400, roomy, { bottom: 0 }, 0.8)).toEqual({
+      width: 400,
+      height: 500 + title,
+    });
   });
 
   it("clamps to the minimum and maximum width", () => {
@@ -226,13 +279,95 @@ describe("floatingPreviewCardSize", () => {
     expect(floatingPreviewCardSize(500, { width: 600, height: 1400 }, { bottom: 0 }).width).toBe(
       360,
     );
-    // 400 - 150 composer - 24 margins leaves 226 px of height: 361.6 px wide at 16:10.
+    // 400 - 150 composer - 24 margins - 28 title leaves 198 px of page: 316.8 px wide at 16:10.
     expect(floatingPreviewCardSize(500, { width: 2000, height: 400 }, { bottom: 150 }).width).toBe(
-      362,
+      317,
     );
     expect(floatingPreviewCardSize(500, { width: 100, height: 100 }, { bottom: 0 }).width).toBe(
       FLOATING_PREVIEW_MIN_WIDTH,
     );
+  });
+
+  it("needs more height to float a tall page", () => {
+    expect(floatingPreviewMinCardSize().height).toBe(125 + title);
+    expect(floatingPreviewMinCardSize(0.8).height).toBe(250 + title);
+  });
+});
+
+describe("floating preview page scale", () => {
+  const box = { width: 248, height: 155 };
+
+  it("fits a whole 16:10 viewport exactly", () => {
+    expect(floatingPreviewPageFrame({ width: 1280, height: 800 }, box)).toEqual({
+      left: 0,
+      top: 0,
+      width: 248,
+      height: 155,
+      scale: 248 / 1280,
+    });
+  });
+
+  it("scales a tall viewport by its height and centres it, instead of cropping to its top", () => {
+    // A side-panel-shaped page: 700 x 1100.
+    const frame = floatingPreviewPageFrame({ width: 700, height: 1100 }, box);
+    expect(frame?.scale).toBeCloseTo(155 / 1100);
+    expect(frame?.height).toBeCloseTo(155);
+    expect(frame?.width).toBeCloseTo(700 * (155 / 1100));
+    expect(frame?.left).toBeCloseTo((248 - 700 * (155 / 1100)) / 2);
+    expect(frame?.top).toBe(0);
+  });
+
+  it("scales a wide viewport by its width and centres it", () => {
+    const frame = floatingPreviewPageFrame({ width: 2000, height: 500 }, box);
+    expect(frame?.scale).toBeCloseTo(248 / 2000);
+    expect(frame?.width).toBeCloseTo(248);
+    expect(frame?.top).toBeCloseTo((155 - 62) / 2);
+  });
+
+  it("depends only on the page's shape, so device pixels and CSS pixels agree", () => {
+    const css = floatingPreviewPageFrame({ width: 900, height: 700 }, box);
+    const retina = floatingPreviewPageFrame({ width: 1800, height: 1400 }, box);
+    expect(retina?.width).toBeCloseTo(css?.width ?? 0);
+    expect(retina?.height).toBeCloseTo(css?.height ?? 0);
+    expect(retina?.left).toBeCloseTo(css?.left ?? 0);
+  });
+
+  it("recomputes for a resized card", () => {
+    const page = { width: 1280, height: 800 };
+    expect(floatingPreviewPageFrame(page, { width: 496, height: 310 })?.scale).toBeCloseTo(
+      2 * (floatingPreviewPageFrame(page, box)?.scale ?? 0),
+    );
+  });
+
+  it("draws nothing until both the page and the card have a size", () => {
+    expect(floatingPreviewPageFrame(null, box)).toBeNull();
+    expect(floatingPreviewPageFrame({ width: 0, height: 800 }, box)).toBeNull();
+    expect(
+      floatingPreviewPageFrame({ width: 1280, height: 800 }, { width: 0, height: 0 }),
+    ).toBeNull();
+  });
+
+  it("bounds the page area's shape, letterboxing pages beyond it", () => {
+    expect(floatingPreviewPageAspect(null)).toBe(DEFAULT_FLOATING_PREVIEW_PAGE_ASPECT);
+    expect(floatingPreviewPageAspect({ width: 1280, height: 800 })).toBe(1.6);
+    expect(floatingPreviewPageAspect({ width: 400, height: 2000 })).toBe(
+      FLOATING_PREVIEW_MIN_PAGE_ASPECT,
+    );
+    expect(floatingPreviewPageAspect({ width: 4000, height: 500 })).toBe(
+      FLOATING_PREVIEW_MAX_PAGE_ASPECT,
+    );
+  });
+});
+
+describe("floating preview pane area", () => {
+  it("keeps a free card inside the chat pane, above the composer and left of the minimap", () => {
+    const area = floatingPreviewPaneArea({ width: 1000, height: 800 }, { bottom: 120, right: 24 });
+    const card = { width: 248, height: 183 };
+    expect(clampFloatingPreviewToArea({ x: -300, y: -50 }, area, card)).toEqual({ x: 12, y: 12 });
+    expect(clampFloatingPreviewToArea({ x: 5000, y: 5000 }, area, card)).toEqual({
+      x: 1000 - 24 - 12 - 248,
+      y: 800 - 120 - 12 - 183,
+    });
   });
 });
 
@@ -283,38 +418,5 @@ describe("floating preview driver", () => {
     expect(resolveFloatingPreviewDriver({ ...input, desktopController: "agent" })).toBe("agent");
     expect(resolveFloatingPreviewDriver({ ...input, desktopController: "human" })).toBe("you");
     expect(resolveFloatingPreviewDriver({ ...input, desktopController: "none" })).toBe("none");
-  });
-
-  it("says what the page is doing and how to take over", () => {
-    const loading = {
-      _tag: "Loading",
-      url: "https://example.com/a",
-      title: "",
-    } as PreviewNavStatus;
-    expect(floatingPreviewStatus({ driver: "agent", navStatus: loading, streamed: true })).toEqual({
-      chip: "Agent",
-      headline: "Agent is driving",
-      activity: "Loading example.com",
-      takeOver: "stream",
-    });
-    const desktop = floatingPreviewStatus({
-      driver: "agent",
-      navStatus: page("https://example.com/"),
-      streamed: false,
-    });
-    expect(desktop.activity).toBe("On example.com");
-    expect(desktop.takeOver).toBe("page");
-  });
-
-  it("shows no chip and offers no take-over while nobody else drives", () => {
-    for (const driver of ["you", "none"] as const) {
-      const status = floatingPreviewStatus({
-        driver,
-        navStatus: page("https://example.com/"),
-        streamed: true,
-      });
-      expect(status.chip).toBeNull();
-      expect(status.takeOver).toBeNull();
-    }
   });
 });
