@@ -9,6 +9,7 @@ import {
   IsoDateTime,
   PROJECT_INSTRUCTIONS_MAX_LENGTH,
   ProjectLabel,
+  ProjectLabelId,
   ProjectSourceLink,
   ScheduledTask,
   TrimmedNonEmptyString,
@@ -69,6 +70,7 @@ export const AgentFields = Schema.Struct({
   createdAt: Agent.fields.createdAt,
 });
 export const ScheduleFields = Schema.Struct({
+  projectFolderId: Schema.optionalKey(Schema.NullOr(ProjectLabelId)),
   machine: Schema.optionalKey(Schema.NullOr(PortableId)),
   agentId: Schema.NullOr(PortableId),
   title: ScheduledTask.fields.title,
