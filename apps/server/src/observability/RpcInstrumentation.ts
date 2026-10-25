@@ -77,6 +77,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.serverReportClientActivity]: "server",
   [WS_METHODS.serverReportHostPowerState]: "server",
   [WS_METHODS.serverGetBackgroundPolicy]: "server",
+  [WS_METHODS.serverGetChatGreeting]: "server",
   [WS_METHODS.searchQuery]: "search",
   [WS_METHODS.projectLabelsList]: "projectLabels",
   [WS_METHODS.projectLabelsSubscribe]: "projectLabels",

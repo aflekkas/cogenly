@@ -12,6 +12,14 @@ becomes an attachment when inserting it would exceed the message limit. On a
 hardware keyboard, use `Cmd+Shift+V` on Apple devices or `Ctrl+Shift+V` elsewhere
 to keep a large paste editable in the composer instead.
 
+## The new chat greeting
+
+The line above an empty chat's composer is written by your text generation model a
+few times a day (morning, afternoon, and evening) from the titles of what you have
+been working on. Without a connected provider, or late at night, the built-in
+greetings appear instead. To keep only the built-in greetings and make no model
+calls for them, turn off **Settings → General → AI greetings**.
+
 ## Formatting
 
 The composer writes Markdown and shows it styled as you type. Markers such as

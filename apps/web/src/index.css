@@ -1004,6 +1004,12 @@ html[data-mode-switch-transition] :is(.swap-motion, .reveal-motion, .agent-morph
   animation: message-send-fade var(--motion-duration-base) --theme(--ease-out) 150ms both;
 }
 
+/* A written new-chat greeting that arrives after the screen opened replaces
+   the built-in line with an opacity fade. Never on first paint. */
+@utility animate-greeting-swap {
+  animation: message-send-fade var(--motion-duration-base) --theme(--ease-out) both;
+}
+
 /* One message bubble for every transcript: regular chats' user messages and
    both sides of an agent conversation. Body size, 9px by 14px inside, a radius
    scaled to that, and no more than ~70% of the lane. Grouping and colours are

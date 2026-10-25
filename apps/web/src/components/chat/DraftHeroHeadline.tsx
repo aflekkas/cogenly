@@ -74,7 +74,7 @@ import { useOwnerRepositorySearch } from "~/projectLabels/useOwnerRepositorySear
 import { useRemoteRepositoryClone } from "~/projectLabels/useRemoteRepositoryClone";
 import { useProjectLabelDirectory } from "~/projectLabels/useProjectLabels";
 import { answerNoProjectPick, useWorkNoProjectPicked } from "~/projectLabels/workNoProjectPicks";
-import { chatGreeting } from "./chatGreeting";
+import { ChatGreetingText, useChatGreeting } from "./ChatGreetingText";
 import { FadeSwap } from "./StateTransition";
 import { useHeroHeadlineMotion } from "./useHeroHeadlineMotion";
 import { cn } from "~/lib/utils";
@@ -998,7 +998,7 @@ export function DraftHeroHeadline({
   // in the h1; without an explicit label its widget state bleeds into the
   // announced phrase.
   // Fixed when the screen opens, so the line holds still while the user types.
-  const [greeting] = useState(() => chatGreeting(new Date()));
+  const greeting = useChatGreeting(draftThread?.environmentId ?? primaryEnvironmentId);
   // A chat picked into a project says so after the greeting, quietly.
   const greetingSuffix = heroProjectSuffix(pendingProject?.label.name ?? null);
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -1116,7 +1116,7 @@ export function DraftHeroHeadline({
                 data-hero-greeting=""
                 className="inline-block max-w-full group-data-stacked/hero-headline:block"
               >
-                {greeting}
+                <ChatGreetingText text={greeting} />
               </span>
               {draftThread && draftId ? (
                 <ComposerProjectPicker

@@ -477,6 +477,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["generated thread titles source control content default provider"],
   },
   {
+    id: "ai-greetings",
+    title: "AI greetings",
+    to: "/settings/general",
+    scope: "environment-defaults",
+    searchTerms: ["new chat greeting headline hello welcome message generated recent work"],
+  },
+  {
     id: "app-version",
     title: "Version",
     to: "/settings/general",

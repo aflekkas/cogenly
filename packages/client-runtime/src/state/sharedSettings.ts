@@ -25,6 +25,7 @@ const SHARED_SERVER_SETTING_KEYS = [
   "continueThreadsAfterServerUpdate",
   "autoResumeLimitedThreads",
   "snoozeLimitedThreads",
+  "aiGreetings",
   "newWorktreesStartFromOrigin",
   "sourceControlWritingStyle",
   "textGenerationModelSelection",
