@@ -4,6 +4,9 @@ import {
   ProjectLabelId,
   THREAD_REPLICATION_BATCH_BYTES,
   type OrchestrationV2DomainEvent,
+  ProviderDriverKind,
+  ProviderInstanceId,
+  ProviderSessionId,
   ThreadId,
   ThreadReplicationApply,
 } from "@cogenly/contracts";
@@ -11,6 +14,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 
 import { pair } from "../machines/testkit.ts";
+import { CodexProviderCapabilitiesV2 } from "../orchestration-v2/Adapters/CodexAdapterV2.ts";
 import * as EventSink from "../orchestration-v2/EventSink.ts";
 import {
   encodeEvent,
@@ -374,6 +378,74 @@ describe("replication safety regressions", () => {
         );
         expect(moved.events).toContainEqual(raw);
         expect(moved.meta[0]).toMatchObject({ owner: hub.environmentId, futureMeta: "keep" });
+      }).pipe(Effect.scoped),
+    30000,
+  );
+
+  it.live(
+    "a shared provider session id from before machine-named ids does not wedge replication",
+    () =>
+      Effect.gen(function* () {
+        const hub = yield* start("legacy-session-hub", "cloud-server");
+        const laptop = yield* start("legacy-session-laptop", "computer");
+        yield* pair(hub, laptop);
+        const at = yield* DateTime.now;
+        // Both machines once named their shared Codex process the same way.
+        const legacy = ProviderSessionId.make("provider-session:provider-instance:codex:shared");
+        const attached = (id: ThreadId): OrchestrationV2DomainEvent => ({
+          id: EventId.make(`event:session:${id}`),
+          type: "provider-session.attached",
+          threadId: id,
+          occurredAt: at,
+          payload: {
+            id: legacy,
+            driver: ProviderDriverKind.make("codex"),
+            providerInstanceId: ProviderInstanceId.make("codex"),
+            status: "ready",
+            cwd: "/work",
+            model: null,
+            capabilities: CodexProviderCapabilitiesV2,
+            createdAt: at,
+            updatedAt: at,
+            lastError: null,
+          },
+        });
+        const hubThread = ThreadId.make("thread:on-hub");
+        yield* hub.sink.write({
+          events: [forThread(hubThread, thread("event:hub-created", at)), attached(hubThread)],
+        });
+        yield* laptop.sink.write({
+          events: [
+            thread("event:laptop-created", at),
+            attached(threadId),
+            message("event:m", at, "hi"),
+          ],
+        });
+
+        yield* laptop.sync.sync(hub.environmentId);
+        yield* hub.sync.sync(laptop.environmentId);
+
+        expect(
+          (yield* hub.projections.getThreadProjection(threadId)).messages.map((x) => x.text),
+        ).toEqual(["hi"]);
+        expect((yield* laptop.projections.getThreadProjection(hubThread)).thread.id).toBe(
+          hubThread,
+        );
+        // Each replica names the machine whose process it was, as current ids do.
+        const sessions = (machine: typeof hub, id: ThreadId) =>
+          machine.sql<{
+            readonly provider_session_id: string;
+          }>`SELECT provider_session_id FROM orchestration_v2_projection_provider_session_bindings WHERE thread_id = ${id}`.pipe(
+            Effect.map((rows) => rows.map((row) => row.provider_session_id)),
+          );
+        expect(yield* sessions(hub, hubThread)).toEqual([legacy]);
+        expect(yield* sessions(hub, threadId)).toEqual([
+          `${legacy}:machine:${encodeURIComponent(laptop.environmentId)}`,
+        ]);
+        expect(yield* sessions(laptop, threadId)).toEqual([legacy]);
+        expect(yield* sessions(laptop, hubThread)).toEqual([
+          `${legacy}:machine:${encodeURIComponent(hub.environmentId)}`,
+        ]);
       }).pipe(Effect.scoped),
     30000,
   );

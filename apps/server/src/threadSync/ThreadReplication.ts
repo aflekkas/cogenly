@@ -217,6 +217,27 @@ const decodeHandoff = Schema.decodeUnknownSync(HandoffJson);
 const isCursor = (value: number, latest: number) =>
   Number.isSafeInteger(value) && value >= 0 && value <= latest;
 
+/**
+ * Shared provider session ids once omitted their machine, so every machine
+ * called its shared Codex process `provider-session:provider-instance:codex:shared`.
+ * A peer's thread from then claims this machine's own session row and the
+ * receiver refuses the batch for good. Name the thread's owner as current ids
+ * do (Orchestrator `providerSessionIdFor`); a current id never matches.
+ */
+const LEGACY_SHARED_SESSION = /"(provider-session:provider-instance:[^":\\]+:shared)"/g;
+const ownLegacySessions = (raw: Schema.Json, owner: unknown): Schema.Json => {
+  if (typeof owner !== "string") return raw;
+  const json = encodeJson(raw);
+  if (!json.includes(':shared"')) return raw;
+  const named = json.replace(
+    LEGACY_SHARED_SESSION,
+    (_, id: string) => `"${id}:machine:${encodeURIComponent(owner)}"`,
+  );
+  return named === json
+    ? raw
+    : (Option.getOrElse(decodeJsonOption(named), () => raw) as Schema.Json);
+};
+
 interface OwnerRow {
   readonly thread_id: string;
   readonly owner_env: string;
@@ -819,11 +840,11 @@ const make = Effect.gen(function* () {
       threadId: rawThreadId(raw),
       decoded: decodeMeta(raw),
     }));
-    const events = batch.events.map((raw) => ({
-      raw,
-      threadId: rawThreadId(raw),
-      decoded: decodeEventJson(raw),
-    }));
+    const owners = new Map(batch.meta.map((raw) => [rawThreadId(raw), rawField(raw, "owner")]));
+    const events = batch.events.map((sent) => {
+      const raw = ownLegacySessions(sent, owners.get(rawThreadId(sent)));
+      return { raw, threadId: rawThreadId(raw), decoded: decodeEventJson(raw) };
+    });
     // Shape checks that hold for every build: each item names its thread,
     // each event comes with its thread's metadata, and a peer speaks only
     // for threads it owns unless it is this spoke's hub.

@@ -125,6 +125,8 @@ checkout or cloning it with their own credentials. Absolute worktree paths
 cannot be used remotely. Offline targets refuse work instead of queuing it.
 
 Shared provider session ids include their machine identity, since provider instance names are local.
+Older ids lack it, so a receiver names the thread's owner in them; otherwise a
+peer's old thread claims the receiver's own session row and wedges the stream.
 
 A delegated child and its parent may have different owners. The child owns its
 conversation; task bookkeeping and completion wakes belong to the parent.
