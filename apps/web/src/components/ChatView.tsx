@@ -9500,16 +9500,18 @@ export default function ChatView(props: ChatViewProps) {
               title={activeThread.title}
               messagesCarried={workHandoffMessagesCarried}
               onOpenThread={onOpenRelatedThreadStable}
+              trailing={
+                activeThreadShell ? (
+                  <ThreadOwnerBadge
+                    environmentId={activeThreadShell.environmentId}
+                    ownerMachine={activeThreadShell.source.ownerMachine}
+                  />
+                ) : null
+              }
             />
           ) : (
             <h2 className="sr-only">{activeThread.title}</h2>
           )}
-          {isServerThread && activeThreadShell ? (
-            <ThreadOwnerBadge
-              environmentId={activeThreadShell.environmentId}
-              ownerMachine={activeThreadShell.source.ownerMachine}
-            />
-          ) : null}
           {threadDetailsControl && !threadDetailsInTitlebarCluster ? (
             <span key="header" className="swap-motion ms-auto flex h-full shrink-0 items-center">
               {threadDetailsControl}

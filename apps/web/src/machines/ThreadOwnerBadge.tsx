@@ -43,7 +43,9 @@ export function ThreadOwnerBadge(props: {
       <Tooltip>
         <TooltipTrigger delay={300} render={<Badge variant="outline" size="sm" />}>
           <EnvironmentMachineIcon aria-hidden kind={runner.kind} />
-          Runs on {runner.name}
+          {/* The chip never shrinks into the title: a long machine name
+              truncates, and narrow windows keep only the machine icon. */}
+          <span className="max-w-40 truncate max-sm:sr-only">Runs on {runner.name}</span>
         </TooltipTrigger>
         <TooltipPopup side="bottom">
           {runner.online
