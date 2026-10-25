@@ -283,7 +283,6 @@ export function DraftHeroHeadline({
     folderByRepository: projectDirectory.folderByRepository,
   });
   const workProject = isChatDraft ? null : draftProject.project;
-  const workProjectKey = workProject?.key ?? null;
   const heroLine = workHeroLine({
     isChat: isChatDraft,
     hasProject: workProject !== null,
@@ -659,6 +658,7 @@ export function DraftHeroHeadline({
               render={
                 <InlineButton
                   tone="picker"
+                  weight="normal"
                   className="pointer-events-auto min-w-0 max-w-64 shrink align-baseline"
                 />
               }
@@ -750,17 +750,7 @@ export function DraftHeroHeadline({
   // A chat picked into a project says so after the greeting, quietly.
   const greetingSuffix = heroProjectSuffix(pendingProject?.label.name ?? null);
   const headingRef = useRef<HTMLHeadingElement>(null);
-  const measureRef = useRef<HTMLSpanElement>(null);
-  // Work's project and repository change in place: its pieces glide and the
-  // changed name crossfades (useHeroHeadlineMotion), also across the new draft
-  // a picked repository opens.
-  const workHeroKey = `${workProjectKey ?? "none"}:${isScratchDraft ? "none" : activeProjectKey}`;
-  useHeroHeadlineMotion(
-    headingRef,
-    measureRef,
-    isChatDraft && draftThread ? `chat:${draftThread.threadId}` : "heading",
-    { contentKey: isChatDraft ? "chat" : workHeroKey, handoff: DRAFT_HEADING_GROUP },
-  );
+  useHeroHeadlineMotion(headingRef, isChatDraft ? "chat" : "work");
   // A project picked for this Work draft, in the hero or the toolbar, moves it
   // into the project (projectSwitchRepository): the current repository while
   // the project holds it, else its only one, else the project's folder. A
@@ -891,21 +881,12 @@ export function DraftHeroHeadline({
 
   return (
     <div className="@container flex w-full flex-col items-center">
-      {/* Sized to the pane, not the window: beside an open right panel the
-          greeting steps down so it and its project stay on one line. A step
-          rescales smoothly, and a project or breadcrumb that no longer fits
-          goes to its own line (useHeroHeadlineMotion). */}
       <h1
         ref={headingRef}
+        style={{ fontSize: "clamp(var(--text-xl), 3cqw, var(--text-3xl))" }}
         aria-label={headingLabel}
-        className="group/hero-headline relative w-full origin-bottom text-balance text-center font-normal text-xl text-foreground tracking-tight @xl:text-2xl @2xl:text-3xl"
+        className="group/hero-headline relative w-full origin-bottom text-balance text-center font-normal text-xl text-foreground tracking-tight"
       >
-        {/* The greeting and its project on one line, to tell whether they fit. */}
-        <span
-          ref={measureRef}
-          aria-hidden
-          className="pointer-events-none invisible absolute start-0 top-0 whitespace-pre"
-        />
         <FadeSwap
           group={DRAFT_HEADING_GROUP}
           // A chat's project and Work's breadcrumb change in place, not by a swap.
@@ -913,10 +894,7 @@ export function DraftHeroHeadline({
         >
           {isChatDraft ? (
             <>
-              <span
-                data-hero-greeting=""
-                className="inline-block max-w-full group-data-stacked/hero-headline:block"
-              >
+              <span data-hero-greeting="" className="inline">
                 {greeting}
               </span>
               {draftThread && draftId ? (

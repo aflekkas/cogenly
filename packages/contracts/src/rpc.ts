@@ -530,7 +530,6 @@ export const WS_METHODS = {
   projectLabelsMerge: "projectLabels.merge",
   projectLabelsUndismissDuplicate: "projectLabels.undismissDuplicate",
   projectLabelsDismissDuplicate: "projectLabels.dismissDuplicate",
-  projectLabelsUndismissDuplicate: "projectLabels.undismissDuplicate",
   projectLabelsDelete: "projectLabels.delete",
   projectLabelsArchive: "projectLabels.archive",
   projectLabelsUnarchive: "projectLabels.unarchive",
