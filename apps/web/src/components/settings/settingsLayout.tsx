@@ -15,6 +15,7 @@ import {
   createContext,
   type ComponentPropsWithoutRef,
   type ReactNode,
+  type Ref,
   useCallback,
   useContext,
   useEffect,
@@ -27,7 +28,7 @@ import {
   usePrimarySettingsAvailable,
 } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
-import { PageContent, type PageContentWidth } from "../PageContent";
+import { PageContent } from "../PageContent";
 import { Button, InlineButton } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { useOptionalSettingsScope } from "./SettingsScopeContext";
@@ -194,8 +195,8 @@ export function SettingsSection({
   children,
   className,
   ...sectionProps
-}: ComponentPropsWithoutRef<"section"> & {
-  title: string;
+}: Omit<ComponentPropsWithoutRef<"section">, "title"> & {
+  title: ReactNode;
   hideTitle?: boolean;
   icon?: ReactNode;
   /** Small control shown right after the title, such as an add button. */
@@ -282,6 +283,7 @@ export function SettingsRow({
   serverScoped = false,
   settingKeys = EMPTY_SETTING_KEYS,
   clientSetting = false,
+  interactive = false,
   mixed: mixedOverride,
   children,
   className,
@@ -302,6 +304,7 @@ export function SettingsRow({
    * whose keys take no override.
    */
   clientSetting?: boolean;
+  interactive?: boolean;
   mixed?: boolean;
   children?: ReactNode;
 }) {
@@ -508,47 +511,31 @@ export function SettingsRow({
   const renderedStatus = status;
 
   return (
-    <div
+    <SettingsRowContent
       {...rowProps}
       ref={targetRef}
       tabIndex={rowProps.id ? -1 : rowProps.tabIndex}
-      data-slot="settings-row"
-      className={cn(
-        "@container/settings-row rounded-xl px-3 sm:px-4 aria-disabled:opacity-64 aria-disabled:[&_*]:text-muted-foreground",
-        children ? "pt-3 pb-1" : "py-3",
-        className,
-      )}
-    >
-      <div className="flex flex-col gap-3 @min-[32rem]/settings-row:grid @min-[32rem]/settings-row:grid-cols-[minmax(0,1fr)_minmax(10rem,auto)] @min-[32rem]/settings-row:items-center @min-[32rem]/settings-row:gap-8">
-        <div className="min-w-0 flex-1 space-y-1">
-          <div className="flex min-h-5 items-center gap-1.5">
-            <h3 className="text-sm font-medium text-foreground">{title}</h3>
-            {renderedInheritance ? (
-              <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center">
-                {renderedInheritance}
-              </span>
-            ) : null}
+      title={title}
+      description={description}
+      status={renderedStatus}
+      control={renderedControl}
+      interactive={interactive}
+      className={className}
+      titleActions={
+        <>
+          {renderedInheritance ? (
             <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center">
-              {renderedReset}
+              {renderedInheritance}
             </span>
-            {machineLabel}
-            {allProjectsLink}
-          </div>
-          {description ? (
-            <p className="max-w-xl text-xs leading-normal text-muted-foreground/80">
-              {description}
-            </p>
           ) : null}
-          {renderedStatus ? (
-            <div className="pt-0.5 text-xs text-muted-foreground">{renderedStatus}</div>
-          ) : null}
-        </div>
-        {renderedControl ? (
-          <div className="flex w-full min-w-0 shrink-0 items-center gap-2 @min-[32rem]/settings-row:w-auto @min-[32rem]/settings-row:justify-end">
-            {renderedControl}
-          </div>
-        ) : null}
-      </div>
+          <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center">
+            {renderedReset}
+          </span>
+          {machineLabel}
+          {allProjectsLink}
+        </>
+      }
+    >
       {(unavailable || environmentWide) && children ? (
         <div inert className="opacity-50">
           {children}
@@ -556,6 +543,62 @@ export function SettingsRow({
       ) : (
         children
       )}
+    </SettingsRowContent>
+  );
+}
+
+/** Shared row presentation without settings subscriptions, also used by content lists. */
+export function SettingsRowContent({
+  title,
+  description,
+  status,
+  titleActions,
+  control,
+  children,
+  interactive = false,
+  className,
+  ...rowProps
+}: Omit<ComponentPropsWithoutRef<"div">, "title"> & {
+  title: ReactNode;
+  description?: ReactNode;
+  status?: ReactNode;
+  titleActions?: ReactNode;
+  control?: ReactNode;
+  interactive?: boolean;
+  ref?: Ref<HTMLDivElement>;
+}) {
+  return (
+    <div
+      {...rowProps}
+      data-slot="settings-row"
+      className={cn(
+        "@container/settings-row rounded-xl px-3 sm:px-4 aria-disabled:opacity-64 aria-disabled:[&_*]:text-muted-foreground",
+        children ? "pt-3 pb-1" : "py-3",
+        interactive &&
+          "cursor-pointer outline-none transition-opacity duration-(--motion-duration-fast) ease-out hover:bg-muted/20 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+        className,
+      )}
+    >
+      <div className="flex flex-col gap-3 @min-[32rem]/settings-row:grid @min-[32rem]/settings-row:grid-cols-[minmax(0,1fr)_minmax(10rem,auto)] @min-[32rem]/settings-row:items-center @min-[32rem]/settings-row:gap-8">
+        <div className="min-w-0 flex-1 space-y-1">
+          <div className="flex min-h-5 items-center gap-1.5">
+            <h3 className="min-w-0 text-sm font-medium text-foreground">{title}</h3>
+            {titleActions}
+          </div>
+          {description ? (
+            <p className="max-w-xl text-xs leading-normal text-muted-foreground/80">
+              {description}
+            </p>
+          ) : null}
+          {status ? <div className="pt-0.5 text-xs text-muted-foreground">{status}</div> : null}
+        </div>
+        {control ? (
+          <div className="flex w-full min-w-0 shrink-0 items-center gap-2 @min-[32rem]/settings-row:w-auto @min-[32rem]/settings-row:justify-end">
+            {control}
+          </div>
+        ) : null}
+      </div>
+      {children}
     </div>
   );
 }
@@ -594,15 +637,14 @@ export function SettingResetButton({
   );
 }
 
-export function SettingsPageContainer({
-  children,
-  className,
-  width = "default",
-}: {
-  children: ReactNode;
-  className?: string;
-  width?: PageContentWidth;
-}) {
+/**
+ * The one frame every settings page renders in, owned by the settings route
+ * layout: the page scroller, the content column's width and padding, and the
+ * scope sentence. Pages return their sections and never set their own width;
+ * size page content with `@container/settings-page` queries instead of
+ * viewport breakpoints.
+ */
+export function SettingsPageContainer({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const hash = useLocation({ select: (location) => location.hash });
   const highlightTarget = useLocation({
@@ -630,13 +672,18 @@ export function SettingsPageContainer({
         className="scroll-fade-y scrollbar-gutter-both flex-1 overflow-x-hidden overflow-y-auto"
         data-settings-page-scroll
       >
-        <PageContent width={width} className={cn("gap-8", className)}>
+        <PageContent className="@container/settings-page gap-8">
           <SettingsScopeSentence />
           {children}
         </PageContent>
       </div>
     </SettingsSearchTargetProvider>
   );
+}
+
+/** Back to the top of the settings page, for a sub-page swapped in by search. */
+export function resetSettingsPageScroll(): void {
+  document.querySelector("[data-settings-page-scroll]")?.scrollTo({ top: 0 });
 }
 
 export function scrollToSettingsTarget(

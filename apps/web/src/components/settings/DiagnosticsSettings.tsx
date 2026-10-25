@@ -35,7 +35,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
 import { ExpandableText } from "./ExpandableText";
 import { ResourceTelemetryDiagnostics } from "./ResourceTelemetryDiagnostics";
-import { SettingsPageContainer, SettingsSection, useRelativeTimeTick } from "./settingsLayout";
+import { SettingsSection, useRelativeTimeTick } from "./settingsLayout";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { TelemetryExportSettings } from "./TelemetryExportSettings";
@@ -919,7 +919,7 @@ export function DiagnosticsSettingsPanel() {
 
   if (!canReadDiagnostics) {
     return (
-      <SettingsPageContainer>
+      <>
         <p className="text-sm text-muted-foreground">
           {environmentId === null
             ? "Connect a machine to see diagnostics."
@@ -927,12 +927,12 @@ export function DiagnosticsSettingsPanel() {
               ? "Checking diagnostics access…"
               : diagnosticsAccess.error}
         </p>
-      </SettingsPageContainer>
+      </>
     );
   }
 
   return (
-    <SettingsPageContainer width="wide" className="gap-10">
+    <>
       <ResourceTelemetryDiagnostics environmentId={environmentId} />
 
       <SettingsSection
@@ -1338,6 +1338,6 @@ export function DiagnosticsSettingsPanel() {
         )}
       </SettingsSection>
       {exportFormEnvironmentId === environmentId && <TelemetryExportSettings />}
-    </SettingsPageContainer>
+    </>
   );
 }

@@ -1,3 +1,12 @@
+import { matchesSettingsListQuery } from "./settingsList.logic";
+import {
+  SettingsList,
+  SettingsListItem,
+  SettingsListToolbar,
+  SettingsListSearch,
+  SettingsListFilter,
+  SettingsListEmpty,
+} from "./SettingsList";
 import type {
   AgentId,
   EnvironmentId,
@@ -39,21 +48,13 @@ import {
 } from "../../vault/vault.logic";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
-import {
-  Empty,
-  EmptyContent,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "../ui/empty";
 import { OverlayPresence } from "../ui/overlay-presence";
 import { Spinner } from "../ui/spinner";
 import { Switch } from "../ui/switch";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { PeerSyncRow } from "./PeerSyncRow";
 import { useSettingsScope } from "./SettingsScopeContext";
-import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
+import { SettingsRow, SettingsSection } from "./settingsLayout";
 
 const NO_WRITE_TITLE = "This connection cannot change the vault.";
 
@@ -89,7 +90,17 @@ export function VaultSettings() {
   // A standalone machine shows nothing about sharing: there is no one to share with.
   const paired = (sharing.status?.peers.length ?? 0) > 0 || syncPeers.peers.length > 0;
   const [editing, setEditing] = useState<Editing | null>(null);
-  const items = useMemo(() => sortVaultItems(list.items), [list.items]);
+  const [query, setQuery] = useState("");
+  const [type, setType] = useState("all");
+  const items = useMemo(
+    () =>
+      sortVaultItems(list.items).filter(
+        (item) =>
+          (type === "all" || item.type === type) &&
+          matchesSettingsListQuery(query, [item.name, item.label, VAULT_TYPE_LABELS[item.type]]),
+      ),
+    [list.items, query, type],
+  );
   const lastUsed = useMemo(() => lastUsedByItem(activity.usage), [activity.usage]);
   const agentName = (id: AgentId) => agents.find((agent) => agent.id === id)?.name;
   const itemName = (id: string) => list.items.find((item) => item.id === id)?.name;
@@ -110,8 +121,20 @@ export function VaultSettings() {
   );
 
   return (
-    <SettingsPageContainer>
+    <>
       <SettingsSection id="vault" title="Vault" headerAction={addButton("xs")}>
+        <SettingsListToolbar>
+          <SettingsListSearch label="Search vault" value={query} onValueChange={setQuery} />
+          <SettingsListFilter
+            label="Type"
+            value={type}
+            onValueChange={setType}
+            options={[
+              { value: "all", label: "All types" },
+              ...Object.entries(VAULT_TYPE_LABELS).map(([value, label]) => ({ value, label })),
+            ]}
+          />
+        </SettingsListToolbar>
         {environmentId === null ? (
           <SettingsRow title="Choose a machine to see its vault." />
         ) : list.error !== null ? (
@@ -119,21 +142,19 @@ export function VaultSettings() {
         ) : !list.isLoaded ? (
           <SettingsRow title="Loading vault…" />
         ) : items.length === 0 ? (
-          <Empty>
-            <EmptyHeader>
-              <EmptyMedia>
-                <KeyRoundIcon />
-              </EmptyMedia>
-              <EmptyTitle>Nothing in the vault yet</EmptyTitle>
-              <EmptyDescription>
-                Store logins, API keys, cards and notes here so agents can use them without ever
-                seeing them.
-              </EmptyDescription>
-            </EmptyHeader>
-            <EmptyContent>{addButton("default")}</EmptyContent>
-          </Empty>
+          <SettingsListEmpty
+            icon={<KeyRoundIcon />}
+            title={query || type !== "all" ? "Nothing matches" : "Nothing in the vault yet"}
+            description={
+              query || type !== "all"
+                ? "Try another search or type."
+                : "Store logins, API keys, cards and notes here so agents can use them without ever seeing them."
+            }
+          >
+            {query || type !== "all" ? null : addButton("default")}
+          </SettingsListEmpty>
         ) : (
-          <ul className="divide-y divide-border/60">
+          <SettingsList>
             {items.map((item) => (
               <VaultItemRow
                 key={item.id}
@@ -155,13 +176,13 @@ export function VaultSettings() {
                 }}
               />
             ))}
-          </ul>
+          </SettingsList>
         )}
       </SettingsSection>
       {environmentId !== null && paired ? (
         <VaultSharingSection sharing={sharing} syncPeers={syncPeers.peers} />
       ) : null}
-      {environmentId !== null && items.length > 0 ? (
+      {environmentId !== null && list.items.length > 0 ? (
         <SettingsSection id="vault-activity" title="All activity">
           <div className="px-3 py-3 sm:px-4">
             <UsageBody
@@ -198,7 +219,7 @@ export function VaultSettings() {
           />
         )}
       </OverlayPresence>
-    </SettingsPageContainer>
+    </>
   );
 }
 
@@ -221,10 +242,10 @@ function VaultItemRow(props: {
   const label = item.label ?? null;
   const cardLast4 = item.type === "card" && item.cardLast4 ? `•••• ${item.cardLast4}` : null;
   return (
-    <li className="flex flex-col gap-1.5 px-3 py-3 sm:px-4">
-      <div className="flex items-start gap-2">
-        <div className="flex min-w-0 flex-1 items-center gap-1.5">
-          <p className="truncate text-sm text-foreground">{item.name}</p>
+    <SettingsListItem
+      title={item.name}
+      status={
+        <span className="flex min-w-0 flex-wrap items-center gap-1.5">
           <Badge size="sm" variant="outline">
             {VAULT_TYPE_LABELS[item.type]}
           </Badge>
@@ -242,7 +263,9 @@ function VaultItemRow(props: {
           {cardLast4 ? (
             <span className="truncate text-xs text-muted-foreground">{cardLast4}</span>
           ) : null}
-        </div>
+        </span>
+      }
+      control={
         <div className="flex shrink-0 items-center gap-0.5">
           <Button
             size="icon-xs"
@@ -278,8 +301,9 @@ function VaultItemRow(props: {
             <HistoryIcon />
           </Button>
         </div>
-      </div>
-      <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-muted-foreground">
+      }
+    >
+      <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 py-2 text-xs text-muted-foreground">
         <span>{props.policy}</span>
         <span>· {props.scope ?? "All projects"}</span>
         {item.allowedDomains.length > 0 ? <span>· {item.allowedDomains.join(", ")}</span> : null}
@@ -293,7 +317,7 @@ function VaultItemRow(props: {
       {showUsage ? (
         <ItemUsage environmentId={props.environmentId} item={item} agentName={props.agentName} />
       ) : null}
-    </li>
+    </SettingsListItem>
   );
 }
 

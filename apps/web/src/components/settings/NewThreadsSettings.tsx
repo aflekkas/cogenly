@@ -7,12 +7,7 @@ import { DraftInput } from "../ui/draft-input";
 import { ProjectActionsSettings } from "./ProjectActionsSettings";
 import { ProjectDefaultsSettings } from "./ProjectDefaultsSettings";
 import { useSettingsScope } from "./SettingsScopeContext";
-import {
-  SettingResetButton,
-  SettingsPageContainer,
-  SettingsRow,
-  SettingsSection,
-} from "./settingsLayout";
+import { SettingResetButton, SettingsRow, SettingsSection } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 import {
   useScopedSettings,
@@ -27,11 +22,11 @@ import {
 export function NewThreadsSettingsPanel() {
   const { scope } = useSettingsScope();
   return (
-    <SettingsPageContainer>
+    <>
       <ProjectDefaultsSettings category="new-threads" />
       <AddingRepositoriesSettings />
       {scope.kind === "project" ? <ProjectActionsSettings /> : null}
-    </SettingsPageContainer>
+    </>
   );
 }
 

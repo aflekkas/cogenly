@@ -39,7 +39,6 @@ import {
   latestExecutedRun,
   latestRootProviderFailure,
 } from "@cogenly/shared/orchestrationV2ThreadError";
-import type { UsageLimitSourceSnapshots } from "@cogenly/contracts";
 import {
   collectProviderUsageLimits,
   hasProviderUsageLimits,
@@ -601,7 +600,6 @@ import type { CodexArtifactTemplate } from "@cogenly/shared/codexArtifactTemplat
 
 const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_PROVIDER_MODELS: ServerProvider["models"] = [];
-const EMPTY_USAGE_LIMIT_SOURCES: UsageLimitSourceSnapshots = [];
 
 const TIMELINE_SCROLL_CANCEL_SENTINEL = Object.freeze({});
 const EMPTY_FEEDBACK_SUBMISSIONS: ReadonlyArray<CodexFeedbackSubmission> = [];
@@ -2878,7 +2876,6 @@ export default function ChatView(props: ChatViewProps) {
   ) {
     setUsageLimitsPanel(null);
   }
-  const usageLimitSources = serverConfig?.usageLimitSources ?? EMPTY_USAGE_LIMIT_SOURCES;
   const usageLimitsReport = useMemo(
     () =>
       usageLimitsPanel !== null &&
@@ -2888,17 +2885,10 @@ export default function ChatView(props: ChatViewProps) {
         ? collectProviderUsageLimits(
             activeProviderInstanceId,
             providerStatuses,
-            usageLimitSources,
             usageLimitsPanel.now,
           )
         : null,
-    [
-      activeProviderInstanceId,
-      providerStatuses,
-      usageLimitSources,
-      usageLimitsKey,
-      usageLimitsPanel,
-    ],
+    [activeProviderInstanceId, providerStatuses, usageLimitsKey, usageLimitsPanel],
   );
   const usageLimitsBanner = useMemo(
     () =>
@@ -2917,18 +2907,13 @@ export default function ChatView(props: ChatViewProps) {
   // elsewhere the name stays the provider's own and is sent through untouched.
   const usageLimitsOffered =
     activeProviderStatus !== null &&
-    hasProviderUsageLimits(activeProviderStatus.driver, providerStatuses, usageLimitSources);
+    hasProviderUsageLimits(activeProviderStatus.driver, providerStatuses);
   // Answered locally from the last Limits snapshot; the agent never sees it.
   const openUsageLimits = () => {
     const now = Date.now();
     const report =
       activeProviderInstanceId !== null && usageLimitsKey !== null
-        ? collectProviderUsageLimits(
-            activeProviderInstanceId,
-            providerStatuses,
-            usageLimitSources,
-            now,
-          )
+        ? collectProviderUsageLimits(activeProviderInstanceId, providerStatuses, now)
         : null;
     if (report && usageLimitsKey !== null) {
       setUsageLimitsPanel({ key: usageLimitsKey, threadKey: routeThreadKey, now });

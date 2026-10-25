@@ -69,7 +69,7 @@ import {
   whenNodeRemoveLabel,
 } from "./KeybindingsSettings.logic";
 import { SettingsGroup } from "./SettingsGroup";
-import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
+import { SettingsRow, SettingsSection } from "./settingsLayout";
 import { keybindingSearchAnchorId, searchableSetting } from "./settingsSearch";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -1427,7 +1427,7 @@ export function KeybindingsSettingsPanel() {
   };
 
   return (
-    <SettingsPageContainer>
+    <>
       <SettingsSection
         {...searchableSetting("keybindings")}
         headerAction={!isElectron ? <BrowserKeybindingNotice /> : null}
@@ -1482,6 +1482,6 @@ export function KeybindingsSettingsPanel() {
           </SettingsGroup>
         )}
       </div>
-    </SettingsPageContainer>
+    </>
   );
 }

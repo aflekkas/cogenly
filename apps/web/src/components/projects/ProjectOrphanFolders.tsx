@@ -23,7 +23,6 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { SettingsRow, SettingsSection } from "../settings/settingsLayout";
 import { Button } from "../ui/button";
 import { DisclosurePanel } from "../ui/disclosure";
-import { PageContent } from "../PageContent";
 
 const NO_PERMISSION = "You don't have permission to change projects here.";
 
@@ -191,7 +190,7 @@ function EnvironmentOrphanFolders(props: {
         settle(folders.flatMap((folder) => (isLeaving(folder.dirName) ? [folder.dirName] : [])))
       }
     >
-      <PageContent width="wide" className="pt-0 pb-6">
+      <div className="flex min-w-0 flex-col gap-6">
         <SettingsSection title={title}>
           {folders.map((folder) => {
             const action = pending.get(folder.dirName) ?? null;
@@ -248,7 +247,7 @@ function EnvironmentOrphanFolders(props: {
             );
           })}
         </SettingsSection>
-      </PageContent>
+      </div>
     </DisclosurePanel>
   );
 }

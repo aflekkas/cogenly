@@ -21,7 +21,7 @@ import { Button } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { useSettingsScope } from "./SettingsScopeContext";
-import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
+import { SettingsRow, SettingsSection } from "./settingsLayout";
 
 type ExportSection = "chats" | "work" | "agents" | "commitments" | "projects" | "memory";
 const SECTIONS: ReadonlyArray<{ value: ExportSection; label: string }> = [
@@ -147,7 +147,7 @@ function DataSettingsPanel({ environmentId }: { environmentId: EnvironmentId | n
         : null;
 
   return (
-    <SettingsPageContainer>
+    <>
       <SettingsSection id="data-export" title="Export">
         <SettingsRow
           title="What to include"
@@ -283,6 +283,6 @@ function DataSettingsPanel({ environmentId }: { environmentId: EnvironmentId | n
         Validate reads a bundle back and checks every record without changing anything. Importing a
         bundle isn't available yet.
       </p>
-    </SettingsPageContainer>
+    </>
   );
 }

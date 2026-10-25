@@ -15,7 +15,7 @@ import { DisclosureChevron } from "../ui/disclosure";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { SearchInput } from "../ui/search-input";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { SettingsPageContainer, SettingsSection } from "./settingsLayout";
+import { SettingsSection } from "./settingsLayout";
 
 type LicenseManifestState =
   | { readonly status: "loading" }
@@ -239,7 +239,7 @@ export function OpenSourceLicensesPanel() {
   const retry = useCallback(() => setRequestVersion((value) => value + 1), []);
 
   return (
-    <SettingsPageContainer>
+    <>
       <SettingsSection
         title="Third-party notices"
         headerAction={
@@ -283,6 +283,6 @@ export function OpenSourceLicensesPanel() {
           </p>
         )}
       </SettingsSection>
-    </SettingsPageContainer>
+    </>
   );
 }

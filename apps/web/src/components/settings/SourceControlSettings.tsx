@@ -54,7 +54,6 @@ import { SourceControlWritingSettingsSection } from "./SourceControlWritingSetti
 import {
   PolicyTooltip,
   SettingResetButton,
-  SettingsPageContainer,
   SettingsSearchTarget,
   SettingsSection,
   useSettingsSearchTargetId,
@@ -560,7 +559,7 @@ export function SourceControlSettingsPanel() {
   );
 
   return (
-    <SettingsPageContainer>
+    <>
       <ProjectDefaultsSettings category="source-control" />
       {environmentId === null ? (
         <SettingsSection id={searchableSetting("source-control").id} title="Server machine">
@@ -640,6 +639,6 @@ export function SourceControlSettingsPanel() {
       )}
 
       <SourceControlWritingSettingsSection />
-    </SettingsPageContainer>
+    </>
   );
 }

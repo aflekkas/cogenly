@@ -67,18 +67,12 @@ function SettingsScopeBoundary({ pathname, children }: { pathname: string; child
   }
   // Keep the scope sentence on screen so the selection can be changed back.
   if (scope.kind === "unavailable")
-    return (
-      <SettingsPageContainer>
-        <p className="px-3 text-sm text-muted-foreground sm:px-4">{scope.message}</p>
-      </SettingsPageContainer>
-    );
+    return <p className="px-3 text-sm text-muted-foreground sm:px-4">{scope.message}</p>;
   if (scope.kind === "environment" && connectedEnvironments.length === 0) {
     return (
-      <SettingsPageContainer>
-        <p className="px-3 text-sm text-muted-foreground sm:px-4">
-          Reconnect {scope.label} to change its settings.
-        </p>
-      </SettingsPageContainer>
+      <p className="px-3 text-sm text-muted-foreground sm:px-4">
+        Reconnect {scope.label} to change its settings.
+      </p>
     );
   }
   return children;
@@ -111,9 +105,13 @@ function SettingsContentLayout() {
         </WorkspacePageHeader>
 
         <div key={contentScopeKey} className="min-h-0 flex flex-1 flex-col">
-          <SettingsScopeBoundary pathname={location.pathname}>
-            <Outlet />
-          </SettingsScopeBoundary>
+          {/* Every page shares this frame and its width; a new section starts
+              its own scroller at the top. */}
+          <SettingsPageContainer key={sectionRouteId}>
+            <SettingsScopeBoundary pathname={location.pathname}>
+              <Outlet />
+            </SettingsScopeBoundary>
+          </SettingsPageContainer>
         </div>
       </div>
     </SidebarInset>

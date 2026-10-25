@@ -41,7 +41,7 @@ import {
   type T3ImportSourceWithBackup,
   type T3ImportView,
 } from "./T3ImportSettings.logic";
-import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
+import { SettingsRow, SettingsSection } from "./settingsLayout";
 
 /**
  * Settings → Import. Brings T3 Code's projects, threads and a few settings
@@ -59,7 +59,7 @@ function T3ImportGate({ environmentId }: { environmentId: EnvironmentId | null }
   const canImport = useAtomValue(t3ImportRpc.scan.permissionAtom(environmentId));
   if (environmentId === null || !canImport) {
     return (
-      <SettingsPageContainer>
+      <>
         <SettingsSection id="t3-import" title="Import from T3 Code">
           <SettingsRow
             title={
@@ -69,7 +69,7 @@ function T3ImportGate({ environmentId }: { environmentId: EnvironmentId | null }
             }
           />
         </SettingsSection>
-      </SettingsPageContainer>
+      </>
     );
   }
   return <T3ImportSettingsPanel environmentId={environmentId} />;
@@ -78,9 +78,9 @@ function T3ImportGate({ environmentId }: { environmentId: EnvironmentId | null }
 function T3ImportSettingsPanel({ environmentId }: { environmentId: EnvironmentId }) {
   const flow = useT3ImportFlow(environmentId);
   return (
-    <SettingsPageContainer>
+    <>
       <T3ImportFlowView flow={flow} presentation="settings" />
-    </SettingsPageContainer>
+    </>
   );
 }
 

@@ -8,7 +8,7 @@ import { WsRpcGroup, WsSubscribeServerConfigRpc } from "./rpc.ts";
 const decodeServerConfigPayload = Schema.decodeSync(WsSubscribeServerConfigRpc.payloadSchema);
 
 /**
- * The client always sends `usageLimitSources`, including to servers built
+ * The client always sends `usageLimitsCommand`, including to servers built
  * before the field existed, whose payload schema was an empty struct. What
  * makes that safe is that such a schema accepts the request rather than
  * rejecting it -- an error here would take down the config subscription.
@@ -16,15 +16,15 @@ const decodeServerConfigPayload = Schema.decodeSync(WsSubscribeServerConfigRpc.p
 describe("subscribeServerConfig payload compatibility", () => {
   it("is accepted by a server whose schema predates the field", () => {
     const oldServerPayload = Schema.Struct({});
-    const decoded = Schema.decodeExit(oldServerPayload)({ usageLimitSources: true });
+    const decoded = Schema.decodeExit(oldServerPayload)({ usageLimitsCommand: true });
     expect(Exit.isSuccess(decoded)).toBe(true);
   });
 
   it("is carried by a server that declares it", () => {
     const decoded = decodeServerConfigPayload({
-      usageLimitSources: true,
+      usageLimitsCommand: true,
     });
-    expect(decoded).toEqual({ usageLimitSources: true });
+    expect(decoded).toEqual({ usageLimitsCommand: true });
   });
 
   it("stays optional, so a client that never sends it still subscribes", () => {

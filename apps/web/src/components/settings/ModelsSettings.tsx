@@ -23,7 +23,6 @@ import { useSettingsScope } from "./SettingsScopeContext";
 import {
   SETTINGS_PICKER_TRIGGER_CLASSNAME,
   SettingResetButton,
-  SettingsPageContainer,
   SettingsRow,
   SettingsSection,
 } from "./settingsLayout";
@@ -40,12 +39,12 @@ const DEFAULT_DRIVER_KIND = ProviderDriverKind.make("codex");
 /** Settings → Models: which models new threads and generated text use. */
 export function ModelsSettingsPanel() {
   return (
-    <SettingsPageContainer>
+    <>
       <SettingsSection id="models" title="Defaults">
         <ProjectDefaultsSettings category="models" />
         <TextGenerationModelRow />
       </SettingsSection>
-    </SettingsPageContainer>
+    </>
   );
 }
 

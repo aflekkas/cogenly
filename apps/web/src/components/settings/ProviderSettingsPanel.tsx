@@ -92,7 +92,6 @@ import { ExpandableText } from "./ExpandableText";
 import { ProviderInstanceCard } from "./ProviderInstanceCard";
 import { ProjectOverridesPopover } from "./SettingInheritance";
 import { useProviderInstanceOverrides } from "./useScopedSettings";
-import { UsageProviderSettings } from "./UsageProviderSettings";
 import { ProviderAuthenticationSection } from "./ProviderAuthenticationSection";
 import { CodexSetupSection, CodexManagedRuntimeFields } from "./CodexSetupSection";
 import { readCodexSetupMode } from "./CodexSetupSection.logic";
@@ -108,7 +107,6 @@ import {
 import {
   PolicyTooltip,
   SettingResetButton,
-  SettingsPageContainer,
   SettingsRow,
   SettingsSection,
   useRelativeTimeTick,
@@ -176,7 +174,7 @@ function providerEnvironmentDetail(environment: EnvironmentPresentation): string
 // Shared by the editor grid and the placeholder states so switching devices
 // never changes the card's footprint.
 const providerCardHeightClassName =
-  "@min-[48rem]/providers:h-[min(44rem,calc(100dvh-11rem))] @min-[48rem]/providers:min-h-[32rem]";
+  "@min-[48rem]/settings-page:h-[min(44rem,calc(100dvh-11rem))] @min-[48rem]/settings-page:min-h-[32rem]";
 
 /**
  * Same chrome as the provider editor (section heading, floating device tabs,
@@ -294,12 +292,12 @@ interface ProviderSettingsTarget {
 
 export function ProviderSettingsPanel(target: ProviderSettingsTarget) {
   return (
-    <SettingsPageContainer className="@container/providers gap-8">
+    <>
       <ProviderSettingsPanelContent
         key={`${target.environmentId ?? ""}:${target.instanceId ?? ""}`}
         {...target}
       />
-    </SettingsPageContainer>
+    </>
   );
 }
 
@@ -343,8 +341,7 @@ function ProviderSettingsPanelContent(target: ProviderSettingsTarget) {
   useEffect(() => {
     if (
       !target.scoped &&
-      (searchTargetId === searchableSetting("provider-health-check-interval").id ||
-        searchTargetId === searchableSetting("usage-providers").id) &&
+      searchTargetId === searchableSetting("provider-health-check-interval").id &&
       !selectedEnvironmentCanRenderSettings &&
       searchableEnvironmentId !== undefined
     ) {
@@ -1101,14 +1098,14 @@ export function EnvironmentProviderSettings({
           divided={false}
           className={cn(
             providerCardHeightClassName,
-            "overflow-hidden @min-[48rem]/providers:grid @min-[48rem]/providers:grid-cols-[17rem_minmax(0,1fr)]",
+            "overflow-hidden @min-[48rem]/settings-page:grid @min-[48rem]/settings-page:grid-cols-[17rem_minmax(0,1fr)]",
           )}
         >
-          <div className="border-b border-border/60 bg-muted/10 @min-[48rem]/providers:flex @min-[48rem]/providers:min-h-0 @min-[48rem]/providers:flex-col @min-[48rem]/providers:border-r @min-[48rem]/providers:border-b-0">
+          <div className="border-b border-border/60 bg-muted/10 @min-[48rem]/settings-page:flex @min-[48rem]/settings-page:min-h-0 @min-[48rem]/settings-page:flex-col @min-[48rem]/settings-page:border-r @min-[48rem]/settings-page:border-b-0">
             <ScrollArea
               scrollFade
               chainVerticalScroll
-              className="@min-[48rem]/providers:min-h-0 @min-[48rem]/providers:flex-1"
+              className="@min-[48rem]/settings-page:min-h-0 @min-[48rem]/settings-page:flex-1"
             >
               <div className="divide-y divide-border/50">
                 {rows.map((row) => renderProviderInstance(row, "list"))}
@@ -1126,9 +1123,13 @@ export function EnvironmentProviderSettings({
             </ScrollArea>
           </div>
 
-          <div className="min-w-0 @min-[48rem]/providers:min-h-0">
+          <div className="min-w-0 @min-[48rem]/settings-page:min-h-0">
             {selectedRow ? (
-              <ScrollArea scrollFade chainVerticalScroll className="@min-[48rem]/providers:h-full">
+              <ScrollArea
+                scrollFade
+                chainVerticalScroll
+                className="@min-[48rem]/settings-page:h-full"
+              >
                 <div className="space-y-6 p-4">{renderProviderInstance(selectedRow, "editor")}</div>
               </ScrollArea>
             ) : (
@@ -1141,14 +1142,6 @@ export function EnvironmentProviderSettings({
           </div>
         </SettingsGroup>
       </SettingsSection>
-
-      <UsageProviderSettings
-        key={environmentId}
-        environmentId={environmentId}
-        environmentLabel={environmentLabel}
-        sources={settings.usageLimitSources}
-        readOnly={readOnly}
-      />
 
       <SettingsSection title="Advanced">
         <SettingsRow

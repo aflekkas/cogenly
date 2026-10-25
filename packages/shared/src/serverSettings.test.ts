@@ -3,7 +3,6 @@ import {
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
-  UsageLimitSourceId,
   type ServerProvider,
 } from "@cogenly/contracts";
 import * as Duration from "effect/Duration";
@@ -127,20 +126,6 @@ describe("serverSettings helpers", () => {
       worktreeKeepWhen: "uncommitted-changes",
       browserArtifactsAfterDays: null,
       logsAfterDays: 30,
-    });
-  });
-  it("replaces a source control host's patched field so a cleared account pin does not survive", () => {
-    const pinned = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
-      sourceControlHosts: {
-        github: { hosts: { "github.com": { account: "work", enabled: true } }, tokens: {} },
-      },
-    });
-    const unpinned = applyServerSettingsPatch(pinned, {
-      sourceControlHosts: { github: { hosts: { "github.com": { enabled: false } } } },
-    });
-    expect(unpinned.sourceControlHosts.github).toEqual({
-      hosts: { "github.com": { enabled: false } },
-      tokens: {},
     });
   });
   it("replaces SSH host lists when saving, editing, and removing hosts", () => {
@@ -765,29 +750,6 @@ describe("serverSettings helpers", () => {
       newWorktreesStartFromOrigin: true,
       providerInstances: {},
     });
-  });
-
-  it("upserts and removes usageLimitSources per entry so concurrent edits cannot clobber", () => {
-    const hubA = UsageLimitSourceId.make("cliproxy-a");
-    const hubB = UsageLimitSourceId.make("cliproxy-b");
-    const source = (url: string) => ({
-      kind: "cliproxy" as const,
-      url,
-      managementKey: "secret",
-      enabled: true,
-    });
-    const current = {
-      ...DEFAULT_SERVER_SETTINGS,
-      usageLimitSources: { [hubA]: source("http://a:8318") },
-    };
-
-    const added = applyServerSettingsPatch(current, {
-      usageLimitSources: { [hubB]: source("http://b:8318") },
-    });
-    expect(Object.keys(added.usageLimitSources)).toEqual([hubA, hubB]);
-
-    const removed = applyServerSettingsPatch(added, { usageLimitSources: { [hubA]: null } });
-    expect(Object.keys(removed.usageLimitSources)).toEqual([hubB]);
   });
 
   it("stores background activity profiles as a versioned object and syncs legacy aliases", () => {

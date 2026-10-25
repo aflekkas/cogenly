@@ -1,3 +1,9 @@
+import {
+  SettingsListToolbar,
+  SettingsListSearch,
+  SettingsListFilter,
+  SettingsListEmpty,
+} from "./SettingsList";
 import { OverlayPresence } from "~/components/ui/overlay-presence";
 import type { AgentId, ProjectLabelId } from "@cogenly/contracts";
 import { BrainIcon, PlusIcon } from "lucide-react";
@@ -12,12 +18,9 @@ import { useFactActions, useFactNavigation, useFacts } from "../../memory/useFac
 import { sortProjectLabels } from "../../projectLabels/projectLabels.logic";
 import { useEnvironmentProjectLabels } from "../../projectLabels/useProjectLabels";
 import { Button } from "../ui/button";
-import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "../ui/empty";
-import { SearchInput } from "../ui/search-input";
-import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { PeerSyncRow } from "./PeerSyncRow";
 import { useSettingsScope } from "./SettingsScopeContext";
-import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
+import { SettingsRow, SettingsSection } from "./settingsLayout";
 
 const ALL = "all";
 
@@ -57,7 +60,7 @@ export function MemorySettings() {
   const filtered = labelId !== ALL || agentId !== ALL || status !== "current" || query !== "";
 
   return (
-    <SettingsPageContainer>
+    <>
       <SettingsSection
         id="memory"
         title="Memory"
@@ -78,88 +81,52 @@ export function MemorySettings() {
           <SettingsRow title="Choose a machine to see what it remembers." />
         ) : (
           <>
-            <div className="flex flex-wrap items-center gap-2 px-3 py-2.5 sm:px-4">
-              <SearchInput
-                frameClassName="min-w-40 flex-1"
-                aria-label="Search memory"
-                placeholder="Search memory"
-                value={query}
-                onChange={(event) => setQuery(event.currentTarget.value)}
-                clearLabel="Clear memory search"
-                onClear={() => setQuery("")}
+            <SettingsListToolbar>
+              <SettingsListSearch label="Search memory" value={query} onValueChange={setQuery} />
+              <SettingsListFilter
+                label="Project"
+                value={labelId}
+                onValueChange={setLabelId}
+                options={[
+                  { value: ALL, label: "All projects" },
+                  ...sortedLabels.map((label) => ({ value: label.id, label: label.name })),
+                ]}
               />
-              <Select value={labelId} onValueChange={(value) => setLabelId(value ?? ALL)}>
-                <SelectTrigger size="sm" aria-label="Project">
-                  <SelectValue>
-                    {labelId === ALL
-                      ? "All projects"
-                      : (labels.find((label) => label.id === labelId)?.name ?? "Project")}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectPopup align="end" alignItemWithTrigger={false}>
-                  <SelectItem value={ALL}>All projects</SelectItem>
-                  {sortedLabels.map((label) => (
-                    <SelectItem key={label.id} value={label.id}>
-                      {label.name}
-                    </SelectItem>
-                  ))}
-                </SelectPopup>
-              </Select>
               {agents.length > 0 ? (
-                <Select value={agentId} onValueChange={(value) => setAgentId(value ?? ALL)}>
-                  <SelectTrigger size="sm" aria-label="Agent">
-                    <SelectValue>
-                      {agentId === ALL ? "All agents" : (agentName(agentId) ?? "Agent")}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectPopup align="end" alignItemWithTrigger={false}>
-                    <SelectItem value={ALL}>All agents</SelectItem>
-                    {agents.map((agent) => (
-                      <SelectItem key={agent.id} value={agent.id}>
-                        {agent.name}
-                      </SelectItem>
-                    ))}
-                  </SelectPopup>
-                </Select>
+                <SettingsListFilter
+                  label="Agent"
+                  value={agentId}
+                  onValueChange={setAgentId}
+                  options={[
+                    { value: ALL, label: "All agents" },
+                    ...agents.map((agent) => ({ value: agent.id, label: agent.name })),
+                  ]}
+                />
               ) : null}
-              <Select
+              <SettingsListFilter
+                label="Status"
                 value={status}
-                onValueChange={(value) =>
-                  setStatus((value as FactStatusFilter | null) ?? "current")
-                }
-              >
-                <SelectTrigger size="sm" aria-label="Status">
-                  <SelectValue>
-                    {FACT_STATUS_FILTERS.find((option) => option.value === status)?.label}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectPopup align="end" alignItemWithTrigger={false}>
-                  {FACT_STATUS_FILTERS.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectPopup>
-              </Select>
-            </div>
+                onValueChange={(value) => {
+                  const option = FACT_STATUS_FILTERS.find((option) => option.value === value);
+                  if (option) setStatus(option.value);
+                }}
+                options={FACT_STATUS_FILTERS}
+              />
+            </SettingsListToolbar>
             {list.error !== null ? (
               <SettingsRow title="Could not load memory" description={list.error} />
             ) : !list.isLoaded ? (
               <SettingsRow title="Loading memory…" />
             ) : facts.length === 0 ? (
-              <Empty>
-                <EmptyHeader>
-                  <EmptyMedia>
-                    <BrainIcon />
-                  </EmptyMedia>
-                  <EmptyTitle>{filtered ? "Nothing matches" : "Nothing remembered yet"}</EmptyTitle>
-                  <EmptyDescription>
-                    {filtered
-                      ? "Try another project, agent or status."
-                      : "Add something here. Agents can propose facts for you to confirm."}
-                  </EmptyDescription>
-                </EmptyHeader>
-              </Empty>
+              <SettingsListEmpty
+                icon={<BrainIcon />}
+                title={filtered ? "Nothing matches" : "Nothing remembered yet"}
+                description={
+                  filtered
+                    ? "Try another project, agent or status."
+                    : "Add something here. Agents can propose facts for you to confirm."
+                }
+              />
             ) : (
               <FactList
                 environmentId={environmentId}
@@ -214,6 +181,6 @@ export function MemorySettings() {
           />
         )}
       </OverlayPresence>
-    </SettingsPageContainer>
+    </>
   );
 }

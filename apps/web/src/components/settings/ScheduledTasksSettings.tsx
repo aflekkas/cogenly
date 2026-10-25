@@ -1,3 +1,12 @@
+import { matchesSettingsListQuery } from "./settingsList.logic";
+import {
+  SettingsList,
+  SettingsListItem,
+  SettingsListToolbar,
+  SettingsListSearch,
+  SettingsListFilter,
+  SettingsListEmpty,
+} from "./SettingsList";
 import { useEnvironmentMachineList } from "~/machines/useMachines";
 import { mergeRunOnOptions } from "~/machines/launchMachine.logic";
 import { EnvironmentOptionContent } from "../BranchToolbarEnvironmentSelector";
@@ -82,7 +91,6 @@ import {
 import { EventTriggerFields } from "../../agents/EventTriggerFields";
 import { useEnvironmentProjectLabels } from "../../projectLabels/useProjectLabels";
 import { EnvironmentRow, environmentTransportLabel } from "./EnvironmentRow";
-import { SettingsGroup } from "./SettingsGroup";
 import { settingsScopeEnvironmentLabel, settingsScopeEnvironmentLabels } from "./settingsScopeAxis";
 import {
   DEFAULT_DRAFT_EVENT,
@@ -98,7 +106,6 @@ import {
 import { Label } from "../ui/label";
 import { Menu, MenuTrigger, MenuPopup, MenuItem, MenuSeparator } from "../ui/menu";
 import { ToggleGroup, Toggle } from "../ui/toggle-group";
-import { Empty, EmptyHeader, EmptyTitle, EmptyDescription, EmptyMedia } from "../ui/empty";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -119,7 +126,6 @@ import { Textarea } from "../ui/textarea";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
-  SettingsPageContainer,
   SettingsRow,
   SettingsSection,
   SETTINGS_PICKER_TRIGGER_CLASSNAME,
@@ -270,6 +276,11 @@ export function ScheduledTasksSettings(target: {
   readonly taskId?: ScheduledTaskId | undefined;
   readonly create?: true | undefined;
 }) {
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const matchesTask = (task: ScheduledTask) =>
+    (statusFilter === "all" || task.enabled === (statusFilter === "enabled")) &&
+    matchesSettingsListQuery(query, [task.title, task.prompt]);
   const { scope, environments, connectedEnvironments, environment } = useSettingsScope();
   const [editor, setEditor] = useState<{
     environmentId: EnvironmentId;
@@ -292,10 +303,9 @@ export function ScheduledTasksSettings(target: {
     setEditor({ environmentId: createEnvironmentId, task: null });
   }, [canCreate, createEnvironmentId, target.create]);
   return (
-    <SettingsPageContainer>
+    <>
       <SettingsSection
         title="Scheduled tasks"
-        variant="plain"
         headerAction={
           <Button
             size="xs"
@@ -311,44 +321,58 @@ export function ScheduledTasksSettings(target: {
           </Button>
         }
       >
+        <SettingsListToolbar>
+          <SettingsListSearch
+            label="Search scheduled tasks"
+            value={query}
+            onValueChange={setQuery}
+          />
+          <SettingsListFilter
+            label="Status"
+            value={statusFilter}
+            onValueChange={setStatusFilter}
+            options={[
+              { value: "all", label: "All tasks" },
+              { value: "enabled", label: "Enabled" },
+              { value: "paused", label: "Paused" },
+            ]}
+          />
+        </SettingsListToolbar>
         {scope.kind === "unavailable" ? (
           <SettingsSection title="Unavailable selection">
             <SettingsRow title={scope.message} />
           </SettingsSection>
         ) : environments.length === 0 ? (
-          <Empty>
-            <EmptyHeader>
-              <EmptyMedia>
-                <Clock3Icon />
-              </EmptyMedia>
-              <EmptyTitle>No machines available</EmptyTitle>
-              <EmptyDescription>Connect a machine to manage scheduled tasks.</EmptyDescription>
-            </EmptyHeader>
-          </Empty>
+          <SettingsListEmpty
+            icon={<Clock3Icon />}
+            title="No machines available"
+            description="Connect a machine to manage scheduled tasks."
+          />
         ) : environments.length > 1 ? (
           <ScheduledTaskEnvironmentList
             key={`${target.environmentId ?? defaultEnvironment?.environmentId}:${target.taskId ?? ""}`}
             environmentId={target.environmentId ?? defaultEnvironment?.environmentId}
             taskId={target.taskId}
+            matchesTask={matchesTask}
             onEdit={openForEdit}
           />
         ) : (
-          <div className="space-y-8">
+          <>
             {environments.map((entry) => (
               <ScheduledTaskEnvironmentSection
                 key={`${entry.environmentId}:${target.taskId ?? ""}`}
                 environment={entry}
-                showEnvironmentHeading={environments.length > 1}
                 taskId={
                   (target.environmentId ?? defaultEnvironment?.environmentId) ===
                   entry.environmentId
                     ? target.taskId
                     : undefined
                 }
+                matchesTask={matchesTask}
                 onEdit={openForEdit}
               />
             ))}
-          </div>
+          </>
         )}
       </SettingsSection>
       <OverlayPresence when={editor}>
@@ -361,7 +385,7 @@ export function ScheduledTasksSettings(target: {
           />
         )}
       </OverlayPresence>
-    </SettingsPageContainer>
+    </>
   );
 }
 
@@ -369,9 +393,11 @@ function ScheduledTaskEnvironmentList({
   environmentId,
   taskId,
   onEdit,
+  matchesTask,
 }: {
   readonly environmentId: EnvironmentId | undefined;
   readonly taskId: ScheduledTaskId | undefined;
+  readonly matchesTask: (task: ScheduledTask) => boolean;
   readonly onEdit: (environmentId: EnvironmentId, task: ScheduledTask) => void;
 }) {
   const { scope, environments } = useSettingsScope();
@@ -416,7 +442,7 @@ function ScheduledTaskEnvironmentList({
   useRelativeTimeTick(60_000);
 
   const loaded = states.filter((state) => state.connected && state.error === null && state.tasks);
-  const populated = loaded.filter((state) => state.tasks && state.tasks.length > 0);
+  const populated = loaded.filter((state) => state.tasks && state.tasks.some(matchesTask));
   const summaries: Record<string, string[]> = {
     "Not connected:": [],
     "Loading scheduled tasks on": [],
@@ -439,7 +465,7 @@ function ScheduledTaskEnvironmentList({
   }
 
   return (
-    <SettingsGroup>
+    <>
       {populated.map(({ environment, tasks }) => {
         const { primary, secondary } = settingsScopeEnvironmentLabels(environment, environments);
         const transport = environmentTransportLabel(environment);
@@ -465,14 +491,16 @@ function ScheduledTaskEnvironmentList({
                 {connectionStatusTitle(environment.connection)}
               </span>
             </EnvironmentRow>
-            {tasks?.map((task) => (
-              <ScheduledTaskRow
-                key={task.id}
-                environmentId={environment.environmentId}
-                task={task}
-                onEdit={() => onEdit(environment.environmentId, task)}
-              />
-            ))}
+            <SettingsList>
+              {tasks?.filter(matchesTask).map((task) => (
+                <ScheduledTaskRow
+                  key={task.id}
+                  environmentId={environment.environmentId}
+                  task={task}
+                  onEdit={() => onEdit(environment.environmentId, task)}
+                />
+              ))}
+            </SettingsList>
           </div>
         );
       })}
@@ -484,9 +512,10 @@ function ScheduledTaskEnvironmentList({
         />
       ) : null}
       {populated.length === 0 && loaded.length > 0 ? (
-        <SettingsRow
+        <SettingsListEmpty
+          icon={<Clock3Icon />}
           title="No scheduled tasks"
-          description="No tasks match this machine and repository selection."
+          description="No tasks match the selected search and filters."
         />
       ) : null}
       {Object.entries(summaries).map(([label, entries]) => {
@@ -508,19 +537,19 @@ function ScheduledTaskEnvironmentList({
           </Tooltip>
         );
       })}
-    </SettingsGroup>
+    </>
   );
 }
 
 function ScheduledTaskEnvironmentSection({
   environment,
-  showEnvironmentHeading,
   taskId,
   onEdit,
+  matchesTask,
 }: {
   readonly environment: EnvironmentPresentation;
-  readonly showEnvironmentHeading: boolean;
   readonly taskId?: ScheduledTaskId | undefined;
+  readonly matchesTask: (task: ScheduledTask) => boolean;
   readonly onEdit: (environmentId: EnvironmentId, task: ScheduledTask) => void;
 }) {
   const { scope } = useSettingsScope();
@@ -547,16 +576,7 @@ function ScheduledTaskEnvironmentSection({
   }, [environment.environmentId, linkedTask, onEdit]);
   useRelativeTimeTick(60_000);
   return (
-    <SettingsSection
-      title={environment.label}
-      hideTitle={!showEnvironmentHeading}
-      icon={
-        <EnvironmentMachineIcon
-          kind={resolveEnvironmentMachineKind(environment.serverConfig)}
-          className="size-3.5"
-        />
-      }
-    >
+    <>
       {!connected ? (
         <SettingsRow
           title="Machine disconnected"
@@ -575,24 +595,27 @@ function ScheduledTaskEnvironmentSection({
               role="status"
             />
           ) : null}
-          {tasks.length === 0 ? (
-            <SettingsRow
+          {tasks.filter(matchesTask).length === 0 ? (
+            <SettingsListEmpty
+              icon={<Clock3Icon />}
               title="No scheduled tasks"
-              description="No tasks match this machine and repository selection."
+              description="No tasks match the selected search and filters."
             />
           ) : (
-            tasks.map((task) => (
-              <ScheduledTaskRow
-                key={task.id}
-                environmentId={environment.environmentId}
-                task={task}
-                onEdit={() => onEdit(environment.environmentId, task)}
-              />
-            ))
+            <SettingsList>
+              {tasks.filter(matchesTask).map((task) => (
+                <ScheduledTaskRow
+                  key={task.id}
+                  environmentId={environment.environmentId}
+                  task={task}
+                  onEdit={() => onEdit(environment.environmentId, task)}
+                />
+              ))}
+            </SettingsList>
           )}
         </>
       )}
-    </SettingsSection>
+    </>
   );
 }
 
@@ -653,7 +676,7 @@ function ScheduledTaskRow({
     }
   };
   return (
-    <SettingsRow
+    <SettingsListItem
       title={task.title}
       description={<span className="line-clamp-2">{task.prompt}</span>}
       status={

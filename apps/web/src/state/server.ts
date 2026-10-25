@@ -27,7 +27,6 @@ import { environmentSession } from "./session";
 // before caching, so following all of them costs a few KB per environment.
 export const serverEnvironment = createServerEnvironmentAtoms(connectionAtomRuntime, {
   initialConfigValueAtom: environmentSession.initialConfigValueAtom,
-  usageLimitSources: true,
   usageLimitsCommand: true,
 });
 /** Updates a host whose protocol is too old for this client to connect to. */
