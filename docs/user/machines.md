@@ -106,7 +106,9 @@ happens when a turn is running or waiting for an answer, when Work has
 uncommitted or unpushed changes in its worktree, or when no project on the new
 machine links the thread's repository. Move them again to retry, or add
 `--leave-local-changes` to move Work anyway. Those changes then stay on the old
-machine, and the new machine checks out the branch as last pushed. A moved
+machine, and the new machine checks out the branch as last pushed. If its local
+branch has diverged, the move keeps that work under `preserved/<branch>-<timestamp>`
+and reports the preserved branch. `--dry-run` previews branch handling too. A moved
 thread starts a fresh provider session that continues from its history. Diffs
 and restore points from before the move stay on the old machine.
 

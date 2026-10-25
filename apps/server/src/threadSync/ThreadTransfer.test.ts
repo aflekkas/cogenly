@@ -438,6 +438,11 @@ describe("handoff failure regressions", () => {
           lastEventId: EventId.make("event:initial"),
           eventCount: 2,
           attachmentIds: [],
+          repository: {
+            branch: "feature/pit-stops",
+            revision: "a".repeat(40),
+            remoteRef: "refs/heads/feature/pit-stops",
+          },
         });
         // The old owner has not received the commit reply or called finish.
         expect((yield* laptop.replication.owner(threadId))?.handoff).not.toBeNull();

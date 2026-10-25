@@ -2,7 +2,7 @@ import * as NetService from "@cogenly/shared/Net";
 import * as Layer from "effect/Layer";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
-import { EnvironmentId } from "@cogenly/contracts";
+import { EnvironmentId, ThreadId } from "@cogenly/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -12,6 +12,7 @@ import * as Stdio from "effect/Stdio";
 import * as Stream from "effect/Stream";
 
 import {
+  describeMove,
   decodeJoinCode,
   encodeJoinCode,
   readMachineJoinCode,
@@ -123,5 +124,37 @@ it.layer(Layer.merge(NodeServices.layer, NetService.layer))("migration CLI", (it
         assert.include(error.message, "isn't running");
       }
     }),
+  );
+});
+
+it("prints branch handling in dry runs and preserved branches after a move", () => {
+  const threadId = ThreadId.make("thread:move");
+  const revision = "a".repeat(40);
+  const branch = { branch: "feature/work", revision, action: "verify" as const };
+  const preview = describeMove("VPS", {
+    moved: [],
+    skipped: [],
+    planned: [
+      {
+        threadId,
+        title: "Work",
+        from: EnvironmentId.make("source"),
+        project: "/repo",
+        worktreePath: "/worktree",
+        branch,
+      },
+    ],
+  });
+  assert.include(preview, revision);
+  assert.include(preview, "fast-forward if an ancestor, otherwise preserve");
+  assert.include(
+    describeMove("VPS", {
+      moved: [threadId],
+      skipped: [],
+      branches: [
+        { threadId, ...branch, action: "preserve", preservedBranch: "preserved/feature/work-123" },
+      ],
+    }),
+    "preserved local branch as preserved/feature/work-123",
   );
 });

@@ -215,11 +215,37 @@ export const ThreadMoveSkip = Schema.Struct({
 });
 export type ThreadMoveSkip = typeof ThreadMoveSkip.Type;
 
+/** Bounded committed Git history for worktree delegation. */
+export const ThreadRepositoryBundle = Schema.Struct({
+  revision: Schema.String.check(Schema.isPattern(/^[a-f0-9]{40,64}$/)),
+  ref: Schema.String.check(Schema.isPattern(/^refs\/cogenly\/delegate\/[a-zA-Z0-9._-]+$/)),
+  base64: Schema.String.check(Schema.isMaxLength(45 * 1024 * 1024)),
+});
+export type ThreadRepositoryBundle = typeof ThreadRepositoryBundle.Type;
+
+/** The source's pinned pushed revision, independent of destination branch names. */
+export const ThreadHandoffRepository = Schema.Struct({
+  branch: TrimmedNonEmptyString,
+  revision: ThreadRepositoryBundle.fields.revision,
+  remoteRef: TrimmedNonEmptyString,
+  bundle: Schema.optional(ThreadRepositoryBundle),
+});
+export type ThreadHandoffRepository = typeof ThreadHandoffRepository.Type;
+
+export const ThreadMoveBranch = Schema.Struct({
+  branch: Schema.String,
+  revision: Schema.String,
+  action: Schema.Literals(["create", "fast-forward", "preserve", "unchanged", "verify"]),
+  preservedBranch: Schema.optional(Schema.String),
+});
+export type ThreadMoveBranch = typeof ThreadMoveBranch.Type;
+
 /** Where a thread would run on the target, from a dry run. */
 export const ThreadMovePlacement = Schema.Struct({
   threadId: ThreadId,
   /** The target's checkout, or what the move does to get one. */
   project: Schema.String,
+  branch: Schema.optional(ThreadMoveBranch),
   /** The target's worktree path for Work; the next turn creates it from the branch. */
   worktreePath: Schema.NullOr(Schema.String),
 });
@@ -240,6 +266,9 @@ export const ThreadMoveResult = Schema.Struct({
   skipped: Schema.Array(ThreadMoveSkip),
   /** Dry run only: the threads that would move, and where. */
   planned: Schema.optional(Schema.Array(ThreadMovePlanned)),
+  branches: Schema.optional(
+    Schema.Array(Schema.Struct({ threadId: ThreadId, ...ThreadMoveBranch.fields })),
+  ),
 });
 export type ThreadMoveResult = typeof ThreadMoveResult.Type;
 
@@ -284,13 +313,14 @@ export const ThreadHandoffReceipts = makePeerChannel({
 });
 
 export const ThreadHandoffCommit = makePeerChannel({
-  name: "threads.handoff.commit.v1",
+  name: "threads.handoff.commit.v2",
   scope: AuthPeerDelegateScope,
   payload: Schema.Struct({
     threadId: ThreadId,
     from: EnvironmentId,
     to: EnvironmentId,
     epoch: Counter,
+    repository: Schema.NullOr(ThreadHandoffRepository),
     /** The owner's last event for the thread; null for a thread without events. */
     lastEventId: Schema.NullOr(EventId),
     /**
@@ -301,7 +331,7 @@ export const ThreadHandoffCommit = makePeerChannel({
     /** Attachment ids the target copies before it accepts, since the owner may go offline. */
     attachmentIds: Schema.Array(ThreadAttachmentFile.fields.name),
   }),
-  success: Schema.Struct({}),
+  success: Schema.Struct({ branch: Schema.optional(ThreadMoveBranch) }),
   error: ThreadRemoteError,
 });
 
@@ -320,11 +350,14 @@ export const ThreadMovePreview = makePeerChannel({
 
 /** Ask the target where it would run threads it has replicas of, as a commit would place them. */
 export const ThreadHandoffPreview = makePeerChannel({
-  name: "threads.handoff.preview.v1",
+  name: "threads.handoff.preview.v2",
   scope: AuthPeerDelegateScope,
   payload: Schema.Struct({
     threadIds: Schema.Array(ThreadId).check(Schema.isMaxLength(THREAD_MOVE_MAX_THREADS)),
     to: EnvironmentId,
+    repositories: Schema.Array(
+      Schema.Struct({ threadId: ThreadId, repository: Schema.NullOr(ThreadHandoffRepository) }),
+    ),
   }),
   success: Schema.Struct({
     placed: Schema.Array(ThreadMovePlacement),
@@ -452,14 +485,6 @@ export const ThreadLaunchPortable = Schema.Struct({
   creationSource: OrchestrationV2CreationSource,
 });
 export type ThreadLaunchPortable = typeof ThreadLaunchPortable.Type;
-
-/** Bounded committed Git history for worktree delegation. */
-export const ThreadRepositoryBundle = Schema.Struct({
-  revision: Schema.String.check(Schema.isPattern(/^[a-f0-9]{40,64}$/)),
-  ref: Schema.String.check(Schema.isPattern(/^refs\/cogenly\/delegate\/[a-zA-Z0-9._-]+$/)),
-  base64: Schema.String.check(Schema.isMaxLength(45 * 1024 * 1024)),
-});
-export type ThreadRepositoryBundle = typeof ThreadRepositoryBundle.Type;
 
 /**
  * Start a new thread on `target`, which owns it from its first event and

@@ -497,7 +497,15 @@ const findMachine = (machines: ReadonlyArray<MachineInfo>, wanted: string, allow
 /** At most this many skipped threads are listed; --json has them all. */
 const SKIPS_SHOWN = 20;
 
-const describeMove = (target: string, result: ThreadMoveResult) =>
+const describeMoveBranch = (
+  branch:
+    | NonNullable<ThreadMoveResult["branches"]>[number]
+    | NonNullable<NonNullable<ThreadMoveResult["planned"]>[number]["branch"]>,
+  dryRun: boolean,
+) =>
+  `${branch.branch} at ${branch.revision}: ${branch.preservedBranch !== undefined ? `${dryRun ? "would preserve" : "preserved"} local branch as ${branch.preservedBranch}` : branch.action === "verify" ? "fetch and verify; fast-forward if an ancestor, otherwise preserve local branch as preserved/<branch>-<timestamp>" : `${dryRun ? "would " : ""}${branch.action}`}`;
+
+export const describeMove = (target: string, result: ThreadMoveResult) =>
   [
     ...(result.planned === undefined
       ? [
@@ -505,11 +513,16 @@ const describeMove = (target: string, result: ThreadMoveResult) =>
         ]
       : [
           `Dry run: ${result.planned.length} threads would move to ${target}; ${result.moved.length} already run there.`,
-          ...result.planned.map(
-            (entry) =>
-              `  ${entry.threadId} (${entry.title}): ${entry.worktreePath ?? entry.project}${entry.worktreePath === null ? "" : ` · checkout ${entry.project}`}`,
-          ),
+          ...result.planned.flatMap((entry) => [
+            `  ${entry.threadId} (${entry.title}): ${entry.worktreePath ?? entry.project}${entry.worktreePath === null ? "" : ` · checkout ${entry.project}`}`,
+            ...(entry.branch === undefined
+              ? []
+              : [`    ${describeMoveBranch(entry.branch, true)}`]),
+          ]),
         ]),
+    ...(result.branches ?? [])
+      .filter((branch) => branch.preservedBranch !== undefined)
+      .map((branch) => `  ${branch.threadId}: ${describeMoveBranch(branch, false)}`),
     ...(result.skipped.length === 0
       ? []
       : [
