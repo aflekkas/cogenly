@@ -24,7 +24,7 @@ import {
   TriangleAlertIcon,
   type LucideIcon,
 } from "lucide-react";
-import { useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
 import { AnimatedHeight } from "~/components/AnimatedHeight";
 import { useUpdateEnvironmentSettings } from "../../hooks/useSettings";
@@ -60,7 +60,6 @@ import { Spinner } from "../ui/spinner";
 import { Switch } from "../ui/switch";
 import { createIntegrationStatusFade } from "./integrationStatusMotion";
 import {
-  isConnectingReport,
   alertChannelIntegrations,
   canaryIntervalOptions,
   canaryMachineId,
@@ -69,6 +68,7 @@ import {
   HEALTH_STATUS_BADGE_VARIANTS,
   HEALTH_STATUS_LABELS,
   healthHeadline,
+  machineHealthView,
   partitionHealthChecks,
   unreachableHeadline,
   uptimeLabel,
@@ -196,9 +196,28 @@ function MachineHealthSection({
     }),
   );
   const report = query.data;
-  const connecting = report !== null && isConnectingReport(report, machine.online);
+  // Coarse: only the end of the connect grace changes what this shows.
+  const nowMs = useRelativeTimeTick(15_000);
+  const view = machineHealthView({
+    report,
+    failed: query.error !== null,
+    machine: {
+      relation: machine.relation,
+      online: machine.online,
+      pairedAtMs: machine.pairedAt === null ? null : DateTime.toEpochMillis(machine.pairedAt),
+      lastSeenAtMs: machine.lastSeenAt === null ? null : DateTime.toEpochMillis(machine.lastSeenAt),
+    },
+    nowMs,
+  });
+  // A report read while the machine was still offline is stale once it connects.
+  const refreshReport = query.refresh;
+  const wasOnline = useRef(machine.online);
+  useEffect(() => {
+    if (machine.online && !wasOnline.current) refreshReport();
+    wasOnline.current = machine.online;
+  }, [machine.online, refreshReport]);
   const overall: MachineHealthStatus | "connecting" | null =
-    report === null ? null : connecting ? "connecting" : report.reachable ? report.status : "fail";
+    view._tag === "connecting" ? "connecting" : view._tag === "report" ? view.overall : null;
   const context: MachineHealthActionContext = {
     originEnvironmentId: machine.environmentId,
     viaEnvironmentId: viewed.environmentId,
@@ -211,31 +230,32 @@ function MachineHealthSection({
       title={`${machine.name} health`}
       headerAction={overall === null ? null : <StatusBadge status={overall} />}
     >
-      {report === null ? (
-        query.error !== null ? (
-          <SettingsRow
-            title={`Couldn't check ${machine.name}'s health`}
-            description={query.error}
-          />
-        ) : (
-          <SettingsRow
-            title={
-              <span className="flex items-center gap-2">
-                <Spinner size="sm" tone="muted" />
-                Checking {machine.name}…
-              </span>
-            }
-            role="status"
-          />
-        )
-      ) : connecting ? (
+      {view._tag === "error" ? (
+        <SettingsRow title={`Couldn't check ${machine.name}'s health`} description={query.error} />
+      ) : view._tag === "checking" ? (
+        <SettingsRow
+          title={
+            <span className="flex items-center gap-2">
+              <Spinner size="sm" tone="muted" />
+              Checking {machine.name}…
+            </span>
+          }
+          role="status"
+        />
+      ) : view._tag === "connecting" || report === null ? (
         <SettingsRow
           title={`Connecting to ${machine.name}…`}
           description="It hasn't checked in yet. This usually takes a few seconds."
           role="status"
         />
       ) : (
-        <HealthReportRows report={report} machine={machine} viewed={viewed} context={context} />
+        <HealthReportRows
+          report={report}
+          unreachable={view.unreachable}
+          machine={machine}
+          viewed={viewed}
+          context={context}
+        />
       )}
       {runsCanary ? <CanaryRow machine={machine} list={list} /> : null}
       {isThis ? <AlertChannelRows environment={viewed} /> : null}
@@ -246,20 +266,31 @@ function MachineHealthSection({
 /** The summary row, the checks that need attention, then the rest behind a disclosure. */
 function HealthReportRows({
   report,
+  unreachable,
   machine,
   viewed,
   context,
 }: {
   readonly report: MachineHealthReport;
+  readonly unreachable: "offline" | "unanswered" | null;
   readonly machine: MachineInfo;
   readonly viewed: EnvironmentPresentation;
   readonly context: MachineHealthActionContext;
 }) {
-  const { problems, others } = partitionHealthChecks(report.checks);
+  // Unreachable reports contain a synthetic connection failure, which is stale
+  // when the machine list already knows the peer is online.
+  const { problems, others } = partitionHealthChecks(
+    unreachable === "unanswered" ? [] : report.checks,
+  );
   const arrived = useArrivedKeys(problems.map((check) => check.id));
   return (
     <>
-      <HealthSummaryRow report={report} machine={machine} viewed={viewed} />
+      <HealthSummaryRow
+        report={report}
+        unreachable={unreachable}
+        machine={machine}
+        viewed={viewed}
+      />
       {problems.map((check) => (
         <SettingsRow
           key={check.id}
@@ -286,16 +317,27 @@ function HealthReportRows({
 
 function HealthSummaryRow({
   report,
+  unreachable,
   machine,
   viewed,
 }: {
   readonly report: MachineHealthReport;
+  readonly unreachable: "offline" | "unanswered" | null;
   readonly machine: MachineInfo;
   readonly viewed: EnvironmentPresentation;
 }) {
   // Minute-level labels only; nothing repaints in between.
   const nowMs = useRelativeTimeTick(60_000);
-  if (!report.reachable) {
+  if (unreachable === "unanswered") {
+    // Online in the machine list, so never "can't be reached".
+    return (
+      <SettingsRow
+        title={`${report.machineName}'s health report hasn't arrived`}
+        description={`${report.machineName} is connected. Its report should show here shortly.`}
+      />
+    );
+  }
+  if (unreachable === "offline") {
     const sinceMs = machine.lastSeenAt === null ? null : DateTime.toEpochMillis(machine.lastSeenAt);
     return (
       <SettingsRow
