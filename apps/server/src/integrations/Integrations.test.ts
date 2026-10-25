@@ -33,6 +33,7 @@ import { runMigrations } from "../persistence/Migrations.ts";
 import * as Credentials from "./IntegrationCredentials.ts";
 import { availableToConnect } from "./IntegrationCatalog.ts";
 import * as Integrations from "./Integrations.ts";
+import * as NativeImport from "./NativeIntegrationImport.ts";
 import * as Tokens from "./IntegrationTokens.ts";
 import { IntegrationEndpointPolicy } from "./RemoteEndpoint.ts";
 import * as Workspace from "../agents/AgentWorkspaceService.ts";
@@ -1577,4 +1578,36 @@ it.effect(
         "missing a required scope",
       );
     }).pipe(Effect.scoped, Effect.provide(layerWith())),
+);
+
+it.effect("preserves incomplete review warnings when importing available native definitions", () =>
+  Effect.gen(function* () {
+    yield* runMigrations();
+    const service = yield* Integrations.Integrations;
+    const result = yield* service.importNative();
+    expect(result).toMatchObject({
+      imported: ["native-fixture"],
+      incomplete: true,
+      warnings: ["Fixture source could not be reviewed."],
+    });
+    expect((yield* service.list()).integrations[0]?.integration.enabled).toBe(false);
+    expect((yield* service.importNative()).imported).toEqual([]);
+  }).pipe(
+    Effect.provide(
+      layerWith().pipe(
+        Layer.provide(
+          Layer.succeed(NativeImport.NativeIntegrationImport, {
+            preview: Effect.succeed({
+              definitions: [
+                { ...createInput("https://fixture.example/mcp", "native-fixture"), enabled: false },
+              ],
+              reconnect: [],
+              warnings: ["Fixture source could not be reviewed."],
+              incomplete: true,
+            }),
+          }),
+        ),
+      ),
+    ),
+  ),
 );

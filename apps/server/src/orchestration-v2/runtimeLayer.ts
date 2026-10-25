@@ -118,7 +118,7 @@ const layerLocalIntegrationsProvided = LocalIntegrations.layer.pipe(
 // Shared by reference so the runtime policy, agent MCP policy and settings
 // all read one gateway (one tool cache, one change stream).
 export const layerIntegrationsProvided = Integrations.layer.pipe(
-  Layer.provide(NativeIntegrationImport.layer),
+  Layer.provide(NativeIntegrationImport.layer.pipe(Layer.provide(ProjectStore.layer))),
   Layer.provide(layerIntegrationCredentials),
   Layer.provide(IntegrationTokens.layer.pipe(Layer.provide(layerVaultProvided))),
   Layer.provide(layerLocalIntegrationsProvided),

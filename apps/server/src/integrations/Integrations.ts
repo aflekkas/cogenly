@@ -1590,7 +1590,12 @@ const make = (options: IntegrationsOptions = {}) =>
             yield* service.create(definition);
             imported.push(definition.name);
           }
-          return { imported, reconnect: preview.reconnect, warnings: preview.warnings };
+          return {
+            imported,
+            reconnect: preview.reconnect,
+            warnings: preview.warnings,
+            incomplete: preview.incomplete,
+          };
         }),
       setupGuide: (service) => Effect.succeed(integrationSetupGuide(service)),
       list: (options) =>

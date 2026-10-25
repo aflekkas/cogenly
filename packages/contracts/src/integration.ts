@@ -570,11 +570,15 @@ export const IntegrationNativeImportPreview = Schema.Struct({
   definitions: Schema.Array(IntegrationCreateInput),
   reconnect: Schema.Array(Schema.String),
   warnings: Schema.Array(Schema.String),
+  /** At least one source needs manual review; importing must not complete the gate. */
+  incomplete: Schema.optional(Schema.Boolean),
 });
 export type IntegrationNativeImportPreview = typeof IntegrationNativeImportPreview.Type;
 export const IntegrationNativeImportResult = Schema.Struct({
   imported: Schema.Array(Schema.String),
   reconnect: Schema.Array(Schema.String),
   warnings: Schema.Array(Schema.String),
+  /** At least one source needs manual review; importing must not complete the gate. */
+  incomplete: Schema.optional(Schema.Boolean),
 });
 export type IntegrationNativeImportResult = typeof IntegrationNativeImportResult.Type;
