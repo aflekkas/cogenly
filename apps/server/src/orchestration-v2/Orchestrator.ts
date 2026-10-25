@@ -6651,6 +6651,74 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         occurredAt: now,
         payload: providerThread,
       });
+      // A delegated child has no user to release its queue after a handoff.
+      // Move only messages held by this limit stop, with all execution records.
+      if (
+        projection.thread.lineage.relationshipToParent === "subagent" &&
+        limitContinuedRun?.status === "failed" &&
+        limitContinuedRun.completedAt !== null &&
+        limitContinuedRun.providerInstanceId !== modelSelection.instanceId
+      ) {
+        const stoppedAt = DateTime.toEpochMillis(limitContinuedRun.completedAt);
+        const held = projection.runs.filter(
+          (queued) => queued.status === "queued" && queued.queueHeld === true,
+        );
+        if (held.every((queued) => DateTime.toEpochMillis(queued.requestedAt) >= stoppedAt)) {
+          for (const queued of held) {
+            yield* emitEvent({
+              type: "run.updated",
+              threadId: command.threadId,
+              runId: queued.id,
+              providerInstanceId: modelSelection.instanceId,
+              occurredAt: now,
+              payload: {
+                ...queued,
+                queueHeld: false,
+                modelSelection,
+                providerInstanceId: modelSelection.instanceId,
+                providerThreadId: providerThread.id,
+              },
+            });
+            const node = projection.nodes.find((node) => node.id === queued.rootNodeId);
+            const attempt = projection.attempts.find(
+              (attempt) => attempt.id === queued.activeAttemptId,
+            );
+            if (node !== undefined)
+              yield* emitEvent({
+                type: "node.updated",
+                threadId: command.threadId,
+                runId: queued.id,
+                nodeId: node.id,
+                occurredAt: now,
+                payload: { ...node, providerThreadId: providerThread.id },
+              });
+            if (attempt !== undefined)
+              yield* emitEvent({
+                type: "run-attempt.updated",
+                threadId: command.threadId,
+                runId: queued.id,
+                occurredAt: now,
+                payload: {
+                  ...attempt,
+                  providerInstanceId: modelSelection.instanceId,
+                  modelSelection,
+                  providerThreadId: providerThread.id,
+                },
+              });
+            const scope = projection.checkpointScopes.find(
+              (scope) => scope.id === node?.checkpointScopeId,
+            );
+            if (scope !== undefined)
+              yield* emitEvent({
+                type: "checkpoint-scope.created",
+                threadId: command.threadId,
+                runId: queued.id,
+                occurredAt: now,
+                payload: { ...scope, providerThreadId: providerThread.id },
+              });
+          }
+        }
+      }
       if (portableForkHandoff !== null) {
         yield* emitEvent({
           type: "context-handoff.updated",

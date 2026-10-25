@@ -788,3 +788,58 @@ it.effect("hands off to the second target after the first target refuses", () =>
     ).toBe("codex-c");
   }).pipe(Effect.provide(runtime));
 });
+
+it.effect("releases a delegated child's held messages onto its handoff model", () => {
+  const { provider, runtime, sweep } = setupHandoff();
+  return Effect.gen(function* () {
+    const { orchestrator, worker, childId, failedRun } = yield* delegateIntoQuota(provider);
+    yield* orchestrator.dispatch({
+      type: "message.dispatch",
+      commandId: CommandId.make("queued-notice"),
+      threadId: childId,
+      messageId: MessageId.make("message:held"),
+      text: "Check the background result",
+      attachments: [],
+      dispatchMode: { type: "queue_after_active" },
+      createdBy: "agent",
+      creationSource: "server",
+    });
+    expect((yield* orchestrator.getThreadProjection(childId)).runs.at(-1)?.queueHeld).toBe(true);
+    yield* sweep;
+    const queued = (yield* orchestrator.getThreadProjection(childId)).runs.find(
+      (run) => run.status === "queued",
+    )!;
+    expect(queued).toMatchObject({
+      queueHeld: false,
+      providerInstanceId: accountB,
+      modelSelection: { instanceId: accountB, model: "gpt-5" },
+    });
+    yield* worker.drain();
+    const input = provider.turns.find(
+      (turn) => turn.threadId === childId && turn.runId !== failedRun.id,
+    )!;
+    yield* waitFor(
+      orchestrator,
+      childId,
+      (row) =>
+        row.event.type === "provider-turn.updated" &&
+        row.event.payload.runAttemptId === input.attemptId,
+    );
+    const turn = (yield* orchestrator.getThreadProjection(childId)).providerTurns.find(
+      (turn) => turn.runAttemptId === input.attemptId,
+    )!;
+    yield* provider.finish(input, turn.id);
+    yield* waitFor(
+      orchestrator,
+      childId,
+      (row) =>
+        row.event.type === "run.updated" &&
+        row.event.payload.id === input.runId &&
+        row.event.payload.status === "waiting",
+    );
+    yield* worker.drain();
+    expect(
+      provider.turns.find((turn) => turn.runId === queued.id)?.providerThread.providerInstanceId,
+    ).toBe(accountB);
+  }).pipe(Effect.provide(runtime));
+});
