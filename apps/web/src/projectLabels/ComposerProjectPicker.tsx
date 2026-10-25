@@ -36,6 +36,7 @@ import {
   PROJECT_LABEL_COLORS,
   isProjectChatThread,
   priorFiling,
+  projectLabelsOn,
   type EnvironmentProjectLabel,
   threadFolderState,
   threadForksIntoProjects,
@@ -150,7 +151,7 @@ export function ComposerProjectPicker(props: {
   const projects = useMemo(
     // Archived projects are not offered; one the thread is already in still
     // names itself as `current`.
-    () => directory.active.filter((entry) => entry.environmentId === environmentId),
+    () => projectLabelsOn(directory.active, environmentId),
     [directory.active, environmentId],
   );
   const options = useMemo((): ProjectOption[] => {

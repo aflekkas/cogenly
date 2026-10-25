@@ -11,7 +11,7 @@ import {
   scopedRepositoryKey,
   threadProjectFolderId,
 } from "~/projectLabels/projectLabels.logic";
-import { workHeroBreadcrumb } from "~/projectLabels/projectMeta.logic";
+import { workHeroBreadcrumb, workThreadDisplayProject } from "~/projectLabels/projectMeta.logic";
 import { linkedRepositoryIcon } from "~/projectLabels/repositoryPicker.logic";
 import { RepositoryRowIcon } from "~/projectLabels/RepositorySourceRows";
 import { useProjectLabelDirectory } from "~/projectLabels/useProjectLabels";
@@ -43,10 +43,21 @@ export function ThreadHeroHeadline({
   const environmentIds = useMemo(() => [thread.environmentId], [thread.environmentId]);
   const directory = useProjectLabelDirectory(environmentIds);
   const folderId = threadProjectFolderId(thread);
-  const folder =
+  const filed =
     folderId === null
       ? null
       : (directory.byKey.get(projectLabelKey(thread.environmentId, folderId)) ?? null);
+  // Work names its repository's project when its filing does not hold it.
+  const folder = isChat
+    ? filed
+    : workThreadDisplayProject({
+        filed,
+        repository:
+          isScratch || project === null
+            ? null
+            : { environmentId: project.environmentId, projectId: project.id },
+        folderByRepository: directory.folderByRepository,
+      });
   // Fixed when the screen opens, so the line holds still while the user types.
   const [greeting] = useState(() => chatGreeting(new Date()));
   const headingRef = useRef<HTMLHeadingElement>(null);

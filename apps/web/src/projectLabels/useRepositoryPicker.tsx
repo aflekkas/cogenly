@@ -25,6 +25,7 @@ import { serverEnvironment } from "../state/server";
 import { useAtomCommand } from "../state/use-atom-command";
 import {
   projectLabelKey,
+  projectLabelOn,
   repositoryFolderMove,
   scopedRepositoryKey,
   type EnvironmentProjectLabel,
@@ -144,9 +145,9 @@ export function useRepositoryPicker(input: {
   // so the project is read as the selected machine has it.
   const project = useMemo(() => {
     if (input.project === null || environmentId === null) return null;
-    return (
-      directory.byKey.get(projectLabelKey(environmentId, input.project.label.id)) ??
-      (input.project.environmentId === environmentId ? input.project : null)
+    return projectLabelOn(
+      directory.byKey.get(projectLabelKey(environmentId, input.project.label.id)) ?? input.project,
+      environmentId,
     );
   }, [directory.byKey, environmentId, input.project]);
   const machineProjects = useMemo(

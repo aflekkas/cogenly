@@ -36,9 +36,12 @@ import {
   type EnvironmentProjectLabel,
 } from "~/projectLabels/projectLabels.logic";
 import {
+  draftWorkProject,
   heroProjectSuffix,
   isPickableRepository,
   projectDefaultRepository,
+  projectHoldsRepository,
+  projectSwitchRepository,
   workDraftFolderId,
   workHeroBreadcrumb,
   workHeroLine,
@@ -258,21 +261,35 @@ export function DraftHeroHeadline({
           projectLabelKey(pendingFolder.environmentId, pendingFolder.folderId),
         ) ?? null)
       : null;
-  // Work's project: the one picked for the draft, else its repository's own,
-  // which Work follows. It leads the sentence; the repository is picked in it.
+  const activeRepositoryRef = activeProjectRef === null || isScratchDraft ? null : activeProjectRef;
   const repositoryFolder =
-    activeProjectRef === null || isScratchDraft
+    activeRepositoryRef === null
       ? null
       : (projectDirectory.folderByRepository.get(
-          scopedRepositoryKey(activeProjectRef.environmentId, activeProjectRef.projectId),
+          scopedRepositoryKey(activeRepositoryRef.environmentId, activeRepositoryRef.projectId),
         ) ?? null);
-  const workProject = isChatDraft ? null : (pendingProject ?? repositoryFolder);
+  // Work's project: the one picked for the draft, else its repository's own,
+  // which Work follows. It leads the sentence; the repository is picked in it.
+  // A pick that does not hold the repository is stale, and corrected below.
+  const draftProject = draftWorkProject({
+    pending: pendingProject,
+    pendingRepositoryId: pendingFolder?.repositoryId,
+    repository: activeRepositoryRef,
+    folderByRepository: projectDirectory.folderByRepository,
+  });
+  const workProject = isChatDraft ? null : draftProject.project;
   const workProjectKey = workProject?.key ?? null;
+  const repositoryUnchosen =
+    !isChatDraft &&
+    isScratchDraft &&
+    pendingProject !== null &&
+    pendingFolder?.awaitingRepository === true;
   const heroLine = workHeroLine({
     isChat: isChatDraft,
     hasProject: workProject !== null,
     hasRepository: !isScratchDraft,
     canStartWithoutRepository: scratchWorkspaceRoot !== null,
+    repositoryUnchosen,
   });
   const showProjectFolderRow = heroLine.projectFolderRow !== "hidden";
   // What a project pick moves the draft to: the logical projects' repositories.
@@ -329,6 +346,7 @@ export function DraftHeroHeadline({
       selectedRow?.name ??
       (activeProject ? repositoryNameOf(activeProject) : activeProjectDisplayName),
     hasRepository: !isScratchDraft,
+    repositoryUnchosen,
   });
   const noRepositoryItem = useMemo(
     (): HeroRow => ({
@@ -410,11 +428,18 @@ export function DraftHeroHeadline({
   // thread there: moving it would replace that draft and strand whatever it
   // holds, such as the browser tabs of the no-project draft.
   // `folder` is the project the Work lands in; the draft keeps it
-  // (workDraftFolderId), so a pick never drops the project.
+  // (workDraftFolderId), so a pick never drops the project. Callers only pass
+  // a folder that holds `project` (or is linking it now), or Work without a
+  // repository; `awaitingRepository` leaves the repository to be chosen.
+  // `onUnavailable` runs when the draft could not move.
   const selectProject = (
     project: (typeof projects)[number],
     logicalProjectKey: string,
     folder: EnvironmentProjectLabel | null,
+    options?: {
+      readonly awaitingRepository?: boolean;
+      readonly onUnavailable?: () => void;
+    },
   ) => {
     if (!draftId) {
       return;
@@ -432,7 +457,14 @@ export function DraftHeroHeadline({
     const fileDraft = (threadId: ThreadId) =>
       setPendingProjectFolder(
         threadId,
-        folderId === null ? null : { environmentId: project.environmentId, folderId },
+        folderId === null
+          ? null
+          : {
+              environmentId: project.environmentId,
+              folderId,
+              repositoryId: isNoProjectHome(project) ? null : project.id,
+              ...(options?.awaitingRepository === true ? { awaitingRepository: true } : {}),
+            },
       );
     const leavingThreadId = draftThread?.threadId ?? null;
     const currentDraft = getComposerDraft(draftId);
@@ -441,7 +473,11 @@ export function DraftHeroHeadline({
         scopeProjectRef(project.environmentId, project.id),
         surface ? { surface } : {},
       ).then((started) => {
-        if (!started || isChatDraft) return;
+        if (!started) {
+          options?.onUnavailable?.();
+          return;
+        }
+        if (isChatDraft) return;
         // The project moves with the pick; the empty draft left behind keeps
         // none once it unmounts.
         if (leavingThreadId !== null && leavingThreadId !== started.threadId) {
@@ -474,29 +510,59 @@ export function DraftHeroHeadline({
     }
   };
   // Work without a repository, filed in `folder` (the Work project by default).
+  // A draft already without one is re-filed in place. `onUnavailable` runs
+  // when this machine cannot host Work without a repository.
   const startScratch = async (
     folder: EnvironmentProjectLabel | null = workProject,
-  ): Promise<boolean> => {
-    if (scratchTargetEnvironmentId === null || isScratchDraft) {
-      return false;
+    options?: {
+      readonly awaitingRepository?: boolean;
+      readonly onUnavailable?: () => void;
+    },
+  ): Promise<void> => {
+    if (isScratchDraft) {
+      if (!draftThread || isChatDraft || activeProject === null) return;
+      const folderId = workDraftFolderId({
+        repository: { environmentId: activeProject.environmentId, projectId: activeProject.id },
+        project: folder,
+        byKey: projectDirectory.byKey,
+      });
+      setPendingProjectFolder(
+        draftThread.threadId,
+        folderId === null
+          ? null
+          : {
+              environmentId: activeProject.environmentId,
+              folderId,
+              repositoryId: null,
+              ...(options?.awaitingRepository === true ? { awaitingRepository: true } : {}),
+            },
+      );
+      return;
+    }
+    if (scratchTargetEnvironmentId === null) {
+      options?.onUnavailable?.();
+      return;
     }
     const requested = { draftId, activeProjectKey, scratchTargetEnvironmentId };
     const project = await openScratchProject(scratchTargetEnvironmentId);
     const latest = latestTargetRef.current;
     if (
-      !project ||
       latest.draftId !== requested.draftId ||
       latest.activeProjectKey !== requested.activeProjectKey ||
       latest.scratchTargetEnvironmentId !== requested.scratchTargetEnvironmentId
     ) {
-      return false;
+      return;
+    }
+    if (!project) {
+      options?.onUnavailable?.();
+      return;
     }
     selectProject(
       project,
       deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings),
       folder,
+      options,
     );
-    return true;
   };
 
   // A picked repository becomes the draft's, in the Work project. One cloned
@@ -564,7 +630,7 @@ export function DraftHeroHeadline({
         if (!item) return;
         if (item.kind === "no-repository") {
           closePicker();
-          // Already there when the draft has no repository.
+          // A draft already without one settles there, out of "Choose a repository".
           void startScratch();
           return;
         }
@@ -702,25 +768,80 @@ export function DraftHeroHeadline({
     { contentKey: isChatDraft ? "chat" : workHeroKey, handoff: DRAFT_HEADING_GROUP },
   );
   // A project picked for this Work draft, in the hero or the toolbar, moves it
-  // to one of the project's repositories: the current one if the project holds
-  // it, else its most recently active. "No project" does the same among the
-  // repositories in no project. With none to pick, Work runs without a
-  // repository (in the project's folder) and is filed in the project.
+  // into the project (projectSwitchRepository): the current repository while
+  // the project holds it, else its only one, else "Choose a repository", or
+  // its folder when it has none. A draft whose project does not hold its
+  // repository (left from before this rule) is moved the same way. When the
+  // draft cannot move, it leaves the project instead: a repository never pairs
+  // with a project outside it. "No project" moves it to the most recently
+  // active repository in no project.
   const noProjectPicked = useWorkNoProjectPicked(draftThread?.threadId);
+  // The project move last started, so a re-render while it lands does not repeat it.
+  const projectMoveRef = useRef<string | null>(null);
   useEffect(() => {
     if (!draftThread) return;
+    const threadId = draftThread.threadId;
     const choseProject = pendingFolder?.chosen === true && pendingProject !== null;
-    if (!choseProject && !noProjectPicked) return;
+    const correcting = !choseProject && !isChatDraft && draftProject.stale;
+    if (!choseProject && !noProjectPicked && !correcting) return;
     // A project picked after "No project" wins.
-    if (noProjectPicked) answerNoProjectPick(draftThread.threadId);
+    if (noProjectPicked) answerNoProjectPick(threadId);
     if (choseProject && pendingFolder) {
-      setPendingProjectFolder(draftThread.threadId, {
+      setPendingProjectFolder(threadId, {
         environmentId: pendingFolder.environmentId,
         folderId: pendingFolder.folderId,
       });
     }
     if (isChatDraft) return;
-    const project = choseProject ? pendingProject : null;
+    const project = choseProject || correcting ? pendingProject : null;
+    if (project !== null) {
+      const move = `${threadId}:${project.key}:${isScratchDraft ? "none" : activeProjectKey}`;
+      if (correcting && projectMoveRef.current === move) return;
+      projectMoveRef.current = move;
+      const leaveProject = () => setPendingProjectFolder(threadId, null);
+      const next = projectSwitchRepository({
+        project,
+        current: activeRepositoryRef,
+        items: repositoryItems,
+        refsOf: refsOfRepository,
+      });
+      switch (next.kind) {
+        case "keep": {
+          if (activeProject === null) return;
+          // Staying put: the project stays filed unless this machine lacks it.
+          const folderId = workDraftFolderId({
+            repository: { environmentId: activeProject.environmentId, projectId: activeProject.id },
+            project,
+            byKey: projectDirectory.byKey,
+          });
+          if (folderId === null) leaveProject();
+          return;
+        }
+        case "select": {
+          const entry = projectEntryByKey.get(next.item.projectKey);
+          if (!entry) return;
+          // The member the project holds, on the draft's machine when it has one.
+          const held = entry.group.memberProjects.filter((member) =>
+            projectHoldsRepository(project, {
+              environmentId: member.environmentId,
+              projectId: member.id,
+            }),
+          );
+          const member =
+            held.find((candidate) => candidate.environmentId === pickerEnvironmentId) ??
+            held[0] ??
+            entry.targetProject;
+          selectProject(member, entry.group.projectKey, project, { onUnavailable: leaveProject });
+          return;
+        }
+        case "choose":
+          void startScratch(project, { awaitingRepository: true, onUnavailable: leaveProject });
+          return;
+        case "project-folder":
+          void startScratch(project, { onUnavailable: leaveProject });
+          return;
+      }
+    }
     const lastActive = new Map<string, number>();
     for (const thread of threads) {
       if (thread.archivedAt !== null) continue;
@@ -731,7 +852,7 @@ export function DraftHeroHeadline({
     const target = projectDefaultRepository({
       items: repositoryItems,
       refsOf: refsOfRepository,
-      project,
+      project: null,
       projects: projectDirectory.active,
       isCurrent: (item) => !isScratchDraft && item.projectKey === activeProjectKey,
       lastActiveAt: (item) =>
@@ -745,22 +866,12 @@ export function DraftHeroHeadline({
     const entry = target ? projectEntryByKey.get(target.projectKey) : undefined;
     if (entry) {
       if (isScratchDraft || target?.projectKey !== activeProjectKey) {
-        selectProject(entry.targetProject, entry.group.projectKey, project);
-        return;
-      }
-      // Staying put: the project stays filed unless this machine lacks it.
-      if (project !== null && activeProject !== null) {
-        const folderId = workDraftFolderId({
-          repository: { environmentId: activeProject.environmentId, projectId: activeProject.id },
-          project,
-          byKey: projectDirectory.byKey,
-        });
-        if (folderId === null) setPendingProjectFolder(draftThread.threadId, null);
+        selectProject(entry.targetProject, entry.group.projectKey, null);
       }
       return;
     }
-    // Nothing to run in: Work goes without a repository, filed in the project.
-    if (!isScratchDraft) void startScratch(project);
+    // Nothing to run in: Work goes without a repository, in no project.
+    if (!isScratchDraft) void startScratch(null);
   });
   const projectHeadline =
     draftThread && draftId ? (

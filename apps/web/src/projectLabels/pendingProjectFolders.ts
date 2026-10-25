@@ -1,4 +1,4 @@
-import type { EnvironmentId, ProjectLabelId, ThreadId } from "@cogenly/contracts";
+import type { EnvironmentId, ProjectId, ProjectLabelId, ThreadId } from "@cogenly/contracts";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
@@ -21,6 +21,14 @@ export interface PendingProjectFolder {
    * draft to one of the project's repositories, then clears this.
    */
   readonly chosen?: boolean;
+  /**
+   * The repository a Work draft was filed with (null: none, in the project's
+   * folder). A repository linked or cloned into the project a moment ago is
+   * picked before the link reaches this client; the pick still holds.
+   */
+  readonly repositoryId?: ProjectId | null;
+  /** The project has several repositories and none is picked yet ("Choose a repository"). */
+  readonly awaitingRepository?: boolean;
 }
 
 interface PendingProjectFolderState {

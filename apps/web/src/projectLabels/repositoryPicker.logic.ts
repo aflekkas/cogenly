@@ -15,6 +15,7 @@ import {
   repositoryDirectoryNameFor,
   repositoryGroupingKeyOf,
   repositoryRemoteParts,
+  type EnvironmentId,
   type ProjectCloneSnapshot,
   type ProjectId,
   type ProjectLabelOwnerRepository,
@@ -24,7 +25,7 @@ import {
   type RepositoryIdentity,
 } from "@cogenly/contracts";
 
-import type { EnvironmentProjectLabel } from "./projectLabels.logic";
+import { projectLabelsOn, type EnvironmentProjectLabel } from "./projectLabels.logic";
 
 const GITHUB_PREFIX = "github.com/";
 
@@ -321,7 +322,7 @@ export function machineRepositoryRows<Local extends RepositoryListLocal>(input: 
  * shows, per machine. Keyed by `environmentId:id`.
  */
 export function repositoryNamesByCheckout<
-  Local extends RepositoryListLocal & { readonly environmentId: string },
+  Local extends RepositoryListLocal & { readonly environmentId: EnvironmentId },
 >(
   locals: ReadonlyArray<Local>,
   projects: ReadonlyArray<EnvironmentProjectLabel>,
@@ -330,7 +331,7 @@ export function repositoryNamesByCheckout<
   for (const environmentId of new Set(locals.map((local) => local.environmentId))) {
     const rows = machineRepositoryRows({
       locals: locals.filter((local) => local.environmentId === environmentId),
-      projects: projects.filter((project) => project.environmentId === environmentId),
+      projects: projectLabelsOn(projects, environmentId),
     });
     for (const row of rows) {
       if (row.local !== null) names.set(`${environmentId}:${row.local.id}`, row.name);
