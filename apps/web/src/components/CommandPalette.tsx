@@ -1398,25 +1398,17 @@ function OpenCommandPaletteDialog(props: {
         },
         renderDescription: (project) => {
           const location = projectEnvironmentLocationById.get(project.environmentId) ?? {
-            kind: "remote",
+            kind: "remote" as const,
             label: "Remote",
             machine: "server" as const,
           };
           return (
-            <span className="flex min-w-0 items-center gap-1">
-              <span className="inline-flex min-w-0 items-center gap-1">
-                {location.kind === "remote" ? (
-                  <EnvironmentMachineIcon
-                    aria-hidden
-                    kind={location.machine}
-                    className={COMMAND_PALETTE_META_ICON_CLASS}
-                  />
-                ) : null}
-                <span className="truncate">{location.label}</span>
-              </span>
-              <CommandPaletteMetaDot />
-              <span className="truncate">{project.workspaceRoot}</span>
-            </span>
+            <ProjectSearchDescription
+              environmentLabels={[]}
+              grouped={false}
+              location={location}
+              workspaceRoot={project.workspaceRoot}
+            />
           );
         },
         icon: projectFaviconIcon,
@@ -4288,9 +4280,10 @@ function ProjectSearchDescription(props: {
   readonly workspaceRoot: string;
 }) {
   if (!props.grouped) {
+    // The machine tag stays whole (up to half the row); the path gives way.
     return (
       <span className="flex min-w-0 items-center gap-1">
-        <span className="inline-flex min-w-0 items-center gap-1">
+        <span className="inline-flex max-w-1/2 shrink-0 items-center gap-1">
           {props.location.kind === "remote" ? (
             <EnvironmentMachineIcon
               aria-hidden
@@ -4301,7 +4294,7 @@ function ProjectSearchDescription(props: {
           <span className="truncate">{props.location.label}</span>
         </span>
         <CommandPaletteMetaDot />
-        <span className="truncate">{props.workspaceRoot}</span>
+        <span className="min-w-0 truncate">{props.workspaceRoot}</span>
       </span>
     );
   }
