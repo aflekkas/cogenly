@@ -33,8 +33,8 @@ const decodeClaudeRepoMcpServer = Schema.decodeUnknownOption(ClaudeRepoMcpServer
  * every file from the checkout root (the nearest directory holding `.git`)
  * down to `cwd`, the closest file winning a name. Outside a checkout only
  * `cwd` is read. Claude's strict MCP mode ignores these files, so Cogenly
- * passes them in its explicit config: a repo the user opened is trusted, and
- * Claude never asks to approve them. Values stay raw; Claude expands `${VAR}`.
+ * passes reviewed servers in its explicit config after RepoMcpTrust checks
+ * local command execution. Values stay raw; Claude expands `${VAR}`.
  */
 export const readClaudeRepoMcpServers = Effect.fn("readClaudeRepoMcpServers")(function* (
   cwd: string,
@@ -119,10 +119,16 @@ export const nativeMcpContextLine = (input: {
   readonly repoFile: string;
   readonly repo?: ReadonlyArray<string> | undefined;
   readonly managed?: ReadonlyArray<string> | undefined;
+  readonly waiting?: ReadonlyArray<string> | undefined;
 }): string | undefined => {
   const repo = input.repo ?? [];
   const managed = input.managed ?? [];
   const lines = [
+    ...((input.waiting?.length ?? 0) === 0
+      ? []
+      : [
+          `Local MCP servers from this repo are waiting on the user's trust: ${input.waiting!.join(", ")}. They are disabled until the user chooses Trust in this thread.`,
+        ]),
     ...(repo.length === 0
       ? []
       : [

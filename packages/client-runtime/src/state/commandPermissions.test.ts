@@ -66,24 +66,26 @@ const setup = Effect.gen(function* () {
 });
 
 describe("command permissions", () => {
-  it.effect.each([WS_METHODS.projectLabelsMerge, WS_METHODS.projectLabelsDismissDuplicate])(
-    "%s checks the destination environment's operate grant",
-    (method) =>
-      Effect.scoped(
-        Effect.gen(function* () {
-          const registry = yield* setup;
-          const command = createCommandPermissions(runtime, method);
-          registry.set(sessions(env), AsyncResult.success(grant(false)));
-          registry.set(sessions(other), AsyncResult.success(grant(true)));
-          expect(registry.get(command.permissionAtom(env))).toBe(false);
-          expect(yield* command.authorize(registry, env).pipe(Effect.flip)).toMatchObject({
-            requiredScope: AuthOrchestrationOperateScope,
-          });
-          registry.set(sessions(env), AsyncResult.success(grant(true)));
-          expect(registry.get(command.permissionAtom(env))).toBe(true);
-          yield* command.authorize(registry, env);
-        }),
-      ),
+  it.effect.each([
+    WS_METHODS.projectLabelsMerge,
+    WS_METHODS.projectLabelsDismissDuplicate,
+    WS_METHODS.repoMcpTrustRespond,
+  ])("%s checks the destination environment's operate grant", (method) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const registry = yield* setup;
+        const command = createCommandPermissions(runtime, method);
+        registry.set(sessions(env), AsyncResult.success(grant(false)));
+        registry.set(sessions(other), AsyncResult.success(grant(true)));
+        expect(registry.get(command.permissionAtom(env))).toBe(false);
+        expect(yield* command.authorize(registry, env).pipe(Effect.flip)).toMatchObject({
+          requiredScope: AuthOrchestrationOperateScope,
+        });
+        registry.set(sessions(env), AsyncResult.success(grant(true)));
+        expect(registry.get(command.permissionAtom(env))).toBe(true);
+        yield* command.authorize(registry, env);
+      }),
+    ),
   );
 
   it.effect("forks on a paired machine only with the request environment's operate grant", () =>

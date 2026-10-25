@@ -365,7 +365,25 @@ describe("ClaudeAdapterV2 native MCP isolation", () => {
     assert.notProperty(launched.extraArgs ?? {}, "mcp-config");
   });
 
-  it("names administrator-managed servers and leaves the repo to managed policy", () => {
+  it.each([false, true])(
+    "does not let Claude's native config bypass pending repo trust (connectors=%s)",
+    (useProviderConnectors) => {
+      const result = options({
+        useProviderConnectors,
+        repoMcpServers: { web: { type: "http", url: "https://example.com/mcp" } },
+        repoMcpWaiting: ["untrusted-local"],
+      });
+      assert.include(result.settings, { enableAllProjectMcpServers: false });
+      assert.deepEqual(
+        (result.settings as { disabledMcpjsonServers: string[] }).disabledMcpjsonServers,
+        ["untrusted-local"],
+      );
+      assert.notProperty(result.mcpServers ?? {}, "untrusted-local");
+      assert.include(promptOf(result), "waiting on the user's trust: untrusted-local");
+    },
+  );
+
+  it("keeps reviewed repo servers alongside administrator-managed servers", () => {
     const result = options({
       mcpServers: { cogenly },
       repoMcpServers,
@@ -373,20 +391,20 @@ describe("ClaudeAdapterV2 native MCP isolation", () => {
       managedMcpServerNames: ["corp-search"],
     });
     assert.isUndefined(result.strictMcpConfig);
-    assert.deepEqual(result.mcpServers, { cogenly });
+    assert.deepEqual(result.mcpServers, { ...repoMcpServers, cogenly });
     assert.include(promptOf(result), "Administrator-managed MCP servers");
     assert.include(promptOf(result), "corp-search");
-    assert.notInclude(promptOf(result), "MCP servers from this repo");
+    assert.include(promptOf(result), "MCP servers from this repo");
   });
 
-  it("leaves the repo's servers to Claude itself when native configuration is restored", () => {
+  it("keeps repo servers explicit when native configuration is restored", () => {
     const result = options({
       mcpServers: { cogenly },
       repoMcpServers,
       useProviderConnectors: true,
     });
-    assert.deepEqual(result.mcpServers, { cogenly });
-    assert.notInclude(promptOf(result), "MCP servers from this repo");
+    assert.deepEqual(result.mcpServers, { ...repoMcpServers, cogenly });
+    assert.include(promptOf(result), "MCP servers from this repo");
   });
 });
 

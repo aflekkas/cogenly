@@ -1,3 +1,4 @@
+import * as RepoMcpTrust from "./integrations/RepoMcpTrust.ts";
 import * as AccountConnections from "./accounts/AccountConnections.ts";
 import * as AccountAccess from "./accounts/AccountAccess.ts";
 import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
@@ -1099,6 +1100,7 @@ const makeWsRpcHandlers = (
     const agentStore = yield* AgentStore.AgentStore;
     const facts = yield* Facts.FactService;
     const integrations = yield* Integrations.Integrations;
+    const repoMcpTrust = yield* RepoMcpTrust.RepoMcpTrust;
     const machines = yield* Machines.Machines;
     const syncStatus = yield* SharedSyncStatus.SharedSyncStatus;
     const threadTransfer = yield* ThreadTransfer.ThreadTransfer;
@@ -1738,6 +1740,8 @@ const makeWsRpcHandlers = (
       [WS_METHODS.agentsActivity]: (input) => agentWorkspace.activity(input.agentId),
       [WS_METHODS.integrationsPreviewNative]: () => integrations.previewNative(),
       [WS_METHODS.integrationsImportNative]: () => integrations.importNative(),
+      [WS_METHODS.repoMcpTrustSubscribe]: ({ threadId }) => repoMcpTrust.subscribe(threadId),
+      [WS_METHODS.repoMcpTrustRespond]: (input) => repoMcpTrust.respond(input),
       [WS_METHODS.integrationsList]: () => integrations.list({ includeProcessOutput: true }),
       // The owner's own Settings writes approve the vault items their headers reference.
       [WS_METHODS.integrationsCreate]: (input) =>
@@ -2882,6 +2886,7 @@ type WsRequestServices =
   | Exports.ExportService
   | ExternalLauncher.ExternalLauncher
   | Facts.FactService
+  | RepoMcpTrust.RepoMcpTrust
   | Integrations.Integrations
   | Machines.Machines
   | SharedSyncStatus.SharedSyncStatus
