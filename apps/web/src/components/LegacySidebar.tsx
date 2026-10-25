@@ -1631,7 +1631,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
                 !readEnvironmentScope(member.environmentId, AuthOrchestrationOperateScope),
             }),
             buildTargetedItem("grouping", "Group into..."),
-            buildTargetedItem("copy-path", "Copy Path"),
+            buildTargetedItem("copy-path", "Copy path"),
             { id: "project-settings", label: "Repository settings", icon: "settings" },
             buildTargetedItem("delete", "Remove", {
               destructive: true,
@@ -2160,8 +2160,8 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
             : []),
           { id: "rename", label: "Rename thread", disabled: !canOperateThread },
           { id: "mark-unread", label: "Mark unread" },
-          { id: "copy-path", label: "Copy Path" },
-          { id: "copy-thread-id", label: "Copy Thread ID" },
+          { id: "copy-path", label: "Copy path" },
+          { id: "copy-thread-id", label: "Copy thread ID" },
           { id: "project-settings", label: "Repository settings" },
           {
             id: "delete",

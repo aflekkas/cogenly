@@ -75,7 +75,7 @@ export function useProjectFolderMenu(
     const current = projectLabelPaletteColor(label.color);
     const machineItem = (target: MachineMoveTarget, name: string) => ({
       id: `move-machine:${target.environmentId}` as const,
-      label: target.online ? `${name}…` : `${name} (Offline)`,
+      label: target.online ? `${name}…` : `${name} (offline)`,
       icon: "server",
       disabled: !canMoveToMachine || !target.online,
     });
@@ -89,7 +89,7 @@ export function useProjectFolderMenu(
           : [
               {
                 id: "move-machine",
-                label: "Move to Machine",
+                label: "Move to machine",
                 icon: "server",
                 disabled: !canMoveToMachine,
                 children: machineTargets.map((target) => machineItem(target, target.name)),

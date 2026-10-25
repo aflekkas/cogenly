@@ -65,7 +65,7 @@ export function buildDraftActionMenuItems(options: {
       : []),
     {
       id: "discard",
-      label: "Discard Draft",
+      label: "Discard draft",
       icon: "trash",
       destructive: true,
       separatorBefore: copyChildren.length > 0,
@@ -84,7 +84,7 @@ export function buildRepositoryActionMenuItems(options: {
   readonly folder: { readonly key: string; readonly name: string } | null;
 }): ReadonlyArray<ContextMenuItem<RepositoryActionMenuId>> {
   return [
-    { id: "new-thread", label: "New Thread", icon: "message-square-plus" },
+    { id: "new-thread", label: "New thread", icon: "message-square-plus" },
     ...(options.folder
       ? [
           {
@@ -96,7 +96,7 @@ export function buildRepositoryActionMenuItems(options: {
       : []),
     {
       id: "project-settings",
-      label: "Repository Settings",
+      label: "Repository settings",
       icon: "settings",
       separatorBefore: true,
     },
@@ -112,13 +112,13 @@ export interface ThreadActionMenuState {
   readonly isSettled: boolean;
   readonly isSnoozed: boolean;
   readonly canSnoozeNow: boolean;
-  /** Offers "Mark as Read" in place of "Mark as Unread". */
+  /** Offers "Mark as read" in place of "Mark as unread". */
   readonly isUnread?: boolean;
   /** Delete asks first (the confirm setting, or a kind that always confirms), so it reads "Delete…". */
   readonly confirmsDelete?: boolean;
   /** Archive rejects a thread with an attached provider, so disable it here rather than let the action fail. */
   readonly isRunning: boolean;
-  /** The agent is already naming the thread again, so Regenerate Title waits. */
+  /** The agent is already naming the thread again, so Regenerate title waits. */
   readonly isRegeneratingTitle?: boolean;
   /** What the thread's environment understands; a kind's action still needs its server. */
   readonly supports: {
@@ -151,7 +151,7 @@ export interface ThreadActionMenuMachines {
 }
 
 /**
- * "Move to <machine>" for the one paired machine, or a "Move to Machine"
+ * "Move to <machine>" for the one paired machine, or a "Move to machine"
  * submenu with one item per machine. Offline machines show but stay disabled.
  * `countSuffix` labels a bulk move, such as " (12)".
  */
@@ -162,7 +162,7 @@ export function machineMenuItems(
   if (machines === undefined || machines.targets.length === 0) return [];
   const item = (target: ThreadActionMenuMachines["targets"][number], label: string) => ({
     id: `move-machine:${target.environmentId}` as const,
-    label: target.online ? label : `${label} (Offline)`,
+    label: target.online ? label : `${label} (offline)`,
     icon: "server",
     disabled: !machines.canMove || !target.online,
   });
@@ -173,7 +173,7 @@ export function machineMenuItems(
   return [
     {
       id: "move-machine",
-      label: `Move to Machine${countSuffix}`,
+      label: `Move to machine${countSuffix}`,
       icon: "server",
       disabled: !machines.canMove,
       children: machines.targets.map((target) => item(target, target.name)),
@@ -188,7 +188,7 @@ function forkMachineMenuItems(
   if (machines?.canFork === undefined || machines.targets.length === 0) return [];
   const item = (target: ThreadActionMenuMachines["targets"][number], label: string) => ({
     id: `fork-machine:${target.environmentId}` as const,
-    label: target.online ? label : `${label} (Offline)`,
+    label: target.online ? label : `${label} (offline)`,
     icon: "git-branch",
     disabled: !machines.canFork || !target.online,
   });
@@ -198,7 +198,7 @@ function forkMachineMenuItems(
     : [
         {
           id: "fork-machine",
-          label: "Fork to Machine",
+          label: "Fork to machine",
           icon: "git-branch",
           disabled: !machines.canFork,
           children: machines.targets.map((target) => item(target, target.name)),
@@ -278,7 +278,7 @@ function folderMenuItems(
   }
   children.push({
     id: "new-folder",
-    label: "New Project…",
+    label: "New project…",
     separatorBefore: children.length > 0,
   });
   const label = folder.forks === true ? "Fork into project…" : "Move to project…";
@@ -299,25 +299,25 @@ type MenuItems = ReadonlyArray<ContextMenuItem<ThreadActionMenuId>>;
 export function buildThreadActionMenuItems(state: ThreadActionMenuState): MenuItems {
   const can = state.capabilities;
   const status: MenuItems = [
-    ...(can.startWork ? [{ id: "start-work" as const, label: "Start Work…", icon: "hammer" }] : []),
+    ...(can.startWork ? [{ id: "start-work" as const, label: "Start work…", icon: "hammer" }] : []),
     ...(can.pin && state.supports.pinning
       ? [
           state.isPinned
-            ? { id: "unpin" as const, label: "Unpin Thread", icon: "pin-off" }
-            : { id: "pin" as const, label: "Pin Thread", icon: "pin" },
+            ? { id: "unpin" as const, label: "Unpin thread", icon: "pin-off" }
+            : { id: "pin" as const, label: "Pin thread", icon: "pin" },
         ]
       : []),
     ...(can.settle && state.supports.settlement
       ? [
           state.isSettled
-            ? { id: "unsettle" as const, label: "Un-settle Thread", icon: "circle-check" }
-            : { id: "settle" as const, label: "Settle Thread", icon: "circle-check" },
+            ? { id: "unsettle" as const, label: "Un-settle thread", icon: "circle-check" }
+            : { id: "settle" as const, label: "Settle thread", icon: "circle-check" },
         ]
       : []),
     ...(can.snooze && state.supports.snooze
       ? [
           state.isSnoozed
-            ? { id: "unsnooze" as const, label: "Wake Thread", icon: "clock" }
+            ? { id: "unsnooze" as const, label: "Wake thread", icon: "clock" }
             : {
                 id: "snooze" as const,
                 label: "Snooze",
@@ -334,15 +334,15 @@ export function buildThreadActionMenuItems(state: ThreadActionMenuState): MenuIt
         ]
       : []),
     ...(state.limitResume === "scheduled"
-      ? [{ id: "limit-resume:off" as const, label: "Don't Resume at Reset", icon: "timer-off" }]
+      ? [{ id: "limit-resume:off" as const, label: "Don't resume at reset", icon: "timer-off" }]
       : state.limitResume === "cancelled"
-        ? [{ id: "limit-resume:on" as const, label: "Resume at Reset", icon: "clock" }]
+        ? [{ id: "limit-resume:on" as const, label: "Resume at reset", icon: "clock" }]
         : []),
     ...(can.markUnread
       ? [
           state.isUnread
-            ? { id: "mark-read" as const, label: "Mark as Read", icon: "mail" }
-            : { id: "mark-unread" as const, label: "Mark as Unread", icon: "mail-open" },
+            ? { id: "mark-read" as const, label: "Mark as read", icon: "mail" }
+            : { id: "mark-unread" as const, label: "Mark as unread", icon: "mail-open" },
         ]
       : []),
   ];
@@ -353,7 +353,7 @@ export function buildThreadActionMenuItems(state: ThreadActionMenuState): MenuIt
       : []),
     ...(can.copyLink
       ? [
-          { id: "copy-thread-link" as const, label: "Thread Link", icon: "link" },
+          { id: "copy-thread-link" as const, label: "Thread link", icon: "link" },
           { id: "copy-thread-id" as const, label: "Thread ID", icon: "hash" },
         ]
       : []),
@@ -364,7 +364,7 @@ export function buildThreadActionMenuItems(state: ThreadActionMenuState): MenuIt
       ? [
           {
             id: "regenerate-title" as const,
-            label: state.isRegeneratingTitle === true ? "Regenerating Title…" : "Regenerate Title",
+            label: state.isRegeneratingTitle === true ? "Regenerating title…" : "Regenerate title",
             icon: "refresh-cw",
             disabled: state.isRegeneratingTitle === true,
           },
@@ -377,7 +377,7 @@ export function buildThreadActionMenuItems(state: ThreadActionMenuState): MenuIt
       ? [{ id: "copy" as const, label: "Copy", icon: "copy", children: copyChildren }]
       : []),
     ...(can.agentSettings
-      ? [{ id: "agent-settings" as const, label: "Agent Settings", icon: "settings" }]
+      ? [{ id: "agent-settings" as const, label: "Agent settings", icon: "settings" }]
       : []),
   ];
   // Archive removes the thread from the sidebar while keeping its
@@ -391,7 +391,7 @@ export function buildThreadActionMenuItems(state: ThreadActionMenuState): MenuIt
           {
             id: "archive" as const,
             // Supported but unavailable right now, so it says why.
-            label: state.isRunning ? "Archive Thread (Stop It First)" : "Archive Thread",
+            label: state.isRunning ? "Archive thread (stop it first)" : "Archive thread",
             icon: "archive",
             disabled: state.isRunning,
           },

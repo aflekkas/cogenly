@@ -3457,7 +3457,7 @@ export default function Sidebar() {
     },
     [updateThreadMetadata],
   );
-  // The rename field's regenerate button and the row menu's Regenerate Title:
+  // The rename field's regenerate button and the row menu's Regenerate title:
   // drop the typed title and let the agent name the thread again.
   const regenerateThreadTitle = useCallback(
     (threadRef: ScopedThreadRef) => {
@@ -4446,7 +4446,7 @@ export default function Sidebar() {
         supportedCount: titleRegenerationThreads.length,
         actionableCount: regeneratableTitleThreads.length,
       });
-      // Move to Machine goes through one environment, so a selection spanning
+      // Move to machine goes through one environment, so a selection spanning
       // environments does not offer it.
       const moveEnvironmentId = selectedThreads.every(
         (thread) => thread.environmentId === selectedThreads[0]?.environmentId,
@@ -4515,7 +4515,7 @@ export default function Sidebar() {
                 ]
               : []),
             ...(offersMarkUnread
-              ? [{ id: "mark-unread", label: `Mark as Unread (${count})` }]
+              ? [{ id: "mark-unread", label: `Mark as unread (${count})` }]
               : []),
             ...machineItems,
             ...(offersDelete

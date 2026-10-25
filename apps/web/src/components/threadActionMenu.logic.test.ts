@@ -133,7 +133,7 @@ describe("buildThreadActionMenuItems per thread kind", () => {
     const archive = buildThreadActionMenuItems(stateFor("work", { isRunning: true })).find(
       (item) => item.id === "archive",
     );
-    expect(archive).toMatchObject({ disabled: true, label: "Archive Thread (Stop It First)" });
+    expect(archive).toMatchObject({ disabled: true, label: "Archive thread (stop it first)" });
   });
 
   it("ends Delete with an ellipsis only when it asks first", () => {
@@ -175,7 +175,7 @@ describe("buildThreadActionMenuItems per thread kind", () => {
     ).not.toContain("pin");
   });
 
-  it("offers Regenerate Title after Rename when the server supports it, waiting while it runs", () => {
+  it("offers Regenerate title after Rename when the server supports it, waiting while it runs", () => {
     const withRegeneration = (kind: ThreadKind, isRegeneratingTitle = false) => {
       const base = stateFor(kind, { isRegeneratingTitle });
       return buildThreadActionMenuItems({
@@ -188,7 +188,7 @@ describe("buildThreadActionMenuItems per thread kind", () => {
       expect(items.indexOf("regenerate-title")).toBe(items.indexOf("rename") + 1);
     }
     const pending = withRegeneration("work", true).find((item) => item.id === "regenerate-title");
-    expect(pending).toMatchObject({ label: "Regenerating Title…", disabled: true });
+    expect(pending).toMatchObject({ label: "Regenerating title…", disabled: true });
     expect(ids(buildThreadActionMenuItems(stateFor("work")))).not.toContain("regenerate-title");
     expect(ids(withRegeneration("agentConversation"))).not.toContain("regenerate-title");
   });
@@ -313,7 +313,7 @@ describe("buildRepositoryActionMenuItems", () => {
       buildRepositoryActionMenuItems({ folder: { key: "env:spawn", name: "Spawn" } }).map(
         (item) => item.label,
       ),
-    ).toEqual(["New Thread", "Open Spawn", "Repository Settings"]);
+    ).toEqual(["New thread", "Open Spawn", "Repository settings"]);
   });
 });
 
@@ -333,7 +333,7 @@ describe("Move to project options", () => {
   });
 });
 
-describe("Move to Machine", () => {
+describe("Move to machine", () => {
   const vps = { environmentId: "vps", name: "VPS", online: true };
   const mini = { environmentId: "mini", name: "Mac mini", online: false };
 
@@ -356,7 +356,7 @@ describe("Move to Machine", () => {
     const [submenu] = machineMenuItems({ targets: [mini, vps], canMove: true });
     expect(submenu?.id).toBe("move-machine");
     expect(submenu?.children?.map((item) => [item.label, item.disabled])).toEqual([
-      ["Mac mini (Offline)", true],
+      ["Mac mini (offline)", true],
       ["VPS", false],
     ]);
   });
@@ -369,7 +369,7 @@ describe("Move to Machine", () => {
   });
 });
 
-describe("Fork to Machine", () => {
+describe("Fork to machine", () => {
   const targets = [
     { environmentId: "vps", name: "VPS", online: true },
     { environmentId: "mini", name: "Mac mini", online: false },
@@ -381,7 +381,7 @@ describe("Fork to Machine", () => {
       ).find((item) => item.id === "fork-machine");
     expect(menu(true)?.children?.map((item) => [item.label, item.disabled])).toEqual([
       ["VPS", false],
-      ["Mac mini (Offline)", true],
+      ["Mac mini (offline)", true],
     ]);
     expect(menu(false)?.disabled).toBe(true);
     expect(menu(true, false)?.disabled).toBe(true);
