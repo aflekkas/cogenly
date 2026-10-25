@@ -389,9 +389,9 @@ name. Neither you nor an agent can add threads or repositories to it until you
 unarchive it, though you can still move threads out. **Archived** at the top of
 Settings → Projects lists them; choose **Unarchive** to bring one back.
 
-To file a thread, right-click it and choose **Move to folder**, or run **Move to folder…** from the command palette. Choose
-**Remove from folder** to take it out; Work then falls back to its repository's
-project. A filed chat also gets
+To file a thread, right-click it and choose **Move to project…**, run **Move to project…**
+from the command palette, or pick a project in the composer. Choose **Remove from
+project** to take it out; Work then falls back to its repository's project. A filed chat also gets
 [project context](./memory-and-export.md#project-context-in-chats).
 
 **Chats** stays one list of titles by date. **Work** is one list of cards in the order you

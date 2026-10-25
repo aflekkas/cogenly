@@ -2229,7 +2229,7 @@ function OpenCommandPaletteDialog(props: {
           "folder",
           "project",
         ],
-        title: forks ? "Fork into project…" : "Move to folder…",
+        title: forks ? "Fork into project…" : "Move to project…",
         icon: <FolderIcon className={ITEM_ICON_CLASS} />,
         addonIcon: <FolderIcon className={ADDON_ICON_CLASS} />,
         disabled: !canMoveActiveThread,
@@ -2268,7 +2268,8 @@ function OpenCommandPaletteDialog(props: {
         kind: "action",
         value: "action:remove-thread-from-folder",
         searchTerms: ["remove from folder", "remove from project", "unfile", "folder"],
-        title: `Remove from ${folderState.current.label.name}`,
+        title: "Remove from project",
+        description: folderState.current.label.name,
         icon: <FolderMinusIcon className={ITEM_ICON_CLASS} />,
         disabled: !canMoveActiveThread,
         run: async () => {

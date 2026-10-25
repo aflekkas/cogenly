@@ -551,7 +551,7 @@ function AgentRow({
         ? [
             {
               id: "move-project" as const,
-              label: "Move to Project",
+              label: "Move to project…",
               icon: "folder",
               disabled: !canMoveProject,
               children: [
@@ -569,13 +569,16 @@ function AgentRow({
                     checked: entry.label.id === currentFolderId,
                     disabled: entry.label.id === currentFolderId,
                   })),
-                {
-                  id: "move-project-none" as const,
-                  label: "No Project",
-                  checked: currentFolderId === null,
-                  disabled: currentFolderId === null,
-                  separatorBefore: folders.length > 0,
-                },
+                // The way out, as on a thread's menu: only while it is in one.
+                ...(currentFolderId !== null
+                  ? [
+                      {
+                        id: "move-project-none" as const,
+                        label: "Remove from project",
+                        separatorBefore: folders.length > 0,
+                      },
+                    ]
+                  : []),
               ],
             },
           ]
