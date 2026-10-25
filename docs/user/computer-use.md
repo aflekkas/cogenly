@@ -26,9 +26,8 @@ permissions for that terminal app, and the prompt names it.
 Turn off **Computer use** in **Settings → Integrations → Agent access**, for all projects or for
 one project. It applies when an agent session next starts.
 
-Persistent agents follow the same rule as the browser: they can always look (status, app list,
-window contents, screenshots), and they can click and type only when they have every sensitive
-permission (send, create pull requests, merge, deploy, delete).
+Persistent agents can look, click and type with their default permissions. Computer actions require
+the execute permission; the browser's permission rules stay the same.
 
 ## Servers without a desktop
 

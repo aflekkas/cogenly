@@ -1526,6 +1526,8 @@ it.effect(
           "deploy",
           "delete_project",
           "terminal_run",
+          "preview_click",
+          "preview_type",
           "create_threads",
           "delegate_task",
           "thread_configure",
@@ -1581,6 +1583,31 @@ it.effect(
         expect(h.launches).toHaveLength(1);
       }).pipe(Effect.provide(h.layer));
     }),
+);
+
+it.effect.each([
+  "computer_press",
+  "computer_click",
+  "computer_type",
+  "computer_key",
+  "computer_scroll",
+  "computer_drag",
+  "computer_open_app",
+])("agents use %s with default grants and lose access when execute is revoked", (name) =>
+  Effect.gen(function* () {
+    const h = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const store = yield* Store.AgentStore;
+      const policy = yield* Policy.AgentMcpPolicy;
+      const agent = yield* store.save({ ...h.fixture, permissions: defaultAgentPermissions });
+      const scope = scopeFor(agent.conversationThreadId);
+      expect(yield* policy.beforeTool(scope, name, {}, false)).toEqual({ handled: false });
+      yield* store.save({ ...agent, permissions: { ...agent.permissions, execute: false } });
+      const denied = yield* policy.beforeTool(scope, name, {}, false).pipe(Effect.flip);
+      expect(denied.code).toBe("agent_permission_denied");
+      expect(denied.message).toBe("This agent has no execute grant.");
+    }).pipe(Effect.provide(h.layer));
+  }),
 );
 
 it.effect("agents add projects with the execute grant, without the high-impact grants", () =>

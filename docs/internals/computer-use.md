@@ -28,6 +28,6 @@ as missing after the user turned it on.
 
 `enableAgentComputerUse` puts the `computer` capability on the session credential when
 `prepareMcpSession` runs, alongside `preview` and `device`. A flipped setting rotates the
-credential. Persistent agents get the browser's rule in
-[`AgentMcpPolicy`](../../apps/server/src/agents/AgentMcpPolicy.ts): reads always pass, and
-unrestricted writes need every sensitive grant.
+credential. In [`AgentMcpPolicy`](../../apps/server/src/agents/AgentMcpPolicy.ts), persistent
+agents use computer actions with the ordinary execute grant, enabled by default. The browser's
+unrestricted writes still need every sensitive grant.
