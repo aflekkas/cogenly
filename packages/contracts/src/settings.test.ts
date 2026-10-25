@@ -172,6 +172,30 @@ describe("ServerSettings usage-limit recovery", () => {
   });
 });
 
+describe("ServerSettings retired CLI Proxy hubs", () => {
+  const savedHub = {
+    "cliproxy-hub": {
+      kind: "cliproxy",
+      url: "http://hub:8317",
+      managementKey: "••••••",
+      enabled: true,
+    },
+  };
+
+  it("loads settings saved with hubs and drops them", () => {
+    const decoded = decodeServerSettings({
+      autoResumeLimitedThreads: false,
+      usageLimitSources: savedHub,
+    });
+    expect(decoded.autoResumeLimitedThreads).toBe(false);
+    expect("usageLimitSources" in decoded).toBe(false);
+  });
+
+  it("ignores a hub patch from an older client", () => {
+    expect(decodeServerSettingsPatch({ usageLimitSources: savedHub })).toEqual({});
+  });
+});
+
 describe("ServerSettings default permissions", () => {
   it("keeps full access for settings saved before a default was configured", () => {
     expect(decodeServerSettings({}).defaultRuntimeMode).toBe("full-access");

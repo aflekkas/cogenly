@@ -2,7 +2,6 @@ import {
   ClaudeSettings,
   CodexSettings,
   type ServerSettings,
-  UsageLimitSourceConfig,
   secretSettingsFields,
 } from "@cogenly/contracts";
 import {
@@ -20,7 +19,6 @@ const providerSecretFields = new Map([
   // Preserve redaction and secret-store lookup for settings written before retirement.
   ["antigravity", ["apiKey"]],
 ]);
-const usageLimitSecretFields = secretSettingsFields(UsageLimitSourceConfig);
 const encode = (value: string) => Buffer.from(value, "utf8").toString("base64url");
 
 export interface SettingsSecret {
@@ -121,20 +119,5 @@ export function mapSettingsSecrets(
     ]),
   ) as ServerSettings["sourceControlHosts"];
 
-  const usageLimitSources = Object.fromEntries(
-    Object.entries(settings.usageLimitSources).map(([id, source]) => [
-      id,
-      mapFields(
-        source,
-        usageLimitSecretFields,
-        (field, serverHost) =>
-          `usage-limit-source-${encode(id)}` +
-          (field === "managementKey" && serverHost === null
-            ? ""
-            : `-${encode(field)}${serverHost === null ? "" : `-${encode(serverHost)}`}`),
-      ),
-    ]),
-  ) as ServerSettings["usageLimitSources"];
-
-  return { ...settings, providerInstances, sourceControlHosts, usageLimitSources };
+  return { ...settings, providerInstances, sourceControlHosts };
 }

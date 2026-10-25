@@ -3,7 +3,6 @@ import {
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
-  UsageLimitSourceId,
   type ServerProvider,
 } from "@cogenly/contracts";
 import * as Duration from "effect/Duration";
@@ -767,27 +766,24 @@ describe("serverSettings helpers", () => {
     });
   });
 
-  it("upserts and removes usageLimitSources per entry so concurrent edits cannot clobber", () => {
-    const hubA = UsageLimitSourceId.make("cliproxy-a");
-    const hubB = UsageLimitSourceId.make("cliproxy-b");
-    const source = (url: string) => ({
-      kind: "cliproxy" as const,
-      url,
-      managementKey: "secret",
-      enabled: true,
-    });
+  it("upserts and removes usageModelAliases per entry", () => {
     const current = {
       ...DEFAULT_SERVER_SETTINGS,
-      usageLimitSources: { [hubA]: source("http://a:8318") },
+      usageModelAliases: { "model-a-preview": "model-a" },
     };
 
     const added = applyServerSettingsPatch(current, {
-      usageLimitSources: { [hubB]: source("http://b:8318") },
+      usageModelAliases: { "model-b-preview": "model-b" },
     });
-    expect(Object.keys(added.usageLimitSources)).toEqual([hubA, hubB]);
+    expect(added.usageModelAliases).toEqual({
+      "model-a-preview": "model-a",
+      "model-b-preview": "model-b",
+    });
 
-    const removed = applyServerSettingsPatch(added, { usageLimitSources: { [hubA]: null } });
-    expect(Object.keys(removed.usageLimitSources)).toEqual([hubB]);
+    const removed = applyServerSettingsPatch(added, {
+      usageModelAliases: { "model-a-preview": null },
+    });
+    expect(removed.usageModelAliases).toEqual({ "model-b-preview": "model-b" });
   });
 
   it("stores background activity profiles as a versioned object and syncs legacy aliases", () => {

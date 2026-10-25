@@ -53,7 +53,6 @@ import { followStreamInEnvironment } from "./runtime.ts";
 import {
   applyServerConfigProjection,
   type ServerConfigProjection,
-  withoutUsageLimitSources,
 } from "./serverConfigProjection.ts";
 
 // Exported server state includes this type in its inferred public return type.
@@ -372,7 +371,6 @@ const cachedConfigSnapshotEvent = (config: ServerConfig): ServerConfigStreamEven
 });
 
 export interface ServerConfigSubscriptionOptions {
-  readonly usageLimitSources?: boolean;
   readonly usageLimitsCommand?: boolean;
 }
 
@@ -393,11 +391,9 @@ export const makeEnvironmentServerConfigState = Effect.fn("EnvironmentServerConf
       ),
     );
     const state = yield* SubscriptionRef.make<Option.Option<ServerConfigProjection>>(
-      // Stripped on load as well as on save: a cache written by an earlier
-      // build can still carry published themes.
       Option.map(cachedConfig, (cached) => ({
-        config: withoutUsageLimitSources(cached),
-        latestEvent: cachedConfigSnapshotEvent(withoutUsageLimitSources(cached)),
+        config: cached,
+        latestEvent: cachedConfigSnapshotEvent(cached),
         source: "cache" as const,
       })),
     );
@@ -407,7 +403,7 @@ export const makeEnvironmentServerConfigState = Effect.fn("EnvironmentServerConf
     const persist = Effect.fn("EnvironmentServerConfigState.persist")(function* (
       config: ServerConfig,
     ) {
-      return yield* cache.saveServerConfig(environmentId, withoutUsageLimitSources(config)).pipe(
+      return yield* cache.saveServerConfig(environmentId, config).pipe(
         Effect.as(true),
         Effect.catch((error) =>
           Effect.logWarning("Could not persist cached server configuration.").pipe(
@@ -446,7 +442,6 @@ export const makeEnvironmentServerConfigState = Effect.fn("EnvironmentServerConf
     yield* runCachePersistence(persistence, persistPending).pipe(Effect.forkScoped);
 
     yield* subscribe(WS_METHODS.subscribeServerConfig, {
-      ...(subscription.usageLimitSources === true ? { usageLimitSources: true } : {}),
       ...(subscription.usageLimitsCommand === true ? { usageLimitsCommand: true } : {}),
     }).pipe(
       Stream.runForEach((event) =>
@@ -646,13 +641,6 @@ export function createServerEnvironmentAtoms<R, E>(
     readonly initialConfigValueAtom: (
       environmentId: EnvironmentId,
     ) => Atom.Atom<ServerConfig | null>;
-    /**
-     * Whether this surface renders themes the environment publishes. Mobile
-     * keeps its own appearance settings, so it neither asks for the stream nor
-     * receives the payload.
-     */
-    /** Whether this surface renders quota from configured usage-limit sources. */
-    readonly usageLimitSources?: boolean;
     readonly usageLimitsCommand?: boolean;
   },
 ) {
@@ -667,7 +655,6 @@ export function createServerEnvironmentAtoms<R, E>(
     runtime
       .atom(
         serverConfigStateChanges(environmentId, {
-          ...(options.usageLimitSources === true ? { usageLimitSources: true } : {}),
           ...(options.usageLimitsCommand === true ? { usageLimitsCommand: true } : {}),
         }),
       )

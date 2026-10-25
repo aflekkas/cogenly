@@ -107,7 +107,6 @@ import * as ProviderInstanceRegistry from "./provider/ProviderInstanceRegistry.t
 import * as ProviderAdapterRegistry from "./orchestration-v2/ProviderAdapterRegistry.ts";
 import * as ProviderRegistry from "./provider/ProviderRegistry.ts";
 import * as ProviderUsageLimitsIngestion from "./provider/ProviderUsageLimitsIngestion.ts";
-import * as UsageLimitSources from "./usage/UsageLimitSources.ts";
 import * as ProjectFaviconResolver from "./project/ProjectFaviconResolver.ts";
 import * as ProjectConfigFileLoader from "./project/ProjectConfigFileLoader.ts";
 import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolver.ts";
@@ -758,14 +757,9 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   Layer.provideMerge(layerVcs),
   Layer.provideMerge(Layer.mergeAll(layerTerminal, layerPreview, layerDevice, layerComputerUse)),
   Layer.provideMerge(layerPersistence),
-  // Both read a user-owned file out of the state directory and stream changes
-  // to clients. Keybindings mirrors its portable list through server settings.
-  Layer.provideMerge(
-    Layer.mergeAll(
-      Keybindings.layer.pipe(Layer.provide(layerServerSettings)),
-      UsageLimitSources.layer,
-    ),
-  ),
+  // Reads a user-owned file out of the state directory and streams changes to
+  // clients. Keybindings mirrors its portable list through server settings.
+  Layer.provideMerge(Keybindings.layer.pipe(Layer.provide(layerServerSettings))),
   Layer.provideMerge(ProviderRegistry.layer),
   // The instance registry is the new routing keystone — text generation,
   // adapter lookup, and runtime ingestion all resolve `ProviderInstanceId`

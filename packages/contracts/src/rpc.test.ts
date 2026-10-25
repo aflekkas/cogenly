@@ -8,26 +8,21 @@ import { WsRpcGroup, WsSubscribeServerConfigRpc } from "./rpc.ts";
 const decodeServerConfigPayload = Schema.decodeSync(WsSubscribeServerConfigRpc.payloadSchema);
 
 /**
- * The client always sends `usageLimitSources`, including to servers built
- * before the field existed, whose payload schema was an empty struct. What
- * makes that safe is that such a schema accepts the request rather than
- * rejecting it -- an error here would take down the config subscription.
+ * Clients send capability flags the server may not declare: older clients
+ * still send the removed `usageLimitSources`, and newer ones send flags an
+ * older server predates. Rejecting either would take down the config
+ * subscription, so unknown flags must decode away.
  */
 describe("subscribeServerConfig payload compatibility", () => {
-  it("is accepted by a server whose schema predates the field", () => {
-    const oldServerPayload = Schema.Struct({});
-    const decoded = Schema.decodeExit(oldServerPayload)({ usageLimitSources: true });
-    expect(Exit.isSuccess(decoded)).toBe(true);
-  });
-
-  it("is carried by a server that declares it", () => {
+  it("drops a flag this server does not declare", () => {
     const decoded = decodeServerConfigPayload({
       usageLimitSources: true,
+      usageLimitsCommand: true,
     });
-    expect(decoded).toEqual({ usageLimitSources: true });
+    expect(decoded).toEqual({ usageLimitsCommand: true });
   });
 
-  it("stays optional, so a client that never sends it still subscribes", () => {
+  it("stays optional, so a client that sends no flags still subscribes", () => {
     const decoded = decodeServerConfigPayload({});
     expect(decoded).toEqual({});
   });

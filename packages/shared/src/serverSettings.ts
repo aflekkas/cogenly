@@ -442,9 +442,8 @@ export function applyServerSettingsPatch(
     backgroundActivityProfile,
     backgroundActivity,
     worktreeCleanup: worktreeCleanupPatch,
-    // Merged per entry below; its `null` removals must not reach deepMerge.
-    usageLimitSources: usageLimitSourcesPatch,
     sourceControlHosts: sourceControlHostsPatch,
+    // Merged per entry below; its `null` removals must not reach deepMerge.
     usageModelAliases: usageModelAliasesPatch,
     // Entry replacement: deepMerge would keep keys the client meant to clear.
     projectSettingsOverrides: projectSettingsOverridesPatch,
@@ -637,14 +636,6 @@ export function applyServerSettingsPatch(
       : {}),
     ...(patch.defaultProjectScripts !== undefined
       ? { defaultProjectScripts: patch.defaultProjectScripts }
-      : {}),
-    ...(usageLimitSourcesPatch !== undefined
-      ? {
-          usageLimitSources: mergeSettingsEntries(
-            current.usageLimitSources,
-            usageLimitSourcesPatch,
-          ),
-        }
       : {}),
     ...(usageModelAliasesPatch !== undefined
       ? {

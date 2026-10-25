@@ -83,9 +83,9 @@ function UsageLimitsBannerBody({
     <ComposerBanner.Scroll>
       <ComposerBanner.Body className="flex flex-col gap-2 pt-1 pb-1.5 pe-2">
         {report.accounts.map((account) => {
-          const resetCreditInput =
-            account.resetCreditInput ??
-            (account.instanceId ? { instanceId: account.instanceId } : undefined);
+          const resetCreditInput = account.instanceId
+            ? { instanceId: account.instanceId }
+            : undefined;
           const notice = limitsNotice(account.limits);
           const externalUsage = account.limits.externalUsage;
           return (
@@ -126,11 +126,6 @@ function UsageLimitsBannerBody({
             </div>
           );
         })}
-        {report.notices.map((notice) => (
-          <span key={notice} className="text-xs text-muted-foreground">
-            {notice}
-          </span>
-        ))}
       </ComposerBanner.Body>
     </ComposerBanner.Scroll>
   );
