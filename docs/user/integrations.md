@@ -7,7 +7,9 @@ request the agent opens. Never paste credentials into a conversation.
 
 Settings → Integrations shows connected accounts, live connection status and
 which projects can use each account. **Connect with an agent** opens a new chat
-with a connection request ready to send. **Reconnect** renews a sign-in;
+that starts “Connect” for you to finish with the service's name; before your
+first connection, a suggested service such as Slack or Notion fills it in.
+**Reconnect** renews a sign-in;
 **Disconnect** stops access until you reconnect; **Remove** deletes the connection.
 Ask an agent to rename an account or change its project scope. Connect a service
 again to add another account, such as personal Gmail and work Gmail.
@@ -52,16 +54,19 @@ availability; the agent also verifies that the required data can be read.
 ## Provider configuration
 
 **Use only Cogenly integrations** is on by default in Settings → Integrations.
-This keeps integrations in one place and avoids duplicate tools. Turn it off to
-allow the providers' own MCP configuration again; the change applies to new
-provider sessions. Native configuration files are never modified.
+Agents then use only the integrations connected in Cogenly, not the MCP
+servers, claude.ai connectors and Codex plugins set up in Claude or Codex. This
+keeps integrations in one place and avoids duplicate tools. Servers your
+organization manages for Claude stay available, and Muse can't hide its own
+servers. Turn the setting off to let agents use both; the change applies to new
+agent sessions. Claude and Codex configuration files are never modified.
 
-Administrator-managed Claude MCP servers and Muse's native configuration have
-provider limitations; see the status explained in Settings. Before switching
-from native configuration, review the import offer. It imports connection
-definitions, with secrets collected separately into the vault. claude.ai
-connectors require a new sign-in through Cogenly because their authorization
-cannot be imported.
+Until you import or skip **Import from Claude and Codex** on the same page,
+agents keep using the servers set up in Claude and Codex. **Review** lists what
+was found and what each server still needs. **Import** brings the definitions
+over, turned off; an agent then collects secrets into the vault and checks each
+connection with you. claude.ai connectors need a new sign-in through Cogenly
+because their authorization can't be imported.
 
 ## Sign-ins on paired machines
 

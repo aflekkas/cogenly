@@ -35,26 +35,21 @@ import { SearchField } from "~/components/ui/search-input";
  */
 
 /**
- * A row's frame, for the engine items in components/ui. `density` follows the container: a dialog
- * or the composer drawer is `comfortable`, a popover picker `compact`. `highlight` is how the
- * keyboard cursor paints: `hover` where a chosen value is painted selected and the cursor only
- * hovers, `cursor` where nothing is chosen so the cursor takes the selected fill, `none` when the
- * caller paints an `active` row itself.
+ * A row's frame, for the engine items in components/ui. Every searchable list shares one row
+ * height and radius, whether it is the palette, the composer drawer or a popover picker; only the
+ * list's padding follows its container. `highlight` is how the keyboard cursor paints: `hover`
+ * where a chosen value is painted selected and the cursor only hovers, `cursor` where nothing is
+ * chosen so the cursor takes the selected fill, `none` when the caller paints an `active` row itself.
  */
 const searchListRowVariants = cva(
-  "flex min-h-8 cursor-pointer select-none items-center gap-2 rounded-sm px-2 text-base outline-none data-disabled:pointer-events-none data-disabled:cursor-not-allowed data-disabled:opacity-64 sm:min-h-7 sm:text-sm [&_svg:not([class*='text-'])]:text-muted-foreground",
+  "flex min-h-8 cursor-pointer select-none items-center gap-2 rounded-sm px-2 py-1 text-base outline-none data-disabled:pointer-events-none data-disabled:cursor-not-allowed data-disabled:opacity-64 sm:min-h-7 sm:text-sm [&_svg:not([class*='text-'])]:text-muted-foreground",
   {
     defaultVariants: {
-      density: "compact",
       divider: false,
       highlight: "hover",
       tone: "default",
     },
     variants: {
-      density: {
-        compact: "py-1",
-        comfortable: "py-1.5",
-      },
       highlight: {
         hover: "state-hover data-selected:state-selected",
         cursor: "data-highlighted:state-selected data-selected:state-selected",
@@ -113,28 +108,12 @@ const searchListEmptyVariants = cva("text-muted-foreground", {
   },
 });
 
-/** A group's header: a quiet section line whose optional mark sits on the row-icon column. */
+/**
+ * A group's header: a quiet text line aligned with the rows' edge. Text only, in every list; the
+ * rows under it carry their own marks.
+ */
 const SEARCH_LIST_GROUP_LABEL_CLASS =
-  "flex min-w-0 items-center gap-2 px-2 py-1.5 font-medium text-muted-foreground text-xs";
-
-/** A group label's content: its mark on the row-icon column, then its text. */
-function SearchListGroupLabelContent(props: {
-  icon?: React.ReactNode;
-  children?: React.ReactNode;
-}) {
-  if (!props.icon) return props.children;
-  return (
-    <>
-      <span
-        aria-hidden="true"
-        className="flex h-4 min-w-4 shrink-0 items-center justify-center [&>svg:not([class*='size-'])]:size-3.5"
-      >
-        {props.icon}
-      </span>
-      <span className="min-w-0 truncate">{props.children}</span>
-    </>
-  );
-}
+  "min-w-0 truncate px-2 py-1.5 font-medium text-muted-foreground text-xs";
 
 /** The search header around an engine's input (`CommandInput`, `ComboboxSearchInput`). */
 function SearchListSearch({
@@ -186,16 +165,12 @@ function SearchListEmpty({
  * A row that is listed but cannot be picked, outside the engine's items (the palette lists
  * unavailable commands this way so they never take the keyboard cursor).
  */
-function SearchListStaticRow({
-  density = "comfortable",
-  className,
-  ...props
-}: React.ComponentProps<"div"> & { density?: "compact" | "comfortable" }) {
+function SearchListStaticRow({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       aria-disabled="true"
       className={cn(
-        searchListRowVariants({ density, highlight: "none" }),
+        searchListRowVariants({ highlight: "none" }),
         "cursor-default opacity-64",
         className,
       )}
@@ -374,7 +349,6 @@ function SearchListRowSubmenu({
 export {
   SEARCH_LIST_GROUP_LABEL_CLASS,
   SearchListEmpty,
-  SearchListGroupLabelContent,
   SearchListRowBadge,
   SearchListRowCheck,
   SearchListRowDescription,

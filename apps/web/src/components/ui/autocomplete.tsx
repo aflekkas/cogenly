@@ -8,7 +8,6 @@ import { Input } from "~/components/ui/input";
 import { ScrollArea } from "~/components/ui/scroll-area";
 import {
   SEARCH_LIST_GROUP_LABEL_CLASS,
-  SearchListGroupLabelContent,
   searchListEmptyVariants,
   searchListListVariants,
   searchListRowVariants,
@@ -132,16 +131,14 @@ function AutocompleteItem({
   className,
   children,
   highlight = "hover",
-  density = "compact",
   ...props
 }: AutocompletePrimitive.Item.Props & {
   /** How the keyboard cursor paints; `none` when the caller paints the active row (see CommandItem). */
   highlight?: "hover" | "cursor" | "none";
-  density?: "compact" | "comfortable";
 }) {
   return (
     <AutocompletePrimitive.Item
-      className={cn(searchListRowVariants({ density, highlight }), className)}
+      className={cn(searchListRowVariants({ highlight }), className)}
       data-slot="autocomplete-item"
       {...props}
     >
@@ -160,42 +157,25 @@ function AutocompleteGroup({ className, ...props }: AutocompletePrimitive.Group.
   );
 }
 
-function AutocompleteGroupLabel({
-  className,
-  icon,
-  children,
-  ...props
-}: AutocompletePrimitive.GroupLabel.Props & {
-  /** The group's mark, on the row-icon column. */
-  icon?: React.ReactNode;
-}) {
+function AutocompleteGroupLabel({ className, ...props }: AutocompletePrimitive.GroupLabel.Props) {
   return (
     <AutocompletePrimitive.GroupLabel
       className={cn(SEARCH_LIST_GROUP_LABEL_CLASS, className)}
       data-slot="autocomplete-group-label"
       {...props}
-    >
-      <SearchListGroupLabelContent icon={icon}>{children}</SearchListGroupLabelContent>
-    </AutocompletePrimitive.GroupLabel>
+    />
   );
 }
 
 // A group label for virtualized lists, where rows cannot be wrapped in a group.
-function AutocompleteListHeading({
-  className,
-  icon,
-  children,
-  ...props
-}: React.ComponentProps<"div"> & { icon?: React.ReactNode }) {
+function AutocompleteListHeading({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       className={cn(SEARCH_LIST_GROUP_LABEL_CLASS, className)}
       data-slot="autocomplete-group-label"
       role="presentation"
       {...props}
-    >
-      <SearchListGroupLabelContent icon={icon}>{children}</SearchListGroupLabelContent>
-    </div>
+    />
   );
 }
 

@@ -5,8 +5,10 @@ import {
 } from "@cogenly/client-runtime/state/runtime";
 import { useAtomValue } from "@effect/atom-react";
 import {
+  INTEGRATION_CATALOG,
   integrationCatalogEntryFor,
   type EnvironmentId,
+  type IntegrationNativeImportPreview,
   type IntegrationSummary,
 } from "@cogenly/contracts";
 import { useState } from "react";
@@ -20,7 +22,9 @@ import { integrationsRpc } from "../../rpc/integrations";
 import { useEnvironmentQuery } from "../../state/query";
 import { useOrchestrationCommand } from "../../state/use-orchestration-command";
 import { IntegrationSourceIcon } from "../chat/ComposerSourcesPicker";
+import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
+import { DisclosurePanel, DisclosureTrigger } from "../ui/disclosure";
 import { toastManager } from "../ui/toast";
 import {
   integrationErrorText,
@@ -28,6 +32,11 @@ import {
   integrationTitle,
   scopeLabel,
 } from "./integrationServices.logic";
+import {
+  NATIVE_IMPORT_STATUS_TEXT,
+  nativeImportReview,
+  type NativeImportReview,
+} from "./nativeImportReview.logic";
 import { openSignInPage } from "./openIntegrationSignIn";
 import { useStatusFade } from "./integrationStatusMotion";
 import { useEnvironmentMachineList } from "../../machines/useMachines";
@@ -44,9 +53,8 @@ function useConnectWithAgent(environmentId: EnvironmentId | null) {
   const [pending, setPending] = useState(false);
   return {
     pending,
-    connect: async (
-      request = "Help me connect an integration. Read integration_setup_guide and do the setup for me.",
-    ) => {
+    // Left open for the service's name; a suggested service fills it in.
+    connect: async (request = "Connect ") => {
       if (environmentId === null || pending) return;
       setPending(true);
       try {
@@ -72,6 +80,17 @@ export function IntegrationServicesSettings() {
   );
   const canWrite = useAtomValue(integrationsRpc.update.permissionAtom(environmentId));
   const agent = useConnectWithAgent(environmentId);
+  const connectDisabled = !canWrite || environmentId === null || agent.pending;
+  const connectButton = (
+    <Button
+      size="sm"
+      variant="outline"
+      disabled={connectDisabled}
+      onClick={() => void agent.connect()}
+    >
+      Connect with an agent
+    </Button>
+  );
   return (
     <>
       <SettingsSection {...searchableSetting("integration-services")}>
@@ -91,157 +110,75 @@ export function IntegrationServicesSettings() {
             />
           ))
         )}
-        <SettingsRow
-          {...searchableSetting("integration-add")}
-          description="Ask an agent to connect Gmail, Wispr Flow, or any MCP server. It handles setup and asks you for consent or secrets when needed."
-          control={
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={!canWrite || environmentId === null || agent.pending}
-              onClick={() => void agent.connect()}
-            >
-              Connect with an agent
-            </Button>
-          }
-        />
+        {query.data !== null && query.data.integrations.length === 0 ? (
+          <SettingsRow
+            id={searchableSetting("integration-add").id}
+            title="Connect your services"
+            description="Integrations let agents read and act in services like Gmail, Slack and Linear. An agent sets each one up with you and asks for sign-in or secrets when needed."
+            control={connectButton}
+          >
+            <div role="group" aria-label="Suggested services" className="flex flex-wrap gap-2 pb-3">
+              {INTEGRATION_CATALOG.map((entry) => (
+                <Button
+                  key={entry.id}
+                  size="sm"
+                  variant="outline"
+                  disabled={connectDisabled}
+                  onClick={() => void agent.connect(`Connect ${entry.name}`)}
+                >
+                  <IntegrationSourceIcon icon={entry.icon} />
+                  {entry.name}
+                </Button>
+              ))}
+            </div>
+          </SettingsRow>
+        ) : (
+          <SettingsRow
+            {...searchableSetting("integration-add")}
+            description="Ask an agent to connect Gmail, Wispr Flow, or any MCP server. It handles setup and asks you for consent or secrets when needed."
+            control={connectButton}
+          />
+        )}
       </SettingsSection>
       <SettingsSection title="Provider connectors" hideTitle>
-        <ProviderConnectorsSettingRow key={environmentId ?? "none"} environmentId={environmentId} />
+        <ProviderConnectorsSettingRow
+          key={environmentId ?? "none"}
+          environmentId={environmentId}
+          onAgent={agent.connect}
+        />
       </SettingsSection>
     </>
   );
 }
 
+const REVIEW_WITH_AGENT_REQUEST =
+  "Help me finish importing my Claude and Codex integrations into Cogenly. Tell me what couldn't be reviewed, then set up the ones I choose.";
+
 function ProviderConnectorsSettingRow({
   environmentId,
+  onAgent,
 }: {
   readonly environmentId: EnvironmentId | null;
+  readonly onAgent: (request: string) => Promise<void>;
 }) {
   const settings = useScopedSettings();
   const updateSettings = useUpdateScopedSettings();
-  const preview = useOrchestrationCommand(integrationsRpc.previewNative, { reportFailure: false });
-  const importNative = useOrchestrationCommand(integrationsRpc.importNative, {
-    reportFailure: false,
-  });
-  const canImport = useAtomValue(integrationsRpc.importNative.permissionAtom(environmentId));
-  const [offer, setOffer] = useState<
-    import("@cogenly/contracts").IntegrationNativeImportPreview | null
-  >(null);
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const review = async (accept: boolean) => {
-    if (environmentId === null) return;
-    setPending(true);
-    setError(null);
-    try {
-      if (accept) {
-        const result = await importNative({ environmentId, input: {} });
-        if (result._tag !== "Success") {
-          if (!isAtomCommandInterrupted(result))
-            setError(integrationErrorText(squashAtomCommandFailure(result)));
-          return;
-        }
-        if (result.value.incomplete) {
-          setOffer((current) => ({
-            definitions: current?.definitions ?? [],
-            reconnect: result.value.reconnect,
-            warnings: result.value.warnings,
-            incomplete: true,
-          }));
-          setError(
-            "Some native sources could not be reviewed. Resolve the warnings and try again, or explicitly skip the import.",
-          );
-          return;
-        }
-      }
-      updateSettings({ nativeMcpImportReviewed: true });
-    } finally {
-      setPending(false);
-    }
-  };
   return (
     <>
       <AnimatedHeight>
         {!settings.nativeMcpImportReviewed && !settings.useProviderConnectors ? (
-          <SettingsRow
-            title="Review your native integrations first"
-            description="Native servers stay available until you import their definitions or skip this offer. Imported connections stay disconnected until an agent collects secrets and verifies them."
-            control={
-              <div className="flex gap-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={pending || !canImport || environmentId === null}
-                  onClick={() =>
-                    void (async () => {
-                      if (environmentId === null) return;
-                      setPending(true);
-                      try {
-                        const result = await preview({ environmentId, input: {} });
-                        if (result._tag === "Success") setOffer(result.value);
-                        else if (!isAtomCommandInterrupted(result))
-                          setError(integrationErrorText(squashAtomCommandFailure(result)));
-                      } finally {
-                        setPending(false);
-                      }
-                    })()
-                  }
-                >
-                  Review import
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  disabled={pending || !canImport}
-                  onClick={() => void review(false)}
-                >
-                  Skip import
-                </Button>
-              </div>
-            }
-          >
-            <AnimatedHeight>
-              {offer ? (
-                <div className="space-y-2 pb-3 text-sm">
-                  <p>
-                    {offer.definitions.length
-                      ? offer.definitions.map((definition) => definition.name).join(", ")
-                      : offer.incomplete
-                        ? "Native source review is incomplete."
-                        : "No native definitions found."}
-                  </p>
-                  {offer.reconnect.map((name) => (
-                    <p key={name}>{name}: reconnect with an agent</p>
-                  ))}
-                  {offer.warnings.map((warning) => (
-                    <p key={warning}>{warning}</p>
-                  ))}
-                  <Button
-                    size="sm"
-                    disabled={pending || !canImport}
-                    onClick={() => void review(true)}
-                  >
-                    Import definitions and continue
-                  </Button>
-                </div>
-              ) : null}
-            </AnimatedHeight>
-            <AnimatedHeight>
-              {error ? (
-                <p role="alert" className="pb-2 text-sm text-destructive">
-                  {error}
-                </p>
-              ) : null}
-            </AnimatedHeight>
-          </SettingsRow>
+          <NativeImportOffer
+            environmentId={environmentId}
+            onAgent={onAgent}
+            onDone={() => updateSettings({ nativeMcpImportReviewed: true })}
+          />
         ) : null}
       </AnimatedHeight>
 
       <SettingsRow
         serverScoped
         {...searchableSetting("provider-connectors")}
-        description="Agents use Cogenly's integrations instead of the provider's native MCP servers and apps. Turn off to restore native configuration. Applies to new provider sessions; Muse and administrator-managed Claude servers may remain available."
+        description="Agents use the integrations connected here, not the MCP servers, connectors and plugins set up in Claude or Codex. Servers your organization manages for Claude stay on. Turn off to let agents use both. Applies to new agent sessions."
         settingKeys={["useProviderConnectors"]}
         control={
           <ScopedSwitch
@@ -253,6 +190,176 @@ function ProviderConnectorsSettingRow({
         }
       />
     </>
+  );
+}
+
+/**
+ * The one-time offer to bring native Claude and Codex servers into Cogenly. Review loads what
+ * was found into a short grouped list; Import or Skip settles the offer. The per-field detail an
+ * agent needs to finish setup stays in `integration_native_preview`, not here.
+ */
+function NativeImportOffer({
+  environmentId,
+  onAgent,
+  onDone,
+}: {
+  readonly environmentId: EnvironmentId | null;
+  readonly onAgent: (request: string) => Promise<void>;
+  readonly onDone: () => void;
+}) {
+  const preview = useOrchestrationCommand(integrationsRpc.previewNative, { reportFailure: false });
+  const importNative = useOrchestrationCommand(integrationsRpc.importNative, {
+    reportFailure: false,
+  });
+  const canImport = useAtomValue(integrationsRpc.importNative.permissionAtom(environmentId));
+  const [offer, setOffer] = useState<IntegrationNativeImportPreview | null>(null);
+  const [open, setOpen] = useState(false);
+  const [incomplete, setIncomplete] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const review = offer === null ? null : nativeImportReview(offer.servers ?? []);
+  const found = review === null ? 0 : review.count || (offer?.definitions.length ?? 0);
+  const run = async (action: (environmentId: EnvironmentId) => Promise<void>) => {
+    if (environmentId === null) return;
+    setPending(true);
+    setError(null);
+    try {
+      await action(environmentId);
+    } finally {
+      setPending(false);
+    }
+  };
+  const load = (environmentId: EnvironmentId) =>
+    preview({ environmentId, input: {} }).then((result) => {
+      if (result._tag === "Success") {
+        setOffer(result.value);
+        setIncomplete(result.value.incomplete === true);
+        setOpen(true);
+      } else if (!isAtomCommandInterrupted(result))
+        setError(integrationErrorText(squashAtomCommandFailure(result)));
+    });
+  const accept = (environmentId: EnvironmentId) =>
+    importNative({ environmentId, input: {} }).then((result) => {
+      if (result._tag !== "Success") {
+        if (!isAtomCommandInterrupted(result))
+          setError(integrationErrorText(squashAtomCommandFailure(result)));
+        return;
+      }
+      // Whatever was imported stays; the offer stays open until the rest is reviewed or skipped.
+      if (result.value.incomplete) setIncomplete(true);
+      else onDone();
+    });
+  return (
+    <SettingsRow
+      title="Import from Claude and Codex"
+      description={
+        review === null
+          ? "Agents keep using the MCP servers set up in Claude and Codex until you import or skip them. Imported servers stay off until an agent finishes setting them up with you."
+          : found === 0
+            ? "No servers found in your Claude or Codex settings."
+            : `Found ${found === 1 ? "1 server" : `${found} servers`} in your Claude and Codex settings. Imported servers stay off until an agent finishes setting them up with you.`
+      }
+      control={
+        <div className="flex gap-2">
+          {review === null ? (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={pending || !canImport || environmentId === null}
+              onClick={() => void run(load)}
+            >
+              Review
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              disabled={pending || !canImport || environmentId === null}
+              onClick={() => void run(accept)}
+            >
+              Import
+            </Button>
+          )}
+          <Button size="sm" variant="ghost" disabled={pending || !canImport} onClick={onDone}>
+            Skip
+          </Button>
+        </div>
+      }
+    >
+      {review !== null && review.count > 0 ? (
+        <div className="pb-3">
+          <DisclosureTrigger
+            open={open}
+            variant="quiet"
+            className="w-fit"
+            onClick={() => setOpen(!open)}
+          >
+            {open ? "Hide servers" : "Show servers"}
+          </DisclosureTrigger>
+          <DisclosurePanel open={open} appear>
+            <NativeImportList review={review} />
+          </DisclosurePanel>
+        </div>
+      ) : null}
+      <AnimatedHeight>
+        {incomplete ? (
+          <div role="status" className="flex flex-wrap items-center gap-2 pb-3 text-sm">
+            <p className="min-w-0 flex-1 text-muted-foreground">
+              Some settings couldn't be read, so this list may be missing servers. An agent can
+              check them with you, or you can skip the import.
+            </p>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={pending}
+              onClick={() => void onAgent(REVIEW_WITH_AGENT_REQUEST)}
+            >
+              Ask an agent
+            </Button>
+          </div>
+        ) : null}
+      </AnimatedHeight>
+      <AnimatedHeight>
+        {error ? (
+          <p role="alert" className="pb-2 text-sm text-destructive">
+            {error}
+          </p>
+        ) : null}
+      </AnimatedHeight>
+    </SettingsRow>
+  );
+}
+
+const STATUS_BADGE_VARIANT = {
+  success: "success",
+  warning: "warning",
+  neutral: "secondary",
+} as const;
+
+/** The review's servers, grouped by provider and capped in height so the page stays short. */
+function NativeImportList({ review }: { readonly review: NativeImportReview }) {
+  return (
+    <div className="mt-2 max-h-72 space-y-3 overflow-y-auto">
+      {review.groups.map((group) => (
+        <section key={group.provider} aria-label={group.title}>
+          <h4 className="pb-1 font-medium text-muted-foreground text-xs">{group.title}</h4>
+          <ul>
+            {group.rows.map((row) => {
+              const status = NATIVE_IMPORT_STATUS_TEXT[row.status];
+              return (
+                <li key={row.key} className="flex min-w-0 items-center gap-2 py-1">
+                  <IntegrationSourceIcon icon={row.icon} className="size-4 shrink-0" />
+                  <span className="shrink-0 text-sm">{row.label}</span>
+                  <span className="min-w-0 flex-1 truncate text-muted-foreground text-xs">
+                    {row.source}
+                  </span>
+                  <Badge variant={STATUS_BADGE_VARIANT[status.tone]}>{status.label}</Badge>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      ))}
+    </div>
   );
 }
 

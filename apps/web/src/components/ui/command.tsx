@@ -229,12 +229,11 @@ function CommandItem({
   className,
   active,
   ...props
-}: Omit<React.ComponentProps<typeof AutocompleteItem>, "highlight" | "density"> & {
+}: Omit<React.ComponentProps<typeof AutocompleteItem>, "highlight"> & {
   active?: boolean;
 }) {
   return (
     <AutocompleteItem
-      density="comfortable"
       // Nothing is chosen in a command list, so its cursor takes the selected fill.
       highlight={active === undefined ? "cursor" : "none"}
       className={cn(active && "state-selected", className)}
