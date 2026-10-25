@@ -16,7 +16,24 @@ const headers = {
 };
 
 /** Capability links initiate sign-in; the upstream OAuth state routes its public callback to one managed account. */
-export const layer = Layer.merge(
+export const layer = Layer.mergeAll(
+  HttpRouter.add(
+    "POST",
+    "/oauth/integrations/google/credentials",
+    Effect.gen(function* () {
+      const request = yield* HttpServerRequest.HttpServerRequest;
+      const service = yield* Local.LocalIntegrations;
+      const capability = request.headers.authorization?.replace(/^Bearer /, "") ?? "";
+      return yield* service.credentialRequest(capability, yield* request.json).pipe(
+        Effect.flatMap((body) => HttpServerResponse.json(body, { headers })),
+        Effect.catch(() =>
+          Effect.succeed(
+            HttpServerResponse.text("Credential bridge rejected", { status: 403, headers }),
+          ),
+        ),
+      );
+    }).pipe(HttpMiddleware.withLoggerDisabled, Effect.withTracerEnabled(false)),
+  ),
   HttpRouter.add(
     "GET",
     GOOGLE_SIGN_IN_PATH,

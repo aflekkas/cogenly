@@ -96,6 +96,36 @@ const addedByAgent = (fail: (cause: unknown) => OrchestratorMcpFailure) =>
   });
 
 export const layer = McpToolAccess.toLayer(IntegrationsToolkit, {
+  integration_native_preview: McpToolAccess.writesEnvironment(() =>
+    Effect.gen(function* () {
+      const scope = yield* Invocation.McpInvocationContext;
+      return yield* (yield* Integrations.Integrations)
+        .previewNative()
+        .pipe(Effect.mapError(failureAt(scope.httpOrigin)));
+    }),
+  ),
+  integration_install_runtime: McpToolAccess.writesEnvironment((input) =>
+    Effect.gen(function* () {
+      const scope = yield* Invocation.McpInvocationContext;
+      return yield* (yield* Integrations.Integrations)
+        .installRuntime(input.runtime)
+        .pipe(Effect.mapError(failureAt(scope.httpOrigin)));
+    }),
+  ),
+  integration_setup_guide: McpToolAccess.reads((input) =>
+    Effect.gen(function* () {
+      return yield* (yield* Integrations.Integrations).setupGuide(input.service);
+    }),
+  ),
+  integration_test: McpToolAccess.writesWithCapability((input) =>
+    Effect.gen(function* () {
+      const scope = yield* Invocation.McpInvocationContext;
+      const integration = yield* byName(input.name, failureAt(scope.httpOrigin));
+      return yield* (yield* Integrations.Integrations)
+        .testConnection(integration.id, yield* callerLabel)
+        .pipe(Effect.mapError(failureAt(scope.httpOrigin)));
+    }),
+  ),
   integrations_list: McpToolAccess.reads(() =>
     Effect.gen(function* () {
       const service = yield* Integrations.Integrations;
@@ -206,6 +236,7 @@ export const layer = McpToolAccess.toLayer(IntegrationsToolkit, {
             ...(input.url === undefined ? {} : { url: input.url }),
             ...(input.transport === undefined ? {} : { transport: input.transport }),
             ...(input.headers === undefined ? {} : { headers: input.headers }),
+            ...(input.command === undefined ? {} : { command: input.command }),
             ...(input.enabled === undefined ? {} : { enabled: input.enabled }),
             ...(input.scope === undefined ? {} : { scope: input.scope }),
             ...(input.hint === undefined ? {} : { hint: input.hint }),
@@ -214,11 +245,10 @@ export const layer = McpToolAccess.toLayer(IntegrationsToolkit, {
           },
           {
             preserveCredentialDestination: agent !== null,
-            // An agent never moves a stored token or vault credential to a new destination;
-            // the owner makes that change in Settings.
+            fromAgent: true,
             holdStoredSecrets: true,
             callerLabelId: label,
-            preserveScope: true,
+            preserveScope: agent !== null,
           },
         )
         .pipe(Effect.mapError(fail));

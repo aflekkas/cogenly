@@ -20,10 +20,9 @@ import {
   ExternalLinkIcon,
   PlusIcon,
 } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { AnimatedHeight } from "~/components/AnimatedHeight";
-import { CopyButton } from "~/components/ui/copy-button";
 import { OverlayPresence } from "~/components/ui/overlay-presence";
 import { requestConfirmDialog } from "../../confirmDialog";
 import { ensureLocalApi } from "../../localApi";
@@ -48,7 +47,8 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { Spinner } from "../ui/spinner";
 import { Switch } from "../ui/switch";
 import { toastManager } from "../ui/toast";
-import { createIntegrationStatusFade } from "./integrationStatusMotion";
+import { CopyableValue } from "./CopyableValue";
+import { useStatusFade } from "./integrationStatusMotion";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
@@ -68,22 +68,6 @@ function openInBrowser(url: string) {
 
 function failureMessage(cause: unknown, fallback: string): string {
   return cause instanceof Error && cause.message.trim().length > 0 ? cause.message : fallback;
-}
-
-/** Fades an element when `status` changes, never on mount. */
-function useStatusFade<T extends HTMLElement>(status: string) {
-  const node = useRef<T>(null);
-  const fade = useRef<ReturnType<typeof createIntegrationStatusFade> | null>(null);
-  useLayoutEffect(() => {
-    if (!node.current) return;
-    const created = createIntegrationStatusFade(node.current);
-    fade.current = created;
-    return () => created.dispose();
-  }, []);
-  useLayoutEffect(() => {
-    fade.current?.update(status);
-  }, [status]);
-  return node;
 }
 
 function machineKindLabel(machine: MachineInfo): string {
@@ -798,12 +782,7 @@ function SetupStepRow({
             {handoff?._tag === "run-command" ? (
               <div className="space-y-1">
                 <p className="text-xs text-muted-foreground">{handoff.reason}</p>
-                <div className="flex items-start gap-1 rounded-md bg-muted/60 px-2 py-1.5">
-                  <code className="min-w-0 flex-1 font-mono text-xs break-all text-foreground">
-                    {handoff.command}
-                  </code>
-                  <CopyButton value={handoff.command} label="Copy command" target="command" />
-                </div>
+                <CopyableValue value={handoff.command} label="Command" />
               </div>
             ) : null}
             <AnimatedHeight>

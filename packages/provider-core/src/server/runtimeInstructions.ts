@@ -72,7 +72,7 @@ export function buildIntegrationsContextLine(
 }
 
 const PROVIDER_CONNECTORS_HIDDEN_TEXT =
-  "In Cogenly these services come only through Cogenly integrations; the provider's own connectors for them (claude.ai connectors, ChatGPT apps, plugin MCP servers) are turned off.";
+  "Use Cogenly integrations. Native MCP servers, plugins and apps are turned off for supported providers; Muse and administrator-managed Claude configurations may still expose native servers.";
 
 function integrationsLine(
   integrations: ReadonlyArray<IntegrationContextEntry>,
@@ -81,7 +81,7 @@ function integrationsLine(
   const availableText =
     available.length === 0
       ? ""
-      : `${integrations.length === 0 ? "Integrations available" : "Also available"} to connect with integration_add catalogId: ${available.map(toSingleLine).join(", ")}.`;
+      : `${integrations.length === 0 ? "Integrations available" : "Also available"} to connect: ${available.map(toSingleLine).join(", ")}. Read integration_setup_guide before integration_add.`;
   if (integrations.length === 0) return availableText;
   const nameOf = (integration: IntegrationContextEntry) => {
     const hint = integration.hint?.trim() ?? "";

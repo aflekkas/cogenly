@@ -1707,6 +1707,8 @@ const makeWsRpcHandlers = (
       [WS_METHODS.threadApprovalsSubscribe]: () => agentWorkspace.subscribeThreadApprovals,
       [WS_METHODS.agentsStartWork]: (input) => agentWorkspace.startWork(input),
       [WS_METHODS.agentsActivity]: (input) => agentWorkspace.activity(input.agentId),
+      [WS_METHODS.integrationsPreviewNative]: () => integrations.previewNative(),
+      [WS_METHODS.integrationsImportNative]: () => integrations.importNative(),
       [WS_METHODS.integrationsList]: () => integrations.list({ includeProcessOutput: true }),
       // The owner's own Settings writes approve the vault items their headers reference.
       [WS_METHODS.integrationsCreate]: (input) =>

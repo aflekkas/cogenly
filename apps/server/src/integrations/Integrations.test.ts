@@ -6,6 +6,7 @@ import {
   IntegrationId,
   IntegrationName,
   ProjectLabelId,
+  ThreadId,
   SLACK_MCP_USER_SCOPES,
   integrationCatalogEntryFor,
   type Integration,
@@ -60,7 +61,7 @@ interface FakeUpstream {
 }
 
 /** A real in-process HTTP MCP server speaking streamable-HTTP JSON-RPC. */
-const fakeUpstreamWith = (redirectTo?: string) =>
+const fakeUpstreamWith = (redirectTo?: string, denyListScope = false) =>
   Effect.acquireRelease(
     Effect.sync(() => {
       const seen: FakeUpstream["seen"] = [];
@@ -91,6 +92,18 @@ const fakeUpstreamWith = (redirectTo?: string) =>
             reply(
               { jsonrpc: "2.0", id: body.id, result: { protocolVersion: "2025-03-26" } },
               { "mcp-session-id": "session-1" },
+            );
+          } else if (body.method === "tools/list" && denyListScope) {
+            response.writeHead(403, {
+              "content-type": "application/json",
+              "www-authenticate": 'Bearer error="insufficient_scope"',
+            });
+            response.end(
+              JSON.stringify({
+                jsonrpc: "2.0",
+                id: body.id,
+                error: { code: -32000, message: "insufficient_scope: required read scope missing" },
+              }),
             );
           } else if (body.method === "tools/list") {
             reply({
@@ -308,7 +321,7 @@ describe("Integrations gateway", () => {
           { ...createInput(original.url), headers: { authorization: "Bearer LITERAL-TOKEN" } },
           { approveCredentials: true },
         );
-        const hold = { holdStoredSecrets: true };
+        const hold = { fromAgent: true };
         for (const change of [
           { url: other.url },
           { url: other.url, headers: { authorization: Integrations.HEADER_MASK } },
@@ -406,6 +419,70 @@ describe("Integrations gateway", () => {
             ),
             Layer.provide(NodeServices.layer),
           ),
+        ),
+      ),
+    ),
+  );
+
+  it.effect("a thread's executable proposal stays unstartable until approved once", () =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      const service = yield* Integrations.Integrations;
+      const workspace = yield* Workspace.AgentWorkspaceService;
+      const sql = yield* SqlClient.SqlClient;
+      const threadId = ThreadId.make("thread:executable");
+      yield* sql`INSERT INTO orchestration_v2_projection_threads(thread_id, project_id, title, default_provider, runtime_mode, interaction_mode, created_at, updated_at, payload_json) VALUES (${threadId}, 'project:1', 'Thread', 'codex', 'full-access', 'default', '2026-10-01T00:00:00.000Z', '2026-10-01T00:00:00.000Z', '{}')`;
+      const payload = {
+        ...createInput("https://localhost", "worker"),
+        transport: "stdio" as const,
+        headers: {},
+        command: {
+          command: "fixture",
+          args: ["--synthetic"],
+          env: { KEY: "{{credential:fixture.value}}" },
+        },
+      };
+      expect((yield* service.create(payload, { fromAgent: true }).pipe(Effect.flip)).reason).toBe(
+        "approval_required",
+      );
+      const proposal = { actionKind: "integration_add" as const, payload };
+      const { approval } = yield* workspace.requestThreadIntegrationApproval(threadId, proposal);
+      expect(
+        (yield* workspace.requestThreadIntegrationApproval(threadId, proposal)).approval.id,
+      ).toBe(approval.id);
+      expect((yield* workspace.listThreadApprovals(threadId)).approvals).toHaveLength(1);
+      expect((yield* service.list()).integrations).toHaveLength(0);
+      yield* workspace.approve(approval.id);
+      yield* workspace.approve(approval.id);
+      expect((yield* workspace.listThreadApprovals(threadId)).approvals).toHaveLength(0);
+      const [created] = (yield* service.list()).integrations;
+      expect(created?.integration.command).toEqual(payload.command);
+      expect(
+        (yield* service
+          .update(
+            { id: created!.integration.id, command: { ...payload.command, args: ["changed"] } },
+            { fromAgent: true },
+          )
+          .pipe(Effect.flip)).reason,
+      ).toBe("approval_required");
+      // Direct owner edits retain their existing authority.
+      yield* service.update({
+        id: created!.integration.id,
+        command: { ...payload.command, args: ["owner"] },
+      });
+    }).pipe(
+      Effect.provide(
+        Workspace.layer.pipe(
+          Layer.provideMerge(layerWith()),
+          Layer.provide(
+            Layer.mergeAll(
+              Layer.mock(AgentStore.AgentStore)({}),
+              Layer.mock(Agents.AgentService)({}),
+              Layer.mock(Work.WorkHandoffService)({}),
+              Layer.mock(Schedules.ScheduledTaskService)({}),
+            ),
+          ),
+          Layer.provide(NodeServices.layer),
         ),
       ),
     ),
@@ -1135,6 +1212,63 @@ describe("Settings secret forms", () => {
     }).pipe(Effect.provide(offline)),
   );
 
+  it.effect(
+    "save a custom server's manual OAuth client privately without replacing its account",
+    () =>
+      Effect.gen(function* () {
+        savedSecrets.length = 0;
+        const service = yield* Integrations.Integrations;
+        const { integration } = yield* service.create({
+          ...createInput("https://mcp.custom.test/mcp", "custom-work"),
+          headers: {},
+          auth: { type: "oauth", scope: "read" },
+        });
+        const result = yield* service.saveOAuthClient(
+          {
+            integrationId: integration.id,
+            clientId: "custom-client",
+            clientSecret: "custom-PRIVATE-SECRET",
+          },
+          nowhere,
+        );
+        expect(result.integration).toMatchObject({
+          id: integration.id,
+          name: "custom-work",
+          auth: {
+            type: "oauth",
+            scope: "read",
+            clientId: "custom-client",
+            clientSecret: "{{credential:custom-work-client-secret.value}}",
+          },
+          approvedCredentialItems: ["custom-work-client-secret"],
+        });
+        expect(savedSecrets).toEqual([
+          expect.objectContaining({
+            item: "custom-work-client-secret",
+            fields: { value: "custom-PRIVATE-SECRET" },
+            domains: ["mcp.custom.test"],
+          }),
+        ]);
+        expect(result.setup).toMatchObject({ type: "retry", button: "sign_in" });
+        const listed = yield* service.list();
+        expect(listed.integrations).toHaveLength(1);
+        expect(JSON.stringify([result, listed])).not.toContain("custom-PRIVATE-SECRET");
+
+        const { integration: plain } = yield* service.create(
+          createInput("https://plain.custom.test/mcp", "plain"),
+        );
+        expect(
+          yield* service
+            .saveOAuthClient(
+              { integrationId: plain.id, clientId: "id", clientSecret: "secret" },
+              nowhere,
+            )
+            .pipe(Effect.flip),
+        ).toMatchObject({ reason: "invalid_request" });
+        expect(savedSecrets).toHaveLength(1);
+      }).pipe(Effect.provide(offline)),
+  );
+
   it.effect("store an app's client secret and point the account's sign-in at it", () =>
     Effect.gen(function* () {
       yield* runMigrations();
@@ -1263,12 +1397,19 @@ describe("Integration credential destinations", () => {
             allowedDomains: ["127.0.0.1"],
             secretFields: { value: "scoped-credential" },
           });
-          yield* service.create({ ...createInput(upstream.url), headers: tokenHeaders });
+          const { integration } = yield* service.create({
+            ...createInput(upstream.url),
+            headers: tokenHeaders,
+          });
           expect((yield* service.listTools(IntegrationName.make("gmail"), a)).tools).toHaveLength(
             1,
           );
           const calls = upstream.seen.length;
           for (const scope of [b, null]) {
+            expect(yield* service.testConnection(integration.id, scope)).toMatchObject({
+              status: "disconnected",
+              reason: "credential_unresolved",
+            });
             for (const operation of [
               service.listTools(IntegrationName.make("gmail"), scope).pipe(Effect.asVoid),
               service
@@ -1365,3 +1506,22 @@ describe("Integration credential destinations", () => {
     ),
   );
 });
+
+it.effect(
+  "verification reports missing scopes separately from authentication and reachability",
+  () =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      const upstream = yield* fakeUpstreamWith(undefined, true);
+      const gateway = yield* Integrations.Integrations;
+      const { integration } = yield* gateway.create(createInput(upstream.url));
+      expect(yield* gateway.testConnection(integration.id)).toMatchObject({
+        status: "disconnected",
+        reason: "scope_missing",
+        toolCount: 0,
+      });
+      expect((yield* gateway.list()).integrations[0]?.message).toContain(
+        "missing a required scope",
+      );
+    }).pipe(Effect.scoped, Effect.provide(layerWith())),
+);

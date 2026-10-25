@@ -1,3 +1,5 @@
+import * as Schema from "effect/Schema";
+import { IntegrationSaveOAuthClientInput } from "./integration.ts";
 import { describe, expect, it } from "vite-plus/test";
 import { AuthStandardClientScopes } from "./auth.ts";
 import { clientRpcRequiredScopes } from "./clientRpcPermissions.ts";
@@ -34,5 +36,17 @@ describe("integration RPC permissions", () => {
     const standard: ReadonlyArray<string> = AuthStandardClientScopes;
     for (const scope of clientRpcRequiredScopes(WS_METHODS.integrationsSubscribeSources, {}))
       expect(standard).toContain(scope);
+  });
+});
+
+describe("private OAuth client targets", () => {
+  const decode = Schema.decodeUnknownSync(IntegrationSaveOAuthClientInput);
+  const fields = { clientId: "id", clientSecret: "secret" };
+  it("requires an account id for a custom server, and permits catalog setup before an account exists", () => {
+    expect(decode({ ...fields, integrationId: "integration:custom" })).toMatchObject({
+      integrationId: "integration:custom",
+    });
+    expect(decode({ ...fields, catalogId: "slack" })).toMatchObject({ catalogId: "slack" });
+    expect(() => decode(fields)).toThrow();
   });
 });

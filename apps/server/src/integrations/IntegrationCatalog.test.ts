@@ -20,16 +20,16 @@ const ready = (resolution: ReturnType<typeof resolve>) => {
 };
 
 describe("resolveCatalogConnect", () => {
-  it("ignores Google callback origins supplied by agents", () => {
+  it("keeps an explicit reachable Google callback origin supplied by an agent", () => {
     const resolved = resolveCatalogConnect(
       {
         catalogId: "google-workspace",
         accountLabel: "work",
-        inputs: { callbackOrigin: "https://attacker.example" },
+        inputs: { callbackOrigin: "https://vps.example" },
       },
-      { existingNames: new Set(), requestOrigin: "https://attacker.example", fromAgent: true },
+      { existingNames: new Set(), requestOrigin: "https://vps.example", fromAgent: true },
     );
-    expect(ready(resolved).input).not.toHaveProperty("callbackOrigin");
+    expect(ready(resolved).input).toHaveProperty("callbackOrigin", "https://vps.example");
   });
 
   it("signs in to a remote OAuth service under an unused name per account", () => {

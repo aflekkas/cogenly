@@ -1307,14 +1307,10 @@ export const ServerSettings = Schema.Struct({
   projectAgentBrowserAccessOverrides: Schema.Record(ProjectId, Schema.Boolean).pipe(
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
-  /**
-   * Off by default: Cogenly integrations are the only source for the services
-   * in the integrations catalog, so provider adapters keep the provider's own
-   * duplicate connectors and MCP servers (claude.ai connectors, ChatGPT apps,
-   * plugin servers) away from agents. On lets those reach agents too. Applies
-   * to provider sessions opened after the change.
-   */
+  /** Off restores CLI-native MCP configuration; otherwise Cogenly owns integrations. */
   useProviderConnectors: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  /** The owner reviewed the one-time native-definition import offer. */
+  nativeMcpImportReviewed: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   defaultAutoPull: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   defaultProjectScripts: Schema.Array(ProjectScript).pipe(
     Schema.withDecodingDefault(Effect.succeed([])),
@@ -1784,6 +1780,7 @@ export const ServerSettingsPatch = Schema.Struct({
     Schema.Record(ProjectId, Schema.NullOr(Schema.Boolean)),
   ),
   useProviderConnectors: Schema.optionalKey(Schema.Boolean),
+  nativeMcpImportReviewed: Schema.optionalKey(Schema.Boolean),
   defaultAutoPull: Schema.optionalKey(Schema.Boolean),
   defaultProjectScripts: Schema.optionalKey(Schema.Array(ProjectScript)),
   projectScriptOverrides: Schema.optionalKey(

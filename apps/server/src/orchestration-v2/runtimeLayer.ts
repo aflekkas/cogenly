@@ -1,3 +1,5 @@
+import * as GoogleTokenStore from "../integrations/local/GoogleTokenStore.ts";
+import * as NativeIntegrationImport from "../integrations/NativeIntegrationImport.ts";
 import * as AccountConnections from "../accounts/AccountConnections.ts";
 import * as AccountAccess from "../accounts/AccountAccess.ts";
 import * as CliCredentials from "../accounts/CliCredentials.ts";
@@ -98,13 +100,42 @@ export const layerEventInfrastructure = Layer.mergeAll(
 // Shared so every consumer gets the one files index and watcher.
 const layerProjectFilesProvided = ProjectFiles.layer.pipe(Layer.provide(ProjectLabelFolders.layer));
 
-const layerRuntimePolicyProvided = RuntimePolicy.layerFromProjectStore.pipe(
+// One signal shared by every writer of agent_approvals and both approval streams.
+const layerApprovalChanges = ApprovalChanges.layer;
+export const layerVaultProvided = Vault.layer.pipe(
+  Layer.provide(ServerEnvironment.layerIdentity),
+  Layer.provide(layerProjectFilesProvided),
+  Layer.provide(layerApprovalChanges),
+);
+const layerIntegrationCredentials = IntegrationCredentials.layer.pipe(
+  Layer.provide(layerVaultProvided),
+);
+const layerLocalIntegrationsProvided = LocalIntegrations.layer.pipe(
+  Layer.provide(GoogleTokenStore.layer.pipe(Layer.provide(layerVaultProvided))),
+  Layer.provide(LocalMcpRunner.layer),
+  Layer.provide(layerIntegrationCredentials),
+);
+// Shared by reference so the runtime policy, agent MCP policy and settings
+// all read one gateway (one tool cache, one change stream).
+export const layerIntegrationsProvided = Integrations.layer.pipe(
+  Layer.provide(NativeIntegrationImport.layer),
+  Layer.provide(layerIntegrationCredentials),
+  Layer.provide(IntegrationTokens.layer.pipe(Layer.provide(layerVaultProvided))),
+  Layer.provide(layerLocalIntegrationsProvided),
+  // Settings' secret forms and the uv installer.
+  Layer.provide(IntegrationCredentials.secretsLayer.pipe(Layer.provide(layerVaultProvided))),
+  Layer.provide(RuntimeInstaller.layer),
+);
+
+/** The runtime policy every provider turn resolves, as the orchestrator and turn start get it. */
+export const layerRuntimePolicyProvided = RuntimePolicy.layerFromProjectStore.pipe(
   Layer.provide(
     Layer.mergeAll(
       ProjectStore.layer,
       ProjectLabelFolders.layer,
       // Nested: a merge would leave the files layer's folder requirement dangling.
       layerProjectFilesProvided,
+      layerIntegrationsProvided,
     ),
   ),
 );
@@ -360,28 +391,6 @@ const layerThreadLifecycleProvided = ThreadLifecycleService.layer.pipe(
 );
 const layerSecretRequestsProvided = SecretRequests.layer.pipe(
   Layer.provide(layerThreadManagementProvided),
-);
-// One signal shared by every writer of agent_approvals and both approval streams.
-const layerApprovalChanges = ApprovalChanges.layer;
-export const layerVaultProvided = Vault.layer.pipe(
-  Layer.provide(ServerEnvironment.layerIdentity),
-  Layer.provide(layerProjectFilesProvided),
-  Layer.provide(layerApprovalChanges),
-);
-const layerIntegrationCredentials = IntegrationCredentials.layer.pipe(
-  Layer.provide(layerVaultProvided),
-);
-const layerLocalIntegrationsProvided = LocalIntegrations.layer.pipe(
-  Layer.provide(LocalMcpRunner.layer),
-  Layer.provide(layerIntegrationCredentials),
-);
-const layerIntegrationsProvided = Integrations.layer.pipe(
-  Layer.provide(layerIntegrationCredentials),
-  Layer.provide(IntegrationTokens.layer.pipe(Layer.provide(layerVaultProvided))),
-  Layer.provide(layerLocalIntegrationsProvided),
-  // Settings' secret forms and the uv installer.
-  Layer.provide(IntegrationCredentials.secretsLayer.pipe(Layer.provide(layerVaultProvided))),
-  Layer.provide(RuntimeInstaller.layer),
 );
 const layerAgentsProvided = Agents.layer.pipe(
   Layer.provide(

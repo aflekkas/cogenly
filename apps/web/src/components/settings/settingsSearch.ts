@@ -647,12 +647,20 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Services",
     to: "/settings/integrations",
     searchTerms: [
-      "integrations mcp servers connect remote gmail google workspace calendar drive linear notion github atlassian jira confluence intercom slack wispr flow fathom figma catalog accounts sign in tools vault credentials headers add custom",
+      "integrations mcp servers connect remote gmail google workspace calendar drive docs linear notion github slack wispr flow fathom accounts sign in status needs sign-in error test tools",
+    ],
+  },
+  {
+    id: "integration-add",
+    title: "Connect with an agent",
+    to: "/settings/integrations",
+    searchTerms: [
+      "connect new service account custom mcp server setup oauth client id secret api key personal access token slack app manifest google cloud install uv",
     ],
   },
   {
     id: "provider-connectors",
-    title: "Use provider connectors too",
+    title: "Use only Cogenly integrations",
     to: "/settings/integrations",
     searchTerms: [
       "claude.ai connectors chatgpt apps codex plugins mcp servers duplicate native gmail slack notion linear",

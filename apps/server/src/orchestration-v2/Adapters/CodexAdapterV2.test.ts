@@ -1314,6 +1314,7 @@ describe("Codex terminal routing", () => {
     assert.equal(params.config["features.shell_tool"], false);
     assert.deepInclude(params.config.mcp_servers, {
       cogenly: {
+        enabled: true,
         url: session.endpoint,
         tool_timeout_sec: 65 * 60,
         default_tools_approval_mode: "approve",
@@ -1365,7 +1366,7 @@ describe("Codex provider connector duplicates", () => {
     },
   });
 
-  it("finds the apps and HTTP servers the Cogenly catalog covers, and only those", () => {
+  it("finds all apps and configured HTTP or stdio servers", () => {
     assert.deepEqual(duplicates, {
       appIds: [
         "connector_2128aebfecb84f64a069897515042a44",
@@ -1373,8 +1374,10 @@ describe("Codex provider connector duplicates", () => {
         "connector_76869538009648d5b282a4bb21c3d157",
         "asdk_app_69a1d78e929881919bba0dbda1f6436d",
         "asdk_app_6a5ae9736be0819199d06d61ac171080",
+        "connector_68de829bf7648191acd70a907364c67c",
+        "asdk_app_6aa2b88dd4e881918d850abcf8b92206",
       ],
-      mcpServerNames: ["linear", "notion-sse"],
+      mcpServerNames: ["linear", "notion-sse", "spawn-prod-followups", "node_repl"],
     });
   });
 
@@ -1387,8 +1390,11 @@ describe("Codex provider connector duplicates", () => {
     assert.equal(config["apps.asdk_app_69a1d78e929881919bba0dbda1f6436d.enabled"], false);
     assert.equal(config["mcp_servers.linear.enabled"], false);
     assert.equal(config["mcp_servers.notion-sse.enabled"], false);
-    assert.isUndefined(config["apps.connector_68de829bf7648191acd70a907364c67c.enabled"]);
-    assert.isUndefined(config["mcp_servers.spawn-prod-followups.enabled"]);
+    assert.equal(config["apps.connector_68de829bf7648191acd70a907364c67c.enabled"], false);
+    assert.equal(config["features.plugins"], false);
+    assert.equal(config["features.apps"], false);
+    assert.equal(config["mcp_servers.spawn-prod-followups.enabled"], false);
+    assert.equal(config["mcp_servers.node_repl.enabled"], false);
     assert.equal(config["apps._default.default_tools_approval_mode"], "approve");
   });
 

@@ -111,6 +111,29 @@ describe("setupActionFor, per service", () => {
   });
 });
 
+describe("custom server setup", () => {
+  it("turns missing manual clients and missing secrets into the same inline form", () => {
+    for (const reason of [
+      "client_id_required",
+      "credential_unresolved",
+      "credential_not_allowed",
+    ] as const) {
+      const action = setupActionFor({
+        entry: undefined,
+        integration: account({ clientId: "custom", clientSecret: "{{credential:custom.value}}" }),
+        status: "needs_sign_in",
+        reason,
+        redirectUri: "https://cogenly.example.com/oauth/integrations/callback",
+      });
+      expect(action).toMatchObject({ type: "oauth_client", integrationId: "integration:1" });
+      expect(steps(action).map((step) => step.copy?.value)).toContain(
+        "https://cogenly.example.com/oauth/integrations/callback",
+      );
+      expect(action).not.toHaveProperty("catalogId");
+    }
+  });
+});
+
 describe("setupActionFor, from errors", () => {
   it("maps every failure to the control that fixes it", () => {
     const slack = { entry: entry("slack"), integration: account() };
@@ -204,44 +227,28 @@ describe("setupActionFor, from errors", () => {
 });
 
 describe("agentNextStep", () => {
-  it("tells an agent the private route for a secret and the Settings link", () => {
-    const url = settingsSetupUrl("https://cogenly.example.com/mcp", "slack");
-    expect(url).toBe("https://cogenly.example.com/settings/integrations?setup=slack");
+  it("gives the agent private setup instructions rather than a Settings wizard", () => {
     const text = agentNextStep(catalogSetupFor({ entry: entry("slack"), mode: "oauth_app" })!, {
-      settingsUrl: url,
+      settingsUrl: settingsSetupUrl(undefined),
       entry: entry("slack"),
       accountLabel: "Acme",
     });
-    expect(text).toContain(url);
-    expect(text).toContain(
-      'request_secret with saveToVault: {name: "slack-acme-client-secret", type: "api_key", domains: ["slack.com"]}',
-    );
-    expect(text).toContain('clientSecret: "{{credential:slack-acme-client-secret.value}}"');
-    // An existing account is fixed with integration_update and a header reference.
-    const update = agentNextStep(catalogSetupFor({ entry: entry("linear"), mode: "api_key" })!, {
-      settingsUrl: url,
-      entry: entry("linear"),
-      name: "linear-work",
-      accountLabel: "work",
-    });
-    expect(update).toContain('call integration_update with name "linear-work"');
-    expect(update).toContain('Authorization: "Bearer {{credential:linear-work-api-key.value}}"');
+    expect(text).toContain("request_secret");
+    expect(text).toContain("clientSecret {{credential:");
+    expect(text).toContain("Retry integration_add");
+    expect(text).not.toContain("The user can do this in Settings");
   });
-
-  it("turns a failure into the same words, never an internal reason code", () => {
+  it("keeps precise failures while directing setup to the agent", () => {
     const { message, transient } = agentFailureMessage(
       { reason: "google_client_missing" },
-      "https://cogenly.example.com",
+      undefined,
     );
     expect(transient).toBe(false);
-    expect(message).toContain("Google needs an OAuth client of your own");
-    expect(message).toContain(
-      "https://cogenly.example.com/settings/integrations?setup=google-workspace",
-    );
+    expect(message).toContain("google-oauth-client");
     expect(message).not.toContain("google_client_missing");
     expect(agentFailureMessage({ reason: "upstream_timeout" }, undefined).transient).toBe(true);
-    expect(agentFailureMessage({ reason: "not_found" }, undefined).message).toBe(
-      "No connected integration with that name is available in this project.",
+    expect(agentFailureMessage({ reason: "not_found" }, undefined).message).toContain(
+      "No connected integration",
     );
   });
 });

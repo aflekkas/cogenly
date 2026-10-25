@@ -1,3 +1,4 @@
+import { integrationSetupGuide } from "./IntegrationSetupGuides.ts";
 import {
   integrationCatalogEntry,
   integrationCatalogEntryFor,
@@ -190,7 +191,28 @@ const githubSteps = (redirectUri: string | undefined): Array<IntegrationSetupSte
 
 const appClient = (input: SetupInput, problem?: string): IntegrationSetupAction | undefined => {
   const entry = input.entry;
-  if (entry === undefined) return undefined;
+  if (entry === undefined) {
+    if (input.integration?.auth?.type !== "oauth") return undefined;
+    const { account } = titleOf(input);
+    return {
+      type: "oauth_client",
+      ...baseOf(input),
+      title: `Set up ${account}'s OAuth client`,
+      message:
+        problem ??
+        `${account} needs an app of your own. Create an OAuth app with the service, then paste its client ID and secret here.`,
+      steps: [
+        { text: "Create an OAuth app in this service's developer settings." },
+        {
+          text: "Add this exact redirect URI to the app.",
+          ...(input.redirectUri === undefined
+            ? {}
+            : { copy: { label: "Authorized redirect URI", value: input.redirectUri } }),
+        },
+        { text: "Copy the app's client ID and secret, and paste them here." },
+      ],
+    };
+  }
   const { account } = titleOf(input);
   const base = { type: "oauth_client" as const, ...baseOf(input) };
   const synced =
@@ -349,6 +371,13 @@ export const setupActionFor = (input: SetupInput): IntegrationSetupAction | unde
       return credentialProblem(input, false);
     case "credential_not_allowed":
       return credentialProblem(input, true);
+    case "scope_missing":
+      return signIn({
+        ...input,
+        message:
+          "The grant is missing a required scope. Ask the user to approve the required permissions and verify a read operation.",
+        reason: "sign_in_required",
+      });
     case "sign_in_required":
       return input.syncedFrom !== undefined && usesClientSecret(input)
         ? (appClient(input) ?? signIn(input))
@@ -445,67 +474,29 @@ export const secretItemName = (
   return `${base}${label === "" ? "" : `-${label}`}-${kind}`;
 };
 
-const MAX_AGENT_COPY_CHARS = 300;
-
-/**
- * The action in words for an agent: what to tell the user, the Settings link
- * that does it in one place, and the private route for secrets.
- */
+/** Agents perform setup and ask only for actions requiring the account owner. */
 export const agentNextStep = (
   action: IntegrationSetupAction,
   context: {
     readonly settingsUrl: string;
     readonly entry?: IntegrationCatalogEntry | undefined;
-    /** The account's integration name, once it exists. */
     readonly name?: string | undefined;
     readonly accountLabel?: string | undefined;
   },
 ): string => {
-  const settings = `The user can do this in Settings: ${context.settingsUrl}`;
-  const entry = context.entry;
-  const steps = (list: ReadonlyArray<IntegrationSetupStep>) =>
-    list
-      .map(
-        (step, index) =>
-          `${index + 1}. ${step.text}${step.url === undefined ? "" : ` ${step.url}`}${
-            step.copy !== undefined && step.copy.value.length <= MAX_AGENT_COPY_CHARS
-              ? ` ${step.copy.label}: ${step.copy.value}`
-              : step.copy !== undefined
-                ? ` (${step.copy.label}: copy it from Settings)`
-                : ""
-          }`,
-      )
-      .join(" ");
-  const retryCall =
+  const retry =
     context.name === undefined
-      ? `call integration_add again${entry === undefined ? "" : ` with catalogId "${entry.id}"`}`
-      : `call integration_update with name "${context.name}"`;
-  switch (action.type) {
-    case "sign_in":
-      return `${action.message} ${settings}, by choosing Sign in. Agents get a sign-in link only for an account that has never signed in: ${context.name === undefined ? "integration_add returns it" : `integration_update with name "${context.name}" returns it`}.`;
-    case "oauth_client": {
-      if (action.catalogId === "google-workspace")
-        return `${action.message} ${settings}, by pasting the client ID and secret. Steps: ${steps(action.steps)} Or collect the downloaded client JSON privately with request_secret with saveToVault: {name: "${GOOGLE_CLIENT_ITEM}", type: "api_key", domains: ["${GOOGLE_HOST}"]} (never in chat), then ${retryCall}. See docs/user/integrations.md#connect-google.`;
-      const item = secretItemName(action.catalogId ?? "app", "client-secret", context.accountLabel);
-      const host = entry?.kind === "remote" ? (entry.tokenHost ?? new URL(entry.url).hostname) : "";
-      return `${action.message} ${settings}, by pasting the client ID and secret. Steps: ${steps(action.steps)} Or ask for the client ID, collect the client secret with request_secret with saveToVault: {name: "${item}", type: "api_key", domains: ["${host}"]} (never in chat), then ${retryCall} passing clientId and clientSecret: "{{credential:${item}.value}}".`;
-    }
-    case "api_key": {
-      const item = secretItemName(action.catalogId ?? "service", "api-key", context.accountLabel);
-      const host = entry?.kind === "remote" ? new URL(entry.url).hostname : "";
-      const pass =
-        context.name === undefined
-          ? `apiKey: "{{credential:${item}.value}}"`
-          : `headers: {Authorization: "Bearer {{credential:${item}.value}}"}`;
-      return `${action.message}${action.url === undefined ? "" : ` Create it at ${action.url}.`} ${settings}, by pasting it there. Or collect it with request_secret with saveToVault: {name: "${item}", type: "api_key", domains: ["${host}"]} (never in chat), then ${retryCall} passing ${pass}.`;
-    }
-    case "install_runtime":
-      return `${action.message} ${settings}${action.canInstall ? ", by choosing Install" : ""}, or the user runs ${action.command} on that machine. Then ${retryCall} to retry.`;
-    case "retry":
-      return `${action.message} Try again later, or ask the user to check it in Settings: ${context.settingsUrl}`;
-    case "fix":
-      return `${action.message} ${settings}`;
-  }
+      ? `Retry integration_add${context.entry === undefined ? "" : ` with catalogId ${context.entry.id}`}.`
+      : `Retry integration_update with name ${context.name}.`;
+  const copies =
+    action.type === "oauth_client"
+      ? action.steps
+          .flatMap((step) =>
+            step.copy === undefined ? [] : [`${step.copy.label}: ${step.copy.value}`],
+          )
+          .join("\n")
+      : "";
+  return `${integrationSetupGuide(context.entry?.id ?? "custom").instructions}\n\nCurrent requirement: ${action.title}. ${action.type === "install_runtime" ? action.command : ["sign_in", "retry", "fix"].includes(action.type) ? action.message : ""} ${copies}\n${retry}`;
 };
 
 /** A connect or update result for an agent: its setup action, in words and as a Settings link. */

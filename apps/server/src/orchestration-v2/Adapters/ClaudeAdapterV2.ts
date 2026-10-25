@@ -109,7 +109,6 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
-import { CLAUDE_DENIED_DUPLICATE_MCP_SERVERS } from "../../integrations/ProviderConnectorDuplicates.ts";
 import { resolveClaudeSdkExecutablePath } from "../../provider/Drivers/ClaudeExecutable.ts";
 import { planClaudeSkillDispatch } from "../../provider/Drivers/ClaudeSkillDispatch.ts";
 import { discoverClaudeSkills } from "../../provider/Drivers/ClaudeSkills.ts";
@@ -121,6 +120,7 @@ import * as ServerConfig from "../../config.ts";
 import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 import { signalProcessGroup } from "@t3tools/provider-core/server/processGroup";
 import {
+  hasClaudeManagedMcpConfig,
   claudeSessionTranscriptExists,
   claudeSignedOutMessage,
   makeClaudeEnvironment,
@@ -1106,22 +1106,7 @@ function claudeLiveSelectionFlagSettings(
   };
 }
 
-/**
- * Adds the denylist that keeps Claude's own copies of Cogenly catalog services
- * (claude.ai connectors, plugin and user MCP servers) out of the session. It
- * travels as per-session flag settings, so the user's config files stay as
- * they are, and it holds for the process's native subagents as well.
- */
-function withDeniedDuplicateMcpServers(settings: ClaudeSdkSettings | undefined): ClaudeSdkSettings {
-  return {
-    ...settings,
-    deniedMcpServers: [
-      ...(settings?.deniedMcpServers ?? []),
-      ...CLAUDE_DENIED_DUPLICATE_MCP_SERVERS,
-    ],
-  };
-}
-
+/** Real turns isolate native MCP configuration unless the owner restores it. */
 export function makeClaudeQueryOptions(input: {
   readonly modelSelection: ModelSelection;
   readonly nativeThreadId: string;
@@ -1153,8 +1138,9 @@ export function makeClaudeQueryOptions(input: {
   readonly onUserDialog?: ClaudeQueryOptions["onUserDialog"];
   readonly supportedDialogKinds?: ClaudeQueryOptions["supportedDialogKinds"];
   readonly allowDangerouslySkipPermissions?: boolean;
-  /** True lets Claude's own connectors for Cogenly catalog services load too. */
+  /** True restores Claude's native MCP configuration. */
   readonly useProviderConnectors?: boolean;
+  readonly managedMcpConfig?: boolean;
 }): ClaudeAgentSdkQueryOptions {
   const compiledSelection = compileClaudeModelSelection(input.modelSelection);
   const {
@@ -1162,6 +1148,10 @@ export function makeClaudeQueryOptions(input: {
     "dangerously-skip-permissions": _launchArgSkipPermissions,
     ...extraArgs
   } = input.settings === undefined ? {} : parseCliArgs(input.settings.launchArgs).flags;
+  if (input.useProviderConnectors !== true) {
+    delete extraArgs["mcp-config"];
+    delete extraArgs["strict-mcp-config"];
+  }
   const requestThinkingSummaries =
     compiledSelection.settings.alwaysThinkingEnabled !== false &&
     extraArgs["thinking-display"] !== "omitted";
@@ -1189,10 +1179,7 @@ export function makeClaudeQueryOptions(input: {
           ...(typeof querySettings === "object" && querySettings !== null ? querySettings : {}),
           autoCompactWindow: Number(input.settings.autoCompactWindow),
         } as ClaudeSdkSettings);
-  const effectiveQuerySettings =
-    input.useProviderConnectors === true || typeof compactedQuerySettings === "string"
-      ? compactedQuerySettings
-      : withDeniedDuplicateMcpServers(compactedQuerySettings);
+  const effectiveQuerySettings = compactedQuerySettings;
   const options: ClaudeAgentSdkQueryOptions = {
     model: compiledSelection.apiModelId,
     tools: claudeAgentSdkQueryToolsForSdk(selectedTools),
@@ -1230,7 +1217,14 @@ export function makeClaudeQueryOptions(input: {
     ...(input.settings?.binaryPath
       ? { pathToClaudeCodeExecutable: input.settings.binaryPath }
       : {}),
-    ...(input.environment === undefined ? {} : { env: input.environment }),
+    ...(input.useProviderConnectors === true
+      ? input.environment === undefined
+        ? {}
+        : { env: input.environment }
+      : {
+          ...(input.managedMcpConfig ? {} : { strictMcpConfig: true }),
+          env: { ...input.environment, ENABLE_CLAUDEAI_MCP_SERVERS: "false" },
+        }),
     ...(input.mcpServers === undefined ? {} : { mcpServers: input.mcpServers }),
     systemPrompt: {
       type: "preset" as const,
@@ -8639,6 +8633,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             attachmentsDir,
             settings: adapterOptions.settings,
             environment: adapterOptions.environment,
+            managedMcpConfig: yield* hasClaudeManagedMcpConfig().pipe(
+              Effect.provideService(FileSystem.FileSystem, fileSystem),
+            ),
             tools: queryPolicy.tools ?? CLAUDE_CODE_PRESET_TOOLS,
             ...(conversationMode ? { conversationMode } : {}),
             ...(turnInput.runtimePolicy.projectManifest === undefined

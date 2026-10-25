@@ -77,6 +77,7 @@ export const googleWorkspaceSpec = (input: {
   readonly clientId: string;
   readonly clientSecret: string;
   readonly environment: Readonly<Record<string, string>>;
+  readonly credentialBridge?: { readonly url: string; readonly capability: string };
 }): LocalMcpSpec => ({
   id: input.id,
   runtime: command.runtime,
@@ -101,6 +102,7 @@ export const googleWorkspaceSpec = (input: {
   version: GOOGLE_WORKSPACE_VERSION,
   directory: input.directory,
   transport: "stdio",
+  idleTimeoutMs: 15 * 60_000,
   port: input.port,
   portEnvironment: {
     WORKSPACE_MCP_PORT: "{port}",
@@ -108,6 +110,12 @@ export const googleWorkspaceSpec = (input: {
   },
   env: {
     ...input.environment,
+    ...(input.credentialBridge
+      ? {
+          COGENLY_GOOGLE_CREDENTIAL_URL: input.credentialBridge.url,
+          COGENLY_GOOGLE_CREDENTIAL_CAPABILITY: input.credentialBridge.capability,
+        }
+      : {}),
     GOOGLE_OAUTH_CLIENT_ID: input.clientId,
     GOOGLE_OAUTH_CLIENT_SECRET: input.clientSecret,
     GOOGLE_OAUTH_REDIRECT_URI: `${input.callbackOrigin}${GOOGLE_CALLBACK_PATH}`,
@@ -123,5 +131,8 @@ export const googleWorkspaceSpec = (input: {
     OAUTHLIB_INSECURE_TRANSPORT: "1",
     WORKSPACE_MCP_DISABLE_LOCAL_FILES: "true",
   },
-  secrets: [input.clientId, input.clientSecret],
+  secrets: [
+    input.clientSecret,
+    ...(input.credentialBridge ? [input.credentialBridge.capability] : []),
+  ],
 });

@@ -318,3 +318,23 @@ describe("LocalMcpRunner", () => {
     }).pipe(Effect.scoped, Effect.provide(layer)),
   );
 });
+
+it.live("stops an idle stdio process after its last request without polling", () =>
+  Effect.gen(function* () {
+    const runner = yield* Runner.LocalMcpRunner;
+    const spec = { ...(yield* specFor("stdio")), idleTimeoutMs: 0 };
+    const stopped = yield* Deferred.make<void>();
+    yield* runner.changes.pipe(
+      Stream.runForEach((event) =>
+        event.status.state === "stopped" ? Deferred.succeed(stopped, undefined) : Effect.void,
+      ),
+      Effect.forkScoped,
+    );
+    yield* runner.start(spec);
+    expect(yield* runner.rpc(spec.id, "tools/list", {})).toMatchObject({
+      tools: [{ name: "echo" }],
+    });
+    yield* Deferred.await(stopped);
+    expect(yield* runner.status(spec.id)).toBeUndefined();
+  }).pipe(Effect.scoped, Effect.provide(layer)),
+);

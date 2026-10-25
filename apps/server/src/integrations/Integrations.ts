@@ -1,9 +1,12 @@
+import * as NativeImport from "./NativeIntegrationImport.ts";
 import {
   Integration,
   IntegrationError,
   IntegrationId,
   integrationCatalogEntry,
   integrationCatalogEntryFor,
+  type IntegrationNativeImportPreview,
+  type IntegrationNativeImportResult,
   type IntegrationCallResult,
   type IntegrationAddInput,
   type IntegrationCatalogConnectInput,
@@ -40,6 +43,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 
+import { integrationSetupGuide } from "./IntegrationSetupGuides.ts";
 import { redactUpstream, toolErrorMessage, upstreamErrorMessage } from "./UpstreamResult.ts";
 import { selectCallbackOrigin, type SignInOrigin } from "./SignInOrigin.ts";
 import { redactValue } from "../vault/VaultRedactor.ts";
@@ -83,9 +87,14 @@ export const credentialRefsIn = (template: string): ReadonlyArray<string> =>
 const credentialItemsIn = (
   headers: Readonly<Record<string, string>>,
   auth?: Integration["auth"],
+  command?: Integration["command"],
 ): Array<string> => [
   ...new Set(
-    [...Object.values(headers), auth?.clientSecret ?? ""].flatMap((template) =>
+    [
+      ...Object.values(headers),
+      ...Object.values(command?.env ?? {}),
+      auth?.clientSecret ?? "",
+    ].flatMap((template) =>
       credentialRefsIn(template).flatMap((ref) => {
         const parsed = Credentials.parseCredentialRef(ref);
         return parsed === undefined ? [] : [parsed.item];
@@ -151,6 +160,8 @@ export const integrationDestinationChanged = (
   current: Integration,
   input: IntegrationUpdateInput,
 ): boolean =>
+  (input.command !== undefined &&
+    JSON.stringify(input.command) !== JSON.stringify(current.command)) ||
   (input.url !== undefined && input.url !== current.url) ||
   (input.transport !== undefined && input.transport !== current.transport) ||
   (input.auth !== undefined &&
@@ -160,6 +171,15 @@ export const integrationDestinationChanged = (
       Object.entries(input.headers).some(
         ([name, value]) => value !== HEADER_MASK && current.headers[name] !== value,
       )));
+
+/** An agent may only change the executable after the owner reviews the whole command. */
+export const integrationExecutableChanged = (
+  current: Integration,
+  input: Pick<IntegrationUpdateInput, "command" | "transport">,
+): boolean =>
+  (input.transport === "stdio" && current.transport !== "stdio") ||
+  (input.command !== undefined &&
+    JSON.stringify(input.command) !== JSON.stringify(current.command));
 
 /** Account labels identify the signed-in account; agents need approval to change them. */
 export const integrationAccountLabelChanged = (
@@ -280,6 +300,7 @@ interface CachedTools {
  */
 export interface IntegrationWriteOptions {
   readonly approveCredentials?: boolean;
+  readonly approveExecutable?: boolean;
   readonly fromAgent?: boolean | undefined;
   readonly ownerOrigin?: string | undefined;
   readonly addedByAgent?: { readonly id: string; readonly name: string } | undefined;
@@ -309,6 +330,11 @@ const REFRESH_SKEW_MS = 60_000;
 export class Integrations extends Context.Service<
   Integrations,
   {
+    readonly previewNative: () => Effect.Effect<IntegrationNativeImportPreview, IntegrationError>;
+    readonly importNative: () => Effect.Effect<IntegrationNativeImportResult, IntegrationError>;
+    readonly setupGuide: (
+      service: string,
+    ) => Effect.Effect<ReturnType<typeof integrationSetupGuide>>;
     /** Every live integration, unscoped (settings/client view). */
     readonly list: (options?: {
       readonly includeProcessOutput?: boolean;
@@ -340,6 +366,7 @@ export class Integrations extends Context.Service<
     ) => Effect.Effect<{ deleted: boolean }, IntegrationError>;
     readonly testConnection: (
       id: IntegrationId,
+      labelId?: ProjectLabelId | null,
     ) => Effect.Effect<IntegrationTestResult, IntegrationError>;
     readonly listTools: (
       name: IntegrationName,
@@ -492,13 +519,17 @@ const CHECK_MESSAGES: Partial<Record<IntegrationError["reason"], string>> = {
   upstream_timeout: "The server took too long to answer.",
   upstream_error: "The server answered with an error.",
   sign_in_required: "Sign in again.",
+  scope_missing:
+    "The grant is missing a required scope. Reconnect to approve the required permissions.",
   client_id_required: "This server needs a client ID from an app you create with the provider.",
 };
 
 /** Status text owners and agents see; upstream messages are already bounded. */
 const checkMessage = (reason: IntegrationError["reason"], cause: unknown): string => {
   const base = CHECK_MESSAGES[reason] ?? "The request could not be completed.";
-  return reason === "upstream_error" && typeof cause === "string" && cause.trim() !== ""
+  return (reason === "upstream_error" || reason === "scope_missing") &&
+    typeof cause === "string" &&
+    cause.trim() !== ""
     ? `${base} ${cause.trim().slice(0, MAX_UPSTREAM_MESSAGE_CHARS)}`
     : base;
 };
@@ -516,6 +547,7 @@ const make = (options: IntegrationsOptions = {}) =>
     const credentials = yield* Credentials.IntegrationCredentials;
     const tokenStore = yield* Tokens.IntegrationTokens;
     const protocol = yield* OAuth.make;
+    const nativeImport = yield* Effect.serviceOption(NativeImport.NativeIntegrationImport);
     const local = yield* Effect.serviceOption(Local.LocalIntegrations);
     // Settings' secret forms and the uv installer; absent in suites that do not use them.
     const secretWriter = yield* Effect.serviceOption(Credentials.IntegrationSecrets);
@@ -627,20 +659,43 @@ const make = (options: IntegrationsOptions = {}) =>
       });
 
     /**
-     * A managed local account's process and the status it implies. Listing
-     * (re)starts an enabled account's process; a failed process is an error,
-     * and a running one without a Google grant needs sign-in like remote OAuth.
+     * Managed process health and grant state. Status reads retry failed Google
+     * starts but leave idle processes stopped; only use or sign-in wakes them.
      */
     const managedState = (integration: StoredIntegration) =>
       Effect.gen(function* () {
-        if (integration.transport !== "local" || !integration.enabled || Option.isNone(local))
+        if (
+          !["local", "stdio"].includes(integration.transport) ||
+          !integration.enabled ||
+          Option.isNone(local)
+        )
           return undefined;
-        yield* local.value.start(integration).pipe(Effect.ignore);
-        const process = yield* local.value.status(integration.id);
-        if (process === undefined) return undefined;
-        const signedIn = yield* local.value
-          .signedIn(integration.id)
-          .pipe(Effect.orElseSucceed(() => false));
+        let process = yield* local.value.status(integration.id);
+        if (
+          integration.transport === "local" &&
+          (process?.state === "missing_runtime" || process?.state === "failed")
+        ) {
+          yield* local.value.start(integration).pipe(Effect.ignore);
+          process = yield* local.value.status(integration.id);
+        }
+        if (process === undefined) {
+          if (integration.transport !== "local") return undefined;
+          const signedIn = yield* local.value
+            .signedIn(integration.id)
+            .pipe(Effect.orElseSucceed(() => false));
+          const check = (yield* Ref.get(checks)).get(integration.id);
+          return {
+            process: undefined,
+            status: !signedIn
+              ? ("needs_sign_in" as const)
+              : check?.updatedAt === integration.updatedAt && !check.ok
+                ? ("error" as const)
+                : ("connected" as const),
+          };
+        }
+        const signedIn =
+          integration.transport === "stdio" ||
+          (yield* local.value.signedIn(integration.id).pipe(Effect.orElseSucceed(() => false)));
         const check = (yield* Ref.get(checks)).get(integration.id);
         const status: IntegrationSummary["status"] =
           process.state === "failed" || process.state === "missing_runtime"
@@ -737,7 +792,7 @@ const make = (options: IntegrationsOptions = {}) =>
                         ? "unknown"
                         : "connected";
               const message =
-                (managed?.status === "error" ? managed.process.message : undefined) ??
+                (managed?.status === "error" ? managed.process?.message : undefined) ??
                 current?.message;
               const localProvenance =
                 integration.transport === "local" && Option.isSome(local)
@@ -748,10 +803,10 @@ const make = (options: IntegrationsOptions = {}) =>
                   ? failed
                     ? current?.reason
                     : undefined
-                  : managed.process.state === "missing_runtime"
+                  : managed.process?.state === "missing_runtime"
                     ? ("local_runtime_missing" as const)
                     : managed.status === "error"
-                      ? (managed.process.reason ?? current?.reason)
+                      ? (managed.process?.reason ?? current?.reason)
                       : undefined;
               const setup = yield* setupFor(integration, status, {
                 ...(failureReason === undefined ? {} : { reason: failureReason }),
@@ -774,7 +829,7 @@ const make = (options: IntegrationsOptions = {}) =>
                   ? {}
                   : { syncedFrom: integration.syncedFrom }),
                 ...(current === undefined ? {} : { checkedAt: current.checkedAt as never }),
-                ...(managed === undefined
+                ...(managed?.process === undefined
                   ? {}
                   : {
                       managed: {
@@ -1099,9 +1154,12 @@ const make = (options: IntegrationsOptions = {}) =>
             operation: method,
             // Under OAuth a 401 means the token was refused, which a refresh may fix.
             reason:
-              usesOAuth(integration) && response.status === 401
+              response.status === 401
                 ? "sign_in_required"
-                : "upstream_error",
+                : response.status === 403 &&
+                    /insufficient_scope|scope.*(missing|required)/i.test(text)
+                  ? "scope_missing"
+                  : "upstream_error",
             ...(message === undefined ? {} : { cause: message }),
           });
         }
@@ -1212,7 +1270,7 @@ const make = (options: IntegrationsOptions = {}) =>
       bearer?: string,
     ) =>
       Effect.gen(function* () {
-        if (integration.transport === "local") {
+        if (integration.transport === "local" || integration.transport === "stdio") {
           if (Option.isNone(local))
             return yield* new IntegrationError({
               operation: method,
@@ -1366,6 +1424,45 @@ const make = (options: IntegrationsOptions = {}) =>
           });
       });
 
+    const validateCommand = (
+      input: Pick<Integration, "transport" | "command" | "auth" | "headers">,
+    ) =>
+      Effect.gen(function* () {
+        if (input.transport !== "stdio") {
+          if (input.command !== undefined)
+            return yield* new IntegrationError({
+              operation: "command requires stdio",
+              reason: "invalid_request",
+            });
+          return;
+        }
+        if (
+          !input.command ||
+          input.auth !== undefined ||
+          Object.keys(input.headers).length > 0 ||
+          input.command.command.includes("{{") ||
+          (/\s/.test(input.command.command) && !input.command.command.startsWith("/")) ||
+          input.command.args.some((arg) => arg.includes("{{credential:"))
+        )
+          return yield* new IntegrationError({
+            operation: "validate stdio command (secrets must use environment vault references)",
+            reason: "invalid_request",
+          });
+        for (const [key, value] of Object.entries(input.command.env)) {
+          if (
+            !/^[A-Za-z_][A-Za-z0-9_]*$/.test(key) ||
+            (value.includes("{{") &&
+              credentialRefsIn(value).some(
+                (ref) => Credentials.parseCredentialRef(ref) === undefined,
+              ))
+          )
+            return yield* new IntegrationError({
+              operation: "validate stdio environment",
+              reason: "invalid_request",
+            });
+        }
+      });
+
     const validateUrl = (url: string) =>
       Effect.try({
         try: () => new URL(url),
@@ -1474,6 +1571,29 @@ const make = (options: IntegrationsOptions = {}) =>
           );
 
     const service: Integrations["Service"] = Integrations.of({
+      previewNative: () =>
+        Option.isSome(nativeImport)
+          ? nativeImport.value.preview
+          : Effect.fail(
+              new IntegrationError({
+                operation: "preview native integrations",
+                reason: "upstream_unreachable",
+              }),
+            ),
+      importNative: () =>
+        Effect.gen(function* () {
+          const preview = yield* service.previewNative();
+          const existing = (yield* service.list()).integrations.map((row) => row.integration);
+          const imported: string[] = [];
+          for (const definition of preview.definitions) {
+            if (existing.some((item) => item.deletedAt === null && item.name === definition.name))
+              continue;
+            yield* service.create(definition);
+            imported.push(definition.name);
+          }
+          return { imported, reconnect: preview.reconnect, warnings: preview.warnings };
+        }),
+      setupGuide: (service) => Effect.succeed(integrationSetupGuide(service)),
       list: (options) =>
         rows().pipe(
           Effect.flatMap((all) => summaries(all, options?.includeProcessOutput === true)),
@@ -1481,7 +1601,9 @@ const make = (options: IntegrationsOptions = {}) =>
       listForProject: (labelId) =>
         rows().pipe(
           Effect.map((all) =>
-            all.filter((integration) => integrationVisibleTo(integration, labelId)),
+            all.filter((integration) =>
+              integrationVisibleTo({ ...integration, enabled: true }, labelId),
+            ),
           ),
           Effect.flatMap(summaries),
         ),
@@ -1522,6 +1644,12 @@ const make = (options: IntegrationsOptions = {}) =>
             );
             input = { ...input, local: prepared.local };
           }
+          if (options?.fromAgent && input.transport === "stdio" && !options.approveExecutable)
+            return yield* new IntegrationError({
+              operation: "approve executable integration",
+              reason: "approval_required",
+            });
+          yield* validateCommand(input);
           yield* validateUrl(input.url);
           yield* validateAuth(input.auth, "create");
           yield* validateTransport(input);
@@ -1559,11 +1687,12 @@ const make = (options: IntegrationsOptions = {}) =>
             displayName: input.displayName,
             transport: input.transport,
             ...(input.local ? { local: input.local } : {}),
+            ...(input.command ? { command: input.command } : {}),
             url: input.url,
             headers: input.headers,
             credentialOrigin: new URL(input.url).origin,
             approvedCredentialItems: options?.approveCredentials
-              ? credentialItemsIn(input.headers, input.auth)
+              ? credentialItemsIn(input.headers, input.auth, input.command)
               : [],
             enabled: input.enabled ?? true,
             scope: input.scope,
@@ -1595,6 +1724,15 @@ const make = (options: IntegrationsOptions = {}) =>
               operation: "update local integration",
               reason: "invalid_request",
             });
+          if (
+            options?.fromAgent &&
+            integrationExecutableChanged(current, masked) &&
+            !options.approveExecutable
+          )
+            return yield* new IntegrationError({
+              operation: "approve executable integration",
+              reason: "approval_required",
+            });
           if (!integrationVisibleTo({ ...current, enabled: true }, options?.callerLabelId))
             return yield* new IntegrationError({ operation: "update", reason: "not_found" });
           if (options?.preserveScope && integrationScopeWidened(current, masked))
@@ -1625,17 +1763,23 @@ const make = (options: IntegrationsOptions = {}) =>
                           ),
                   ).pipe(Effect.map(Object.fromEntries<string>)),
                 };
-          if (options?.holdStoredSecrets && integrationAccountLabelChanged(current, input))
+          if (
+            (options?.holdStoredSecrets || options?.fromAgent) &&
+            integrationAccountLabelChanged(current, input)
+          )
             return yield* new IntegrationError({
               operation: "change account label",
               reason: "approval_required",
             });
           const auth = input.auth === undefined ? current.auth : (input.auth ?? undefined);
           if (
-            options?.holdStoredSecrets &&
+            (options?.holdStoredSecrets || options?.fromAgent) &&
             integrationDestinationChanged(current, input) &&
             (current.oauthState?.tokenItemId !== undefined ||
               headersKeepStoredSecrets(current, input.headers ?? current.headers) ||
+              Object.values(current.command?.env ?? {}).some(
+                (value) => credentialRefsIn(value).length > 0,
+              ) ||
               credentialRefsIn(auth?.clientSecret ?? "").length > 0)
           ) {
             return yield* new IntegrationError({
@@ -1649,6 +1793,12 @@ const make = (options: IntegrationsOptions = {}) =>
           ) {
             return yield* new IntegrationError({ operation: "update", reason: "invalid_request" });
           }
+          yield* validateCommand({
+            transport: input.transport ?? current.transport,
+            command: input.command ?? current.command,
+            auth,
+            headers: input.headers ?? current.headers,
+          });
           if (input.url !== undefined) yield* validateUrl(input.url);
           yield* validateAuth(auth, "update");
           yield* validateTransport({
@@ -1661,7 +1811,7 @@ const make = (options: IntegrationsOptions = {}) =>
             : new URL(input.url ?? current.url).origin;
           const headers = input.headers ?? current.headers;
           const approvedCredentialItems = options?.approveCredentials
-            ? credentialItemsIn(headers, auth)
+            ? credentialItemsIn(headers, auth, input.command ?? current.command)
             : credentialOrigin === current.credentialOrigin
               ? (current.approvedCredentialItems ?? [])
               : [];
@@ -1679,6 +1829,7 @@ const make = (options: IntegrationsOptions = {}) =>
             ...(input.transport === undefined ? {} : { transport: input.transport }),
             ...(input.url === undefined ? {} : { url: input.url }),
             ...(input.headers === undefined ? {} : { headers: input.headers }),
+            ...(input.command === undefined ? {} : { command: input.command }),
             ...(input.enabled === undefined ? {} : { enabled: input.enabled }),
             ...(input.scope === undefined ? {} : { scope: input.scope }),
             ...(input.hint === undefined ? {} : { hint: input.hint }),
@@ -1708,7 +1859,9 @@ const make = (options: IntegrationsOptions = {}) =>
           integrationLock(masked.id).withPermits(1),
           // Once committed, the old process gives way; the next list starts the new version.
           Effect.tap(({ integration, changed }) =>
-            changed && integration.transport === "local" && Option.isSome(local)
+            changed &&
+            (integration.transport === "local" || integration.transport === "stdio") &&
+            Option.isSome(local)
               ? local.value.stop(integration.id, integration)
               : Effect.void,
           ),
@@ -1727,7 +1880,11 @@ const make = (options: IntegrationsOptions = {}) =>
           if (current === undefined) return { deleted: false };
           if (!integrationVisibleTo({ ...current, enabled: true }, options?.callerLabelId))
             return yield* new IntegrationError({ operation: "delete", reason: "not_found" });
-          if (current.transport === "local" && Option.isSome(local)) yield* local.value.stop(id);
+          if (
+            (current.transport === "local" || current.transport === "stdio") &&
+            Option.isSome(local)
+          )
+            yield* local.value.stop(id);
           const at = yield* now;
           const { oauthState: _, ...rest } = current;
           yield* persistDefinition({ ...rest, deletedAt: at, updatedAt: at }, current);
@@ -1736,7 +1893,7 @@ const make = (options: IntegrationsOptions = {}) =>
           yield* notify;
           return { deleted: true };
         }).pipe(integrationLock(id).withPermits(1), Effect.mapError(failure("delete", "storage"))),
-      testConnection: (id) =>
+      testConnection: (id, labelId) =>
         Effect.gen(function* () {
           const integration = yield* getById(id);
           if (!integration.enabled) {
@@ -1745,12 +1902,17 @@ const make = (options: IntegrationsOptions = {}) =>
               reason: "disabled",
             });
           }
+          if (!integrationVisibleTo(integration, labelId))
+            return yield* new IntegrationError({
+              operation: "test connection",
+              reason: "not_found",
+            });
           const checkedAt = yield* now;
-          const result = yield* fetchTools(integration).pipe(
+          const result = yield* fetchTools(integration, labelId).pipe(
             // A passing test is a fresh tool list, so the list view shows it.
             Effect.tap((tools) =>
               Effect.gen(function* () {
-                const key = `${integration.id}:${integration.updatedAt}`;
+                const key = `${integration.id}:${integration.updatedAt}${labelId === undefined ? "" : labelId === null ? ":unfiled" : `:project:${labelId}`}`;
                 const at = yield* Clock.currentTimeMillis;
                 yield* Ref.update(cache, (entries) =>
                   new Map(entries).set(key, { key, atMs: at, result: tools }),
@@ -1767,6 +1929,7 @@ const make = (options: IntegrationsOptions = {}) =>
               Effect.succeed<IntegrationTestResult>({
                 status: error.reason === "sign_in_required" ? "needs_sign_in" : "disconnected",
                 toolCount: 0,
+                reason: error.reason,
                 message:
                   error.reason === "upstream_error" && typeof error.cause === "string"
                     ? checkMessage(error.reason, error.cause)
@@ -1832,16 +1995,6 @@ const make = (options: IntegrationsOptions = {}) =>
       beginSignIn: (id, from) =>
         Effect.gen(function* () {
           const integration = yield* getById(id);
-          if (
-            from.fromAgent &&
-            (integration.provenance?.signedInAt !== undefined ||
-              integration.browserOrigin !== undefined ||
-              integration.oauthState?.tokenItemId !== undefined)
-          )
-            return yield* new IntegrationError({
-              operation: "reauthorize from Settings",
-              reason: "approval_required",
-            });
           if (!integration.enabled)
             return yield* new IntegrationError({ operation: "sign in", reason: "disabled" });
           // A managed account signs in through its own process, on its fixed callback origin.
@@ -2128,7 +2281,10 @@ const make = (options: IntegrationsOptions = {}) =>
                 entry,
                 reason: error.reason,
                 redirectUri: Option.isSome(local)
-                  ? yield* local.value.redirectUri(undefined, options.origin)
+                  ? yield* local.value.redirectUri(undefined, {
+                      ...options.origin,
+                      origin: request.inputs?.callbackOrigin ?? options.origin.origin,
+                    })
                   : undefined,
               });
               if (setup !== undefined) return { setup } satisfies IntegrationConnectResult;
@@ -2154,8 +2310,6 @@ const make = (options: IntegrationsOptions = {}) =>
           if (summary.status === "error") return { integration, ...keep };
           if (summary.status !== "needs_sign_in") return { integration };
           // Only the owner reauthorizes an account that signed in before.
-          if (from.fromAgent && summary.integration.provenance?.signedInAt !== undefined)
-            return { integration, ...keep };
           const signIn = yield* service.beginSignIn(id, from).pipe(Effect.result);
           if (signIn._tag === "Success") return { integration, signIn: signIn.success };
           const error = signIn.failure;
@@ -2182,6 +2336,39 @@ const make = (options: IntegrationsOptions = {}) =>
         }),
       saveOAuthClient: (input, options) =>
         Effect.gen(function* () {
+          if (input.catalogId === undefined) {
+            const current = yield* getById(input.integrationId);
+            if (
+              current.transport !== "http" ||
+              !usesOAuth(current) ||
+              integrationCatalogEntryFor(current) !== undefined
+            )
+              return yield* new IntegrationError({
+                operation: "save OAuth client",
+                reason: "invalid_request",
+              });
+            const item = `${current.name}-client-secret`;
+            yield* saveSecret({
+              item,
+              type: "api_key",
+              fields: { value: input.clientSecret },
+              domains: [new URL(current.url).hostname],
+              label: `${current.displayName} client secret (${current.name})`,
+            });
+            yield* service.update(
+              {
+                id: current.id,
+                auth: {
+                  ...current.auth!,
+                  type: "oauth",
+                  clientId: input.clientId,
+                  clientSecret: `{{credential:${item}.value}}`,
+                },
+              },
+              { approveCredentials: true },
+            );
+            return yield* service.prepareSignIn(current.id, options.origin);
+          }
           const entry = integrationCatalogEntry(input.catalogId);
           if (
             entry === undefined ||

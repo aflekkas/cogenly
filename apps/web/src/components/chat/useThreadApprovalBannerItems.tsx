@@ -82,7 +82,9 @@ export function useThreadApprovalBannerItems(
                 disabled={disabled}
                 onClick={() => void decide(approval.id, "approve")}
               >
-                Allow in this thread
+                {approval.actionKind === "vault_use"
+                  ? "Allow in this thread"
+                  : "Approve integration"}
               </Button>
             </>
           ),
