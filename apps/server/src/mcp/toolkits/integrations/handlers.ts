@@ -240,6 +240,7 @@ export const layer = McpToolAccess.toLayer(IntegrationsToolkit, {
             id: current.id,
             ...(input.displayName === undefined ? {} : { displayName: input.displayName }),
             ...(input.url === undefined ? {} : { url: input.url }),
+            ...(input.endpointRef === undefined ? {} : { endpointRef: input.endpointRef }),
             ...(input.transport === undefined ? {} : { transport: input.transport }),
             ...(input.headers === undefined ? {} : { headers: input.headers }),
             ...(input.command === undefined ? {} : { command: input.command }),

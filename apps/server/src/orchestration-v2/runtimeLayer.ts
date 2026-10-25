@@ -130,7 +130,7 @@ export const layerIntegrationSyncPeers = IntegrationSyncPeers.layer.pipe(
 );
 export const layerIntegrationsProvided = Integrations.layer.pipe(
   Layer.provide(layerIntegrationSyncPeers),
-  Layer.provide(NativeIntegrationImport.layer),
+  Layer.provide(NativeIntegrationImport.layer.pipe(Layer.provide(ProjectStore.layer))),
   Layer.provide(layerIntegrationCredentials),
   Layer.provide(IntegrationTokens.layer.pipe(Layer.provide(layerVaultProvided))),
   Layer.provide(layerLocalIntegrationsProvided),

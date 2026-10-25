@@ -34,6 +34,7 @@ import * as Credentials from "./IntegrationCredentials.ts";
 import { availableToConnect } from "./IntegrationCatalog.ts";
 import * as Integrations from "./Integrations.ts";
 import * as IntegrationSyncPeers from "./IntegrationSyncPeers.ts";
+import * as NativeImport from "./NativeIntegrationImport.ts";
 import * as Tokens from "./IntegrationTokens.ts";
 import { IntegrationEndpointPolicy } from "./RemoteEndpoint.ts";
 import * as Workspace from "../agents/AgentWorkspaceService.ts";
@@ -55,6 +56,7 @@ interface FakeUpstream {
   readonly url: string;
   readonly seen: Array<{
     method: string;
+    path: string | undefined;
     authorization: string | undefined;
     sessionId: string | undefined;
   }>;
@@ -82,6 +84,7 @@ const fakeUpstreamWith = (redirectTo?: string, denyListScope = false) =>
           };
           seen.push({
             method: body.method,
+            path: request.url,
             authorization: request.headers.authorization,
             sessionId: [request.headers["mcp-session-id"]].flat()[0],
           });
@@ -1403,6 +1406,57 @@ describe("Integration credential destinations", () => {
     exit._tag === "Failure" ? (exit.failure as { readonly reason?: string }).reason : "success";
 
   it.effect(
+    "resolves private endpoints only at call time and keeps them off settings and spans",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* runMigrations();
+          const upstream = yield* fakeUpstream;
+          const vault = yield* Vault.Vault;
+          const service = yield* Integrations.Integrations;
+          const spans: Array<Tracer.NativeSpan> = [];
+          const tracer = Tracer.make({
+            span(options) {
+              const span = new Tracer.NativeSpan(options);
+              spans.push(span);
+              return span;
+            },
+          });
+          const { integration } = yield* service.create({
+            ...createInput(new URL(upstream.url).origin),
+            headers: {},
+            endpointRef: "private-endpoint.value",
+          });
+          expect(
+            (yield* service.callTool(integration.name, "echo", {}, null).pipe(Effect.flip)).reason,
+          ).toBe("credential_unresolved");
+          expect(upstream.seen).toHaveLength(0);
+          const privatePath = "/mcp/fixture-private-capability-6YpA92x";
+          yield* vault.create({
+            name: "private-endpoint",
+            type: "api_key",
+            allowedDomains: ["127.0.0.1"],
+            secretFields: { value: new URL(privatePath, upstream.url).href },
+          });
+          yield* service
+            .callTool(integration.name, "echo", {}, null)
+            .pipe(Effect.withSpan("private-endpoint-test"), Effect.withTracer(tracer));
+          expect(upstream.seen.at(-1)?.path).toBe(privatePath);
+          expect(JSON.stringify(yield* service.list())).not.toContain(privatePath);
+          expect(JSON.stringify(spans.map((span) => [...span.attributes]))).not.toContain(
+            privatePath,
+          );
+          const calls = upstream.seen.length;
+          yield* service.update({ id: integration.id, url: "https://other.example" });
+          expect(
+            (yield* service.callTool(integration.name, "echo", {}, null).pipe(Effect.flip)).reason,
+          ).toBe("credential_not_allowed");
+          expect(upstream.seen).toHaveLength(calls);
+        }),
+      ).pipe(Effect.provide(vaultLayer())),
+  );
+
+  it.effect(
     "keeps project-scoped vault credentials inside that project, including cached tools",
     () =>
       Effect.scoped(
@@ -1547,4 +1601,36 @@ it.effect(
         "missing a required scope",
       );
     }).pipe(Effect.scoped, Effect.provide(layerWith())),
+);
+
+it.effect("preserves incomplete review warnings when importing available native definitions", () =>
+  Effect.gen(function* () {
+    yield* runMigrations();
+    const service = yield* Integrations.Integrations;
+    const result = yield* service.importNative();
+    expect(result).toMatchObject({
+      imported: ["native-fixture"],
+      incomplete: true,
+      warnings: ["Fixture source could not be reviewed."],
+    });
+    expect((yield* service.list()).integrations[0]?.integration.enabled).toBe(false);
+    expect((yield* service.importNative()).imported).toEqual([]);
+  }).pipe(
+    Effect.provide(
+      layerWith().pipe(
+        Layer.provide(
+          Layer.succeed(NativeImport.NativeIntegrationImport, {
+            preview: Effect.succeed({
+              definitions: [
+                { ...createInput("https://fixture.example/mcp", "native-fixture"), enabled: false },
+              ],
+              reconnect: [],
+              warnings: ["Fixture source could not be reviewed."],
+              incomplete: true,
+            }),
+          }),
+        ),
+      ),
+    ),
+  ),
 );

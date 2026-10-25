@@ -142,6 +142,18 @@ function ProviderConnectorsSettingRow({
             setError(integrationErrorText(squashAtomCommandFailure(result)));
           return;
         }
+        if (result.value.incomplete) {
+          setOffer((current) => ({
+            definitions: current?.definitions ?? [],
+            reconnect: result.value.reconnect,
+            warnings: result.value.warnings,
+            incomplete: true,
+          }));
+          setError(
+            "Some native sources could not be reviewed. Resolve the warnings and try again, or explicitly skip the import.",
+          );
+          return;
+        }
       }
       updateSettings({ nativeMcpImportReviewed: true });
     } finally {
@@ -195,7 +207,9 @@ function ProviderConnectorsSettingRow({
                   <p>
                     {offer.definitions.length
                       ? offer.definitions.map((definition) => definition.name).join(", ")
-                      : "No native definitions found."}
+                      : offer.incomplete
+                        ? "Native source review is incomplete."
+                        : "No native definitions found."}
                   </p>
                   {offer.reconnect.map((name) => (
                     <p key={name}>{name}: reconnect with an agent</p>
