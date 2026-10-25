@@ -329,6 +329,7 @@ import {
   ServerSettingsError,
   ServerSettingsPatch,
 } from "./settings.ts";
+import { ChatGreetingInput, ChatGreetingResult } from "./chatGreeting.ts";
 import {
   ScheduledTaskDeleteInput,
   ScheduledTaskDeleteResult,
@@ -508,6 +509,7 @@ export const WS_METHODS = {
   serverReportClientActivity: "server.reportClientActivity",
   serverReportHostPowerState: "server.reportHostPowerState",
   serverGetBackgroundPolicy: "server.getBackgroundPolicy",
+  serverGetChatGreeting: "server.getChatGreeting",
   serverGetUsageSummary: "server.getUsageSummary",
   serverRefreshUsageRates: "server.refreshUsageRates",
 
@@ -981,6 +983,13 @@ const WsServerReportHostPowerStateRpc = Rpc.make(WS_METHODS.serverReportHostPowe
 const WsServerGetBackgroundPolicyRpc = Rpc.make(WS_METHODS.serverGetBackgroundPolicy, {
   payload: Schema.Struct({}),
   success: BackgroundPolicySnapshot,
+  error: EnvironmentAuthorizationError,
+});
+
+/** The new-chat greeting written from recent work; never fails, null means use the built-in line. */
+const WsServerGetChatGreetingRpc = Rpc.make(WS_METHODS.serverGetChatGreeting, {
+  payload: ChatGreetingInput,
+  success: ChatGreetingResult,
   error: EnvironmentAuthorizationError,
 });
 
@@ -2657,6 +2666,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerReportClientActivityRpc,
   WsServerReportHostPowerStateRpc,
   WsServerGetBackgroundPolicyRpc,
+  WsServerGetChatGreetingRpc,
   WsCloudGetRelayClientStatusRpc,
   WsCloudInstallRelayClientRpc,
   WsPullRequestsListRpc,

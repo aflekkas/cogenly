@@ -1245,6 +1245,26 @@ export function createServerEnvironmentAtoms<R, E>(
           ),
         ),
     }),
+    // The new-chat greeting for the client's local day and bucket. While the
+    // server writes one, the first answer (`pending`) shows the built-in line
+    // and a second request waits for the written greeting.
+    chatGreeting: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:chat-greeting",
+      tag: WS_METHODS.serverGetChatGreeting,
+      staleTimeMs: 10 * 60_000,
+      execute: (input, emit) =>
+        request(WS_METHODS.serverGetChatGreeting, input).pipe(
+          Effect.flatMap((greeting) =>
+            greeting.pending
+              ? emit(greeting).pipe(
+                  Effect.andThen(
+                    request(WS_METHODS.serverGetChatGreeting, { ...input, awaitGeneration: true }),
+                  ),
+                )
+              : Effect.succeed(greeting),
+          ),
+        ),
+    }),
     resourceTelemetry: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
       label: "environment-data:server:resource-telemetry",
       tag: WS_METHODS.subscribeResourceTelemetry,

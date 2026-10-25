@@ -521,6 +521,7 @@ export function useSettingsRestore(onRestored?: () => void) {
         : []),
       ...(settings.confirmQuit !== DEFAULT_UNIFIED_SETTINGS.confirmQuit ? ["Quit shortcut"] : []),
       ...(isTextGenerationModelDirty ? ["Text generation model"] : []),
+      ...(settings.aiGreetings !== DEFAULT_UNIFIED_SETTINGS.aiGreetings ? ["AI greetings"] : []),
       ...getChangedBrowserSettingLabels(settings),
       ...(settings.enableAgentBrowserAccess !== DEFAULT_UNIFIED_SETTINGS.enableAgentBrowserAccess
         ? ["Agent browser access"]
@@ -562,6 +563,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.continueThreadsAfterServerUpdate,
       settings.autoResumeLimitedThreads,
       settings.snoozeLimitedThreads,
+      settings.aiGreetings,
       settings.sidebarProjectGroupingMode,
       settings.sidebarProjectSortOrder,
       settings.sidebarWorkingShelfEnabled,
@@ -629,6 +631,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       confirmThreadDelete: DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete,
       confirmQuit: DEFAULT_UNIFIED_SETTINGS.confirmQuit,
       textGenerationModelSelection: DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
+      aiGreetings: DEFAULT_UNIFIED_SETTINGS.aiGreetings,
       fontSizeInterface: DEFAULT_UNIFIED_SETTINGS.fontSizeInterface,
       fontSizePrompt: DEFAULT_UNIFIED_SETTINGS.fontSizePrompt,
       fontSizeCode: DEFAULT_UNIFIED_SETTINGS.fontSizeCode,
@@ -2088,6 +2091,30 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
                 ) : null}
               </div>
             )
+          }
+        />
+        <SettingsRow
+          serverScoped
+          settingKeys={["aiGreetings"]}
+          {...searchableSetting("ai-greetings")}
+          description="Write the new chat greeting from what you've been working on, a few times a day with the text generation model."
+          resetAction={
+            settings.aiGreetings !== DEFAULT_UNIFIED_SETTINGS.aiGreetings ? (
+              <SettingResetButton
+                label="AI greetings"
+                onClick={() =>
+                  updateSettings({ aiGreetings: DEFAULT_UNIFIED_SETTINGS.aiGreetings })
+                }
+              />
+            ) : null
+          }
+          control={
+            <ScopedSwitch
+              settingKeys={["aiGreetings"]}
+              checked={settings.aiGreetings}
+              onCheckedChange={(checked) => updateSettings({ aiGreetings: Boolean(checked) })}
+              aria-label="AI greetings"
+            />
           }
         />
       </SettingsSection>

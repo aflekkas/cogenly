@@ -2,7 +2,7 @@ import type {
   EnvironmentProject,
   EnvironmentThreadShell,
 } from "@t3tools/client-runtime/state/shell";
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef } from "react";
 
 import { ComposerProjectPicker } from "~/projectLabels/ComposerProjectPicker";
 import { HERO_INLINE_ICON_STYLE, ProjectFolderIcon } from "~/projectLabels/ProjectFolderMark";
@@ -11,7 +11,7 @@ import { workHeroBreadcrumb } from "~/projectLabels/projectMeta.logic";
 import { useProjectLabelDirectory } from "~/projectLabels/useProjectLabels";
 import { ProjectFavicon } from "../ProjectFavicon";
 import { RepositoryBadge } from "../sidebar/modes/RepositoryBadge";
-import { chatGreeting } from "./chatGreeting";
+import { ChatGreetingText, useChatGreeting } from "./ChatGreetingText";
 import { FadeSwap } from "./StateTransition";
 import { useHeroHeadlineMotion } from "./useHeroHeadlineMotion";
 import { WorkHeroCrumbText, WorkHeroSentence } from "./WorkHeroSentence";
@@ -43,7 +43,7 @@ export function ThreadHeroHeadline({
       ? null
       : (directory.byKey.get(projectLabelKey(thread.environmentId, folderId)) ?? null);
   // Fixed when the screen opens, so the line holds still while the user types.
-  const [greeting] = useState(() => chatGreeting(new Date()));
+  const greeting = useChatGreeting(thread.environmentId);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const measureRef = useRef<HTMLSpanElement>(null);
   useHeroHeadlineMotion(headingRef, measureRef, isChat ? `chat:${thread.id}` : "heading");
@@ -110,7 +110,7 @@ export function ThreadHeroHeadline({
                 data-hero-greeting=""
                 className="inline-block max-w-full group-data-stacked/hero-headline:block"
               >
-                {greeting}
+                <ChatGreetingText text={greeting} />
               </span>
               <ComposerProjectPicker
                 appearance="hero"

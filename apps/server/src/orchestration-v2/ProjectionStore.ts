@@ -427,6 +427,18 @@ export interface ProjectionStoreV2Shape {
     ReadonlyArray<{ readonly threadId: ThreadId; readonly worktreePath: string }>,
     ProjectionStoreV2Error
   >;
+  /**
+   * Titles of active, non-subagent threads updated at or after `since`, newest
+   * first, with their project's title when known. Reads only thread and project
+   * rows, for small activity summaries such as the new-chat greeting.
+   */
+  readonly getRecentThreadTitles: (input: {
+    readonly since: DateTime.Utc;
+    readonly limit: number;
+  }) => Effect.Effect<
+    ReadonlyArray<{ readonly title: string; readonly projectTitle: string | null }>,
+    ProjectionStoreV2Error
+  >;
   readonly getTurnStartContext: (
     threadId: ThreadId,
     runId: RunId,
@@ -5839,6 +5851,30 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         Effect.mapError((cause) => new ProjectionStoreSetupError({ cause })),
       );
 
+    const getRecentThreadTitles: ProjectionStoreV2Shape["getRecentThreadTitles"] = ({
+      since,
+      limit,
+    }) =>
+      sql<{ readonly title: string | null; readonly project_title: string | null }>`
+        SELECT json_extract(t.payload_json, '$.title') AS title, p.title AS project_title
+        FROM orchestration_v2_projection_threads t
+        LEFT JOIN projection_projects p
+          ON p.project_id = t.project_id AND p.deleted_at IS NULL
+        WHERE t.deleted_at IS NULL
+          AND json_extract(t.payload_json, '$.archivedAt') IS NULL
+          AND COALESCE(json_extract(t.payload_json, '$.lineage.relationshipToParent'), '') <> 'subagent'
+          AND t.updated_at >= ${DateTime.formatIso(since)}
+        ORDER BY t.updated_at DESC
+        LIMIT ${limit}
+      `.pipe(
+        Effect.map((rows) =>
+          rows.flatMap((row) =>
+            row.title === null ? [] : [{ title: row.title, projectTitle: row.project_title }],
+          ),
+        ),
+        Effect.mapError((cause) => new ProjectionStoreSetupError({ cause })),
+      );
+
     const shellThreadStateFromRow = (input: {
       readonly row: ShellThreadRow;
       readonly runOrdinalsByThreadId: ReadonlyMap<ThreadId, Map<RunId, number>>;
@@ -6193,6 +6229,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       getThread,
       getThreadsWithPullRequests,
       getThreadWorktreePaths,
+      getRecentThreadTitles,
       getThreadProjection,
       getTurnStartContext,
       getTurnStartHistory,
@@ -6323,6 +6360,26 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
                 ? [{ threadId: thread.id, worktreePath: thread.worktreePath }]
                 : [],
             ),
+          ),
+        ),
+      getRecentThreadTitles: ({ since, limit }) =>
+        Ref.get(replayState).pipe(
+          Effect.map((state) =>
+            [...state.projections.values()]
+              .map(({ thread }) => thread)
+              .filter(
+                (thread) =>
+                  thread.deletedAt === null &&
+                  thread.archivedAt === null &&
+                  thread.lineage.relationshipToParent !== "subagent" &&
+                  DateTime.toEpochMillis(thread.updatedAt) >= DateTime.toEpochMillis(since),
+              )
+              .toSorted(
+                (left, right) =>
+                  DateTime.toEpochMillis(right.updatedAt) - DateTime.toEpochMillis(left.updatedAt),
+              )
+              .slice(0, limit)
+              .map((thread) => ({ title: thread.title, projectTitle: null })),
           ),
         ),
       getThreadsWithPullRequests: (threadId) =>

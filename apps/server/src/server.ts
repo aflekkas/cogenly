@@ -170,6 +170,7 @@ import * as ResourceAttribution from "./resourceTelemetry/ResourceAttribution.ts
 import * as ResourceMonitorBinary from "./resourceTelemetry/ResourceMonitorBinary.ts";
 import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as UsageService from "./usage/UsageService.ts";
+import * as ChatGreetingService from "./greeting/ChatGreetingService.ts";
 import * as Scheduler from "./scheduling/Scheduler.ts";
 import * as SharedState from "./sync/SharedState.ts";
 import * as SharedSync from "./sync/SharedSync.ts";
@@ -582,6 +583,7 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   HeldHooksWaker.layer,
   layerThreadSettlementWorker,
   StorageCleanup.layer.pipe(Layer.provide(ProjectionStoreV2.layer)),
+  ChatGreetingService.layer.pipe(Layer.provide(ProjectionStoreV2.layer)),
   // Server-owned periodic jobs: nightly home backups and housekeeping.
   // Neither starts provider turns; both are plain service methods.
   ServerBackup.layer,
