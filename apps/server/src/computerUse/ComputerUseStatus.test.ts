@@ -106,6 +106,17 @@ describe("hostAppName", () => {
     ).toBe("Cogenly");
   });
 
+  it("names the outer app when the server runs in a nested helper", () => {
+    expect(
+      hostAppName({
+        platform: "darwin",
+        executablePath:
+          "/Applications/Cogenly.app/Contents/Frameworks/Cogenly Helper.app/Contents/MacOS/Cogenly Helper",
+        environment: {},
+      }),
+    ).toBe("Cogenly");
+  });
+
   it("names the terminal a dev server was started from", () => {
     expect(
       hostAppName({

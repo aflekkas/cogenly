@@ -67,7 +67,8 @@ export function hostAppName(input: {
   readonly environment: Readonly<Record<string, string | undefined>>;
 }): string | null {
   if (input.platform !== "darwin") return null;
-  const bundle = /\/([^/]+)\.app\/Contents\/MacOS\/[^/]+$/.exec(input.executablePath)?.[1];
+  // The outermost bundle: Electron helpers live in nested `.app`s inside it.
+  const bundle = /^(?:\/[^/]+)*?\/([^/]+)\.app\//.exec(input.executablePath)?.[1];
   if (bundle) return bundle;
   const terminals: Record<string, string> = {
     "com.apple.Terminal": "Terminal",
