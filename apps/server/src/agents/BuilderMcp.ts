@@ -1,4 +1,10 @@
-import { AgentBuilderProposal, OrchestratorMcpFailure } from "@t3tools/contracts";
+import {
+  AgentBuilderProposal,
+  TrimmedNonEmptyString,
+  OrchestratorMcpFailure,
+} from "@t3tools/contracts";
+import * as Schema from "effect/Schema";
+import { resolveMachine } from "../machines/resolveMachine.ts";
 import * as Effect from "effect/Effect";
 import { Tool, Toolkit } from "effect/ai";
 import * as Access from "../mcp/McpToolAccess.ts";
@@ -19,7 +25,10 @@ const Propose = Tool.make("propose_agent", {
   ...shared,
   description:
     "Replace this builder thread's agent proposal with the whole current one. Only builder threads may call it; the client renders the latest call as the proposal card.",
-  parameters: AgentBuilderProposal,
+  parameters: Schema.Struct({
+    ...AgentBuilderProposal.fields,
+    machine: Schema.optional(TrimmedNonEmptyString),
+  }),
   success: AgentBuilderProposal,
 });
 export const toolkit = Toolkit.make(Propose);
@@ -40,7 +49,13 @@ export const handlers = Access.toLayer(toolkit, {
           message: "propose_agent needs a builder thread.",
         });
       const { proposal } = yield* (yield* Service.AgentService)
-        .recordProposal({ threadId: scope.thread.threadId, proposal: input })
+        .recordProposal({
+          threadId: scope.thread.threadId,
+          proposal: {
+            ...input,
+            machine: yield* resolveMachine(input.machine).pipe(Effect.mapError(unavailable)),
+          },
+        })
         .pipe(Effect.mapError(unavailable));
       return proposal;
     }),

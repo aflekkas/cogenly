@@ -1,3 +1,6 @@
+import { useEnvironmentMachineList } from "~/machines/useMachines";
+import { mergeRunOnOptions } from "~/machines/launchMachine.logic";
+import { EnvironmentOptionContent } from "../BranchToolbarEnvironmentSelector";
 import { OverlayPresence } from "~/components/ui/overlay-presence";
 import { CopyButton } from "../ui/copy-button";
 import { useAtomValue } from "@effect/atom-react";
@@ -996,6 +999,23 @@ function ScheduledTaskEditorDialog({
 }) {
   const { scope, connectedEnvironments } = useSettingsScope();
   const [environmentId, setEnvironmentId] = useState(initialEnvironmentId);
+  const [targetMachine, setTargetMachine] = useState<EnvironmentId | null>(task?.machine ?? null);
+  const machineList = useEnvironmentMachineList(environmentId);
+  const runTarget =
+    targetMachine ??
+    task?.ownerMachine ??
+    (machineList?.link._tag === "spoke" ? machineList.link.hubEnvironmentId : environmentId);
+  const runOnOptions = mergeRunOnOptions({
+    environments: connectedEnvironments.map((entry) => ({
+      environmentId: entry.environmentId,
+      projectId: null,
+      label: entry.label,
+      isPrimary: entry.environmentId === environmentId,
+      machine: resolveEnvironmentMachineKind(entry.serverConfig),
+    })),
+    machines: machineList,
+    pickedMachine: targetMachine,
+  });
   const environment = useEnvironment(environmentId);
   const connected =
     environment?.connection.phase === "connected" && environment.serverConfig !== null;
@@ -1013,8 +1033,14 @@ function ScheduledTaskEditorDialog({
     [allProjects, environmentId, scope],
   );
   const settings = useEnvironmentSettings(environmentId);
-  const providers =
+  const localProviders =
     useAtomValue(serverEnvironment.providersValueAtom(environmentId)) ?? EMPTY_SERVER_PROVIDERS;
+  const remoteProviders = useEnvironmentQuery(
+    runTarget === environmentId
+      ? null
+      : serverEnvironment.machineProviders({ environmentId, input: { machine: runTarget } }),
+  );
+  const providers = remoteProviders.data?.providers ?? localProviders;
   const canOperate = useAtomValue(
     serverEnvironment.upsertScheduledTask.permissionAtom(environmentId),
   );
@@ -1153,6 +1179,7 @@ function ScheduledTaskEditorDialog({
             };
     const input: ScheduledTaskUpsertInput = {
       ...(draft.editingId ? { id: draft.editingId as ScheduledTaskId, requireExisting: true } : {}),
+      machine: draft.threadId || draft.agentId ? null : targetMachine,
       title: draft.title.trim(),
       prompt: draft.prompt.trim(),
       enabled: draft.enabled,
@@ -1210,11 +1237,26 @@ function ScheduledTaskEditorDialog({
             ) : null}
             <Field label="Runs on" htmlFor="scheduled-task-environment">
               <Select
-                value={environmentId}
-                disabled={task !== null || saving}
+                value={runTarget}
+                disabled={saving || Boolean(draft.threadId) || Boolean(draft.agentId)}
                 onValueChange={(id) => {
                   const next = connectedEnvironments.find((entry) => entry.environmentId === id);
-                  if (!next) return;
+                  if (!next) {
+                    const picked = runOnOptions.find((option) => option.environmentId === id);
+                    if (!picked) return;
+                    setTargetMachine(picked.environmentId);
+                    setDraft((current) =>
+                      current.workspaceMode === "existing_worktree"
+                        ? { ...current, workspaceMode: "worktree", existingWorktreePath: "" }
+                        : current,
+                    );
+                    return;
+                  }
+                  if (task !== null && next.environmentId !== environmentId) {
+                    setTargetMachine(next.environmentId);
+                    return;
+                  }
+                  setTargetMachine(next.environmentId);
                   setEnvironmentId(next.environmentId);
                   setDraft((current) => ({
                     ...current,
@@ -1231,10 +1273,16 @@ function ScheduledTaskEditorDialog({
                   <SelectValue>
                     <span className="flex items-center gap-2">
                       <EnvironmentMachineIcon
-                        kind={resolveEnvironmentMachineKind(environment?.serverConfig ?? null)}
+                        kind={
+                          runOnOptions.find((option) => option.environmentId === runTarget)
+                            ?.machine ??
+                          resolveEnvironmentMachineKind(environment?.serverConfig ?? null)
+                        }
                         className="size-4"
                       />
-                      {environment?.label ?? "Unavailable machine"}
+                      {runOnOptions.find((option) => option.environmentId === runTarget)?.label ??
+                        environment?.label ??
+                        "Unavailable machine"}
                     </span>
                   </SelectValue>
                 </SelectTrigger>
@@ -1267,6 +1315,17 @@ function ScheduledTaskEditorDialog({
                       </SelectItem>
                     );
                   })}
+                  {runOnOptions
+                    .filter((option) => option.pairedMachine !== undefined)
+                    .map((option) => (
+                      <SelectItem
+                        key={option.environmentId}
+                        value={option.environmentId}
+                        label={option.label}
+                      >
+                        <EnvironmentOptionContent option={option} />
+                      </SelectItem>
+                    ))}
                 </SelectPopup>
               </Select>
             </Field>

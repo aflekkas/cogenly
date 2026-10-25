@@ -184,8 +184,13 @@ import * as IntegrationSyncBinding from "./integrations/IntegrationSyncBinding.t
 import * as ThreadReplication from "./threadSync/ThreadReplication.ts";
 import * as ThreadRouting from "./threadSync/ThreadRouting.ts";
 import * as ThreadTransfer from "./threadSync/ThreadTransfer.ts";
+import * as ThreadFork from "./threadSync/ThreadFork.ts";
 import * as ProjectMove from "./threadSync/ProjectMove.ts";
 import * as RemoteThreadCommands from "./orchestration-v2/RemoteThreadCommands.ts";
+import * as RemoteThreadLaunch from "./orchestration-v2/RemoteThreadLaunch.ts";
+import * as ThreadLaunchRouting from "./threadSync/ThreadLaunchRouting.ts";
+import * as MachinesTurnContext from "./orchestration-v2/MachinesTurnContext.ts";
+import * as MachinesTurnContextLive from "./machines/machinesTurnContext.ts";
 import * as ThreadSync from "./threadSync/ThreadSync.ts";
 import * as RuntimeLayer from "./orchestration-v2/runtimeLayer.ts";
 import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
@@ -606,14 +611,20 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
       Layer.provide(RuntimeLayer.layerVaultSyncCapture),
       Layer.provide(RuntimeLayer.layerIntegrationSyncPeers),
     ),
+    // Same reference as turn start's, which reads the block.
+    MachinesTurnContextLive.layer.pipe(Layer.provide(MachinesTurnContext.layer)),
     // The orchestrator's own sink, so replicated events reach the same
     // subscribers, and its forwarder registry, so routing sees its commands.
-    ProjectMove.layer.pipe(
+    // Its launcher registry, so a launch naming another machine reaches it.
+    Layer.mergeAll(ProjectMove.layer, ThreadLaunchRouting.layer, ThreadFork.layer).pipe(
+      Layer.provide(SharedSync.layer.pipe(Layer.provide(SharedState.layer))),
       Layer.provideMerge(ThreadTransfer.layer),
       Layer.provideMerge(ThreadRouting.layer),
       Layer.provideMerge(ThreadSync.layer),
       Layer.provide(ThreadReplication.layer),
+      Layer.provide(ProjectLabelFolders.layer),
       Layer.provide(RemoteThreadCommands.layer),
+      Layer.provide(RemoteThreadLaunch.layer),
       // Agents follow their conversation; the same layer as SharedSync's.
       Layer.provide(SharedState.layer),
       Layer.provide(

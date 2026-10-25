@@ -65,8 +65,10 @@ import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ProjectionMaintenance from "./ProjectionMaintenance.ts";
 import * as ProjectStore from "./ProjectStore.ts";
 import * as ProviderAdapterRegistry from "./ProviderAdapterRegistry.ts";
+import * as MachinesTurnContext from "./MachinesTurnContext.ts";
 import * as ProviderContinuationRequests from "@t3tools/provider-core/server/ProviderContinuationRequests";
 import * as RemoteThreadCommands from "./RemoteThreadCommands.ts";
+import * as RemoteThreadLaunch from "./RemoteThreadLaunch.ts";
 import * as ProviderContinuationService from "./ProviderContinuationService.ts";
 import * as ThreadTitleRegenerationService from "./ThreadTitleRegenerationService.ts";
 import * as ProviderEventIngestor from "./ProviderEventIngestor.ts";
@@ -253,6 +255,8 @@ const layerProviderTurnStartServiceProvided = ProviderTurnStartService.layer.pip
   Layer.provide(
     Layer.mergeAll(
       layerContextHandoffServiceProvided,
+      // Same reference as the machine link's, which registers the reader.
+      MachinesTurnContext.layer,
       layerEventSinkProvided,
       IdAllocator.layer,
       ProjectionStore.layer,
@@ -299,6 +303,7 @@ const layerRunFinalizationServiceProvided = RunFinalizationService.layer.pipe(
 );
 
 const layerOrchestratorProvided = Orchestrator.layer.pipe(
+  Layer.provide(ServerEnvironment.layerIdentity),
   Layer.provide(
     Layer.mergeAll(
       layerCheckpointServiceProvided,
@@ -315,6 +320,7 @@ const layerOrchestratorProvided = Orchestrator.layer.pipe(
       ProviderContinuationRequests.layer,
       // Same reference as thread sync's router, which registers the forwarder.
       RemoteThreadCommands.layer,
+      RemoteThreadLaunch.layer,
       layerProviderEventIngestorProvided,
       layerRuntimePolicyProvided,
       layerProviderSessionManagerProvided,
@@ -384,6 +390,8 @@ const layerThreadLaunchProvided = ThreadLaunchService.layer.pipe(
       layerThreadManagementProvided,
       layerCommandReceiptStoreProvided,
       IdAllocator.layer,
+      // Same reference as thread sync's launch router, which registers the launcher.
+      RemoteThreadLaunch.layer,
     ),
   ),
 );
@@ -405,6 +413,7 @@ const layerSecretRequestsProvided = SecretRequests.layer.pipe(
   Layer.provide(layerThreadManagementProvided),
 );
 const layerAgentsProvided = Agents.layer.pipe(
+  Layer.provide(RemoteThreadLaunch.layer),
   Layer.provide(
     Layer.mergeAll(
       AgentStore.layer,
@@ -419,6 +428,7 @@ const layerAgentsProvided = Agents.layer.pipe(
   ),
 );
 const layerScheduledTaskProvided = ScheduledTaskService.layer.pipe(
+  Layer.provide(RemoteThreadLaunch.layer),
   Layer.provide(
     Layer.mergeAll(
       layerThreadLaunchProvided,
@@ -564,6 +574,7 @@ export const layer = Layer.mergeAll(
 );
 
 const layerProductionBase = Layer.mergeAll(
+  RemoteThreadLaunch.layer,
   layerLocalIntegrationsProvided,
   Facts.layer,
   layerIntegrationsProvided,

@@ -1,3 +1,4 @@
+import { requestLaunchMachine } from "~/machines/LaunchMachineDialog";
 import { useNavigate } from "@tanstack/react-router";
 import type {
   EnvironmentId,
@@ -271,7 +272,13 @@ export function AgentBuilder({
         }),
         kickoff: true,
       };
-      const contact = await client.save(thread.environmentId, draft, first);
+      const machine = proposal.machine ?? (await requestLaunchMachine(thread.environmentId, true));
+      if (machine === null) return;
+      const contact = await client.save(
+        thread.environmentId,
+        { ...draft, ownerMachine: machine },
+        first,
+      );
       await finish(contact, rest);
     } catch (cause) {
       if (cause instanceof AgentCreatedWithoutTriggerError) {

@@ -1237,9 +1237,18 @@ export function createServerEnvironmentAtoms<R, E>(
       tag: WS_METHODS.projectLabelsMoveToMachine,
     }),
     /** The machines this environment is paired with, live: a fresh list after every change. */
+    machineProviders: createEnvironmentGuardedRpcQueryAtomFamily(runtime, {
+      label: "environment-data:machines:providers",
+      tag: WS_METHODS.machinesCatalog,
+    }),
     machinesLive: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
       label: "environment-data:machines:live",
       tag: WS_METHODS.machinesSubscribe,
+    }),
+    /** Copy the conversation to a paired machine in the same repository. */
+    forkThreadToMachine: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:machines:forkThreadToMachine",
+      tag: WS_METHODS.machinesForkThread,
     }),
     /** Hand threads to another paired machine; answers once it runs them, with skips. */
     moveThreadsToMachine: createEnvironmentRpcCommand(runtime, {

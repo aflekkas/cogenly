@@ -87,6 +87,10 @@ import { runOutcome } from "../orchestration-v2/RestartBackgroundNote.ts";
 import { delegatedTaskStop } from "../orchestration-v2/DelegatedTaskFailureNotice.ts";
 import { limitRecoveryPending } from "../orchestration-v2/UsageLimitStop.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
+import { derive } from "@t3tools/provider-core/server/IdAllocator";
+import * as Machines from "../machines/Machines.ts";
+import * as RemoteLaunch from "../orchestration-v2/RemoteThreadLaunch.ts";
+import { resolveMachine } from "../machines/resolveMachine.ts";
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import { isSnoozed } from "../orchestration-v2/ThreadSettlementService.ts";
@@ -267,6 +271,7 @@ function scheduledTaskSummary(
       : (task.webhook?.url ?? undefined);
   return {
     scheduledTaskId: task.id,
+    ...(task.machine == null ? {} : { machine: task.machine }),
     title: task.title,
     prompt: task.prompt,
     enabled: task.enabled,
@@ -1120,6 +1125,19 @@ const make = Effect.gen(function* () {
     });
 
   const loadProviders = providerRegistry.getProviders;
+  const targetProviders = (machine: import("@t3tools/contracts").EnvironmentId | undefined) =>
+    Effect.gen(function* () {
+      if (machine !== undefined) {
+        const remote = yield* Effect.serviceOption(RemoteLaunch.RemoteThreadLaunch);
+        if (Option.isNone(remote))
+          return yield* failure("provider_unavailable", "Machine selection is unavailable.");
+        const catalog = yield* remote.value
+          .catalog(machine)
+          .pipe(Effect.mapError((error) => failure("provider_unavailable", error.message)));
+        if (Option.isSome(catalog)) return { providers: catalog.value, remote: true };
+      }
+      return { providers: yield* loadProviders, remote: false };
+    });
 
   /**
    * Instance ids the adapter registry resolves — the same lookup a
@@ -1155,7 +1173,7 @@ const make = Effect.gen(function* () {
         ? input.parent.thread.modelSelection.instanceId
         : undefined);
     const resolved = resolveTarget(input);
-    if (instanceId === undefined) return resolved;
+    if (instanceId === undefined || input.remote === true) return resolved;
     return resolved.pipe(
       Effect.catchIf(
         (error) => error.code === "provider_unavailable",
@@ -1181,11 +1199,15 @@ const make = Effect.gen(function* () {
      * command id than the one checked for a receipt.
      */
     readonly skipProjectEnablementFilter?: boolean;
+    readonly remote?: boolean;
   }): Effect.Effect<ResolvedTarget, OrchestratorMcpFailure> =>
     Effect.gen(function* () {
       const requestedInstanceId = input.target?.providerInstanceId;
       const requestedDriver = input.target?.driverKind;
-      const orchestrationCapableInstanceIds = yield* loadOrchestrationCapableInstanceIds();
+      const orchestrationCapableInstanceIds =
+        input.remote === true
+          ? new Set(input.providers.map((provider) => provider.instanceId))
+          : yield* loadOrchestrationCapableInstanceIds();
       let instanceId = requestedInstanceId;
 
       if (instanceId === undefined && requestedDriver !== undefined) {
@@ -1217,6 +1239,7 @@ const make = Effect.gen(function* () {
         ];
         for (const candidate of orderedCandidates) {
           const enabledForProject =
+            input.remote === true ||
             input.skipProjectEnablementFilter === true ||
             (yield* threadManagement.isProviderInstanceEnabledForProject({
               projectId: input.parent.thread.projectId,
@@ -1438,6 +1461,21 @@ const make = Effect.gen(function* () {
           : taskResultRun !== undefined && isTerminalTaskStatus(status)
             ? subagentResultForRun(childProjection, taskResultRun).text
             : null;
+      const remoteResults = yield* Effect.serviceOption(RemoteLaunch.RemoteThreadLaunch);
+      const branchResult =
+        !isTerminalTaskStatus(status) || Option.isNone(remoteResults)
+          ? undefined
+          : yield* remoteResults.value
+              .copyResult(task.childThreadId, `${task.id}:${taskResultRun?.id ?? ""}`)
+              .pipe(Effect.result);
+      const branchFields =
+        branchResult === undefined
+          ? {}
+          : branchResult._tag === "Failure"
+            ? { branchError: branchResult.failure.message }
+            : branchResult.success === undefined
+              ? {}
+              : { branch: branchResult.success };
       const resultTransfers = parentProjection.contextTransfers.filter(
         (transfer) =>
           transfer.type === "subagent_result" &&
@@ -1455,6 +1493,7 @@ const make = Effect.gen(function* () {
       const resultTransfer = taskResultTransfer(parentProjection, childProjection, task) ?? null;
       const terminalStatus = terminalRun === undefined ? null : taskStatusForRun(terminalRun);
       const response = {
+        ...branchFields,
         taskId: task.id,
         childThreadId: task.childThreadId,
         childRunId: childRun?.id ?? null,
@@ -1657,7 +1696,9 @@ const make = Effect.gen(function* () {
         // Binding means "wake this thread", which only a thread caller in that project has.
         const bindToCurrentThread =
           input.bindToCurrentThread ??
-          (parent !== undefined && parent.thread.projectId === projectId);
+          (input.machine === undefined &&
+            parent !== undefined &&
+            parent.thread.projectId === projectId);
         if (
           bindToCurrentThread &&
           (parent === undefined || parent.thread.projectId !== projectId)
@@ -1674,7 +1715,11 @@ const make = Effect.gen(function* () {
         const derivedTitle = input.prompt.split("\n")[0]?.trim() ?? "";
         const title =
           input.title ?? (derivedTitle.length > 0 ? derivedTitle.slice(0, 80) : "Scheduled task");
+        const machine = yield* resolveMachine(input.machine).pipe(
+          Effect.mapError((error) => failure("invalid_request", error.message)),
+        );
         const upsertInput: ScheduledTaskUpsertInput = {
+          ...(machine === undefined ? {} : { machine }),
           ...(input.agentId === undefined ? {} : { agentId: input.agentId }),
           title,
           prompt: input.prompt,
@@ -1756,7 +1801,11 @@ const make = Effect.gen(function* () {
           input.bindToCurrentThread === undefined
             ? existing.workspaceStrategy
             : scheduledTaskWorkspaceStrategy(input.bindToCurrentThread);
+        const machine = yield* resolveMachine(input.machine).pipe(
+          Effect.mapError((error) => failure("invalid_request", error.message)),
+        );
         const upsertInput: ScheduledTaskUpsertInput = {
+          ...(machine === undefined ? {} : { machine }),
           id: existing.id,
           title: input.title ?? existing.title,
           prompt: input.prompt ?? existing.prompt,
@@ -2043,7 +2092,28 @@ const make = Effect.gen(function* () {
           })),
           Effect.mapError(() => failure("orchestration_error", "Unable to read server settings.")),
         );
+        const machinesService = yield* Effect.serviceOption(Machines.Machines);
+        const machineCatalogs = Option.isNone(machinesService)
+          ? undefined
+          : yield* machinesService.value.list.pipe(
+              Effect.flatMap((view) =>
+                Effect.forEach(view.machines, (machine) =>
+                  Effect.gen(function* () {
+                    if (!machine.online || machine.pairing === "revoked") return machine;
+                    const catalog = yield* targetProviders(machine.environmentId).pipe(
+                      Effect.option,
+                    );
+                    return {
+                      ...machine,
+                      ...(Option.isNone(catalog) ? {} : { catalog: catalog.value.providers }),
+                    };
+                  }),
+                ),
+              ),
+              Effect.orElseSucceed(() => undefined),
+            );
         return {
+          ...(machineCatalogs === undefined ? {} : { machines: machineCatalogs }),
           parentThreadId: parent?.thread.id ?? null,
           inheritedProviderInstanceId: parent?.thread.modelSelection.instanceId ?? null,
           inheritedModel: parent?.thread.modelSelection.model ?? null,
@@ -2100,6 +2170,9 @@ const make = Effect.gen(function* () {
     delegateTask: (callerScope, input) =>
       Effect.gen(function* () {
         const { scope, parent } = yield* loadThreadCaller(callerScope, "delegate_task");
+        const machine = yield* resolveMachine(input.machine).pipe(
+          Effect.mapError((error) => failure("invalid_request", error.message)),
+        );
         const parentRun = parent.runs
           .filter(ThreadManagementService.isActiveRun)
           .toSorted((left, right) => right.ordinal - left.ordinal)[0];
@@ -2113,7 +2186,6 @@ const make = Effect.gen(function* () {
             "Delegated tasks require an active run owned by this MCP provider session.",
           );
         }
-        const providers = yield* loadProviders;
         // Computed before resolving the target so a retry of an already
         // accepted delegation can be recognized: dispatching under the same
         // command id only replays the recorded result, so candidate
@@ -2125,10 +2197,14 @@ const make = Effect.gen(function* () {
           operation: "delegate-task",
         });
         const isRetryOfAcceptedDelegation = yield* threadManagement.hasReceipt(commandId);
+        if (isRetryOfAcceptedDelegation)
+          return yield* readTask(scope, derive.delegatedTaskNode({ commandId }), false, true);
+        const { providers, remote } = yield* targetProviders(machine);
         const target = yield* resolveTargetRechecking({
           parent,
           target: input.target,
           providers,
+          remote,
           skipProjectEnablementFilter: isRetryOfAcceptedDelegation,
         });
         const runtimeMode = yield* resolveRuntimeMode(
@@ -2161,6 +2237,7 @@ const make = Effect.gen(function* () {
         const result = yield* threadManagement
           .dispatch({
             type: "delegated_task.request",
+            ...(machine === undefined ? {} : { machine }),
             createdBy: "agent",
             creationSource: "mcp",
             commandId,
@@ -2448,16 +2525,20 @@ const make = Effect.gen(function* () {
           );
         }
         const parentNodeId = parentRun.rootNodeId;
-        const providers = yield* loadProviders;
         const key = yield* requestKey(input.clientRequestId);
         const created = yield* Effect.forEach(
           input.threads,
           (request, index) =>
             Effect.gen(function* () {
+              const machine = yield* resolveMachine(request.machine ?? input.machine).pipe(
+                Effect.mapError((error) => failure("invalid_request", error.message)),
+              );
+              const { providers, remote } = yield* targetProviders(machine);
               const target = yield* resolveTargetRechecking({
                 parent,
                 target: request.target,
                 providers,
+                remote,
               });
               const runtimeMode = yield* resolveRuntimeMode(
                 parent.thread.runtimeMode,
@@ -2473,25 +2554,20 @@ const make = Effect.gen(function* () {
                 requestKey: key,
                 index,
               });
-              yield* assertTargetEnabledForProject(
-                parent,
-                stableCommandId({ scope, requestKey: key, operation: "create-thread", index }),
-                target,
-              );
+              if (!remote)
+                yield* assertTargetEnabledForProject(
+                  parent,
+                  stableCommandId({ scope, requestKey: key, operation: "create-thread", index }),
+                  target,
+                );
               const title = threadTitle({
                 parentTitle: parent.thread.title,
                 prompt: request.prompt,
                 title: request.title,
                 index,
               });
-              yield* threadManagement
-                .dispatch({
-                  type: "thread.create",
-                  createdBy: "agent",
-                  creationSource: "mcp",
-                  ...(parent.thread.surface === undefined
-                    ? {}
-                    : { surface: parent.thread.surface }),
+              yield* threadLaunch
+                .launch({
                   commandId: stableCommandId({
                     scope,
                     requestKey: key,
@@ -2499,55 +2575,39 @@ const make = Effect.gen(function* () {
                     index,
                   }),
                   threadId,
+                  ...(machine === undefined ? {} : { machine }),
                   projectId: parent.thread.projectId,
                   title,
+                  ...(parent.thread.surface === undefined
+                    ? {}
+                    : { surface: parent.thread.surface }),
                   modelSelection: target.modelSelection,
                   runtimeMode,
                   interactionMode,
-                  branch: parent.thread.branch,
-                  worktreePath: parent.thread.worktreePath,
+                  workspaceStrategy:
+                    machine === undefined && parent.thread.worktreePath !== null
+                      ? {
+                          type: "existing_worktree",
+                          worktreePath: parent.thread.worktreePath,
+                          ...(parent.thread.branch === null
+                            ? {}
+                            : { branch: parent.thread.branch }),
+                        }
+                      : { type: "root" },
+                  ...(request.prompt === undefined
+                    ? {}
+                    : {
+                        initialMessage: {
+                          messageId: stableMessageId({ scope, requestKey: key, index }),
+                          senderThreadId: scope.thread.threadId,
+                          text: request.prompt,
+                          attachments: [],
+                        },
+                      }),
+                  createdBy: "agent",
+                  creationSource: "mcp",
                 })
-                .pipe(
-                  Effect.mapError((error) =>
-                    failure(
-                      "orchestration_error",
-                      `Unable to create thread ${index + 1}: ${errorMessage(error)}`,
-                    ),
-                  ),
-                );
-              if (request.prompt !== undefined) {
-                yield* threadManagement
-                  .dispatch({
-                    type: "message.dispatch",
-                    createdBy: "agent",
-                    creationSource: "mcp",
-                    commandId: stableCommandId({
-                      scope,
-                      requestKey: key,
-                      operation: "dispatch-thread",
-                      index,
-                    }),
-                    threadId,
-                    senderThreadId: scope.thread.threadId,
-                    messageId: stableMessageId({
-                      scope,
-                      requestKey: key,
-                      index,
-                    }),
-                    text: request.prompt,
-                    attachments: [],
-                    modelSelection: target.modelSelection,
-                    dispatchMode: { type: "start_immediately" },
-                  })
-                  .pipe(
-                    Effect.mapError((error) =>
-                      failure(
-                        "orchestration_error",
-                        `Unable to start thread ${index + 1}: ${errorMessage(error)}`,
-                      ),
-                    ),
-                  );
-              }
+                .pipe(Effect.mapError((error) => failure("orchestration_error", error.message)));
               const projection = yield* loadProjection(threadId);
               const run = projection.runs.at(-1);
               yield* threadManagement

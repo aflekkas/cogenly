@@ -1,6 +1,6 @@
 import { AgentPermissions } from "./agent.ts";
 import * as Schema from "effect/Schema";
-import { ProjectId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { EnvironmentId, ProjectId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { ModelSelection } from "./modelSelection.ts";
 import { ProjectLabelId } from "./projectLabel.ts";
 import { ScheduledTaskUpsertSchedule } from "./scheduledTaskSchedule.ts";
@@ -45,6 +45,7 @@ export const AgentBuilderProposalPermissions = Schema.Struct({
 export type AgentBuilderProposalPermissions = typeof AgentBuilderProposalPermissions.Type;
 
 export const AgentBuilderProposal = Schema.Struct({
+  machine: Schema.optional(EnvironmentId),
   name: TrimmedNonEmptyString.check(Schema.isMaxLength(200)),
   face: AgentBuilderProposalFace,
   responsibility: Schema.String.check(Schema.isMaxLength(32000)),
@@ -68,6 +69,7 @@ export type AgentBuilderProposal = typeof AgentBuilderProposal.Type;
  * lands in that folder unless the proposal names another.
  */
 export const AgentBuilderStartInput = Schema.Struct({
+  machine: Schema.optional(EnvironmentId),
   projectId: Schema.optional(ProjectId),
   projectFolderId: Schema.optional(ProjectLabelId),
   modelSelection: ModelSelection,

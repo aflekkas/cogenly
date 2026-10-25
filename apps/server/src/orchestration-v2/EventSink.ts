@@ -1,5 +1,7 @@
 import {
   CommandId,
+  type EventId,
+  type EnvironmentId,
   type OrchestrationV2Run,
   OrchestrationV2DomainEvent,
   type OrchestrationV2ProviderThread,
@@ -11,6 +13,7 @@ import {
   NodeId,
   type ProjectId,
   ThreadId,
+  type ThreadRemoteError,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -24,7 +27,6 @@ import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import { replayAndBufferProjectedLiveEvents } from "./LiveStreamBudget.ts";
-import { isReplicaCommandId } from "./ReplayedCommandIds.ts";
 import type { UnsequencedProjectEvent } from "../persistence/OrchestrationEventStore.ts";
 import { projectDomainEventForWire } from "./WireProjection.ts";
 
@@ -83,6 +85,24 @@ export type EventSinkV2Error = typeof EventSinkV2Error.Type;
  * SERVICE DEFINITION
  */
 export interface EventSinkV2Shape {
+  /** Commit an ownership transition with its machine-local metadata, then publish. */
+  readonly writeAtomic: (input: {
+    readonly beforeWrite: Effect.Effect<unknown, ThreadRemoteError>;
+    readonly commandId: CommandId;
+    readonly events: ReadonlyArray<OrchestrationV2DomainEvent>;
+  }) => Effect.Effect<ReadonlyArray<OrchestrationV2StoredEvent>, EventSinkV2Error>;
+  /** Replication alone may append another machine's events; command ids grant no authority. */
+  readonly writeReplica: (input: {
+    readonly owners?: ReadonlyArray<{
+      readonly threadId: ThreadId;
+      readonly owner: EnvironmentId;
+      readonly epoch: number;
+    }>;
+    readonly receipts?: ReadonlyArray<Omit<CommandReceiptStore.CommandReceiptV2, "resultSequence">>;
+    readonly retainedEvents?: ReadonlyArray<{ readonly id: EventId; readonly json: string }>;
+    readonly commandId: CommandId;
+    readonly events: ReadonlyArray<OrchestrationV2DomainEvent>;
+  }) => Effect.Effect<ReadonlyArray<OrchestrationV2StoredEvent>, EventSinkV2Error>;
   readonly write: (input: {
     readonly guardPendingUserInputCancellations?: boolean;
     readonly commandId?: CommandId;
@@ -360,12 +380,87 @@ const layerBase: Layer.Layer<
     // One writer per thread: a thread another machine owns, or one being
     // handed to another machine, takes events only from replication. Checked
     // inside the write transaction so a handoff fence cannot race a writer.
+    const replicaEntities: Readonly<Record<string, readonly [string, string, string]>> = {
+      run: ["runs", "run_id", "thread_id"],
+      "run-attempt": ["run_attempts", "attempt_id", "thread_id"],
+      node: ["nodes", "node_id", "thread_id"],
+      subagent: ["subagents", "subagent_id", "thread_id"],
+      "provider-session": ["provider_sessions", "provider_session_id", "thread_id"],
+      "provider-thread": ["provider_threads", "provider_thread_id", "thread_id"],
+      "provider-turn": ["provider_turns", "provider_turn_id", "thread_id"],
+      "runtime-request": ["runtime_requests", "runtime_request_id", "thread_id"],
+      message: ["messages", "message_id", "thread_id"],
+      plan: ["plans", "plan_id", "thread_id"],
+      "turn-item": ["turn_items", "turn_item_id", "thread_id"],
+      "checkpoint-scope": ["checkpoint_scopes", "scope_id", "thread_id"],
+      checkpoint: ["checkpoints", "checkpoint_id", "thread_id"],
+      "context-handoff": ["context_handoffs", "context_handoff_id", "thread_id"],
+      "context-transfer": ["context_transfers", "context_transfer_id", "target_thread_id"],
+    };
+    const validateReplicaIdentities = (events: ReadonlyArray<OrchestrationV2DomainEvent>) =>
+      Effect.gen(function* () {
+        const claimed = new Map<string, ThreadId>();
+        const sameWriter = (left: ThreadId | string, right: ThreadId | string) =>
+          sql<{
+            readonly writer: string;
+          }>`SELECT CASE WHEN local = 1 THEN 'local' ELSE owner_env END AS writer
+            FROM thread_owners WHERE thread_id IN (${left}, ${right})`.pipe(
+            Effect.map((rows) => rows.length === 2 && rows[0]!.writer === rows[1]!.writer),
+          );
+        for (const event of events) {
+          const payload = event.payload;
+          if (
+            ("threadId" in payload && payload.threadId !== event.threadId) ||
+            ("appThreadId" in payload &&
+              payload.appThreadId !== null &&
+              payload.appThreadId !== event.threadId) ||
+            ("targetThreadId" in payload &&
+              event.type.startsWith("context-transfer.") &&
+              payload.targetThreadId !== event.threadId) ||
+            (event.type.startsWith("thread.") &&
+              "projectId" in payload &&
+              payload.id !== event.threadId)
+          )
+            return yield* new ThreadOwnedElsewhereError({ threadId: event.threadId });
+          const entity = replicaEntities[event.type.split(".")[0]!];
+          if (entity === undefined || !("id" in payload)) continue;
+          const [table, column, threadColumn] = entity;
+          const key = `${table}:${payload.id}`;
+          const prior = claimed.get(key);
+          if (
+            prior !== undefined &&
+            prior !== event.threadId &&
+            !(table === "provider_sessions" && (yield* sameWriter(prior, event.threadId)))
+          )
+            return yield* new ThreadOwnedElsewhereError({ threadId: event.threadId });
+          claimed.set(key, event.threadId);
+          const rows = yield* sql<{
+            readonly thread_id: string;
+          }>`SELECT ${sql(threadColumn)} AS thread_id
+            FROM ${sql(`orchestration_v2_projection_${table}`)} WHERE ${sql(column)} = ${payload.id}`;
+          for (const row of rows) {
+            if (row.thread_id === event.threadId) continue;
+            // A provider session can intentionally serve several threads. A
+            // prior binding, or the same writer attaching it, proves that link.
+            if (table === "provider_sessions") {
+              const bound =
+                yield* sql`SELECT 1 FROM orchestration_v2_projection_provider_session_bindings
+                WHERE provider_session_id = ${payload.id} AND thread_id = ${event.threadId}`;
+              if (bound.length > 0 || (yield* sameWriter(row.thread_id, event.threadId))) continue;
+            }
+            return yield* new ThreadOwnedElsewhereError({ threadId: event.threadId });
+          }
+        }
+      });
+
     const appendOwned = (input: {
       readonly commandId?: CommandId;
       readonly events: ReadonlyArray<OrchestrationV2DomainEvent>;
+      readonly replica?: boolean;
     }) =>
       Effect.gen(function* () {
-        if (input.events.length > 0 && !isReplicaCommandId(input.commandId)) {
+        if (input.replica === true) yield* validateReplicaIdentities(input.events);
+        if (input.events.length > 0 && input.replica !== true) {
           const threadIds = [...new Set(input.events.map((event) => event.threadId))];
           const owned = yield* sql<{
             readonly thread_id: string;
@@ -410,6 +505,15 @@ const layerBase: Layer.Layer<
 
     const writeEffect = Effect.fn("orchestrationV2.EventSink.write")(function* (
       input: Parameters<EventSinkV2Shape["writeWithEffects"]>[0],
+      replica = false,
+      beforeWrite: Effect.Effect<unknown, ThreadRemoteError> = Effect.void,
+      retainedEvents: ReadonlyArray<{ readonly id: EventId; readonly json: string }> = [],
+      receipts: ReadonlyArray<Omit<CommandReceiptStore.CommandReceiptV2, "resultSequence">> = [],
+      owners: ReadonlyArray<{
+        readonly threadId: ThreadId;
+        readonly owner: EnvironmentId;
+        readonly epoch: number;
+      }> = [],
     ) {
       yield* Effect.annotateCurrentSpan({
         "orchestration_v2.command_id": input.commandId ?? null,
@@ -419,6 +523,14 @@ const layerBase: Layer.Layer<
 
       return yield* commitThenPublish(
         Effect.gen(function* () {
+          yield* beforeWrite;
+          for (const owner of owners) {
+            const current =
+              yield* sql`SELECT 1 FROM thread_owners WHERE thread_id = ${owner.threadId}
+              AND local = 0 AND owner_env = ${owner.owner} AND epoch = ${owner.epoch}`;
+            if (current.length === 0)
+              return yield* new ThreadOwnedElsewhereError({ threadId: owner.threadId });
+          }
           const normalized = yield* normalizeEvents(
             input.guardPendingUserInputCancellations === true
               ? yield* guardUserInputCancellations(input.events)
@@ -427,7 +539,27 @@ const layerBase: Layer.Layer<
           const committed = yield* appendOwned({
             ...(input.commandId === undefined ? {} : { commandId: input.commandId }),
             events: normalized,
+            replica,
           });
+          for (const retained of retainedEvents)
+            yield* sql`INSERT INTO thread_replication_raw_events(event_id, event_json)
+              VALUES (${retained.id}, ${retained.json}) ON CONFLICT(event_id) DO UPDATE SET event_json = excluded.event_json`;
+          for (const receipt of receipts) {
+            const prior = yield* sql<{
+              readonly aggregate_id: string;
+              readonly aggregate_kind: string;
+            }>`SELECT aggregate_id, aggregate_kind FROM orchestration_command_receipts WHERE command_id = ${receipt.commandId}`;
+            if (
+              prior.some(
+                (row) => row.aggregate_kind !== "thread" || row.aggregate_id !== receipt.threadId,
+              )
+            )
+              return yield* new ThreadOwnedElsewhereError({ threadId: receipt.threadId });
+            yield* commandReceipts.insertIfAbsent({
+              ...receipt,
+              resultSequence: committed.at(-1)?.sequence ?? 0,
+            });
+          }
           yield* applyStoredEvents(committed);
           yield* effectOutbox.enqueue(input.effects);
           return committed;
@@ -847,6 +979,35 @@ const layerBase: Layer.Layer<
     };
 
     return EventSinkV2.of({
+      writeAtomic: (input) =>
+        writeEffect({ ...input, effects: [] }, false, input.beforeWrite).pipe(
+          Effect.mapError(
+            (cause) =>
+              new EventSinkWriteError({
+                eventCount: input.events.length,
+                commandId: input.commandId,
+                cause,
+              }),
+          ),
+        ),
+      writeReplica: (input) =>
+        writeEffect(
+          { ...input, effects: [] },
+          true,
+          Effect.void,
+          input.retainedEvents,
+          input.receipts,
+          input.owners,
+        ).pipe(
+          Effect.mapError(
+            (cause) =>
+              new EventSinkWriteError({
+                eventCount: input.events.length,
+                commandId: input.commandId,
+                cause,
+              }),
+          ),
+        ),
       write: (input) =>
         writeEffect({ ...input, effects: [] }).pipe(
           Effect.mapError(

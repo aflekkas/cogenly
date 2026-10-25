@@ -1,9 +1,11 @@
 import { layerIdentity as layerSharedIdentity } from "../../sync/testkit.ts";
+import * as ServerEnvironment from "../../environment/ServerEnvironment.ts";
 import * as AgentStore from "../../agents/AgentStore.ts";
 import * as OtelEnvironment from "@t3tools/shared/otelEnvironment";
 import { DEFAULT_SIGNAL_EXPORT } from "@t3tools/shared/observability";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import type {
+  EnvironmentId,
   ProviderDriverKind,
   ProviderReplayTranscript,
   ResponseStreamingMode,
@@ -38,6 +40,8 @@ import * as EffectWorker from "../EffectWorker.ts";
 import * as EventSink from "../EventSink.ts";
 import * as EventStore from "../EventStore.ts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import type * as RemoteThreadLaunch from "../RemoteThreadLaunch.ts";
+import type * as RemoteThreadCommands from "../RemoteThreadCommands.ts";
 import * as Orchestrator from "../Orchestrator.ts";
 import * as ProjectionStore from "../ProjectionStore.ts";
 import * as ProjectStore from "../ProjectStore.ts";
@@ -51,6 +55,7 @@ import * as ProviderSessionManager from "../ProviderSessionManager.ts";
 import * as CommandOutputRecorder from "./CommandOutputRecorder.ts";
 import * as ProviderSwitchService from "../ProviderSwitchService.ts";
 import * as ProviderTurnControlService from "../ProviderTurnControlService.ts";
+import * as MachinesTurnContext from "../MachinesTurnContext.ts";
 import * as ProviderTurnStartService from "../ProviderTurnStartService.ts";
 import * as ProviderTurnStartServiceTestkit from "../ProviderTurnStartService.testkit.ts";
 import * as McpAppModelContext from "../../mcpApps/McpAppModelContext.ts";
@@ -199,6 +204,10 @@ export function runOrchestratorV2ProviderReplayScenario<
       MigrationError | PlatformError.PlatformError | SqlError
     >;
     readonly runEffectWorker?: boolean;
+    readonly environmentId?: EnvironmentId;
+    readonly remoteServices?: Layer.Layer<
+      RemoteThreadLaunch.RemoteThreadLaunch | RemoteThreadCommands.RemoteThreadCommands
+    >;
     // Start continuation runs for provider wake turns, as the live runtime does.
     // Off by default: most fixtures record no wake turn.
     readonly runContinuationWorker?: boolean;
@@ -245,6 +254,10 @@ export function layerProviderReplay<Transcript extends ProviderReplayTranscript,
       MigrationError | PlatformError.PlatformError | SqlError
     >;
     readonly runEffectWorker?: boolean;
+    readonly environmentId?: EnvironmentId;
+    readonly remoteServices?: Layer.Layer<
+      RemoteThreadLaunch.RemoteThreadLaunch | RemoteThreadCommands.RemoteThreadCommands
+    >;
     // Start continuation runs for provider wake turns, as the live runtime does.
     // Off by default: most fixtures record no wake turn.
     readonly runContinuationWorker?: boolean;
@@ -283,6 +296,10 @@ export function layerWithRegistry<Error>(
     >;
     readonly runEffectWorker?: boolean;
     readonly responseStreamingMode?: ResponseStreamingMode;
+    readonly environmentId?: EnvironmentId;
+    readonly remoteServices?: Layer.Layer<
+      RemoteThreadLaunch.RemoteThreadLaunch | RemoteThreadCommands.RemoteThreadCommands
+    >;
     // Start continuation runs for provider wake turns, as the live runtime does.
     // Off by default: most fixtures record no wake turn.
     readonly runContinuationWorker?: boolean;
@@ -417,6 +434,7 @@ export function layerWithRegistry<Error>(
           Layer.orDie,
         ),
         layerContextHandoffServiceProvided,
+        MachinesTurnContext.layer,
         layerEventSinkProvided,
         IdAllocator.layer,
         layerStores,
@@ -468,6 +486,14 @@ export function layerWithRegistry<Error>(
     }),
   );
   const layerOrchestratorProvided = Orchestrator.layer.pipe(
+    Layer.provide(
+      options.environmentId === undefined
+        ? Layer.empty
+        : Layer.succeed(ServerEnvironment.ServerEnvironmentIdentity, {
+            getEnvironmentId: Effect.succeed(options.environmentId),
+          }),
+    ),
+    Layer.provide(options.remoteServices ?? Layer.empty),
     Layer.provide(
       Layer.mergeAll(
         layerCheckpointServiceProvided,

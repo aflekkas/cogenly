@@ -69,6 +69,7 @@ export const AgentFields = Schema.Struct({
   createdAt: Agent.fields.createdAt,
 });
 export const ScheduleFields = Schema.Struct({
+  machine: Schema.optionalKey(Schema.NullOr(PortableId)),
   agentId: Schema.NullOr(PortableId),
   title: ScheduledTask.fields.title,
   prompt: ScheduledTask.fields.prompt,

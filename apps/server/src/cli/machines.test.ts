@@ -105,3 +105,23 @@ it.layer(Layer.merge(NodeServices.layer, NetService.layer))("machine join codes"
     }),
   );
 });
+
+it.layer(Layer.merge(NodeServices.layer, NetService.layer))("migration CLI", (it) => {
+  it.effect("parses dry-run moves and explicit adoption without starting offline work", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const baseDir = yield* fs.makeTempDirectoryScoped();
+      for (const argv of [
+        ["move", "--from", "MacBook", "--to", "Hub", "--dry-run"],
+        ["adopt", "--dry-run"],
+        ["adopt", "--from", "lost-environment"],
+      ]) {
+        const error = yield* Command.runWith(machinesCommand, {
+          version: "test",
+          renderErrors: false,
+        })([...argv, "--base-dir", baseDir]).pipe(Effect.flip);
+        assert.include(error.message, "isn't running");
+      }
+    }),
+  );
+});

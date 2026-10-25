@@ -7,6 +7,7 @@ import {
   ThreadId,
   type OrchestrationV2ThreadProjection,
   type OrchestrationV2ThreadShell,
+  type ThreadForkMachineInput,
 } from "@t3tools/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
@@ -14,6 +15,8 @@ import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 
+import * as Machines from "../../../machines/Machines.ts";
+import * as MachineFork from "../../../threadSync/ThreadFork.ts";
 import * as ServerConfig from "../../../config.ts";
 import * as ScheduledTasks from "../../../scheduledTasks/ScheduledTaskService.ts";
 import * as ThreadSearch from "../../../orchestration-v2/ThreadSearch.ts";
@@ -85,6 +88,7 @@ type Recorded = { readonly method: string; readonly input: Record<string, unknow
 const callTool = Effect.fn("test.callThreadTool")(function* (
   scope: Invocation.McpInvocationScope,
   tool:
+    | "thread_fork"
     | "thread_snooze"
     | "thread_unsnooze"
     | "thread_settle"
@@ -92,6 +96,7 @@ const callTool = Effect.fn("test.callThreadTool")(function* (
     | "pending_request_respond",
   params: Record<string, unknown>,
   overrides: Partial<Threads.ThreadManagementServiceShape> = {},
+  forks?: MachineFork.ThreadFork["Service"],
 ) {
   const calls: Array<Recorded> = [];
   const record =
@@ -118,6 +123,27 @@ const callTool = Effect.fn("test.callThreadTool")(function* (
       ...overrides,
     }),
     newYorkConfig,
+    forks === undefined ? Layer.empty : Layer.succeed(MachineFork.ThreadFork, forks),
+    Layer.mock(Machines.Machines)({
+      list: Effect.succeed({
+        link: { _tag: "standalone" },
+        machines: [
+          {
+            environmentId: EnvironmentId.make("target-machine"),
+            name: "Target",
+            kind: "other-computer",
+            hardware: "desktop",
+            platform: "darwin",
+            relation: "peer",
+            online: true,
+            lastSeenAt: null,
+            pairedAt: null,
+            pairing: "paired",
+            providers: [],
+          },
+        ],
+      }),
+    }),
     Layer.mock(ScheduledTasks.ScheduledTaskService)({}),
     Layer.mock(ThreadSearch.ThreadSearch)({}),
     NodeServices.layer,
@@ -323,5 +349,48 @@ it.effect.each([
   Effect.gen(function* () {
     const { result } = yield* respond(scope, target);
     expect(result).toMatchObject({ code: "capability_denied" });
+  }),
+);
+
+it.effect("keeps machine fork retry IDs stable and namespaces them by caller", () =>
+  Effect.gen(function* () {
+    const calls: ThreadForkMachineInput[] = [];
+    const forks = MachineFork.ThreadFork.of({
+      fork: (input) =>
+        Effect.sync(() => {
+          calls.push(input);
+          return {
+            targetThreadId: input.targetThreadId,
+            sequence: 7,
+            branch: "feature",
+            commit: "abc",
+            usedLastPushed: input.allowLastPushed === true,
+          };
+        }),
+    });
+    const input = {
+      threadId: otherId,
+      machine: "Target",
+      clientRequestId: "retry:fork",
+      title: "Copied context",
+    };
+    const first = yield* callTool(threadScope(callerId), "thread_fork", input, {}, forks);
+    const retry = yield* callTool(
+      threadScope(callerId),
+      "thread_fork",
+      { ...input, allowLastPushed: true },
+      {},
+      forks,
+    );
+    expect(first.result?.targetThreadId).toBe(retry.result?.targetThreadId);
+    expect(calls[0]?.commandId).toBe(calls[1]?.commandId);
+    expect(calls[1]).toMatchObject({
+      sourceThreadId: otherId,
+      machine: "target-machine",
+      title: "Copied context",
+      allowLastPushed: true,
+    });
+    yield* callTool(threadScope(childId), "thread_fork", input, {}, forks);
+    expect(calls[2]?.targetThreadId).not.toBe(calls[0]?.targetThreadId);
   }),
 );

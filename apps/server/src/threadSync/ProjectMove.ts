@@ -11,6 +11,7 @@ import {
   type ProjectLabelId,
   type ProjectMoveInput,
   ProjectMovePrepare,
+  ProjectMovePreview,
   type ProjectMoveRepository,
   type ProjectMoveResult,
   THREAD_MOVE_MAX_THREADS,
@@ -23,6 +24,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import * as Machines from "../machines/Machines.ts";
@@ -30,10 +32,11 @@ import * as PeerChannels from "../machines/PeerChannels.ts";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as RepositoryCheckout from "../project/RepositoryCheckout.ts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
+import * as ProjectLabelFolders from "../projectLabels/ProjectLabelFolders.ts";
 import * as ProjectLabelService from "../projectLabels/ProjectLabelService.ts";
 import * as ThreadReplication from "./ThreadReplication.ts";
 import * as ThreadRouting from "./ThreadRouting.ts";
-import { adoptLocalCheckout } from "./localCheckout.ts";
+import { adoptLocalCheckout, findLocalCheckout, previewClonePath } from "./localCheckout.ts";
 import * as ThreadTransfer from "./ThreadTransfer.ts";
 
 export class ProjectMove extends Context.Service<
@@ -59,6 +62,8 @@ const make = Effect.gen(function* () {
     | FileSystem.FileSystem
     | RepositoryIdentityResolver.RepositoryIdentityResolver
     | ProjectLabelService.ProjectLabelService
+    | ProjectLabelFolders.ProjectLabelFolders
+    | Path.Path
   >();
   const self = replication.environmentId;
 
@@ -75,7 +80,10 @@ const make = Effect.gen(function* () {
    * checkoutRepository clones it into the project folder, and the clone runs
    * on after this answers.
    */
-  const prepareHere = Effect.fn("ProjectMove.prepareHere")(function* (id: ProjectLabelId) {
+  const prepareHere = Effect.fn("ProjectMove.prepareHere")(function* (
+    id: ProjectLabelId,
+    dryRun = false,
+  ) {
     const { label } = yield* labels.readActive(id).pipe(
       Effect.mapError(
         (error) =>
@@ -106,15 +114,24 @@ const make = Effect.gen(function* () {
         continue;
       }
       // A checkout of it here, outside any other project, joins this one in place.
-      const adopted = yield* adoptLocalCheckout(id, link.remote).pipe(
-        Effect.provideContext(context),
-      );
+      const adopted = yield* (dryRun ? findLocalCheckout : adoptLocalCheckout)(
+        id,
+        link.remote,
+      ).pipe(Effect.provideContext(context));
       if (Option.isSome(adopted)) {
         results.push({
           remote: link.remote,
           status: "present",
-          detail: `Filed the checkout at ${adopted.value.workspaceRoot} into the project.`,
+          detail: `${dryRun ? "Would file" : "Filed"} the checkout at ${adopted.value.workspaceRoot} into the project.`,
         });
+        continue;
+      }
+      if (dryRun) {
+        const destination = yield* previewClonePath(id, link.remote).pipe(
+          Effect.provideContext(context),
+          Effect.orDie,
+        );
+        results.push({ remote: link.remote, status: "will-clone", detail: destination });
         continue;
       }
       const started = yield* Effect.result(
@@ -131,17 +148,22 @@ const make = Effect.gen(function* () {
     return results;
   });
 
-  yield* channels.register(ProjectMovePrepare, ({ id, target }, caller) =>
-    Effect.gen(function* () {
-      if (target === self) return yield* prepareHere(id);
-      const view = yield* machines.list.pipe(
-        Effect.mapError(() => new ThreadRemoteError({ reason: "offline" })),
-      );
-      if (view.link._tag !== "hub" || target === caller.environmentId)
-        return yield* new ThreadRemoteError({ reason: "not-owner" });
-      return yield* routing.callMachine(target, ProjectMovePrepare, { id, target }, "30 minutes");
-    }),
-  );
+  // A dry run has its own channel, so an older target refuses it instead of cloning.
+  for (const [channel, dryRun] of [
+    [ProjectMovePrepare, false],
+    [ProjectMovePreview, true],
+  ] as const)
+    yield* channels.register(channel, ({ id, target }, caller) =>
+      Effect.gen(function* () {
+        if (target === self) return yield* prepareHere(id, dryRun);
+        const view = yield* machines.list.pipe(
+          Effect.mapError(() => new ThreadRemoteError({ reason: "offline" })),
+        );
+        if (view.link._tag !== "hub" || target === caller.environmentId)
+          return yield* new ThreadRemoteError({ reason: "not-owner" });
+        return yield* routing.callMachine(target, channel, { id, target }, "30 minutes");
+      }),
+    );
 
   /** Every live thread filed in the project, its own chat included. */
   const projectThreads = (id: ProjectLabelId) =>
@@ -158,18 +180,22 @@ const make = Effect.gen(function* () {
     );
 
   const move: ProjectMove["Service"]["move"] = Effect.fn("ProjectMove.move")(function* (input) {
+    const dryRun = input.dryRun === true;
     const repositories =
       input.target === self
-        ? yield* prepareHere(input.id)
+        ? yield* prepareHere(input.id, dryRun)
         : yield* routing.callMachine(
             input.target,
-            ProjectMovePrepare,
+            dryRun ? ProjectMovePreview : ProjectMovePrepare,
             { id: input.id, target: input.target as EnvironmentId },
             "30 minutes",
           );
     const threadIds = yield* projectThreads(input.id);
-    const threads: { moved: Array<ThreadId>; skipped: Array<ThreadMoveResult["skipped"][number]> } =
-      { moved: [], skipped: [] };
+    const threads: {
+      moved: Array<ThreadId>;
+      skipped: Array<ThreadMoveResult["skipped"][number]>;
+      planned: Array<NonNullable<ThreadMoveResult["planned"]>[number]>;
+    } = { moved: [], skipped: [], planned: [] };
     for (let at = 0; at < threadIds.length; at += THREAD_MOVE_MAX_THREADS) {
       const result = yield* transfer.move({
         threadIds: threadIds.slice(at, at + THREAD_MOVE_MAX_THREADS),
@@ -177,11 +203,17 @@ const make = Effect.gen(function* () {
         ...(input.leaveLocalChanges === undefined
           ? {}
           : { leaveLocalChanges: input.leaveLocalChanges }),
+        ...(dryRun ? { dryRun } : {}),
       });
       threads.moved.push(...result.moved);
       threads.skipped.push(...result.skipped);
+      threads.planned.push(...(result.planned ?? []));
     }
-    return { repositories, threads } satisfies ProjectMoveResult;
+    const { planned: _planned, ...moved } = threads;
+    return {
+      repositories,
+      threads: dryRun ? threads : moved,
+    } satisfies ProjectMoveResult;
   });
 
   return ProjectMove.of({ move });

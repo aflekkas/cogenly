@@ -233,9 +233,12 @@ export const launchThread = Effect.fn("ThreadMessageIntake.launchThread")(functi
         // The initial message's own dispatch can still find the instance newly
         // disabled, which wraps the same tag handled above instead of surfacing
         // it directly, so the guard below also recognizes it.
+        // A launch on another machine took its own copies of the files if it
+        // took the launch at all, so these are never the only ones.
         const notAccepted =
           error.operation === "resolve-project" ||
           error.operation === "read-receipt" ||
+          error.operation === "launch-remote" ||
           ((error.operation === "create-thread" || error.operation === "dispatch-message") &&
             (isOrchestratorError(error.cause) || isThreadManagementError(error.cause)) &&
             // Projection errors under create-thread can occur after the message commit.

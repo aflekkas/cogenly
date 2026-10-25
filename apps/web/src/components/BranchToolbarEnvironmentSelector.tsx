@@ -5,7 +5,7 @@ import type { EnvironmentId } from "@t3tools/contracts";
 import { ScaleIcon } from "lucide-react";
 import { memo, useMemo } from "react";
 
-import type { EnvironmentOption } from "./BranchToolbar.logic";
+import { type EnvironmentOption, resolveEnvironmentOptionTitle } from "./BranchToolbar.logic";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
 import { useComposerMenuProps } from "./chat/composerEventScope";
 import {
@@ -16,6 +16,25 @@ import {
   SelectPopup,
   SelectValue,
 } from "./ui/select";
+
+/**
+ * One "Run on" choice, as both the Select and the run-context menu list it.
+ * A paired machine that is offline stays pickable; the launch then offers to
+ * run here instead.
+ */
+export function EnvironmentOptionContent({ option }: { option: EnvironmentOption }) {
+  const offline = option.pairedMachine?.online === false;
+  return (
+    <span className="flex min-w-0 items-center gap-1.5">
+      <EnvironmentMachineIcon
+        kind={option.machine}
+        className={offline ? "size-3 shrink-0 opacity-50" : "size-3 shrink-0"}
+      />
+      <span className="min-w-0 truncate">{option.label}</span>
+      {offline ? <span className="shrink-0 text-muted-foreground/70">offline</span> : null}
+    </span>
+  );
+}
 
 interface BranchToolbarEnvironmentSelectorProps {
   autoEnvironmentLabel?: string | undefined;
@@ -74,7 +93,7 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
       <Tooltip>
         <TooltipTrigger render={lockedRow} />
         <TooltipPopup {...COMPOSER_CONTEXT_TOOLTIP}>
-          {activeEnvironment?.label ?? "Run on"}
+          {activeEnvironment ? resolveEnvironmentOptionTitle(activeEnvironment) : "Run on"}
         </TooltipPopup>
       </Tooltip>
     );
@@ -114,7 +133,8 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
           </ComposerContextLabel>
         </TooltipTrigger>
         <TooltipPopup {...COMPOSER_CONTEXT_TOOLTIP}>
-          {autoEnvironmentLabel ?? activeEnvironment?.label ?? "Run on"}
+          {autoEnvironmentLabel ??
+            (activeEnvironment ? resolveEnvironmentOptionTitle(activeEnvironment) : "Run on")}
         </TooltipPopup>
       </Tooltip>
       <SelectPopup alignItemWithTrigger={false} {...composerFloatingLayerProps}>
@@ -135,10 +155,7 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
           )}
           {availableEnvironments.map((env) => (
             <SelectItem key={env.environmentId} value={env.environmentId}>
-              <span className="inline-flex items-center gap-1.5">
-                <EnvironmentMachineIcon kind={env.machine} className="size-3" />
-                {env.label}
-              </span>
+              <EnvironmentOptionContent option={env} />
             </SelectItem>
           ))}
         </SelectGroup>

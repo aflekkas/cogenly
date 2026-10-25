@@ -51,6 +51,7 @@ export interface WorkHandoffActor {
 /** A chat agent's request to hand work off as a task card. */
 export interface WorkTaskHandoffInput {
   /** Stable across retries: one request makes one card and at most one Work thread. */
+  readonly machine?: import("@t3tools/contracts").EnvironmentId | undefined;
   readonly commandId: CommandId;
   readonly sourceThreadId: ThreadId;
   readonly mode: WorkTaskMode;
@@ -157,6 +158,7 @@ const make = Effect.gen(function* () {
           ? startInput
           : {
               ...startInput,
+              machine: startInput.machine ?? proposed.machine,
               title: startInput.title ?? proposed.title,
               scopeSummary: startInput.scopeSummary ?? proposed.brief,
               ...((startInput.workspace ?? proposed.workspace) === undefined
@@ -242,6 +244,7 @@ const make = Effect.gen(function* () {
       const result = yield* launches
         .launch({
           commandId: input.commandId,
+          ...(input.machine === undefined ? {} : { machine: input.machine }),
           ...(actor?.threadId === undefined ? {} : { threadId: actor.threadId }),
           projectId: input.targetProjectId,
           title: input.title ?? source.thread.title,
@@ -259,6 +262,8 @@ const make = Effect.gen(function* () {
           runtimeMode: actor?.runtimeMode ?? source.thread.runtimeMode,
           interactionMode: actor?.interactionMode ?? source.thread.interactionMode,
           workspaceStrategy,
+          handoffContext,
+          handoffSummary: scopeSummary,
           createdBy: origin === "agent" || actor?.createdByAgent === true ? "agent" : "user",
           creationSource: origin === "agent" || actor?.createdByAgent === true ? "mcp" : "web",
           initialMessage: {
@@ -273,6 +278,7 @@ const make = Effect.gen(function* () {
               new WorkHandoffError({
                 sourceThreadId: input.sourceThreadId,
                 stage: "launch",
+                machineOffline: Launch.remoteLaunchFailure(cause)?.reason === "offline",
                 cause,
               }),
           ),
@@ -618,6 +624,7 @@ const make = Effect.gen(function* () {
       title: input.title.trim().slice(0, 200),
       brief: cardBrief(input.brief),
       targetProjectId,
+      ...(input.machine === undefined ? {} : { machine: input.machine }),
       ...(input.workspace === undefined ? {} : { workspace: input.workspace }),
       ...(input.modelSelection === undefined ? {} : { modelSelection: input.modelSelection }),
       ...(input.runId === undefined ? {} : { runId: input.runId }),
@@ -653,6 +660,7 @@ const make = Effect.gen(function* () {
         commandId: input.commandId,
         sourceThreadId: input.sourceThreadId,
         targetProjectId,
+        ...(input.machine === undefined ? {} : { machine: input.machine }),
         title: task.title,
         scopeSummary: input.brief.trim().slice(0, 16000),
         ...(input.workspace === undefined ? {} : { workspace: input.workspace }),

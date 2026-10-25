@@ -1,6 +1,7 @@
 import * as Schema from "effect/Schema";
 import {
   CommandId,
+  EnvironmentId,
   IsoDateTime,
   MessageId,
   ProjectId,
@@ -39,6 +40,7 @@ export const WorkTaskOutcome = Schema.Struct({
 export type WorkTaskOutcome = typeof WorkTaskOutcome.Type;
 /** A coding task a chat handed off, shown as a card in the chat that asked for it. */
 export const WorkTask = Schema.Struct({
+  machine: Schema.optional(EnvironmentId),
   id: WorkTaskId,
   status: WorkTaskStatus,
   requestedMode: WorkTaskMode,
@@ -60,6 +62,7 @@ export const WorkTask = Schema.Struct({
 export type WorkTask = typeof WorkTask.Type;
 
 export const WorkStartInput = Schema.Struct({
+  machine: Schema.optional(EnvironmentId),
   /** Stable across retries: one handoff creates one Work thread. */
   commandId: CommandId,
   sourceThreadId: ThreadId,
@@ -102,6 +105,7 @@ export const WorkHandoffDraft = Schema.Struct({
 export type WorkHandoffDraft = typeof WorkHandoffDraft.Type;
 export class WorkHandoffError extends Schema.TaggedError<WorkHandoffError>()("WorkHandoffError", {
   sourceThreadId: ThreadId,
+  machineOffline: Schema.optional(Schema.Boolean),
   stage: Schema.Literals([
     "read-source",
     "resolve-project",

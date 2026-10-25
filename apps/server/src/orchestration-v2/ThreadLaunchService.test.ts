@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest";
 import {
   CommandId,
+  EnvironmentId,
   MessageId,
   ProjectId,
   ProjectLabelError,
@@ -9,6 +10,7 @@ import {
   RunId,
   RuntimeMode,
   ThreadId,
+  ThreadRemoteError,
   type OrchestrationV2ThreadProjection,
 } from "@t3tools/contracts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
@@ -16,6 +18,7 @@ import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import * as GitWorkflow from "../git/GitWorkflowService.ts";
@@ -31,6 +34,7 @@ import * as ServerSettings from "../serverSettings.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import * as CommandReceiptStore from "./CommandReceiptStore.ts";
+import * as RemoteThreadLaunch from "./RemoteThreadLaunch.ts";
 import * as ThreadLaunch from "./ThreadLaunchService.ts";
 import * as ThreadManagement from "./ThreadManagementService.ts";
 import { userFacingDispatchErrorMessage } from "./UserFacingErrors.ts";
@@ -351,5 +355,80 @@ describe("ThreadLaunchService project filing", () => {
       );
       expect(steps).toEqual([{ kind: "read-label", id: folderId }]);
     }).pipe(Effect.provide(layer));
+  });
+});
+
+describe("ThreadLaunchService on a chosen machine", () => {
+  const laptop = EnvironmentId.make("env:laptop");
+  /** A harness whose machine link answers every launch with `answer`. */
+  const onMachine = (
+    answer: (
+      input: ThreadLaunch.ThreadLaunchInput,
+    ) => Effect.Effect<Option.Option<ThreadLaunch.ThreadLaunchResult>, ThreadRemoteError>,
+  ) => {
+    const { steps, layer } = harness();
+    const asked: Array<ThreadLaunch.ThreadLaunchInput> = [];
+    const run = <A, E>(
+      effect: Effect.Effect<
+        A,
+        E,
+        ThreadLaunch.ThreadLaunchService | RemoteThreadLaunch.RemoteThreadLaunch
+      >,
+    ) =>
+      Effect.gen(function* () {
+        const registry = yield* RemoteThreadLaunch.RemoteThreadLaunch;
+        yield* registry.register((machine, input) => {
+          expect(machine).toBe(laptop);
+          asked.push(input);
+          return answer(input);
+        });
+        return yield* effect;
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(layer.pipe(Layer.provideMerge(RemoteThreadLaunch.layer))),
+      );
+    return { steps, asked, run };
+  };
+
+  it.effect("hands the launch to the machine link and creates nothing here", () => {
+    const remote = { threadId, projection: {} as never, resumed: false };
+    const { steps, asked, run } = onMachine(() => Effect.succeedSome(remote));
+    return run(
+      Effect.gen(function* () {
+        const launches = yield* ThreadLaunch.ThreadLaunchService;
+        expect(yield* launches.launch(launchInput({ machine: laptop }))).toBe(remote);
+        expect(steps).toEqual([]);
+        // The machine is the link's business; the launch it carries is the same.
+        expect(asked).toEqual([launchInput()]);
+      }),
+    );
+  });
+
+  it.effect("launches here when the named machine is this one", () => {
+    const { steps, run } = onMachine(() => Effect.succeedNone);
+    return run(
+      Effect.gen(function* () {
+        const launches = yield* ThreadLaunch.ThreadLaunchService;
+        yield* launches.launch(launchInput({ machine: laptop }));
+        expect(steps.map((step) => step.kind)).toEqual(["dispatch", "dispatch"]);
+      }),
+    );
+  });
+
+  it.effect("fails with the machine's own reason when it is offline", () => {
+    const offline = new ThreadRemoteError({
+      reason: "offline",
+      detail: "Laptop is offline. Launch on this machine instead, or try again when it reconnects.",
+    });
+    const { steps, run } = onMachine(() => Effect.fail(offline));
+    return run(
+      Effect.gen(function* () {
+        const launches = yield* ThreadLaunch.ThreadLaunchService;
+        const error = yield* Effect.flip(launches.launch(launchInput({ machine: laptop })));
+        expect(error.message).toBe(offline.detail);
+        expect(ThreadLaunch.remoteLaunchFailure(error)?.reason).toBe("offline");
+        expect(steps).toEqual([]);
+      }),
+    );
   });
 });

@@ -6,6 +6,7 @@
  */
 import {
   type EnvironmentId,
+  type MachineListResult,
   ThreadReplicationApply,
   type ThreadReplicationBatch,
   ThreadReplicationError,
@@ -28,12 +29,29 @@ export class ThreadSync extends Context.Service<
   {
     /** Push everything `peer` has not acknowledged, in bounded batches. */
     readonly sync: (peer: EnvironmentId) => Effect.Effect<void, ThreadReplicationError>;
+    /**
+     * Push until `peer` has acknowledged this machine's log through
+     * `sequence`, past sync's per-pass cap. A move waits on this so a long
+     * backlog does not make the target refuse as behind.
+     */
+    readonly syncThrough: (
+      peer: EnvironmentId,
+      sequence: number,
+    ) => Effect.Effect<void, ThreadReplicationError>;
     /** One pass over every online paired machine. */
     readonly catchUp: Effect.Effect<void>;
   }
 >()("cogenly-server/threadSync/ThreadSync") {}
 
 const isReplicationError = Schema.is(ThreadReplicationError);
+
+/** Machines paired with this one now; an owner outside it can only be adopted from. */
+export const pairedMachines = (machines: MachineListResult["machines"]) =>
+  new Set(
+    machines
+      .filter((machine) => machine.relation !== "this" && machine.pairing === "paired")
+      .map((machine) => machine.environmentId),
+  );
 
 const make = Effect.gen(function* () {
   const replication = yield* ThreadReplication.ThreadReplication;
@@ -98,6 +116,19 @@ const make = Effect.gen(function* () {
       permit.withPermits(1),
     );
 
+  const syncThrough: ThreadSync["Service"]["syncThrough"] = Effect.fn("ThreadSync.syncThrough")(
+    function* (peer, sequence) {
+      let previous = -1;
+      for (;;) {
+        yield* sync(peer);
+        const { acknowledged } = yield* replication.cursors(peer);
+        // Done, or a pass that moved nothing (offline, or not a peer this syncs with).
+        if (acknowledged.events >= sequence || acknowledged.events === previous) return;
+        previous = acknowledged.events;
+      }
+    },
+  );
+
   const catchUp: ThreadSync["Service"]["catchUp"] = Effect.gen(function* () {
     const view = yield* topology;
     for (const machine of view.machines)
@@ -127,7 +158,7 @@ const make = Effect.gen(function* () {
     Effect.forkScoped,
   );
   yield* Queue.take(pending).pipe(Effect.andThen(catchUp), Effect.forever, Effect.forkScoped);
-  return ThreadSync.of({ sync, catchUp });
+  return ThreadSync.of({ sync, syncThrough, catchUp });
 });
 
 export const layer = Layer.effect(ThreadSync, make);

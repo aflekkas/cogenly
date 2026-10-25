@@ -410,6 +410,45 @@ describe("V2 environment commands", () => {
     }).pipe(Effect.provide(layerTestCrypto)),
   );
 
+  it.effect("launches a draft on the paired machine it picked, and here without one", () =>
+    Effect.gen(function* () {
+      const launches: OrchestrationV2ThreadLaunchInput[] = [];
+      const supervisor = yield* makeSupervisor({ commands: [], projects: [], launches });
+      const launch = (machine: EnvironmentId | undefined) =>
+        startThreadTurn({
+          commandId: CommandId.make(`launch-${machine ?? "here"}`),
+          threadId: v2ThreadId,
+          message: {
+            messageId: MessageId.make(`message-${machine ?? "here"}`),
+            role: "user",
+            text: "Run it on the hub",
+            attachments: [],
+          },
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          bootstrap: {
+            createThread: {
+              projectId: ProjectId.make("project-1"),
+              title: "Thread",
+              modelSelection: v2Projection.thread.modelSelection,
+              runtimeMode: "full-access",
+              interactionMode: "default",
+              branch: null,
+              worktreePath: null,
+              createdAt: "2026-06-20T00:00:00.000Z",
+              ...(machine === undefined ? {} : { machine }),
+            },
+          },
+        }).pipe(Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor));
+
+      yield* launch(EnvironmentId.make("environment-hub"));
+      yield* launch(undefined);
+
+      expect(launches[0]).toMatchObject({ threadId: v2ThreadId, machine: "environment-hub" });
+      expect(launches[1]).not.toHaveProperty("machine");
+    }).pipe(Effect.provide(layerTestCrypto)),
+  );
+
   it.effect("provisions an origin-based worktree for an existing empty thread", () =>
     Effect.gen(function* () {
       const launches: OrchestrationV2ThreadLaunchInput[] = [];

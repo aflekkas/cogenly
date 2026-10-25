@@ -1,3 +1,5 @@
+import { MachineInfo } from "./machine.ts";
+import { ServerProvider } from "./server.ts";
 import { AgentId } from "./agent.ts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -5,6 +7,7 @@ import * as SchemaTransformation from "effect/SchemaTransformation";
 
 import {
   ContextTransferId,
+  EnvironmentId,
   IsoDateTime,
   MessageId,
   NodeId,
@@ -171,6 +174,12 @@ export type OrchestratorMcpTerminalDelegatedTaskStatus =
   typeof OrchestratorMcpTerminalDelegatedTaskStatus.Type;
 
 export const OrchestratorMcpDelegateTaskInput = Schema.Struct({
+  machine: Schema.optional(
+    TrimmedNonEmptyString.annotate({
+      description:
+        "A paired machine name or environment ID, this, vps, or auto (the hub). Omit to run on this machine. Offline launches fail without queuing.",
+    }),
+  ),
   task: OrchestratorMcpPrompt.annotate({
     description: "Self-contained task for one delegated child agent/subagent.",
   }),
@@ -205,6 +214,8 @@ export const OrchestratorMcpDelegateTaskInput = Schema.Struct({
 export type OrchestratorMcpDelegateTaskInput = typeof OrchestratorMcpDelegateTaskInput.Type;
 
 export const OrchestratorMcpDelegateTaskResult = Schema.Struct({
+  branch: Schema.optional(Schema.String),
+  branchError: Schema.optional(Schema.String),
   taskId: NodeId,
   childThreadId: ThreadId,
   childRunId: Schema.NullOr(RunId),
@@ -262,6 +273,12 @@ export const OrchestratorMcpTaskCancelResult = Schema.Struct({
 export type OrchestratorMcpTaskCancelResult = typeof OrchestratorMcpTaskCancelResult.Type;
 
 export const OrchestratorMcpCreateThreadRequest = Schema.Struct({
+  machine: Schema.optional(
+    TrimmedNonEmptyString.annotate({
+      description:
+        "A paired machine name or environment ID, this, vps, or auto (the hub). Omit to run on this machine. Offline launches fail without queuing.",
+    }),
+  ),
   prompt: Schema.optional(OrchestratorMcpPrompt),
   title: Schema.optional(OrchestratorMcpTitle),
   target: Schema.optional(OrchestratorMcpTarget),
@@ -271,6 +288,12 @@ export const OrchestratorMcpCreateThreadRequest = Schema.Struct({
 export type OrchestratorMcpCreateThreadRequest = typeof OrchestratorMcpCreateThreadRequest.Type;
 
 export const OrchestratorMcpCreateThreadsInput = Schema.Struct({
+  machine: Schema.optional(
+    TrimmedNonEmptyString.annotate({
+      description:
+        "A paired machine name or environment ID, this, vps, or auto (the hub). Omit to run on this machine. Offline launches fail without queuing.",
+    }),
+  ),
   threads: Schema.Array(OrchestratorMcpCreateThreadRequest).check(
     Schema.isMinLength(1),
     Schema.isMaxLength(20),
@@ -545,6 +568,14 @@ export const OrchestratorMcpProviderCapability = Schema.Struct({
 export type OrchestratorMcpProviderCapability = typeof OrchestratorMcpProviderCapability.Type;
 
 export const OrchestratorMcpCapabilitiesResult = Schema.Struct({
+  machines: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        ...MachineInfo.fields,
+        catalog: Schema.optional(Schema.Array(ServerProvider)),
+      }),
+    ),
+  ),
   /** The calling thread, or null when the caller is not a Cogenly thread. */
   parentThreadId: Schema.NullOr(ThreadId),
   /** The calling thread's selection, or null when the caller is not a Cogenly thread. */
@@ -567,6 +598,12 @@ export const OrchestratorMcpCapabilitiesResult = Schema.Struct({
 export type OrchestratorMcpCapabilitiesResult = typeof OrchestratorMcpCapabilitiesResult.Type;
 
 export const OrchestratorMcpScheduleTaskInput = Schema.Struct({
+  machine: Schema.optional(
+    TrimmedNonEmptyString.annotate({
+      description:
+        "A paired machine name or environment ID, this, vps, or auto (the hub). Omit to run on this machine. Offline launches fail without queuing.",
+    }),
+  ),
   agentId: Schema.optional(AgentId),
   projectId: OrchestratorMcpProjectTarget,
   prompt: OrchestratorMcpPrompt.annotate({
@@ -594,6 +631,7 @@ export type OrchestratorMcpScheduleTaskInput = typeof OrchestratorMcpScheduleTas
 
 /** Summary of a scheduled task returned by the schedule/list/update tools. */
 export const OrchestratorMcpScheduledTask = Schema.Struct({
+  machine: Schema.optional(EnvironmentId),
   scheduledTaskId: ScheduledTaskId,
   title: Schema.String,
   prompt: Schema.String,
@@ -635,6 +673,12 @@ export type OrchestratorMcpListScheduledTasksResult =
   typeof OrchestratorMcpListScheduledTasksResult.Type;
 
 export const OrchestratorMcpUpdateScheduledTaskInput = Schema.Struct({
+  machine: Schema.optional(
+    TrimmedNonEmptyString.annotate({
+      description:
+        "A paired machine name or environment ID, this, vps, or auto (the hub). Omit to run on this machine. Offline launches fail without queuing.",
+    }),
+  ),
   scheduledTaskId: ScheduledTaskId,
   prompt: Schema.optional(OrchestratorMcpPrompt),
   title: Schema.optional(OrchestratorMcpTitle),

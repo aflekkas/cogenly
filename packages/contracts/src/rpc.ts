@@ -634,6 +634,7 @@ export const WS_METHODS = {
 
   // Machines: this server, its hub, and its paired spokes
   machinesList: "machines.list",
+  machinesCatalog: "machines.catalog",
   machinesSubscribe: "machines.subscribe",
   machinesUpdate: "machines.update",
   machinesPrepareJoin: "machines.prepareJoin",
@@ -642,7 +643,12 @@ export const WS_METHODS = {
   machinesUnpair: "machines.unpair",
   // Hand threads to another paired machine, which runs them from then on.
   machinesMoveThreads: "machines.moveThreads",
+  machinesForkThread: "machines.forkThread",
   machinesMoveAllThreads: "machines.moveAllThreads",
+  machinesPreviewMoveThreads: "machines.previewMoveThreads",
+  machinesPreviewMoveAllThreads: "machines.previewMoveAllThreads",
+  projectLabelsPreviewMoveToMachine: "projectLabels.previewMoveToMachine",
+  machinesAdoptThreads: "machines.adoptThreads",
   machineSecurityStatus: "machines.securityStatus",
   // What each paired machine has yet to receive from this one
   syncStatus: "sync.status",
@@ -2007,8 +2013,19 @@ const WsProjectLabelsSubscribeConfirmedThreadLabelsRpc = Rpc.make(
     stream: true,
   },
 );
+// Machine forks preserve the source and select a pushed repository snapshot.
+const WsMachinesForkThreadRpc = Rpc.make(WS_METHODS.machinesForkThread, {
+  payload: ThreadReplication.ThreadForkMachineInput,
+  success: ThreadReplication.ThreadForkMachineResult,
+  error: Schema.Union([ThreadReplication.ThreadRemoteError, EnvironmentAuthorizationError]),
+});
 // Moves are answered once the target runs the threads; skipped threads say why.
 const WsMachinesMoveThreadsRpc = Rpc.make(WS_METHODS.machinesMoveThreads, {
+  payload: ThreadReplication.ThreadMoveInput,
+  success: ThreadReplication.ThreadMoveResult,
+  error: Schema.Union([ThreadReplication.ThreadRemoteError, EnvironmentAuthorizationError]),
+});
+const WsMachinesPreviewMoveThreadsRpc = Rpc.make(WS_METHODS.machinesPreviewMoveThreads, {
   payload: ThreadReplication.ThreadMoveInput,
   success: ThreadReplication.ThreadMoveResult,
   error: Schema.Union([ThreadReplication.ThreadRemoteError, EnvironmentAuthorizationError]),
@@ -2018,11 +2035,29 @@ const WsMachinesMoveAllThreadsRpc = Rpc.make(WS_METHODS.machinesMoveAllThreads, 
   success: ThreadReplication.ThreadMoveResult,
   error: Schema.Union([ThreadReplication.ThreadRemoteError, EnvironmentAuthorizationError]),
 });
+const WsMachinesPreviewMoveAllThreadsRpc = Rpc.make(WS_METHODS.machinesPreviewMoveAllThreads, {
+  payload: ThreadReplication.ThreadMoveAllInput,
+  success: ThreadReplication.ThreadMoveResult,
+  error: Schema.Union([ThreadReplication.ThreadRemoteError, EnvironmentAuthorizationError]),
+});
+const WsMachinesAdoptThreadsRpc = Rpc.make(WS_METHODS.machinesAdoptThreads, {
+  payload: ThreadReplication.ThreadAdoptInput,
+  success: ThreadReplication.ThreadAdoptResult,
+  error: Schema.Union([ThreadReplication.ThreadRemoteError, EnvironmentAuthorizationError]),
+});
 const WsProjectLabelsMoveToMachineRpc = Rpc.make(WS_METHODS.projectLabelsMoveToMachine, {
   payload: ThreadReplication.ProjectMoveInput,
   success: ThreadReplication.ProjectMoveResult,
   error: Schema.Union([ThreadReplication.ThreadRemoteError, EnvironmentAuthorizationError]),
 });
+const WsProjectLabelsPreviewMoveToMachineRpc = Rpc.make(
+  WS_METHODS.projectLabelsPreviewMoveToMachine,
+  {
+    payload: ThreadReplication.ProjectMoveInput,
+    success: ThreadReplication.ProjectMoveResult,
+    error: Schema.Union([ThreadReplication.ThreadRemoteError, EnvironmentAuthorizationError]),
+  },
+);
 const WsProjectLabelsMoveThreadRpc = Rpc.make(WS_METHODS.projectLabelsMoveThread, {
   payload: ProjectLabels.MoveThreadProjectFolderInput,
   success: ProjectLabels.ThreadProjectFolderResult,
@@ -2291,6 +2326,12 @@ const WsSyncStatusRpc = Rpc.make(WS_METHODS.syncStatus, {
   payload: SharedDocuments.SharedSyncStatusInput,
   success: SharedDocuments.SharedSyncStatusResult,
   error: Schema.Union([SharedDocuments.SharedStateError, EnvironmentAuthorizationError]),
+});
+
+const WsMachinesCatalogRpc = Rpc.make(WS_METHODS.machinesCatalog, {
+  payload: Machines.MachineCatalogInput,
+  success: Machines.MachineCatalogResult,
+  error: Schema.Union([ThreadReplication.ThreadRemoteError, EnvironmentAuthorizationError]),
 });
 const WsMachinesListRpc = Rpc.make(WS_METHODS.machinesList, {
   payload: Schema.Struct({}),
@@ -2732,8 +2773,13 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectLabelsSubscribeConfirmedThreadLabelsRpc,
   WsProjectLabelsMoveThreadRpc,
   WsProjectLabelsMoveToMachineRpc,
+  WsProjectLabelsPreviewMoveToMachineRpc,
   WsMachinesMoveThreadsRpc,
+  WsMachinesForkThreadRpc,
+  WsMachinesPreviewMoveThreadsRpc,
   WsMachinesMoveAllThreadsRpc,
+  WsMachinesPreviewMoveAllThreadsRpc,
+  WsMachinesAdoptThreadsRpc,
   WsProjectLabelsForkThreadToProjectRpc,
   WsProjectLabelsSetThreadLabelsRpc,
   WsProjectLabelsLinkSourceRpc,
@@ -2777,6 +2823,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsMachineSecurityStatusRpc,
   WsSyncStatusRpc,
   WsMachinesListRpc,
+  WsMachinesCatalogRpc,
   WsMachinesSubscribeRpc,
   WsMachinesUpdateRpc,
   WsMachinesPrepareJoinRpc,

@@ -13,6 +13,7 @@ import * as Machines from "./machines/Machines.ts";
 import * as SharedSyncStatus from "./sync/SharedSyncStatus.ts";
 import * as ProjectMove from "./threadSync/ProjectMove.ts";
 import * as ThreadTransfer from "./threadSync/ThreadTransfer.ts";
+import * as ThreadFork from "./threadSync/ThreadFork.ts";
 import * as MachineSecurity from "./security/MachineSecurity.ts";
 import * as MachineSetup from "./tailscale/MachineSetup.ts";
 import * as VisualStates from "./htmlRender/VisualState.ts";
@@ -278,6 +279,7 @@ import * as UsageLimitSources from "./usage/UsageLimitSources.ts";
 
 const CONFIG_DISCOVERY_TIMEOUT = Duration.seconds(5);
 const isProviderUploadFeedbackError = Schema.is(ProviderUploadFeedbackError);
+const isProjectLabelError = Schema.is(ProjectLabelError);
 
 const resolveDiscoveryForConfig = <A, E, R>(
   discovery: Effect.Effect<A, E, R>,
@@ -1097,6 +1099,7 @@ const makeWsRpcHandlers = (
     const machines = yield* Machines.Machines;
     const syncStatus = yield* SharedSyncStatus.SharedSyncStatus;
     const threadTransfer = yield* ThreadTransfer.ThreadTransfer;
+    const threadFork = yield* ThreadFork.ThreadFork;
     const projectMove = yield* ProjectMove.ProjectMove;
     const machineSecurity = yield* MachineSecurity.MachineSecurity;
     const machineSetup = yield* MachineSetup.MachineSetup;
@@ -1562,6 +1565,7 @@ const makeWsRpcHandlers = (
                       }),
                   createdBy: "user",
                   creationSource: input.creationSource ?? "web",
+                  ...(input.machine === undefined ? {} : { machine: input.machine }),
                 }).pipe(Effect.provide(intakeContext)),
               )
               .pipe(
@@ -1589,16 +1593,22 @@ const makeWsRpcHandlers = (
                       message: cause.message,
                       cause,
                     }),
-                  ThreadLaunchError: (cause) =>
-                    new OrchestrationV2ThreadLaunchError({
+                  ThreadLaunchError: (cause) => {
+                    // Another machine's refusal, or its absence, says why in its own words.
+                    const remote = ThreadLaunchService.remoteLaunchFailure(cause);
+                    return new OrchestrationV2ThreadLaunchError({
                       commandId: input.commandId,
                       projectId: input.projectId,
                       // A refused project pick (missing or archived) says why.
-                      message: Schema.is(ProjectLabelError)(cause.cause)
-                        ? cause.cause.message
-                        : "Failed to launch thread",
+                      message:
+                        remote?.message ??
+                        (isProjectLabelError(cause.cause)
+                          ? cause.cause.message
+                          : "Failed to launch thread"),
+                      ...(remote?.reason === "offline" ? { machineOffline: true } : {}),
                       cause,
-                    }),
+                    });
+                  },
                   ServerRuntimeStartupError: (cause) =>
                     new OrchestrationV2ThreadLaunchError({
                       commandId: input.commandId,
@@ -1739,14 +1749,23 @@ const makeWsRpcHandlers = (
       [WS_METHODS.machineSecurityStatus]: () => machineSecurity.status,
       [WS_METHODS.machinesList]: () => machines.list,
       [WS_METHODS.syncStatus]: (input) => syncStatus.status(input),
+      [WS_METHODS.machinesCatalog]: (input) => threadLaunch.providers(input.machine),
       [WS_METHODS.machinesSubscribe]: () => machines.subscribe,
       [WS_METHODS.machinesUpdate]: (input) => machines.update(input),
       [WS_METHODS.machinesPrepareJoin]: () => machines.prepareJoin,
       [WS_METHODS.machinesCreatePeerGrant]: (input) => machines.createPeerGrant(input),
       [WS_METHODS.machinesJoinHub]: (input) => machines.joinHub(input),
       [WS_METHODS.machinesUnpair]: (input) => machines.unpair(input),
+      [WS_METHODS.machinesForkThread]: (input) => threadFork.fork(input),
       [WS_METHODS.machinesMoveThreads]: (input) => threadTransfer.move(input),
       [WS_METHODS.machinesMoveAllThreads]: (input) => threadTransfer.moveAllFrom(input),
+      [WS_METHODS.machinesPreviewMoveThreads]: (input) =>
+        threadTransfer.move({ ...input, dryRun: true }),
+      [WS_METHODS.machinesPreviewMoveAllThreads]: (input) =>
+        threadTransfer.moveAllFrom({ ...input, dryRun: true }),
+      [WS_METHODS.projectLabelsPreviewMoveToMachine]: (input) =>
+        projectMove.move({ ...input, dryRun: true }),
+      [WS_METHODS.machinesAdoptThreads]: (input) => threadTransfer.adoptFrom(input),
       [WS_METHODS.machinesSetupStatus]: () => machineSetup.status,
       [WS_METHODS.machinesSetupSubscribe]: () => machineSetup.subscribe,
       [WS_METHODS.machinesSetupRunStep]: (input) => machineSetup.runStep(input.step),
@@ -2842,6 +2861,7 @@ type WsRequestServices =
   | Integrations.Integrations
   | Machines.Machines
   | SharedSyncStatus.SharedSyncStatus
+  | ThreadFork.ThreadFork
   | ThreadTransfer.ThreadTransfer
   | ProjectMove.ProjectMove
   | MachineSecurity.MachineSecurity

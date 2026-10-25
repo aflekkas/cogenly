@@ -7,6 +7,8 @@ import Migration0096 from "./Migrations/096_VaultSync.ts";
 import Migration0097 from "./Migrations/097_VaultSharingAuthorization.ts";
 import Migration0098 from "./Migrations/098_SharedSettings.ts";
 import Migration0099 from "./Migrations/099_SharedIntegrations.ts";
+import Migration0100 from "./Migrations/100_ReplicaRawFields.ts";
+import Migration0101 from "./Migrations/101_ScheduledTaskMachine.ts";
 /**
  * Migration runner with an inline loader.
  *
@@ -226,6 +228,8 @@ export const migrationEntries = [
   [97, "VaultSharingAuthorization", Migration0097],
   [98, "SharedSettings", Migration0098],
   [99, "SharedIntegrations", Migration0099],
+  [100, "ReplicaRawFields", Migration0100],
+  [101, "ScheduledTaskMachine", Migration0101],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

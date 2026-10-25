@@ -50,6 +50,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 
+import * as RemoteLaunch from "../orchestration-v2/RemoteThreadLaunch.ts";
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
 import * as Metrics from "../observability/Metrics.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
@@ -197,6 +198,7 @@ const encodeHeadersJson = Schema.encodeSync(HeadersJson);
 const encodeMissingFieldsJson = Schema.encodeSync(MissingFieldsJson);
 
 interface ScheduledTaskRow {
+  readonly target_machine?: string | null;
   readonly agent_id: string | null;
   readonly task_id: string;
   readonly owner_machine?: string | null;
@@ -349,6 +351,7 @@ const decodeRow = (row: ScheduledTaskRow, origin: WebhookOrigin | null = null) =
       // as a typed parse error, not a `ScheduledTaskId.make` defect.
       id: row.task_id,
       ...(row.owner_machine == null ? {} : { ownerMachine: row.owner_machine }),
+      ...(row.target_machine == null ? {} : { machine: row.target_machine }),
       agentId: row.agent_id,
       title: row.title,
       prompt: row.prompt,
@@ -431,6 +434,7 @@ export const layer = Layer.effect(
     const agents = yield* Agents.AgentService;
     const agentStore = yield* AgentStore.AgentStore;
     const threadLaunch = yield* ThreadLaunchService.ThreadLaunchService;
+    const remoteLaunch = yield* Effect.serviceOption(RemoteLaunch.RemoteThreadLaunch);
     const threadManagement = yield* ThreadManagementService.ThreadManagementService;
     const secretRequests = yield* SecretRequests.SecretRequests;
     const scheduler = yield* Scheduler.Scheduler;
@@ -455,6 +459,7 @@ export const layer = Layer.effect(
     const selectAllRows = () => sql<ScheduledTaskRow>`
       SELECT
         owner_machine,
+        target_machine,
         agent_id,
         task_id,
         title,
@@ -492,6 +497,7 @@ export const layer = Layer.effect(
     const getRows = (id: ScheduledTaskId) => sql<ScheduledTaskRow>`
       SELECT
         owner_machine,
+        target_machine,
         agent_id,
         task_id,
         title,
@@ -574,6 +580,7 @@ export const layer = Layer.effect(
       sql<{ task_id: string }>`
         INSERT INTO scheduled_tasks (
           owner_machine,
+          target_machine,
           agent_id,
           task_id,
           title,
@@ -600,6 +607,7 @@ export const layer = Layer.effect(
         )
         SELECT
           ${task.ownerMachine ?? shared.environmentId},
+          ${task.machine ?? null},
           ${task.agentId ?? null},
           ${task.id},
           ${task.title},
@@ -628,6 +636,7 @@ export const layer = Layer.effect(
         ON CONFLICT (task_id)
         DO UPDATE SET
           owner_machine = excluded.owner_machine,
+          target_machine = excluded.target_machine,
           agent_id = excluded.agent_id,
           title = excluded.title,
           prompt = excluded.prompt,
@@ -891,6 +900,7 @@ export const layer = Layer.effect(
               ? yield* Effect.exit(
                   threadLaunch.launch({
                     commandId,
+                    ...(active.machine == null ? {} : { machine: active.machine }),
                     projectId: active.projectId,
                     title: active.title,
                     modelSelection: active.modelSelection,
@@ -1145,6 +1155,30 @@ export const layer = Layer.effect(
                 .forThread(input.threadId)
                 .pipe(Effect.mapError((cause) => taskError("Could not resolve agent.", { cause })))
             : null;
+        const explicitAgent =
+          input.agentId == null
+            ? null
+            : yield* agentStore
+                .get(input.agentId)
+                .pipe(
+                  Effect.mapError((cause) => taskError("Agent not found.", { taskId: id, cause })),
+                );
+        const owner =
+          input.ownerMachine ??
+          existingTask?.ownerMachine ??
+          explicitAgent?.ownerMachine ??
+          boundAgent?.ownerMachine ??
+          (yield* shared.defaultOwner);
+        if (owner !== shared.environmentId) {
+          if (Option.isNone(remoteLaunch))
+            return yield* taskError("The machine that owns this schedule is unavailable.", {
+              taskId: id,
+            });
+          yield* remoteLaunch.value
+            .upsertSchedule(owner, { ...input, id })
+            .pipe(Effect.mapError((cause) => taskError(cause.message, { taskId: id, cause })));
+          return { task: yield* loadTask(id) };
+        }
         // Keep the existing next_run_at when the schedule itself is untouched:
         // editing a title or prompt must not postpone (or resurrect) a due
         // run — only schedule/enabled changes restart the clock.
@@ -1212,6 +1246,7 @@ export const layer = Layer.effect(
             existingTask?.ownerMachine ??
             boundAgent?.ownerMachine ??
             (yield* shared.defaultOwner),
+          machine: input.machine === undefined ? (existingTask?.machine ?? null) : input.machine,
           agentId:
             input.agentId === undefined
               ? (existingTask?.agentId ?? boundAgent?.id ?? null)
@@ -1238,6 +1273,11 @@ export const layer = Layer.effect(
           lastRunError: existingTask?.lastRunError ?? null,
           runCount: existingTask?.runCount ?? 0,
         };
+        if (task.machine != null && (task.threadId !== null || task.agentId != null))
+          return yield* taskError(
+            "machine selects where a fresh thread runs; omit it for a bound thread or agent trigger.",
+            { taskId: id },
+          );
         if (task.schedule.type === "event" && task.agentId == null) {
           return yield* taskError("Event triggers require an agent.", { taskId: id });
         }
@@ -1363,6 +1403,17 @@ export const layer = Layer.effect(
     const runNow: ScheduledTaskService["Service"]["runNow"] = (input: ScheduledTaskRunNowInput) =>
       Effect.gen(function* () {
         const task = yield* loadTask(input.id);
+        if (task.ownerMachine !== undefined && task.ownerMachine !== shared.environmentId) {
+          if (Option.isNone(remoteLaunch))
+            return yield* taskError("The machine that owns this schedule is unavailable.", {
+              taskId: input.id,
+            });
+          return yield* remoteLaunch.value
+            .runSchedule(task.ownerMachine, input)
+            .pipe(
+              Effect.mapError((cause) => taskError(cause.message, { taskId: input.id, cause })),
+            );
+        }
         if (task.schedule.type === "event")
           return yield* new ScheduledTaskError({
             taskId: input.id,

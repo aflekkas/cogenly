@@ -113,6 +113,7 @@ import {
 import { machineMoveTargetsForThreads, threadsRunOnName } from "../machines/machines.logic";
 import { useEnvironmentMachineList } from "../machines/useMachines";
 import { useMoveThreadsToMachine } from "../machines/useMoveToMachine";
+import { useForkToMachine } from "../machines/useForkToMachine";
 import {
   useEnvironmentProjectLabels,
   useProjectLabelDirectory,
@@ -732,6 +733,10 @@ function OpenCommandPaletteDialog(props: {
     serverEnvironment.moveThreadsToMachine.permissionAtom(activeThread?.environmentId ?? null),
   );
   const moveThreadsToMachine = useMoveThreadsToMachine();
+  const forkToMachine = useForkToMachine();
+  const canForkToMachine = useAtomValue(
+    serverEnvironment.forkThreadToMachine.permissionAtom(activeThread?.environmentId ?? null),
+  );
   const { snoozeThread, unsnoozeThread } = useThreadActions();
   const canOperateActiveThread = useEnvironmentScope(
     activeThread?.environmentId ?? null,
@@ -2282,6 +2287,22 @@ function OpenCommandPaletteDialog(props: {
     const thread = activeThread;
     const owners = [thread.source.ownerMachine];
     for (const target of machineMoveTargetsForThreads(activeMachineList, owners)) {
+      actionItems.push({
+        kind: "action",
+        value: `action:fork-thread-to-machine:${target.environmentId}`,
+        searchTerms: ["fork", "copy conversation", "machine", target.name],
+        title: `Fork to ${target.name}`,
+        ...(target.online ? {} : { description: "Offline" }),
+        icon: <EnvironmentMachineIcon kind={target.icon} className={ITEM_ICON_CLASS} />,
+        disabled: !canForkToMachine || !canOperateActiveThread || !target.online,
+        run: async () => {
+          await forkToMachine({
+            environmentId: thread.environmentId,
+            sourceThreadId: thread.id,
+            target,
+          });
+        },
+      });
       actionItems.push({
         kind: "action",
         value: `action:move-thread-to-machine:${target.environmentId}`,

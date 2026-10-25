@@ -9,6 +9,7 @@ import { describe, expect, it } from "@effect/vitest";
 import { vi } from "vite-plus/test";
 import {
   AuthOrchestrationOperateScope,
+  AuthAccessWriteScope,
   AuthOrchestrationReadScope,
   AuthSettingsWriteScope,
   AuthSourceControlWriteScope,
@@ -65,6 +66,23 @@ const setup = Effect.gen(function* () {
 });
 
 describe("command permissions", () => {
+  it.effect("forks on a paired machine only with the request environment's operate grant", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const registry = yield* setup;
+        const fork = createCommandPermissions(runtime, WS_METHODS.machinesForkThread);
+        registry.set(sessions(env), AsyncResult.success(grant(false)));
+        registry.set(sessions(other), AsyncResult.success(grant(true)));
+        expect(registry.get(fork.permissionAtom(env))).toBe(false);
+        expect(yield* fork.authorize(registry, env).pipe(Effect.flip)).toMatchObject({
+          requiredScope: AuthOrchestrationOperateScope,
+        });
+        registry.set(sessions(env), AsyncResult.success(grant(true)));
+        expect(registry.get(fork.permissionAtom(env))).toBe(true);
+        yield* fork.authorize(registry, env);
+      }),
+    ),
+  );
   it.effect("executes guarded read queries only with the destination read grant", () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -225,6 +243,9 @@ describe("command permissions", () => {
     WS_METHODS.projectLabelsLinkRepository,
     WS_METHODS.projectLabelsUnlinkRepository,
     WS_METHODS.projectLabelsMoveThread,
+    WS_METHODS.machinesPreviewMoveThreads,
+    WS_METHODS.machinesPreviewMoveAllThreads,
+    WS_METHODS.projectLabelsPreviewMoveToMachine,
     WS_METHODS.projectLabelsForkThreadToProject,
     WS_METHODS.projectLabelsSetThreadLabels,
     WS_METHODS.projectLabelsAddResource,
@@ -267,6 +288,30 @@ describe("command permissions", () => {
         registry.set(sessions(env), AsyncResult.success(grant(true)));
         expect(registry.get(permission.permissionAtom(env))).toBe(true);
         yield* permission.authorize(registry, env);
+      }),
+    ),
+  );
+
+  it.effect("requires access management authority to recover lost-machine threads", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const registry = yield* setup;
+        const recovery = createCommandPermissions(runtime, WS_METHODS.machinesAdoptThreads);
+        registry.set(sessions(env), AsyncResult.success(grant(true)));
+        expect(registry.get(recovery.permissionAtom(env))).toBe(false);
+        expect(yield* recovery.authorize(registry, env).pipe(Effect.flip)).toMatchObject({
+          requiredScope: AuthAccessWriteScope,
+        });
+        registry.set(
+          sessions(env),
+          AsyncResult.success({
+            ...grant(false),
+            scopes: [AuthAccessWriteScope],
+            permissions: [AuthAccessWriteScope],
+          }),
+        );
+        expect(registry.get(recovery.permissionAtom(env))).toBe(true);
+        yield* recovery.authorize(registry, env);
       }),
     ),
   );

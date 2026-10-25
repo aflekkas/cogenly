@@ -29,10 +29,12 @@ import {
 } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Schema from "effect/Schema";
+import * as RemoteLaunch from "../orchestration-v2/RemoteThreadLaunch.ts";
 import * as SharedState from "../sync/SharedState.ts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import * as Stream from "effect/Stream";
@@ -73,7 +75,10 @@ export class AgentService extends Context.Service<
     readonly markRead: (
       input: AgentMarkReadInput,
     ) => Effect.Effect<{ agent: AgentListItem }, AgentError>;
-    readonly upsert: (input: AgentUpsertInput) => Effect.Effect<{ agent: Agent }, AgentError>;
+    readonly upsert: (
+      input: AgentUpsertInput,
+      creationId?: AgentId,
+    ) => Effect.Effect<{ agent: Agent }, AgentError>;
     /** Re-file the agent's conversation in a project folder, or unfile it with null. */
     readonly setProject: (
       input: AgentSetProjectInput,
@@ -111,6 +116,7 @@ export class AgentService extends Context.Service<
 const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const shared = yield* SharedState.SharedState;
+  const remoteLaunch = yield* Effect.serviceOption(RemoteLaunch.RemoteThreadLaunch);
   const store = yield* Store.AgentStore;
   const launch = yield* ThreadLaunch.ThreadLaunchService;
   const threads = yield* Threads.ThreadManagementService;
@@ -472,14 +478,31 @@ const make = Effect.gen(function* () {
           );
         }),
       ),
-    upsert: (input) =>
+    upsert: (input, creationId) =>
       Effect.gen(function* () {
         const at = DateTime.formatIso(yield* DateTime.now);
-        const existing = input.id === undefined ? null : yield* store.get(input.id);
+        const existing =
+          input.id === undefined
+            ? creationId === undefined
+              ? null
+              : yield* store.get(creationId).pipe(Effect.orElseSucceed(() => null))
+            : yield* store.get(input.id);
         const ownerMachine =
           input.ownerMachine ?? existing?.ownerMachine ?? (yield* shared.defaultOwner);
         const ownsAgent = ownerMachine === shared.environmentId;
-        const id = existing?.id ?? AgentId.make(`agent:${yield* crypto.randomUUIDv4()}`);
+        const id =
+          existing?.id ?? creationId ?? AgentId.make(`agent:${yield* crypto.randomUUIDv4()}`);
+        if (existing === null && !ownsAgent) {
+          if (Option.isNone(remoteLaunch))
+            return yield* new AgentError({
+              message: "That machine is unavailable. Create the agent on this machine instead.",
+            });
+          yield* remoteLaunch.value
+            .createAgent(ownerMachine, input, id)
+            .pipe(Effect.mapError((cause) => new AgentError({ message: cause.message, cause })));
+          yield* changed;
+          return { agent: yield* store.get(id) };
+        }
         const conversationThreadId =
           existing?.conversationThreadId ?? ThreadId.make(`agent-conversation:${id}`);
         if (existing === null && ownsAgent) {
@@ -615,6 +638,10 @@ const make = Effect.gen(function* () {
         const threadId = ThreadId.make(`agent-builder:${key}`);
         yield* launch.launch({
           surface: "builder",
+          ...(input.machine === undefined ? {} : { machine: input.machine }),
+          ...(input.projectFolderId === undefined
+            ? {}
+            : { projectFolderId: input.projectFolderId }),
           commandId: CommandId.make(`agent-builder:${key}`),
           threadId,
           projectId,
@@ -633,8 +660,7 @@ const make = Effect.gen(function* () {
         });
         // Builder threads are not gated, so filing after launch is direct; the
         // proposed agent defaults to this project.
-        if (input.projectFolderId !== undefined)
-          yield* fileConversation(threadId, input.projectFolderId);
+        // ThreadLaunchService files it on its owner before its first turn.
         return { threadId, projectId };
       }).pipe(Effect.mapError(failure)),
     recordProposal: (input) =>

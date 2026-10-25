@@ -12,7 +12,8 @@ storage and backups, background activity, and devices. Changes made while a
 machine is offline catch up when it reconnects. A machine on an older version
 keeps syncing and picks up anything newer once it updates.
 
-Agents and schedules run only on their owner machine. New ones default to the
+Agents and schedule timers run only on their owner machine. A schedule can
+start each fresh conversation on another machine. New owners default to the
 hub; existing ones keep the machine they were created on until you
 [move them](#move-threads-and-projects). Editing a profile or schedule on
 another machine updates the owner's configuration without starting a second
@@ -37,6 +38,40 @@ machine that runs the thread. If that machine is offline, sending fails with
 a notice instead of waiting; reading still works. Attachments open from any
 machine and are copied over the first time you view them.
 
+To start a conversation on another machine, pick it in the composer's **Run
+on** control before you send; every paired machine is listed, even one you are
+not connected to. A new conversation runs on the machine that has the project's
+repository unless you pick another. A machine without the repository clones it
+first. If the machine you picked is offline, nothing starts and your draft
+stays as it was; the notice offers to run it on this machine instead.
+
+Start Work asks which machine to use after you choose its repository. You can
+also choose a machine when creating an agent or editing a schedule. A schedule
+bound to an existing conversation follows that conversation instead. A fresh
+scheduled conversation whose target is offline fails that run; it is not queued.
+
+Agents can name a paired machine with `machine` on `thread_launch`,
+`create_threads`, `work_start`, `delegate_task`, and `schedule_task` (or when
+updating a schedule). Names and environment IDs work; `this` means the machine
+the agent runs on and `auto` means the hub. Isolated delegated work carries the
+parent's committed code to the target. Its committed result branch can come
+back when the parent reads the task result, without a push; uncommitted changes
+stay on their original machine.
+
+## Fork a thread to another machine
+
+Choose **Fork to** in a thread's menu, or **Fork to <machine>** in the command
+palette, to continue a copy on another machine. The fork stays in the same
+project and repository, cloned on the target if needed, at the source's pushed
+branch and commit. Its conversation becomes context for a fresh provider
+session; the original thread stays where it is and keeps all its work.
+
+If the source has unpushed commits or uncommitted changes, Cogenly asks you to
+commit and push them or explicitly **Start from last pushed commit**. Local
+work stays on the source machine. Conflicting target commits or edits must be
+resolved before the fork can start; they are never overwritten. Agents use
+`thread_fork` with `machine`, and keep the same `clientRequestId` when retrying.
+
 ## Move threads and projects
 
 Move threads to the machine you want them to run on, for example everything
@@ -59,6 +94,10 @@ cogenly machines move --project athens-racing --to 'Cloud server · my-host'
 cogenly machines move --threads <id>,<id> --to 'Cloud server · my-host'
 ```
 
+Add `--dry-run` to preview what would move, what would be skipped and the
+target paths. Nothing moves or clones. Add `--json` for the complete structured
+result.
+
 Agents can do the same with `machines_move_threads` and
 `project_move_to_machine`.
 
@@ -70,6 +109,14 @@ machine links the thread's repository. Move them again to retry, or add
 machine, and the new machine checks out the branch as last pushed. A moved
 thread starts a fresh provider session that continues from its history. Diffs
 and restore points from before the move stay on the old machine.
+
+If a machine is permanently gone, unpair it first. On the hub, run
+`cogenly machines adopt --dry-run` to list lost owner ids, then
+`cogenly machines adopt --from <environment-id> --dry-run` to preview recovery.
+Remove `--dry-run` to run those replicated threads here. Recovery uses the last
+copy this machine received; data that never synced remains on the lost machine.
+Busy threads and agent conversations are skipped. A machine that is merely
+offline keeps ownership until it reconnects.
 
 ## Pair from Settings
 

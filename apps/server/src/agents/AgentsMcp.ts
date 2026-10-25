@@ -5,7 +5,9 @@ import {
   AgentMutationResult,
   AgentSetProjectInput,
   OrchestratorMcpFailure,
+  TrimmedNonEmptyString,
 } from "@t3tools/contracts";
+import { resolveMachine } from "../machines/resolveMachine.ts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { Tool, Toolkit } from "effect/ai";
@@ -44,7 +46,10 @@ const BuilderStart = Tool.make("start_agent_builder", {
   ...shared,
   description:
     "Start an agent-builder conversation from a request. Pass projectFolderId (from project_label_list) to start it in a project; the proposed agent lands there. The builder drafts its proposal in the new thread and the owner confirms it on the proposal card; this never creates an agent directly.",
-  parameters: AgentBuilderStartInput,
+  parameters: Schema.Struct({
+    ...AgentBuilderStartInput.fields,
+    machine: Schema.optional(TrimmedNonEmptyString),
+  }),
   success: AgentBuilderStartResult,
 })
   .annotate(Tool.Destructive, true)
@@ -91,7 +96,10 @@ export const handlers = Access.toLayer(toolkit, {
     (input) =>
       Effect.gen(function* () {
         return yield* (yield* Service.AgentService)
-          .builderStart(input)
+          .builderStart({
+            ...input,
+            machine: yield* resolveMachine(input.machine).pipe(Effect.mapError(unavailable)),
+          })
           .pipe(Effect.mapError(unavailable));
       }),
   ),

@@ -21,6 +21,11 @@ export interface EnvironmentOption {
   label: string;
   isPrimary: boolean;
   machine: EnvironmentMachineKind;
+  /**
+   * Set for a machine reached only through the draft environment's pairing:
+   * the launch goes to that environment, naming this machine to run it.
+   */
+  pairedMachine?: { readonly online: boolean };
 }
 
 export const EnvMode = Schema.Literals(["local", "worktree"]);
@@ -51,6 +56,13 @@ export function resolveEnvironmentOptionLabel(input: {
   }
 
   return runtimeLabel ?? savedLabel ?? input.environmentId;
+}
+
+/** A "Run on" choice's tooltip: its label, and whether a paired machine is offline. */
+export function resolveEnvironmentOptionTitle(
+  option: Pick<EnvironmentOption, "label" | "pairedMachine">,
+): string {
+  return option.pairedMachine?.online === false ? `${option.label} (offline)` : option.label;
 }
 
 // A remote (non-primary) environment is always surfaced, even when it is the
