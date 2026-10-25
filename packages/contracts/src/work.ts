@@ -11,6 +11,7 @@ import {
   ThreadId,
   TrimmedNonEmptyString,
 } from "./baseSchemas.ts";
+import { ProviderInstanceId } from "./providerInstance.ts";
 import { ModelSelection } from "./modelSelection.ts";
 
 export const WorkTitle = TrimmedNonEmptyString.check(Schema.isMaxLength(200));
@@ -112,6 +113,7 @@ export class WorkHandoffError extends Schema.TaggedError<WorkHandoffError>()("Wo
   repositoryMismatch: Schema.optional(ProjectRepositoryMismatchError),
   sourceThreadId: ThreadId,
   machineOffline: Schema.optional(Schema.Boolean),
+  disabledProviderInstanceId: Schema.optional(ProviderInstanceId),
   stage: Schema.Literals([
     "read-source",
     "resolve-project",

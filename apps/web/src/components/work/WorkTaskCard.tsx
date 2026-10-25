@@ -1,3 +1,4 @@
+import { useNavigate } from "@tanstack/react-router";
 import { scopeThreadRef } from "@cogenly/client-runtime/environment";
 import { isScratchProject } from "@cogenly/client-runtime/state/projects";
 import {
@@ -38,7 +39,12 @@ import { Spinner } from "../ui/spinner";
 import { Textarea } from "../ui/textarea";
 import { toastManager } from "../ui/toast";
 import { useWorkPickerChoices } from "./StartWork";
-import { ADD_REPOSITORY, describeWorkStartFailure, NO_REPOSITORY } from "./work.logic";
+import {
+  ADD_REPOSITORY,
+  describeWorkStartFailure,
+  disabledWorkProviderMessage,
+  NO_REPOSITORY,
+} from "./work.logic";
 import {
   deriveWorkTaskCardState,
   WORK_TASK_STATE_LABEL,
@@ -98,6 +104,8 @@ export function WorkTaskCard(props: {
 }) {
   const { environmentId, chatThreadId, task } = props;
   const nameOf = useRepositoryNames();
+  const navigate = useNavigate();
+  const serverConfigs = useServerConfigs();
   const workRef = useMemo(
     () => (task.threadId === undefined ? null : scopeThreadRef(environmentId, task.threadId)),
     [environmentId, task.threadId],
@@ -162,6 +170,9 @@ export function WorkTaskCard(props: {
       if (result._tag === "Failure") {
         if (isAtomCommandInterrupted(result)) return;
         const failure = squashAtomCommandFailure(result);
+        const disabledInstanceId = isWorkHandoffError(failure)
+          ? failure.disabledProviderInstanceId
+          : undefined;
         const described = describeWorkStartFailure(
           isWorkHandoffError(failure) ? failure.stage : null,
         );
@@ -169,7 +180,26 @@ export function WorkTaskCard(props: {
         toastManager.add({
           type: "error",
           title: "Could not start the task",
-          description: described.message,
+          description:
+            disabledInstanceId === undefined
+              ? described.message
+              : disabledWorkProviderMessage(
+                  disabledInstanceId,
+                  serverConfigs.get(environmentId)?.providers ?? [],
+                ),
+          ...(disabledInstanceId === undefined
+            ? {}
+            : {
+                actionProps: {
+                  children: "Provider settings",
+                  onClick: () => {
+                    void navigate({
+                      to: "/settings/providers",
+                      search: { environmentId, instanceId: disabledInstanceId },
+                    });
+                  },
+                },
+              }),
         });
         return;
       }

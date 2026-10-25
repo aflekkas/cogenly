@@ -3,6 +3,8 @@ import type {
   MessageId,
   OrchestrationV2Notification,
   ProjectId,
+  ServerProvider,
+  ProviderInstanceId,
   RunId,
   ThreadEnvMode,
   WorkHandoffError,
@@ -389,4 +391,16 @@ export function workNotificationStatus(
     case "unknown":
       return "done";
   }
+}
+
+/** Names a refused provider instance using the same machine snapshot as Settings. */
+export function disabledWorkProviderMessage(
+  instanceId: ProviderInstanceId,
+  providers: ReadonlyArray<ServerProvider>,
+): string {
+  const provider = providers.find((entry) => entry.instanceId === instanceId);
+  const fallbackName = instanceId
+    .replace(/[_-]+/g, " ")
+    .replace(/\b[a-z]/g, (letter) => letter.toUpperCase());
+  return `${provider?.displayName ?? fallbackName} is turned off for Work on this machine. Turn it on in provider settings.`;
 }

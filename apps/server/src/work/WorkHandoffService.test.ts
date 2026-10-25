@@ -157,6 +157,7 @@ const makeHarness = (
     scratch?: boolean;
     /** Whether the target repository is under git; defaults to true. */
     git?: boolean;
+    disabledProvider?: boolean;
   } = {},
 ) =>
   Effect.gen(function* () {
@@ -196,7 +197,15 @@ const makeHarness = (
         getThreadShell: orchestrator.getThreadShell,
         getThreadEventSequence: orchestrator.getThreadEventSequence,
         streamStoredEventsFrom: orchestrator.streamStoredEventsFrom,
-        assertProviderInstanceEnabled: () => Effect.void,
+        assertProviderInstanceEnabled: (request) =>
+          options.disabledProvider
+            ? Effect.fail(
+                new Threads.ThreadManagementProviderInstanceDisabledError({
+                  projectId: request.projectId,
+                  instanceId: request.instanceId,
+                }),
+              )
+            : Effect.void,
       }),
       Layer.mock(Projects.ProjectService)({
         getById: (id) =>
@@ -1155,6 +1164,22 @@ it.effect("starts a task in No project at once and reports its result back to th
         .pipe(Effect.flip);
       expect(again).toBeTruthy();
       yield* (yield* Worker.OrchestrationEffectWorkerV2).drain();
+    }).pipe(Effect.provide(h.work));
+  }).pipe(Effect.provide(runtime)),
+);
+
+it.effect("preserves the disabled provider instance when Work launch is refused", () =>
+  Effect.gen(function* () {
+    const h = yield* makeHarness({ disabledProvider: true });
+    yield* h.orchestrator.dispatch(create(sourceId));
+    yield* Effect.gen(function* () {
+      const service = yield* Work.WorkHandoffService;
+      const error = yield* Effect.flip(service.start(input));
+      expect(error.stage).toBe("launch");
+      expect(error.disabledProviderInstanceId).toBe(selection.instanceId);
+      expect(
+        (yield* h.orchestrator.getThreadProjection(sourceId)).thread.workHandoffs ?? [],
+      ).toHaveLength(0);
     }).pipe(Effect.provide(h.work));
   }).pipe(Effect.provide(runtime)),
 );
