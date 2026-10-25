@@ -3,7 +3,11 @@ import {
   probeClaudeManagedAttribution,
   readClaudeLaunchSettings,
 } from "../../provider/ClaudeCommitAttribution.ts";
-import { prepareCommitAttributionEnvironment } from "@cogenly/provider-core/server/commitAttribution";
+import {
+  prepareCommitAttributionEnvironment,
+  ATTRIBUTION_POLICY_CONFLICT_MESSAGE,
+  ATTRIBUTION_POLICY_UNAVAILABLE_MESSAGE,
+} from "@cogenly/provider-core/server/commitAttribution";
 import { makeProviderTextDeltaCoalescer } from "./ProviderTextDeltaCoalescer.ts";
 import { claudeTaskOutputRoot, tailClaudeTaskOutput } from "./ClaudeTaskOutputTail.ts";
 import {
@@ -486,10 +490,9 @@ export class ClaudeAgentSdkQueryRunnerError extends Schema.TaggedError<ClaudeAge
   },
 ) {
   override get message(): string {
-    if (this.method === "managedAttributionProbe")
-      return "Cogenly could not check Claude's managed attribution policy. No provider session was started.";
+    if (this.method === "managedAttributionProbe") return ATTRIBUTION_POLICY_UNAVAILABLE_MESSAGE;
     return this.method === "managedAttribution"
-      ? "Claude managed policy overrides AI attribution suppression or uses a policy helper that Cogenly cannot inspect. Ask your administrator to disable attribution in managed settings."
+      ? ATTRIBUTION_POLICY_CONFLICT_MESSAGE
       : "Claude Agent SDK query failed.";
   }
 }

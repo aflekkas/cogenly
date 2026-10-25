@@ -216,3 +216,32 @@ it.effect("keys terminal failure items by provider turn across retries and fallb
     assert.equal(firstAttempt.ordinal, 101);
   }).pipe(Effect.provide(IdAllocator.layer)),
 );
+
+it("surfaces managed attribution conflicts through turn-start wrappers without exposing defects", () => {
+  for (const method of ["managedAttribution", "managedAttributionProbe"]) {
+    const cause = {
+      _tag: "ProviderAdapterTurnStartError",
+      cause: {
+        _tag: "ClaudeAgentSdkQueryRunnerError",
+        method,
+        cause: new Error("private policy data"),
+        message: "untrusted detail",
+      },
+    };
+    const failure = makeProviderFailure({ cause: Cause.fail(cause) });
+    assert.include(
+      failure.message,
+      method === "managedAttribution"
+        ? "managed policy overrides AI attribution"
+        : "could not check Claude's managed attribution policy",
+    );
+    assert.notInclude(failure.message, "private policy data");
+    assert.notInclude(failure.message, "untrusted detail");
+  }
+  assert.equal(
+    makeProviderFailure({
+      cause: { _tag: "ClaudeAgentSdkQueryRunnerError", method: "other", message: "private data" },
+    }).message,
+    "Provider turn failed.",
+  );
+});

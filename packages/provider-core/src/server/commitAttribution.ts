@@ -1,6 +1,11 @@
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 
+export const ATTRIBUTION_POLICY_CONFLICT_MESSAGE =
+  "Claude managed policy overrides AI attribution suppression or uses a policy helper that Cogenly cannot inspect. Ask your administrator to disable attribution in managed settings.";
+export const ATTRIBUTION_POLICY_UNAVAILABLE_MESSAGE =
+  "Cogenly could not check Claude's managed attribution policy. No provider session was started.";
+
 export const AI_ATTRIBUTION_INSTRUCTIONS =
   "<commit_attribution>AI attribution is disabled. Do not add AI co-author trailers, generated-with footers, or provider session links to commits or pull request descriptions. Preserve the user's Git author and committer identity and human co-authors. Do not bypass Git hooks or the process Git configuration.</commit_attribution>";
 
