@@ -1,4 +1,3 @@
-import { useAtomValue } from "@effect/atom-react";
 import {
   EMPTY_V2_ITEM_SUPPORT,
   resolveV2ItemSupport,
@@ -10,6 +9,7 @@ import { scopeThreadRef } from "@cogenly/client-runtime/environment";
 import { Atom } from "effect/reactivity";
 
 import { environmentThreadDetails } from "./threads";
+import { useAtomValueBuiltOutsideRender } from "./useAtomValueBuiltOutsideRender";
 
 function supportKey(input: {
   readonly environmentId: EnvironmentId;
@@ -45,12 +45,21 @@ const itemSupportAtomFamily = Atom.family((key: string) => {
   }).pipe(Atom.withLabel(`web-v2-item-support:${key}`));
 });
 
+const EMPTY_SUPPORT_ATOM = Atom.make(EMPTY_V2_ITEM_SUPPORT).pipe(
+  Atom.withLabel("web-v2-item-support:empty"),
+);
+
+/**
+ * An item's live support. An item inherited from another thread (a fork's
+ * history, a subagent's) opens that thread's live state, so it is built
+ * outside render.
+ */
 export function useV2ItemSupport(input: {
   readonly environmentId: EnvironmentId;
   readonly sourceThreadId: ThreadId;
   readonly sourceItemId: TurnItemId;
 }): V2ItemSupport {
-  return useAtomValue(
+  return useAtomValueBuiltOutsideRender(
     itemSupportAtomFamily(
       supportKey({
         environmentId: input.environmentId,
@@ -58,5 +67,6 @@ export function useV2ItemSupport(input: {
         itemId: input.sourceItemId,
       }),
     ),
+    EMPTY_SUPPORT_ATOM,
   );
 }
