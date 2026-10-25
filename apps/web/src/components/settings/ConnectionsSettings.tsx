@@ -77,12 +77,7 @@ import {
   selectQrEndpointOption,
   togglePairingScopeSelection,
 } from "./ConnectionsSettings.logic";
-import {
-  SettingsPageContainer,
-  SettingsRow,
-  SettingsSection,
-  useRelativeTimeTick,
-} from "./settingsLayout";
+import { SettingsRow, SettingsSection, useRelativeTimeTick } from "./settingsLayout";
 import { LocalEnvironmentSetting } from "./LocalEnvironmentSetting";
 import { searchableSetting } from "./settingsSearch";
 import { EnvironmentIconMenu } from "./EnvironmentIconPicker";
@@ -3781,7 +3776,7 @@ export function ConnectionsSettings() {
   );
 
   return (
-    <SettingsPageContainer>
+    <>
       {primarySettings}
       <SettingsSection
         {...searchableSetting("remote-environments")}
@@ -3895,6 +3890,6 @@ export function ConnectionsSettings() {
       ) : null}
       <LoadBalancingSettings environments={loadBalancingEnvironments} />
       <GitHubRoutingSettings environments={loadBalancingEnvironments} />
-    </SettingsPageContainer>
+    </>
   );
 }

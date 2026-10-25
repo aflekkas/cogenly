@@ -119,7 +119,6 @@ import { Textarea } from "../ui/textarea";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
-  SettingsPageContainer,
   SettingsRow,
   SettingsSection,
   SETTINGS_PICKER_TRIGGER_CLASSNAME,
@@ -292,7 +291,7 @@ export function ScheduledTasksSettings(target: {
     setEditor({ environmentId: createEnvironmentId, task: null });
   }, [canCreate, createEnvironmentId, target.create]);
   return (
-    <SettingsPageContainer>
+    <>
       <SettingsSection
         title="Scheduled tasks"
         variant="plain"
@@ -361,7 +360,7 @@ export function ScheduledTasksSettings(target: {
           />
         )}
       </OverlayPresence>
-    </SettingsPageContainer>
+    </>
   );
 }
 

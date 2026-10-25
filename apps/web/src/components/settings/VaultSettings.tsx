@@ -53,7 +53,7 @@ import { Switch } from "../ui/switch";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { PeerSyncRow } from "./PeerSyncRow";
 import { useSettingsScope } from "./SettingsScopeContext";
-import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
+import { SettingsRow, SettingsSection } from "./settingsLayout";
 
 const NO_WRITE_TITLE = "This connection cannot change the vault.";
 
@@ -110,7 +110,7 @@ export function VaultSettings() {
   );
 
   return (
-    <SettingsPageContainer>
+    <>
       <SettingsSection id="vault" title="Vault" headerAction={addButton("xs")}>
         {environmentId === null ? (
           <SettingsRow title="Choose a machine to see its vault." />
@@ -198,7 +198,7 @@ export function VaultSettings() {
           />
         )}
       </OverlayPresence>
-    </SettingsPageContainer>
+    </>
   );
 }
 

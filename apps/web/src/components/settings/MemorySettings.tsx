@@ -17,7 +17,7 @@ import { SearchInput } from "../ui/search-input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { PeerSyncRow } from "./PeerSyncRow";
 import { useSettingsScope } from "./SettingsScopeContext";
-import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
+import { SettingsRow, SettingsSection } from "./settingsLayout";
 
 const ALL = "all";
 
@@ -57,7 +57,7 @@ export function MemorySettings() {
   const filtered = labelId !== ALL || agentId !== ALL || status !== "current" || query !== "";
 
   return (
-    <SettingsPageContainer>
+    <>
       <SettingsSection
         id="memory"
         title="Memory"
@@ -214,6 +214,6 @@ export function MemorySettings() {
           />
         )}
       </OverlayPresence>
-    </SettingsPageContainer>
+    </>
   );
 }

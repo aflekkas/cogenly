@@ -34,9 +34,7 @@ import {
   EmptyTitle,
 } from "../ui/empty";
 import { OverlayPresence } from "../ui/overlay-presence";
-import { ScrollArea } from "../ui/scroll-area";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
-import { PageContent } from "../PageContent";
 import { PossibleDuplicateNotice } from "./PossibleDuplicateNotice";
 import { ProjectOrphanFolders } from "./ProjectOrphanFolders";
 import {
@@ -216,7 +214,7 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
         id="project-folders"
         className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground"
       >
-        <PageContent width="wide" className="pb-0">
+        <div className="flex min-w-0 flex-col gap-6">
           <div className="flex w-full min-w-0 items-center gap-3">
             <p className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
               Repositories, chats, Work, files and agents grouped by effort. Agents can change any
@@ -251,11 +249,11 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
               </Button>
             </span>
           </div>
-        </PageContent>
+        </div>
 
         {/* The tiles give keyboard access, so the viewport stays out of the tab order. */}
-        <ScrollArea className="min-h-0 flex-1" viewportTabIndex={-1}>
-          <PageContent width="wide">
+        <>
+          <div className="flex min-w-0 flex-col gap-6">
             {duplicates.map((pair) => (
               <PossibleDuplicateNotice key={pair.key} pair={pair} />
             ))}
@@ -323,9 +321,9 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
                 })}
               </ul>
             )}
-          </PageContent>
+          </div>
           <ProjectOrphanFolders environmentId={props.environmentId} />
-        </ScrollArea>
+        </>
       </div>
       <OverlayPresence when={renaming}>
         {(entry) => (

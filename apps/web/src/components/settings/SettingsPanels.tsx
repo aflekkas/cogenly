@@ -109,7 +109,6 @@ import {
 import {
   PolicyTooltip,
   SettingResetButton,
-  SettingsPageContainer,
   SettingsRow,
   SettingsSection,
   useSettingsSearchTarget,
@@ -976,7 +975,7 @@ export function AppearanceSettingsPanel() {
   const { appearanceMode, setAppearanceMode } = useTheme();
   const { preferences, update } = useAppearancePreferences();
   return (
-    <SettingsPageContainer>
+    <>
       <SettingsSection id="appearance" title="Appearance">
         <SettingsRow
           {...searchableSetting("color-scheme")}
@@ -1080,7 +1079,7 @@ export function AppearanceSettingsPanel() {
       <SettingsSection id="browser-appearance" title="Browser on this device">
         <BrowserAppearanceSettingRow disabled={false} />
       </SettingsSection>
-    </SettingsPageContainer>
+    </>
   );
 }
 
@@ -1244,7 +1243,7 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
   );
 
   return (
-    <SettingsPageContainer>
+    <>
       <SettingsSection id="organization" title="Organization">
         <SettingsRow
           clientSetting
@@ -1953,7 +1952,7 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
 
       <LegacyFeaturesSection />
       <RestoreDefaultsSection onRestored={onRestored} />
-    </SettingsPageContainer>
+    </>
   );
 }
 
@@ -2108,7 +2107,7 @@ export function ArchivedThreadsPanel() {
   );
 
   return (
-    <SettingsPageContainer>
+    <>
       {archivedGroups.length === 0 ? (
         <SettingsSection
           id={isLoadingArchive ? undefined : searchableSetting("archive").id}
@@ -2219,6 +2218,6 @@ export function ArchivedThreadsPanel() {
           </SettingsSection>
         ))
       )}
-    </SettingsPageContainer>
+    </>
   );
 }

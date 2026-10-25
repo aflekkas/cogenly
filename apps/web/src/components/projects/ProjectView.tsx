@@ -75,8 +75,6 @@ import {
 } from "../ui/menu";
 import { GitHubIcon } from "../Icons";
 import { OverlayPresence } from "../ui/overlay-presence";
-import { ScrollArea } from "../ui/scroll-area";
-import { PageContent } from "../PageContent";
 import {
   AgentsCard,
   FilesCard,
@@ -410,10 +408,10 @@ function ProjectPage(props: {
             ];
     return (
       <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
-        <PageContent width="wide" className="gap-1">
+        <div className="flex min-w-0 flex-col gap-6">
           <h1 className="truncate text-xl font-semibold tracking-tight">{title}</h1>
           {description ? <p className="text-sm text-muted-foreground">{description}</p> : null}
-        </PageContent>
+        </div>
       </div>
     );
   }
@@ -424,8 +422,8 @@ function ProjectPage(props: {
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
       {/* The cards give keyboard access, so the viewport stays out of the tab order. */}
-      <ScrollArea className="min-h-0 flex-1" viewportTabIndex={-1}>
-        <PageContent width="wide">
+      <>
+        <div className="flex min-w-0 flex-col gap-6">
           <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
             <Button size="sm" variant="ghost-muted" onClick={backToProjects}>
               <ChevronLeftIcon />
@@ -559,8 +557,8 @@ function ProjectPage(props: {
               />
             </ProjectCardSlot>
           </section>
-        </PageContent>
-      </ScrollArea>
+        </div>
+      </>
       <OverlayPresence when={editingSources && label}>
         {(label) => (
           <ProjectSourceLinksDialog

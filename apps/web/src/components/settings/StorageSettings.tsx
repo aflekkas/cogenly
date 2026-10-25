@@ -30,7 +30,6 @@ import {
 } from "../ui/number-field";
 import {
   SettingResetButton,
-  SettingsPageContainer,
   SettingsRow,
   SettingsSection,
   useRelativeTimeTick,
@@ -449,7 +448,7 @@ export function StorageSettingsPanel() {
   }
 
   return (
-    <SettingsPageContainer>
+    <>
       {connectedEnvironments
         .filter(
           (environment) =>
@@ -603,6 +602,6 @@ export function StorageSettingsPanel() {
         />
       </SettingsSection>
       <CleanupSection />
-    </SettingsPageContainer>
+    </>
   );
 }

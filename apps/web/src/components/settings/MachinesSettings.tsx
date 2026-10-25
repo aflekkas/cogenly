@@ -52,7 +52,7 @@ import { useStatusFade } from "./integrationStatusMotion";
 import { createIntegrationStatusFade } from "./integrationStatusMotion";
 import { MachineHealthSections } from "./MachineHealthSection";
 import { useSettingsScope } from "./SettingsScopeContext";
-import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
+import { SettingsRow, SettingsSection } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 
 const TAILSCALE_SENTENCE =
@@ -155,13 +155,13 @@ export function MachinesSettingsPanel({
   }, [addRequested, onAddOpened]);
 
   return (
-    <SettingsPageContainer>
+    <>
       <MachinesSection environment={environment} onAdd={() => setAdding(true)} />
       <MachineHealthSections environment={environment} />
       <OverlayPresence when={adding ? environment : null}>
         {(viewed) => <AddMachineDialog viewed={viewed} onClose={() => setAdding(false)} />}
       </OverlayPresence>
-    </SettingsPageContainer>
+    </>
   );
 }
 

@@ -114,7 +114,6 @@ import {
 import {
   SettingsUnavailableGroup,
   SettingResetButton,
-  SettingsPageContainer,
   SettingsRow,
   SettingsSection,
 } from "./settingsLayout";
@@ -1517,7 +1516,7 @@ export function IntegrationsSettingsPanel() {
   );
 
   return (
-    <SettingsPageContainer>
+    <>
       <IntegrationServicesSettings />
       {/* Server-authoritative agent access is scoped by the header selection;
           the preview defaults below are device-local and ignore it. */}
@@ -1532,6 +1531,6 @@ export function IntegrationsSettingsPanel() {
         )}
       </SettingsSection>
       <DeviceIntegrationSettings />
-    </SettingsPageContainer>
+    </>
   );
 }

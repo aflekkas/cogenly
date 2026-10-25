@@ -27,7 +27,7 @@ import {
   usePrimarySettingsAvailable,
 } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
-import { PageContent, type PageContentWidth } from "../PageContent";
+import { PageContent } from "../PageContent";
 import { Button, InlineButton } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { useOptionalSettingsScope } from "./SettingsScopeContext";
@@ -594,15 +594,14 @@ export function SettingResetButton({
   );
 }
 
-export function SettingsPageContainer({
-  children,
-  className,
-  width = "default",
-}: {
-  children: ReactNode;
-  className?: string;
-  width?: PageContentWidth;
-}) {
+/**
+ * The one frame every settings page renders in, owned by the settings route
+ * layout: the page scroller, the content column's width and padding, and the
+ * scope sentence. Pages return their sections and never set their own width;
+ * size page content with `@container/settings-page` queries instead of
+ * viewport breakpoints.
+ */
+export function SettingsPageContainer({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const hash = useLocation({ select: (location) => location.hash });
   const highlightTarget = useLocation({
@@ -630,13 +629,18 @@ export function SettingsPageContainer({
         className="scroll-fade-y scrollbar-gutter-both flex-1 overflow-x-hidden overflow-y-auto"
         data-settings-page-scroll
       >
-        <PageContent width={width} className={cn("gap-8", className)}>
+        <PageContent className="@container/settings-page gap-8">
           <SettingsScopeSentence />
           {children}
         </PageContent>
       </div>
     </SettingsSearchTargetProvider>
   );
+}
+
+/** Back to the top of the settings page, for a sub-page swapped in by search. */
+export function resetSettingsPageScroll(): void {
+  document.querySelector("[data-settings-page-scroll]")?.scrollTo({ top: 0 });
 }
 
 export function scrollToSettingsTarget(

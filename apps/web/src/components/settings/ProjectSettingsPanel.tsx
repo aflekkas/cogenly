@@ -33,12 +33,7 @@ import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import {
-  SettingResetButton,
-  SettingsPageContainer,
-  SettingsRow,
-  SettingsSection,
-} from "./settingsLayout";
+import { SettingResetButton, SettingsRow, SettingsSection } from "./settingsLayout";
 import {
   canPickExternalProjectFavicon,
   ProjectFaviconPickerDialog,
@@ -507,7 +502,7 @@ function ProjectDetail({
 
   return (
     <>
-      <SettingsPageContainer className="gap-6">
+      <>
         <SettingsSection id="project-overview" title="Repository" hideTitle>
           {!canEditGroup ? (
             <p className="px-3 py-2 text-sm text-muted-foreground sm:px-4">
@@ -624,7 +619,7 @@ function ProjectDetail({
             }
           />
         </SettingsSection>
-      </SettingsPageContainer>
+      </>
 
       {/* Each open mounts a fresh picker; closing keeps it for the exit motion. */}
       <OverlayPresence when={faviconPickerOpen && canEditGroup}>
