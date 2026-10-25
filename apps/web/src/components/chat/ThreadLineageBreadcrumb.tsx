@@ -50,11 +50,18 @@ function useThreadLineageChain(shell: EnvironmentThreadShell | null) {
   }, [shell, first, second, third, fourth]);
 }
 
-const SEGMENT_CLASS = "min-w-0 shrink [-webkit-app-region:no-drag]";
+const SEGMENT_CLASS = "min-w-0 max-w-full [-webkit-app-region:no-drag]";
 
 // Inline in a page's own top bar (no nav rail): clear of the fixed titlebar
 // controls at the header's right edge. The rail's titlebar slot lifts the cap.
 const HEADER_TITLE_MAX_WIDTH_CLASS = "max-w-[min(40rem,calc(100%-10rem))]";
+
+// The title row is a size container, so the trail drops ancestors by the room
+// it has: the root and the "…" menu below 28rem, the parent below 16rem.
+// Every minimum left at those widths fits beside the "Runs on" chip, so the
+// trail never runs under it; below 16rem the title alone shrinks.
+const ROOT_HIDE_CLASS = "@max-[28rem]/thread-title:hidden";
+const PARENT_HIDE_CLASS = "@max-[16rem]/thread-title:hidden";
 
 /**
  * The chat header's leading title, always visible at the pane's left gutter
@@ -78,7 +85,10 @@ export function ThreadHeaderTitle(
   return (
     <WorkspacePageTitle>
       <div
-        className={cn("flex min-w-0 items-center", HEADER_TITLE_MAX_WIDTH_CLASS)}
+        className={cn(
+          "@container/thread-title flex min-w-0 flex-1 items-center",
+          HEADER_TITLE_MAX_WIDTH_CLASS,
+        )}
         // Leads the top bar, so it rides the pane's left edge when the sidebar toggles.
         data-panel-flip="start"
       >
@@ -161,8 +171,11 @@ function ThreadHeaderTitleContent(props: {
       </Tooltip>
     );
   };
-  const separator = (
-    <span aria-hidden className="shrink-0 px-0.5 text-muted-foreground/50 select-none">
+  const separator = (hideClass: string) => (
+    <span
+      aria-hidden
+      className={cn("shrink-0 px-0.5 text-muted-foreground/50 select-none", hideClass)}
+    >
       /
     </span>
   );
@@ -178,8 +191,10 @@ function ThreadHeaderTitleContent(props: {
       <h2 className="sr-only">{props.title}</h2>
       {segments.root ? (
         <>
-          <span className="flex min-w-16 shrink-[4]">{segment(segments.root, false)}</span>
-          {separator}
+          <span className={cn("flex min-w-0 shrink-[40]", ROOT_HIDE_CLASS)}>
+            {segment(segments.root, false)}
+          </span>
+          {separator(ROOT_HIDE_CLASS)}
         </>
       ) : null}
       {segments.hidden.length > 0 ? (
@@ -190,7 +205,7 @@ function ThreadHeaderTitleContent(props: {
                 <Button
                   variant="ghost-muted"
                   size="icon-xs"
-                  className="[-webkit-app-region:no-drag]"
+                  className={cn("shrink-0 [-webkit-app-region:no-drag]", ROOT_HIDE_CLASS)}
                   aria-label={`${segments.hidden.length} more in this thread's lineage`}
                 />
               }
@@ -208,18 +223,21 @@ function ThreadHeaderTitleContent(props: {
               ))}
             </MenuPopup>
           </Menu>
-          {separator}
+          {separator(ROOT_HIDE_CLASS)}
         </>
       ) : null}
-      {/* Every segment shows in full while the trail fits. Short of room they
-          truncate together, weighted by width (the parent faster), and never
-          below their minimums. No percentage caps: the trail is sized by its
-          content, so a percentage would resolve against itself. */}
-      <span className="flex min-w-24 shrink-[2]">{segment(segments.parent, true)}</span>
-      {separator}
+      {/* Every segment shows in full while the trail fits. Short of room the
+          ancestors truncate well before the title (their shrink weights dwarf
+          its own), then drop out at the container widths above. No percentage
+          caps: the trail is sized by its content, so a percentage would
+          resolve against itself. */}
+      <span className={cn("flex min-w-0 shrink-[20]", PARENT_HIDE_CLASS)}>
+        {segment(segments.parent, true)}
+      </span>
+      {separator(PARENT_HIDE_CLASS)}
       <span
         aria-current="page"
-        className="min-w-16 shrink truncate px-1 font-medium text-foreground"
+        className="min-w-0 shrink truncate px-1 font-medium text-foreground"
       >
         {props.shell.title}
       </span>
