@@ -516,10 +516,7 @@ function ProjectPage(props: {
           ))}
           {/* Balanced columns: each card sizes to its content and the next one
               fills under the shortest column, so no gap opens under a short card. */}
-          <section
-            aria-label={`${label.name} details`}
-            className="columns-1 gap-3 md:columns-2 xl:columns-3"
-          >
+          <section aria-label={`${label.name} details`} className="flex min-w-0 flex-col gap-8">
             <ProjectCardSlot>
               <RepositoriesCard
                 environmentId={machineId}

@@ -1,3 +1,5 @@
+import { SettingsRowContent, SettingsSection } from "../settings/settingsLayout";
+import { SettingsListEmpty } from "../settings/SettingsList";
 import { XIcon } from "lucide-react";
 import {
   useEffect,
@@ -31,28 +33,25 @@ export function ProjectCard(props: {
 }) {
   const count = props.count === undefined ? null : projectCardCount(props.count);
   return (
-    <section aria-label={props.title} className={cn("project-card", props.className)}>
-      <header className="flex h-7 items-center gap-2 px-1.5 text-menu font-semibold">
-        <span
-          aria-hidden
-          className="flex size-3.5 shrink-0 items-center justify-center text-muted-foreground [&>svg]:size-3.5"
-        >
-          {props.icon}
-        </span>
-        <span className="min-w-0 truncate">{props.title}</span>
-        {count !== null ? (
-          <span className="text-xs font-medium tabular-nums text-muted-foreground">{count}</span>
-        ) : null}
-        {props.add !== undefined ? (
-          <span className="ml-auto flex shrink-0 items-center">{props.add}</span>
-        ) : null}
-      </header>
+    <SettingsSection
+      title={
+        <>
+          {props.title}
+          {count !== null ? (
+            <span className="text-xs tabular-nums text-muted-foreground">{count}</span>
+          ) : null}
+        </>
+      }
+      icon={props.icon}
+      headerAction={props.add}
+      className={props.className}
+    >
       {props.isEmpty ? (
-        <p className="px-1.5 pt-0.5 pb-1.5 text-xs/relaxed text-muted-foreground">{props.empty}</p>
+        <SettingsListEmpty title={props.empty ?? `No ${props.title.toLowerCase()} yet`} />
       ) : (
-        <div className="flex flex-col">{props.children}</div>
+        props.children
       )}
-    </section>
+    </SettingsSection>
   );
 }
 
@@ -110,66 +109,70 @@ export function ProjectCardRow(props: {
     props.onOpen?.();
   };
   return (
-    <div
+    <SettingsRowContent
+      interactive={interactive}
       role={interactive ? "button" : undefined}
       tabIndex={interactive ? 0 : undefined}
       aria-label={props.ariaLabel}
-      data-arrived={props.arrived ? "" : undefined}
       className={cn(
-        "project-card-row group/card-row",
-        interactive && "cursor-pointer select-none",
-        props.arrived && "project-card-row-arrived",
+        "group/card-row",
+        props.arrived && "reveal-motion",
         props.removing && "pointer-events-none opacity-0",
       )}
       onClick={props.onOpen}
       onKeyDown={interactive ? onKeyDown : undefined}
-    >
-      <span
-        aria-hidden
-        className="flex size-3.5 shrink-0 items-center justify-center text-muted-foreground [&>svg]:size-3.5"
-      >
-        {props.icon}
-      </span>
-      <span className="min-w-0 flex-1 truncate">{props.title}</span>
-      {props.pip ? (
-        <span
-          role="img"
-          aria-label={props.pipLabel}
-          className="project-card-pip"
-          data-pip={props.pip}
-        />
-      ) : null}
-      {props.meta !== undefined ? (
-        <span className="max-w-2/5 shrink-0 truncate text-2xs tabular-nums text-secondary-label">
-          {props.meta}
-        </span>
-      ) : null}
-      {props.menu ? <span className="-me-1 flex shrink-0 items-center">{props.menu}</span> : null}
-      {props.onRemove ? (
-        <span
-          className="-me-1 flex shrink-0 items-center opacity-0 transition-opacity duration-(--motion-duration-fast) ease-standard group-hover/card-row:opacity-100 group-focus-within/card-row:opacity-100 pointer-coarse:opacity-100"
-          onClick={(event) => event.stopPropagation()}
-          onKeyDown={(event) => event.stopPropagation()}
-        >
-          <Button
-            size="icon-micro"
-            variant="ghost-muted"
-            aria-label={props.removeLabel ?? "Remove"}
-            title={props.removeDisabledReason ?? props.removeLabel ?? "Remove"}
-            disabled={props.removeDisabledReason != null}
-            onClick={props.onRemove}
+      title={
+        <span className="flex min-w-0 items-center gap-2">
+          <span
+            aria-hidden
+            className="flex size-3.5 shrink-0 items-center justify-center text-muted-foreground [&>svg]:size-3.5"
           >
-            <XIcon />
-          </Button>
+            {props.icon}
+          </span>
+          <span className="min-w-0 truncate">{props.title}</span>
+          {props.pip ? (
+            <span
+              role="img"
+              aria-label={props.pipLabel}
+              className="project-card-pip"
+              data-pip={props.pip}
+            />
+          ) : null}
         </span>
-      ) : null}
-    </div>
+      }
+      description={props.meta}
+      control={
+        <>
+          {props.menu ? (
+            <span className="-me-1 flex shrink-0 items-center">{props.menu}</span>
+          ) : null}
+          {props.onRemove ? (
+            <span
+              className="-me-1 flex shrink-0 items-center opacity-0 transition-opacity duration-(--motion-duration-fast) ease-standard group-hover/card-row:opacity-100 group-focus-within/card-row:opacity-100 pointer-coarse:opacity-100"
+              onClick={(event) => event.stopPropagation()}
+              onKeyDown={(event) => event.stopPropagation()}
+            >
+              <Button
+                size="icon-micro"
+                variant="ghost-muted"
+                aria-label={props.removeLabel ?? "Remove"}
+                title={props.removeDisabledReason ?? props.removeLabel ?? "Remove"}
+                disabled={props.removeDisabledReason != null}
+                onClick={props.onRemove}
+              >
+                <XIcon />
+              </Button>
+            </span>
+          ) : null}
+        </>
+      }
+    />
   );
 }
 
 /** A muted line under a card's rows: "+3 more", a loading note, an upload in flight. */
 export function ProjectCardNote(props: { readonly children: ReactNode }) {
-  return <p className="px-1.5 pt-1 pb-0.5 text-xs text-muted-foreground">{props.children}</p>;
+  return <p className="px-3 py-2 text-xs text-muted-foreground sm:px-4">{props.children}</p>;
 }
 
 /**

@@ -1,11 +1,20 @@
+import { matchesSettingsListQuery } from "../settings/settingsList.logic";
+import { SettingsSection } from "../settings/settingsLayout";
+import {
+  SettingsList,
+  SettingsListItem,
+  SettingsListToolbar,
+  SettingsListSearch,
+  SettingsListFilter,
+  SettingsListEmpty,
+} from "../settings/SettingsList";
 import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentId, ProjectLabelId } from "@cogenly/contracts";
 import { useNavigate } from "@tanstack/react-router";
-import { FolderIcon, FolderPlusIcon, LaptopMinimalIcon } from "lucide-react";
+import { FolderIcon, FolderPlusIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useAgents } from "../../agents/agentsClient";
-import { cn } from "../../lib/utils";
 import { openCreateProjectDialog } from "../../projectLabels/CreateProjectDialogHost";
 import { ProjectFolderIcon } from "../../projectLabels/ProjectFolderMark";
 import { ProjectLabelEditorDialog } from "../../projectLabels/ProjectLabelEditorDialog";
@@ -25,16 +34,7 @@ import { serverEnvironment } from "../../state/server";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { chatActivityAt } from "../sidebar/modes/sidebarModes.logic";
 import { Button } from "../ui/button";
-import {
-  Empty,
-  EmptyContent,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "../ui/empty";
 import { OverlayPresence } from "../ui/overlay-presence";
-import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { PossibleDuplicateNotice } from "./PossibleDuplicateNotice";
 import { ProjectOrphanFolders } from "./ProjectOrphanFolders";
 import {
@@ -48,7 +48,7 @@ export interface ProjectsOverviewSearch {
   readonly create?: true | undefined;
   /** The machine a new project is created on; defaults to the primary one. */
   readonly environmentId?: EnvironmentId | undefined;
-  /** The open project's machine and id: Settings → Projects shows its page instead of the grid. */
+  /** The open project's machine and id: Settings → Projects shows its page instead of the list. */
   readonly projectEnvironmentId?: EnvironmentId | undefined;
   readonly projectLabelId?: ProjectLabelId | undefined;
 }
@@ -85,7 +85,7 @@ export function projectSettingsSearch(environmentId: EnvironmentId, labelId: Pro
 type ProjectsFilter = "active" | "archived";
 
 /**
- * One project on the grid: its folder and name with the last activity, its
+ * One project on the list: its folder and name with the last activity, its
  * description, then what it holds on every machine and the machines that have
  * it. Clicking opens the project's page; right-click (or the context-menu
  * key) opens its menu.
@@ -103,55 +103,46 @@ function ProjectTile(props: {
   const menu = useProjectFolderMenu(props.entry, { ...props, onDeleted: () => {} });
   const description = label.description?.trim() || null;
   return (
-    <li className="flex min-w-0 list-none">
-      <button
-        type="button"
-        data-menu-open={menu.menuOpen ? "" : undefined}
-        aria-label={[label.name, props.summary, description].filter(Boolean).join(", ")}
-        onClick={props.onOpen}
-        onKeyDown={(event) => {
-          if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
-            event.preventDefault();
-            menu.openMenuAtElement(event.currentTarget);
-          }
-        }}
-        onContextMenu={(event) => {
-          event.preventDefault();
-          void menu.openMenu({ x: event.clientX, y: event.clientY });
-        }}
-        className="project-tile flex-1"
-      >
+    <SettingsListItem
+      onContextMenu={(event) => {
+        event.preventDefault();
+        void menu.openMenu({ x: event.clientX, y: event.clientY });
+      }}
+      title={
         <span className="flex min-w-0 items-center gap-2">
-          <ProjectFolderIcon project={props.entry} className="size-4.5 shrink-0" />
-          <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
-            {label.name}
-          </span>
-          {props.lastActivityAt ? (
-            <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-              {formatRelativeTimeLabel(props.lastActivityAt)}
-            </span>
-          ) : null}
+          <ProjectFolderIcon project={props.entry} className="size-4 shrink-0" />
+          {label.name}
         </span>
-        {description ? (
-          <span className="line-clamp-2 text-xs/relaxed text-muted-foreground">{description}</span>
-        ) : null}
-        {/* Counts and machines get a line each and wrap rather than truncate. */}
-        <span className="mt-auto flex min-w-0 flex-col gap-0.5 pt-1 text-xs text-muted-foreground">
-          <span className="min-w-0 break-words tabular-nums">{props.summary}</span>
-          {props.machinesLabel ? (
-            <span className="flex min-w-0 items-start gap-1">
-              <LaptopMinimalIcon aria-hidden className="mt-0.5 size-3 shrink-0" />
-              <span className="min-w-0 break-words">{props.machinesLabel}</span>
-            </span>
-          ) : null}
+      }
+      description={description ?? props.summary}
+      status={
+        <span>
+          {description ? `${props.summary} · ` : ""}
+          {props.machinesLabel}
+          {props.lastActivityAt ? ` · ${formatRelativeTimeLabel(props.lastActivityAt)}` : ""}
         </span>
-      </button>
-    </li>
+      }
+      control={
+        <>
+          <Button
+            size="xs"
+            variant="ghost-muted"
+            aria-label={`Actions for ${label.name}`}
+            onClick={(event) => menu.openMenuAtElement(event.currentTarget)}
+          >
+            Actions
+          </Button>
+          <Button size="xs" variant="outline" onClick={props.onOpen}>
+            Open
+          </Button>
+        </>
+      }
+    />
   );
 }
 
 /**
- * Settings → Projects: every project across connected machines as a grid, the
+ * Settings → Projects: every project across connected machines as a list, the
  * active ones or the archived ones. A project opens its page in the same
  * section. `?create` opens the new-project dialog at once.
  */
@@ -166,8 +157,7 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
   const { agents } = useAgents();
   const presentations = useAtomValue(environmentPresentations.presentationsAtom);
   const [filter, setFilter] = useState<ProjectsFilter>("active");
-  // Only a filter the user picked fades the grid; opening the page shows it at once.
-  const [filterPicked, setFilterPicked] = useState(false);
+  const [query, setQuery] = useState("");
   const [renaming, setRenaming] = useState<EnvironmentProjectLabel | null>(null);
   const [linking, setLinking] = useState<EnvironmentProjectLabel | null>(null);
 
@@ -202,129 +192,97 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
         )
       : null;
 
-  // An empty filter falls back to the other, so the page never opens onto nothing.
-  const shownFilter: ProjectsFilter =
-    filter === "archived" && directory.archived.length === 0 ? "active" : filter;
-  const shown = shownFilter === "archived" ? directory.archived : directory.active;
+  const shownFilter = filter;
+  const shown = (shownFilter === "archived" ? directory.archived : directory.active).filter(
+    (entry) => matchesSettingsListQuery(query, [entry.label.name, entry.label.description]),
+  );
   const duplicates = useMemo(() => possibleDuplicateProjects(directory.labels), [directory]);
 
   return (
     <>
-      <div
+      <SettingsSection
         id="project-folders"
-        className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground"
+        title="Projects"
+        headerAction={
+          <Button
+            size="xs"
+            variant="ghost-muted"
+            disabled={createEnvironmentId === null || !canCreate}
+            onClick={createProject}
+          >
+            <FolderPlusIcon />
+            New project
+          </Button>
+        }
       >
-        <div className="flex min-w-0 flex-col gap-6">
-          <div className="flex w-full min-w-0 items-center gap-3">
-            <p className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
-              Repositories, chats, Work, files and agents grouped by effort. Agents can change any
-              project from a thread.
-            </p>
-            <span className="flex shrink-0 items-center gap-2">
-              {directory.archived.length > 0 ? (
-                <ToggleGroup
-                  aria-label="Which projects"
-                  variant="segmented"
-                  value={[shownFilter]}
-                  onValueChange={(next) => {
-                    const value = next[0];
-                    if (value === "active" || value === "archived") {
-                      setFilter(value);
-                      setFilterPicked(true);
-                    }
-                  }}
-                >
-                  <Toggle value="active">Active</Toggle>
-                  <Toggle value="archived">Archived · {directory.archived.length}</Toggle>
-                </ToggleGroup>
-              ) : null}
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={createEnvironmentId === null || !canCreate}
-                onClick={createProject}
-              >
-                <FolderPlusIcon />
-                New project
-              </Button>
-            </span>
-          </div>
-        </div>
-
-        {/* The tiles give keyboard access, so the viewport stays out of the tab order. */}
-        <>
-          <div className="flex min-w-0 flex-col gap-6">
-            {duplicates.map((pair) => (
-              <PossibleDuplicateNotice key={pair.key} pair={pair} />
-            ))}
-            {directory.labels.length === 0 ? (
-              <Empty>
-                <EmptyHeader>
-                  <EmptyMedia>
-                    <FolderIcon />
-                  </EmptyMedia>
-                  <EmptyTitle>No projects yet</EmptyTitle>
-                  <EmptyDescription>
-                    A project groups the repositories, chats, Work, files and agents for one effort,
-                    and gives agents its instructions.
-                  </EmptyDescription>
-                </EmptyHeader>
-                <EmptyContent>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={createEnvironmentId === null || !canCreate}
-                    onClick={createProject}
-                  >
-                    <FolderPlusIcon />
-                    New project
-                  </Button>
-                </EmptyContent>
-              </Empty>
-            ) : (
-              <ul
-                key={shownFilter}
-                aria-label={shownFilter === "archived" ? "Archived projects" : "Projects"}
-                className={cn(
-                  filterPicked && "swap-motion",
-                  "grid grid-cols-[repeat(auto-fill,minmax(16rem,1fr))] gap-3",
-                )}
-              >
-                {shown.map((entry) => {
-                  const contents = byProject.get(entry.key);
-                  return (
-                    <ProjectTile
-                      key={entry.key}
-                      entry={entry}
-                      summary={
-                        projectPanelSummary({
-                          // Every repository any machine links, once each.
-                          repositories: projectRepositoryCount(entry),
-                          chats: contents?.chats.length ?? 0,
-                          work: contents?.work.length ?? 0,
-                          files: 0,
-                          agents: agentsByProject.get(entry.key) ?? 0,
-                        }) ?? "Empty"
-                      }
-                      lastActivityAt={latestProjectActivity(contents, chatActivityAt)}
-                      machinesLabel={machinesLabel(entry)}
-                      onOpen={() =>
-                        void navigate({
-                          to: PROJECTS_SETTINGS_PATH,
-                          search: projectSettingsSearch(entry.environmentId, entry.label.id),
-                        })
-                      }
-                      onRename={() => setRenaming(entry)}
-                      onLinkSources={() => setLinking(entry)}
-                    />
-                  );
-                })}
-              </ul>
-            )}
-          </div>
-          <ProjectOrphanFolders environmentId={props.environmentId} />
-        </>
-      </div>
+        <SettingsListToolbar>
+          <SettingsListSearch label="Search projects" value={query} onValueChange={setQuery} />
+          <SettingsListFilter
+            label="Status"
+            value={shownFilter}
+            onValueChange={(value) => {
+              if (value === "active" || value === "archived") setFilter(value);
+            }}
+            options={[
+              { value: "active", label: "Active projects" },
+              { value: "archived", label: "Archived projects" },
+            ]}
+          />
+        </SettingsListToolbar>
+        {duplicates.map((pair) => (
+          <PossibleDuplicateNotice key={pair.key} pair={pair} />
+        ))}
+        {shown.length === 0 ? (
+          <SettingsListEmpty
+            icon={<FolderIcon />}
+            title={
+              query
+                ? "Nothing matches"
+                : shownFilter === "archived"
+                  ? "No archived projects"
+                  : "No projects yet"
+            }
+            description={
+              query
+                ? "Try another search."
+                : "A project groups repositories, chats, Work, files and agents for one effort."
+            }
+          />
+        ) : (
+          <SettingsList aria-label={shownFilter === "archived" ? "Archived projects" : "Projects"}>
+            {shown.map((entry) => {
+              const contents = byProject.get(entry.key);
+              return (
+                <ProjectTile
+                  key={entry.key}
+                  entry={entry}
+                  summary={
+                    projectPanelSummary({
+                      // Every repository any machine links, once each.
+                      repositories: projectRepositoryCount(entry),
+                      chats: contents?.chats.length ?? 0,
+                      work: contents?.work.length ?? 0,
+                      files: 0,
+                      agents: agentsByProject.get(entry.key) ?? 0,
+                    }) ?? "Empty"
+                  }
+                  lastActivityAt={latestProjectActivity(contents, chatActivityAt)}
+                  machinesLabel={machinesLabel(entry)}
+                  onOpen={() =>
+                    void navigate({
+                      to: PROJECTS_SETTINGS_PATH,
+                      search: projectSettingsSearch(entry.environmentId, entry.label.id),
+                    })
+                  }
+                  onRename={() => setRenaming(entry)}
+                  onLinkSources={() => setLinking(entry)}
+                />
+              );
+            })}
+          </SettingsList>
+        )}
+      </SettingsSection>
+      <ProjectOrphanFolders environmentId={props.environmentId} />
       <OverlayPresence when={renaming}>
         {(entry) => (
           <ProjectLabelEditorDialog
