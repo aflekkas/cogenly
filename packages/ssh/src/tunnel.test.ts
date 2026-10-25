@@ -54,7 +54,10 @@ const writeFakeExecutable = Effect.fn("test.writeFakeExecutable")(function* (
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   yield* fs.makeDirectory(path.dirname(file), { recursive: true });
-  yield* fs.writeFileString(file, `#!/bin/sh\necho "${label} $*"\n`);
+  yield* fs.writeFileString(
+    file,
+    `#!/bin/sh\nif [ "$*" = "security setup --help" ]; then echo --local; else echo "${label} $*"; fi\n`,
+  );
   yield* fs.chmod(file, 0o755);
 });
 
@@ -111,7 +114,7 @@ const runRunner = Effect.fn("test.runRunner")(function* (home: string, releaseBa
   );
   return yield* run("/bin/sh", [runnerPath, "serve", "--port", "4773"], {
     HOME: home,
-    PATH: "/usr/bin:/bin",
+    PATH: `${home}/bin:/usr/bin:/bin`,
   });
 });
 
@@ -174,6 +177,30 @@ describe("SSH runner install selection", () => {
           path.join(home, ".cogenly/runtime/versions", VERSION, ".install-complete"),
         ),
       ).toBe(`${VERSION}\n`);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("a Linux archive install provisions the sandbox without corrupting stdout", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const home = yield* makeHome;
+      yield* fs.makeDirectory(path.join(home, "bin"));
+      const uname = path.join(home, "bin/uname");
+      yield* fs.writeFileString(
+        uname,
+        '#!/bin/sh\nif [ "$1" = "-s" ]; then echo Linux; else exec /usr/bin/uname "$@"; fi\n',
+      );
+      yield* fs.chmod(uname, 0o755);
+      const mirror = yield* writeMirror(true).pipe(
+        Effect.provideService(HostProcess.Platform, "linux"),
+      );
+      const cold = yield* runRunner(home, mirror);
+      expect(cold).toMatchObject({ code: 0, stdout: "downloaded-cogenly serve --port 4773" });
+      expect(cold.stderr).toContain("downloaded-cogenly security setup --local");
+      const warm = yield* runRunner(home, mirror);
+      expect(warm).toMatchObject({ code: 0, stdout: "downloaded-cogenly serve --port 4773" });
+      expect(warm.stderr).not.toContain("security setup");
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 

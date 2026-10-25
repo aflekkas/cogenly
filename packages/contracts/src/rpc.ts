@@ -658,6 +658,7 @@ export const WS_METHODS = {
   projectLabelsPreviewMoveToMachine: "projectLabels.previewMoveToMachine",
   machinesAdoptThreads: "machines.adoptThreads",
   machineSecurityStatus: "machines.securityStatus",
+  machineSandboxSetup: "machines.sandboxSetup",
   computerUseStatus: "computerUse.status",
   computerUseRequestPermission: "computerUse.requestPermission",
   // What each paired machine has yet to receive from this one
@@ -2361,6 +2362,11 @@ const WsIntegrationsSubscribeSourcesRpc = Rpc.make(WS_METHODS.integrationsSubscr
 });
 
 const machineErrors = Schema.Union([Machines.MachineError, EnvironmentAuthorizationError]);
+const WsMachineSandboxSetupRpc = Rpc.make(WS_METHODS.machineSandboxSetup, {
+  payload: Schema.Struct({}),
+  success: MachineSecurity.ChatSandboxSetupResult,
+  error: EnvironmentAuthorizationError,
+});
 const WsMachineSecurityStatusRpc = Rpc.make(WS_METHODS.machineSecurityStatus, {
   payload: Schema.Struct({}),
   success: MachineSecurity.MachineSecurityStatus,
@@ -2918,6 +2924,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsIntegrationsInstallRuntimeRpc,
   WsIntegrationsSubscribeSourcesRpc,
   WsMachineSecurityStatusRpc,
+  WsMachineSandboxSetupRpc,
   WsComputerUseStatusRpc,
   WsComputerUseRequestPermissionRpc,
   WsSyncStatusRpc,

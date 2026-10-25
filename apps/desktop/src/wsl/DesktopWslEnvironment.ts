@@ -391,6 +391,10 @@ export const buildWslRuntimeInstallScript = (
     "  printf 'WSL runtime archive does not contain a working cogenly executable\\n' >&2",
     "  exit 1",
     "fi",
+    // Provision through the executable; setup never prompts and leaves stdout for runtimeRoot.
+    'if "$runtime_tmp/cogenly" security setup --help 2>/dev/null | grep -q -- "--local"; then',
+    '  "$runtime_tmp/cogenly" security setup --local </dev/null >&2',
+    "fi",
     // The archive's bytes were verified against archiveSha256 above, so the
     // digest recorded here describes content this install proved. Every later
     // warm reuse checks the entry against it.

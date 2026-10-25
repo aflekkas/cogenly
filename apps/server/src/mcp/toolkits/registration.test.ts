@@ -649,6 +649,7 @@ const smokeCases = [
       "environment_preferences_update",
       "environment_read",
       "machine_health",
+      "machine_health_fix",
       "machine_security_status",
     ],
     tool: "environment_read",

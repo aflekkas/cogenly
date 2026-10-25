@@ -4,6 +4,7 @@
  */
 import {
   AuthOrchestrationReadScope,
+  AuthSettingsWriteScope,
   WS_METHODS,
   type MachineSecurityStatus,
 } from "@cogenly/contracts";
@@ -18,6 +19,7 @@ import * as Schema from "effect/Schema";
 import { Command, Flag, GlobalFlag } from "effect/cli";
 import { FetchHttpClient } from "effect/http";
 
+import * as ReadOnlySandbox from "../terminal/ReadOnlySandbox.ts";
 import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
 import * as ServerConfig from "../config.ts";
 import { readPersistedServerRuntimeState } from "../serverRuntimeState.ts";
@@ -43,8 +45,23 @@ const describeStatus = (status: MachineSecurityStatus): string =>
     ),
   ].join("\n");
 
-const runStatus = (flags: { readonly baseDir: Option.Option<string>; readonly json: boolean }) =>
+const encodeStatusJson = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
+
+const runStatus = (flags: {
+  readonly baseDir: Option.Option<string>;
+  readonly json: boolean;
+  readonly setup?: boolean;
+  readonly local?: boolean;
+}) =>
   Effect.gen(function* () {
+    if (flags.local) {
+      const result = yield* ReadOnlySandbox.ReadOnlySandbox.pipe(
+        Effect.flatMap((sandbox) => sandbox.setup),
+        Effect.provide(ReadOnlySandbox.layer),
+      );
+      yield* Console.log(result.message);
+      return;
+    }
     const config = yield* resolveCliAuthConfig(flags, yield* GlobalFlag.LogLevel);
     const authContext = yield* Layer.build(
       EnvironmentAuth.layerRuntime.pipe(
@@ -61,7 +78,9 @@ const runStatus = (flags: { readonly baseDir: Option.Option<string>; readonly js
       });
     }
     const issued = yield* environmentAuth.issueSession({
-      scopes: [AuthOrchestrationReadScope],
+      scopes: flags.setup
+        ? [AuthOrchestrationReadScope, AuthSettingsWriteScope]
+        : [AuthOrchestrationReadScope],
       label: "cogenly security cli",
     });
     yield* Effect.addFinalizer(() =>
@@ -78,6 +97,11 @@ const runStatus = (flags: { readonly baseDir: Option.Option<string>; readonly js
         Effect.provideContext(authContext),
       ),
     );
+    if (flags.setup) {
+      const result = yield* client[WS_METHODS.machineSandboxSetup]({});
+      yield* Console.log(result.message);
+      return;
+    }
     const status = yield* client[WS_METHODS.machineSecurityStatus]({}).pipe(
       Effect.mapError(
         (cause) =>
@@ -88,11 +112,7 @@ const runStatus = (flags: { readonly baseDir: Option.Option<string>; readonly js
       ),
     );
     yield* Console.log(
-      flags.json
-        ? yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(status).pipe(
-            Effect.orDie,
-          )
-        : describeStatus(status),
+      flags.json ? yield* encodeStatusJson(status).pipe(Effect.orDie) : describeStatus(status),
     );
   }).pipe(Effect.scoped);
 
@@ -107,7 +127,22 @@ const statusCommand = Command.make("status", {
   Command.withHandler((flags) => runStatus(flags)),
 );
 
+const setupCommand = Command.make("setup", {
+  ...projectLocationFlags,
+  local: Flag.Boolean("local").pipe(
+    Flag.withDescription(
+      "Provision this host without connecting to a running server (for installers).",
+    ),
+    Flag.withDefault(false),
+  ),
+}).pipe(
+  Command.withDescription(
+    "Install the Linux chat sandbox using root or passwordless sudo, then re-check confinement.",
+  ),
+  Command.withHandler((flags) => runStatus({ ...flags, json: false, setup: true })),
+);
+
 export const securityCommand = Command.make("security").pipe(
   Command.withDescription("Machine security checks."),
-  Command.withSubcommands([statusCommand]),
+  Command.withSubcommands([statusCommand, setupCommand]),
 );

@@ -44,6 +44,14 @@ afterwards, that directory is not on your `PATH` yet; the installer prints the
 line to add. Set `COGENLY_VERSION` to install an exact version, such as the one
 your desktop app runs. The download is self-contained: the host needs no Node.js.
 
+On Linux, installation, updates, and background service setup also provision the
+chat command sandbox through the distro's `bubblewrap` package. Cogenly uses root
+or passwordless sudo and never asks for a sudo password. Otherwise, it prints the
+command to run, such as `sudo apt-get update && sudo apt-get install -y bubblewrap`
+on Ubuntu/Debian. Run `cogenly security setup` afterwards, or use **Fix** in
+Settings → Machines → Health, to enable chat commands without restarting. macOS
+uses its built-in sandbox and needs no package.
+
 | Task                                  | Command                                                                           |
 | ------------------------------------- | --------------------------------------------------------------------------------- |
 | Start the server and open the web app | `cogenly`                                                                         |

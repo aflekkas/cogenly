@@ -15,6 +15,7 @@ import * as NodeFSP from "node:fs/promises";
 
 import {
   type EnvironmentId,
+  type ChatSandboxSetupResult,
   MachineHealthError,
   type MachineHealthCheck,
   type MachineHealthCheckId,
@@ -54,6 +55,7 @@ import * as SharedSync from "../sync/SharedSync.ts";
 import * as MachineSetup from "../tailscale/MachineSetup.ts";
 import * as TailscaleServeMode from "../tailscale/TailscaleServeMode.ts";
 import * as ThreadSync from "../threadSync/ThreadSync.ts";
+import * as ReadOnlySandbox from "../terminal/ReadOnlySandbox.ts";
 import * as HealthCanary from "./HealthCanary.ts";
 import * as ComputerUseService from "../computerUse/ComputerUseService.ts";
 import {
@@ -63,6 +65,7 @@ import {
   type SyncPeerSample,
   bootServiceCheck,
   computerUseCheck,
+  chatSandboxCheck,
   buildReport,
   databaseCheck,
   directPeers,
@@ -90,6 +93,7 @@ export class MachineHealth extends Context.Service<
   {
     /** This machine's report. Never fails: a check that cannot run is `unknown`. */
     readonly report: Effect.Effect<MachineHealthReport>;
+    readonly setupSandbox: Effect.Effect<ChatSandboxSetupResult>;
     /** This machine, or a paired one read over the peer link. */
     readonly reportFor: (
       input: MachineHealthInput,
@@ -261,6 +265,7 @@ const make = Effect.gen(function* () {
   const launcher = yield* ServiceLauncherClient.ServiceLauncherClient;
   const canary = yield* HealthCanary.HealthCanary;
   const computerUse = yield* ComputerUseService.ComputerUse;
+  const sandbox = yield* ReadOnlySandbox.ReadOnlySandbox;
 
   const freeSpace = yield* Effect.cachedWithTTL(
     Effect.tryPromise(() => NodeFSP.statfs(config.stateDir)).pipe(
@@ -432,6 +437,7 @@ const make = Effect.gen(function* () {
             }),
           ),
         ),
+        Effect.sync(() => chatSandboxCheck(sandbox.status)),
         database,
         guarded("disk", Effect.map(freeSpace, diskCheck)),
         guarded(
@@ -536,7 +542,13 @@ const make = Effect.gen(function* () {
     },
   );
 
-  return MachineHealth.of({ report, reportFor, subscribe, retrySync });
+  return MachineHealth.of({
+    report,
+    reportFor,
+    subscribe,
+    retrySync,
+    setupSandbox: sandbox.setup.pipe(Effect.tap(() => report)),
+  });
 });
 
-export const layer = Layer.effect(MachineHealth, make);
+export const layer = Layer.effect(MachineHealth, make).pipe(Layer.provide(ReadOnlySandbox.layer));

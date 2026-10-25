@@ -12,6 +12,10 @@ import { connectionAtomRuntime } from "../connection/runtime";
  * after every change.
  */
 export const machinesRpc = {
+  sandboxSetup: createEnvironmentRpcCommand(connectionAtomRuntime, {
+    label: "machines:sandboxSetup",
+    tag: "machines.sandboxSetup",
+  }),
   list: createEnvironmentRpcSubscriptionAtomFamily(connectionAtomRuntime, {
     label: "machines:live",
     tag: "machines.subscribe",

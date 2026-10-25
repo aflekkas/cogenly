@@ -106,6 +106,9 @@ export const layer = McpToolAccess.toLayer(EnvironmentToolkit, {
   machine_security_status: McpToolAccess.reads(() =>
     MachineSecurity.MachineSecurity.pipe(Effect.flatMap((security) => security.status)),
   ),
+  machine_health_fix: McpToolAccess.writesEnvironmentAsWork(() =>
+    MachineHealth.MachineHealth.pipe(Effect.flatMap((health) => health.setupSandbox)),
+  ),
   machine_health: McpToolAccess.reads((input) =>
     MachineHealth.MachineHealth.pipe(
       Effect.flatMap((health) => health.reportFor(input)),

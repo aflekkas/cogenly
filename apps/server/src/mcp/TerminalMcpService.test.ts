@@ -50,6 +50,7 @@ it.effect(
       const launches: Array<{ shell: string; args?: string[]; env: NodeJS.ProcessEnv }> = [];
       let sandboxAvailable = true;
       const sandbox = ReadOnlySandbox.ReadOnlySandbox.of({
+        setup: Effect.die("setup is not exercised here"),
         get status() {
           return sandboxAvailable
             ? { available: true as const, backend: "sandbox-exec" as const }

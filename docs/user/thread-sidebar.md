@@ -152,7 +152,15 @@ quick read-only commands, such as searching files, reading git history or queryi
 each command shows in the conversation. It doesn't edit repositories, install
 anything or run long builds from a chat; it hands that work to a task instead.
 Chat commands need full-access mode and the `enableAgentTerminals` preference. They also require a working local sandbox:
-macOS uses `sandbox-exec`; Linux needs `bubblewrap` with user namespaces enabled.
+macOS uses the built-in `sandbox-exec`. On Linux, Cogenly installs the distro's
+`bubblewrap` package during installation, updates, and background service setup
+when running as root or with passwordless sudo. If elevation needs a password,
+it prints the exact command to run. On Ubuntu/Debian:
+`sudo apt-get update && sudo apt-get install -y bubblewrap`.
+Settings → Machines → Health offers **Fix** for a missing or blocked sandbox;
+`cogenly health --fix` and `cogenly security setup` do the same. After installation,
+Cogenly checks confinement again and enables chat commands without a restart.
+Hosts that block user namespaces or seccomp keep chat commands off.
 On Windows or when the sandbox probe fails, commands are unavailable in chats;
 use Work for command-based tasks.
 
