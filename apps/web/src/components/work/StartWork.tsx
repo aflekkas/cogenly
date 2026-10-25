@@ -12,14 +12,14 @@ import {
   WorkHandoffError,
 } from "@cogenly/contracts";
 import { useNavigate } from "@tanstack/react-router";
-import { ChevronLeftIcon, ChevronRightIcon, FolderPlusIcon } from "lucide-react";
+import { ChevronLeftIcon, FolderPlusIcon } from "lucide-react";
 import * as Schema from "effect/Schema";
 import { type ReactElement, type ReactNode, useCallback, useMemo, useRef, useState } from "react";
 import { create } from "zustand";
 
 import { requestLaunchMachine } from "~/machines/LaunchMachineDialog";
 import { openCommandPalette } from "~/commandPaletteBus";
-import { ProjectFolderIcon } from "~/projectLabels/ProjectFolderMark";
+import { ProjectPickerRow } from "~/projectLabels/ProjectPickerRow";
 import {
   type EnvironmentProjectLabel,
   projectLabelsOn,
@@ -28,6 +28,7 @@ import {
 import { linkedRepositoryIcon } from "~/projectLabels/repositoryPicker.logic";
 import {
   ManageRepositoriesRowContent,
+  PickerRowContent,
   ProjectFolderRowIcon,
   RepositoryPickerRow,
   RepositoryRowIcon,
@@ -61,7 +62,6 @@ import {
   ComboboxGroup,
   ComboboxGroupItems,
   ComboboxItem,
-  ComboboxItemIcon,
   ComboboxList,
   ComboboxPopup,
   ComboboxSearchInput,
@@ -564,19 +564,20 @@ export function StartWorkPicker(props: {
             tone={isAdd || item.kind === "all-projects" ? "action" : "default"}
             divider={isAdd}
           >
-            <ComboboxItemIcon>
-              {item.kind === "project" ? (
-                <ProjectFolderIcon project={item.group.project} className="size-4" />
-              ) : item.kind === "all-projects" ? (
-                <ChevronLeftIcon className="size-4" />
-              ) : (
-                <WorkPickerChoiceIcon choice={item.choice} />
-              )}
-            </ComboboxItemIcon>
-            <span className="min-w-0 flex-1 truncate text-sm">{item.label}</span>
             {item.kind === "project" ? (
-              <ChevronRightIcon aria-hidden className="ml-auto size-3.5 shrink-0" />
-            ) : null}
+              <ProjectPickerRow project={item.group.project} label={item.label} submenu />
+            ) : (
+              <PickerRowContent
+                icon={
+                  item.kind === "all-projects" ? (
+                    <ChevronLeftIcon className="size-4" />
+                  ) : (
+                    <WorkPickerChoiceIcon choice={item.choice} />
+                  )
+                }
+                label={item.label}
+              />
+            )}
           </ComboboxItem>
         );
       }

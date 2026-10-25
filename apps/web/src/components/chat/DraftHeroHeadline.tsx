@@ -13,7 +13,6 @@ import {
 import { scopedProjectKey, scopeProjectRef } from "@cogenly/client-runtime/environment";
 import { isScratchProject } from "@cogenly/client-runtime/state/projects";
 import { useNavigate } from "@tanstack/react-router";
-import { CheckIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useNewThreadHandler } from "~/hooks/useHandleNewThread";
@@ -54,6 +53,7 @@ import {
 import { ComposerProjectPicker } from "~/projectLabels/ComposerProjectPicker";
 import {
   ManageRepositoriesRowContent,
+  PickerRowContent,
   ProjectFolderRowIcon,
   RepositoryRowIcon,
 } from "~/projectLabels/RepositorySourceRows";
@@ -80,7 +80,6 @@ import {
   ComboboxGroup,
   ComboboxGroupItems,
   ComboboxItem,
-  ComboboxItemIcon,
   ComboboxList,
   ComboboxPopup,
   ComboboxSearchInput,
@@ -591,11 +590,11 @@ export function DraftHeroHeadline({
     if (item.kind === "no-repository") {
       return (
         <ComboboxItem key={item.value} hideIndicator value={item}>
-          <ComboboxItemIcon>
-            <ProjectFolderRowIcon />
-          </ComboboxItemIcon>
-          <span className="min-w-0 flex-1 truncate text-sm">{item.label}</span>
-          {heroLine.projectFolderRow === "selected" ? <CheckIcon className="ml-auto" /> : null}
+          <PickerRowContent
+            icon={<ProjectFolderRowIcon />}
+            label={item.label}
+            chosen={heroLine.projectFolderRow === "selected"}
+          />
         </ComboboxItem>
       );
     }
