@@ -344,7 +344,7 @@ import { TimelineSystemDivider } from "./TimelineSystemDivider";
 import {
   isWorkHandoffThread,
   WorkHandoffMarkersAfterRow,
-  workNotificationLabel,
+  WorkReportCard,
 } from "../work/WorkHandoffMarkers";
 
 import { SkillChipIcon, SkillInlineText } from "./SkillInlineText";
@@ -6190,8 +6190,8 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
   const notifiedSubagentThreadId = notification
     ? notificationChildThreadId(notification.source)
     : undefined;
-  // A Work session this chat handed off reports back as Work, matching its
-  // "Continued in Work" row, not as a subagent.
+  // A Work session this chat handed off reports back as Work, on the
+  // "Handed off to Work" card's look, not as a subagent.
   const notifiedThread = useThreadShell(
     notifiedSubagentThreadId
       ? scopeThreadRef(ctx.activeThreadEnvironmentId, notifiedSubagentThreadId)
@@ -6214,6 +6214,24 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
     }
     setExpanded(next);
   };
+  if (notifiedWork && notification && notifiedThread && notifiedSubagentThreadId) {
+    return (
+      <div
+        data-v2-item-type="notification"
+        data-v2-item-visibility={workEntry.projectedItem?.visibility}
+        className="py-1"
+      >
+        <WorkReportCard
+          entryId={workEntry.id}
+          createdAt={workEntry.createdAt}
+          threadId={notifiedSubagentThreadId}
+          title={notifiedThread.title}
+          outcome={notification.outcome}
+          onOpenThread={ctx.onOpenThread}
+        />
+      </div>
+    );
+  }
   const failureItem = workEntry.projectedItem?.item;
   if (failureItem?.type === "error" && failureItem.status === "failed") {
     const warning = failureItem.failure.class === "usage_limit";
@@ -6300,9 +6318,7 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
       ? workEntry.toolLifecycleStatus === "inProgress"
         ? "Thinking"
         : "Thought"
-      : notifiedWork && notification && notifiedThread
-        ? workNotificationLabel(notifiedThread.title, notification.outcome)
-        : questionHeading || (displayLabel ?? workEntryLabel(workEntry));
+      : questionHeading || (displayLabel ?? workEntryLabel(workEntry));
   const answerPreview =
     workEntry.questionAnswer && hasQuestionAnswer(workEntry.questionAnswer)
       ? getQuestionAnswerPreview(workEntry.questionAnswer)
@@ -6433,16 +6449,12 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
           role={showFailedIndicator ? "img" : undefined}
           aria-label={showFailedIndicator ? "Tool call failed" : undefined}
         >
-          {notifiedWork ? (
-            <HammerIcon aria-hidden className="block size-4 shrink-0 text-icon-muted" />
-          ) : (
-            <ToolActivityIconView
-              icon={entryToolIcon}
-              fallbackName={entryIconName}
-              className={cn("block shrink-0 stroke-2", quietNotice ? "size-3.5" : "size-4")}
-              muted
-            />
-          )}
+          <ToolActivityIconView
+            icon={entryToolIcon}
+            fallbackName={entryIconName}
+            className={cn("block shrink-0 stroke-2", quietNotice ? "size-3.5" : "size-4")}
+            muted
+          />
         </span>
       }
       label={
@@ -6525,14 +6537,14 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
           ) : null}
           {notifiedSubagentThreadId ? (
             <InlineButton
-              aria-label={notifiedWork ? "Open Work" : "Open subagent thread"}
+              aria-label="Open subagent thread"
               onClick={(event) => {
                 event.stopPropagation();
                 ctx.onOpenThread(notifiedSubagentThreadId);
               }}
               onKeyDown={stopRowToggle}
             >
-              {notifiedWork ? "Open Work" : "Open subagent"}
+              Open subagent
             </InlineButton>
           ) : null}
           {showFailedIndicator &&

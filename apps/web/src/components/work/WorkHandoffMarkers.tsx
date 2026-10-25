@@ -8,22 +8,23 @@ import type {
   WorkHandoffLink,
   WorkTask,
 } from "@t3tools/contracts";
-import { CheckIcon, CircleAlertIcon, CircleSlashIcon, HammerIcon } from "lucide-react";
-import { createContext, use, useMemo, type ReactNode } from "react";
+import { ChevronRightIcon, GitBranchIcon, HammerIcon } from "lucide-react";
+import { createContext, use, useMemo, useState, type ReactNode } from "react";
 
+import { cn } from "~/lib/utils";
 import { useProjects, useServerConfigs, useThreadShell } from "~/state/entities";
 import type { MessagesTimelineRow } from "../chat/MessagesTimeline.logic";
 import { resolveThreadOrigin } from "../chat/threadLineage.logic";
-import { WorkLogRow } from "../chat/WorkLog";
 import { ProjectFavicon } from "../ProjectFavicon";
-import { InlineButton } from "../ui/button";
-import { Spinner } from "../ui/spinner";
+import { BadgeDot, type BadgeDotTone } from "../ui/badge-dot";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
   deriveWorkHandoffStatus,
+  workNotificationStatus,
   type WorkHandoffAnchors,
   type WorkHandoffStatus,
 } from "./work.logic";
-import { WorkTaskCard } from "./WorkTaskCard";
+import { changeFade, useChangedSinceMount, WorkTaskCard } from "./WorkTaskCard";
 import type { WorkTaskAnchors } from "./workTask.logic";
 
 interface WorkHandoffMarkersState {
@@ -127,7 +128,7 @@ function WorkHandoffMarkerList(props: {
   readonly state: WorkHandoffMarkersState;
 }) {
   return (
-    <div className="pt-1">
+    <div className="flex flex-col gap-2 pt-3">
       {props.links.map((link) => (
         <WorkHandoffMarker
           key={link.threadId}
@@ -152,26 +153,34 @@ export function formatWorkHandoffSourceDetail(
   return `${title} · ${messagesCarried} ${messagesCarried === 1 ? "message" : "messages"}`;
 }
 
-const STATUS_LABEL: Record<WorkHandoffStatus, string> = {
-  running: "Running",
-  attention: "Needs attention",
-  done: "Done",
-  stopped: "Stopped",
+/** The status dot's colour and the words for it, in the subagent rows' language. */
+const STATUS_VISUAL: Record<
+  WorkHandoffStatus,
+  { readonly tone: BadgeDotTone; readonly label: string; readonly className?: string }
+> = {
+  running: { tone: "info", label: "Running" },
+  waiting: { tone: "warning", label: "Waiting for you", className: "text-warning-foreground" },
+  done: { tone: "success", label: "Done" },
+  failed: { tone: "destructive", label: "Failed", className: "text-destructive" },
+  stopped: { tone: "muted", label: "Stopped" },
 };
 
-function WorkHandoffStatusIcon({ status }: { readonly status: WorkHandoffStatus | null }) {
-  switch (status) {
-    case "running":
-      return <Spinner size="xs" tone="muted" aria-hidden />;
-    case "attention":
-      return <CircleAlertIcon aria-hidden className="size-3 shrink-0 text-warning" />;
-    case "done":
-      return <CheckIcon aria-hidden className="size-3 shrink-0 text-success" />;
-    case "stopped":
-      return <CircleSlashIcon aria-hidden className="size-3 shrink-0 text-muted-foreground" />;
-    case null:
-      return null;
-  }
+/** The Work agent's avatar: its mark on a round tile, with the status dot in the corner. */
+function WorkAvatar({ status }: { readonly status: WorkHandoffStatus | null }) {
+  return (
+    <span
+      aria-hidden
+      className="relative inline-flex size-7 shrink-0 items-center justify-center rounded-full border border-border/70 bg-muted"
+    >
+      <HammerIcon className="size-3.5 text-secondary-label" />
+      <BadgeDot
+        tone={status ? STATUS_VISUAL[status].tone : null}
+        size="md"
+        ring="background"
+        className="absolute -right-px -bottom-px"
+      />
+    </span>
+  );
 }
 
 /** Whether a thread is a Work session handed off from a chat or an agent conversation. */
@@ -180,27 +189,49 @@ export function isWorkHandoffThread(source: Parameters<typeof resolveThreadOrigi
   return origin?.kind === "chat" || origin?.kind === "agent-conversation";
 }
 
-const NOTIFICATION_OUTCOME_VERB: Record<OrchestrationV2Notification["outcome"], string> = {
-  completed: "finished",
-  failed: "failed",
-  cancelled: "stopped",
-  updated: "updated",
-  unknown: "finished",
-};
+/** Report ids already shown, so history and virtualized remounts never replay the fade. */
+const shownWorkReportIds = new Set<string>();
+const WORK_REPORT_ENTER_WINDOW_MS = 10_000;
 
-/** The chat's note that a Work session it handed off reported back, e.g. `Work "X" finished`. */
-export function workNotificationLabel(
-  title: string,
-  outcome: OrchestrationV2Notification["outcome"],
-): string {
-  return `Work "${title}" ${NOTIFICATION_OUTCOME_VERB[outcome]}`;
+/**
+ * A Work session this chat handed off reporting back, drawn as the handoff
+ * card's final state: "Work reported back" with the status it reported then
+ * and the session's title. The task or handoff card higher up keeps the live
+ * state and the repository, so this card leaves them out. The whole card opens
+ * the session. Only a report that just arrived fades in.
+ */
+export function WorkReportCard(props: {
+  readonly entryId: string;
+  readonly createdAt: string;
+  readonly threadId: ThreadId;
+  readonly title: string;
+  readonly outcome: OrchestrationV2Notification["outcome"];
+  readonly onOpenThread: (threadId: ThreadId) => void;
+}) {
+  const [entering] = useState(() => {
+    if (shownWorkReportIds.has(props.entryId)) return false;
+    shownWorkReportIds.add(props.entryId);
+    return Date.now() - Date.parse(props.createdAt) < WORK_REPORT_ENTER_WINDOW_MS;
+  });
+  const status = workNotificationStatus(props.outcome);
+  return (
+    <WorkHandoffCardFrame
+      threadId={props.threadId}
+      title={props.title}
+      status={status}
+      onOpenThread={props.onOpenThread}
+      className={entering ? "swap-motion" : undefined}
+    >
+      <WorkHandoffCardContent heading="Work reported back" status={status} title={props.title} />
+    </WorkHandoffCardFrame>
+  );
 }
 
 /**
- * The timeline row that says this chat continued as a Work session here: the
- * session's live title, its repository and status, drawn like every other
- * timeline event. "Open Work" opens it; the Work thread links back with
- * "From chat".
+ * The card that says this chat handed work off to a Work session here, drawn
+ * like a subagent: the Work avatar with its status dot, the session's live
+ * title, and its repository and branch. The whole card opens the session; the
+ * Work thread links back with "From chat".
  */
 function WorkHandoffMarker(props: {
   readonly environmentId: EnvironmentId;
@@ -226,49 +257,122 @@ function WorkHandoffMarker(props: {
       : project;
   const status = thread ? deriveWorkHandoffStatus(thread) : null;
   const title = thread?.title || link.title;
-  const repositoryLabel = repository?.title ?? "No repository";
+  const branch = repository ? thread?.branch : null;
 
   return (
-    <WorkLogRow
-      data-work-handoff=""
-      icon={<HammerIcon aria-hidden className="size-4 text-icon-muted" />}
-      label={
-        <span className="flex min-w-0 items-center gap-1.5">
-          <span className="shrink-0">Continued in Work</span>
-          <span aria-hidden className="shrink-0">
-            ·
-          </span>
-          {status ? (
-            // Keyed by status: a Work finishing fades its new icon in place.
-            <span
-              key={status}
-              role="img"
-              aria-label={STATUS_LABEL[status]}
-              className="flex shrink-0 items-center swap-motion"
-            >
-              <WorkHandoffStatusIcon status={status} />
-            </span>
+    <WorkHandoffCardFrame
+      threadId={link.threadId}
+      title={title}
+      status={status}
+      onOpenThread={props.onOpenThread}
+    >
+      <WorkHandoffCardContent
+        heading="Handed off to Work"
+        status={status}
+        title={title}
+        location={{
+          repository,
+          label: repository?.title ?? "No repository",
+          branch: branch ?? null,
+        }}
+      />
+    </WorkHandoffCardFrame>
+  );
+}
+
+/** The handoff card's frame: the whole card is the button that opens the Work session. */
+function WorkHandoffCardFrame(props: {
+  readonly threadId: ThreadId;
+  readonly title: string;
+  readonly status: WorkHandoffStatus | null;
+  readonly onOpenThread: (threadId: ThreadId) => void;
+  readonly className?: string | undefined;
+  readonly children: ReactNode;
+}) {
+  const { threadId, title, status } = props;
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        delay={300}
+        render={
+          <button
+            type="button"
+            data-work-handoff=""
+            aria-label={`Open Work: ${title}`}
+            aria-description={status ? STATUS_VISUAL[status].label : undefined}
+            onClick={() => props.onOpenThread(threadId)}
+            className={cn(
+              "group/work-handoff flex w-full min-w-0 cursor-pointer items-center gap-2.5 rounded-xl border border-border bg-background px-3 py-2 text-left state-hover state-fade focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70",
+              props.className,
+            )}
+          />
+        }
+      >
+        {props.children}
+      </TooltipTrigger>
+      <TooltipPopup side="top">{title}</TooltipPopup>
+    </Tooltip>
+  );
+}
+
+function WorkHandoffCardContent(props: {
+  readonly heading: string;
+  readonly status: WorkHandoffStatus | null;
+  readonly title: string;
+  /** The repository and branch line; left out where a card above already shows it. */
+  readonly location?: {
+    readonly repository: Parameters<typeof ProjectFavicon>[0]["project"] | null;
+    readonly label: string;
+    readonly branch: string | null;
+  };
+}) {
+  const { status, title, location } = props;
+  const statusChanged = useChangedSinceMount(status);
+  const visual = status ? STATUS_VISUAL[status] : null;
+  return (
+    <>
+      <WorkAvatar status={status} />
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="flex min-w-0 items-center gap-1.5 text-2xs text-muted-foreground">
+          <span className="shrink-0">{props.heading}</span>
+          {visual ? (
+            <>
+              <span aria-hidden className="shrink-0">
+                ·
+              </span>
+              {/* Keyed so a live status change fades the new label in; history paints still. */}
+              <span
+                key={status}
+                className={cn("min-w-0 truncate", visual.className, statusChanged && changeFade)}
+              >
+                {visual.label}
+              </span>
+            </>
           ) : null}
-          <span className="min-w-0 truncate font-medium text-foreground/80">{title}</span>
-          <span aria-hidden className="shrink-0">
-            ·
-          </span>
-          <span className="flex min-w-0 shrink-[2] items-center gap-1 text-muted-foreground">
-            {repository ? (
-              <ProjectFavicon project={repository} className="size-3.5 shrink-0" />
-            ) : null}
-            <span className="min-w-0 truncate">{repositoryLabel}</span>
-          </span>
         </span>
-      }
-      trailing={
-        <InlineButton
-          aria-label={`Open Work: ${title}`}
-          onClick={() => props.onOpenThread(link.threadId)}
-        >
-          Open Work
-        </InlineButton>
-      }
-    />
+        <span className="min-w-0 truncate text-sm font-medium text-foreground">{title}</span>
+        {location ? (
+          <span className="flex min-w-0 items-center gap-1 text-2xs text-muted-foreground">
+            {location.repository ? (
+              <ProjectFavicon project={location.repository} className="size-3 shrink-0" />
+            ) : null}
+            <span className="min-w-0 truncate">{location.label}</span>
+            {location.branch ? (
+              <>
+                <GitBranchIcon aria-hidden className="ms-1 size-3 shrink-0" />
+                <span className="min-w-0 shrink-[2] truncate">{location.branch}</span>
+              </>
+            ) : null}
+          </span>
+        ) : null}
+      </span>
+      <span
+        aria-hidden
+        className="flex shrink-0 items-center gap-0.5 text-2xs text-muted-foreground transition-colors duration-(--motion-duration-fast) ease-out group-hover/work-handoff:text-foreground"
+      >
+        Open
+        <ChevronRightIcon className="size-3.5" />
+      </span>
+    </>
   );
 }

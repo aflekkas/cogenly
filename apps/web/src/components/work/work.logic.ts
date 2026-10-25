@@ -1,6 +1,7 @@
 import type {
   EnvironmentId,
   MessageId,
+  OrchestrationV2Notification,
   ProjectId,
   RunId,
   ThreadEnvMode,
@@ -315,12 +316,13 @@ export function anchorAtTurnEnd(
   );
 }
 
-export type WorkHandoffStatus = "running" | "attention" | "done" | "stopped";
+export type WorkHandoffStatus = "running" | "waiting" | "done" | "failed" | "stopped";
 
 /**
- * A Work session's state as its chat's handoff marker shows it, from the
- * thread shell alone so a marker never loads the Work thread's history.
- * Null when it has not started a run yet.
+ * A Work session's state as its chat's handoff card shows it, from the
+ * thread shell alone so a card never loads the Work thread's history.
+ * `waiting` means it waits on the user (an approval or an answer). Null when
+ * it has not started a run yet.
  */
 export function deriveWorkHandoffStatus(thread: {
   readonly latestRun: { readonly status: string } | null;
@@ -331,7 +333,7 @@ export function deriveWorkHandoffStatus(thread: {
   readonly settledOverride: "settled" | "active" | null;
   readonly settledAt: string | null;
 }): WorkHandoffStatus | null {
-  if (thread.hasPendingApprovals || thread.hasPendingUserInput) return "attention";
+  if (thread.hasPendingApprovals || thread.hasPendingUserInput) return "waiting";
   const runtimeStatus = thread.runtime?.status;
   if (
     runtimeStatus === "preparing" ||
@@ -355,12 +357,33 @@ export function deriveWorkHandoffStatus(thread: {
     case "completed":
       return "done";
     case "failed":
-      return "attention";
+      return "failed";
     case "interrupted":
     case "cancelled":
     case "rolled_back":
       return "stopped";
     default:
       return "running";
+  }
+}
+
+/**
+ * The status a Work session reported back to its chat with, as that chat's
+ * notification card shows it: the state then, not now. A delegated session
+ * reports `updated` when it has a question for the user.
+ */
+export function workNotificationStatus(
+  outcome: OrchestrationV2Notification["outcome"],
+): WorkHandoffStatus {
+  switch (outcome) {
+    case "failed":
+      return "failed";
+    case "cancelled":
+      return "stopped";
+    case "updated":
+      return "waiting";
+    case "completed":
+    case "unknown":
+      return "done";
   }
 }
