@@ -86,6 +86,7 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
     readonly clone?: (remote: string) => Effect.Effect<string>;
   },
   realFiling = false,
+  lifecycle?: { readonly afterLaunch?: () => Effect.Effect<void> },
 ) {
   const machine = yield* startMachine(name, role);
   const database = Layer.succeed(SqlClient.SqlClient, yield* machine.run(SqlClient.SqlClient));
@@ -167,6 +168,7 @@ export const startThreadMachine = Effect.fn("startThreadMachine")(function* (
               createdBy: input.createdBy,
               creationSource: input.creationSource,
             });
+          yield* lifecycle?.afterLaunch?.() ?? Effect.void;
           return {
             threadId: id,
             projection: yield* projections.getThreadProjection(id),

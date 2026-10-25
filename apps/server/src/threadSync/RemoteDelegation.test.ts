@@ -8,7 +8,7 @@ import * as ServerConfig from "../config.ts";
 import { pair } from "../machines/testkit.ts";
 import { startThreadMachine } from "./testkit.ts";
 
-it.live.each(["complete", "cancel", "limit"] as const)(
+it.live.each(["complete", "cancel", "limit", "stopping", "attach-refused"] as const)(
   "remote delegation: %s, owner execution, replicated results, parent wake and idempotent retry",
   (outcome) =>
     Effect.gen(function* () {
@@ -19,12 +19,16 @@ it.live.each(["complete", "cancel", "limit"] as const)(
         undefined,
         true,
       );
+      let afterLaunch: Effect.Effect<void> = Effect.void;
       const laptop = yield* startThreadMachine(
         "delegate-laptop",
         "computer",
         () => [],
         undefined,
         true,
+        undefined,
+        false,
+        { afterLaunch: () => afterLaunch },
       );
       yield* pair(hub, laptop);
       const parent = Option.getOrThrow(hub.engine);
@@ -87,6 +91,35 @@ it.live.each(["complete", "cancel", "limit"] as const)(
         createdBy: "agent" as const,
         creationSource: "mcp" as const,
       };
+      if (outcome === "stopping") {
+        yield* parent.dispatch({
+          type: "run.interrupt",
+          commandId: CommandId.make("interrupt-before-delegate"),
+          threadId: parentId,
+          runId: run.id,
+        });
+        yield* parent.dispatch(request).pipe(Effect.flip);
+        expect(laptop.launched).toHaveLength(0);
+        return;
+      }
+      if (outcome === "attach-refused") {
+        afterLaunch = parent
+          .dispatch({
+            type: "thread.stop",
+            commandId: CommandId.make("stop-before-attach"),
+            threadId: parentId,
+          })
+          .pipe(Effect.asVoid, Effect.orDie);
+        yield* parent.dispatch(request).pipe(Effect.flip);
+        const child = yield* Option.getOrThrow(laptop.engine).getThreadProjection(
+          laptop.launched[0]!.threadId!,
+        );
+        expect(child.runs.every((run) => ["interrupted", "cancelled"].includes(run.status))).toBe(
+          true,
+        );
+        expect((yield* parent.getThreadProjection(parentId)).subagents).toHaveLength(0);
+        return;
+      }
       const accepted = yield* parent.dispatch(request);
       const task = accepted.storedEvents.find((row) => row.event.type === "subagent.updated")!;
       if (task.event.type !== "subagent.updated") return yield* Effect.die("Missing task");

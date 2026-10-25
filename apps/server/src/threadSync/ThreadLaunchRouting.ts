@@ -420,8 +420,29 @@ const make = Effect.gen(function* () {
               }),
           ),
         );
+      const childThreadId = derive.delegatedTaskThread({ commandId: command.commandId });
       const attach = (driver: import("@cogenly/contracts").ProviderDriverKind) =>
         threads.dispatch({ ...local, type: "delegated_task.attach", driver }).pipe(
+          Effect.tapError((error) =>
+            error._tag === "OrchestratorDispatchError" ||
+            error._tag === "OrchestratorCommandRejectedError" ||
+            error._tag === "ThreadManagementProviderInstanceDisabledError"
+              ? threads
+                  .dispatch({
+                    type: "thread.stop",
+                    commandId: CommandId.make(`${command.commandId}:abandon-child`),
+                    threadId: childThreadId,
+                  })
+                  .pipe(
+                    Effect.catchCause((cause) =>
+                      Effect.logWarning(
+                        "Failed to stop a remote child after its parent refused attachment",
+                        { childThreadId, cause },
+                      ),
+                    ),
+                  )
+              : Effect.void,
+          ),
           Effect.mapError(
             () =>
               new ThreadRemoteError({
@@ -431,7 +452,6 @@ const make = Effect.gen(function* () {
               }),
           ),
         );
-      const childThreadId = derive.delegatedTaskThread({ commandId: command.commandId });
       if (yield* threads.hasReceipt(command.commandId)) {
         const child = yield* projections.getThreadProjection(childThreadId).pipe(Effect.orDie);
         return yield* attach(child.providerThreads[0]!.driver);

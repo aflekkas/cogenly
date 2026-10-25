@@ -67,6 +67,7 @@ import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Hex from "effect/encoding/Hex";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -582,6 +583,8 @@ export function resolveInteractionMode(
 function stablePart(value: string): string {
   return encodeURIComponent(value);
 }
+
+const encodeRemoteDelegationIdentity = Schema.encodeEffect(Schema.fromJsonString(Schema.Json));
 
 function stableCommandId(input: {
   readonly scope: McpInvocationScope;
@@ -2196,7 +2199,32 @@ const make = Effect.gen(function* () {
         // accepted delegation can be recognized: dispatching under the same
         // command id only replays the recorded result, so candidate
         // selection must not refuse it over the project's current settings.
-        const key = yield* requestKey(input.clientRequestId);
+        // A lost remote launch reply must retry the same child. Within one owner
+        // run, identical unnamed remote requests represent that same delegation.
+        const remoteRequestKey =
+          machine === undefined
+            ? undefined
+            : yield* Effect.gen(function* () {
+                const identity = yield* encodeRemoteDelegationIdentity([
+                  parentRun.id,
+                  machine,
+                  taskPrompt(input),
+                  input.title ?? null,
+                  input.target?.providerInstanceId ?? null,
+                  input.target?.driverKind ?? null,
+                  input.target?.model ?? null,
+                  input.target?.options
+                    ?.toSorted((a, b) => a.id.localeCompare(b.id))
+                    .map((option) => ({ id: option.id, value: option.value })) ?? null,
+                  input.runtimeMode ?? null,
+                  input.interactionMode ?? null,
+                  input.isolation ?? null,
+                ]);
+                return yield* crypto
+                  .digest("SHA-256", new TextEncoder().encode(identity))
+                  .pipe(Effect.map(Hex.encode));
+              }).pipe(Effect.orDie);
+        const key = yield* requestKey(input.clientRequestId ?? remoteRequestKey);
         const commandId = stableCommandId({
           scope,
           requestKey: key,

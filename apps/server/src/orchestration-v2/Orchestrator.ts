@@ -12597,6 +12597,19 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             reason: "offline",
             detail: "Machine delegation is unavailable. Omit machine to run here.",
           });
+        const receipt = yield* commandReceipts
+          .getByCommandId(command.commandId)
+          .pipe(mapDispatchError(command));
+        if (
+          Option.isNone(receipt) &&
+          (yield* stopReachedRun(command, command.parentThreadId, command.parentRunId))
+        ) {
+          return yield* new OrchestratorDispatchError({
+            commandId: command.commandId,
+            commandType: command.type,
+            cause: `Parent run ${command.parentRunId} is stopping.`,
+          });
+        }
         return yield* remoteLaunch.value.delegate(command);
       }
       const dispatch = threadDispatch.withLock(
