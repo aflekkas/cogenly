@@ -170,6 +170,25 @@ const make = Effect.gen(function* () {
                 ? {}
                 : { modelSelection: startInput.modelSelection ?? proposed.modelSelection }),
             };
+      if (input.machine === undefined && input.projectFolderId != null)
+        yield* launches
+          .validateProjectRepository({
+            projectId: input.targetProjectId,
+            projectFolderId: input.projectFolderId,
+          })
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new WorkHandoffError({
+                  sourceThreadId: input.sourceThreadId,
+                  stage: "resolve-project",
+                  ...(cause._tag === "ProjectRepositoryMismatchError"
+                    ? { repositoryMismatch: cause }
+                    : {}),
+                  cause,
+                }),
+            ),
+          );
       const task: WorkTask | undefined =
         newTask ??
         (proposed === undefined
@@ -249,6 +268,7 @@ const make = Effect.gen(function* () {
           ...(input.machine === undefined ? {} : { machine: input.machine }),
           ...(actor?.threadId === undefined ? {} : { threadId: actor.threadId }),
           projectId: input.targetProjectId,
+          ...(input.projectFolderId == null ? {} : { projectFolderId: input.projectFolderId }),
           title: input.title ?? source.thread.title,
           ...(input.title === undefined ? { generateTitle: true } : {}),
           surface: "work" as const,
@@ -280,6 +300,9 @@ const make = Effect.gen(function* () {
               new WorkHandoffError({
                 sourceThreadId: input.sourceThreadId,
                 stage: "launch",
+                ...(cause._tag === "ProjectRepositoryMismatchError"
+                  ? { repositoryMismatch: cause }
+                  : {}),
                 machineOffline: Launch.remoteLaunchFailure(cause)?.reason === "offline",
                 cause,
               }),

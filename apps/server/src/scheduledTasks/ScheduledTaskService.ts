@@ -1,3 +1,5 @@
+import { userFacingDispatchErrorMessage } from "../orchestration-v2/UserFacingErrors.ts";
+import * as Membership from "../projectLabels/ProjectRepositoryMembership.ts";
 import * as SharedState from "../sync/SharedState.ts";
 import type { EnvironmentId } from "@cogenly/contracts";
 import * as Access from "../agents/AgentAccessScope.ts";
@@ -207,6 +209,7 @@ interface ScheduledTaskRow {
   readonly enabled: number;
   readonly schedule_json: string;
   readonly project_id: string;
+  readonly project_folder_id: string | null;
   readonly thread_id: string | null;
   readonly workspace_strategy_json: string;
   readonly model_selection_json: string;
@@ -318,7 +321,8 @@ function nextRunAt(
 }
 
 function errorMessage(error: unknown): string {
-  if (Cause.isCause(error)) return Cause.pretty(error);
+  if (Cause.isCause(error))
+    return userFacingDispatchErrorMessage(Cause.squash(error)) ?? Cause.pretty(error);
   if (error instanceof Error) return error.message;
   return String(error);
 }
@@ -358,6 +362,7 @@ const decodeRow = (row: ScheduledTaskRow, origin: WebhookOrigin | null = null) =
       enabled: row.enabled === 1,
       schedule,
       projectId: row.project_id,
+      projectFolderId: row.project_folder_id,
       threadId: row.thread_id,
       workspaceStrategy,
       modelSelection,
@@ -436,6 +441,7 @@ export const layer = Layer.effect(
     const threadLaunch = yield* ThreadLaunchService.ThreadLaunchService;
     const remoteLaunch = yield* Effect.serviceOption(RemoteLaunch.RemoteThreadLaunch);
     const threadManagement = yield* ThreadManagementService.ThreadManagementService;
+    const membership = yield* Membership.ProjectRepositoryMembership;
     const secretRequests = yield* SecretRequests.SecretRequests;
     const scheduler = yield* Scheduler.Scheduler;
     const readWebhookOrigin = yield* ScheduledTaskWebhookOrigin;
@@ -467,6 +473,7 @@ export const layer = Layer.effect(
         enabled,
         schedule_json,
         project_id,
+        project_folder_id,
         thread_id,
         workspace_strategy_json,
         model_selection_json,
@@ -505,6 +512,7 @@ export const layer = Layer.effect(
         enabled,
         schedule_json,
         project_id,
+        project_folder_id,
         thread_id,
         workspace_strategy_json,
         model_selection_json,
@@ -588,6 +596,7 @@ export const layer = Layer.effect(
           enabled,
           schedule_json,
           project_id,
+        project_folder_id,
           thread_id,
           workspace_strategy_json,
           model_selection_json,
@@ -615,6 +624,7 @@ export const layer = Layer.effect(
           ${task.enabled ? 1 : 0},
           ${JSON.stringify(task.schedule)},
           ${task.projectId},
+          ${task.projectFolderId ?? null},
           ${task.threadId},
           ${JSON.stringify(task.workspaceStrategy)},
           ${JSON.stringify(task.modelSelection)},
@@ -643,6 +653,7 @@ export const layer = Layer.effect(
           enabled = excluded.enabled,
           schedule_json = excluded.schedule_json,
           project_id = excluded.project_id,
+          project_folder_id = excluded.project_folder_id,
           thread_id = excluded.thread_id,
           workspace_strategy_json = excluded.workspace_strategy_json,
           model_selection_json = excluded.model_selection_json,
@@ -902,6 +913,9 @@ export const layer = Layer.effect(
                     commandId,
                     ...(active.machine == null ? {} : { machine: active.machine }),
                     projectId: active.projectId,
+                    ...(active.projectFolderId == null
+                      ? {}
+                      : { projectFolderId: active.projectFolderId }),
                     title: active.title,
                     modelSelection: active.modelSelection,
                     runtimeMode: enforceRuntimeMode(active.runtimeMode),
@@ -1256,6 +1270,10 @@ export const layer = Layer.effect(
           enabled: input.enabled,
           schedule,
           projectId: input.projectId,
+          projectFolderId:
+            input.projectFolderId === undefined
+              ? (existingTask?.projectFolderId ?? null)
+              : input.projectFolderId,
           threadId: input.threadId ?? null,
           workspaceStrategy: input.workspaceStrategy,
           modelSelection: input.modelSelection,
@@ -1273,6 +1291,13 @@ export const layer = Layer.effect(
           lastRunError: existingTask?.lastRunError ?? null,
           runCount: existingTask?.runCount ?? 0,
         };
+        yield* membership
+          .validate({
+            projectId: explicitAgent?.projectId ?? boundAgent?.projectId ?? task.projectId,
+            projectFolderId:
+              task.projectFolderId ?? explicitAgent?.projectFolderId ?? boundAgent?.projectFolderId,
+          })
+          .pipe(Effect.mapError((cause) => taskError(cause.message, { taskId: id, cause })));
         if (task.machine != null && (task.threadId !== null || task.agentId != null))
           return yield* taskError(
             "machine selects where a fresh thread runs; omit it for a bound thread or agent trigger.",
@@ -1969,4 +1994,8 @@ export const layer = Layer.effect(
       triggerWebhook,
     });
   }),
-).pipe(Layer.provide(Access.layer), Layer.provide(SharedState.layer));
+).pipe(
+  Layer.provide(Access.layer),
+  Layer.provide(SharedState.layer),
+  Layer.provide(Membership.layer),
+);

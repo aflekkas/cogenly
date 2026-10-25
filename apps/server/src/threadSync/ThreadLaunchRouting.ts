@@ -1,3 +1,4 @@
+import * as Membership from "../projectLabels/ProjectRepositoryMembership.ts";
 /**
  * ThreadLaunchRouting: starting a new thread on another paired machine. The
  * caller sends a portable launch over `threads.launch.v1` (through the hub
@@ -14,7 +15,7 @@ import {
   isRemoteRepositoryPlaceholder,
   type MachineListResult,
   type PeerCallError,
-  type ProjectId,
+  ProjectId,
   ProjectLabelId,
   REMOTE_REPOSITORY_ID_PREFIX,
   SharedRepositoryRemote,
@@ -103,6 +104,7 @@ const make = Effect.gen(function* () {
   const sharedSync = yield* SharedSync.SharedSync;
   const folders = yield* ManagedProjectFolders.ManagedProjectFolders;
   const sql = yield* SqlClient.SqlClient;
+  const membership = yield* Membership.ProjectRepositoryMembership;
   const context = yield* Effect.context<
     | SqlClient.SqlClient
     | Git.GitVcsDriver
@@ -271,6 +273,13 @@ const make = Effect.gen(function* () {
         reason: "needs-repository",
         detail: `This repository has no remote ${targetName} could clone. Launch on this machine instead.`,
       });
+    yield* membership
+      .validate({ ...input, repositoryRemote: remote })
+      .pipe(
+        Effect.mapError(
+          (cause) => new ThreadRemoteError({ reason: "rejected", detail: cause.message }),
+        ),
+      );
     const labelId = yield* linkingProject(remote, input.projectFolderId);
     return {
       kind: "repository",
@@ -521,7 +530,13 @@ const make = Effect.gen(function* () {
             detail:
               "Choose a repository root or new worktree for a schedule owned by another machine.",
           });
-        const project = yield* portableProject({ projectId: input.projectId }, nameOf(view, owner));
+        const project = yield* portableProject(
+          {
+            projectId: input.projectId,
+            ...(input.projectFolderId == null ? {} : { projectFolderId: input.projectFolderId }),
+          },
+          nameOf(view, owner),
+        );
         const { projectId: _project, ownerMachine: _owner, ...portable } = input;
         return yield* routing.callMachine(
           owner,
@@ -695,6 +710,18 @@ const make = Effect.gen(function* () {
           reason: "rejected",
           detail: "This server cannot create agents.",
         });
+      if (payload.project.kind === "repository")
+        yield* membership
+          .validate({
+            projectId: ProjectId.make(`remote:${payload.project.remote}`),
+            projectFolderId: payload.input.projectFolderId,
+            repositoryRemote: payload.project.remote,
+          })
+          .pipe(
+            Effect.mapError(
+              (cause) => new ThreadRemoteError({ reason: "rejected", detail: cause.message }),
+            ),
+          );
       const projectId = yield* localProject(payload.project);
       const result = yield* agentService.value
         .upsert({ ...payload.input, projectId, ownerMachine: self }, payload.agentId)
@@ -732,6 +759,18 @@ const make = Effect.gen(function* () {
         yield* threadSync.sync(caller.environmentId).pipe(Effect.ignore);
         return relayed;
       }
+      if (payload.project.kind === "repository")
+        yield* membership
+          .validate({
+            projectId: ProjectId.make(`remote:${payload.project.remote}`),
+            projectFolderId: payload.launch.projectFolderId,
+            repositoryRemote: payload.project.remote,
+          })
+          .pipe(
+            Effect.mapError(
+              (cause) => new ThreadRemoteError({ reason: "rejected", detail: cause.message }),
+            ),
+          );
       const projectId: ProjectId = yield* localProject(payload.project);
       if (payload.bundle !== undefined) {
         const project = yield* projects.get(projectId).pipe(Effect.orDie);
@@ -771,4 +810,4 @@ const make = Effect.gen(function* () {
 });
 
 /** Registers the launcher and the target handler for the scope of the machine link. */
-export const layer = Layer.effectDiscard(make);
+export const layer = Layer.effectDiscard(make).pipe(Layer.provide(Membership.layer));

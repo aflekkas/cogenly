@@ -1,3 +1,4 @@
+import * as Membership from "../../projectLabels/ProjectRepositoryMembership.ts";
 import { layerIdentity as layerSharedIdentity } from "../../sync/testkit.ts";
 import * as ServerEnvironment from "../../environment/ServerEnvironment.ts";
 import * as AgentStore from "../../agents/AgentStore.ts";
@@ -486,6 +487,9 @@ export function layerWithRegistry<Error>(
     }),
   );
   const layerOrchestratorProvided = Orchestrator.layer.pipe(
+    Layer.provide(
+      Membership.layer.pipe(Layer.provide(Layer.merge(layerDatabase, layerServerConfig))),
+    ),
     Layer.provide(
       options.environmentId === undefined
         ? Layer.empty

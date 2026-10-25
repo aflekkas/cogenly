@@ -2947,6 +2947,7 @@ export type ThreadLaunchSubagent = typeof ThreadLaunchSubagent.Type;
 export const OrchestrationV2Command = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("thread.create"),
+    projectFolderId: Schema.optional(Schema.NullOr(ProjectLabelId)),
     subagent: Schema.optional(ThreadLaunchSubagent),
     fork: Schema.optional(ThreadLaunchFork),
     ...WorkMetadataFields,

@@ -1,5 +1,9 @@
+import * as Membership from "./ProjectRepositoryMembership.ts";
 import {
   ProjectId,
+  PROJECT_INSTRUCTIONS_MAX_LENGTH,
+  type ProjectLabelMergeInput,
+  type ProjectLabelDismissDuplicateInput,
   ProjectLabelError,
   ProjectLabelId,
   ProjectLabelWithRepositories,
@@ -82,6 +86,12 @@ export class ProjectLabelService extends Context.Service<
     ) => Effect.Effect<{ label: ProjectLabelWithRepositories }, ProjectLabelError>;
     readonly update: (
       input: ProjectLabelUpdateInput,
+    ) => Effect.Effect<{ label: ProjectLabelWithRepositories }, ProjectLabelError>;
+    readonly merge: (
+      input: ProjectLabelMergeInput,
+    ) => Effect.Effect<{ label: ProjectLabelWithRepositories }, ProjectLabelError>;
+    readonly dismissDuplicate: (
+      input: ProjectLabelDismissDuplicateInput,
     ) => Effect.Effect<{ label: ProjectLabelWithRepositories }, ProjectLabelError>;
     readonly delete: (id: ProjectLabelId) => Effect.Effect<{ deleted: boolean }, ProjectLabelError>;
     /** Project folders no project claims (see ProjectLabelFolders.listOrphans). */
@@ -200,6 +210,10 @@ const decodeSourceLinkRows = Schema.decodeUnknownEffect(
 );
 const decodeSourceLink = Schema.decodeUnknownOption(ProjectSourceLink);
 const decodeLabel = Schema.decodeUnknownEffect(ProjectLabelWithRepositories);
+const decodeDuplicateIds = Schema.decodeUnknownEffect(Schema.Array(ProjectLabelId));
+const decodeDuplicateIdsJson = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(Schema.Array(ProjectLabelId)),
+);
 const decodeViewer = Schema.decodeUnknownOption(
   Schema.fromJsonString(Schema.Struct({ login: Schema.String })),
 );
@@ -219,6 +233,7 @@ const encodeAudit = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  const membership = yield* Membership.ProjectRepositoryMembership;
   const shared = yield* SharedState.SharedState;
   const crypto = yield* Crypto.Crypto;
   const events = yield* Events.OrchestrationEventStore;
@@ -231,6 +246,13 @@ const make = Effect.gen(function* () {
   const missing = (operation: string) => new ProjectLabelError({ operation, reason: "not_found" });
   const readLabels = (id?: ProjectLabelId) =>
     sql`SELECT label_id AS id, name, color, description, instructions, project_chat_thread_id AS projectChatThreadId, archived_at AS archivedAt, created_at AS createdAt, updated_at AS updatedAt,
+    (SELECT json_group_array(other_id) FROM (
+      SELECT CASE WHEN d.first_id=l.label_id THEN d.second_id ELSE d.first_id END AS other_id
+      FROM shared_possible_duplicates d JOIN project_labels a ON a.label_id=d.first_id JOIN project_labels b ON b.label_id=d.second_id
+      WHERE d.kind='project' AND (d.first_id=l.label_id OR d.second_id=l.label_id)
+      AND NOT EXISTS (SELECT 1 FROM shared_documents dead WHERE dead.kind='project' AND dead.id IN (d.first_id,d.second_id) AND dead.tombstone_json IS NOT NULL)
+      AND NOT EXISTS (SELECT 1 FROM shared_documents doc,json_each(doc.fields_json,'$.dismissedDuplicateIds') j WHERE doc.kind='project' AND ((doc.id=d.first_id AND j.value=d.second_id) OR (doc.id=d.second_id AND j.value=d.first_id)))
+      ORDER BY other_id)) AS duplicates,
     (SELECT json_group_array(repository_id) FROM (SELECT repository_id FROM label_repositories r WHERE r.label_id = l.label_id ORDER BY repository_id)) AS repositories
     , (SELECT json_group_array(json(link)) FROM (SELECT json_object('repositoryId', repository_id, 'remote', remote, 'directoryName', directory_name, 'workspaceRoot', (SELECT p.workspace_root FROM projection_projects p WHERE p.project_id = r.repository_id AND p.deleted_at IS NULL), 'faviconPath', (SELECT p.favicon_path FROM projection_projects p WHERE p.project_id = r.repository_id AND p.deleted_at IS NULL), 'iconPath', icon_path) AS link FROM label_repositories r WHERE r.label_id = l.label_id ORDER BY repository_id)) AS repositoryLinks
     , (SELECT json_group_array(json(source)) FROM (SELECT json_object('kind', kind, 'owner', owner, 'repo', repo) AS source FROM label_source_links s WHERE s.label_id = l.label_id ORDER BY kind, owner, repo)) AS sources
@@ -243,7 +265,7 @@ const make = Effect.gen(function* () {
           json_extract(t.payload_json, '$.agent') IS NULL
           AND NOT EXISTS (SELECT 1 FROM agents a WHERE a.conversation_thread_id = t.thread_id)
         ))) AS threadCount
-    FROM project_labels l ${id === undefined ? sql`` : sql`WHERE label_id = ${id}`} ORDER BY name COLLATE NOCASE, label_id`.pipe(
+    FROM project_labels l WHERE NOT EXISTS (SELECT 1 FROM shared_documents dead WHERE dead.kind='project' AND dead.id=l.label_id AND dead.tombstone_json IS NOT NULL) ${id === undefined ? sql`` : sql`AND label_id = ${id}`} ORDER BY name COLLATE NOCASE, label_id`.pipe(
       Effect.flatMap((rows) =>
         Effect.forEach(rows, (row) =>
           Effect.gen(function* () {
@@ -270,6 +292,7 @@ const make = Effect.gen(function* () {
             );
             return yield* decodeLabel({
               ...row,
+              possibleDuplicateIds: yield* decodeDuplicateIdsJson(row.duplicates),
               color: row.color ?? undefined,
               description: row.description ?? undefined,
               archivedAt: row.archivedAt ?? undefined,
@@ -444,6 +467,16 @@ const make = Effect.gen(function* () {
             }),
           ),
         );
+  if (Option.isSome(folders)) {
+    const reconcileMerges = folders.value.reconcileMerges.pipe(
+      Effect.catch((cause) => Effect.logWarning("Project merge files deferred", { cause })),
+    );
+    yield* shared.changes.pipe(
+      Stream.runForEach(() => reconcileMerges),
+      Effect.forkScoped,
+    );
+    yield* reconcileMerges;
+  }
   // Links written before portable identity (or by a link whose checkout had
   // no readable remote yet) backfill lazily on read: the remote comes from
   // the checkout's git remote when it can be read. A repo with no remote
@@ -716,7 +749,7 @@ const make = Effect.gen(function* () {
       "moveThread",
       input,
       Effect.gen(function* () {
-        yield* requireThread(input.threadId);
+        const thread = yield* requireThread(input.threadId);
         // A project's own conversation lives on its page: it may be filed in
         // that project (as ProjectHome does) but never moved out or elsewhere.
         const home = yield* sql<{
@@ -751,6 +784,26 @@ const make = Effect.gen(function* () {
               operation: "moveThread",
               reason: "thread_active",
             });
+        }
+        if (input.folderId !== current) {
+          yield* membership
+            .validate({
+              projectId: ProjectId.make(thread.project_id),
+              projectFolderId: input.folderId,
+            })
+            .pipe(
+              Effect.mapError((cause) =>
+                cause._tag === "ProjectRepositoryMismatchError"
+                  ? new ProjectLabelError({
+                      operation: "moveThread",
+                      reason: "invalid_membership",
+                      projectName: cause.projectName,
+                      repositoryName: cause.repositoryName,
+                      cause,
+                    })
+                  : failure("moveThread")(cause),
+              ),
+            );
         }
         yield* sql`DELETE FROM thread_project_labels WHERE thread_id = ${input.threadId}`;
         if (input.folderId !== null)
@@ -849,6 +902,83 @@ const make = Effect.gen(function* () {
         if (renamed) yield* PubSub.publish(changes, undefined);
         return result;
       }),
+    merge: (input) =>
+      mutate(
+        "merge",
+        input,
+        Effect.gen(function* () {
+          if (input.sourceId === input.targetId)
+            return yield* new ProjectLabelError({ operation: "merge", reason: "same_project" });
+          const previousMerge = yield* shared.get("project", input.sourceId);
+          if (previousMerge?.tombstone && previousMerge.fields.mergedInto === input.targetId)
+            return yield* get(input.targetId);
+          const source = (yield* get(input.sourceId)).label;
+          const target = (yield* readActive(input.targetId)).label;
+          const instructions =
+            source.instructions.trim() && source.instructions !== target.instructions
+              ? [
+                  target.instructions,
+                  `--- Instructions from ${source.name} ---`,
+                  source.instructions,
+                ]
+                  .filter(Boolean)
+                  .join("\n\n")
+              : target.instructions;
+          if (instructions.length > PROJECT_INSTRUCTIONS_MAX_LENGTH)
+            return yield* new ProjectLabelError({
+              operation: "merge",
+              reason: "instructions_too_long",
+            });
+          // Preserve local-only repository links before capture; portable remotes go in the target document.
+          yield* shared.capture("project", source.id);
+          yield* sql`UPDATE label_repositories SET label_id=${target.id} WHERE label_id=${source.id}`;
+          yield* sql`INSERT OR IGNORE INTO label_source_links(label_id,kind,owner,repo,created_at) SELECT ${target.id},kind,owner,repo,created_at FROM label_source_links WHERE label_id=${source.id}`;
+          yield* sql`UPDATE project_labels SET instructions=${instructions},description=${target.description?.trim() ? target.description : (source.description ?? target.description ?? null)},updated_at=${yield* now} WHERE label_id=${target.id}`;
+          yield* shared.capture("project", target.id);
+          const sourceSettings = yield* shared.get("project-settings", source.id);
+          const targetSettings = yield* shared.get("project-settings", target.id);
+          if (sourceSettings && !sourceSettings.tombstone) {
+            const fields = { ...sourceSettings.fields };
+            for (const [key, value] of Object.entries(targetSettings?.fields ?? {}))
+              if (value !== null) fields[key] = value;
+            yield* shared.write("project-settings", target.id, fields);
+          }
+          yield* shared.write(
+            "project",
+            source.id,
+            { mergedInto: target.id, mergeSourceName: source.name },
+            true,
+          );
+          return yield* get(target.id);
+        }),
+      ).pipe(
+        Effect.tap(() =>
+          Option.isSome(folders)
+            ? folders.value.reconcileMerges.pipe(Effect.mapError(failure("mergeFiles")))
+            : Effect.void,
+        ),
+      ),
+    dismissDuplicate: (input) =>
+      mutate(
+        "dismissDuplicate",
+        input,
+        Effect.gen(function* () {
+          if (input.id === input.otherId)
+            return yield* new ProjectLabelError({
+              operation: "dismissDuplicate",
+              reason: "same_project",
+            });
+          yield* get(input.id);
+          yield* get(input.otherId);
+          const [first, second] = [input.id, input.otherId].sort();
+          const previous = yield* shared.get("project", first!);
+          const dismissed = yield* decodeDuplicateIds(previous?.fields.dismissedDuplicateIds ?? []);
+          yield* shared.write("project", first!, {
+            dismissedDuplicateIds: [...new Set([...dismissed, second!])],
+          });
+          return yield* get(input.id);
+        }),
+      ),
     delete: (id) =>
       Effect.gen(function* () {
         const before = yield* readLabels(id);
@@ -1028,4 +1158,7 @@ const make = Effect.gen(function* () {
     },
   });
 });
-export const layer = Layer.effect(ProjectLabelService, make).pipe(Layer.provide(SharedState.layer));
+export const layer = Layer.effect(ProjectLabelService, make).pipe(
+  Layer.provide(SharedState.layer),
+  Layer.provide(Membership.layer),
+);

@@ -255,6 +255,7 @@ const make = Effect.gen(function* () {
               : {}),
             agentId: agent.id,
             projectId: (isWorkStart ? params.targetProjectId : params.projectId) ?? agent.projectId,
+            projectFolderId: params.projectFolderId,
             title: params.title,
             prompt: isWorkStart ? params.scopeSummary : (params.message ?? params.title),
             workspaceStrategy: isWorkStart

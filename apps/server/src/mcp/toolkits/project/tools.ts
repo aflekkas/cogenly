@@ -1,3 +1,4 @@
+import { ProjectLabelId } from "@cogenly/contracts";
 import { McpAttachmentInput } from "../attachment/input.ts";
 import {
   NonNegativeInt,
@@ -108,6 +109,7 @@ const ThreadLaunchTool = Tool.make("thread_launch", {
   parameters: Schema.Struct({
     machine: Schema.optional(TrimmedNonEmptyString),
     projectId: Schema.optional(ProjectId),
+    projectFolderId: Schema.optional(ProjectLabelId),
     scratch: Schema.optional(
       Schema.Boolean.annotate({
         description:

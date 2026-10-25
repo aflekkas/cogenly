@@ -96,3 +96,5 @@ export * from "./accounts.ts";
 
 export * from "./sharedDocument.ts";
 export * from "./threadReplication.ts";
+
+export * from "./projectRepositoryMembership.ts";

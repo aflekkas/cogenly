@@ -1,3 +1,5 @@
+import { ProjectRepositoryMismatchError } from "@cogenly/contracts";
+import * as Membership from "../projectLabels/ProjectRepositoryMembership.ts";
 import type {
   OrchestrationV2SearchThreadInput,
   OrchestrationV2SearchThreadResult,
@@ -291,6 +293,7 @@ export function canReplayCommandReceipt(
 }
 
 export const OrchestratorV2Error = Schema.Union([
+  ProjectRepositoryMismatchError,
   ThreadRemoteError,
   OrchestratorDispatchError,
   OrchestratorCommandRejectedError,
@@ -914,6 +917,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
   const commandReceipts = yield* CommandReceiptStoreV2;
   const idAllocator = yield* IdAllocator.IdAllocatorV2;
   const projects = yield* ProjectStore.ProjectStoreV2;
+  const membership = yield* Membership.ProjectRepositoryMembership;
   const projectionStore = yield* ProjectionStoreV2;
   const effectOutbox = yield* EffectOutbox.EffectOutboxV2;
   const nextTurnItemOrdinal = (
@@ -12268,6 +12272,53 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       } satisfies OrchestratorV2DispatchResult;
     }
 
+    if (
+      command.type === "thread.create" &&
+      command.importedNativeThread === undefined &&
+      !isReplayedCommandId(command.commandId)
+    ) {
+      yield* membership.validate(command).pipe(
+        Effect.mapError((cause) =>
+          cause._tag === "ProjectRepositoryMismatchError"
+            ? cause
+            : new OrchestratorDispatchError({
+                commandId: command.commandId,
+                commandType: command.type,
+                cause,
+              }),
+        ),
+      );
+    }
+
+    if (command.type === "message.dispatch" && !isReplayedCommandId(command.commandId)) {
+      const existing = yield* projectionStore
+        .getThreadShell(command.threadId)
+        .pipe(
+          Effect.mapError(
+            (cause) => new OrchestratorProjectionError({ threadId: command.threadId, cause }),
+          ),
+        );
+      if (
+        existing !== null &&
+        existing.latestRunId === null &&
+        existing.historyOrigin === undefined &&
+        existing.projectFolderSource === "explicit"
+      )
+        yield* membership
+          .validate({ projectId: existing.projectId, projectFolderId: existing.projectFolderId })
+          .pipe(
+            Effect.mapError((cause) =>
+              cause._tag === "ProjectRepositoryMismatchError"
+                ? cause
+                : new OrchestratorDispatchError({
+                    commandId: command.commandId,
+                    commandType: command.type,
+                    cause,
+                  }),
+            ),
+          );
+    }
+
     // A limited sender checked these modes before dispatching; the thread's
     // user may have raised them since, and only here can they not change.
     const limit = yield* DispatchModeLimit;
@@ -12941,6 +12992,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
 export const layer: Layer.Layer<
   OrchestratorV2,
   never,
+  | Membership.ProjectRepositoryMembership
   | CheckpointServiceV2
   | FileSystem.FileSystem
   | Path.Path

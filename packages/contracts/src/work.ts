@@ -1,3 +1,5 @@
+import { ProjectRepositoryMismatchError } from "./projectRepositoryMembership.ts";
+import { ProjectLabelId } from "./projectLabel.ts";
 import * as Schema from "effect/Schema";
 import {
   CommandId,
@@ -64,6 +66,7 @@ export const WorkTask = Schema.Struct({
 export type WorkTask = typeof WorkTask.Type;
 
 export const WorkStartInput = Schema.Struct({
+  projectFolderId: Schema.optional(Schema.NullOr(ProjectLabelId)),
   machine: Schema.optional(EnvironmentId),
   /** Stable across retries: one handoff creates one Work thread. */
   commandId: CommandId,
@@ -106,6 +109,7 @@ export const WorkHandoffDraft = Schema.Struct({
 });
 export type WorkHandoffDraft = typeof WorkHandoffDraft.Type;
 export class WorkHandoffError extends Schema.TaggedError<WorkHandoffError>()("WorkHandoffError", {
+  repositoryMismatch: Schema.optional(ProjectRepositoryMismatchError),
   sourceThreadId: ThreadId,
   machineOffline: Schema.optional(Schema.Boolean),
   stage: Schema.Literals([
@@ -118,6 +122,6 @@ export class WorkHandoffError extends Schema.TaggedError<WorkHandoffError>()("Wo
   cause: Schema.optional(Schema.Defect()),
 }) {
   override get message(): string {
-    return `Work handoff failed during ${this.stage}.`;
+    return this.repositoryMismatch?.message ?? `Work handoff failed during ${this.stage}.`;
   }
 }

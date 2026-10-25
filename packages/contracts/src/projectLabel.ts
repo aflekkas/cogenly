@@ -515,9 +515,15 @@ export const ProjectLabelKey = Schema.Struct({ id: ProjectLabelId });
 export const ProjectLabelListResult = Schema.Struct({
   labels: Schema.Array(ProjectLabelWithRepositories),
 });
-export const ProjectLabelMergeInput = Schema.Struct({ sourceId: ProjectLabelId, targetId: ProjectLabelId });
+export const ProjectLabelMergeInput = Schema.Struct({
+  sourceId: ProjectLabelId,
+  targetId: ProjectLabelId,
+});
 export type ProjectLabelMergeInput = typeof ProjectLabelMergeInput.Type;
-export const ProjectLabelDismissDuplicateInput = Schema.Struct({ id: ProjectLabelId, otherId: ProjectLabelId });
+export const ProjectLabelDismissDuplicateInput = Schema.Struct({
+  id: ProjectLabelId,
+  otherId: ProjectLabelId,
+});
 export type ProjectLabelDismissDuplicateInput = typeof ProjectLabelDismissDuplicateInput.Type;
 export const ProjectLabelMutationResult = Schema.Struct({ label: ProjectLabelWithRepositories });
 export const ProjectLabelDeleteResult = Schema.Struct({ deleted: Schema.Boolean });
@@ -576,6 +582,8 @@ export class ProjectLabelError extends Schema.TaggedError<ProjectLabelError>()(
     operation: Schema.String,
     reason: Schema.Literals([
       "storage",
+      "same_project",
+      "instructions_too_long",
       "not_found",
       "invalid_membership",
       "invalid_path",
@@ -593,6 +601,10 @@ export class ProjectLabelError extends Schema.TaggedError<ProjectLabelError>()(
 ) {
   override get message(): string {
     switch (this.reason) {
+      case "same_project":
+        return "Choose two different projects.";
+      case "instructions_too_long":
+        return "The combined project instructions are too long. Shorten them before merging.";
       case "archived":
         return `${this.projectName ?? "This project"} is archived. Unarchive it to add to it.`;
       case "not_found":

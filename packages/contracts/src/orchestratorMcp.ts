@@ -1,3 +1,4 @@
+import { ProjectLabelId } from "./projectLabel.ts";
 import { MachineInfo } from "./machine.ts";
 import { ServerProvider } from "./server.ts";
 import { AgentId } from "./agent.ts";
@@ -598,6 +599,7 @@ export const OrchestratorMcpCapabilitiesResult = Schema.Struct({
 export type OrchestratorMcpCapabilitiesResult = typeof OrchestratorMcpCapabilitiesResult.Type;
 
 export const OrchestratorMcpScheduleTaskInput = Schema.Struct({
+  projectFolderId: Schema.optional(Schema.NullOr(ProjectLabelId)),
   machine: Schema.optional(
     TrimmedNonEmptyString.annotate({
       description:

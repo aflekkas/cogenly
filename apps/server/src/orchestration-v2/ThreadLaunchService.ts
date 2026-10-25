@@ -1,8 +1,10 @@
+import * as Membership from "../projectLabels/ProjectRepositoryMembership.ts";
 import * as WorktreeSetupTracker from "../project/WorktreeSetupTracker.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
 import { resolveProjectSettings } from "@cogenly/shared/projectSettings";
 import {
   isRemoteRepositoryPlaceholder,
+  ProjectRepositoryMismatchError,
   CommandId,
   type ChatAttachment,
   type MessageId,
@@ -222,11 +224,14 @@ export class ThreadLaunchService extends Context.Service<
       { providers: ReadonlyArray<import("@cogenly/contracts").ServerProvider> },
       ThreadRemoteError
     >;
+    readonly validateProjectRepository: Membership.ProjectRepositoryMembership["Service"]["validate"];
     readonly launch: (
       input: ThreadLaunchInput,
     ) => Effect.Effect<
       ThreadLaunchResult,
-      ThreadLaunchError | ThreadManagement.ThreadManagementProviderInstanceDisabledError
+      | ProjectRepositoryMismatchError
+      | ThreadLaunchError
+      | ThreadManagement.ThreadManagementProviderInstanceDisabledError
     >;
     /**
      * Fails when a new worktree's base ref cannot give provisioning a commit.
@@ -261,6 +266,7 @@ function failureDetail(error: unknown): string {
 
 const make = Effect.gen(function* () {
   const projects = yield* ProjectService.ProjectService;
+  const membership = yield* Membership.ProjectRepositoryMembership;
   const setupTracker = yield* WorktreeSetupTracker.WorktreeSetupTracker;
   const terminals = yield* TerminalManager.TerminalManager;
   const git = yield* GitWorkflow.GitWorkflowService;
@@ -987,6 +993,16 @@ const make = Effect.gen(function* () {
   const launchHere = Effect.fn("ThreadLaunchService.launchHere")(function* (
     requested: ThreadLaunchInput,
   ) {
+    if (requested.importedNativeThread === undefined)
+      yield* membership
+        .validate(requested)
+        .pipe(
+          Effect.mapError((cause) =>
+            cause._tag === "ProjectRepositoryMismatchError"
+              ? cause
+              : mapError(requested, "resolve-project")(cause),
+          ),
+        );
     const input = yield* resolveRemoteRepository(requested);
     const project = yield* projects.getById(input.projectId).pipe(
       Effect.mapError(mapError(input, "resolve-project")),
@@ -1129,6 +1145,9 @@ const make = Effect.gen(function* () {
             })
           : threads.dispatch({
               type: "thread.create",
+              ...(input.projectFolderId === undefined
+                ? {}
+                : { projectFolderId: input.projectFolderId }),
               ...(input.fork === undefined ? {} : { fork: input.fork }),
               ...(input.subagent === undefined ? {} : { subagent: input.subagent }),
               ...(input.surface === undefined ? {} : { surface: input.surface }),
@@ -1377,6 +1396,7 @@ const make = Effect.gen(function* () {
   });
   return ThreadLaunchService.of({
     providers,
+    validateProjectRepository: membership.validate,
     launch,
     checkWorktreeBase,
     retryPreparation,
@@ -1384,4 +1404,4 @@ const make = Effect.gen(function* () {
   });
 });
 
-export const layer = Layer.effect(ThreadLaunchService, make);
+export const layer = Layer.effect(ThreadLaunchService, make).pipe(Layer.provide(Membership.layer));

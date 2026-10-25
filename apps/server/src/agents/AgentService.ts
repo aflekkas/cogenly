@@ -1,3 +1,5 @@
+import { ProjectRepositoryMismatchError } from "@cogenly/contracts";
+import * as Membership from "../projectLabels/ProjectRepositoryMembership.ts";
 import { isReplayedCommandId } from "../orchestration-v2/ReplayedCommandIds.ts";
 import * as Access from "./AgentAccessScope.ts";
 import { canReceiveAgentEvent } from "./agentEventPolicy.ts";
@@ -63,10 +65,16 @@ import {
 const encodeEventContext = Schema.encodeEffect(Schema.fromJsonString(AgentEventContext));
 const encodeEventSchedule = Schema.encodeEffect(Schema.fromJsonString(ScheduledTaskSchedule));
 const isAgentError = Schema.is(AgentError);
+const isProjectRepositoryMismatch = Schema.is(ProjectRepositoryMismatchError);
 const failure = (cause: unknown) =>
   isAgentError(cause)
     ? cause
-    : new AgentError({ message: "Could not complete agent operation.", cause });
+    : new AgentError({
+        message: isProjectRepositoryMismatch(cause)
+          ? cause.message
+          : "Could not complete agent operation.",
+        cause,
+      });
 export class AgentService extends Context.Service<
   AgentService,
   {
@@ -124,6 +132,7 @@ const make = Effect.gen(function* () {
   const events = yield* EventSink.EventSinkV2;
   const scheduler = yield* Scheduler.Scheduler;
   const sql = yield* SqlClient.SqlClient;
+  const membership = yield* Membership.ProjectRepositoryMembership;
   const folders = yield* Folders.ManagedProjectFolders;
   const labels = yield* Labels.ProjectLabelService;
   const access = yield* Access.AgentAccessScope;
@@ -145,7 +154,7 @@ const make = Effect.gen(function* () {
             message:
               cause.reason === "not_found"
                 ? "That project no longer exists."
-                : cause.reason === "archived"
+                : cause.reason === "archived" || cause.reason === "invalid_membership"
                   ? cause.message
                   : "Could not move the agent to that project.",
             cause,
@@ -172,6 +181,7 @@ const make = Effect.gen(function* () {
     if ((yield* projections.getThreadShell(agent.conversationThreadId)) !== null) return;
     const projectId = agent.projectId ?? (yield* folders.ensureScratchProject).projectId;
     yield* launch.launch({
+      ...(agent.projectFolderId === null ? {} : { projectFolderId: agent.projectFolderId }),
       agent: { id: agent.id, role: "conversation" },
       commandId: CommandId.make(`agent-create:${agent.id}`),
       threadId: agent.conversationThreadId,
@@ -505,6 +515,12 @@ const make = Effect.gen(function* () {
         }
         const conversationThreadId =
           existing?.conversationThreadId ?? ThreadId.make(`agent-conversation:${id}`);
+        if (ownsAgent) {
+          const folderId =
+            input.projectFolderId === undefined ? existing?.projectFolderId : input.projectFolderId;
+          if (input.projectId !== null)
+            yield* membership.validate({ projectId: input.projectId, projectFolderId: folderId });
+        }
         if (existing === null && ownsAgent) {
           if (input.projectId === null)
             return yield* new AgentError({ message: "Choose a project to create an agent." });
@@ -516,6 +532,7 @@ const make = Effect.gen(function* () {
             commandId: CommandId.make(`agent-create:${id}`),
             threadId: conversationThreadId,
             projectId: input.projectId,
+            ...(input.projectFolderId == null ? {} : { projectFolderId: input.projectFolderId }),
             title: input.name,
             modelSelection: input.modelSelection,
             runtimeMode: input.runtimeMode,
@@ -827,6 +844,7 @@ const make = Effect.gen(function* () {
             commandId: CommandId.make(id),
             threadId: workThreadId,
             projectId: agent.projectId ?? task.projectId,
+            ...(agent.projectFolderId === null ? {} : { projectFolderId: agent.projectFolderId }),
             title: `${agent.name}: ${task.title}`,
             modelSelection: usedSelection,
             runtimeMode: agent.runtimeMode,
@@ -848,8 +866,14 @@ const make = Effect.gen(function* () {
           yield* store.finishRun(
             id,
             "failed",
-            "I could not start this job. Open its work details to inspect it.",
+            result.failure._tag === "ProjectRepositoryMismatchError"
+              ? result.failure.message
+              : "I could not start this job. Open its work details to inspect it.",
           );
+          if (result.failure._tag === "ProjectRepositoryMismatchError") {
+            yield* changed;
+            return yield* result.failure;
+          }
         }
         yield* changed;
         return true;
@@ -858,5 +882,6 @@ const make = Effect.gen(function* () {
   });
 });
 export const layer = Layer.effect(AgentService, make)
+  .pipe(Layer.provide(Membership.layer))
   .pipe(Layer.provide(SharedState.layer))
   .pipe(Layer.provide(Access.layer));

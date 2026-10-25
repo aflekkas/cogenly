@@ -38,6 +38,9 @@ const RelativePath = Schema.String.check(
 );
 const Selection = Agent.fields.modelSelection;
 export const ProjectFields = Schema.Struct({
+  mergedInto: Schema.optionalKey(ProjectLabelId),
+  mergeSourceName: Schema.optionalKey(ProjectLabel.fields.name),
+  dismissedDuplicateIds: Schema.optionalKey(Schema.Array(ProjectLabelId)),
   name: ProjectLabel.fields.name,
   color: Schema.NullOr(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(100))),
   description: Schema.NullOr(Schema.String.check(Schema.isMaxLength(4000))),
