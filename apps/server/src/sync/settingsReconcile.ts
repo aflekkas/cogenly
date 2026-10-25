@@ -10,20 +10,13 @@
  */
 import {
   DEFAULT_SERVER_SETTINGS,
-  type ProjectId,
-  type ProjectSettingsOverrides,
   type ServerSettings,
   UNIVERSAL_SERVER_SETTING_KEYS,
 } from "@cogenly/contracts";
-import { withProjectSettingsOverrides } from "@cogenly/shared/projectSettings";
 import type * as Schema from "effect/Schema";
 import {
-  decodeProjectOverrides,
   decodeUniversalSetting,
-  encodeProjectOverrides,
   encodeUniversalSettings,
-  PROJECT_SETTINGS_SYNC_KEYS,
-  projectSettingsDocumentId,
   UNIVERSAL_SETTINGS_DOCUMENT_ID,
 } from "./settingsDocument.ts";
 
@@ -80,43 +73,7 @@ export function reconcileSettingsField(input: {
   return { _tag: "none" };
 }
 
-/**
- * One project key across the machine's repositories in that project, which
- * all carry the project's override. The first repository with a local edit
- * publishes it (in the order given), and every other repository follows it.
- */
-export function reconcileProjectSettingsField(input: {
-  readonly repositories: ReadonlyArray<{
-    readonly local: Schema.Json;
-    readonly base: Schema.Json | undefined;
-  }>;
-  readonly remote: Schema.Json | undefined;
-}): {
-  readonly publish: Schema.Json | undefined;
-  readonly repositories: ReadonlyArray<SettingsFieldOutcome>;
-} {
-  const outcomes = input.repositories.map((repository) =>
-    reconcileSettingsField({
-      local: repository.local,
-      base: repository.base,
-      remote: input.remote,
-      unset: repository.local === null,
-    }),
-  );
-  const edit = outcomes.find((outcome) => outcome._tag === "publish");
-  if (edit === undefined) return { publish: undefined, repositories: outcomes };
-  return {
-    publish: edit.value,
-    repositories: input.repositories.map((repository): SettingsFieldOutcome => {
-      if (!same(repository.local, edit.value)) return { _tag: "apply", value: edit.value };
-      return repository.base !== undefined && same(repository.base, edit.value)
-        ? { _tag: "none" }
-        : { _tag: "settle", value: edit.value };
-    }),
-  };
-}
-
-/** Where a reconciled value is recorded: `scope` is '' for universal keys, else a repository id. */
+/** Where a reconciled value is recorded: `scope` is '' (builds before 0.3.2 also kept a repository id). */
 export interface SettingsBaseEntry {
   readonly documentId: string;
   readonly scope: string;
@@ -133,8 +90,6 @@ export interface SettingsReconcileInput {
   readonly base: ReadonlyMap<string, Schema.Json>;
   /** The shared documents' merged fields, by document id. */
   readonly documents: ReadonlyMap<string, Readonly<Record<string, Schema.Json>>>;
-  /** This machine's live repositories in each project, in a stable order. */
-  readonly projects: ReadonlyMap<string, ReadonlyArray<ProjectId>>;
 }
 
 export interface SettingsReconcilePlan {
@@ -154,7 +109,7 @@ const remoteField = (
 ): Schema.Json | undefined =>
   document !== undefined && Object.hasOwn(document, key) ? document[key] : undefined;
 
-/** Decide every universal key and every project key on this machine's filed repositories. */
+/** Decide every universal key. */
 export function planSettingsReconcile(input: SettingsReconcileInput): SettingsReconcilePlan {
   const applied: Partial<ServerSettings> = {};
   let changed = false;
@@ -186,52 +141,5 @@ export function planSettingsReconcile(input: SettingsReconcileInput): SettingsRe
     if (outcome._tag === "publish") addPublish(UNIVERSAL_SETTINGS_DOCUMENT_ID, key, outcome.value);
     base.push({ documentId: UNIVERSAL_SETTINGS_DOCUMENT_ID, scope: "", key, value: outcome.value });
   }
-  let next: ServerSettings = { ...input.settings, ...applied };
-
-  for (const [labelId, repositoryIds] of input.projects) {
-    if (repositoryIds.length === 0) continue;
-    const documentId = projectSettingsDocumentId(labelId);
-    const document = input.documents.get(documentId);
-    const locals = repositoryIds.map((repositoryId) =>
-      encodeProjectOverrides(input.settings.projectSettingsOverrides[repositoryId]),
-    );
-    const entries = new Map<ProjectId, Record<string, unknown>>();
-    for (const key of PROJECT_SETTINGS_SYNC_KEYS) {
-      const result = reconcileProjectSettingsField({
-        remote: remoteField(document, key),
-        repositories: repositoryIds.map((repositoryId, index) => ({
-          local: locals[index]![key],
-          base: input.base.get(settingsBaseKey(documentId, repositoryId, key)),
-        })),
-      });
-      if (result.publish !== undefined) addPublish(documentId, key, result.publish);
-      result.repositories.forEach((outcome, index) => {
-        if (outcome._tag === "none") return;
-        const repositoryId = repositoryIds[index]!;
-        if (outcome._tag === "apply") {
-          const decoded = decodeProjectOverrides({ [key]: outcome.value });
-          if (outcome.value !== null && !Object.hasOwn(decoded, key)) return;
-          const entry = entries.get(repositoryId) ?? {
-            ...next.projectSettingsOverrides[repositoryId],
-          };
-          if (outcome.value === null) delete entry[key];
-          else entry[key] = decoded[key];
-          entries.set(repositoryId, entry);
-        }
-        base.push({ documentId, scope: repositoryId, key, value: outcome.value });
-      });
-    }
-    for (const [repositoryId, entry] of entries) {
-      next = {
-        ...next,
-        projectSettingsOverrides: withProjectSettingsOverrides(
-          next,
-          repositoryId,
-          entry as ProjectSettingsOverrides,
-        ),
-      };
-      changed = true;
-    }
-  }
-  return { settings: changed ? next : null, publish, base };
+  return { settings: changed ? { ...input.settings, ...applied } : null, publish, base };
 }

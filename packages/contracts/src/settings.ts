@@ -11,9 +11,7 @@ import * as Schema from "effect/Schema";
 import * as SchemaTransformation from "effect/SchemaTransformation";
 import {
   ForwardCompatibleNullable,
-  ForwardCompatibleOptional,
   OmittedWhenNull,
-  ProjectId,
   ThreadId,
   TrimmedNonEmptyString,
   TrimmedString,
@@ -1551,7 +1549,6 @@ export const ServerSettingsOperation = Schema.Literals([
   "create-provider-instance",
   "read-file",
   "read-provider-history",
-  "read-project-settings",
   "read-secret",
   "remove-secret",
   "remove-stale-secret",

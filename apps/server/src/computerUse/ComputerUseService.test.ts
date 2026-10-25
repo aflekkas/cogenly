@@ -1,10 +1,8 @@
 import {
   type ComputerUsePermission,
   ComputerUseUnavailableError,
-  ProjectId,
   ServerSettings,
 } from "@cogenly/contracts";
-import { resolveProjectSettings } from "@cogenly/shared/projectSettings";
 import { assert, describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -64,20 +62,8 @@ const missingOf = (error: ComputerUseUnavailableError) => ({
 });
 
 describe("ComputerUse", () => {
-  it("is on by default for every agent, and a project can still turn it off", () => {
-    const defaults = decodeSettings({});
-    expect(defaults.enableAgentComputerUse).toBe(true);
-    const projectId = ProjectId.make("project-1");
-    const withOverride = decodeSettings({
-      projectSettingsOverrides: { [projectId]: { enableAgentComputerUse: false } },
-    });
-    expect(resolveProjectSettings(withOverride, projectId).settings.enableAgentComputerUse).toBe(
-      false,
-    );
-    expect(
-      resolveProjectSettings(withOverride, ProjectId.make("project-2")).settings
-        .enableAgentComputerUse,
-    ).toBe(true);
+  it("is on by default for every agent", () => {
+    expect(decodeSettings({}).enableAgentComputerUse).toBe(true);
   });
 
   it.effect("sees a permission the user grants on the very next call, with no restart", () => {

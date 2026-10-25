@@ -79,7 +79,7 @@ import * as CheckpointStore from "./checkpointing/CheckpointStore.ts";
 import * as SourceControlBuiltInDrivers from "./sourceControl/builtInDrivers.ts";
 import * as TextGeneration from "./textGeneration/TextGeneration.ts";
 import * as ProviderInstanceRegistryHydration from "./provider/ProviderInstanceRegistryHydration.ts";
-import * as ProjectSettingsOverrideSweep from "./provider/ProjectSettingsOverrideSweep.ts";
+import * as LegacyProjectActionsMigration from "./project/LegacyProjectActionsMigration.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import * as McpHttpServer from "./mcp/McpHttpServer.ts";
 import * as McpSessionRegistry from "./mcp/McpSessionRegistry.ts";
@@ -388,8 +388,7 @@ const layerPullRequestService = PullRequestService.layer.pipe(
 );
 
 const layerGitManager = GitManager.layer.pipe(
-  // Per-project git settings resolve the acting thread's project.
-  Layer.provide(Layer.merge(ProjectionStoreV2.layer, ProjectStore.layer)),
+  Layer.provide(ProjectStore.layer),
   // New worktrees resolve their repository's project folder by its id file.
   Layer.provide(ProjectLabelFolders.layer),
   Layer.provideMerge(RuntimeLayer.layerProjectSetupScriptRunner),
@@ -682,7 +681,7 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   MachineSecurity.layer,
   layerMachineSetup,
   layerMachineHealth,
-  // Universal settings and project overrides follow the user to paired machines.
+  // Universal settings follow the user to paired machines.
   SettingsSync.layer.pipe(
     Layer.provide(SharedState.layer),
     Layer.provide(ServerEnvironment.layerIdentity),
@@ -744,10 +743,8 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   ProviderUsageLimitsIngestion.layer,
   layerProviderInstallationRefresh,
   ReplayMarkers.layer,
-  // Catches overrides left behind by a project deleted before this cleanup
-  // existed, or by a cleanup write that failed. See ProjectService.delete
-  // for the normal (on-delete) path.
-  Layer.effectDiscard(ProjectSettingsOverrideSweep.sweep),
+  // Moves repository actions saved as pre-0.3.2 project settings onto each repository.
+  Layer.effectDiscard(LegacyProjectActionsMigration.migrate),
 ).pipe(
   // Core Services
   Layer.provideMerge(

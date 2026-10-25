@@ -37,18 +37,12 @@ import {
   VcsStatusResult,
   ModelSelection,
   ProjectLabelId,
-  type ProjectId,
   SourceControlProviderError,
   type SourceControlWritingStyleSettings,
-  type ThreadId,
   type ThreadPullRequestKey,
   type VcsCreateWorktreeInput,
   type VcsCreateWorktreeResult,
 } from "@cogenly/contracts";
-import {
-  hasProjectSettingsOverrides,
-  resolveProjectSettings,
-} from "@cogenly/shared/projectSettings";
 import {
   detectSourceControlProviderFromGitRemoteUrl,
   mergeGitStatusParts,
@@ -82,7 +76,6 @@ import {
   customTextGenerationPolicy,
   repositoryConventionsTextGenerationPolicy,
 } from "../textGeneration/TextGenerationPresets.ts";
-import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
@@ -740,7 +733,6 @@ export const make = Effect.gen(function* () {
 
   const sourceControlProvider = (cwd: string) => sourceControlProviders.resolve({ cwd });
   const serverSettingsService = yield* ServerSettings.ServerSettingsService;
-  const threads = yield* ProjectionStore.ProjectionStoreV2;
   const projects = yield* ProjectStore.ProjectStoreV2;
   // Optional so settings-only callers keep the old default location: without
   // the database or server config there is no project folder to resolve.
@@ -748,25 +740,6 @@ export const make = Effect.gen(function* () {
   const serverConfig = yield* Effect.serviceOption(ServerConfig.ServerConfig);
   const labelFolders = yield* Effect.serviceOption(ProjectLabelFolders.ProjectLabelFolders);
   const home = yield* HostProcess.HomeDirectory;
-  /** Environment settings with the acting project's overrides applied. */
-  const projectSettingsFor = Effect.fnUntraced(function* (input: {
-    readonly cwd: string;
-    readonly threadId?: ThreadId | undefined;
-  }) {
-    const settings = yield* serverSettingsService.getSettings;
-    if (!hasProjectSettingsOverrides(settings))
-      return { settings, projectId: null as ProjectId | null };
-    const projectId: ProjectId | null = yield* input.threadId !== undefined
-      ? threads.getThreadShell(input.threadId).pipe(
-          Effect.map((thread) => thread?.projectId ?? null),
-          Effect.orElseSucceed(() => null),
-        )
-      : projects.findActiveByWorkspaceRoot(input.cwd).pipe(
-          Effect.map((project) => Option.getOrNull(project)?.projectId ?? null),
-          Effect.orElseSucceed(() => null),
-        );
-    return { settings: resolveProjectSettings(settings, projectId).settings, projectId };
-  });
   // Best effort: a settings read failure falls back to the default location.
   const readWorktreesDirectory = serverSettingsService.getSettings.pipe(
     Effect.map((settings) => settings.worktreesDirectory),
@@ -839,8 +812,8 @@ export const make = Effect.gen(function* () {
     const submodules =
       options?.submodules !== undefined
         ? options.submodules
-        : yield* projectSettingsFor(input).pipe(
-            Effect.map(({ settings }) => settings.worktreeSubmodules),
+        : yield* serverSettingsService.getSettings.pipe(
+            Effect.map((settings) => settings.worktreeSubmodules),
             Effect.orElseSucceed(() => null),
           );
     const worktreesDirectory = yield* readWorktreesDirectory;
@@ -3012,8 +2985,8 @@ export const make = Effect.gen(function* () {
         },
         {
           // Best effort: a settings read failure falls back to the checkout's cogenly.json.
-          submodules: yield* projectSettingsFor(input).pipe(
-            Effect.map(({ settings }) => settings.worktreeSubmodules),
+          submodules: yield* serverSettingsService.getSettings.pipe(
+            Effect.map((settings) => settings.worktreeSubmodules),
             Effect.orElseSucceed(() => null),
           ),
         },
@@ -3124,8 +3097,8 @@ export const make = Effect.gen(function* () {
         let commitMessageForStep = input.commitMessage;
         let preResolvedCommitSuggestion: CommitAndBranchSuggestion | undefined = undefined;
 
-        const textGenerationSettings = yield* projectSettingsFor(input).pipe(
-          Effect.flatMap(({ settings, projectId }) =>
+        const textGenerationSettings = yield* serverSettingsService.getSettings.pipe(
+          Effect.flatMap((settings) =>
             settings.sourceControlWriterModelSelection === null
               ? Effect.succeed({
                   modelSelection: settings.textGenerationModelSelection,
@@ -3136,7 +3109,6 @@ export const make = Effect.gen(function* () {
                     modelSelection: ServerSettings.resolveSourceControlWriterModelSelection(
                       settings,
                       providers,
-                      projectId,
                     ),
                     style: settings.sourceControlWritingStyle,
                   })),

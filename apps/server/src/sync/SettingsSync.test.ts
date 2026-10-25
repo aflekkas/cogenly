@@ -54,35 +54,8 @@ const start = Effect.fn("startSettingsMachine")(function* (
 });
 
 describe("settings sync between paired machines", () => {
-  it.live("late source overrides follow a merged project and an explicit target reset wins", () =>
-    Effect.gen(function* () {
-      const repository = ProjectId.make("merge-settings-repo");
-      const machine = yield* start("merge-settings", "cloud-server", repository);
-      yield* machine.state.write(
-        "project",
-        "label:source",
-        { mergedInto: LABEL, mergeSourceName: "Source" },
-        true,
-      );
-      yield* machine.state.write("project-settings", "label:source", {
-        enableAgentBrowserAccess: { value: false },
-      });
-      yield* machine.reconcile;
-      expect(
-        (yield* machine.settings.getSettings).projectSettingsOverrides[repository]
-          ?.enableAgentBrowserAccess,
-      ).toBe(false);
-      yield* machine.state.write("project-settings", LABEL, { enableAgentBrowserAccess: null });
-      yield* machine.reconcile;
-      expect(
-        (yield* machine.settings.getSettings).projectSettingsOverrides[repository]
-          ?.enableAgentBrowserAccess,
-      ).toBeUndefined();
-    }),
-  );
-
   it.live(
-    "lifecycle scripts stay local in universal settings and project overrides",
+    "lifecycle scripts stay local",
     () =>
       Effect.gen(function* () {
         const hubRepository = ProjectId.make("scripts-hub-repo");
@@ -102,7 +75,6 @@ describe("settings sync between paired machines", () => {
         ];
         yield* hub.settings.updateSettings({
           defaultProjectScripts: scripts,
-          projectSettingsOverrides: { [hubRepository]: { defaultProjectScripts: scripts } },
         });
         yield* hub.reconcile;
         yield* spoke.reconcile;
@@ -112,17 +84,8 @@ describe("settings sync between paired machines", () => {
         const local = yield* hub.settings.getSettings;
         const remote = yield* spoke.settings.getSettings;
         expect(local.defaultProjectScripts).toEqual(scripts);
-        expect(local.projectSettingsOverrides[hubRepository]?.defaultProjectScripts).toEqual(
-          scripts,
-        );
         expect(remote.defaultProjectScripts).toEqual([]);
-        expect(
-          remote.projectSettingsOverrides[spokeRepository]?.defaultProjectScripts,
-        ).toBeUndefined();
         expect((yield* hub.state.get("settings", "universal"))?.fields ?? {}).not.toHaveProperty(
-          "defaultProjectScripts",
-        );
-        expect((yield* hub.state.get("project-settings", LABEL))?.fields ?? {}).not.toHaveProperty(
           "defaultProjectScripts",
         );
       }).pipe(Effect.scoped),
@@ -130,7 +93,7 @@ describe("settings sync between paired machines", () => {
   );
 
   it.live(
-    "universal settings and project overrides follow the user; machine-local ones stay",
+    "universal settings follow the user; machine-local ones stay",
     () =>
       Effect.gen(function* () {
         const hubRepository = ProjectId.make("hub-checkout");
@@ -153,7 +116,6 @@ describe("settings sync between paired machines", () => {
           clientFollowUpBehavior: "queue",
           sharedKeybindings: [{ key: "mod+shift+k", command: "settings.open" }],
           projectsRoot: "/srv/projects",
-          projectSettingsOverrides: { [hubRepository]: { defaultAutoPull: true } },
         });
         yield* exchange;
         const onSpoke = yield* spoke.settings.getSettings;
@@ -165,9 +127,6 @@ describe("settings sync between paired machines", () => {
           { key: "mod+shift+k", command: "settings.open" },
         ]);
         expect(onSpoke.projectsRoot).toBe("");
-        expect(onSpoke.projectSettingsOverrides[spokeRepository]).toEqual({
-          defaultAutoPull: true,
-        });
 
         // The way back: an edit and a reset on the spoke reach the hub.
         yield* spoke.settings.updateSettings({
@@ -175,7 +134,6 @@ describe("settings sync between paired machines", () => {
           aiGreetings: true,
           clientAppearanceAccent: "orange",
           sharedKeybindings: [],
-          projectSettingsOverrides: { [spokeRepository]: null },
         });
         yield* exchange;
         const onHub = yield* hub.settings.getSettings;
@@ -185,7 +143,6 @@ describe("settings sync between paired machines", () => {
         expect(onHub.clientFollowUpBehavior).toBe("queue");
         expect(onHub.sharedKeybindings).toEqual([]);
         expect(onHub.projectsRoot).toBe("/srv/projects");
-        expect(onHub.projectSettingsOverrides[hubRepository]).toBeUndefined();
 
         // Settled: another pass changes nothing on either side.
         const before = yield* hub.run(

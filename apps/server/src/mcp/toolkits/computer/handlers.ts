@@ -13,7 +13,7 @@ const requireComputerAccess = McpInvocationContext.requireThreadMcpCapability("c
       new ComputerUseUnavailableError({
         code: "disabled",
         reason:
-          "The owner turned computer use off for this thread's project or machine. Do not work around it with osascript or other scripts. They can turn on Computer use in Settings → Integrations → Agent access; it applies when the agent session next starts.",
+          "The owner turned computer use off on this machine. Do not work around it with osascript or other scripts. They can turn on Computer use in Settings → Integrations → Agent access; it applies when the agent session next starts.",
       }),
   ),
 );

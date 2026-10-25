@@ -1,4 +1,3 @@
-import { resolveProjectSettings } from "@cogenly/shared/projectSettings";
 import {
   CommandId,
   type ChatAttachment,
@@ -108,10 +107,7 @@ const make = Effect.gen(function* () {
         return { type: "complete" as const };
       }
 
-      const settings = resolveProjectSettings(
-        yield* serverSettings.getSettings,
-        projection.thread.projectId,
-      ).settings;
+      const settings = yield* serverSettings.getSettings;
       const result = yield* textGeneration.generateThreadTitle({
         cwd: projection.thread.worktreePath ?? project.value.workspaceRoot,
         message: context.message,

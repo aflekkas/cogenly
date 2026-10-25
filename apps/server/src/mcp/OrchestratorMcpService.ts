@@ -1230,7 +1230,7 @@ const make = Effect.gen(function* () {
         // Inherit the parent's instance only when it can actually serve the
         // child; an unavailable parent yields to a healthy instance of the
         // requested driver rather than failing the delegation. An instance
-        // the project turned off cannot serve either, so selection skips it
+        // the machine turned off cannot serve either, so selection skips it
         // for the next candidate instead of failing the enablement check.
         const healthyCandidates = candidates.filter(
           (candidate) => providerConstraints(candidate, true).length === 0,
@@ -1243,14 +1243,13 @@ const make = Effect.gen(function* () {
           ...healthyCandidates.filter((candidate) => candidate !== inheritedCandidate),
         ];
         for (const candidate of orderedCandidates) {
-          const enabledForProject =
+          const enabled =
             input.remote === true ||
             input.skipProjectEnablementFilter === true ||
-            (yield* threadManagement.isProviderInstanceEnabledForProject({
-              projectId: input.parent.thread.projectId,
+            (yield* threadManagement.isProviderInstanceEnabled({
               instanceId: candidate.instanceId,
             }));
-          if (enabledForProject) {
+          if (enabled) {
             instanceId = candidate.instanceId;
             break;
           }
@@ -1260,7 +1259,7 @@ const make = Effect.gen(function* () {
             "provider_unavailable",
             healthyCandidates.length === 0
               ? `No available V2 provider instance for driver ${requestedDriver}.`
-              : `No instance of driver ${requestedDriver} is enabled for this project.`,
+              : `No instance of driver ${requestedDriver} is turned on on this machine.`,
           );
         }
       }
