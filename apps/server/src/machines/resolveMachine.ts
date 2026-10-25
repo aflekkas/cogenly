@@ -2,6 +2,7 @@ import { type EnvironmentId, ThreadRemoteError } from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Machines from "./Machines.ts";
+import { normalizeMachineName } from "./machineName.ts";
 
 /** Resolves a portable tool argument; omitted means this server, even without pairing. */
 export const resolveMachine = Effect.fn("Machines.resolveTarget")(function* (
@@ -20,7 +21,7 @@ export const resolveMachine = Effect.fn("Machines.resolveTarget")(function* (
         new ThreadRemoteError({ reason: "offline", detail: "The machine list could not be read." }),
     ),
   );
-  const key = value.trim().toLowerCase();
+  const key = normalizeMachineName(value).toLowerCase();
   const machines = view.machines.filter((machine) => machine.pairing !== "revoked");
   const matches =
     key === "this"
@@ -31,7 +32,9 @@ export const resolveMachine = Effect.fn("Machines.resolveTarget")(function* (
               machines.find((machine) => machine.relation === "this"),
           ].filter((machine) => machine !== undefined)
         : machines.filter(
-            (machine) => machine.environmentId === value || machine.name.toLowerCase() === key,
+            (machine) =>
+              machine.environmentId === value ||
+              normalizeMachineName(machine.name).toLowerCase() === key,
           );
   const candidates =
     matches.length === 0 && key === "vps"

@@ -4,6 +4,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Machines from "./Machines.ts";
 import { resolveMachine } from "./resolveMachine.ts";
+import { machinesTurnContext } from "./machinesTurnContext.ts";
 
 const machine = (
   name: string,
@@ -60,3 +61,13 @@ it.effect("refuses ambiguous or revoked destinations rather than guessing a mach
     expect(revoked.message).toContain("No paired machine");
   }),
 );
+
+it.effect("resolves the normalized machine name advertised to agent turns", () => {
+  const target = machine(" \tStudio\n  Mac \t", "spoke");
+  return Effect.gen(function* () {
+    const view: MachineListResult = { machines: [local, target], link: { _tag: "hub", spokes: 1 } };
+    expect(machinesTurnContext(view)).toContain("- Studio Mac (laptop, online)");
+    expect(yield* resolveMachine("Studio Mac")).toBe(target.environmentId);
+    expect(yield* resolveMachine(" studio\t mac ")).toBe(target.environmentId);
+  }).pipe(Effect.provide(withMachines([local, target])));
+});
