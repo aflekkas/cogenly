@@ -704,31 +704,32 @@ describe("managed Google integrations", () => {
     return Effect.gen(function* () {
       yield* runMigrations();
       const gateway = yield* Integrations.Integrations;
-      const fs = yield* FileSystem.FileSystem;
       const { integration } = yield* gateway.create({
         preset: "google-workspace",
         accountLabel: "work",
         callbackOrigin: "https://cogenly.example.com",
       });
-      yield* fs.writeFileString(
-        `${specs[0]!.env.WORKSPACE_MCP_CREDENTIALS_DIR}/work.json`,
-        JSON.stringify({ refresh_token: "grant" }),
-      );
-      const statuses = yield* gateway.subscribe().pipe(
-        Stream.map((listed) => listed.integrations[0]?.status),
-        Stream.toQueue({ capacity: "unbounded" }),
-      );
+      yield* (yield* GoogleTokens.GoogleTokenStore).write(integration.id, {
+        email: "work@example.com",
+        credentials: {
+          token: "access",
+          refresh_token: "grant",
+          token_uri: "https://oauth2.googleapis.com/token",
+          client_id: "id",
+          client_secret: "secret",
+          scopes: [],
+          expiry: null,
+        },
+      });
       const crashed = yield* gateway
         .callTool(integration.name, "crash", {}, undefined)
         .pipe(Effect.result);
       expect(crashed._tag).toBe("Failure");
-      // No further call: the restart alone brings it back to connected.
-      yield* Stream.fromQueue(statuses).pipe(
-        Stream.filter((status) => status === "error"),
-        Stream.take(1),
-        Stream.runDrain,
-      );
-      yield* Stream.fromQueue(statuses).pipe(
+      // These are current-state snapshots: a quick restart can coalesce the
+      // transient error. Await recovery without requiring that intermediate frame.
+      // No further tool call: the supervisor's restart must trigger the probe.
+      yield* gateway.subscribe().pipe(
+        Stream.map((listed) => listed.integrations[0]?.status),
         Stream.filter((status) => status === "connected"),
         Stream.take(1),
         Stream.runDrain,

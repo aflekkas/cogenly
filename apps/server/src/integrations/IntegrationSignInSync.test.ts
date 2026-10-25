@@ -276,36 +276,35 @@ describe("web integration sign-ins across paired machines", () => {
       }).pipe(Effect.scoped, http),
   );
 
-  for (const hasDefinition of [false, true]) {
-    it.effect(
-      `short-lived shared tokens refresh halfway through with definition=${hasDefinition}`,
-      () =>
-        Effect.gen(function* () {
-          const { hub, spoke } = yield* sharedPair;
-          const mock = yield* startMockAuthServer;
-          mock.tokenLifetimeSeconds = 60;
-          const integration = yield* addLinear(spoke, mock);
-          if (hasDefinition) yield* copyDefinition(spoke, hub, integration.id);
-          yield* signIn(spoke, integration.id, "spawn");
-          yield* settle(hub, [spoke]);
-          yield* hub.integrations.adoptSyncedSignIns();
-          yield* TestClock.adjust(Duration.seconds(15));
-          yield* hub.integrations.refreshSharedSignIns;
-          expect(mock.refreshes).toBe(0);
-          yield* TestClock.adjust(Duration.seconds(16));
-          yield* hub.integrations.refreshSharedSignIns;
-          expect(mock.refreshes).toBe(1);
-          yield* hub.integrations.refreshSharedSignIns;
-          expect(mock.refreshes).toBe(1);
-          yield* settle(hub, [spoke]);
-          yield* whoami(spoke);
-          expect(mock.refreshes).toBe(1);
-        }).pipe(Effect.scoped, http),
-    );
-  }
+  it.effect.each([false, true])(
+    "short-lived shared tokens refresh halfway through with definition=%s",
+    (hasDefinition) =>
+      Effect.gen(function* () {
+        const { hub, spoke } = yield* sharedPair;
+        const mock = yield* startMockAuthServer;
+        mock.tokenLifetimeSeconds = 60;
+        const integration = yield* addLinear(spoke, mock);
+        if (hasDefinition) yield* copyDefinition(spoke, hub, integration.id);
+        yield* signIn(spoke, integration.id, "spawn");
+        yield* settle(hub, [spoke]);
+        yield* hub.integrations.adoptSyncedSignIns();
+        yield* TestClock.adjust(Duration.seconds(15));
+        yield* hub.integrations.refreshSharedSignIns;
+        expect(mock.refreshes).toBe(0);
+        yield* TestClock.adjust(Duration.seconds(16));
+        yield* hub.integrations.refreshSharedSignIns;
+        expect(mock.refreshes).toBe(1);
+        yield* hub.integrations.refreshSharedSignIns;
+        expect(mock.refreshes).toBe(1);
+        yield* settle(hub, [spoke]);
+        yield* whoami(spoke);
+        expect(mock.refreshes).toBe(1);
+      }).pipe(Effect.scoped, http),
+  );
 
-  for (const change of ["endpoint", "project scope"] as const) {
-    it.effect(`a peer cannot restore a cleared grant after changing its ${change}`, () =>
+  it.effect.each(["endpoint", "project scope"] as const)(
+    "a peer cannot restore a cleared grant after changing its %s",
+    (change) =>
       Effect.gen(function* () {
         const { hub, spoke } = yield* sharedPair;
         const mock = yield* startMockAuthServer;
@@ -327,8 +326,7 @@ describe("web integration sign-ins across paired machines", () => {
         yield* hub.integrations.adoptSyncedSignIns();
         expect((yield* oauthStateOf(hub, integration.id))?.signedIn).not.toBe(true);
       }).pipe(Effect.scoped, http),
-    );
-  }
+  );
 
   it.effect("a cached token gives way to a new revision of its item", () =>
     Effect.gen(function* () {

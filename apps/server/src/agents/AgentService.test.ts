@@ -497,11 +497,15 @@ describe("agent execution", () => {
         const schedules = yield* Schedules.ScheduledTaskService;
         const sql = yield* SqlClient.SqlClient;
         const ownerMachine = EnvironmentId.make("other-machine");
+        yield* store.save(h.fixture);
+        const { task } = yield* schedules.upsert(h.triggerInput);
+        // A replica arrives through sync; ordinary writes to a remote owner now route there.
         yield* store.save({ ...h.fixture, ownerMachine });
-        const { task } = yield* schedules.upsert({ ...h.triggerInput, ownerMachine });
-        yield* sql`UPDATE scheduled_tasks SET next_run_at='1969-01-01T00:00:00.000Z' WHERE task_id=${task.id}`;
+        yield* sql`UPDATE scheduled_tasks SET owner_machine=${ownerMachine}, next_run_at='1969-01-01T00:00:00.000Z' WHERE task_id=${task.id}`;
         expect(yield* store.reserve(h.fixture.id)).toBe(false);
-        expect(yield* agents.trigger(task, "off-owner", task.prompt)).toBe(false);
+        expect(yield* agents.trigger({ ...task, ownerMachine }, "off-owner", task.prompt)).toBe(
+          false,
+        );
         yield* h.jobs.get("scheduled-tasks")!;
         yield* agents.reconcile();
         expect(h.launches).toHaveLength(0);

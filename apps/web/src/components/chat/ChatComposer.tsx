@@ -65,7 +65,6 @@ import { createModelSelection, normalizeModelSlug } from "@cogenly/shared/model"
 import { USAGE_LIMITS_COMMAND } from "@cogenly/shared/usageLimits";
 import {
   memo,
-  type ComponentProps,
   type ReactNode,
   useCallback,
   useEffect,
@@ -3972,6 +3971,42 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   };
 
   const { onUsageLimitsCommand } = props;
+  /**
+   * The one way a source enters the draft, from the Sources picker or `@`: its chip at the
+   * caret (or in place of the `@` query) and its record beside it. Picking a source the draft
+   * already holds adds another chip for the same record.
+   */
+  const insertIntegrationSource = (
+    source: IntegrationSource,
+    replace?: { text: string; rangeStart: number; rangeEnd: number },
+  ): boolean => {
+    const record = integrationContextRecord(source);
+    const replacement = `${formatInlineContextReference(linkContextReference(record))} `;
+    if (!replace) {
+      if (insertComposerText(replacement, "cursor", { ensureLeadingBoundary: true })) {
+        addComposerDraftThreadContexts(attachmentDraftTarget, [record], { appendReference: false });
+        return true;
+      }
+      // The editor is not taking input (connecting, a question pending): the store appends
+      // the chip to the draft, as it does for context from other panels.
+      addComposerDraftThreadContexts(attachmentDraftTarget, [record]);
+      return false;
+    }
+    const rangeEnd = extendReplacementRangeForTrailingSpace(
+      replace.text,
+      replace.rangeEnd,
+      replacement,
+    );
+    const applied = applyPromptReplacement(replace.rangeStart, rangeEnd, replacement, {
+      expectedText: replace.text.slice(replace.rangeStart, rangeEnd),
+    });
+    if (applied) {
+      addComposerDraftThreadContexts(attachmentDraftTarget, [record], { appendReference: false });
+    }
+    return applied;
+  };
+  const insertIntegrationSourceStable = useStableCallback(insertIntegrationSource);
+
   const onSelectComposerItem = (item: ComposerCommandItem) => {
     if (composerSelectLockRef.current) return;
     composerSelectLockRef.current = true;
@@ -4149,42 +4184,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     }
   };
   const onSelectComposerItemStable = useStableCallback(onSelectComposerItem);
-
-  /**
-   * The one way a source enters the draft, from the Sources picker or `@`: its chip at the
-   * caret (or in place of the `@` query) and its record beside it. Picking a source the draft
-   * already holds adds another chip for the same record.
-   */
-  const insertIntegrationSource = (
-    source: IntegrationSource,
-    replace?: { text: string; rangeStart: number; rangeEnd: number },
-  ): boolean => {
-    const record = integrationContextRecord(source);
-    const replacement = `${formatInlineContextReference(linkContextReference(record))} `;
-    if (!replace) {
-      if (insertComposerText(replacement, "cursor", { ensureLeadingBoundary: true })) {
-        addComposerDraftThreadContexts(attachmentDraftTarget, [record], { appendReference: false });
-        return true;
-      }
-      // The editor is not taking input (connecting, a question pending): the store appends
-      // the chip to the draft, as it does for context from other panels.
-      addComposerDraftThreadContexts(attachmentDraftTarget, [record]);
-      return false;
-    }
-    const rangeEnd = extendReplacementRangeForTrailingSpace(
-      replace.text,
-      replace.rangeEnd,
-      replacement,
-    );
-    const applied = applyPromptReplacement(replace.rangeStart, rangeEnd, replacement, {
-      expectedText: replace.text.slice(replace.rangeStart, rangeEnd),
-    });
-    if (applied) {
-      addComposerDraftThreadContexts(attachmentDraftTarget, [record], { appendReference: false });
-    }
-    return applied;
-  };
-  const insertIntegrationSourceStable = useStableCallback(insertIntegrationSource);
 
   const onComposerMenuItemHighlighted = (itemId: string | null) => {
     setComposerHighlightedItemId(itemId);

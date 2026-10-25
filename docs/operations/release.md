@@ -74,7 +74,7 @@ hold:
    the `ProgramArguments` in
    `~/Library/LaunchAgents/com.cogenly.app.service.plist`) names
    `runtime/versions/<v>/cogenly __service-launcher` with `<v>` at least
-   0.2.3. An older launcher can still name `0.1.11/t3`; run
+   0.3.0. An older launcher can still name `0.1.11/t3`; run
    `cogenly update` or `cogenly service install` there first.
 2. Every machine we know of runs a server and CLI from v0.3.0 or later
    (`activeVersion` in `~/.cogenly/runtime/service-state.json`, and

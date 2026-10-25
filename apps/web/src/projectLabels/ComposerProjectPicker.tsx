@@ -133,8 +133,11 @@ export function ComposerProjectPicker(props: {
   readonly appearance?: "toolbar" | "hero" | "headline";
 }) {
   const { environmentId, threadId } = props;
-  const { directory, thread, draftSurface, isWorkDraft, current, canPickProject } =
-    useComposerProjectPickerState(environmentId, threadId, props.draftId);
+  const { directory, thread, isWorkDraft, current, canPickProject } = useComposerProjectPickerState(
+    environmentId,
+    threadId,
+    props.draftId,
+  );
   const canCreate = useAtomValue(
     serverEnvironment.createProjectLabel.permissionAtom(environmentId),
   );
