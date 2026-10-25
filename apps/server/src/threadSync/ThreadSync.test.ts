@@ -515,3 +515,78 @@ it.live(
     }).pipe(Effect.scoped),
   30000,
 );
+
+it.live(
+  "held history checks all pages before replay and resumes committed chunks after failure",
+  () =>
+    Effect.gen(function* () {
+      const hub = yield* start("paged-hub", "cloud-server");
+      const laptop = yield* start("paged-owner", "computer");
+      yield* pair(hub, laptop);
+      const at = yield* DateTime.now;
+      for (let batch = 0; batch < 3; batch++) {
+        const events = Array.from({ length: 100 }, (_, i) => {
+          const index = batch * 100 + i;
+          return encodeEvent(
+            message(
+              `event:held:${index}`,
+              DateTime.add(at, { milliseconds: index + 1 }),
+              `${index}`,
+            ),
+          );
+        });
+        if (batch === 0) events.unshift(encodeEvent(thread("event:held-created", at)));
+        if (batch === 2)
+          events.push({
+            id: "event:still-unreadable",
+            type: "message.newer-format",
+            threadId,
+            occurredAt: DateTime.formatIso(at),
+            payload: {},
+          });
+        yield* laptop.machines.call(hub.environmentId, ThreadReplicationApply, {
+          after: { events: batch * 100, meta: 0 },
+          cursor: { events: (batch + 1) * 100, meta: 0 },
+          events,
+          meta: [
+            {
+              threadId,
+              owner: laptop.environmentId,
+              epoch: "newer-epoch",
+              folderId: null,
+              source: null,
+            },
+          ],
+        });
+      }
+      // Simulate a build learning the metadata, with one unreadable event on the last page.
+      yield* hub.sql`UPDATE thread_replication_deferred SET item_json = json_set(item_json, '$.epoch', 0) WHERE item_kind = 'meta'`;
+      yield* hub.restartReplication;
+      expect(yield* hub.replication.eventCount(threadId)).toBe(0);
+      yield* hub.sql`DELETE FROM thread_replication_deferred WHERE json_extract(item_json, '$.id') = 'event:still-unreadable'`;
+      yield* hub.sql`CREATE TRIGGER interrupt_replay BEFORE INSERT ON orchestration_events
+      WHEN NEW.event_id = 'event:held:200' BEGIN SELECT RAISE(ABORT, 'injected replay interruption'); END`;
+      yield* hub.restartReplication;
+      const committed = yield* hub.replication.eventCount(threadId);
+      expect(committed).toBeGreaterThan(0);
+      expect(committed).toBeLessThan(301);
+      const held = (yield* hub.sql<{
+        readonly count: number;
+      }>`SELECT count(*) AS count FROM thread_replication_deferred`)[0]!.count;
+      expect(held).toBeGreaterThan(0);
+      expect(held).toBeLessThan(302);
+      yield* hub.sql`DROP TRIGGER interrupt_replay`;
+      yield* hub.restartReplication;
+      expect(yield* hub.replication.eventCount(threadId)).toBe(301);
+      expect(yield* hub.sql`SELECT 1 FROM thread_replication_deferred`).toEqual([]);
+      const chunks = yield* hub.sql<{
+        readonly count: number;
+      }>`SELECT count(*) AS count FROM orchestration_events
+      WHERE stream_id = ${threadId} GROUP BY command_id`;
+      expect(Math.max(...chunks.map((chunk) => chunk.count))).toBeLessThanOrEqual(128);
+      expect(
+        (yield* hub.projections.getThreadProjection(threadId)).messages.map((entry) => entry.text),
+      ).toEqual(Array.from({ length: 300 }, (_, i) => `${i}`));
+    }).pipe(Effect.scoped),
+  30000,
+);

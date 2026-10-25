@@ -890,58 +890,112 @@ const make = Effect.gen(function* () {
     Effect.mapError(storage),
   );
 
-  /**
-   * After an update, applies held threads this build can now read, each in
-   * its original order. A thread with any item still unreadable stays held.
-   */
-  const replayHeld = Effect.gen(function* () {
-    const rows = yield* sql<{
-      readonly seq: number;
-      readonly thread_id: string;
-      readonly item_kind: "meta" | "event";
-      readonly source_env: string;
-      readonly trusted_relay: number;
-      readonly item_json: string;
-    }>`SELECT seq, thread_id, item_kind, source_env, trusted_relay, item_json FROM thread_replication_deferred ORDER BY thread_id, seq`;
-    const byThread = new Map<string, Array<(typeof rows)[number]>>();
-    for (const row of rows)
-      byThread.set(row.thread_id, [...(byThread.get(row.thread_id) ?? []), row]);
-    for (const [threadId, items] of byThread) {
-      const decoded = items.map((row) => {
-        const raw = decodeJsonOption(row.item_json);
-        return {
-          row,
-          raw: Option.getOrUndefined(raw),
-          meta: row.item_kind === "meta" ? Option.flatMap(raw, decodeMeta) : Option.none(),
-          event: row.item_kind === "event" ? Option.flatMap(raw, decodeEventJson) : Option.none(),
-        };
-      });
-      // A row decodes to exactly one of the two; neither means still unreadable.
-      if (decoded.some((item) => Option.isNone(item.meta) && Option.isNone(item.event))) continue;
-      // Held items keep their sender; apply them in runs from one sender.
-      let at = 0;
-      while (at < decoded.length) {
-        const { source_env: sender, trusted_relay: trusted } = decoded[at]!.row;
-        let end = at;
-        while (
-          end < decoded.length &&
-          decoded[end]!.row.source_env === sender &&
-          decoded[end]!.row.trusted_relay === trusted
-        )
-          end++;
-        const run = decoded.slice(at, end);
-        yield* applyItems(
-          run.flatMap((item) => Option.toArray(item.meta).map((meta) => ({ meta, raw: item.raw }))),
-          run.flatMap((item) =>
-            Option.toArray(item.event).map((event) => ({ event, raw: item.raw })),
-          ),
-          EnvironmentId.make(sender),
-          `held:${run[0]!.row.seq}`,
-          trusted === 1,
-        );
-        at = end;
+  // Read sizes before payloads: a page holds at most 128 items and the normal
+  // byte budget, allowing a metadata/event pair even when one item is oversized.
+  const heldPage = (threadId: string, after: number, through: number) =>
+    Effect.gen(function* () {
+      const sizes = yield* sql<{ readonly seq: number; readonly bytes: number }>`
+      SELECT seq, length(CAST(item_json AS BLOB)) AS bytes FROM thread_replication_deferred
+      WHERE thread_id = ${threadId} AND seq > ${after} AND seq <= ${through}
+      ORDER BY seq LIMIT 128`;
+      let end = after;
+      let bytes = 0;
+      let count = 0;
+      for (const row of sizes) {
+        if (count >= 2 && bytes + row.bytes > THREAD_REPLICATION_BATCH_BYTES) break;
+        bytes += row.bytes;
+        count++;
+        end = row.seq;
       }
-      yield* sql`DELETE FROM thread_replication_deferred WHERE thread_id = ${threadId}`;
+      return yield* sql<{
+        readonly seq: number;
+        readonly item_kind: "meta" | "event";
+        readonly source_env: string;
+        readonly trusted_relay: number;
+        readonly item_json: string;
+      }>`SELECT seq, item_kind, source_env, trusted_relay, item_json FROM thread_replication_deferred
+      WHERE thread_id = ${threadId} AND seq > ${after} AND seq <= ${end} ORDER BY seq`;
+    });
+  const decodeHeld = (row: Effect.Success<ReturnType<typeof heldPage>>[number]) => {
+    const raw = decodeJsonOption(row.item_json);
+    return {
+      row,
+      raw: Option.getOrUndefined(raw),
+      meta: row.item_kind === "meta" ? Option.flatMap(raw, decodeMeta) : Option.none(),
+      event: row.item_kind === "event" ? Option.flatMap(raw, decodeEventJson) : Option.none(),
+    };
+  };
+
+  /** Readability is checked incrementally before any part of a thread applies. */
+  const readableHeld = (threadId: string, through: number) =>
+    Effect.gen(function* () {
+      let after = 0;
+      for (;;) {
+        const page = yield* heldPage(threadId, after, through);
+        if (page.length === 0) return true;
+        for (const row of page) {
+          const item = decodeHeld(row);
+          if (Option.isNone(item.meta) && Option.isNone(item.event)) return false;
+        }
+        after = page.at(-1)!.seq;
+      }
+    });
+
+  /** Replay bounded chunks; deletion and application commit together as durable progress. */
+  const replayHeld = Effect.gen(function* () {
+    let afterThread = "";
+    for (;;) {
+      const next = (yield* sql<{ readonly thread_id: string; readonly through: number }>`
+        SELECT thread_id, MAX(seq) AS through FROM thread_replication_deferred
+        WHERE thread_id > ${afterThread} GROUP BY thread_id ORDER BY thread_id LIMIT 1`)[0];
+      if (next === undefined) return;
+      const { thread_id: threadId, through } = next;
+      afterThread = threadId;
+      if (!(yield* readableHeld(threadId, through))) continue;
+      for (;;) {
+        const page = (yield* heldPage(threadId, 0, through)).map(decodeHeld);
+        if (page.length === 0) break;
+        const end = page.at(-1)!.row.seq;
+        yield* sql.withTransaction(
+          Effect.gen(function* () {
+            // Keep sender runs separate. Each batch starts with metadata; retain
+            // the final run's last meta row as context for the next chunk/restart.
+            let at = 0;
+            let retained: number | null = null;
+            while (at < page.length) {
+              const first = page[at]!.row;
+              let stop = at + 1;
+              while (
+                stop < page.length &&
+                page[stop]!.row.source_env === first.source_env &&
+                page[stop]!.row.trusted_relay === first.trusted_relay
+              )
+                stop++;
+              const run = page.slice(at, stop);
+              const metas = run.flatMap((item) =>
+                Option.toArray(item.meta).map((meta) => ({ meta, raw: item.raw })),
+              );
+              const events = run.flatMap((item) =>
+                Option.toArray(item.event).map((event) => ({ event, raw: item.raw })),
+              );
+              if (metas.length === 0 && events.length > 0)
+                return yield* new ThreadReplicationError({ reason: "invalid-batch" });
+              yield* applyItems(
+                metas,
+                events,
+                EnvironmentId.make(first.source_env),
+                `held:${run.at(-1)!.row.seq}`,
+                first.trusted_relay === 1,
+              );
+              retained = run.findLast((item) => Option.isSome(item.meta))?.row.seq ?? null;
+              at = stop;
+            }
+            yield* sql`DELETE FROM thread_replication_deferred WHERE thread_id = ${threadId} AND seq <= ${end}
+            ${end === through || retained === null ? sql`` : sql`AND seq <> ${retained}`}`;
+          }),
+        );
+        if (end === through) break;
+      }
     }
   }).pipe(
     Effect.catchCause((cause) =>
