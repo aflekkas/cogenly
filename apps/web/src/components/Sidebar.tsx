@@ -4207,6 +4207,13 @@ export default function Sidebar() {
   // its edge: read down from the dock in the top layout, while in the bottom
   // layout Work's active lists and Agents open on their last rows by the dock.
   const agentListFilter = useAgentListFilter();
+  // The list's rows also sit against this edge when they don't fill the column.
+  const sidebarModeListEdge = sidebarListEdge({
+    layout: sidebarLayout,
+    searching: isSearchingThreads,
+    mode: sidebarMode,
+    shelf: openShelf ?? null,
+  });
   useSidebarListAnchor(
     sidebarModeListRef,
     isSearchingThreads
@@ -4216,12 +4223,7 @@ export default function Sidebar() {
         : sidebarMode === "agents"
           ? `agents:${agentListFilter}`
           : sidebarMode,
-    sidebarListEdge({
-      layout: sidebarLayout,
-      searching: isSearchingThreads,
-      mode: sidebarMode,
-      shelf: openShelf ?? null,
-    }),
+    sidebarModeListEdge,
   );
   const listMotionModeRef = useRef(sidebarMode);
   const listMotionShelfRef = useRef(openShelf);
@@ -5223,7 +5225,7 @@ export default function Sidebar() {
       >
         <SidebarGroup
           ref={sidebarModeListRef}
-          className={sidebarLayout === "bottom" ? "flex-1 justify-end" : "flex-1"}
+          className={sidebarModeListEdge === "bottom" ? "flex-1 justify-end" : "flex-1"}
           role="presentation"
         >
           {isSearchingThreads ? (
@@ -5333,6 +5335,7 @@ export default function Sidebar() {
                 density={sidebarMode === "tasks" ? "cards" : "rows"}
                 onKeyDown={sidebarMode === "tasks" ? handleWorkListKeyDown : undefined}
                 grow={sidebarListItems.length > 0}
+                edge={sidebarModeListEdge}
                 className={cn(
                   // An action sweep owns the pointer: rows it passes over
                   // neither show hover actions nor open tooltips, even

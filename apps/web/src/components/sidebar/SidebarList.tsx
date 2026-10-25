@@ -5,17 +5,18 @@ import type {
   ReactNode,
 } from "react";
 
-import { type SidebarLayout, useSidebarLayout } from "~/appearancePreferences";
+import { useSidebarLayout } from "~/appearancePreferences";
 import { cn } from "~/lib/utils";
 import { DisclosureChevron, DisclosurePanel } from "../ui/disclosure";
+import type { SidebarListEdge } from "./sidebarListAnchor.logic";
 
 /**
  * The sidebar's shared list pieces. Every tab (Chats, Work, Agents, Projects,
  * search results) builds its column from these, so spacing, type, hover and
  * selected states, truncation and collapse read the same everywhere:
  *
- * - `SidebarList` — the list itself, reading down from the search dock above
- *   it, or in the bottom sidebar layout stacked up against the dock below it;
+ * - `SidebarList` — the list itself, reading down from the top, or for a list
+ *   anchored to the bottom edge stacked up against the dock below it;
  *   it fills the column when it `grow`s (`sidebarFillClassName`).
  * - `SidebarGroupHeader` — a group's heading: optional icon or badge, a label
  *   that truncates, a hairline, and a disclosure chevron when it collapses.
@@ -44,15 +45,18 @@ import { DisclosureChevron, DisclosurePanel } from "../ui/disclosure";
 
 /**
  * A sidebar column that fills the rest of the scroll area: its items read
- * down from the top, or in the bottom layout stack up against the dock below.
+ * down from the top, or stack up against the dock below for a list anchored
+ * to the bottom edge (`sidebarListEdge`). A list that reads from the top must
+ * not sit at the bottom, or a short one opens with a gap above it.
  */
-export function sidebarFillClassName(layout: SidebarLayout): string {
-  return cn("flex-1", layout === "bottom" && "justify-end");
+export function sidebarFillClassName(edge: SidebarListEdge): string {
+  return cn("flex-1", edge === "bottom" && "justify-end");
 }
 
 export function SidebarList({
   density = "rows",
   grow = false,
+  edge,
   className,
   ...props
 }: ComponentProps<"ul"> & {
@@ -60,6 +64,8 @@ export function SidebarList({
   density?: "rows" | "cards";
   /** Fill the rest of the column, so an empty state centres in it. */
   grow?: boolean;
+  /** The edge a growing list's items sit against; the sidebar layout's by default. */
+  edge?: SidebarListEdge | undefined;
 }) {
   const layout = useSidebarLayout();
   return (
@@ -68,7 +74,7 @@ export function SidebarList({
       className={cn(
         "relative flex min-w-0 flex-col",
         density === "rows" && "gap-(--sidebar-row-gap)",
-        grow && sidebarFillClassName(layout),
+        grow && sidebarFillClassName(edge ?? layout),
         className,
       )}
     />
