@@ -335,7 +335,6 @@ function MachineRow({
               </Badge>
             ) : null}
             <Switch
-              size="sm"
               checked={served === true}
               disabled={!canPrivateAccess || setup?.status === null || privateBusy}
               aria-label={`Private access for ${machine.name}`}

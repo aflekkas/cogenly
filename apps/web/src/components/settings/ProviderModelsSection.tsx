@@ -463,7 +463,6 @@ export function ProviderModelsSection({
     <Tooltip>
       <TooltipTrigger render={<span className="flex shrink-0 items-center" />}>
         <Switch
-          size="sm"
           checked={!isHidden}
           disabled={!canWritePreferences || model.isCustom}
           onCheckedChange={(checked) => setHidden(model.slug, !checked)}

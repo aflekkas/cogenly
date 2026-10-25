@@ -1680,7 +1680,6 @@ function SavedBackendListRow({
         <TooltipTrigger
           render={
             <Switch
-              size="sm"
               checked={enabled}
               disabled={isRemoving || unsupported}
               aria-label={`${enabled ? "Switch off" : "Switch on"} ${environment.label}`}

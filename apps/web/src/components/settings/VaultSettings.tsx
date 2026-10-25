@@ -374,7 +374,6 @@ function VaultPeerRow(props: {
     >
       <span className="text-xs text-muted-foreground">Share vault</span>
       <Switch
-        size="sm"
         checked={shared}
         disabled={!props.canWrite || busy || blockedOffline}
         aria-label={`Share vault with ${peer.label}`}
