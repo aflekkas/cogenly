@@ -679,7 +679,7 @@ function BackgroundActivityAdvancedDialog({
     <Dialog open={open && canWriteSettings} onOpenChange={onOpenChange}>
       <DialogPopup className="max-w-xl">
         <DialogHeader>
-          <DialogTitle>Background Activity</DialogTitle>
+          <DialogTitle>Background activity</DialogTitle>
           <DialogDescription>
             Tune the shared power policy and the background intervals that feed it.
           </DialogDescription>

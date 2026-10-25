@@ -357,22 +357,22 @@ export interface ThreadStatusPill {
     | "Working"
     | "Connecting"
     | "Completed"
-    | "Pending Approval"
-    | "Awaiting Input"
+    | "Pending approval"
+    | "Awaiting input"
     | "Waiting"
-    | "Plan Ready";
+    | "Plan ready";
   colorClass: string;
   dotClass: string;
   pulse: boolean;
 }
 
 const THREAD_STATUS_PRIORITY: Record<ThreadStatusPill["label"], number> = {
-  "Pending Approval": 5,
-  "Awaiting Input": 4,
+  "Pending approval": 5,
+  "Awaiting input": 4,
   Working: 3,
   Connecting: 3,
   Waiting: 2.5,
-  "Plan Ready": 2,
+  "Plan ready": 2,
   Completed: 1,
 };
 
@@ -900,7 +900,7 @@ export function resolveThreadStatusPill(input: {
 
   if (thread.hasPendingApprovals || thread.pendingSubagentRequest === "approval") {
     return {
-      label: "Pending Approval",
+      label: "Pending approval",
       colorClass: "text-amber-600 dark:text-amber-300/90",
       dotClass: "bg-amber-500 dark:bg-amber-300/90",
       pulse: false,
@@ -909,7 +909,7 @@ export function resolveThreadStatusPill(input: {
 
   if (thread.hasPendingUserInput || thread.pendingSubagentRequest === "user_input") {
     return {
-      label: "Awaiting Input",
+      label: "Awaiting input",
       colorClass: "text-indigo-600 dark:text-indigo-300/90",
       dotClass: "bg-indigo-500 dark:bg-indigo-300/90",
       pulse: false,
@@ -954,7 +954,7 @@ export function resolveThreadStatusPill(input: {
     thread.hasActionableProposedPlan;
   if (hasPlanReadyPrompt) {
     return {
-      label: "Plan Ready",
+      label: "Plan ready",
       colorClass: "text-violet-600 dark:text-violet-300/90",
       dotClass: "bg-violet-500 dark:bg-violet-300/90",
       pulse: false,

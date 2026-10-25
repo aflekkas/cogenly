@@ -1846,7 +1846,7 @@ function OpenCommandPaletteDialog(props: {
                       openSourceControlSettings();
                     }}
                   >
-                    Setup Required
+                    Setup required
                   </Button>
                 }
               />

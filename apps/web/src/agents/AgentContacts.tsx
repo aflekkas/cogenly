@@ -544,9 +544,9 @@ function AgentRow({
     if (!api) return;
     const items: ContextMenuItem<AgentMenuAction>[] = [
       { id: "open", label: "Open", icon: "mail-open" },
-      { id: "details", label: "Open Details", icon: "settings" },
+      { id: "details", label: "Open details", icon: "settings" },
       { id: "rename", label: "Rename", icon: "pencil", disabled: !canWrite },
-      { id: "face", label: "Change Face…", disabled: !canWrite },
+      { id: "face", label: "Change face…", disabled: !canWrite },
       ...(folders.length > 0 || currentFolderId !== null
         ? [
             {
@@ -586,7 +586,7 @@ function AgentRow({
       ...(unread > 0 && latestReply
         ? [{ id: "mark-read" as const, label: "Mark as Read", icon: "check" }]
         : []),
-      { id: "copy-link", label: "Copy Link", icon: "link" },
+      { id: "copy-link", label: "Copy link", icon: "link" },
       {
         id: "delete",
         label: "Delete…",

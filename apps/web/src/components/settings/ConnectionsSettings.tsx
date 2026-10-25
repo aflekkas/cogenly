@@ -373,7 +373,7 @@ function parseRemotePairingFields(input: { readonly host: string; readonly pairi
   const host = input.host.trim();
   const pairingCode = input.pairingCode.trim();
   if (!host) {
-    throw new Error("Enter a backend host.");
+    throw new Error("Enter the machine's address.");
   }
   if (!pairingCode) {
     throw new Error("Enter a pairing code.");
@@ -1958,8 +1958,8 @@ function EmptyRemoteEnvironments({ cloudEnabled = true }: { readonly cloudEnable
         <EmptyTitle>No other machines connected</EmptyTitle>
         <EmptyDescription>
           {cloudEnabled
-            ? "Choose “Connect a machine” to use another Cogenly server from this app, or connect one from Cogenly Connect."
-            : "Choose “Connect a machine” to use another Cogenly server from this app."}
+            ? "Choose “Connect a machine” to use another machine running Cogenly from this app, or connect one from Cogenly Connect."
+            : "Choose “Connect a machine” to use another machine running Cogenly from this app."}
         </EmptyDescription>
       </EmptyHeader>
     </Empty>
@@ -2452,12 +2452,12 @@ export function ConnectionsSettings() {
         pairingCode: savedBackendPairingCode,
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to add backend.";
+      const message = error instanceof Error ? error.message : "Couldn't connect the machine.";
       setSavedBackendError(message);
       toastManager.add(
         stackedThreadToast({
           type: "error",
-          title: "Could not add backend",
+          title: "Couldn't connect the machine",
           description: message,
         }),
       );
@@ -2472,12 +2472,12 @@ export function ConnectionsSettings() {
     if (result._tag === "Failure") {
       if (!isAtomCommandInterrupted(result)) {
         const error = squashAtomCommandFailure(result);
-        const message = error instanceof Error ? error.message : "Failed to add backend.";
+        const message = error instanceof Error ? error.message : "Couldn't connect the machine.";
         setSavedBackendError(message);
         toastManager.add(
           stackedThreadToast({
             type: "error",
-            title: "Could not add backend",
+            title: "Couldn't connect the machine",
             description: message,
           }),
         );
@@ -2636,12 +2636,12 @@ export function ConnectionsSettings() {
       setRemovingSavedEnvironmentId(null);
       if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
         const error = squashAtomCommandFailure(result);
-        const message = error instanceof Error ? error.message : "Failed to remove backend.";
+        const message = error instanceof Error ? error.message : "Couldn't remove the machine.";
         setSavedBackendError(message);
         toastManager.add(
           stackedThreadToast({
             type: "error",
-            title: "Could not remove backend",
+            title: "Couldn't remove the machine",
             description: message,
           }),
         );
@@ -2775,11 +2775,11 @@ export function ConnectionsSettings() {
     <div className="space-y-3">
       <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_10rem]">
         <label className="block">
-          <span className="mb-1.5 block text-xs font-medium text-foreground">Host</span>
+          <span className="mb-1.5 block text-xs font-medium text-foreground">Machine address</span>
           <Input
             value={savedBackendHost}
             onChange={(event) => handleSavedBackendHostChange(event.target.value)}
-            placeholder="backend.example.com"
+            placeholder="my-machine.example.com"
             disabled={isAddingSavedBackend}
             spellCheck={false}
           />
@@ -3814,7 +3814,9 @@ export function ConnectionsSettings() {
                     />
                   }
                 />
-                <TooltipPopup side="top">Connect this app to another Cogenly server</TooltipPopup>
+                <TooltipPopup side="top">
+                  Connect this app to another machine running Cogenly
+                </TooltipPopup>
               </Tooltip>
               <DialogPopup className="max-h-[80dvh] sm:max-w-3xl">
                 <DialogHeader>
@@ -3824,7 +3826,7 @@ export function ConnectionsSettings() {
                   <DialogDescription>
                     {routeTarget
                       ? "Connect to this machine again over another address, such as its Tailscale name. It joins the existing routes instead of adding a second machine."
-                      : "Connect this app to another Cogenly server. To link servers to each other, use Settings → Machines."}
+                      : "Connect this app to another machine running Cogenly. To link machines to each other, use Settings → Machines."}
                   </DialogDescription>
                 </DialogHeader>
                 <DialogPanel>
@@ -3833,7 +3835,7 @@ export function ConnectionsSettings() {
                       {renderConnectionModeCard({
                         mode: "remote",
                         title: "Remote link",
-                        description: "Enter a backend host and pairing code.",
+                        description: "Enter the machine's address and pairing code.",
                         icon: <ChevronsLeftRightEllipsisIcon aria-hidden className="size-4" />,
                       })}
                       {desktopBridge
@@ -3841,7 +3843,7 @@ export function ConnectionsSettings() {
                             mode: "ssh",
                             title: "SSH",
                             description:
-                              "Use local SSH config, agent, and tunnels for the backend.",
+                              "Reach the machine through your SSH config, agent and tunnels.",
                             icon: <TerminalIcon aria-hidden className="size-4" />,
                           })
                         : null}

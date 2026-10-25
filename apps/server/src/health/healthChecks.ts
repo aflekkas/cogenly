@@ -668,7 +668,7 @@ export function bootServiceCheck(input: {
     item({
       key: "boot-service:managed",
       status: "warn",
-      title: "This server isn't running as a background service",
+      title: "This machine isn't running Cogenly as a background service",
       detail:
         "It won't come back after a crash or reboot. Run `cogenly service install` on this machine.",
     }),
