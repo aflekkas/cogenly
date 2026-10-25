@@ -18,6 +18,7 @@ import * as Duration from "effect/Duration";
 
 import {
   DISK_FAIL_FREE_BYTES,
+  DISK_FAIL_LOW_FREE_BYTES,
   DISK_WARN_FREE_BYTES,
   SCHEDULED_TASK_OVERDUE_GRACE_MS,
   SCHEDULED_TASK_STUCK_AFTER_MS,
@@ -123,19 +124,27 @@ describe("serverCheck", () => {
 });
 
 describe("diskCheck", () => {
-  it("applies the absolute and relative thresholds", () => {
+  it("warns only when free space is small in bytes and in share", () => {
     const total = 1000 * GB;
     assert.strictEqual(statusOf(diskCheck({ freeBytes: 500 * GB, totalBytes: total })), "ok");
-    // Plenty of bytes but under 10% of a large disk.
-    assert.strictEqual(statusOf(diskCheck({ freeBytes: 90 * GB, totalBytes: total })), "warn");
-    // Under 3% fails even with many gigabytes left.
-    assert.strictEqual(statusOf(diskCheck({ freeBytes: 20 * GB, totalBytes: total })), "fail");
-    // Small disk: the byte floors decide.
+    // Tens of gigabytes on a big disk stay quiet, even under 10% (36.6 GB of 460 GB).
+    assert.strictEqual(statusOf(diskCheck({ freeBytes: 90 * GB, totalBytes: total })), "ok");
+    assert.strictEqual(statusOf(diskCheck({ freeBytes: 36.6 * GB, totalBytes: 460 * GB })), "ok");
+    assert.strictEqual(statusOf(diskCheck({ freeBytes: 20 * GB, totalBytes: total })), "ok");
+    // Under 10 GB and under 10% warns.
+    assert.strictEqual(statusOf(diskCheck({ freeBytes: 8 * GB, totalBytes: total })), "warn");
+    // Under 10 GB but a large share of a small disk stays quiet.
     assert.strictEqual(
       statusOf(diskCheck({ freeBytes: DISK_WARN_FREE_BYTES - 1, totalBytes: 40 * GB })),
-      "warn",
+      "ok",
     );
-    const full = diskCheck({ freeBytes: DISK_FAIL_FREE_BYTES - 1, totalBytes: 40 * GB });
+    // Under 5 GB and under 3% fails.
+    assert.strictEqual(
+      statusOf(diskCheck({ freeBytes: DISK_FAIL_LOW_FREE_BYTES - 1, totalBytes: total })),
+      "fail",
+    );
+    // Under 1 GB fails whatever the share.
+    const full = diskCheck({ freeBytes: DISK_FAIL_FREE_BYTES - 1, totalBytes: 8 * GB });
     assert.strictEqual(full.status, "fail");
     assert.strictEqual(full.items[0]?.key, "disk:free");
   });
