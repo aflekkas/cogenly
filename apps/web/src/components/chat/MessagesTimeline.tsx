@@ -4789,6 +4789,7 @@ function WorkGroupToggleTimelineRow({
       label={row.summary}
       iconName={row.summaryIcon}
       toolIcon={row.toolIcon}
+      sandboxed={row.sandboxed}
       failed={row.hasFailure}
       expanded={row.expanded}
       createdAt={row.createdAt}
@@ -4799,6 +4800,7 @@ function WorkGroupToggleTimelineRow({
 }
 
 function WorkGroupHeader(props: {
+  sandboxed?: boolean;
   label: string;
   iconName: WorkEntryIconName;
   toolIcon?: ToolActivityIcon | undefined;
@@ -4823,7 +4825,16 @@ function WorkGroupHeader(props: {
           muted
         />
       }
-      label={props.label}
+      label={
+        props.sandboxed ? (
+          <span>
+            {props.label}
+            <span className="ml-2 text-2xs text-muted-foreground">Sandboxed · read-only</span>
+          </span>
+        ) : (
+          props.label
+        )
+      }
       active={props.active && !props.failed}
       trailing={
         <TimelineRowTimestamp createdAt={props.createdAt} timestampFormat={props.timestampFormat} />

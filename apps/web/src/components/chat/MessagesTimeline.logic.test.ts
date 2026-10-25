@@ -863,3 +863,45 @@ describe("a disclosure toggle keeps the end pinned wherever the list would re-pi
     expect(resolveDisclosureHoldsEnd({ isAtEnd: false }, follow)).toBe(false);
   });
 });
+
+it("keeps the sandbox label on a collapsed Claude terminal group", () => {
+  const createdAt = "2026-01-01T00:00:01.000Z";
+  const entries: TimelineEntry[] = [messageEntry("sandbox-user", "user", { at: 0 })];
+  for (const id of ["sandbox-1", "sandbox-2"]) {
+    entries.push({
+      id,
+      kind: "work",
+      createdAt,
+      entry: {
+        id,
+        createdAt,
+        label: "Ran command",
+        tone: "tool",
+        itemType: "dynamic_tool",
+        runId,
+        toolLifecycleStatus: "completed",
+        structuredPayload: {
+          id: TurnItemId.make(id),
+          type: "dynamic_tool",
+          status: "completed",
+          toolName: "mcp__cogenly__terminal_run",
+          input: { command: "pwd" },
+          output: { sandbox: "read-only" },
+        } as OrchestrationV2TurnItem,
+      },
+    });
+  }
+  entries.push(messageEntry("sandbox-reply", "assistant", { at: 3 }));
+  const rows = deriveMessagesTimelineRows({
+    timelineEntries: entries,
+    latestRun: completedRun,
+    expandedRunIds: new Set([runId]),
+    isWorking: false,
+    turnDiffSummaries: [],
+    supportsConversationRollback: false,
+  });
+  expect(rows.find((row) => row.kind === "work-toggle")).toMatchObject({
+    sandboxed: true,
+    expanded: false,
+  });
+});
