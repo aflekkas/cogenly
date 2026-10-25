@@ -152,8 +152,22 @@ describe("workThreadFolder", () => {
     expect(workThreadFolder(work("server", null), directory)).toBe(spawn);
   });
 
-  it("keeps an explicit filing over the repository's project", () => {
+  it("keeps an explicit filing for Work in its project's folder", () => {
     expect(workThreadFolder(work("server", "bartr", "explicit"), directory)).toBe(bartr);
+  });
+
+  it("never names a filing with a repository it does not hold: the repository's project, or none", () => {
+    const inRepository = () => true;
+    expect(workThreadFolder(work("server", "bartr", "explicit"), directory, inRepository)).toBe(
+      spawn,
+    );
+    // cogenly in no project, filed in Spawn Partners: shown in no project.
+    expect(
+      workThreadFolder(work("cogenly", "spawn", "explicit"), directory, inRepository),
+    ).toBeNull();
+    expect(workThreadFolder(work("server", "spawn", "explicit"), directory, inRepository)).toBe(
+      spawn,
+    );
   });
 
   it("drops a repository project the repository has left, and names none without one", () => {

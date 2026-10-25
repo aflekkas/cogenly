@@ -2661,6 +2661,17 @@ export default function Sidebar() {
     }
     return projectDisplayNameByKey.get(projectKey) ?? repositoryNameOf(project);
   };
+  // Whether Work runs in a real repository, not a machine's or a project's folder.
+  const workInRepository = useCallback(
+    (thread: { readonly environmentId: EnvironmentId; readonly projectId: ProjectId }) => {
+      const project = projectByKey.get(`${thread.environmentId}:${thread.projectId}`);
+      return (
+        project !== undefined &&
+        !isScratchProject(project, serverConfigs.get(thread.environmentId)?.scratchWorkspaceRoot)
+      );
+    },
+    [projectByKey, serverConfigs],
+  );
   // Project folders hold chats and Work, across environments.
   const labelEnvironmentIds = useConnectedEnvironmentIds();
   const projectLabelDirectory = useProjectLabelDirectory(labelEnvironmentIds);
@@ -2727,10 +2738,10 @@ export default function Sidebar() {
   );
   const workFolderFor = useCallback(
     (thread: SidebarThreadSummary): SidebarRowFolder | null => {
-      const entry = workThreadFolder(thread, projectLabelDirectory);
+      const entry = workThreadFolder(thread, projectLabelDirectory, workInRepository);
       return entry ? (rowFolderByKey.get(entry.key) ?? null) : null;
     },
-    [projectLabelDirectory, rowFolderByKey],
+    [projectLabelDirectory, rowFolderByKey, workInRepository],
   );
   const repositoryFolderFor = useCallback(
     (environmentId: EnvironmentId, projectId: ProjectId): SidebarRowFolder | null => {
@@ -4120,7 +4131,9 @@ export default function Sidebar() {
     const groups = groupWorkCards(cards, (card) => {
       if (card.kind === "thread") {
         const thread = threadByKey.get(card.key);
-        return projectOf(thread && workThreadFolder(thread, projectLabelDirectory));
+        return projectOf(
+          thread && workThreadFolder(thread, projectLabelDirectory, workInRepository),
+        );
       }
       const { draft } = card;
       const picked = pendingFolderByThreadId[draft.threadId];
@@ -4145,6 +4158,7 @@ export default function Sidebar() {
     threadByKey,
     workDrafts,
     workDrag,
+    workInRepository,
   ]);
   const workRowsRef = useRef(workRows);
   workRowsRef.current = workRows;

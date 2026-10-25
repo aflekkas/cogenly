@@ -447,6 +447,9 @@ export function threadFolderState(
  * repository is in now. The repository's project is read from the live
  * directory because a thread's server-resolved folder is only refreshed with
  * the thread, so it lags a repository being added to or taken out of a project.
+ * A filing never names a repository it does not hold: Work in a real
+ * repository (`inRepository`) filed elsewhere names the repository's own
+ * project, or none. Work in a project's folder keeps its filing.
  */
 export function workThreadFolder(
   thread: FolderedThread & { readonly projectId: ProjectId },
@@ -454,6 +457,10 @@ export function workThreadFolder(
     readonly byKey: ReadonlyMap<ProjectLabelKey, EnvironmentProjectLabel>;
     readonly folderByRepository: ReadonlyMap<string, EnvironmentProjectLabel>;
   },
+  inRepository: (thread: {
+    readonly environmentId: EnvironmentId;
+    readonly projectId: ProjectId;
+  }) => boolean = () => false,
 ): EnvironmentProjectLabel | null {
   const folderId = threadProjectFolderId(thread);
   const filed =
@@ -461,10 +468,14 @@ export function workThreadFolder(
       ? null
       : (directory.byKey.get(projectLabelKey(thread.environmentId, folderId)) ?? null);
   const source = thread.source.projectFolderSource ?? null;
-  if (source === "explicit") return filed;
   const repositoryFolder =
     directory.folderByRepository.get(scopedRepositoryKey(thread.environmentId, thread.projectId)) ??
     null;
+  if (source === "explicit") {
+    return filed !== null && filed !== repositoryFolder && inRepository(thread)
+      ? repositoryFolder
+      : filed;
+  }
   // An older server sends no source, so a folder it resolved may be explicit.
   return source === "repository" || filed === null ? repositoryFolder : filed;
 }
