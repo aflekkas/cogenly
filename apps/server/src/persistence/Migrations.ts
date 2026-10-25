@@ -11,6 +11,7 @@
 import * as Migrator from "effect/sql/Migrator";
 import Migration0090 from "./Migrations/090_SharedBootstrap.ts";
 import Migration0091 from "./Migrations/091_MessageItemLookupIndexes.ts";
+import Migration0092 from "./Migrations/092_RepositoryIconPath.ts";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import { reconcileV2PreviewMigration } from "./reconcileV2PreviewMigration.ts";
@@ -210,6 +211,7 @@ export const migrationEntries = [
   [89, "SharedDocuments", Migration0089],
   [90, "SharedBootstrap", Migration0090],
   [91, "MessageItemLookupIndexes", Migration0091],
+  [92, "RepositoryIconPath", Migration0092],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

@@ -442,6 +442,10 @@
     "./state/vault": {
       "types": "./src/state/vault.ts",
       "default": "./src/state/vault.ts"
+    },
+    "./machines/pair": {
+      "types": "./src/machines/pairMachines.ts",
+      "default": "./src/machines/pairMachines.ts"
     }
   },
   "scripts": {

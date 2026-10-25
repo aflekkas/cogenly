@@ -2,6 +2,7 @@ import { expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   AgentId,
+  CommandId,
   EventId,
   MessageId,
   NodeId,
@@ -46,6 +47,77 @@ const recoveryRuntime = (continueThreadsAfterServerUpdate: boolean) =>
     Layer.provide(NodeServices.layer),
   );
 const runtime = recoveryRuntime(true);
+
+it.effect("startup keeps the turn start it queues for a continuation a second restart cut", () =>
+  Effect.gen(function* () {
+    const sink = yield* EventSink.EventSinkV2;
+    const outbox = yield* EffectOutbox.EffectOutboxV2;
+    const recovery = yield* Recovery.ProviderRuntimeRecoveryService;
+    const at = yield* DateTime.now;
+    const threadId = ThreadId.make("thread:twice-restarted");
+    const thread = idleThreadProjection(liveThreadShell(threadId)).thread;
+    const attemptId = RunAttemptId.make("attempt:continuation");
+    // The first restart's continuation: dispatched, but cut before its turn began.
+    const continuation: OrchestrationV2Run = {
+      id: RunId.make("run:continuation"),
+      threadId,
+      ordinal: 2,
+      providerInstanceId: thread.providerInstanceId,
+      modelSelection: thread.modelSelection,
+      providerThreadId: null,
+      userMessageId: MessageId.make("message:restart-continuation:run:cut"),
+      rootNodeId: NodeId.make("node:continuation"),
+      activeAttemptId: attemptId,
+      status: "starting",
+      requestedAt: at,
+      startedAt: null,
+      completedAt: null,
+      checkpointId: null,
+      contextHandoffId: null,
+      restartContinuationOfRunId: RunId.make("run:cut"),
+    };
+    yield* sink.writeWithEffects({
+      commandId: CommandId.make("command:restart-continuation:run:cut"),
+      events: [
+        {
+          id: EventId.make("event:create-twice"),
+          type: "thread.created",
+          threadId,
+          occurredAt: at,
+          payload: thread,
+        },
+        {
+          id: EventId.make("event:continuation"),
+          type: "run.updated",
+          threadId,
+          runId: continuation.id,
+          occurredAt: at,
+          payload: continuation,
+        },
+      ],
+      // The previous process's start for it, which the restart cancels.
+      effects: [
+        {
+          id: "effect:old-start",
+          commandId: CommandId.make("command:restart-continuation:run:cut"),
+          threadId,
+          request: { type: "provider-turn.start", runId: continuation.id },
+        },
+      ],
+    });
+
+    yield* recovery.recover;
+
+    // Without a live start the run would stay `starting`, a delegated task
+    // "running", forever.
+    const claimed = yield* outbox.claimNext({ workerId: "test", leaseDurationMs: 60_000 });
+    expect(Option.getOrUndefined(claimed)).toMatchObject({
+      request: { type: "provider-turn.start", runId: continuation.id },
+      commandId: expect.stringContaining("command:restart-revive:startup:"),
+    });
+    expect(Option.getOrUndefined(yield* outbox.get("effect:old-start"))?.status).toBe("cancelled");
+  }).pipe(Effect.provide(runtime)),
+);
 
 it.effect.each(["starting", "running", "queued"] as const)(
   "startup fails an interrupted agent %s run with a persisted restart reason, once",

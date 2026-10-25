@@ -28,6 +28,7 @@ export type SettingsPath =
   | "/settings/data"
   | "/settings/import"
   | "/settings/connections"
+  | "/settings/machines"
   | "/settings/archived";
 
 /**
@@ -109,6 +110,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/data": "Data",
   "/settings/import": "Import",
   "/settings/connections": "Connections",
+  "/settings/machines": "Machines",
   "/settings/archived": "Archive",
 };
 
@@ -848,6 +850,21 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["pull request trusted environments shared credentials permissions read actions"],
   },
   {
+    id: "machines",
+    title: "Machines",
+    to: "/settings/machines",
+    searchTerms: [
+      "pair paired pairing unpair hub always-on sync computers laptops servers online offline tailscale",
+    ],
+  },
+  {
+    id: "add-machine",
+    title: "Add a machine",
+    to: "/settings/machines",
+    targetId: "machines",
+    searchTerms: ["pair new computer laptop server tailscale sign in https link sync"],
+  },
+  {
     id: "archive",
     title: "Archived threads",
     to: "/settings/archived",
@@ -883,6 +900,8 @@ const SETTINGS_CATEGORY_SCOPES: Readonly<Record<SettingsPath, SettingsSearchScop
   "/settings/source-control": "environment-defaults",
   "/settings/storage": "project-defaults",
   "/settings/connections": "connections",
+  // One machine at a time, like Providers: any selection resolves to one.
+  "/settings/machines": null,
   "/settings/scheduled-tasks": null,
   "/settings/archived": "project-defaults",
 };

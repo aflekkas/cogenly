@@ -300,18 +300,40 @@ const NOTIFICATION_OUTCOME_LABEL: Record<OrchestrationV2Notification["outcome"],
 
 const DELEGATED_FAILURE_LABEL: Record<OrchestrationV2DelegatedTaskFailure["kind"], string> = {
   rate_limit: "rate limit",
+  usage_limit: "usage limit",
   provider_error: "provider error",
   interrupted_by_restart: "interrupted by restart",
   crashed: "crashed",
 };
 
-/** Why a delegated child stopped, with its limit reset in the user's own time. */
+/**
+ * Why a delegated child stopped, with its limit reset in the user's own time,
+ * or what the server did about a stop it is recovering on its own.
+ */
 function delegatedFailureLabel(
   failure: OrchestrationV2DelegatedTaskFailure,
+  providers: ReadonlyArray<ServerProvider>,
   timestampFormat: TimestampFormat,
 ): string {
-  const reset = failure.resetAt ? formatUpcomingTimestamp(failure.resetAt, timestampFormat) : "";
-  return `Stopped: ${DELEGATED_FAILURE_LABEL[failure.kind]}${reset ? `, resets ${reset}` : ""}`;
+  const kind = DELEGATED_FAILURE_LABEL[failure.kind];
+  const recovery = failure.recovery;
+  switch (recovery?.type) {
+    case "handed_off": {
+      const provider = providers.find((entry) => entry.instanceId === recovery.providerInstanceId);
+      return `Hit a ${kind}, handed off to ${provider?.displayName ?? recovery.providerInstanceId}`;
+    }
+    case "resuming_at_reset":
+    case "retrying":
+      return `Hit a ${kind}, resumes ${formatUpcomingTimestamp(recovery.at, timestampFormat)}`;
+    case "resuming_after_restart":
+      return "Resuming after restart";
+    case undefined: {
+      const reset = failure.resetAt
+        ? formatUpcomingTimestamp(failure.resetAt, timestampFormat)
+        : "";
+      return `Stopped: ${kind}${reset ? `, resets ${reset}` : ""}`;
+    }
+  }
 }
 
 /** A notification about one subagent, drawn as that subagent's card. Renders `fallback` when the parent has no record of it. */
@@ -365,7 +387,11 @@ export function SubagentNotificationLink(props: {
             event: {
               status: NOTIFICATION_OUTCOME_STATUS[props.outcome],
               label: props.failure
-                ? delegatedFailureLabel(props.failure, props.timestampFormat)
+                ? delegatedFailureLabel(
+                    props.failure,
+                    props.providerStatuses,
+                    props.timestampFormat,
+                  )
                 : NOTIFICATION_OUTCOME_LABEL[props.outcome],
               timestamp: formatShortTimestamp(props.createdAt, props.timestampFormat),
             },

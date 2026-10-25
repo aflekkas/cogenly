@@ -7,6 +7,7 @@ import * as ProjectLabels from "./projectLabel.ts";
 import * as Integrations from "./integration.ts";
 import * as Machines from "./machine.ts";
 import * as MachineSecurity from "./machineSecurity.ts";
+import * as MachineSetup from "./machineSetup.ts";
 import * as Work from "./work.ts";
 import * as Vault from "./vault.ts";
 import * as Accounts from "./accounts.ts";
@@ -536,6 +537,12 @@ export const WS_METHODS = {
   projectLabelsUnlinkSource: "projectLabels.unlinkSource",
   projectLabelsSearchOwnerRepositories: "projectLabels.searchOwnerRepositories",
   projectLabelsCloneRepository: "projectLabels.cloneRepository",
+  projectLabelsCheckoutRepository: "projectLabels.checkoutRepository",
+  projectLabelsRemoveCheckout: "projectLabels.removeCheckout",
+  projectLabelsAdoptRepository: "projectLabels.adoptRepository",
+  projectLabelsListOrphanFolders: "projectLabels.listOrphanFolders",
+  projectLabelsAdoptOrphanFolder: "projectLabels.adoptOrphanFolder",
+  projectLabelsRemoveOrphanFolder: "projectLabels.removeOrphanFolder",
   projectLabelsListResources: "projectLabels.listResources",
   projectLabelsSubscribeResources: "projectLabels.subscribeResources",
   projectLabelsAddResource: "projectLabels.addResource",
@@ -621,6 +628,11 @@ export const WS_METHODS = {
   machinesJoinHub: "machines.joinHub",
   machinesUnpair: "machines.unpair",
   machineSecurityStatus: "machines.securityStatus",
+  // Getting this machine ready to pair (Tailscale and Serve)
+  machinesSetupStatus: "machines.setupStatus",
+  machinesSetupSubscribe: "machines.setupSubscribe",
+  machinesSetupRunStep: "machines.setupRunStep",
+  machinesSetupDisableServe: "machines.setupDisableServe",
 
   // Cloud environment methods
   cloudGetRelayClientStatus: "cloud.getRelayClientStatus",
@@ -2034,6 +2046,42 @@ const WsProjectLabelsCloneRepositoryRpc = Rpc.make(WS_METHODS.projectLabelsClone
     EnvironmentAuthorizationError,
   ]),
 });
+// Clone a repository the project already links onto this machine. Returns
+// once the clone runs; the link's `checkout` state and the project-clone
+// subscription carry its progress.
+const WsProjectLabelsCheckoutRepositoryRpc = Rpc.make(WS_METHODS.projectLabelsCheckoutRepository, {
+  payload: ProjectLabels.ProjectLabelCheckoutRepositoryInput,
+  success: ProjectLabels.ProjectLabelCheckoutRepositoryResult,
+  error: Schema.Union([ProjectLabels.RepositoryCheckoutError, EnvironmentAuthorizationError]),
+});
+// Delete this machine's checkout of a linked repository; the link stays.
+const WsProjectLabelsRemoveCheckoutRpc = Rpc.make(WS_METHODS.projectLabelsRemoveCheckout, {
+  payload: ProjectLabels.ProjectLabelRemoveCheckoutInput,
+  success: ProjectLabels.ProjectLabelRemoveCheckoutResult,
+  error: Schema.Union([ProjectLabels.RepositoryCheckoutError, EnvironmentAuthorizationError]),
+});
+// Move a linked repository's checkout into its project folder.
+const WsProjectLabelsAdoptRepositoryRpc = Rpc.make(WS_METHODS.projectLabelsAdoptRepository, {
+  payload: ProjectLabels.ProjectLabelAdoptRepositoryInput,
+  success: ProjectLabels.ProjectLabelAdoptRepositoryResult,
+  error: Schema.Union([ProjectLabels.RepositoryCheckoutError, EnvironmentAuthorizationError]),
+});
+// Folders under the projects root that no project claims, and what to do with them.
+const WsProjectLabelsListOrphanFoldersRpc = Rpc.make(WS_METHODS.projectLabelsListOrphanFolders, {
+  payload: Schema.Struct({}),
+  success: ProjectLabels.ProjectOrphanFoldersResult,
+  error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
+});
+const WsProjectLabelsAdoptOrphanFolderRpc = Rpc.make(WS_METHODS.projectLabelsAdoptOrphanFolder, {
+  payload: ProjectLabels.ProjectOrphanFolderInput,
+  success: ProjectLabels.ProjectLabelMutationResult,
+  error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
+});
+const WsProjectLabelsRemoveOrphanFolderRpc = Rpc.make(WS_METHODS.projectLabelsRemoveOrphanFolder, {
+  payload: ProjectLabels.ProjectOrphanFolderInput,
+  success: ProjectLabels.ProjectOrphanFolderRemoveResult,
+  error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
+});
 const WsProjectLabelsListResourcesRpc = Rpc.make(WS_METHODS.projectLabelsListResources, {
   payload: ProjectLabels.ProjectLabelKey,
   success: ProjectLabels.ProjectLabelListResourcesResult,
@@ -2202,6 +2250,34 @@ const WsMachinesUnpairRpc = Rpc.make(WS_METHODS.machinesUnpair, {
   payload: Machines.MachineUnpairInput,
   success: Machines.MachineUnpairResult,
   error: machineErrors,
+});
+const machineSetupErrors = Schema.Union([
+  MachineSetup.MachineSetupError,
+  EnvironmentAuthorizationError,
+]);
+const WsMachinesSetupStatusRpc = Rpc.make(WS_METHODS.machinesSetupStatus, {
+  payload: Schema.Struct({}),
+  success: MachineSetup.MachineSetupStatus,
+  error: machineSetupErrors,
+});
+/** The status, then again whenever it changes, re-checked while subscribed. */
+const WsMachinesSetupSubscribeRpc = Rpc.make(WS_METHODS.machinesSetupSubscribe, {
+  payload: Schema.Struct({}),
+  success: MachineSetup.MachineSetupStatus,
+  error: machineSetupErrors,
+  stream: true,
+});
+/** Starts one step and returns at once; progress arrives through the status. */
+const WsMachinesSetupRunStepRpc = Rpc.make(WS_METHODS.machinesSetupRunStep, {
+  payload: MachineSetup.MachineSetupRunStepInput,
+  success: MachineSetup.MachineSetupStatus,
+  error: machineSetupErrors,
+});
+/** Turns Tailscale Serve off for this server and saves that choice. */
+const WsMachinesSetupDisableServeRpc = Rpc.make(WS_METHODS.machinesSetupDisableServe, {
+  payload: Schema.Struct({}),
+  success: MachineSetup.MachineSetupStatus,
+  error: machineSetupErrors,
 });
 
 const WsFactsListRpc = Rpc.make(WS_METHODS.factsList, {
@@ -2574,6 +2650,12 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectLabelsUnlinkSourceRpc,
   WsProjectLabelsSearchOwnerRepositoriesRpc,
   WsProjectLabelsCloneRepositoryRpc,
+  WsProjectLabelsCheckoutRepositoryRpc,
+  WsProjectLabelsRemoveCheckoutRpc,
+  WsProjectLabelsAdoptRepositoryRpc,
+  WsProjectLabelsListOrphanFoldersRpc,
+  WsProjectLabelsAdoptOrphanFolderRpc,
+  WsProjectLabelsRemoveOrphanFolderRpc,
   WsProjectLabelsListResourcesRpc,
   WsProjectLabelsSubscribeResourcesRpc,
   WsProjectLabelsAddResourceRpc,
@@ -2604,6 +2686,10 @@ export const WsRpcGroup = RpcGroup.make(
   WsMachinesCreatePeerGrantRpc,
   WsMachinesJoinHubRpc,
   WsMachinesUnpairRpc,
+  WsMachinesSetupStatusRpc,
+  WsMachinesSetupSubscribeRpc,
+  WsMachinesSetupRunStepRpc,
+  WsMachinesSetupDisableServeRpc,
   WsFactsListRpc,
   WsFactsCreateRpc,
   WsFactsUpdateRpc,

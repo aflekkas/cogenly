@@ -347,8 +347,28 @@ export const OrchestrationV2LimitRecovery = Schema.Struct({
   resetAt: IsoDateTime,
   autoResume: Schema.Boolean,
   snooze: Schema.optional(Schema.Boolean),
+  /**
+   * Set when the server armed this recovery itself to retry a short-term rate
+   * limit: the consecutive retry this is, counting from 1.
+   */
+  retryAttempt: Schema.optional(PositiveInt),
+  /** A retry's backoff, when it ends after `resetAt`. The resume waits for both. */
+  retryAt: Schema.optional(IsoDateTime),
 });
 export type OrchestrationV2LimitRecovery = typeof OrchestrationV2LimitRecovery.Type;
+
+/** Consecutive server retries of a short-term rate limit before it counts as a hard stop. */
+export const MAX_RATE_LIMIT_RETRIES = 5;
+
+/** When a recorded recovery may continue the thread: its reset, or a later retry backoff. */
+export function limitRecoveryResumeAt(
+  recovery: Pick<OrchestrationV2LimitRecovery, "resetAt" | "retryAt">,
+): string {
+  return recovery.retryAt !== undefined &&
+    Date.parse(recovery.retryAt) > Date.parse(recovery.resetAt)
+    ? recovery.retryAt
+    : recovery.resetAt;
+}
 
 /** A choice update preserves omitted options for this same run and reset. */
 export const OrchestrationV2LimitRecoveryUpdate = Schema.Struct({
@@ -356,6 +376,8 @@ export const OrchestrationV2LimitRecoveryUpdate = Schema.Struct({
   resetAt: IsoDateTime,
   autoResume: Schema.optional(Schema.Boolean),
   snooze: Schema.optional(Schema.Boolean),
+  retryAttempt: Schema.optional(PositiveInt),
+  retryAt: Schema.optional(IsoDateTime),
 }).check(
   Schema.makeFilter(
     (update) =>
@@ -812,6 +834,12 @@ export const OrchestrationV2Subagent = Schema.Struct({
   // blocking tool call). Absent on legacy records; treated as settled_only.
   completionWake: Schema.optional(Schema.Literals(["always", "settled_only"])),
   completionDelivery: Schema.optional(OrchestrationV2DelegatedCompletionTaskDelivery),
+  /**
+   * Set on an app-owned task started by a message to an existing subagent's
+   * thread after that subagent ran: the task whose child it continues. Its
+   * result is an update to that task's, which keeps its own.
+   */
+  followUpOf: Schema.optional(NodeId),
   status: Schema.Literals([
     "idle",
     "pending",
@@ -1262,13 +1290,33 @@ export type OrchestrationV2NotificationSource = typeof OrchestrationV2Notificati
 
 /** Why a delegated task's child run stopped without a result, as its parent is told. */
 export const OrchestrationV2DelegatedTaskFailureKind = Schema.Literals([
+  /** A short-term API rate limit (429). */
   "rate_limit",
+  /** An exhausted usage window, lasting until its reset. */
+  "usage_limit",
   "provider_error",
   "interrupted_by_restart",
   "crashed",
 ]);
 export type OrchestrationV2DelegatedTaskFailureKind =
   typeof OrchestrationV2DelegatedTaskFailureKind.Type;
+
+/** What the server is doing about a delegated child's stop, so its parent need not act. */
+export const OrchestrationV2DelegatedTaskRecovery = Schema.Union([
+  /** Retrying on the same provider instance after a short backoff. */
+  Schema.Struct({ type: Schema.Literal("retrying"), at: IsoDateTime, attempt: PositiveInt }),
+  /** Continued on another provider instance with the child's context. */
+  Schema.Struct({
+    type: Schema.Literal("handed_off"),
+    providerInstanceId: ProviderInstanceId,
+    model: TrimmedNonEmptyString,
+  }),
+  /** Nothing else had headroom; resumes on its own at the reset. */
+  Schema.Struct({ type: Schema.Literal("resuming_at_reset"), at: IsoDateTime }),
+  /** A restart cut the run; it resumes once the server is back. */
+  Schema.Struct({ type: Schema.Literal("resuming_after_restart") }),
+]);
+export type OrchestrationV2DelegatedTaskRecovery = typeof OrchestrationV2DelegatedTaskRecovery.Type;
 
 export const OrchestrationV2DelegatedTaskFailure = Schema.Struct({
   taskId: NodeId,
@@ -1277,10 +1325,14 @@ export const OrchestrationV2DelegatedTaskFailure = Schema.Struct({
   title: Schema.String,
   kind: OrchestrationV2DelegatedTaskFailureKind,
   message: Schema.String,
-  /** The provider's reported limit reset, for `rate_limit`. */
+  /** The provider's reported limit reset, for `rate_limit` and `usage_limit`. */
   resetAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   /** The child may have left edits or other partial work behind. */
   partialWork: Schema.Boolean,
+  /** Set when the stop is not final: the server is recovering the child on its own. */
+  recovery: Schema.optional(OrchestrationV2DelegatedTaskRecovery),
+  /** The earlier task whose subagent a later message continued (see the subagent's `followUpOf`). */
+  followUpOf: Schema.optional(NodeId),
 });
 export type OrchestrationV2DelegatedTaskFailure = typeof OrchestrationV2DelegatedTaskFailure.Type;
 
@@ -1456,6 +1508,9 @@ export const OrchestrationV2ProviderFailureClass = Schema.Literals([
 ]);
 export type OrchestrationV2ProviderFailureClass = typeof OrchestrationV2ProviderFailureClass.Type;
 
+export const OrchestrationV2ProviderLimitKind = Schema.Literals(["rate_limit", "quota"]);
+export type OrchestrationV2ProviderLimitKind = typeof OrchestrationV2ProviderLimitKind.Type;
+
 const OrchestrationV2ProviderFailureMessage = TrimmedNonEmptyString.check(
   Schema.isMaxLength(4_096),
 );
@@ -1473,6 +1528,13 @@ export const OrchestrationV2ProviderFailure = Schema.Struct({
   retryable: Schema.NullOr(Schema.Boolean),
   /** Reported reset time; absent when the provider cannot name one. */
   resetAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  /**
+   * For `usage_limit`: `rate_limit` is a short-term API throttle (429) the
+   * server retries on the same instance; `quota` is an exhausted usage window
+   * that lasts until `resetAt`. Absent on failures recorded before the split,
+   * which are treated as `quota`.
+   */
+  limitKind: Schema.optional(OrchestrationV2ProviderLimitKind),
 });
 export type OrchestrationV2ProviderFailure = typeof OrchestrationV2ProviderFailure.Type;
 

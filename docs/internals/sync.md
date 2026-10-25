@@ -30,7 +30,9 @@ reset protocol yet.
 
 Only the three declared document kinds cross these channels. The receiver
 rejects unknown fields, malformed values, oversized multi-document batches, cursor
-gaps, forged authorship and ownership changes.
+gaps, forged authorship and ownership changes. A rejected batch fails whole and its
+cursor does not advance, so adding a synced field (even an optional, nested one such
+as a repository's `iconPath`) stalls a peer on an older build until it updates too.
 V1 ownership is fixed after creation: transferring execution needs a separate
 handoff protocol. Only the owner machine may change an existing agent's or
 schedule's sensitive fields (permissions, instructions, prompt, provider/model,

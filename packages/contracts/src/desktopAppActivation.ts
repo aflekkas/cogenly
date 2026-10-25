@@ -32,9 +32,26 @@ export const DesktopAppAddEnvironmentRequest = Schema.Struct({
 });
 export type DesktopAppAddEnvironmentRequest = typeof DesktopAppAddEnvironmentRequest.Type;
 
+/**
+ * `machine_pair`: pair two machines the desktop app is connected to, the same
+ * way Settings → Machines → Add a machine does. Servers hold no credential
+ * for each other before pairing, so the app that is signed in to both runs
+ * it, and the one-time join code stays inside the app. `hub` and `joining`
+ * name a connection by environment id or by its name.
+ */
+export const DesktopAppPairMachinesRequest = Schema.Struct({
+  version: Schema.Literal(DESKTOP_APP_ACTIVATION_PROTOCOL_VERSION),
+  requestId: TrimmedNonEmptyString,
+  type: Schema.Literal("pair-machines"),
+  hub: TrimmedNonEmptyString,
+  joining: TrimmedNonEmptyString,
+});
+export type DesktopAppPairMachinesRequest = typeof DesktopAppPairMachinesRequest.Type;
+
 export const DesktopAppActivationRequest = Schema.Union([
   DesktopAppOpenWorkspaceRequest,
   DesktopAppAddEnvironmentRequest,
+  DesktopAppPairMachinesRequest,
 ]);
 export type DesktopAppActivationRequest = typeof DesktopAppActivationRequest.Type;
 
@@ -46,6 +63,7 @@ export const DesktopAppActivationErrorCode = Schema.Literals([
   "project-create-failed",
   "thread-open-failed",
   "environment-add-failed",
+  "machines-pair-failed",
   "request-timeout",
   "internal-error",
 ]);
@@ -69,6 +87,22 @@ export const DesktopAppEnvironmentAdded = Schema.Struct({
 });
 export type DesktopAppEnvironmentAdded = typeof DesktopAppEnvironmentAdded.Type;
 
+export const DesktopAppPairedMachine = Schema.Struct({
+  environmentId: EnvironmentId,
+  name: TrimmedNonEmptyString,
+});
+export type DesktopAppPairedMachine = typeof DesktopAppPairedMachine.Type;
+
+/** `pair-machines` finished: `joining` now syncs with `hub`. */
+export const DesktopAppMachinesPaired = Schema.Struct({
+  version: Schema.Literal(DESKTOP_APP_ACTIVATION_PROTOCOL_VERSION),
+  requestId: TrimmedNonEmptyString,
+  ok: Schema.Literal(true),
+  hub: DesktopAppPairedMachine,
+  joining: DesktopAppPairedMachine,
+});
+export type DesktopAppMachinesPaired = typeof DesktopAppMachinesPaired.Type;
+
 export const DesktopAppActivationFailure = Schema.Struct({
   version: Schema.Literal(DESKTOP_APP_ACTIVATION_PROTOCOL_VERSION),
   requestId: TrimmedNonEmptyString,
@@ -81,6 +115,7 @@ export type DesktopAppActivationFailure = typeof DesktopAppActivationFailure.Typ
 export const DesktopAppActivationResponse = Schema.Union([
   DesktopAppActivationSuccess,
   DesktopAppEnvironmentAdded,
+  DesktopAppMachinesPaired,
   DesktopAppActivationFailure,
 ]);
 export type DesktopAppActivationResponse = typeof DesktopAppActivationResponse.Type;

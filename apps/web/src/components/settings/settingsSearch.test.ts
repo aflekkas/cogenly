@@ -307,6 +307,23 @@ describe("searchSettings", () => {
     expect(searchSettings(query)[0]).toMatchObject({ id, to });
   });
 
+  it("finds machine pairing on the Machines page", () => {
+    expect(searchSettings("add a machine")[0]).toMatchObject({
+      id: "add-machine",
+      to: "/settings/machines",
+      targetId: "machines",
+    });
+    expect(searchSettings("unpair")[0]).toMatchObject({ id: "machines", to: "/settings/machines" });
+    expect(searchSettings("pair machines").map((item) => item.id)).toEqual([
+      "machines",
+      "add-machine",
+    ]);
+    expect(getSettingsSearchTargetScope("add-machine")).toEqual({
+      title: "Add a machine",
+      scope: null,
+    });
+  });
+
   it("keeps environment settings discoverable without a primary environment", () => {
     const available = filterAvailableSettingsSearchItems({
       hasCloudPublicConfig: false,

@@ -1,5 +1,5 @@
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
-import type { ProjectIconColor } from "@t3tools/contracts";
+import type { EnvironmentId, ProjectIconColor } from "@t3tools/contracts";
 import {
   getProjectFaviconResourceKey,
   isProjectFaviconFallbackUrl,
@@ -18,7 +18,7 @@ import {
 import type { IconName } from "lucide-react/dynamic";
 import { lazy, type ReactNode, Suspense, useState } from "react";
 import { useAtomValue } from "@effect/atom-react";
-import { projectFaviconUrlAtom } from "../state/assets";
+import { projectFaviconUrlAtom, repositoryIconUrlAtom } from "../state/assets";
 import {
   deriveProjectIdentity,
   resolveProjectIconSource,
@@ -138,6 +138,38 @@ export function ProjectFavicon(input: {
         />
       </Suspense>
     </span>
+  );
+}
+
+/**
+ * A linked repository's icon by its remote, whether or not it is cloned on
+ * that machine: the server's repository icon resolver picks a checkout's
+ * favicon, else the icon a machine with a checkout recorded, else the
+ * owner's GitHub avatar. `fallback` shows while it loads and when there is none.
+ */
+export function RepositoryRemoteIcon(input: {
+  readonly environmentId: EnvironmentId;
+  readonly remote: string;
+  readonly iconPath: string | null;
+  readonly className?: string | undefined;
+  readonly fallback: ReactNode;
+}) {
+  const url = useAtomValue(
+    repositoryIconUrlAtom({
+      environmentId: input.environmentId,
+      remote: input.remote,
+      iconPath: input.iconPath,
+    }),
+  );
+  if (url === null) return input.fallback;
+  return (
+    <ProjectFaviconImage
+      key={`${input.environmentId}|${input.remote}|${input.iconPath ?? ""}`}
+      src={url}
+      className={input.className}
+      fallbackProjectName={input.remote}
+      fallback={input.fallback}
+    />
   );
 }
 

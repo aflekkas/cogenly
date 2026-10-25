@@ -2,6 +2,8 @@ import type {
   DesktopAppActivationFailure,
   DesktopAppAddEnvironmentRequest,
   DesktopAppOpenWorkspaceRequest,
+  DesktopAppPairMachinesRequest,
+  DesktopAppPairedMachine,
   DesktopAppActivationResponse,
   DesktopSshEnvironmentTarget,
   EnvironmentId,
@@ -164,4 +166,94 @@ export async function handleDesktopAddEnvironmentRequest(
     dependencies.onFailed(displayName, message);
     return failure(request.requestId, "environment-add-failed", message);
   }
+}
+
+/** A machine this app has a connection to. */
+export interface DesktopPairingCandidate {
+  readonly environmentId: EnvironmentId;
+  readonly label: string;
+  readonly connected: boolean;
+}
+
+export interface DesktopPairMachinesDependencies {
+  readonly machines: ReadonlyArray<DesktopPairingCandidate>;
+  /** Runs Settings → Machines → Add a machine's pairing command; throws its failure. */
+  readonly pair: (input: {
+    readonly hub: DesktopAppPairedMachine;
+    readonly joining: DesktopAppPairedMachine;
+  }) => Promise<void>;
+  readonly onPaired: (input: {
+    readonly hub: DesktopAppPairedMachine;
+    readonly joining: DesktopAppPairedMachine;
+  }) => void;
+}
+
+/** The connection a request names, by environment id or by its name. */
+export function findPairingCandidate(
+  machines: ReadonlyArray<DesktopPairingCandidate>,
+  query: string,
+):
+  | { readonly ok: true; readonly machine: DesktopPairingCandidate }
+  | {
+      readonly ok: false;
+      readonly message: string;
+    } {
+  const byId = machines.find((machine) => machine.environmentId === query);
+  if (byId !== undefined) return { ok: true, machine: byId };
+  const wanted = query.trim().toLowerCase();
+  const named = machines.filter((machine) => machine.label.trim().toLowerCase() === wanted);
+  if (named.length === 1) return { ok: true, machine: named[0]! };
+  const known = machines.map((machine) => `"${machine.label}" (${machine.environmentId})`);
+  return {
+    ok: false,
+    message:
+      named.length > 1
+        ? `More than one connection is named "${query}". Use its environment id: ${named.map((machine) => machine.environmentId).join(", ")}.`
+        : `This app has no connection named "${query}". Its connections: ${known.join(", ")}. Add a missing machine with environment_add or in Settings → Connections.`,
+  };
+}
+
+/**
+ * Pairs two machines for `machine_pair`, with the command Settings → Machines →
+ * Add a machine uses. The join code passes between the two connections inside
+ * that command and never reaches the request, the response, or the agent.
+ */
+export async function handleDesktopPairMachinesRequest(
+  request: DesktopAppPairMachinesRequest,
+  dependencies: DesktopPairMachinesDependencies,
+): Promise<DesktopAppActivationResponse> {
+  const hub = findPairingCandidate(dependencies.machines, request.hub);
+  if (!hub.ok) return failure(request.requestId, "invalid-request", hub.message);
+  const joining = findPairingCandidate(dependencies.machines, request.joining);
+  if (!joining.ok) return failure(request.requestId, "invalid-request", joining.message);
+  if (hub.machine.environmentId === joining.machine.environmentId) {
+    return failure(
+      request.requestId,
+      "invalid-request",
+      "A machine can't pair with itself. Name two different machines.",
+    );
+  }
+  const offline = [hub.machine, joining.machine].find((machine) => !machine.connected);
+  if (offline !== undefined) {
+    return failure(
+      request.requestId,
+      "environment-unavailable",
+      `This app isn't connected to ${offline.label} right now. Wake it up and make sure Cogenly is running there.`,
+    );
+  }
+  const pair = {
+    hub: { environmentId: hub.machine.environmentId, name: hub.machine.label },
+    joining: { environmentId: joining.machine.environmentId, name: joining.machine.label },
+  };
+  try {
+    await dependencies.pair(pair);
+  } catch (error) {
+    return failure(
+      request.requestId,
+      "machines-pair-failed",
+      errorMessage(error, `Cogenly couldn't pair ${pair.joining.name} with ${pair.hub.name}.`),
+    );
+  }
+  dependencies.onPaired(pair);
+  return { version: 1, requestId: request.requestId, ok: true, ...pair };
 }

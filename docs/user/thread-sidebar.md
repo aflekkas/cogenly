@@ -330,21 +330,28 @@ it. Projects are context only; they never change what an agent can access.
 A new task's heading reads "What should we build in _project_ / _repository_?". Pick
 the project there or in the composer's project control, and the task moves to that
 project's most recently used repository, or to the project's folder when it has none.
-The repository menu lists only the project's own repositories (with **No project**,
-only repositories in no project); **No repository (project folder)** runs the task in
-the project's own folder instead. Under **On GitHub** it also lists the project's GitHub
-repositories that aren't in the project yet: pick one to clone it in. A clone that fails or
-is cancelled adds nothing, and you can retry it from the same row. **Manage repositories…**
-opens the project's page, where you can remove a repository from the project.
+The repository menu lists every repository in the project, on the machine the task runs on
+(with **No project**, that machine's repositories). A repository the project has but this
+machine doesn't reads **Clone to set up**: pick it to clone it here, and the task moves to it
+once the clone lands. The command palette's **New thread in...** lists the same repositories
+under **Not cloned here**; picking one clones it. A repository not cloned here still shows
+its icon once any machine with a checkout has found it, or its owner's GitHub avatar until
+then. A repository's **⋯** menu can remove it from this machine (the project
+keeps it, so you can clone it again here or on another machine), move its folder into the
+project's folder, or take it out of the project. **Add repository…** lists this machine's
+other repositories and the project's GitHub repositories to clone in. **No repository
+(project folder)** runs the task in the project's own folder instead. **Manage
+repositories…** opens the project's page, which lists the same repositories.
 
 Manage projects in **Settings → Projects** (or **Open projects** in the command palette,
 or `mod+alt+4`). It shows every project as a card; open one for its page with its
 repositories, recent chats and Work, agents, files and GitHub org. The GitHub org (the
 button beside the project's name) is where agents and the repository picker look for its
 repositories; **Sources** lists any other repositories it reaches. Use **Add repository** to bring one in
-(a repository already in another project asks before it moves), the remove button on a
-repository row to take it out, and the **⋯** menu to rename, recolor, describe or delete
-the project. Deleting a project keeps its chats, Work and repositories; they are just no
+from this machine or GitHub (a repository already in another project asks before it moves),
+click a **Clone to set up** row to clone it on this machine, a repository row's **⋯** menu
+to remove it from this machine or the project, and the page's **⋯** menu to rename,
+recolor, describe or delete the project. Deleting a project keeps its chats, Work and repositories; they are just no
 longer in a folder. Start one with **New project** on the page or in the command palette.
 
 You can also ask an agent in any chat or Work to set a project up or change it: add a
@@ -423,9 +430,12 @@ retry and the normal snooze choices.
 On web and desktop, use **Agents** to follow work delegated to subagents.
 Stop on a thread also stops the subagents it delegated to.
 
-Subagent threads started by the agent can't take messages; message the parent
-thread instead. When such a subagent needs an approval or an answer, the parent
-thread asks for it.
+You can message a subagent from its own thread. While it runs, a subagent the
+agent started with its own tools takes your message once its current work ends;
+one started with `delegate_task` takes it the way any running thread does. When
+your message produces a new result after the subagent reported, the parent
+thread is told it has an updated result. When a subagent the agent started with
+its own tools needs an approval or an answer, the parent thread asks for it.
 
 Expand a tool call in the conversation to see its full command and output.
 Summaries shorten shell wrappers and can still describe the latest call after it

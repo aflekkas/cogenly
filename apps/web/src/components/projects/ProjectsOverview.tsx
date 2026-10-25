@@ -15,6 +15,7 @@ import {
   type EnvironmentProjectLabel,
   type ProjectLabelKey,
 } from "../../projectLabels/projectLabels.logic";
+import { projectRepositoryLinks } from "../../projectLabels/repositoryPicker.logic";
 import { useProjectContents } from "../../projectLabels/useProjectContents";
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import { environmentPresentations } from "../../state/presentation";
@@ -34,6 +35,7 @@ import { OverlayPresence } from "../ui/overlay-presence";
 import { ScrollArea } from "../ui/scroll-area";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { PageContent } from "../PageContent";
+import { ProjectOrphanFolders } from "./ProjectOrphanFolders";
 import { latestProjectActivity, projectPanelSummary } from "./projectPanel.logic";
 import { useProjectFolderMenu } from "./useProjectFolderMenu";
 
@@ -275,7 +277,8 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
                       entry={entry}
                       summary={
                         projectPanelSummary({
-                          repositories: entry.label.repositoryIds.length,
+                          // Every linked repository, as the project page lists them.
+                          repositories: projectRepositoryLinks(entry.label).length,
                           chats: contents?.chats.length ?? 0,
                           work: contents?.work.length ?? 0,
                           files: 0,
@@ -298,6 +301,7 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
               </ul>
             )}
           </PageContent>
+          <ProjectOrphanFolders environmentId={props.environmentId} />
         </ScrollArea>
       </div>
       <OverlayPresence when={renaming}>

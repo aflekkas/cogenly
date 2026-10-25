@@ -10,6 +10,8 @@ import {
   ProjectLabelUpdateInput,
   ProjectLabelWithRepositories,
   ProjectSourceLink,
+  projectHomeOwner,
+  repositoryDirectoryNameFor,
 } from "./projectLabel.ts";
 
 describe("project colors", () => {
@@ -43,6 +45,7 @@ describe("project colors", () => {
 const decodeSourceLink = Schema.decodeUnknownSync(ProjectSourceLink);
 const decodeSourceLinkInput = Schema.decodeUnknownSync(ProjectLabelSourceLinkInput);
 const decodeLabel = Schema.decodeUnknownSync(ProjectLabelWithRepositories);
+const encodeLabel = Schema.encodeSync(ProjectLabelWithRepositories);
 const decodeSearchInput = Schema.decodeUnknownSync(ProjectLabelOwnerRepositorySearchInput);
 const decodeCloneInput = Schema.decodeUnknownSync(ProjectLabelCloneRepositoryInput);
 
@@ -101,6 +104,7 @@ describe("project repository links", () => {
         { repositoryId: "repo-1", remote: "github.com/spawn/platform", directoryName: "platform" },
         { repositoryId: "repo-2", remote: null, directoryName: "local-notes" },
       ],
+      sourceLinks: [{ kind: "github-owner", owner: "spawn" }],
       threadCount: 0,
       createdAt: "2026-01-01T00:00:00.000Z",
       updatedAt: "2026-01-01T00:00:00.000Z",
@@ -126,6 +130,84 @@ describe("project repository links", () => {
   it("names the active-run refusal for a move attempted mid-turn", () => {
     const error = new ProjectLabelError({ operation: "moveThread", reason: "thread_active" });
     expect(error.message).toContain("turn is running");
+  });
+});
+
+describe("repository folder names", () => {
+  const label = (
+    owner: string | null,
+    repositories: ReadonlyArray<{ remote: string | null; directoryName: string | null }>,
+  ) => ({
+    id: "label:1",
+    name: "Spawn Partners",
+    repositoryIds: repositories.map((_, index) => `repo-${index}`),
+    repositories: repositories.map((link, index) => ({ repositoryId: `repo-${index}`, ...link })),
+    sourceLinks: owner === null ? [] : [{ kind: "github-owner", owner }],
+    threadCount: 0,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  });
+
+  it("names a home-owner repository by its name and any other by owner/name", () => {
+    expect(repositoryDirectoryNameFor("github.com/spawn-partners/platform", "Spawn-Partners")).toBe(
+      "platform",
+    );
+    expect(repositoryDirectoryNameFor("github.com/bartr-app/platform", "Spawn-Partners")).toBe(
+      "bartr-app/platform",
+    );
+    expect(repositoryDirectoryNameFor("github.com/aflekkas/athens-racing", null)).toBe(
+      "aflekkas/athens-racing",
+    );
+    // The home owner is a GitHub owner: the same login on another host is not it.
+    expect(repositoryDirectoryNameFor("gitlab.com/spawn-partners/platform", "spawn-partners")).toBe(
+      "spawn-partners/platform",
+    );
+    // A local bare repository has no owner, only its name.
+    expect(repositoryDirectoryNameFor("/srv/git/platform.git", "spawn-partners")).toBe("platform");
+  });
+
+  it("takes the project's linked GitHub owner as its home owner", () => {
+    expect(
+      projectHomeOwner([
+        { kind: "github-repo", owner: "aflekkas", repo: "athens-racing" },
+        { kind: "github-owner", owner: "Spawn-Partners" },
+      ]),
+    ).toBe("Spawn-Partners");
+    expect(projectHomeOwner([{ kind: "github-repo", owner: "aflekkas", repo: "x" }])).toBeNull();
+  });
+
+  it("derives every folder on decode, so a stale or chosen name never survives", () => {
+    const decoded = decodeLabel(
+      label("spawn-partners", [
+        { remote: "github.com/spawn-partners/platform", directoryName: "spawn-platform" },
+        { remote: "github.com/bartr-app/platform", directoryName: "platform" },
+        { remote: null, directoryName: "local-notes" },
+      ]),
+    );
+    expect(decoded.repositories?.map((link) => link.directoryName)).toEqual([
+      "platform",
+      "bartr-app/platform",
+      "local-notes",
+    ]);
+  });
+
+  it("refuses to make or encode a project whose folder names disagree", () => {
+    const decoded = decodeLabel(
+      label("spawn-partners", [
+        { remote: "github.com/spawn-partners/platform", directoryName: "platform" },
+      ]),
+    );
+    const renamed = {
+      ...decoded,
+      repositories: (decoded.repositories ?? []).map((link) => ({
+        ...link,
+        directoryName: "mine",
+      })),
+    };
+    expect(() => encodeLabel(renamed)).toThrow();
+    expect(encodeLabel(decoded)).toMatchObject({
+      repositories: [{ directoryName: "platform" }],
+    });
   });
 });
 

@@ -22,7 +22,6 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import {
-  DEFAULT_PROJECTS_ROOT,
   DEFAULT_UNIFIED_SETTINGS,
   type ChatWidth,
   type EnvironmentIdentificationMode,
@@ -1983,7 +1982,11 @@ export function GeneralSettingsPanel({ onRestored }: { onRestored: () => void })
                 className="w-full sm:w-56"
                 value={mixedProjectsRoot ? "" : settings.projectsRoot}
                 onCommit={(next) => updateSettings({ projectsRoot: next })}
-                placeholder={mixedProjectsRoot ? "Mixed" : DEFAULT_PROJECTS_ROOT}
+                placeholder={
+                  mixedProjectsRoot
+                    ? "Mixed"
+                    : (environment?.serverConfig?.defaultProjectsRoot ?? "<Cogenly home>/projects")
+                }
                 spellCheck={false}
                 aria-label="Projects folder"
               />

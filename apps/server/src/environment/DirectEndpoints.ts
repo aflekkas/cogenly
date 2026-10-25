@@ -26,6 +26,7 @@ import * as NodeOS from "node:os";
 import { isPrivateNetworkHost, isTailnetHost } from "@t3tools/shared/hostClassification";
 
 import * as ServerConfig from "../config.ts";
+import * as TailscaleServeMode from "../tailscale/TailscaleServeMode.ts";
 import { formatHostForUrl, isLoopbackHost, isWildcardHost } from "../startupAccess.ts";
 
 type NetworkInterfacesMap = ReturnType<typeof NodeOS.networkInterfaces>;
@@ -116,7 +117,19 @@ export const make = Effect.gen(function* () {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const httpClient = yield* HttpClient.HttpClient;
 
+  // Machine setup can turn Serve on while the server runs.
+  const serveMode = yield* Effect.serviceOption(TailscaleServeMode.TailscaleServeMode);
+  const currentServe = Option.match(serveMode, {
+    onNone: () =>
+      Effect.succeed({
+        enabled: config.tailscaleServeEnabled,
+        servePort: config.tailscaleServePort,
+      }),
+    onSome: (mode) => mode.current,
+  });
+
   const resolve = Effect.gen(function* () {
+    const serve = yield* currentServe;
     const endpoints = [
       ...resolveBoundEndpoints({
         host: config.host,
@@ -129,14 +142,14 @@ export const make = Effect.gen(function* () {
     // listed once it answers as this server: Serve setup can fail without
     // stopping startup. Anything slower than the probe leaves it out rather
     // than holding back the addresses already found.
-    if (config.tailscaleServeEnabled) {
+    if (serve.enabled) {
       const servedUrl = yield* readTailscaleStatus.pipe(
         Effect.map((status) => status.magicDnsName),
         Effect.flatMap((magicDnsName) => {
           if (magicDnsName === null) return Effect.succeed(null);
           const httpBaseUrl = buildTailscaleHttpsBaseUrl({
             magicDnsName,
-            servePort: config.tailscaleServePort,
+            servePort: serve.servePort,
           });
           return probeTailscaleHttpsEndpoint({ baseUrl: httpBaseUrl }).pipe(
             Effect.map((reachable) => (reachable ? httpBaseUrl : null)),
