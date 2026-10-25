@@ -4,8 +4,18 @@
  * machine link exists; until then, and on a standalone server, every thread
  * is local. Kept as a registry so the orchestrator does not depend on the
  * machine link and the link does not depend on the orchestrator.
+ *
+ * Filing a thread into a project folder is not an orchestration command, but
+ * it is the owner's to decide as well (filing replicates from the owner), so
+ * project folders hand those moves over through the same seam.
  */
-import type { OrchestrationV2ServerCommand, ThreadRemoteError } from "@cogenly/contracts";
+import type {
+  MoveThreadProjectFolderInput,
+  OrchestrationV2ServerCommand,
+  ProjectLabelError,
+  ThreadProjectFolderResult,
+  ThreadRemoteError,
+} from "@cogenly/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -20,6 +30,11 @@ export type RemoteThreadForwarder = (
   command: OrchestrationV2ServerCommand,
 ) => Effect.Effect<Option.Option<OrchestratorV2DispatchResult>, ThreadRemoteError>;
 
+/** None when the thread runs here; otherwise the owner's filing, replicated back. */
+export type RemoteThreadFolderMover = (
+  input: MoveThreadProjectFolderInput,
+) => Effect.Effect<Option.Option<ThreadProjectFolderResult>, ThreadRemoteError | ProjectLabelError>;
+
 export class RemoteThreadCommands extends Context.Service<
   RemoteThreadCommands,
   {
@@ -27,6 +42,10 @@ export class RemoteThreadCommands extends Context.Service<
       forwarder: RemoteThreadForwarder,
     ) => Effect.Effect<void, never, Scope.Scope>;
     readonly forward: RemoteThreadForwarder;
+    readonly registerFolderMove: (
+      mover: RemoteThreadFolderMover,
+    ) => Effect.Effect<void, never, Scope.Scope>;
+    readonly moveFolder: RemoteThreadFolderMover;
   }
 >()("cogenly-server/orchestration-v2/RemoteThreadCommands") {}
 
@@ -34,6 +53,7 @@ export const layer = Layer.effect(
   RemoteThreadCommands,
   Effect.gen(function* () {
     const current = yield* Ref.make<RemoteThreadForwarder | undefined>(undefined);
+    const folderMover = yield* Ref.make<RemoteThreadFolderMover | undefined>(undefined);
     return RemoteThreadCommands.of({
       register: (forwarder) =>
         Effect.acquireRelease(Ref.set(current, forwarder), () => Ref.set(current, undefined)),
@@ -41,6 +61,14 @@ export const layer = Layer.effect(
         Ref.get(current).pipe(
           Effect.flatMap((forwarder) =>
             forwarder === undefined ? Effect.succeed(Option.none()) : forwarder(command),
+          ),
+        ),
+      registerFolderMove: (mover) =>
+        Effect.acquireRelease(Ref.set(folderMover, mover), () => Ref.set(folderMover, undefined)),
+      moveFolder: (input) =>
+        Ref.get(folderMover).pipe(
+          Effect.flatMap((mover) =>
+            mover === undefined ? Effect.succeed(Option.none()) : mover(input),
           ),
         ),
     });

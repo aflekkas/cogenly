@@ -592,10 +592,14 @@ export class ProjectLabelError extends Schema.TaggedError<ProjectLabelError>()(
       "worktrees_inside",
       "archived",
       "project_chat",
+      // The machine that runs the thread could not be reached or refused.
+      "remote",
     ]),
     /** The project's name, so an `archived` or `project_chat` refusal can say which one. */
     projectName: Schema.optional(Schema.String),
     repositoryName: Schema.optional(Schema.String),
+    /** What the machine that runs the thread said, for a `remote` refusal. */
+    detail: Schema.optional(Schema.String),
     cause: Schema.optional(Schema.Defect()),
   },
 ) {
@@ -625,6 +629,8 @@ export class ProjectLabelError extends Schema.TaggedError<ProjectLabelError>()(
         return `This is ${this.projectName ?? "a project"}'s own conversation; it stays in its project.`;
       case "storage":
         return "Could not access project folders.";
+      case "remote":
+        return this.detail ?? "The machine that runs this thread could not move it.";
     }
   }
 }

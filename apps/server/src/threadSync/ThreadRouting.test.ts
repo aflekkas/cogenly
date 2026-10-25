@@ -4,6 +4,7 @@ import {
   CommandId,
   MessageId,
   type OrchestrationV2ServerCommand,
+  ProjectLabelId,
   ThreadId,
   ThreadCommandForward,
   ThreadAttachmentRead,
@@ -117,6 +118,44 @@ describe("continuing a thread another machine runs", () => {
         expect(Option.getOrThrow(visited).storedEvents).toEqual([]);
         const sent = yield* Effect.flip(hub.remoteCommands.forward(send("hello?", away)));
         expect(sent.reason).toBe("offline");
+      }).pipe(Effect.scoped),
+    30000,
+  );
+
+  it.live(
+    "moving a replica into a project files it on the machine that runs it, then here",
+    () =>
+      Effect.gen(function* () {
+        const at = yield* DateTime.now;
+        const hub = yield* startThreadMachine("folder-hub", "cloud-server");
+        const laptop = yield* startThreadMachine("folder-laptop", "computer");
+        yield* pair(hub, laptop);
+        yield* laptop.sink.write({ events: [threadCreated("event:created", at)] });
+        yield* laptop.sync.sync(hub.environmentId);
+        // Paired machines share the project under one id.
+        for (const machine of [hub, laptop])
+          yield* machine.sql`INSERT INTO project_labels(label_id, name, created_at, updated_at)
+            VALUES ('label:bartr', 'Bartr', '2026-10-24T00:00:00.000Z', '2026-10-24T00:00:00.000Z')`;
+        const filed = (machine: typeof hub) =>
+          machine.sql<{
+            readonly label_id: string;
+          }>`SELECT label_id FROM thread_project_labels WHERE thread_id = ${threadId}`.pipe(
+            Effect.map((rows) => rows.map((row) => row.label_id)),
+          );
+
+        const moved = yield* hub.remoteCommands.moveFolder({
+          threadId,
+          folderId: ProjectLabelId.make("label:bartr"),
+        });
+        expect(Option.getOrThrow(moved).projectFolderId).toBe("label:bartr");
+        expect(yield* filed(laptop)).toEqual(["label:bartr"]);
+        // The owner pushed the filing back before it answered.
+        expect(yield* filed(hub)).toEqual(["label:bartr"]);
+
+        // The laptop files its own threads itself.
+        expect(
+          Option.isNone(yield* laptop.remoteCommands.moveFolder({ threadId, folderId: null })),
+        ).toBe(true);
       }).pipe(Effect.scoped),
     30000,
   );

@@ -101,6 +101,7 @@ export function ThreadFolderPicker(props: {
       needle !== "" &&
       canCreate &&
       !state.inRepository &&
+      !state.projectHome &&
       !state.options.some((entry) => entry.label.name.toLowerCase() === needle)
     ) {
       result.push({ kind: "create", key: "create", name: query.trim() });
