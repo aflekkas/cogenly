@@ -9,7 +9,7 @@
 - [Memory and export](./user/memory-and-export.md)
 - [Terminal](./user/terminal.md)
 - [Source control](./user/source-control.md)
-- [Project settings](./user/project-settings.md)
+- [Settings](./user/settings.md)
 - [Appearance and themes](./user/appearance.md)
 - [Keyboard shortcuts](./user/keybindings.md)
 - [Visual replies](./user/html-renders.md)
