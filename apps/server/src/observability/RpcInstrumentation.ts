@@ -327,6 +327,8 @@ const RPC_AGGREGATES = {
   [WS_METHODS.previewRefresh]: "preview",
   [WS_METHODS.previewClose]: "preview",
   [WS_METHODS.previewList]: "preview",
+  [WS_METHODS.browserCookieSources]: "preview",
+  [WS_METHODS.browserImportCookies]: "preview",
   [WS_METHODS.previewClearProfile]: "preview",
   [WS_METHODS.previewReportProfiles]: "preview",
   [WS_METHODS.previewReportShown]: "preview",

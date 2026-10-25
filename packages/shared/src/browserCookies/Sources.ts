@@ -42,6 +42,7 @@ export interface BrowserImportPathContext {
   readonly appData: string | undefined;
   /** `%LOCALAPPDATA%` on Windows; unused elsewhere. */
   readonly localAppData: string | undefined;
+  readonly configHome?: string | undefined;
 }
 
 export interface BrowserImportSourceDefinition {
@@ -99,7 +100,10 @@ const chromiumSource = (input: {
         : undefined;
     }
     return input.linuxSegments
-      ? context.path.join(context.home, ".config", ...input.linuxSegments)
+      ? context.path.join(
+          context.configHome ?? context.path.join(context.home, ".config"),
+          ...input.linuxSegments,
+        )
       : undefined;
   },
 });
@@ -109,6 +113,22 @@ export const BROWSER_IMPORT_SOURCES: ReadonlyArray<BrowserImportSourceDefinition
   // are encrypted to the browser's own identity (App-Bound Encryption), so no
   // other process can read them. macOS and Linux keep working, so only the
   // Windows segments are omitted.
+  chromiumSource({
+    id: "chromium",
+    name: "Chromium",
+    keychainService: "Chromium Safe Storage",
+    keychainAccount: "Chromium",
+    macSegments: ["Chromium"],
+    linuxSegments: ["chromium"],
+    linuxSecretApplication: "chromium",
+  }),
+  chromiumSource({
+    id: "dia",
+    name: "Dia",
+    keychainService: "Dia Safe Storage",
+    keychainAccount: "Dia",
+    macSegments: ["Dia", "User Data"],
+  }),
   chromiumSource({
     id: "chrome",
     name: "Chrome",
@@ -223,7 +243,7 @@ export const BROWSER_IMPORT_SOURCES: ReadonlyArray<BrowserImportSourceDefinition
  * subdirectory for sandboxing. The candidate list includes both locations so
  * callers tolerate fresh and legacy installs alike.
  */
-export const cookieDatabaseCandidatePaths = (
+const cookieDatabaseCandidatePaths = (
   definition: BrowserImportSourceDefinition,
   context: BrowserImportPathContext,
   profileDirectory: string,
@@ -264,7 +284,7 @@ export const resolveCookieDatabase = Effect.fnUntraced(function* (
  * a default profile but do not describe one, so only `[ProfileN]` blocks
  * count.
  */
-export function parseFirefoxProfiles(
+function parseFirefoxProfiles(
   ini: string,
   path: Path.Path,
   root: string,
@@ -338,6 +358,7 @@ export const sourcePathContext = Effect.gen(function* () {
     home: environment.HOME ?? environment.USERPROFILE ?? "",
     appData: environment.APPDATA,
     localAppData: environment.LOCALAPPDATA,
+    configHome: environment.XDG_CONFIG_HOME,
   } satisfies BrowserImportPathContext;
 });
 
@@ -574,7 +595,10 @@ export const listSourceProfiles = Effect.fn("BrowserImportSources.listSourceProf
   definition: BrowserImportSourceDefinition,
   context: BrowserImportPathContext,
 ): Effect.fn.Return<ReadonlyArray<BrowserImportSourceProfile>, never, FileSystem.FileSystem> {
-  if (definition.engine !== "firefox" || context.platform !== "linux") {
+  if (
+    context.platform !== "linux" ||
+    (definition.engine !== "firefox" && definition.id !== "chromium")
+  ) {
     return yield* listSourceProfilesInDirectory(definition, context);
   }
 
@@ -582,7 +606,9 @@ export const listSourceProfiles = Effect.fn("BrowserImportSources.listSourceProf
   if (root === undefined) return [];
   const roots = [
     root,
-    context.path.join(context.home, "snap", "firefox", "common", ".mozilla", "firefox"),
+    definition.engine === "firefox"
+      ? context.path.join(context.home, "snap", "firefox", "common", ".mozilla", "firefox")
+      : context.path.join(context.home, "snap", "chromium", "common", "chromium"),
   ];
   const profiles = new Map<string, BrowserImportSourceProfile>();
   for (const directory of roots) {
@@ -615,7 +641,7 @@ const databaseFileExists = Effect.fnUntraced(function* (path: string) {
 
 type ProcessLivenessProbe = (pid: number) => Effect.Effect<boolean>;
 
-export const chromiumProcessIsAlive = (
+const chromiumProcessIsAlive = (
   pid: number,
   signalProcess: (pid: number, signal: 0) => unknown = process.kill.bind(process),
 ) =>
@@ -640,7 +666,7 @@ export const chromiumProcessIsAlive = (
 const processIsAlive: ProcessLivenessProbe = (pid) => chromiumProcessIsAlive(pid);
 
 /** Whether a Chromium `<host>-<pid>` lock target may still name its owner. */
-export const chromiumSingletonLockIsHeld = Effect.fnUntraced(function* (
+const chromiumSingletonLockIsHeld = Effect.fnUntraced(function* (
   target: string,
   currentHost: string,
   isProcessAlive: ProcessLivenessProbe,
@@ -659,7 +685,7 @@ export const chromiumSingletonLockIsHeld = Effect.fnUntraced(function* (
 });
 
 /** Windows sharing and lock violations are translated by libuv to `Busy`. */
-export const isWindowsLockHeldError = (error: PlatformError.PlatformError): boolean =>
+const isWindowsLockHeldError = (error: PlatformError.PlatformError): boolean =>
   error.reason._tag === "Busy";
 
 /**
@@ -687,7 +713,7 @@ type WindowsLockProbe = (path: string) => Effect.Effect<boolean, never, FileSyst
  * live cookie database is opened without sharing instead, so probing each
  * profile's current jar is the reliable running signal there.
  */
-export const windowsChromiumCookiesAreHeld = Effect.fnUntraced(function* (
+const windowsChromiumCookiesAreHeld = Effect.fnUntraced(function* (
   definition: BrowserImportSourceDefinition,
   context: BrowserImportPathContext,
   lockIsHeld: WindowsLockProbe = windowsLockIsHeld,
@@ -708,7 +734,7 @@ export const windowsChromiumCookiesAreHeld = Effect.fnUntraced(function* (
  * live owner. Firefox writes this symlink beside the profile while it runs and
  * unlinks it on a clean exit, so a dangling one is either live or a crash.
  */
-export const firefoxSymlinkLockIsHeld = Effect.fnUntraced(function* (
+const firefoxSymlinkLockIsHeld = Effect.fnUntraced(function* (
   target: string,
   localAddresses: ReadonlySet<string>,
   isProcessAlive: ProcessLivenessProbe,
@@ -772,7 +798,7 @@ const FCNTL_PROBE_SCRIPT =
  * outright on such machines, and the SQLite snapshot already copes with a
  * live database's WAL, as it does for every other engine.
  */
-export const posixLockIsHeld = Effect.fnUntraced(function* (
+const posixLockIsHeld = Effect.fnUntraced(function* (
   path: string,
   interpreters: ReadonlyArray<string> = FCNTL_PROBE_INTERPRETERS,
 ) {

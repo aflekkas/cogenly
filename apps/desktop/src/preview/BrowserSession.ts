@@ -1,3 +1,5 @@
+import type { ImportedCookie } from "@cogenly/shared/browserCookies/CookieDatabase";
+import { resolvePartitionScope } from "./BrowserPartitionScope.ts";
 import type { Session, WebContents } from "electron";
 import { BrowserWindow, session, systemPreferences } from "electron";
 import * as Context from "effect/Context";
@@ -173,6 +175,12 @@ export type BrowserSessionError = typeof BrowserSessionError.Type;
 export class BrowserSession extends Context.Service<
   BrowserSession,
   {
+    readonly clearProfileData: (environmentId: string, profileId: string) => Effect.Effect<boolean>;
+    readonly importCookie: (
+      environmentId: string,
+      profileId: string,
+      cookie: ImportedCookie,
+    ) => Effect.Effect<boolean>;
     readonly getPartition: (
       scope?: string,
       persistent?: boolean,
@@ -427,6 +435,42 @@ export const make = Effect.gen(function* BrowserSessionMake() {
   });
 
   return BrowserSession.of({
+    clearProfileData: (environmentId, profileId) =>
+      Effect.gen(function* () {
+        const { scope, persistent, namespace } = resolvePartitionScope(environmentId, profileId);
+        const target = yield* getSession(scope, persistent, namespace);
+        yield* Effect.tryPromise(() =>
+          target.clearStorageData({
+            storages: ["cookies", "localstorage", "indexdb", "serviceworkers"],
+          }),
+        );
+        return true;
+      }).pipe(Effect.orElseSucceed(() => false)),
+    importCookie: (environmentId, profileId, cookie) =>
+      Effect.gen(function* () {
+        const { scope, persistent, namespace } = resolvePartitionScope(environmentId, profileId);
+        const target = yield* getSession(scope, persistent, namespace);
+        yield* Effect.tryPromise(() =>
+          target.cookies.set({
+            url: cookie.url,
+            name: cookie.name,
+            value: cookie.value,
+            path: cookie.path,
+            secure: cookie.secure,
+            httpOnly: cookie.httpOnly,
+            sameSite: cookie.sameSite,
+            ...(cookie.domain === undefined ? {} : { domain: cookie.domain }),
+            ...(cookie.expirationDate === undefined
+              ? {}
+              : { expirationDate: cookie.expirationDate }),
+          }),
+        );
+        yield* Effect.tryPromise(() => target.cookies.flushStore());
+        return true;
+      }).pipe(
+        Effect.orElseSucceed(() => false),
+        Effect.withTracerEnabled(false),
+      ),
     getPartition,
     isPartition: (partition) =>
       partition.startsWith(PREVIEW_PARTITION_PREFIX) ||

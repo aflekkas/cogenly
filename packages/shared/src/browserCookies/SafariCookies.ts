@@ -199,7 +199,7 @@ export function parseBinaryCookies(buffer: Buffer): ReadonlyArray<ImportedCookie
  * too — otherwise a Full Disk Access refusal is reported as a generic read
  * failure and the user is never told what to grant.
  */
-export const isPermissionDenied = (error: PlatformError.PlatformError): boolean => {
+const isPermissionDenied = (error: PlatformError.PlatformError): boolean => {
   // TCC denies with EPERM, which Effect tags `Unknown` rather than
   // `PermissionDenied` — so the errno is what identifies it. EACCES (and the
   // `PermissionDenied` tag it maps to) is an ordinary POSIX permission or

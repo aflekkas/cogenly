@@ -1,4 +1,12 @@
 import {
+  BrowserCookieImportInput,
+  BrowserCookieImportResult,
+  BrowserCookieImportError,
+  BrowserImportSource,
+  CookieDomain,
+} from "@cogenly/contracts";
+import * as ServerBrowser from "../../../preview/ServerBrowser.ts";
+import {
   BrowserNavigationTarget,
   OrchestratorMcpFailure,
   ToolActivityIcon,
@@ -69,6 +77,28 @@ const safeBrowserTool = <T extends Tool.Any>(tool: T): T =>
 /** A safe browser action that only observes, so it is also repeatable. */
 const readonlyBrowserTool = <T extends Tool.Any>(tool: T): T =>
   safeBrowserTool(tool).annotate(Tool.Readonly, true).annotate(Tool.Idempotent, true) as T;
+
+const BrowserCookieSourcesTool = Tool.make("browser_cookie_sources", {
+  description:
+    "List browsers and source profiles found on this environment's own machine. Cookie values are never returned. Imports stay on this machine, including on Linux servers.",
+  parameters: Tool.EmptyParams,
+  success: Schema.Array(BrowserImportSource),
+  failure: OrchestratorMcpFailure,
+  dependencies: [...dependencies, ServerBrowser.ServerBrowser],
+})
+  .annotate(Tool.Readonly, true)
+  .annotate(Tool.Destructive, false);
+const BrowserImportCookiesTool = Tool.make("browser_import_cookies", {
+  description:
+    "Reuse the owner's local browser sign-ins in a persistent Cogenly server-browser profile. Import only the domains needed for the task. Use browser_cookie_sources to choose sourceId and sourceProfileDirectory; dryRun previews counts. macOS may prompt for Keychain access; Safari needs Full Disk Access. Cookies never leave this environment or enter the vault. Open preview tabs with profileId set to the returned targetProfileId, then reload existing tabs to use the sign-ins. The desktop this server launched also receives them over local inherited pipes. No extra owner approval is needed.",
+  parameters: Schema.Struct({
+    ...BrowserCookieImportInput.fields,
+    domains: Schema.Array(CookieDomain).check(Schema.isMinLength(1)),
+  }),
+  success: BrowserCookieImportResult,
+  failure: Schema.Union([BrowserCookieImportError, OrchestratorMcpFailure]),
+  dependencies: [...dependencies, ServerBrowser.ServerBrowser],
+}).annotate(Tool.Destructive, false);
 
 const PreviewStatusTool = Tool.make("preview_status", {
   description:
@@ -367,6 +397,8 @@ const PreviewRecordingStopTool = safeBrowserTool(
 );
 
 export const PreviewToolkit = Toolkit.make(
+  BrowserCookieSourcesTool,
+  BrowserImportCookiesTool,
   PreviewDialogTool,
   PreviewStatusTool,
   PreviewOpenTool,
@@ -390,6 +422,8 @@ export const PreviewToolkit = Toolkit.make(
 );
 
 export const PreviewStandardToolkit = Toolkit.make(
+  BrowserCookieSourcesTool,
+  BrowserImportCookiesTool,
   PreviewDialogTool,
   PreviewStatusTool,
   PreviewOpenTool,
