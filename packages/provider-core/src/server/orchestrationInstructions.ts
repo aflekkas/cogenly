@@ -60,6 +60,28 @@ Do not switch to global browser skills, Chrome, Node REPL browser automation, st
 `;
 
 /**
+ * The computer-use block for a session whose credential grants `computer`.
+ * `platform` is the environment server's, since that is the machine the
+ * tools drive: off macOS the block only says not to try.
+ */
+export function cogenlyComputerUseInstructions(platform: string): string {
+  if (platform !== "darwin") {
+    return `
+
+## Computer use
+
+This environment runs on ${platform === "linux" ? "Linux, without a desktop to control" : platform}, so the \`computer_*\` tools are unavailable here. Do not try to control apps with scripts. For web pages use the \`preview_*\` browser tools.
+`;
+  }
+  return `
+
+## Computer use
+
+The \`cogenly\` MCP server's \`computer_*\` tools control this Mac's apps: \`computer_apps\`, \`computer_open_app\`, \`computer_ui\` (the window's controls with paths and center points), \`computer_press\`, \`computer_click\`, \`computer_type\`, \`computer_key\`, \`computer_scroll\`, \`computer_drag\`, and \`computer_screenshot\`. When the user asks you to do something in another app, such as changing a setting, do it with these tools instead of asking them to. Read the window with \`computer_ui\`, prefer \`computer_press\` on a path, then confirm the result with \`computer_ui\` or \`computer_screenshot\`. Use \`preview_*\` for web pages in the Cogenly browser. Never script other apps through \`osascript\` or System Events. If a tool reports a missing macOS permission, tell the user the one switch to turn on (the thread shows them a button for it) and call \`computer_status\` after they say it is on.
+`;
+}
+
+/**
  * Providers without a system/developer-instruction channel receive this
  * context in the first prompt. Keep the wrapper explicit so it cannot be
  * mistaken for text authored by the user.

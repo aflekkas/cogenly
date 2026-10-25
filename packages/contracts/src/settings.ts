@@ -1090,6 +1090,7 @@ export const PROJECT_SCOPED_SERVER_SETTING_KEYS = [
   "defaultProjectScripts",
   "enableAgentBrowserAccess",
   "enableAgentDeviceAccess",
+  "enableAgentComputerUse",
   "textGenerationModelSelection",
   "sourceControlWriterModelSelection",
   "reviewGuideModelSelection",
@@ -1140,6 +1141,7 @@ export const ProjectSettingsOverrides = Schema.Struct({
   defaultProjectScripts: Schema.optionalKey(Schema.Array(ProjectScript)),
   enableAgentBrowserAccess: Schema.optionalKey(Schema.Boolean),
   enableAgentDeviceAccess: Schema.optionalKey(Schema.Boolean),
+  enableAgentComputerUse: Schema.optionalKey(Schema.Boolean),
   textGenerationModelSelection: Schema.optionalKey(ModelSelection),
   sourceControlWriterModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
   reviewGuideModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
@@ -1357,6 +1359,14 @@ export const ServerSettings = Schema.Struct({
    */
   enableAgentDeviceAccess: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   /**
+   * Whether agents may drive this machine's own apps through the `computer_*`
+   * MCP tools (screenshots, clicks, typing, the accessibility tree). Gated
+   * like `enableAgentBrowserAccess`: server-authoritative and applied when the
+   * provider session is prepared. On by default; macOS still needs its
+   * one-time Accessibility and Screen Recording grants.
+   */
+  enableAgentComputerUse: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  /**
    * Whether this server may install and run Cogenly's device helper processes.
    * Kept separate from agent access so a user can turn off agent control and
    * keep their own Device panel. On by default.
@@ -1540,6 +1550,7 @@ export const UNIVERSAL_SERVER_SETTING_KEYS = [
   "autoResumeLimitedThreads",
   "enableAgentBrowserAccess",
   "enableAgentDeviceAccess",
+  "enableAgentComputerUse",
   "defaultAutoPull",
   "defaultThreadEnvMode",
   "newWorktreesStartFromOrigin",
@@ -1813,6 +1824,7 @@ export const ServerSettingsPatch = Schema.Struct({
     Schema.Record(ProjectId, Schema.NullOr(ProjectSettingsOverrides)),
   ),
   enableAgentDeviceAccess: Schema.optionalKey(Schema.Boolean),
+  enableAgentComputerUse: Schema.optionalKey(Schema.Boolean),
   enableDeviceSupport: Schema.optionalKey(Schema.Boolean),
   deviceOnboardingCompleted: Schema.optionalKey(Schema.Boolean),
   deviceHosts: Schema.optionalKey(SshDeviceHostConfigs),

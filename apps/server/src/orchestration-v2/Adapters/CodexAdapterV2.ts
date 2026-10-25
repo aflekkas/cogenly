@@ -701,6 +701,8 @@ export function buildCodexTurnStartParams(input: {
   readonly hasT3Mcp?: boolean;
   readonly browserToolsAvailable?: boolean;
   readonly deviceToolsAvailable?: boolean;
+  /** Set when the session carries the computer-use tools: the platform of the machine they drive. */
+  readonly computerUsePlatform?: string;
   readonly terminalToolsAvailable?: boolean;
   /** ChatGPT token sharing does not accept service tiers. */
   readonly omitServiceTier?: boolean;
@@ -758,6 +760,9 @@ export function buildCodexTurnStartParams(input: {
             {
               browser: input.browserToolsAvailable ?? true,
               device: input.deviceToolsAvailable ?? false,
+              ...(input.computerUsePlatform === undefined
+                ? {}
+                : { computer: input.computerUsePlatform }),
               terminal: terminalTools,
             },
           )
@@ -5967,6 +5972,9 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               hasT3Mcp: mcpSession !== undefined,
               browserToolsAvailable: mcpSession?.browserToolsAvailable ?? true,
               deviceToolsAvailable: mcpSession?.capabilities?.has("device") ?? false,
+              ...(mcpSession?.capabilities?.has("computer") === true
+                ? { computerUsePlatform: yield* HostProcess.Platform }
+                : {}),
               terminalToolsAvailable: McpProviderSession.terminalToolsAvailable(mcpSession),
               omitServiceTier: adapterOptions.resolveRuntime !== undefined,
               ...(turnInput.appContext === undefined ? {} : { appContext: turnInput.appContext }),

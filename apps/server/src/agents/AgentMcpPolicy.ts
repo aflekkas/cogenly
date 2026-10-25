@@ -419,11 +419,11 @@ const make = Effect.gen(function* () {
                     ? "draft"
                     : "execute";
         if (!agent.permissions[grant]) return yield* denied(`This agent has no ${grant} grant.`);
-        // Arbitrary shell/browser/device writes can send, merge, deploy or delete.
+        // Arbitrary shell/browser/device/desktop-app writes can send, merge, deploy or delete.
         // They cannot safely be reduced to an execute grant by parsing model text.
         // Adding a project (create or clone) is ordinary execute work for an agent.
         if (
-          /^(terminal_|preview_(?!close$|list$)|device_(?!setup_status$)|project_(?:update|delete)$)/.test(
+          /^(terminal_|preview_(?!close$|list$)|device_(?!setup_status$)|computer_|project_(?:update|delete)$)/.test(
             name,
           ) &&
           !["send", "create_pr", "merge", "deploy", "delete"].every(

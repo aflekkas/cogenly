@@ -30,6 +30,7 @@ export const MachineHealthCheckId = Schema.Literals([
   "boot-service",
   "tailscale-serve",
   "canary",
+  "computer-use",
 ]);
 export type MachineHealthCheckId = typeof MachineHealthCheckId.Type;
 

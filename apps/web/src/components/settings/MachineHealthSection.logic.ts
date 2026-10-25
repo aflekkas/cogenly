@@ -38,6 +38,7 @@ export const HEALTH_CHECK_LABELS = {
   "boot-service": "Starts at boot",
   "tailscale-serve": "Private access",
   canary: "Canary check",
+  "computer-use": "Computer use",
 } as const satisfies Record<MachineHealthCheckId, string>;
 
 /**
