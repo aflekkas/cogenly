@@ -15,6 +15,7 @@ import * as Ref from "effect/Ref";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Stream from "effect/Stream";
 
+import * as Config from "../config.ts";
 import { liveThreadShell } from "../mcp/McpToolAccess.testkit.ts";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
@@ -28,6 +29,7 @@ import * as Labels from "./ProjectLabelService.ts";
 
 const at = "2026-01-01T00:00:00.000Z";
 const scratch = ProjectId.make("scratch");
+const testHome = "/tmp/cogenly-project-home-test";
 const repo = ProjectId.make("repo-web");
 const modelSelection = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5" };
 
@@ -37,17 +39,17 @@ const launches = Ref.makeUnsafe<ReadonlyArray<ThreadId>>([]);
 const launchedProjects = Ref.makeUnsafe<ReadonlyArray<ProjectId>>([]);
 const removedPaths = Ref.makeUnsafe<ReadonlyArray<string>>([]);
 
-const insertThread = (threadId: ThreadId) =>
+const insertThread = (threadId: ThreadId, projectId = scratch) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
-    yield* sql`INSERT INTO orchestration_v2_projection_threads(thread_id, project_id, title, default_provider, runtime_mode, interaction_mode, created_at, updated_at, payload_json) VALUES (${threadId}, ${scratch}, 'Project chat', 'codex', 'full-access', 'default', ${at}, ${at}, '{"surface":"chat"}')`;
+    yield* sql`INSERT INTO orchestration_v2_projection_threads(thread_id, project_id, title, default_provider, runtime_mode, interaction_mode, created_at, updated_at, payload_json) VALUES (${threadId}, ${projectId}, 'Project chat', 'codex', 'full-access', 'default', ${at}, ${at}, '{"surface":"chat"}')`;
   });
 
 const database = Sqlite.layerMemory.pipe(Layer.provide(NodeServices.layer));
 const persistence = Events.layer.pipe(Layer.provideMerge(database));
 const labels = Labels.layer
   .pipe(Layer.provide(layerSharedIdentity))
-  .pipe(Layer.provideMerge(persistence));
+  .pipe(Layer.provideMerge(persistence), Layer.provide(Config.layerTest(process.cwd(), testHome)));
 
 // The launch stub writes the thread row and files it, as the real launch does.
 const launch = Layer.effect(
@@ -61,7 +63,9 @@ const launch = Layer.effect(
           const threadId = input.threadId!;
           yield* Ref.update(launches, (all) => [...all, threadId]);
           yield* Ref.update(launchedProjects, (all) => [...all, input.projectId]);
-          yield* insertThread(threadId).pipe(Effect.provideService(SqlClient.SqlClient, sql));
+          yield* insertThread(threadId, input.projectId).pipe(
+            Effect.provideService(SqlClient.SqlClient, sql),
+          );
           if (input.projectFolderId !== undefined)
             yield* service.moveThread({ threadId, folderId: input.projectFolderId });
           return { threadId, projection: null as never, resumed: false };
@@ -133,6 +137,9 @@ const seed = Effect.gen(function* () {
   yield* Ref.set(launchedProjects, []);
   yield* Ref.set(removedPaths, []);
   const sql = yield* SqlClient.SqlClient;
+  // Scratch is the managed No project workspace, not an unlinked repository.
+  // Membership recognizes its configured root, never the arbitrary project id.
+  yield* sql`INSERT INTO projection_projects(project_id, title, workspace_root, scripts_json, created_at, updated_at) VALUES (${scratch}, 'No project', ${`${testHome}/scratch`}, '[]', ${at}, ${at})`;
   yield* sql`INSERT INTO projection_projects(project_id, title, workspace_root, scripts_json, created_at, updated_at) VALUES (${repo}, 'web', '/repos/web', '[]', ${at}, ${at})`;
   const service = yield* Labels.ProjectLabelService;
   return (yield* service.create({ name: "Spawn" })).label.id;
@@ -160,6 +167,7 @@ describe("ProjectHome project chat", () => {
         { threadId: first.threadId, created: false },
       ]);
       expect(yield* Ref.get(launches)).toEqual([first.threadId]);
+      expect(yield* Ref.get(launchedProjects)).toEqual([scratch]);
       const label = yield* labelOf(id);
       expect(label.projectChatThreadId).toBe(first.threadId);
       // The project chat is filed in the project but not counted as one of its chats.
