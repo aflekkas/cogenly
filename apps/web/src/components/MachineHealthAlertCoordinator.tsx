@@ -81,12 +81,14 @@ export function MachineHealthAlertCoordinator() {
     const description = alert.detail.trim()
       ? `${alert.originMachineName}: ${alert.detail}`
       : alert.originMachineName;
+    const failing = alert.status === "fail";
     const toastId = toastManager.add({
-      type: alert.status === "fail" ? "error" : "warning",
+      type: failing ? "error" : "warning",
       title: alert.title,
       description,
-      // Stays until dismissed or the problem clears; it is the alert.
-      timeout: 0,
+      // A failure stays until dismissed or it clears; a warning leaves after the
+      // usual time. Settings → Machines and the nav-rail dot keep showing both.
+      ...(failing ? { timeout: 0 } : {}),
       data: {
         hideCopyButton: true,
         ...(secondary === null
