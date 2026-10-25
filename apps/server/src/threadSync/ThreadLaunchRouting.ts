@@ -59,7 +59,7 @@ import * as Projections from "../orchestration-v2/ProjectionStore.ts";
 import * as RemoteThreadLaunch from "../orchestration-v2/RemoteThreadLaunch.ts";
 import * as ThreadLaunch from "../orchestration-v2/ThreadLaunchService.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
-import type * as RepositoryCheckout from "../project/RepositoryCheckout.ts";
+import * as RepositoryCheckout from "../project/RepositoryCheckout.ts";
 import type * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
 import type * as ProjectLabelService from "../projectLabels/ProjectLabelService.ts";
 import { readAttachmentFiles, writeAttachmentFiles } from "./attachmentFiles.ts";
@@ -100,6 +100,7 @@ const make = Effect.gen(function* () {
   const threads = yield* ThreadManagement.ThreadManagementService;
   const projections = yield* Projections.ProjectionStoreV2;
   const projects = yield* Projects.ProjectStoreV2;
+  const checkout = yield* RepositoryCheckout.RepositoryCheckout;
   const agentService = yield* Effect.serviceOption(AgentService.AgentService);
   const scheduledTasks = yield* Effect.serviceOption(ScheduledTasks.ScheduledTaskService);
   const sharedSync = yield* SharedSync.SharedSync;
@@ -795,6 +796,14 @@ const make = Effect.gen(function* () {
           );
       const projectId: ProjectId = yield* localProject(payload.project);
       if (payload.bundle !== undefined) {
+        yield* checkout
+          .ensureCheckout(projectId)
+          .pipe(
+            Effect.mapError(
+              (error) =>
+                new ThreadRemoteError({ reason: "needs-repository", detail: error.message }),
+            ),
+          );
         const project = yield* projects.get(projectId).pipe(Effect.orDie);
         if (Option.isNone(project))
           return yield* new ThreadRemoteError({ reason: "needs-repository" });
