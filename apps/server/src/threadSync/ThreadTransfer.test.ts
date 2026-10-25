@@ -715,3 +715,32 @@ it.live(
     }).pipe(Effect.scoped),
   30000,
 );
+
+it.live(
+  "an agent cannot move with active jobs or undelivered completions",
+  () =>
+    Effect.gen(function* () {
+      const { hub, laptop, at } = yield* start("busy-agent");
+      yield* addProject(laptop, "/Users/someone/racing");
+      yield* addProject(hub, "/srv/racing");
+      yield* laptop.sink.write({ events: [threadCreated("event:created", at)] });
+      yield* laptop.sql`INSERT INTO agents(agent_id, conversation_thread_id, payload_json, enabled, daily_run_cap, owner_machine)
+      VALUES ('agent:busy', ${threadId}, '{}', 1, 10, ${laptop.environmentId})`;
+      yield* laptop.sql`INSERT INTO agent_work_runs(run_id, agent_id, trigger_id, work_thread_id, status, created_at)
+      VALUES ('job:busy', 'agent:busy', 'task:busy', 'thread:job', 'starting', '2026-10-24T00:00:00.000Z')`;
+      for (const status of ["starting", "running", "completed", "failed"]) {
+        yield* laptop.sql`UPDATE agent_work_runs SET status = ${status}`;
+        const result = yield* laptop.transfer.move({
+          threadIds: [threadId],
+          target: hub.environmentId,
+        });
+        expect(result.moved).toEqual([]);
+        expect(result.skipped[0]?.reason).toBe("busy");
+        expect(yield* laptop.replication.owner(threadId)).toBeUndefined();
+      }
+      yield* laptop.sql`UPDATE agent_work_runs SET posted = 1`;
+      const fenced = yield* laptop.replication.fence(threadId, hub.environmentId);
+      expect(fenced.epoch).toBe(1);
+    }).pipe(Effect.scoped),
+  30000,
+);

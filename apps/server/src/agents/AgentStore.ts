@@ -342,7 +342,9 @@ const make = Effect.gen(function* () {
         const at = yield* now;
         const day = at.slice(0, 10);
         const rows =
-          yield* sql`UPDATE agents SET run_day = ${day}, daily_runs = CASE WHEN run_day = ${day} THEN daily_runs + 1 ELSE 1 END WHERE agent_id = ${id} AND enabled = 1 AND (owner_machine IS NULL OR owner_machine = ${shared.environmentId}) AND (backoff_until IS NULL OR backoff_until <= ${at}) AND (run_day IS NULL OR run_day <> ${day} OR daily_runs < daily_run_cap) AND NOT EXISTS (SELECT 1 FROM agent_work_runs WHERE agent_id = ${id} AND status IN ('starting', 'running')) RETURNING agent_id`;
+          yield* sql`UPDATE agents SET run_day = ${day}, daily_runs = CASE WHEN run_day = ${day} THEN daily_runs + 1 ELSE 1 END WHERE agent_id = ${id} AND enabled = 1 AND (owner_machine IS NULL OR owner_machine = ${shared.environmentId}) AND (backoff_until IS NULL OR backoff_until <= ${at}) AND (run_day IS NULL OR run_day <> ${day} OR daily_runs < daily_run_cap) AND NOT EXISTS (SELECT 1 FROM agent_work_runs WHERE agent_id = ${id} AND status IN ('starting', 'running'))
+            AND NOT EXISTS (SELECT 1 FROM thread_owners WHERE thread_id = agents.conversation_thread_id
+              AND (local = 0 OR handoff_json IS NOT NULL)) RETURNING agent_id`;
         return rows.length > 0;
       }).pipe(Effect.mapError(storeError)),
     outcome: (id, succeeded) =>

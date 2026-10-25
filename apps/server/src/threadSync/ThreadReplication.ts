@@ -979,6 +979,9 @@ const make = Effect.gen(function* () {
   // Work that would run, or answer, on this machine after the fence.
   const busyReason = (threadId: ThreadId) =>
     sql<{ readonly busy: string | null }>`SELECT CASE
+        WHEN EXISTS (SELECT 1 FROM agent_work_runs w JOIN agents a ON a.agent_id = w.agent_id
+          WHERE a.conversation_thread_id = ${threadId}
+          AND (w.status IN ('starting','running') OR w.posted = 0)) THEN 'An agent job is active or awaiting completion delivery.'
         WHEN EXISTS (SELECT 1 FROM orchestration_v2_projection_runs WHERE thread_id = ${threadId}
           AND status IN ('queued','preparing','starting','running','waiting')) THEN 'It has a turn running or queued.'
         WHEN EXISTS (SELECT 1 FROM orchestration_v2_projection_runtime_requests WHERE thread_id = ${threadId}
