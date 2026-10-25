@@ -191,7 +191,8 @@ export type VaultUsageListResult = typeof VaultUsageListResult.Type;
 
 /**
  * Vault sharing with one directly paired machine (docs/internals/vault-sync.md).
- * `waiting_for_peer`: this machine shares, the other has not turned it on.
+ * `waiting_for_peer`: this machine shares, the other has not turned it on, so
+ * nothing is released to it or accepted from it yet.
  * `key_changed`: the other machine now presents a different vault key than the
  * one pinned here. Re-pairing clears the pin; the UI tells the owner to do that.
  */
