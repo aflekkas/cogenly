@@ -1,4 +1,4 @@
-import { getProviderSendBlockReason } from "./ChatView.logic";
+import { getProviderSendBlockReason, timelineAwaitsRows } from "./ChatView.logic";
 import {
   agentControlledBrowserCloseConfirmation,
   ENVIRONMENT_RECONNECT_WARNING_GRACE_MS,
@@ -1834,5 +1834,31 @@ describe("retired provider history", () => {
     expect(
       getProviderSendBlockReason({ driver: ProviderDriverKind.make("muse") }, "muse-spark-1.3"),
     ).toBeNull();
+  });
+});
+
+describe("timelineAwaitsRows", () => {
+  const settled = {
+    detailLoading: false,
+    shellStarted: true,
+    rowCount: 0,
+    isWorking: false,
+    hasHistoryToLoad: false,
+  };
+
+  it("waits while the detail loads, and while a thread with messages shows none yet", () => {
+    expect(timelineAwaitsRows({ ...settled, detailLoading: true, shellStarted: false })).toBe(true);
+    // A replica catching up after a move reports live before its rows arrive.
+    expect(timelineAwaitsRows(settled)).toBe(true);
+  });
+
+  it("stops once rows arrive, and never waits for a thread nobody wrote in", () => {
+    expect(timelineAwaitsRows({ ...settled, rowCount: 3 })).toBe(false);
+    expect(timelineAwaitsRows({ ...settled, shellStarted: false })).toBe(false);
+  });
+
+  it("leaves a running thread and trimmed history to their own rows", () => {
+    expect(timelineAwaitsRows({ ...settled, isWorking: true })).toBe(false);
+    expect(timelineAwaitsRows({ ...settled, hasHistoryToLoad: true })).toBe(false);
   });
 });
