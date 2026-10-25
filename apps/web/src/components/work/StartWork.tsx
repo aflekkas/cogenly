@@ -141,13 +141,19 @@ export function useStartWork(): (request: StartWorkRequest) => Promise<void> {
       const key = scopedThreadKey(threadRef);
       if (usePendingStarts.getState().pending.has(key)) return;
       setPending(key, true);
-      const progressToast = announce
-        ? toastManager.add({ type: "loading", title: "Starting Work…", timeout: 0 })
-        : null;
+      let progressToast: ReturnType<typeof toastManager.add> | null = null;
       try {
         const { environmentId } = threadRef;
         const machine = selectedMachine ?? (await requestLaunchMachine(environmentId));
         if (machine === null) return;
+        // Only once the machine is chosen: the "Run on" dialog is still asking until then.
+        if (announce) {
+          progressToast = toastManager.add({
+            type: "loading",
+            title: "Starting Work…",
+            timeout: 0,
+          });
+        }
         // "No repository" is the environment's scratch project, created on first use.
         const targetProjectId =
           choice === NO_REPOSITORY ? (await openScratchProject(environmentId))?.id : choice;
