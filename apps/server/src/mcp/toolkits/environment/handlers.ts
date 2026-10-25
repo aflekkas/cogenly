@@ -14,6 +14,7 @@ import * as Settings from "../../../serverSettings.ts";
 import * as MachineSecurity from "../../../security/MachineSecurity.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
+import * as StorageCleanup from "../../../storageCleanup.ts";
 import { readCaller, unavailable } from "../../threadAccess.ts";
 import { EnvironmentToolkit } from "./tools.ts";
 
@@ -99,6 +100,18 @@ const cliCommand = (input: {
   );
 
 export const layer = McpToolAccess.toLayer(EnvironmentToolkit, {
+  storage_status: McpToolAccess.reads(() =>
+    StorageCleanup.StorageCleanup.pipe(
+      Effect.flatMap((storage) => storage.status),
+      Effect.mapError(unavailable),
+    ),
+  ),
+  storage_cleanup: McpToolAccess.writesEnvironmentAsWork((input) =>
+    StorageCleanup.StorageCleanup.pipe(
+      Effect.flatMap((storage) => (input.dryRun !== false ? storage.preview : storage.runNow)),
+      Effect.mapError(unavailable),
+    ),
+  ),
   cli_command_status: McpToolAccess.reads(() => cliCommand({ action: "status" })),
   // Writes a launcher into the user's own PATH folder; a /usr/local/bin install also
   // needs the user to approve macOS's admin prompt. Full-access work callers only.

@@ -229,6 +229,7 @@ export function diskCheck(input: {
       : [
           item({
             key: "disk:free",
+            target: { _tag: "storage" },
             status,
             title:
               status === "fail"

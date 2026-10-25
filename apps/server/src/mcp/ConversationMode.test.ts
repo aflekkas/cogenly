@@ -1,3 +1,4 @@
+import * as StorageCleanup from "../storageCleanup.ts";
 import {
   EnvironmentId,
   ProjectLabelId,
@@ -109,7 +110,9 @@ const serverLayer = Layer.mergeAll(
     ),
   ),
 ).pipe(
-  Layer.provideMerge(McpServer.McpServer.layer),
+  Layer.provideMerge(
+    Layer.merge(McpServer.McpServer.layer, Layer.mock(StorageCleanup.StorageCleanup)({})),
+  ),
   Layer.provideMerge(threadLayers),
   Layer.provideMerge(
     Layer.mock(TerminalMcpService.TerminalMcpService)({

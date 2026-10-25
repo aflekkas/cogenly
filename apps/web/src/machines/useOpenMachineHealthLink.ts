@@ -9,6 +9,9 @@ export function useOpenMachineHealthLink(): (link: MachineHealthLink) => void {
   return useCallback(
     (link: MachineHealthLink) => {
       switch (link.kind) {
+        case "storage":
+          void navigate({ to: "/settings/storage", search: { machine: link.environmentId } });
+          return;
         case "thread":
           void navigate({
             to: "/$environmentId/$threadId",

@@ -190,6 +190,7 @@ export type ProjectionThreadPullRequests = Pick<
 >;
 
 const ProjectionCheckpointContext = Schema.Struct({
+  repositoryCwd: Schema.optionalKey(Schema.NullOr(Schema.String)),
   runs: Schema.Array(
     OrchestrationV2RunJsonSchema.mapFields(({ id, ordinal, status }) => ({ id, ordinal, status })),
   ),
@@ -4959,9 +4960,13 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       sql
         .withTransaction(
           Effect.gen(function* () {
-            const threads = yield* sql<{ readonly thread_id: string }>`
-            SELECT thread_id FROM orchestration_v2_projection_threads
-            WHERE thread_id = ${threadId} LIMIT 1
+            const threads = yield* sql<{
+              readonly thread_id: string;
+              readonly repositoryCwd: string | null;
+            }>`
+            SELECT t.thread_id, p.workspace_root AS "repositoryCwd" FROM orchestration_v2_projection_threads t
+            LEFT JOIN projection_projects p ON p.project_id = t.project_id
+            WHERE t.thread_id = ${threadId} LIMIT 1
           `;
             if (threads.length === 0) {
               return yield* new ProjectionStoreThreadNotFoundError({ threadId });
@@ -4991,7 +4996,12 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               ORDER BY scope_id ASC, ordinal_within_scope ASC
             `,
             ]);
-            return yield* decodeCheckpointContext({ runs, checkpointScopes, checkpoints });
+            return yield* decodeCheckpointContext({
+              runs,
+              checkpointScopes,
+              checkpoints,
+              repositoryCwd: threads[0]?.repositoryCwd,
+            });
           }),
         )
         .pipe(

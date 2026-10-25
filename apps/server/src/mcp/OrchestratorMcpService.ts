@@ -661,9 +661,11 @@ function threadTitle(input: {
 }
 
 function taskPrompt(input: OrchestratorMcpDelegateTaskInput): string {
-  return input.role === undefined || input.role === "general"
-    ? input.task
-    : `Act as the ${input.role} sub-agent for this task.\n\n${input.task}`;
+  const prompt =
+    input.role === undefined || input.role === "general"
+      ? input.task
+      : `Act as the ${input.role} sub-agent for this task.\n\n${input.task}`;
+  return `${prompt}\n\nPrefer reusing the parent's dependencies or the package manager's shared store; seed a dev database only when the task needs it. Stop and clean up dev rigs you start before finishing.`;
 }
 
 function threadSettlement(

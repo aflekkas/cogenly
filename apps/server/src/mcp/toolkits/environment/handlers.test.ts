@@ -1,3 +1,4 @@
+import * as StorageCleanup from "../../../storageCleanup.ts";
 import { expect, it } from "@effect/vitest";
 import {
   DEFAULT_SERVER_SETTINGS,
@@ -100,6 +101,7 @@ const makeServer = (
         Layer.succeed(MachineSecurity.MachineSecurity, {
           status: Effect.die("machine_security_status is not exercised here"),
         }),
+        Layer.mock(StorageCleanup.StorageCleanup)({}),
         Layer.mock(MachineHealth.MachineHealth)({ reportFor, setupSandbox }),
         Layer.mock(ChildProcessSpawner.ChildProcessSpawner)({}),
       ),
@@ -262,6 +264,7 @@ it.effect("environment_preferences_update saves local and shared settings", () =
             cliCommand: () => Effect.die("unused"),
           }),
           Layer.succeed(MachineSecurity.MachineSecurity, { status: Effect.die("unused") }),
+          Layer.mock(StorageCleanup.StorageCleanup)({}),
           Layer.mock(MachineHealth.MachineHealth)({}),
           Layer.mock(ChildProcessSpawner.ChildProcessSpawner)({}),
         ),

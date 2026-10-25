@@ -259,7 +259,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "storage-worktree-keep-when",
     targetId: "storage-worktrees",
-    title: "Keep worktrees with local changes",
+    title: "Keep ignored local files too",
     to: "/settings/storage",
     scope: "project-defaults",
     searchTerms: [
@@ -268,10 +268,28 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "storage-delete-now",
-    title: "Delete now",
+    title: "Preview cleanup and clean up now",
     to: "/settings/storage",
     scope: "environment-defaults",
-    searchTerms: ["storage cleanup run now results report removed kept failed"],
+    searchTerms: [
+      "storage cleanup dry run preview run now results report removed kept failed unsaved agent worktrees",
+    ],
+  },
+  {
+    id: "storage-backups",
+    targetId: "storage-backups",
+    title: "Backups to keep",
+    to: "/settings/storage",
+    scope: "environment-defaults",
+    searchTerms: ["nightly backup snapshots retention database disk space cleanup"],
+  },
+  {
+    id: "storage-dependencies",
+    targetId: "storage-artifacts",
+    title: "Prune idle dependencies",
+    to: "/settings/storage",
+    scope: "environment-defaults",
+    searchTerms: ["node_modules pnpm shared store hardlinks dist turbo disk usage dev data copies"],
   },
   {
     id: "storage-worktrees",

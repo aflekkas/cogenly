@@ -116,32 +116,35 @@ are, and cleanup covers both the default folder and the custom one.
 
 ## Storage cleanup
 
-Open **Settings → Storage** and pick a machine to enable automatic cleanup on it. Policies are
-per machine, off by default, and run on that machine at startup, when changed, and hourly.
+Open **Settings → Storage** and pick a machine to see allocated disk usage and preview cleanup.
+Volume usage counts shared blocks once. APFS clones and reflinks make exact per-category disk use unavailable without deletion; those category sizes are shown as unknown, with file counts. Cleanup reports the change in available volume space instead of adding directory sizes.
 
-Worktrees can be removed after a chosen number of inactive days, after a thread settles, after
-merging, or when they have no commits beyond the default branch. Set settled retention to 0 days
-to remove a worktree at the next cleanup after settlement. Only Cogenly-managed worktrees are eligible.
-Active sessions and shared worktrees prevent removal. **Keep worktrees with local changes** defaults
-to **Uncommitted changes**, which protects tracked edits and untracked files but deletes ignored
-files such as `.env` and build output. **Any local files** also protects ignored files other than
-`node_modules`. **Edited tracked files** protects only tracked edits and allows untracked and
-ignored files to be deleted. Branches and thread history stay; starting another turn recreates the checkout.
-Merge cleanup requires a merged pull request whose commits are included in the remote default
-branch. A squash or rebase merge on GitHub also counts when the pull request targeted the default
-branch and the worktree is still at the pull request's last commit.
+Completed delegated tasks release their separate worktrees when safe. Settled and archived Work
+threads keep theirs for 7 days by default. Active-thread retention is off until you choose an
+inactivity period. Branches, conversation history and checkpoints stay. Starting another turn
+recreates a removed checkout from its branch and runs the project's setup script.
 
-Enable **Delete worktrees with deleted threads** to remove safe worktrees after their last
-thread is deleted, including archived threads and worktrees left by earlier deletions. The
-server waits for sessions and terminals to stop and retries skipped worktrees after restart.
-Existing prompts for deleting a worktree manually remain available when this policy is off.
+Cleanup keeps worktrees with edits, untracked files, stashes, live sessions, running processes,
+pending work or other live thread references. Unknown ignored files such as a real `.env` also
+block removal. **Keep ignored local files too** additionally protects ignored build output and
+dev data copies. Rebuildable dependencies and isolated dev data are otherwise removed with the
+checkout. Cleanup never deletes the branch or an unreferenced worktree folder.
 
-Choose **Delete now** to run the enabled rules immediately. The latest results show which
-worktrees were removed or kept and why, plus any failures.
-Results also list folders in the worktree folder that no thread uses, with their sizes; cleanup never removes them, so remove them manually if you want.
+Optional dependency pruning removes ignored `node_modules`, `.turbo` and `dist` from idle
+worktrees after the chosen period. It is off by default: package stores often share these files,
+so removing them may reclaim little disk space. Project setup runs before the next turn.
 
-Browser captures and rotated logs have separate retention periods. Expired capture links stop
-working. Current logs, message attachments, and browser profiles are kept.
+Cleanup runs at startup, hourly, when its rules change, and after delegated task completion.
+Choose **Preview cleanup**, review eligible items and blockers, then **Clean up now**. Execution
+checks safety again. Project cleanup overrides still apply to Work thread retention.
+
+Nightly backups keep the newest two complete snapshots by default. Storage shows backup files and the database file size; **Clean up now** uses the same backup retention. Cleanup keeps conversation history and does not compact the database.
+
+Browser captures and inactive rotated logs expire after 14 days by default. Current logs,
+message attachments and browser profiles are kept. Expired capture links stop working.
+Agents can use `storage_status` and `storage_cleanup` (dry run by default). On the machine,
+`cogenly doctor --storage` reports usage, `--dry-run` previews cleanup, and `--fix` applies it
+through the running server.
 
 ## Repository icons
 

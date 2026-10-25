@@ -1,3 +1,4 @@
+import * as WorktreeLifecycle from "../workspace/WorktreeLifecycle.ts";
 import * as Membership from "../projectLabels/ProjectRepositoryMembership.ts";
 import * as GoogleTokenStore from "../integrations/local/GoogleTokenStore.ts";
 import * as NativeIntegrationImport from "../integrations/NativeIntegrationImport.ts";
@@ -257,7 +258,11 @@ const layerRunExecutionServiceProvided = RunExecutionService.layer.pipe(
   ),
 );
 
+export const layerProjectSetupScriptRunner = ProjectSetupScriptRunner.layer.pipe(
+  Layer.provide(layerProjectService),
+);
 const layerProviderTurnStartServiceProvided = ProviderTurnStartService.layer.pipe(
+  Layer.provide(WorktreeLifecycle.layer.pipe(Layer.provide(layerProjectSetupScriptRunner))),
   Layer.provide(AgentStore.layer),
   Layer.provide(
     Layer.mergeAll(
@@ -361,9 +366,6 @@ const layerThreadManagementProvided = ThreadManagementService.layerWithLegacyImp
       layerProviderSessionManagerProvided,
     ),
   ),
-);
-export const layerProjectSetupScriptRunner = ProjectSetupScriptRunner.layer.pipe(
-  Layer.provide(layerProjectService),
 );
 // Built once and shared: named projects file into labels through the same
 // instance direct consumers use, so filing notifications reach every

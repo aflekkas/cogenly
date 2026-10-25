@@ -213,8 +213,14 @@ export const layer: Layer.Layer<
           path.resolve(scope.cwd) !== path.resolve(projection.thread.worktreePath)
         )
           return yield* unavailable;
+        const project = !(yield* fileSystem.exists(scope.cwd))
+          ? yield* projects.get(projection.thread.projectId)
+          : Option.none();
         yield* checkpoints
-          .assertRestorable({ scope, checkpoint })
+          .assertRestorable({
+            scope: Option.isSome(project) ? { ...scope, cwd: project.value.workspaceRoot } : scope,
+            checkpoint,
+          })
           .pipe(Effect.mapError(() => unavailable));
       }
 
@@ -228,6 +234,18 @@ export const layer: Layer.Layer<
             refName: branch,
             path: worktreePath,
           });
+          const gitFile = yield* fileSystem.readFileString(path.join(worktreePath, ".git"));
+          if (gitFile.startsWith("gitdir: ")) {
+            // Restoring files does not need dependencies. The next provider
+            // turn runs setup before using this recreated checkout.
+            yield* fileSystem.writeFileString(
+              path.join(
+                path.resolve(worktreePath, gitFile.slice("gitdir: ".length).trim()),
+                "cogenly-dependencies-pruned",
+              ),
+              "Setup required before next turn.\n",
+            );
+          }
         }
       }
 

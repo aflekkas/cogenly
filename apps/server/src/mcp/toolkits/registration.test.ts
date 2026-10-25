@@ -1,3 +1,4 @@
+import * as StorageCleanup from "../../storageCleanup.ts";
 import * as Accounts from "../../accounts/Accounts.ts";
 import * as AccountAccess from "../../accounts/AccountAccess.ts";
 import * as AccountConnections from "../../accounts/AccountConnections.ts";
@@ -225,6 +226,7 @@ const layerStubServices = Layer.mergeAll(
   Layer.mock(ThreadTransfer.ThreadTransfer)({}),
   Layer.mock(ProjectMove.ProjectMove)({}),
   Layer.mock(MachineSetup.MachineSetup)({}),
+  Layer.mock(StorageCleanup.StorageCleanup)({}),
   Layer.mock(MachineHealth.MachineHealth)({}),
   Layer.mock(ProjectionStore.ProjectionStoreV2)({}),
   Layer.mock(DeviceService.DeviceService)({
@@ -651,6 +653,8 @@ const smokeCases = [
       "machine_health",
       "machine_health_fix",
       "machine_security_status",
+      "storage_cleanup",
+      "storage_status",
     ],
     tool: "environment_read",
     args: {},

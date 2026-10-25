@@ -2088,7 +2088,9 @@ const makeWsRpcHandlers = (
           const keybindingsConfig = yield* keybindings.removeKeybindingRule(rule);
           return { keybindings: keybindingsConfig, issues: [] };
         }),
-      [WS_METHODS.serverRunStorageCleanup]: () => storageCleanup.runNow,
+      [WS_METHODS.serverRunStorageCleanup]: (input) =>
+        input.dryRun === true ? storageCleanup.preview : storageCleanup.runNow,
+      [WS_METHODS.serverGetStorageStatus]: () => storageCleanup.status,
       [WS_METHODS.serverGetStorageCleanupReport]: () => storageCleanup.reports,
       [WS_METHODS.serverGetDatabaseStorage]: () => databaseStorage.status,
       [WS_METHODS.serverGetSettings]: (_input) =>
