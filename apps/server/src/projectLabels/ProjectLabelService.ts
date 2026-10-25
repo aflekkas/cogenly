@@ -478,6 +478,7 @@ const make = Effect.gen(function* () {
         );
   if (Option.isSome(folders)) {
     const reconcileMerges = folders.value.reconcileMerges.pipe(
+      Effect.tap(() => PubSub.publish(changes, undefined)),
       Effect.catch((cause) => Effect.logWarning("Project merge files deferred", { cause })),
     );
     yield* shared.changes.pipe(
@@ -985,7 +986,10 @@ const make = Effect.gen(function* () {
       ).pipe(
         Effect.tap(() =>
           Option.isSome(folders)
-            ? folders.value.reconcileMerges.pipe(Effect.mapError(failure("mergeFiles")))
+            ? folders.value.reconcileMerges.pipe(
+                Effect.tap(() => PubSub.publish(changes, undefined)),
+                Effect.mapError(failure("mergeFiles")),
+              )
             : Effect.void,
         ),
       ),

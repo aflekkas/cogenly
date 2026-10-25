@@ -20,6 +20,8 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
+import * as ServerConfig from "../config.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import * as GitWorkflow from "../git/GitWorkflowService.ts";
 import * as Events from "../persistence/OrchestrationEventStore.ts";
 import * as Sqlite from "../persistence/Sqlite.ts";
@@ -436,13 +438,32 @@ function checkoutHarness(
       input: ProjectService.ProjectUpdateInput,
     ) => Effect.Effect<void, ProjectService.ProjectServiceError>;
     readonly relocation?: boolean;
+    readonly realFolders?: boolean;
     /** Told about every workspace-root update, like the record's event. */
     readonly onMoved?: (projectId: ProjectId, workspaceRoot: string) => Effect.Effect<void>;
   },
 ) {
   const database = Sqlite.layerMemory.pipe(Layer.provide(NodeServices.layer));
   const persistence = Events.layer.pipe(Layer.provideMerge(database));
+  const folders = options?.realFolders
+    ? ProjectLabelFolders.layer.pipe(
+        Layer.provide(database),
+        Layer.provide(ServerConfig.layerTest("/tmp", { prefix: "checkout-folders" })),
+        Layer.provide(ServerSettings.layerTest({ projectsRoot: NodePath.dirname(projectDir) })),
+        Layer.provide(NodeServices.layer),
+      )
+    : Layer.mock(ProjectLabelFolders.ProjectLabelFolders)({
+        ensureForLabel: () =>
+          Effect.sync(() => {
+            NodeFS.mkdirSync(projectDir, { recursive: true });
+            return { dir: projectDir, dirName: NodePath.basename(projectDir) };
+          }),
+        dirForLabel: () =>
+          Effect.succeed({ dir: projectDir, dirName: NodePath.basename(projectDir) }),
+        projectsRoot: Effect.succeed(NodePath.dirname(projectDir)),
+      });
   const labels = ProjectLabelService.layer.pipe(
+    Layer.provideMerge(options?.realFolders ? folders : Layer.empty),
     Layer.provide(layerSharedIdentity),
     Layer.provideMerge(persistence),
     Layer.provide(NodeServices.layer),
@@ -501,20 +522,12 @@ function checkoutHarness(
         projects,
         Layer.mock(GitWorkflow.GitWorkflowService)({ isRepository }),
         gitDriver,
-        Layer.mock(ProjectLabelFolders.ProjectLabelFolders)({
-          ensureForLabel: () =>
-            Effect.sync(() => {
-              NodeFS.mkdirSync(projectDir, { recursive: true });
-              return { dir: projectDir, dirName: NodePath.basename(projectDir) };
-            }),
-          dirForLabel: () =>
-            Effect.succeed({ dir: projectDir, dirName: NodePath.basename(projectDir) }),
-          projectsRoot: Effect.succeed(NodePath.dirname(projectDir)),
-        }),
+        folders,
       ),
     ),
     Layer.provideMerge(ProjectCloneTracker.layer.pipe(Layer.provide(gitRepositories(box)))),
     Layer.provideMerge(labels),
+    Layer.provideMerge(folders),
     Layer.provideMerge(NodeServices.layer),
   );
   return options?.relocation
@@ -947,6 +960,30 @@ describe("RepositoryCheckout.adoptRepository", () => {
     }).pipe(Effect.provide(checkoutHarness(projectDir, { cloneCalls: 0 })));
   });
 
+  it.effect("repoints an already moved checkout through its forwarding link", () => {
+    const bare = makeBareRemote();
+    const projectDir = NodePath.join(tempRoot(), "Spawn");
+    return Effect.gen(function* () {
+      const { label, repositoryId, elsewhere } = yield* linkedElsewhere(bare, "forwarded");
+      const destination = NodePath.join(projectDir, "repos", "smile-express");
+      NodeFS.mkdirSync(NodePath.dirname(destination), { recursive: true });
+      const worktree = NodePath.join(tempRoot(), "external");
+      git(elsewhere, ["worktree", "add", worktree, "-b", "external"]);
+      NodeFS.renameSync(elsewhere, destination);
+      NodeFS.symlinkSync(destination, elsewhere);
+      const checkouts = yield* RepositoryCheckout.RepositoryCheckout;
+      expect(yield* checkouts.adoptRepository({ labelId: label.id, repositoryId })).toEqual({
+        moved: true,
+        workspaceRoot: destination,
+      });
+      expect(NodeFS.lstatSync(elsewhere).isSymbolicLink()).toBe(true);
+      expect(NodeFS.lstatSync(destination).isDirectory()).toBe(true);
+      expect(git(worktree, ["rev-parse", "--git-common-dir"]).toString().trim()).toBe(
+        NodeFS.realpathSync(NodePath.join(destination, ".git")),
+      );
+    }).pipe(Effect.provide(checkoutHarness(projectDir, { cloneCalls: 0 })));
+  });
+
   it.effect("never tears a subfolder out of some other repository", () => {
     const bare = makeBareRemote();
     const projectDir = NodePath.join(tempRoot(), "Spawn");
@@ -1056,6 +1093,69 @@ describe("RepositoryCheckout.relocateProjectRepositories", () => {
       });
     }).pipe(Effect.provide(checkoutHarness(projectDir, { cloneCalls: 0 })));
   });
+
+  it.effect(
+    "follows merged checkouts to their real suffixed path and through a later project rename",
+    () => {
+      const parent = tempRoot();
+      const projectDir = NodePath.join(parent, "Target");
+      return Effect.gen(function* () {
+        const labels = yield* ProjectLabelService.ProjectLabelService;
+        const folders = yield* ProjectLabelFolders.ProjectLabelFolders;
+        const sql = yield* SqlClient.SqlClient;
+        const checkouts = yield* RepositoryCheckout.RepositoryCheckout;
+        const source = (yield* labels.create({ name: "Source" })).label;
+        const target = (yield* labels.create({ name: "Target" })).label;
+        const sourceRoot = NodePath.join(
+          (yield* folders.dirForLabel(source)).dir,
+          "repos",
+          "platform",
+        );
+        const targetRoot = NodePath.join(projectDir, "repos", "platform");
+        for (const root of [sourceRoot, targetRoot]) {
+          NodeFS.mkdirSync(root, { recursive: true });
+          git(root, ["init", "--initial-branch=main"]);
+          git(root, [
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.com",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "init",
+          ]);
+        }
+        const worktree = NodePath.join(parent, "external");
+        git(sourceRoot, ["worktree", "add", worktree, "-b", "external"]);
+        const repositoryId = ProjectId.make("repo:merged");
+        yield* sql`INSERT INTO projection_projects(project_id,title,workspace_root,scripts_json,created_at,updated_at) VALUES (${repositoryId},'platform',${sourceRoot},'[]','2026-01-01','2026-01-01')`;
+        yield* sql`INSERT INTO label_repositories(label_id,repository_id,directory_name) VALUES (${source.id},${repositoryId},'platform')`;
+        yield* labels.merge({ sourceId: source.id, targetId: target.id });
+        yield* folders.reconcileMerges;
+        yield* checkouts.relocateProjectRepositories(target.id);
+        const moved = NodePath.join(projectDir, "repos", "platform (2)");
+        expect(yield* sql`SELECT workspace_root FROM projection_projects`).toEqual([
+          { workspace_root: moved },
+        ]);
+        expect(git(worktree, ["rev-parse", "--git-common-dir"]).toString().trim()).toBe(
+          NodeFS.realpathSync(NodePath.join(moved, ".git")),
+        );
+        expect(NodeFS.lstatSync(sourceRoot).isSymbolicLink()).toBe(true);
+        yield* labels.update({ id: target.id, name: "Renamed" });
+        yield* checkouts.relocateProjectRepositories(target.id);
+        const renamed = NodePath.join(parent, "Renamed", "repos", "platform (2)");
+        expect(yield* sql`SELECT workspace_root FROM projection_projects`).toEqual([
+          { workspace_root: renamed },
+        ]);
+        expect(git(worktree, ["rev-parse", "--git-common-dir"]).toString().trim()).toBe(
+          NodeFS.realpathSync(NodePath.join(renamed, ".git")),
+        );
+      }).pipe(
+        Effect.provide(checkoutHarness(projectDir, { cloneCalls: 0 }, { realFolders: true })),
+      );
+    },
+  );
 
   it.effect("relocates by itself when the project's owner changes", () => {
     const projectDir = NodePath.join(tempRoot(), "Spawn");

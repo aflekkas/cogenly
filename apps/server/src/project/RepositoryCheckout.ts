@@ -978,6 +978,24 @@ const make = Effect.gen(function* () {
         "move_failed",
         "there is no checkout of its own on this machine to move",
       );
+    const realSource = yield* fileSystem.realPath(source).pipe(Effect.mapError(fail));
+    const realDestination = yield* fileSystem.realPath(path.dirname(destination)).pipe(
+      Effect.map((parent) => path.join(parent, path.basename(destination))),
+      Effect.orElseSucceed(() => destination),
+    );
+    // Merge forwarding links already lead to the desired checkout. Moving the
+    // symlink as a case rename would replace the checkout with a link to itself.
+    if (realSource === realDestination) {
+      yield* repointMovedCheckout(
+        repositoryId,
+        repositoryName,
+        source,
+        destination,
+        () => Effect.void,
+      );
+      yield* labels.notifyCheckoutChanged;
+      return { moved: true, workspaceRoot: destination };
+    }
     if (yield* insideOtherCheckout(destination, dir))
       return yield* refuse("destination_taken", destination);
     // A worktree inside the folder would move with it under git's feet.
@@ -994,7 +1012,6 @@ const make = Effect.gen(function* () {
       .split("\n")
       .flatMap((line) => (line.startsWith("worktree ") ? [line.slice("worktree ".length)] : []));
     // git reports real paths; the record may hold a symlinked one.
-    const realSource = yield* fileSystem.realPath(source).pipe(Effect.orElseSucceed(() => source));
     if (
       [...threadWorktrees.map((row) => row.worktree_path), ...gitWorktrees].some(
         (worktree) => isInside(worktree, source) || isInside(worktree, realSource),
@@ -1073,6 +1090,10 @@ const make = Effect.gen(function* () {
             .dirForLabel(label)
             .pipe(Effect.mapError(storage(ProjectId.make(labelId), label.name)));
           const repos = path.join(dir, PROJECT_REPOSITORIES_SEGMENT);
+          const forwarded = yield* sql<{ source: string; target: string }>`
+            SELECT source,target FROM project_merge_file_moves WHERE directory=1 AND complete=1
+            ORDER BY length(source) DESC
+          `.pipe(Effect.mapError(storage(ProjectId.make(labelId), label.name)));
           const moved: Array<ProjectId> = [];
           for (const link of label.repositories ?? []) {
             if (isRemoteRepositoryPlaceholder(link.repositoryId) || link.directoryName === null)
@@ -1081,6 +1102,41 @@ const make = Effect.gen(function* () {
               yield* projects.getById(link.repositoryId).pipe(Effect.orElseSucceed(Option.none)),
             );
             if (project === undefined) continue;
+            const forwarding = forwarded.find(
+              (move) =>
+                project.workspaceRoot === move.source ||
+                isInside(project.workspaceRoot, move.source),
+            );
+            if (forwarding !== undefined) {
+              const destination = path.join(
+                forwarding.target,
+                path.relative(forwarding.source, project.workspaceRoot),
+              );
+              const followed = yield* Effect.gen(function* () {
+                if (!(yield* hasOwnCheckout(destination))) return false;
+                const sourceReal = yield* fileSystem.realPath(project.workspaceRoot);
+                const targetReal = yield* fileSystem.realPath(destination);
+                if (sourceReal !== targetReal) return false;
+                yield* assertIdle(link.repositoryId, link.directoryName!);
+                yield* repointMovedCheckout(
+                  link.repositoryId,
+                  link.directoryName!,
+                  project.workspaceRoot,
+                  destination,
+                  () => Effect.void,
+                );
+                return true;
+              }).pipe(
+                Effect.catch((cause) =>
+                  Effect.logWarning("Merged checkout still uses its forwarding path", {
+                    repositoryId: link.repositoryId,
+                    cause,
+                  }).pipe(Effect.as(false)),
+                ),
+              );
+              if (followed) moved.push(link.repositoryId);
+              continue;
+            }
             // The project folder was renamed (here, in Finder, or by a peer's
             // rename), taking the checkout with it: point the record at where
             // the checkout went, the derived place or the same spot in the
