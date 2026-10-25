@@ -46,6 +46,7 @@ import {
   type EnvironmentMachineKind,
   type FilesystemBrowseResult,
   type ProjectId,
+  type ScopedProjectRef,
   type ScopedThreadRef,
   type SourceControlDiscoveryResult,
   SourceControlProviderKind,
@@ -198,6 +199,7 @@ import {
 } from "../lib/projectPaths";
 import {
   type CommandPaletteAddProjectTarget,
+  type CommandPaletteStartWorkHandoff,
   onOpenCommandPalette,
   openCommandPalette,
 } from "../commandPaletteBus";
@@ -234,6 +236,7 @@ import {
   findHighlightedCommandPaletteItem,
   type CommandPaletteActionItem,
   type CommandPaletteGroup,
+  type CommandPaletteAddProjectRequest,
   type CommandPaletteOpenIntent,
   type CommandPaletteProject,
   type CommandPaletteSubmenuItem,
@@ -430,8 +433,12 @@ export function CommandPalette({ children }: { children: ReactNode }) {
     [],
   );
   const openAddProject = useCallback(
-    (into?: CommandPaletteAddProjectTarget) =>
-      dispatch({ _tag: "OpenAddProject", ...(into ? { into } : {}) }),
+    (request: CommandPaletteAddProjectRequest) =>
+      dispatch({
+        _tag: "OpenAddProject",
+        ...(request.into ? { into: request.into } : {}),
+        ...(request.startWorkFrom ? { startWorkFrom: request.startWorkFrom } : {}),
+      }),
     [],
   );
   const openNewThreadIn = useCallback(() => dispatch({ _tag: "OpenNewThreadIn" }), []);
@@ -547,7 +554,10 @@ export function CommandPalette({ children }: { children: ReactNode }) {
         } else if (detail.open === "snooze" && detail.threadRef) {
           dispatch({ _tag: "OpenSnooze", threadRef: detail.threadRef });
         } else if (detail.open === "add-project") {
-          openAddProject(detail.into);
+          openAddProject({
+            ...(detail.into ? { into: detail.into } : {}),
+            ...(detail.startWorkFrom ? { startWorkFrom: detail.startWorkFrom } : {}),
+          });
         } else if (detail.query !== undefined) {
           dispatch({
             _tag: "OpenSearch",
@@ -807,7 +817,8 @@ function OpenCommandPaletteDialog(props: {
         icon: <WorkPickerChoiceIcon choice={choice} className={ITEM_ICON_CLASS} />,
         run: async () => {
           if (choice.value === ADD_REPOSITORY) {
-            openCommandPalette({ open: "add-project" });
+            // The repository it adds starts this chat's Work.
+            openCommandPalette({ open: "add-project", startWorkFrom: { threadRef } });
             return;
           }
           await startWork({ threadRef, choice: choice.value, announce: true });
@@ -878,6 +889,10 @@ function OpenCommandPaletteDialog(props: {
   const [addProjectCloneFlow, setAddProjectCloneFlow] = useState<AddProjectCloneFlow | null>(null);
   // The project an Add repository flow opened from a project group files into.
   const [addProjectInto, setAddProjectInto] = useState<CommandPaletteAddProjectTarget | null>(null);
+  // The chat whose Work the added repository starts, when Start Work opened the flow.
+  const [addProjectHandoff, setAddProjectHandoff] = useState<CommandPaletteStartWorkHandoff | null>(
+    null,
+  );
   // The name step of New project: while set, the palette input is the name.
   const [newProjectFlow, setNewProjectFlow] = useState<{
     readonly environmentId: EnvironmentId;
@@ -1684,6 +1699,7 @@ function OpenCommandPaletteDialog(props: {
     if (viewStack.length <= 1) {
       setAddProjectEnvironmentId(null);
       setAddProjectInto(null);
+      setAddProjectHandoff(null);
     } else if (newProjectFlow?.sourcesEnvironmentId) {
       // The machine switcher may have moved off the sources view's machine.
       setAddProjectEnvironmentId(newProjectFlow.sourcesEnvironmentId);
@@ -2023,6 +2039,7 @@ function OpenCommandPaletteDialog(props: {
     }
     clearOpenIntent();
     const into = openIntent.into ?? null;
+    setAddProjectHandoff(openIntent.startWorkFrom ?? null);
     if (into === null) {
       openAddProjectFlow();
       return;
@@ -2898,6 +2915,27 @@ function OpenCommandPaletteDialog(props: {
         : allThreadItems,
   });
 
+  // Opens a repository the add flow brought in: the Work of the chat that
+  // asked for it (on that chat's machine), else a new draft in it.
+  const openAddedRepository = useCallback(
+    async (projectRef: ScopedProjectRef): Promise<unknown> => {
+      const handoff = addProjectHandoff;
+      if (handoff === null || handoff.threadRef.environmentId !== projectRef.environmentId) {
+        return handleNewThread(projectRef);
+      }
+      setAddProjectHandoff(null);
+      return startWork({
+        threadRef: handoff.threadRef,
+        choice: projectRef.projectId,
+        ...(handoff.throughMessageId === undefined
+          ? {}
+          : { throughMessageId: handoff.throughMessageId }),
+        announce: true,
+      });
+    },
+    [addProjectHandoff, handleNewThread, startWork],
+  );
+
   // Files a repository the add flow brought in under the project it was
   // opened from. The repository is in place either way, so a failure only says so.
   const fileIntoAddProjectTarget = useCallback(
@@ -2978,7 +3016,9 @@ function OpenCommandPaletteDialog(props: {
           existing.id,
           clientSettings.sidebarThreadSortOrder,
         );
-        if (latestThread && latestThread.settledOverride !== "settled") {
+        // A chat handing off to Work starts it there rather than reopening older work.
+        const handsOff = addProjectHandoff?.threadRef.environmentId === existing.environmentId;
+        if (!handsOff && latestThread && latestThread.settledOverride !== "settled") {
           await navigate({
             to: "/$environmentId/$threadId",
             params: buildThreadRouteParams(
@@ -2987,7 +3027,7 @@ function OpenCommandPaletteDialog(props: {
           });
         } else {
           const navigationResult = await settlePromise(() =>
-            handleNewThread(scopeProjectRef(existing.environmentId, existing.id)),
+            openAddedRepository(scopeProjectRef(existing.environmentId, existing.id)),
           );
           if (navigationResult._tag === "Failure") {
             const error = squashAtomCommandFailure(navigationResult);
@@ -3044,7 +3084,7 @@ function OpenCommandPaletteDialog(props: {
       await fileIntoAddProjectTarget(input.environmentId, projectId);
 
       const navigationResult = await settlePromise(() =>
-        handleNewThread(scopeProjectRef(input.environmentId, projectId)),
+        openAddedRepository(scopeProjectRef(input.environmentId, projectId)),
       );
       if (navigationResult._tag === "Failure") {
         const error = squashAtomCommandFailure(navigationResult);
@@ -3060,7 +3100,8 @@ function OpenCommandPaletteDialog(props: {
       setOpen(false);
     },
     [
-      handleNewThread,
+      addProjectHandoff,
+      openAddedRepository,
       createProject,
       fileIntoAddProjectTarget,
       environments,
@@ -3119,6 +3160,7 @@ function OpenCommandPaletteDialog(props: {
         ...(addProjectInto !== null && addProjectInto.environmentId === newProjectFlow.environmentId
           ? { projectLabelId: addProjectInto.labelId }
           : {}),
+        open: openAddedRepository,
       });
       if (created) setOpen(false);
     } finally {
@@ -3375,7 +3417,7 @@ function OpenCommandPaletteDialog(props: {
     // stream a moment so the draft opens with its project resolved instead of
     // flashing the project picker.
     await waitForProject(projectRef, 3_000).catch(() => null);
-    const navigationResult = await settlePromise(() => handleNewThread(projectRef));
+    const navigationResult = await settlePromise(() => openAddedRepository(projectRef));
     if (navigationResult._tag === "Failure") {
       const error = squashAtomCommandFailure(navigationResult);
       toastManager.add(

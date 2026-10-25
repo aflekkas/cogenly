@@ -369,6 +369,11 @@ export function StartWorkPicker(props: {
   const openProject = openGroup?.project ?? null;
 
   const navigate = useNavigate();
+  // "Add repository" keeps the handoff: the repository it adds starts this Work.
+  const startWorkFrom = useMemo(
+    () => ({ threadRef, ...(throughMessageId === undefined ? {} : { throughMessageId }) }),
+    [threadRef, throughMessageId],
+  );
   const closePicker = () => {
     setOpen(false);
     setQuery("");
@@ -382,6 +387,7 @@ export function StartWorkPicker(props: {
     open: open && openGroup !== null,
     query,
     leadRepositoryId: thread?.projectId ?? null,
+    startWorkFrom,
     onPickUncloned: (choice) => {
       closePicker();
       void startWork({
@@ -510,7 +516,7 @@ export function StartWorkPicker(props: {
       case "choice":
         closePicker();
         if (item.choice.value === ADD_REPOSITORY) {
-          openCommandPalette({ open: "add-project" });
+          openCommandPalette({ open: "add-project", startWorkFrom });
           return;
         }
         void startWork({
