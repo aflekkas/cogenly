@@ -1,3 +1,6 @@
+import * as Sqlite from "../persistence/Sqlite.ts";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as SqlClient from "effect/sql/SqlClient";
 import { describe, expect, it } from "@effect/vitest";
 import {
   CommandId,
@@ -53,6 +56,7 @@ type Step =
 
 function harness(
   options: {
+    readonly repositoryMismatch?: boolean;
     readonly labelMissing?: boolean;
     readonly labelArchived?: boolean;
     readonly checkoutFails?: boolean;
@@ -69,6 +73,16 @@ function harness(
     runs: [{ id: runId, status: options.runPreparing === true ? "preparing" : "running" }],
     messages: [],
   } as unknown as OrchestrationV2ThreadProjection;
+  const database = Sqlite.layerMemory;
+  const preparedDatabase = Layer.effectDiscard(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`INSERT INTO project_labels(label_id, name, created_at, updated_at) VALUES (${folderId}, 'Spawn Partners', '2026-01-01', '2026-01-01')`;
+      yield* sql`INSERT INTO projection_projects(project_id, title, workspace_root, scripts_json, created_at, updated_at) VALUES (${projectId}, 'cogenly', '/repos/cogenly', '[]', '2026-01-01', '2026-01-01')`;
+      if (!options.repositoryMismatch)
+        yield* sql`INSERT INTO label_repositories(label_id, repository_id) VALUES (${folderId}, ${projectId})`;
+    }),
+  ).pipe(Layer.provideMerge(database));
   const layer = ThreadLaunch.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
@@ -190,7 +204,11 @@ function harness(
       ),
     ),
   );
-  return { steps, createdWorktreePaths, layer };
+  return {
+    steps,
+    createdWorktreePaths,
+    layer: layer.pipe(Layer.provide(preparedDatabase), Layer.provide(NodeServices.layer)),
+  };
 }
 
 const launchInput = (overrides: Partial<ThreadLaunch.ThreadLaunchInput> = {}) =>
@@ -214,6 +232,23 @@ const launchInput = (overrides: Partial<ThreadLaunch.ThreadLaunchInput> = {}) =>
   }) satisfies ThreadLaunch.ThreadLaunchInput;
 
 describe("ThreadLaunchService project filing", () => {
+  it.effect(
+    "rejects a repository outside the explicit project before creating or filing a thread",
+    () => {
+      const { steps, layer } = harness({ repositoryMismatch: true });
+      return Effect.gen(function* () {
+        const launches = yield* ThreadLaunch.ThreadLaunchService;
+        const error = yield* Effect.flip(
+          launches.launch(launchInput({ projectFolderId: folderId })),
+        );
+        expect(userFacingDispatchErrorMessage(error)).toBe(
+          "cogenly is not in the Spawn Partners project. Add it to the project first, or start without a project.",
+        );
+        expect(steps).toEqual([]);
+      }).pipe(Effect.provide(layer));
+    },
+  );
+
   it.effect("files a chat in its project while it is turnless, before the first message", () => {
     const { steps, layer } = harness();
     return Effect.gen(function* () {

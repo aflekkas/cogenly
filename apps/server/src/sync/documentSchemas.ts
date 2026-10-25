@@ -9,6 +9,7 @@ import {
   IsoDateTime,
   PROJECT_INSTRUCTIONS_MAX_LENGTH,
   ProjectLabel,
+  ProjectLabelId,
   ProjectSourceLink,
   ScheduledTask,
   TrimmedNonEmptyString,
@@ -37,6 +38,9 @@ const RelativePath = Schema.String.check(
 );
 const Selection = Agent.fields.modelSelection;
 export const ProjectFields = Schema.Struct({
+  mergedInto: Schema.optionalKey(ProjectLabelId),
+  mergeSourceName: Schema.optionalKey(ProjectLabel.fields.name),
+  dismissedDuplicateIds: Schema.optionalKey(Schema.Array(ProjectLabelId)),
   name: ProjectLabel.fields.name,
   color: Schema.NullOr(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(100))),
   description: Schema.NullOr(Schema.String.check(Schema.isMaxLength(4000))),
@@ -69,6 +73,7 @@ export const AgentFields = Schema.Struct({
   createdAt: Agent.fields.createdAt,
 });
 export const ScheduleFields = Schema.Struct({
+  projectFolderId: Schema.optionalKey(Schema.NullOr(ProjectLabelId)),
   machine: Schema.optionalKey(Schema.NullOr(PortableId)),
   agentId: Schema.NullOr(PortableId),
   title: ScheduledTask.fields.title,

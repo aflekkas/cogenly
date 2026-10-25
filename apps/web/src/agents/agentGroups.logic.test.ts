@@ -9,6 +9,7 @@ import {
 import {
   groupAgentsByProject,
   NO_PROJECT_GROUP_KEY,
+  onePerAgent,
   orderAgentsForList,
 } from "./agentGroups.logic";
 
@@ -103,6 +104,35 @@ describe("groupAgentsByProject", () => {
 
   it("returns no groups for no agents", () => {
     expect(groupAgentsByProject({ agents: [], folders }).groups).toEqual([]);
+  });
+
+  it("files an agent listed from another machine into the project's one group", () => {
+    const shared = {
+      ...folder(env, "web", "Website"),
+      copies: [
+        { environmentId: env, label: folder(env, "web", "Website").label },
+        { environmentId: other, label: folder(other, "web", "Website").label },
+      ],
+    };
+    const result = groupAgentsByProject({
+      agents: [agent("a", "web"), agent("b", "web", other)],
+      folders: [shared],
+    });
+    expect(names(result)).toEqual([["env:web", ["a", "b"]]]);
+  });
+});
+
+describe("onePerAgent", () => {
+  it("keeps one contact per agent id, the owner machine's copy, in the first copy's place", () => {
+    const kept = onePerAgent([
+      { id: "scout", environmentId: env, ownerMachine: other, name: "replica" },
+      { id: "solo", environmentId: env, name: "solo" },
+      { id: "scout", environmentId: other, ownerMachine: other, name: "owner" },
+    ]);
+    expect(kept.map((entry) => [entry.id, entry.name])).toEqual([
+      ["scout", "owner"],
+      ["solo", "solo"],
+    ]);
   });
 });
 

@@ -38,6 +38,7 @@ import {
   resolveAgentModelStatus,
   type AgentModelStatus,
 } from "./agents.logic";
+import { onePerAgent } from "./agentGroups.logic";
 import { triggerErrorMessage } from "./agentWorkspace.logic";
 import { AgentHydrationContext, AgentsClientContext } from "./agentsContext";
 
@@ -392,92 +393,97 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
   const lastKnown = useRef(new Map<EnvironmentId, ReadonlyArray<AgentListItem>>());
   const agents = useMemo(
     () =>
-      results.flatMap(({ environmentId, result, approvals: approvalsResult }) => {
-        const received = Option.getOrNull(AsyncResult.value(result))?.agents;
-        if (received) lastKnown.current.set(environmentId, received);
-        const records = received ?? lastKnown.current.get(environmentId) ?? [];
-        const pendingApprovals =
-          Option.getOrNull(AsyncResult.value(approvalsResult))?.approvals ?? [];
-        return records.map((record): AgentContact => {
-          const shell = threads.find(
-            (thread) =>
-              thread.environmentId === environmentId && thread.id === record.conversationThreadId,
-          );
-          const latest = record.latestMessage;
-          const key = agentContactKey({ environmentId, id: record.id });
-          const cached = hydrated.get(key);
-          const triggers = tasks
-            .filter(
-              (entry) => entry.environmentId === environmentId && entry.task.agentId === record.id,
-            )
-            .map(({ task }) => ({
-              id: task.id,
-              title: task.title,
-              prompt: task.prompt,
-              schedule: task.schedule,
-              enabled: task.enabled,
-            }));
-          const workThreads = threads.filter((thread) => {
-            const ownership = thread.source.agent;
-            return (
-              thread.environmentId === environmentId &&
-              ownership?.id === record.id &&
-              ownership.role === "work"
+      onePerAgent(
+        results.flatMap(({ environmentId, result, approvals: approvalsResult }) => {
+          const received = Option.getOrNull(AsyncResult.value(result))?.agents;
+          if (received) lastKnown.current.set(environmentId, received);
+          const records = received ?? lastKnown.current.get(environmentId) ?? [];
+          const pendingApprovals =
+            Option.getOrNull(AsyncResult.value(approvalsResult))?.approvals ?? [];
+          return records.map((record): AgentContact => {
+            const shell = threads.find(
+              (thread) =>
+                thread.environmentId === environmentId && thread.id === record.conversationThreadId,
             );
-          });
-          const approvals = pendingApprovals.filter(
-            (approval) => approval.agentId === record.id && approval.status === "pending",
-          );
-          const waitingInRun = Boolean(
-            shell?.hasPendingApprovals ||
-            shell?.hasPendingUserInput ||
-            workThreads.some((thread) => thread.hasPendingApprovals || thread.hasPendingUserInput),
-          );
-          const state =
-            approvals.length || waitingInRun || cached?.requests.length
-              ? "blocked"
-              : shell?.runtime?.activeRunId ||
-                  workThreads.some((thread) => thread.runtime?.activeRunId)
-                ? "thinking"
-                : "idle";
-          return {
-            ...record,
-            environmentId,
-            state,
-            updatedAt: shell?.updatedAt ?? record.updatedAt,
-            // A text that only carried files has no words to preview.
-            preview: latest ? latest.text.trim() || "Attachment" : "Say hello",
-            messages: reconcileAgentMessages(
-              mergeLatestMessage(
-                cached?.messages ?? [],
-                latest && !cached?.messages.some((message) => message.id === latest.id)
-                  ? {
-                      id: latest.id,
-                      role: latest.role,
-                      text: latest.text,
-                      createdAt: latest.createdAt,
-                      updatedAt: latest.updatedAt,
-                    }
-                  : null,
+            const latest = record.latestMessage;
+            const key = agentContactKey({ environmentId, id: record.id });
+            const cached = hydrated.get(key);
+            const triggers = tasks
+              .filter(
+                (entry) =>
+                  entry.environmentId === environmentId && entry.task.agentId === record.id,
+              )
+              .map(({ task }) => ({
+                id: task.id,
+                title: task.title,
+                prompt: task.prompt,
+                schedule: task.schedule,
+                enabled: task.enabled,
+              }));
+            const workThreads = threads.filter((thread) => {
+              const ownership = thread.source.agent;
+              return (
+                thread.environmentId === environmentId &&
+                ownership?.id === record.id &&
+                ownership.role === "work"
+              );
+            });
+            const approvals = pendingApprovals.filter(
+              (approval) => approval.agentId === record.id && approval.status === "pending",
+            );
+            const waitingInRun = Boolean(
+              shell?.hasPendingApprovals ||
+              shell?.hasPendingUserInput ||
+              workThreads.some(
+                (thread) => thread.hasPendingApprovals || thread.hasPendingUserInput,
               ),
-              outbox.get(key) ?? [],
-            ),
-            triggers,
-            memory: cached?.memory ?? [],
-            activity: cached?.activity ?? [],
-            requests: cached?.requests ?? [],
-            approvals,
-            waitingInRun,
-            // The list's arranged order rides on the conversation thread, as Work's does.
-            orderKey: shell?.activeOrderKey ?? null,
-            orderable:
-              shell !== undefined &&
-              shell.pinnedAt == null &&
-              shell.settledOverride !== "settled" &&
-              shell.archivedAt == null,
-          };
-        });
-      }),
+            );
+            const state =
+              approvals.length || waitingInRun || cached?.requests.length
+                ? "blocked"
+                : shell?.runtime?.activeRunId ||
+                    workThreads.some((thread) => thread.runtime?.activeRunId)
+                  ? "thinking"
+                  : "idle";
+            return {
+              ...record,
+              environmentId,
+              state,
+              updatedAt: shell?.updatedAt ?? record.updatedAt,
+              // A text that only carried files has no words to preview.
+              preview: latest ? latest.text.trim() || "Attachment" : "Say hello",
+              messages: reconcileAgentMessages(
+                mergeLatestMessage(
+                  cached?.messages ?? [],
+                  latest && !cached?.messages.some((message) => message.id === latest.id)
+                    ? {
+                        id: latest.id,
+                        role: latest.role,
+                        text: latest.text,
+                        createdAt: latest.createdAt,
+                        updatedAt: latest.updatedAt,
+                      }
+                    : null,
+                ),
+                outbox.get(key) ?? [],
+              ),
+              triggers,
+              memory: cached?.memory ?? [],
+              activity: cached?.activity ?? [],
+              requests: cached?.requests ?? [],
+              approvals,
+              waitingInRun,
+              // The list's arranged order rides on the conversation thread, as Work's does.
+              orderKey: shell?.activeOrderKey ?? null,
+              orderable:
+                shell !== undefined &&
+                shell.pinnedAt == null &&
+                shell.settledOverride !== "settled" &&
+                shell.archivedAt == null,
+            };
+          });
+        }),
+      ),
     [results, tasks, threads, hydrated, outbox],
   );
   const snapshot = useMemo<AgentsSnapshot>(

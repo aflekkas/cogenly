@@ -76,6 +76,7 @@ import { chatActivityAt } from "../sidebar/modes/sidebarModes.logic";
 import { Button } from "../ui/button";
 import { Menu, MenuGroup, MenuGroupLabel, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { toastManager } from "../ui/toast";
+import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import {
   ProjectCard,
   ProjectCardAddButton,
@@ -114,10 +115,10 @@ async function confirmRemoval(message: string): Promise<boolean> {
 
 /**
  * Every repository the project links, as the pickers list it, with its state
- * on this page's machine: one not cloned here reads "Clone to set up" and
+ * on the selected machine: one not cloned there reads "Clone to set up" and
  * clicking it clones it; a cloned one opens its settings. Its ⋯ menu moves
- * it into the project folder, removes it from this machine, or takes it out
- * of the project.
+ * it into the project folder, removes it from that machine, or takes it out
+ * of the project. A project on several machines switches between them.
  */
 export function RepositoriesCard(props: {
   readonly environmentId: EnvironmentId;
@@ -125,6 +126,12 @@ export function RepositoriesCard(props: {
   /** `linkedRepositoryRows` for the project on this machine. */
   readonly rows: ReadonlyArray<RepositoryRow>;
   readonly onOpenRepository: (repositoryId: ProjectId) => void;
+  /** The machines that have the project, when more than one does. */
+  readonly machines?: ReadonlyArray<{
+    readonly environmentId: EnvironmentId;
+    readonly label: string;
+  }>;
+  readonly onSelectMachine?: (environmentId: EnvironmentId) => void;
 }) {
   const { environmentId, rows } = props;
   const canLink = useAtomValue(
@@ -151,56 +158,79 @@ export function RepositoriesCard(props: {
       title="Repositories"
       count={rows.length}
       add={
-        <ProjectRepositoryPicker
-          folder={props.folder}
-          disabled={!canLink}
-          triggerLabel="Add repository"
-          iconOnly
-        />
+        <span className="flex items-center gap-1">
+          {props.machines && props.machines.length > 1 ? (
+            <ToggleGroup
+              aria-label="Checkouts on"
+              variant="segmented"
+              value={[environmentId]}
+              onValueChange={(next) => {
+                const picked = props.machines?.find((machine) => machine.environmentId === next[0]);
+                if (picked) props.onSelectMachine?.(picked.environmentId);
+              }}
+            >
+              {props.machines.map((machine) => (
+                <Toggle key={machine.environmentId} value={machine.environmentId}>
+                  {machine.label}
+                </Toggle>
+              ))}
+            </ToggleGroup>
+          ) : null}
+          <ProjectRepositoryPicker
+            folder={props.folder}
+            disabled={!canLink}
+            triggerLabel="Add repository"
+            iconOnly
+          />
+        </span>
       }
       isEmpty={rows.length === 0}
       empty="No repositories yet. Add one from this machine or GitHub, and its Work files here too."
     >
-      {rows.map((row) => {
-        const view = checkouts.viewOf(row);
-        const action = repositoryRowAction(row);
-        const { project, repositoryId } = row;
-        const cloneable = (view.kind === "needs-clone" || view.kind === "failed") && view.cloneable;
-        const onOpen =
-          action === "select" && repositoryId !== null && view.kind === "ready"
-            ? () => props.onOpenRepository(repositoryId)
-            : cloneable && project !== null
-              ? () => void checkouts.start({ ...row, project })
-              : undefined;
-        return (
-          <Fragment key={row.key}>
-            <ProjectCardRow
-              icon={rowIcon(row)}
-              title={row.name}
-              meta={
-                // Once cloned, the GitHub repository it came from, as before.
-                view.kind === "ready" ? (
-                  (row.detail ?? gitHubRepositoryOf(row.local?.repositoryIdentity) ?? undefined)
-                ) : (
-                  <RepositoryRowStatus view={view} />
-                )
-              }
-              arrived={arrived.has(row.key)}
-              removing={view.kind === "working" && view.work === "unlinking"}
-              {...(onOpen ? { onOpen } : {})}
-              ariaLabel={
-                cloneable
-                  ? `Clone ${row.name} to this machine`
-                  : view.kind === "ready"
-                    ? `Repository settings for ${row.name}`
-                    : row.name
-              }
-              menu={<RepositoryRowMenu label={`${row.name} actions`} actions={rowActions(row)} />}
-            />
-            <RepositoryRowError view={view} name={row.name} className="ps-7" />
-          </Fragment>
-        );
-      })}
+      {/* A machine switch fades its rows in place. */}
+      <div key={environmentId} className="swap-motion flex flex-col">
+        {rows.map((row) => {
+          const view = checkouts.viewOf(row);
+          const action = repositoryRowAction(row);
+          const { project, repositoryId } = row;
+          const cloneable =
+            (view.kind === "needs-clone" || view.kind === "failed") && view.cloneable;
+          const onOpen =
+            action === "select" && repositoryId !== null && view.kind === "ready"
+              ? () => props.onOpenRepository(repositoryId)
+              : cloneable && project !== null
+                ? () => void checkouts.start({ ...row, project })
+                : undefined;
+          return (
+            <Fragment key={row.key}>
+              <ProjectCardRow
+                icon={rowIcon(row)}
+                title={row.name}
+                meta={
+                  // Once cloned, the GitHub repository it came from, as before.
+                  view.kind === "ready" ? (
+                    (row.detail ?? gitHubRepositoryOf(row.local?.repositoryIdentity) ?? undefined)
+                  ) : (
+                    <RepositoryRowStatus view={view} />
+                  )
+                }
+                arrived={arrived.has(row.key)}
+                removing={view.kind === "working" && view.work === "unlinking"}
+                {...(onOpen ? { onOpen } : {})}
+                ariaLabel={
+                  cloneable
+                    ? `Clone ${row.name} to this machine`
+                    : view.kind === "ready"
+                      ? `Repository settings for ${row.name}`
+                      : row.name
+                }
+                menu={<RepositoryRowMenu label={`${row.name} actions`} actions={rowActions(row)} />}
+              />
+              <RepositoryRowError view={view} name={row.name} className="ps-7" />
+            </Fragment>
+          );
+        })}
+      </div>
     </ProjectCard>
   );
 }
@@ -593,6 +623,8 @@ export function RecentCard(props: {
  */
 export function AgentsCard(props: {
   readonly environmentId: EnvironmentId;
+  /** Every machine that has the project; the agents listed from any of them count. */
+  readonly environmentIds?: ReadonlyArray<EnvironmentId>;
   readonly label: ProjectLabelWithRepositories;
 }) {
   const { environmentId, label } = props;
@@ -600,11 +632,12 @@ export function AgentsCard(props: {
   const { agents, loading } = useAgents();
   const client = useAgentsClient();
   const { removing, run } = useRemoving();
+  const machines = props.environmentIds ?? [environmentId];
   const here = agents.filter(
-    (agent) => agent.environmentId === environmentId && agent.projectFolderId === label.id,
+    (agent) => machines.includes(agent.environmentId) && agent.projectFolderId === label.id,
   );
   const elsewhere = agents.filter(
-    (agent) => agent.environmentId === environmentId && agent.projectFolderId !== label.id,
+    (agent) => machines.includes(agent.environmentId) && agent.projectFolderId !== label.id,
   );
   const arrived = useArrivedKeys(
     here.map((agent) => agent.id),

@@ -245,6 +245,17 @@ describe("linkedRepositoryRows", () => {
     expect(rows.find((row) => row.name === "platform")?.local).toBe(platformCheckout);
   });
 
+  it("offers only the project's repositories, never the machine's others", () => {
+    const listed = linkedRepositoryRows({
+      project: spawn,
+      localById: byId([platformCheckout, looseCheckout, bartrCheckout]),
+    });
+    const ids = listed.map((row) => row.local?.id ?? null);
+    expect(ids).not.toContain(looseCheckout.id);
+    expect(ids).not.toContain(bartrCheckout.id);
+    expect(listed.every((row) => row.project === spawn)).toBe(true);
+  });
+
   it("leads with the draft's repository", () => {
     const led = linkedRepositoryRows({
       project: spawn,

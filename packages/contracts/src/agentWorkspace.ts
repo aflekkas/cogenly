@@ -20,6 +20,7 @@ import {
 import { VaultField } from "./vault.ts";
 
 export const AgentStartWorkInput = Schema.Struct({
+  projectFolderId: Schema.optional(Schema.NullOr(ProjectLabelId)),
   agentId: AgentId,
   commandId: Schema.optional(CommandId),
   sourceThreadId: Schema.optional(ThreadId),

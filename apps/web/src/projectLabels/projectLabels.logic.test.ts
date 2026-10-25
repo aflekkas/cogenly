@@ -76,6 +76,18 @@ describe("threadFolderState", () => {
     expect(state.options.map((entry) => entry.label.name)).toEqual(["Bartr", "Spawn Partners"]);
   });
 
+  it("lists every project but blocks those without the thread's repository, saying why", () => {
+    const repository = { projectId: ProjectId.make("server"), name: "platform" };
+    const state = threadFolderState(thread(null), directory, repository);
+    expect(state.options.map((entry) => entry.label.name)).toEqual(["Bartr", "Spawn Partners"]);
+    expect([...state.blocked]).toEqual([[bartr.key, "Doesn't include platform"]]);
+    expect(state.inRepository).toBe(true);
+    // A chat in its machine's folder can go anywhere.
+    const chat = threadFolderState(thread(null), directory);
+    expect(chat.blocked.size).toBe(0);
+    expect(chat.inRepository).toBe(false);
+  });
+
   it("lets only an explicit filing be removed; Work in its repository's folder cannot", () => {
     expect(threadFolderState(thread("spawn", "repository"), directory)).toMatchObject({
       current: spawn,
@@ -152,8 +164,22 @@ describe("workThreadFolder", () => {
     expect(workThreadFolder(work("server", null), directory)).toBe(spawn);
   });
 
-  it("keeps an explicit filing over the repository's project", () => {
+  it("keeps an explicit filing for Work in its project's folder", () => {
     expect(workThreadFolder(work("server", "bartr", "explicit"), directory)).toBe(bartr);
+  });
+
+  it("never names a filing with a repository it does not hold: the repository's project, or none", () => {
+    const inRepository = () => true;
+    expect(workThreadFolder(work("server", "bartr", "explicit"), directory, inRepository)).toBe(
+      spawn,
+    );
+    // cogenly in no project, filed in Spawn Partners: shown in no project.
+    expect(
+      workThreadFolder(work("cogenly", "spawn", "explicit"), directory, inRepository),
+    ).toBeNull();
+    expect(workThreadFolder(work("server", "spawn", "explicit"), directory, inRepository)).toBe(
+      spawn,
+    );
   });
 
   it("drops a repository project the repository has left, and names none without one", () => {

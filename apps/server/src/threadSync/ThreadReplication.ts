@@ -1,3 +1,4 @@
+import { resolveProjectLabelId } from "../sync/ProjectMergeProjection.ts";
 /**
  * ThreadReplication: copies thread event logs between paired machines. Each
  * thread has one owner, the only machine that appends its events; others
@@ -785,11 +786,14 @@ const make = Effect.gen(function* () {
           const filed = yield* sql<{
             readonly label_id: string;
           }>`SELECT label_id FROM thread_project_labels WHERE thread_id = ${meta.threadId}`;
-          if ((filed[0]?.label_id ?? null) === meta.folderId) continue;
+          const folderId = yield* resolveProjectLabelId(meta.folderId).pipe(
+            Effect.provideService(SqlClient.SqlClient, sql),
+          );
+          if ((filed[0]?.label_id ?? null) === folderId) continue;
           yield* sql`DELETE FROM thread_project_labels WHERE thread_id = ${meta.threadId}`;
-          if (meta.folderId !== null)
+          if (folderId !== null)
             yield* sql`INSERT INTO thread_project_labels(thread_id, label_id)
-                SELECT ${meta.threadId}, label_id FROM project_labels WHERE label_id = ${meta.folderId}`;
+                SELECT ${meta.threadId}, label_id FROM project_labels WHERE label_id = ${folderId}`;
         }
       }),
     );

@@ -21,6 +21,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Stream from "effect/Stream";
 import { ServerSettingsService } from "../serverSettings.ts";
+import { resolveProjectLabelId } from "./ProjectMergeProjection.ts";
 import { SharedState } from "./SharedState.ts";
 import {
   projectSettingsDocumentId,
@@ -78,6 +79,25 @@ const make = Effect.gen(function* () {
       const address = settingsDocumentAddress(id);
       const document = yield* shared.get(address.kind, address.id);
       if (document) documents.set(id, document.fields);
+    }
+    // Source settings can arrive after the merge tombstone on a different sync
+    // channel. Inherit unset keys without rewriting the peer's authored document.
+    const mergedProjects = yield* sql<{
+      id: string;
+      target: string;
+    }>`SELECT id,json_extract(fields_json,'$.mergedInto') AS target FROM shared_documents WHERE kind='project' AND tombstone_json IS NOT NULL AND json_type(fields_json,'$.mergedInto')='text' ORDER BY id`;
+    for (const source of mergedProjects) {
+      const target = yield* resolveProjectLabelId(source.target).pipe(
+        Effect.provideService(SqlClient.SqlClient, sql),
+      );
+      if (target === null || !projects.has(target)) continue;
+      const sourceSettings = yield* shared.get("project-settings", source.id);
+      if (!sourceSettings || sourceSettings.tombstone) continue;
+      const documentId = projectSettingsDocumentId(target);
+      const fields = { ...documents.get(documentId) };
+      for (const [key, value] of Object.entries(sourceSettings.fields))
+        if (fields[key] === undefined) fields[key] = value;
+      documents.set(documentId, fields);
     }
     const base = new Map(
       baseRows.map((row) => [

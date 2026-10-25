@@ -188,6 +188,7 @@ export type ProjectLabelRepositoryLink = typeof ProjectLabelRepositoryLink.Type;
 
 const projectLabelWithRepositoriesFields = {
   ...ProjectLabel.fields,
+  possibleDuplicateIds: Schema.optionalKey(Schema.Array(ProjectLabelId)),
   repositoryIds: Schema.Array(ProjectId),
   // Older servers (and caches written by them) predate portable repo identity.
   repositories: Schema.optionalKey(Schema.Array(ProjectLabelRepositoryLink)),
@@ -514,6 +515,16 @@ export const ProjectLabelKey = Schema.Struct({ id: ProjectLabelId });
 export const ProjectLabelListResult = Schema.Struct({
   labels: Schema.Array(ProjectLabelWithRepositories),
 });
+export const ProjectLabelMergeInput = Schema.Struct({
+  sourceId: ProjectLabelId,
+  targetId: ProjectLabelId,
+});
+export type ProjectLabelMergeInput = typeof ProjectLabelMergeInput.Type;
+export const ProjectLabelDismissDuplicateInput = Schema.Struct({
+  id: ProjectLabelId,
+  otherId: ProjectLabelId,
+});
+export type ProjectLabelDismissDuplicateInput = typeof ProjectLabelDismissDuplicateInput.Type;
 export const ProjectLabelMutationResult = Schema.Struct({ label: ProjectLabelWithRepositories });
 export const ProjectLabelDeleteResult = Schema.Struct({ deleted: Schema.Boolean });
 export const ThreadProjectLabelsInput = Schema.Struct({ threadId: ThreadId });
@@ -571,6 +582,8 @@ export class ProjectLabelError extends Schema.TaggedError<ProjectLabelError>()(
     operation: Schema.String,
     reason: Schema.Literals([
       "storage",
+      "same_project",
+      "instructions_too_long",
       "not_found",
       "invalid_membership",
       "invalid_path",
@@ -582,16 +595,23 @@ export class ProjectLabelError extends Schema.TaggedError<ProjectLabelError>()(
     ]),
     /** The project's name, so an `archived` or `project_chat` refusal can say which one. */
     projectName: Schema.optional(Schema.String),
+    repositoryName: Schema.optional(Schema.String),
     cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message(): string {
     switch (this.reason) {
+      case "same_project":
+        return "Choose two different projects.";
+      case "instructions_too_long":
+        return "The combined project instructions are too long. Shorten them before merging.";
       case "archived":
         return `${this.projectName ?? "This project"} is archived. Unarchive it to add to it.`;
       case "not_found":
         return "The folder, repository, thread, or file was not found.";
       case "invalid_membership":
+        if (this.repositoryName !== undefined)
+          return `${this.repositoryName} is not in the ${this.projectName} project. Add it to the project first, or start without a project.`;
         return "A thread can belong to at most one project folder.";
       case "invalid_path":
         return "That path is not a file in this project folder.";

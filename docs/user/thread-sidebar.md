@@ -344,6 +344,11 @@ repositories. A project can hold several repositories, but each repository and e
 thread is in at most one project. Work goes in its repository's project unless you move
 it. Projects are context only; they never change what an agent can access.
 
+If two projects created separately on paired machines have the same name, choose
+**Merge** to move their contents into one project, or **Keep separate** to dismiss the
+suggestion on every machine. Merging removes the source project everywhere and cannot
+be undone automatically; files with conflicting names are kept under new names.
+
 A new task's heading reads "What should we build in _project_ / _repository_?". Pick
 the project there or in the composer's project control, and the task moves to that
 project's most recently used repository, or to the project's folder when it has none.

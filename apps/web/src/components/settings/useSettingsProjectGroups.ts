@@ -2,6 +2,7 @@ import { useMemo } from "react";
 
 import { useClientSettings } from "../../hooks/useSettings";
 import { selectProjectGroupingSettings } from "../../logicalProject";
+import { projectLabelsOn } from "../../projectLabels/projectLabels.logic";
 import { useProjectLabelDirectory } from "../../projectLabels/useProjectLabels";
 import { buildSidebarProjectSnapshots } from "../../sidebarProjectGrouping";
 import { useEnvironments, usePrimaryEnvironmentId } from "../../state/environments";
@@ -34,5 +35,13 @@ export function useSettingsProjectFolders() {
     [environments],
   );
   const { active } = useProjectLabelDirectory(environmentIds);
-  return useMemo(() => buildSettingsProjectFolders(active, projects), [active, projects]);
+  // Every machine's copy, so a folder holds its repositories on each machine.
+  return useMemo(
+    () =>
+      buildSettingsProjectFolders(
+        environmentIds.flatMap((environmentId) => projectLabelsOn(active, environmentId)),
+        projects,
+      ),
+    [active, environmentIds, projects],
+  );
 }

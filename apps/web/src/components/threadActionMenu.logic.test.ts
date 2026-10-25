@@ -230,6 +230,24 @@ describe("Move to project in the thread action menu", () => {
     expect(ids(items)).toContain("move-folder:bartr");
   });
 
+  it("lists a project that doesn't include Work's repository, disabled with why, and no new project", () => {
+    const items = folderItems(
+      stateFor("work", {
+        folder: {
+          ...base,
+          inRepository: true,
+          options: [
+            { id: "bartr", name: "Bartr", blockedReason: "Doesn't include platform" },
+            { id: "spawn", name: "Spawn", color: "violet" },
+          ],
+        },
+      }),
+    );
+    const bartr = items[0]?.children?.find((child) => child.id === "move-folder:bartr");
+    expect(bartr).toMatchObject({ label: "Bartr (Doesn't include platform)", disabled: true });
+    expect(ids(items)).not.toContain("new-folder");
+  });
+
   it("disables moves without permission but still opens the folder", () => {
     const items = folderItems(stateFor("chat", { folder: { ...base, canMove: false } }));
     const move = items.find((item) => item.id === "move-folder");

@@ -40,6 +40,7 @@ const Start = Tool.make("work_start", {
     machine: Schema.optional(TrimmedNonEmptyString),
     commandId: WorkStartInput.fields.commandId,
     targetProjectId: WorkStartInput.fields.targetProjectId,
+    projectFolderId: WorkStartInput.fields.projectFolderId,
     // An agent writes its own title and scope; only the web hands off the raw chat.
     title: WorkTitle,
     scopeSummary: WorkScopeSummary,
@@ -150,7 +151,15 @@ export const handlers = Access.toLayer(toolkit, {
               ...(sourceAgentRunId === undefined ? {} : { sourceAgentRunId }),
             },
           )
-          .pipe(Effect.mapError(unavailable));
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new OrchestratorMcpFailure({
+                  code: "invalid_request",
+                  message: cause.message,
+                }),
+            ),
+          );
       }),
   ),
 });

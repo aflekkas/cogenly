@@ -2,6 +2,7 @@ import * as AccountAccess from "../accounts/AccountAccess.ts";
 import * as Access from "./AgentAccessScope.ts";
 import {
   AgentError,
+  WorkHandoffError,
   AgentEventContext,
   AgentId,
   AgentApproval,
@@ -76,10 +77,17 @@ const decodeRunAction = Schema.decodeUnknownEffect(AgentRunAction);
 
 type AgentActor = { readonly agent: Agent; readonly threadId: ThreadId };
 const fail = (message: string) => new AgentError({ message });
+const isWorkHandoffError = Schema.is(WorkHandoffError);
 const wrap = (cause: unknown) =>
   isAgentError(cause)
     ? cause
-    : new AgentError({ message: "Could not access agent workspace state.", cause });
+    : new AgentError({
+        message:
+          isWorkHandoffError(cause) && cause.repositoryMismatch !== undefined
+            ? cause.message
+            : "Could not access agent workspace state.",
+        cause,
+      });
 export class AgentWorkspaceService extends Context.Service<
   AgentWorkspaceService,
   {
@@ -387,6 +395,9 @@ const make = Effect.gen(function* () {
           commandId: CommandId.make(`agent-work:${agent.id}:${key}`),
           sourceThreadId: input.sourceThreadId ?? agent.conversationThreadId,
           targetProjectId: input.projectId,
+          ...(input.projectFolderId === undefined
+            ? {}
+            : { projectFolderId: input.projectFolderId }),
           title: input.title,
           scopeSummary: input.prompt,
           modelSelection: agent.modelSelection,

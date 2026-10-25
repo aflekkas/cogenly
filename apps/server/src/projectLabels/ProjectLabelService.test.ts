@@ -1,3 +1,4 @@
+import * as Config from "../config.ts";
 // @effect-diagnostics nodeBuiltinImport:off - the checkout-state test reads real folders on disk.
 import { layerIdentity as layerSharedIdentity } from "../sync/testkit.ts";
 import * as Projections from "../orchestration-v2/ProjectionStore.ts";
@@ -34,7 +35,11 @@ const database = Sqlite.layerMemory.pipe(Layer.provide(NodeServices.layer));
 const persistence = Events.layer.pipe(Layer.provideMerge(database));
 const layer = Labels.layer
   .pipe(Layer.provide(layerSharedIdentity))
-  .pipe(Layer.provideMerge(persistence), Layer.provide(NodeServices.layer));
+  .pipe(
+    Layer.provideMerge(persistence),
+    Layer.provide(Config.layerTest(process.cwd(), "/tmp/cogenly-project-label-tests")),
+    Layer.provide(NodeServices.layer),
+  );
 const threadId = ThreadId.make("chat");
 const repoA = ProjectId.make("repo-a"),
   repoB = ProjectId.make("repo-b");
@@ -45,6 +50,26 @@ const seed = Effect.gen(function* () {
   yield* sql`INSERT INTO orchestration_v2_projection_threads(thread_id, project_id, title, default_provider, runtime_mode, interaction_mode, created_at, updated_at, payload_json) VALUES (${threadId}, ${repoA}, 'Chat', 'codex', 'full-access', 'default', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z', '{}')`;
 });
 describe("project labels", () => {
+  it.effect("refuses mismatched filing and accepts the explicit link-then-file path", () =>
+    Effect.gen(function* () {
+      yield* seed;
+      const service = yield* Labels.ProjectLabelService;
+      const sql = yield* SqlClient.SqlClient;
+      const folder = (yield* service.create({ name: "Spawn Partners" })).label.id;
+      const error = yield* Effect.flip(service.moveThread({ threadId, folderId: folder }));
+      expect(error.reason).toBe("invalid_membership");
+      expect(error.message).toBe(
+        "repo-a is not in the Spawn Partners project. Add it to the project first, or start without a project.",
+      );
+      expect(yield* sql`SELECT 1 FROM thread_project_labels`).toEqual([]);
+      expect(yield* sql`SELECT 1 FROM label_repositories`).toEqual([]);
+      yield* service.linkRepository({ labelId: folder, repositoryId: repoA });
+      expect(yield* service.moveThread({ threadId, folderId: folder })).toMatchObject({
+        projectFolderId: folder,
+      });
+    }).pipe(Effect.provide(layer)),
+  );
+
   it.effect(
     "counts only visible chats and Work, preserving independent forks and excluding archives and child threads",
     () =>
@@ -220,6 +245,7 @@ describe("project labels", () => {
       yield* service.linkRepository({ labelId: a, repositoryId: repoA });
       expect((yield* service.getThreadLabels(threadId)).labels.map((t) => t.labelId)).toEqual([a]);
       expect((yield* service.list()).labels.find((l) => l.id === a)?.threadCount).toBe(1);
+      yield* service.linkRepository({ labelId: b, repositoryId: repoA });
       expect(yield* service.moveThread({ threadId, folderId: b })).toEqual({
         threadId,
         projectFolderId: b,
@@ -244,6 +270,7 @@ describe("project labels", () => {
           .pipe(Effect.flip)).reason,
       ).toBe("not_found");
       expect((yield* service.getThreadLabels(threadId)).labels[0]?.labelId).toBe(a);
+      yield* sql`UPDATE projection_projects SET workspace_root='/tmp/cogenly-project-label-tests/scratch' WHERE project_id=${repoA}`;
       // Chats do not inherit a folder even if they have a repository record.
       yield* sql`UPDATE orchestration_v2_projection_threads SET payload_json = '{"surface":"chat"}' WHERE thread_id = ${threadId}`;
       expect((yield* service.getThreadLabels(threadId)).labels).toEqual([]);
@@ -274,6 +301,8 @@ describe("project labels", () => {
   it.effect("re-homes chats with turns into a project, keeping the same thread", () =>
     Effect.gen(function* () {
       yield* seed;
+      const fixtureSql = yield* SqlClient.SqlClient;
+      yield* fixtureSql`UPDATE projection_projects SET workspace_root='/tmp/cogenly-project-label-tests/scratch' WHERE project_id=${repoA}`;
       const service = yield* Labels.ProjectLabelService;
       const sql = yield* SqlClient.SqlClient;
       const folder = (yield* service.create({ name: "Folder" })).label.id;
@@ -317,6 +346,8 @@ describe("project labels", () => {
   it.effect("refuses to move a thread while a run is active in it", () =>
     Effect.gen(function* () {
       yield* seed;
+      const fixtureSql = yield* SqlClient.SqlClient;
+      yield* fixtureSql`UPDATE projection_projects SET workspace_root='/tmp/cogenly-project-label-tests/scratch' WHERE project_id=${repoA}`;
       const service = yield* Labels.ProjectLabelService;
       const sql = yield* SqlClient.SqlClient;
       const folder = (yield* service.create({ name: "Folder" })).label.id;
@@ -344,6 +375,8 @@ describe("project labels", () => {
   it.effect("re-files an agent's conversation with turns instead of requiring a fork", () =>
     Effect.gen(function* () {
       yield* seed;
+      const fixtureSql = yield* SqlClient.SqlClient;
+      yield* fixtureSql`UPDATE projection_projects SET workspace_root='/tmp/cogenly-project-label-tests/scratch' WHERE project_id=${repoA}`;
       const service = yield* Labels.ProjectLabelService;
       const sql = yield* SqlClient.SqlClient;
       const first = (yield* service.create({ name: "First" })).label.id;
@@ -391,6 +424,8 @@ describe("project labels", () => {
     () =>
       Effect.gen(function* () {
         yield* seed;
+        const fixtureSql = yield* SqlClient.SqlClient;
+        yield* fixtureSql`UPDATE projection_projects SET workspace_root='/tmp/cogenly-project-label-tests/scratch' WHERE project_id=${repoA}`;
         const service = yield* Labels.ProjectLabelService;
         const sql = yield* SqlClient.SqlClient;
         const a = (yield* service.create({ name: "A" })).label.id;
@@ -466,6 +501,8 @@ describe("project labels", () => {
     Effect.scoped(
       Effect.gen(function* () {
         yield* seed;
+        const fixtureSql = yield* SqlClient.SqlClient;
+        yield* fixtureSql`UPDATE projection_projects SET workspace_root='/tmp/cogenly-project-label-tests/scratch' WHERE project_id=${repoA}`;
         const service = yield* Labels.ProjectLabelService;
         const list = yield* service.subscribe().pipe(Stream.toQueue({ capacity: 16 }));
         const thread = yield* service
@@ -487,6 +524,8 @@ describe("project labels", () => {
     Effect.scoped(
       Effect.gen(function* () {
         yield* seed;
+        const fixtureSql = yield* SqlClient.SqlClient;
+        yield* fixtureSql`UPDATE projection_projects SET workspace_root='/tmp/cogenly-project-label-tests/scratch' WHERE project_id=${repoA}`;
         const service = yield* Labels.ProjectLabelService;
         const a = (yield* service.create({ name: "A" })).label.id;
         const b = (yield* service.create({ name: "B" })).label.id;
@@ -564,8 +603,8 @@ describe("project labels", () => {
           projectFolderId: b,
           projectFolderSource: "repository",
         });
-        yield* folders.moveThread({ threadId, folderId: a });
         yield* folders.linkRepository({ labelId: a, repositoryId: repoA });
+        yield* folders.moveThread({ threadId, folderId: a });
         yield* folders.linkRepository({ labelId: b, repositoryId: repoA });
         expect((yield* projections.getThreadProjection(threadId)).thread).toMatchObject({
           projectFolderId: a,

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest";
 import {
   EventId,
+  ProjectLabelId,
   THREAD_REPLICATION_BATCH_BYTES,
   type OrchestrationV2DomainEvent,
   ThreadId,
@@ -29,6 +30,55 @@ const forThread = (id: ThreadId, event: OrchestrationV2DomainEvent): Orchestrati
   }) as OrchestrationV2DomainEvent;
 
 describe("thread replication across builds", () => {
+  it.live("delayed owner metadata keeps a replica filed in the merged project", () =>
+    Effect.gen(function* () {
+      const hub = yield* start("merge-hub", "cloud-server");
+      const laptop = yield* start("merge-laptop", "computer");
+      yield* pair(hub, laptop);
+      const source = ProjectLabelId.make("label:source");
+      const target = ProjectLabelId.make("label:target");
+      const createdAt = "2026-01-01T00:00:00.000Z";
+      const project = {
+        name: "Project",
+        color: null,
+        description: null,
+        instructions: "",
+        archivedAt: null,
+        repositories: [],
+        sourceLinks: [],
+        createdAt,
+      };
+      yield* hub.shared.write("project", source, project);
+      yield* hub.shared.write("project", target, project);
+      yield* laptop.shared.write("project", source, project);
+      const at = yield* DateTime.now;
+      yield* laptop.sink.write({ events: [thread("event:created", at)] });
+      yield* laptop.sql`INSERT INTO thread_project_labels(thread_id,label_id) VALUES (${threadId},${source})`;
+      yield* laptop.sync.sync(hub.environmentId);
+      yield* hub.shared.write(
+        "project",
+        source,
+        { mergedInto: target, mergeSourceName: "Project" },
+        true,
+      );
+      expect((yield* hub.projections.getThreadProjection(threadId)).thread.projectFolderId).toBe(
+        target,
+      );
+      // The offline owner has not received the merge yet and sends its old filing again.
+      yield* laptop.sql`DELETE FROM thread_project_labels WHERE thread_id=${threadId}`;
+      yield* laptop.sql`INSERT INTO thread_project_labels(thread_id,label_id) VALUES (${threadId},${source})`;
+      yield* laptop.sink.write({ events: [message("event:later", at, "Still here")] });
+      yield* laptop.sync.sync(hub.environmentId);
+      expect((yield* hub.projections.getThreadProjection(threadId)).thread.projectFolderId).toBe(
+        target,
+      );
+      expect((yield* hub.replication.owner(threadId))?.owner).toBe(laptop.environmentId);
+      expect(
+        (yield* hub.projections.getThreadProjection(threadId)).messages.map((entry) => entry.text),
+      ).toEqual(["Still here"]);
+    }),
+  );
+
   it.live(
     "an older build holds only the thread it cannot read, in order, and replays it after an update",
     () =>

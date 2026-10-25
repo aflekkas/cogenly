@@ -9,6 +9,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
+import { projectPendingMerges, resolveProjectLabelId } from "./ProjectMergeProjection.ts";
 import { compareClock } from "./merge.ts";
 import { nextScheduledRunAt } from "../scheduledTasks/Schedule.ts";
 import { decodeAgent, decodeProject, decodeSchedule } from "./documentSchemas.ts";
@@ -143,6 +144,7 @@ export const readConfiguration = Effect.fn("SharedState.readConfiguration")(func
     enabled: number;
     schedule_json: string;
     project_id: string;
+    project_folder_id: string | null;
     workspace_strategy_json: string;
     model_selection_json: string;
     runtime_mode: string;
@@ -170,12 +172,25 @@ export const readConfiguration = Effect.fn("SharedState.readConfiguration")(func
       strategy.type = "root";
     }
   }
+  const savedFiling = (yield* sql<{
+    folder: string | null;
+    field_type: string | null;
+  }>`SELECT json_extract(fields_json,'$.projectFolderId') AS folder,json_type(fields_json,'$.projectFolderId') AS field_type FROM shared_documents WHERE kind='schedule' AND id=${id}`)[0];
+  // A merge places every machine's schedule locally without authoring its owner's
+  // sensitive fields. Keep an equivalent portable reference during later captures,
+  // so a non-owner can still rename or pause the schedule.
+  const projectFolderId =
+    savedFiling &&
+    (yield* resolveProjectLabelId(savedFiling.folder)) === (row.project_folder_id ?? null)
+      ? savedFiling.folder
+      : (row.project_folder_id ?? null);
   return {
     agentId: row.agent_id,
     title: row.title,
     prompt: row.prompt,
     enabled: row.enabled === 1,
     schedule: yield* json(row.schedule_json),
+    ...(projectFolderId !== null || savedFiling?.field_type ? { projectFolderId } : {}),
     repositoryRemote: yield* repository(row.project_id, kind, id),
     workspaceStrategy: strategy,
     modelSelection: yield* json(row.model_selection_json),
@@ -291,6 +306,11 @@ export const projectDocument = Effect.fn("SharedState.projectDocument")(function
     yield* sql`INSERT INTO shared_repository_checkouts(remote,repository_id,directory_name) SELECT r.remote,r.repository_id,r.directory_name FROM label_repositories r JOIN projection_projects p ON p.project_id=r.repository_id WHERE r.remote IS NOT NULL AND p.deleted_at IS NULL GROUP BY r.remote ON CONFLICT(remote) DO UPDATE SET repository_id=excluded.repository_id,directory_name=excluded.directory_name`;
   if (document.tombstone) {
     if (kind === "project") {
+      if (typeof fields.mergedInto === "string") {
+        yield* projectPendingMerges();
+        if (!preserveLocalBindings) yield* reconcileRepositories();
+        return;
+      }
       yield* sql`UPDATE commitments SET payload_json=json_set(payload_json,'$.labelIds',json((SELECT json_group_array(l.value) FROM json_each(commitments.payload_json,'$.labelIds') l WHERE l.value<>${id}))) WHERE id IN (SELECT commitment_id FROM commitment_labels WHERE label_id=${id})`;
       yield* sql`DELETE FROM commitment_labels WHERE label_id=${id}`;
       yield* sql`UPDATE facts SET updated_at=${at},payload_json=json_set(payload_json,'$.updatedAt',${at},'$.labelIds',json((SELECT json_group_array(l.value) FROM json_each(facts.payload_json,'$.labelIds') l WHERE l.value<>${id}))) WHERE id IN (SELECT fact_id FROM fact_labels WHERE label_id=${id})`;
@@ -328,6 +348,7 @@ export const projectDocument = Effect.fn("SharedState.projectDocument")(function
     )
       yield* reconcileRepositories();
     yield* sql`INSERT OR IGNORE INTO shared_possible_duplicates(kind,first_id,second_id) SELECT 'project',min(label_id,${id}),max(label_id,${id}) FROM project_labels WHERE lower(trim(name))=lower(trim(${f.name})) AND label_id<>${id}`;
+    yield* projectPendingMerges();
     yield* linkArrivedProject(id);
     return;
   }
@@ -357,7 +378,9 @@ export const projectDocument = Effect.fn("SharedState.projectDocument")(function
           ? previous.projectId
           : (checkout?.project_id ?? previous.projectId ?? null),
       conversationThreadId: previous.conversationThreadId ?? `agent-conversation:${id}`,
-      projectFolderId: null,
+      projectFolderId: yield* resolveProjectLabelId(
+        typeof previous.projectFolderId === "string" ? previous.projectFolderId : null,
+      ),
       updatedAt: at,
       consecutiveFailures: 0,
       backoffUntil: null,
@@ -418,5 +441,5 @@ export const projectDocument = Effect.fn("SharedState.projectDocument")(function
       })
     : null;
   const next = occurrence === null ? null : DateTime.formatIso(occurrence);
-  yield* sql`INSERT INTO scheduled_tasks(task_id,agent_id,title,prompt,enabled,schedule_json,project_id,thread_id,workspace_strategy_json,model_selection_json,runtime_mode,interaction_mode,created_by,creation_source,created_at,updated_at,next_run_at,last_run_status,run_count,owner_machine,target_machine) VALUES (${id},${f.agentId},${f.title},${f.prompt},${f.enabled ? 1 : 0},${schedule},${projectId},${previous[0]?.thread_id ?? null},${encodeJson(strategy)},${encodeJson(f.modelSelection)},${f.runtimeMode},${f.interactionMode},'user','web',${f.createdAt},${at},${next},'never',0,${f.ownerMachine},${f.machine ?? null}) ON CONFLICT(task_id) DO UPDATE SET agent_id=excluded.agent_id,title=excluded.title,prompt=excluded.prompt,enabled=excluded.enabled,schedule_json=excluded.schedule_json,project_id=excluded.project_id,workspace_strategy_json=excluded.workspace_strategy_json,model_selection_json=excluded.model_selection_json,runtime_mode=excluded.runtime_mode,interaction_mode=excluded.interaction_mode,updated_at=excluded.updated_at,owner_machine=excluded.owner_machine,target_machine=excluded.target_machine,next_run_at=CASE WHEN scheduled_tasks.schedule_json=excluded.schedule_json AND scheduled_tasks.enabled=excluded.enabled THEN scheduled_tasks.next_run_at ELSE excluded.next_run_at END`;
+  yield* sql`INSERT INTO scheduled_tasks(task_id,agent_id,title,prompt,enabled,schedule_json,project_id,thread_id,workspace_strategy_json,model_selection_json,runtime_mode,interaction_mode,created_by,creation_source,created_at,updated_at,next_run_at,last_run_status,run_count,owner_machine,target_machine,project_folder_id) VALUES (${id},${f.agentId},${f.title},${f.prompt},${f.enabled ? 1 : 0},${schedule},${projectId},${previous[0]?.thread_id ?? null},${encodeJson(strategy)},${encodeJson(f.modelSelection)},${f.runtimeMode},${f.interactionMode},'user','web',${f.createdAt},${at},${next},'never',0,${f.ownerMachine},${f.machine ?? null},${yield* resolveProjectLabelId(f.projectFolderId ?? null)}) ON CONFLICT(task_id) DO UPDATE SET agent_id=excluded.agent_id,title=excluded.title,prompt=excluded.prompt,enabled=excluded.enabled,schedule_json=excluded.schedule_json,project_id=excluded.project_id,workspace_strategy_json=excluded.workspace_strategy_json,model_selection_json=excluded.model_selection_json,runtime_mode=excluded.runtime_mode,interaction_mode=excluded.interaction_mode,updated_at=excluded.updated_at,owner_machine=excluded.owner_machine,target_machine=excluded.target_machine,project_folder_id=excluded.project_folder_id,next_run_at=CASE WHEN scheduled_tasks.schedule_json=excluded.schedule_json AND scheduled_tasks.enabled=excluded.enabled THEN scheduled_tasks.next_run_at ELSE excluded.next_run_at END`;
 }, Effect.mapError(storage));

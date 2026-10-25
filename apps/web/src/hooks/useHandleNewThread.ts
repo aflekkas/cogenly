@@ -47,6 +47,7 @@ import { environmentServerConfigsAtom } from "../state/server";
 import { resolveThreadRouteTarget } from "../threadRoutes";
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
 import { workPrefersNewWorktree } from "../components/work/work.logic";
+import { usePendingProjectFolderStore } from "../projectLabels/pendingProjectFolders";
 import { useClientSettings } from "./useSettings";
 
 interface NewThreadWorkspaceOptions {
@@ -222,6 +223,16 @@ export function useNewThreadHandler() {
       const logicalProjectKey = project
         ? deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings)
         : scopedProjectKey(projectRef);
+      // Opening a repository's draft picks that repository, so the draft
+      // follows its project: a reused draft drops the project it was left in,
+      // which may not hold the repository. A caller filing it in a project
+      // (the Work hero) does so once this resolves.
+      const forgetLeftProject = (opened: { draftId: DraftId; threadId: ThreadId } | null) => {
+        if (opened !== null && !startsInScratch) {
+          usePendingProjectFolderStore.getState().clearPending(opened.threadId);
+        }
+        return opened;
+      };
       const hasBranchOption = options?.branch !== undefined;
       const hasWorktreePathOption = options?.worktreePath !== undefined;
       const hasEnvModeOption = options?.envMode !== undefined;
@@ -383,7 +394,7 @@ export function useNewThreadHandler() {
             replace: options?.replace ?? false,
           });
           return opened;
-        })();
+        })().then(forgetLeftProject);
       }
 
       if (
@@ -411,10 +422,12 @@ export function useNewThreadHandler() {
           interactionMode: latestActiveDraftThread.interactionMode,
           ...pickExplicitWorkspaceOptions(options),
         });
-        return Promise.resolve({
-          draftId: currentRouteTarget.draftId,
-          threadId: latestActiveDraftThread.threadId,
-        });
+        return Promise.resolve(
+          forgetLeftProject({
+            draftId: currentRouteTarget.draftId,
+            threadId: latestActiveDraftThread.threadId,
+          }),
+        );
       }
 
       const draftId = newDraftId();
@@ -460,7 +473,7 @@ export function useNewThreadHandler() {
             params: { draftId: racedDraft.draftId },
             replace: options?.replace ?? false,
           });
-          return { draftId: racedDraft.draftId, threadId: racedDraft.threadId };
+          return forgetLeftProject({ draftId: racedDraft.draftId, threadId: racedDraft.threadId });
         }
         setLogicalProjectDraftThreadId(logicalProjectKey, projectRef, draftId, {
           threadId,

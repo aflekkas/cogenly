@@ -1,3 +1,5 @@
+import Migration0103 from "./Migrations/103_ProjectMergeFiles.ts";
+import Migration0102 from "./Migrations/102_ScheduledTaskProjectFolder.ts";
 import Migration0091 from "./Migrations/091_MessageItemLookupIndexes.ts";
 import Migration0092 from "./Migrations/092_RepositoryIconPath.ts";
 import Migration0093 from "./Migrations/093_ThreadReplication.ts";
@@ -230,6 +232,8 @@ export const migrationEntries = [
   [99, "SharedIntegrations", Migration0099],
   [100, "ReplicaRawFields", Migration0100],
   [101, "ScheduledTaskMachine", Migration0101],
+  [102, "ScheduledTaskProjectFolder", Migration0102],
+  [103, "ProjectMergeFiles", Migration0103],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

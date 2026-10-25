@@ -1,3 +1,4 @@
+import * as Path from "effect/Path";
 import * as EventSink from "../orchestration-v2/EventSink.ts";
 import * as DateTime from "effect/DateTime";
 import * as AgentEventReactor from "../agents/AgentEventReactor.ts";
@@ -283,7 +284,7 @@ const makeHarness = (
       Settings.layerTest(),
       Ids.layer,
     );
-    const launches = Launch.layer.pipe(Layer.provide(boundaries));
+    const launches = Launch.layer.pipe(Layer.provide(boundaries), Layer.provide(Path.layer));
     const work = Work.layer.pipe(Layer.provide(Layer.merge(launches, boundaries)));
     return { orchestrator, finished, worktrees, work };
   });

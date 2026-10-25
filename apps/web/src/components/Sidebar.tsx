@@ -263,6 +263,7 @@ import { openCreateProjectDialog } from "../projectLabels/CreateProjectDialogHos
 import { usePendingProjectFolderStore } from "../projectLabels/pendingProjectFolders";
 import { useMoveThreadToFolder } from "../projectLabels/useMoveThreadToFolder";
 import { useProjectLabelDirectory } from "../projectLabels/useProjectLabels";
+import { useThreadRepository } from "../projectLabels/useThreadRepository";
 import { useRepositoryNames } from "../projectLabels/useRepositoryNames";
 import { ProjectFolderIcon, type ProjectIconProject } from "../projectLabels/ProjectFolderMark";
 import {
@@ -2661,6 +2662,19 @@ export default function Sidebar() {
     }
     return projectDisplayNameByKey.get(projectKey) ?? repositoryNameOf(project);
   };
+  // The repository a thread works in, which move menus keep it with.
+  const threadRepositoryOf = useThreadRepository();
+  // Whether Work runs in a real repository, not a machine's or a project's folder.
+  const workInRepository = useCallback(
+    (thread: { readonly environmentId: EnvironmentId; readonly projectId: ProjectId }) => {
+      const project = projectByKey.get(`${thread.environmentId}:${thread.projectId}`);
+      return (
+        project !== undefined &&
+        !isScratchProject(project, serverConfigs.get(thread.environmentId)?.scratchWorkspaceRoot)
+      );
+    },
+    [projectByKey, serverConfigs],
+  );
   // Project folders hold chats and Work, across environments.
   const labelEnvironmentIds = useConnectedEnvironmentIds();
   const projectLabelDirectory = useProjectLabelDirectory(labelEnvironmentIds);
@@ -2698,37 +2712,39 @@ export default function Sidebar() {
   const modeListsThreads = sidebarMode === "chats" || sidebarMode === "tasks";
   // Rows name their folder in the hover card. One object per folder, so
   // memoized rows keep the same prop while the directory holds.
-  const folderFor = useMemo(() => {
+  // Work cards name their project: an explicit filing, else the project their
+  // repository is in now, so filing a repository shows on its Work at once.
+  // One stable object per project, under every machine's key for it, so
+  // memoized cards skip unchanged renders.
+  const rowFolderByKey = useMemo(() => {
+    const byEntry = new Map(
+      projectLabelDirectory.labels.map(
+        (entry) =>
+          [entry, { name: entry.label.name, color: entry.label.color, icon: entry }] as const,
+      ),
+    );
     const byKey = new Map<string, SidebarRowFolder>();
-    for (const entry of projectLabelDirectory.labels) {
-      byKey.set(entry.key, { name: entry.label.name, color: entry.label.color, icon: entry });
+    for (const [key, entry] of projectLabelDirectory.byKey) {
+      const folder = byEntry.get(entry);
+      if (folder) byKey.set(key, folder);
     }
-    return (thread: SidebarThreadSummary): SidebarRowFolder | null => {
+    return byKey;
+  }, [projectLabelDirectory]);
+  const folderFor = useCallback(
+    (thread: SidebarThreadSummary): SidebarRowFolder | null => {
       const folderId = threadProjectFolderId(thread);
       return folderId === null
         ? null
-        : (byKey.get(projectLabelKey(thread.environmentId, folderId)) ?? null);
-    };
-  }, [projectLabelDirectory]);
-  // Work cards name their project: an explicit filing, else the project their
-  // repository is in now, so filing a repository shows on its Work at once.
-  // One stable object per project, so memoized cards skip unchanged renders.
-  const rowFolderByKey = useMemo(
-    () =>
-      new Map(
-        projectLabelDirectory.labels.map(
-          (entry) =>
-            [entry.key, { name: entry.label.name, color: entry.label.color, icon: entry }] as const,
-        ),
-      ),
-    [projectLabelDirectory],
+        : (rowFolderByKey.get(projectLabelKey(thread.environmentId, folderId)) ?? null);
+    },
+    [rowFolderByKey],
   );
   const workFolderFor = useCallback(
     (thread: SidebarThreadSummary): SidebarRowFolder | null => {
-      const entry = workThreadFolder(thread, projectLabelDirectory);
+      const entry = workThreadFolder(thread, projectLabelDirectory, workInRepository);
       return entry ? (rowFolderByKey.get(entry.key) ?? null) : null;
     },
-    [projectLabelDirectory, rowFolderByKey],
+    [projectLabelDirectory, rowFolderByKey, workInRepository],
   );
   const repositoryFolderFor = useCallback(
     (environmentId: EnvironmentId, projectId: ProjectId): SidebarRowFolder | null => {
@@ -4118,7 +4134,9 @@ export default function Sidebar() {
     const groups = groupWorkCards(cards, (card) => {
       if (card.kind === "thread") {
         const thread = threadByKey.get(card.key);
-        return projectOf(thread && workThreadFolder(thread, projectLabelDirectory));
+        return projectOf(
+          thread && workThreadFolder(thread, projectLabelDirectory, workInRepository),
+        );
       }
       const { draft } = card;
       const picked = pendingFolderByThreadId[draft.threadId];
@@ -4143,6 +4161,7 @@ export default function Sidebar() {
     threadByKey,
     workDrafts,
     workDrag,
+    workInRepository,
   ]);
   const workRowsRef = useRef(workRows);
   workRowsRef.current = workRows;
@@ -4790,7 +4809,11 @@ export default function Sidebar() {
         const isSnoozed = snoozedThreadKeysRef.current.has(threadKey);
         // Presets resolve at menu-open time (same as the popover).
         const snoozePresets = resolveSnoozePresets(new Date(), timestampFormat);
-        const folderState = threadFolderState(thread, projectLabelDirectory);
+        const folderState = threadFolderState(
+          thread,
+          projectLabelDirectory,
+          threadRepositoryOf(thread),
+        );
         const machineList = machineDirectory.get(thread.environmentId) ?? null;
         const machineTargets = machineMoveTargetsForThreads(machineList, [
           thread.source.ownerMachine,
@@ -4849,7 +4872,9 @@ export default function Sidebar() {
                   id: entry.label.id,
                   name: entry.label.name,
                   color: entry.label.color,
+                  blockedReason: folderState.blocked.get(entry.key),
                 })),
+                inRepository: folderState.inRepository,
                 canMove: appAtomRegistry.get(
                   serverEnvironment.moveThreadProjectFolder.permissionAtom(thread.environmentId),
                 ),
@@ -4895,7 +4920,11 @@ export default function Sidebar() {
               : (folderState.options.find(
                   (entry) => entry.label.id === clickedId.slice("move-folder:".length),
                 ) ?? null);
-          if (clickedId !== "remove-folder" && target === null) return;
+          if (
+            clickedId !== "remove-folder" &&
+            (target === null || folderState.blocked.has(target.key))
+          )
+            return;
           await moveThreadToFolder({
             thread,
             folder: target && { id: target.label.id, name: target.label.name },
@@ -5095,10 +5124,8 @@ export default function Sidebar() {
         const api = readLocalApi();
         if (!api) return;
         const folder =
-          projectLabelDirectory.labels.find(
-            (entry) =>
-              entry.environmentId === projectRef.environmentId &&
-              entry.label.repositoryIds.includes(projectRef.projectId),
+          projectLabelDirectory.folderByRepository.get(
+            scopedRepositoryKey(projectRef.environmentId, projectRef.projectId),
           ) ?? null;
         const clicked = await settlePromise(() =>
           api.contextMenu.show(

@@ -1,3 +1,4 @@
+import * as Membership from "../projectLabels/ProjectRepositoryMembership.ts";
 import * as GoogleTokenStore from "../integrations/local/GoogleTokenStore.ts";
 import * as NativeIntegrationImport from "../integrations/NativeIntegrationImport.ts";
 import * as ReadOnlySandbox from "../terminal/ReadOnlySandbox.ts";
@@ -309,6 +310,7 @@ const layerRunFinalizationServiceProvided = RunFinalizationService.layer.pipe(
 );
 
 const layerOrchestratorProvided = Orchestrator.layer.pipe(
+  Layer.provide(Membership.layer),
   Layer.provide(ServerEnvironment.layerIdentity),
   Layer.provide(
     Layer.mergeAll(
@@ -386,6 +388,7 @@ const layerRepositoryCheckoutProvided = RepositoryCheckout.layer.pipe(
   ),
 );
 const layerThreadLaunchProvided = ThreadLaunchService.layer.pipe(
+  Layer.provide(Membership.layer),
   Layer.provide(
     Layer.mergeAll(
       layerProjectService,
@@ -419,6 +422,7 @@ const layerSecretRequestsProvided = SecretRequests.layer.pipe(
   Layer.provide(layerThreadManagementProvided),
 );
 const layerAgentsProvided = Agents.layer.pipe(
+  Layer.provide(Membership.layer),
   Layer.provide(RemoteThreadLaunch.layer),
   Layer.provide(
     Layer.mergeAll(
@@ -434,6 +438,7 @@ const layerAgentsProvided = Agents.layer.pipe(
   ),
 );
 const layerScheduledTaskProvided = ScheduledTaskService.layer.pipe(
+  Layer.provide(Membership.layer),
   Layer.provide(RemoteThreadLaunch.layer),
   Layer.provide(
     Layer.mergeAll(

@@ -1719,6 +1719,9 @@ const make = Effect.gen(function* () {
           Effect.mapError((error) => failure("invalid_request", error.message)),
         );
         const upsertInput: ScheduledTaskUpsertInput = {
+          ...(input.projectFolderId === undefined
+            ? {}
+            : { projectFolderId: input.projectFolderId }),
           ...(machine === undefined ? {} : { machine }),
           ...(input.agentId === undefined ? {} : { agentId: input.agentId }),
           title,
@@ -1812,6 +1815,9 @@ const make = Effect.gen(function* () {
           enabled: input.enabled ?? existing.enabled,
           schedule: input.schedule ?? existing.schedule,
           projectId: existing.projectId,
+          ...(existing.projectFolderId === undefined
+            ? {}
+            : { projectFolderId: existing.projectFolderId }),
           threadId,
           workspaceStrategy,
           modelSelection: existing.modelSelection,
@@ -2577,6 +2583,9 @@ const make = Effect.gen(function* () {
                   threadId,
                   ...(machine === undefined ? {} : { machine }),
                   projectId: parent.thread.projectId,
+                  ...(parent.thread.projectFolderId == null
+                    ? {}
+                    : { projectFolderId: parent.thread.projectFolderId }),
                   title,
                   ...(parent.thread.surface === undefined
                     ? {}

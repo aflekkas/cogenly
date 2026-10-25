@@ -7,7 +7,11 @@ import type { EnvironmentId, ProjectId, ProjectLabelId } from "@cogenly/contract
 import { normalizeProjectPathForComparison } from "@cogenly/shared/path";
 
 import {
+  projectLabelCopies,
   projectLabelKey,
+  projectLabelOn,
+  projectRepositoryCount,
+  scopedRepositoryKey,
   threadProjectFolderId,
   type EnvironmentProjectLabel,
   type ProjectLabelKey,
@@ -84,11 +88,13 @@ export function groupRepositoriesByProject<Item>(input: {
 }): RepositoryProjectGroup<Item>[] {
   const memberKeys = new Map<string, ProjectLabelKey[]>();
   for (const project of input.projects) {
-    for (const repositoryId of project.label.repositoryIds) {
-      const key = `${project.environmentId}:${repositoryId}`;
-      const keys = memberKeys.get(key);
-      if (keys) keys.push(project.key);
-      else memberKeys.set(key, [project.key]);
+    for (const copy of projectLabelCopies(project)) {
+      for (const repositoryId of copy.label.repositoryIds) {
+        const key = `${copy.environmentId}:${repositoryId}`;
+        const keys = memberKeys.get(key);
+        if (keys) keys.push(project.key);
+        else memberKeys.set(key, [project.key]);
+      }
     }
   }
   const itemsByProject = new Map<ProjectLabelKey, Item[]>();
@@ -129,12 +135,20 @@ export function groupRepositoriesByProject<Item>(input: {
   return groups;
 }
 
-function holdsRepository(project: EnvironmentProjectLabel, refs: ReadonlyArray<RepositoryRef>) {
-  return refs.some(
-    (ref) =>
-      ref.environmentId === project.environmentId &&
-      project.label.repositoryIds.includes(ref.projectId),
+/** Whether `project` links the repository, as the repository's own machine has the project. */
+export function projectHoldsRepository(
+  project: EnvironmentProjectLabel,
+  repository: RepositoryRef,
+): boolean {
+  return (
+    projectLabelOn(project, repository.environmentId)?.label.repositoryIds.includes(
+      repository.projectId,
+    ) === true
   );
+}
+
+function holdsRepository(project: EnvironmentProjectLabel, refs: ReadonlyArray<RepositoryRef>) {
+  return refs.some((ref) => projectHoldsRepository(project, ref));
 }
 
 /** Whether a repository belongs to `project`, or with none, to no project of `projects`. */
@@ -226,13 +240,113 @@ export function projectDefaultRepository<Item>(input: {
 }
 
 /**
+ * What a Work draft's repository becomes when `project` is picked for it: the
+ * current one while the project links it, else the project's only repository,
+ * else Work in the project's folder, which is what would run, whether it links
+ * several (the user can still pick one) or none. A repository from outside
+ * the project never stays.
+ */
+export type ProjectSwitchRepository<Item> =
+  | { readonly kind: "keep" }
+  | { readonly kind: "select"; readonly item: Item }
+  | { readonly kind: "project-folder" };
+
+export function projectSwitchRepository<Item>(input: {
+  readonly project: EnvironmentProjectLabel;
+  /** The draft's repository; null for Work without one. */
+  readonly current: RepositoryRef | null;
+  /** The repositories the draft can move to now. */
+  readonly items: ReadonlyArray<Item>;
+  readonly refsOf: (item: Item) => ReadonlyArray<RepositoryRef>;
+}): ProjectSwitchRepository<Item> {
+  const { project } = input;
+  if (input.current !== null && projectHoldsRepository(project, input.current)) {
+    return { kind: "keep" };
+  }
+  const members = input.items.filter((item) => holdsRepository(project, input.refsOf(item)));
+  // Linked repositories not on any machine here yet count too: the picker clones them.
+  const linked = Math.max(projectRepositoryCount(project), members.length);
+  if (linked === 1 && members.length === 1) return { kind: "select", item: members[0]! };
+  return { kind: "project-folder" };
+}
+
+/**
+ * The note a Work draft shows when picking `projectName` could not keep it in
+ * the project: none of its repositories was chosen and `machineName` can't
+ * run Work without one, so the draft stays outside the project.
+ */
+export function projectDroppedNote(
+  projectName: string,
+  machineName: string | null,
+): { readonly title: string; readonly description: string } {
+  const machine = machineName ?? "This machine";
+  return {
+    title: `Not in ${projectName}`,
+    description: `${machine} can't run Work without a repository. Pick a repository from ${projectName} to work in it.`,
+  };
+}
+
+/**
+ * The project a Work draft is in, given its pending pick (`pending`, with the
+ * repository it was filed with) and its repository. With no pick it follows
+ * its repository's project, or none. `stale` marks a pick that does not link
+ * the repository, which the draft must not keep: the hero corrects it by
+ * moving the repository (projectSwitchRepository), never by linking it. A
+ * pick filed with this very repository is trusted while its link lands.
+ */
+export function draftWorkProject(input: {
+  readonly pending: EnvironmentProjectLabel | null;
+  readonly pendingRepositoryId: ProjectId | null | undefined;
+  /** Null for Work without a repository, which any project can hold. */
+  readonly repository: RepositoryRef | null;
+  readonly folderByRepository: ReadonlyMap<string, EnvironmentProjectLabel>;
+}): { readonly project: EnvironmentProjectLabel | null; readonly stale: boolean } {
+  const { pending, repository } = input;
+  if (repository === null) return { project: pending, stale: false };
+  if (pending === null) {
+    return {
+      project:
+        input.folderByRepository.get(
+          scopedRepositoryKey(repository.environmentId, repository.projectId),
+        ) ?? null,
+      stale: false,
+    };
+  }
+  const holds =
+    projectHoldsRepository(pending, repository) ||
+    input.pendingRepositoryId === repository.projectId;
+  return { project: pending, stale: !holds };
+}
+
+/**
+ * The project an existing Work thread names: its filing while that links its
+ * repository (or it runs without one), else the repository's own project, or
+ * none. A filing that left its repository behind is never shown with it.
+ */
+export function workThreadDisplayProject(input: {
+  readonly filed: EnvironmentProjectLabel | null;
+  /** Null for Work in its project's folder. */
+  readonly repository: RepositoryRef | null;
+  readonly folderByRepository: ReadonlyMap<string, EnvironmentProjectLabel>;
+}): EnvironmentProjectLabel | null {
+  const { filed, repository } = input;
+  if (repository === null) return filed;
+  if (filed !== null && projectHoldsRepository(filed, repository)) return filed;
+  return (
+    input.folderByRepository.get(
+      scopedRepositoryKey(repository.environmentId, repository.projectId),
+    ) ?? null
+  );
+}
+
+/**
  * The project a Work draft records for its thread once it targets
  * `repository`: the draft's project, kept explicitly (also when it is the
- * repository's own, so a repository cloned or linked a moment ago, or filed
- * in another project later, never drops the pick). Projects sync across
- * machines, so a repository on another machine keeps the project when that
- * machine has it too. Null without a project, or when the repository's
- * machine does not have it.
+ * repository's own, so a repository cloned or linked a moment ago never drops
+ * the pick). Callers only pass a project that links the repository or is
+ * linking it now (its own picker's rows). Projects sync across machines, so a
+ * repository on another machine keeps the project when that machine has it
+ * too. Null without a project, or when the repository's machine lacks it.
  */
 export function workDraftFolderId(input: {
   readonly repository: RepositoryRef;
@@ -242,10 +356,9 @@ export function workDraftFolderId(input: {
 }): ProjectLabelId | null {
   const { project, repository } = input;
   if (project === null) return null;
-  if (project.environmentId === repository.environmentId) return project.label.id;
-  return input.byKey.has(projectLabelKey(repository.environmentId, project.label.id))
-    ? project.label.id
-    : null;
+  const entry =
+    input.byKey.get(projectLabelKey(repository.environmentId, project.label.id)) ?? project;
+  return projectLabelOn(entry, repository.environmentId) === null ? null : project.label.id;
 }
 
 /** The collapsed groups after toggling `groupKey`. */

@@ -2,14 +2,19 @@
  * Projects are folders (`ProjectLabel` in code). A folder holds many
  * repositories (Cogenly projects) and threads; each repository and thread is
  * in at most one. Work without an explicit folder follows its repository's.
- * Folders are context only and never grant access. They live per
- * environment, so every key here is scoped by environment id.
+ * Folders are context only and never grant access. Each machine stores its
+ * own copy, and paired machines sync a project under one id, so the client
+ * shows one entry per id (`unifyProjectLabels`) while repository and thread
+ * keys stay scoped by environment id.
  */
 import {
+  isRemoteRepositoryPlaceholder,
   projectHomeOwner,
+  REMOTE_REPOSITORY_ID_PREFIX,
   type EnvironmentId,
   type ProjectId,
   type ProjectLabelId,
+  type ProjectLabelRepositoryLink,
   type ProjectLabelWithRepositories,
   type ProjectSourceLink,
 } from "@cogenly/contracts";
@@ -22,10 +27,255 @@ import {
 
 export type ProjectLabelKey = `${string}:${string}`;
 
-export interface EnvironmentProjectLabel {
-  readonly key: ProjectLabelKey;
+/** One machine's copy of a project. */
+export interface ProjectLabelCopy {
   readonly environmentId: EnvironmentId;
   readonly label: ProjectLabelWithRepositories;
+}
+
+export interface EnvironmentProjectLabel {
+  readonly key: ProjectLabelKey;
+  /** The machine whose copy speaks for the project: the primary one when it has it. */
+  readonly environmentId: EnvironmentId;
+  /**
+   * The project as one: `environmentId`'s copy, named as most recently edited
+   * anywhere, linking every repository any machine links.
+   */
+  readonly label: ProjectLabelWithRepositories;
+  /** Every connected machine's copy, `environmentId`'s first. Absent when only it has one. */
+  readonly copies?: ReadonlyArray<ProjectLabelCopy>;
+}
+
+/** Every connected machine's copy of `entry`, its own machine's first. */
+export function projectLabelCopies(
+  entry: EnvironmentProjectLabel,
+): ReadonlyArray<ProjectLabelCopy> {
+  return entry.copies ?? [{ environmentId: entry.environmentId, label: entry.label }];
+}
+
+/** The machines that have `entry`, its own first. */
+export function projectLabelEnvironmentIds(
+  entry: EnvironmentProjectLabel,
+): ReadonlyArray<EnvironmentId> {
+  return projectLabelCopies(entry).map((copy) => copy.environmentId);
+}
+
+/**
+ * `entry` as `environmentId` has it: that machine's own copy (its repository
+ * ids are that machine's), under the same key. Null when the machine lacks it.
+ */
+export function projectLabelOn(
+  entry: EnvironmentProjectLabel,
+  environmentId: EnvironmentId,
+): EnvironmentProjectLabel | null {
+  const copy = projectLabelCopies(entry).find(
+    (candidate) => candidate.environmentId === environmentId,
+  );
+  if (copy === undefined) return null;
+  if (entry.copies === undefined) return entry;
+  return { key: entry.key, environmentId, label: copy.label, copies: entry.copies };
+}
+
+/** The projects `environmentId` has, each as that machine has it. */
+export function projectLabelsOn(
+  entries: ReadonlyArray<EnvironmentProjectLabel>,
+  environmentId: EnvironmentId,
+): EnvironmentProjectLabel[] {
+  return entries.flatMap((entry) => projectLabelOn(entry, environmentId) ?? []);
+}
+
+/**
+ * How many repositories the project links on any machine: one per remote,
+ * plus each machine's links that have none.
+ */
+export function projectRepositoryCount(entry: EnvironmentProjectLabel): number {
+  const keys = new Set<string>();
+  for (const copy of projectLabelCopies(entry)) {
+    for (const link of copyRepositoryLinks(copy.label)) {
+      const remote = linkRemote(link);
+      keys.add(remote === null ? `${copy.environmentId}:${link.repositoryId}` : `remote:${remote}`);
+    }
+  }
+  return keys.size;
+}
+
+function copyRepositoryLinks(label: ProjectLabelWithRepositories) {
+  return (
+    label.repositories ??
+    label.repositoryIds.map((repositoryId): ProjectLabelRepositoryLink => ({
+      repositoryId,
+      remote: null,
+      directoryName: null,
+    }))
+  );
+}
+
+function linkRemote(link: ProjectLabelRepositoryLink): string | null {
+  const remote =
+    link.remote ??
+    (isRemoteRepositoryPlaceholder(link.repositoryId)
+      ? link.repositoryId.slice(REMOTE_REPOSITORY_ID_PREFIX.length) || null
+      : null);
+  return remote === null ? null : remote.toLowerCase();
+}
+
+/**
+ * The project as one, from its copies (the speaking machine's first): the
+ * name, colour and other synced fields of the most recently edited copy, and
+ * the speaking copy's links plus any remote only another machine links yet,
+ * which reads as not cloned here, as the server would show it once synced.
+ */
+function mergeProjectLabelCopies(
+  copies: ReadonlyArray<ProjectLabelCopy>,
+): ProjectLabelWithRepositories {
+  const own = copies[0]!.label;
+  if (copies.length === 1) return own;
+  const newest = copies.reduce(
+    (latest, copy) => (copy.label.updatedAt > latest.updatedAt ? copy.label : latest),
+    own,
+  );
+  const ownLinks = copyRepositoryLinks(own);
+  const held = new Set(ownLinks.map(linkRemote).filter((remote) => remote !== null));
+  const arrived: ProjectLabelRepositoryLink[] = [];
+  for (const copy of copies.slice(1)) {
+    for (const link of copyRepositoryLinks(copy.label)) {
+      const remote = linkRemote(link);
+      if (remote === null || held.has(remote)) continue;
+      held.add(remote);
+      arrived.push({
+        repositoryId: `${REMOTE_REPOSITORY_ID_PREFIX}${link.remote ?? remote}` as ProjectId,
+        remote: link.remote ?? remote,
+        directoryName: link.directoryName,
+        checkout: "not_cloned",
+        ...(link.iconPath === undefined ? {} : { iconPath: link.iconPath }),
+      });
+    }
+  }
+  const possibleDuplicateIds = [
+    ...new Set(copies.flatMap((copy) => copy.label.possibleDuplicateIds ?? [])),
+  ];
+  const {
+    color: _color,
+    description: _description,
+    archivedAt: _archivedAt,
+    possibleDuplicateIds: _possibleDuplicateIds,
+    ...base
+  } = own;
+  return {
+    ...base,
+    name: newest.name,
+    ...(newest.color === undefined ? {} : { color: newest.color }),
+    ...(newest.description === undefined ? {} : { description: newest.description }),
+    ...(newest.archivedAt === undefined ? {} : { archivedAt: newest.archivedAt }),
+    instructions: newest.instructions,
+    sourceLinks: newest.sourceLinks,
+    updatedAt: newest.updatedAt,
+    ...(arrived.length > 0 || own.repositories !== undefined
+      ? { repositories: [...ownLinks, ...arrived] }
+      : {}),
+    projectChatThreadId:
+      own.projectChatThreadId ??
+      copies.find((copy) => copy.label.projectChatThreadId !== null)?.label.projectChatThreadId ??
+      null,
+    threadCount: Math.max(...copies.map((copy) => copy.label.threadCount)),
+    ...(possibleDuplicateIds.length > 0 ? { possibleDuplicateIds } : {}),
+  };
+}
+
+export interface UnifiedProjectLabels {
+  /** One entry per project id, alphabetical. */
+  readonly labels: ReadonlyArray<EnvironmentProjectLabel>;
+  /** Every machine's `projectLabelKey` for a project → its one entry. */
+  readonly byKey: ReadonlyMap<ProjectLabelKey, EnvironmentProjectLabel>;
+  /** `environmentId:repositoryId` → the one entry holding that machine's repository. */
+  readonly folderByRepository: ReadonlyMap<string, EnvironmentProjectLabel>;
+}
+
+/**
+ * One entry per project across machines. Paired machines sync a project
+ * under one id, so copies with the same id are the same project; the first
+ * machine listed that has it speaks for it. Same-name projects with
+ * different ids stay apart (the server flags them as possible duplicates).
+ */
+export function unifyProjectLabels(
+  perEnvironment: ReadonlyArray<{
+    readonly environmentId: EnvironmentId;
+    readonly labels: ReadonlyArray<ProjectLabelWithRepositories>;
+  }>,
+): UnifiedProjectLabels {
+  const copiesById = new Map<string, ProjectLabelCopy[]>();
+  for (const { environmentId, labels } of perEnvironment) {
+    for (const label of labels) {
+      const copies = copiesById.get(label.id);
+      if (copies === undefined) copiesById.set(label.id, [{ environmentId, label }]);
+      else if (!copies.some((copy) => copy.environmentId === environmentId))
+        copies.push({ environmentId, label });
+    }
+  }
+  const byKey = new Map<ProjectLabelKey, EnvironmentProjectLabel>();
+  const folderByRepository = new Map<string, EnvironmentProjectLabel>();
+  const labels: EnvironmentProjectLabel[] = [];
+  for (const copies of copiesById.values()) {
+    const own = copies[0]!;
+    const entry: EnvironmentProjectLabel = {
+      key: projectLabelKey(own.environmentId, own.label.id),
+      environmentId: own.environmentId,
+      label: mergeProjectLabelCopies(copies),
+      ...(copies.length > 1 ? { copies } : {}),
+    };
+    labels.push(entry);
+    for (const copy of copies) {
+      byKey.set(projectLabelKey(copy.environmentId, copy.label.id), entry);
+    }
+  }
+  const sorted = sortProjectLabels(labels);
+  // Alphabetical, so a repository two projects claim mid-sync resolves as before.
+  for (const entry of sorted) {
+    for (const copy of projectLabelCopies(entry)) {
+      for (const repositoryId of copy.label.repositoryIds) {
+        folderByRepository.set(scopedRepositoryKey(copy.environmentId, repositoryId), entry);
+      }
+    }
+  }
+  return { labels: sorted, byKey, folderByRepository };
+}
+
+/**
+ * Two projects created apart under the same name, which the server flags as
+ * possibly one. Merging moves `from` into `into`, the older one.
+ */
+export interface PossibleDuplicateProjects {
+  readonly key: string;
+  readonly into: EnvironmentProjectLabel;
+  readonly from: EnvironmentProjectLabel;
+  /** A machine that has both, which runs the merge; null while none does yet. */
+  readonly environmentId: EnvironmentId | null;
+}
+
+/** Every flagged pair among `entries` once, in the order the entries come. */
+export function possibleDuplicateProjects(
+  entries: ReadonlyArray<EnvironmentProjectLabel>,
+): PossibleDuplicateProjects[] {
+  const byId = new Map(entries.map((entry) => [entry.label.id as string, entry] as const));
+  const seen = new Set<string>();
+  const pairs: PossibleDuplicateProjects[] = [];
+  for (const entry of entries) {
+    for (const otherId of entry.label.possibleDuplicateIds ?? []) {
+      const other = byId.get(otherId);
+      if (other === undefined || other === entry) continue;
+      const key = [entry.label.id, other.label.id].toSorted().join("\0");
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const entryFirst =
+        entry.label.createdAt < other.label.createdAt ||
+        (entry.label.createdAt === other.label.createdAt && entry.label.id < other.label.id);
+      const [into, from] = entryFirst ? [entry, other] : [other, entry];
+      const fromMachines = new Set(projectLabelEnvironmentIds(from));
+      const shared = projectLabelEnvironmentIds(into).filter((id) => fromMachines.has(id));
+      pairs.push({ key, into, from, environmentId: shared[0] ?? null });
+    }
+  }
+  return pairs;
 }
 
 export function projectLabelKey(
@@ -143,8 +393,22 @@ export interface ThreadFolderState {
   readonly viaRepository: boolean;
   /** Only an explicit filing can be removed; removing restores the repository default. */
   readonly removable: boolean;
-  /** Active folders on the thread's environment it can move to, alphabetical. */
+  /** Active folders on the thread's environment, alphabetical. */
   readonly options: ReadonlyArray<EnvironmentProjectLabel>;
+  /**
+   * Why an option can't take the thread, by option key: a project that does
+   * not include the repository it works in ("Doesn't include platform").
+   * Such options are listed, disabled; a move menu never links a repository.
+   */
+  readonly blocked: ReadonlyMap<ProjectLabelKey, string>;
+  /** Whether the thread works in a repository, so a new project could not take it either. */
+  readonly inRepository: boolean;
+}
+
+/** The repository a thread works in, for move menus; null for a machine's or a project's folder. */
+export interface ThreadRepository {
+  readonly projectId: ProjectId;
+  readonly name: string;
 }
 
 /**
@@ -153,14 +417,12 @@ export interface ThreadFolderState {
  */
 export function isProjectChatThread(
   thread: { readonly id?: string; readonly environmentId: EnvironmentId },
-  labels: ReadonlyArray<Pick<EnvironmentProjectLabel, "environmentId" | "label">>,
+  labels: ReadonlyArray<EnvironmentProjectLabel>,
 ): boolean {
-  return labels.some(
-    (entry) =>
-      entry.environmentId === thread.environmentId &&
-      entry.label.projectChatThreadId != null &&
-      entry.label.projectChatThreadId === thread.id,
-  );
+  return labels.some((entry) => {
+    const own = projectLabelOn(entry, thread.environmentId);
+    return own?.label.projectChatThreadId != null && own.label.projectChatThreadId === thread.id;
+  });
 }
 
 /** Where a thread is filed, how, and where it could go, for move menus. */
@@ -170,6 +432,7 @@ export function threadFolderState(
     readonly labels: ReadonlyArray<EnvironmentProjectLabel>;
     readonly byKey: ReadonlyMap<ProjectLabelKey, EnvironmentProjectLabel>;
   },
+  repository: ThreadRepository | null = null,
 ): ThreadFolderState {
   const folderId = threadProjectFolderId(thread);
   const current =
@@ -179,19 +442,28 @@ export function threadFolderState(
   const source = current === null ? null : (thread.source.projectFolderSource ?? null);
   // A project's own conversation stays in its project: nowhere to move it.
   const projectHome = thread.id !== undefined && isProjectChatThread(thread, directory.labels);
+  // An archived folder is never offered, though a thread already in one
+  // still names it as `current`.
+  const options = projectHome
+    ? []
+    : projectLabelsOn(directory.labels, thread.environmentId).filter(
+        (entry) => !isProjectLabelArchived(entry.label),
+      );
+  const blocked = new Map<ProjectLabelKey, string>();
+  if (repository !== null) {
+    for (const entry of options) {
+      if (!entry.label.repositoryIds.includes(repository.projectId))
+        blocked.set(entry.key, `Doesn't include ${repository.name}`);
+    }
+  }
   return {
     current,
     source,
     viaRepository: source === "repository",
     removable: source === "explicit" && !projectHome,
-    // An archived folder is never offered, though a thread already in one
-    // still names it as `current`.
-    options: projectHome
-      ? []
-      : directory.labels.filter(
-          (entry) =>
-            entry.environmentId === thread.environmentId && !isProjectLabelArchived(entry.label),
-        ),
+    options,
+    blocked,
+    inRepository: repository !== null,
   };
 }
 
@@ -200,6 +472,9 @@ export function threadFolderState(
  * repository is in now. The repository's project is read from the live
  * directory because a thread's server-resolved folder is only refreshed with
  * the thread, so it lags a repository being added to or taken out of a project.
+ * A filing never names a repository it does not hold: Work in a real
+ * repository (`inRepository`) filed elsewhere names the repository's own
+ * project, or none. Work in a project's folder keeps its filing.
  */
 export function workThreadFolder(
   thread: FolderedThread & { readonly projectId: ProjectId },
@@ -207,6 +482,10 @@ export function workThreadFolder(
     readonly byKey: ReadonlyMap<ProjectLabelKey, EnvironmentProjectLabel>;
     readonly folderByRepository: ReadonlyMap<string, EnvironmentProjectLabel>;
   },
+  inRepository: (thread: {
+    readonly environmentId: EnvironmentId;
+    readonly projectId: ProjectId;
+  }) => boolean = () => false,
 ): EnvironmentProjectLabel | null {
   const folderId = threadProjectFolderId(thread);
   const filed =
@@ -214,10 +493,14 @@ export function workThreadFolder(
       ? null
       : (directory.byKey.get(projectLabelKey(thread.environmentId, folderId)) ?? null);
   const source = thread.source.projectFolderSource ?? null;
-  if (source === "explicit") return filed;
   const repositoryFolder =
     directory.folderByRepository.get(scopedRepositoryKey(thread.environmentId, thread.projectId)) ??
     null;
+  if (source === "explicit") {
+    return filed !== null && filed !== repositoryFolder && inRepository(thread)
+      ? repositoryFolder
+      : filed;
+  }
   // An older server sends no source, so a folder it resolved may be explicit.
   return source === "repository" || filed === null ? repositoryFolder : filed;
 }

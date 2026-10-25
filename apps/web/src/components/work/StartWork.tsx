@@ -22,6 +22,7 @@ import { openCommandPalette } from "~/commandPaletteBus";
 import { ProjectFolderIcon } from "~/projectLabels/ProjectFolderMark";
 import {
   type EnvironmentProjectLabel,
+  projectLabelsOn,
   scopedRepositoryKey,
 } from "~/projectLabels/projectLabels.logic";
 import { linkedRepositoryIcon } from "~/projectLabels/repositoryPicker.logic";
@@ -341,9 +342,7 @@ export function StartWorkPicker(props: {
   const environmentIds = useMemo(() => [threadRef.environmentId], [threadRef.environmentId]);
   const directory = useProjectLabelDirectory(environmentIds);
   const projectGroups = useMemo(() => {
-    const projects = directory.active.filter(
-      (project) => project.environmentId === threadRef.environmentId,
-    );
+    const projects = projectLabelsOn(directory.active, threadRef.environmentId);
     const activeKeys = new Set(projects.map((project) => project.key));
     return groupWorkChoicesByProject({
       choices,

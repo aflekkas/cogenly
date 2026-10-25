@@ -1,3 +1,4 @@
+import { ProjectLabelId } from "./projectLabel.ts";
 import { AgentId } from "./agent.ts";
 import * as Schema from "effect/Schema";
 
@@ -44,6 +45,7 @@ export const ScheduledTask = Schema.Struct({
   enabled: Schema.Boolean,
   schedule: ScheduledTaskSchedule,
   projectId: ProjectId,
+  projectFolderId: Schema.optional(Schema.NullOr(ProjectLabelId)),
   threadId: Schema.NullOr(ThreadId),
   workspaceStrategy: OrchestrationV2ThreadLaunchWorkspaceStrategy,
   modelSelection: ModelSelection,
@@ -86,6 +88,7 @@ export const ScheduledTaskUpsertInput = Schema.Struct({
   enabled: Schema.Boolean,
   schedule: ScheduledTaskUpsertSchedule,
   projectId: ProjectId,
+  projectFolderId: Schema.optional(Schema.NullOr(ProjectLabelId)),
   threadId: Schema.optional(Schema.NullOr(ThreadId)),
   workspaceStrategy: OrchestrationV2ThreadLaunchWorkspaceStrategy,
   modelSelection: ModelSelection,
