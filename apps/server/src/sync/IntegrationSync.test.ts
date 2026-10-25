@@ -160,7 +160,9 @@ describe("integration definitions between paired machines", () => {
           );
         }
         expect(yield* spoke.read(legacy.id)).toBeUndefined();
-        expect(yield* hub.state.get("integration", legacy.id)).toBeUndefined();
+        expect(JSON.stringify(yield* hub.state.get("integration", legacy.id))).not.toContain(
+          "bearer-PRIVATE",
+        );
       }).pipe(Effect.scoped),
     20000,
   );
@@ -259,7 +261,7 @@ describe("integration definitions between paired machines", () => {
           yield* hub.store(original);
           yield* exchange(hub, spoke);
           const credentials = {
-            headers: { authorization: "Bearer local" },
+            headers: { authorization: "Bearer {{credential:local-item.value}}" },
             approvedCredentialItems: ["local-item"],
             oauthState: { signedIn: true, tokenItemId: "local-token" },
             auth: {

@@ -49,6 +49,7 @@ const startGateway = (node: VaultNode) =>
       // The mock servers listen on loopback, which production refuses.
       Layer.provide(Layer.succeed(IntegrationEndpointPolicy, loopbackHttpsPolicy)),
       Layer.provide(Credentials.layer),
+      Layer.provide(Credentials.secretsLayer),
       Layer.provideMerge(Tokens.layer),
       Layer.provideMerge(IntegrationSyncPeers.layerFor(node.environmentId)),
       Layer.provide(FetchHttpClient.layer),

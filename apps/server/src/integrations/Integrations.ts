@@ -142,7 +142,10 @@ export const redactHeaders = (headers: Readonly<Record<string, string>>): Record
   Object.fromEntries(
     Object.entries(headers).map(([name, value]) => [
       name,
-      value === "" || credentialRefsIn(value).length > 0 ? value : HEADER_MASK,
+      value === "" ||
+      (credentialRefsIn(value).length > 0 && !value.includes("{{credential:integration-secret:"))
+        ? value
+        : HEADER_MASK,
     ]),
   );
 
@@ -154,7 +157,25 @@ const redactIntegration = (integration: Integration | StoredIntegration): Integr
     syncedFrom: _synced,
     ...rest
   } = integration as StoredIntegration;
-  return { ...rest, headers: redactHeaders(integration.headers) };
+  return {
+    ...rest,
+    headers: redactHeaders(integration.headers),
+    ...(integration.command === undefined
+      ? {}
+      : {
+          command: {
+            ...integration.command,
+            env: Object.fromEntries(
+              Object.entries(integration.command.env).map(([key, value]) => [
+                key,
+                integration.command?.nonSecretEnv?.includes(key)
+                  ? value
+                  : redactHeaders({ value }).value!,
+              ]),
+            ),
+          },
+        }),
+  };
 };
 
 /**
@@ -745,15 +766,119 @@ const make = (options: IntegrationsOptions = {}) =>
         return next;
       });
 
+    /** Stores a secret typed into Settings; the failure carries no cause, so no value can leak. */
+    const saveSecret = (
+      input: Credentials.IntegrationSecretInput,
+    ): Effect.Effect<void, IntegrationError> =>
+      Option.isNone(secretWriter)
+        ? Effect.fail(new IntegrationError({ operation: "save secret", reason: "storage" }))
+        : secretWriter.value
+            .save(input)
+            .pipe(
+              Effect.mapError(
+                () => new IntegrationError({ operation: "save secret", reason: "storage" }),
+              ),
+            );
+
+    /** Private paths are capabilities: keep the endpoint in the vault, even for direct creates. */
+    const protectEndpoint = (integration: StoredIntegration) =>
+      Effect.gen(function* () {
+        if (integration.transport !== "http") return integration;
+        const url = new URL(integration.url);
+        if (isPublicIntegrationPath(url.pathname)) return integration;
+        const item = `integration-endpoint:${integration.id.replace(/^integration:/, "")}`;
+        yield* saveSecret({
+          item,
+          type: "api_key",
+          fields: { value: integration.url },
+          domains: [url.hostname],
+          label: `${integration.displayName} private endpoint`,
+        });
+        return { ...integration, url: `${url.origin}/`, endpointRef: `${item}.value` };
+      });
+
+    /** Encrypt literal pieces, retaining only known protocol prefixes alongside credential refs. */
+    const protectLiterals = (integration: StoredIntegration) =>
+      Effect.gen(function* () {
+        const domains = [
+          integration.transport === "stdio" ? "localhost" : new URL(integration.url).hostname,
+        ];
+        const protect = (value: string, header: boolean) =>
+          Effect.gen(function* () {
+            if (value === "") return value;
+            const matches = [...value.matchAll(CREDENTIAL_REF)];
+            const literal = (part: string) =>
+              Effect.gen(function* () {
+                if (
+                  part === "" ||
+                  (header && matches.length > 0 && ["Bearer ", "Basic "].includes(part))
+                )
+                  return part;
+                const item = `integration-secret:${yield* crypto.randomUUIDv4().pipe(Effect.mapError(failure("save secret", "storage")))}`;
+                yield* saveSecret({
+                  item,
+                  type: "api_key",
+                  fields: { value: part },
+                  domains,
+                  label: `${integration.displayName} credential`,
+                });
+                return `{{credential:${item}.value}}`;
+              });
+            let result = "";
+            let offset = 0;
+            for (const match of matches) {
+              result += (yield* literal(value.slice(offset, match.index))) + match[0];
+              offset = match.index + match[0].length;
+            }
+            return result + (yield* literal(value.slice(offset)));
+          });
+        const headers = Object.fromEntries(
+          yield* Effect.forEach(Object.entries(integration.headers), ([key, value]) =>
+            protect(value, true).pipe(Effect.map((value) => [key, value] as const)),
+          ),
+        );
+        const command = integration.command;
+        return {
+          ...integration,
+          headers,
+          ...(command === undefined
+            ? {}
+            : {
+                command: {
+                  ...command,
+                  env: Object.fromEntries(
+                    yield* Effect.forEach(Object.entries(command.env), ([key, value]) =>
+                      (command.nonSecretEnv?.includes(key)
+                        ? Effect.succeed(value)
+                        : protect(value, false)
+                      ).pipe(Effect.map((value) => [key, value] as const)),
+                    ),
+                  ),
+                },
+              }),
+        };
+      });
+
+    /** Upgrade legacy plaintext rows on startup and on reads, including old writers and tombstones. */
+    const readStored = (payload: string) =>
+      Effect.gen(function* () {
+        const current = yield* decode(payload).pipe(Effect.mapError(failure("read", "storage")));
+        const protectedValue = yield* protectLiterals(yield* protectEndpoint(current));
+        const encoded = yield* encode(protectedValue).pipe(
+          Effect.mapError(failure("write", "storage")),
+        );
+        if (encoded !== (yield* encode(current).pipe(Effect.mapError(failure("read", "storage")))))
+          yield* sql`UPDATE integrations SET payload_json=${encoded} WHERE id=${current.id} AND payload_json=${payload}`.pipe(
+            Effect.mapError(failure("write", "storage")),
+          );
+        return protectedValue;
+      }).pipe(sql.withTransaction, Effect.mapError(failure("migrate credentials", "storage")));
+
     const rows = () =>
       sql<{
         payload_json: string;
       }>`SELECT payload_json FROM integrations WHERE deleted_at IS NULL ORDER BY name`.pipe(
-        Effect.flatMap((found) =>
-          Effect.forEach(found, (row) =>
-            decode(row.payload_json).pipe(Effect.mapError(failure("list", "storage"))),
-          ),
-        ),
+        Effect.flatMap((found) => Effect.forEach(found, (row) => readStored(row.payload_json))),
         Effect.mapError(failure("list", "storage")),
       );
 
@@ -767,9 +892,7 @@ const make = (options: IntegrationsOptions = {}) =>
         if (!found[0]) {
           return yield* new IntegrationError({ operation: "read", reason: "not_found" });
         }
-        return yield* decode(found[0].payload_json).pipe(
-          Effect.mapError(failure("read", "storage")),
-        );
+        return yield* readStored(found[0].payload_json);
       });
 
     const getByName = (name: IntegrationName, labelId: ProjectLabelId | null | undefined) =>
@@ -1965,6 +2088,14 @@ const make = (options: IntegrationsOptions = {}) =>
       Effect.withSpan("Integrations.refreshSharedSignIns"),
     );
 
+    yield* sql<{ payload_json: string }>`SELECT payload_json FROM integrations`.pipe(
+      Effect.mapError(failure("migrate credentials", "storage")),
+      Effect.flatMap((rows) =>
+        Effect.forEach(rows, (row) => readStored(row.payload_json), { discard: true }),
+      ),
+      Effect.orDie,
+    );
+
     // Sign-ins that arrive through vault sync, and removals, apply here as they land.
     yield* tokenStore.syncedChanges.pipe(
       Stream.runForEach((change) =>
@@ -2046,37 +2177,6 @@ const make = (options: IntegrationsOptions = {}) =>
         Effect.forkScoped,
       );
     }
-
-    /** Stores a secret typed into Settings; the failure carries no cause, so no value can leak. */
-    const saveSecret = (
-      input: Credentials.IntegrationSecretInput,
-    ): Effect.Effect<void, IntegrationError> =>
-      Option.isNone(secretWriter)
-        ? Effect.fail(new IntegrationError({ operation: "save secret", reason: "storage" }))
-        : secretWriter.value
-            .save(input)
-            .pipe(
-              Effect.mapError(
-                () => new IntegrationError({ operation: "save secret", reason: "storage" }),
-              ),
-            );
-
-    /** Private paths are capabilities: keep the endpoint in the vault, even for direct creates. */
-    const protectEndpoint = (integration: StoredIntegration) =>
-      Effect.gen(function* () {
-        if (integration.transport !== "http") return integration;
-        const url = new URL(integration.url);
-        if (isPublicIntegrationPath(url.pathname)) return integration;
-        const item = `integration-endpoint:${integration.id.replace(/^integration:/, "")}`;
-        yield* saveSecret({
-          item,
-          type: "api_key",
-          fields: { value: integration.url },
-          domains: [url.hostname],
-          label: `${integration.displayName} private endpoint`,
-        });
-        return { ...integration, url: `${url.origin}/`, endpointRef: `${item}.value` };
-      });
 
     /** The account a secret form updates, which must belong to that catalog entry. */
     const targetAccount = (
@@ -2245,7 +2345,7 @@ const make = (options: IntegrationsOptions = {}) =>
             updatedAt: at,
             deletedAt: null,
           };
-          integration = yield* protectEndpoint(integration);
+          integration = yield* protectLiterals(yield* protectEndpoint(integration));
           yield* persistDefinition(integration);
           // The process starts now so a sign-in link answers quickly; listing retries a failure.
           if (integration.transport === "local" && Option.isSome(local))
@@ -2287,6 +2387,20 @@ const make = (options: IntegrationsOptions = {}) =>
           if (Object.entries(masked).every(([key, value]) => key === "id" || value === undefined))
             return { integration: redactIntegration(current), changed: false };
           // A masked value is one the caller left as it was.
+          if (masked.command !== undefined) {
+            const env = Object.fromEntries(
+              yield* Effect.forEach(Object.entries(masked.command.env), ([key, value]) => {
+                if (value !== HEADER_MASK) return Effect.succeed([key, value] as const);
+                const stored = current.command?.env[key];
+                return stored === undefined
+                  ? Effect.fail(
+                      new IntegrationError({ operation: "update", reason: "invalid_request" }),
+                    )
+                  : Effect.succeed([key, stored] as const);
+              }),
+            );
+            masked = { ...masked, command: { ...masked.command, env } };
+          }
           const input: IntegrationUpdateInput =
             masked.headers === undefined
               ? masked
@@ -2381,7 +2495,9 @@ const make = (options: IntegrationsOptions = {}) =>
             auth?.type === "oauth" &&
             (input.url === undefined || input.url === current.url) &&
             auth.clientId === current.auth?.clientId &&
-            JSON.stringify(auth.server) === JSON.stringify(current.auth?.server);
+            auth.server?.issuer === current.auth?.server?.issuer &&
+            auth.server?.authorizationEndpoint === current.auth?.server?.authorizationEndpoint &&
+            auth.server?.tokenEndpoint === current.auth?.server?.tokenEndpoint;
           const {
             auth: _auth,
             endpointRef: _endpointRef,
@@ -2419,7 +2535,7 @@ const make = (options: IntegrationsOptions = {}) =>
             credentialOrigin,
             approvedCredentialItems,
           };
-          integration = yield* protectEndpoint(integration);
+          integration = yield* protectLiterals(yield* protectEndpoint(integration));
           yield* persistDefinition(integration, current);
           if (!keepSignIn) yield* dropTokens(current);
           yield* invalidate(integration.id);

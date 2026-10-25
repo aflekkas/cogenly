@@ -50,6 +50,7 @@ const gatewayLayer = (
     // The mock servers listen on loopback, which production refuses.
     Layer.provide(Layer.succeed(IntegrationEndpointPolicy, loopbackHttpsPolicy)),
     Layer.provideMerge(Credentials.layer),
+    Layer.provide(Credentials.secretsLayer),
     Layer.provideMerge(
       Layer.effect(
         Tokens.IntegrationTokens,
@@ -142,6 +143,8 @@ describe("Integration OAuth sign-in", () => {
               .completeSignIn({
                 state: new URL(link.success.authorizationUrl).searchParams.get("state")!,
                 code: "attacker-code",
+                error: undefined,
+                iss: undefined,
               })
               .pipe(Effect.result);
           }
@@ -207,6 +210,8 @@ describe("Integration OAuth sign-in", () => {
             .completeSignIn({
               state: new URL(link.authorizationUrl).searchParams.get("state")!,
               code: "code",
+              error: undefined,
+              iss: undefined,
             })
             .pipe(Effect.result),
         ).toMatchObject({ _tag: "Failure", failure: { reason: "credential_not_allowed" } });
@@ -442,7 +447,11 @@ describe("Integration OAuth sign-in", () => {
           yield* Deferred.succeed(gate.resume, undefined);
           expect((yield* Fiber.join(completion))._tag).toBe("Failure");
           const vault = yield* Vault.Vault;
-          expect((yield* vault.list({})).items).toHaveLength(0);
+          expect(
+            (yield* vault.list({})).items.filter((item) =>
+              item.name.startsWith("integration-oauth:"),
+            ),
+          ).toHaveLength(0);
           expect(mock.bearers.filter((bearer) => bearer !== undefined)).toHaveLength(0);
           if (mutation === "edit")
             expect((yield* statusOf(integration.id))?.status).toBe("needs_sign_in");

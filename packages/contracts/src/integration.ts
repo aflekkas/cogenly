@@ -38,6 +38,8 @@ export const IntegrationCommand = Schema.Struct({
   command: TrimmedNonEmptyString.check(Schema.isMaxLength(2000)),
   args: Schema.Array(Schema.String.check(Schema.isMaxLength(4000))).check(Schema.isMaxLength(100)),
   env: Schema.Record(Schema.String, Schema.String.check(Schema.isMaxLength(4000))),
+  /** Environment keys explicitly reviewed as public constants. Everything else is vaulted. */
+  nonSecretEnv: Schema.optional(Schema.Array(Schema.String).check(Schema.isMaxLength(100))),
 });
 export type IntegrationCommand = typeof IntegrationCommand.Type;
 
