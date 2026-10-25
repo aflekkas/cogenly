@@ -412,7 +412,8 @@ it.layer(layerWithHealthAlert)("RuntimePolicyV2 machine health", (it) => {
         thread: { ...makeThread({ now, worktreePath: null }), id: ThreadId.make("thread:unfiled") },
         modelSelection,
       });
-      assert.equal(unfiled.projectManifest, line);
+      assert.ok(unfiled.projectManifest?.includes(line));
+      assert.ok(unfiled.projectManifest?.includes("Use Cogenly integrations."));
     }),
   );
 });
