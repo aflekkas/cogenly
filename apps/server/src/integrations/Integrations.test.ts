@@ -1020,6 +1020,7 @@ const vaultLayer = () => {
   return Integrations.layer.pipe(
     Layer.provide(Layer.succeed(IntegrationEndpointPolicy, loopbackHttpsPolicy)),
     Layer.provide(Credentials.layer),
+    Layer.provide(Credentials.secretsLayer),
     Layer.provide(Tokens.layer),
     Layer.provide(IntegrationSyncPeers.layerFor("env:test")),
     Layer.provideMerge(Vault.layer),
@@ -1404,6 +1405,39 @@ describe("Integration credential destinations", () => {
   const tokenHeaders = { authorization: "Bearer {{credential:github.value}}" };
   const reasonOf = (exit: { readonly _tag: string; readonly failure?: unknown }) =>
     exit._tag === "Failure" ? (exit.failure as { readonly reason?: string }).reason : "success";
+
+  it.effect(
+    "vaults directly created and updated private endpoint paths before returning or persisting",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* runMigrations();
+          const upstream = yield* fakeUpstream;
+          const service = yield* Integrations.Integrations;
+          const sql = yield* SqlClient.SqlClient;
+          const secret = "bearer-path-PRIVATE-123";
+          const { integration } = yield* service.create({
+            ...createInput(`${upstream.url}/${secret}`),
+            headers: {},
+          });
+          expect(integration.url).toBe(`${new URL(upstream.url).origin}/`);
+          expect(integration.endpointRef).toBeDefined();
+          yield* service.callTool(integration.name, "echo", {}, null);
+          expect(upstream.seen.at(-1)?.path).toBe(`/mcp/${secret}`);
+          const updated = yield* service.update({
+            id: integration.id,
+            url: `${upstream.url}/${secret}-updated`,
+          });
+          yield* service.callTool(integration.name, "echo", {}, null);
+          expect(upstream.seen.at(-1)?.path).toBe(`/mcp/${secret}-updated`);
+          const rows = yield* sql`SELECT payload_json FROM integrations`;
+          expect(JSON.stringify([integration, updated, yield* service.list(), rows])).not.toContain(
+            secret,
+          );
+          expect(JSON.stringify(yield* sql`SELECT * FROM vault_items`)).not.toContain(secret);
+        }),
+      ).pipe(Effect.provide(vaultLayer())),
+  );
 
   it.effect(
     "resolves private endpoints only at call time and keeps them off settings and spans",

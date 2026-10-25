@@ -1,3 +1,4 @@
+import { isPublicIntegrationPath } from "./publicEndpoint.ts";
 import * as NativeImport from "./NativeIntegrationImport.ts";
 import {
   Integration,
@@ -2060,6 +2061,23 @@ const make = (options: IntegrationsOptions = {}) =>
               ),
             );
 
+    /** Private paths are capabilities: keep the endpoint in the vault, even for direct creates. */
+    const protectEndpoint = (integration: StoredIntegration) =>
+      Effect.gen(function* () {
+        if (integration.transport !== "http") return integration;
+        const url = new URL(integration.url);
+        if (isPublicIntegrationPath(url.pathname)) return integration;
+        const item = `integration-endpoint:${integration.id.replace(/^integration:/, "")}`;
+        yield* saveSecret({
+          item,
+          type: "api_key",
+          fields: { value: integration.url },
+          domains: [url.hostname],
+          label: `${integration.displayName} private endpoint`,
+        });
+        return { ...integration, url: `${url.origin}/`, endpointRef: `${item}.value` };
+      });
+
     /** The account a secret form updates, which must belong to that catalog entry. */
     const targetAccount = (
       id: IntegrationId | undefined,
@@ -2199,7 +2217,7 @@ const make = (options: IntegrationsOptions = {}) =>
             accountLabel = `#${ordinal}`;
           }
           const at = yield* now;
-          const integration: Integration = {
+          let integration: StoredIntegration = {
             id: IntegrationId.make(
               `integration:${yield* crypto.randomUUIDv4().pipe(Effect.mapError(failure("create", "storage")))}`,
             ),
@@ -2227,6 +2245,7 @@ const make = (options: IntegrationsOptions = {}) =>
             updatedAt: at,
             deletedAt: null,
           };
+          integration = yield* protectEndpoint(integration);
           yield* persistDefinition(integration);
           // The process starts now so a sign-in link answers quickly; listing retries a failure.
           if (integration.transport === "local" && Option.isSome(local))
@@ -2372,7 +2391,7 @@ const make = (options: IntegrationsOptions = {}) =>
           } = current;
           const accountLabel =
             input.accountLabel === undefined ? current.accountLabel : input.accountLabel.trim();
-          const integration: StoredIntegration = {
+          let integration: StoredIntegration = {
             ...rest,
             ...(endpointRef === undefined ? {} : { endpointRef }),
             ...(input.displayName === undefined ? {} : { displayName: input.displayName }),
@@ -2400,6 +2419,7 @@ const make = (options: IntegrationsOptions = {}) =>
             credentialOrigin,
             approvedCredentialItems,
           };
+          integration = yield* protectEndpoint(integration);
           yield* persistDefinition(integration, current);
           if (!keepSignIn) yield* dropTokens(current);
           yield* invalidate(integration.id);

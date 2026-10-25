@@ -83,6 +83,7 @@ const start = Effect.fn("startIntegrationMachine")(function* (
               remove: () => Effect.void,
             }),
           ),
+          Layer.provide(Layer.succeed(Credentials.IntegrationSecrets, { save: () => Effect.void })),
           Layer.provide(FetchHttpClient.layer),
         ),
       ).pipe(
@@ -133,6 +134,37 @@ const paired = Effect.gen(function* () {
 });
 
 describe("integration definitions between paired machines", () => {
+  it.live(
+    "private paths never enter shared documents, from native import, direct creation or legacy rows",
+    () =>
+      Effect.gen(function* () {
+        const { hub, spoke } = yield* paired;
+        const privateUrl = "https://vendor.example/sse/bearer-PRIVATE-capability";
+        const imported = mapNativeIntegrations(
+          { mcpServers: { private: { url: privateUrl } } },
+          {},
+        );
+        const direct = (yield* hub.integrations.create({
+          ...definition("integration:unused", "direct"),
+          url: privateUrl,
+        })).integration;
+        const native = (yield* hub.integrations.create(imported.definitions[0]!)).integration;
+        const legacy = { ...definition("integration:legacy", "legacy"), url: privateUrl };
+        yield* hub.store(legacy);
+        yield* exchange(hub, spoke);
+        for (const id of [direct.id, native.id]) {
+          expect((yield* hub.read(id))?.endpointRef).toBeDefined();
+          expect((yield* spoke.read(id))?.url).toBe("https://vendor.example/");
+          expect(JSON.stringify(yield* hub.state.get("integration", id))).not.toContain(
+            "bearer-PRIVATE",
+          );
+        }
+        expect(yield* spoke.read(legacy.id)).toBeUndefined();
+        expect(yield* hub.state.get("integration", legacy.id)).toBeUndefined();
+      }).pipe(Effect.scoped),
+    20000,
+  );
+
   it.live(
     "URL credentials and unrecognized query parameters never publish or bootstrap",
     () =>
@@ -191,9 +223,9 @@ describe("integration definitions between paired machines", () => {
         ).not.toContain("local-secret");
         expect((yield* spoke.read(original.id))?.url).toBe(original.url);
         // The way back becomes shareable again.
-        yield* hub.integrations.update({ id: original.id, url: "https://example.com/public" });
+        yield* hub.integrations.update({ id: original.id, url: "https://example.com/sse" });
         yield* exchange(hub, spoke);
-        expect((yield* spoke.read(original.id))?.url).toBe("https://example.com/public");
+        expect((yield* spoke.read(original.id))?.url).toBe("https://example.com/sse");
       }).pipe(Effect.scoped),
     20000,
   );
@@ -296,7 +328,7 @@ describe("integration definitions between paired machines", () => {
           /local-token|private-literal|clientId|clientSecret|headers|approvedCredential/,
         );
         // Peer URL edits discard this machine's grant and cannot retarget its headers.
-        yield* hub.integrations.update({ id, url: "https://mcp.linear.app/new" });
+        yield* hub.integrations.update({ id, url: "https://mcp.linear.app/sse" });
         yield* exchange(hub, spoke);
         expect((yield* spoke.read(id))?.oauthState).toBeUndefined();
         expect((yield* spoke.read(id))?.headers).toEqual({});

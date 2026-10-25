@@ -1,3 +1,4 @@
+import { isPublicIntegrationPath } from "./publicEndpoint.ts";
 import {
   ClaudeSettings,
   CodexSettings,
@@ -133,7 +134,7 @@ export function mapNativeIntegrations(
           continue;
         }
         // Only standard, credential-free paths may leave the native config reader.
-        const privateEndpoint = !["/", "/mcp", "/sse"].includes(url.pathname);
+        const privateEndpoint = !isPublicIntegrationPath(url.pathname);
         if (privateEndpoint)
           warnings.push(
             `${name}: private endpoint withheld; use request_secret with saveToVault for ${name}-endpoint, field value, allowed domain ${url.hostname}, then verify before enabling.`,

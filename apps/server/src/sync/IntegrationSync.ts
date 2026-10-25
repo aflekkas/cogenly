@@ -147,6 +147,7 @@ const make = Effect.gen(function* () {
       updatedAt: at,
       deletedAt: null,
       headers: local?.headers ?? {},
+      ...(local?.endpointRef === undefined ? {} : { endpointRef: local.endpointRef }),
       approvedCredentialItems: local?.approvedCredentialItems ?? [],
       ...(local?.credentialOrigin === undefined
         ? {}
