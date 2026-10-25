@@ -8,6 +8,7 @@ import {
   ThreadId,
   ThreadCommandForward,
   ThreadAttachmentRead,
+  ThreadFolderMove,
   RunId,
 } from "@cogenly/contracts";
 import * as DateTime from "effect/DateTime";
@@ -342,6 +343,58 @@ it.live(
         });
         expect(yield* fs.readFileString(path.join(dir, `${attachment.id}.txt`))).toBe("notes");
       }
+    }).pipe(Effect.scoped),
+  30000,
+);
+
+it.live(
+  "filing rechecks ownership after routing and rejects stale local writes",
+  () =>
+    Effect.gen(function* () {
+      const hub = yield* startThreadMachine("filing-race-hub", "cloud-server");
+      const laptop = yield* startThreadMachine(
+        "filing-race-owner",
+        "computer",
+        undefined,
+        undefined,
+        false,
+        undefined,
+        true,
+      );
+      yield* pair(hub, laptop);
+      const at = yield* DateTime.now;
+      yield* laptop.sink.write({ events: [threadCreated("event:filing-race", at)] });
+      const folderId = ProjectLabelId.make("label:race");
+      yield* laptop.sql`INSERT INTO project_labels(label_id, name, created_at, updated_at)
+      VALUES (${folderId}, 'Race', '2026-10-24T00:00:00.000Z', '2026-10-24T00:00:00.000Z')`;
+      const projectId = (yield* laptop.projections.getThreadProjection(threadId)).thread.projectId;
+      yield* laptop.sql`INSERT INTO projection_projects(project_id, title, workspace_root, scripts_json, created_at, updated_at)
+      VALUES (${projectId}, 'Race', '/tmp/race', '[]', '2026-10-24T00:00:00.000Z', '2026-10-24T00:00:00.000Z')`;
+      yield* laptop.sql`INSERT INTO label_repositories(label_id, repository_id) VALUES (${folderId}, ${projectId})`;
+      // Finish a handoff after the local entry point's routing decision, before its mutation.
+      yield* laptop.remoteCommands.registerFolderMove(() =>
+        Effect.gen(function* () {
+          expect(yield* laptop.replication.owner(threadId)).toBeUndefined();
+          yield* laptop.sql`INSERT INTO thread_owners(thread_id, owner_env, local, epoch, updated_at)
+        VALUES (${threadId}, ${hub.environmentId}, 0, 1, '2026-10-24T00:00:00.000Z')`;
+          return Option.none();
+        }).pipe(Effect.orDie),
+      );
+      const input = { threadId, folderId };
+      expect((yield* Effect.result(laptop.labels.moveThread(input)))._tag).toBe("Failure");
+      expect((yield* Effect.result(laptop.labels.moveLocalThread(input)))._tag).toBe("Failure");
+      yield* laptop.sql`UPDATE thread_owners SET local = 1, owner_env = ${laptop.environmentId}, handoff_json = '{"target":"other","epoch":2}'`;
+      expect((yield* Effect.result(laptop.labels.moveLocalThread(input)))._tag).toBe("Failure");
+      expect(
+        (yield* Effect.result(hub.machines.call(laptop.environmentId, ThreadFolderMove, input)))
+          ._tag,
+      ).toBe("Failure");
+      expect(
+        yield* laptop.sql`SELECT * FROM thread_project_labels WHERE thread_id = ${threadId}`,
+      ).toEqual([]);
+      expect(
+        yield* laptop.sql`SELECT * FROM project_label_audit WHERE operation = 'moveThread'`,
+      ).toEqual([]);
     }).pipe(Effect.scoped),
   30000,
 );
