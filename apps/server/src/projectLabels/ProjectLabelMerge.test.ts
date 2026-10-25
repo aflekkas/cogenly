@@ -10,6 +10,7 @@ import {
   type SharedChangeBatch,
 } from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
+import * as Deferred from "effect/Deferred";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -33,9 +34,9 @@ const git = (cwd: string, args: ReadonlyArray<string>) =>
 const at = "2026-01-01T00:00:00.000Z";
 const repoA = ProjectId.make("repo-a");
 const repoB = ProjectId.make("repo-b");
-const makeLayer = (name: string) => {
+const makeLayer = (name: string, foldersLayer = Folders.layer) => {
   const database = Sqlite.layerMemory.pipe(Layer.provideMerge(NodeServices.layer));
-  const infrastructure = Layer.mergeAll(Events.layer, Folders.layer, Shared.layer).pipe(
+  const infrastructure = Layer.mergeAll(Events.layer, foldersLayer, Shared.layer).pipe(
     Layer.provideMerge(database),
     Layer.provideMerge(ServerConfig.layerTest("/tmp", { prefix: `project-merge-${name}` })),
     Layer.provideMerge(Settings.layerTest()),
@@ -329,6 +330,7 @@ describe("project merge", () => {
         yield* fs.writeFileString(`${checkout}/${branch}.txt`, branch!);
       }
       yield* labels.merge({ sourceId: source.id, targetId: target.id });
+      yield* folders.reconcileMerges;
       const moved = `${to}/${layout} (2)`;
       expect(yield* fs.readFileString(`${moved}/source.txt`)).toBe("source");
       expect(yield* fs.exists(`${to}/${layout}/source.txt`)).toBe(false);
@@ -354,6 +356,7 @@ describe("project merge", () => {
         yield* fs.makeDirectory(`${from}/repos/a`, { recursive: true });
         yield* fs.writeFileString(`${from}/repos/a/README.md`, "checkout");
         yield* labels.merge({ sourceId: source.id, targetId: target.id });
+        yield* folders.reconcileMerges;
         expect(yield* fs.readFileString(`${to}/Resources/note.md`)).toBe("target");
         expect(yield* fs.readFileString(`${to}/Resources/note (2).md`)).toBe("source");
         expect(yield* fs.readFileString(`${from}/Resources/note.md`)).toBe("source");
@@ -371,6 +374,62 @@ describe("project merge", () => {
           "note.md",
         ]);
       }).pipe(Effect.provide(makeLayer("files"))),
+  );
+
+  it.effect("returns the committed merge while file reconciliation is still running", () => {
+    const entered = Deferred.makeUnsafe<void>();
+    const release = Deferred.makeUnsafe<void>();
+    let block = false;
+    const folders = Layer.mock(Folders.ProjectLabelFolders)({
+      reconcileMerges: Effect.suspend(() =>
+        block
+          ? Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release)))
+          : Effect.void,
+      ),
+      mergeFileStatus: Effect.succeed({ pendingMoves: 1, failedMoves: 0 }),
+      ensureForLabel: () => Effect.succeed({ dir: "/tmp/unused", dirName: "unused" }),
+    });
+    return Effect.gen(function* () {
+      const labels = yield* Labels.ProjectLabelService;
+      const source = (yield* labels.create({ name: "Source" })).label;
+      const target = (yield* labels.create({ name: "Target" })).label;
+      block = true;
+      expect((yield* labels.merge({ sourceId: source.id, targetId: target.id })).label.id).toBe(
+        target.id,
+      );
+      yield* Deferred.await(entered);
+      expect(yield* labels.mergeFileStatus()).toEqual({ pendingMoves: 1, failedMoves: 0 });
+      expect((yield* labels.list()).labels.map((label) => label.id)).toEqual([target.id]);
+      yield* Deferred.succeed(release, undefined);
+    }).pipe(Effect.provide(makeLayer("background-files", folders)));
+  });
+
+  it.effect("a stuck journal row does not fail a committed merge or block later file moves", () =>
+    Effect.gen(function* () {
+      const labels = yield* Labels.ProjectLabelService;
+      const folders = yield* Folders.ProjectLabelFolders;
+      const fs = yield* FileSystem.FileSystem;
+      const sql = yield* SqlClient.SqlClient;
+      const source = (yield* labels.create({ name: "Source" })).label;
+      const target = (yield* labels.create({ name: "Target" })).label;
+      const from = (yield* folders.dirForLabel(source)).dir;
+      const to = (yield* folders.dirForLabel(target)).dir;
+      yield* sql`INSERT INTO project_merge_file_moves(source,target,directory) VALUES (${`${from}/missing`},${`${to}/missing`},1)`;
+      yield* fs.writeFileString(`${from}/Resources/note.md`, "saved");
+      expect((yield* labels.merge({ sourceId: source.id, targetId: target.id })).label.id).toBe(
+        target.id,
+      );
+      yield* folders.reconcileMerges;
+      expect(yield* fs.readFileString(`${to}/Resources/note.md`)).toBe("saved");
+      expect(yield* labels.mergeFileStatus()).toEqual({ pendingMoves: 1, failedMoves: 1 });
+      // A later retry can finish the same row, and its failure status clears.
+      yield* fs.makeDirectory(`${from}/missing`);
+      yield* fs.writeFileString(`${from}/missing/recovered.txt`, "recovered");
+      yield* folders.reconcileMerges;
+      expect(yield* fs.readFileString(`${to}/missing/recovered.txt`)).toBe("recovered");
+      expect(yield* labels.mergeFileStatus()).toEqual({ pendingMoves: 0, failedMoves: 0 });
+      expect((yield* labels.list()).labels.map((label) => label.id)).toEqual([target.id]);
+    }).pipe(Effect.provide(makeLayer("stuck-row"))),
   );
 
   it.effect("defers missing targets and redirects facts and filing that arrive after a merge", () =>

@@ -78,6 +78,9 @@ describe("RPC authorization scopes", () => {
   });
 
   it("requires operate access to create a project's chat", () => {
+    expect(requiredScopeForRpcMethod(WS_METHODS.projectLabelsMergeFileStatus)).toBe(
+      AuthOrchestrationReadScope,
+    );
     expect(requiredScopeForRpcMethod(WS_METHODS.projectLabelsEnsureProjectChat)).toBe(
       AuthOrchestrationOperateScope,
     );

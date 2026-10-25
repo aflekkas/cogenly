@@ -526,6 +526,7 @@ export const WS_METHODS = {
   projectLabelsSubscribe: "projectLabels.subscribe",
   projectLabelsCreate: "projectLabels.create",
   projectLabelsUpdate: "projectLabels.update",
+  projectLabelsMergeFileStatus: "projectLabels.mergeFileStatus",
   projectLabelsMerge: "projectLabels.merge",
   projectLabelsDismissDuplicate: "projectLabels.dismissDuplicate",
   projectLabelsDelete: "projectLabels.delete",
@@ -1976,6 +1977,10 @@ const WsProjectLabelsUpdateRpc = Rpc.make(WS_METHODS.projectLabelsUpdate, {
   success: ProjectLabels.ProjectLabelMutationResult,
   error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
 });
+const WsProjectLabelsMergeFileStatusRpc = Rpc.make(WS_METHODS.projectLabelsMergeFileStatus, {
+  success: ProjectLabels.ProjectMergeFileStatus,
+  error: Schema.Union([ProjectLabels.ProjectLabelError, EnvironmentAuthorizationError]),
+});
 const WsProjectLabelsMergeRpc = Rpc.make(WS_METHODS.projectLabelsMerge, {
   payload: ProjectLabels.ProjectLabelMergeInput,
   success: ProjectLabels.ProjectLabelMutationResult,
@@ -2833,6 +2838,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectLabelsCreateRpc,
   WsProjectLabelsUpdateRpc,
   WsProjectLabelsMergeRpc,
+  WsProjectLabelsMergeFileStatusRpc,
   WsProjectLabelsDismissDuplicateRpc,
   WsProjectLabelsDeleteRpc,
   WsProjectLabelsArchiveRpc,

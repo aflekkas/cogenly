@@ -3,6 +3,7 @@ import {
   ProjectId,
   PROJECT_INSTRUCTIONS_MAX_LENGTH,
   type ProjectLabelMergeInput,
+  type ProjectMergeFileStatus,
   type ProjectLabelDismissDuplicateInput,
   ProjectLabelError,
   ProjectLabelId,
@@ -37,6 +38,7 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
+import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
@@ -92,6 +94,7 @@ export class ProjectLabelService extends Context.Service<
     readonly update: (
       input: ProjectLabelUpdateInput,
     ) => Effect.Effect<{ label: ProjectLabelWithRepositories }, ProjectLabelError>;
+    readonly mergeFileStatus: () => Effect.Effect<ProjectMergeFileStatus, ProjectLabelError>;
     readonly merge: (
       input: ProjectLabelMergeInput,
     ) => Effect.Effect<{ label: ProjectLabelWithRepositories }, ProjectLabelError>;
@@ -476,16 +479,22 @@ const make = Effect.gen(function* () {
             }),
           ),
         );
+  const mergeFileRequests = yield* Queue.sliding<void>(1);
   if (Option.isSome(folders)) {
     const reconcileMerges = folders.value.reconcileMerges.pipe(
-      Effect.tap(() => PubSub.publish(changes, undefined)),
       Effect.catch((cause) => Effect.logWarning("Project merge files deferred", { cause })),
+      Effect.andThen(PubSub.publish(changes, undefined)),
     );
-    yield* shared.changes.pipe(
-      Stream.runForEach(() => reconcileMerges),
+    yield* Queue.take(mergeFileRequests).pipe(
+      Effect.andThen(reconcileMerges),
+      Effect.forever,
       Effect.forkScoped,
     );
-    yield* reconcileMerges;
+    yield* shared.changes.pipe(
+      Stream.runForEach(() => Queue.offer(mergeFileRequests, undefined)),
+      Effect.forkScoped,
+    );
+    yield* Queue.offer(mergeFileRequests, undefined);
   }
   // Links written before portable identity (or by a link whose checkout had
   // no readable remote yet) backfill lazily on read: the remote comes from
@@ -983,16 +992,11 @@ const make = Effect.gen(function* () {
           );
           return yield* get(target.id);
         }),
-      ).pipe(
-        Effect.tap(() =>
-          Option.isSome(folders)
-            ? folders.value.reconcileMerges.pipe(
-                Effect.tap(() => PubSub.publish(changes, undefined)),
-                Effect.mapError(failure("mergeFiles")),
-              )
-            : Effect.void,
-        ),
-      ),
+      ).pipe(Effect.tap(() => Queue.offer(mergeFileRequests, undefined))),
+    mergeFileStatus: () =>
+      Option.isSome(folders)
+        ? folders.value.mergeFileStatus.pipe(Effect.mapError(failure("mergeFileStatus")))
+        : Effect.succeed({ pendingMoves: 0, failedMoves: 0 }),
     dismissDuplicate: (input) =>
       mutate(
         "dismissDuplicate",
