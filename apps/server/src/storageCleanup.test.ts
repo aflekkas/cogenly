@@ -13,9 +13,12 @@ import {
   type OrchestrationV2ThreadShell,
 } from "@cogenly/contracts";
 import * as NodeSqliteClient from "@cogenly/shared/nodeSqliteClient";
+import * as HostProcess from "@cogenly/shared/HostProcess";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as PlatformError from "effect/PlatformError";
 import * as Layer from "effect/Layer";
 import type * as Scope from "effect/Scope";
 import * as PubSub from "effect/PubSub";
@@ -157,6 +160,17 @@ describe("storage safety inspection", () => {
       const box = fixture();
       const nested = NodePath.join(box.worktree, "dist");
       NodeFS.mkdirSync(nested);
+      const processIds: string[] = [];
+      // Linux runners cannot inspect unrelated system processes. This fixture
+      // inventories only its own child, whose real cwd and exit are still checked.
+      const processInventory = Layer.effect(
+        FileSystem.FileSystem,
+        Effect.map(FileSystem.FileSystem, (fs) => ({
+          ...fs,
+          readDirectory: (directory) =>
+            directory === "/proc" ? Effect.succeed(processIds) : fs.readDirectory(directory),
+        })),
+      );
       return Effect.gen(function* () {
         const child = yield* Effect.acquireRelease(
           Effect.sync(() =>
@@ -174,6 +188,7 @@ describe("storage safety inspection", () => {
         yield* Effect.callback<void>((resume) => {
           child.stdout!.once("data", () => resume(Effect.void));
         });
+        processIds.push(String(child.pid));
         const inspect = yield* Inspection.StorageInspection;
         expect(yield* inspect.processBlocker(box.worktree)).toContain("cwd");
         yield* Effect.callback<void>((resume) => {
@@ -183,10 +198,49 @@ describe("storage safety inspection", () => {
         expect(yield* inspect.processBlocker(box.worktree)).toBeNull();
       }).pipe(
         Effect.scoped,
-        Effect.provide(Inspection.layer.pipe(Layer.provide(infrastructure(box)))),
+        Effect.provide(
+          Inspection.layer.pipe(
+            Layer.provide(processInventory),
+            Layer.provide(infrastructure(box)),
+          ),
+        ),
       );
     },
   );
+
+  it.effect("keeps worktrees when a Linux process cwd cannot be inspected", () => {
+    const box = fixture();
+    const processInventory = Layer.effect(
+      FileSystem.FileSystem,
+      Effect.map(FileSystem.FileSystem, (fs) => ({
+        ...fs,
+        readDirectory: (directory) =>
+          directory === "/proc" ? Effect.succeed(["123"]) : fs.readDirectory(directory),
+        readLink: (path) =>
+          path === "/proc/123/cwd"
+            ? Effect.fail(
+                PlatformError.systemError({
+                  _tag: "PermissionDenied",
+                  module: "FileSystem",
+                  method: "readLink",
+                  pathOrDescriptor: path,
+                }),
+              )
+            : fs.readLink(path),
+      })),
+    );
+    return Effect.gen(function* () {
+      const inspect = yield* Inspection.StorageInspection;
+      expect(yield* inspect.processBlocker(box.worktree)).toBe(
+        "process inventory could not be verified",
+      );
+    }).pipe(
+      Effect.provide(
+        Inspection.layer.pipe(Layer.provide(processInventory), Layer.provide(infrastructure(box))),
+      ),
+      Effect.provideService(HostProcess.Platform, "linux"),
+    );
+  });
 
   it.effect(
     "counts allocated hardlinks once, excludes external links from reclaimable bytes and skips symlinks",
