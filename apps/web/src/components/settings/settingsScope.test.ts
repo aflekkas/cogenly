@@ -40,12 +40,13 @@ function label(id: string, name: string, repositoryIds: readonly ProjectId[]) {
 }
 
 // The same folder id on both machines, as paired machines sync it.
+const cogenlyOnLaptop = {
+  environmentId: laptopId,
+  label: label("label:cogenly", "Cogenly", [cogenlyMac.id, docsMac.id]),
+};
 const folders = buildSettingsProjectFolders(
   [
-    {
-      environmentId: laptopId,
-      label: label("label:cogenly", "Cogenly", [cogenlyMac.id, docsMac.id]),
-    },
+    cogenlyOnLaptop,
     { environmentId: serverId, label: label("label:cogenly", "Cogenly", [cogenlyVps.id]) },
     { environmentId: laptopId, label: label("label:empty", "Empty", []) },
     // A repository id the environment no longer has is not a member.
@@ -56,19 +57,21 @@ const folders = buildSettingsProjectFolders(
 
 describe("settings project folders", () => {
   it("dedupes a folder across machines and collects every repository it holds", () => {
-    expect(folders).toEqual([
-      {
-        id: "label:cogenly",
-        name: "Cogenly",
-        color: undefined,
-        members: [cogenlyMac, docsMac, cogenlyVps],
-      },
-    ]);
+    expect(folders.find((folder) => folder.id === "label:cogenly")).toEqual({
+      id: "label:cogenly",
+      name: "Cogenly",
+      color: undefined,
+      icon: cogenlyOnLaptop,
+      members: [cogenlyMac, docsMac, cogenlyVps],
+    });
   });
 
-  it("leaves out folders without a repository, which cannot hold overrides", () => {
-    expect(folders.map((folder) => folder.id)).not.toContain("label:empty");
-    expect(folders.map((folder) => folder.id)).not.toContain("label:gone");
+  it("lists folders without a repository, as the composer's project picker does", () => {
+    expect(folders.map((folder) => [folder.id, folder.members.length])).toEqual([
+      ["label:cogenly", 3],
+      ["label:empty", 0],
+      ["label:gone", 0],
+    ]);
   });
 });
 
@@ -151,6 +154,16 @@ describe("settings scope resolution", () => {
     expect(
       resolveSettingsScope({}, folders, environments, { ...options, machinePage: true }),
     ).toMatchObject({ kind: "environment", environmentId: laptopId });
+  });
+
+  it("names a project without repositories instead of editing nothing", () => {
+    expect(
+      resolveSettingsScope({ project: "label:empty" }, folders, environments, options),
+    ).toMatchObject({
+      kind: "unavailable",
+      reason: "project-empty",
+      message: expect.stringContaining("Empty has no repositories yet"),
+    });
   });
 
   it.each([

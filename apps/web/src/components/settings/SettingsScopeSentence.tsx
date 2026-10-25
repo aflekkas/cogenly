@@ -260,7 +260,7 @@ function ProjectScopeMenu() {
       ariaLabel="Project"
       icon={
         selected ? (
-          <ProjectFolderIcon color={selected.color} className="size-3.5" />
+          <ProjectFolderIcon project={selected.icon} className="size-3.5" />
         ) : search.project || search.checkout ? null : (
           <LayersIcon aria-hidden className="size-3.5 shrink-0" />
         )
@@ -280,7 +280,7 @@ function ProjectScopeMenu() {
       options={folders.map((folder) => ({
         value: folder.id,
         label: folder.name,
-        icon: <ProjectFolderIcon color={folder.color} className="size-3.5" />,
+        icon: <ProjectFolderIcon project={folder.icon} className="size-3.5" />,
       }))}
     />
   );
