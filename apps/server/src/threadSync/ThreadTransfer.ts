@@ -360,13 +360,19 @@ const make = Effect.gen(function* () {
     agentId: string,
     target: EnvironmentId,
   ) {
-    yield* shared.write("agent", agentId, { ownerMachine: target });
-    const schedules = yield* sql<{
-      readonly id: string;
-    }>`SELECT id FROM shared_documents WHERE kind = 'schedule' AND tombstone_json IS NULL
-      AND json_extract(fields_json, '$.agentId') = ${agentId}`;
-    for (const schedule of schedules)
-      yield* shared.write("schedule", schedule.id, { ownerMachine: target });
+    // Recovery may retry after the conversation moved. Never leave a committed
+    // agent owner that makes recovery skip schedules still owned by this machine.
+    yield* sql.withTransaction(
+      Effect.gen(function* () {
+        yield* shared.write("agent", agentId, { ownerMachine: target });
+        const schedules = yield* sql<{
+          readonly id: string;
+        }>`SELECT id FROM shared_documents WHERE kind = 'schedule' AND tombstone_json IS NULL
+        AND json_extract(fields_json, '$.agentId') = ${agentId}`;
+        for (const schedule of schedules)
+          yield* shared.write("schedule", schedule.id, { ownerMachine: target });
+      }),
+    );
   }, Effect.orDie);
 
   /** Dry run of moving threads this machine runs: the checks here, then the target's placement. */

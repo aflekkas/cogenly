@@ -744,3 +744,56 @@ it.live(
     }).pipe(Effect.scoped),
   30000,
 );
+
+it.live(
+  "agent and schedule ownership roll back together and recover after a failed handoff",
+  () =>
+    Effect.gen(function* () {
+      const { hub, laptop, at } = yield* start("atomic-agent");
+      yield* addProject(laptop, "/Users/someone/racing");
+      yield* addProject(hub, "/srv/racing");
+      yield* laptop.sink.write({ events: [threadCreated("event:created", at)] });
+      yield* laptop.sync.sync(hub.environmentId);
+      yield* laptop.sql`INSERT INTO agents(agent_id, conversation_thread_id, payload_json, enabled, daily_run_cap, owner_machine)
+          VALUES ('agent:pit', ${threadId}, '{}', 1, 10, ${laptop.environmentId})`;
+      yield* laptop.shared.write("agent", "agent:pit", { ownerMachine: laptop.environmentId });
+      yield* laptop.shared.write("schedule", "task:pit", {
+        agentId: "agent:pit",
+        title: "Morning check",
+        prompt: "Check",
+        enabled: true,
+        schedule: { type: "interval", everyMs: 60000 },
+        repositoryRemote: null,
+        workspaceStrategy: { type: "root" },
+        modelSelection: { instanceId: "codex", model: "gpt-5" },
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        ownerMachine: laptop.environmentId,
+        createdAt: "2026-10-24T00:00:00.000Z",
+      });
+
+      yield* laptop.sql`CREATE TRIGGER fail_schedule_handoff BEFORE UPDATE ON shared_documents
+          WHEN NEW.kind = 'schedule' AND json_extract(NEW.fields_json, '$.ownerMachine') <> json_extract(OLD.fields_json, '$.ownerMachine')
+          BEGIN SELECT RAISE(ABORT, 'injected schedule failure'); END`;
+      const failed = yield* Effect.exit(
+        laptop.transfer.move({ threadIds: [threadId], target: hub.environmentId }),
+      );
+      expect(failed._tag).toBe("Failure");
+      expect((yield* laptop.replication.owner(threadId))?.local).toBe(false);
+      expect((yield* laptop.shared.get("agent", "agent:pit"))?.fields.ownerMachine).toBe(
+        laptop.environmentId,
+      );
+      expect((yield* laptop.shared.get("schedule", "task:pit"))?.fields.ownerMachine).toBe(
+        laptop.environmentId,
+      );
+      yield* laptop.sql`DROP TRIGGER fail_schedule_handoff`;
+      yield* laptop.transfer.resume;
+      expect((yield* laptop.shared.get("agent", "agent:pit"))?.fields.ownerMachine).toBe(
+        hub.environmentId,
+      );
+      expect((yield* laptop.shared.get("schedule", "task:pit"))?.fields.ownerMachine).toBe(
+        hub.environmentId,
+      );
+    }).pipe(Effect.scoped),
+  30000,
+);
