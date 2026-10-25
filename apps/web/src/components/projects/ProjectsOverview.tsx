@@ -247,7 +247,7 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
             description={
               query
                 ? "Try another search."
-                : "A project groups repositories, chats, Work, files and agents for one effort."
+                : "A project groups the repositories, chats, Work, files and agents of a multi-repo or large effort. A single repository works fine without one."
             }
           />
         ) : (
