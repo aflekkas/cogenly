@@ -1340,6 +1340,7 @@ export const CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS: ReadonlyArray<string> = [
   "mcp__cogenly__thread_search",
   "mcp__cogenly__preview_list",
   "mcp__cogenly__environment_read",
+  "mcp__cogenly__storage_status",
   "mcp__cogenly__cli_command_status",
   "mcp__cogenly__queue_list",
   "mcp__cogenly__queue_read",
