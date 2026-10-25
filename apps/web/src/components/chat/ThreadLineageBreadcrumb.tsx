@@ -2,7 +2,7 @@ import { useAtomValue } from "@effect/atom-react";
 import { scopeThreadRef } from "@cogenly/client-runtime/environment";
 import type { EnvironmentThreadShell } from "@cogenly/client-runtime/state/models";
 import type { ThreadId } from "@cogenly/contracts";
-import { ChevronLeftIcon, EllipsisIcon } from "lucide-react";
+import { EllipsisIcon } from "lucide-react";
 import { type ReactNode, useMemo, useState } from "react";
 
 import { cn } from "~/lib/utils";
@@ -19,7 +19,6 @@ import {
   buildThreadLineageChain,
   collapseThreadBreadcrumb,
   resolveThreadOrigin,
-  THREAD_ORIGIN_LABELS,
   type ThreadLineageAncestor,
 } from "./threadLineage.logic";
 
@@ -67,7 +66,7 @@ const PARENT_HIDE_CLASS = "@max-[16rem]/thread-title:hidden";
  * The chat header's leading title, always visible at the pane's left gutter
  * (after the toggle and back/forward pair while the sidebar is collapsed).
  * A top-level thread shows its title; a subagent, fork, or Work started from a
- * chat or an agent conversation shows `‹ Parent / This thread` instead, where
+ * chat or an agent conversation shows `Parent title / This thread` instead, where
  * a deeper chain keeps its root and direct parent and folds the middle into a
  * "…" menu. Until the thread's shell loads, the title shows alone.
  */
@@ -130,11 +129,10 @@ function ThreadHeaderTitleContent(props: {
     );
   }
   const shortcut = shortcutLabelForCommand(keybindings, "thread.openParent");
-  const leading = segments.root ?? segments.parent;
 
+  // A muted link back to an ancestor; the current title after it stays emphasized.
   const segment = (ancestor: ThreadLineageAncestor, isParent: boolean) => {
     const title = ancestor.title ?? "Untitled thread";
-    const kindLabel = THREAD_ORIGIN_LABELS[ancestor.kind];
     return (
       <Tooltip>
         <TooltipTrigger
@@ -144,27 +142,15 @@ function ThreadHeaderTitleContent(props: {
               variant="ghost-muted"
               size="xs"
               className={SEGMENT_CLASS}
-              aria-label={isParent ? `${kindLabel}: ${title}` : title}
               onClick={() => props.onOpenThread(ancestor.threadId)}
             />
           }
         >
-          {ancestor === leading ? <ChevronLeftIcon aria-hidden /> : null}
-          {isParent ? (
-            // Gives way first when the trail runs short, before the title truncates.
-            <span className="min-w-0 shrink-[8] truncate opacity-70 max-sm:hidden">
-              {kindLabel} ·
-            </span>
-          ) : null}
           <span className="min-w-0 truncate">{title}</span>
         </TooltipTrigger>
         <TooltipPopup side="bottom">
-          {isParent
-            ? `${kindLabel}: ${
-                ancestor.kind === "chat"
-                  ? formatWorkHandoffSourceDetail(title, props.messagesCarried)
-                  : title
-              }`
+          {isParent && ancestor.kind === "chat"
+            ? formatWorkHandoffSourceDetail(title, props.messagesCarried)
             : title}
           {isParent && shortcut ? ` (${shortcut})` : null}
         </TooltipPopup>
