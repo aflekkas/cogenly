@@ -416,10 +416,16 @@ const account = (instanceId: ProviderInstanceId, usedPercent: number, now: DateT
  * spent; B has headroom.
  */
 const setupHandoff = (options?: {
+  readonly firstCandidateRefuses?: boolean;
   /** Runs once, mid-sweep, after the sweep read its candidates and before it hands off. */
   readonly midSweep?: (orchestrator: Orchestrator.OrchestratorV2["Service"]) => Effect.Effect<void>;
 }) => {
-  const provider = makeControllableProvider(CodexProviderCapabilitiesV2, [accountA, accountB]);
+  const accountC = ProviderInstanceId.make("codex-c");
+  const provider = makeControllableProvider(CodexProviderCapabilitiesV2, [
+    accountA,
+    accountB,
+    accountC,
+  ]);
   let midSweep = options?.midSweep;
   const database = Sqlite.layerMemory;
   const base = Layer.mergeAll(
@@ -442,7 +448,18 @@ const setupHandoff = (options?: {
     Effect.gen(function* () {
       const orchestrator = yield* Orchestrator.OrchestratorV2;
       return Layer.mock(ThreadManagementService.ThreadManagementService)({
-        dispatch: orchestrator.dispatch,
+        dispatch: (command) =>
+          options?.firstCandidateRefuses &&
+          command.type === "message.dispatch" &&
+          command.modelSelection?.instanceId === accountB
+            ? Effect.fail(
+                new Orchestrator.OrchestratorDispatchError({
+                  commandId: command.commandId,
+                  commandType: command.type,
+                  cause: "Target refused",
+                }),
+              )
+            : orchestrator.dispatch(command),
         getThreadRecords: (...args) =>
           Effect.suspend(() => {
             const hook = midSweep;
@@ -457,9 +474,10 @@ const setupHandoff = (options?: {
     getProviders: Effect.map(DateTime.now, (now) => [
       account(accountA, 100, now),
       account(accountB, 20, now),
+      ...(options?.firstCandidateRefuses ? [account(accountC, 30, now)] : []),
     ]),
   });
-  const settings = ServerSettings.layerTest({}).pipe(Layer.orDie);
+  const settings = ServerSettings.layerTest({ autoResumeLimitedThreads: true }).pipe(Layer.orDie);
   const recovery = UsageLimitRecoveryWorker.layer.pipe(
     Layer.provide(UsageLimitHandoff.layer),
     Layer.provideMerge(Layer.mergeAll(threads, registry, settings, scheduler)),
@@ -756,5 +774,17 @@ it.effect("a Stop on a delegated child still recovering from a limit ends the re
         message.id.startsWith("message:delegated-task-failure:"),
       ),
     ).toBe(false);
+  }).pipe(Effect.provide(runtime));
+});
+
+// A refusal restores the scheduled reset before the next candidate is tried.
+it.effect("hands off to the second target after the first target refuses", () => {
+  const { provider, runtime, sweep } = setupHandoff({ firstCandidateRefuses: true });
+  return Effect.gen(function* () {
+    const { orchestrator, childId } = yield* delegateIntoQuota(provider);
+    yield* sweep;
+    expect(
+      (yield* orchestrator.getThreadProjection(childId)).thread.modelSelection.instanceId,
+    ).toBe("codex-c");
   }).pipe(Effect.provide(runtime));
 });

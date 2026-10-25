@@ -353,7 +353,9 @@ const make = Effect.gen(function* () {
         yield* threads
           .dispatch({
             type: "thread.metadata.update",
-            commandId: CommandId.make(`${LIMIT_HANDOFF_CANCEL_COMMAND_PREFIX}${identity}`),
+            commandId: CommandId.make(
+              `${LIMIT_HANDOFF_CANCEL_COMMAND_PREFIX}${identity}:${candidate.instanceId}`,
+            ),
             threadId,
             limitRecovery: cancelResume,
           })
