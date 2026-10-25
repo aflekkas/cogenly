@@ -1,7 +1,7 @@
 import {
   OrchestrationDispatchCommandError,
   OrchestrationV2ThreadLaunchError,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Schema from "effect/Schema";
 
 const isOrchestrationDispatchCommandError = Schema.is(OrchestrationDispatchCommandError);

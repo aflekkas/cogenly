@@ -11,7 +11,7 @@ import type {
   ProjectLabelId,
   ProviderApprovalDecision,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import type { ChatAttachment } from "~/types";
 import type {
   AgentAttachmentSupport,
@@ -201,15 +201,15 @@ export function useAgentUnread(agent: AgentContact) {
 
 // All environment, thread, and RPC access for the feature stays at this boundary.
 import { RegistryContext, useAtomValue } from "@effect/atom-react";
-import { derivePendingThreadRequests } from "@t3tools/client-runtime/state/thread-requests";
-import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+import { derivePendingThreadRequests } from "@cogenly/client-runtime/state/thread-requests";
+import { squashAtomCommandFailure } from "@cogenly/client-runtime/state/runtime";
 import {
   CommandId,
   MessageId,
   ScheduledTaskId,
   RuntimeRequestId,
   AuthOrchestrationOperateScope,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
@@ -218,7 +218,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { agentWorkspaceRpc, agentsRpc } from "~/rpc/agents";
 import { readLocalApi } from "~/localApi";
 import { useEnvironmentProjectLabels } from "~/projectLabels/useProjectLabels";
-import { isScratchProject } from "@t3tools/client-runtime/state/projects";
+import { isScratchProject } from "@cogenly/client-runtime/state/projects";
 import { usePrimaryEnvironmentId, useConnectedEnvironmentIds } from "~/state/environments";
 import {
   useProjects,
@@ -238,7 +238,7 @@ import {
   resolveDefaultProviderModelSelection,
   sortProviderInstanceEntries,
 } from "~/providerInstances";
-import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+import { resolveProjectSettings } from "@cogenly/shared/projectSettings";
 import { ProviderModelPicker } from "~/components/chat/ProviderModelPicker";
 import { TraitsPicker } from "~/components/chat/TraitsPicker";
 import { useAtomCommand } from "~/state/use-atom-command";
@@ -248,7 +248,7 @@ import { useEnvironmentQuery } from "~/state/query";
 import { randomUUID, newMessageId } from "~/lib/utils";
 import { useAgentScheduledTasks } from "~/components/sidebar/modes/useAgentScheduledTasks";
 import { AgentFactsSection } from "~/memory/AgentFacts";
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { scopeThreadRef } from "@cogenly/client-runtime/environment";
 import type { AgentRequest } from "./agents.types";
 
 function commandValue<A>(
@@ -511,7 +511,7 @@ export function LiveAgentsProvider({ children }: { children: ReactNode }) {
         text: string;
         attachmentIds: string;
         commandId: CommandId;
-        messageId: import("@t3tools/contracts").MessageId;
+        messageId: import("@cogenly/contracts").MessageId;
       }
     >(),
   );

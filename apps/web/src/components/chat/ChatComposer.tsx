@@ -1,5 +1,5 @@
 import { OverlayPresence } from "~/components/ui/overlay-presence";
-import { formatProviderSkillDisplayName } from "@t3tools/shared/inlineSkills";
+import { formatProviderSkillDisplayName } from "@cogenly/shared/inlineSkills";
 import { useComposerTypingGuard } from "./useComposerTypingGuard";
 import { DESKTOP_PASTE_AS_TEXT_EVENT } from "../../lib/desktopPasteAsText";
 import { isLocalEnvironmentDisabled } from "../../localEnvironment";
@@ -10,7 +10,7 @@ import { Dialog, DialogPopup, DialogTitle } from "../ui/dialog";
 import {
   composerPullRequestsFromLinks,
   filterComposerPullRequestMatches,
-} from "@t3tools/shared/composerPullRequestMatches";
+} from "@cogenly/shared/composerPullRequestMatches";
 import { importPastedComposerText, readPastedComposerContext } from "../composerInlineTokenPaste";
 import { elementContextToPreviewAnnotation } from "../../lib/elementContext";
 import { RefreshIcon } from "~/components/ui/refresh-icon";
@@ -40,7 +40,7 @@ import type {
   ScopedThreadRef,
   ServerProvider,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import {
   EnvironmentRequestInvalidError,
   AuthOrchestrationOperateScope,
@@ -49,20 +49,20 @@ import {
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
   PROVIDER_WORKSPACE_SNAPSHOT_TTL_MS,
-} from "@t3tools/contracts";
-import type { EnvironmentConnectionPresentation } from "@t3tools/client-runtime/connection";
-import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+} from "@cogenly/contracts";
+import type { EnvironmentConnectionPresentation } from "@cogenly/client-runtime/connection";
+import { squashAtomCommandFailure } from "@cogenly/client-runtime/state/runtime";
 import * as Schema from "effect/Schema";
 import {
   isPasteAsTextShortcut,
   nextPastedTextFileName,
   pastedTextDisposition,
   wouldTextPasteExceedLimit,
-} from "@t3tools/client-runtime/text-paste";
-import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
+} from "@cogenly/client-runtime/text-paste";
+import { serializeComposerFileLink } from "@cogenly/shared/composerTrigger";
 import { folderDropTarget, resolveDroppedFolderPath } from "./folderDrop";
-import { createModelSelection, normalizeModelSlug } from "@t3tools/shared/model";
-import { USAGE_LIMITS_COMMAND } from "@t3tools/shared/usageLimits";
+import { createModelSelection, normalizeModelSlug } from "@cogenly/shared/model";
+import { USAGE_LIMITS_COMMAND } from "@cogenly/shared/usageLimits";
 import {
   memo,
   type ComponentProps,
@@ -147,7 +147,7 @@ import {
   type ComposerBannerStackItem,
 } from "./ComposerBannerStack";
 import { ComposerStackColumn } from "./ComposerStackColumn";
-import { formatAttachmentSize } from "@t3tools/client-runtime/state/attachments";
+import { formatAttachmentSize } from "@cogenly/client-runtime/state/attachments";
 import {
   acceptComposerAttachmentFiles,
   attachmentsToReleaseOnUploadCapabilityLoss,
@@ -176,7 +176,7 @@ import {
   type TerminalContextSelection,
 } from "../../lib/terminalContext";
 import { useComposerPathSearch } from "../../lib/composerPathSearchState";
-import { toKindScopedComposerContextId } from "@t3tools/shared/composerContextReferences";
+import { toKindScopedComposerContextId } from "@cogenly/shared/composerContextReferences";
 import {
   getRestingComposerImagePreviewCounts,
   resolveComposerDictationFit,
@@ -230,19 +230,19 @@ import {
   projectFolderContextRecord,
   integrationContextRecord,
 } from "~/lib/composerContextRecords";
-import { matchComposerMentionItems } from "@t3tools/client-runtime/composerThreadItems";
+import { matchComposerMentionItems } from "@cogenly/client-runtime/composerThreadItems";
 import { useAgents } from "~/agents/agentsClient";
 import { useThreadKindResolver } from "~/hooks/useThreadKind";
 import { useEnvironmentProjectLabels } from "~/projectLabels/useProjectLabels";
 import { useThreadContextDrop, threadContextDropTargetProps } from "./threadContextDrag";
 import { readThreadShell, useThreadShells } from "~/state/entities";
 import { requestConfirmDialog } from "~/confirmDialog";
-import { encodeComposerContextFragment } from "@t3tools/shared/composerContextClipboard";
+import { encodeComposerContextFragment } from "@cogenly/shared/composerContextClipboard";
 import type {
   ComposerContextClipboardFragment,
   ComposerContextRecord,
   ThreadPullRequestLink,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { resolveAssetUrl } from "~/assets/assetUrls";
 import { assetEnvironment } from "~/state/assets";
 import { readPreparedConnection } from "~/state/session";
@@ -329,7 +329,7 @@ import {
   PlayIcon,
   XIcon,
 } from "lucide-react";
-import { proposedPlanTitle } from "@t3tools/shared/proposedPlanText";
+import { proposedPlanTitle } from "@cogenly/shared/proposedPlanText";
 import { hasProviderSetup } from "./ProviderStatusBanner";
 import {
   applyProviderInstanceSettings,
@@ -339,7 +339,7 @@ import {
   type ProviderInstanceEntry,
 } from "../../providerInstances";
 import { type AppModelOption, getAppModelOptionsForInstance } from "../../modelSelection";
-import type { UnifiedSettings } from "@t3tools/contracts/settings";
+import type { UnifiedSettings } from "@cogenly/contracts/settings";
 import {
   isVideoAttachment,
   type ChatMessage,
@@ -361,7 +361,7 @@ import type {
 import {
   resolveComposerDispatchMode,
   type ComposerDispatchMode,
-} from "@t3tools/client-runtime/state/composer-dispatch";
+} from "@cogenly/client-runtime/state/composer-dispatch";
 import type { ContextWindowSnapshot } from "../../lib/contextWindow";
 import {
   getProviderSlashCommandsForSlashMenu,
@@ -370,7 +370,7 @@ import {
   hasCurrentProviderWorkspaceSnapshot,
   resolveProviderSkillsForCwd,
   resolveProviderSlashCommandsForCwd,
-} from "@t3tools/client-runtime/providerSkills";
+} from "@cogenly/client-runtime/providerSkills";
 import { searchProviderSkills } from "../../providerSkillSearch";
 import { useDelayedStatus } from "../../hooks/useDelayedStatus";
 import { useElementState } from "../../hooks/useElementState";

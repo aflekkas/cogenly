@@ -3,8 +3,8 @@ import { LiveAgentsProvider } from "../agents/agentsClient";
 import { AgentsCreateHost } from "../agents/AgentsCreateHost";
 import { CreateProjectDialogHost } from "../projectLabels/CreateProjectDialogHost";
 import { PermissionUpdateNotice } from "../components/PermissionUpdateNotice";
-import { type ServerLifecycleWelcomePayload } from "@t3tools/contracts";
-import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
+import { type ServerLifecycleWelcomePayload } from "@cogenly/contracts";
+import { scopedProjectKey, scopeProjectRef } from "@cogenly/client-runtime/environment";
 import {
   Outlet,
   Link,

@@ -1,5 +1,5 @@
 import * as Vault from "../vault/Vault.ts";
-import { AccountId, ProjectLabelId, VaultItemId } from "@t3tools/contracts";
+import { AccountId, ProjectLabelId, VaultItemId } from "@cogenly/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { NodeCrypto } from "@effect/platform-node";
 import { describe, expect, it } from "@effect/vitest";

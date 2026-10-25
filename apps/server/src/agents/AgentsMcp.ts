@@ -6,7 +6,7 @@ import {
   AgentSetProjectInput,
   OrchestratorMcpFailure,
   TrimmedNonEmptyString,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { resolveMachine } from "../machines/resolveMachine.ts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";

@@ -9,12 +9,12 @@ import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 import * as SynchronizedRef from "effect/SynchronizedRef";
 
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as HostProcess from "@cogenly/shared/HostProcess";
 
 import * as ElectronDialog from "../electron/ElectronDialog.ts";
 import * as SitePermissions from "./SitePermissions.ts";
 import { permissionOriginOf, sitePermissionsForRequest } from "./SitePermissionStore.ts";
-import type { SitePermission } from "@t3tools/contracts";
+import type { SitePermission } from "@cogenly/contracts";
 
 const PREVIEW_PARTITION_PREFIX = "persist:cogenly-preview-";
 /**
@@ -194,7 +194,7 @@ export class BrowserSession extends Context.Service<
       partitions?: ReadonlyArray<string>,
     ) => Effect.Effect<void, BrowserSessionCacheClearError>;
   }
->()("@t3tools/desktop/preview/BrowserSession") {}
+>()("@cogenly/desktop/preview/BrowserSession") {}
 
 /**
  * Restricts a clear to the given partitions. Omitting them keeps the historical

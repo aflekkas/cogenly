@@ -1,4 +1,4 @@
-import { Integration, IntegrationSyncedFrom } from "@t3tools/contracts";
+import { Integration, IntegrationSyncedFrom } from "@cogenly/contracts";
 import * as Schema from "effect/Schema";
 import * as OAuth from "./IntegrationOAuth.ts";
 

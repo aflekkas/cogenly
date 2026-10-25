@@ -1,4 +1,4 @@
-import type { EnvironmentId, ProjectLabelWithRepositories } from "@t3tools/contracts";
+import type { EnvironmentId, ProjectLabelWithRepositories } from "@cogenly/contracts";
 
 import type { EnvironmentProjectLabel } from "../../projectLabels/projectLabels.logic";
 import type { EnvironmentPresentation } from "../../state/environments";

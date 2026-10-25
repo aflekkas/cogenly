@@ -171,7 +171,7 @@ export class DesktopBackendPool extends Context.Service<
       id: BackendInstanceId,
     ) => Effect.Effect<void, DesktopBackendPoolCannotUnregisterPrimaryError>;
   }
->()("@t3tools/desktop/backend/DesktopBackendPool") {}
+>()("@cogenly/desktop/backend/DesktopBackendPool") {}
 
 // Services required by makeBackendInstance — exported so caller
 // orchestrators that build their own specs can confirm the layer graph

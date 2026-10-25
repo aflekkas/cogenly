@@ -20,10 +20,10 @@ import type {
   VcsStatusResult,
   VcsStatusStreamEvent,
   VcsStatusSubscriptionInput,
-} from "@t3tools/contracts";
-import { mergeGitStatusParts } from "@t3tools/shared/git";
-import * as KeyedLock from "@t3tools/shared/KeyedLock";
-import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+} from "@cogenly/contracts";
+import { mergeGitStatusParts } from "@cogenly/shared/git";
+import * as KeyedLock from "@cogenly/shared/KeyedLock";
+import { resolveProjectSettings } from "@cogenly/shared/projectSettings";
 
 import * as BackgroundPolicy from "../background/BackgroundPolicy.ts";
 import * as GitWorkflowService from "../git/GitWorkflowService.ts";

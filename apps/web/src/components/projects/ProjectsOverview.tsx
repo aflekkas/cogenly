@@ -1,5 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
-import type { EnvironmentId, ProjectLabelId } from "@t3tools/contracts";
+import type { EnvironmentId, ProjectLabelId } from "@cogenly/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { FolderIcon, FolderPlusIcon, LaptopMinimalIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";

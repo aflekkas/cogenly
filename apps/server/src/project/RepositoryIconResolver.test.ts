@@ -1,7 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off - tests lay out checkouts on disk.
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import * as GitHubRest from "@t3tools/source-control-github/server/GitHubRest";
+import * as GitHubRest from "@cogenly/source-control-github/server/GitHubRest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/sql/SqlClient";

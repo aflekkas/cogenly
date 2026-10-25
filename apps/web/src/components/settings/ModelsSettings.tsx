@@ -1,7 +1,7 @@
 import { useNavigate } from "@tanstack/react-router";
-import { ProviderDriverKind, type ProviderInstanceId } from "@t3tools/contracts";
-import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
-import { createModelSelection } from "@t3tools/shared/model";
+import { ProviderDriverKind, type ProviderInstanceId } from "@cogenly/contracts";
+import { DEFAULT_UNIFIED_SETTINGS } from "@cogenly/contracts/settings";
+import { createModelSelection } from "@cogenly/shared/model";
 import * as Equal from "effect/Equal";
 
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";

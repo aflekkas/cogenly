@@ -10,7 +10,7 @@ import type {
   VaultSecretFields,
   VaultUpdateInput,
   VaultUsageEntry,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 
 export const VAULT_TYPE_LABELS: Readonly<Record<VaultItemType, string>> = {
   login: "Login",

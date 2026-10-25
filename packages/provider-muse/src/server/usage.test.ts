@@ -3,8 +3,8 @@ import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
-import { ProviderInstanceId } from "@t3tools/contracts";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import { ProviderInstanceId } from "@cogenly/contracts";
+import * as HostProcess from "@cogenly/shared/HostProcess";
 import { MuseSettings } from "../settings.ts";
 import { museUsageReader, parseMuseLine, parseMuseRecord } from "./usage.ts";
 

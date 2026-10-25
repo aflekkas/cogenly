@@ -2,7 +2,7 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
   type AtomCommandResult,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@cogenly/client-runtime/state/runtime";
 import { CopyButton } from "../ui/copy-button";
 import type {
   EnvironmentId,
@@ -10,7 +10,7 @@ import type {
   ProviderAuthResponse,
   ProviderInstanceId,
   ServerProvider,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { lazy, Suspense, useRef, useState } from "react";
 
 import { ensureLocalApi } from "../../localApi";

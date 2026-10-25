@@ -1,4 +1,4 @@
-import { type EnvironmentId, ThreadRemoteError } from "@t3tools/contracts";
+import { type EnvironmentId, ThreadRemoteError } from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Machines from "./Machines.ts";

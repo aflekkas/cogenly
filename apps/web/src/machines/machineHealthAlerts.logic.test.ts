@@ -2,7 +2,7 @@ import type {
   EnvironmentId,
   MachineHealthAlert,
   MachineHealthAlertsSnapshot,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 

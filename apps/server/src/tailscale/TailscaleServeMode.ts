@@ -3,7 +3,7 @@
  * ingress accepts Serve's forwarded requests and pairing advertises the
  * tailnet URL. `--tailscale-serve` (or `COGENLY_TAILSCALE_SERVE`) sets it for
  * one run. Otherwise it lives in `tailscale-serve.json` in the state
- * directory (see `@t3tools/tailscale`'s servePreference), written by machine
+ * directory (see `@cogenly/tailscale`'s servePreference), written by machine
  * setup (Private access), `cogenly service install --tailscale-serve`, or
  * `cogenly doctor`. The server reads it on every start,
  * however it is launched (desktop app, launchd, systemd), and setup changes it
@@ -24,7 +24,7 @@ import {
   TAILSCALE_SERVE_PREFERENCE_FILE,
   type TailscaleServePreference,
   writeServePreference,
-} from "@t3tools/tailscale";
+} from "@cogenly/tailscale";
 
 import * as ServerConfig from "../config.ts";
 
@@ -33,7 +33,7 @@ export {
   TAILSCALE_SERVE_PREFERENCE_FILE,
   TailscaleServePreference,
   writeServePreference,
-} from "@t3tools/tailscale";
+} from "@cogenly/tailscale";
 
 export const servePreferencePath = Effect.fn("TailscaleServeMode.preferencePath")(function* (
   stateDir: string,

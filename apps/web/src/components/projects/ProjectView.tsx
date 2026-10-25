@@ -1,11 +1,11 @@
 import { useAtomValue } from "@effect/atom-react";
-import { isAtomCommandInterrupted } from "@t3tools/client-runtime/state/runtime";
+import { isAtomCommandInterrupted } from "@cogenly/client-runtime/state/runtime";
 import type {
   EnvironmentId,
   ProjectId,
   ProjectLabelId,
   ProjectLabelWithRepositories,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import {
   ArchiveIcon,

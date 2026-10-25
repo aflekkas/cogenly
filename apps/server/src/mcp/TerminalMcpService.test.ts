@@ -4,7 +4,7 @@ import * as AgentStore from "../agents/AgentStore.ts";
 import * as CliCredentials from "../accounts/CliCredentials.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
-import { EnvironmentId, ProjectLabelId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import { EnvironmentId, ProjectLabelId, ProviderInstanceId, ThreadId } from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";

@@ -1,5 +1,5 @@
-import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
-import type { DesktopAppActivationRequest } from "@t3tools/contracts";
+import { squashAtomCommandFailure } from "@cogenly/client-runtime/state/runtime";
+import type { DesktopAppActivationRequest } from "@cogenly/contracts";
 import { useEffect, useEffectEvent, useRef } from "react";
 
 import { formatDesktopSshConnectionError } from "../../connection/sshConnectionError";

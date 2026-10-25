@@ -28,13 +28,13 @@ import {
   type ProviderOptionSelection,
   type ServerProvider,
   type ServerProviderModel,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 
 import {
   type CustomModelDefinition,
   readCustomModelEntries,
   toCustomModelSetting,
-} from "@t3tools/shared/model";
+} from "@cogenly/shared/model";
 import { cn } from "../../lib/utils";
 import { normalizeProviderAccentColor } from "../../providerInstances";
 import { Badge } from "../ui/badge";
@@ -49,7 +49,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import type {
   ProviderClientDefinition,
   ProviderEnvironmentField,
-} from "@t3tools/provider-core/client";
+} from "@cogenly/provider-core/client";
 import { deriveProviderSettingsFields, ProviderSettingsForm } from "./ProviderSettingsForm";
 import { ProviderModelsSection } from "./ProviderModelsSection";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";

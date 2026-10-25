@@ -1,5 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
-import { cliReleaseTagApiUrl } from "@t3tools/shared/cliRelease";
+import { cliReleaseTagApiUrl } from "@cogenly/shared/cliRelease";
 import * as Effect from "effect/Effect";
 import { FetchHttpClient, HttpClient, HttpClientResponse } from "effect/http";
 import { AsyncResult, Atom } from "effect/reactivity";

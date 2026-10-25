@@ -2,8 +2,8 @@ import { useAtomValue } from "@effect/atom-react";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
-import type { EnvironmentId, ProjectCloneSnapshot, ProjectId } from "@t3tools/contracts";
+} from "@cogenly/client-runtime/state/runtime";
+import type { EnvironmentId, ProjectCloneSnapshot, ProjectId } from "@cogenly/contracts";
 import { Atom } from "effect/reactivity";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 

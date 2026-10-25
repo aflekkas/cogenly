@@ -1,4 +1,4 @@
-import type { ProjectLabelId, ProjectLabelWithRepositories } from "@t3tools/contracts";
+import type { ProjectLabelId, ProjectLabelWithRepositories } from "@cogenly/contracts";
 import { CheckIcon, PlusIcon, Settings2Icon } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 

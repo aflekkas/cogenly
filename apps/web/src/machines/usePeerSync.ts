@@ -1,5 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
-import type { EnvironmentId, SharedDocumentKind, SharedSyncPeerStatus } from "@t3tools/contracts";
+import type { EnvironmentId, SharedDocumentKind, SharedSyncPeerStatus } from "@cogenly/contracts";
 
 import { useLiveRefresh } from "../hooks/useLiveRefresh";
 import { syncRpc } from "../rpc/sync";

@@ -31,13 +31,13 @@ import * as ProjectLabelFork from "./projectLabels/ProjectLabelForkToProject.ts"
 import * as ProjectFiles from "./projectLabels/ProjectFiles.ts";
 import * as ProjectHome from "./projectLabels/ProjectHome.ts";
 import * as ProjectLabelOwnerSearch from "./projectLabels/ProjectOwnerRepositorySearch.ts";
-import * as GitHubRest from "@t3tools/source-control-github/server/GitHubRest";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as GitHubRest from "@cogenly/source-control-github/server/GitHubRest";
+import * as HostProcess from "@cogenly/shared/HostProcess";
 import * as WorkHandoff from "./work/WorkHandoffService.ts";
 import * as AgentWorkspace from "./agents/AgentWorkspaceService.ts";
 import * as Agents from "./agents/AgentService.ts";
 import * as AgentStore from "./agents/AgentStore.ts";
-import { OrchestrationDispatchCommandError, ProjectLabelError } from "@t3tools/contracts";
+import { OrchestrationDispatchCommandError, ProjectLabelError } from "@cogenly/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Orchestrator from "./orchestration-v2/Orchestrator.ts";
 
@@ -126,8 +126,8 @@ import {
   type PullRequestRef,
   WS_METHODS,
   WsRpcGroup,
-} from "@t3tools/contracts";
-import { resolveServerBackgroundActivitySettings } from "@t3tools/shared/backgroundActivitySettings";
+} from "@cogenly/contracts";
+import { resolveServerBackgroundActivitySettings } from "@cogenly/shared/backgroundActivitySettings";
 import {
   HttpRouter,
   HttpServerRequest,
@@ -193,7 +193,7 @@ import { userFacingDispatchErrorMessage } from "./orchestration-v2/UserFacingErr
 import * as ProviderRegistry from "./provider/ProviderRegistry.ts";
 import * as ProviderInstanceRegistry from "./provider/ProviderInstanceRegistry.ts";
 import * as ModelManifest from "./provider/ModelManifest.ts";
-import * as ProviderLatestVersions from "@t3tools/provider-core/server/ProviderLatestVersions";
+import * as ProviderLatestVersions from "@cogenly/provider-core/server/ProviderLatestVersions";
 import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
 import * as ProviderAuthService from "./provider/ProviderAuthService.ts";
 import { makeProviderInstallation } from "./provider/providerInstallation.ts";
@@ -269,11 +269,11 @@ import * as VcsProjectConfig from "./vcs/VcsProjectConfig.ts";
 import * as PairingGrantStore from "./auth/PairingGrantStore.ts";
 import * as SessionStore from "./auth/SessionStore.ts";
 import { failEnvironmentAuthInvalid, failEnvironmentInternal } from "./auth/http.ts";
-import * as RelayClient from "@t3tools/shared/relayClient";
+import * as RelayClient from "@cogenly/shared/relayClient";
 import {
   sameUsageLimitCommandCoverage,
   withUsageLimitsCommands,
-} from "@t3tools/shared/usageLimits";
+} from "@cogenly/shared/usageLimits";
 import * as AgentSessionScanner from "./project/AgentSessionScanner.ts";
 import * as AgentSessionImporter from "./project/AgentSessionImporter.ts";
 import * as T3Import from "./t3Import/T3ImportService.ts";

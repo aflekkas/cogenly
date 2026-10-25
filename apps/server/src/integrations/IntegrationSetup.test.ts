@@ -4,7 +4,7 @@ import {
   integrationCatalogEntry,
   type IntegrationCatalogId,
   type IntegrationSetupAction,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 
 import {
   GOOGLE_SCOPES,

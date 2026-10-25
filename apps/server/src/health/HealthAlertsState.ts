@@ -4,7 +4,7 @@
  * built below the machine link HealthAlerts needs. Both provide this same
  * `layer` reference, so layer memoization shares one instance.
  */
-import type { MachineHealthAlertsSnapshot } from "@t3tools/contracts";
+import type { MachineHealthAlertsSnapshot } from "@cogenly/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";

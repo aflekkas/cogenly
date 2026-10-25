@@ -7,7 +7,7 @@ import {
   MessageId,
   ThreadId,
   type AssistantCitation,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import {
   assistantCitationsToPlainText,
   collectAssistantCitations,

@@ -24,9 +24,9 @@ import {
   PREVIEW_URL_MAX_LENGTH,
   ThreadId,
   type DiscoveredLocalServer,
-} from "@t3tools/contracts";
-import * as HostProcess from "@t3tools/shared/HostProcess";
-import { isLoopbackHost, LSOF_LOCAL_HOST_TOKENS } from "@t3tools/shared/preview";
+} from "@cogenly/contracts";
+import * as HostProcess from "@cogenly/shared/HostProcess";
+import { isLoopbackHost, LSOF_LOCAL_HOST_TOKENS } from "@cogenly/shared/preview";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";

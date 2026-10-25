@@ -58,9 +58,9 @@ import {
   type ScheduledTaskUpsertInput,
   type ServerProvider,
   ThreadId,
-} from "@t3tools/contracts";
-import { latestExecutedRun, runRanAfter } from "@t3tools/shared/orchestrationV2ThreadError";
-import { applyModelEffortDefaults } from "@t3tools/shared/model";
+} from "@cogenly/contracts";
+import { latestExecutedRun, runRanAfter } from "@cogenly/shared/orchestrationV2ThreadError";
+import { applyModelEffortDefaults } from "@cogenly/shared/model";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
@@ -78,7 +78,7 @@ import * as ProviderAdapterRegistry from "../orchestration-v2/ProviderAdapterReg
 import {
   subagentResultForRun,
   delegatedTaskProgress,
-} from "@t3tools/provider-core/server/subagentProjection";
+} from "@cogenly/provider-core/server/subagentProjection";
 import {
   DispatchModeLimit,
   type DispatchModeRefusal,
@@ -87,7 +87,7 @@ import { runOutcome } from "../orchestration-v2/RestartBackgroundNote.ts";
 import { delegatedTaskStop } from "../orchestration-v2/DelegatedTaskFailureNotice.ts";
 import { limitRecoveryPending } from "../orchestration-v2/UsageLimitStop.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
-import { derive } from "@t3tools/provider-core/server/IdAllocator";
+import { derive } from "@cogenly/provider-core/server/IdAllocator";
 import * as Machines from "../machines/Machines.ts";
 import * as RemoteLaunch from "../orchestration-v2/RemoteThreadLaunch.ts";
 import { resolveMachine } from "../machines/resolveMachine.ts";
@@ -106,7 +106,7 @@ import {
   type McpThreadInvocationScope,
   requireThreadScope,
 } from "./McpInvocationContext.ts";
-import { formatThreadLink } from "@t3tools/shared/threadLinks";
+import { formatThreadLink } from "@cogenly/shared/threadLinks";
 import * as Metrics from "../observability/Metrics.ts";
 import * as SecretRequests from "../secrets/SecretRequests.ts";
 import * as Vault from "../vault/Vault.ts";
@@ -1125,7 +1125,7 @@ const make = Effect.gen(function* () {
     });
 
   const loadProviders = providerRegistry.getProviders;
-  const targetProviders = (machine: import("@t3tools/contracts").EnvironmentId | undefined) =>
+  const targetProviders = (machine: import("@cogenly/contracts").EnvironmentId | undefined) =>
     Effect.gen(function* () {
       if (machine !== undefined) {
         const remote = yield* Effect.serviceOption(RemoteLaunch.RemoteThreadLaunch);

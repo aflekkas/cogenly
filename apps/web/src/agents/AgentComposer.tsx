@@ -1,7 +1,7 @@
-import type { ModelSelection } from "@t3tools/contracts";
+import type { ModelSelection } from "@cogenly/contracts";
 import { useAtomValue } from "@effect/atom-react";
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { formatAttachmentSize } from "@t3tools/client-runtime/state/attachments";
+import { scopeThreadRef } from "@cogenly/client-runtime/environment";
+import { formatAttachmentSize } from "@cogenly/client-runtime/state/attachments";
 import { FileIcon, PaperclipIcon, XIcon } from "lucide-react";
 import {
   useEffect,

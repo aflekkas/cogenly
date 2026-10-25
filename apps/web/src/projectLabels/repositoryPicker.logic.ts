@@ -21,7 +21,7 @@ import {
   type ProjectLabelRepositoryLink,
   type ProjectLabelWithRepositories,
   type RepositoryIdentity,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 
 import type { EnvironmentProjectLabel } from "./projectLabels.logic";
 

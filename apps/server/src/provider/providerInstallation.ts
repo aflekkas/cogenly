@@ -5,8 +5,8 @@ import {
   type ProviderInstanceId,
   ProviderSetupError,
   type ProviderSetupInput,
-} from "@t3tools/contracts";
-import { resolveCommandPath } from "@t3tools/shared/shell";
+} from "@cogenly/contracts";
+import { resolveCommandPath } from "@cogenly/shared/shell";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
@@ -16,7 +16,7 @@ import * as ServerSettings from "../serverSettings.ts";
 import { deriveProviderInstanceConfigMap } from "./ProviderInstanceRegistryHydration.ts";
 import * as ProviderInstanceRegistry from "./ProviderInstanceRegistry.ts";
 import * as ProviderRegistry from "./ProviderRegistry.ts";
-import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
+import { mergeProviderInstanceEnvironment } from "@cogenly/provider-core/server/instanceEnvironment";
 
 const hasBinaryPath = Schema.is(Schema.Struct({ binaryPath: Schema.String }));
 const decodeCodexSettings = Schema.decodeUnknownEffect(CodexSettings);

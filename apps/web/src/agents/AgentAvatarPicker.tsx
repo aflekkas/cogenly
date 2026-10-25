@@ -1,4 +1,4 @@
-import type { AgentAvatar } from "@t3tools/contracts";
+import type { AgentAvatar } from "@cogenly/contracts";
 import { ShuffleIcon } from "lucide-react";
 import { useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 

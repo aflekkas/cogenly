@@ -1,20 +1,20 @@
-import { AuthProvidersManageScope } from "@t3tools/contracts";
+import { AuthProvidersManageScope } from "@cogenly/contracts";
 import { useEnvironmentScope } from "../../state/session";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
   type AtomCommandResult,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@cogenly/client-runtime/state/runtime";
 import type {
   ChatGptHandoffInput,
   ChatGptTransferredProfile,
   EnvironmentId,
   ProviderInstanceId,
   ServerProvider,
-} from "@t3tools/contracts";
-import { codexAuthHandoffUrl } from "@t3tools/shared/codexAuthHandoff";
-import { providerAuthReturnUrl } from "@t3tools/shared/providerAuthReturnUrl";
-import { isLoopbackHost } from "@t3tools/shared/preview";
+} from "@cogenly/contracts";
+import { codexAuthHandoffUrl } from "@cogenly/shared/codexAuthHandoff";
+import { providerAuthReturnUrl } from "@cogenly/shared/providerAuthReturnUrl";
+import { isLoopbackHost } from "@cogenly/shared/preview";
 import { CheckIcon, ExternalLinkIcon } from "lucide-react";
 import { Children, useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
 

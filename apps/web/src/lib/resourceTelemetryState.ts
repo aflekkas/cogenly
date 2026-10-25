@@ -1,10 +1,10 @@
-import { AuthDiagnosticsReadScope } from "@t3tools/contracts";
-import { AuthEnvironmentMaintainScope } from "@t3tools/contracts";
+import { AuthDiagnosticsReadScope } from "@cogenly/contracts";
+import { AuthEnvironmentMaintainScope } from "@cogenly/contracts";
 import type {
   EnvironmentId,
   ResourceTelemetryHistoryInput,
   ResourceTelemetrySnapshot,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Cause from "effect/Cause";
 import { useCallback } from "react";
 

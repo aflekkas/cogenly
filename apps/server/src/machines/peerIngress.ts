@@ -4,7 +4,7 @@ import {
   isLocalLoopbackHost,
   isSharedAddressSpaceHost,
   isTailnetHost,
-} from "@t3tools/shared/hostClassification";
+} from "@cogenly/shared/hostClassification";
 import type { HttpServerRequest } from "effect/http";
 import * as Option from "effect/Option";
 

@@ -3,7 +3,7 @@ import {
   type AgentApproval,
   type EnvironmentId,
   type ThreadId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
 

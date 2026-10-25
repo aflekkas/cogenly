@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest";
-import { ProjectId } from "@t3tools/contracts";
+import { ProjectId } from "@cogenly/contracts";
 import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";

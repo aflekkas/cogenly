@@ -19,7 +19,7 @@ import {
   type ProjectLabelId,
   type ScheduledTaskSchedule,
   type ScheduledTaskUpsertSchedule,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { EXPRESSIONS as AGENT_FACE_EXPRESSIONS } from "~/components/agents/face/engine/expressions";
 import {
   COLORS as AGENT_FACE_COLORS,
@@ -54,7 +54,7 @@ export interface AgentProposalTrigger {
   schedule: ScheduledTaskSchedule | null;
 }
 export interface AgentProposal {
-  machine?: import("@t3tools/contracts").EnvironmentId;
+  machine?: import("@cogenly/contracts").EnvironmentId;
   name?: string;
   face?: Pick<AgentAvatar, "shape" | "color" | "expression">;
   responsibility?: string;

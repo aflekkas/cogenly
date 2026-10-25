@@ -10,11 +10,11 @@ import {
   DESKTOP_APP_ACTIVATION_PROTOCOL_VERSION,
   DesktopAppActivationRequest,
   type DesktopAppActivationResponse,
-} from "@t3tools/contracts";
-import { resolveDesktopAppControlAddress } from "@t3tools/shared/desktopAppControl";
-import type { AddEnvironmentRequest } from "@t3tools/shared/environmentLinks";
-import type { PromptLinkResult } from "@t3tools/shared/promptLinks";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+} from "@cogenly/contracts";
+import { resolveDesktopAppControlAddress } from "@cogenly/shared/desktopAppControl";
+import type { AddEnvironmentRequest } from "@cogenly/shared/environmentLinks";
+import type { PromptLinkResult } from "@cogenly/shared/promptLinks";
+import * as HostProcess from "@cogenly/shared/HostProcess";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -322,7 +322,7 @@ export class DesktopAppActivation extends Context.Service<
       link: PromptLinkResult<AddEnvironmentRequest>,
     ) => Effect.Effect<void>;
   }
->()("@t3tools/desktop/app/DesktopAppActivation") {}
+>()("@cogenly/desktop/app/DesktopAppActivation") {}
 
 /** The native confirmation for a deep link, worded for a request the user may not have made. */
 export function environmentLinkConfirmation(request: AddEnvironmentRequest) {

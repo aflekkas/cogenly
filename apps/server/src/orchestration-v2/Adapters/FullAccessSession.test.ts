@@ -16,10 +16,10 @@ import {
   RunId,
   RuntimeMode,
   ThreadId,
-} from "@t3tools/contracts";
-import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
-import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
-import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
+} from "@cogenly/contracts";
+import * as IdAllocator from "@cogenly/provider-core/server/IdAllocator";
+import * as McpProviderSessions from "@cogenly/provider-core/server/McpProviderSessions";
+import type * as ProviderAdapter from "@cogenly/provider-core/server/ProviderAdapter";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";

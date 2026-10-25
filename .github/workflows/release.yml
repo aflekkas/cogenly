@@ -168,7 +168,7 @@ jobs:
           xcode="$(ls -d /Applications/Xcode_26*.app | sort -V | tail -n 1)"
           echo "COGENLY_SPEECH_DEVELOPER_DIR=$xcode/Contents/Developer" >> "$GITHUB_ENV"
           DEVELOPER_DIR="$xcode/Contents/Developer" xcrun swiftc --version
-      - run: vp run --filter @t3tools/desktop ensure:electron
+      - run: vp run --filter @cogenly/desktop ensure:electron
       - name: Stamp package versions
         env:
           VERSION: ${{ needs.prepare.outputs.version }}

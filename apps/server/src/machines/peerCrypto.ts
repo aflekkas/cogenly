@@ -7,13 +7,13 @@ import {
   type AuthPeerScope,
   type PeerChallengeResult,
   PEER_PROTOCOL_VERSION,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import {
   computeDpopAccessTokenHash,
   computeDpopJwkThumbprint,
   DpopPublicJwk,
   normalizeDpopHtu,
-} from "@t3tools/shared/dpop";
+} from "@cogenly/shared/dpop";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";

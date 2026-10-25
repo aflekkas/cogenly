@@ -5,7 +5,7 @@ import type {
   ProviderInstanceId,
   ScheduledTaskId,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 
 /**
  * Where a health item or alert leads, and what its fix does. Settings →

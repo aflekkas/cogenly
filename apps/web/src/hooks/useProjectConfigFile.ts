@@ -4,8 +4,8 @@ import {
   type EnvironmentId,
   type T3ProjectFile,
   type T3ProjectFileScript,
-} from "@t3tools/contracts";
-import { parseT3ProjectFile } from "@t3tools/shared/t3ProjectFile";
+} from "@cogenly/contracts";
+import { parseT3ProjectFile } from "@cogenly/shared/t3ProjectFile";
 import { useMemo } from "react";
 
 import { useProjectFileQuery } from "~/components/files/projectFilesQueryState";

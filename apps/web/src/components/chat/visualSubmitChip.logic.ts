@@ -1,4 +1,4 @@
-import type { VisualState } from "@t3tools/contracts";
+import type { VisualState } from "@cogenly/contracts";
 import * as DateTime from "effect/DateTime";
 
 /**

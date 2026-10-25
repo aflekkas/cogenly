@@ -1,4 +1,4 @@
-import { threadPullRequestSearchTerms } from "@t3tools/shared/threadPullRequests";
+import { threadPullRequestSearchTerms } from "@cogenly/shared/threadPullRequests";
 import type {
   CommandPaletteAddProjectTarget,
   CommandPaletteLinkedThreads,
@@ -8,10 +8,10 @@ import {
   type FilesystemBrowseEntry,
   type KeybindingCommand,
   THREAD_JUMP_KEYBINDING_COMMANDS,
-} from "@t3tools/contracts";
-import { filterFilesystemBrowseEntries } from "@t3tools/client-runtime/state/filesystem";
-import type { ScopedThreadRef } from "@t3tools/contracts";
-import type { SidebarThreadSortOrder } from "@t3tools/contracts/settings";
+} from "@cogenly/contracts";
+import { filterFilesystemBrowseEntries } from "@cogenly/client-runtime/state/filesystem";
+import type { ScopedThreadRef } from "@cogenly/contracts";
+import type { SidebarThreadSortOrder } from "@cogenly/contracts/settings";
 import * as Arr from "effect/Array";
 import * as Result from "effect/Result";
 import { type ReactNode } from "react";

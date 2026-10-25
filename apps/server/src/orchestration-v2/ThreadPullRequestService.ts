@@ -1,7 +1,7 @@
 import {
   canonicalRepositoryKey,
   sourceControlRepositorySelector,
-} from "@t3tools/shared/sourceControl";
+} from "@cogenly/shared/sourceControl";
 import {
   CommandId,
   type OrchestrationProjectShell,
@@ -9,9 +9,9 @@ import {
   type OrchestrationV2ThreadShell,
   type ThreadId,
   type ThreadLinkedPullRequest,
-} from "@t3tools/contracts";
-import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
-import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
+} from "@cogenly/contracts";
+import { makeDrainableWorker } from "@cogenly/shared/DrainableWorker";
+import * as NodeSqliteClient from "@cogenly/shared/nodeSqliteClient";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";

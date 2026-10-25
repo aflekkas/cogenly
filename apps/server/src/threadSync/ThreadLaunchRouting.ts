@@ -28,7 +28,7 @@ import {
   ThreadScheduleUpsert,
   ThreadScheduleRun,
   ThreadRemoteError,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { exportBundle, importBundle } from "./repositoryBundle.ts";
 import * as ScheduledTasks from "../scheduledTasks/ScheduledTaskService.ts";
 import * as AgentService from "../agents/AgentService.ts";
@@ -37,7 +37,7 @@ import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import * as Projects from "../orchestration-v2/ProjectStore.ts";
 import * as Git from "../vcs/GitVcsDriver.ts";
-import { derive } from "@t3tools/provider-core/server/IdAllocator";
+import { derive } from "@cogenly/provider-core/server/IdAllocator";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as Clock from "effect/Clock";
 import * as Ref from "effect/Ref";
@@ -409,7 +409,7 @@ const make = Effect.gen(function* () {
               }),
           ),
         );
-      const attach = (driver: import("@t3tools/contracts").ProviderDriverKind) =>
+      const attach = (driver: import("@cogenly/contracts").ProviderDriverKind) =>
         threads.dispatch({ ...local, type: "delegated_task.attach", driver }).pipe(
           Effect.mapError(
             () =>

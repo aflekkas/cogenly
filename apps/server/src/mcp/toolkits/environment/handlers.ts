@@ -3,7 +3,7 @@ import {
   OrchestratorMcpFailure,
   UNIVERSAL_CLIENT_PREFERENCE_KEYS,
   type ServerSettings,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Struct from "effect/Struct";
 import * as Effect from "effect/Effect";
 import * as DesktopAppControl from "../../../environment/DesktopAppControl.ts";

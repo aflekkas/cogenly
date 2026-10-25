@@ -1,8 +1,8 @@
-import { createMachinePairingCommand } from "@t3tools/client-runtime/machines/pair";
+import { createMachinePairingCommand } from "@cogenly/client-runtime/machines/pair";
 import {
   createEnvironmentRpcCommand,
   createEnvironmentRpcSubscriptionAtomFamily,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@cogenly/client-runtime/state/runtime";
 
 import { connectionAtomRuntime } from "../connection/runtime";
 

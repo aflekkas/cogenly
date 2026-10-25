@@ -1,4 +1,4 @@
-import type { VaultItemPortability, VaultPortabilityReason } from "@t3tools/contracts";
+import type { VaultItemPortability, VaultPortabilityReason } from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
 

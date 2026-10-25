@@ -5,14 +5,14 @@ import {
   type OrchestrationSearchThreadsResult,
   ProjectId,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as SqlSchema from "effect/sql/SqlSchema";
-import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
+import * as NodeSqliteClient from "@cogenly/shared/nodeSqliteClient";
 
 /** Carries no query text: search input is user content. */
 export class ThreadSearchError extends Schema.TaggedError<ThreadSearchError>()(

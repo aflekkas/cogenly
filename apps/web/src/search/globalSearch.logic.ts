@@ -5,7 +5,7 @@ import type {
   SearchKind,
   SearchQueryResult,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 
 /** Shorter queries match too much of everything to be worth a server round trip. */
 export const GLOBAL_SEARCH_MIN_QUERY_LENGTH = 2;

@@ -1,5 +1,5 @@
-import { ThreadRemoteError } from "@t3tools/contracts";
-import { normalizeGitRemoteUrl } from "@t3tools/shared/git";
+import { ThreadRemoteError } from "@cogenly/contracts";
+import { normalizeGitRemoteUrl } from "@cogenly/shared/git";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as Git from "../vcs/GitVcsDriver.ts";

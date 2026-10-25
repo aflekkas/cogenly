@@ -5,7 +5,7 @@ import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import { runMigrations } from "../Migrations.ts";
-import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
+import * as NodeSqliteClient from "@cogenly/shared/nodeSqliteClient";
 
 // A bare client: the app's memory layer would already have run every migration.
 const layer = NodeSqliteClient.layer({ filename: ":memory:" }).pipe(

@@ -17,8 +17,8 @@
  *
  * @module provider-muse/server/usage
  */
-import * as HostProcess from "@t3tools/shared/HostProcess";
-import { UsageProviderKind } from "@t3tools/contracts";
+import * as HostProcess from "@cogenly/shared/HostProcess";
+import { UsageProviderKind } from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
 import * as Path from "effect/Path";
 
@@ -29,7 +29,7 @@ import {
   type ProviderUsageReader,
   type TranscriptUsageFormat,
   type UsageRecord,
-} from "@t3tools/provider-core/server/usage";
+} from "@cogenly/provider-core/server/usage";
 import type { MuseSettings } from "../settings.ts";
 
 export type MuseUsageReaderEnv = Path.Path;

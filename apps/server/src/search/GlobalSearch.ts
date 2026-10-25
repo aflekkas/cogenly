@@ -1,12 +1,12 @@
 import * as Access from "../agents/AgentAccessScope.ts";
-import { SearchError, SearchQueryResult, type SearchQueryInput } from "@t3tools/contracts";
+import { SearchError, SearchQueryResult, type SearchQueryInput } from "@cogenly/contracts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
-import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
+import * as NodeSqliteClient from "@cogenly/shared/nodeSqliteClient";
 import * as Store from "../agents/AgentStore.ts";
 import * as Config from "../config.ts";
 import type { McpInvocationScope } from "../mcp/McpInvocationContext.ts";

@@ -1,5 +1,5 @@
-import { ServerProviderModel } from "@t3tools/contracts";
-import { resolveSpawnCommand } from "@t3tools/shared/shell";
+import { ServerProviderModel } from "@cogenly/contracts";
+import { resolveSpawnCommand } from "@cogenly/shared/shell";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -13,7 +13,7 @@ import {
   providerModelsFromSettings,
   spawnAndCollect,
   type ProviderProbeResult,
-} from "@t3tools/provider-core/server/snapshotProbe";
+} from "@cogenly/provider-core/server/snapshotProbe";
 
 import { GrokSettings } from "../settings.ts";
 import { createGrokAcpHost, createGrokAcpHostEffect, makeGrokEnvironment } from "./acp.ts";

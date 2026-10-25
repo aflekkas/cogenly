@@ -1,7 +1,7 @@
 import * as ReadOnlySandbox from "./ReadOnlySandbox.ts";
 import * as Vault from "../vault/Vault.ts";
 import type { CredentialDelivery } from "../accounts/CliCredentials.ts";
-import type { AccountError } from "@t3tools/contracts";
+import type { AccountError } from "@cogenly/contracts";
 /**
  * TerminalManager - Terminal session orchestration service interface.
  *
@@ -47,13 +47,13 @@ import {
   CodexSettings,
   ProviderInstanceId,
   TERMINAL_COMMAND_MAX_LENGTH,
-} from "@t3tools/contracts";
-import { makeKeyedCoalescingWorker } from "@t3tools/shared/KeyedCoalescingWorker";
-import * as KeyedLock from "@t3tools/shared/KeyedLock";
-import { AgentScope } from "@t3tools/shared/AgentScope";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+} from "@cogenly/contracts";
+import { makeKeyedCoalescingWorker } from "@cogenly/shared/KeyedCoalescingWorker";
+import * as KeyedLock from "@cogenly/shared/KeyedLock";
+import { AgentScope } from "@cogenly/shared/AgentScope";
+import * as HostProcess from "@cogenly/shared/HostProcess";
 
-import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
+import { getTerminalLabel } from "@cogenly/shared/terminalLabels";
 import * as DateTime from "effect/DateTime";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -70,7 +70,7 @@ import * as Scope from "effect/Scope";
 import * as SynchronizedRef from "effect/SynchronizedRef";
 
 import * as ServerConfig from "../config.ts";
-import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
+import { mergeProviderInstanceEnvironment } from "@cogenly/provider-core/server/instanceEnvironment";
 import { resolveCodexHomeLayout } from "../provider/Drivers/CodexHomeLayout.ts";
 import { makeClaudeEnvironment } from "../provider/Drivers/ClaudeHome.ts";
 import { deriveProviderInstanceConfigMap } from "../provider/ProviderInstanceRegistryHydration.ts";
@@ -80,11 +80,11 @@ import {
   terminalRestartsTotal,
   terminalSessionsTotal,
 } from "../observability/Metrics.ts";
-import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
+import { expandHomePath } from "@cogenly/provider-core/server/pathExpansion";
 import * as ProcessRunner from "../processRunner.ts";
 import * as PortScanner from "../preview/PortScanner.ts";
 import * as NativeTelemetryClient from "../resourceTelemetry/NativeTelemetryClient.ts";
-import * as PtyAdapter from "@t3tools/shared/PtyAdapter";
+import * as PtyAdapter from "@cogenly/shared/PtyAdapter";
 
 export {
   TerminalCwdError,

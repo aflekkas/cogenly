@@ -1,11 +1,11 @@
-import { integrationSourceNotice } from "@t3tools/client-runtime/composerThreadItems";
+import { integrationSourceNotice } from "@cogenly/client-runtime/composerThreadItems";
 import type {
   AgentContextRecord,
   EnvironmentId,
   IntegrationCatalogId,
   ProjectFolderContextRecord,
   ThreadContextRecord,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { Link } from "@tanstack/react-router";
 import { BotIcon, MessagesSquareIcon } from "lucide-react";
 

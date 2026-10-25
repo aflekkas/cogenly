@@ -1,5 +1,5 @@
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import { scopeThreadRef } from "@cogenly/client-runtime/environment";
+import type { EnvironmentId, ThreadId } from "@cogenly/contracts";
 import { useMemo } from "react";
 
 import { type DraftId, useComposerDraftStore } from "../composerDraftStore";

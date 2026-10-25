@@ -1,4 +1,4 @@
-import type { OrchestrationV2ThreadProjection } from "@t3tools/contracts";
+import type { OrchestrationV2ThreadProjection } from "@cogenly/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import { activeRunRefusesSteering } from "./threadWorkflows.ts";

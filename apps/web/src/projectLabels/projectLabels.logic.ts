@@ -12,7 +12,7 @@ import {
   type ProjectLabelId,
   type ProjectLabelWithRepositories,
   type ProjectSourceLink,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 
 import {
   normalizeProjectColor,

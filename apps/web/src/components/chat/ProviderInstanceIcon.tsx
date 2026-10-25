@@ -1,8 +1,8 @@
 import { type CSSProperties, memo } from "react";
 
-import { providerInstanceInitials } from "@t3tools/client-runtime/state/provider-instance-display";
+import { providerInstanceInitials } from "@cogenly/client-runtime/state/provider-instance-display";
 
-import { ProviderDriverKind } from "@t3tools/contracts";
+import { ProviderDriverKind } from "@cogenly/contracts";
 
 import { cn } from "~/lib/utils";
 import { providerClients } from "../settings/providerDriverMeta";

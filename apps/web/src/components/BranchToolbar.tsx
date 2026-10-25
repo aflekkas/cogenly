@@ -2,8 +2,8 @@ import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
 import { readLocalApi } from "../localApi";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { COMPOSER_CONTEXT_TOOLTIP, ComposerContextLabel } from "./ComposerContextLabel";
-import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
-import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import { scopeProjectRef, scopeThreadRef } from "@cogenly/client-runtime/environment";
+import type { EnvironmentId, ThreadId } from "@cogenly/contracts";
 import {
   ChevronDownIcon,
   FolderGit2Icon,

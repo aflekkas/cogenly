@@ -5,21 +5,21 @@ import type {
   OrchestrationV2TurnItem,
   Project,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import {
   RelayApi,
   type RelayAgentActivityPublishProofPayload,
   type RelayAgentActivityState,
-} from "@t3tools/contracts/relay";
-import { projectThreadAwarenessV2 } from "@t3tools/shared/agentAwareness";
-import { turnItemUpdateCanEndBackgroundWork } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
-import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
-import { withRelayClientTracing } from "@t3tools/shared/relayTracing";
+} from "@cogenly/contracts/relay";
+import { projectThreadAwarenessV2 } from "@cogenly/shared/agentAwareness";
+import { turnItemUpdateCanEndBackgroundWork } from "@cogenly/shared/orchestrationV2PendingBackgroundWork";
+import { makeDrainableWorker } from "@cogenly/shared/DrainableWorker";
+import { withRelayClientTracing } from "@cogenly/shared/relayTracing";
 import {
   normalizeRelayIssuer,
   RELAY_ACTIVITY_PUBLISH_TYP,
   signRelayJwt,
-} from "@t3tools/shared/relayJwt";
+} from "@cogenly/shared/relayJwt";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";

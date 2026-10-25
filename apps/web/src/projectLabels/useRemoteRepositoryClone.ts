@@ -1,8 +1,8 @@
-import { scopeProjectRef } from "@t3tools/client-runtime/environment";
+import { scopeProjectRef } from "@cogenly/client-runtime/environment";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@cogenly/client-runtime/state/runtime";
 import {
   projectCloneProgressSummary,
   type ProjectCloneSnapshot,
@@ -10,7 +10,7 @@ import {
   type ProjectLabelOwnerRepository,
   type ScopedProjectRef,
   SourceControlProviderKind,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { useEffect, useMemo, useState } from "react";
 
 import { useRemoveClonedProject } from "../hooks/useRemoveClonedProject";

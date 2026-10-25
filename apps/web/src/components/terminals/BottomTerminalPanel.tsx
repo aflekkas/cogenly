@@ -1,10 +1,10 @@
-import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { scopedThreadKey, scopeThreadRef } from "@cogenly/client-runtime/environment";
 import {
   AuthTerminalOperateScope,
   AuthTerminalReadScope,
   ThreadId,
   type ScopedThreadRef,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { Bot, TerminalSquare, X } from "lucide-react";
 import {
   memo,

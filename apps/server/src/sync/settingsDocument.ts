@@ -14,7 +14,7 @@ import {
   ServerSettings,
   UNIVERSAL_SERVER_SETTING_KEYS,
   type UniversalServerSettingKey,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 

@@ -4,7 +4,7 @@ import type {
   SharedSyncPeerStatus,
   VaultItemMetadata,
   VaultPeerSharing,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { HistoryIcon, KeyRoundIcon, PencilIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 

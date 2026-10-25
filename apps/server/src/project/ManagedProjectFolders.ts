@@ -19,8 +19,8 @@ import {
   type ProjectLabelId,
   type ThreadId,
   VcsProcessSpawnError,
-} from "@t3tools/contracts";
-import { newProjectFolderName } from "@t3tools/shared/path";
+} from "@cogenly/contracts";
+import { newProjectFolderName } from "@cogenly/shared/path";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
@@ -41,7 +41,7 @@ import * as ServerSettings from "../serverSettings.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as ProjectLabelService from "../projectLabels/ProjectLabelService.ts";
 import * as ProjectLabelFolders from "../projectLabels/ProjectLabelFolders.ts";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as HostProcess from "@cogenly/shared/HostProcess";
 import * as ProjectService from "./ProjectService.ts";
 import {
   UNFILED_REPOSITORIES_SEGMENT,

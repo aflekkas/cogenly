@@ -1,4 +1,4 @@
-import { presentThreadShell } from "@t3tools/client-runtime/state/models";
+import { presentThreadShell } from "@cogenly/client-runtime/state/models";
 import * as DateTime from "effect/DateTime";
 import { deriveActiveWorkStartedAt } from "../session-logic.ts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
@@ -52,9 +52,9 @@ import {
   type SidebarListMarker,
   type SidebarSection,
 } from "./Sidebar.logic";
-import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
-import { sortSettledThreads } from "@t3tools/client-runtime/state/thread-sort";
-import { EnvironmentId, ProjectId, ProviderInstanceId, RunId, ThreadId } from "@t3tools/contracts";
+import { threadSearchMatchKey } from "@cogenly/client-runtime/state/thread-search";
+import { sortSettledThreads } from "@cogenly/client-runtime/state/thread-sort";
+import { EnvironmentId, ProjectId, ProviderInstanceId, RunId, ThreadId } from "@cogenly/contracts";
 
 import {
   DEFAULT_INTERACTION_MODE,

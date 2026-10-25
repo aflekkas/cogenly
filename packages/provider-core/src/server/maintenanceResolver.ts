@@ -1,20 +1,20 @@
 export type {
   ProviderMaintenanceCapabilities,
   ProviderMaintenanceCommandAction,
-} from "@t3tools/provider-core/server/maintenance";
+} from "@cogenly/provider-core/server/maintenance";
 import type {
   ProviderMaintenanceCapabilities,
   ProviderMaintenanceCommandAction,
-} from "@t3tools/provider-core/server/maintenance";
+} from "@cogenly/provider-core/server/maintenance";
 import {
   ProviderDriverKind,
   type ServerProvider,
   type ServerProviderVersionAdvisory,
-} from "@t3tools/contracts";
-import { compareSemverVersions } from "@t3tools/shared/semver";
-import * as HostProcess from "@t3tools/shared/HostProcess";
-import { causeErrorTag } from "@t3tools/shared/observability";
-import { resolveCommandPath } from "@t3tools/shared/shell";
+} from "@cogenly/contracts";
+import { compareSemverVersions } from "@cogenly/shared/semver";
+import * as HostProcess from "@cogenly/shared/HostProcess";
+import { causeErrorTag } from "@cogenly/shared/observability";
+import { resolveCommandPath } from "@cogenly/shared/shell";
 import * as Cache from "effect/Cache";
 import * as Config from "effect/Config";
 import * as DateTime from "effect/DateTime";

@@ -1,4 +1,4 @@
-import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
+import type { EnvironmentId, ScopedThreadRef } from "@cogenly/contracts";
 import { Globe } from "lucide-react";
 
 import type { BrowserHistoryEntry } from "~/browserHistoryStore";

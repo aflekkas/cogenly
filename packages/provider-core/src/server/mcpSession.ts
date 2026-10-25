@@ -5,7 +5,7 @@ import type {
   ThreadId,
   RuntimeMode,
   ProviderInteractionMode,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 
 export interface McpProviderSessionConfig {
   readonly environmentId: EnvironmentId;

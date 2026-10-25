@@ -62,7 +62,7 @@ export interface SqliteClientConfig {
  * Set by `readOnly`. A top-level transaction started while it is true runs on
  * the reader worker when the client has one, and on the writer otherwise.
  */
-const ReadOnly = Context.Reference<boolean>("@t3tools/shared/nodeSqliteClient/ReadOnly", {
+const ReadOnly = Context.Reference<boolean>("@cogenly/shared/nodeSqliteClient/ReadOnly", {
   defaultValue: () => false,
 });
 
@@ -98,7 +98,7 @@ const annotateAcquired = (fiber: Fiber.Fiber<unknown, unknown>, acquired: Acquir
  * leaves its result here and the transaction body puts it on the span.
  */
 const TransactionAcquire = Context.Reference<{ acquired?: Acquired } | undefined>(
-  "@t3tools/shared/nodeSqliteClient/TransactionAcquire",
+  "@cogenly/shared/nodeSqliteClient/TransactionAcquire",
   { defaultValue: () => undefined },
 );
 

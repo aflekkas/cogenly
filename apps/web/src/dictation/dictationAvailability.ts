@@ -1,4 +1,4 @@
-import type { DesktopDictationBridge } from "@t3tools/contracts";
+import type { DesktopDictationBridge } from "@cogenly/contracts";
 import { useEffect, useState } from "react";
 
 import { BrowserDictationMicrophone, type DictationMicrophone } from "./browserDictationMicrophone";

@@ -2,7 +2,7 @@ import {
   latestExecutedRun,
   latestRootProviderFailure,
   runRanAfter,
-} from "@t3tools/shared/orchestrationV2ThreadError";
+} from "@cogenly/shared/orchestrationV2ThreadError";
 import {
   CommandId,
   limitRecoveryResumeAt,
@@ -18,8 +18,8 @@ import {
   type OrchestrationV2TurnItem,
   type RunId,
   type ThreadId,
-} from "@t3tools/contracts";
-import { reportLabel } from "@t3tools/provider-core/server/notification";
+} from "@cogenly/contracts";
+import { reportLabel } from "@cogenly/provider-core/server/notification";
 import * as Effect from "effect/Effect";
 
 import * as ThreadManagementService from "./ThreadManagementService.ts";

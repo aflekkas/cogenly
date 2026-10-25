@@ -2,7 +2,7 @@ import {
   OrchestratorMcpFailure,
   type ProjectLabelError,
   type ProjectLabelId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
 
 import * as ProjectFiles from "../../../projectLabels/ProjectFiles.ts";

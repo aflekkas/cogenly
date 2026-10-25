@@ -1,5 +1,5 @@
-import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentThreadShell } from "@cogenly/client-runtime/state/shell";
+import type { EnvironmentId } from "@cogenly/contracts";
 
 import { agentAttentionCount } from "../../../agents/agentWorkspace.logic";
 import {

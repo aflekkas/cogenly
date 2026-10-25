@@ -1,4 +1,4 @@
-import { EnvironmentId, ThreadId, type OrchestrationV2ThreadShell } from "@t3tools/contracts";
+import { EnvironmentId, ThreadId, type OrchestrationV2ThreadShell } from "@cogenly/contracts";
 import { describe, expect, it } from "vite-plus/test";
 import { Atom, AtomRegistry } from "effect/reactivity";
 

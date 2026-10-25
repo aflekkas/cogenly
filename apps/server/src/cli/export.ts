@@ -1,5 +1,5 @@
 import * as Schema from "effect/Schema";
-import { ExportResult } from "@t3tools/contracts";
+import { ExportResult } from "@cogenly/contracts";
 import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";

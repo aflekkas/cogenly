@@ -8,7 +8,7 @@ import type {
   MachineHealthItem,
   MachineHealthReport,
   MachineInfo,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 

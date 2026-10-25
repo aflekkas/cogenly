@@ -1,4 +1,4 @@
-import { EnvironmentId, ProviderInstanceId } from "@t3tools/contracts";
+import { EnvironmentId, ProviderInstanceId } from "@cogenly/contracts";
 import * as Schema from "effect/Schema";
 import { providerAuthReturnUrl } from "./providerAuthReturnUrl.ts";
 

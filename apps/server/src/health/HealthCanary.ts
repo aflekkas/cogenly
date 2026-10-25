@@ -13,8 +13,8 @@ import {
   type ServerProvider,
   type ServerSettings as ServerSettingsDocument,
   ThreadId,
-} from "@t3tools/contracts";
-import { defaultTextGenerationModelForDriver } from "@t3tools/provider-core/server/driver";
+} from "@cogenly/contracts";
+import { defaultTextGenerationModelForDriver } from "@cogenly/provider-core/server/driver";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";

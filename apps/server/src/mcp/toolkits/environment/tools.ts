@@ -7,11 +7,11 @@ import {
   ServerSettingsPatch,
   UniversalClientPreferenceValues,
   UniversalClientPreferencePatch,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Schema from "effect/Schema";
 import { Tool, Toolkit } from "effect/ai";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
-import { EnvironmentId, MachineHealthReport, MachineSecurityStatus } from "@t3tools/contracts";
+import { EnvironmentId, MachineHealthReport, MachineSecurityStatus } from "@cogenly/contracts";
 import * as DesktopAppControl from "../../../environment/DesktopAppControl.ts";
 import * as ServerEnvironment from "../../../environment/ServerEnvironment.ts";
 import * as MachineHealth from "../../../health/MachineHealth.ts";

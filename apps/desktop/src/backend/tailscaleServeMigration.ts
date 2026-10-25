@@ -1,4 +1,4 @@
-import { adoptLegacyServePreference } from "@t3tools/tailscale";
+import { adoptLegacyServePreference } from "@cogenly/tailscale";
 import * as Effect from "effect/Effect";
 
 /**

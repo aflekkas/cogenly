@@ -5,7 +5,7 @@
  * These rows stand in for that notification until it lands, then give way to
  * it.
  */
-import type { OrchestrationV2NotificationSource } from "@t3tools/contracts";
+import type { OrchestrationV2NotificationSource } from "@cogenly/contracts";
 
 export type PendingCompletionOutcome = "completed" | "failed" | "cancelled";
 

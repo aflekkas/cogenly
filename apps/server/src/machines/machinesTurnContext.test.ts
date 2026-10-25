@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest";
-import { EnvironmentId, type MachineInfo, type MachineListResult } from "@t3tools/contracts";
+import { EnvironmentId, type MachineInfo, type MachineListResult } from "@cogenly/contracts";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";

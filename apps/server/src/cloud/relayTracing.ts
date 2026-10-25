@@ -1,4 +1,4 @@
-import * as RelayTracing from "@t3tools/shared/relayTracing";
+import * as RelayTracing from "@cogenly/shared/relayTracing";
 
 import { resolveRelayClientTracingConfig } from "./publicConfig.ts";
 

@@ -1,4 +1,4 @@
-import { commandDisplayText } from "@t3tools/client-runtime/work-log/command-label";
+import { commandDisplayText } from "@cogenly/client-runtime/work-log/command-label";
 
 import {
   commandTitle,

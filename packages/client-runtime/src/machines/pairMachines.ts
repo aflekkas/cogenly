@@ -7,7 +7,7 @@ import {
   type MachineListResult,
   type MachinePeerIdentity,
   type MachineSetupStatus,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import type { Atom } from "effect/reactivity";

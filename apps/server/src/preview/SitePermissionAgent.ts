@@ -8,7 +8,7 @@ import {
   type SitePermission,
   type SitePermissionSetting,
   type SitePermissionsState,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 
 /** Playwright's names for the permissions a context can grant. */
 const PLAYWRIGHT_PERMISSION: Readonly<Record<SitePermission, string>> = {

@@ -3,7 +3,7 @@
  * Alert text is built from health items, which never carry credentials, but
  * everything leaving through Slack or email still passes `sanitizeAlertText`.
  */
-import type { IntegrationToolInfo, MachineHealthAlert } from "@t3tools/contracts";
+import type { IntegrationToolInfo, MachineHealthAlert } from "@cogenly/contracts";
 import * as DateTime from "effect/DateTime";
 
 const REDACTED = "[redacted]";

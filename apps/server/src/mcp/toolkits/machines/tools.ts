@@ -10,7 +10,7 @@ import {
   THREAD_MOVE_MAX_THREADS,
   ThreadId,
   ThreadMoveResult,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { Tool, Toolkit } from "effect/ai";
 import * as Schema from "effect/Schema";
 

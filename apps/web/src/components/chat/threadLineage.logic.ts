@@ -1,4 +1,4 @@
-import type { OrchestrationV2ThreadShell, ThreadId } from "@t3tools/contracts";
+import type { OrchestrationV2ThreadShell, ThreadId } from "@cogenly/contracts";
 
 /** How a thread relates to the thread it came from. */
 export type ThreadOriginKind = "subagent" | "fork" | "chat" | "agent-conversation";

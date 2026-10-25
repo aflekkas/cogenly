@@ -1,4 +1,4 @@
-import type { ContextMenuItem } from "@t3tools/contracts";
+import type { ContextMenuItem } from "@cogenly/contracts";
 
 import {
   MENU_VIEWPORT_MARGIN_PX,

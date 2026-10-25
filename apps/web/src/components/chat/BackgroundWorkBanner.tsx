@@ -1,5 +1,5 @@
-import type { PendingBackgroundWorkPresentation } from "@t3tools/client-runtime/state/thread-execution";
-import { ThreadId, type EnvironmentId } from "@t3tools/contracts";
+import type { PendingBackgroundWorkPresentation } from "@cogenly/client-runtime/state/thread-execution";
+import { ThreadId, type EnvironmentId } from "@cogenly/contracts";
 import { ActivityIcon, BellRingIcon, BotIcon, TerminalIcon } from "lucide-react";
 import { useState } from "react";
 

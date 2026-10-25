@@ -2,7 +2,7 @@ import { useAtomValue } from "@effect/atom-react";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@cogenly/client-runtime/state/runtime";
 import {
   AuthSettingsWriteScope,
   type EnvironmentId,
@@ -14,7 +14,7 @@ import {
   type MachineHealthStatus,
   type MachineInfo,
   type MachineListResult,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { Link } from "@tanstack/react-router";
 import * as DateTime from "effect/DateTime";
 import {

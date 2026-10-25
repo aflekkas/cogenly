@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest";
-import { RunId, ThreadId } from "@t3tools/contracts";
+import { RunId, ThreadId } from "@cogenly/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 

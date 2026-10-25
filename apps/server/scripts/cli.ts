@@ -15,7 +15,7 @@ import {
   findEsmImportsOfExternalPackages,
 } from "../../../scripts/lib/cli-executable-imports.ts";
 import { isRuntimeExternalCliDependency } from "../../../scripts/lib/cli-external-packages.ts";
-import { resolveSpawnCommand } from "@t3tools/shared/shell";
+import { resolveSpawnCommand } from "@cogenly/shared/shell";
 import {
   ServerCliBuildAssetMissingError,
   ServerCliCommandExitError,

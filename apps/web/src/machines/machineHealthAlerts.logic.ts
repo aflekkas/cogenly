@@ -3,7 +3,7 @@ import type {
   MachineHealthAlert,
   MachineHealthAlertsSnapshot,
   MachineHealthStatus,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as DateTime from "effect/DateTime";
 
 /**

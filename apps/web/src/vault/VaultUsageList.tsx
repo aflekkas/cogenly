@@ -1,4 +1,4 @@
-import type { AgentId, EnvironmentId, VaultItemId, VaultUsageEntry } from "@t3tools/contracts";
+import type { AgentId, EnvironmentId, VaultItemId, VaultUsageEntry } from "@cogenly/contracts";
 
 import { MarkdownThreadLink } from "../components/chat/MarkdownThreadLink";
 import { Badge } from "../components/ui/badge";

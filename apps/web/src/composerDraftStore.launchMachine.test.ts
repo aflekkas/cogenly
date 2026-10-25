@@ -1,5 +1,5 @@
-import { EnvironmentId, ProjectId } from "@t3tools/contracts";
-import { scopeProjectRef } from "@t3tools/client-runtime/environment";
+import { EnvironmentId, ProjectId } from "@cogenly/contracts";
+import { scopeProjectRef } from "@cogenly/client-runtime/environment";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { DraftId, useComposerDraftStore } from "./composerDraftStore";

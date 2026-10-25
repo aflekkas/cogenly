@@ -1,13 +1,13 @@
 import type {
   RelayClientEnvironmentRecord,
   RelayEnvironmentStatusResponse,
-} from "@t3tools/contracts/relay";
-import type { EnvironmentId } from "@t3tools/contracts";
+} from "@cogenly/contracts/relay";
+import type { EnvironmentId } from "@cogenly/contracts";
 import {
   RelayEnvironmentConnectScope,
   RelayEnvironmentStatusScope,
-} from "@t3tools/contracts/relay";
-import { decodeRelayJwt } from "@t3tools/shared/relayJwt";
+} from "@cogenly/contracts/relay";
+import { decodeRelayJwt } from "@cogenly/shared/relayJwt";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Data from "effect/Data";

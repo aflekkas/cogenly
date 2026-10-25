@@ -1,10 +1,10 @@
-import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { isScratchProject } from "@t3tools/client-runtime/state/projects";
+import { scopeProjectRef, scopeThreadRef } from "@cogenly/client-runtime/environment";
+import { isScratchProject } from "@cogenly/client-runtime/state/projects";
 import type {
   EnvironmentProject,
   EnvironmentThreadShell,
-} from "@t3tools/client-runtime/state/shell";
-import type { EnvironmentId } from "@t3tools/contracts";
+} from "@cogenly/client-runtime/state/shell";
+import type { EnvironmentId } from "@cogenly/contracts";
 import { useRouter } from "@tanstack/react-router";
 import { useCallback, useContext } from "react";
 

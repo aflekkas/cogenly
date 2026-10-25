@@ -3,7 +3,7 @@ import type {
   EnvironmentId,
   PreviewSessionSnapshot,
   ResolvedKeybindingsConfig,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import {
   Check,
   CircleUser,

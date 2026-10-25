@@ -6,7 +6,7 @@ import {
   type PreviewStreamCapabilities,
   type PreviewStreamHostSetup,
   type PreviewViewportSetting,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 
 export const PREVIEW_STREAM_BASE_PATH = "/api/preview-stream";
 

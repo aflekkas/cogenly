@@ -1,4 +1,4 @@
-import type { DesktopUpdateChannel, DesktopUpdateReleaseNote } from "@t3tools/contracts";
+import type { DesktopUpdateChannel, DesktopUpdateReleaseNote } from "@cogenly/contracts";
 
 import { resolveDefaultDesktopUpdateChannel } from "./updateChannels.ts";
 

@@ -11,7 +11,7 @@ import {
   ThreadId,
   WorkTaskId,
   type WorkTask,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Stream from "effect/Stream";
 import * as Effect from "effect/Effect";

@@ -1,4 +1,4 @@
-import type { OrchestrationV2AppThread } from "@t3tools/contracts";
+import type { OrchestrationV2AppThread } from "@cogenly/contracts";
 
 /** Old events and downgraded servers omit provenance. Never infer it from model text. */
 export function withWorkMetadata<

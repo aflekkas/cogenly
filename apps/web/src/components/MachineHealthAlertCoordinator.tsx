@@ -1,5 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
-import type { EnvironmentId, MachineHealthAlertsSnapshot } from "@t3tools/contracts";
+import type { EnvironmentId, MachineHealthAlertsSnapshot } from "@cogenly/contracts";
 import * as Option from "effect/Option";
 import { AsyncResult } from "effect/reactivity";
 import { useEffect, useRef } from "react";

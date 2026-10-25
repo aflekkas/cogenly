@@ -1,7 +1,7 @@
 import { useAtomValue } from "@effect/atom-react";
-import { isAtomCommandInterrupted } from "@t3tools/client-runtime/state/runtime";
-import type { EnvironmentProject } from "@t3tools/client-runtime/state/models";
-import { type EnvironmentId, ProjectId } from "@t3tools/contracts";
+import { isAtomCommandInterrupted } from "@cogenly/client-runtime/state/runtime";
+import type { EnvironmentProject } from "@cogenly/client-runtime/state/models";
+import { type EnvironmentId, ProjectId } from "@cogenly/contracts";
 import { ChevronLeftIcon, FolderPlusIcon } from "lucide-react";
 import {
   type KeyboardEvent as ReactKeyboardEvent,

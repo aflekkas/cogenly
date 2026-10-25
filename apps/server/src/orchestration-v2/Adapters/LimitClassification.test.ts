@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import type { OrchestrationV2ProviderFailure } from "@t3tools/contracts";
+import type { OrchestrationV2ProviderFailure } from "@cogenly/contracts";
 import * as DateTime from "effect/DateTime";
 
 import { classifyClaudeLimitFailure } from "./ClaudeAdapterV2.ts";

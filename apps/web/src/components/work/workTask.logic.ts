@@ -1,4 +1,4 @@
-import type { MessageId, RunId, WorkHandoffLink, WorkTask } from "@t3tools/contracts";
+import type { MessageId, RunId, WorkHandoffLink, WorkTask } from "@cogenly/contracts";
 
 import { anchorAtTurnEnd } from "./work.logic";
 

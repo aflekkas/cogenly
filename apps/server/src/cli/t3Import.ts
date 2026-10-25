@@ -3,7 +3,7 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { Command, Flag, GlobalFlag } from "effect/cli";
-import { T3ImportReport, T3ImportResult } from "@t3tools/contracts";
+import { T3ImportReport, T3ImportResult } from "@cogenly/contracts";
 
 import { projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
 import {

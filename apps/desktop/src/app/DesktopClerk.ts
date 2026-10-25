@@ -8,14 +8,14 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 
-import { codexAuthDeliveryUrl, readCodexAuthHandoff } from "@t3tools/shared/codexAuthHandoff";
+import { codexAuthDeliveryUrl, readCodexAuthHandoff } from "@cogenly/shared/codexAuthHandoff";
 import { receiveCodexAuthCallback, CodexAuthCallbackError } from "./CodexAuthCallback.ts";
 import * as ElectronShell from "../electron/ElectronShell.ts";
-import { providerAuthReturnUrl } from "@t3tools/shared/providerAuthReturnUrl";
-import { promptLinkAppPath } from "@t3tools/shared/promptLinks";
-import { parseAddEnvironmentLink } from "@t3tools/shared/environmentLinks";
-import * as HostProcess from "@t3tools/shared/HostProcess";
-import { clerkFrontendApiHostnameFromPublishableKey } from "@t3tools/shared/relayAuth";
+import { providerAuthReturnUrl } from "@cogenly/shared/providerAuthReturnUrl";
+import { promptLinkAppPath } from "@cogenly/shared/promptLinks";
+import { parseAddEnvironmentLink } from "@cogenly/shared/environmentLinks";
+import * as HostProcess from "@cogenly/shared/HostProcess";
+import { clerkFrontendApiHostnameFromPublishableKey } from "@cogenly/shared/relayAuth";
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronProtocol from "../electron/ElectronProtocol.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
@@ -65,7 +65,7 @@ export class DesktopClerk extends Context.Service<
       | Scope.Scope
     >;
   }
->()("@t3tools/desktop/app/DesktopClerk") {}
+>()("@cogenly/desktop/app/DesktopClerk") {}
 
 function resolveDesktopClerkFrontendApiHostname(
   publishableKey: string | undefined,

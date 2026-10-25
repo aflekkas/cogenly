@@ -4,7 +4,7 @@ import {
   SLACK_MCP_USER_SCOPES,
   integrationCatalogEntryFor,
   type IntegrationCatalogConnectInput,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 
 import { availableToConnect, resolveCatalogConnect } from "./IntegrationCatalog.ts";
 

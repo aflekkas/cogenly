@@ -1,5 +1,5 @@
 import { OverlayPresence } from "~/components/ui/overlay-presence";
-import type { AgentId, EnvironmentId, ProjectLabelWithRepositories } from "@t3tools/contracts";
+import type { AgentId, EnvironmentId, ProjectLabelWithRepositories } from "@cogenly/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { PlusIcon } from "lucide-react";
 import { useMemo, useState } from "react";

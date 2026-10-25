@@ -1,4 +1,4 @@
-import { generateSpreadPinOrderKeys } from "@t3tools/client-runtime/state/thread-sort";
+import { generateSpreadPinOrderKeys } from "@cogenly/client-runtime/state/thread-sort";
 import { describe, expect, it } from "vite-plus/test";
 
 import {

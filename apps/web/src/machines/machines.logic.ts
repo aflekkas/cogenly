@@ -8,7 +8,7 @@ import {
   type ThreadId,
   type ThreadMoveResult,
   type ThreadMoveSkip,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 
 /** A machine a thread or project can be handed to, as menus offer it. */
 export interface MachineMoveTarget {

@@ -3,7 +3,7 @@ import {
   type ProjectId,
   type ProjectLabelId,
   type ScopedProjectRef,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { ThreadContextDragGhost } from "./chat/ThreadContextDragGhost";
 import {
   dropThreadContext,
@@ -14,41 +14,41 @@ import { discardComposerDraft } from "../lib/discardComposerDraft";
 import { requestCustomSnooze } from "./CustomSnoozeDialog";
 import { WorkRowStatusMarker } from "./work/WorkRowStatusMarker";
 import { useAtomValue } from "@effect/atom-react";
-import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
+import { replaceComposerContextReferences } from "@cogenly/shared/composerContextReferences";
 import * as Schema from "effect/Schema";
-import { canSnooze, threadWokeAt } from "@t3tools/client-runtime/state/thread-settled";
-import { createInboxReturnTracker } from "@t3tools/client-runtime/state/thread-inbox";
-import { formatDiffCount } from "@t3tools/client-runtime/diff-count";
+import { canSnooze, threadWokeAt } from "@cogenly/client-runtime/state/thread-settled";
+import { createInboxReturnTracker } from "@cogenly/client-runtime/state/thread-inbox";
+import { formatDiffCount } from "@cogenly/client-runtime/diff-count";
 import {
   planPinnedReorder,
   resolveSettledThreadTimestamp,
   sortActiveThreadsByOrderKey,
   sortSettledThreads,
-} from "@t3tools/client-runtime/state/thread-sort";
+} from "@cogenly/client-runtime/state/thread-sort";
 import {
   threadSearchMatchKey,
   type EnvironmentThreadSearchMatch,
-} from "@t3tools/client-runtime/state/thread-search";
+} from "@cogenly/client-runtime/state/thread-search";
 import {
   resolveThreadProviderStack,
   threadRuntimeCanArchive,
   type EnvironmentThreadShell,
-} from "@t3tools/client-runtime/state/models";
+} from "@cogenly/client-runtime/state/models";
 import {
   parseScopedThreadKey,
   scopeProjectRef,
   scopeThreadRef,
   scopedThreadKey,
-} from "@t3tools/client-runtime/environment";
+} from "@cogenly/client-runtime/environment";
 import {
   AuthOrchestrationOperateScope,
   DEFAULT_SERVER_SETTINGS,
   type EnvironmentMachineKind,
   type ScopedThreadRef,
   type ThreadId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 
-import type { TimestampFormat } from "@t3tools/contracts/settings";
+import type { TimestampFormat } from "@cogenly/contracts/settings";
 import {
   AlarmClockIcon,
   AlarmClockOffIcon,
@@ -105,7 +105,7 @@ import {
   isAtomCommandInterrupted,
   settlePromise,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@cogenly/client-runtime/state/runtime";
 import { isElectron } from "../env";
 import {
   resolveShortcutCommand,
@@ -164,8 +164,8 @@ import {
 } from "../threadRoutes";
 import { formatRelativeTimeLabel, parseTimestampDate } from "../timestampFormat";
 import type { SidebarThreadSummary } from "../types";
-import { isScratchProject } from "@t3tools/client-runtime/state/projects";
-import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
+import { isScratchProject } from "@cogenly/client-runtime/state/projects";
+import type { EnvironmentProject } from "@cogenly/client-runtime/state/shell";
 import { cn } from "~/lib/utils";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
 import {
@@ -306,7 +306,7 @@ import {
   type ThreadCapabilities,
 } from "../threadCapabilities";
 import { agentViewKey, requestAgentView } from "../agents/agentViewIntent";
-import { formatThreadLink } from "@t3tools/shared/threadLinks";
+import { formatThreadLink } from "@cogenly/shared/threadLinks";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuShortcut, MenuTrigger } from "./ui/menu";
 import { SidebarChatStatusSlot } from "./sidebar/SidebarChatStatusSlot";
 import {

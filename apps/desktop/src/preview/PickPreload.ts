@@ -12,7 +12,7 @@ import type {
   PreviewAnnotationStrokeTarget,
   PreviewAnnotationStyleChange,
   PreviewAnnotationSubmission,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 
 import { annotationBoxInsets } from "./AnnotationLayout.ts";
 import { resolveAnnotationSubmission } from "./AnnotationKeyboard.ts";

@@ -1,10 +1,10 @@
-import type { ModelSelection } from "@t3tools/contracts";
+import type { ModelSelection } from "@cogenly/contracts";
 import {
   getModelSelectionBooleanOptionValue,
   getModelSelectionStringOptionValue,
   getProviderOptionDescriptors,
   resolvePromptInjectedEffort,
-} from "@t3tools/shared/model";
+} from "@cogenly/shared/model";
 
 import {
   bundledClaudeModelCatalog,

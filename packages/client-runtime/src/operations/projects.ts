@@ -7,13 +7,13 @@ import type {
   ServerConfig,
   SourceControlDiscoveryResult,
   SourceControlRepositoryInfo,
-} from "@t3tools/contracts";
-import { SourceControlProviderKind } from "@t3tools/contracts";
+} from "@cogenly/contracts";
+import { SourceControlProviderKind } from "@cogenly/contracts";
 import {
   UNFILED_REPOSITORIES_SEGMENT,
   newProjectFolderName,
   sanitizePathSegment,
-} from "@t3tools/shared/path";
+} from "@cogenly/shared/path";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as Order from "effect/Order";

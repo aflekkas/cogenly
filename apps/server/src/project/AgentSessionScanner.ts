@@ -27,7 +27,7 @@ import {
   type AgentSessionProjectGit,
   type AgentSessionScanResult,
   type ProviderInstanceConfig,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -43,14 +43,14 @@ import {
   normalizeGitRemoteUrl,
   parseGitHubRepositoryNameWithOwnerFromRemoteUrl,
   parseOriginUrlFromGitConfig,
-} from "@t3tools/shared/git";
-import * as HostProcess from "@t3tools/shared/HostProcess";
-import { normalizeProjectPathForComparison } from "@t3tools/shared/path";
+} from "@cogenly/shared/git";
+import * as HostProcess from "@cogenly/shared/HostProcess";
+import { normalizeProjectPathForComparison } from "@cogenly/shared/path";
 
 import * as ServerConfig from "../config.ts";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import { resolveCodexHomeLayout } from "../provider/Drivers/CodexHomeLayout.ts";
-import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
+import { expandHomePath } from "@cogenly/provider-core/server/pathExpansion";
 import * as ServerSettings from "../serverSettings.ts";
 import {
   createTranscriptJsonReader,

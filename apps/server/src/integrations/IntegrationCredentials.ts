@@ -4,7 +4,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
-import { VaultField } from "@t3tools/contracts";
+import { VaultField } from "@cogenly/contracts";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as Vault from "../vault/Vault.ts";

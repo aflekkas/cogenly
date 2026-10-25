@@ -1,4 +1,4 @@
-import type { EnvironmentId, SshDeviceHostConfig } from "@t3tools/contracts";
+import type { EnvironmentId, SshDeviceHostConfig } from "@cogenly/contracts";
 
 export interface DeviceHostEnvironment {
   readonly environmentId: EnvironmentId;

@@ -1,5 +1,5 @@
 import { OverlayPresence } from "~/components/ui/overlay-presence";
-import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
+import type { EnvironmentId, ScopedThreadRef } from "@cogenly/contracts";
 import {
   HTML_RENDER_COLUMN_WIDTH,
   htmlRenderFileName,
@@ -7,7 +7,7 @@ import {
   htmlRenderOutlineBoxes,
   type HtmlRenderOutlineBox,
   type HtmlRenderReference,
-} from "@t3tools/shared/htmlRender";
+} from "@cogenly/shared/htmlRender";
 import { Maximize2Icon } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 

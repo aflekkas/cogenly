@@ -1,5 +1,5 @@
 import * as SharedState from "../sync/SharedState.ts";
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId } from "@cogenly/contracts";
 import * as Access from "../agents/AgentAccessScope.ts";
 import { matchesAgentEvent } from "../agents/agentEventPolicy.ts";
 import * as Agents from "../agents/AgentService.ts";
@@ -30,7 +30,7 @@ import {
   type ScheduledTaskRunNowResult,
   type ScheduledTaskSetEnabledInput,
   type ScheduledTaskUpsertInput,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";

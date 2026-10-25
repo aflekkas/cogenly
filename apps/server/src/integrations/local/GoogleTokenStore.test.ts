@@ -1,7 +1,7 @@
 import { expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { NodeCrypto } from "@effect/platform-node";
-import { EnvironmentId } from "@t3tools/contracts";
+import { EnvironmentId } from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";

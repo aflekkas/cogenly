@@ -4,11 +4,11 @@ import {
   ThreadId,
   VaultItemId,
   VaultPeerKey,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Context from "effect/Context";
-import * as NodeSqlite from "@t3tools/shared/nodeSqliteClient";
+import * as NodeSqlite from "@cogenly/shared/nodeSqliteClient";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";

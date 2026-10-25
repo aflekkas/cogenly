@@ -2,7 +2,7 @@ import {
   AgentBuilderProposal,
   TrimmedNonEmptyString,
   OrchestratorMcpFailure,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Schema from "effect/Schema";
 import { resolveMachine } from "../machines/resolveMachine.ts";
 import * as Effect from "effect/Effect";

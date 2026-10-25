@@ -10,7 +10,7 @@ import {
   type MachineListResult,
   PeerCallError,
   VaultPeerKey,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { expect } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { NodeCrypto } from "@effect/platform-node";

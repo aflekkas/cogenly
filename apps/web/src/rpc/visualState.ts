@@ -1,4 +1,4 @@
-import { createEnvironmentRpcCommand } from "@t3tools/client-runtime/state/runtime";
+import { createEnvironmentRpcCommand } from "@cogenly/client-runtime/state/runtime";
 
 import { connectionAtomRuntime } from "../connection/runtime";
 

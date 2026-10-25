@@ -1,4 +1,4 @@
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId } from "@cogenly/contracts";
 import { useEffect } from "react";
 import { create } from "zustand";
 import {

@@ -2,8 +2,8 @@
 import * as NodeFS from "node:fs";
 import { describe, expect, it } from "vite-plus/test";
 
-import { APPEARANCE_ACCENTS, type AppearanceAccent } from "@t3tools/contracts";
-import { ACCENT_PRESETS } from "@t3tools/shared/accentColors";
+import { APPEARANCE_ACCENTS, type AppearanceAccent } from "@cogenly/contracts";
+import { ACCENT_PRESETS } from "@cogenly/shared/accentColors";
 
 // The accent presets live in three places that cannot import each other: the
 // stylesheet, the boot page's inline script (it runs before any bundle), and

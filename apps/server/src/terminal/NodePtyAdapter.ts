@@ -1,4 +1,4 @@
-import { signalProcessGroup } from "@t3tools/provider-core/server/processGroup";
+import { signalProcessGroup } from "@cogenly/provider-core/server/processGroup";
 import * as NodeModule from "node:module";
 import * as NodeNet from "node:net";
 
@@ -8,9 +8,9 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as HostProcess from "@cogenly/shared/HostProcess";
 
-import * as PtyAdapter from "@t3tools/shared/PtyAdapter";
+import * as PtyAdapter from "@cogenly/shared/PtyAdapter";
 
 export class NodePtyModuleLoadError extends Schema.TaggedError<NodePtyModuleLoadError>()(
   "NodePtyModuleLoadError",

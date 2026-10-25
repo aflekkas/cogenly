@@ -11,14 +11,14 @@ import {
   type BackgroundActivityProfile,
   type ScopedThreadRef,
   type SidebarProjectGroupingMode,
-} from "@t3tools/contracts";
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { presentThreadShell } from "@t3tools/client-runtime/state/shell";
+} from "@cogenly/contracts";
+import { scopeThreadRef } from "@cogenly/client-runtime/environment";
+import { presentThreadShell } from "@cogenly/client-runtime/state/shell";
 import {
   isAtomCommandInterrupted,
   settlePromise,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@cogenly/client-runtime/state/runtime";
 import {
   DEFAULT_UNIFIED_SETTINGS,
   type ChatWidth,
@@ -26,8 +26,8 @@ import {
   type ResponseStreamingMode,
   type QuitConfirmationMode,
   SidebarProjectSortOrder,
-} from "@t3tools/contracts/settings";
-import { resolveServerBackgroundActivitySettings } from "@t3tools/shared/backgroundActivitySettings";
+} from "@cogenly/contracts/settings";
+import { resolveServerBackgroundActivitySettings } from "@cogenly/shared/backgroundActivitySettings";
 import * as Duration from "effect/Duration";
 import * as Equal from "effect/Equal";
 import * as Schema from "effect/Schema";

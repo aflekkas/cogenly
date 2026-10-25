@@ -9,8 +9,8 @@ import {
   ProviderSessionId,
   ProviderThreadId,
   ThreadId,
-} from "@t3tools/contracts";
-import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+} from "@cogenly/contracts";
+import * as IdAllocator from "@cogenly/provider-core/server/IdAllocator";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";

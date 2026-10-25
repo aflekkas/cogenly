@@ -35,10 +35,10 @@ import {
   ProjectId,
   type RepositoryIdentity,
   type ThreadPullRequestKey,
-} from "@t3tools/contracts";
-import type { ReviewGuideStackLayer } from "@t3tools/provider-core/server/textGeneration";
-import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
-import { sourceControlRepositorySelector } from "@t3tools/shared/sourceControl";
+} from "@cogenly/contracts";
+import type { ReviewGuideStackLayer } from "@cogenly/provider-core/server/textGeneration";
+import { resolveProjectSettings } from "@cogenly/shared/projectSettings";
+import { sourceControlRepositorySelector } from "@cogenly/shared/sourceControl";
 
 import * as ServerConfig from "../config.ts";
 import * as PullRequestReviewGuides from "../persistence/PullRequestReviewGuides.ts";

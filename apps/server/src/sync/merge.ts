@@ -1,4 +1,4 @@
-import type { HybridClock, SharedDocumentChange } from "@t3tools/contracts";
+import type { HybridClock, SharedDocumentChange } from "@cogenly/contracts";
 
 /** Total order: physical milliseconds, logical counter, then stable environment id. */
 export const compareClock = (a: HybridClock, b: HybridClock): number =>

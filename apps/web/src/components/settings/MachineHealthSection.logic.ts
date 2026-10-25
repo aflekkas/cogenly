@@ -9,7 +9,7 @@ import {
   type MachineHealthReport,
   type MachineHealthStatus,
   type MachineListResult,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 
 export const HEALTH_STATUS_LABELS = {
   ok: "Healthy",

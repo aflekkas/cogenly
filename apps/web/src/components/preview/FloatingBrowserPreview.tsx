@@ -5,8 +5,8 @@ import {
   createPreviewStreamClient,
   type PreviewStreamControl,
   type PreviewStreamViewport,
-} from "@t3tools/client-runtime/preview/server-browser-stream";
-import { AuthPreviewOperateScope, type ScopedThreadRef } from "@t3tools/contracts";
+} from "@cogenly/client-runtime/preview/server-browser-stream";
+import { AuthPreviewOperateScope, type ScopedThreadRef } from "@cogenly/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import {
   Bot,

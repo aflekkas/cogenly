@@ -7,9 +7,9 @@
  *
  * @module usagePricing
  */
-import type { UsageCategoryCost, UsageCostSource, UsageTokenTotals } from "@t3tools/contracts";
+import type { UsageCategoryCost, UsageCostSource, UsageTokenTotals } from "@cogenly/contracts";
 
-import type { UsageRecord, UsageSpeed } from "@t3tools/provider-core/server/usage";
+import type { UsageRecord, UsageSpeed } from "@cogenly/provider-core/server/usage";
 
 /** Token rates for one billing speed. All values are USD per token. */
 export interface TokenRates {

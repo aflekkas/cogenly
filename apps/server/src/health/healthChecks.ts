@@ -20,7 +20,7 @@ import {
   type ScheduledTask,
   type ServerProvider,
   type ThreadId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 

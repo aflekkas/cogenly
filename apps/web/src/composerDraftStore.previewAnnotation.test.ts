@@ -1,5 +1,5 @@
-import { EnvironmentId, ThreadId, type PreviewAnnotationPayload } from "@t3tools/contracts";
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { EnvironmentId, ThreadId, type PreviewAnnotationPayload } from "@cogenly/contracts";
+import { scopeThreadRef } from "@cogenly/client-runtime/environment";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { pickMarkers } from "./browser/serverBrowserPick";

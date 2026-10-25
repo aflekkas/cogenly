@@ -1,4 +1,4 @@
-import { CommandId, OrchestrationV2ThreadLaunchError, ProjectId } from "@t3tools/contracts";
+import { CommandId, OrchestrationV2ThreadLaunchError, ProjectId } from "@cogenly/contracts";
 import { describe, expect, it } from "@effect/vitest";
 
 import { wasLaunchMachineOffline } from "./orchestration.ts";

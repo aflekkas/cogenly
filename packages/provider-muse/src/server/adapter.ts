@@ -1,7 +1,7 @@
 import { museNativeMcpNotice } from "./nativeMcpPolicy.ts";
 import { parseMuseUsageLimits } from "./usageLimits.ts";
-import type { ServerProviderUsageLimits } from "@t3tools/contracts";
-import { COGENLY_ORCHESTRATION_INSTRUCTIONS as COGENLY_ORCHESTRATION_INSTRUCTIONS } from "@t3tools/provider-core/server/orchestrationInstructions";
+import type { ServerProviderUsageLimits } from "@cogenly/contracts";
+import { COGENLY_ORCHESTRATION_INSTRUCTIONS as COGENLY_ORCHESTRATION_INSTRUCTIONS } from "@cogenly/provider-core/server/orchestrationInstructions";
 import { MspError, type SendUserTurnOptions } from "@muse-code/sdk";
 import {
   MUSE_DEFAULT_MODEL,
@@ -26,10 +26,10 @@ import {
   type RuntimeRequestId,
   type ServerProviderModel,
   type ThreadId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import type { MuseSettings } from "../settings.ts";
-import { AgentScope } from "@t3tools/shared/AgentScope";
-import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
+import { AgentScope } from "@cogenly/shared/AgentScope";
+import { getModelSelectionStringOptionValue } from "@cogenly/shared/model";
 import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
@@ -42,13 +42,13 @@ import * as Semaphore from "effect/Semaphore";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
-import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
-import * as McpProviderSession from "@t3tools/provider-core/server/mcpSession";
-import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
+import * as ProviderHost from "@cogenly/provider-core/server/ProviderHost";
+import * as McpProviderSession from "@cogenly/provider-core/server/mcpSession";
+import * as McpProviderSessions from "@cogenly/provider-core/server/McpProviderSessions";
 import {
   buildRuntimeInstructions,
   conversationModeInstructions,
-} from "@t3tools/provider-core/server/runtimeInstructions";
+} from "@cogenly/provider-core/server/runtimeInstructions";
 import { museModelCapabilities, resolveMuseReasoningEffort } from "./modelCatalog.ts";
 import {
   MuseApproval,
@@ -77,25 +77,25 @@ import {
   type createMuseSdkHost,
   type MuseSdkHost,
 } from "./sdk.ts";
-import type * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
+import type * as ProviderEventLoggers from "@cogenly/provider-core/server/ProviderEventLoggers";
 import {
   providerMessageTextWithAttachmentPaths,
   isProviderNativeImageAttachment,
-} from "@t3tools/provider-core/server/attachmentPrompt";
-import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
-import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
+} from "@cogenly/provider-core/server/attachmentPrompt";
+import * as IdAllocator from "@cogenly/provider-core/server/IdAllocator";
+import * as ProviderAdapter from "@cogenly/provider-core/server/ProviderAdapter";
 import {
   backgroundWorkNotification,
   type BackgroundWorkReport,
-} from "@t3tools/provider-core/server/notification";
-import type * as ProviderContinuationRequests from "@t3tools/provider-core/server/ProviderContinuationRequests";
-import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
+} from "@cogenly/provider-core/server/notification";
+import type * as ProviderContinuationRequests from "@cogenly/provider-core/server/ProviderContinuationRequests";
+import { makeProviderFailure } from "@cogenly/provider-core/server/failure";
 import {
   makeSubagentChildThread,
   makeSubagentConversationArtifacts,
   subagentThreadTitle,
-} from "@t3tools/provider-core/server/subagentProjection";
-import { turnScopedSelectionTransition } from "@t3tools/provider-core/server/selectionTransition";
+} from "@cogenly/provider-core/server/subagentProjection";
+import { turnScopedSelectionTransition } from "@cogenly/provider-core/server/selectionTransition";
 import { museItemStatus, museToolPresentation } from "./itemPresentation.ts";
 
 const MUSE_PROVIDER = ProviderDriverKind.make("muse");

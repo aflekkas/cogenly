@@ -10,7 +10,7 @@ import {
   type SitePermissionDecidedBy,
   type SitePermissionEntry,
   type SitePermissionSetting,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 
 export interface StoredSitePermission {
   readonly setting: "allow" | "block";

@@ -4,7 +4,7 @@ import { EnvironmentOptionContent } from "../BranchToolbarEnvironmentSelector";
 import { OverlayPresence } from "~/components/ui/overlay-presence";
 import { CopyButton } from "../ui/copy-button";
 import { useAtomValue } from "@effect/atom-react";
-import { connectionStatusTitle } from "@t3tools/client-runtime/connection";
+import { connectionStatusTitle } from "@cogenly/client-runtime/connection";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
 import {
@@ -29,19 +29,19 @@ import type {
   ScheduledTaskWebhookDeliveryOutcome,
   ScheduledTaskWebhookDeliverySummary,
   ThreadId,
-} from "@t3tools/contracts";
-import { DEFAULT_WEBHOOK_PROMPT } from "@t3tools/client-runtime/scheduled-task-webhook";
+} from "@cogenly/contracts";
+import { DEFAULT_WEBHOOK_PROMPT } from "@cogenly/client-runtime/scheduled-task-webhook";
 import {
   AgentId,
   MAX_WEBHOOK_DELIVERY_AGE_MINUTES,
   MIN_SCHEDULED_TASK_INTERVAL_MS,
   ProviderInstanceId,
   resolveEnvironmentMachineKind,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@cogenly/client-runtime/state/runtime";
 
 import { formatRelativeTime } from "../../timestampFormat";
 import { useEnvironmentSettings } from "../../hooks/useSettings";
@@ -53,7 +53,7 @@ import {
 } from "../../providerInstances";
 import { usePrimaryCloudLinkState } from "../../cloud/primaryCloudLinkState";
 import { requestConfirmDialog } from "../../confirmDialog";
-import { webhookAddress } from "@t3tools/client-runtime/webhook-address";
+import { webhookAddress } from "@cogenly/client-runtime/webhook-address";
 import { Link } from "@tanstack/react-router";
 import {
   useEnvironment,
@@ -67,7 +67,7 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { WorktreeBaseBranchPicker } from "../WorktreeBaseBranchPicker";
 import { EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
 import { ConnectionStatusDot, connectionPhaseDotClassName } from "../ConnectionStatusDot";
-import { AuthOrchestrationOperateScope } from "@t3tools/contracts";
+import { AuthOrchestrationOperateScope } from "@cogenly/contracts";
 import { readEnvironmentScope } from "~/state/session";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { useAgents } from "../../agents/agentsClient";

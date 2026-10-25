@@ -1,5 +1,5 @@
-import type { EnvironmentId } from "@t3tools/contracts";
-import { formatAttachmentSize } from "@t3tools/client-runtime/state/attachments";
+import type { EnvironmentId } from "@cogenly/contracts";
+import { formatAttachmentSize } from "@cogenly/client-runtime/state/attachments";
 
 import { useFileMetadata } from "../../hooks/useFileMetadata";
 import { PierreEntryIcon } from "./PierreEntryIcon";

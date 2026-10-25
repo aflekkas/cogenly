@@ -9,7 +9,7 @@ import {
   ProjectLabelError,
   ThreadId,
   type ServerProvider,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Deferred from "effect/Deferred";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -20,7 +20,7 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Stream from "effect/Stream";
 
-import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import * as IdAllocator from "@cogenly/provider-core/server/IdAllocator";
 import * as CommandReceipts from "../orchestration-v2/CommandReceiptStore.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as SetupTracker from "../project/WorktreeSetupTracker.ts";

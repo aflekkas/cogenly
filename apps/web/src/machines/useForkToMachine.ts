@@ -1,9 +1,9 @@
-import { CommandId, ThreadId, ThreadRemoteError, type EnvironmentId } from "@t3tools/contracts";
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { CommandId, ThreadId, ThreadRemoteError, type EnvironmentId } from "@cogenly/contracts";
+import { scopeThreadRef } from "@cogenly/client-runtime/environment";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@cogenly/client-runtime/state/runtime";
 import { useNavigate } from "@tanstack/react-router";
 import * as Schema from "effect/Schema";
 import { useCallback } from "react";

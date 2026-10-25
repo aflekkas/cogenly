@@ -1,4 +1,4 @@
-import { integrationCatalogEntry, type IntegrationCatalogId } from "@t3tools/contracts";
+import { integrationCatalogEntry, type IntegrationCatalogId } from "@cogenly/contracts";
 
 // Setup knowledge belongs to agents. Keep uncertain provider requirements explicit.
 const GUIDES: Record<IntegrationCatalogId | "custom", string> = {

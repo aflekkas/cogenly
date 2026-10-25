@@ -1,16 +1,16 @@
 import { useAtomValue } from "@effect/atom-react";
-import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { scopedThreadKey, scopeThreadRef } from "@cogenly/client-runtime/environment";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@cogenly/client-runtime/state/runtime";
 import {
   CommandId,
   type MessageId,
   type EnvironmentId,
   type ScopedThreadRef,
   WorkHandoffError,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { ChevronLeftIcon, ChevronRightIcon, FolderPlusIcon } from "lucide-react";
 import * as Schema from "effect/Schema";

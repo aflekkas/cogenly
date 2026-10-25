@@ -1,4 +1,4 @@
-import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
+import type { EnvironmentThreadShell } from "@cogenly/client-runtime/state/shell";
 import { describe, expect, it } from "vite-plus/test";
 
 import { modesNeedingAttention } from "./modeAttention.logic";

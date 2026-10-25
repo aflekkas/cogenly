@@ -3,13 +3,13 @@ import { decisionsWaitingCount } from "../../../agents/agentWorkspace.logic";
 import type {
   EnvironmentProject,
   EnvironmentThreadShell,
-} from "@t3tools/client-runtime/state/shell";
+} from "@cogenly/client-runtime/state/shell";
 import type {
   EnvironmentId,
   ResolvedKeybindingsConfig,
   ScopedThreadRef,
   ThreadSurface,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo } from "react";
 

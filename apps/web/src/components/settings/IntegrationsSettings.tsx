@@ -39,8 +39,8 @@ import {
   type BrowserImportSource,
   type BrowserAppearanceSetting,
   type PreviewViewportSetting,
-} from "@t3tools/contracts";
-import { PREVIEW_VIEWPORT_PRESETS } from "@t3tools/shared/previewViewport";
+} from "@cogenly/contracts";
+import { PREVIEW_VIEWPORT_PRESETS } from "@cogenly/shared/previewViewport";
 import { MoreVertical, Plus as PlusIcon } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
 
@@ -55,7 +55,7 @@ import { readEnvironmentScope, useEnvironmentScope } from "~/state/session";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { previewEnvironment } from "~/state/preview";
 import { useServerConfigs } from "~/state/entities";
-import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+import { squashAtomCommandFailure } from "@cogenly/client-runtime/state/runtime";
 import {
   AgentDeviceSetupStatus,
   DeviceHubSetupStatus,

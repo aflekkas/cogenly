@@ -3,7 +3,7 @@ import {
   type ProviderDriverKind,
   type ServerProvider,
   type ServerSettings,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 
 import { providerClients } from "../components/settings/providerDriverMeta";
 

@@ -6,7 +6,7 @@ import {
   type EnvironmentId,
   type ServerSettings,
   type ServerSettingsPatch,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import type * as Schema from "effect/Schema";
 import {
   DEFAULT_APPEARANCE_PREFERENCES,

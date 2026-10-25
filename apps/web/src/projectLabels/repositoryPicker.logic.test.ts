@@ -7,7 +7,7 @@ import {
   type ProjectLabelWithRepositories,
   type ProjectSourceLink,
   type RepositoryIdentity,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import { projectLabelKey, type EnvironmentProjectLabel } from "./projectLabels.logic";

@@ -1,4 +1,4 @@
-import type { EnvironmentId, MachineListResult } from "@t3tools/contracts";
+import type { EnvironmentId, MachineListResult } from "@cogenly/contracts";
 
 import type { EnvironmentOption } from "../components/BranchToolbar.logic";
 import { machineMoveTargets } from "./machines.logic";

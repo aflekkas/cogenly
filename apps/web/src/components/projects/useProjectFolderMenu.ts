@@ -1,6 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
-import { isAtomCommandInterrupted, settlePromise } from "@t3tools/client-runtime/state/runtime";
-import type { ContextMenuItem } from "@t3tools/contracts";
+import { isAtomCommandInterrupted, settlePromise } from "@cogenly/client-runtime/state/runtime";
+import type { ContextMenuItem } from "@cogenly/contracts";
 import { useState } from "react";
 
 import { readLocalApi } from "../../localApi";

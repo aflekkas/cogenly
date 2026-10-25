@@ -1,9 +1,9 @@
-import { Connection } from "@t3tools/client-runtime/connection";
-import { ShellSnapshotLoader } from "@t3tools/client-runtime/state/shell";
+import { Connection } from "@cogenly/client-runtime/connection";
+import { ShellSnapshotLoader } from "@cogenly/client-runtime/state/shell";
 import {
   BoundedThreadSnapshotLoader,
   ThreadHistoryController,
-} from "@t3tools/client-runtime/state/threads";
+} from "@cogenly/client-runtime/state/threads";
 import * as Layer from "effect/Layer";
 import { Atom } from "effect/reactivity";
 

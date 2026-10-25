@@ -1,4 +1,4 @@
-import { WS_METHODS, type EnvironmentId } from "@t3tools/contracts";
+import { WS_METHODS, type EnvironmentId } from "@cogenly/contracts";
 import type { Atom } from "effect/reactivity";
 import type { EnvironmentRegistry } from "../connection/registry.ts";
 import { createEnvironmentGuardedRpcQueryAtomFamily } from "./runtime.ts";

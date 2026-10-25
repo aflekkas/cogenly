@@ -1,4 +1,4 @@
-import { type ThreadRepositoryBundle, ThreadRemoteError } from "@t3tools/contracts";
+import { type ThreadRepositoryBundle, ThreadRemoteError } from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Schema from "effect/Schema";

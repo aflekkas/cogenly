@@ -1,4 +1,4 @@
-import { AgentId, ThreadId, ProjectId, ProviderInstanceId, type Agent } from "@t3tools/contracts";
+import { AgentId, ThreadId, ProjectId, ProviderInstanceId, type Agent } from "@cogenly/contracts";
 export const agentFixture = (suffix = "one"): Agent => ({
   id: AgentId.make(`agent:${suffix}`),
   name: "Juniper",

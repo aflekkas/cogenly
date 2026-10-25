@@ -1,6 +1,6 @@
 "use client";
 
-import type { DesktopPreviewPointerEvent } from "@t3tools/contracts";
+import type { DesktopPreviewPointerEvent } from "@cogenly/contracts";
 import { MousePointer2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 

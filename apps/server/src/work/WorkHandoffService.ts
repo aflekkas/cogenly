@@ -19,7 +19,7 @@ import {
   type OrchestrationV2ThreadLaunchWorkspaceStrategy,
   type OrchestrationV2ThreadProjection,
   type Project,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -51,7 +51,7 @@ export interface WorkHandoffActor {
 /** A chat agent's request to hand work off as a task card. */
 export interface WorkTaskHandoffInput {
   /** Stable across retries: one request makes one card and at most one Work thread. */
-  readonly machine?: import("@t3tools/contracts").EnvironmentId | undefined;
+  readonly machine?: import("@cogenly/contracts").EnvironmentId | undefined;
   readonly commandId: CommandId;
   readonly sourceThreadId: ThreadId;
   readonly mode: WorkTaskMode;

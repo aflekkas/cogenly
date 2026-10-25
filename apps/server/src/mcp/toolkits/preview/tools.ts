@@ -29,7 +29,7 @@ import {
   PreviewAutomationUploadInput,
   PreviewAutomationWaitForInput,
   SitePermissionsState,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Schema from "effect/Schema";
 import * as FileSystem from "effect/FileSystem";
 import { Tool, Toolkit } from "effect/ai";

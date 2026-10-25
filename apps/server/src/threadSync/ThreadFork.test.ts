@@ -8,7 +8,7 @@ import {
   ProviderInstanceId,
   ServerProvider,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";

@@ -1,4 +1,4 @@
-import type { EnvironmentId, MachineInfo, MachineListResult, ProjectId } from "@t3tools/contracts";
+import type { EnvironmentId, MachineInfo, MachineListResult, ProjectId } from "@cogenly/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import type { EnvironmentOption } from "../components/BranchToolbar.logic";

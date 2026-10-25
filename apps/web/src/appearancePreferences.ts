@@ -1,4 +1,4 @@
-import { APPEARANCE_ACCENTS, type AppearanceAccent } from "@t3tools/contracts";
+import { APPEARANCE_ACCENTS, type AppearanceAccent } from "@cogenly/contracts";
 import { useCallback, useSyncExternalStore } from "react";
 
 /**

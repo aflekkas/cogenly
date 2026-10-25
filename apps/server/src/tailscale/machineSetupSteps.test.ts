@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import type { MachineSetupStatus, MachineSetupStepId } from "@t3tools/contracts";
+import type { MachineSetupStatus, MachineSetupStepId } from "@cogenly/contracts";
 import * as DateTime from "effect/DateTime";
 
 import {

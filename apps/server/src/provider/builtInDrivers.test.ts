@@ -5,13 +5,13 @@ import {
   isUnconfiguredDefaultInstanceEnabled,
   PROVIDER_DISPLAY_NAMES,
   ProviderDriverKind,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import {
   defaultModelForDriver,
   defaultTextGenerationModelForDriver,
   normalizeDriverVersion,
   textGenerationFallbackDriverKinds,
-} from "@t3tools/provider-core/server/driver";
+} from "@cogenly/provider-core/server/driver";
 import { describe, expect, it } from "vite-plus/test";
 
 import { BUILT_IN_DRIVERS, BUILT_IN_USAGE_DRIVERS } from "./builtInDrivers.ts";

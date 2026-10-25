@@ -1,5 +1,5 @@
-import { planPinnedReorder } from "@t3tools/client-runtime/state/thread-sort";
-import { type EnvironmentId, ProjectLabelId } from "@t3tools/contracts";
+import { planPinnedReorder } from "@cogenly/client-runtime/state/thread-sort";
+import { type EnvironmentId, ProjectLabelId } from "@cogenly/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {

@@ -1,5 +1,5 @@
 {
-  "name": "@t3tools/source-control-testing",
+  "name": "@cogenly/source-control-testing",
   "private": true,
   "type": "module",
   "exports": {
@@ -12,9 +12,9 @@
     "typecheck": "tsc-rs --noEmit"
   },
   "dependencies": {
-    "@t3tools/contracts": "workspace:*",
-    "@t3tools/shared": "workspace:*",
-    "@t3tools/source-control-core": "workspace:*",
+    "@cogenly/contracts": "workspace:*",
+    "@cogenly/shared": "workspace:*",
+    "@cogenly/source-control-core": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {

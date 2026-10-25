@@ -4,7 +4,7 @@ import type {
   ProjectLabelId,
   ScopedThreadRef,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 
 /** Per section with a query; bare `@` shows fewer, as a hint of what it can find. */
 const MENTION_RESULT_LIMIT = 4;

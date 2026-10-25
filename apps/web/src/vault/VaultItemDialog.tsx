@@ -5,7 +5,7 @@ import type {
   VaultItemMetadata,
   VaultItemType,
   VaultPortabilityReason,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { useId, useState } from "react";
 
 import { vaultPortabilityExplanation } from "../machines/peerSync.logic";

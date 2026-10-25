@@ -1,14 +1,14 @@
-import { scopeProjectRef } from "@t3tools/client-runtime/environment";
+import { scopeProjectRef } from "@cogenly/client-runtime/environment";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@cogenly/client-runtime/state/runtime";
 import { useAtomValue } from "@effect/atom-react";
 import {
   integrationCatalogEntryFor,
   type EnvironmentId,
   type IntegrationSummary,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { useState } from "react";
 import { useComposerDraftStore } from "~/composerDraftStore";
 import { useNewThreadHandler } from "~/hooks/useHandleNewThread";
@@ -126,7 +126,7 @@ function ProviderConnectorsSettingRow({
   });
   const canImport = useAtomValue(integrationsRpc.importNative.permissionAtom(environmentId));
   const [offer, setOffer] = useState<
-    import("@t3tools/contracts").IntegrationNativeImportPreview | null
+    import("@cogenly/contracts").IntegrationNativeImportPreview | null
   >(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);

@@ -1,4 +1,4 @@
-import { presentThreadShell } from "@t3tools/client-runtime/state/shell";
+import { presentThreadShell } from "@cogenly/client-runtime/state/shell";
 import {
   EnvironmentId,
   MessageId,
@@ -10,7 +10,7 @@ import {
   ProviderInstanceId,
   ThreadId,
   type OrchestrationV2ThreadProjection,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as DateTime from "effect/DateTime";
 
 import type { ChatMessage, Thread } from "./types";

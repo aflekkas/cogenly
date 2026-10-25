@@ -6,7 +6,7 @@
  * repair moves it into Cogenly's own setting and removes a drop-in that holds
  * nothing else.
  */
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as HostProcess from "@cogenly/shared/HostProcess";
 import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -14,7 +14,7 @@ import * as Path from "effect/Path";
 import { Prompt } from "effect/cli";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
-import { DEFAULT_TAILSCALE_SERVE_PORT } from "@t3tools/tailscale";
+import { DEFAULT_TAILSCALE_SERVE_PORT } from "@cogenly/tailscale";
 
 import packageJson from "../../package.json" with { type: "json" };
 import * as BootService from "../cloud/bootService.ts";

@@ -1,5 +1,5 @@
 import * as Option from "effect/Option";
-import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
+import type { EnvironmentThreadShell } from "@cogenly/client-runtime/state/shell";
 import {
   type AssetCreateUrlInput,
   type AssetCreateUrlResult,
@@ -24,21 +24,21 @@ import {
   type ThreadId,
   type RunId,
   type WorktreeSetupSnapshot,
-} from "@t3tools/contracts";
-import { worktreeSetupAgentStarted } from "@t3tools/client-runtime/worktree-setup";
+} from "@cogenly/contracts";
+import { worktreeSetupAgentStarted } from "@cogenly/client-runtime/worktree-setup";
 import * as DateTime from "effect/DateTime";
-import { resolveAssetUrl } from "@t3tools/client-runtime/state/assets";
+import { resolveAssetUrl } from "@cogenly/client-runtime/state/assets";
 import {
   squashAtomCommandFailure,
   type AtomCommandResult,
-} from "@t3tools/client-runtime/state/runtime";
-import { videoMimeType } from "@t3tools/shared/video";
+} from "@cogenly/client-runtime/state/runtime";
+import { videoMimeType } from "@cogenly/shared/video";
 import {
   appendCodexArtifactTemplateUsePrompt,
   codexArtifactTemplateUsePrompt,
   type CodexArtifactTemplate,
-} from "@t3tools/shared/codexArtifactTemplates";
-import { presentThreadShell } from "@t3tools/client-runtime/state/shell";
+} from "@cogenly/shared/codexArtifactTemplates";
+import { presentThreadShell } from "@cogenly/client-runtime/state/shell";
 import { type ChatMessage, isImageAttachment, type SessionPhase, type Thread } from "../types";
 import { type ComposerImageAttachment, type DraftThreadState } from "../composerDraftStore";
 import * as Schema from "effect/Schema";
@@ -122,7 +122,7 @@ export function shouldDockDraftHeroForSubmission(input: {
 export {
   findRecordedWorktreeSetup,
   resolveVisibleWorktreeSetup,
-} from "@t3tools/client-runtime/worktree-setup";
+} from "@cogenly/client-runtime/worktree-setup";
 
 /** Keep setup visible across local dispatch, durable preparation, and the live stream. */
 export function resolveWorktreeSetupProgress(input: {

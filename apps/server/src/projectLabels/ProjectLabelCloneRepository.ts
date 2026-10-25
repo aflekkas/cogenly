@@ -9,7 +9,7 @@ import {
   repositoryDirectoryNameFor,
   repositoryRemoteParts,
   type ProjectLabelCloneRepositoryInput,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import type * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";

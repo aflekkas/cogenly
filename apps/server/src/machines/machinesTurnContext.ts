@@ -3,7 +3,7 @@
  * on. Turns read the last rendered block from memory, so a slow or failing
  * machine list never delays a turn; it only empties the block.
  */
-import type { MachineInfo, MachineListResult } from "@t3tools/contracts";
+import type { MachineInfo, MachineListResult } from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";

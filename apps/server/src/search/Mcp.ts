@@ -1,4 +1,4 @@
-import { OrchestratorMcpFailure, SearchQueryInput, SearchQueryResult } from "@t3tools/contracts";
+import { OrchestratorMcpFailure, SearchQueryInput, SearchQueryResult } from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
 import { Tool, Toolkit } from "effect/ai";
 import * as Access from "../mcp/McpToolAccess.ts";

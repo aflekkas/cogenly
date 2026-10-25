@@ -1,4 +1,4 @@
-import type { EnvironmentId, OrchestrationV2ProjectedTurnItem, ThreadId } from "@t3tools/contracts";
+import type { EnvironmentId, OrchestrationV2ProjectedTurnItem, ThreadId } from "@cogenly/contracts";
 import {
   toolCallLines,
   turnItemDetailRevision,
@@ -6,12 +6,12 @@ import {
   turnItemOutputImages,
   turnItemOutputText,
   webSearchQueries,
-} from "@t3tools/client-runtime/work-log/item-detail";
-import { formatDiffCount } from "@t3tools/client-runtime/diff-count";
-import { isJavaScriptReplTool } from "@t3tools/shared/toolActivity";
+} from "@cogenly/client-runtime/work-log/item-detail";
+import { formatDiffCount } from "@cogenly/client-runtime/diff-count";
+import { isJavaScriptReplTool } from "@cogenly/shared/toolActivity";
 import { ExternalLinkIcon, GitBranchIcon, RotateCcwIcon } from "lucide-react";
 import { memo, type ReactNode, Suspense, use, useMemo } from "react";
-import type { WorkLogToolPresentation } from "@t3tools/client-runtime/work-log/tool-registry";
+import type { WorkLogToolPresentation } from "@cogenly/client-runtime/work-log/tool-registry";
 
 import { useTheme } from "../../hooks/useTheme";
 import { cn } from "../../lib/utils";

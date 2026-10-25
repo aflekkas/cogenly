@@ -6,8 +6,8 @@ import type {
   ProjectId,
   ProjectLabelId,
   ThreadId,
-} from "@t3tools/contracts";
-import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+} from "@cogenly/contracts";
+import { squashAtomCommandFailure } from "@cogenly/client-runtime/state/runtime";
 import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 import { FolderIcon, XIcon } from "lucide-react";

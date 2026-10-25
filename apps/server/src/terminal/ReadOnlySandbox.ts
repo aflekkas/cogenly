@@ -1,5 +1,5 @@
-import * as HostProcess from "@t3tools/shared/HostProcess";
-import { resolveCommandPath } from "@t3tools/shared/shell";
+import * as HostProcess from "@cogenly/shared/HostProcess";
+import { resolveCommandPath } from "@cogenly/shared/shell";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";

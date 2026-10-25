@@ -1,7 +1,7 @@
 import {
   codexFeedbackNotice,
   type CodexFeedbackSubmission,
-} from "@t3tools/client-runtime/state/threads";
+} from "@cogenly/client-runtime/state/threads";
 import { MessageSquareIcon } from "lucide-react";
 
 import { CopyButton } from "../ui/copy-button";

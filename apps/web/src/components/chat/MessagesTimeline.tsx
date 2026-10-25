@@ -1,5 +1,5 @@
 import { ThreadFindTimelineContext } from "./ThreadFindProvider";
-import { shouldPreserveAssistantLineBreaks } from "@t3tools/shared/markdownPipeline";
+import { shouldPreserveAssistantLineBreaks } from "@cogenly/shared/markdownPipeline";
 import { MarkdownFindContext, useFindRevealRef } from "./markdownFindContext";
 import { useChatCanvas } from "./ChatCanvasContext";
 import { useTimelineMinimapClearance } from "./useTimelineMinimapClearance";
@@ -21,7 +21,7 @@ import {
   type TimelineRestoreTarget,
 } from "./timelineRestoreWait";
 import { PullRequestGlyph } from "../changeRequestIcons";
-import type { WorktreeSetupSnapshot } from "@t3tools/contracts";
+import type { WorktreeSetupSnapshot } from "@cogenly/contracts";
 import { ReadOnlySourcePreview } from "../files/AttachmentFilePreview";
 import { useRightPanelStore } from "~/rightPanelStore";
 import { useOpenLink } from "~/browser/useOpenLink";
@@ -31,7 +31,7 @@ import {
   getQuestionAnswerText,
   getQuestionTextPreview,
   hasQuestionAnswer,
-} from "@t3tools/client-runtime/work-log/user-input";
+} from "@cogenly/client-runtime/work-log/user-input";
 import {
   deriveTimelineMinimapItems,
   resolveTimelineMinimapPreview,
@@ -58,13 +58,13 @@ import {
   type RunId,
   ThreadId,
   type ToolActivityIcon,
-} from "@t3tools/contracts";
-import { parseScopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { resolveUserMessagePresentation } from "@t3tools/client-runtime/user-message";
+} from "@cogenly/contracts";
+import { parseScopedThreadKey, scopeThreadRef } from "@cogenly/client-runtime/environment";
+import { resolveUserMessagePresentation } from "@cogenly/client-runtime/user-message";
 import { Link } from "@tanstack/react-router";
-import { canForkProjectedAssistantItem } from "@t3tools/client-runtime/state/thread-workflows";
-import { notificationChildThreadId } from "@t3tools/client-runtime/state/thread-execution";
-import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
+import { canForkProjectedAssistantItem } from "@cogenly/client-runtime/state/thread-workflows";
+import { notificationChildThreadId } from "@cogenly/client-runtime/state/thread-execution";
+import { replaceComposerContextReferences } from "@cogenly/shared/composerContextReferences";
 import {
   liveActivityToolStatus,
   liveThoughtLine,
@@ -72,8 +72,8 @@ import {
   workEntryToolCall,
   resolveViewedImageAsset,
   workEntryViewedImagePath,
-} from "@t3tools/client-runtime/work-log/presentation";
-import { quietReasoningMarkdown } from "@t3tools/client-runtime/work-log/reasoning-text";
+} from "@cogenly/client-runtime/work-log/presentation";
+import { quietReasoningMarkdown } from "@cogenly/client-runtime/work-log/reasoning-text";
 import {
   resolveWorkLogNotice,
   resolveWorkLogTool,
@@ -82,19 +82,19 @@ import {
   type WorkLogToolIcon,
   type WorkLogToolPresentation,
   type WorkLogToolTarget,
-} from "@t3tools/client-runtime/work-log/tool-registry";
-import { resolveWorkGroupScrollAnchor } from "@t3tools/client-runtime/work-log/scroll-anchor";
-import { turnItemHasDetail } from "@t3tools/client-runtime/work-log/item-detail";
-import { formatAttachmentSize } from "@t3tools/client-runtime/state/attachments";
+} from "@cogenly/client-runtime/work-log/tool-registry";
+import { resolveWorkGroupScrollAnchor } from "@cogenly/client-runtime/work-log/scroll-anchor";
+import { turnItemHasDetail } from "@cogenly/client-runtime/work-log/item-detail";
+import { formatAttachmentSize } from "@cogenly/client-runtime/state/attachments";
 import { observeResize } from "~/lib/observeResize";
 
 const NOOP_USE_ARTIFACT_TEMPLATE = () => {};
 const NOOP_OPEN_ATTACHMENT = (_attachment: ChatFileAttachment) => {};
 
-import { toolActivityFaviconUrl } from "@t3tools/shared/favicon";
-import { formatDuration } from "@t3tools/shared/orchestrationTiming";
-import { getProjectFaviconCacheKey } from "@t3tools/shared/projectFavicon";
-import { claudeSkillInvocation } from "@t3tools/shared/toolActivity";
+import { toolActivityFaviconUrl } from "@cogenly/shared/favicon";
+import { formatDuration } from "@cogenly/shared/orchestrationTiming";
+import { getProjectFaviconCacheKey } from "@cogenly/shared/projectFavicon";
+import { claudeSkillInvocation } from "@cogenly/shared/toolActivity";
 import {
   createContext,
   memo,
@@ -126,7 +126,7 @@ import {
   workEntrySignalsSevereFailure,
   workLogEntryIsToolLike,
 } from "../../session-logic";
-import type { CodexArtifactTemplate } from "@t3tools/shared/codexArtifactTemplates";
+import type { CodexArtifactTemplate } from "@cogenly/shared/codexArtifactTemplates";
 import {
   type ChatMessage,
   type ChatFileAttachment,
@@ -200,7 +200,7 @@ import type {
   ComposerContextId,
   ComposerContextRecord,
   KnownComposerContextRecord,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { Button, InlineButton } from "../ui/button";
 import { useAssetUrlRefresh, useAssetUrls, useAssetUrlState } from "../../assets/assetUrls";
 import { MediaVideoPlayer } from "../media/MediaVideoPlayer";
@@ -213,7 +213,7 @@ import {
 import { ProposedPlanCard } from "./ProposedPlanCard";
 import { HtmlRenderFrame } from "./HtmlRenderFrame";
 import { VisualSubmitChip } from "./VisualSubmitChip";
-import { readVisualSubmitMessage } from "@t3tools/shared/htmlRender";
+import { readVisualSubmitMessage } from "@cogenly/shared/htmlRender";
 import { McpAppFrame } from "./McpAppFrame";
 import { useThreadShell } from "../../state/entities";
 import { StartWorkPicker, useCanStartWork } from "../work/StartWork";
@@ -309,12 +309,12 @@ import {
 import {
   collectComposerContextReferences,
   formatComposerContextReference,
-} from "@t3tools/shared/composerContextReferences";
+} from "@cogenly/shared/composerContextReferences";
 import {
   COMPOSER_CONTEXT_CLIPBOARD_MIME,
   encodeComposerContextClipboardHtml,
   encodeComposerContextFragment,
-} from "@t3tools/shared/composerContextClipboard";
+} from "@cogenly/shared/composerContextClipboard";
 import { chatMarkdownClipboardPayload } from "../../markdown-clipboard";
 import { ContextChip, ContextChipLabel, type ContextChipKind } from "../ContextChip";
 import { createContextPresentationRegistry } from "../contextPresentationRegistry";
@@ -322,7 +322,7 @@ import { useOpenPrLink } from "~/lib/openPullRequestLink";
 import { useClientSettings } from "~/hooks/useSettings";
 import type { ChatMarkdownContextReference } from "../ChatMarkdown";
 import { cn } from "~/lib/utils";
-import { type TimestampFormat } from "@t3tools/contracts/settings";
+import { type TimestampFormat } from "@cogenly/contracts/settings";
 import {
   formatChatTimestampTooltip,
   formatDayAwareTimestamp,
@@ -6612,7 +6612,7 @@ function terminalRunToolCall(
 function QuestionAnswerHistory({
   answer,
 }: {
-  answer: import("@t3tools/contracts").UserInputAttachmentAnswerPayload;
+  answer: import("@cogenly/contracts").UserInputAttachmentAnswerPayload;
 }) {
   const { activeThreadEnvironmentId } = use(TimelineRowCtx);
   const attachments = useMemo(() => Object.values(answer.attachmentsByQuestionId).flat(), [answer]);

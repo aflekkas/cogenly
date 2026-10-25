@@ -1,4 +1,4 @@
-import type { AgentAvatar } from "@t3tools/contracts";
+import type { AgentAvatar } from "@cogenly/contracts";
 import type { CSSProperties } from "react";
 import { avatarFace } from "~/components/agents/face/agentAvatar.logic";
 import { resolveFaceColor } from "~/components/agents/face/agentFace.logic";

@@ -3,8 +3,8 @@ import {
   DEFAULT_CLIENT_SETTINGS,
   DEFAULT_SERVER_SETTINGS,
   EnvironmentId,
-} from "@t3tools/contracts";
-import { splitSharedServerPatch } from "@t3tools/client-runtime/state/shared-settings";
+} from "@cogenly/contracts";
+import { splitSharedServerPatch } from "@cogenly/client-runtime/state/shared-settings";
 import { DEFAULT_APPEARANCE_PREFERENCES } from "./appearancePreferences";
 import { DEFAULT_APPEARANCE_MODE } from "./theme";
 import {

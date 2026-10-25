@@ -5,7 +5,7 @@ import {
   type IntegrationScope,
   type IntegrationSummary,
   type IntegrationTestResult,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 
 const REASON_TEXT: Readonly<Record<IntegrationError["reason"], string>> = {
   google_client_missing: "Ask an agent to configure your Google OAuth client.",

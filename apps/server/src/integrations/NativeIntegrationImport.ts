@@ -6,22 +6,22 @@ import {
   ProviderDriverKind,
   type IntegrationCreateInput,
   type IntegrationNativeImportPreview,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as ChildProcess from "effect/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
-import { resolveSpawnCommand } from "@t3tools/shared/shell";
+import { resolveSpawnCommand } from "@cogenly/shared/shell";
 import * as Option from "effect/Option";
 import * as Hash from "effect/Hash";
 import * as Schema from "effect/Schema";
 import * as Path from "effect/Path";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as HostProcess from "@cogenly/shared/HostProcess";
 import { parse } from "smol-toml";
-import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
-import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
+import { expandHomePath } from "@cogenly/provider-core/server/pathExpansion";
+import { mergeProviderInstanceEnvironment } from "@cogenly/provider-core/server/instanceEnvironment";
 import { makeClaudeEnvironment, resolveClaudeHomePath } from "../provider/Drivers/ClaudeHome.ts";
 import { claudeAccountConfigPath } from "../provider/claudeResetCredits.ts";
 import { resolveCodexHomeLayout } from "../provider/Drivers/CodexHomeLayout.ts";

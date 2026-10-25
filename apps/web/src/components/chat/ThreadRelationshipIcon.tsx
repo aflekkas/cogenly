@@ -1,6 +1,6 @@
 // Ported from T3 Code (MIT, https://github.com/pingdotgg/t3code),
 // apps/web/src/components/chat/ThreadRelationshipIcon.tsx.
-import type { ProviderDriverKind, ServerProvider } from "@t3tools/contracts";
+import type { ProviderDriverKind, ServerProvider } from "@cogenly/contracts";
 import { BotIcon, type LucideIcon } from "lucide-react";
 
 import { BadgeDot, type BadgeDotTone } from "../ui/badge-dot";

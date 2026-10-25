@@ -1,7 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
-import { ProviderInstanceId } from "@t3tools/contracts";
-import type { PtyExitEvent, PtyProcess } from "@t3tools/shared/PtyAdapter";
+import { ProviderInstanceId } from "@cogenly/contracts";
+import type { PtyExitEvent, PtyProcess } from "@cogenly/shared/PtyAdapter";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";

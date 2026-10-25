@@ -10,10 +10,10 @@ import {
   type DesktopAppActivationRequest,
   type DesktopAppEnvironmentAdded,
   type DesktopAppMachinesPaired,
-} from "@t3tools/contracts";
-import { resolveDesktopAppControlAddress } from "@t3tools/shared/desktopAppControl";
-import { parseAddEnvironmentRequest } from "@t3tools/shared/environmentLinks";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+} from "@cogenly/contracts";
+import { resolveDesktopAppControlAddress } from "@cogenly/shared/desktopAppControl";
+import { parseAddEnvironmentRequest } from "@cogenly/shared/environmentLinks";
+import * as HostProcess from "@cogenly/shared/HostProcess";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";

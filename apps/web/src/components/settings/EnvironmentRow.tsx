@@ -3,8 +3,8 @@ import {
   connectionRouteId,
   connectionRouteLabel,
   connectionRoutes,
-} from "@t3tools/client-runtime/connection";
-import type { DesktopSshEnvironmentTarget, EnvironmentMachineKind } from "@t3tools/contracts";
+} from "@cogenly/client-runtime/connection";
+import type { DesktopSshEnvironmentTarget, EnvironmentMachineKind } from "@cogenly/contracts";
 import * as Option from "effect/Option";
 import type { ReactNode } from "react";
 

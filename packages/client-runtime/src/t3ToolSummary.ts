@@ -1,4 +1,4 @@
-import type { T3McpToolSummaryAction } from "@t3tools/shared/t3McpToolPresentation";
+import type { T3McpToolSummaryAction } from "@cogenly/shared/t3McpToolPresentation";
 
 export interface T3ToolSummaryCall {
   readonly input: unknown;

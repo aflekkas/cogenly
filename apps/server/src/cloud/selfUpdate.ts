@@ -5,8 +5,8 @@ import {
   type ServerSelfUpdateProgressStage,
   type ServerSelfUpdateResult,
   type ThreadId,
-} from "@t3tools/contracts";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+} from "@cogenly/contracts";
+import * as HostProcess from "@cogenly/shared/HostProcess";
 import * as Cause from "effect/Cause";
 import * as Config from "effect/Config";
 import * as Context from "effect/Context";
@@ -24,7 +24,7 @@ import {
   CLI_RELEASE_BASE_URL_ENV,
   CLI_RELEASES_PUBLISHED,
   CLI_RELEASES_UNAVAILABLE_MESSAGE,
-} from "@t3tools/shared/cliRelease";
+} from "@cogenly/shared/cliRelease";
 
 import * as ServerConfig from "../config.ts";
 import * as DesktopAppUpdate from "../desktopUpdate/DesktopAppUpdate.ts";

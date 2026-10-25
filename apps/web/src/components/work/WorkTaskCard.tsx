@@ -1,9 +1,9 @@
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { isScratchProject } from "@t3tools/client-runtime/state/projects";
+import { scopeThreadRef } from "@cogenly/client-runtime/environment";
+import { isScratchProject } from "@cogenly/client-runtime/state/projects";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@cogenly/client-runtime/state/runtime";
 import {
   CommandId,
   WorkHandoffError,
@@ -11,7 +11,7 @@ import {
   type ProjectId,
   type ThreadId,
   type WorkTask,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import {
   CheckIcon,
   CircleAlertIcon,

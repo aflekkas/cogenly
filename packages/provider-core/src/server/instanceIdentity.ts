@@ -1,7 +1,7 @@
-import type { ProviderDriverKind, ServerProvider } from "@t3tools/contracts";
+import type { ProviderDriverKind, ServerProvider } from "@cogenly/contracts";
 
-import type { ProviderInstance } from "@t3tools/provider-core/server/driver";
-import type { ServerProviderDraft } from "@t3tools/provider-core/server/snapshotProbe";
+import type { ProviderInstance } from "@cogenly/provider-core/server/driver";
+import type { ServerProviderDraft } from "@cogenly/provider-core/server/snapshotProbe";
 
 /**
  * Stamp instance identity onto a `ServerProvider` snapshot produced by the

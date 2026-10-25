@@ -27,7 +27,7 @@ import {
   type VcsStatusLocalResult,
   type VcsStatusRemoteResult,
   type VcsStatusResult,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 
 import * as GitManager from "./GitManager.ts";
 import { forkSource, forkCheckout } from "./forkRepository.ts";
@@ -41,7 +41,7 @@ export class GitWorkflowService extends Context.Service<
       readonly cwd: string;
       readonly remote: string;
       readonly allowLastPushed?: boolean;
-    }) => Effect.Effect<import("@t3tools/contracts").ThreadForkRepository, ThreadRemoteError>;
+    }) => Effect.Effect<import("@cogenly/contracts").ThreadForkRepository, ThreadRemoteError>;
     readonly forkCheckout: (input: {
       readonly cwd: string;
       readonly remote: string;

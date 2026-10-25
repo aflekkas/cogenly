@@ -4,7 +4,7 @@ import {
   ProjectId,
   type ProjectLabelId,
   ProviderInstanceId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -12,12 +12,12 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
-import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
+import * as ProviderAdapter from "@cogenly/provider-core/server/ProviderAdapter";
 import {
   buildIntegrationsContextLine,
   buildProjectManifest,
-} from "@t3tools/provider-core/server/runtimeInstructions";
-import { buildMachineHealthContextLine } from "@t3tools/provider-core/server/machineHealthContext";
+} from "@cogenly/provider-core/server/runtimeInstructions";
+import { buildMachineHealthContextLine } from "@cogenly/provider-core/server/machineHealthContext";
 import * as HealthAlertsState from "../health/HealthAlertsState.ts";
 import { availableToConnect } from "../integrations/IntegrationCatalog.ts";
 import * as Integrations from "../integrations/Integrations.ts";

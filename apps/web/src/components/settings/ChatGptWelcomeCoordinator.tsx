@@ -1,6 +1,6 @@
 import { useLastPresent } from "~/components/ui/overlay-presence";
 import { useAtomValue } from "@effect/atom-react";
-import { usesChatGptSharing } from "@t3tools/shared/usageLimits";
+import { usesChatGptSharing } from "@cogenly/shared/usageLimits";
 import { useState } from "react";
 import { environmentPresentations } from "../../state/presentation";
 import { OpenAI } from "../Icons";

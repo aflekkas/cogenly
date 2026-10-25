@@ -5,7 +5,7 @@ import {
   ThreadId,
   VaultItemMetadata,
   VaultSecretFields,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { NodeCrypto } from "@effect/platform-node";

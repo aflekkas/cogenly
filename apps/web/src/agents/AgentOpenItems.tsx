@@ -4,7 +4,7 @@ import {
   type Commitment,
   type CommitmentRef,
   type ProjectLabelId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import {
   ArrowUpRightIcon,
   CalendarIcon,

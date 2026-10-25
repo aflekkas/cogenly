@@ -1,4 +1,4 @@
-import { AppearanceAccentSchema } from "@t3tools/contracts";
+import { AppearanceAccentSchema } from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 

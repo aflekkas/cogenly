@@ -1,4 +1,4 @@
-import { ImageSearchInput, ImageSearchResult, OrchestratorMcpFailure } from "@t3tools/contracts";
+import { ImageSearchInput, ImageSearchResult, OrchestratorMcpFailure } from "@cogenly/contracts";
 import { Tool, Toolkit } from "effect/ai";
 
 import * as ImageSearchService from "../../../images/ImageSearchService.ts";

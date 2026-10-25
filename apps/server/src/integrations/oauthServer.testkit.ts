@@ -23,7 +23,7 @@ import * as NodeCrypto from "node:crypto";
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- NodeHttpServer.layer takes a node:http server factory.
 import * as NodeHttp from "node:http";
 
-import { IntegrationName } from "@t3tools/contracts";
+import { IntegrationName } from "@cogenly/contracts";
 
 import { CALLBACK_PATH } from "./IntegrationOAuth.ts";
 

@@ -2,7 +2,7 @@ import {
   AuthPreviewOperateScope,
   AuthTerminalReadScope,
   type ScopedThreadRef,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { readLocalApi } from "~/localApi";

@@ -9,7 +9,7 @@ import {
   type MachineHealthReport,
   type MachineInfo,
   type PeerChannel,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";

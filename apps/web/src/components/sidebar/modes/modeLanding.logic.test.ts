@@ -1,5 +1,5 @@
-import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
+import { scopeProjectRef, scopeThreadRef } from "@cogenly/client-runtime/environment";
+import { EnvironmentId, ProjectId, ThreadId } from "@cogenly/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {

@@ -3,7 +3,7 @@ import type {
   MachineKind,
   MachineRelation,
   MachineSelfReport,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import type * as DateTime from "effect/DateTime";
 
 const kindFor = (role: MachineSelfReport["role"], relation: MachineRelation): MachineKind =>

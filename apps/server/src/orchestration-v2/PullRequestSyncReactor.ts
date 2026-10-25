@@ -1,4 +1,4 @@
-import { siblingPullRequestUrl } from "@t3tools/shared/changeRequestUrl";
+import { siblingPullRequestUrl } from "@cogenly/shared/changeRequestUrl";
 import {
   CommandId,
   type PullRequestSummary,
@@ -7,14 +7,14 @@ import {
   type ThreadPullRequestLink,
   type ThreadPullRequestSnapshot,
   type ThreadPullRequestStack,
-} from "@t3tools/contracts";
-import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
+} from "@cogenly/contracts";
+import { makeDrainableWorker } from "@cogenly/shared/DrainableWorker";
 import {
   threadPullRequestKeyOf,
   normalizeThreadPullRequestKey,
   threadPullRequestKeysEqual,
   visibleThreadPullRequests,
-} from "@t3tools/shared/threadPullRequests";
+} from "@cogenly/shared/threadPullRequests";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -29,7 +29,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 
 import * as GitManager from "../git/GitManager.ts";
-import { PullRequestProviderError } from "@t3tools/source-control-core/server/PullRequestProvider";
+import { PullRequestProviderError } from "@cogenly/source-control-core/server/PullRequestProvider";
 import * as PullRequestService from "../pullRequest/PullRequestService.ts";
 import { forkParked } from "../serverActivation.ts";
 import * as Orchestrator from "./Orchestrator.ts";

@@ -17,7 +17,7 @@
 import * as NodeModule from "node:module";
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { ACCENT_PRESETS, colorBlend, hexToRgb } from "@t3tools/shared/accentColors";
+import { ACCENT_PRESETS, colorBlend, hexToRgb } from "@cogenly/shared/accentColors";
 import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";

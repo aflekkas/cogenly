@@ -1,4 +1,4 @@
-import type { ConfirmDialogOptions, ContextMenuItem, LocalApi } from "@t3tools/contracts";
+import type { ConfirmDialogOptions, ContextMenuItem, LocalApi } from "@cogenly/contracts";
 
 import { requestConfirmDialog } from "./confirmDialog";
 import { dismissContextMenu, showContextMenuFallback } from "./contextMenuFallback";

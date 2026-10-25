@@ -3,8 +3,8 @@
  * page: the sidebar row subtext, the composer's project picker, the hero line
  * and the repository picker's project groups.
  */
-import type { EnvironmentId, ProjectId, ProjectLabelId } from "@t3tools/contracts";
-import { normalizeProjectPathForComparison } from "@t3tools/shared/path";
+import type { EnvironmentId, ProjectId, ProjectLabelId } from "@cogenly/contracts";
+import { normalizeProjectPathForComparison } from "@cogenly/shared/path";
 
 import {
   projectLabelKey,

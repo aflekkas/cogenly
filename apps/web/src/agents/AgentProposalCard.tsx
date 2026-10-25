@@ -1,4 +1,4 @@
-import type { EnvironmentId, ProjectLabelId } from "@t3tools/contracts";
+import type { EnvironmentId, ProjectLabelId } from "@cogenly/contracts";
 import {
   FlagIcon,
   FolderIcon,

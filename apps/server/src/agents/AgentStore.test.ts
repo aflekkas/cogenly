@@ -1,7 +1,7 @@
 import { layerIdentity as layerSharedIdentity } from "../sync/testkit.ts";
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { MessageId, ThreadId, ProviderInstanceId } from "@t3tools/contracts";
+import { MessageId, ThreadId, ProviderInstanceId } from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -14,7 +14,7 @@ import {
 } from "./context.ts";
 import { callingAgent } from "./MemoryMcp.ts";
 import * as Invocation from "../mcp/McpInvocationContext.ts";
-import { EnvironmentId } from "@t3tools/contracts";
+import { EnvironmentId } from "@cogenly/contracts";
 
 import { agentFixture } from "./agent.testkit.ts";
 const database = Sqlite.layerMemory.pipe(Layer.provide(NodeServices.layer));

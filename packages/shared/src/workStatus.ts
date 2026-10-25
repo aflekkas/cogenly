@@ -1,4 +1,4 @@
-import type { OrchestrationV2ThreadProjection } from "@t3tools/contracts";
+import type { OrchestrationV2ThreadProjection } from "@cogenly/contracts";
 
 export type WorkStatus =
   | "draft"

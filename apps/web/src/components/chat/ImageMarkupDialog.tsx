@@ -19,7 +19,7 @@ import {
   type ReactNode,
 } from "react";
 
-import { PROVIDER_SEND_TURN_MAX_IMAGE_BYTES } from "@t3tools/contracts";
+import { PROVIDER_SEND_TURN_MAX_IMAGE_BYTES } from "@cogenly/contracts";
 
 import type { ComposerImageAttachment } from "../../composerDraftStore";
 import { isContextMenuOpen } from "../../contextMenuFallback";

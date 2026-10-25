@@ -1,5 +1,5 @@
 import { expect, it } from "@effect/vitest";
-import { CommandId, MessageId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import { CommandId, MessageId, ProjectId, ProviderInstanceId, ThreadId } from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
 import * as Stream from "effect/Stream";
 import * as Worker from "./EffectWorker.ts";

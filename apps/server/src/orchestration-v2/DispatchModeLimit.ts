@@ -1,4 +1,4 @@
-import type { ProviderInteractionMode, RuntimeMode, ThreadId } from "@t3tools/contracts";
+import type { ProviderInteractionMode, RuntimeMode, ThreadId } from "@cogenly/contracts";
 import * as Context from "effect/Context";
 import type * as Ref from "effect/Ref";
 

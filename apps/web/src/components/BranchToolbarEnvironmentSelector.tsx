@@ -1,7 +1,7 @@
 import { ComposerSelectControl } from "./chat/ComposerControl";
 import { COMPOSER_CONTEXT_TOOLTIP, ComposerContextLabel } from "./ComposerContextLabel";
 import { Tooltip, TooltipTrigger, TooltipPopup } from "./ui/tooltip";
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId } from "@cogenly/contracts";
 import { ScaleIcon } from "lucide-react";
 import { memo, useMemo } from "react";
 

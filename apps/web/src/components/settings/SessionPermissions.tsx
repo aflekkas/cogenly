@@ -1,5 +1,5 @@
-import { type EnvironmentId, sessionGrantsScope } from "@t3tools/contracts";
-import { AUTH_SCOPE_OPTIONS } from "@t3tools/shared/authScopeOptions";
+import { type EnvironmentId, sessionGrantsScope } from "@cogenly/contracts";
+import { AUTH_SCOPE_OPTIONS } from "@cogenly/shared/authScopeOptions";
 import { useEnvironmentSessionState } from "~/state/session";
 
 export function SessionPermissions({

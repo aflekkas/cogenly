@@ -13,16 +13,16 @@ import {
   ThreadId,
   type OrchestrationV2AppThread,
   type OrchestrationV2ProviderThread,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
 import * as DateTime from "effect/DateTime";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 import * as Schema from "effect/Schema";
-import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
-import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
-import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
-import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
+import * as IdAllocator from "@cogenly/provider-core/server/IdAllocator";
+import * as ProviderAdapter from "@cogenly/provider-core/server/ProviderAdapter";
+import * as McpProviderSessions from "@cogenly/provider-core/server/McpProviderSessions";
+import * as ProviderHost from "@cogenly/provider-core/server/ProviderHost";
 import { makeGrokAdapterV2 } from "./adapter.ts";
 import type { GrokAcpHost } from "./acp.ts";
 import { GrokSettings } from "../settings.ts";

@@ -2,7 +2,7 @@ import { Link } from "@tanstack/react-router";
 import { useLastPresent } from "~/components/ui/overlay-presence";
 import { SessionPermissions } from "./SessionPermissions";
 import { RenameEnvironmentDialog } from "./RenameEnvironmentDialog";
-import { AUTH_SCOPE_OPTIONS as PAIRING_SCOPE_OPTIONS } from "@t3tools/shared/authScopeOptions";
+import { AUTH_SCOPE_OPTIONS as PAIRING_SCOPE_OPTIONS } from "@cogenly/shared/authScopeOptions";
 import {
   ChevronsLeftRightEllipsisIcon,
   EllipsisIcon,
@@ -48,18 +48,18 @@ import {
   type DesktopWslState,
   type EnvironmentId,
   resolveEnvironmentMachineKind,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import {
   RelayConnectionRegistration,
   RelayConnectionTarget,
   connectionRoutes,
   connectionStatusText,
   environmentMcpUrl,
-} from "@t3tools/client-runtime/connection";
+} from "@cogenly/client-runtime/connection";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@cogenly/client-runtime/state/runtime";
 import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 

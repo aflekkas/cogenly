@@ -1,5 +1,5 @@
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { isScratchProject } from "@t3tools/client-runtime/state/projects";
+import { scopeThreadRef } from "@cogenly/client-runtime/environment";
+import { isScratchProject } from "@cogenly/client-runtime/state/projects";
 import type {
   EnvironmentId,
   MessageId,
@@ -7,7 +7,7 @@ import type {
   ThreadId,
   WorkHandoffLink,
   WorkTask,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { ChevronRightIcon, GitBranchIcon, HammerIcon } from "lucide-react";
 import { createContext, use, useMemo, useState, type ReactNode } from "react";
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest";
-import { EnvironmentId, ThreadId, type MachineHealthReport } from "@t3tools/contracts";
+import { EnvironmentId, ThreadId, type MachineHealthReport } from "@cogenly/contracts";
 import * as DateTime from "effect/DateTime";
 
 import { describeHealthReport, healthExitCode } from "./health.ts";

@@ -8,10 +8,10 @@
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 
-import type { ThreadId } from "@t3tools/contracts";
-import type * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
-import { makeAsyncRotatingFileSink } from "@t3tools/shared/logging";
-import { errorTag } from "@t3tools/shared/observability";
+import type { ThreadId } from "@cogenly/contracts";
+import type * as ProviderEventLoggers from "@cogenly/provider-core/server/ProviderEventLoggers";
+import { makeAsyncRotatingFileSink } from "@cogenly/shared/logging";
+import { errorTag } from "@cogenly/shared/observability";
 import * as Clock from "effect/Clock";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";

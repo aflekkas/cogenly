@@ -1,4 +1,4 @@
-import type { OrchestrationV2ProviderFailureClass, ScopedThreadRef } from "@t3tools/contracts";
+import type { OrchestrationV2ProviderFailureClass, ScopedThreadRef } from "@cogenly/contracts";
 import { useEffect } from "react";
 import { useStableCallback } from "../../hooks/useStableCallback";
 import { toastManager } from "../ui/toast";

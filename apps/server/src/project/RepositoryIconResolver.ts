@@ -1,6 +1,6 @@
-import * as GitHubRest from "@t3tools/source-control-github/server/GitHubRest";
-import { repositoryRemoteParts } from "@t3tools/contracts";
-import { isProjectFaviconPath } from "@t3tools/shared/projectFavicon";
+import * as GitHubRest from "@cogenly/source-control-github/server/GitHubRest";
+import { repositoryRemoteParts } from "@cogenly/contracts";
+import { isProjectFaviconPath } from "@cogenly/shared/projectFavicon";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";

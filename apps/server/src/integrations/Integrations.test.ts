@@ -10,7 +10,7 @@ import {
   SLACK_MCP_USER_SCOPES,
   integrationCatalogEntryFor,
   type Integration,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { NodeCrypto } from "@effect/platform-node";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";

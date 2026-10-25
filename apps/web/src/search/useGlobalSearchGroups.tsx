@@ -1,6 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import type { EnvironmentId, SearchKind, ThreadId } from "@t3tools/contracts";
+import { scopeThreadRef } from "@cogenly/client-runtime/environment";
+import type { EnvironmentId, SearchKind, ThreadId } from "@cogenly/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import * as Cause from "effect/Cause";
 import * as Option from "effect/Option";

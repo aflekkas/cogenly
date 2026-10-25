@@ -17,10 +17,10 @@ import {
   type SourceControlRepositoryCloneUrls,
   type SourceControlRepositoryInfo,
   type SourceControlRepositoryLookupInput,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 
 import * as ServerConfig from "../config.ts";
-import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
+import { expandHomePath } from "@cogenly/provider-core/server/pathExpansion";
 import {
   parseGitCloneProgressLine,
   type GitCloneProgressLine,
@@ -29,7 +29,7 @@ import { resolveDefaultCloneDestination } from "../project/ProjectsRoot.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as SourceControlProviderRegistry from "./SourceControlProviderRegistry.ts";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as HostProcess from "@cogenly/shared/HostProcess";
 const isSourceControlRepositoryError = Schema.is(SourceControlRepositoryError);
 
 export class SourceControlRepositoryService extends Context.Service<

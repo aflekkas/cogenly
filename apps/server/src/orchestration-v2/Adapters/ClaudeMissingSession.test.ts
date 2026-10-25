@@ -10,9 +10,9 @@ import {
   ThreadId,
   type OrchestrationV2Command,
   type OrchestrationV2ThreadProjection,
-} from "@t3tools/contracts";
-import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
-import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
+} from "@cogenly/contracts";
+import * as IdAllocator from "@cogenly/provider-core/server/IdAllocator";
+import * as McpProviderSessions from "@cogenly/provider-core/server/McpProviderSessions";
 import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";

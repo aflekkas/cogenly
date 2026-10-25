@@ -4,7 +4,7 @@ import {
   type ServerSettings,
   UsageLimitSourceConfig,
   secretSettingsFields,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import {
   readSecretFieldValues,
   SOURCE_CONTROL_HOST_SECRET_FIELDS,

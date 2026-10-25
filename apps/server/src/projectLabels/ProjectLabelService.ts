@@ -22,7 +22,7 @@ import {
   type ThreadProjectFolderResult,
   type ThreadId,
   type ApplicationStoredEvent,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
@@ -38,7 +38,7 @@ import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 
-import * as GitHubRest from "@t3tools/source-control-github/server/GitHubRest";
+import * as GitHubRest from "@cogenly/source-control-github/server/GitHubRest";
 
 import * as SharedState from "../sync/SharedState.ts";
 import * as Events from "../persistence/OrchestrationEventStore.ts";

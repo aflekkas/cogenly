@@ -1,10 +1,10 @@
-import type { MediaActionId } from "@t3tools/client-runtime/media-actions";
+import type { MediaActionId } from "@cogenly/client-runtime/media-actions";
 import {
   mediaReferenceFileName,
   type MediaReference,
-} from "@t3tools/client-runtime/media-reference";
-import { resolveAssetUrl } from "@t3tools/client-runtime/state/assets";
-import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+} from "@cogenly/client-runtime/media-reference";
+import { resolveAssetUrl } from "@cogenly/client-runtime/state/assets";
+import { squashAtomCommandFailure } from "@cogenly/client-runtime/state/runtime";
 import {
   AuthFilesystemReadScope,
   type AssetResource,
@@ -13,7 +13,7 @@ import {
   type EnvironmentId,
   sessionGrantsScope,
   type SessionGrantInput,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Option from "effect/Option";
 import { AsyncResult } from "effect/reactivity";
 import { useCallback, useRef, useState, type ReactElement } from "react";

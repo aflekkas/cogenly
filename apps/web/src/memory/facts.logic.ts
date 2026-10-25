@@ -5,7 +5,7 @@ import type {
   FactCreateInput,
   ProjectLabelId,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 
 import { safeExternalUrl } from "../search/globalSearch.logic";
 

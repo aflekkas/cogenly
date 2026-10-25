@@ -3,7 +3,7 @@ import type {
   AgentEventKind,
   ProjectId,
   ProjectLabelWithRepositories,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { FolderGit2Icon, PlusIcon } from "lucide-react";
 import type { ComponentType, ReactNode } from "react";
 import { Button } from "~/components/ui/button";

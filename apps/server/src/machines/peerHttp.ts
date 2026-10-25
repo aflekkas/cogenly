@@ -20,7 +20,7 @@ import {
   PeerScopeAuthorization,
   PeerTicketResult,
   type AuthEnvironmentScope,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";

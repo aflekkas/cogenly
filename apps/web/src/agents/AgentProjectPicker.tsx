@@ -1,4 +1,4 @@
-import type { EnvironmentId, ProjectLabelId } from "@t3tools/contracts";
+import type { EnvironmentId, ProjectLabelId } from "@cogenly/contracts";
 import { CheckIcon, FolderMinusIcon } from "lucide-react";
 import { useMemo, useState, type ReactElement, type ReactNode } from "react";
 

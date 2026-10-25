@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest";
-import { DEFAULT_SERVER_SETTINGS, ProjectId, type ServerSettings } from "@t3tools/contracts";
+import { DEFAULT_SERVER_SETTINGS, ProjectId, type ServerSettings } from "@cogenly/contracts";
 
 import { projectSettingsDocumentId, UNIVERSAL_SETTINGS_DOCUMENT_ID } from "./settingsDocument.ts";
 import {

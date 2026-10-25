@@ -7,9 +7,9 @@ import {
   ProviderInstanceId,
   ThreadId,
   TurnItemId,
-} from "@t3tools/contracts";
-import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
-import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
+} from "@cogenly/contracts";
+import * as ProviderAdapter from "@cogenly/provider-core/server/ProviderAdapter";
+import { makeProviderFailure } from "@cogenly/provider-core/server/failure";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Stream from "effect/Stream";

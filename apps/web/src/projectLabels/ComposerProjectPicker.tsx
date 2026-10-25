@@ -1,5 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
-import type { EnvironmentId, ProjectLabelId, ThreadId } from "@t3tools/contracts";
+import type { EnvironmentId, ProjectLabelId, ThreadId } from "@cogenly/contracts";
 import { FolderIcon, FolderMinusIcon, PlusIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 

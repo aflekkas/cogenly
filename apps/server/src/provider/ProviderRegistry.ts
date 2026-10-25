@@ -34,7 +34,7 @@ import {
   type ProviderInstanceId,
   type ServerProvider,
   type ServerProviderUpdateState,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -65,11 +65,11 @@ import {
 import type {
   ProviderInstance,
   ProviderWorkspaceSnapshot,
-} from "@t3tools/provider-core/server/driver";
+} from "@cogenly/provider-core/server/driver";
 import {
   makeManualOnlyProviderMaintenanceCapabilities,
   type ProviderMaintenanceCapabilities,
-} from "@t3tools/provider-core/server/maintenanceResolver";
+} from "@cogenly/provider-core/server/maintenanceResolver";
 import type { ProviderSnapshotSource } from "./builtInProviderCatalog.ts";
 
 export type ProviderMaintenanceActionKind = "update";

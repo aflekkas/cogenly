@@ -7,8 +7,8 @@ import {
   PRIMARY_LOCAL_ENVIRONMENT_ID,
   SystemSettingsPaneSchema,
   type DesktopEnvironmentBootstrap,
-} from "@t3tools/contracts";
-import { PROJECT_FAVICON_EXTENSIONS } from "@t3tools/shared/projectFavicon";
+} from "@cogenly/contracts";
+import { PROJECT_FAVICON_EXTENSIONS } from "@cogenly/shared/projectFavicon";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";

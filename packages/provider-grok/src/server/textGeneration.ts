@@ -2,28 +2,28 @@ import {
   type ModelSelection,
   type ServerProviderModel,
   TextGenerationError,
-} from "@t3tools/contracts";
-import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@t3tools/shared/git";
-import { extractJsonObject } from "@t3tools/shared/schemaJson";
+} from "@cogenly/contracts";
+import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@cogenly/shared/git";
+import { extractJsonObject } from "@cogenly/shared/schemaJson";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
-import type { ProviderTextGeneration } from "@t3tools/provider-core/server/textGeneration";
-import { investigationUnsupported } from "@t3tools/provider-core/server/textGenerationOperations";
+import type { ProviderTextGeneration } from "@cogenly/provider-core/server/textGeneration";
+import { investigationUnsupported } from "@cogenly/provider-core/server/textGenerationOperations";
 import {
   buildBranchNamePrompt,
   buildCommitMessagePrompt,
   buildPrContentPrompt,
   buildThreadTitlePrompt,
-} from "@t3tools/provider-core/server/textGenerationPrompts";
+} from "@cogenly/provider-core/server/textGenerationPrompts";
 import {
   sanitizeCommitSubject,
   sanitizePrTitle,
   sanitizeThreadTitle,
   toJsonSchemaObject,
-} from "@t3tools/provider-core/server/textGenerationUtils";
+} from "@cogenly/provider-core/server/textGenerationUtils";
 
 import type { GrokSettings } from "../settings.ts";
 import { createGrokAcpHost, createGrokAcpHostEffect, type GrokAcpHost } from "./acp.ts";

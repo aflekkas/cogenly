@@ -7,10 +7,10 @@ import {
   VisualStateError,
   VISUAL_STATE_MAX_BYTES,
   type OrchestrationV2Command,
-} from "@t3tools/contracts";
-import { formatVisualSubmitMessage } from "@t3tools/shared/htmlRender";
+} from "@cogenly/contracts";
+import { formatVisualSubmitMessage } from "@cogenly/shared/htmlRender";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
+import * as ProviderAdapter from "@cogenly/provider-core/server/ProviderAdapter";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -22,7 +22,7 @@ import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as Registry from "../orchestration-v2/ProviderAdapterRegistry.ts";
 import { layerWithRegistry } from "../orchestration-v2/testkit/ProviderReplayHarness.ts";
 import { CodexProviderCapabilitiesV2 } from "../orchestration-v2/Adapters/CodexAdapterV2.ts";
-import { ProviderDriverKind } from "@t3tools/contracts";
+import { ProviderDriverKind } from "@cogenly/contracts";
 import * as Events from "../orchestration-v2/EventStore.ts";
 import * as Receipts from "../orchestration-v2/CommandReceiptStore.ts";
 import * as Sqlite from "../persistence/Sqlite.ts";

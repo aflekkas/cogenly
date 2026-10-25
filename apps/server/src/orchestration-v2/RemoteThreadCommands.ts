@@ -5,7 +5,7 @@
  * is local. Kept as a registry so the orchestrator does not depend on the
  * machine link and the link does not depend on the orchestrator.
  */
-import type { OrchestrationV2ServerCommand, ThreadRemoteError } from "@t3tools/contracts";
+import type { OrchestrationV2ServerCommand, ThreadRemoteError } from "@cogenly/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";

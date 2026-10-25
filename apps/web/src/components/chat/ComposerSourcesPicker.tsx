@@ -2,13 +2,13 @@ import {
   integrationSourceNotice,
   integrationSourceRowText,
   integrationSourcesForProject,
-} from "@t3tools/client-runtime/composerThreadItems";
+} from "@cogenly/client-runtime/composerThreadItems";
 import type {
   EnvironmentId,
   IntegrationCatalogId,
   IntegrationSource,
   ProjectLabelId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { PlugIcon, PlusIcon } from "lucide-react";
 import { useMemo, useRef, useState } from "react";

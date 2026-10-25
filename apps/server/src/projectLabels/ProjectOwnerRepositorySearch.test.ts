@@ -4,9 +4,9 @@ import {
   ProjectLabelError,
   ProjectLabelId,
   type ProjectLabelWithRepositories,
-} from "@t3tools/contracts";
-import * as GitHubCredentials from "@t3tools/source-control-github/server/GitHubCredentials";
-import * as GitHubRequestPolicy from "@t3tools/source-control-github/server/GitHubRequestPolicy";
+} from "@cogenly/contracts";
+import * as GitHubCredentials from "@cogenly/source-control-github/server/GitHubCredentials";
+import * as GitHubRequestPolicy from "@cogenly/source-control-github/server/GitHubRequestPolicy";
 import * as Effect from "effect/Effect";
 
 import {

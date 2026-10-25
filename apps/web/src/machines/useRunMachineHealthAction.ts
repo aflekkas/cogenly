@@ -1,7 +1,7 @@
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@cogenly/client-runtime/state/runtime";
 import { Atom } from "effect/reactivity";
 import { useCallback } from "react";
 

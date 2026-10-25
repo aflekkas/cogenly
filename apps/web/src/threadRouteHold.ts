@@ -1,4 +1,4 @@
-import type { EnvironmentThreadState } from "@t3tools/client-runtime/state/threads";
+import type { EnvironmentThreadState } from "@cogenly/client-runtime/state/threads";
 import * as Option from "effect/Option";
 
 import type { ThreadRouteTarget } from "./threadRoutes";

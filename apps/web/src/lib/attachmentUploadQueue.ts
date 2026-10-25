@@ -3,14 +3,14 @@ import {
   PROVIDER_SEND_TURN_SUPPORTED_IMAGE_MIME_TYPES,
   type ChatAttachment,
   type EnvironmentId,
-} from "@t3tools/contracts";
-import { parseScopedThreadKey } from "@t3tools/client-runtime/environment";
-import { resolveAssetUrl } from "@t3tools/client-runtime/state/assets";
+} from "@cogenly/contracts";
+import { parseScopedThreadKey } from "@cogenly/client-runtime/environment";
+import { resolveAssetUrl } from "@cogenly/client-runtime/state/assets";
 import {
   deletePendingAttachmentUpload,
   runAttachmentUploadCycle,
   verifyPersistedAttachmentUpload,
-} from "@t3tools/client-runtime/state/attachments";
+} from "@cogenly/client-runtime/state/attachments";
 import { create } from "zustand";
 import * as Option from "effect/Option";
 import { AsyncResult } from "effect/reactivity";

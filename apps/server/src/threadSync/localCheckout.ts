@@ -5,7 +5,7 @@
  * worked on before it joined a project. Moving that project here files that
  * checkout into it, where it is, instead of cloning a second copy beside it.
  */
-import { type ProjectId, type ProjectLabelId, ThreadRemoteError } from "@t3tools/contracts";
+import { type ProjectId, type ProjectLabelId, ThreadRemoteError } from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";

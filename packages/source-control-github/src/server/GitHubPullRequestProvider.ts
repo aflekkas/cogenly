@@ -1,5 +1,5 @@
-import { SourceControlProviderKind } from "@t3tools/contracts";
-import { removeAgentCredits } from "@t3tools/source-control-core/server/mergeMessage";
+import { SourceControlProviderKind } from "@cogenly/contracts";
+import { removeAgentCredits } from "@cogenly/source-control-core/server/mergeMessage";
 import * as Effect from "effect/Effect";
 import type {
   PullRequestActor,
@@ -7,9 +7,9 @@ import type {
   PullRequestCheck,
   PullRequestReaction,
   PullRequestViewerPermissions,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 
-import * as SourceControlRateLimit from "@t3tools/source-control-core/server/SourceControlRateLimit";
+import * as SourceControlRateLimit from "@cogenly/source-control-core/server/SourceControlRateLimit";
 import * as GitHubPullRequestApi from "./GitHubPullRequestApi.ts";
 import {
   PullRequestProviderError,
@@ -18,7 +18,7 @@ import {
   type ProviderChangeRequestDetail,
   type PullRequestProviderApi,
   type ProviderRepositoryRef,
-} from "@t3tools/source-control-core/server/PullRequestProvider";
+} from "@cogenly/source-control-core/server/PullRequestProvider";
 import type { GitHubViewerAccess, GitHubWorkflowRunApproval } from "./gitHubPullRequestJson.ts";
 import { definition } from "../client/definition.ts";
 

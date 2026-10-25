@@ -1,4 +1,4 @@
-import { Integration, IntegrationAuth } from "@t3tools/contracts";
+import { Integration, IntegrationAuth } from "@cogenly/contracts";
 import * as Schema from "effect/Schema";
 
 /** Why a definition stays on this machine; never include its potentially secret URL. */

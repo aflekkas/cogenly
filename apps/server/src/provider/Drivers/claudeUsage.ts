@@ -5,21 +5,21 @@
  * @module provider/Drivers/claudeUsage
  */
 
-import { UsageProviderKind, type ClaudeSettings } from "@t3tools/contracts";
+import { UsageProviderKind, type ClaudeSettings } from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
 import * as Path from "effect/Path";
 
 const USAGE_PROVIDER = UsageProviderKind.make("claude");
 
-import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
+import { expandHomePath } from "@cogenly/provider-core/server/pathExpansion";
 import {
   parseTimestampMs,
   tokenCount,
   type ProviderUsageReader,
   type TranscriptUsageFormat,
   type UsageRecord,
-} from "@t3tools/provider-core/server/usage";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+} from "@cogenly/provider-core/server/usage";
+import * as HostProcess from "@cogenly/shared/HostProcess";
 
 /**
  * Parses one line of a Claude Code transcript.

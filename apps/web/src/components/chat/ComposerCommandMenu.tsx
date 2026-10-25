@@ -1,19 +1,19 @@
-import { formatProviderSkillDisplayName } from "@t3tools/shared/inlineSkills";
+import { formatProviderSkillDisplayName } from "@cogenly/shared/inlineSkills";
 import {
   resolveProviderSkillSourceKind,
   type ProviderSkillSourceKind,
-} from "@t3tools/client-runtime/providerSkills";
+} from "@cogenly/client-runtime/providerSkills";
 import type {
   ComposerMentionGroup,
   ComposerMentionItem,
-} from "@t3tools/client-runtime/composerThreadItems";
+} from "@cogenly/client-runtime/composerThreadItems";
 import {
   type ProjectEntry,
   type ProviderDriverKind,
   type PullRequestContextMetadata,
   type ServerProviderSkill,
   type ServerProviderSlashCommand,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import {
   BlocksIcon,
   BotIcon,

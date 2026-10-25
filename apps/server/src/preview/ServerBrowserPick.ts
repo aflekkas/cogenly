@@ -3,7 +3,7 @@ import type {
   PreviewAnnotationPayload,
   PreviewAnnotationRect,
   PreviewAnnotationScreenshot,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import {
   buildPickElementAnnotation,
   buildPickHoverLabel,
@@ -16,7 +16,7 @@ import {
   type PickBox,
   type PickPoint,
   type PickRawElementCapture,
-} from "@t3tools/shared/previewPick";
+} from "@cogenly/shared/previewPick";
 
 /** Advertised on the stream's `control` message while picking is supported. */
 export const PICK_CAPABILITIES = { pick: true } as const;

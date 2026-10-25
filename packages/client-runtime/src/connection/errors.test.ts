@@ -1,9 +1,9 @@
-import { EnvironmentAuthInvalidError } from "@t3tools/contracts";
+import { EnvironmentAuthInvalidError } from "@cogenly/contracts";
 import {
   RelayAuthInvalidError,
   RelayEnvironmentConnectNotAuthorizedError,
   RelayEnvironmentEndpointTimedOutError,
-} from "@t3tools/contracts/relay";
+} from "@cogenly/contracts/relay";
 import { describe, expect, it } from "@effect/vitest";
 
 import {

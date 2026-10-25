@@ -1,4 +1,4 @@
-import { ProviderDriverKind, UsageProviderKind } from "@t3tools/contracts";
+import { ProviderDriverKind, UsageProviderKind } from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vite-plus/test";

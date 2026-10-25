@@ -10,7 +10,7 @@ import {
   type Integration,
   type IntegrationCreateInput,
   type OrchestrationV2ThreadShell,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";

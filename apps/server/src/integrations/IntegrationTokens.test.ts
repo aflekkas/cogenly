@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest";
-import { VaultItemId, type VaultError } from "@t3tools/contracts";
+import { VaultItemId, type VaultError } from "@cogenly/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";

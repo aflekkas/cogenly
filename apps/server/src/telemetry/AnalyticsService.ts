@@ -8,8 +8,8 @@
  *
  * @module AnalyticsService
  */
-import * as HostProcess from "@t3tools/shared/HostProcess";
-import type { ClientOs } from "@t3tools/contracts";
+import * as HostProcess from "@cogenly/shared/HostProcess";
+import type { ClientOs } from "@cogenly/contracts";
 import * as Clock from "effect/Clock";
 import * as Config from "effect/Config";
 import * as Context from "effect/Context";

@@ -4,9 +4,9 @@ import {
   ExternalLauncherBrowserSpawnError,
   ExternalLauncherFileManagerSpawnError,
   type FileManagerRevealKind,
-} from "@t3tools/contracts";
-import * as HostProcess from "@t3tools/shared/HostProcess";
-import { isCommandAvailable, resolveSpawnCommand } from "@t3tools/shared/shell";
+} from "@cogenly/contracts";
+import * as HostProcess from "@cogenly/shared/HostProcess";
+import { isCommandAvailable, resolveSpawnCommand } from "@cogenly/shared/shell";
 import * as Config from "effect/Config";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -27,7 +27,7 @@ export {
   ExternalLauncherError,
   ExternalLauncherBrowserSpawnError,
   ExternalLauncherFileManagerSpawnError,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 interface FileManagerLaunch {
   readonly target: string;
   readonly command: string;

@@ -1,4 +1,4 @@
-import type { DeviceHostId, DeviceServiceState, DeviceSummary } from "@t3tools/contracts";
+import type { DeviceHostId, DeviceServiceState, DeviceSummary } from "@cogenly/contracts";
 
 import type { RightPanelSurface } from "~/rightPanelStore";
 

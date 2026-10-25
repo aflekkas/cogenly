@@ -1,4 +1,4 @@
-import { IntegrationError } from "@t3tools/contracts";
+import { IntegrationError } from "@cogenly/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import type * as Scope from "effect/Scope";

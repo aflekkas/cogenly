@@ -14,7 +14,7 @@ import {
   type IntegrationSetupStep,
   type IntegrationSummary,
   type IntegrationSyncedFrom,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 
 /**
  * The next action for an integration that cannot be used yet, from the

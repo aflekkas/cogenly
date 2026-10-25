@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { NodeId } from "@t3tools/contracts";
+import { NodeId } from "@cogenly/contracts";
 
 import {
   pendingSubagentCompletions,

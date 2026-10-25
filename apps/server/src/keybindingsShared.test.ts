@@ -1,6 +1,6 @@
 import { expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { KeybindingsConfig, type KeybindingRule } from "@t3tools/contracts";
+import { KeybindingsConfig, type KeybindingRule } from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";

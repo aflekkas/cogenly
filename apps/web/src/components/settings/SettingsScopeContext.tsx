@@ -2,8 +2,8 @@ import {
   LEGACY_PROJECT_CONFIG_FILE_NAME,
   PROJECT_CONFIG_FILE_NAME,
   type T3ProjectFile,
-} from "@t3tools/contracts";
-import { parseT3ProjectFile } from "@t3tools/shared/t3ProjectFile";
+} from "@cogenly/contracts";
+import { parseT3ProjectFile } from "@cogenly/shared/t3ProjectFile";
 import { useAtomValue } from "@effect/atom-react";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";

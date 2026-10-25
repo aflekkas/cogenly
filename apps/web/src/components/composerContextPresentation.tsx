@@ -7,12 +7,12 @@ import type {
   PreviewAnnotationPayload,
   ProjectFolderContextRecord,
   ThreadContextRecord,
-} from "@t3tools/contracts";
-import { formatAttachmentSize } from "@t3tools/client-runtime/state/attachments";
-import { videoMimeType } from "@t3tools/shared/video";
+} from "@cogenly/contracts";
+import { formatAttachmentSize } from "@cogenly/client-runtime/state/attachments";
+import { videoMimeType } from "@cogenly/shared/video";
 import { MessageCircleIcon, MousePointerClickIcon } from "lucide-react";
 import { createContext, type MouseEvent, type ReactElement, type ReactNode, use } from "react";
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId } from "@cogenly/contracts";
 
 import type { ComposerFileAttachment, ComposerImageAttachment } from "~/composerDraftStore";
 import { composerFileNeedsReattach } from "~/composerDraftStore";

@@ -4,7 +4,7 @@ import {
   TerminalSessionStatus,
   TerminalSummary,
   TrimmedNonEmptyString,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Schema from "effect/Schema";
 import { Tool, Toolkit } from "effect/ai";
 import * as TerminalMcpService from "../../TerminalMcpService.ts";

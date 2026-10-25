@@ -1,4 +1,4 @@
-import type { MachineHealthStatus } from "@t3tools/contracts";
+import type { MachineHealthStatus } from "@cogenly/contracts";
 import { create } from "zustand";
 
 /**

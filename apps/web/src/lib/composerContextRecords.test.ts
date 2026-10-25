@@ -1,4 +1,4 @@
-import { IntegrationContextRecord, type IntegrationSource } from "@t3tools/contracts";
+import { IntegrationContextRecord, type IntegrationSource } from "@cogenly/contracts";
 import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vite-plus/test";
 

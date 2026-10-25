@@ -1,7 +1,7 @@
 import {
   createEnvironmentRpcCommand,
   createEnvironmentRpcSubscriptionAtomFamily,
-} from "@t3tools/client-runtime/state/runtime";
+} from "@cogenly/client-runtime/state/runtime";
 
 import { connectionAtomRuntime } from "../connection/runtime";
 

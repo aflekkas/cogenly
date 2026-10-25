@@ -1,4 +1,4 @@
-import { createThreadApprovalAtoms } from "@t3tools/client-runtime/state/threadApprovals";
+import { createThreadApprovalAtoms } from "@cogenly/client-runtime/state/threadApprovals";
 
 import { connectionAtomRuntime } from "../connection/runtime";
 

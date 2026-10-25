@@ -3,14 +3,14 @@ import {
   scopedProjectKey,
   scopeProjectRef,
   scopeThreadRef,
-} from "@t3tools/client-runtime/environment";
+} from "@cogenly/client-runtime/environment";
 import {
   DEFAULT_SERVER_SETTINGS,
   type ScopedProjectRef,
   type ThreadId,
   type ThreadSurface,
-} from "@t3tools/contracts";
-import { isScratchProject } from "@t3tools/client-runtime/state/projects";
+} from "@cogenly/contracts";
+import { isScratchProject } from "@cogenly/client-runtime/state/projects";
 import { useParams, useRouter } from "@tanstack/react-router";
 import { useCallback, useMemo } from "react";
 import {
@@ -28,7 +28,7 @@ import {
   getProjectOrderKey,
   selectProjectGroupingSettings,
 } from "../logicalProject";
-import { resolveNewThreadEnvMode, resolveProjectSettings } from "@t3tools/shared/projectSettings";
+import { resolveNewThreadEnvMode, resolveProjectSettings } from "@cogenly/shared/projectSettings";
 import {
   readProject,
   readProjects,

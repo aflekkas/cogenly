@@ -28,7 +28,7 @@ import {
   type PeerPush,
   PeerRpcGroup,
   PeerTicketResult,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Context from "effect/Context";
 import * as Cause from "effect/Cause";
 import * as Exit from "effect/Exit";

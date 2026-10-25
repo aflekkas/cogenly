@@ -1,4 +1,4 @@
-import type { PreviewAnnotationRect } from "@t3tools/contracts";
+import type { PreviewAnnotationRect } from "@cogenly/contracts";
 
 /** Keeps annotation borders inside the page, including targets larger than the viewport. */
 export function annotationBoxInsets(

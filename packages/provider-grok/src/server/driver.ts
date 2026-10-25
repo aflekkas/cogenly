@@ -1,5 +1,5 @@
-import { ProviderDriverKind } from "@t3tools/contracts";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import { ProviderDriverKind } from "@cogenly/contracts";
+import * as HostProcess from "@cogenly/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
@@ -7,30 +7,30 @@ import * as Schema from "effect/Schema";
 import * as HttpClient from "effect/http/HttpClient";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
-import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
-import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
-import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
-import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
-import * as ProviderLatestVersions from "@t3tools/provider-core/server/ProviderLatestVersions";
+import * as IdAllocator from "@cogenly/provider-core/server/IdAllocator";
+import * as McpProviderSessions from "@cogenly/provider-core/server/McpProviderSessions";
+import * as ProviderEventLoggers from "@cogenly/provider-core/server/ProviderEventLoggers";
+import * as ProviderHost from "@cogenly/provider-core/server/ProviderHost";
+import * as ProviderLatestVersions from "@cogenly/provider-core/server/ProviderLatestVersions";
 import {
   defaultProviderContinuationIdentity,
   type ProviderDriver,
   type ProviderInstance,
-} from "@t3tools/provider-core/server/driver";
-import { ProviderDriverError } from "@t3tools/provider-core/server/errors";
-import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
-import { withInstanceIdentity } from "@t3tools/provider-core/server/instanceIdentity";
+} from "@cogenly/provider-core/server/driver";
+import { ProviderDriverError } from "@cogenly/provider-core/server/errors";
+import { mergeProviderInstanceEnvironment } from "@cogenly/provider-core/server/instanceEnvironment";
+import { withInstanceIdentity } from "@cogenly/provider-core/server/instanceIdentity";
 import {
   makeCachedProviderMaintenanceResolution,
   resolveProviderMaintenanceCapabilitiesEffect,
-} from "@t3tools/provider-core/server/maintenanceResolver";
-import { makeManagedServerProvider } from "@t3tools/provider-core/server/managedProvider";
-import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
+} from "@cogenly/provider-core/server/maintenanceResolver";
+import { makeManagedServerProvider } from "@cogenly/provider-core/server/managedProvider";
+import { expandHomePath } from "@cogenly/provider-core/server/pathExpansion";
 import {
   haveProviderSnapshotSettingsChanged,
   makeProviderSnapshotSettingsSource,
   type ProviderSnapshotSettings,
-} from "@t3tools/provider-core/server/snapshotSettings";
+} from "@cogenly/provider-core/server/snapshotSettings";
 
 import { GrokSettings } from "../settings.ts";
 import { createGrokAcpHost, makeGrokEnvironment } from "./acp.ts";

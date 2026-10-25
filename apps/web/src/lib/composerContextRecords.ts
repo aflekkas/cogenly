@@ -2,7 +2,7 @@ import {
   COMPOSER_CONTEXT_LABEL_MAX_CHARS,
   COMPOSER_CONTEXT_REVIEW_DIFF_MAX_CHARS,
   COMPOSER_CONTEXT_REVIEW_TEXT_MAX_CHARS,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import type {
   ComposerContextId,
   ComposerContextRecord,
@@ -24,15 +24,15 @@ import type {
   TerminalContextRecord,
   ThreadContextRecord,
   ThreadId,
-} from "@t3tools/contracts";
-import { integrationSourceChipLabel } from "@t3tools/client-runtime/composerThreadItems";
-import { upgradeLegacyContextMessage } from "@t3tools/shared/composerContextLegacy";
-import { encodeComposerContextFragment } from "@t3tools/shared/composerContextClipboard";
+} from "@cogenly/contracts";
+import { integrationSourceChipLabel } from "@cogenly/client-runtime/composerThreadItems";
+import { upgradeLegacyContextMessage } from "@cogenly/shared/composerContextLegacy";
+import { encodeComposerContextFragment } from "@cogenly/shared/composerContextClipboard";
 import {
   collectComposerContextReferences,
   sanitizeComposerContextLabel,
   toKindScopedComposerContextId,
-} from "@t3tools/shared/composerContextReferences";
+} from "@cogenly/shared/composerContextReferences";
 
 import {
   type ComposerContextReference,

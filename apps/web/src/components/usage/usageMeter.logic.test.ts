@@ -1,5 +1,5 @@
-import type { ServerProviderUsageWindow } from "@t3tools/contracts";
-import { paceOf } from "@t3tools/shared/usageLimits";
+import type { ServerProviderUsageWindow } from "@cogenly/contracts";
+import { paceOf } from "@cogenly/shared/usageLimits";
 import { describe, expect, it } from "vite-plus/test";
 
 import {

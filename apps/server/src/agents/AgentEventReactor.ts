@@ -8,8 +8,8 @@ import {
   type AgentEventContext,
   type OrchestrationV2StoredEvent,
   ThreadId,
-} from "@t3tools/contracts";
-import { deriveWorkStatus } from "@t3tools/shared/workStatus";
+} from "@cogenly/contracts";
+import { deriveWorkStatus } from "@cogenly/shared/workStatus";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";

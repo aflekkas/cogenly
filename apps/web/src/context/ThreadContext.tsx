@@ -2,8 +2,8 @@ import { useAtomValue } from "@effect/atom-react";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
-import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
+} from "@cogenly/client-runtime/state/runtime";
+import type { EnvironmentId, ThreadId } from "@cogenly/contracts";
 import { useState } from "react";
 
 import { Switch } from "../components/ui/switch";

@@ -5,7 +5,7 @@ import {
   ProjectLabelId,
   VaultItemId,
   type IntegrationId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
 import * as Option from "effect/Option";

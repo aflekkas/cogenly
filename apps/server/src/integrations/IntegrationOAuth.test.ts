@@ -2,7 +2,7 @@ import { loopbackHttpsPolicy } from "./https.testkit.ts";
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { NodeCrypto as EffectNodeCrypto } from "@effect/platform-node";
-import { EnvironmentId, IntegrationName, type IntegrationId } from "@t3tools/contracts";
+import { EnvironmentId, IntegrationName, type IntegrationId } from "@cogenly/contracts";
 import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";

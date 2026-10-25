@@ -1,4 +1,4 @@
-import type { ProjectIconColor } from "@t3tools/contracts";
+import type { ProjectIconColor } from "@cogenly/contracts";
 
 /**
  * The colors a project (folder) or repository icon can take: eight hues

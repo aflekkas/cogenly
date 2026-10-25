@@ -1,6 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
-import { isAtomCommandInterrupted } from "@t3tools/client-runtime/state/runtime";
-import type { EnvironmentId, ProjectId } from "@t3tools/contracts";
+import { isAtomCommandInterrupted } from "@cogenly/client-runtime/state/runtime";
+import type { EnvironmentId, ProjectId } from "@cogenly/contracts";
 import { useCallback } from "react";
 
 import { requestConfirmDialog } from "../confirmDialog";

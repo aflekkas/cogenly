@@ -1,5 +1,5 @@
-import type { ScopedThreadRef } from "@t3tools/contracts";
-import { isAtomCommandInterrupted } from "@t3tools/client-runtime/state/runtime";
+import type { ScopedThreadRef } from "@cogenly/contracts";
+import { isAtomCommandInterrupted } from "@cogenly/client-runtime/state/runtime";
 import * as Schema from "effect/Schema";
 
 import {

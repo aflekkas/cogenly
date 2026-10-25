@@ -1,9 +1,9 @@
 import * as ReadOnlySandbox from "../terminal/ReadOnlySandbox.ts";
 import * as AgentStore from "../agents/AgentStore.ts";
-import { terminalToolsAuthorized } from "@t3tools/provider-core/server/mcpSession";
-import { AgentScope } from "@t3tools/shared/AgentScope";
-import * as KeyedLock from "@t3tools/shared/KeyedLock";
-import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+import { terminalToolsAuthorized } from "@cogenly/provider-core/server/mcpSession";
+import { AgentScope } from "@cogenly/shared/AgentScope";
+import * as KeyedLock from "@cogenly/shared/KeyedLock";
+import { resolveProjectSettings } from "@cogenly/shared/projectSettings";
 import {
   isOrchestrationV2WorkActive,
   ModelSelection,
@@ -15,7 +15,7 @@ import {
   ProviderSessionId,
   ThreadId,
   type ProviderThreadId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -45,14 +45,14 @@ import {
 } from "../observability/Metrics.ts";
 import { ProviderWorkspaceMissingError } from "../provider/Errors.ts";
 import * as ProjectService from "../project/ProjectService.ts";
-import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
+import * as McpProviderSessions from "@cogenly/provider-core/server/McpProviderSessions";
 import * as ServerSettings from "../serverSettings.ts";
 import * as McpSessionRegistry from "../mcp/McpSessionRegistry.ts";
 import * as EventSink from "./EventSink.ts";
 import * as CommandOutputHub from "./CommandOutputHub.ts";
-import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import * as IdAllocator from "@cogenly/provider-core/server/IdAllocator";
 import * as ProviderEventIngestor from "./ProviderEventIngestor.ts";
-import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
+import * as ProviderAdapter from "@cogenly/provider-core/server/ProviderAdapter";
 import * as ProviderAdapterRegistry from "./ProviderAdapterRegistry.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 

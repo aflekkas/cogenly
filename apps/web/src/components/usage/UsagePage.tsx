@@ -1,6 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
-import type { EnvironmentId } from "@t3tools/contracts";
-import { refreshUsageLimits } from "@t3tools/client-runtime/state/usage";
+import type { EnvironmentId } from "@cogenly/contracts";
+import { refreshUsageLimits } from "@cogenly/client-runtime/state/usage";
 import { ChevronDownIcon } from "lucide-react";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 

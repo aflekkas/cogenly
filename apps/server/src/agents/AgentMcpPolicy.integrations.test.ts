@@ -7,7 +7,7 @@ import {
   ProviderInstanceId,
   type AgentApprovalAction,
   type Integration,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/sql/SqlClient";

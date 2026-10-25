@@ -16,7 +16,7 @@ import {
   type OrchestrationV2DomainEvent,
   type OrchestrationV2TurnItem,
   type ProjectId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Exit from "effect/Exit";
 import * as Schema from "effect/Schema";
 

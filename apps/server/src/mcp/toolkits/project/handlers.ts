@@ -1,4 +1,4 @@
-import { MessageId, ThreadId, OrchestratorMcpFailure, ProjectId } from "@t3tools/contracts";
+import { MessageId, ThreadId, OrchestratorMcpFailure, ProjectId } from "@cogenly/contracts";
 import { resolveMachine } from "../../../machines/resolveMachine.ts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";

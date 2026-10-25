@@ -2,9 +2,9 @@ import {
   PROJECT_CONFIG_FILE_NAMES,
   type EnvironmentId,
   type T3ProjectFile,
-} from "@t3tools/contracts";
-import { parseT3ProjectFile } from "@t3tools/shared/t3ProjectFile";
-import { executeAtomQuery } from "@t3tools/client-runtime/state/runtime";
+} from "@cogenly/contracts";
+import { parseT3ProjectFile } from "@cogenly/shared/t3ProjectFile";
+import { executeAtomQuery } from "@cogenly/client-runtime/state/runtime";
 
 import {
   getProjectFileQueryAtom,

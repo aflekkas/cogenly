@@ -1,5 +1,5 @@
 import { SettingsGroup } from "./SettingsGroup";
-import { AuthSettingsWriteScope } from "@t3tools/contracts";
+import { AuthSettingsWriteScope } from "@cogenly/contracts";
 import { usePrimaryEnvironmentId, usePrimaryEnvironment } from "../../state/environments";
 import { useEnvironmentScope, useEnvironmentsWithScope } from "../../state/session";
 import { InfoIcon, Undo2Icon } from "lucide-react";
@@ -8,7 +8,7 @@ import {
   isUniversalServerSettingKey,
   isMachineLocalProjectSettingKey,
   type ServerSettings,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Equal from "effect/Equal";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import {

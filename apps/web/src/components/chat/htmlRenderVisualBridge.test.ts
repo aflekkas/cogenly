@@ -1,4 +1,4 @@
-import { VisualStateError } from "@t3tools/contracts";
+import { VisualStateError } from "@cogenly/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {

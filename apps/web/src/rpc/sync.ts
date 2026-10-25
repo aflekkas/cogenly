@@ -1,4 +1,4 @@
-import { createSyncStatusAtoms } from "@t3tools/client-runtime/state/sync";
+import { createSyncStatusAtoms } from "@cogenly/client-runtime/state/sync";
 import { connectionAtomRuntime } from "../connection/runtime";
 import { serverEnvironment } from "../state/server";
 

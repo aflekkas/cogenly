@@ -29,21 +29,21 @@ import {
   type SidebarProjectGroupingMode,
   resolveEnvironmentMachineKind,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import {
   parseScopedThreadKey,
   scopedProjectKey,
   scopedThreadKey,
   scopeProjectRef,
   scopeThreadRef,
-} from "@t3tools/client-runtime/environment";
-import { safeErrorLogAttributes } from "@t3tools/client-runtime/errors";
+} from "@cogenly/client-runtime/environment";
+import { safeErrorLogAttributes } from "@cogenly/client-runtime/errors";
 import {
   isAtomCommandInterrupted,
   settlePromise,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
-import { threadRuntimeCanArchive } from "@t3tools/client-runtime/state/models";
+} from "@cogenly/client-runtime/state/runtime";
+import { threadRuntimeCanArchive } from "@cogenly/client-runtime/state/models";
 import { useNavigate, useParams, useRouter } from "@tanstack/react-router";
 import {
   MAX_SIDEBAR_THREAD_PREVIEW_COUNT,
@@ -51,7 +51,7 @@ import {
   type SidebarProjectSortOrder,
   type SidebarThreadPreviewCount,
   type SidebarThreadSortOrder,
-} from "@t3tools/contracts/settings";
+} from "@cogenly/contracts/settings";
 import { isDesktopLocalConnectionTarget, isWslConnectionTarget } from "../connection/desktopLocal";
 import { useDesktopLocalBootstraps } from "../connection/useDesktopLocalBootstraps";
 import { isElectron } from "../env";

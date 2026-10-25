@@ -1,4 +1,4 @@
-import { EnvironmentId } from "@t3tools/contracts";
+import { EnvironmentId } from "@cogenly/contracts";
 import * as Vault from "../vault/Vault.ts";
 import * as Sqlite from "../persistence/Sqlite.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
@@ -15,12 +15,12 @@ import * as Deferred from "effect/Deferred";
 import * as Fiber from "effect/Fiber";
 import * as Queue from "effect/Queue";
 import { TestClock } from "effect/testing";
-import type { PtyProcess, PtyExitEvent } from "@t3tools/shared/PtyAdapter";
+import type { PtyProcess, PtyExitEvent } from "@cogenly/shared/PtyAdapter";
 import * as ProcessRunner from "../processRunner.ts";
 import { processOutputRedactor } from "../vault/VaultRedactor.ts";
 import * as Manager from "./Manager.ts";
 import * as NodePtyAdapter from "./NodePtyAdapter.ts";
-import * as PtyAdapter from "@t3tools/shared/PtyAdapter";
+import * as PtyAdapter from "@cogenly/shared/PtyAdapter";
 
 class FakePty implements PtyProcess {
   readonly pid = 12345;

@@ -4,9 +4,9 @@ import {
   type AppearanceAccent,
   type DesktopServerExposureMode,
   type DesktopUpdateChannel,
-} from "@t3tools/contracts";
-import { fromLenientJson } from "@t3tools/shared/schemaJson";
-import { resolveSymlinkTarget } from "@t3tools/shared/symlink";
+} from "@cogenly/contracts";
+import { fromLenientJson } from "@cogenly/shared/schemaJson";
+import { resolveSymlinkTarget } from "@cogenly/shared/symlink";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -204,7 +204,7 @@ export class DesktopAppSettings extends Context.Service<
     >;
     readonly applyWslWindowsFallbackInMemory: Effect.Effect<DesktopSettingsChange>;
   }
->()("@t3tools/desktop/settings/DesktopAppSettings") {}
+>()("@cogenly/desktop/settings/DesktopAppSettings") {}
 
 export function resolveDefaultDesktopSettings(_appVersion: string): DesktopSettings {
   return {

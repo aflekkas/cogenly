@@ -13,7 +13,7 @@ import {
   type ReviewDiffPreviewError,
   type ReviewDiffPreviewInput,
   type ReviewDiffPreviewResult,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 
 import * as ServerConfig from "../config.ts";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
@@ -26,7 +26,7 @@ import {
   managedWorktreesDirectories,
   projectWorktreesDirectories,
 } from "../worktreesDirectory.ts";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as HostProcess from "@cogenly/shared/HostProcess";
 
 export class ReviewService extends Context.Service<
   ReviewService,

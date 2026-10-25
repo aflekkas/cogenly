@@ -3,7 +3,7 @@ import {
   latestUnheldRun,
   threadErrorSummary,
   usageLimitRunPresentedAsLatest,
-} from "@t3tools/shared/orchestrationV2ThreadError";
+} from "@cogenly/shared/orchestrationV2ThreadError";
 import {
   isOrchestrationV2WorkActive,
   isProviderNativeSubagentThread,
@@ -16,13 +16,13 @@ import {
   type OrchestrationV2ThreadProjection,
   orchestrationV2RunWorkStartedAt,
   type ThreadId,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import {
   backgroundWorkHoldsCompletion,
   derivePendingBackgroundWork,
-} from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
-import { getProviderOptionCurrentLabel, getProviderOptionDescriptors } from "@t3tools/shared/model";
-import { formatDuration } from "@t3tools/shared/orchestrationTiming";
+} from "@cogenly/shared/orchestrationV2PendingBackgroundWork";
+import { getProviderOptionCurrentLabel, getProviderOptionDescriptors } from "@cogenly/shared/model";
+import { formatDuration } from "@cogenly/shared/orchestrationTiming";
 import * as DateTime from "effect/DateTime";
 
 import {

@@ -3,7 +3,7 @@ import {
   EnvironmentId,
   type MachineHealthItem,
   type MachineHealthStatus,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as DateTime from "effect/DateTime";
 
 import {

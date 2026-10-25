@@ -1,4 +1,4 @@
-import type { EnvironmentId, ScopedProjectRef, ScopedThreadRef } from "@t3tools/contracts";
+import type { EnvironmentId, ScopedProjectRef, ScopedThreadRef } from "@cogenly/contracts";
 
 import type { SidebarMode, SidebarThreadMode } from "./sidebarModes.logic";
 

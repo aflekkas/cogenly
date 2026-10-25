@@ -17,7 +17,7 @@ import {
   type SitePermission,
   type SitePermissionChangeResult,
   type SitePermissionSetting,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";

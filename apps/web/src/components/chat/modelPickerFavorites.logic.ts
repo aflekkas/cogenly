@@ -1,4 +1,4 @@
-import type { ProviderInstanceId } from "@t3tools/contracts";
+import type { ProviderInstanceId } from "@cogenly/contracts";
 
 import { modelPickerModelKey } from "./modelPickerKeys";
 

@@ -1,4 +1,4 @@
-import type { EnvironmentId, T3ImportStatus } from "@t3tools/contracts";
+import type { EnvironmentId, T3ImportStatus } from "@cogenly/contracts";
 
 /**
  * Steps of the welcome wizard. `local` is the brief wait for this computer's

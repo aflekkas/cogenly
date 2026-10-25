@@ -8,7 +8,7 @@ import {
   EnvironmentId,
   MachineHealthReport,
   WS_METHODS,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Console from "effect/Console";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";

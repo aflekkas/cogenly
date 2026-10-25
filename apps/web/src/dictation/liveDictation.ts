@@ -1,5 +1,5 @@
 // @effect-diagnostics globalTimers:off -- The recording and flush limits are plain timers owned by one run.
-import type { DesktopDictationBridge, DesktopDictationResult } from "@t3tools/contracts";
+import type { DesktopDictationBridge, DesktopDictationResult } from "@cogenly/contracts";
 
 import type { DictationMicrophone } from "./browserDictationMicrophone";
 

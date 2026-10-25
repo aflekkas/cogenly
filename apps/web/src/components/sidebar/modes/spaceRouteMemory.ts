@@ -3,8 +3,8 @@
  * settle, kept in localStorage per primary environment, and read when a
  * space is picked. See useSelectSidebarMode and the rail's Settings button.
  */
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import { scopeThreadRef } from "@cogenly/client-runtime/environment";
+import type { EnvironmentId, ThreadId } from "@cogenly/contracts";
 import { useRouterState } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo } from "react";
 

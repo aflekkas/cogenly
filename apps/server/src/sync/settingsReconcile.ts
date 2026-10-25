@@ -14,8 +14,8 @@ import {
   type ProjectSettingsOverrides,
   type ServerSettings,
   UNIVERSAL_SERVER_SETTING_KEYS,
-} from "@t3tools/contracts";
-import { withProjectSettingsOverrides } from "@t3tools/shared/projectSettings";
+} from "@cogenly/contracts";
+import { withProjectSettingsOverrides } from "@cogenly/shared/projectSettings";
 import type * as Schema from "effect/Schema";
 import {
   decodeProjectOverrides,

@@ -4,13 +4,13 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
-import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as HostProcess from "@cogenly/shared/HostProcess";
 import * as Schema from "effect/Schema";
 import {
   OrchestrationProjectShell,
   ProviderInstanceId,
   ProviderDriverKind,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as NativeImport from "./NativeIntegrationImport.ts";

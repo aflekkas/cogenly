@@ -3,7 +3,7 @@ import type {
   SharedSyncPeerStatus,
   VaultPeerSharingState,
   VaultPortabilityReason,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 
 /** How one paired machine stands for one kind of synced data, as its row shows it. */
 export type PeerSyncIndicator =

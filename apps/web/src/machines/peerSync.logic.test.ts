@@ -1,4 +1,4 @@
-import type { EnvironmentId, SharedSyncPeerStatus } from "@t3tools/contracts";
+import type { EnvironmentId, SharedSyncPeerStatus } from "@cogenly/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {

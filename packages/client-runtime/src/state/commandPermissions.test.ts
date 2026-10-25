@@ -18,7 +18,7 @@ import {
   ScheduledTaskId,
   WS_METHODS,
   type AuthSessionState,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";

@@ -8,7 +8,7 @@ import {
   ThreadId,
   type OrchestrationV2StoredEvent,
   type ServerProvider,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";

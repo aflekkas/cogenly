@@ -1,4 +1,4 @@
-import type { ProjectId } from "@t3tools/contracts";
+import type { ProjectId } from "@cogenly/contracts";
 import { useState } from "react";
 import { Button } from "~/components/ui/button";
 import {

@@ -1,4 +1,4 @@
-import { tokenizeCliArgs } from "@t3tools/shared/cliArgs";
+import { tokenizeCliArgs } from "@cogenly/shared/cliArgs";
 
 const COGENLY_CODEX_LAUNCH_ARGS_ENV = "COGENLY_CODEX_LAUNCH_ARGS";
 

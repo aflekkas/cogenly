@@ -9,7 +9,7 @@ import type {
   OrchestrationV2TurnItem,
   OrchestrationV2TurnItemStatus,
   ProviderApprovalDecision,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 
 const asRecord = (value: unknown): Record<string, unknown> | undefined =>
   typeof value === "object" && value !== null && !Array.isArray(value)

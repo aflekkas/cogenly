@@ -8,7 +8,7 @@ import {
   SHARED_BATCH_BYTES,
   SHARED_BATCH_LIMIT,
   type SharedDocumentKind,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";

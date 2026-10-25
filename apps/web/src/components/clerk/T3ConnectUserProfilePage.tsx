@@ -1,11 +1,11 @@
-import { findErrorTraceId } from "@t3tools/client-runtime/errors";
+import { findErrorTraceId } from "@cogenly/client-runtime/errors";
 import { writeTextToClipboard } from "~/hooks/useCopyToClipboard";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
-import type { EnvironmentId } from "@t3tools/contracts";
-import type { RelayClientEnvironmentRecord } from "@t3tools/contracts/relay";
+} from "@cogenly/client-runtime/state/runtime";
+import type { EnvironmentId } from "@cogenly/contracts";
+import type { RelayClientEnvironmentRecord } from "@cogenly/contracts/relay";
 import { ServerIcon } from "lucide-react";
 import { useRef, useState } from "react";
 

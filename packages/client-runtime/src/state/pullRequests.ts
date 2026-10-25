@@ -17,7 +17,7 @@ import {
   type PullRequestRef,
   type PullRequestMergeMethod,
   PullRequestOperationError,
-} from "@t3tools/contracts";
+} from "@cogenly/contracts";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";

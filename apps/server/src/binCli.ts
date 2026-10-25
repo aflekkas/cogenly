@@ -10,7 +10,7 @@ import * as Layer from "effect/Layer";
 import { Argument, Command } from "effect/cli";
 import * as CliError from "effect/cli/CliError";
 
-import * as NetService from "@t3tools/shared/Net";
+import * as NetService from "@cogenly/shared/Net";
 import packageJson from "../package.json" with { type: "json" };
 import { authCommand } from "./cli/auth.ts";
 import { appCommand } from "./cli/app.ts";
