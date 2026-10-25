@@ -1,4 +1,30 @@
+import { normalizeWorkLogToolKey } from "@cogenly/client-runtime/work-log/tool-registry";
+import type { OrchestrationV2TurnItem } from "@cogenly/contracts";
 import { normalizeTerminalOutput } from "@cogenly/shared/terminalOutput";
+
+type DynamicToolItem = Extract<OrchestrationV2TurnItem, { readonly type: "dynamic_tool" }>;
+
+/**
+ * `item` when it is a call to Cogenly's `terminal_run`, under any provider's
+ * naming: Claude's `mcp__cogenly__terminal_run`, Codex's `cogenly.terminal_run`,
+ * or a bare dynamic tool `terminal_run`. The timeline row's tag and the
+ * expanded terminal block both recognize the call through this.
+ */
+export function terminalRunItem(
+  item: OrchestrationV2TurnItem | null | undefined,
+): DynamicToolItem | null {
+  return item?.type === "dynamic_tool" && normalizeWorkLogToolKey(item.toolName) === "terminal_run"
+    ? item
+    : null;
+}
+
+/**
+ * Whether a `terminal_run` result ran in a chat's read-only sandbox. Reads the
+ * full result or the timeline's compact copy, which keeps only `sandbox`.
+ */
+export function terminalRunSandboxed(value: unknown): boolean {
+  return resultRecord(value)?.sandbox === "read-only";
+}
 
 /** What a `terminal_run` call reported, ready to show as a terminal block. */
 export interface TerminalRunResult {
@@ -34,7 +60,7 @@ function resultRecord(value: unknown): Record<string, unknown> | null {
     return text ? resultRecord(parseJson(text)) : null;
   }
   if (!isRecord(value)) return null;
-  if (typeof value.output === "string") return value;
+  if (typeof value.output === "string" || typeof value.sandbox === "string") return value;
   if (isRecord(value.structuredContent)) return resultRecord(value.structuredContent);
   return Array.isArray(value.content) ? resultRecord(value.content) : null;
 }
@@ -52,7 +78,7 @@ export function parseTerminalRunResult(value: unknown): TerminalRunResult | null
     exitCode: typeof record.exitCode === "number" ? record.exitCode : null,
     timedOut: record.timedOut === true,
     truncated: record.truncated === true,
-    sandboxed: record.sandbox === "read-only",
+    sandboxed: terminalRunSandboxed(record),
     notice: typeof record.notice === "string" ? record.notice : null,
   };
 }
