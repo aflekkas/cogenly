@@ -1,5 +1,6 @@
 import {
   ModelSelection,
+  resolveAiAttribution,
   OrchestrationV2AppThread,
   ProjectId,
   type ProjectLabelId,
@@ -24,6 +25,7 @@ import * as Integrations from "../integrations/Integrations.ts";
 import * as ProjectFiles from "../projectLabels/ProjectFiles.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as ProjectStore from "./ProjectStore.ts";
+import { AI_ATTRIBUTION_INSTRUCTIONS } from "@cogenly/provider-core/server/commitAttribution";
 
 /**
  * ERRORS
@@ -218,6 +220,14 @@ export const layerFromProjectStore: Layer.Layer<
     return RuntimePolicyV2.of({
       resolve: Effect.fn("RuntimePolicyV2.resolve")(function* (input) {
         const providerConnectors = yield* useProviderConnectors;
+        const aiAttributionEnabled = Option.isNone(serverSettings)
+          ? false
+          : yield* serverSettings.value.getSettings.pipe(
+              Effect.map((settings) =>
+                resolveAiAttribution(settings, input.modelSelection.instanceId),
+              ),
+              Effect.orElseSucceed(() => false),
+            );
         const project = yield* projectFor(input.thread, !providerConnectors);
         // A chat or an agent's conversation filed in a project runs with the
         // project dir as its working directory, even when the thread keeps a
@@ -265,13 +275,17 @@ export const layerFromProjectStore: Layer.Layer<
               ? standaloneLine
               : undefined;
         const healthLine = yield* machineHealthLine;
-        const projectManifest =
+        const baseManifest =
           healthLine === null
             ? manifest
             : manifest === undefined
               ? healthLine
               : `${manifest}\n${healthLine}`;
+        const projectManifest = aiAttributionEnabled
+          ? baseManifest
+          : [AI_ATTRIBUTION_INSTRUCTIONS, baseManifest].filter(Boolean).join("\n");
         return ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+          aiAttributionEnabled,
           runtimeMode: "full-access",
           interactionMode: input.thread.interactionMode,
           cwd,

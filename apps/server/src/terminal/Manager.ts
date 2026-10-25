@@ -1,3 +1,8 @@
+import {
+  prepareCommitAttributionEnvironment,
+  withCommitAttributionEnvironment,
+} from "@cogenly/provider-core/server/commitAttribution";
+import { resolveAiAttribution } from "@cogenly/contracts";
 import * as ReadOnlySandbox from "./ReadOnlySandbox.ts";
 import * as Vault from "../vault/Vault.ts";
 import type { CredentialDelivery } from "../accounts/CliCredentials.ts";
@@ -1461,6 +1466,10 @@ interface TerminalManagerOptions {
     readonly threadId: string;
     readonly terminalId: string;
   }) => Effect.Effect<void>;
+  prepareAgentEnvironment?: (
+    providerInstanceId: string | undefined,
+    env: NodeJS.ProcessEnv,
+  ) => Effect.Effect<NodeJS.ProcessEnv, TerminalProviderEnvironmentError>;
   resolveProviderInstanceEnvironment?: (
     providerInstanceId: string,
     env: Record<string, string> | undefined,
@@ -1519,6 +1528,14 @@ export const make = Effect.fn("TerminalManager.make")(function* () {
   const portDiscovery = yield* PortScanner.PortDiscovery;
   const nativeTelemetry = yield* NativeTelemetryClient.NativeTelemetryClient;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
+  const attributionScope = yield* Effect.scope;
+  const attributionFileSystem = yield* FileSystem.FileSystem;
+  const attributionHooks = yield* Effect.cached(
+    prepareCommitAttributionEnvironment({}, false).pipe(
+      Effect.provideService(Scope.Scope, attributionScope),
+      Effect.provideService(FileSystem.FileSystem, attributionFileSystem),
+    ),
+  );
   const path = yield* Path.Path;
   const resolveProviderInstanceEnvironment = Effect.fn(
     "terminal.resolveProviderInstanceEnvironment",
@@ -1540,6 +1557,23 @@ export const make = Effect.fn("TerminalManager.make")(function* () {
     ),
     registerTerminalProcesses: portDiscovery.registerTerminalProcesses,
     unregisterTerminal: portDiscovery.unregisterTerminal,
+    prepareAgentEnvironment: (rawId, env) =>
+      Effect.gen(function* () {
+        const settings = yield* serverSettings.getSettings;
+        if (resolveAiAttribution(settings, rawId)) return env;
+        const hooks = yield* attributionHooks;
+        return withCommitAttributionEnvironment(env, hooks.GIT_CONFIG_VALUE_0!, false);
+      }).pipe(
+        Effect.provideService(Scope.Scope, attributionScope),
+        Effect.provideService(FileSystem.FileSystem, attributionFileSystem),
+        Effect.mapError(
+          (cause) =>
+            new TerminalProviderEnvironmentError({
+              providerInstanceId: ProviderInstanceId.make(rawId ?? "unknown"),
+              cause,
+            }),
+        ),
+      ),
     resolveProviderInstanceEnvironment,
   });
 });
@@ -3577,9 +3611,17 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         const delivery = input.prepareCredentials
           ? yield* input.prepareCredentials(terminalId)
           : undefined;
+        const baseAgentEnv = { ...process.env, ...resolved.env, ...delivery?.env };
+        const agentEnv = options.prepareAgentEnvironment
+          ? yield* options.prepareAgentEnvironment(input.providerInstanceId, baseAgentEnv)
+          : baseAgentEnv;
         const opened = yield* openLocked({
           ...resolved,
-          env: { ...resolved.env, ...delivery?.env },
+          env: Object.fromEntries(
+            Object.entries(agentEnv).filter(
+              (entry): entry is [string, string] => entry[1] !== undefined,
+            ),
+          ),
           ...(delivery?.redactOutput ? { redactOutput: delivery.redactOutput } : {}),
           agentCommand: input.command,
           ...(sandboxLaunch ? { sandboxLaunch } : {}),

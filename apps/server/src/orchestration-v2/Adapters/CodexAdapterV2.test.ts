@@ -18,7 +18,7 @@ import {
   RunAttemptId,
   ThreadId,
 } from "@cogenly/contracts";
-import { assert, describe, it } from "@effect/vitest";
+import { assert, describe, expect, it } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Ref from "effect/Ref";
@@ -1673,4 +1673,23 @@ describe("Codex runtime approval transport", () => {
         assert.equal(handlers.size, 6);
       }),
   );
+});
+
+describe("Codex commit attribution settings", () => {
+  it("disables native commit attribution unless explicitly allowed", () => {
+    expect(
+      CodexAdapterV2.codexThreadRuntimeParams({ mcpSession: undefined }).config.commit_attribution,
+    ).toBe("");
+    expect(
+      CodexAdapterV2.codexThreadRuntimeParams({
+        mcpSession: undefined,
+        runtimePolicy: {
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          cwd: "/workspace",
+          aiAttributionEnabled: true,
+        },
+      }).config.commit_attribution,
+    ).toBeUndefined();
+  });
 });

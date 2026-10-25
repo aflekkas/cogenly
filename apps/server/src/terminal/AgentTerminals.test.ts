@@ -1,4 +1,8 @@
-import { EnvironmentId } from "@cogenly/contracts";
+import {
+  prepareCommitAttributionEnvironment,
+  withCommitAttributionEnvironment,
+} from "@cogenly/provider-core/server/commitAttribution";
+import { EnvironmentId, ProviderInstanceId } from "@cogenly/contracts";
 import * as Vault from "../vault/Vault.ts";
 import * as Sqlite from "../persistence/Sqlite.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
@@ -577,5 +581,54 @@ it.effect("vault redaction precedes terminal events, history and disk across chu
         ),
       ),
     ),
+  ),
+);
+
+it.live("attribution protection applies only to agent launches whose preference is off", () =>
+  provide(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const cwd = yield* fs.makeTempDirectoryScoped({ prefix: "cogenly-terminal-attribution-" });
+      const protectedEnv = yield* prepareCommitAttributionEnvironment({}, false);
+      const launches: Array<NodeJS.ProcessEnv> = [];
+      const manager = yield* Manager.makeWithOptions({
+        logsDir: cwd,
+        ptyAdapter: {
+          spawn: (input) => {
+            launches.push(input.env);
+            return Effect.succeed(new FakePty());
+          },
+        },
+        processKillGraceMs: 0,
+        processTable: Effect.succeed([]),
+        resolveProviderInstanceEnvironment: (_id, env) => Effect.succeed(env ?? {}),
+        prepareAgentEnvironment: (id, env) =>
+          Effect.succeed(
+            withCommitAttributionEnvironment(
+              env,
+              protectedEnv.GIT_CONFIG_VALUE_0!,
+              id === "allowed",
+            ),
+          ),
+      });
+      yield* manager.runAgent({
+        threadId: "A",
+        command: "git commit",
+        cwd,
+        background: true,
+        providerInstanceId: ProviderInstanceId.make("off"),
+      });
+      expect(launches.at(-1)?.GIT_CONFIG_KEY_0).toBe("core.hooksPath");
+      yield* manager.runAgent({
+        threadId: "A",
+        command: "git commit",
+        cwd,
+        background: true,
+        providerInstanceId: ProviderInstanceId.make("allowed"),
+      });
+      expect(launches.at(-1)?.COGENLY_ATTRIBUTION_CONFIG_INDEX).toBeUndefined();
+      yield* manager.open({ threadId: "A", terminalId: "user-terminal", cwd });
+      expect(launches.at(-1)?.COGENLY_ATTRIBUTION_CONFIG_INDEX).toBeUndefined();
+    }),
   ),
 );

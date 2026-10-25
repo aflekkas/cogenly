@@ -634,6 +634,7 @@ interface ProviderInstanceCardProps {
   readonly projectOverride?: ProjectOverrideControl | undefined;
   /** Machine-wide editing: the projects that override the switch, beside it. */
   readonly projectOverrides?: ReactNode;
+  readonly attribution?: ReactNode;
 }
 
 /**
@@ -674,6 +675,7 @@ export function ProviderInstanceCard({
   headerAction,
   setup,
   runtime,
+  attribution,
   hiddenModels,
   modelOrder,
   onHiddenModelsChange,
@@ -1229,6 +1231,8 @@ export function ProviderInstanceCard({
           {runtimeFields}
         </SettingsSection>
       ) : null}
+
+      {attribution ? <SettingsSection title="Attribution">{attribution}</SettingsSection> : null}
 
       <SettingsSection
         title="Environment"

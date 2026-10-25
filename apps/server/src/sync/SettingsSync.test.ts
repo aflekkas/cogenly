@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest";
-import { ProjectId } from "@cogenly/contracts";
+import { ProjectId, ProviderInstanceId } from "@cogenly/contracts";
 import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -231,6 +231,26 @@ describe("settings sync between paired machines", () => {
         yield* mac.settings.updateSettings({ nativeMcpImportReviewed: true });
         yield* exchange;
         expect((yield* vps.settings.getSettings).nativeMcpImportReviewed).toBe(false);
+
+        // Attribution is a preference, including per-instance overrides; paths
+        // and credentials in the provider envelope stay machine-local.
+        yield* mac.settings.updateSettings({
+          aiAttribution: {
+            enabled: true,
+            providers: { [ProviderInstanceId.make("codex")]: "off" },
+          },
+        });
+        yield* exchange;
+        expect((yield* vps.settings.getSettings).aiAttribution).toEqual({
+          enabled: true,
+          providers: { codex: "off" },
+        });
+        yield* vps.settings.updateSettings({ aiAttribution: { enabled: false, providers: {} } });
+        yield* exchange;
+        expect((yield* mac.settings.getSettings).aiAttribution).toEqual({
+          enabled: false,
+          providers: {},
+        });
 
         // And back on from the VPS.
         yield* vps.settings.updateSettings({ useProviderConnectors: false });

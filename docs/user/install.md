@@ -153,6 +153,29 @@ their original values.
 For provider-specific setup and accounts, see [Codex](./providers-codex.md),
 [Claude](./providers-claude.md), [Grok](./providers-grok.md).
 
+### Commit and pull request attribution
+
+**Settings → Providers → AI attribution in commits and pull requests** is off by
+default and shared across paired machines. Each provider instance can inherit the
+shared preference or override it with **On** or **Off**. Start a new provider
+session after changing it. On allows the provider's own attribution settings;
+it does not force a byline.
+
+When off, Claude receives session settings disabling commit and PR attribution
+and session links; managed Claude policy can prevent this, in which case Cogenly
+reports the conflict. Codex receives an empty native commit attribution setting
+on versions that support it. Muse and Grok have no native attribution switch in
+their current integrations. All providers receive instructions to omit AI
+attribution, and commits from provider processes and Cogenly agent terminals
+filter known AI trailers while retaining human co-authors and repository hooks.
+Cogenly also filters PR descriptions it generates itself. PRs created by other
+provider tools rely on the provider's settings and instructions.
+
+This applies to future commits made through Cogenly. It does not alter existing
+history or commits made outside Cogenly. Commands that bypass hooks (such as
+`git commit --no-verify` or an explicit `core.hooksPath` override) and Git APIs
+that do not run hooks bypass the commit filter.
+
 ## Next steps
 
 - [Working with threads](./thread-sidebar.md): start tasks and organize parallel work.

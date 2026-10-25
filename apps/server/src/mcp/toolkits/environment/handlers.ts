@@ -21,6 +21,7 @@ export function preferences(settings: ServerSettings) {
   const {
     defaultThreadEnvMode,
     newWorktreesStartFromOrigin,
+    aiAttribution,
     enableAgentTerminals,
     enableProviderUpdateChecks,
     useProviderConnectors,
@@ -35,6 +36,7 @@ export function preferences(settings: ServerSettings) {
     sharedKeybindings: settings.sharedKeybindings,
     defaultThreadEnvMode,
     newWorktreesStartFromOrigin,
+    aiAttribution,
     enableAgentTerminals,
     enableProviderUpdateChecks,
     useProviderConnectors,

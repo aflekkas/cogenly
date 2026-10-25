@@ -272,6 +272,7 @@ it.effect("environment_preferences_update saves local and shared settings", () =
         mcp.callTool({
           name: "environment_preferences_update",
           arguments: {
+            aiAttribution: { enabled: false, providers: { codex: "off" } },
             projectsRoot: "~/Work/projects",
             clientAppearanceMode: "light",
             clientFollowUpBehavior: "queue",
@@ -291,6 +292,7 @@ it.effect("environment_preferences_update saves local and shared settings", () =
     );
     expect(patches).toEqual([
       {
+        aiAttribution: { enabled: false, providers: { codex: "off" } },
         projectsRoot: "~/Work/projects",
         clientAppearanceMode: "light",
         clientFollowUpBehavior: "queue",
@@ -298,6 +300,7 @@ it.effect("environment_preferences_update saves local and shared settings", () =
       },
     ]);
     expect(JSON.parse(text)).toMatchObject({
+      aiAttribution: { enabled: false, providers: { codex: "off" } },
       projectsRoot: "~/Work/projects",
       clientAppearanceMode: "light",
       clientFollowUpBehavior: "queue",

@@ -1,3 +1,7 @@
+import {
+  ATTRIBUTION_POLICY_CONFLICT_MESSAGE,
+  ATTRIBUTION_POLICY_UNAVAILABLE_MESSAGE,
+} from "./commitAttribution.ts";
 import type {
   NodeId,
   OrchestrationV2ProviderFailure,
@@ -78,6 +82,12 @@ function causeMessage(cause: unknown): string | undefined {
       switch ((cause as Record<string, unknown>)._tag) {
         case "ContextHandoffBudgetError":
           return new ContextHandoffBudgetError().message;
+        case "ClaudeAgentSdkQueryRunnerError": {
+          const method = (cause as Record<string, unknown>).method;
+          if (method === "managedAttribution") return ATTRIBUTION_POLICY_CONFLICT_MESSAGE;
+          if (method === "managedAttributionProbe") return ATTRIBUTION_POLICY_UNAVAILABLE_MESSAGE;
+          break;
+        }
         case "ClaudeBackgroundWorkBlocksQueryReplacementError":
           return stringField(cause, "message");
         case "ContextHandoffDeliveryUncertainError":

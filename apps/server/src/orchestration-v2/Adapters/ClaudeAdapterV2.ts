@@ -1,4 +1,14 @@
 import * as RepoMcpTrust from "../../integrations/RepoMcpTrust.ts";
+import {
+  claudeAttributionSettings,
+  probeClaudeManagedAttribution,
+  readClaudeLaunchSettings,
+} from "../../provider/ClaudeCommitAttribution.ts";
+import {
+  prepareCommitAttributionEnvironment,
+  ATTRIBUTION_POLICY_CONFLICT_MESSAGE,
+  ATTRIBUTION_POLICY_UNAVAILABLE_MESSAGE,
+} from "@cogenly/provider-core/server/commitAttribution";
 import { makeProviderTextDeltaCoalescer } from "./ProviderTextDeltaCoalescer.ts";
 import { claudeTaskOutputRoot, tailClaudeTaskOutput } from "./ClaudeTaskOutputTail.ts";
 import {
@@ -446,6 +456,7 @@ export type ClaudeAgentSdkQueryOptions = Omit<
 } & ClaudeAgentSdkThreadIdentity;
 
 export interface ClaudeAgentSdkQueryOpenInput {
+  readonly suppressAiAttribution?: boolean;
   readonly options: ClaudeAgentSdkQueryOptions;
   readonly threadId: ThreadId;
   readonly providerSessionId: OrchestrationV2ProviderSession["id"];
@@ -480,7 +491,10 @@ export class ClaudeAgentSdkQueryRunnerError extends Schema.TaggedError<ClaudeAge
   },
 ) {
   override get message(): string {
-    return "Claude Agent SDK query failed.";
+    if (this.method === "managedAttributionProbe") return ATTRIBUTION_POLICY_UNAVAILABLE_MESSAGE;
+    return this.method === "managedAttribution"
+      ? ATTRIBUTION_POLICY_CONFLICT_MESSAGE
+      : "Claude Agent SDK query failed.";
   }
 }
 
@@ -770,6 +784,18 @@ export const layerQueryRunner: Layer.Layer<
       open: Effect.fn("ClaudeAgentSdkQueryRunner.open")(function* (
         input: ClaudeAgentSdkQueryOpenInput,
       ) {
+        if (input.suppressAiAttribution === true) {
+          const conflict = yield* probeClaudeManagedAttribution(
+            input.options.cwd,
+            input.options.env,
+          ).pipe(Effect.mapError((cause) => queryRunnerError(cause, "managedAttributionProbe")));
+          if (conflict) {
+            return yield* queryRunnerError(
+              new Error("Managed attribution conflict"),
+              "managedAttribution",
+            );
+          }
+        }
         const protocolLogger = makeClaudeAgentSdkProtocolLogger({
           nativeEventLogger,
           threadId: input.threadId,
@@ -1133,6 +1159,7 @@ export function makeClaudeQueryOptions(input: {
   readonly attachmentsDir?: string;
   readonly settings?: ClaudeSettings;
   readonly sdkSettings?: string | ClaudeSdkSettings;
+  readonly claudeVersion?: string;
   readonly environment?: NodeJS.ProcessEnv;
   readonly mcpServers?: ClaudeQueryOptions["mcpServers"];
   /** The turn's MCP session carries the collaborative browser tools. */
@@ -1181,6 +1208,7 @@ export function makeClaudeQueryOptions(input: {
     delete extraArgs["mcp-config"];
     delete extraArgs["strict-mcp-config"];
   }
+  if (input.runtimePolicy?.aiAttributionEnabled !== true) delete extraArgs.settings;
   const requestThinkingSummaries =
     compiledSelection.settings.alwaysThinkingEnabled !== false &&
     extraArgs["thinking-display"] !== "omitted";
@@ -1218,12 +1246,22 @@ export function makeClaudeQueryOptions(input: {
           ...(typeof querySettings === "object" && querySettings !== null ? querySettings : {}),
           autoCompactWindow: Number(input.settings.autoCompactWindow),
         } as ClaudeSdkSettings);
-  const effectiveQuerySettings =
-    input.repoMcpWaiting === undefined
+  // Session settings override attribution without weakening repository execution consent.
+  const attributedQuerySettings =
+    input.runtimePolicy?.aiAttributionEnabled === true
       ? compactedQuerySettings
-      : {
+      : ({
           ...(typeof compactedQuerySettings === "object" && compactedQuerySettings !== null
             ? compactedQuerySettings
+            : {}),
+          ...claudeAttributionSettings(input.claudeVersion),
+        } as ClaudeSdkSettings);
+  const effectiveQuerySettings =
+    input.repoMcpWaiting === undefined
+      ? attributedQuerySettings
+      : {
+          ...(typeof attributedQuerySettings === "object" && attributedQuerySettings !== null
+            ? attributedQuerySettings
             : {}),
           enableAllProjectMcpServers: false,
           enabledMcpjsonServers: Object.keys(input.repoMcpServers ?? {}),
@@ -3607,6 +3645,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
 ) {
   const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
   const repoTrust = Option.fromUndefinedOr(adapterOptions.repoMcpTrust);
+  let detectedClaudeVersion: string | undefined;
   const { attachmentsDir, fileSystem, path, crypto, idAllocator, queryRunner } = adapterOptions;
   // Subagent model names and effort levels, including the instance's custom models.
   const subagentModelCatalog = scopeClaudeModelCatalog(
@@ -3646,6 +3685,20 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
     planSelectionTransition: () => Effect.succeed(turnScopedSelectionTransition()),
     openSession: Effect.fn("ClaudeAdapterV2.openSession")(
       function* (input: ProviderAdapter.ProviderAdapterV2OpenSessionInput) {
+        const attributionEnvironment = yield* prepareCommitAttributionEnvironment(
+          adapterOptions.environment,
+          input.runtimePolicy.aiAttributionEnabled === true,
+        ).pipe(
+          Effect.provideService(FileSystem.FileSystem, fileSystem),
+          Effect.mapError(
+            (cause) =>
+              new ProviderAdapter.ProviderAdapterOpenSessionError({
+                driver: CLAUDE_PROVIDER,
+                providerSessionId: input.providerSessionId,
+                cause,
+              }),
+          ),
+        );
         const sessionScope = yield* Effect.scope;
         const now = yield* DateTime.now;
         const session = providerSession({
@@ -6919,6 +6972,8 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           }
 
           const message = input.message;
+          if (message.type === "system" && message.subtype === "init")
+            detectedClaudeVersion = message.claude_code_version;
           // Before any routing: a Monitor started during an idle wake turn
           // reports its task before the drain replays the tool call.
           yield* trackClaudeMonitorCalls(message);
@@ -8744,7 +8799,21 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           );
           // Read when the process opens: worktrees and other machines get the
           // servers of whatever checkout they run in.
+          const launchSettings =
+            turnInput.runtimePolicy.aiAttributionEnabled === true
+              ? undefined
+              : yield* readClaudeLaunchSettings(
+                  adapterOptions.settings.launchArgs,
+                  turnInput.runtimePolicy.cwd ?? ".",
+                ).pipe(
+                  Effect.provideService(FileSystem.FileSystem, fileSystem),
+                  Effect.provideService(Path.Path, path),
+                  Effect.mapError((cause) => queryRunnerError(cause, "readLaunchSettings")),
+                );
           const queryOptions = makeClaudeQueryOptions({
+            ...(launchSettings === undefined
+              ? {}
+              : { sdkSettings: launchSettings as ClaudeSdkSettings }),
             modelSelection: turnInput.modelSelection,
             nativeThreadId,
             resume: shouldResume,
@@ -8752,7 +8821,10 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             cwd: turnInput.runtimePolicy.cwd,
             attachmentsDir,
             settings: adapterOptions.settings,
-            environment: adapterOptions.environment,
+            ...(detectedClaudeVersion === undefined
+              ? {}
+              : { claudeVersion: detectedClaudeVersion }),
+            environment: attributionEnvironment,
             ...(managedMcpServerNames === undefined
               ? {}
               : { managedMcpConfig: true, managedMcpServerNames }),
@@ -8797,6 +8869,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               threadId: turnInput.threadId,
               providerSessionId: input.providerSessionId,
               options: queryOptions,
+              suppressAiAttribution: turnInput.runtimePolicy.aiAttributionEnabled !== true,
             })
             .pipe(
               // An interrupted open leaves the old process just as dead.
@@ -8996,7 +9069,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           }
           if ((yield* Ref.get(missingNativeThreads)).has(input.nativeThreadId)) return false;
           const configDir = yield* resolveClaudeSessionConfigDir({
-            environment: adapterOptions.environment,
+            environment: attributionEnvironment,
             cwd: input.cwd,
           }).pipe(Effect.provideService(Path.Path, path));
           const found = yield* claudeSessionTranscriptExists({

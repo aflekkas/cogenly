@@ -1,3 +1,4 @@
+import { prepareCommitAttributionEnvironment } from "@cogenly/provider-core/server/commitAttribution";
 import type { ServerProviderUsageLimits } from "@cogenly/contracts";
 import {
   ProviderDriverKind,
@@ -1001,11 +1002,25 @@ export const makeGrokAdapterV2 = Effect.fn("makeGrokAdapterV2")(function* (
         Effect.forkIn(scope),
       );
 
+      const attributionEnvironment = yield* prepareCommitAttributionEnvironment(
+        options.environment,
+        input.runtimePolicy.aiAttributionEnabled === true,
+      ).pipe(
+        Effect.provideService(FileSystem.FileSystem, fileSystem),
+        Effect.mapError(
+          (cause) =>
+            new ProviderAdapter.ProviderAdapterOpenSessionError({
+              driver: GROK_PROVIDER,
+              providerSessionId: input.providerSessionId,
+              cause,
+            }),
+        ),
+      );
       const launchHost = Effect.fnUntraced(function* () {
         const epoch = ++hostEpoch;
         const mcpSession = yield* mcpSessions.read(input.threadId);
         const environment = McpProviderSession.withAgentDeviceEnvironment(
-          options.environment,
+          attributionEnvironment,
           mcpSession,
         );
         const launch = yield* agentScope.wrap({
