@@ -21,6 +21,7 @@ import { requestLaunchMachine } from "~/machines/LaunchMachineDialog";
 import { openCommandPalette } from "~/commandPaletteBus";
 import { ProjectFolderIcon } from "~/projectLabels/ProjectFolderMark";
 import {
+  chatAddRepositoryTarget,
   type EnvironmentProjectLabel,
   projectLabelsOn,
   scopedRepositoryKey,
@@ -374,6 +375,9 @@ export function StartWorkPicker(props: {
     () => ({ threadRef, ...(throughMessageId === undefined ? {} : { throughMessageId }) }),
     [threadRef, throughMessageId],
   );
+  // The top-level "Add repository" files the new repository in the chat's
+  // project, as the project's own "Add repository" does.
+  const addRepositoryInto = thread ? chatAddRepositoryTarget(thread, directory.byKey) : null;
   const closePicker = () => {
     setOpen(false);
     setQuery("");
@@ -516,7 +520,11 @@ export function StartWorkPicker(props: {
       case "choice":
         closePicker();
         if (item.choice.value === ADD_REPOSITORY) {
-          openCommandPalette({ open: "add-project", startWorkFrom });
+          openCommandPalette({
+            open: "add-project",
+            startWorkFrom,
+            ...(addRepositoryInto ? { into: addRepositoryInto } : {}),
+          });
           return;
         }
         void startWork({
