@@ -6,11 +6,16 @@ import { useMemo, useRef, useState } from "react";
 
 import { ComposerProjectPicker } from "~/projectLabels/ComposerProjectPicker";
 import { HERO_INLINE_ICON_STYLE, ProjectFolderIcon } from "~/projectLabels/ProjectFolderMark";
-import { projectLabelKey, threadProjectFolderId } from "~/projectLabels/projectLabels.logic";
+import {
+  projectLabelKey,
+  scopedRepositoryKey,
+  threadProjectFolderId,
+} from "~/projectLabels/projectLabels.logic";
 import { workHeroBreadcrumb } from "~/projectLabels/projectMeta.logic";
+import { linkedRepositoryIcon } from "~/projectLabels/repositoryPicker.logic";
+import { RepositoryRowIcon } from "~/projectLabels/RepositorySourceRows";
 import { useProjectLabelDirectory } from "~/projectLabels/useProjectLabels";
-import { ProjectFavicon } from "../ProjectFavicon";
-import { RepositoryBadge } from "../sidebar/modes/RepositoryBadge";
+import { useRepositoryNames } from "~/projectLabels/useRepositoryNames";
 import { chatGreeting } from "./chatGreeting";
 import { FadeSwap } from "./StateTransition";
 import { useHeroHeadlineMotion } from "./useHeroHeadlineMotion";
@@ -49,9 +54,10 @@ export function ThreadHeroHeadline({
   useHeroHeadlineMotion(headingRef, measureRef, isChat ? `chat:${thread.id}` : "heading");
 
   // The new-Work screen's sentence, read-only: both halves always named.
+  const repositoryNameOf = useRepositoryNames();
   const breadcrumb = workHeroBreadcrumb({
     projectName: folder?.label.name ?? null,
-    repositoryName: project?.title ?? null,
+    repositoryName: project ? repositoryNameOf(project) : null,
     hasRepository: !isScratch,
   });
   const headingLabel = isChat
@@ -63,12 +69,21 @@ export function ThreadHeroHeadline({
       crumb={breadcrumb.repository}
       icon={
         project ? (
-          <ProjectFavicon
-            project={project}
-            // Sized in em to the heading, like the hero's other inline icons.
-            className="inline-block size-[0.78em] align-[-0.06em] me-[0.28em]"
-            fallback={<RepositoryBadge name={project.title} size="inline" />}
-          />
+          // The same icon the repository picker's row shows for it.
+          <span className="inline-flex size-[0.78em] align-[-0.06em] me-[0.28em] items-center justify-center">
+            <RepositoryRowIcon
+              local={project}
+              {...linkedRepositoryIcon(
+                directory.folderByRepository.get(
+                  scopedRepositoryKey(project.environmentId, project.id),
+                ) ?? null,
+                project.id,
+              )}
+              environmentId={project.environmentId}
+              // Sized in em to the heading, like the hero's other inline icons.
+              className="size-full"
+            />
+          </span>
         ) : null
       }
     />

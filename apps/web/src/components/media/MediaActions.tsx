@@ -86,12 +86,12 @@ export function useMediaActions(source: MediaActionSource) {
     }
     const { environmentId, resource } = source.asset;
     const connection = readPreparedConnection(environmentId);
-    if (!connection) throw new Error("Reconnect to this environment and try again.");
+    if (!connection) throw new Error("Reconnect to this machine and try again.");
     const result = await createAssetUrl({ environmentId, input: { resource } });
     if (result._tag === "Failure") throw squashAtomCommandFailure(result);
     assertCanReadMedia();
     const url = resolveAssetUrl(connection.httpBaseUrl, result.value.relativeUrl);
-    if (!url) throw new Error("The environment returned an invalid media URL.");
+    if (!url) throw new Error("The machine returned an invalid media URL.");
     return url;
   }, [source, createAssetUrl, assertCanReadMedia]);
   const save = useCallback(async () => {

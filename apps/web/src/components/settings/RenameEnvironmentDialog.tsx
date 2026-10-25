@@ -29,7 +29,7 @@ export function RenameEnvironmentDialog({
   readonly environment: { readonly environmentId: EnvironmentId; readonly label: string } | null;
   readonly onClose: () => void;
 }) {
-  const rename = useAtomCommand(environmentCatalog.rename, "Rename environment");
+  const rename = useAtomCommand(environmentCatalog.rename, "Rename machine");
   // Keep the last environment through the close animation.
   const [shown, setShown] = useState(environment);
   const [draft, setDraft] = useState(environment?.label ?? "");
@@ -60,14 +60,14 @@ export function RenameEnvironmentDialog({
       <DialogPopup className="sm:max-w-md">
         <form onSubmit={(event) => void submit(event)}>
           <DialogHeader>
-            <DialogTitle>Rename environment</DialogTitle>
+            <DialogTitle>Rename machine</DialogTitle>
             <DialogDescription>
-              The name this device shows for {shown?.label ?? "this environment"}.
+              The name this device shows for {shown?.label ?? "this machine"}.
             </DialogDescription>
           </DialogHeader>
           <DialogPanel>
             <Input
-              aria-label="Environment name"
+              aria-label="Machine name"
               autoFocus
               value={draft}
               maxLength={ENVIRONMENT_NAME_MAX_LENGTH}

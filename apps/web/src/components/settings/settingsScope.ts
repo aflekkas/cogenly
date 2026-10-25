@@ -1,5 +1,6 @@
 import type { EnvironmentId, ProjectLabelWithRepositories } from "@cogenly/contracts";
 
+import type { ProjectIconProject } from "../../projectLabels/ProjectFolderMark";
 import type { EnvironmentProjectLabel } from "../../projectLabels/projectLabels.logic";
 import type { EnvironmentPresentation } from "../../state/environments";
 import type { Project } from "../../types";
@@ -27,6 +28,8 @@ export interface SettingsProjectFolder {
   readonly id: string;
   readonly name: string;
   readonly color: string | undefined;
+  /** What `ProjectFolderIcon` reads, so the folder is drawn as every project picker draws it. */
+  readonly icon: ProjectIconProject;
   readonly members: readonly Project[];
 }
 
@@ -47,7 +50,7 @@ export type ResolvedSettingsScope = ScopeTargets &
     | { kind: "project"; folder: SettingsProjectFolder }
     | {
         kind: "unavailable";
-        reason: "project-missing" | "environment-missing" | "legacy-link";
+        reason: "project-missing" | "project-empty" | "environment-missing" | "legacy-link";
         message: string;
       }
   );
@@ -69,14 +72,15 @@ export function validateSettingsScopeSearch(raw: Record<string, unknown>): Setti
 }
 
 /**
- * The picker's project folders: active folders deduped by id across
- * environments, each with the repositories it holds on every environment. A
- * folder without a repository cannot hold overrides (they are stored per
- * repository), so it is left out.
+ * The picker's project folders: the active folders every project picker
+ * offers, deduped by id across environments, each with the repositories it
+ * holds on every environment. A folder without a repository is listed too,
+ * though it cannot hold overrides yet (they are stored per repository).
  */
 export function buildSettingsProjectFolders(
   labels: readonly (Pick<EnvironmentProjectLabel, "environmentId"> & {
-    readonly label: Pick<ProjectLabelWithRepositories, "id" | "name" | "color" | "repositoryIds">;
+    readonly label: Pick<ProjectLabelWithRepositories, "id" | "name" | "color" | "repositoryIds"> &
+      ProjectIconProject["label"];
   })[],
   projects: readonly Project[],
 ): SettingsProjectFolder[] {
@@ -85,12 +89,13 @@ export function buildSettingsProjectFolders(
   );
   const folders = new Map<
     string,
-    { name: string; color: string | undefined; members: Project[] }
+    { name: string; color: string | undefined; icon: ProjectIconProject; members: Project[] }
   >();
-  for (const { environmentId, label } of labels) {
+  for (const entry of labels) {
+    const { environmentId, label } = entry;
     let folder = folders.get(label.id);
     if (!folder) {
-      folder = { name: label.name, color: label.color, members: [] };
+      folder = { name: label.name, color: label.color, icon: entry, members: [] };
       folders.set(label.id, folder);
     }
     for (const repositoryId of label.repositoryIds) {
@@ -99,7 +104,6 @@ export function buildSettingsProjectFolders(
     }
   }
   return [...folders]
-    .filter(([, folder]) => folder.members.length > 0)
     .map(([id, folder]) => ({ id, ...folder }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
@@ -172,7 +176,15 @@ export function resolveSettingsScope(
     if (!folder) {
       return unavailable(
         "project-missing",
-        "This project is no longer available, or has no repositories yet. Choose a project above.",
+        "This project is no longer available. Choose a project above.",
+      );
+    }
+    // Overrides live on a project's repositories, so an empty project has
+    // nothing to write to; it never widens to All projects.
+    if (folder.members.length === 0) {
+      return unavailable(
+        "project-empty",
+        `${folder.name} has no repositories yet. A project's own settings are saved with its repositories, so add one to change them here.`,
       );
     }
     return {

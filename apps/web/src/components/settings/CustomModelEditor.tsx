@@ -171,7 +171,6 @@ export function CustomModelEditor({
       />
       <label className="flex shrink-0 items-center gap-1.5 text-2xs text-muted-foreground">
         <Switch
-          size="sm"
           checked={choice.isDefault}
           onCheckedChange={(checked) =>
             updateChoice(descriptor.key, choice.key, { isDefault: checked })

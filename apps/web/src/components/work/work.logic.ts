@@ -35,13 +35,16 @@ export function listWorkPickerChoices(input: {
   readonly repositories: ReadonlyArray<EnvironmentProject>;
   readonly sourceProjectId: ProjectId | null;
   readonly canRunWithoutRepository: boolean;
+  /** What a repository row reads, as the repository pickers name it (`useRepositoryNames`). */
+  readonly nameOf?: (repository: EnvironmentProject) => string;
 }): WorkPickerChoice[] {
+  const nameOf = input.nameOf ?? ((repository: EnvironmentProject) => repository.title);
   const own = input.repositories.filter((repository) => repository.id === input.sourceProjectId);
   const others = input.repositories.filter((repository) => repository.id !== input.sourceProjectId);
   return [
     ...[...own, ...others].map((repository) => ({
       value: repository.id,
-      label: repository.title,
+      label: nameOf(repository),
       repository,
     })),
     ...(input.canRunWithoutRepository

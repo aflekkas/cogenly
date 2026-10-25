@@ -199,7 +199,7 @@ describe("buildThreadActionMenuItems per thread kind", () => {
   });
 });
 
-describe("Move to folder in the thread action menu", () => {
+describe("Move to project in the thread action menu", () => {
   const folderItems = (menuState: ThreadActionMenuState) =>
     buildThreadActionMenuItems(menuState).filter((item) => item.id === "move-folder");
   const base = stateFor("chat").folder!;
@@ -248,9 +248,9 @@ describe("Move to folder in the thread action menu", () => {
   });
 
   it("names the submenu for what picking does: a chat with turns forks", () => {
-    expect(folderItems(stateFor("chat"))[0]?.label).toBe("Move to Folder");
+    expect(folderItems(stateFor("chat"))[0]?.label).toBe("Move to project…");
     expect(folderItems(stateFor("chat", { folder: { ...base, forks: true } }))[0]?.label).toBe(
-      "Fork into Project",
+      "Fork into project…",
     );
   });
 
@@ -317,7 +317,7 @@ describe("buildRepositoryActionMenuItems", () => {
   });
 });
 
-describe("Move to folder options", () => {
+describe("Move to project options", () => {
   it("lead each project with its folder in the project's color", () => {
     const move = buildThreadActionMenuItems(stateFor("chat")).find(
       (item) => item.id === "move-folder",

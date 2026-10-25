@@ -1,4 +1,9 @@
-import type { EnvironmentId, ProjectLabelOwnerRepository } from "@cogenly/contracts";
+import {
+  repositoryGroupingKeyOf,
+  type EnvironmentId,
+  type ProjectLabelOwnerRepository,
+  type RepositoryIdentity,
+} from "@cogenly/contracts";
 import {
   ChevronDownIcon,
   FolderGit2Icon,
@@ -43,15 +48,21 @@ import type { RemoteCloneView, useRemoteRepositoryClone } from "./useRemoteRepos
  * passes them to its card row.
  */
 
+/** A checkout as its icon reads it: its own icon, and its remote when no link names one. */
+export type RepositoryIconLocal = ProjectFaviconProject & {
+  readonly repositoryIdentity?: RepositoryIdentity | null | undefined;
+};
+
 /**
- * A repository's icon, the same on every surface: its own (picked in
- * settings, else its favicon) when it has a checkout here, else the icon its
- * remote resolves to on `environmentId` (a checkout's favicon recorded by
- * any machine, else its owner's GitHub avatar), else GitHub's mark for a
- * GitHub remote, else the repository glyph.
+ * A repository's icon, the same on every surface (pickers, the Work hero,
+ * sidebar Work cards): its own (picked in settings, else its favicon) when it
+ * has a checkout here, else the icon its remote resolves to on
+ * `environmentId` (a checkout's favicon recorded by any machine, else its
+ * owner's GitHub avatar), else GitHub's mark for a GitHub remote, else the
+ * repository glyph. Without a link's remote, a checkout's own remote stands in.
  */
 export function RepositoryRowIcon(props: {
-  readonly local: ProjectFaviconProject | null;
+  readonly local: RepositoryIconLocal | null;
   readonly remote: string | null;
   /** The machine to resolve a remote's icon on; null skips that step. */
   readonly environmentId: EnvironmentId | null;
@@ -59,16 +70,18 @@ export function RepositoryRowIcon(props: {
   readonly className?: string;
 }) {
   const className = props.className ?? "size-4";
-  const mark = props.remote?.toLowerCase().startsWith("github.com/") ? (
+  const identity = props.local?.repositoryIdentity;
+  const remote = props.remote ?? (identity ? repositoryGroupingKeyOf(identity) : null);
+  const mark = remote?.toLowerCase().startsWith("github.com/") ? (
     <GitHubIcon aria-hidden className="size-3.5" />
   ) : (
     <FolderGit2Icon className={className} />
   );
   const remoteIcon =
-    props.remote !== null && props.environmentId !== null ? (
+    remote !== null && props.environmentId !== null ? (
       <RepositoryRemoteIcon
         environmentId={props.environmentId}
-        remote={props.remote}
+        remote={remote}
         iconPath={props.iconPath ?? null}
         className={className}
         fallback={mark}
@@ -121,7 +134,10 @@ export function RepositoryRowStatus(props: { readonly view: RepositoryRowView })
       key={kind}
       role={busy || kind === "starting" ? "status" : undefined}
       className={cn(
-        "swap-motion flex min-w-0 max-w-1/2 shrink-0 items-center gap-1 text-2xs tabular-nums",
+        // A fixed cap: the row's trailing slot sizes to its content, so a
+        // share of it would clip even "Clone to set up". Clone progress
+        // truncates at the cap; the name gives way first.
+        "swap-motion flex min-w-0 max-w-40 shrink-0 items-center gap-1 text-2xs tabular-nums",
         kind === "failed" ? "text-destructive-foreground" : "text-muted-foreground",
       )}
     >

@@ -57,6 +57,7 @@ import {
   type RepositoryPickerItem,
 } from "~/projectLabels/useRepositoryPicker";
 import { useProjectLabelDirectory } from "~/projectLabels/useProjectLabels";
+import { useRepositoryNames } from "~/projectLabels/useRepositoryNames";
 import { answerNoProjectPick, useWorkNoProjectPicked } from "~/projectLabels/workNoProjectPicks";
 import { chatGreeting } from "./chatGreeting";
 import { FadeSwap } from "./StateTransition";
@@ -80,7 +81,6 @@ import {
 } from "../ui/combobox";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { InlineButton } from "../ui/button";
-import { RepositoryBadge } from "../sidebar/modes/RepositoryBadge";
 import { resolveProjectSettings } from "@cogenly/shared/projectSettings";
 
 /** The draft heading's FadeSwap slot, which a replacing draft's heading picks up from. */
@@ -245,6 +245,7 @@ export function DraftHeroHeadline({
     [environments],
   );
   const projectDirectory = useProjectLabelDirectory(environmentIds);
+  const repositoryNameOf = useRepositoryNames();
   const draftThread = useComposerDraftStore((store) =>
     draftId ? store.draftThreadsByThreadKey[draftId] : undefined,
   );
@@ -321,10 +322,12 @@ export function DraftHeroHeadline({
           row.local.environmentId === activeProjectRef?.environmentId &&
           row.local.id === activeProjectRef.projectId,
       ) ?? null);
-  // The repository reads by its folder name in the project, as its row does.
+  // The repository reads as its picker row does, also before the row lists.
   const breadcrumb = workHeroBreadcrumb({
     projectName: workProject?.label.name ?? null,
-    repositoryName: selectedRow?.name ?? activeProjectDisplayName,
+    repositoryName:
+      selectedRow?.name ??
+      (activeProject ? repositoryNameOf(activeProject) : activeProjectDisplayName),
     hasRepository: !isScratchDraft,
   });
   const noRepositoryItem = useMemo(
@@ -612,20 +615,18 @@ export function DraftHeroHeadline({
             )}
           >
             {!breadcrumb.repository.placeholder && activeProjectDisplayName ? (
-              activeProject ? (
-                // The same icon the picker's row shows for it.
-                <span className="inline-flex size-[0.78em] align-[-0.06em] me-[0.28em] items-center justify-center">
-                  <RepositoryRowIcon
-                    local={activeProject}
-                    {...linkedRepositoryIcon(repositoryFolder, activeProject.id)}
-                    environmentId={activeProject.environmentId}
-                    // Sized in em to the heading, like the hero's other inline icons.
-                    className="size-full"
-                  />
-                </span>
-              ) : (
-                <RepositoryBadge name={breadcrumb.repository.text} size="inline" />
-              )
+              // The same icon the picker's row shows for it.
+              <span className="inline-flex size-[0.78em] align-[-0.06em] me-[0.28em] items-center justify-center">
+                <RepositoryRowIcon
+                  local={activeProject}
+                  {...(activeProject
+                    ? linkedRepositoryIcon(repositoryFolder, activeProject.id)
+                    : { remote: null, iconPath: null })}
+                  environmentId={activeProject?.environmentId ?? null}
+                  // Sized in em to the heading, like the hero's other inline icons.
+                  className="size-full"
+                />
+              </span>
             ) : null}
             {breadcrumb.repository.text}
           </span>

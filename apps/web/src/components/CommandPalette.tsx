@@ -107,6 +107,7 @@ import {
   threadForksIntoProjects,
 } from "../projectLabels/projectLabels.logic";
 import { cloneableRepositoryRows } from "../projectLabels/repositoryPicker.logic";
+import { useRepositoryNames } from "../projectLabels/useRepositoryNames";
 import { ProjectFolderRowIcon, RepositoryRowIcon } from "../projectLabels/RepositorySourceRows";
 import {
   reportProjectFolderFailure,
@@ -779,6 +780,7 @@ function OpenCommandPaletteDialog(props: {
   const threads = useThreadShells();
   const serverConfigs = useServerConfigs();
   const startWork = useStartWork();
+  const repositoryNameOf = useRepositoryNames();
   /** Every place a chat can start Work, as palette rows; picking one starts it. */
   const startWorkItems = useCallback(
     (threadRef: ScopedThreadRef): CommandPaletteActionItem[] => {
@@ -791,6 +793,7 @@ function OpenCommandPaletteDialog(props: {
         repositories: listWorkRepositories(projects, threadRef.environmentId, scratchWorkspaceRoot),
         sourceProjectId: source?.projectId ?? null,
         canRunWithoutRepository: scratchWorkspaceRoot != null,
+        nameOf: repositoryNameOf,
       }).map((choice) => ({
         kind: "action" as const,
         value: `start-work:${choice.value}`,
@@ -806,7 +809,7 @@ function OpenCommandPaletteDialog(props: {
         },
       }));
     },
-    [projects, serverConfigs, startWork, threads],
+    [projects, repositoryNameOf, serverConfigs, startWork, threads],
   );
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { appearanceMode, setAppearanceMode } = useTheme();
@@ -981,11 +984,12 @@ function OpenCommandPaletteDialog(props: {
   );
   const pickerProjects = useMemo(
     () =>
-      projectPickerEntries.map(({ group, targetProject }) => ({
+      projectPickerEntries.map(({ targetProject }) => ({
         ...targetProject,
-        displayName: group.displayName,
+        // Named as the repository pickers name it, never by its folder.
+        displayName: repositoryNameOf(targetProject),
       })),
-    [projectPickerEntries],
+    [projectPickerEntries, repositoryNameOf],
   );
   const projectGroupByTargetKey = useMemo(
     () =>
@@ -1398,25 +1402,17 @@ function OpenCommandPaletteDialog(props: {
         },
         renderDescription: (project) => {
           const location = projectEnvironmentLocationById.get(project.environmentId) ?? {
-            kind: "remote",
+            kind: "remote" as const,
             label: "Remote",
             machine: "server" as const,
           };
           return (
-            <span className="flex min-w-0 items-center gap-1">
-              <span className="inline-flex min-w-0 items-center gap-1">
-                {location.kind === "remote" ? (
-                  <EnvironmentMachineIcon
-                    aria-hidden
-                    kind={location.machine}
-                    className={COMMAND_PALETTE_META_ICON_CLASS}
-                  />
-                ) : null}
-                <span className="truncate">{location.label}</span>
-              </span>
-              <CommandPaletteMetaDot />
-              <span className="truncate">{project.workspaceRoot}</span>
-            </span>
+            <ProjectSearchDescription
+              environmentLabels={[]}
+              grouped={false}
+              location={location}
+              workspaceRoot={project.workspaceRoot}
+            />
           );
         },
         icon: projectFaviconIcon,
@@ -1895,8 +1891,8 @@ function OpenCommandPaletteDialog(props: {
         toastManager.add(
           stackedThreadToast({
             type: "error",
-            title: "Environment unavailable",
-            description: `${environment?.label ?? "The selected environment"} is not connected.`,
+            title: "Machine unavailable",
+            description: `${environment?.label ?? "The selected machine"} is not connected.`,
           }),
         );
         return;
@@ -2095,8 +2091,9 @@ function OpenCommandPaletteDialog(props: {
   const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
 
   if (projects.length > 0) {
+    const preferredEntry = projectPickerEntries.find((entry) => entry.isPreferred);
     const activeProjectTitle =
-      projectPickerEntries.find((entry) => entry.isPreferred)?.group.displayName ??
+      (preferredEntry ? repositoryNameOf(preferredEntry.targetProject) : null) ??
       (currentProjectId ? (projectTitleById.get(currentProjectId) ?? null) : null);
 
     if (activeProjectTitle) {
@@ -2232,7 +2229,7 @@ function OpenCommandPaletteDialog(props: {
           "folder",
           "project",
         ],
-        title: forks ? "Fork into project…" : "Move to folder…",
+        title: forks ? "Fork into project…" : "Move to project…",
         icon: <FolderIcon className={ITEM_ICON_CLASS} />,
         addonIcon: <FolderIcon className={ADDON_ICON_CLASS} />,
         disabled: !canMoveActiveThread,
@@ -2271,7 +2268,8 @@ function OpenCommandPaletteDialog(props: {
         kind: "action",
         value: "action:remove-thread-from-folder",
         searchTerms: ["remove from folder", "remove from project", "unfile", "folder"],
-        title: `Remove from ${folderState.current.label.name}`,
+        title: "Remove from project",
+        description: folderState.current.label.name,
         icon: <FolderMinusIcon className={ITEM_ICON_CLASS} />,
         disabled: !canMoveActiveThread,
         run: async () => {
@@ -2902,8 +2900,8 @@ function OpenCommandPaletteDialog(props: {
         toastManager.add(
           stackedThreadToast({
             type: "error",
-            title: "Environment unavailable",
-            description: `${environment?.label ?? "The selected environment"} is not connected.`,
+            title: "Machine unavailable",
+            description: `${environment?.label ?? "The selected machine"} is not connected.`,
           }),
         );
         return;
@@ -3112,8 +3110,8 @@ function OpenCommandPaletteDialog(props: {
       toastManager.add(
         stackedThreadToast({
           type: "error",
-          title: "Environment unavailable",
-          description: `${browseEnvironment?.label ?? "The selected environment"} is not connected.`,
+          title: "Machine unavailable",
+          description: `${browseEnvironment?.label ?? "The selected machine"} is not connected.`,
         }),
       );
       return;
@@ -4288,9 +4286,10 @@ function ProjectSearchDescription(props: {
   readonly workspaceRoot: string;
 }) {
   if (!props.grouped) {
+    // The machine tag stays whole (up to half the row); the path gives way.
     return (
       <span className="flex min-w-0 items-center gap-1">
-        <span className="inline-flex min-w-0 items-center gap-1">
+        <span className="inline-flex max-w-1/2 shrink-0 items-center gap-1">
           {props.location.kind === "remote" ? (
             <EnvironmentMachineIcon
               aria-hidden
@@ -4301,7 +4300,7 @@ function ProjectSearchDescription(props: {
           <span className="truncate">{props.location.label}</span>
         </span>
         <CommandPaletteMetaDot />
-        <span className="truncate">{props.workspaceRoot}</span>
+        <span className="min-w-0 truncate">{props.workspaceRoot}</span>
       </span>
     );
   }

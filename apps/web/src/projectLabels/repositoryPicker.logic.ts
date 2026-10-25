@@ -13,6 +13,7 @@ import {
   projectCloneProgressSummary,
   projectHomeOwner,
   repositoryDirectoryNameFor,
+  repositoryGroupingKeyOf,
   repositoryRemoteParts,
   type ProjectCloneSnapshot,
   type ProjectId,
@@ -151,10 +152,14 @@ function rowFromLink<Local extends RepositoryListLocal>(
     remote,
     directoryName: link.directoryName,
     iconPath: link.iconPath ?? null,
+    // The project's rule for its repositories' names, from the remote when an
+    // older server sent no folder name; a checkout's folder only without one.
     name:
       link.directoryName ??
+      (remote === null
+        ? null
+        : repositoryDirectoryNameFor(remote, projectHomeOwner(project.label.sourceLinks))) ??
       local?.title ??
-      (remote === null ? null : repositoryRemoteParts(remote)?.name) ??
       link.repositoryId,
     detail: null,
     checkout: linkCheckout(link),
@@ -239,9 +244,27 @@ export function linkedRepositoryRows<Local extends RepositoryListLocal>(input: {
 }
 
 /**
+ * The repository a checkout in no project is named after, as owner and name:
+ * a fork's own remote, else the canonical one. Null without a remote, where
+ * the checkout's folder is all there is to name it by.
+ */
+function unlinkedRepositoryParts(
+  identity: RepositoryIdentity | null | undefined,
+): { readonly owner: string | null; readonly name: string } | null {
+  if (!identity) return null;
+  // The identity's own owner and name keep the remote's letter case.
+  if (!identity.origin && identity.name) {
+    return { owner: identity.owner ?? null, name: identity.name };
+  }
+  return repositoryRemoteParts(repositoryGroupingKeyOf(identity));
+}
+
+/**
  * With no project: the repositories on one machine (`locals`, already
  * narrowed to real repositories). One a project links is named and stated as
- * that project has it; same names tell their projects apart.
+ * that project has it; same names tell their projects apart. One in no
+ * project reads as its repository's name, `owner/name` only when another row
+ * would read the same.
  */
 export function machineRepositoryRows<Local extends RepositoryListLocal>(input: {
   readonly locals: ReadonlyArray<Local>;
@@ -258,26 +281,62 @@ export function machineRepositoryRows<Local extends RepositoryListLocal>(input: 
       if (!linkOf.has(link.repositoryId)) linkOf.set(link.repositoryId, { project, link });
     }
   }
+  const rows = input.locals.map((local) => {
+    const linked = linkOf.get(local.id);
+    if (linked) return { row: rowFromLink(linked.link, linked.project, local), owned: null };
+    const parts = unlinkedRepositoryParts(local.repositoryIdentity);
+    const row: RepositoryListRow<Local> = {
+      key: rowKey(null, local.id),
+      repositoryId: local.id,
+      linkId: null,
+      remote: null,
+      directoryName: null,
+      iconPath: null,
+      name: parts?.name ?? local.title,
+      detail: null,
+      checkout: "ready",
+      local,
+      project: null,
+    };
+    return { row, owned: parts?.owner ? `${parts.owner}/${parts.name}` : null };
+  });
+  const nameCounts = new Map<string, number>();
+  for (const { row } of rows) {
+    const name = row.name.toLowerCase();
+    nameCounts.set(name, (nameCounts.get(name) ?? 0) + 1);
+  }
   return finishRows(
-    input.locals.map((local): RepositoryListRow<Local> => {
-      const linked = linkOf.get(local.id);
-      if (linked) return rowFromLink(linked.link, linked.project, local);
-      return {
-        key: rowKey(null, local.id),
-        repositoryId: local.id,
-        linkId: null,
-        remote: null,
-        directoryName: null,
-        iconPath: null,
-        name: local.title,
-        detail: null,
-        checkout: "ready",
-        local,
-        project: null,
-      };
-    }),
+    rows.map(({ row, owned }) =>
+      owned !== null && (nameCounts.get(row.name.toLowerCase()) ?? 0) > 1
+        ? { ...row, name: owned }
+        : row,
+    ),
     input.leadRepositoryId,
   );
+}
+
+/**
+ * What each checkout reads as wherever a repository is named outside the
+ * pickers (the command palette, Start Work): the same name its picker row
+ * shows, per machine. Keyed by `environmentId:id`.
+ */
+export function repositoryNamesByCheckout<
+  Local extends RepositoryListLocal & { readonly environmentId: string },
+>(
+  locals: ReadonlyArray<Local>,
+  projects: ReadonlyArray<EnvironmentProjectLabel>,
+): ReadonlyMap<string, string> {
+  const names = new Map<string, string>();
+  for (const environmentId of new Set(locals.map((local) => local.environmentId))) {
+    const rows = machineRepositoryRows({
+      locals: locals.filter((local) => local.environmentId === environmentId),
+      projects: projects.filter((project) => project.environmentId === environmentId),
+    });
+    for (const row of rows) {
+      if (row.local !== null) names.set(`${environmentId}:${row.local.id}`, row.name);
+    }
+  }
+  return names;
 }
 
 /**
@@ -496,6 +555,12 @@ export function addRepositoryOptions<Local extends RepositoryListLocal>(input: {
         : [],
     ),
   );
+  const homeOwner = projectHomeOwner(input.project.label.sourceLinks);
+  // Named as it will read once linked: the project's rule for its remote.
+  const linkedName = (candidate: Local) =>
+    (candidate.repositoryIdentity
+      ? repositoryDirectoryNameFor(repositoryGroupingKeyOf(candidate.repositoryIdentity), homeOwner)
+      : null) ?? candidate.title;
   const local = input.locals
     .filter(
       (candidate) =>
@@ -504,15 +569,14 @@ export function addRepositoryOptions<Local extends RepositoryListLocal>(input: {
           linkedGitHub.has(key.toLowerCase()),
         ),
     )
-    .toSorted((left, right) => compareNames(left.title, right.title))
     .map((candidate): AddRepositoryOption<Local> => ({
       kind: "local",
       key: `local:${candidate.id}`,
-      name: candidate.title,
+      name: linkedName(candidate),
       from: input.folderOf(candidate),
       local: candidate,
-    }));
-  const homeOwner = projectHomeOwner(input.project.label.sourceLinks);
+    }))
+    .toSorted((left, right) => compareNames(left.name, right.name));
   const outside = remoteRowsOutsideProject(
     input.gitHub,
     input.locals

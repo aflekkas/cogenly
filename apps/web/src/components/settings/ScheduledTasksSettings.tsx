@@ -321,7 +321,7 @@ export function ScheduledTasksSettings(target: {
               <EmptyMedia>
                 <Clock3Icon />
               </EmptyMedia>
-              <EmptyTitle>No environments available</EmptyTitle>
+              <EmptyTitle>No machines available</EmptyTitle>
               <EmptyDescription>Connect a machine to manage scheduled tasks.</EmptyDescription>
             </EmptyHeader>
           </Empty>
@@ -1233,7 +1233,7 @@ function ScheduledTaskEditorDialog({
         <DialogPanel>
           <fieldset disabled={saving} className="space-y-5">
             {!connected ? (
-              <p className="text-sm text-destructive">Reconnect this environment before saving.</p>
+              <p className="text-sm text-destructive">Reconnect this machine before saving.</p>
             ) : null}
             <Field label="Runs on" htmlFor="scheduled-task-environment">
               <Select

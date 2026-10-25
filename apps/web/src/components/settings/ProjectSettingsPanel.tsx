@@ -139,7 +139,7 @@ export function ProjectSettingsPanel({
   if (members.length === 0)
     return (
       <p className="p-8 text-sm text-muted-foreground">
-        This checkout is no longer available in the selected repository and environment.
+        This checkout is no longer available in the selected repository and machine.
       </p>
     );
   const scopedGroup = {

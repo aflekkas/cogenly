@@ -209,7 +209,7 @@ function forkMachineMenuItems(
 export interface ThreadActionMenuFolder {
   /** `key` opens the folder's view; `id` is what a move sends. */
   readonly current: { readonly key: string; readonly id: string; readonly name: string } | null;
-  /** Only an explicit filing offers "Remove from folder"; Work in its repository's folder does not. */
+  /** Only an explicit filing offers "Remove from project"; Work in its repository's folder does not. */
   readonly removable: boolean;
   readonly options: ReadonlyArray<{
     readonly id: string;
@@ -239,9 +239,9 @@ export function threadActionRequiresOperate(action: ThreadActionMenuId): boolean
 }
 
 /**
- * "Move to folder" ("Fork into project" for a chat with turns, which goes
+ * "Move to project…" ("Fork into project…" for a chat with turns, which goes
  * into a project as a fork) with "Open <folder>" first when filed, then every folder
- * (the current one checked), "Remove from folder", and "New project…".
+ * (the current one checked), "Remove from project", and "New project…".
  */
 function folderMenuItems(
   folder: ThreadActionMenuFolder | undefined,
@@ -271,7 +271,7 @@ function folderMenuItems(
   if (current !== null && folder.removable) {
     children.push({
       id: "remove-folder",
-      label: "Remove from Folder",
+      label: "Remove from project",
       disabled,
       separatorBefore: children.length > 0,
     });
@@ -281,7 +281,7 @@ function folderMenuItems(
     label: "New Project…",
     separatorBefore: children.length > 0,
   });
-  const label = folder.forks === true ? "Fork into Project" : "Move to Folder";
+  const label = folder.forks === true ? "Fork into project…" : "Move to project…";
   return [{ id: "move-folder", label, icon: "folder", children }];
 }
 

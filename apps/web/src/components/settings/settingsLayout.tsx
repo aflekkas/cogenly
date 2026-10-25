@@ -28,11 +28,11 @@ import {
 } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
 import { PageContent, type PageContentWidth } from "../PageContent";
-import { Button } from "../ui/button";
+import { Button, InlineButton } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { useOptionalSettingsScope } from "./SettingsScopeContext";
 import { MachineScopeMenu, SettingsScopeSentence } from "./SettingsScopeSentence";
-import { selectProjectScope } from "./settingsScopeAxis";
+import { ALL_PROJECTS_VALUE, selectProjectScope } from "./settingsScopeAxis";
 import {
   groupProjectOverridesByFolder,
   isProjectScopedSettingKey,
@@ -281,6 +281,7 @@ export function SettingsRow({
   control,
   serverScoped = false,
   settingKeys = EMPTY_SETTING_KEYS,
+  clientSetting = false,
   mixed: mixedOverride,
   children,
   className,
@@ -295,6 +296,12 @@ export function SettingsRow({
   control?: ReactNode;
   serverScoped?: boolean;
   settingKeys?: readonly (keyof ServerSettings)[];
+  /**
+   * The row edits a client setting, which has no per-project value. At a
+   * project scope it reads as applying to all projects, like a server row
+   * whose keys take no override.
+   */
+  clientSetting?: boolean;
   mixed?: boolean;
   children?: ReactNode;
 }) {
@@ -328,8 +335,10 @@ export function SettingsRow({
   const machineLocal =
     settingKeys.length > 0 && !settingKeys.some((key) => isUniversalServerSettingKey(key));
   // A project scope can only edit keys that support overrides; the rest stay
-  // visible so the user sees the value for all projects, but cannot change it here.
-  const environmentWide = isProjectScope && serverScoped && scopedKeys.length === 0;
+  // visible, marked as applying to all projects with a way there, but cannot
+  // change here.
+  const environmentWide =
+    isProjectScope && (serverScoped ? scopedKeys.length === 0 : clientSetting);
   const mixed =
     mixedOverride ?? (context !== null && scopedSettingsAreMixed(rowTargets, settingKeys));
   const source = context && isProjectScope ? scopedSettingsSource(rowTargets, scopedKeys) : null;
@@ -375,17 +384,18 @@ export function SettingsRow({
         : (folderId) => context.selectScope(selectProjectScope(context.search, folderId)),
     );
   }, [context, isProjectScope, scopedKeys]);
-  const renderedReset = unavailable ? null : isProjectScope && scopedKeys.length > 0 ? (
-    source === "project" || source === "mixed" ? (
-      <SettingResetButton
-        label={typeof title === "string" ? title : "override"}
-        tooltip="Reset to All projects"
-        onClick={() => (onResetOverride ? onResetOverride() : clearOverrides(scopedKeys))}
-      />
-    ) : null
-  ) : (
-    resetAction
-  );
+  const renderedReset =
+    unavailable || environmentWide ? null : isProjectScope && scopedKeys.length > 0 ? (
+      source === "project" || source === "mixed" ? (
+        <SettingResetButton
+          label={typeof title === "string" ? title : "override"}
+          tooltip="Reset to All projects"
+          onClick={() => (onResetOverride ? onResetOverride() : clearOverrides(scopedKeys))}
+        />
+      ) : null
+    ) : (
+      resetAction
+    );
   const inertControl = (message: string) => (
     <Tooltip>
       <TooltipTrigger
@@ -428,11 +438,24 @@ export function SettingsRow({
         )
       : environmentWide && control
         ? inertControl(
-            machineLocal
-              ? `Applies to every project on ${machineName}. Choose All projects to change it.`
-              : "Applies to all projects. Choose All projects to change it.",
+            serverScoped && machineLocal
+              ? `Applies to every project on ${machineName}. Change it under All projects.`
+              : "Applies to all projects. Change it under All projects.",
           )
         : control;
+  const allProjectsLink =
+    environmentWide && context ? (
+      <span className="text-xs">
+        <InlineButton
+          tone="muted"
+          onClick={() =>
+            context.selectScope(selectProjectScope(context.search, ALL_PROJECTS_VALUE))
+          }
+        >
+          Applies to all projects
+        </InlineButton>
+      </span>
+    ) : null;
   // Server rows get an indicator beside the title that opens the resolution
   // chain per target at every scope; client rows keep a plain status only.
   const customized =
@@ -509,6 +532,7 @@ export function SettingsRow({
               {renderedReset}
             </span>
             {machineLabel}
+            {allProjectsLink}
           </div>
           {description ? (
             <p className="max-w-xl text-xs leading-normal text-muted-foreground/80">
@@ -525,7 +549,7 @@ export function SettingsRow({
           </div>
         ) : null}
       </div>
-      {unavailable && children ? (
+      {(unavailable || environmentWide) && children ? (
         <div inert className="opacity-50">
           {children}
         </div>

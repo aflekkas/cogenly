@@ -517,7 +517,6 @@ function CanaryRow({
             </Select>
           ) : null}
           <Switch
-            size="sm"
             checked={canary?.enabled ?? false}
             disabled={!editable}
             aria-label={`Canary check on ${machine.name}`}
@@ -555,7 +554,6 @@ function AlertChannelRows({ environment }: { readonly environment: EnvironmentPr
         description={`Sends ${environment.label}'s alerts as a Slack direct message, through your connected Slack.`}
         control={
           <Switch
-            size="sm"
             checked={channels.slack.enabled}
             disabled={!editable}
             aria-label="Slack alerts"
@@ -609,7 +607,6 @@ function AlertChannelRows({ environment }: { readonly environment: EnvironmentPr
         description={`Emails ${environment.label}'s alerts from your connected Google Workspace account.`}
         control={
           <Switch
-            size="sm"
             checked={channels.email.enabled}
             disabled={!editable}
             aria-label="Email alerts"

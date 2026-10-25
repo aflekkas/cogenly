@@ -32,6 +32,7 @@ import {
   RepositoryRowIcon,
 } from "~/projectLabels/RepositorySourceRows";
 import { useProjectLabelDirectory } from "~/projectLabels/useProjectLabels";
+import { useRepositoryNames } from "~/projectLabels/useRepositoryNames";
 import {
   RepositoryPickerGroupContent,
   useRepositoryPicker,
@@ -245,14 +246,16 @@ export function useWorkPickerChoices(threadRef: ScopedThreadRef): ReadonlyArray<
   const scratchWorkspaceRoot = useServerConfigs().get(
     threadRef.environmentId,
   )?.scratchWorkspaceRoot;
+  const nameOf = useRepositoryNames();
   return useMemo(
     () =>
       listWorkPickerChoices({
         repositories: listWorkRepositories(projects, threadRef.environmentId, scratchWorkspaceRoot),
         sourceProjectId: thread?.projectId ?? null,
         canRunWithoutRepository: scratchWorkspaceRoot != null,
+        nameOf,
       }),
-    [projects, scratchWorkspaceRoot, thread?.projectId, threadRef.environmentId],
+    [nameOf, projects, scratchWorkspaceRoot, thread?.projectId, threadRef.environmentId],
   );
 }
 

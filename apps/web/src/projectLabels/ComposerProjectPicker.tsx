@@ -56,7 +56,8 @@ type ProjectOption =
       readonly name: string;
       readonly project: EnvironmentProjectLabel;
     }
-  | { readonly kind: "none"; readonly key: "none" }
+  /** "No project" while in none; "Remove from project", the way out, while in one. */
+  | { readonly kind: "none"; readonly key: "none"; readonly label: string }
   | { readonly kind: "new"; readonly key: "new" }
   | { readonly kind: "create"; readonly key: "create"; readonly name: string };
 
@@ -65,7 +66,7 @@ function optionText(option: ProjectOption): string {
     case "project":
       return option.name;
     case "none":
-      return "No project";
+      return option.label;
     case "new":
       return "New project";
     case "create":
@@ -157,7 +158,16 @@ export function ComposerProjectPicker(props: {
     // creating one is the lone action at the end. For Work it moves the draft
     // to a repository in no project (DraftHeroHeadline).
     const needle = query.trim().toLowerCase();
-    const result: ProjectOption[] = needle === "" ? [{ kind: "none", key: "none" }] : [];
+    const result: ProjectOption[] =
+      needle === ""
+        ? [
+            {
+              kind: "none",
+              key: "none",
+              label: current === null ? "No project" : "Remove from project",
+            },
+          ]
+        : [];
     for (const entry of projects) {
       if (needle !== "" && !entry.label.name.toLowerCase().includes(needle)) continue;
       result.push({
@@ -175,7 +185,7 @@ export function ComposerProjectPicker(props: {
       }
     }
     return result;
-  }, [canCreate, projects, query]);
+  }, [canCreate, current, projects, query]);
 
   const isHeadline = props.appearance === "headline";
   const headlineIcon = (
@@ -297,7 +307,7 @@ export function ComposerProjectPicker(props: {
         // line under a stacked heading, it is a size smaller.
         <ComboboxTrigger
           disabled={props.disabled}
-          aria-label={current ? `In ${current.label.name}. Change project` : undefined}
+          aria-label={current ? `In ${current.label.name}. Move to project` : undefined}
           aria-hidden={current === null || undefined}
           tabIndex={current === null ? -1 : undefined}
           data-hero-project-suffix=""
@@ -342,7 +352,7 @@ export function ComposerProjectPicker(props: {
             <ComposerControlChevron size={props.size} />
           </TooltipTrigger>
           <TooltipPopup side="top">
-            {forks ? "Fork into a project" : current ? "Change project" : "Add to a project"}
+            {forks ? "Fork into project…" : "Move to project…"}
           </TooltipPopup>
         </Tooltip>
       )}
@@ -396,7 +406,7 @@ function ProjectOptionRow(props: { readonly option: ProjectOption; readonly chos
     option.kind === "project"
       ? option.name
       : option.kind === "none"
-        ? "No project"
+        ? option.label
         : option.kind === "new"
           ? "New project…"
           : `New project “${option.name}”…`;

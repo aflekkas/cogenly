@@ -756,8 +756,7 @@ function useUpdateSettingsTarget(environmentId: EnvironmentId | null) {
                 .map(({ label }) => label);
               toastManager.add({
                 type: "error",
-                title:
-                  saved.length > 0 ? "Setting saved on some environments" : "Setting not saved",
+                title: saved.length > 0 ? "Setting saved on some machines" : "Setting not saved",
                 description: [
                   ...failures,
                   ...(saved.length > 0 ? [`Saved on ${saved.join(", ")}.`] : []),

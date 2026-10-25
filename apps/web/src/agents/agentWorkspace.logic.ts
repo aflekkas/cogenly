@@ -297,7 +297,7 @@ function describeIntegrationApproval(
         ? [
             `Command: ${[input.command.command, ...input.command.args].map((part) => JSON.stringify(part)).join(" ")}`,
             `Environment: ${JSON.stringify(input.command.env)}`,
-            "Approving allows this command to run on this environment.",
+            "Approving allows this command to run on this machine.",
           ]
         : []),
     ],

@@ -39,7 +39,7 @@ function optionText(option: FolderOption): string {
     case "folder":
       return option.name;
     case "remove":
-      return "Remove from folder";
+      return "Remove from project";
     case "create":
       return `New project ${option.name}`;
   }
@@ -141,7 +141,7 @@ export function ThreadFolderPicker(props: {
 
   // Chats re-home in place now; `forks` stays for the explicit fork action.
   const forks = threadForksIntoProjects(thread);
-  const action = forks ? "Fork into project" : "Move to folder";
+  const action = forks ? "Fork into project" : "Move to project";
   const triggerLabel = current ? `In ${current.label.name}. ${action}` : action;
 
   return (
@@ -206,7 +206,7 @@ export function ThreadFolderPicker(props: {
               ) : option.kind === "remove" ? (
                 <>
                   <FolderMinusIcon />
-                  <span className="min-w-0 flex-1 truncate">Remove from folder</span>
+                  <span className="min-w-0 flex-1 truncate">Remove from project</span>
                 </>
               ) : (
                 <>

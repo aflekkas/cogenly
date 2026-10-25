@@ -5,11 +5,13 @@ import type { WorkHeroCrumb } from "~/projectLabels/projectMeta.logic";
 
 /**
  * The Work hero's "What should we build in <project> / <repository>?", for the
- * new-Work screen (pickers) and an unwritten Work thread (plain names). It
- * holds one line while it fits; otherwise "<project> / <repository>?" moves to
- * the next line whole, never split from its "/" or "?". Each part is a
+ * new-Work screen (pickers) and an unwritten Work thread (plain names). Where
+ * it breaks depends on the pane's width alone, never on the names, so picking
+ * a project never rewraps it: a narrower pane puts "<project> /
+ * <repository>?" on a line of its own, whole; a wider one always fits the
+ * sentence on one line, since each name truncates at 16rem. Each part is a
  * `data-hero-piece`, so useHeroHeadlineMotion can glide it when a name
- * changes or the breadcrumb wraps, and crossfade a changed name.
+ * changes or the pane crosses the break, and crossfade a changed name.
  */
 export function WorkHeroSentence(props: {
   readonly project: ReactNode;
@@ -17,7 +19,11 @@ export function WorkHeroSentence(props: {
 }) {
   return (
     <>
-      <span data-hero-greeting="" data-hero-piece="greeting" className="inline-block max-w-full">
+      <span
+        data-hero-greeting=""
+        data-hero-piece="greeting"
+        className="inline-block max-w-full @max-[60rem]:block"
+      >
         What should we build in
       </span>{" "}
       {/* One unbreakable unit; its halves truncate before it outgrows the line. */}

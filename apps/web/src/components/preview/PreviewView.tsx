@@ -179,7 +179,7 @@ export function PreviewView({
   const open = useAtomCommand(previewEnvironment.open);
   const closePreview = useAtomCommand(previewEnvironment.close, "preview close");
   const threadEnvironment = useEnvironment(threadRef.environmentId);
-  const environmentLabel = threadEnvironment?.label ?? "the environment";
+  const environmentLabel = threadEnvironment?.label ?? "the machine";
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const serverBrowser = useEnvironmentSupportsServerBrowser(threadRef.environmentId);
   const resize = useAtomCommand(previewEnvironment.resize, "preview viewport resize");

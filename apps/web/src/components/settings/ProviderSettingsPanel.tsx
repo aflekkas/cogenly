@@ -426,7 +426,7 @@ function ProviderSettingsPanelContent(target: ProviderSettingsTarget) {
           description={
             isReady
               ? "Connect a machine before configuring providers."
-              : "Reading connected execution environments."
+              : "Reading connected machines."
           }
         />
       ) : null}

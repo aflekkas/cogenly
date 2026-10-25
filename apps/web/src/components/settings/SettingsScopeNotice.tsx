@@ -54,7 +54,7 @@ export function SettingsScopeNotice({
       ? folders.map((folder) => ({
           key: folder.id,
           label: folder.name,
-          icon: <ProjectFolderIcon color={folder.color} className="size-4" />,
+          icon: <ProjectFolderIcon project={folder.icon} className="size-4" />,
           search: selectProjectScope(search, folder.id),
         }))
       : target === "repository"
