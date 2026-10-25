@@ -5,7 +5,6 @@ import { STATIC_KEYBINDING_COMMANDS, type KeybindingCommand } from "@cogenly/con
 import { sourceControlClients } from "@cogenly/client-runtime/source-control-clients";
 import { DEFAULT_KEYBINDINGS } from "@cogenly/shared/keybindings";
 import { commandLabel, RETIRED_KEYBINDING_COMMANDS } from "./KeybindingsSettings.logic";
-import type { ResolvedSettingsScope } from "./settingsScope";
 
 export type SettingsPath =
   | "/settings/projects"
@@ -30,19 +29,10 @@ export type SettingsPath =
   | "/settings/new-threads";
 
 /**
- * Where a setting can be edited. Device-local rows have no scope: they render
- * at every selection. `environment` rows live on a machine page,
- * `environment-defaults` rows outside a project, and `project` rows only at a
- * project. `project-defaults` rows accept project overrides, so they are
- * reachable from any server-backed selection.
+ * A searchable setting. Search and deep links keep the selected scope: every
+ * row renders at every scope, and one that can't vary there says where it
+ * applies inline (see `SettingsRow`) rather than blocking the page.
  */
-export type SettingsSearchScope =
-  | "environment"
-  | "environment-defaults"
-  | "project-defaults"
-  | "project"
-  | "connections";
-
 export interface SettingsSearchItem {
   readonly id: string;
   readonly title: string;
@@ -50,7 +40,6 @@ export interface SettingsSearchItem {
   readonly targetId?: string;
   /** Descriptions, option labels, and aliases people may remember instead of the title. */
   readonly searchTerms?: ReadonlyArray<string>;
-  readonly scope?: SettingsSearchScope;
   // Its row only renders in the desktop app, so a browser result would land on
   // an anchor that isn't there.
   readonly desktopOnly?: boolean;
@@ -244,7 +233,6 @@ const SOURCE_CONTROL_HOST_SEARCH_ITEMS = sourceControlClients.definitions.flatMa
             `${definition.label} ${Object.keys(definition.settings.fields).join(" ")} token credentials sign in`,
           ],
           environmentOnly: true,
-          scope: "environment-defaults" as const,
         },
       ]
     : [],
@@ -261,7 +249,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     targetId: "storage-worktrees",
     title: "Keep ignored local files too",
     to: "/settings/storage",
-    scope: "project-defaults",
     searchTerms: [
       "any local files uncommitted changes edited tracked files ignored env build output cleanup",
     ],
@@ -270,7 +257,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "storage-delete-now",
     title: "Preview cleanup and clean up now",
     to: "/settings/storage",
-    scope: "environment-defaults",
     searchTerms: [
       "storage cleanup dry run preview run now results report removed kept failed unsaved agent worktrees",
     ],
@@ -280,7 +266,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     targetId: "storage-backups",
     title: "Backups to keep",
     to: "/settings/storage",
-    scope: "environment-defaults",
     searchTerms: ["nightly backup snapshots retention database disk space cleanup"],
   },
   {
@@ -288,14 +273,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     targetId: "storage-artifacts",
     title: "Prune idle dependencies",
     to: "/settings/storage",
-    scope: "environment-defaults",
     searchTerms: ["node_modules pnpm shared store hardlinks dist turbo disk usage dev data copies"],
   },
   {
     id: "storage-worktrees",
     title: "Worktree cleanup",
     to: "/settings/storage",
-    scope: "project-defaults",
     searchTerms: [
       "disk storage delete deleted archived threads old inactive merged unchanged worktrees retention days project inherit off custom",
     ],
@@ -304,21 +287,18 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "storage-worktrees-location",
     title: "Worktree location",
     to: "/settings/storage",
-    scope: "environment-defaults",
     searchTerms: ["worktree location folder directory path drive external disk"],
   },
   {
     id: "storage-artifacts",
     title: "Artifacts and logs",
     to: "/settings/storage",
-    scope: "environment-defaults",
     searchTerms: ["disk storage browser screenshots captures rotated logs cleanup retention"],
   },
   {
     id: "project-defaults",
     title: "New threads",
     to: "/settings/new-threads",
-    scope: "project-defaults",
     searchTerms: [
       "project defaults overrides workspace worktree submodules start from origin machines projects repositories inheritance all projects",
     ],
@@ -363,7 +343,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "default-model",
     title: "Default model",
     to: "/settings/models",
-    scope: "project-defaults",
     searchTerms: ["new thread project provider reasoning effort"],
   },
   {
@@ -461,7 +440,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "response-streaming",
     title: "Response streaming",
     to: "/settings/general",
-    scope: "project-defaults",
     searchTerms: ["output token paragraph buffered wait turn legacy"],
   },
   {
@@ -501,13 +479,11 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Provider update checks",
     to: "/settings/general",
     searchTerms: ["installed cli versions newer available codex claude muse grok"],
-    scope: "environment-defaults",
   },
   {
     id: "continue-threads-after-server-update",
     title: "Continue threads after restarts",
     to: "/settings/general",
-    scope: "project-defaults",
     searchTerms: [
       "resume running active interrupted work restart reboot machine crash desktop update automatically",
     ],
@@ -516,7 +492,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "background-activity",
     title: "Background activity",
     to: "/settings/general",
-    scope: "environment-defaults",
     searchTerms: [
       "balanced performance battery saver advanced git fetch provider health refresh host power monitor idle policy",
     ],
@@ -525,35 +500,30 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "new-threads",
     title: "Workspace",
     to: "/settings/new-threads",
-    scope: "project-defaults",
     searchTerms: ["new threads default workspace mode draft local worktree"],
   },
   {
     id: "worktree-submodules",
     title: "Submodules",
     to: "/settings/new-threads",
-    scope: "project-defaults",
     searchTerms: ["git submodule init recursive top-level none worktree cogenly.json"],
   },
   {
     id: "start-from-origin",
     title: "Start from origin",
     to: "/settings/new-threads",
-    scope: "project-defaults",
     searchTerms: ["new worktrees latest matching remote branch local"],
   },
   {
     id: "add-project-starts-in",
     title: "Add repository starts in",
     to: "/settings/new-threads",
-    scope: "environment-defaults",
     searchTerms: ["add project base directory folder browser path home"],
   },
   {
     id: "projects-folder",
     title: "Projects folder",
     to: "/settings/new-threads",
-    scope: "environment-defaults",
     searchTerms: ["projects root cogenly clone new repository location directory path"],
   },
   {
@@ -579,14 +549,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "text-generation-model",
     title: "Text generation model",
     to: "/settings/models",
-    scope: "project-defaults",
     searchTerms: ["generated thread titles source control content default provider"],
   },
   {
     id: "ai-greetings",
     title: "AI greetings",
     to: "/settings/general",
-    scope: "environment-defaults",
     searchTerms: ["new chat greeting headline hello welcome message generated recent work"],
   },
   {
@@ -614,7 +582,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "OpenTelemetry export",
     to: "/settings/diagnostics",
     targetId: "telemetry-export",
-    scope: "environment",
     searchTerms: ["OTel OTLP telemetry export endpoints logs traces metrics Grafana"],
   },
   {
@@ -696,7 +663,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "agent-browser-access",
     title: "Agent browser access",
     to: "/settings/integrations",
-    scope: "project-defaults",
     searchTerms: [
       "agent access allow disable enable open drive shared browser preview tools sessions project override",
     ],
@@ -705,7 +671,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "agent-computer-use",
     title: "Computer use",
     to: "/settings/integrations",
-    scope: "project-defaults",
     searchTerms: [
       "agent access allow disable enable control mac apps click type screenshot accessibility screen recording macos permission system settings privacy project override",
     ],
@@ -794,28 +759,24 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "automatic-pull",
     title: "Automatically pull",
     to: "/settings/source-control",
-    scope: "project-defaults",
     searchTerms: ["auto pull default branch current checkout fast forward upstream"],
   },
   {
     id: "remove-agent-credits-on-merge",
     title: "Remove agent credits when merging",
     to: "/settings/source-control",
-    scope: "project-defaults",
     searchTerms: ["pull request github squash co-authored-by attribution claude codex generated"],
   },
   {
     id: "pull-request-merge-method",
     title: "Default merge method",
     to: "/settings/source-control",
-    scope: "project-defaults",
     searchTerms: ["pull request merge squash rebase last selected"],
   },
   {
     id: "source-control",
     title: "Source control",
     to: "/settings/source-control",
-    scope: "environment-defaults",
     searchTerms: [
       "version control git github hosting integrations credentials scan server environment",
     ],
@@ -828,7 +789,6 @@ export const SETTINGS_SEARCH_ITEMS = [
       "automatic remote branch refresh background credentials security keys seconds off",
     ],
     environmentOnly: true,
-    scope: "environment-defaults",
   },
   {
     id: "worktree-branch-naming",
@@ -836,7 +796,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/source-control",
     searchTerms: ["static semantic prefix custom prompt instructions feat fix refactor chore"],
     environmentOnly: true,
-    scope: "project-defaults",
   },
   {
     id: "github-accounts",
@@ -846,7 +805,6 @@ export const SETTINGS_SEARCH_ITEMS = [
       "github gh account login user host enterprise ghes switch multiple accounts disable sign in token personal access token pat api key credential",
     ],
     environmentOnly: true,
-    scope: "environment-defaults",
   },
   ...SOURCE_CONTROL_HOST_SEARCH_ITEMS,
   {
@@ -873,13 +831,11 @@ export const SETTINGS_SEARCH_ITEMS = [
       "override generated commit change request pr titles descriptions branch bookmark",
     ],
     environmentOnly: true,
-    scope: "project-defaults",
   },
   {
     id: "project-actions",
     title: "Actions",
     to: "/settings/new-threads",
-    scope: "project",
     searchTerms: ["commands scripts setup run dev server checkout worktree cogenly.json import"],
   },
   {
@@ -1039,64 +995,6 @@ export const SETTINGS_SEARCH_ITEMS = [
 export type SettingsSearchItemId = (typeof SETTINGS_SEARCH_ITEMS)[number]["id"];
 
 const SEARCH_ITEMS_BY_ID = new Map(SETTINGS_SEARCH_ITEMS.map((item) => [item.id, item] as const));
-
-const SETTINGS_CATEGORY_SCOPES: Readonly<Record<SettingsPath, SettingsSearchScope | null>> = {
-  "/settings/diagnostics": "environment",
-  // The Repository page follows its own `repository` key.
-  "/settings/projects": null,
-  "/settings/general": null,
-  "/settings/project-tags": null,
-  "/settings/memory": null,
-  "/settings/vault": null,
-  "/settings/data": null,
-  "/settings/import": null,
-  "/settings/appearance": null,
-  // Keybindings fan out to every machine; Providers, Machines and Storage
-  // always resolve to one machine. None needs a particular scope to render.
-  "/settings/keybindings": null,
-  "/settings/providers": null,
-  "/settings/integrations": null,
-  "/settings/source-control": "environment-defaults",
-  "/settings/storage": "project-defaults",
-  "/settings/connections": "connections",
-  "/settings/machines": null,
-  "/settings/scheduled-tasks": null,
-  "/settings/archived": "project-defaults",
-  "/settings/models": null,
-  "/settings/new-threads": null,
-};
-
-/** Search keeps the selected target. A missing row can explain its owning scope instead. */
-export function getSettingsSearchTargetScope(targetId: string) {
-  const items: readonly SettingsSearchItem[] = SETTINGS_SEARCH_ITEMS;
-  const item =
-    items.find((candidate) => candidate.id === targetId) ??
-    items.find((candidate) => candidate.targetId === targetId);
-  return item
-    ? {
-        title: item.title,
-        scope: item.scope ?? SETTINGS_CATEGORY_SCOPES[item.to],
-      }
-    : null;
-}
-
-export function isSettingsSearchScopeAvailable(
-  requiredScope: SettingsSearchScope | null,
-  scopeKind: ResolvedSettingsScope["kind"],
-): boolean {
-  switch (requiredScope) {
-    case null:
-    case "connections":
-      return true;
-    case "environment":
-    case "project":
-      return requiredScope === scopeKind;
-    case "environment-defaults":
-      return scopeKind === "environment" || scopeKind === "all";
-    case "project-defaults":
-      return scopeKind === "environment" || scopeKind === "all" || scopeKind === "project";
-  }
-}
 
 /**
  * `id` and `title` props for the element a search item anchors to. Panels

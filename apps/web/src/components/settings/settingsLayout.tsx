@@ -58,6 +58,7 @@ import { ALL_PROJECTS_VALUE, selectProjectScope } from "./settingsScopeAxis";
 import {
   groupProjectOverridesByFolder,
   isProjectScopedSettingKey,
+  settingAppliesToAllProjects,
   listProjectOverrides,
   type ProjectOverrideEntry,
   scopedSettingsAreMixed,
@@ -663,8 +664,12 @@ export function SettingsRow({
   // A project scope can only edit keys that support overrides; the rest stay
   // visible, marked as applying to all projects with a way there, but cannot
   // change here.
-  const environmentWide =
-    isProjectScope && (serverScoped ? scopedKeys.length === 0 : clientSetting);
+  const environmentWide = settingAppliesToAllProjects({
+    scopeKind: context?.scope.kind ?? null,
+    serverScoped,
+    clientSetting,
+    settingKeys,
+  });
   const mixed =
     mixedOverride ?? (context !== null && scopedSettingsAreMixed(rowTargets, settingKeys));
   const source = context && isProjectScope ? scopedSettingsSource(rowTargets, scopedKeys) : null;

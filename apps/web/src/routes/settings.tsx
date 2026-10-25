@@ -18,17 +18,12 @@ import {
   SettingsScopeProvider,
   useSettingsScope,
 } from "../components/settings/SettingsScopeContext";
-import { SettingsScopeNotice } from "../components/settings/SettingsScopeNotice";
 import { SETTINGS_SCOPELESS_PATHS } from "../components/settings/SettingsScopeSentence";
 import { SettingsPageContainer, SettingsPageMessage } from "../components/settings/settingsLayout";
 import {
   retainSettingsScope,
   validateSettingsRouteSearch,
 } from "../components/settings/settingsScopeNavigation";
-import {
-  getSettingsSearchTargetScope,
-  isSettingsSearchScopeAvailable,
-} from "../components/settings/settingsSearch";
 
 /**
  * Pages about one machine's own state, which are mostly machine-local
@@ -41,25 +36,12 @@ const MACHINE_SETTINGS_PATHS: ReadonlySet<string> = new Set([
   "/settings/storage",
 ]);
 
+/**
+ * Search results and deep links (the hash) never gate the page: every row
+ * renders at the selected scope, and one that can't vary there marks itself.
+ */
 function SettingsScopeBoundary({ pathname, children }: { pathname: string; children: ReactNode }) {
   const { scope, connectedEnvironments } = useSettingsScope();
-  const hash = useLocation({ select: (location) => location.hash });
-  const searchTarget = getSettingsSearchTargetScope(hash);
-  if (
-    scope.kind !== "unavailable" &&
-    searchTarget &&
-    !isSettingsSearchScopeAvailable(searchTarget.scope, scope.kind)
-  ) {
-    const target =
-      searchTarget.scope === "environment" || searchTarget.scope === "project"
-        ? searchTarget.scope
-        : "all";
-    return (
-      <SettingsScopeNotice target={target} targetId={hash}>
-        {`${searchTarget.title} is not available for the selected target. Choose its owning scope to continue.`}
-      </SettingsScopeNotice>
-    );
-  }
   // Unscoped pages handle their own targets; the Repository page follows
   // its own `repository` key.
   if (SETTINGS_SCOPELESS_PATHS.has(pathname) || pathname === "/settings/projects") {

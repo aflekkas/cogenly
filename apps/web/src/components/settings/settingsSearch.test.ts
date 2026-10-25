@@ -2,8 +2,6 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import {
   filterAvailableSettingsSearchItems,
-  getSettingsSearchTargetScope,
-  isSettingsSearchScopeAvailable,
   movedGeneralSettingsPath,
   searchableSetting,
   searchSettings,
@@ -52,7 +50,6 @@ describe("searchSettings", () => {
       expect.objectContaining({
         id: "ai-greetings",
         to: "/settings/general",
-        scope: "environment-defaults",
       }),
     );
     expect(searchSettings("text generation model")).toContainEqual(
@@ -70,7 +67,6 @@ describe("searchSettings", () => {
           id: "telemetry-export",
           to: "/settings/diagnostics",
           targetId: "telemetry-export",
-          scope: "environment",
         }),
       );
     },
@@ -341,10 +337,6 @@ describe("searchSettings", () => {
       "machines",
       "add-machine",
     ]);
-    expect(getSettingsSearchTargetScope("add-machine")).toEqual({
-      title: "Add a machine",
-      scope: null,
-    });
   });
 
   it("keeps environment settings discoverable without a primary environment", () => {
@@ -357,74 +349,6 @@ describe("searchSettings", () => {
       isWslSettingsRowVisible: false,
     });
     expect(searchSettings("writing style", available)[0]?.id).toBe("source-control-writing-style");
-  });
-});
-
-describe("settings search targets", () => {
-  it("requires an environment for the resolved telemetry export destination", () => {
-    const result = searchSettings("OpenTelemetry export").find(
-      (item) => item.id === "telemetry-export",
-    )!;
-    const target = getSettingsSearchTargetScope(result.targetId ?? result.id)!;
-    expect(isSettingsSearchScopeAvailable(target.scope, "all")).toBe(false);
-    expect(isSettingsSearchScopeAvailable(target.scope, "project")).toBe(false);
-    expect(isSettingsSearchScopeAvailable(target.scope, "environment")).toBe(true);
-  });
-  it("treats device-local rows as reachable from every selection", () => {
-    const setting = getSettingsSearchTargetScope("time-format")!;
-    expect(setting).toEqual({ title: "Time format", scope: null });
-    expect(isSettingsSearchScopeAvailable(setting.scope, "project")).toBe(true);
-    expect(isSettingsSearchScopeAvailable(setting.scope, "all")).toBe(true);
-    expect(getSettingsSearchTargetScope("appearance")).toMatchObject({ scope: null });
-    expect(getSettingsSearchTargetScope("missing-setting")).toBeNull();
-  });
-
-  it.each(["all", "environment", "project"] as const)(
-    "makes browser access editable at the %s scope",
-    (kind) => {
-      const setting = getSettingsSearchTargetScope("agent-browser-access")!;
-      expect(isSettingsSearchScopeAvailable(setting.scope, kind)).toBe(true);
-      expect(isSettingsSearchScopeAvailable(setting.scope, "unavailable")).toBe(false);
-    },
-  );
-
-  it("lets project-scopable rows resolve at every server-backed scope", () => {
-    const model = getSettingsSearchTargetScope("text-generation-model")!;
-    expect(isSettingsSearchScopeAvailable(model.scope, "all")).toBe(true);
-    expect(isSettingsSearchScopeAvailable(model.scope, "environment")).toBe(true);
-    expect(isSettingsSearchScopeAvailable(model.scope, "project")).toBe(true);
-  });
-
-  it("reaches source control discovery and git fetch interval from the default scope", () => {
-    for (const id of ["source-control", "git-fetch-interval"]) {
-      const item = getSettingsSearchTargetScope(id)!;
-      expect(isSettingsSearchScopeAvailable(item.scope, "all")).toBe(true);
-      expect(isSettingsSearchScopeAvailable(item.scope, "environment")).toBe(true);
-      expect(isSettingsSearchScopeAvailable(item.scope, "project")).toBe(false);
-    }
-  });
-
-  it("keeps environment-wide settings out of project scopes", () => {
-    const updates = getSettingsSearchTargetScope("provider-update-checks")!;
-    expect(updates.scope).toBe("environment-defaults");
-    expect(isSettingsSearchScopeAvailable(updates.scope, "environment")).toBe(true);
-    expect(isSettingsSearchScopeAvailable(updates.scope, "all")).toBe(true);
-    expect(isSettingsSearchScopeAvailable(updates.scope, "project")).toBe(false);
-    const streaming = getSettingsSearchTargetScope("response-streaming")!;
-    expect(streaming.scope).toBe("project-defaults");
-    expect(isSettingsSearchScopeAvailable(streaming.scope, "project")).toBe(true);
-    for (const id of ["legacy-plan-mode", "legacy-context-window-indicator", "legacy-sidebar"]) {
-      expect(getSettingsSearchTargetScope(id)!.scope).toBeNull();
-    }
-  });
-});
-
-describe("settings sidebar scope", () => {
-  it("keeps project actions to a project scope", () => {
-    const actions = getSettingsSearchTargetScope("project-actions")!;
-    expect(isSettingsSearchScopeAvailable(actions.scope, "project")).toBe(true);
-    expect(isSettingsSearchScopeAvailable(actions.scope, "all")).toBe(false);
-    expect(isSettingsSearchScopeAvailable(actions.scope, "environment")).toBe(false);
   });
 });
 

@@ -18,6 +18,7 @@ import {
   planScopedSettingsPatch,
   resolveScopedSettingsTargets,
   selectMachineLocalSettingsTargets,
+  settingAppliesToAllProjects,
 } from "./scopedSettings";
 import { buildSettingsProjectFolders, resolveSettingsScope } from "./settingsScope";
 
@@ -347,5 +348,32 @@ describe("overrides edited outside a project scope", () => {
     expect(listProjectOverrides(overridden, ["worktreeCleanup"])).toEqual([
       { environmentId: vpsId, projectId: appVps.id },
     ]);
+  });
+});
+
+describe("settingAppliesToAllProjects", () => {
+  it("shows AI greetings inline at a project scope, marked as applying to all projects", () => {
+    const row = { serverScoped: true, clientSetting: false, settingKeys: ["aiGreetings"] };
+    expect(settingAppliesToAllProjects({ ...row, scopeKind: "project" })).toBe(true);
+    for (const scopeKind of ["all", "environment", null] as const) {
+      expect(settingAppliesToAllProjects({ ...row, scopeKind })).toBe(false);
+    }
+  });
+
+  it("keeps rows that take a project value editable at a project scope", () => {
+    expect(
+      settingAppliesToAllProjects({
+        scopeKind: "project",
+        serverScoped: true,
+        clientSetting: false,
+        settingKeys: ["responseStreamingMode"],
+      }),
+    ).toBe(false);
+  });
+
+  it("marks client settings, which have no per-project value", () => {
+    const row = { serverScoped: false, settingKeys: [], scopeKind: "project" } as const;
+    expect(settingAppliesToAllProjects({ ...row, clientSetting: true })).toBe(true);
+    expect(settingAppliesToAllProjects({ ...row, clientSetting: false })).toBe(false);
   });
 });

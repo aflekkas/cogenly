@@ -7,6 +7,7 @@ import { DraftInput } from "../ui/draft-input";
 import { ProjectActionsSettings } from "./ProjectActionsSettings";
 import { ProjectDefaultsSettings } from "./ProjectDefaultsSettings";
 import { useSettingsScope } from "./SettingsScopeContext";
+import { ProjectScopeMenu } from "./SettingsScopeSentence";
 import { SettingResetButton, SettingsRow, SettingsSection } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 import {
@@ -25,7 +26,19 @@ export function NewThreadsSettingsPanel() {
     <>
       <ProjectDefaultsSettings category="new-threads" />
       <AddingRepositoriesSettings />
-      {scope.kind === "project" ? <ProjectActionsSettings /> : null}
+      {scope.kind === "project" ? (
+        <ProjectActionsSettings />
+      ) : (
+        // Actions belong to one project; outside one, the row stays reachable
+        // from search and points at a project instead of disappearing.
+        <SettingsSection id={searchableSetting("project-actions").id} title="Actions">
+          <SettingsRow
+            title="Project actions"
+            description="Each project has its own actions. Choose a project to edit them."
+            control={<ProjectScopeMenu />}
+          />
+        </SettingsSection>
+      )}
     </>
   );
 }

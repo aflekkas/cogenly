@@ -50,6 +50,21 @@ export function isProjectScopedSettingKey(key: string): key is ProjectScopedServ
   return PROJECT_SCOPED_KEYS.has(key);
 }
 
+/**
+ * A row at a project scope that can't take a project value. It still renders
+ * inline, marked "Applies to all projects" with a link there, never a blocked
+ * page: `SettingsRow` and every search or deep link rely on this.
+ */
+export function settingAppliesToAllProjects(row: {
+  readonly scopeKind: ResolvedSettingsScope["kind"] | null;
+  readonly serverScoped: boolean;
+  readonly clientSetting: boolean;
+  readonly settingKeys: readonly string[];
+}): boolean {
+  if (row.scopeKind !== "project") return false;
+  return row.serverScoped ? !row.settingKeys.some(isProjectScopedSettingKey) : row.clientSetting;
+}
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
