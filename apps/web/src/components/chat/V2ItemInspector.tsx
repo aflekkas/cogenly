@@ -23,7 +23,12 @@ import { formatWorkspaceRelativePath } from "../../filePathDisplay";
 import { Button } from "../ui/button";
 import ChatMarkdown, { ChatMarkdownAssetImage } from "../ChatMarkdown";
 import { RenderErrorBoundary } from "../RenderErrorBoundary";
-import { CommandOutputPanel, useCommandOutputStreaming } from "./CommandOutputPanel";
+import {
+  CommandOutputPanel,
+  TerminalOutputBlock,
+  useCommandOutputStreaming,
+} from "./CommandOutputPanel";
+import { parseTerminalRunResult, terminalRunResultSummary } from "./terminalRunResult.logic";
 import { resolveExternalWebLinkHref } from "./externalLinkContextMenu";
 import type { ExpandedImagePreview } from "./ExpandedImagePreview";
 import { ShellCommandBlock } from "./ShellCommandBlock";
@@ -542,6 +547,24 @@ export const V2ItemExpansion = memo(function V2ItemExpansion(props: {
       break;
     }
     case "dynamic_tool": {
+      // A command the agent ran reads like one: the command, then its output
+      // as a terminal shows it, not the tool's JSON.
+      const terminalRun = tool?.key === "terminal_run" ? parseTerminalRunResult(item.output) : null;
+      if (terminalRun) {
+        const call = toolCallLines({ args: item.input });
+        const commandText = call.args?.find(([key]) => key === "command")?.[1];
+        command = commandText ? <ShellCommandBlock command={commandText} /> : null;
+        args = undefined;
+        resultSummary = terminalRunResultSummary(terminalRun) ?? resultSummary;
+        body = mono(
+          terminalRun.output ? (
+            <TerminalOutputBlock text={terminalRun.output} truncated={terminalRun.truncated} />
+          ) : (
+            <div className="italic">No output.</div>
+          ),
+        );
+        break;
+      }
       if (!args) {
         const call = toolCallLines({ args: item.input });
         args = call.args ? argRows(call.args, item.toolName) : undefined;

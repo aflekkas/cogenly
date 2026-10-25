@@ -42,7 +42,7 @@ export class TerminalMcpService extends Context.Service<
     readonly run: (
       input: RunInput,
     ) => Effect.Effect<
-      TerminalManager.AgentTerminalResult,
+      TerminalManager.AgentTerminalResult & { readonly sandbox?: "read-only" },
       OrchestratorMcpFailure,
       McpInvocationContext.McpInvocationContext
     >;
@@ -123,7 +123,7 @@ const make = Effect.gen(function* () {
     run: (input) =>
       Effect.gen(function* () {
         const { threadId } = yield* access;
-        const started = yield* executor.withLock(
+        const { started, sandboxed } = yield* executor.withLock(
           threadId,
           Effect.gen(function* () {
             const { caller, scope, terminalPolicy } = yield* writable;
@@ -155,7 +155,7 @@ const make = Effect.gen(function* () {
               path.isAbsolute(relative)
             )
               return yield* denied("cwd must be inside this thread's workspace.");
-            return yield* manager
+            const started = yield* manager
               .runAgent({
                 threadId,
                 terminalPolicy,
@@ -177,9 +177,10 @@ const make = Effect.gen(function* () {
                     : unavailable(),
                 ),
               );
+            return { started, sandboxed: terminalPolicy === "readOnlyLookup" };
           }),
         );
-        return yield* input.background
+        const result = yield* input.background
           ? Effect.succeed(started)
           : manager
               .waitAgent({
@@ -188,6 +189,9 @@ const make = Effect.gen(function* () {
                 ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
               })
               .pipe(Effect.mapError(unavailable));
+        // Marks a chat's lookup that ran in the read-only sandbox, for the
+        // agent and for the timeline row that shows it.
+        return sandboxed ? { ...result, sandbox: "read-only" as const } : result;
       }),
     read: (input) =>
       Effect.gen(function* () {

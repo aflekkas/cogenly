@@ -214,7 +214,13 @@ it.effect(
         // project's workspace, and cannot start outside it.
         const realFolder = yield* fs.realPath(projectFolder);
         spawnedIn.length = 0;
-        yield* as("chat", tools.run({ command: "git log --oneline", background: true }));
+        const lookup = yield* as(
+          "chat",
+          tools.run({ command: "git log --oneline", background: true }),
+        );
+        // The result says it ran sandboxed; an ordinary thread's does not.
+        expect(lookup.sandbox).toBe("read-only");
+        expect(started.sandbox).toBeUndefined();
         expect(spawnedIn).toEqual([realFolder]);
         expect(launches.at(-1)?.shell).toBe("/usr/bin/sandbox-exec");
         expect(launches.at(-1)?.args).toContain("git log --oneline");

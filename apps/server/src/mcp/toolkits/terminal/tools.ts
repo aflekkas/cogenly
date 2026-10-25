@@ -30,6 +30,8 @@ const result = Schema.Struct({
   nextOffset: NonNegativeInt,
   truncated: Schema.Boolean,
   notice: Schema.optional(Schema.String),
+  /** Set when a chat's command ran in the read-only sandbox. */
+  sandbox: Schema.optional(Schema.Literal("read-only")),
 });
 const run = Tool.make("terminal_run", {
   ...shared,
