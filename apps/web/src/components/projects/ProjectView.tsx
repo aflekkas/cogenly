@@ -11,6 +11,7 @@ import {
   ArchiveIcon,
   ArchiveRestoreIcon,
   ChevronLeftIcon,
+  CopyIcon,
   MoreHorizontalIcon,
   PaletteIcon,
   PencilIcon,
@@ -43,11 +44,17 @@ import {
 import {
   possibleDuplicateProjects,
   PROJECT_LABEL_COLORS,
+  projectMergeCandidates,
   projectLabelEnvironmentIds,
   projectLabelKey,
   projectLabelOn,
   projectLabelPaletteColor,
+  type PossibleDuplicateProjects,
 } from "../../projectLabels/projectLabels.logic";
+import {
+  useMergeDuplicateProjects,
+  useProjectMergePermissions,
+} from "../../projectLabels/useMergeDuplicateProjects";
 import { linkedRepositoryRows } from "../../projectLabels/repositoryPicker.logic";
 import { reportProjectFolderFailure } from "../../projectLabels/useMoveThreadToFolder";
 import { useProjectArchive } from "../../projectLabels/useProjectArchive";
@@ -182,7 +189,39 @@ function ProjectMachineMenuItems(props: {
   );
 }
 
-/** The header's ⋯ menu: a new chat in the project, rename, color, details, move, archive, delete. */
+/** "Merge with" and the other projects a machine has alongside this one. */
+function ProjectMergeMenuItems(props: {
+  readonly labelId: ProjectLabelId;
+  readonly candidates: ReadonlyArray<PossibleDuplicateProjects>;
+  readonly allowedMerges: ReadonlySet<string>;
+  readonly onMerge: (pair: PossibleDuplicateProjects) => void;
+}) {
+  return (
+    <MenuSub>
+      <MenuSubTrigger disabled={props.allowedMerges.size === 0}>
+        <CopyIcon />
+        Merge with
+      </MenuSubTrigger>
+      <MenuSubPopup>
+        {props.candidates.map((pair) => {
+          const other = pair.into.label.id === props.labelId ? pair.from : pair.into;
+          return (
+            <MenuItem
+              key={pair.key}
+              disabled={!props.allowedMerges.has(pair.key)}
+              onClick={() => props.onMerge(pair)}
+            >
+              <ProjectFolderIcon project={other} className="size-4" />
+              {other.label.name}…
+            </MenuItem>
+          );
+        })}
+      </MenuSubPopup>
+    </MenuSub>
+  );
+}
+
+/** The header's ⋯ menu: a new chat in the project, rename, color, details, move, merge, archive, delete. */
 function ProjectHeaderMenu(props: {
   readonly label: ProjectLabelWithRepositories;
   readonly canEdit: boolean;
@@ -191,6 +230,9 @@ function ProjectHeaderMenu(props: {
   readonly canArchive: boolean;
   readonly machineTargets: ReadonlyArray<MachineMoveTarget>;
   readonly canMoveToMachine: boolean;
+  readonly mergeCandidates: ReadonlyArray<PossibleDuplicateProjects>;
+  readonly allowedMerges: ReadonlySet<string>;
+  readonly onMerge: (pair: PossibleDuplicateProjects) => void;
   readonly onNewChat: () => void;
   readonly onRename: () => void;
   readonly onRecolor: (color: string) => void;
@@ -247,6 +289,12 @@ function ProjectHeaderMenu(props: {
           targets={props.machineTargets}
           canMove={props.canMoveToMachine}
           onMove={props.onMoveToMachine}
+        />
+        <ProjectMergeMenuItems
+          labelId={props.label.id}
+          candidates={props.mergeCandidates}
+          allowedMerges={props.allowedMerges}
+          onMerge={props.onMerge}
         />
         <MenuSeparator />
         <MenuItem disabled={!props.canArchive} onClick={props.onToggleArchived}>
@@ -360,6 +408,12 @@ function ProjectPage(props: {
           ),
     [directory, entry],
   );
+  const mergeCandidates = useMemo(
+    () => (entry === null ? [] : projectMergeCandidates(entry, directory.labels)),
+    [directory, entry],
+  );
+  const allowedMerges = useProjectMergePermissions(mergeCandidates);
+  const { mergePair } = useMergeDuplicateProjects();
   const chats = useMemo(() => sortRecentFirst(contents?.chats ?? [], chatActivityAt), [contents]);
   const work = useMemo(() => sortRecentFirst(contents?.work ?? [], chatActivityAt), [contents]);
   const [editingSources, setEditingSources] = useState(false);
@@ -485,6 +539,14 @@ function ProjectPage(props: {
                 canArchive={archive.canArchive}
                 machineTargets={machineTargets}
                 canMoveToMachine={canMoveToMachine}
+                mergeCandidates={mergeCandidates}
+                allowedMerges={allowedMerges}
+                onMerge={(pair) =>
+                  void mergePair(pair).then((merged) => {
+                    // Merged away, this project's page is gone too.
+                    if (merged && pair.from.key === entry.key) leave();
+                  })
+                }
                 onMoveToMachine={(target) =>
                   void moveProjectToMachine({
                     environmentId,

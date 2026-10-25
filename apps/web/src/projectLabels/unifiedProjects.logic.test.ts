@@ -10,6 +10,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { projectMachinesLabel } from "../components/projects/projectPanel.logic";
 import {
   possibleDuplicateProjects,
+  projectMergeCandidates,
   projectLabelEnvironmentIds,
   projectLabelKey,
   projectLabelOn,
@@ -214,5 +215,47 @@ describe("projectMachinesLabel", () => {
       "MacBook · Contabo VPS",
     );
     expect(projectMachinesLabel(["gone" as EnvironmentId], () => null)).toBeNull();
+  });
+});
+
+describe("projectMergeCandidates", () => {
+  it("offers dismissed and differently named projects, preserving the older destination", () => {
+    const unified = unifyProjectLabels([
+      {
+        environmentId: mac,
+        labels: [
+          label("label:new", "New name", [], { createdAt: "2026-10-03T00:00:00.000Z" }),
+          label("label:old", "Old name"),
+        ],
+      },
+    ]);
+    const entry = unified.labels.find((each) => each.label.id === "label:new")!;
+    expect(possibleDuplicateProjects(unified.labels)).toEqual([]);
+    const candidates = projectMergeCandidates(entry, unified.labels);
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]).toMatchObject({
+      environmentId: mac,
+      into: { label: { id: "label:old" } },
+      from: { label: { id: "label:new" } },
+    });
+  });
+
+  it("excludes itself and projects with no shared machine", () => {
+    const unified = unifyProjectLabels([
+      { environmentId: mac, labels: [label("label:local", "Local")] },
+      { environmentId: vps, labels: [label("label:remote", "Remote")] },
+    ]);
+    expect(projectMergeCandidates(unified.labels[0]!, unified.labels)).toEqual([]);
+  });
+
+  it("uses a shared replica even when each project's preferred machine differs", () => {
+    const a = label("label:a", "A");
+    const b = label("label:b", "B");
+    const unified = unifyProjectLabels([
+      { environmentId: mac, labels: [a] },
+      { environmentId: vps, labels: [a, b] },
+    ]);
+    const entry = unified.labels.find((each) => each.label.id === a.id)!;
+    expect(projectMergeCandidates(entry, unified.labels)[0]?.environmentId).toBe(vps);
   });
 });
