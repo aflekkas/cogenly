@@ -1948,13 +1948,8 @@ function CloudLinkRow({
   return <ConfiguredCloudLinkRow canManageRelay={canManageRelay} />;
 }
 
-function EmptyRemoteEnvironments({
-  cloudEnabled = true,
-  onConnect,
-}: {
-  readonly cloudEnabled?: boolean;
-  readonly onConnect: () => void;
-}) {
+/** No action of its own: the section's Connect a machine sits right above it. */
+function EmptyRemoteEnvironments({ cloudEnabled = true }: { readonly cloudEnabled?: boolean }) {
   return (
     <SettingsEmpty
       icon={<ChevronsLeftRightEllipsisIcon />}
@@ -1964,11 +1959,6 @@ function EmptyRemoteEnvironments({
           ? "Use another machine running Cogenly from this app, by its address, over SSH, or through Cogenly Connect."
           : "Use another machine running Cogenly from this app, by its address or over SSH."
       }
-      action={
-        <Button size="sm" variant="outline" onClick={onConnect}>
-          Connect a machine
-        </Button>
-      }
     />
   );
 }
@@ -1976,20 +1966,18 @@ function EmptyRemoteEnvironments({
 function CloudRemoteEnvironmentRows({
   primaryEnvironmentId,
   savedEnvironments,
-  onConnect,
 }: {
   readonly primaryEnvironmentId: EnvironmentId | null;
   readonly savedEnvironments: ReadonlyArray<EnvironmentPresentation>;
-  readonly onConnect: () => void;
 }) {
   return hasCloudPublicConfig() ? (
     <CloudEnvironmentConnectRows
       primaryEnvironmentId={primaryEnvironmentId}
       savedEnvironments={savedEnvironments}
-      empty={<EmptyRemoteEnvironments onConnect={onConnect} />}
+      empty={<EmptyRemoteEnvironments />}
     />
   ) : savedEnvironments.length === 0 ? (
-    <EmptyRemoteEnvironments cloudEnabled={false} onConnect={onConnect} />
+    <EmptyRemoteEnvironments cloudEnabled={false} />
   ) : null;
 }
 
@@ -3867,11 +3855,6 @@ export function ConnectionsSettings() {
         <CloudRemoteEnvironmentRows
           primaryEnvironmentId={primaryEnvironmentId}
           savedEnvironments={savedEnvironments}
-          onConnect={() => {
-            setRouteTarget(null);
-            setSavedBackendError(null);
-            setAddBackendDialogOpen(true);
-          }}
         />
       </SettingsSection>
       <RenameEnvironmentDialog
