@@ -1310,7 +1310,7 @@ export default function ChatView(props: ChatViewProps) {
     [serverVisibleTurnItems],
   );
   // Queued messages have no turn item until their run starts, so the
-  // turn-item-derived set alone can never retire their optimistic rows —
+  // turn-item-derived set alone can never retire their optimistic rows;
   // cancelling such a run would leave a phantom "pending" queue row behind.
   // Union in the projection's user messages: once the server holds the
   // message, the optimistic copy is redundant everywhere it could render.
@@ -1357,7 +1357,7 @@ export default function ChatView(props: ChatViewProps) {
       : null;
   }, [citationHref, citationKey, environmentId, threadId]);
   const { resolvedTheme } = useTheme();
-  // Granular store selectors — avoid subscribing to prompt changes.
+  // Granular store selectors, to avoid subscribing to prompt changes.
   const composerInteractionMode = useComposerDraftStore(
     (store) => store.getComposerDraft(composerDraftTarget)?.interactionMode ?? null,
   );
@@ -1887,7 +1887,7 @@ export default function ChatView(props: ChatViewProps) {
     () => deriveActivePlanState(serverProjection, activeActivityRun?.runId),
     [activeActivityRun?.runId, serverProjection],
   );
-  // Tasks progress for the running turn's own plan only — deriveActivePlanState
+  // Tasks progress for the running turn's own plan only; deriveActivePlanState
   // falls back to older runs' plans, which must not label fresh work.
   const activeComposerTasksProgress = useMemo(() => {
     if (
@@ -4858,7 +4858,7 @@ export default function ChatView(props: ChatViewProps) {
         const scrollNode = legendListRef.current?.getScrollableNode();
         if (!scrollNode) {
           // The list may not have mounted on the first frame after a thread
-          // switch — without a retry the opt-out listeners never attach and
+          // switch. Without a retry the opt-out listeners never attach and
           // live-follow becomes impossible to escape for the whole thread.
           if (remainingAttempts > 0) {
             attach(remainingAttempts - 1);
@@ -4898,7 +4898,7 @@ export default function ChatView(props: ChatViewProps) {
         };
         // Touch direction isn't observable here (touchmove fires on any
         // finger motion, scrolling or not), so break only once the drag has
-        // actually carried the viewport out of the end band — an upward flick
+        // actually carried the viewport out of the end band. An upward flick
         // gets there within its first few events and later touchmoves break.
         const handleTouchMove = () => {
           if (viewportIsAwayFromEnd()) {
@@ -5585,7 +5585,7 @@ export default function ChatView(props: ChatViewProps) {
   };
   // The stack renders items[0] front-most and tucks the rest behind hover, so
   // ordering is priority: system banners, then the branch-mismatch notice,
-  // and the informational parked-thread banner last — it must never cover another.
+  // and the informational parked-thread banner last, since it must never cover another.
   // Background work (subagent fleets, workflow runs, watch loops, dev servers) can outlive
   // the turn, and stays listed while a steer or wake runs a new one. Once the turn
   // settles the composer stop button is gone, so this banner is the only visible stop
@@ -6154,7 +6154,7 @@ export default function ChatView(props: ChatViewProps) {
         icon: <GitBranchIcon />,
         title: (
           <span className="flex min-w-0 items-baseline gap-1.5">
-            <span className="shrink-0 font-normal text-muted-foreground">Branch changed — was</span>
+            <span className="shrink-0 font-normal text-muted-foreground">Branch changed from</span>
             <Tooltip>
               <TooltipTrigger
                 render={
@@ -9645,7 +9645,7 @@ export default function ChatView(props: ChatViewProps) {
             )}
             {/* Messages Wrapper */}
             <div className="relative flex min-h-0 flex-1 flex-col bg-background">
-              {/* Messages — LegendList handles virtualization and scrolling internally */}
+              {/* Messages: LegendList handles virtualization and scrolling internally */}
               <WorkHandoffMarkersProvider
                 environmentId={activeThreadShell?.environmentId ?? null}
                 anchors={paintOnlyDisplayedTimeline ? null : workHandoffAnchors}
@@ -9809,7 +9809,7 @@ export default function ChatView(props: ChatViewProps) {
               </div>
             </div>
 
-            {/* Input bar — centered for an empty draft, docked after sending. */}
+            {/* Input bar, centered for an empty draft, docked after sending. */}
             <div
               ref={setComposerOverlayElement}
               inert={isRevertingCheckpoint}

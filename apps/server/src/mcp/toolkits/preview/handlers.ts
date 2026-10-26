@@ -39,7 +39,7 @@ import { PreviewSnapshotToolkit, PreviewStandardToolkit, PreviewToolkit } from "
  * Collapses the `show` alias onto `open` and defaults tab reuse.
  *
  * Deliberately leaves an unstated `open` unstated. Whether a preview the agent
- * said nothing about surfaces is the client's call — filling in `true` would
+ * said nothing about surfaces is the client's call; filling in `true` would
  * force every `preview_open` into view.
  */
 export function normalizePreviewOpenInput(

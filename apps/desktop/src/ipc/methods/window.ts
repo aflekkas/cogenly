@@ -99,7 +99,7 @@ export const getLocalEnvironmentBootstraps = DesktopIpc.makeSyncIpcMethod({
       // is retrying a *transient* preflight failure (WSL VM still booting, a
       // not-yet-built linux server entry) is not listening on a port. We
       // surface it as a *pending* bootstrap (null endpoints, no token) so the
-      // renderer can show a "Connecting…" indicator while it retries — null
+      // renderer can show a "Connecting…" indicator while it retries. Null
       // endpoints keep the renderer from dialing the dead port, avoiding the
       // needless /api/auth/bootstrap/bearer error cycles a real endpoint would
       // trigger.
@@ -107,7 +107,7 @@ export const getLocalEnvironmentBootstraps = DesktopIpc.makeSyncIpcMethod({
         // Skip the primary (same-origin, no "connecting" affordance) and skip a
         // secondary whose preflight failed *fatally* (no node, wrong version,
         // missing build tools): it has stopped retrying, so an indefinite
-        // "Connecting…" would be misleading — its error is surfaced by the
+        // "Connecting…" would be misleading; its error is surfaced by the
         // WSL-state UI instead.
         const fatalPreflight =
           Option.isSome(config) &&

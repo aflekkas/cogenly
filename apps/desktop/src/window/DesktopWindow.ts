@@ -115,7 +115,7 @@ export class DesktopWindow extends Context.Service<
     // macOS "activate without windows" path may open the real main window. The
     // renderer now always loads the local client URL (getDesktopUrl) and connects
     // to the backend through the connection layer, so the reported httpBaseUrl is
-    // no longer used to point the window at the backend — it is kept only for the
+    // no longer used to point the window at the backend. It is kept only for the
     // readiness log and to preserve the callback contract the backend pool drives.
     readonly handleBackendReady: (httpBaseUrl: URL) => Effect.Effect<void, DesktopWindowError>;
     // Called when the backend transitions back to "not ready" (clean stop,
@@ -213,7 +213,7 @@ function splashAccentTint(accent: AppearanceAccent): string | null {
 
 // A self-contained "Connecting to WSL" splash, shown immediately in wsl-only
 // mode while the WSL backend (which serves the renderer) cold-boots. Inlined as
-// a data URL so it needs no bundled asset and no backend — pure CSS, no JS.
+// a data URL so it needs no bundled asset and no backend: pure CSS, no JS.
 // Under another accent the ember takes its hue, as the web boot splash does.
 function buildConnectingSplashDataUrl(accent: AppearanceAccent): string {
   const tint = splashAccentTint(accent);
@@ -827,7 +827,7 @@ export const make = Effect.gen(function* () {
       // Long sessions can OOM the renderer (V8 heap exhaustion from
       // accumulated thread state). Without a reload the user is left staring
       // at a dead white window while agents keep running invisibly, so
-      // recover by reloading — the renderer rehydrates from the backend,
+      // recover by reloading; the renderer rehydrates from the backend,
       // which is unaffected. Recovery attempts are bounded so a renderer
       // that dies immediately on boot cannot reload-loop forever.
       runFork(
@@ -968,7 +968,7 @@ export const make = Effect.gen(function* () {
     void splash.loadURL(buildConnectingSplashDataUrl(accentColor));
     yield* logWindowInfo("connecting splash shown");
   }).pipe(
-    // The splash is best-effort UX — never let it fail startup.
+    // The splash is best-effort UX; never let it fail startup.
     Effect.catch((error) =>
       logWindowWarning("failed to show connecting splash", { message: error.message }),
     ),

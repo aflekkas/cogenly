@@ -17,9 +17,9 @@ import {
 /** A mode's dot: amber when something waits on you, blue when there is unread news. */
 export type ModeIndicatorTone = "warning" | "info";
 
-/** A mode's accessible name while its dot is lit: "Chats — needs you", "Chats — unread". */
+/** A mode's accessible name while its dot is lit: "Chats: needs you", "Chats: unread". */
 export const modeIndicatorLabel = (modeLabel: string, tone: ModeIndicatorTone) =>
-  `${modeLabel} — ${tone === "warning" ? "needs you" : "unread"}`;
+  `${modeLabel}: ${tone === "warning" ? "needs you" : "unread"}`;
 
 /**
  * Each mode's dot on the navigation rail. It asks the sidebar's own questions,

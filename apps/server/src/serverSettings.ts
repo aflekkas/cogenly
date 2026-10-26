@@ -95,7 +95,7 @@ const textDecoder = new TextDecoder();
  * explicit provider instances carry exactly one enabled flag. Old settings
  * files can hold both flags with conflicting values; an explicit false on
  * either side wins so a user's disable is never silently undone. Runs on
- * every load and update — the file converges on the next write.
+ * every load and update; the file converges on the next write.
  */
 const foldProviderInstanceEnabledFlags = (settings: ServerSettings): ServerSettings => {
   let changed = false;
@@ -510,7 +510,7 @@ function fallbackTextGenerationProvider(settings: ServerSettings): ServerSetting
   return fallback === null ? settings : { ...settings, textGenerationModelSelection: fallback };
 }
 
-// Values under these keys are compared as a whole — never stripped field-by-field.
+// Values under these keys are compared as a whole, never stripped field-by-field.
 const ATOMIC_SETTINGS_KEYS: ReadonlySet<string> = new Set([
   "backgroundActivity",
   "automaticGitFetchInterval",

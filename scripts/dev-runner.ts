@@ -43,14 +43,14 @@ const FETCH_BAD_PORTS = new Set([
 // Dev servers bind loopback, so loopback is the only interface whose
 // availability decides whether we can use a port. Probing wildcards too made
 // the runner walk away from a perfectly free port whenever something else held
-// the same number on another interface — `tailscale serve` does exactly that,
+// the same number on another interface. `tailscale serve` does exactly that,
 // which silently moved the ports out from under a URL that had just been shared.
 const DEV_PORT_PROBE_HOSTS = ["127.0.0.1", "::1"] as const;
 
 /**
  * Bind hosts on which a backend still answers `http://localhost:<port>`, which
  * is where single-origin browser dev proxies to. Loopback and the wildcards
- * qualify; a specific interface (e.g. a LAN IP) does not — the OS binds only
+ * qualify; a specific interface (e.g. a LAN IP) does not: the OS binds only
  * that address and the proxy target goes dark.
  */
 export function isProxiableBindHost(host: string): boolean {
@@ -255,7 +255,7 @@ export function resolveOffset(config: {
   // Worktrees get ports derived from their path so each one is stable across
   // restarts and distinct from its siblings. Without this every worktree starts
   // at offset 0 and scan-collides onto whatever happens to be free that minute,
-  // so ports move under you between runs — which breaks any URL you already
+  // so ports move under you between runs, which breaks any URL you already
   // shared. The main checkout keeps the documented 9733/23773.
   const worktreePath = config.worktreePath?.trim();
   if (worktreePath) {
@@ -342,16 +342,16 @@ export function createDevRunnerEnv({
       // HOST is Vite's own bind address, and the desktop branch below is the
       // only place we set it. An inherited one (an exported HOST, a container,
       // a `HOST=0.0.0.0 npm start` habit) would otherwise reach Vite and pin
-      // its HMR socket to that address — see the `explicitHost` gate in
-      // apps/web/vite.config.ts. Over a shared origin that is invisible: the
+      // its HMR socket to that address (see the `explicitHost` gate in
+      // apps/web/vite.config.ts). Over a shared origin that is invisible: the
       // page loads and only HMR quietly dials the wrong machine.
       delete output.HOST;
       if (mode === "dev" || mode === "dev:web") {
         // Browser dev is single-origin: everything (including /ws) is proxied
         // through Vite, so the client must resolve its backend from
         // window.location.origin rather than a baked-in localhost URL. See
-        // resolveConfiguredPrimaryTarget in apps/web/src/environments/primary/target.ts
-        // — it only defers to the origin when both of these are absent. Baking
+        // resolveConfiguredPrimaryTarget in apps/web/src/environments/primary/target.ts:
+        // it only defers to the origin when both of these are absent. Baking
         // localhost here is what breaks any non-localhost origin (tailnet, LAN,
         // phone): the remote browser dials its own machine.
         delete output.VITE_HTTP_URL;
@@ -451,12 +451,12 @@ export function checkPortAvailabilityOnHosts<R>(
  * Loopback is always checked because the web server and the desktop renderer
  * target reach it there. When `--host`/`COGENLY_HOST` moves the backend onto
  * another interface, that interface decides whether the bind actually
- * succeeds — probing only loopback would hand back a port that is free here
+ * succeeds. Probing only loopback would hand back a port that is free here
  * and taken there, and the server would fail to start.
  *
  * `configuredHost` applies to the *backend* only. Vite takes its bind address
  * from `HOST`, which the runner sets for desktop alone, so the web port stays
- * on loopback and must not be judged against the backend's interface —
+ * on loopback and must not be judged against the backend's interface;
  * a port free on loopback but busy on that interface would otherwise be
  * rejected for a server that was never going to bind there.
  */
@@ -636,7 +636,7 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
     // bind still answers there; a specific non-loopback interface does not,
     // which breaks every proxied request in a way that reads as "server is
     // broken" rather than "flag combination is unsupported". Reject it up
-    // front instead. (dev:server and dev:desktop don't proxy — untouched.)
+    // front instead. (dev:server and dev:desktop don't proxy, so they're untouched.)
     if (
       (input.mode === "dev" || input.mode === "dev:web") &&
       input.host !== undefined &&
@@ -665,11 +665,11 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
 
     const hostEnvironment = yield* HostProcess.Environment;
     // A dev server started inside a worktree defaults to that worktree's own
-    // (gitignored) `.cogenly` — see @cogenly/shared/devHome for why this must
+    // (gitignored) `.cogenly`; see @cogenly/shared/devHome for why this must
     // outrank an ambient COGENLY_HOME. `--home-dir` still wins.
     const worktreeHome = yield* resolveWorktreeT3Home(yield* HostProcess.WorkingDirectory);
     // Trim before choosing: `--home-dir ""` is not a selection, and treating it
-    // as one would skip the worktree default and land on the shared home —
+    // as one would skip the worktree default and land on the shared home,
     // exactly the outcome this precedence exists to prevent.
     const resolvedT3Home =
       (input.t3Home?.trim() || undefined) ??
@@ -700,7 +700,7 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
     );
 
     // Before the share block: --dry-run only resolves and prints. Sharing would
-    // replace, then tear down, whatever mapping the port already had — a
+    // replace, then tear down, whatever mapping the port already had: a
     // surprising side effect from a command documented as inert.
     if (input.dryRun) {
       return;
@@ -728,11 +728,11 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
         //
         // Deliberately no ownership tracking beyond that: if a second runner
         // takes this port during a fast restart, the first's exit can briefly
-        // tear down the new mapping — visible (the URL stops working) and fixed
+        // tear down the new mapping. That is visible (the URL stops working) and fixed
         // by re-running --share. A lease protocol closing that window existed
         // and was removed as more machinery than a dev convenience warrants.
         //
-        // A tailnet that isn't up shouldn't stop the dev server from starting —
+        // A tailnet that isn't up shouldn't stop the dev server from starting:
         // warn, and carry on serving locally.
         const shared = yield* Effect.acquireRelease(
           shareDevServer({ webPort: sharedWebPort }),
@@ -754,7 +754,7 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
           Effect.tapError((error: DevShareError) =>
             Effect.logWarning(
               `[dev-runner] could not share on the tailnet: ${error.message}${
-                error.hint ? ` — ${error.hint}` : ""
+                error.hint ? `. ${error.hint}` : ""
               }`,
             ),
           ),
@@ -773,13 +773,13 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
             .filter((entry) => entry && entry.length > 0)
             .join(",");
           // The server builds its pairing URL from this, so the URL printed at
-          // startup is already the shareable one — no rewriting by hand. An
+          // startup is already the shareable one, with no rewriting by hand. An
           // explicit --dev-url still wins.
           if (input.devUrl === undefined) {
             env.VITE_DEV_SERVER_URL = shared.url;
           }
           // A shared origin serves a remote browser, where unbundled dev's
-          // per-module requests each pay a tailnet round trip — a cold module
+          // per-module requests each pay a tailnet round trip; a cold module
           // graph takes minutes to first paint. Bundled dev collapses that to
           // a few chunk requests. Only defaulted, so COGENLY_BUNDLED_DEV=0
           // still opts a --share run back out.

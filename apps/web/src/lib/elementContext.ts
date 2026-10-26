@@ -26,13 +26,13 @@ export interface ElementContextSelection {
   pageTitle: string | null;
   /** Lowercase tag, e.g. `"button"`. */
   tagName: string;
-  /** CSS selector — may be null when react-grab can't compute one. */
+  /** CSS selector; may be null when react-grab can't compute one. */
   selector: string | null;
   /** Truncated outer-HTML preview. */
   htmlPreview: string;
   /** Nearest React component display name, or null. */
   componentName: string | null;
-  /** Source frame (file + line) — null when unavailable. */
+  /** Source frame (file + line), or null when unavailable. */
   source: PickedElementStackFrame | null;
   /** Author CSS (no UA defaults). May be empty. */
   styles: string;

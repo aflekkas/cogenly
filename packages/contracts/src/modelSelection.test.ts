@@ -7,7 +7,7 @@ import { ProviderInstanceId } from "./providerInstance.ts";
 
 // ── ModelSelection: instance-keyed wire shape + legacy decoder ────────
 //
-// `ModelSelection` is routing-keyed on `instanceId` — never a driver kind.
+// `ModelSelection` is routing-keyed on `instanceId`, never a driver kind.
 // Persisted and in-flight payloads from pre-instance builds carry a
 // `provider` field whose value was a driver kind; those payloads are migrated
 // at the wire boundary by

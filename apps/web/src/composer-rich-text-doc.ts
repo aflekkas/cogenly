@@ -31,7 +31,7 @@ import { collectInlineContextIds } from "~/lib/composerContextReferences";
  * coordinate spaces the composer speaks:
  *
  * - flat document offsets (styled markers excluded, chips count 1),
- * - collapsed cursor offsets (markers literal, chips count 1 — the coordinate
+ * - collapsed cursor offsets (markers literal, chips count 1; the coordinate
  *   the draft store and mention detection use),
  * - markdown offsets (markers literal, chips expand to their source).
  *
@@ -112,7 +112,7 @@ const LIST_NESTING_KEYS = ["Tab", "Shift-Tab"];
 
 /**
  * Task list items keep their exact source indent in an attribute so nesting
- * round-trips byte-identically. Checkbox case (`[X]`) normalizes to `[x]` —
+ * round-trips byte-identically. Checkbox case (`[X]`) normalizes to `[x]`,
  * the same fixed-point deal as `__bold__` becoming `**bold**`.
  */
 export const ComposerTaskItemExtension = TaskItem.extend({
@@ -137,7 +137,7 @@ export const ComposerTaskItemExtension = TaskItem.extend({
  * the empty string when the fence was never closed.
  *
  * Neither delimiter owns a document character, so the caret can never land
- * inside a fence — the same deal as a checkbox marker.
+ * inside a fence, the same deal as a checkbox marker.
  *
  * An empty block written with a blank line (```` ```\n\n``` ````) canonicalizes
  * to the blank-free form, the same fixed-point deal as `__bold__` becoming
@@ -372,7 +372,7 @@ function parseTaskPrefix(head: string): { prefix: TaskLinePrefix; markerLength: 
  * An opening fence: three or more backticks or tildes at the start of a line,
  * followed by an info string. A backtick fence cannot carry a backtick in its
  * info string, which is what keeps `` `code` `` on its own line literal.
- * Indented fences stay paragraphs — the composer is a prompt box, not a
+ * Indented fences stay paragraphs: the composer is a prompt box, not a
  * CommonMark renderer, and honoring indentation would cost another attribute
  * for no case anyone writes.
  */

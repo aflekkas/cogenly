@@ -1,18 +1,18 @@
 /**
- * ProviderInstanceRegistry — the single Effect service in the new model.
+ * ProviderInstanceRegistry: the single Effect service in the new model.
  *
  * Owns a `Map<ProviderInstanceId, ProviderInstance>` produced by running
  * registered driver factories against `ServerSettings.providerInstances`.
  * The registry watches settings; when an instance's config changes (or
  * the entry disappears), the registry tears down the affected instance's
- * scope and rebuilds — that's the entire hot-reload story.
+ * scope and rebuilds. That's the entire hot-reload story.
  *
  * What rest-of-server reads from here:
- *   - `getInstance(instanceId)` — for routing turn/session calls.
- *   - `listInstances` — for snapshot aggregation in `ProviderRegistry`.
- *   - `listUnavailable` — `ServerProvider` shadows for instances whose
+ *   - `getInstance(instanceId)`: for routing turn/session calls.
+ *   - `listInstances`: for snapshot aggregation in `ProviderRegistry`.
+ *   - `listUnavailable`: `ServerProvider` shadows for instances whose
  *     driver is not registered in this build (rollback / fork tolerance).
- *   - `streamChanges` — coalesced "registry mutated" pings so consumers
+ *   - `streamChanges`: coalesced "registry mutated" pings so consumers
  *     can re-pull lists or re-broadcast.
  *
  * The live implementation (`makeProviderInstanceRegistry`, `layer`) also
@@ -32,7 +32,7 @@
  *     `forward/backward compatibility invariant` in
  *     `packages/contracts/src/providerInstance.ts`.
  *   - When the entry's config fails schema decode, the registry logs and
- *     emits a shadow snapshot with the schema detail — same bucket as an
+ *     emits a shadow snapshot with the schema detail, same bucket as an
  *     unknown driver.
  *
  * Unlike the pre-Slice-D layer, the registry now holds mutable state
@@ -76,7 +76,7 @@ export class ProviderInstanceRegistry extends Context.Service<
   {
     /**
      * Look up one instance by id. Returns `undefined` (not Option) when the
-     * id is unknown — callers branch on falsy and emit
+     * id is unknown; callers branch on falsy and emit
      * `ProviderInstanceNotFoundError`.
      */
     readonly getInstance: (
@@ -95,14 +95,14 @@ export class ProviderInstanceRegistry extends Context.Service<
     readonly listUnavailable: Effect.Effect<ReadonlyArray<ServerProvider>>;
     /**
      * Push notification stream emitted whenever the registry's contents
-     * change — instance added, removed, or rebuilt. The payload is `void`
+     * change (instance added, removed, or rebuilt). The payload is `void`
      * because consumers always want to re-pull `listInstances` /
      * `listUnavailable` together.
      *
      * NOTE: because `Stream.fromPubSub` defers `PubSub.subscribe` until the
      * stream starts running, forking a consumer via
      * `Stream.runForEach(...).pipe(Effect.forkScoped)` races the next
-     * publish — the forked fiber may not have subscribed yet when the
+     * publish: the forked fiber may not have subscribed yet when the
      * publish lands. Hot-reload consumers that must not miss a publish
      * should use `subscribeChanges` below instead, which acquires the
      * subscription synchronously in the caller's fiber before the consumer
@@ -121,7 +121,7 @@ export class ProviderInstanceRegistry extends Context.Service<
      *
      * This exists because the `ProviderInstanceRegistry` publishes on a
      * PubSub and `Stream.fromPubSub` defers subscription until the stream
-     * starts executing — a consumer that `forkScoped`s the stream
+     * starts executing, so a consumer that `forkScoped`s the stream
      * consumption can miss a publish that lands in the narrow window
      * between "fiber scheduled" and "fiber starts running".
      */
@@ -162,7 +162,7 @@ const entryEqual = (a: ProviderInstanceConfig, b: ProviderInstanceConfig): boole
 
 /**
  * Resolve an entry's enabled state. An explicit false on either the
- * envelope or the raw config blob wins (most restrictive) — old settings
+ * envelope or the raw config blob wins (most restrictive): old settings
  * files can carry both flags with conflicting values, and a user's disable
  * must never be silently undone. Otherwise the envelope flag wins, then the
  * decoded config's flag (which carries the driver schema's default for
@@ -179,7 +179,7 @@ const resolveEntryEnabled = (entry: ProviderInstanceConfig, typedConfig: unknown
 /**
  * Build one live entry from a raw config envelope. Returns either a
  * `LiveEntry` plus undefined unavailable shadow, or a shadow snapshot and
- * undefined entry — callers dispatch to the appropriate Ref bucket.
+ * undefined entry; callers dispatch to the appropriate Ref bucket.
  */
 const buildEntry = <R>(input: {
   readonly driversById: ReadonlyMap<ProviderDriverKind, AnyProviderDriver<R>>;
@@ -427,7 +427,7 @@ export const makeProviderInstanceRegistry = <R>(input: {
     // Capture the driver R context at construction time so `reconcile`
     // can be invoked later without re-providing driver dependencies.
     // The service tag's declared `reconcile: Effect<void>` hides R from
-    // consumers — we materialize that here.
+    // consumers; we materialize that here.
     const driverContext = yield* Effect.context<R>();
 
     const entries = yield* Ref.make<ReadonlyMap<ProviderInstanceId, LiveEntry>>(new Map());
@@ -462,7 +462,7 @@ export const makeProviderInstanceRegistry = <R>(input: {
       get streamChanges() {
         return Stream.fromPubSub(changes);
       },
-      // Synchronous subscribe — callers that need to consume changes
+      // Synchronous subscribe: callers that need to consume changes
       // from a forked fibre must acquire the subscription in their own
       // fibre first (via `yield* registry.subscribeChanges`) and only
       // then fork a consumer loop on `Stream.fromSubscription(...)` /

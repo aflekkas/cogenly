@@ -54,7 +54,7 @@ export function nextScheduledRunAt(
 /**
  * Canonical form of a weekday mask, mirroring how `nextScheduledRunAt` reads
  * it: order and duplicates are irrelevant, and an empty/omitted mask means the
- * same as explicitly listing all seven days — daily.
+ * same as explicitly listing all seven days: daily.
  */
 function weekdayKey(weekdays: ReadonlyArray<number> | undefined): string {
   const unique = [...new Set(weekdays ?? [])].toSorted((x, y) => x - y);
@@ -81,7 +81,7 @@ export function isSameSchedule(a: ScheduledTaskSchedule, b: ScheduledTaskSchedul
   if (a.type === "webhook") return b.type === "webhook";
   if (b.type !== "fixed_time") return false;
   // The contract accepts padded and unpadded hours ("9:00" and "09:00"), so
-  // compare the parsed time — string equality would treat a format-only edit
+  // compare the parsed time; string equality would treat a format-only edit
   // as a schedule change and recompute the pending run.
   const aTime = parseTimeOfDay(a.timeOfDay);
   const bTime = parseTimeOfDay(b.timeOfDay);

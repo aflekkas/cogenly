@@ -25,7 +25,7 @@ export interface McpProviderSessionConfig {
    * Whether this credential explicitly grants the Cogenly terminal tools.
    * Optional because a session can start with a credential that never stated
    * terminal availability (the shape a delegated child can start with);
-   * consumers must treat an absent flag as "not granted" — see
+   * consumers must treat an absent flag as "not granted"; see
    * {@link terminalToolsAvailable}.
    */
   readonly terminalToolsAvailable?: boolean;

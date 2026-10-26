@@ -782,7 +782,7 @@ const WsServerRefreshProvidersRpc = Rpc.make(WS_METHODS.serverRefreshProviders, 
   payload: Schema.Struct({
     /**
      * When supplied, only refresh this specific provider instance. When
-     * omitted, refresh all configured instances — the legacy `refresh()`
+     * omitted, refresh all configured instances, the legacy `refresh()`
      * behaviour retained for transports that still dispatch untargeted
      * refreshes.
      */

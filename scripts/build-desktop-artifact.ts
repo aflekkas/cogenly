@@ -3597,7 +3597,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
 
   // Assert against the emitted bundle, not the bundler config. `alwaysBundle`
   // only forces packages IN, so a transitive dependency of an external package
-  // is bundled by default however the predicate is written — that silently
+  // is bundled by default however the predicate is written. That silently
   // inlined a native loader (node-gyp-build-optional-packages) while every
   // list-based test still passed. An inlined native loader resolves its
   // prebuilds relative to the bundle and quietly falls back to a slower

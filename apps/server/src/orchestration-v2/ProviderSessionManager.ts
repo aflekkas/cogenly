@@ -355,7 +355,7 @@ export const layerWithOptions = (
        * Optional so the many focused tests that assemble this layer by hand do
        * not each need a settings stub; the production composition always
        * provides it. When present, an unreadable settings file withholds
-       * browser access rather than granting it — an explicit "off" silently
+       * browser access rather than granting it: an explicit "off" silently
        * becoming "on" would violate the user's stated choice, whereas the
        * reverse costs an agent one toolset and is visible immediately (#7083).
        */

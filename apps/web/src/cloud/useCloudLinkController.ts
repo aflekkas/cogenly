@@ -158,11 +158,11 @@ export function useCloudLinkController() {
     if (!canManageLink()) return false;
 
     // A failure after this point may follow a partially applied mutation (e.g.
-    // the link succeeded but the preference update did not), so every exit —
-    // success or failure — refreshes the rendered state to whatever the server
+    // the link succeeded but the preference update did not), so every exit,
+    // success or failure, refreshes the rendered state to whatever the server
     // actually holds now.
     if (!wantsLink) {
-      // Unlink works without a relay token — a failed token read must not
+      // Unlink works without a relay token; a failed token read must not
       // leave the user unable to turn Cogenly Connect off.
       const unlinkResult = await unlinkPrimaryEnvironment({
         target,

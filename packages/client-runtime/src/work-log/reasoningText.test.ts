@@ -51,17 +51,17 @@ describe("markdownPreviewText", () => {
   it("reads a markdown and HTML result as one plain line", () => {
     expect(
       markdownPreviewText(
-        '# 🔔 — iOS (Apple Color Emoji)\n\n### 1. Render\n<span style="color:red">Bell</span> **renders** as _expected_.',
+        '# 🔔 on iOS (Apple Color Emoji)\n\n### 1. Render\n<span style="color:red">Bell</span> **renders** as _expected_.',
       ),
-    ).toBe("🔔 — iOS (Apple Color Emoji) Render Bell renders as expected.");
+    ).toBe("🔔 on iOS (Apple Color Emoji) Render Bell renders as expected.");
   });
 
   it("keeps link text, list items and code, dropping their markup", () => {
     expect(
       markdownPreviewText(
-        "Hi — done, via two subagents:\n\n1. **Tee** at [Shop](https://example.com)\n- `pnpm test` passed\n> quoted",
+        "Hi, done via two subagents:\n\n1. **Tee** at [Shop](https://example.com)\n- `pnpm test` passed\n> quoted",
       ),
-    ).toBe("Hi — done, via two subagents: Tee at Shop pnpm test passed quoted");
+    ).toBe("Hi, done via two subagents: Tee at Shop pnpm test passed quoted");
   });
 
   it("keeps snake_case and literal asterisks inside words", () => {

@@ -91,7 +91,7 @@ it does not own a copy.
   its next turn runs with the project directory as its working directory (an
   unfiled chat runs in its scratch folder again). Provider sessions are
   keyed by cwd, so the next turn starts a fresh provider session in the new
-  cwd, seeded with a portable context handoff of the prior history — the
+  cwd, seeded with a portable context handoff of the prior history. This is the
   same resume-fallback path as a provider switch, for Claude, Codex and
   Muse alike. Moving never happens mid-turn: a thread with an active run
   refuses until that run settles. An explicit "fork to project" action still

@@ -4,7 +4,7 @@ import type { ManagedServerProvider } from "@cogenly/provider-core/server/snapsh
 
 export type ProviderSnapshotSource = {
   /**
-   * Routing key — uniquely identifies this instance in the aggregated
+   * Routing key: uniquely identifies this instance in the aggregated
    * snapshot list. Two different snapshot sources may share the same
    * driver kind (multiple instances of the same driver).
    */

@@ -207,7 +207,7 @@ const decodeBumpUsageResponse = Schema.decodeUnknownEffect(
  * start a session on the bump model, ask for "OK", wait for the turn to
  * settle, then read the observation the response headers taught the host.
  * The session never becomes a Cogenly thread; the host closes on the way
- * out. Any failure — spawn, turn, timeout, empty read — answers undefined
+ * out. Any failure (spawn, turn, timeout, empty read) answers undefined
  * so the probe falls back to cache or banner.
  */
 export const runMuseLimitsBump = Effect.fn("runMuseLimitsBump")(function* (

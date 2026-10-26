@@ -286,8 +286,8 @@ export function PreviewView({
   const viewport = snapshot?.viewport ?? FILL_PREVIEW_VIEWPORT;
   const browserDefaults = useBrowserDefaults();
   // A tab created before profiles existed carries no profile of its own. It
-  // runs in the built-in `default` partition — the scope the browser used
-  // before profiles — not in whatever profile is configured as the default
+  // runs in the built-in `default` partition (the scope the browser used
+  // before profiles), not in whatever profile is configured as the default
   // now, so that is what its label names and its clear actions target.
   // Passing the snapshot's raw `undefined` through would reach the IPC layer
   // as "every profile".
@@ -711,7 +711,7 @@ export function PreviewView({
     // Snapshot whatever the user was focused on (typically the chat
     // composer textarea or the chrome-row pick button) BEFORE main steals
     // focus into the guest webContents. We restore it when the pick
-    // resolves so the user's typing context isn't lost — otherwise after
+    // resolves so the user's typing context isn't lost; otherwise after
     // every pick they'd have to click back into the textarea.
     const previouslyFocused =
       typeof document !== "undefined" ? (document.activeElement as HTMLElement | null) : null;
@@ -850,7 +850,7 @@ export function PreviewView({
         pickDisabled={!tabId || isUnreachable || (isServerTab && !serverPickAvailable)}
         pickDisabledReason={
           isUnreachable
-            ? "Page didn't load — pick unavailable until the page renders"
+            ? "Page didn't load. Pick is unavailable until the page renders"
             : (serverPickBlocker ?? undefined)
         }
         pickNotice={pickNotice}
@@ -876,7 +876,7 @@ export function PreviewView({
               // badge in this row takes its width from the URL input, the only
               // flexible element in the compact chrome. The cap sits on the
               // badge and the truncation on an inner span, because `Badge` is an
-              // `inline-flex` with `whitespace-nowrap` — `text-overflow` never
+              // `inline-flex` with `whitespace-nowrap`, and `text-overflow` never
               // reaches a bare text node inside it, so the name would be cut off
               // at both ends with no ellipsis.
               <Tooltip>

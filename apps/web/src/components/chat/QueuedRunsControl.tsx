@@ -220,7 +220,7 @@ export function QueuedRunsControl({
     [queuedImageAttachmentIds, queuedImageAttachmentUrls],
   );
   // Once the projection holds the message the optimistic copy is stale no
-  // matter what happened to its run — keying on still-queued runs alone would
+  // matter what happened to its run; keying on still-queued runs alone would
   // resurrect a phantom "pending" row after the run is cancelled or started.
   const acknowledgedMessageIds = useMemo(
     () => new Set((projection?.messages ?? []).map((message) => message.id)),

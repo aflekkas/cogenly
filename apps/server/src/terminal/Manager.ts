@@ -1580,7 +1580,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
   const agentScope = yield* AgentScope;
   const processes = options.processes ?? (yield* AgentProcesses.AgentProcesses);
   // Terminals must inherit the user's full environment (minus the blocklist
-  // applied in createTerminalSpawnEnv) — an allowlist here silently strips
+  // applied in createTerminalSpawnEnv); an allowlist here silently strips
   // things like PSModulePath, DISPLAY, proxies, and toolchain variables.
   // `options.env` is the test seam.
   const baseEnv = options.env ?? process.env;
@@ -2378,7 +2378,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       // Flush both redactors through the ordered drain before anything is
       // detached or cleared: each redactor holds back a tail that could
       // still become a secret, and only its final flush releases that
-      // tail — redacted, or as the non-secret text it turned out to be.
+      // tail, redacted or as the non-secret text it turned out to be.
       // Dropping the queue here would silently lose that text.
       let shouldFork = false;
       const tail = session.agent?.redactOutput?.("", true);

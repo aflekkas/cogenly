@@ -4,7 +4,7 @@ import * as Schema from "effect/Schema";
  * ProviderInstanceNotFoundError - Lookup against the instance registry failed.
  *
  * The driver may be registered, but no instance with the requested id has
- * been bootstrapped — typically because
+ * been bootstrapped, typically because
  * the persisted instance id refers to an instance the user removed from
  * settings, or because routing is asked for an instance before the registry
  * has finished its first reload.

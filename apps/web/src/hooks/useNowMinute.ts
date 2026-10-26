@@ -50,7 +50,7 @@ function subscribe(listener: () => void): () => void {
 }
 
 function getSnapshot(): string {
-  // With no timer running (no subscribers yet — e.g. the first render after
+  // With no timer running (no subscribers yet, e.g. the first render after
   // a full unmount), the stored minute may be stale; re-read it so a fresh
   // mount renders the current minute instead of waiting for the first tick.
   // While the timer runs the cached value is returned untouched, as

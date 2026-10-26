@@ -11,7 +11,7 @@ import packageJson from "./package.json" with { type: "json" };
 // desktop build unpacked `**\/node_modules\/**` wholesale: 13,875 loose files to
 // support 20 native binaries. NSIS install time tracks file count, not bytes.
 //
-// Inverted here — bundle everything except the packages that genuinely cannot be
+// Inverted here: bundle everything except the packages that genuinely cannot be
 // inlined. See scripts/lib/cli-external-packages.ts for what earns an exemption.
 import {
   isExternalCliDependency,
@@ -100,7 +100,7 @@ export default mergeConfig(
         // (declared deps are external by default, which is what this change is
         // undoing). `neverBundle` forces the native packages out: returning
         // false from `alwaysBundle` only means "no opinion", so a transitive
-        // dependency would still be bundled — which silently inlined native
+        // dependency would still be bundled, which silently inlined native
         // loaders such as node-gyp-build, losing native acceleration.
         alwaysBundle: shouldBundleCliDependency,
         neverBundle: (id: string) => isExternalCliDependency(id),

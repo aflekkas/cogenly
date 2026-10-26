@@ -15,8 +15,8 @@ import {
 import * as GitHubCredentials from "@cogenly/source-control-github/server/GitHubCredentials";
 
 /**
- * Exactly the hosts the credential is for. Everything a redirect leads to — the presigned
- * object stores GitHub hands assets off to — authorizes with its own signature, and some of
+ * Exactly the hosts the credential is for. Everything a redirect leads to (the presigned
+ * object stores GitHub hands assets off to) authorizes with its own signature, and some of
  * them reject a request that also carries a bearer token.
  */
 const CREDENTIALED_HOSTS = new Set([
@@ -79,7 +79,7 @@ const fetchFollowingRedirects = Effect.fn("GitHubMediaFetch.fetchFollowingRedire
   for (let hop = 0; ; hop += 1) {
     // The credential rides only on a request to GitHub itself. A redirect leads to a signed
     // object URL that authorizes on its own, and the store it lives in has no business seeing
-    // a token — deciding that from the target, not from the hop count, is what makes it so.
+    // a token. Deciding that from the target, not from the hop count, is what makes it so.
     const authorization =
       token !== null && isCredentialedHost(target) ? `Bearer ${Redacted.value(token)}` : null;
     const response: HttpClientResponse.HttpClientResponse = yield* httpClient
@@ -121,7 +121,7 @@ export const githubMediaResponse = Effect.fn("GitHubMediaFetch.githubMediaRespon
   }
   const response = yield* fetchFollowingRedirects(asset.url, forwarded, token);
   // An upload GitHub hosts never changes under its URL, so the only thing a cached copy must
-  // not outlive is the signed URL that granted it — which is the same bound the URL itself has.
+  // not outlive is the signed URL that granted it, which is the same bound the URL itself has.
   const remainingSeconds = Math.floor((asset.expiresAt - (yield* Clock.currentTimeMillis)) / 1000);
   const headers: Record<string, string> = {
     "cache-control":

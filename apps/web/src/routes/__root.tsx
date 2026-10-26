@@ -201,8 +201,8 @@ function RootRouteView() {
     </CommandPalette>
   );
 
-  // FirstRunGate holds back everything below it — including EventRouter,
-  // whose welcome payload navigates into a thread — until the first-run
+  // FirstRunGate holds back everything below it (including EventRouter,
+  // whose welcome payload navigates into a thread) until the first-run
   // decision is known, so a fresh install renders nothing (not the shell,
   // not a flash of threads) before landing on the welcome wizard.
   return (

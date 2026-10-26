@@ -172,7 +172,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   selectedModels?: ReadonlyArray<{ instanceId: ProviderInstanceId; model: string }>;
   onToggleModel?: (instanceId: ProviderInstanceId, model: string) => void;
   /**
-   * When set, the picker is locked to the given driver kind — typically
+   * When set, the picker is locked to the given driver kind, typically
    * because the user is editing a previously-sent message and can't change
    * which driver served the turn. Multiple instances of the same kind
    * remain selectable (e.g. locked to `codex` still lets the user switch
@@ -345,7 +345,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       const entry = entryByInstanceId.get(instanceId);
       if (!entry) {
         // Instance disappeared between renders (configuration change). Skip
-        // its models — stale options shouldn't appear in the picker.
+        // its models; stale options shouldn't appear in the picker.
         continue;
       }
       for (const model of models) {

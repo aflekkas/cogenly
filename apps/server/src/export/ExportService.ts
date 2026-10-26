@@ -413,7 +413,7 @@ const make = Effect.gen(function* () {
                 name,
                 kind === "threads"
                   ? `# ${row.title}\n\nThread: ${row.thread_id}\n\n`
-                  : `## ${row.role} — ${row.created_at}\n\n${row.text ?? ""}\n\n`,
+                  : `## ${row.role}, ${row.created_at}\n\n${row.text ?? ""}\n\n`,
               );
             }
           }

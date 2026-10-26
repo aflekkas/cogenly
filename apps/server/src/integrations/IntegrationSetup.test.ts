@@ -307,7 +307,7 @@ describe("agentNextStep", () => {
       },
     });
     expect(oauth.message).toBe(
-      "OAuth DCR failed at mcp-auth.wisprflow.com (HTTP 400): invalid_redirect_uri — Redirect not allowed.",
+      "OAuth DCR failed at mcp-auth.wisprflow.com (HTTP 400): invalid_redirect_uri (Redirect not allowed).",
     );
     expect(oauth.transient).toBe(true);
   });

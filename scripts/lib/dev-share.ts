@@ -8,7 +8,7 @@
  * stale mapping left by a killed run, and refusing to serve over routes it
  * could not remove.
  *
- * Because browser dev is single-origin (Vite proxies the backend — see
+ * Because browser dev is single-origin (Vite proxies the backend; see
  * `resolveDevProxyTarget` in apps/web/vite.config.ts), one proxy rule covering
  * the web port is enough; the backend needs no mapping of its own.
  */
@@ -32,14 +32,14 @@ import type { ChildProcessSpawner } from "effect/process";
  */
 const DIAGNOSTIC_EXPLANATIONS: Record<TailscaleStderrDiagnostic, string | undefined> = {
   "no-existing-handler": "no mapping existed for that port",
-  "not-logged-in": "this machine is not logged into a tailnet — run `tailscale up`",
-  "permission-denied": "permission denied — `tailscale serve` may need elevated privileges",
+  "not-logged-in": "this machine is not logged into a tailnet; run `tailscale up`",
+  "permission-denied": "permission denied: `tailscale serve` may need elevated privileges",
   unknown: undefined,
 };
 
 /**
  * Our own wording for why a tailscale command failed, derived from the
- * classified diagnostic. Never the CLI's text — see `stderrDiagnosticOf`.
+ * classified diagnostic. Never the CLI's text; see `stderrDiagnosticOf`.
  */
 const explainCommandFailure = (error: TailscaleCommandError): string | undefined =>
   error._tag === "TailscaleCommandExitError" && error.stderrDiagnostic !== undefined
@@ -64,7 +64,7 @@ export class TailscaleUnavailableError extends Schema.TaggedError<TailscaleUnava
   }
 
   get hint(): string {
-    return "Is Tailscale installed and tailscaled running? Try `tailscale status` — or drop --share and open the printed localhost URL.";
+    return "Is Tailscale installed and tailscaled running? Try `tailscale status`, or drop --share and open the printed localhost URL.";
   }
 }
 
@@ -176,7 +176,7 @@ export const shareDevServer = Effect.fn("devShare.shareDevServer")(function* (in
 
   // Clear any mapping left behind by a run that was killed before its finalizer
   // could fire. Serve config survives both the process and a reboot, and a
-  // stale entry may carry path routes we no longer want — older versions mapped
+  // stale entry may carry path routes we no longer want: older versions mapped
   // /ws, /api and friends to a separate backend port, and serving "/" alone
   // would leave those pointing at a port nothing is listening on.
   const cleared = yield* unshareDevServer(input.webPort);

@@ -38,8 +38,8 @@ export interface VaultFormField {
 }
 
 /**
- * Fields by type. A card has its own encrypted fields — number, expiry
- * month/year, CVC and cardholder name — so nothing secret rides in the
+ * Fields by type. A card has its own encrypted fields (number, expiry
+ * month/year, CVC and cardholder name), so nothing secret rides in the
  * plaintext `label`; the label is only display text, as on a login.
  */
 export const VAULT_FIELDS_BY_TYPE: Readonly<Record<VaultItemType, ReadonlyArray<VaultFormField>>> =

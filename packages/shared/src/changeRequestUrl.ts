@@ -5,7 +5,7 @@ import type { RepositoryIdentity, ThreadLinkedPullRequest } from "@cogenly/contr
  * is addressed, the repository path as that host writes it, and the number.
  *
  * The two strings are what `pullRequestHostOf` and the project's `repositoryIdentity` produce
- * from a git remote — lower case, no port, the full path below the host — because links are
+ * from a git remote (lower case, no port, the full path below the host), because links are
  * matched against those. Anything else matches nothing.
  */
 export interface ChangeRequestLink {
@@ -24,7 +24,7 @@ function isHostOf(hostname: string, apex: string, label?: string): boolean {
 
 /**
  * The repository and number behind a change request URL on a host this can read, or null for
- * anything else — an issue, a commit, a repository root, a host this cannot tell apart from an
+ * anything else: an issue, a commit, a repository root, a host this cannot tell apart from an
  * ordinary link. A doubtful match is worse than no match, so nothing here guesses.
  *
  * Each host is recognised by the path shape it alone uses, guarded by a hostname it could
@@ -32,7 +32,7 @@ function isHostOf(hostname: string, apex: string, label?: string): boolean {
  * GitLab's `/-/` marker is unique enough to trust on any hostname, while `/pull/` is generic
  * enough that it is only believed from a GitHub-ish host.
  *
- * Nothing here tries to tell a lookalike hostname from a real one — `github.com.evil.test` and
+ * Nothing here tries to tell a lookalike hostname from a real one; `github.com.evil.test` and
  * the rest are an open set, and blocking spellings of it costs real hosts (`gitlab.com.br` is a
  * registrable domain). What a claim is worth is decided where it is used.
  */

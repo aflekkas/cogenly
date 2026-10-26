@@ -220,7 +220,7 @@ export function indentCodeBlock(
 /**
  * Enter on a line that is nothing but an opening fence turns it into a code
  * block. Tiptap's own input rules only fire on a space, so without this the
- * gesture every markdown editor has — ```` ```ts ```` then Enter — leaves the
+ * gesture every markdown editor has (```` ```ts ```` then Enter) leaves the
  * fence as literal text.
  */
 export function convertCodeFenceOnEnter(

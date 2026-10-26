@@ -298,8 +298,8 @@ const resolveClearPartitions = Effect.fn("desktop.ipc.preview.resolveClearPartit
   const { scope, persistent, namespace } = resolvePartitionScope(environmentId, profileId);
   // Loading the session is what puts the partition in the map the clear walks.
   // Deriving the partition string alone leaves nothing to match, so clearing a
-  // profile with no tab open this run — after a restart, or when deleting a
-  // profile — would report success and delete nothing.
+  // profile with no tab open this run (after a restart, or when deleting a
+  // profile) would report success and delete nothing.
   yield* manager.getBrowserSession(scope, persistent, namespace);
   return [yield* manager.getBrowserPartition(scope, persistent, namespace)];
 });

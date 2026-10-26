@@ -1,5 +1,5 @@
 /**
- * SourceControlHost — what a source control provider package may ask of the server it runs in.
+ * SourceControlHost: what a source control provider package may ask of the server it runs in.
  *
  * Providers run inside a Cogenly server but must not import it. The server provides this one
  * service; everything a provider needs from its environment (settings, the process runner)

@@ -102,8 +102,8 @@ export function useNewThreadHandler() {
          */
         surface?: ThreadSurface;
       },
-      // Which draft the thread ended up in, so a caller that has something to put in it — a
-      // prepared checkout, a task to write — addresses that one rather than looking the project
+      // Which draft the thread ended up in, so a caller that has something to put in it (a
+      // prepared checkout, a task to write) addresses that one rather than looking the project
       // up again and finding whichever draft it happens to hold.
     ): Promise<{ draftId: DraftId; threadId: ThreadId } | null> => {
       const projects = readProjects();
@@ -132,7 +132,7 @@ export function useNewThreadHandler() {
           : null;
       const carrySourceDraft =
         currentRouteTarget?.kind === "draft" ? getDraftSession(currentRouteTarget.draftId) : null;
-      // Composer overrides win over the persisted thread state — they are
+      // Composer overrides win over the persisted thread state; they are
       // what the user currently sees in the composer controls.
       const carrySourceComposer = currentRouteTarget
         ? getComposerDraft(
@@ -265,7 +265,7 @@ export function useNewThreadHandler() {
       // ever reuse a draft the user has NOT invested in. A draft with typed
       // text or attachments is work in progress: it stays alive where it is
       // (reachable from the sidebar draft rows) and this request mints a
-      // fresh draft instead — the remap in the store preserves invested
+      // fresh draft instead. The remap in the store preserves invested
       // drafts rather than deleting them.
       const emptyStoredDraftThread =
         reusableStoredDraftThread &&
@@ -293,7 +293,7 @@ export function useNewThreadHandler() {
           // before a defaults change (or by the old carry-over behavior) stop
           // landing on "current checkout" branches forever. When the draft is
           // already open and no options were passed, leave its workspace
-          // context alone entirely — the user may have just picked a branch
+          // context alone entirely: the user may have just picked a branch
           // in the composer. Model selection has its own explicit-pick rule
           // below and does not follow this guard.
           let workspaceContext: NewThreadWorkspaceOptions | null = null;
@@ -307,11 +307,11 @@ export function useNewThreadHandler() {
             // The await yields. If the draft was opened (a concurrent
             // invocation's navigation landed), promoted to a real thread,
             // remapped away (a concurrent invocation registered a fresh
-            // draft — remapping back would evict the winner and let the
+            // draft; remapping back would evict the winner and let the
             // store GC it), or gained content (no longer a reusable empty
             // draft) in the meantime, this invocation is a stale loser:
             // resetting context, remapping, or navigating would all clobber
-            // state written after the snapshot above. Bail out entirely —
+            // state written after the snapshot above. Bail out entirely;
             // the winner already did this work.
             const routeTargetNow = getCurrentRouteTarget();
             const openedMeanwhile =
@@ -347,7 +347,7 @@ export function useNewThreadHandler() {
             });
           }
           // Model intent: an explicit human pick always stands. Seeds and
-          // legacy entries alike re-resolve here — sticky first, mirroring
+          // legacy entries alike re-resolve here: sticky first, mirroring
           // the mint-fresh path, then the project default or carried
           // selection on top. This runs even when the draft is already open:
           // without it, a changed pin could never reach the draft the user
@@ -450,14 +450,14 @@ export function useNewThreadHandler() {
         }
         // The await yields, so a concurrent invocation may have registered a
         // draft for this logical project in the meantime. Registering ours
-        // too would evict that draft while its navigation is in flight —
+        // too would evict that draft while its navigation is in flight, so
         // reuse the winner instead, like the synchronous path above does.
         const racedDraft = getDraftSessionByLogicalProjectKey(logicalProjectKey);
         if (
           racedDraft &&
           // Only a draft REGISTERED during the await counts as a raced
           // winner. An invested draft this invocation deliberately declined
-          // to reuse is still mapped at this point — reusing it here would
+          // to reuse is still mapped at this point; reusing it here would
           // silently undo mint-fresh semantics.
           racedDraft.draftId !== mappedDraftThread?.draftId &&
           readThreadShell(scopeThreadRef(racedDraft.environmentId, racedDraft.threadId)) === null
@@ -465,7 +465,7 @@ export function useNewThreadHandler() {
           // Same remap the reuse paths above perform: point the draft at the
           // caller's project member and apply explicit workspace options if
           // the caller passed any. Without explicit options the winner's
-          // context stands untouched — the winner's navigation is landing,
+          // context stands untouched: the winner's navigation is landing,
           // which is the isDraftAlreadyOpen "leave it alone" case. Writing
           // this invocation's defaults here instead would clobber the
           // winner's explicit picks and could pair its worktreePath with a

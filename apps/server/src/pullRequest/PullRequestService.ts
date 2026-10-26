@@ -108,8 +108,8 @@ function supersedesReading(current: PullRequestReading | undefined, next: PullRe
  * listing is carried on from a cursor.
  *
  * 99 and not 100, because every provider asks its host for one row over this to probe for a next
- * page: 99 requests 100, which is exactly what a page of GitHub's API serves — GraphQL refuses
- * `first` over 100 with EXCESSIVE_PAGINATION and REST clamps `per_page` to it — and what GitLab
+ * page: 99 requests 100, which is exactly what a page of GitHub's API serves (GraphQL refuses
+ * `first` over 100 with EXCESSIVE_PAGINATION and REST clamps `per_page` to it), and what GitLab
  * caps `per_page` at. Asking for 100 here would request 101 and buy a whole second round trip for
  * one row (measured: `gh pr list --limit 100` makes 1 HTTP request, `--limit 101` makes 2).
  */
@@ -123,7 +123,7 @@ const DEFAULT_REPOSITORY_LIST_LIMIT = 99;
 const REPOSITORY_CONCURRENCY = 12;
 /**
  * Repositories named in one read across a host. Measured against GitHub's search: six hundred
- * `repo:` qualifiers in one query — 14.7KB of it — were all still honoured, and the answer took
+ * `repo:` qualifiers in one query (14.7KB of it) were all still honoured, and the answer took
  * the same three to six seconds at twelve repositories as at four hundred. A hundred is well
  * inside that and past the size of a workspace anyone opens, so a larger one reads in a handful
  * of searches rather than in a request per repository.
@@ -131,12 +131,12 @@ const REPOSITORY_CONCURRENCY = 12;
 const REPOSITORY_SEARCH_CHUNK = 100;
 
 /**
- * Every read leaves the process — a CLI per repository, against hosts whose limits are low
- * (GitHub's search API allows ~30 requests a minute) — so answers are shared for a short
+ * Every read leaves the process (a CLI per repository, against hosts whose limits are low;
+ * GitHub's search API allows ~30 requests a minute), so answers are shared for a short
  * while and concurrent identical reads share one request. The windows sit near the clients'
  * own stale times: long enough that two people opening the same page cost one round trip,
  * short enough that "cached" and "fresh" never need telling apart on screen. Reads that
- * must not share — the refresh button, a client reloading after its own action — go through
+ * must not share (the refresh button, a client reloading after its own action) go through
  * `invalidate` rather than a flag on the read, so an ordinary read can never opt out.
  */
 const LIST_CACHE_TTL = Duration.seconds(30);
@@ -394,7 +394,7 @@ interface WorkspaceProjects {
   /**
    * Every checkout on a host, including the ones the listing de-duplicated away. Asking who is
    * signed in is a question about the host rather than about a repository, and any checkout can
-   * answer it — so a broken worktree is not allowed to take the host down with it just because
+   * answer it, so a broken worktree is not allowed to take the host down with it just because
    * it happened to be the one the listing kept.
    */
   readonly viewerRoots: ReadonlyMap<string, ReadonlyArray<string>>;
@@ -464,12 +464,12 @@ function nextListCursor(
   /** A provider may consume malformed offset-paged rows that never appear in `delivered`. */
   cursorAdvance = delivered.length,
 ): string | null {
-  // The host had nothing at all, so there is no row to carry on from — and repeating the cursor
+  // The host had nothing at all, so there is no row to carry on from, and repeating the cursor
   // that produced the empty slice would ask the same question forever.
   if (fetched.length === 0) return null;
   // Taken from what the host answered rather than from what survived de-duplication: a slice can
-  // be entirely rows already sent — a hundred change requests touched in the same second is one
-  // repository's boring afternoon — and reading "nothing new" as "nothing left" would end the
+  // be entirely rows already sent (a hundred change requests touched in the same second is one
+  // repository's boring afternoon), and reading "nothing new" as "nothing left" would end the
   // walk on the instant it was stuck on, with everything older unreachable for good.
   const oldest = fetched.reduce((left, right) => (right.updatedAt < left.updatedAt ? right : left));
   return listCursorAt(previous, oldest.updatedAt, fetched, cursorAdvance);
@@ -478,7 +478,7 @@ function nextListCursor(
 /**
  * The same cursor against a boundary chosen elsewhere, which is what a slice read across several
  * repositories at once needs: every repository in it is read up to the oldest row of the whole
- * slice, including the ones that contributed nothing to it — their rows are simply all older, and
+ * slice, including the ones that contributed nothing to it. Their rows are simply all older, and
  * a repository that carried on from its own oldest row would be right about where it stopped and
  * silent about the ones that never appeared.
  */
@@ -504,7 +504,7 @@ function isProviderUnusable(error: PullRequestProviderError): boolean {
 /**
  * Why a host is not readable, told as the thing to do about it. A host that is simply not set up
  * says so in the same words the whole-page state uses, rather than repeating whatever its tool
- * printed — "HTTP 401" names the symptom, not the fix.
+ * printed: "HTTP 401" names the symptom, not the fix.
  */
 function providerDetail(error: PullRequestProviderError): string {
   if (!isProviderUnusable(error)) return error.detail;
@@ -994,7 +994,7 @@ export const make = Effect.gen(function* () {
   /**
    * What the signed-in account may do with this change request, asked of the host itself. Every
    * write goes through it: the page hides what a viewer may not do, and a request that arrived
-   * without passing through the page — or after the access behind it was withdrawn — must not be
+   * without passing through the page, or after the access behind it was withdrawn, must not be
    * handed to a provider on the client's word. Read freshly for that reason, rather than taken
    * from whatever the detail said when the page loaded.
    */
@@ -1053,7 +1053,7 @@ export const make = Effect.gen(function* () {
     readonly error: PullRequestProviderError | null;
   };
   // Who is signed in moves on the timescale of `gh auth login`, not of a page visit, yet every
-  // list read was asking each host's CLI again — a subprocess and a network round trip per host
+  // list read was asking each host's CLI again: a subprocess and a network round trip per host
   // per read, three reads per page. Only a success is believed for a while: a failure is the
   // "is this host set up" answer the provider switcher shows, and holding it would keep saying
   // signed-out after the reader has signed in.
@@ -1174,7 +1174,7 @@ export const make = Effect.gen(function* () {
       // Judged on the provider row rather than the entry, because the two absences mean
       // different things and the entry keeps only one of them: `null` is a host that summarises
       // its reviews saying there is no decision yet, which is what "none" asks for, while
-      // `undefined` is a host that does not summarise at all — an unjudgeable row, left alone
+      // `undefined` is a host that does not summarise at all, an unjudgeable row, left alone
       // the way an unreadable check state is.
       (filters.review === undefined ||
         item.reviewDecision === undefined ||
@@ -1464,7 +1464,7 @@ export const make = Effect.gen(function* () {
                 searchVisibleAt.set(searchVisibilityKey(first.host, item.repository), now);
               }
               // The oldest row of the whole slice, which is how far every repository in it has now
-              // been read — including the ones that contributed nothing to it.
+              // been read, including the ones that contributed nothing to it.
               const boundary = page.items.reduce<string | null>(
                 (oldest, item) =>
                   oldest === null || item.updatedAt < oldest ? item.updatedAt : oldest,
@@ -1474,13 +1474,13 @@ export const make = Effect.gen(function* () {
                 chunk,
                 (project): Effect.Effect<RepositoryBatch> => {
                   const fetched = rows.get(project.repository.trim().toLowerCase()) ?? [];
-                  // GitHub does not index every repository for search — a renamed one answers for
-                  // its old name with silence rather than with an error — so a repository the
+                  // GitHub does not index every repository for search (a renamed one answers for
+                  // its old name with silence rather than with an error), so a repository the
                   // search said nothing at all about is read on its own, once, before it is
                   // believed. Only on its first slice: after that it has a boundary to carry on
                   // from, and silence past one means the rows are older rather than absent. That
                   // keeps a search-invisible repository from disappearing on a busy host, at the
-                  // price of one request per repository with nothing in the first slice — which
+                  // price of one request per repository with nothing in the first slice, which
                   // run together, and only there.
                   const lastVisible = searchVisibleAt.get(
                     searchVisibilityKey(project.host, project.repository),
@@ -1569,8 +1569,8 @@ export const make = Effect.gen(function* () {
     });
 
   /**
-   * Who this project's host says the reader is. Shared with the listing's own lookup — the same
-   * ten-minute answer per host — so a page that has already listed anything pays nothing for it,
+   * Who this project's host says the reader is. Shared with the listing's own lookup (the same
+   * ten-minute answer per host), so a page that has already listed anything pays nothing for it,
    * and a host that cannot say leaves it null rather than failing the read it decorates.
    */
   const viewerOf = (project: SupportedProject): Effect.Effect<string | null> =>
@@ -2207,7 +2207,7 @@ export const make = Effect.gen(function* () {
    * Rewriting the change request's own words, and rewriting a remark, are both left to the host to
    * allow or refuse. Neither is a question a permission read answers: every host lets the person
    * who wrote something rewrite it whatever access they have otherwise, and none of them reports
-   * that as a permission — so a check here could only guess, and a wrong guess takes the control
+   * that as a permission, so a check here could only guess, and a wrong guess takes the control
    * away from the one person certain to be allowed.
    */
   const update: PullRequestService["Service"]["update"] = (input) =>
@@ -2705,7 +2705,7 @@ export const make = Effect.gen(function* () {
         if (snapshot === undefined || now - snapshot.at > staleMs) return recorded;
         // Run as its own fiber rather than a child: the caller is answered and gone before the
         // refresh lands. The read still coalesces on the cache key, so ten stale reads in one
-        // window cost one host request — and a failed refresh costs nothing but the retry.
+        // window cost one host request, and a failed refresh costs nothing but the retry.
         return revalidate(recorded).pipe(Effect.as(snapshot.value));
       });
     };
@@ -2760,7 +2760,7 @@ export const make = Effect.gen(function* () {
       );
     /**
      * A change request already read does not wait on the host again. `reuse` answers from
-     * what we hold and spends nothing — title, author, and state barely move, and a linked
+     * what we hold and spends nothing: title, author, and state barely move, and a linked
      * thread already names the change request. `revalidate` answers the same way and
      * refreshes behind it, so line counts and the rest can change in place.
      */
@@ -2780,7 +2780,7 @@ export const make = Effect.gen(function* () {
   const lastGoodDetail = makeLastGoodRead<PullRequestDetail>(DETAIL_CACHE_CAPACITY);
 
   // Epochs are the invalidation mechanism: a key carries its scope's epoch, so bumping the
-  // epoch strands every entry made under the old one — no enumerating a cache whose keys
+  // epoch strands every entry made under the old one, with no enumerating a cache whose keys
   // (cursors, commits) nothing holds a list of. The counter is shared and monotonic so a
   // scope re-entering `refEpochs` after eviction can never mint a key an old entry still has.
   let epochCounter = 0;
@@ -2975,7 +2975,7 @@ export const make = Effect.gen(function* () {
   // Keys serialize positionally and parse back in the lookup, so the cache is the only holder
   // of in-flight state: concurrent identical reads coalesce on the key into one host request.
   // The continuation cursors are part of the key, entries sorted so one continuation is one
-  // key however its record was assembled — a further slice is its own answer, cached like any.
+  // key however its record was assembled; a further slice is its own answer, cached like any.
   const listCache = yield* Cache.makeWith(
     (key: string) => {
       // The parse undoes this module's own serialization, so the shapes are known exactly;
@@ -3222,7 +3222,7 @@ export const make = Effect.gen(function* () {
     const key = refCacheKey(input);
     // Record the summary from a host or cache read, not the stale value
     // `serveHeld` returns immediately. Skip the write when that read is older
-    // than a later strict summary — display reuse would otherwise keep the
+    // than a later strict summary; display reuse would otherwise keep the
     // regression and never ask the host again.
     const read = Cache.get(detailCache, key).pipe(
       Effect.tap((value) => {

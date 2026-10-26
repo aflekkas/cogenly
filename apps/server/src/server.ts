@@ -333,7 +333,7 @@ const layerHttpServer = Layer.unwrap(
       // Negotiate permessage-deflate with clients that offer it; clients
       // that don't still get uncompressed frames on their connection.
       // Context takeover stays enabled (ws default) so the compression
-      // window is shared across frames — that also makes small frames cheap
+      // window is shared across frames. That also makes small frames cheap
       // to compress, so no size threshold is set (ws only honors
       // `threshold` when context takeover is disabled).
       websocket: { perMessageDeflate: true },
@@ -793,7 +793,7 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   // to clients. Keybindings mirrors its portable list through server settings.
   Layer.provideMerge(Layer.mergeAll(Keybindings.layer.pipe(Layer.provide(layerServerSettings)))),
   Layer.provideMerge(ProviderRegistry.layer),
-  // The instance registry is the new routing keystone — text generation,
+  // The instance registry is the new routing keystone: text generation,
   // adapter lookup, and runtime ingestion all resolve `ProviderInstanceId`
   // through this layer. Built-in drivers come from `BUILT_IN_DRIVERS`;
   // hydration adds their default instances to `providerInstances` on boot.

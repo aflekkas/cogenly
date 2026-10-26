@@ -492,7 +492,7 @@ const GIT_FAILURE_REASON_PATTERNS: ReadonlyArray<readonly [RegExp, GitCommandFai
 // text from git's: a pre-push hook echoing "authentication failed" would
 // otherwise be read as a credential failure. Git prefixes its own diagnostics
 // and states a push rejection on a `! [rejected]` line, so only those are
-// classified. `remote:` is deliberately excluded — git prefixes every byte the
+// classified. `remote:` is deliberately excluded: git prefixes every byte the
 // server sends that way, remote hook output included, so trusting it would
 // reintroduce the same false positive from the other end of the connection.
 const GIT_DIAGNOSTIC_LINE_PATTERN = /^(?:fatal|error):|^!\s|^\s+!\s/;
@@ -3742,8 +3742,8 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         input.cwd,
         // `--merge` rather than `--hard`: the cleanliness check above is a snapshot, and another
         // thread may edit a tracked file between it and this move. Git itself refuses a `--merge`
-        // reset that would overwrite such an edit — the same guarantee `--ff-only` gives the
-        // other branch — so a race loses nothing; the refresh fails and is reported instead.
+        // reset that would overwrite such an edit (the same guarantee `--ff-only` gives the
+        // other branch), so a race loses nothing; the refresh fails and is reported instead.
         isAncestor
           ? ["merge", "--ff-only", input.targetCommit]
           : ["reset", "--merge", input.targetCommit],

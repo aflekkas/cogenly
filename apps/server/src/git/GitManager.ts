@@ -1339,14 +1339,14 @@ export const make = Effect.gen(function* () {
     // alias being repointed. Both sides must be resolved before treating a
     // mismatch as real: `readConfigValueNullable` swallows any git-config
     // read failure into `null`, so a transient failure to resolve the
-    // *current* remote URL must read as "unknown", not as "no remote" — the
+    // *current* remote URL must read as "unknown", not as "no remote". The
     // latter would otherwise drop an already-known PR badge on every hiccup.
     if (lastKnown.headRemoteUrlKey !== null && current.headRemoteUrlKey !== null) {
       return lastKnown.headRemoteUrlKey === current.headRemoteUrlKey ? lastKnown.pr : null;
     }
 
     // If the remote URL can't be compared, fall back to the remote identity
-    // encoded by tracked branches — same "both sides known" requirement, for
+    // encoded by tracked branches, with the same "both sides known" requirement, for
     // the same reason. A null-to-non-null transition (upstream/remoteName)
     // is allowed because that is the expected first-push case.
     if (
@@ -2815,7 +2815,7 @@ export const make = Effect.gen(function* () {
         checkedOutBranch: string,
       ) {
         if (checkedOutBranch !== localPullRequestBranch) {
-          // findLocalHeadBranch also accepts a branch that merely shares the head's bare name —
+          // findLocalHeadBranch also accepts a branch that merely shares the head's bare name:
           // a fork PR opened from "main" matches the user's own local main. That checkout is
           // somebody else's work, so it keeps its tracking config and nothing else.
           yield* ensureExistingWorktreeUpstream(worktreePath);
@@ -2842,7 +2842,7 @@ export const make = Effect.gen(function* () {
         const refreshed = yield* gitCore
           // The pull request's own ref, because it is the only thing that certainly names its
           // head. The branch's upstream does not: configuring it is best-effort, so a branch cut
-          // from `origin/main` whose head branch has since been deleted still resolves — and
+          // from `origin/main` whose head branch has since been deleted still resolves, and
           // following it would move the checkout onto main and call that the pull request.
           .fetchPullRequestHeadCommit({ cwd: worktreePath, prNumber: pullRequest.number })
           .pipe(

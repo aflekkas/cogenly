@@ -477,8 +477,8 @@ const make = Effect.gen(function* () {
         });
 
       // The server owns worktree naming: without an explicit branch, decide
-      // the final name before the worktree exists — a deterministic
-      // `c/<slug>` from the request text — so the worktree folder, named by
+      // the final name before the worktree exists (a deterministic
+      // `c/<slug>` from the request text), so the worktree folder, named by
       // the slug, never has to move and no rename follows. Temporary
       // branches sent by older clients are still renamed in the background
       // below.

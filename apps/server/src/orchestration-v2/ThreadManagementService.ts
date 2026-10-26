@@ -922,7 +922,7 @@ const make = Effect.gen(function* () {
             candidate.type === "user_message" && candidate.messageId === input.messageId,
         ) ?? null;
       // A queued message's user turn item is deliberately not emitted at
-      // dispatch time — it materializes when the queued turn actually starts,
+      // dispatch time; it materializes when the queued turn actually starts,
       // so it can map onto the provider turn. Every other dispatch mode still
       // produces its turn item transactionally with the run.
       if (

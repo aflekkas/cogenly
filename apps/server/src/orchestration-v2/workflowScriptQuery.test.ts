@@ -77,7 +77,7 @@ describe("workflow script containment", () => {
         const escaped = yield* Effect.exit(readWorkflowScript({ scriptPath: outside }));
         assert.equal(escaped._tag, "Failure");
         // A symlink INSIDE the root pointing outside must fail specifically on
-        // realpath re-containment — a "not-found" would mean the link was
+        // realpath re-containment. A "not-found" would mean the link was
         // never exercised and the assertion proves nothing.
         const sneaky = yield* Effect.exit(
           readWorkflowScript({ scriptPath: link }).pipe(

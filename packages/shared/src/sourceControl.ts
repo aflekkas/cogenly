@@ -146,7 +146,7 @@ export function detectSourceControlProviderFromRemoteUrl(
  * recorded before that field existed.
  *
  * Azure DevOps is the exception: `az repos pr list --repository` takes a repository name, and
- * takes the organisation and project from the checkout it detects — so the recorded
+ * takes the organisation and project from the checkout it detects, so the recorded
  * `org/project/_git/repo` path is refused outright and the whole repository reads as
  * unavailable. Its name is the last segment, which is what this hands over.
  *

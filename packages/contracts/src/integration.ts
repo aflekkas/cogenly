@@ -540,7 +540,7 @@ export const IntegrationOAuthFailure = Schema.Struct({
 export type IntegrationOAuthFailure = typeof IntegrationOAuthFailure.Type;
 
 export const integrationOAuthFailureMessage = (failure: IntegrationOAuthFailure) =>
-  `OAuth ${failure.stage} failed at ${failure.host}${failure.status === undefined ? "" : ` (HTTP ${failure.status})`}${failure.error ? `: ${failure.error}` : ""}${failure.description ? ` — ${failure.description}` : ""}.`;
+  `OAuth ${failure.stage} failed at ${failure.host}${failure.status === undefined ? "" : ` (HTTP ${failure.status})`}${failure.error ? `: ${failure.error}` : ""}${failure.description ? ` (${failure.description})` : ""}.`;
 
 export class IntegrationError extends Schema.TaggedError<IntegrationError>()("IntegrationError", {
   operation: Schema.String,

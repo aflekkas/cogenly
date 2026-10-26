@@ -1,5 +1,5 @@
 /**
- * SourceControlDriver — what a source control provider package hands the server.
+ * SourceControlDriver: what a source control provider package hands the server.
  *
  * One driver per host kind. The server lists its drivers once and both registries (repository
  * operations and pull requests) iterate that list, so adding a host means writing its package

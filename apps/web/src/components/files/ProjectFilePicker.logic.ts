@@ -16,7 +16,7 @@ function fileName(path: string): string {
 
 /**
  * First ordered subsequence of `query` inside `value`, as highlight indices.
- * Returns null when `value` does not contain the subsequence at all — the
+ * Returns null when `value` does not contain the subsequence at all. The
  * entry still renders (the server matched it), just without highlights.
  */
 function findMatchIndices(value: string, query: string): number[] | null {
@@ -37,7 +37,7 @@ function findMatchIndices(value: string, query: string): number[] | null {
 }
 
 /**
- * Maps server search results to picker rows. Server ordering is preserved —
+ * Maps server search results to picker rows. Server ordering is preserved:
  * ranking already happened there; this pass only filters to files and
  * computes highlight positions with the same query normalization the server
  * applied.

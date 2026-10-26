@@ -491,7 +491,7 @@ const listSafariProfiles = Effect.fnUntraced(function* (
  * that metadata is missing, unreadable or malformed, the directories that
  * actually hold a cookie database are scanned instead. Assuming a single
  * `Default` would report a browser whose cookies live in `Profile 1` as having
- * nothing to import — and it is then left out of the menu entirely.
+ * nothing to import, and it is then left out of the menu entirely.
  */
 const listSourceProfilesInDirectory = Effect.fnUntraced(function* (
   definition: BrowserImportSourceDefinition,
@@ -742,8 +742,8 @@ const firefoxSymlinkLockIsHeld = Effect.fnUntraced(function* (
   const separator = target.lastIndexOf(":");
   if (separator < 0) return true;
   // The owner half is whatever Firefox's resolver returned for the machine's
-  // hostname — 127.0.0.1 when the lookup fails, but often 127.0.1.1 or a LAN
-  // address — so a pid is only meaningful when that address is one of ours.
+  // hostname (127.0.0.1 when the lookup fails, but often 127.0.1.1 or a LAN
+  // address), so a pid is only meaningful when that address is one of ours.
   // A shared (NFS) profile locked from another machine names a foreign
   // address whose pid cannot be probed here, nor could a reused local pid
   // vouch for it, so it stays conservatively held.
@@ -767,7 +767,7 @@ const FCNTL_PROBE_INTERPRETERS = ["/usr/bin/python3", "python3"] as const;
 
 /**
  * The probe prints exactly one of these. Anything else means the script never
- * ran — most importantly Apple's `/usr/bin/python3` shim, which on a Mac
+ * ran, most importantly Apple's `/usr/bin/python3` shim, which on a Mac
  * without the Command Line Tools exits non-zero after printing an install
  * prompt, without ever reaching our code.
  */
@@ -790,9 +790,9 @@ const FCNTL_PROBE_SCRIPT =
  * acquired for real: on success the child exits and the kernel drops it.
  *
  * The answer is trusted only when the script itself spoke. A verdict of
- * `held` or `free` on stdout is the probe's own, and stands. Anything else —
- * no interpreter on any candidate path, or one that refused to run the script
- * (Apple's shim without the developer tools) — is the probe being unavailable,
+ * `held` or `free` on stdout is the probe's own, and stands. Anything else (no
+ * interpreter on any candidate path, or one that refused to run the script, as
+ * Apple's shim does without the developer tools) is the probe being unavailable,
  * not evidence about the lock. That case falls back to "not held" rather than
  * "held": reporting every profile as locked forever would block Firefox import
  * outright on such machines, and the SQLite snapshot already copes with a
@@ -831,7 +831,7 @@ const posixLockIsHeld = Effect.fnUntraced(function* (
  *
  * Firefox leaves two kinds of lock behind, and they mean different things.
  * On Linux the `lock` symlink (target `<ip>:+<pid>`) is removed on a clean
- * exit, so its presence is evidence — provided the pid it names is alive. But
+ * exit, so its presence is evidence, provided the pid it names is alive. But
  * `.parentlock` (macOS/Linux) and `parent.lock` (Windows) are regular files
  * held with fcntl or a Windows handle and are *deliberately left on disk*
  * after exit, as a last-used marker; treating them as proof of a running

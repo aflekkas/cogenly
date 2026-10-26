@@ -70,7 +70,7 @@ function normalizeContextMenuItems(source: readonly ContextMenuItem[]): ContextM
       continue;
     }
 
-    // Header items are decorative section labels for the web fallback only —
+    // Header items are decorative section labels for the web fallback only;
     // Electron's native menu has no equivalent affordance, so we skip them.
     if (sourceItem.header === true) {
       continue;

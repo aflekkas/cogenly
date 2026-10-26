@@ -13,7 +13,7 @@ import {
  * A la difference des silhouettes d'animation (`profiles.ts`), celles-ci ne sont
  * PAS relevees sur la video : elles sont construites analytiquement d'apres la
  * grille du personnalisateur d'origine. Deux sources distinctes, donc, et c'est
- * volontaire — les etats animes doivent rester fideles a la video, les formes de
+ * volontaire : les etats animes doivent rester fideles a la video, les formes de
  * base sont un choix d'utilisateur.
  */
 

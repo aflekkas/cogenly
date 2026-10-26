@@ -94,7 +94,7 @@ export function AgentDetailsMenu({
                 {fallbackEntries.map((entry) => (
                   <p key={entry.index} className="swap-motion">
                     {entry.selection.instanceId} · {entry.selection.model}
-                    {entry.skipReason === null ? "" : ` — skipped: ${entry.skipReason}`}
+                    {entry.skipReason === null ? "" : ` (skipped: ${entry.skipReason})`}
                   </p>
                 ))}
               </div>

@@ -138,7 +138,7 @@ function readConfigCustomModels(config: unknown): ReadonlyArray<CustomModelDefin
 
 /**
  * Set `key` to an arbitrary value on the opaque config blob. Unlike
- * provider settings field updates, does not drop empty-looking values — the
+ * provider settings field updates, does not drop empty-looking values; the
  * caller is responsible for deciding whether an empty array / empty
  * object should be stored explicitly (e.g. `customModels: []` is a
  * meaningful "user cleared their custom list" state distinct from
@@ -511,7 +511,7 @@ interface ProviderInstanceCardProps {
   readonly onUpdate: (nextInstance: ProviderInstanceConfig) => void;
   /**
    * Pass `undefined` to hide the delete footer entirely. Built-in default
-   * instance slots use `undefined` — they can't be deleted without losing
+   * instance slots use `undefined`: they can't be deleted without losing
    * the slot, and their "reset to defaults" affordance lives on an outer
    * reset button instead. Explicit `| undefined` in the type accommodates
    * `exactOptionalPropertyTypes: true`, where an absent key and
@@ -798,7 +798,7 @@ export function ProviderInstanceCard({
                   size={mode === "list" ? "icon-micro" : "icon-xs"}
                   variant="ghost-muted"
                   className={mode === "list" ? "pointer-events-auto relative shrink-0" : undefined}
-                  aria-label={`${updateProgress ? "Updating" : versionAdvisory.title} — view details`}
+                  aria-label={`${updateProgress ? "Updating" : versionAdvisory.title}: view details`}
                 >
                   {updateProgress ? (
                     <Spinner tone="muted" {...(mode === "list" ? { size: "sm" as const } : {})} />

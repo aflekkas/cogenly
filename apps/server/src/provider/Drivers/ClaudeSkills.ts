@@ -1,5 +1,5 @@
 /**
- * ClaudeSkills — filesystem discovery of Claude Code skills for the `$` picker.
+ * ClaudeSkills: filesystem discovery of Claude Code skills for the `$` picker.
  *
  * Claude Code loads skills from `<config dir>/skills` (user scope) and
  * `<cwd>/.claude/skills` (project scope), one directory per skill with a
@@ -303,7 +303,7 @@ const resolveClaudeConfigDirPath = Effect.fn("resolveClaudeConfigDirPath")(funct
   // No tilde expansion here: the spawned CLI receives this env var verbatim
   // (env vars are never shell-expanded), so a literal `~` must stay literal
   // for discovery to scan the same directory the runtime would. A relative
-  // value is resolved against the workspace cwd — the subprocess's own cwd —
+  // value is resolved against the workspace cwd (the subprocess's own cwd)
   // for the same reason.
   const environmentConfigDir = environment.CLAUDE_CONFIG_DIR?.trim() ?? "";
   if (environmentConfigDir.length > 0) {
@@ -354,7 +354,7 @@ export const discoverClaudeSkills = Effect.fn("discoverClaudeSkills")(function* 
 
       const frontmatter = parseSkillFrontmatter(contents);
       // Malformed frontmatter means the skill won't load in Claude Code
-      // either — skip it rather than surfacing a broken entry under its
+      // either, so skip it rather than surfacing a broken entry under its
       // directory name.
       if (frontmatter.kind === "malformed") {
         continue;

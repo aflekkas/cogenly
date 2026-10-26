@@ -2006,8 +2006,8 @@ function ComposerPromptEditorTiptapInner(props: ComposerPromptEditorProps) {
  * Insert pasted markdown at the selection, rebuilding inline tokens as chips
  * and styled spans as marks.
  *
- * Newlines always become paragraph splits — never trailing hard breaks, which
- * render no visible line — so pasted text lands exactly as typed.
+ * Newlines always become paragraph splits, never trailing hard breaks (which
+ * render no visible line), so pasted text lands exactly as typed.
  */
 function insertMarkdownParagraphs(
   value: string,

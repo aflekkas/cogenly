@@ -1,7 +1,7 @@
 /**
  * Instance-aware view over the wire `ServerProvider[]`.
  *
- * The wire carries one `ServerProvider` per *configured instance* — the
+ * The wire carries one `ServerProvider` per *configured instance*: the
  * default built-in codex instance, a user-authored `codex_personal`, an
  * unavailable shadow for a fork driver, etc. Legacy UI code collapsed these
  * into a single bucket per built-in driver via `.find((p) => p.driver === kind)`,
@@ -91,7 +91,7 @@ export interface ProviderInstanceEntry {
   readonly installed: boolean;
   readonly status: ServerProviderState;
   /**
-   * True when this entry is the default instance for its driver kind —
+   * True when this entry is the default instance for its driver kind,
    * i.e. its instance id equals `defaultInstanceIdForDriver(driverKind)`.
    * The settings panel and picker sort defaults before customs.
    */
@@ -142,7 +142,7 @@ export function isProviderInstancePickerVisible(entry: ProviderInstanceEntry): b
 /**
  * Project the wire `ServerProvider[]` into instance entries, one per
  * configured instance. Preserves the server's ordering (which sources
- * from `deriveProviderInstanceConfigMap` — explicit `providerInstances.*`
+ * from `deriveProviderInstanceConfigMap`: explicit `providerInstances.*`
  * first, synthesized defaults after) so callers that want "default first"
  * should sort with `sortProviderInstanceEntries` below.
  */

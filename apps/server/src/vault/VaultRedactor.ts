@@ -59,7 +59,7 @@ const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/
 /**
  * Short secrets (a card CVC, an `MM/YY` expiry) fall below `MIN_SCRUB_LENGTH`,
  * so the pass above would leave them. They are only redacted as whole tokens
- * — not inside a longer word or number — so a CVC of `123` does not blank
+ * (not inside a longer word or number), so a CVC of `123` does not blank
  * every `1234` in unrelated output, while a page echoing the filled CVC on
  * its own is still caught.
  */

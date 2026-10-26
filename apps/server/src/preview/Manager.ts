@@ -2,7 +2,7 @@
  * In-memory PreviewManager implementation.
  *
  * Sessions are keyed by `(threadId, tabId)`; a single thread can host
- * multiple tabs (browser-style). `open` always creates a new tab — tab
+ * multiple tabs (browser-style). `open` always creates a new tab; tab
  * lifecycle is owned by the renderer.
  *
  * Events are published via Effect's `PubSub`, so subscriber failures are
@@ -155,7 +155,7 @@ export const make = Effect.gen(function* PreviewManagerMake() {
   const crypto = yield* Crypto.Crypto;
   const serverEpoch = yield* crypto.randomUUIDv4().pipe(Effect.orDie);
   const stateRef = yield* SynchronizedRef.make<ManagerState>(initialState);
-  // Unbounded PubSub is fine here — events are tiny and we don't want to
+  // Unbounded PubSub is fine here: events are tiny and we don't want to
   // block publishers if a subscriber is slow. WS clients backpressure on
   // their own queues downstream.
   const eventsPubSub = yield* PubSub.unbounded<PreviewEvent>();

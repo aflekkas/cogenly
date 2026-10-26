@@ -66,7 +66,7 @@ describe("mergeHealthAlertSnapshots", () => {
   });
 
   it("groups one machine's items of one check into one counted alert", () => {
-    const title = "Athens Racing — Master: Fixes, Kifissia & Riviera";
+    const title = "Athens Racing Master: Fixes, Kifissia & Riviera";
     // What a 0.3.0 server sends: one alert per stuck subagent.
     const stuck = Array.from({ length: 18 }, (_, index) =>
       alert(`stuck-${index}`, {

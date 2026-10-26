@@ -312,7 +312,7 @@ export const GitPreparePullRequestThreadResult = Schema.Struct({
   branch: TrimmedNonEmptyStringSchema,
   worktreePath: TrimmedNonEmptyStringSchema.pipe(Schema.NullOr),
   /**
-   * False when the checkout could not be brought to the pull request head — a reused worktree
+   * False when the checkout could not be brought to the pull request head: a reused worktree
    * holding local commits or uncommitted changes keeps its own state, so the code being handed
    * over is older than the pull request.
    */

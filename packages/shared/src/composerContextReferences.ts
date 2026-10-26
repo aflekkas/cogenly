@@ -195,7 +195,7 @@ function providerMarkerLabel(record: ComposerContextRecord | undefined, label: s
     : record.serviceName;
 }
 
-/** `[Image: shot.png; ref=ctx_1]` — readable in place, with the id the payload is keyed by. */
+/** `[Image: shot.png; ref=ctx_1]`: readable in place, with the id the payload is keyed by. */
 export function formatComposerContextProviderMarker(
   kind: ComposerContextKind,
   label: string,

@@ -192,12 +192,12 @@ const make = Effect.gen(function* () {
           candidates.push({
             kind: "work",
             id: row.id,
-            text: `${row.title} — run ${row.status}`,
+            text: `${row.title} (run ${row.status})`,
             refs: [{ kind: "thread", id: row.id }, { kind: "run", id: row.runId }, ...refs],
             labelIds: matchedLabels,
             updatedAt: row.updatedAt,
             title: row.title,
-            snippet: snippetOf(`${row.title} — run ${row.status}`),
+            snippet: snippetOf(`${row.title} (run ${row.status})`),
             sourceThreadId: ThreadId.make(row.id),
             sourceThreadTitle: row.title,
             createdAt: row.createdAt,
@@ -405,7 +405,7 @@ const make = Effect.gen(function* () {
         }
         if (item.kind === "work" && threadRow) {
           const status = statusByThread.get(item.id) ?? "completed";
-          const text = snippetOf(`${threadRow.title} — run ${status}`);
+          const text = snippetOf(`${threadRow.title} (run ${status})`);
           filled.set(key, {
             ...item,
             text,

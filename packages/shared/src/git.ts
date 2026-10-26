@@ -369,7 +369,7 @@ function deriveLocalBranchNameCandidatesFromRemoteRef(
 // for a typed name like "new branch". Replacing runs of those with a dash makes
 // the name usable without reimplementing check-ref-format: names invalid for
 // other reasons still surface the git error. Only the whitespace git actually
-// rejects is replaced — git accepts U+00A0 and friends, and rewriting those
+// rejects is replaced; git accepts U+00A0 and friends, and rewriting those
 // would silently create a ref the user never asked for. Case and existing
 // dashes are left alone, since ref names are case sensitive and consecutive
 // dashes are valid.

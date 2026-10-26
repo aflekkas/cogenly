@@ -304,8 +304,8 @@ export const ClientSettingsSchema = Schema.Struct({
   // disabling restores the platform's heavier default. No effect off macOS.
   fontSmoothing: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   // When the first-run welcome wizard finished (or was skipped), as an ISO
-  // timestamp. `null` alone does not mean "show the wizard" — every install
-  // that predates this field decodes to `null` — so the gate also requires an
+  // timestamp. `null` alone does not mean "show the wizard" (every install
+  // that predates this field decodes to `null`), so the gate also requires an
   // empty workspace before it treats the client as a fresh install.
   onboardingCompletedAt: Schema.NullOr(Schema.String).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
@@ -1216,7 +1216,7 @@ export const ServerSettings = Schema.Struct({
    * withholds the MCP credential, so the `t3-code` server (and with it every
    * `preview_*` tool) is never attached to a provider session, and the prompt
    * text describing those tools is dropped along with them. The user's own
-   * browser panel is unaffected — this gates agent access only.
+   * browser panel is unaffected; this gates agent access only.
    *
    * Server-authoritative rather than client-local: tool injection and prompt
    * construction both happen on the server, and the answer must not differ

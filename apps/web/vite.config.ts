@@ -24,7 +24,7 @@ Object.assign(process.env, repoEnv);
 // from the absence of VITE_HTTP_URL/VITE_WS_URL: the runner deletes those keys
 // but `loadRepoEnv` merges `.env`/`.env.local` *underneath* the process env, so
 // a developer with either URL in their `.env` gets it back here. Baking it then
-// pins the client to localhost and breaks every non-localhost origin — the
+// pins the client to localhost and breaks every non-localhost origin: the
 // exact failure single-origin mode exists to prevent, and an invisible one
 // since the page still loads.
 const isSingleOriginDev = process.env.COGENLY_SINGLE_ORIGIN_DEV === "1";
@@ -150,7 +150,7 @@ function devCompressionPlugin(): Plugin {
     apply: "serve",
     configureServer(server) {
       // compression() is typed against Express's req/res, which extend the
-      // node http objects Connect actually passes — safe to narrow.
+      // node http objects Connect actually passes, so it is safe to narrow.
       server.middlewares.use(
         compression({
           brotli: { params: { [NodeZlib.constants.BROTLI_PARAM_QUALITY]: 5 } },
@@ -241,7 +241,7 @@ export default defineConfig(() => {
       allowedHosts,
       // Transform the whole module graph at server start instead of on the
       // first request. Without this, a cold worktree discovers and transforms
-      // modules one import-level at a time while the browser waits — which
+      // modules one import-level at a time while the browser waits, which
       // over a tailnet origin turns into minutes of waterfall.
       warmup: {
         clientFiles: ["./src/main.tsx"],
@@ -250,7 +250,7 @@ export default defineConfig(() => {
         ? {
             // One entry per shared prefix; the server's dev catch-all 404s the
             // same list, so the two sides cannot drift. `/ws` is the app's own
-            // socket and `/api` carries the device hub's stream sockets —
+            // socket and `/api` carries the device hub's stream sockets;
             // Vite's HMR socket is matched separately and exactly (path "/"
             // plus a vite-hmr subprotocol), so the upgrade handlers don't
             // collide.
@@ -271,7 +271,7 @@ export default defineConfig(() => {
       // Everywhere else, leaving this unset lets the client derive it from the
       // page origin, which is what makes HMR work over Tailscale/LAN instead of
       // failing an attempt against the wrong machine's localhost first.
-      // (Vite 8 logs connection state via console.debug — enable "Verbose".)
+      // (Vite 8 logs connection state via console.debug; enable "Verbose".)
       ...(explicitHost
         ? {
             hmr: {

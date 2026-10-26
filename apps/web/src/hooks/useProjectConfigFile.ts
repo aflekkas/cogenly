@@ -30,7 +30,7 @@ export interface ProjectConfigFileState {
 
 /**
  * Decoded state of the project's checked-in `cogenly.json` (or legacy
- * `t3.json`), including whether the file exists but is broken — which the
+ * `t3.json`), including whether the file exists but is broken, which the
  * runtime otherwise swallows silently.
  */
 export function useProjectConfigFileState(

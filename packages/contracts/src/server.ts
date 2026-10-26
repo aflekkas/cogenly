@@ -125,7 +125,7 @@ export const ServerProviderSkill = Schema.Struct({
   shortDescription: Schema.optional(TrimmedNonEmptyString),
   /**
    * The skill is hidden from the agent's own skill tool, so only the user can
-   * start it — Claude Code's `disable-model-invocation`. Composers must offer
+   * start it (Claude Code's `disable-model-invocation`). Composers must offer
    * it as a slash command; naming it in prose does nothing.
    */
   userInvocationOnly: Schema.optional(Schema.Boolean),
@@ -165,10 +165,10 @@ export function isProviderWorkspaceSnapshotCurrent(
 /**
  * Availability of a configured provider instance from the runtime's POV.
  *
- *  - `available` — the build ships this driver and an instance is wired
+ *  - `available`: the build ships this driver and an instance is wired
  *    up. Default for legacy snapshots produced from the closed
  *    `ServerSettings.providers` map.
- *  - `unavailable` — the user's `ServerSettings.providerInstances` (or a
+ *  - `unavailable`: the user's `ServerSettings.providerInstances` (or a
  *    persisted thread / session binding) references a driver this build
  *    doesn't ship. Common after rolling back from a fork or PR branch
  *    that introduced a new driver. The snapshot is preserved so the UI
@@ -893,7 +893,7 @@ export const ServerSelfUpdateInput = Schema.Struct({
 export type ServerSelfUpdateInput = typeof ServerSelfUpdateInput.Type;
 
 /** Acknowledgement that the update artifact is installed and the server is
-    about to restart into it — the connection will drop moments later. */
+    about to restart into it; the connection will drop moments later. */
 export const ServerSelfUpdateResult = Schema.Struct({
   targetVersion: TrimmedNonEmptyString,
   method: ServerSelfUpdateMethod,

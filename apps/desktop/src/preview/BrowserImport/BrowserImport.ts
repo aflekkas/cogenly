@@ -104,7 +104,7 @@ const unavailableReason = Effect.fn("BrowserImport.unavailableReason")(function*
   if (!(yield* isSourceInstalled(definition, context))) return "notInstalled";
   if (yield* isSourceRunning(definition, context)) return "browserRunning";
   // Safari's jar is found by `stat`, which TCC permits without Full Disk
-  // Access — so a Safari that lists as ready may still refuse the read. Probe
+  // Access, so a Safari that lists as ready may still refuse the read. Probe
   // the grant here, so the wizard can open on the permission step and a
   // post-grant recheck can tell granted from still-denied, rather than only
   // discovering it by attempting the import.
@@ -229,7 +229,7 @@ export const make = Effect.gen(function* BrowserImportMake() {
 
     if (platform === "darwin" && definition.engine === "chromium") {
       // macOS attributes the Keychain prompt and the resulting ACL grant to the
-      // executable that asks, so record which one that was — in a packaged build
+      // executable that asks, so record which one that was. In a packaged build
       // it is the signed app, in dev whatever binary hosts the main process.
       yield* Effect.logInfo("Reading browser cookie key from the keychain", {
         sourceId: definition.id,
@@ -271,7 +271,7 @@ export const make = Effect.gen(function* BrowserImportMake() {
     // Both branches fail with a tagged error, so the union stays structurally
     // identifiable and each tag is handled on its own below. The success side
     // is normalized to one shape too, so the skipped tally survives either
-    // engine — Firefox stores plaintext, so nothing there is ever unreadable.
+    // engine; Firefox stores plaintext, so nothing there is ever unreadable.
     const userDataDirectory = definition.userDataDirectory(pathContext);
     const read: Effect.Effect<
       CookieReadResult,
@@ -308,8 +308,8 @@ export const make = Effect.gen(function* BrowserImportMake() {
           Effect.fail(
             new BrowserImportFailedError({ sourceId: definition.id, reason: cause.reason }),
           ),
-        // Firefox has one failure mode — its plaintext database would not open
-        // — so its error carries no reason of its own and the user-facing one
+        // Firefox has one failure mode (its plaintext database would not open),
+        // so its error carries no reason of its own and the user-facing one
         // is supplied here.
         FirefoxCookieReadError: () =>
           Effect.fail(

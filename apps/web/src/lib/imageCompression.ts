@@ -25,7 +25,7 @@ const MAX_DIMENSION = IMAGE_ATTACHMENT_MAX_EDGE;
 /**
  * Ceiling on the *source* file handed to the re-encoder. File size is a
  * proxy for pixel count, and decoding hundreds of megapixels into an
- * ImageBitmap can OOM the tab — beyond this we refuse rather than risk it.
+ * ImageBitmap can OOM the tab. Beyond this we refuse rather than risk it.
  */
 export const MAX_COMPRESSIBLE_SOURCE_BYTES = 50 * 1024 * 1024;
 const MAX_HEIC_DECODE_PIXELS = 64_000_000;
@@ -208,7 +208,7 @@ function createCanvas(width: number, height: number): Canvas2D | null {
 
 /**
  * WebP is preferred: at matched visual quality it lands roughly 25-35%
- * smaller than JPEG, so the same budget buys more resolution and detail —
+ * smaller than JPEG, so the same budget buys more resolution and detail,
  * and it keeps alpha, so screenshots with transparency survive intact.
  * Browsers that can't encode it silently fall back to JPEG.
  */
@@ -332,7 +332,7 @@ async function reencodeWithinBudget(
   try {
     // Each pass shrinks relative to the *previous target*, capped by
     // MAX_DIMENSION. Scaling a fixed ceiling instead would be a no-op for
-    // images already smaller than that ceiling — the fallback passes would
+    // images already smaller than that ceiling: the fallback passes would
     // all resolve to the source size and never actually reduce resolution.
     const baseDimension = Math.min(MAX_DIMENSION, Math.max(bitmap.width, bitmap.height));
     // Tracks whether the *last* attempt threw, so a run of encoder failures
@@ -345,7 +345,7 @@ async function reencodeWithinBudget(
       try {
         encoded = await encodeWithinBudget(bitmap, targetDimension, budgetChars, preferredMimeType);
       } catch {
-        // Canvas allocation, drawing, or the codec itself can throw — often
+        // Canvas allocation, drawing, or the codec itself can throw, often
         // precisely *because* the target is too big (OOM on a large bitmap).
         // Keep trying the smaller fallback scales rather than giving up: a
         // reduced pass may well succeed. The exception must never escape,
@@ -411,7 +411,7 @@ async function fitImageToMaxEdge(file: File): Promise<{ file: File; imageSize: I
  * `File` (WebP or JPEG). A PNG or JPEG over `IMAGE_ATTACHMENT_MAX_EDGE` is
  * first scaled to that edge in its own format. Other files already within the
  * limit pass through untouched, preserving their exact bytes and format. Sources above
- * `MAX_COMPRESSIBLE_SOURCE_BYTES` are refused outright — decoding them is
+ * `MAX_COMPRESSIBLE_SOURCE_BYTES` are refused outright: decoding them is
  * the risk, so no amount of output budget makes them safe. An internally
  * converted image can provide its original source size when the intermediate
  * format expands beyond that ceiling.

@@ -230,7 +230,7 @@ interface ChatMarkdownProps {
   isStreaming?: boolean;
   skills?: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
   className?: string;
-  /** Treat single newlines as hard breaks — chat-style user input. */
+  /** Treat single newlines as hard breaks, as in chat-style user input. */
   lineBreaks?: boolean;
   /** Parse sanitized raw HTML instead of displaying its source text. */
   parseRawHtml?: boolean;
@@ -526,7 +526,7 @@ function extractCodeBlock(
     return null;
   }
   // With a custom `code` component the child's type is that component, not
-  // the "code" tag — the hast node react-markdown attaches still names it.
+  // the "code" tag. The hast node react-markdown attaches still names it.
   if (onlyChild.type !== "code" && onlyChild.props.node?.tagName !== "code") {
     return null;
   }
@@ -1681,8 +1681,8 @@ function hastPlainTextDeep(node: unknown): string {
 }
 
 /**
- * Whether the link carries any words of its own. An anchor that is only an image — a badge, a
- * "Fix in Cursor" button — already shows its identity, and a favicon bolted on in front of it
+ * Whether the link carries any words of its own. An anchor that is only an image (a badge, a
+ * "Fix in Cursor" button) already shows its identity, and a favicon bolted on in front of it
  * is a stray logo rather than a hint.
  */
 function hastHasText(node: unknown): boolean {
@@ -2716,7 +2716,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
       return <blockquote {...props}>{children}</blockquote>;
     }
     // Not a <blockquote>: the stylesheet mutes those, and an alert's body is ordinary
-    // text under a colored title — which is how the host renders it.
+    // text under a colored title, which is how the host renders it.
     return (
       <div role="note" className={cn("my-1 border-l-2 pl-3", alert.borderClassName)}>
         <p

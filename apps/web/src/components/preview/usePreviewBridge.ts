@@ -134,7 +134,7 @@ export function projectDesktopState(state: DesktopPreviewTabState): DesktopPrevi
  * Decide whether a state change warrants an RPC to the server, and shape
  * the report payload.
  *
- * - Idle never reports — the tab is post-close or pre-load and the server
+ * - Idle never reports: the tab is post-close or pre-load and the server
  *   already knows the canonical state from `open` / `closed`.
  * - We dedupe on (kind, url): consecutive Loading→Loading→Loading for the
  *   same URL collapses to a single RPC, ditto Success.

@@ -25,7 +25,7 @@ function getTimestampFormatOptions(
  * reports. Hosts that report nothing fall back to `undefined`, which is the
  * runtime default and the right answer in a browser.
  *
- * A host reports a locale only when it knows better than the runtime does —
+ * A host reports a locale only when it knows better than the runtime does;
  * see `getSystemLocale` on the desktop bridge for why desktop does.
  */
 export function resolveTimestampLocale(

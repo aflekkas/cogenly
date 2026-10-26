@@ -255,7 +255,7 @@ function ProviderSettingsPanelContent(target: ProviderSettingsTarget) {
     [environments, primaryEnvironmentId, target.environmentIds],
   );
   // Raw user intent; the effective selection is re-derived every render so a
-  // machine that drops out of the catalog falls back without erasing the pick —
+  // machine that drops out of the catalog falls back without erasing the pick;
   // if it reappears (e.g. after a reconnect) the selection is restored.
   const [selectedEnvironmentId, setSelectedEnvironmentId] = useState<EnvironmentId | null>(
     target.environmentId ?? primaryEnvironmentId,

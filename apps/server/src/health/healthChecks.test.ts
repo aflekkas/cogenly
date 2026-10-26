@@ -740,7 +740,7 @@ describe("stuckRunsCheck", () => {
   });
 
   it("collapses many stuck subagents in one thread into one counted item", () => {
-    const title = "Athens Racing — Master: Fixes, Kifissia & Riviera";
+    const title = "Athens Racing Master: Fixes, Kifissia & Riviera";
     const result = stuckRunsCheck({
       active: [
         ...Array.from({ length: 18 }, (_, index) =>
@@ -754,7 +754,7 @@ describe("stuckRunsCheck", () => {
     assert.deepStrictEqual(
       result.items.map((entry) => entry.title),
       [
-        `18 subagents stuck in "Athens Racing — Master: Fixes, Kifissia & Riviera" for 2 days`,
+        `18 subagents stuck in "Athens Racing Master: Fixes, Kifissia & Riviera" for 2 days`,
         `A subagent in "Other" has been running for 6 hours`,
       ],
     );

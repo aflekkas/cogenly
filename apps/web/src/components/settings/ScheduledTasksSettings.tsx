@@ -236,7 +236,7 @@ export function scheduleLabel(
 
 /**
  * Human label for a run timestamp. `formatRelativeTime` only handles the
- * past, and `nextRunAt` is a future instant — render "in 5m" style labels
+ * past, and `nextRunAt` is a future instant, so render "in 5m" style labels
  * for upcoming runs instead of a misleading "just now".
  */
 export function relativeLabel(value: string | null): string {

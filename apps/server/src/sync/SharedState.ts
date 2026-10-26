@@ -89,8 +89,8 @@ export class SharedState extends Context.Service<
 
 /**
  * Fields a machine may change on an agent or schedule it does not own.
- * Everything else — permissions, instructions, prompt, provider/model,
- * runtime mode and trigger fields — is owner-only, so a paired machine
+ * Everything else (permissions, instructions, prompt, provider/model,
+ * runtime mode and trigger fields) is owner-only, so a paired machine
  * cannot rewrite another machine's autonomous work.
  */
 const NON_OWNER_EDITABLE_FIELDS: Readonly<Record<"agent" | "schedule", ReadonlySet<string>>> = {

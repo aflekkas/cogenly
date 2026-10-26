@@ -108,7 +108,7 @@ export type BrowserDefaultSettings = Pick<
  * True when two viewport settings describe the same viewport.
  *
  * The setting is a tagged union rather than a scalar, so identity comparison
- * reports every stored viewport as changed — including one that matches the
+ * reports every stored viewport as changed, including one that matches the
  * default.
  */
 function isSamePreviewViewport(

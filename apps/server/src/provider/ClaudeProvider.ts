@@ -390,7 +390,7 @@ const probeClaudeCapabilities = (
     const managedMcpConfig = yield* hasClaudeManagedMcpConfig();
     return yield* Effect.tryPromise(async () => {
       const q = claudeQuery({
-        // Never yield — we only need initialization data, not a conversation.
+        // Never yield; we only need initialization data, not a conversation.
         // This prevents any prompt from reaching the Anthropic API.
         // oxlint-disable-next-line require-yield
         prompt: (async function* (): AsyncGenerator<SDKUserMessage> {

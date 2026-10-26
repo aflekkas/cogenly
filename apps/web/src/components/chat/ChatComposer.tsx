@@ -1242,8 +1242,8 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
   const size = props.size ?? "sm";
   const interactionModeTooltip =
     props.interactionMode === "plan"
-      ? "Plan mode — click to return to normal build mode"
-      : "Default mode — click to enter plan mode";
+      ? "Plan mode. Click to return to normal build mode"
+      : "Default mode. Click to enter plan mode";
 
   return (
     <>
@@ -4290,7 +4290,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     }
     // A send while a pasted image is still compressing would strand that
     // image: the turn snapshot wouldn't include it, and it would surface
-    // in the *next* draft instead. Only oversized images hit this — small
+    // in the *next* draft instead. Only oversized images hit this; small
     // files clear the pending counter within a microtask.
     if (activeThreadId && (pendingImageCompressionsRef.current.get(attachmentTargetKey) ?? 0) > 0) {
       event?.preventDefault();

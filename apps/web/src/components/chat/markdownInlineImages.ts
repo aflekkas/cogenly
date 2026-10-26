@@ -569,7 +569,7 @@ export function groupInlineImageGalleries<T extends InlineImageHastNode>(tree: T
 }
 
 const FENCE_LINE = /^ {0,3}(?:`{3,}|~{3,})/;
-// A trailing `![alt`, `![alt]`, `![alt](url` — or the same image inside a link still being written.
+// A trailing `![alt`, `![alt]`, `![alt](url`, or the same image inside a link still being written.
 const PARTIAL_IMAGE_TAIL = /\[?!\[[^\]\n]*(?:\](?:\([^)\n]*)?)?$/;
 const PARTIAL_LINKED_IMAGE_TAIL = /\[!\[[^\]\n]*\]\([^)\n]*\)(?:\](?:\([^)\n]*)?)?$/;
 

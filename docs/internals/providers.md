@@ -18,7 +18,7 @@ settings schema, glyph as data, usage colours, picker visibility, onboarding
 installers). The server registers the driver in `BUILT_IN_DRIVERS`; the client
 registers the definition in `providerClients`. Pickers, settings lists, usage
 colours, onboarding, and the text-generation fallback all read from those two
-registries — no other file names the driver. Contracts keeps mirrors of the
+registries; no other file names the driver. Contracts keeps mirrors of the
 per-driver defaults for callers without registry access; a registry test fails
 when they drift.
 

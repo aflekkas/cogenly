@@ -1,5 +1,5 @@
 /**
- * ClaudeDriver — `ProviderDriver` for the Claude Agent SDK runtime.
+ * ClaudeDriver: `ProviderDriver` for the Claude Agent SDK runtime.
  *
  * Mirrors `CodexDriver`: a plain value whose `create()` returns one
  * `ProviderInstance` bundling `snapshot` / `adapter` / `textGeneration`

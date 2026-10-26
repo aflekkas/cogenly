@@ -156,7 +156,7 @@ export class UnsupportedNodeSqliteOperationError extends Schema.TaggedError<Unsu
 
 /**
  * Verify that the current Node.js version includes the `node:sqlite` APIs
- * used by `NodeSqliteClient` — specifically `StatementSync.columns()` (added
+ * used by `NodeSqliteClient`, specifically `StatementSync.columns()` (added
  * in Node 22.16.0 / 23.11.0).
  *
  * @see https://github.com/nodejs/node/pull/57490

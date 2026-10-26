@@ -11,7 +11,7 @@ let nextPreviewTabSequence = 0;
 
 /**
  * Generate a fresh preview tab id. Lives in shared (not contracts) because
- * the contracts package is schema-only — runtime helpers belong here.
+ * the contracts package is schema-only; runtime helpers belong here.
  */
 export function newPreviewTabId(): string {
   nextPreviewTabSequence += 1;
@@ -20,7 +20,7 @@ export function newPreviewTabId(): string {
 
 const LOOPBACK_HOSTS: ReadonlySet<string> = new Set(["localhost", "127.0.0.1", "0.0.0.0", "::1"]);
 
-/** Internal — used by `lsof` parsing where the host string is wire-formatted. */
+/** Internal: used by `lsof` parsing where the host string is wire-formatted. */
 export const LSOF_LOCAL_HOST_TOKENS: ReadonlySet<string> = new Set([
   ...LOOPBACK_HOSTS,
   "*",

@@ -792,7 +792,7 @@ export const OrchestrationV2WorkflowAgent = Schema.Struct({
   /**
    * Prompt and result excerpts. A workflow member's whole conversation is one
    * prompt and one answer, so together these are its transcript as far as the
-   * provider exposes it — both are capped by the CLI at a few hundred
+   * provider exposes it. Both are capped by the CLI at a few hundred
    * characters.
    */
   prompt: Schema.optional(Schema.NonEmptyString),
@@ -3086,7 +3086,7 @@ export const OrchestrationV2Command = Schema.Union([
     commandId: CommandId,
     threadId: ThreadId,
     // Fractional-index key: pinned threads sort lexicographically by these
-    // keys, so a drag writes one key to one thread — neighbors are never
+    // keys, so a drag writes one key to one thread; neighbors are never
     // touched. Clients compute a key that sorts between the dropped
     // position's neighbors.
     orderKey: TrimmedNonEmptyString,
@@ -4093,7 +4093,7 @@ export type OrchestrationV2GetWorkflowScriptResult =
 
 /**
  * Shared by every read of a file the Claude harness persisted for a workflow
- * run — the script and each member's transcript. One vocabulary because both
+ * run: the script and each member's transcript. One vocabulary because both
  * reads apply identical containment rules.
  */
 const WORKFLOW_FILE_ERROR_MESSAGES = {

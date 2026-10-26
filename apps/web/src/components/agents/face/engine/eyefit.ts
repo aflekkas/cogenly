@@ -12,7 +12,7 @@
  * Ce choix est l'essentiel du correctif, bien plus que la geometrie qui suit :
  *
  * Resolue dans la boucle de rendu, la correction reagit a tout ce qui bouge a soixante
- * images par seconde — la derive du regard, le pointeur, l'expression en cours de
+ * images par seconde : la derive du regard, le pointeur, l'expression en cours de
  * morph, le bord le plus proche qui change, l'oeil le plus contraint qui change. Sept
  * variantes ont ete ecrites ainsi et toutes produisaient un artefact de mouvement
  * visible : tremblement permanent, saut de direction de 26 unites quand le bord de
@@ -144,7 +144,7 @@ function empreintes(visage: Visage, sil: Pose["sil"], radii: number[]): Empreint
 
 /**
  * Approche la plus courte entre un contour et un segment : la distance, et le vecteur
- * qui va du contour vers le segment — le sens qui degage.
+ * qui va du contour vers le segment, soit le sens qui degage.
  *
  * Les deux sortent de la MEME passe. Les calculer separement doublait le seul vrai cout
  * de ce module, qui est ce balayage.
@@ -223,7 +223,7 @@ const DICHOTOMIE = 8;
  * tailles et inclinaisons sont conserves au pixel. Le visage est seulement pose un peu
  * plus bas sur un corps qui n'a pas de place en haut, ce qui est le geste qu'on ferait a
  * la main. Les variantes qui bornaient chaque oeil separement ecartaient la paire, et
- * celles qui mettaient le visage a l'echelle rapetissaient les yeux — visiblement.
+ * celles qui mettaient le visage a l'echelle rapetissaient visiblement les yeux.
  *
  * La marge visee est celle du profil D'ORIGINE, pas un degagement strict : sur le cercle
  * l'oeil exterieur frole deja le bord, 17,3 unites pour une boule de rayon 100, et c'est
@@ -234,7 +234,7 @@ const DICHOTOMIE = 8;
  * norme qui tient, donc on sonde une couronne de directions et on dichotomie la distance
  * le long de chacune. Une descente de gradient a ete ecrite d'abord et elle ne converge
  * pas : degager la paire d'un bord la rapproche de l'autre, si bien qu'elle tatonne et ne
- * fait que garder son meilleur essai — passer ses tours de 40 a 18 suffisait a faire
+ * fait que garder son meilleur essai ; passer ses tours de 40 a 18 suffisait a faire
  * reapparaitre 34 debordements. Ici le resultat ne depend pas d'une convergence : chaque
  * direction est resolue exactement, au pas de dichotomie pres.
  */
@@ -274,7 +274,7 @@ function resous(epreuves: Epreuve[]): { x: number; y: number } {
 
   /*
    * Deja bon : le cas du cercle, et de toute forme assez large. La gelule doit RENTRER
-   * en plus de n'etre pas plus serree que sur le profil d'origine — sans cette seconde
+   * en plus de n'etre pas plus serree que sur le profil d'origine. Sans cette seconde
    * condition, une forme ou rien ne rentre satisfait la premiere de facon degeneree et
    * on abandonnait. `wide` a des gelules de 87 unites de long, `notify` de 50 de
    * diametre : sur un triangle ou une goutte elles debordent quoi qu'on fasse, et il
@@ -334,8 +334,8 @@ function resous(epreuves: Epreuve[]): { x: number; y: number } {
  * Le visage a couvrir : celui de l'expression si l'etat l'accepte, le sien sinon.
  *
  * UNE entree de table par expression, et non un pire cas commun a toutes. Un pire cas
- * paraissait plus sur — un decalage constant ne peut pas bouger quand l'expression change
- * — mais il est intenable : sur une capsule, `neutre` a les yeux hauts et demande a
+ * paraissait plus sur (un decalage constant ne peut pas bouger quand l'expression change),
+ * mais il est intenable : sur une capsule, `neutre` a les yeux hauts et demande a
  * descendre quand `effraye` les a bas et demande a monter. Aucune translation unique ne
  * satisfait les deux, et la mesure le confirme (4 debordements de 4,8 unites).
  *
@@ -402,12 +402,12 @@ const clef = (state: StateId, expr: string | null) => `${state}|${expr ?? ""}`;
 /**
  * Table des decalages, batie a l'import : une entree par (forme, etat a corps de base,
  * expression). Seuls `idle` et `swirl` portent le visage de repos, donc seuls eux se
- * declinent par expression — les trois autres etats a corps de base ont un visage releve
+ * declinent par expression ; les trois autres etats a corps de base ont un visage releve
  * sur la video et une seule entree.
  *
  * Clef par REFERENCE du tableau de rayons, ce qui est deja la convention du moteur : ses
  * gardes `radii === this.shape` et `expression === this.expr` reposent sur la meme
- * stabilite. Un profil inconnu, ou `null`, ne corrige rien — l'API accepte n'importe quel
+ * stabilite. Un profil inconnu, ou `null`, ne corrige rien : l'API accepte n'importe quel
  * tableau et le moteur n'a pas a dependre de la prudence de ses appelants.
  */
 function batir(): Map<number[], Map<string, { x: number; y: number }>> {
@@ -430,7 +430,7 @@ const DECALAGES = batir();
 
 /**
  * Decalage a appliquer aux deux yeux pour cette forme sur cet etat, en unites de rayon
- * de boule — le moteur le remet a son echelle.
+ * de boule ; le moteur le remet a son echelle.
  *
  * Vaut zero des que la forme n'est pas au catalogue, ce qui couvre `null` et le cercle :
  * sur le cercle les deux profils sont le meme, donc la marge est deja celle exigee et la

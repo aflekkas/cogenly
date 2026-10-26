@@ -10,7 +10,7 @@ import { GitHubIcon } from "./Icons";
 
 const SITE_FAVICON_CLASS_NAME = "block size-full shrink-0 select-none";
 
-/** Image URLs whose request already failed this session — skip straight to the next choice. */
+/** Image URLs whose request already failed this session; skip straight to the next choice. */
 const failedFaviconUrls = new Set<string>();
 
 /** Sites whose brand mark (drawn in `currentColor`) replaces the fetched favicon so it follows the theme. */

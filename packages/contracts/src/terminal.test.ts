@@ -92,7 +92,7 @@ describe("TerminalOpenInput", () => {
     ).toBe(false);
   });
 
-  it("requires terminalId — the client must always pick an id", () => {
+  it("requires terminalId because the client must always pick an id", () => {
     expect(
       decodes(TerminalOpenInput, {
         threadId: "thread-1",

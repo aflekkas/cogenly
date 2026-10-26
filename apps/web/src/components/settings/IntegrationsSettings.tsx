@@ -237,8 +237,8 @@ const isValidDimension = (value: number) =>
 
 /**
  * A sized viewport with width and height swapped. Presets keep their identity
- * through a rotation — `resolvePreviewViewport` already stores rotated presets
- * as the preset id plus swapped dimensions — so a rotated iPad is still an
+ * through a rotation (`resolvePreviewViewport` already stores rotated presets
+ * as the preset id plus swapped dimensions), so a rotated iPad is still an
  * iPad, not an anonymous custom size.
  */
 const rotateViewport = (
@@ -980,7 +980,7 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
   const profileWritesDisabled = disabled || !settingsHydrated;
 
   const profiles = resolveBrowserProfiles(userProfiles);
-  // Incognito is deliberately not a row — it holds nothing to manage — so the
+  // Incognito is deliberately not a row (it holds nothing to manage), so the
   // default has to resolve against the list that renders. A stored
   // `browserDefaultProfileId` of "incognito" would otherwise leave the section
   // with no Default badge at all.
@@ -1075,7 +1075,7 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
 
   // A browser that is not on this machine is left out rather than listed as a
   // dead row: there is nothing to act on, and the menu is a list of things you
-  // can import from. An unsupported one is left out for the same reason — the
+  // can import from. An unsupported one is left out for the same reason: the
   // blocked wizard step can't be fixed from here. Every other unavailable
   // reason stays, since each names a step the user can take.
   const importableSources = (sources ?? []).filter(
@@ -1095,7 +1095,7 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
   }, []);
 
   // Runs one import for the wizard. A new profile is registered only once the
-  // import succeeds — the cookies land in its partition first — so a blocked
+  // import succeeds (the cookies land in its partition first), so a blocked
   // attempt never leaves an empty profile behind.
   const runWizardImport = async (
     source: BrowserImportSource,
@@ -1253,7 +1253,7 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
               ) : importableSources.length === 0 ? (
                 <MenuItem disabled>No supported browsers found</MenuItem>
               ) : (
-                // Every source is a plain row — running, needs-permission and
+                // Every source is a plain row: running, needs-permission and
                 // ready all look the same here. The wizard picks up whatever
                 // state the source is in and walks the user forward from there.
                 <>

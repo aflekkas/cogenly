@@ -31,9 +31,9 @@ User guide:
 
 `vault_items` keeps plaintext: name, type, scope (environment-wide or a
 project label id), an optional display `label`, field _names_, allowed
-domains, policy, timestamps, and a deleted tombstone. The secret body —
-username, password, TOTP secret, value, and a card's number, expiry
-month/year, CVC and cardholder name — exists inside the ciphertext.
+domains, policy, timestamps, and a deleted tombstone. The secret body
+(username, password, TOTP secret, value, and a card's number, expiry
+month/year, CVC and cardholder name) exists inside the ciphertext.
 
 Two secret-derived values are copied out as display text, because lists
 need them to tell items apart: a card's last 4 digits, and a **login's**

@@ -29,7 +29,7 @@ export type ProviderStatusKey = keyof typeof PROVIDER_STATUS_STYLES;
  * Derive the headline + detail copy shown under a provider's name in the
  * settings page. Prefers `provider.message` for server-supplied detail and
  * falls back to generic phrasing when the server has not yet reported any
- * state — which happens before the first probe or when an instance names a
+ * state, which happens before the first probe or when an instance names a
  * driver this build does not ship. A ready provider without account metadata
  * remains available and does not imply an authentication failure.
  */

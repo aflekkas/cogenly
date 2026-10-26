@@ -4,8 +4,8 @@
  * Chromium cookie extraction.
  *
  * Reads a Chromium-family browser's cookie database and decrypts each record
- * with the key its prefix calls for. Key acquisition — and the consent it
- * needs — lives in `ChromiumKeys`.
+ * with the key its prefix calls for. Key acquisition (and the consent it
+ * needs) lives in `ChromiumKeys`.
  *
  * Records whose scheme we hold no key for are skipped rather than failing the
  * whole import: a Linux database can mix `v10` and `v11`. A partial result
@@ -178,7 +178,7 @@ const decryptGcm = (
 
 /**
  * Decrypts one stored value, choosing the scheme from its prefix. Returns null
- * when no key covers that scheme — including Windows' app-bound `v20`, which
+ * when no key covers that scheme, including Windows' app-bound `v20`, which
  * this build has no key for at all.
  */
 export function decryptChromiumValue(
@@ -221,9 +221,9 @@ export function decryptChromiumValue(
   }
   // No recognised prefix: Chromium on macOS and Linux both treat this as
   // legacy data stored in the clear and return it as-is, so it is a readable
-  // cookie rather than an undecryptable one. Windows is the exception — its
+  // cookie rather than an undecryptable one. Windows is the exception: its
   // app-bound `v20` blobs also lack these prefixes and must not be read as
-  // plaintext — but Windows Chromium is not importable here at all.
+  // plaintext, but Windows Chromium is not importable here at all.
   if (platform === "darwin" || platform === "linux") {
     return stripDomainBinding(buffer, domain, schemaVersion)?.toString("utf8") ?? null;
   }

@@ -1,8 +1,8 @@
 /**
  * Keeping what a reader is looking at true, whichever way they arrived at it.
  *
- * A pull request changes while nobody is looking at it — a push lands, a check finishes, somebody
- * approves — and a view that only reads on mount shows yesterday's answer for as long as the tab
+ * A pull request changes while nobody is looking at it (a push lands, a check finishes, somebody
+ * approves), and a view that only reads on mount shows yesterday's answer for as long as the tab
  * stays open. Three moments deserve a read: arriving at the view, coming back to the window, and
  * simply sitting on it while it is open. All three are the same policy, so they live in one hook
  * rather than three; every one of them is bounded by the same minimum interval, so the moments
@@ -32,7 +32,7 @@ export const LIVE_REFRESH_IDLE_AFTER_MS = 6 * 60_000;
 
 /**
  * Whether a view should read again now. Separate from the hook because the rule is the whole of
- * it: only while the window is actually showing, and not again straight away — a reader passing
+ * it: only while the window is actually showing, and not again straight away: a reader passing
  * through three windows, or returning to a tab that missed an hour of ticks, is asking for one
  * read, not one per thing that happened while they were away.
  */
@@ -130,7 +130,7 @@ export function useLiveRefresh(
   // listeners, which would otherwise refresh on every render that changed anything at all.
   const latest = useRef(refresh);
   latest.current = refresh;
-  // A caller that shows a different thing in the same place — one panel, a pull request at a time —
+  // A caller that shows a different thing in the same place (one panel, a pull request at a time)
   // says which thing it is showing, so the reads it owes follow the thing rather than the slot.
   // Anything else is one view per place it appears, which is what the tree position already means.
   const fallbackViewId = useId();

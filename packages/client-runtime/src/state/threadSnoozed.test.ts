@@ -107,7 +107,7 @@ describe("effectiveSnoozed", () => {
     ).toBe(false);
   });
 
-  it("stays snoozed when the failure predates the snooze — the user saw it", () => {
+  it("stays snoozed when the failure predates the snooze, since the user saw it", () => {
     expect(
       effectiveSnoozed(
         makeShell({
@@ -121,7 +121,7 @@ describe("effectiveSnoozed", () => {
     ).toBe(true);
   });
 
-  it("stays snoozed while the session keeps working — snooze never pauses the agent", () => {
+  it("stays snoozed while the session keeps working, since snooze never pauses the agent", () => {
     expect(
       effectiveSnoozed(makeShell({ snoozedUntil: FUTURE_WAKE, sessionStatus: "running" }), {
         now: NOW,
@@ -138,7 +138,7 @@ describe("effectiveSnoozed", () => {
     ).toBe(false);
   });
 
-  it("ignores runs that completed before the snooze — the user saw that result", () => {
+  it("ignores runs that completed before the snooze, since the user saw that result", () => {
     expect(
       effectiveSnoozed(
         makeShell({ snoozedUntil: FUTURE_WAKE, turnCompletedAt: "2026-04-10T08:00:00.000Z" }),
@@ -197,7 +197,7 @@ describe("canSnooze", () => {
     ).toBe(false);
   });
 
-  it("refuses a queued turn start — same invisible-pending-work rule as settle", () => {
+  it("refuses a queued turn start, following the same invisible-pending-work rule as settle", () => {
     // Fresh user message, no turn has adopted it, within the grace window.
     expect(
       canSnooze(

@@ -537,8 +537,8 @@ function DeliveryFailure({
         ? `${model.model} isn't available on ${status.providerName}`
         : failed
           ? `Couldn't reach ${model.model}`
-          : "Interrupted"}{" "}
-      —{" "}
+          : "Interrupted"}
+      .{" "}
       {canRetry ? (
         <button type="button" disabled={disabled} onClick={onRetry}>
           Retry

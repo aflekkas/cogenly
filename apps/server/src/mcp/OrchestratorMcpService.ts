@@ -1337,7 +1337,7 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Instance ids the adapter registry resolves — the same lookup a
+   * Instance ids the adapter registry resolves, the same lookup a
    * `delegated_task.request` performs when it runs. Capability reporting and
    * target resolution must not advertise a set narrower (or wider) than what
    * dispatch can actually serve.

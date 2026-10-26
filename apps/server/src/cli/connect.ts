@@ -518,7 +518,7 @@ const connectLinkCommand = Command.make("link", {
   headless: headlessFlag,
   publishOnly: Flag.Boolean("publish-only").pipe(
     Flag.withDescription(
-      "Link to publish agent activity only — no managed tunnel. Reach this environment out of band (e.g. Tailscale).",
+      "Link to publish agent activity only, with no managed tunnel. Reach this environment out of band (e.g. Tailscale).",
     ),
     Flag.withDefault(false),
   ),
@@ -619,7 +619,7 @@ const connectPublishCommand = Command.make("publish", {
         );
         if (!enabled) {
           // If enabling scheduled a publish-only link that hasn't been
-          // provisioned yet, disabling must cancel it too — otherwise the next
+          // provisioned yet, disabling must cancel it too; otherwise the next
           // start still links an environment whose only purpose was publishing.
           // A pending managed link is left alone; it exists for the tunnel.
           const linkedNow = Option.isSome(yield* secrets.get(CLOUD_LINKED_USER_ID));
@@ -639,7 +639,7 @@ const connectPublishCommand = Command.make("publish", {
 
         // Publishing needs the relay to know this environment belongs to you.
         // Establish a tunnel-free publish-only link automatically so signing in
-        // is all it takes — the mobile client can still reach the environment
+        // is all it takes. The mobile client can still reach the environment
         // out of band without Cogenly Connect.
         if (!(yield* tokens.hasCredential)) {
           yield* Console.log(

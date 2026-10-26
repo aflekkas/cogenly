@@ -16,7 +16,7 @@
  *      threads with pending recovery, are skipped, and scheduled tasks and
  *      queued effects are dropped, so the dev server never adopts live work.
  *      Auth sessions, pairing links, command receipts, and provider
- *      runtime rows are dropped — pair a fresh browser against dev.
+ *      runtime rows are dropped; pair a fresh browser against dev.
  *   3. Runs migrations on the result. Because the clone carries the real
  *      `effect_sql_migrations` table, this proves a new migration applies
  *      on top of the real applied set, and the slot check below catches
@@ -192,7 +192,7 @@ const isProcessAlive = (pid: number): boolean => {
  * server holding an open-but-inactive connection. The SQL probes below back
  * that up: BEGIN IMMEDIATE fails while a writer is active, and
  * wal_checkpoint(TRUNCATE) reports busy while another connection holds the
- * WAL. A leftover -shm alone is not a signal — read-only connections cannot
+ * WAL. A leftover -shm alone is not a signal: read-only connections cannot
  * clean it up on close. */
 const ensureNotInUse = Effect.fn("ensureDevDbNotInUse")(function* (databasePath: string) {
   const fs = yield* FileSystem.FileSystem;

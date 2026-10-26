@@ -143,7 +143,7 @@ export interface PreviousWorktreeSeed {
 // The most recently touched worktree in the project that the composer isn't
 // already pointing at. Backs the "Previous worktree" entry in the workspace
 // selector so a follow-up thread can hop back into the worktree you just
-// worked in without hunting for its branch. Archived threads don't compete —
+// worked in without hunting for its branch. Archived threads don't compete:
 // the rest of the UI hides them, so their worktrees shouldn't resurface here.
 export function resolvePreviousWorktreeSeed(input: {
   threads: ReadonlyArray<{

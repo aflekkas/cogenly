@@ -345,7 +345,7 @@ export function useThreadActions() {
   const router = useRouter();
   const handleNewThread = useNewThreadHandler();
   // Keep a ref so archiveThread can call handleNewThread without appearing in
-  // its dependency array — handleNewThread is inherently unstable (depends on
+  // its dependency array: handleNewThread is inherently unstable (depends on
   // the projects list) and would otherwise cascade new references into every
   // sidebar row via archiveThread → attemptArchiveThread.
   const handleNewThreadRef = useRef(handleNewThread);
@@ -460,7 +460,7 @@ export function useThreadActions() {
       if (permissionFailure) return permissionFailure;
       const resolved = resolveThreadTarget(target);
       if (!resolved) {
-        // Thread not in main store (e.g. archived thread) — dispatch delete directly.
+        // Thread not in main store (e.g. archived thread), so dispatch delete directly.
         const result = await deleteThreadMutation({
           environmentId: target.environmentId,
           input: { threadId: target.threadId },
@@ -695,7 +695,7 @@ export function useThreadActions() {
 
   const settleThread = useCallback(
     async (target: ScopedThreadRef) => {
-      // Version skew: never send the command to a server that predates it —
+      // Version skew: never send the command to a server that predates it;
       // the raw protocol rejection would read as a random failure.
       if (!readEnvironmentSupportsSettlement(target.environmentId)) {
         return AsyncResult.failure(
@@ -861,7 +861,7 @@ export function useThreadActions() {
         );
       }
       const resolved = resolveThreadTarget(target);
-      // Blocked-on-you work and queued turns can't be snoozed away —
+      // Blocked-on-you work and queued turns can't be snoozed away. This is the
       // client-side twin of the server invariants so the UI rejects before
       // a round trip.
       if (resolved && !canSnooze(resolved.thread, { now: new Date().toISOString() })) {

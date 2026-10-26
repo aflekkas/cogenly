@@ -6,7 +6,7 @@ import { SHAPES } from "./skins";
 
 /**
  * `radiusAtAngle`, la fonction qui recolle sur le contour reel tout ce qui est pose « sur »
- * le corps — les yeux et la pastille de notification.
+ * le corps : les yeux et la pastille de notification.
  *
  * Elle n'avait aucun test, alors que le moteur l'appelle en `atan2(y, x) - pose.sil.rot` et
  * qu'`orbit` pousse `rot` jusqu'a environ -30 rad : son argument sort donc largement de
@@ -48,7 +48,7 @@ describe("radiusAtAngle", () => {
 
   /**
    * Continue au passage par zero, la ou l'enroulement fait sauter l'index de 63 a 0. Une
-   * simplification qui renverrait une valeur de repli — 1, typiquement — se verrait ici
+   * simplification qui renverrait une valeur de repli (1, typiquement) se verrait ici
    * comme une marche de 0,22 sur ce profil.
    *
    * Huit decimales et pas neuf : l'ecart mesure vaut 7e-10, du bruit flottant sur des
@@ -69,7 +69,7 @@ describe("radiusAtAngle", () => {
  * C'est ce qui rend le controle necessaire : `blend` interpole par INDEX et retombe sur
  * `?? 1` quand l'index manque, donc une forme construite avec un autre nombre
  * d'echantillons morphe silencieusement vers un cercle unite au lieu d'echouer. Elle serait
- * juste au repos et fausse dans toutes ses transitions — le pire des deux mondes, parce que
+ * juste au repos et fausse dans toutes ses transitions : le pire des deux mondes, parce que
  * personne ne penserait a regarder un morph.
  */
 describe("profils des formes du personnalisateur", () => {

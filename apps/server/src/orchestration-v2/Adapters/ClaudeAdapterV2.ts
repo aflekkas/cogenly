@@ -4850,8 +4850,8 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
         /**
          * Projects a workflow's members as ordinary subagents.
          *
-         * A member is not a provider task — it exists only inside the
-         * coordinator's progress snapshot — but everything the user expects
+         * A member is not a provider task (it exists only inside the
+         * coordinator's progress snapshot), but everything the user expects
          * from a subagent (a thread to open, a prompt, an answer) is expressed
          * by the same events, so this emits exactly the sequence
          * updateClaudeSubagentNode emits rather than inventing a parallel
@@ -6470,7 +6470,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
          * Deliberately narrow: only a registered coordinator that this frame
          * carries a snapshot for is touched, and only `subagent.updated` is
          * emitted, because node and turn-item ids need a turn context this path
-         * does not have. Status is left alone — `task_notification` owns the
+         * does not have. Status is left alone: `task_notification` owns the
          * lifecycle, and it has its own turn-aware path.
          * These updates only reach the projection while the launching run is still
          * ingesting, which holds because a running coordinator keeps that run open.

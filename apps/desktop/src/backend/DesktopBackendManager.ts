@@ -1,6 +1,6 @@
 // Per-instance backend factory. Replaces the legacy singleton
 // `DesktopBackendManager` Context.Service: each call to
-// `makeBackendInstance(spec)` constructs an isolated backend lifecycle —
+// `makeBackendInstance(spec)` constructs an isolated backend lifecycle:
 // its own state Ref, mutex, restart loop, and active child process. The
 // returned `DesktopBackendInstance` exposes start/stop/snapshot/wait
 // methods that operate on that single backend.
@@ -12,11 +12,11 @@
 // Singleton couplings that the legacy service held inline are now
 // parameterized via the spec:
 //   - configResolve replaces the legacy `DesktopBackendConfiguration.resolve`
-//     so each instance can resolve its own start config — the primary wires
+//     so each instance can resolve its own start config. The primary wires
 //     `configuration.resolvePrimary`, the WSL orchestrator wires a
 //     `configuration.resolveWsl({ port, distro })` closure.
 //   - onReady / onShutdown drive UI side effects (window auto-open,
-//     readiness latch) only for instances that want them — the primary's
+//     readiness latch) only for instances that want them; the primary's
 //     spec passes the window's handleBackendReady/handleBackendNotReady,
 //     other pool instances pass nothing.
 //   - log writes go through a per-instance writer that the factory
@@ -802,7 +802,7 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
           });
           if (attempt > attemptLimit) {
             // We already surfaced and asked for the Windows fallback, yet we're
-            // still resolving the WSL primary — the fallback didn't take (e.g.
+            // still resolving the WSL primary, so the fallback didn't take (e.g.
             // the settings write failed). Stop rather than loop forever.
             yield* logInstanceError("backend preflight still failing after fallback; stopping", {
               reason,
@@ -841,7 +841,7 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
           yield* scheduleRestart(reason);
           return;
         }
-        // Clean preflight — reset the fatal counter so a later failure gets a
+        // Clean preflight: reset the fatal counter so a later failure gets a
         // fresh allowance.
         yield* Ref.update(state, (latest) =>
           latest.preflightFailureAttempt === 0 ? latest : { ...latest, preflightFailureAttempt: 0 },
@@ -1193,8 +1193,8 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
   const waitForReady = (timeout: Duration.Duration): Effect.Effect<boolean> =>
     Effect.gen(function* () {
       const current = yield* Ref.get(state);
-      // Return false early if an external `stop()` flipped desiredRunning off
-      // — no point polling for a backend that is being torn down.
+      // Return false early if an external `stop()` flipped desiredRunning off;
+      // there is no point polling for a backend that is being torn down.
       if (!current.desiredRunning) return { done: true, ready: false };
       return current.ready ? { done: true, ready: true } : { done: false, ready: false };
     }).pipe(

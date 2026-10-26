@@ -19,7 +19,7 @@ const BACKGROUND_TURN_ITEM_TYPES = new Set<OrchestrationV2TurnItem["type"]>([
 /**
  * True terminal run statuses (includes `rolled_back`). Retained as the
  * canonical terminal set for this module; do not widen or reuse it as the
- * background-wait gate — that gate intentionally excludes `rolled_back`.
+ * background-wait gate; that gate intentionally excludes `rolled_back`.
  */
 const TERMINAL_RUN_STATUSES = new Set<OrchestrationV2Run["status"]>([
   "cancelled",

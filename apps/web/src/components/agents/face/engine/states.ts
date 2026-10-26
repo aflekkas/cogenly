@@ -482,8 +482,8 @@ export const STATES: StateDef[] = [
      * Entree dans la vue des reglages.
      *
      * SEUL etat qui n'est pas releve sur la video : il est CHOISI, comme la
-     * couleur `--ink`. Il emprunte le vocabulaire d'`orbit` — les memes anneaux,
-     * avec leurs parametres mesures — mais coupe court : 1 s au lieu de 3,4, la
+     * couleur `--ink`. Il emprunte le vocabulaire d'`orbit` (les memes anneaux,
+     * avec leurs parametres mesures), mais coupe court : 1 s au lieu de 3,4, la
      * moitie des anneaux, et aucun triangle.
      *
      * Les deux drapeaux a `true` sont tout l'interet de cet etat :

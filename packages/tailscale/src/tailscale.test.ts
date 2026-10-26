@@ -314,7 +314,7 @@ describe("tailscale", () => {
 
       assert.instanceOf(error, TailscaleCommandExitError);
       // Unmatched stderr degrades to "unknown" rather than passing text
-      // through — that fallback is what keeps novel output from leaking.
+      // through; that fallback is what keeps novel output from leaking.
       assert.equal(error.stderrDiagnostic, "unknown");
       assertCarriesNoSecret(error, "tskey-auth-secret-token-value");
       assertCarriesNoSecret(error, "fluffy-badger");

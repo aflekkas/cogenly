@@ -504,7 +504,7 @@ function ProcessActions({
   onSignal: (process: ResourceTelemetryProcess, signal: ServerProcessSignal) => void;
 }) {
   if (!canSignalProcess(process)) {
-    return <span className="text-3xs text-muted-foreground/35">—</span>;
+    return null;
   }
   const isSignaling = signalingKeys.has(processIdentityKey(process));
   return (

@@ -219,8 +219,8 @@ export function renderBootServicePlist(
   // (and, with it, the process group) mid-handoff.
   // ProcessType Interactive opts out of background-job resource throttling.
   // AbandonProcessGroup stays at its default (false): launchd reaps leftover
-  // process-group members only when the launcher itself exits — the analog of
-  // KillMode=mixed's final cgroup kill — and not when the launcher restarts its
+  // process-group members only when the launcher itself exits (the analog of
+  // KillMode=mixed's final cgroup kill), and not when the launcher restarts its
   // child, so agent children survive server updates.
   return [
     `<?xml version="1.0" encoding="UTF-8"?>`,

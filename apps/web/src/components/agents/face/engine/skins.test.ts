@@ -11,7 +11,7 @@ import { STATES, type StateId } from "./states";
  * Ce fichier verrouille deux choses, et la seconde a coute bien plus que la premiere :
  *
  * 1. **La gelule ne sort pas de la silhouette.** Les yeux vivent sur une sphere, et
- *    `radiusAtAngle` les recolle au contour au prorata du rayon local — ce qui divise leur
+ *    `radiusAtAngle` les recolle au contour au prorata du rayon local, ce qui divise leur
  *    marge par le meme prorata. Une forme etroite dans la direction de l'oeil le poussait
  *    contre le bord jusqu'a ce que le masque l'ouvre : la gelule apparaissait comme une
  *    encoche dans le corps.
@@ -148,7 +148,7 @@ describe("formes du personnalisateur", () => {
   /**
    * Le cercle est la forme relevee sur la video, et le corps par defaut : le choisir dans
    * le personnalisateur ne doit RIEN changer par rapport a ne rien choisir. C'est ce qui
-   * garantit que la correction est neutre sur la reference — y compris son oeil exterieur,
+   * garantit que la correction est neutre sur la reference, y compris son oeil exterieur,
    * qui frole deja le bord et doit continuer de le froler. C'est aussi ce qui protege
    * `public/favicon.svg`, dont les deux matrices d'yeux sont celles de `sample(1)` sur
    * `idle`, au byte.
@@ -168,7 +168,7 @@ describe("formes du personnalisateur", () => {
 
   /**
    * Les silhouettes relevees sur la video ne sont pas remplacables, donc la forme choisie
-   * ne doit pas les atteindre — ni leur corps, ni leurs yeux. `orbit` est le cas qui
+   * ne doit pas les atteindre : ni leur corps, ni leurs yeux. `orbit` est le cas qui
    * compte : la marge de son oeil est plus serree que celle du cercle et elle est pourtant
    * juste, puisque relevee ainsi. Une regle de marge appliquee sans distinction la
    * deplacerait.
@@ -208,7 +208,7 @@ describe("formes du personnalisateur", () => {
    * Le vrai piege : la correction doit etre INVISIBLE en mouvement.
    *
    * Ce qu'on mesure est l'OSCILLATION et non la vitesse. Un morph deplace les yeux vite de
-   * toute facon — les expressions ne regardent pas au meme endroit — et c'est du mouvement
+   * toute facon (les expressions ne regardent pas au meme endroit), et c'est du mouvement
    * voulu. Trembler, c'est aller et REVENIR. On compte donc les changements de sens image
    * par image, et on les compare au cercle, que la correction ne touche pas.
    *
@@ -302,7 +302,7 @@ describe("formes du personnalisateur", () => {
       /*
        * Un changement d'expression fait passer le decalage d'une entree de table a l'autre.
        * Sept formes sur huit n'y gagnent aucun aller-retour ; la `goutte` passe de un
-       * rebroussement de 6,3 unites — deja present sans correction — a deux de 11,1. La
+       * rebroussement de 6,3 unites (deja present sans correction) a deux de 11,1. La
        * borne laisse passer ca et rien de plus : les versions fautives etaient a 26.
        */
       expect(

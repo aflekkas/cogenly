@@ -1,5 +1,5 @@
 /**
- * ClaudeSkillDispatch — turns `$skill` mentions in a composer prompt into the
+ * ClaudeSkillDispatch: turns `$skill` mentions in a composer prompt into the
  * slash invocation Claude Code actually runs.
  *
  * The composer inserts `$name` for every provider. Codex parses that natively;

@@ -1357,8 +1357,8 @@ function ImportStep({
     const importGeneration = importGenerationRef.current;
     const importedProjects = importedProjectsRef.current;
     const projectAttempts = projectAttemptsRef.current;
-    // Interrupted imports are neither failures nor successes — the command was
-    // superseded or the environment dropped — but they still didn't land, so
+    // Interrupted imports are neither failures nor successes (the command was
+    // superseded or the environment dropped), but they still didn't land, so
     // they must not read as "imported everything". Retries skip paths that
     // already landed this session (re-creating them would only trip the
     // duplicate-root invariant and read as a failure).

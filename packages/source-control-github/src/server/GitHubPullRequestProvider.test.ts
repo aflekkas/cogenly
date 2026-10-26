@@ -1014,7 +1014,7 @@ describe("getChangeRequestActivity dismissed reviews", () => {
   });
 
   it.effect("fills a marker-only dismissed review with the timeline's reason", () =>
-    // Macroscope's approvals carry only an HTML comment, which markdown renders as nothing —
+    // Macroscope's approvals carry only an HTML comment, which markdown renders as nothing;
     // an empty-string check misses them and the card opens onto nothing.
     readActivity.pipe(
       Effect.map((activity) => {
@@ -1100,7 +1100,7 @@ describe("loginAvatarUrl", () => {
   });
 
   it("has nothing for an app, which names no page", () => {
-    // `dependabot[bot]` has a picture, but not at `/dependabot[bot].png` — a guess that 404s is
+    // `dependabot[bot]` has a picture, but not at `/dependabot[bot].png`, and a guess that 404s is
     // worse than the initials it would replace.
     expect(loginAvatarUrl("dependabot[bot]", "github.com")).toBeNull();
   });

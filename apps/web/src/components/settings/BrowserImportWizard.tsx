@@ -67,8 +67,8 @@ interface BrowserImportWizardProps {
 /**
  * Guides one browser's cookies into a profile.
  *
- * Every state the import can be in — the browser is open, a profile has to be
- * chosen, the read failed — is a screen the user can move forward from, rather
+ * Every state the import can be in (the browser is open, a profile has to be
+ * chosen, the read failed) is a screen the user can move forward from, rather
  * than a disabled row that only says no.
  */
 export function BrowserImportWizard({
@@ -288,7 +288,7 @@ function FullDiskAccessStep({
         <DialogTitle>Let Cogenly read {source.name}&rsquo;s cookies</DialogTitle>
         <DialogDescription>
           To import cookies from {source.name}, Cogenly needs Full Disk Access. Turn it on in System
-          Settings, then come back to finish the import — you can revoke it again once the import is
+          Settings, then come back to finish the import. You can revoke it again once the import is
           done.
         </DialogDescription>
       </DialogHeader>
@@ -356,7 +356,7 @@ function ConfigureStep({
     target.kind === "existing" &&
     !targetProfiles.some((profile) => profile.id === target.profileId);
   // The "New profile" tile is unrendered once the cap is reached, so a target
-  // chosen before that leaves nothing selected in "Into" — say so, the same
+  // chosen before that leaves nothing selected in "Into". Say so, the same
   // way a vanished existing target is explained.
   const targetUncreatable = target.kind === "new" && !canCreateProfile;
   const targetFeedback =

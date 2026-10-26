@@ -459,7 +459,7 @@ export const layer = Layer.effect(
     const activeRuns = yield* Ref.make<ReadonlySet<ScheduledTaskId>>(new Set());
     // Sliding(1) coalesces the dirty-signal: every notification triggers a
     // full list() re-emit anyway, so a slow subscriber only ever needs the
-    // latest signal — an unbounded backlog would just grow memory.
+    // latest signal; an unbounded backlog would just grow memory.
     const changesPubSub = yield* PubSub.sliding<void>(1);
     const notifyChanged = PubSub.publish(changesPubSub, undefined).pipe(Effect.asVoid);
 
@@ -761,7 +761,7 @@ export const layer = Layer.effect(
         // edited while the run was in flight is honoured; fall back to the
         // run's snapshot only if the re-read itself fails.
         const reread = yield* Effect.result(findTask(task.id));
-        if (Result.isSuccess(reread) && reread.success === null) return; // deleted — nothing to release
+        if (Result.isSuccess(reread) && reread.success === null) return; // deleted, nothing to release
         const source = Result.isSuccess(reread) && reread.success !== null ? reread.success : task;
         yield* sql`
           UPDATE scheduled_tasks
@@ -807,7 +807,7 @@ export const layer = Layer.effect(
 
         // The in-memory snapshot may be stale: re-read before touching run
         // state. The task may have been deleted, paused, or postponed since
-        // the poll loaded it — none of those may fire.
+        // the poll loaded it, and none of those may fire.
         const active = yield* findTask(task.id);
         if (active === null) {
           if (webhook !== undefined) {
@@ -993,7 +993,7 @@ export const layer = Layer.effect(
             yield* sql`DELETE FROM deferred_agent_fires WHERE fire_key = ${fireKey}`;
           }
           // startedAtIso in the guard ensures this writes only to the row this
-          // run marked as running — a task deleted mid-run and recreated with
+          // run marked as running: a task deleted mid-run and recreated with
           // the same id (idempotent commandId replay) must not be stamped.
           yield* markCompleted({
             id: task.id,
@@ -1097,7 +1097,7 @@ export const layer = Layer.effect(
     // Recover from a crash or hard shutdown mid-run: rows stuck in 'running'
     // would otherwise be skipped by the due-task filter forever. The dispatch
     // may already have gone out before the crash, so next_run_at must advance
-    // and run_count must count the attempt — otherwise the first poll after
+    // and run_count must count the attempt; otherwise the first poll after
     // every restart re-fires the interrupted task (same rationale as
     // releaseStuckRun). Schedules are JSON, so this is per-row Effect work
     // rather than a single UPDATE.
@@ -1128,7 +1128,7 @@ export const layer = Layer.effect(
               return;
             }
             // The schedule cannot be decoded, so the next occurrence cannot
-            // be computed — still release the row so it is not stuck in
+            // be computed. Still release the row so it is not stuck in
             // 'running' (the lenient poller skips it, so it cannot re-fire).
             yield* Effect.logWarning(
               "Recovering undecodable schedule task row without rescheduling",
@@ -1244,7 +1244,7 @@ export const layer = Layer.effect(
         }
         // Keep the existing next_run_at when the schedule itself is untouched:
         // editing a title or prompt must not postpone (or resurrect) a due
-        // run — only schedule/enabled changes restart the clock.
+        // run. Only schedule/enabled changes restart the clock.
         const schedule: ScheduledTask["schedule"] =
           input.schedule.type === "webhook"
             ? {

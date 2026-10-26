@@ -5,7 +5,7 @@
  *
  * A member agent never becomes a provider task and emits nothing on the event
  * stream, so the transcript the harness writes is the only full record of its
- * turn — the progress snapshot carries a capped excerpt. The path is derived
+ * turn; the progress snapshot carries a capped excerpt. The path is derived
  * here from the run's transcript directory and the member's provider id rather
  * than accepted from the caller, and the read itself is contained by
  * readContainedWorkflowFile.

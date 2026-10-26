@@ -68,7 +68,7 @@ export const cloneInputRemote = (input: ProjectLabelCloneRepositoryInput): strin
  * projects root (`<root>/<Project>/repos/<repo>`, or `repos/<owner>/<repo>`
  * for an owner other than the project's), the clone runs through the
  * tracked clone flow (progress on the project-clone subscription), and the
- * repository is filed in the project — immediately, so the picker shows it
+ * repository is filed in the project: immediately, so the picker shows it
  * while it clones, and again once it lands, which files its GitHub link too.
  */
 export const cloneRepositoryIntoLabel = Effect.fn("ProjectLabelCloneRepository.clone")(function* (

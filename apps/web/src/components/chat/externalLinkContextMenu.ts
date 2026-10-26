@@ -21,8 +21,8 @@ const EXTERNAL_LINK_CONTEXT_MENU_ITEMS = [
 ] as const satisfies readonly ContextMenuItem<ExternalLinkContextMenuAction>[];
 
 /**
- * The integrated browser is not always there to offer — it needs a thread to open beside and a
- * runtime that can show it — but the other two answers hold wherever a link does. Dropping the
+ * The integrated browser is not always there to offer (it needs a thread to open beside and a
+ * runtime that can show it), but the other two answers hold wherever a link does. Dropping the
  * whole menu with the one item that cannot be honoured is what left a right-click on a link
  * showing the platform's cut-and-paste menu instead of a way to copy the link.
  */

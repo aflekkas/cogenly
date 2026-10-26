@@ -388,7 +388,7 @@ const make = Effect.gen(function* () {
       }
       // The check above and this start are not atomic: a concurrent launch
       // for the same repository can claim the clone in between. Its start
-      // conflict is not a failure — the caller waits for that clone instead.
+      // conflict is not a failure; the caller waits for that clone instead.
       const started = yield* Effect.result(
         clones
           .start(

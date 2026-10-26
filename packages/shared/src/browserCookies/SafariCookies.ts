@@ -3,7 +3,7 @@
  *
  * Safari does not encrypt its cookies; it stores them in a proprietary
  * `Cookies.binarycookies` file inside its app container. The protection is
- * TCC, not cryptography — the file lives under a path only apps with Full Disk
+ * TCC, not cryptography: the file lives under a path only apps with Full Disk
  * Access may read, so the gate is a permission the user grants in System
  * Settings rather than a key to obtain.
  *
@@ -78,7 +78,7 @@ export function parseBinaryCookies(buffer: Buffer): ReadonlyArray<ImportedCookie
   // contains, and a mismatch fails the read. `Buffer.subarray` clamps silently,
   // so accepting a short page or an overlong record would return a cookie set
   // that is quietly missing entries or carrying fields read out of the next
-  // record — a partial import the user has no way to notice.
+  // record, a partial import the user has no way to notice.
   if (8 + pageCount * 4 > buffer.length) {
     throw new SafariCookieReadError({ reason: "readFailed" });
   }
@@ -173,8 +173,8 @@ export function parseBinaryCookies(buffer: Buffer): ReadonlyArray<ImportedCookie
   }
 
   // Safari writes an 8-byte checksum after the pages, then an optional
-  // length-prefixed property list. Anything else past the declared pages —
-  // in particular whole extra pages — means the page table does not describe
+  // length-prefixed property list. Anything else past the declared pages
+  // (in particular whole extra pages) means the page table does not describe
   // the file, and a jar the header lies about is refused rather than
   // imported with cookies silently missing.
   const trailer = buffer.length - pageStart;
@@ -196,12 +196,12 @@ export function parseBinaryCookies(buffer: Buffer): ReadonlyArray<ImportedCookie
  *
  * A TCC denial arrives as EPERM, which Effect tags `Unknown` rather than
  * `PermissionDenied` (reserved for EACCES), so the underlying errno is checked
- * too — otherwise a Full Disk Access refusal is reported as a generic read
+ * too; otherwise a Full Disk Access refusal is reported as a generic read
  * failure and the user is never told what to grant.
  */
 const isPermissionDenied = (error: PlatformError.PlatformError): boolean => {
   // TCC denies with EPERM, which Effect tags `Unknown` rather than
-  // `PermissionDenied` — so the errno is what identifies it. EACCES (and the
+  // `PermissionDenied`, so the errno is what identifies it. EACCES (and the
   // `PermissionDenied` tag it maps to) is an ordinary POSIX permission or
   // ACL failure that granting Full Disk Access cannot fix, so it stays a plain
   // read failure rather than sending the user to a grant that won't help.
@@ -211,8 +211,8 @@ const isPermissionDenied = (error: PlatformError.PlatformError): boolean => {
 
 /**
  * Whether reading the jar is refused by TCC. `stat` succeeds on the jar
- * inside Safari's container even without Full Disk Access — that is what lets
- * the listing find it — so presence alone cannot tell granted from denied.
+ * inside Safari's container even without Full Disk Access (that is what lets
+ * the listing find it), so presence alone cannot tell granted from denied.
  * Opening it for read is what TCC gates: EPERM means the grant is missing.
  * Anything else (including a missing jar) is not a permission answer.
  */
@@ -241,7 +241,7 @@ export const readSafariCookies = Effect.fn("SafariCookies.readSafariCookies")(fu
   const fileSystem = yield* FileSystem.FileSystem;
   const contents = yield* fileSystem.readFile(cookiePath).pipe(
     Effect.mapError((cause) => {
-      // TCC denies the read even though the file exists — a permission the user
+      // TCC denies the read even though the file exists: a permission the user
       // grants in System Settings rather than a missing browser. macOS never
       // prompts for Full Disk Access, so there is no dialog to wait on; the
       // read just fails, and it fails with EPERM, which Effect surfaces as an
