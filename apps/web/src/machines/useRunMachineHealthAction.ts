@@ -10,8 +10,8 @@ import { useOpenAgentChat } from "../hooks/useOpenAgentChat";
 import { machinesRpc } from "../rpc/machines";
 import { useAtomCommand } from "../state/use-atom-command";
 import {
+  healthFixFollowUp,
   machineHealthAgentPrompt,
-  problemsLeftForAgent,
   type MachineHealthAction,
 } from "./machineHealthLinks.logic";
 import { useOpenMachineHealthLink } from "./useOpenMachineHealthLink";
@@ -24,7 +24,9 @@ export function machineHealthActionPermissionAtom(action: MachineHealthAction): 
     case "open":
       return ALWAYS_PERMITTED;
     case "fix":
-      return machinesRpc.healthFix.permissionAtom(action.environmentId);
+      return action.direct === null
+        ? ALWAYS_PERMITTED
+        : machinesRpc.healthFix.permissionAtom(action.direct.environmentId);
     // Starting a chat is an operate grant on the server it opens on, as Fix is.
     case "agent":
       return machinesRpc.healthFix.permissionAtom(action.request.environmentId);
@@ -55,50 +57,65 @@ export function useRunMachineHealthAction(): (action: MachineHealthAction) => Pr
         case "agent":
           return openAgentChat(action.request.environmentId, action.request.prompt);
         case "fix": {
-          const outcome = await healthFix({
-            environmentId: action.environmentId,
-            input: {
-              ...(action.environmentId === action.originEnvironmentId
-                ? {}
-                : { environmentId: action.originEnvironmentId }),
-              itemKeys: action.itemKeys,
-            },
-          });
-          if (outcome._tag !== "Success") {
-            if (!isAtomCommandInterrupted(outcome))
-              toastManager.add({
-                type: "error",
-                title: `Couldn't fix it on ${action.originMachineName}`,
-                description: failureMessage(squashAtomCommandFailure(outcome)),
-              });
-            return false;
-          }
-          const result = outcome.value;
-          const failed = result.outcomes.some((entry) => entry.status === "failed");
-          toastManager.add({
-            type: failed ? "warning" : "success",
-            title: failed
-              ? `Fix needs attention on ${result.machineName}`
-              : `Fixed on ${result.machineName}`,
-            description: result.summary,
-            // A failure explains what to do next; leave it until read.
-            ...(failed ? { timeout: 0 } : {}),
-          });
-          const left = problemsLeftForAgent(
-            action,
-            result.outcomes
+          let failed = false;
+          let manual: ReadonlyArray<string> = [];
+          const { direct } = action;
+          if (direct !== null) {
+            const outcome = await healthFix({
+              environmentId: direct.environmentId,
+              input: {
+                ...(direct.environmentId === action.originEnvironmentId
+                  ? {}
+                  : { environmentId: action.originEnvironmentId }),
+                itemKeys: direct.itemKeys,
+              },
+            });
+            if (outcome._tag !== "Success") {
+              if (!isAtomCommandInterrupted(outcome))
+                toastManager.add({
+                  type: "error",
+                  title: `Couldn't fix it on ${action.originMachineName}`,
+                  description: failureMessage(squashAtomCommandFailure(outcome)),
+                });
+              return false;
+            }
+            const result = outcome.value;
+            failed = result.outcomes.some((entry) => entry.status === "failed");
+            toastManager.add({
+              type: failed ? "warning" : "success",
+              title: failed
+                ? `Fix needs attention on ${result.machineName}`
+                : `Fixed on ${result.machineName}`,
+              description: result.summary,
+              // A failure explains what to do next; leave it until read.
+              ...(failed ? { timeout: 0 } : {}),
+            });
+            manual = result.outcomes
               .filter((entry) => entry.status === "manual")
-              .map((entry) => entry.itemKey),
-          );
-          if (left.length > 0) {
+              .map((entry) => entry.itemKey);
+          }
+          const next = healthFixFollowUp(action, manual);
+          if (next.signIn !== null) open(next.signIn);
+          if (next.agent.length > 0 && action.agentEnvironmentId !== null) {
             await openAgentChat(
-              action.environmentId,
-              machineHealthAgentPrompt(left, {
+              action.agentEnvironmentId,
+              machineHealthAgentPrompt(next.agent, {
                 environmentId: action.originEnvironmentId,
                 name: action.originMachineName,
-                local: action.environmentId === action.originEnvironmentId,
+                local: action.agentEnvironmentId === action.originEnvironmentId,
               }),
             );
+          }
+          if (next.remaining > 0) {
+            toastManager.add({
+              type: "info",
+              title:
+                next.remaining === 1
+                  ? `1 more problem on ${action.originMachineName}`
+                  : `${next.remaining} more problems on ${action.originMachineName}`,
+              description: "Each has its own action in the machine's health.",
+              actionProps: { children: "Details", onClick: () => open(action.details) },
+            });
           }
           return !failed;
         }

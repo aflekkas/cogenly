@@ -57,23 +57,39 @@ export interface MachineHealthAgentRequest {
   readonly prompt: string;
 }
 
+/**
+ * `machines.healthFix` sent to `environmentId`, which runs it on the origin
+ * (over the peer link when that is another machine).
+ */
+export interface MachineHealthDirectFix {
+  readonly environmentId: EnvironmentId;
+  readonly itemKeys: readonly [string, ...Array<string>];
+}
+
 export type MachineHealthAction =
   | { readonly kind: "open"; readonly label: string; readonly link: MachineHealthLink }
   | {
       /**
-       * `machines.healthFix` sent to `environmentId`, which runs it on the origin
-       * (over the peer link when that is another machine). What comes back
-       * `manual`, plus `rest`, goes to an agent.
+       * Everything a group's Fix does, in order: run the direct fixes, then
+       * open the first sign-in, or else hand what is left to an agent. The
+       * rest stay listed on the machine's health, at `details`.
        */
       readonly kind: "fix";
       readonly label: string;
-      readonly environmentId: EnvironmentId;
       readonly originEnvironmentId: EnvironmentId;
-      readonly itemKeys: readonly [string, ...Array<string>];
-      readonly problems: ReadonlyArray<MachineHealthProblem>;
       readonly originMachineName: string;
+      readonly direct: MachineHealthDirectFix | null;
+      /** Sign-ins, which need the owner: Fix opens the first. */
+      readonly signIns: ReadonlyArray<MachineHealthLink>;
+      /** What an agent may get: items with no other route, and direct ones that come back `manual`. */
+      readonly problems: ReadonlyArray<MachineHealthProblem>;
+      /** Where that chat opens, or null when this client reaches no server to start it on. */
+      readonly agentEnvironmentId: EnvironmentId | null;
+      readonly details: MachineHealthLink;
     }
   | { readonly kind: "agent"; readonly label: string; readonly request: MachineHealthAgentRequest };
+
+export type MachineHealthFixAction = Extract<MachineHealthAction, { readonly kind: "fix" }>;
 
 export interface MachineHealthActionContext {
   /** The machine the item is on. Its threads, tasks, providers and integrations live there. */
@@ -243,71 +259,121 @@ export function healthTargetAction(
   }
 }
 
+/** The provider or integration sign-in a `sign-in` item opens, or null when its target has none. */
+function signInLink(
+  problem: MachineHealthProblem,
+  context: MachineHealthActionContext,
+): MachineHealthLink | null {
+  const { target } = problem;
+  if (problem.fix !== "sign-in") return null;
+  if (target?._tag !== "provider" && target?._tag !== "integration") return null;
+  const action = healthTargetAction(target, context);
+  return action.kind === "open" ? action.link : null;
+}
+
 /**
- * The one Fix for a problem or a group of them, or null when this client
- * reaches no server to run it on:
- * - items with a direct fix run it on their machine (`machines.healthFix`),
- *   and whatever is left goes to an agent afterwards;
- * - a sign-in opens the provider or integration sign-in, which needs the owner;
- * - anything else starts a chat with an agent, pre-filled with the problem.
+ * The one Fix for a problem or a group of them, or null when it has nothing
+ * this client can do:
+ * - items with a direct fix run it on their machine (`machines.healthFix`);
+ * - a sign-in opens the provider or integration sign-in, which needs the
+ *   owner. Fix opens the first; each has its own Sign in on the machine's health;
+ * - only items with neither start a chat with an agent, pre-filled with them.
  */
 export function healthFixAction(
   problems: ReadonlyArray<MachineHealthProblem>,
   context: MachineHealthActionContext,
 ): MachineHealthAction | null {
-  const [first] = problems;
-  if (first === undefined) return null;
+  if (problems.length === 0) return null;
   const label = "Fix";
-  const direct = problems.filter(
-    (problem) => problem.fix !== null && DIRECT_FIXES.has(problem.fix),
-  );
-  const [firstKey, ...restKeys] = direct.map((problem) => problem.itemKey);
-  if (firstKey !== undefined) {
-    const environmentId = commandEnvironment(context);
-    return environmentId === null
+  const commandEnvironmentId = commandEnvironment(context);
+  const directKeys: Array<string> = [];
+  const signIns = new Map<string, MachineHealthLink>();
+  const forAgent: Array<MachineHealthProblem> = [];
+  for (const problem of problems) {
+    if (commandEnvironmentId !== null && problem.fix !== null && DIRECT_FIXES.has(problem.fix)) {
+      directKeys.push(problem.itemKey);
+      // A direct fix that comes back manual goes to the agent.
+      forAgent.push(problem);
+      continue;
+    }
+    const link = signInLink(problem, context);
+    // Two integrations sign in on the same screen; open it once.
+    if (link !== null) signIns.set(JSON.stringify(link), link);
+    else forAgent.push(problem);
+  }
+  const [firstKey, ...restKeys] = directKeys;
+  const direct: MachineHealthDirectFix | null =
+    firstKey === undefined || commandEnvironmentId === null
       ? null
-      : {
-          kind: "fix",
-          label,
-          environmentId,
-          originEnvironmentId: context.originEnvironmentId,
-          itemKeys: [firstKey, ...restKeys],
-          problems,
-          originMachineName: context.originMachineName,
-        };
+      : { environmentId: commandEnvironmentId, itemKeys: [firstKey, ...restKeys] };
+  const [onlySignIn, ...moreSignIns] = signIns.values();
+  if (direct === null) {
+    if (onlySignIn === undefined) {
+      const request = machineHealthAgentRequest(forAgent, context);
+      return request === null ? null : { kind: "agent", label, request };
+    }
+    if (moreSignIns.length === 0 && forAgent.length === 0) {
+      return { kind: "open", label, link: onlySignIn };
+    }
   }
-  const signIn = first.target;
-  if (
-    problems.every((problem) => problem.fix === "sign-in") &&
-    (signIn?._tag === "provider" || signIn?._tag === "integration")
-  ) {
-    return { ...healthTargetAction(signIn, context), label };
-  }
-  const request = machineHealthAgentRequest(problems, context);
-  return request === null ? null : { kind: "agent", label, request };
+  return {
+    kind: "fix",
+    label,
+    originEnvironmentId: context.originEnvironmentId,
+    originMachineName: context.originMachineName,
+    direct,
+    signIns: [...signIns.values()],
+    problems: forAgent,
+    agentEnvironmentId: commandEnvironmentId,
+    details: machineHealthLink(context.originEnvironmentId, context),
+  };
 }
 
 /** What Fix leaves to an agent: the problems the origin returned `manual`, and those with no direct fix. */
 export function problemsLeftForAgent(
-  action: Extract<MachineHealthAction, { readonly kind: "fix" }>,
+  action: MachineHealthFixAction,
   manualItemKeys: ReadonlyArray<string>,
 ): ReadonlyArray<MachineHealthProblem> {
   const manual = new Set(manualItemKeys);
-  const sent = new Set<string>(action.itemKeys);
+  const sent = new Set<string>(action.direct?.itemKeys ?? []);
   return action.problems.filter(
     (problem) => manual.has(problem.itemKey) || !sent.has(problem.itemKey),
   );
 }
 
 /**
+ * What a group's Fix does once its direct fixes ran: open the first sign-in,
+ * or else start the agent on what is left. `remaining` counts what neither
+ * reached, for a pointer to the machine's health where each has its own action.
+ */
+export function healthFixFollowUp(
+  action: MachineHealthFixAction,
+  manualItemKeys: ReadonlyArray<string>,
+): {
+  readonly signIn: MachineHealthLink | null;
+  readonly agent: ReadonlyArray<MachineHealthProblem>;
+  readonly remaining: number;
+} {
+  const left = problemsLeftForAgent(action, manualItemKeys);
+  const [signIn, ...moreSignIns] = action.signIns;
+  if (signIn !== undefined) {
+    return { signIn, agent: [], remaining: moreSignIns.length + left.length };
+  }
+  return action.agentEnvironmentId === null
+    ? { signIn: null, agent: [], remaining: left.length }
+    : { signIn: null, agent: left, remaining: 0 };
+}
+
+/**
  * What a Settings → Machines item offers: its Fix, then a link to the thing it
- * points at unless Fix already opens it.
+ * points at unless Fix already opens it. A sign-in's Fix reads Sign in.
  */
 export function healthItemActions(
   problem: MachineHealthProblem,
   context: MachineHealthActionContext,
 ): { readonly fix: MachineHealthAction | null; readonly open: MachineHealthAction | null } {
-  const fix = healthFixAction([problem], context);
+  const action = healthFixAction([problem], context);
+  const fix = action?.kind === "open" ? { ...action, label: "Sign in" } : action;
   const open =
     problem.target === null || fix?.kind === "open"
       ? null

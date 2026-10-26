@@ -8,6 +8,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   healthFixAction,
+  healthFixFollowUp,
   healthItemActions,
   machineHealthAgentPrompt,
   machineHealthLink,
@@ -23,6 +24,7 @@ const OTHER = env("other");
 const task = "task-1" as ScheduledTaskId;
 const thread = "thread-1" as ThreadId;
 const provider = "claude" as ProviderInstanceId;
+const integration = (name: string) => ({ _tag: "integration" as const, name });
 
 function context(
   connected: ReadonlyArray<EnvironmentId>,
@@ -55,9 +57,9 @@ describe("healthFixAction", () => {
     expect(healthFixAction([problem()], context([HUB, LAPTOP]))).toMatchObject({
       kind: "fix",
       label: "Fix",
-      environmentId: HUB,
       originEnvironmentId: HUB,
-      itemKeys: ["stuck-runs:thread:thread-1"],
+      direct: { environmentId: HUB, itemKeys: ["stuck-runs:thread:thread-1"] },
+      signIns: [],
     });
   });
 
@@ -65,7 +67,7 @@ describe("healthFixAction", () => {
     // The owner's case: runs stuck on the VPS, the client connected to the Mac.
     expect(
       healthFixAction([problem()], context([LAPTOP], { viaEnvironmentId: LAPTOP })),
-    ).toMatchObject({ kind: "fix", environmentId: LAPTOP, originEnvironmentId: HUB });
+    ).toMatchObject({ kind: "fix", direct: { environmentId: LAPTOP }, originEnvironmentId: HUB });
     expect(healthFixAction([problem()], context([OTHER], { viaEnvironmentId: LAPTOP }))).toBeNull();
   });
 
@@ -80,7 +82,7 @@ describe("healthFixAction", () => {
     );
     expect(action).toMatchObject({
       kind: "fix",
-      itemKeys: ["stuck-runs:thread:thread-1", "stuck-runs:thread:thread-2"],
+      direct: { itemKeys: ["stuck-runs:thread:thread-1", "stuck-runs:thread:thread-2"] },
     });
     if (action?.kind !== "fix") return;
     // Whatever has no direct fix, or came back manual, goes to an agent after.
@@ -107,6 +109,93 @@ describe("healthFixAction", () => {
       label: "Fix",
       link: { kind: "provider", environmentId: HUB, instanceId: provider },
     });
+  });
+
+  it("runs the direct fixes of a mixed group, then opens its sign-in instead of the agent", () => {
+    const signIn = problem({
+      itemKey: "providers:claude",
+      checkId: "providers",
+      fix: "sign-in",
+      target: { _tag: "provider", instanceId: provider },
+    });
+    const action = healthFixAction([problem(), signIn], context([HUB]));
+    expect(action).toMatchObject({
+      kind: "fix",
+      direct: { itemKeys: ["stuck-runs:thread:thread-1"] },
+      signIns: [{ kind: "provider", environmentId: HUB, instanceId: provider }],
+    });
+    if (action?.kind !== "fix") return;
+    // The sign-in never reaches the agent, even when the direct fix comes back manual.
+    expect(healthFixFollowUp(action, [])).toEqual({
+      signIn: { kind: "provider", environmentId: HUB, instanceId: provider },
+      agent: [],
+      remaining: 0,
+    });
+    expect(healthFixFollowUp(action, ["stuck-runs:thread:thread-1"])).toMatchObject({
+      agent: [],
+      remaining: 1,
+    });
+  });
+
+  it("opens the first of several sign-ins and points at the rest", () => {
+    const signIns = [
+      problem({
+        itemKey: "providers:claude",
+        fix: "sign-in",
+        target: { _tag: "provider", instanceId: provider },
+      }),
+      problem({
+        itemKey: "providers:codex",
+        fix: "sign-in",
+        target: { _tag: "provider", instanceId: "codex" as ProviderInstanceId },
+      }),
+      // Integrations sign in on one screen, so two of them open it once.
+      problem({ itemKey: "integrations:slack", fix: "sign-in", target: integration("slack") }),
+      problem({ itemKey: "integrations:linear", fix: "sign-in", target: integration("linear") }),
+    ];
+    const action = healthFixAction(signIns, context([HUB]));
+    expect(action).toMatchObject({
+      kind: "fix",
+      direct: null,
+      details: { kind: "machineHealth", machineEnvironmentId: HUB },
+    });
+    if (action?.kind !== "fix") return;
+    expect(action.signIns).toHaveLength(3);
+    expect(healthFixFollowUp(action, [])).toEqual({
+      signIn: { kind: "provider", environmentId: HUB, instanceId: provider },
+      agent: [],
+      remaining: 2,
+    });
+    // On the machine's health, each one has its own Sign in.
+    expect(signIns.map((entry) => healthItemActions(entry, context([HUB])).fix)).toEqual([
+      {
+        kind: "open",
+        label: "Sign in",
+        link: { kind: "provider", environmentId: HUB, instanceId: provider },
+      },
+      {
+        kind: "open",
+        label: "Sign in",
+        link: { kind: "provider", environmentId: HUB, instanceId: "codex" },
+      },
+      { kind: "open", label: "Sign in", link: { kind: "integrations", environmentId: HUB } },
+      { kind: "open", label: "Sign in", link: { kind: "integrations", environmentId: HUB } },
+    ]);
+  });
+
+  it("gives the agent only the items with no other route", () => {
+    const stuck = problem({ itemKey: "disk:free", checkId: "disk", fix: null, target: null });
+    const signIn = problem({
+      itemKey: "providers:claude",
+      fix: "sign-in",
+      target: { _tag: "provider", instanceId: provider },
+    });
+    const action = healthFixAction([stuck, signIn], context([HUB]));
+    expect(action).toMatchObject({ kind: "fix", direct: null, problems: [stuck] });
+    if (action?.kind !== "fix") return;
+    // The sign-in opens; the full disk waits on the machine's health.
+    expect(healthFixFollowUp(action, [])).toMatchObject({ agent: [], remaining: 1 });
+    expect(healthFixAction([stuck], context([HUB]))?.kind).toBe("agent");
   });
 
   it("starts an agent with the problem when there is no direct fix", () => {
