@@ -1,4 +1,6 @@
-import { requestLaunchMachine } from "~/machines/LaunchMachineDialog";
+import { defaultAgentOwner } from "@cogenly/contracts";
+import { serverEnvironment } from "~/state/server";
+import { useEnvironmentQuery } from "~/state/query";
 import { useNavigate } from "@tanstack/react-router";
 import type {
   EnvironmentId,
@@ -142,6 +144,13 @@ export function AgentBuilder({
   const [startFolderId, setStartFolderId] = useState<ProjectLabelId | null>(
     requestedFolderId ?? null,
   );
+  const [chosenOwner, setChosenOwner] = useState<EnvironmentId | null>(null);
+  const machineQuery = useEnvironmentQuery(
+    environmentId === null ? null : serverEnvironment.machinesLive({ environmentId, input: {} }),
+  );
+  const ownerMachines = machineQuery.data?.machines ?? [];
+  const ownerMachine =
+    environmentId === null ? null : defaultAgentOwner(environmentId, ownerMachines);
   const [cardFolderId, setCardFolderId] = useState<ProjectLabelId | null | undefined>(undefined);
   const { folders } = useAgentProjectFolders(thread?.environmentId ?? environmentId, null);
   const folderExists = (id: ProjectLabelId) => folders.some((entry) => entry.label.id === id);
@@ -272,7 +281,7 @@ export function AgentBuilder({
         }),
         kickoff: true,
       };
-      const machine = proposal.machine ?? (await requestLaunchMachine(thread.environmentId, true));
+      const machine = chosenOwner ?? proposal.machine ?? ownerMachine;
       if (machine === null) return;
       const contact = await client.save(
         thread.environmentId,
@@ -308,7 +317,17 @@ export function AgentBuilder({
       // The server opens the agent's own first turn; nothing visible to send.
       setCreated(contact);
     }
-  }, [client, creating, modelSelection, proposal, proposalFolderId, seed, thread]);
+  }, [
+    chosenOwner,
+    ownerMachine,
+    client,
+    creating,
+    modelSelection,
+    proposal,
+    proposalFolderId,
+    seed,
+    thread,
+  ]);
 
   // The save returns before the live lists carry the agent; wait so the route can't
   // mistake the conversation for a missing thread, then leave and drop the builder thread.
@@ -367,6 +386,11 @@ export function AgentBuilder({
           seed={seed}
           proposal={proposal}
           modelName={modelName}
+          owner={{
+            machines: ownerMachines,
+            value: chosenOwner ?? proposal?.machine ?? ownerMachine,
+            onChange: setChosenOwner,
+          }}
           project={
             // Nothing to pick on a machine without projects.
             thread && folders.length > 0
@@ -429,6 +453,7 @@ function Transcript({
   seed,
   proposal,
   modelName,
+  owner,
   project,
   creating,
   cardRef,
@@ -443,6 +468,7 @@ function Transcript({
   seed: string;
   proposal: ReturnType<typeof proposalFromMessages>;
   modelName: string | null;
+  owner: ComponentProps<typeof AgentProposalCard>["owner"];
   project: ComponentProps<typeof AgentProposalCard>["project"];
   creating: boolean;
   cardRef: RefObject<HTMLDivElement | null>;
@@ -532,6 +558,7 @@ function Transcript({
                           proposal={proposal}
                           seed={seed}
                           modelName={modelName}
+                          owner={owner}
                           project={project}
                           creating={creating}
                           onCreate={onCreate}

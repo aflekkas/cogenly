@@ -442,3 +442,12 @@ export const PeerRpcGroup = RpcGroup.make(
     error: peerErrors,
   }),
 ).middleware(PeerScopeAuthorization);
+
+/** New autonomous work prefers the paired, online hub; otherwise it stays local. */
+export const defaultAgentOwner = (
+  local: EnvironmentId,
+  machines: ReadonlyArray<Pick<MachineInfo, "environmentId" | "relation" | "online" | "pairing">>,
+): EnvironmentId =>
+  machines.find(
+    (machine) => machine.relation === "hub" && machine.online && machine.pairing === "paired",
+  )?.environmentId ?? local;

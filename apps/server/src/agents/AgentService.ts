@@ -8,6 +8,7 @@ import { agentKickoffText } from "./builderPrompt.ts";
 import {
   BUILDER_THREAD_TITLE,
   defaultAgentPermissions,
+  defaultAgentOwner,
   AgentError,
   AgentId,
   CommandId,
@@ -509,8 +510,13 @@ const make = Effect.gen(function* () {
               ? null
               : yield* store.get(creationId).pipe(Effect.orElseSucceed(() => null))
             : yield* store.get(input.id);
+        const machineList = Option.isSome(machines)
+          ? ((yield* machines.value.list.pipe(Effect.orElseSucceed(() => null)))?.machines ?? [])
+          : [];
         const ownerMachine =
-          input.ownerMachine ?? existing?.ownerMachine ?? (yield* shared.defaultOwner);
+          input.ownerMachine ??
+          existing?.ownerMachine ??
+          defaultAgentOwner(shared.environmentId, machineList);
         const ownsAgent = ownerMachine === shared.environmentId;
         const id =
           existing?.id ?? creationId ?? AgentId.make(`agent:${yield* crypto.randomUUIDv4()}`);

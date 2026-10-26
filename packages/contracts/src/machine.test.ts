@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vite-plus/test";
 import { clientRpcRequiredScopes } from "./clientRpcPermissions.ts";
 import * as Schema from "effect/Schema";
-import { MachineCreatePeerGrantInput } from "./machine.ts";
+import { defaultAgentOwner, MachineCreatePeerGrantInput } from "./machine.ts";
+import { EnvironmentId } from "./baseSchemas.ts";
 import { WS_METHODS } from "./rpc.ts";
 
 describe("machine RPC permissions", () => {
@@ -38,4 +39,18 @@ describe("machine RPC permissions", () => {
       expect(clientRpcRequiredScopes(method, {})).toEqual(["access:write"]);
     }
   });
+});
+
+it("defaults new agents to an online paired hub and falls back to local", () => {
+  const local = EnvironmentId.make("local");
+  const hub = {
+    environmentId: EnvironmentId.make("hub"),
+    relation: "hub" as const,
+    online: true,
+    pairing: "paired" as const,
+  };
+  expect(defaultAgentOwner(local, [hub])).toBe(hub.environmentId);
+  expect(defaultAgentOwner(local, [{ ...hub, online: false }])).toBe(local);
+  expect(defaultAgentOwner(local, [{ ...hub, pairing: "revoked" }])).toBe(local);
+  expect(defaultAgentOwner(local, [])).toBe(local);
 });
