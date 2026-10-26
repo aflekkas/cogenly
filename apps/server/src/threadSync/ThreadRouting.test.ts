@@ -47,6 +47,70 @@ const send = (
 
 describe("continuing a thread another machine runs", () => {
   it.live(
+    "a lost hub's replica can be archived, restored and deleted after unpairing",
+    () =>
+      Effect.gen(function* () {
+        const hub = yield* startThreadMachine(
+          "orphan-hub",
+          "cloud-server",
+          undefined,
+          undefined,
+          true,
+        );
+        const spoke = yield* startThreadMachine(
+          "orphan-spoke",
+          "computer",
+          undefined,
+          undefined,
+          true,
+        );
+        yield* pair(hub, spoke);
+        const at = yield* DateTime.now;
+        yield* hub.sink.write({
+          events: [
+            threadCreated("event:orphan-created", at),
+            userMessage("event:orphan-message", at, "Keep this history"),
+          ],
+        });
+        yield* hub.sync.sync(spoke.environmentId);
+        yield* spoke.machines.unpair({ environmentId: hub.environmentId });
+        const engine = Option.getOrThrow(spoke.engine);
+        yield* engine.dispatch({
+          type: "thread.archive",
+          commandId: CommandId.make("orphan:archive"),
+          threadId,
+        });
+        expect(
+          (yield* spoke.projections.getThreadProjection(threadId)).thread.archivedAt,
+        ).not.toBeNull();
+        expect(yield* spoke.replication.owner(threadId)).toMatchObject({
+          local: true,
+          owner: spoke.environmentId,
+          epoch: 1,
+        });
+        yield* engine.dispatch({
+          type: "thread.unarchive",
+          commandId: CommandId.make("orphan:restore"),
+          threadId,
+        });
+        expect(
+          (yield* spoke.projections.getThreadProjection(threadId)).thread.archivedAt,
+        ).toBeNull();
+        yield* engine.dispatch({
+          type: "thread.delete",
+          commandId: CommandId.make("orphan:delete"),
+          threadId,
+        });
+        yield* Option.getOrThrow(spoke.worker).drain();
+        const result = yield* spoke.projections.getThreadProjection(threadId);
+        expect(result.thread.deletedAt).not.toBeNull();
+        expect(result.messages.map((m) => m.text)).toEqual(["Keep this history"]);
+        expect(spoke.provider.turns).toHaveLength(0);
+      }).pipe(Effect.scoped),
+    30000,
+  );
+
+  it.live(
     "a message sent on the hub runs on the laptop and is visible on the hub when the call returns",
     () =>
       Effect.gen(function* () {
