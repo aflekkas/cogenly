@@ -26,7 +26,9 @@ const EMPTY_USAGE: ReadonlyArray<VaultUsageEntry> = [];
 /** Every item in one environment, across scopes. */
 export function useVaultItems(environmentId: EnvironmentId | null) {
   const query = useEnvironmentQuery(
-    environmentId === null ? null : vaultRpc.list({ environmentId, input: {} }),
+    environmentId === null
+      ? null
+      : vaultRpc.list({ environmentId, input: { supportsDenyPolicy: true } }),
   );
   return {
     items: query.data?.items ?? EMPTY_ITEMS,
@@ -134,8 +136,12 @@ export function useVaultActions(environmentId: EnvironmentId | null, onChanged?:
     update: async (input: VaultUpdateInput) =>
       environmentId === null
         ? null
-        : (done(settled("Could not save this item", await update({ environmentId, input })))
-            ?.item ?? null),
+        : (done(
+            settled(
+              "Could not save this item",
+              await update({ environmentId, input: { ...input, supportsDenyPolicy: true } }),
+            ),
+          )?.item ?? null),
     remove: async (id: VaultItemId) =>
       environmentId === null
         ? null

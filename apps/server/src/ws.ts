@@ -155,6 +155,7 @@ import * as LoginRequests from "./secrets/LoginRequests.ts";
 import * as SecretRequests from "./secrets/SecretRequests.ts";
 import * as Vault from "./vault/Vault.ts";
 import * as VaultSync from "./vault/VaultSync.ts";
+import { vaultItemForClient, vaultListForClient } from "./vault/vaultClientCompat.ts";
 import * as Accounts from "./accounts/Accounts.ts";
 import {
   archivedShellStreamItemFromThreadShell,
@@ -1866,9 +1867,17 @@ const makeWsRpcHandlers = (
       [WS_METHODS.accountsCreate]: (input) => accounts.create(input),
       [WS_METHODS.accountsUpdate]: (input) => accounts.update(input),
       [WS_METHODS.accountsDisconnect]: (input) => accounts.disconnect(input),
-      [WS_METHODS.vaultList]: (input) => vault.list(input),
+      [WS_METHODS.vaultList]: (input) =>
+        vault
+          .list(input)
+          .pipe(Effect.map((result) => vaultListForClient(result, input.supportsDenyPolicy))),
       [WS_METHODS.vaultCreate]: (input) => vault.create(input),
-      [WS_METHODS.vaultUpdate]: (input) => vault.update(input),
+      [WS_METHODS.vaultUpdate]: (input) =>
+        vault.update(input).pipe(
+          Effect.map(({ item }) => ({
+            item: vaultItemForClient(item, input.supportsDenyPolicy),
+          })),
+        ),
       [WS_METHODS.vaultDelete]: (input) => vault.delete(input),
       [WS_METHODS.vaultUsage]: (input) => vault.listUsage(input),
       [WS_METHODS.vaultSetPeerSharing]: (input) => vaultSync.setPeerSharing(input),

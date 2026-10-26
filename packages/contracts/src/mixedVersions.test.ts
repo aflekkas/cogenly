@@ -4,7 +4,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { IntegrationAgentResult, IntegrationError, IntegrationSource } from "./integration.ts";
 import { MachineProvider } from "./machine.ts";
 import { ProviderAuthStartInput } from "./providerSetup.ts";
-import { VaultItemMetadata, VaultListResult } from "./vault.ts";
+import { VaultItemMetadata, VaultListInput, VaultListResult, VaultPolicy } from "./vault.ts";
 
 /**
  * Paired machines and clients upgrade one at a time. Each case decodes what
@@ -85,6 +85,33 @@ describe("vault lists across versions", () => {
       sites: [{ host: "github.com", siteName: "GitHub", logins: [] }],
     });
     expect(decoded.items[0]).not.toHaveProperty("username");
+  });
+
+  it("decodes Block on a current client, and only its Ask stand-in on a 0.3.2 client", () => {
+    const { policy: _, ...olderItemFields } = VaultItemMetadata.fields;
+    const olderPolicy = Schema.Struct({
+      ...VaultPolicy.fields,
+      mode: Schema.Literals(["ask", "allow"]),
+    });
+    const older = Schema.Struct({
+      items: Schema.Array(Schema.Struct({ ...olderItemFields, policy: olderPolicy })),
+    });
+    const blocked = { ...login, policy: { ...login.policy, mode: "deny" } };
+    expect(
+      Schema.decodeUnknownSync(VaultListResult)({ items: [blocked] }).items[0]?.policy.mode,
+    ).toBe("deny");
+    expect(() => Schema.decodeUnknownSync(older)({ items: [login, blocked] })).toThrow();
+    const asked = { ...login, policy: { ...login.policy, mode: "ask" } };
+    expect(
+      Schema.decodeUnknownSync(older)({ items: [login, asked] }).items.map(
+        (item) => item.policy.mode,
+      ),
+    ).toEqual(["allow", "ask"]);
+  });
+
+  it("lets a 0.3.2 server ignore the Block capability a current client sends", () => {
+    const older = Schema.Struct({ scopeProjectId: VaultListInput.fields.scopeProjectId });
+    expect(Schema.decodeUnknownSync(older)({ supportsDenyPolicy: true })).toEqual({});
   });
 });
 

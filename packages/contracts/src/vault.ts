@@ -179,11 +179,19 @@ export const VaultUpdateInput = Schema.Struct({
   secretFields: Schema.optional(VaultSecretFields),
   /** Replaces the integrations this login signs in to; logins only. */
   integrationIds: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  /** See `VaultListInput.supportsDenyPolicy`; also keeps Block on an older client's save. */
+  supportsDenyPolicy: Schema.optional(Schema.Boolean),
 });
 export type VaultUpdateInput = typeof VaultUpdateInput.Type;
 
 export const VaultListInput = Schema.Struct({
   scopeProjectId: Schema.optional(ProjectLabelId),
+  /**
+   * The client decodes the `deny` (Block) policy mode. Clients from before it
+   * (0.3.2 and older) leave it out and get Block items as `ask`, which they
+   * can decode; the server still refuses agents for them.
+   */
+  supportsDenyPolicy: Schema.optional(Schema.Boolean),
 });
 export type VaultListInput = typeof VaultListInput.Type;
 

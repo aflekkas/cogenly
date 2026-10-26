@@ -76,6 +76,7 @@ import {
   withholdValue,
 } from "./VaultRedactor.ts";
 import { totp } from "./VaultTotp.ts";
+import { updatedVaultPolicy } from "./vaultClientCompat.ts";
 
 export interface VaultUseInput extends VaultLoginSelector {
   /** Project (label) scope to prefer when a name exists in several scopes. */
@@ -1082,7 +1083,11 @@ const make = Effect.gen(function* () {
         wrappedKeys = encrypted.wrappedKeys;
       }
       const at = yield* now;
-      const policy = input.policy ?? parsePolicy(row.policy_json);
+      const policy = updatedVaultPolicy(
+        parsePolicy(row.policy_json),
+        input.policy,
+        input.supportsDenyPolicy,
+      );
       const label =
         input.label === null ? undefined : (input.label ?? parseMetadata(row.metadata_json).label);
       const type = input.type ?? row.type;
