@@ -175,9 +175,9 @@ const MOVED_GENERAL_ANCHORS: Readonly<Record<string, SettingsPath>> = {
   "new-threads": "/settings/new-threads",
   "worktree-submodules": "/settings/new-threads",
   "start-from-origin": "/settings/new-threads",
-  "projects-and-threads": "/settings/new-threads",
-  "add-project-starts-in": "/settings/new-threads",
-  "projects-folder": "/settings/new-threads",
+  "projects-and-threads": "/settings/project-tags",
+  "add-project-starts-in": "/settings/project-tags",
+  "projects-folder": "/settings/project-tags",
   "project-actions": "/settings/new-threads",
   diagnostics: "/settings/diagnostics",
 };
@@ -516,14 +516,14 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "add-project-starts-in",
-    title: "Add repository starts in",
-    to: "/settings/new-threads",
-    searchTerms: ["add project base directory folder browser path home"],
+    title: "Folder browser starts in",
+    to: "/settings/project-tags",
+    searchTerms: ["add repository project base directory folder browser path home"],
   },
   {
     id: "projects-folder",
     title: "Projects folder",
-    to: "/settings/new-threads",
+    to: "/settings/project-tags",
     searchTerms: ["projects root cogenly clone new repository location directory path"],
   },
   {
@@ -987,7 +987,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/project-tags",
     searchTerms: [
       "folders new project archive github org sources files agents repositories",
-      "orphan folders outside any project adopt as project remove empty projects root",
+      "orphan folders without a project outside adopt make project remove empty projects root",
     ],
   },
 ] as const satisfies ReadonlyArray<SettingsSearchItem>;

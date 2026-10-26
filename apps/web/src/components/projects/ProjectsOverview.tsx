@@ -1,4 +1,5 @@
 import { matchesSettingsListQuery } from "../settings/settingsList.logic";
+import { ProjectFoldersSettings } from "../settings/ProjectFoldersSettings";
 import { SettingsSection } from "../settings/settingsLayout";
 import {
   SettingsList,
@@ -11,7 +12,7 @@ import {
 import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentId, ProjectLabelId } from "@cogenly/contracts";
 import { useNavigate } from "@tanstack/react-router";
-import { FolderIcon, FolderPlusIcon } from "lucide-react";
+import { FolderIcon, FolderPlusIcon, MoreHorizontalIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useAgents } from "../../agents/agentsClient";
@@ -104,6 +105,12 @@ function ProjectTile(props: {
   const { label } = props.entry;
   const menu = useProjectFolderMenu(props.entry, { ...props, onDeleted: () => {} });
   const description = label.description?.trim() || null;
+  // The summary moves under a description; the machines and last activity follow it.
+  const details = [
+    description ? props.summary : null,
+    props.machinesLabel,
+    props.lastActivityAt ? formatRelativeTimeLabel(props.lastActivityAt) : null,
+  ].filter((part) => part !== null && part.length > 0);
   return (
     <SettingsListItem
       onContextMenu={(event) => {
@@ -117,22 +124,16 @@ function ProjectTile(props: {
         </span>
       }
       description={description ?? props.summary}
-      status={
-        <span>
-          {description ? `${props.summary} · ` : ""}
-          {props.machinesLabel}
-          {props.lastActivityAt ? ` · ${formatRelativeTimeLabel(props.lastActivityAt)}` : ""}
-        </span>
-      }
+      status={details.length > 0 ? details.join(" · ") : undefined}
       control={
         <>
           <Button
-            size="xs"
+            size="icon-xs"
             variant="ghost-muted"
             aria-label={`Actions for ${label.name}`}
             onClick={(event) => menu.openMenuAtElement(event.currentTarget)}
           >
-            Actions
+            <MoreHorizontalIcon />
           </Button>
           <Button size="xs" variant="outline" onClick={props.onOpen}>
             Open
@@ -205,6 +206,7 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
       <SettingsSection
         id="project-folders"
         title="Projects"
+        footer="Projects are optional. Make one to group several repositories, or the chats, Work and agents of a bigger effort. A single repository doesn't need one."
         headerAction={
           <Button
             size="xs"
@@ -226,8 +228,8 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
               if (value === "active" || value === "archived") setFilter(value);
             }}
             options={[
-              { value: "active", label: "Active projects" },
-              { value: "archived", label: "Archived projects" },
+              { value: "active", label: "Active" },
+              { value: "archived", label: "Archived" },
             ]}
           />
         </SettingsListToolbar>
@@ -247,7 +249,9 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
             description={
               query
                 ? "Try another search."
-                : "A project groups repositories, chats, Work, files and agents for one effort."
+                : shownFilter === "archived"
+                  ? "Archive a project from its menu to tuck it away here."
+                  : "Your repositories don't need one. Make a project when work spans several repositories."
             }
           />
         ) : (
@@ -286,6 +290,7 @@ export function ProjectsOverview(props: ProjectsOverviewSearch) {
         )}
       </SettingsSection>
       <ProjectOrphanFolders environmentId={props.environmentId} />
+      <ProjectFoldersSettings />
       <OverlayPresence when={renaming}>
         {(entry) => (
           <ProjectLabelEditorDialog

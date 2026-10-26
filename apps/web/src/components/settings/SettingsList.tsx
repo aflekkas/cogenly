@@ -41,21 +41,24 @@ export function SettingsListFilter({
   options: ReadonlyArray<{ value: string; label: string }>;
   onValueChange: (value: string) => void;
 }) {
+  // Sized to its label so it sits beside the search instead of wrapping under it.
   return (
-    <Select value={value} onValueChange={(next) => next !== null && onValueChange(next)}>
-      <SelectTrigger size="sm" aria-label={label}>
-        <SelectValue>
-          {options.find((option) => option.value === value)?.label ?? label}
-        </SelectValue>
-      </SelectTrigger>
-      <SelectPopup align="end" alignItemWithTrigger={false}>
-        {options.map((option) => (
-          <SelectItem key={option.value} value={option.value}>
-            {option.label}
-          </SelectItem>
-        ))}
-      </SelectPopup>
-    </Select>
+    <div className="shrink-0">
+      <Select value={value} onValueChange={(next) => next !== null && onValueChange(next)}>
+        <SelectTrigger size="sm" aria-label={label}>
+          <SelectValue>
+            {options.find((option) => option.value === value)?.label ?? label}
+          </SelectValue>
+        </SelectTrigger>
+        <SelectPopup align="end" alignItemWithTrigger={false}>
+          {options.map((option) => (
+            <SelectItem key={option.value} value={option.value}>
+              {option.label}
+            </SelectItem>
+          ))}
+        </SelectPopup>
+      </Select>
+    </div>
   );
 }
 

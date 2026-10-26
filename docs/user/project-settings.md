@@ -80,7 +80,8 @@ than** on the task.
 ## Defaults and inheritance
 
 Models holds the default model for new threads and the text generation model. New threads holds
-the workspace, submodules and start-from-origin defaults, and where added repositories go.
+the workspace, submodules and start-from-origin defaults. Projects holds the projects folder, where
+new projects and clones go.
 Integrations controls agent browser access and computer use. Source control contains automatic pull, the default
 pull request merge method and the model that writes commit messages and pull requests. The same rows
 edit the value for all projects or a project's override, depending on the project chosen at the top.

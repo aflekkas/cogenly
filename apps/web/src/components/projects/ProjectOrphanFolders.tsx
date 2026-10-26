@@ -26,9 +26,10 @@ import { DisclosurePanel } from "../ui/disclosure";
 
 const NO_PERMISSION = "You don't have permission to change projects here.";
 
-const REASON_LABEL: Record<ProjectOrphanFolder["reason"], string> = {
+// The section already says no project owns these; only a deleted project adds anything.
+const REASON_LABEL: Record<ProjectOrphanFolder["reason"], string | null> = {
   deleted_project: "Left by a deleted project",
-  no_marker: "Not part of any project",
+  no_marker: null,
 };
 
 /** `map` with `key` set to `value`, or without it for `null`. */
@@ -180,8 +181,8 @@ function EnvironmentOrphanFolders(props: {
   };
 
   const title = props.environmentLabel
-    ? `Folders outside any project on ${props.environmentLabel}`
-    : "Folders outside any project";
+    ? `Folders without a project on ${props.environmentLabel}`
+    : "Folders without a project";
   return (
     <DisclosurePanel
       open={shown.length > 0}
@@ -191,10 +192,14 @@ function EnvironmentOrphanFolders(props: {
       }
     >
       <div className="flex min-w-0 flex-col gap-6">
-        <SettingsSection title={title}>
+        <SettingsSection
+          title={title}
+          footer="Folders in the projects folder that no project owns. Make one a project, or remove it if Cogenly left it empty."
+        >
           {folders.map((folder) => {
             const action = pending.get(folder.dirName) ?? null;
             const error = errors.get(folder.dirName) ?? null;
+            const reason = REASON_LABEL[folder.reason];
             return (
               <DisclosurePanel
                 key={folder.dirName}
@@ -205,18 +210,20 @@ function EnvironmentOrphanFolders(props: {
                   title={folder.dirName}
                   description={<span className="break-all">{folder.path}</span>}
                   status={
-                    <>
-                      {REASON_LABEL[folder.reason]}
-                      {error !== null ? (
-                        <span
-                          key={error}
-                          role="alert"
-                          className="reveal-motion block text-destructive-foreground"
-                        >
-                          {error}
-                        </span>
-                      ) : null}
-                    </>
+                    reason === null && error === null ? undefined : (
+                      <>
+                        {reason}
+                        {error !== null ? (
+                          <span
+                            key={error}
+                            role="alert"
+                            className="reveal-motion block text-destructive-foreground"
+                          >
+                            {error}
+                          </span>
+                        ) : null}
+                      </>
+                    )
                   }
                   control={
                     <>
@@ -238,7 +245,7 @@ function EnvironmentOrphanFolders(props: {
                         title={canAdopt ? undefined : NO_PERMISSION}
                         onClick={() => void run(folder, "adopt")}
                       >
-                        {action === "adopt" ? "Adopting…" : "Adopt as project"}
+                        {action === "adopt" ? "Making project…" : "Make project"}
                       </Button>
                     </>
                   }
