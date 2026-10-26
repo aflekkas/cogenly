@@ -22,6 +22,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/sql/SqlClient";
 
+import * as PreviewBrowser from "../preview/PreviewBrowser.ts";
 import * as ServerSelfUpdate from "../cloud/selfUpdate.ts";
 import * as MachineIdentity from "../machines/MachineIdentity.ts";
 import * as Machines from "../machines/Machines.ts";
@@ -89,6 +90,7 @@ const syncCheck = {
 const harness = (
   withVersionItem = false,
   capability: "boot-service" | "desktop-managed" | null = "boot-service",
+  browserProblem = false,
 ) =>
   Effect.gen(function* () {
     const ran: Array<string> = [];
@@ -127,6 +129,12 @@ const harness = (
       MachineHealthFixes.layer.pipe(
         Layer.provideMerge(
           Layer.mergeAll(
+            Layer.mock(PreviewBrowser.PreviewBrowser)({
+              executable: Effect.sync(() => {
+                ran.push("install-browser");
+                return "/test/browser";
+              }),
+            }),
             Layer.mock(ServerSelfUpdate.ServerSelfUpdate)({
               capability,
               update: ({ targetVersion }) =>
@@ -137,25 +145,37 @@ const harness = (
             }),
             Layer.mock(MachineHealth.MachineHealth)({
               report: Effect.succeed(
-                withVersionItem
+                browserProblem
                   ? {
                       ...report,
                       checks: [
                         {
-                          id: "machine-links",
+                          id: "preview-browser",
                           status: "warn",
-                          summary: "Versions differ",
-                          items: [
-                            item(`machine-version:${laptop}`, "update-machine", {
-                              _tag: "machine",
-                              environmentId: laptop,
-                            }),
-                          ],
+                          summary: "Browser missing",
+                          items: [item("preview-browser:install", "setup-browser", null)],
                         },
-                        syncCheck,
                       ],
                     }
-                  : { ...report, checks: [...report.checks, syncCheck] },
+                  : withVersionItem
+                    ? {
+                        ...report,
+                        checks: [
+                          {
+                            id: "machine-links",
+                            status: "warn",
+                            summary: "Versions differ",
+                            items: [
+                              item(`machine-version:${laptop}`, "update-machine", {
+                                _tag: "machine",
+                                environmentId: laptop,
+                              }),
+                            ],
+                          },
+                          syncCheck,
+                        ],
+                      }
+                    : { ...report, checks: [...report.checks, syncCheck] },
               ),
               discardQuarantined: (threadId) =>
                 Effect.sync(() => {
@@ -196,6 +216,22 @@ const harness = (
   });
 
 describe("MachineHealthFixes", () => {
+  it.effect("browser installation uses Fix and requires environment maintenance permission", () =>
+    Effect.gen(function* () {
+      const h = yield* harness(false, "boot-service", true);
+      const denied = yield* h.fixes.fix({ itemKeys: ["preview-browser:install"] }, [
+        AuthOrchestrationOperateScope,
+      ]);
+      expect(denied.outcomes[0]?.status).toBe("failed");
+      expect(h.ran).toEqual([]);
+      const fixed = yield* h.fixes.fix({ itemKeys: ["preview-browser:install"] }, [
+        AuthEnvironmentMaintainScope,
+      ]);
+      expect(fixed.outcomes[0]?.status).toBe("fixed");
+      expect(h.ran).toEqual(["install-browser"]);
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("discards only the named quarantine through the peer Fix channel", () =>
     Effect.gen(function* () {
       const { channels, ran, retried } = yield* harness();

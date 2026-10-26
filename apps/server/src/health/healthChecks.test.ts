@@ -34,6 +34,7 @@ import {
   quarantinedThreadItem,
   agentProcessesCheck,
   chatSandboxCheck,
+  previewBrowserCheck,
   diskCheck,
   databaseCheck,
   integrationsCheck,
@@ -963,4 +964,18 @@ it("chat sandbox health distinguishes AppArmor userns blocking from missing bubb
   expect(blocked.items[0]?.detail).toContain("apparmor_parser -r");
   expect(blocked.items[0]?.detail).toContain("global restriction stays on");
   expect(blocked.items[0]?.detail).not.toContain("installs the distro bubblewrap package");
+});
+
+it("browser host problems retain an actionable Fix without changing sandbox policy", () => {
+  const check = previewBrowserCheck({
+    state: "ready",
+    detail: "Installed",
+    hostProblem: "Run `sudo cogenly browser setup` on the host.",
+  });
+  expect(check.items[0]).toMatchObject({
+    key: "preview-browser:host",
+    status: "fail",
+    fix: "setup-browser",
+    detail: expect.stringContaining("sudo cogenly browser setup"),
+  });
 });

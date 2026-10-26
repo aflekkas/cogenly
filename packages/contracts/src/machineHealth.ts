@@ -39,6 +39,7 @@ export const MachineHealthCheckId = Schema.Literals([
   "computer-use",
   "chat-terminal-sandbox",
   "agent-processes",
+  "preview-browser",
 ]);
 export type MachineHealthCheckId = typeof MachineHealthCheckId.Type;
 
@@ -72,6 +73,7 @@ export const MachineHealthFix = Schema.Literals([
   "retry-sync",
   "discard-quarantined",
   "setup-sandbox",
+  "setup-browser",
   "update-machine",
   "kill-orphans",
 ]);
@@ -92,6 +94,7 @@ export const MACHINE_HEALTH_FIX_REQUIRED_SCOPES: Record<MachineHealthFix, AuthEn
   "retry-sync": AuthOrchestrationOperateScope,
   "discard-quarantined": AuthOrchestrationOperateScope,
   "setup-sandbox": AuthEnvironmentMaintainScope,
+  "setup-browser": AuthEnvironmentMaintainScope,
   "update-machine": AuthEnvironmentMaintainScope,
   // Killing processes is the same capability as serverKillAgentProcess.
   "kill-orphans": AuthEnvironmentMaintainScope,

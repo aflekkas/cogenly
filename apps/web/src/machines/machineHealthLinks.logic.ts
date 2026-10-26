@@ -142,6 +142,7 @@ const DIRECT_FIXES: ReadonlySet<MachineHealthFix> = new Set([
   "retry-sync",
   "discard-quarantined",
   "setup-sandbox",
+  "setup-browser",
   "update-machine",
   "kill-orphans",
 ]);

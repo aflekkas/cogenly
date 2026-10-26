@@ -429,3 +429,16 @@ it("routes a version-skew Fix through the origin machine", () => {
   );
   expect(action).toMatchObject({ kind: "fix", direct: { kind: "healthFix" } });
 });
+
+it("browser setup uses the machine's direct Fix command", () => {
+  const missing = problem({
+    itemKey: "preview-browser:install",
+    checkId: "preview-browser",
+    fix: "setup-browser",
+    target: null,
+  });
+  expect(healthFixAction([missing], context([HUB]))).toMatchObject({
+    kind: "fix",
+    direct: { kind: "healthFix", itemKeys: ["preview-browser:install"] },
+  });
+});

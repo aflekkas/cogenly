@@ -31,6 +31,7 @@ import type { McpThreadInvocationScope } from "../mcp/McpInvocationContext.ts";
 import * as Channel from "./DesktopBrowserChannel.ts";
 import * as Manager from "./Manager.ts";
 import * as Browser from "./PreviewBrowser.ts";
+import * as BrowserHost from "./PreviewBrowserHost.ts";
 import * as ServerBrowser from "./ServerBrowser.ts";
 import { ServerBrowserContexts } from "./ServerBrowserContexts.ts";
 
@@ -525,4 +526,44 @@ it.effect("keeps an unseen agent tab and its login alive across days of inactivi
     expect(r.context.newPage).toHaveBeenCalledTimes(1);
     expect(r.page.close).not.toHaveBeenCalled();
   }).pipe(Effect.scoped),
+);
+
+it.effect.each([
+  new Browser.PreviewBrowserInstallingError({
+    downloadedBytes: 10,
+    totalBytes: 100,
+    unpacking: false,
+  }),
+  new Browser.PreviewBrowserInstallError({ detail: "Check this machine's network access." }),
+  new Browser.PreviewBrowserUnsupportedError({ platform: "test", arch: "test" }),
+  new BrowserHost.PreviewBrowserSandboxError({ setupCommand: "sudo cogenly browser setup" }),
+  new BrowserHost.PreviewBrowserLibrariesError({
+    setupCommand: "sudo cogenly browser setup",
+    libraries: ["libnss3.so"],
+  }),
+])("opening preserves actionable browser setup errors: %s", (error) =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const r = yield* rig(false, false);
+      vi.mocked(ServerBrowserContexts.prototype.contextFor).mockRejectedValue(error);
+      const snapshot = yield* r.manager.open({
+        threadId,
+        runtime: "server",
+        serverRendering: "stream",
+        reveal: false,
+      });
+      const result = yield* r.invoke("open", snapshot.tabId, { open: false }).pipe(Effect.result);
+      expect(result).toMatchObject({
+        _tag: "Failure",
+        failure: { message: expect.stringContaining(error.message) },
+      });
+      vi.mocked(ServerBrowserContexts.prototype.contextFor).mockResolvedValue(
+        r.context as unknown as BrowserContext,
+      );
+      expect(
+        (yield* r.invoke<PreviewAutomationStatus>("open", snapshot.tabId, { open: false }))
+          .available,
+      ).toBe(true);
+    }),
+  ),
 );
