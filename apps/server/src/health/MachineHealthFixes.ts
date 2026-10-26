@@ -33,6 +33,7 @@ import * as PeerChannels from "../machines/PeerChannels.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as ScheduledTasks from "../scheduledTasks/ScheduledTaskService.ts";
 import * as MachineHealth from "./MachineHealth.ts";
+import { STUCK_RUN_AFTER_MS } from "./healthChecks.ts";
 import { readStaleRuns } from "./staleRuns.ts";
 
 export class MachineHealthFixes extends Context.Service<
@@ -82,7 +83,7 @@ const make = Effect.gen(function* () {
     );
 
   /**
-   * Stops a thread's stale work: its active turn when it has one, every stale
+   * Stops a thread's stale work: the specific stale turns and every stale
    * delegated task's child thread, then ends whatever no live work will end.
    * Never resumes: work that lost its provider session can't pick up where it
    * was, and resuming would repeat it; the thread's agent continues on the
@@ -98,11 +99,10 @@ const make = Effect.gen(function* () {
         stale.filter((run) => run.kind === "subagent").map((run) => run.id),
       );
       const staleSubagents = records.subagents.filter((task) => staleSubagentIds.has(task.id));
-      const activeRun = records.runs.some(
-        (run) =>
-          run.status === "preparing" || run.status === "starting" || run.status === "running",
-      );
-      if (stale.length === 0 && !activeRun) {
+      const staleRunIds = new Set(stale.filter((run) => run.kind === "run").map((run) => run.id));
+      const staleRuns = records.runs.filter((run) => staleRunIds.has(run.id));
+      const activeRun = staleRuns.length > 0;
+      if (stale.length === 0) {
         return {
           itemKey,
           status: "resolved",
@@ -115,29 +115,28 @@ const make = Effect.gen(function* () {
           Effect.asVoid,
           Effect.catch((error) => Effect.sync(() => void failures.push(error))),
         );
-      // Only a thread with a turn in flight is stopped: Stop also holds an idle
-      // thread's queue and ends its pull request watches.
-      if (activeRun) {
-        yield* attempt(
-          threads.dispatch({
-            type: "thread.stop",
-            commandId: yield* commandId(`stop:${threadId}`),
-            threadId,
-            reason: STOP_REASON,
-          }),
-        );
-      }
       const unreachableChildThreadIds: Array<ThreadId> = [];
       for (const task of staleSubagents) {
         if (task.origin !== "app_owned" || task.childThreadId === null) continue;
         const child = task.childThreadId;
         const stopId = yield* commandId(`stop:${child}`);
+        const childRecords = yield* threads.getThreadRecords(child, ["runs"]);
+        const cutoff = DateTime.toEpochMillis(yield* DateTime.now) - STUCK_RUN_AFTER_MS;
+        const childRunIds = childRecords.runs
+          .filter(
+            (run) =>
+              ["preparing", "starting", "running"].includes(run.status) &&
+              DateTime.toEpochMillis(run.requestedAt) < cutoff,
+          )
+          .map((run) => run.id);
         // Routed to the child's owner when another machine runs it.
         const stopped = yield* threads
           .dispatch({
-            type: "thread.stop",
+            type: "thread.stale-work.settle",
             commandId: stopId,
             threadId: child,
+            runIds: childRunIds,
+            subagentIds: [],
             reason: STOP_REASON,
           })
           .pipe(Effect.result);
@@ -145,17 +144,15 @@ const make = Effect.gen(function* () {
           failures.push(stopped.failure);
           if (stopped.failure._tag === "ThreadRemoteError") unreachableChildThreadIds.push(child);
         }
-        yield* attempt(
-          threads.stopDelegatedTasks({ threadId: child, commandId: stopId, reason: STOP_REASON }),
-        );
       }
-      if (staleSubagents.length > 0) {
+      if (activeRun || staleSubagents.length > 0) {
         yield* attempt(
           threads.dispatch({
             type: "thread.stale-work.settle",
             commandId: yield* commandId(`settle:${threadId}`),
             threadId,
             subagentIds: staleSubagents.map((task) => task.id),
+            runIds: staleRuns.map((run) => run.id),
             reason: STOP_REASON,
             unreachableChildThreadIds,
           }),
@@ -173,7 +170,8 @@ const make = Effect.gen(function* () {
       ).length;
       const runStillActive = after.runs.some(
         (run) =>
-          run.status === "preparing" || run.status === "starting" || run.status === "running",
+          staleRunIds.has(run.id) &&
+          (run.status === "preparing" || run.status === "starting" || run.status === "running"),
       );
       const stopped = staleSubagents.length - stillActive;
       const what = [
